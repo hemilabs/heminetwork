@@ -88,7 +88,7 @@ func TestFullNetwork(t *testing.T) {
 			"-rpcuser=user",
 			"-rpcpassword=password",
 			"generatetoaddress",
-			"300", // need to generate a lot for greater chance to not spend coinbase
+			"5000", // need to generate a lot for greater chance to not spend coinbase
 			btcAddress.EncodeAddress(),
 		})
 	if err != nil {
@@ -213,11 +213,10 @@ func TestFullNetwork(t *testing.T) {
 	}()
 
 	go func() {
-		// create a new block every second, then view pop payouts and finalities
-
-		firstL2Keystone := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
-
 		for {
+			l2Keystone.L2BlockNumber++
+			l2Keystone.L1BlockNumber++
+
 			l2KeystoneRequest := bssapi.L2KeystoneRequest{
 				L2Keystone: l2Keystone,
 			}
@@ -228,6 +227,14 @@ func TestFullNetwork(t *testing.T) {
 				return
 			}
 
+			// give time for the L2 Keystone to propogate to bitcoin tx mempool
+			select {
+			case <-time.After(10 * time.Second):
+			case <-ctx.Done():
+				panic(ctx.Err())
+			}
+
+			// generate a new btc block, this should include the l2 keystone
 			err = runBitcoinCommand(ctx,
 				t,
 				bitcoindContainer,
@@ -246,21 +253,17 @@ func TestFullNetwork(t *testing.T) {
 				return
 			}
 
-			l2Keystone.L1BlockNumber++
-			l2Keystone.L2BlockNumber++
-
-			time.Sleep(1 * time.Second)
-
-			err = bssapi.Write(ctx, bws.conn, "someotherid", bssapi.PopPayoutsRequest{
-				L2BlockForPayout: firstL2Keystone[:],
-			})
-			if err != nil {
-				t.Logf("error: %s", err)
-				return
+			// give time for bfg to see the new block
+			select {
+			case <-time.After(10 * time.Second):
+			case <-ctx.Done():
+				panic(ctx.Err())
 			}
 
-			err = bssapi.Write(ctx, bws.conn, "someotheridz", bssapi.BTCFinalityByRecentKeystonesRequest{
-				NumRecentKeystones: 100,
+			// ensure the l2 keystone is in the chain
+			ks := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
+			err = bssapi.Write(ctx, bws.conn, "someotherid", bssapi.PopPayoutsRequest{
+				L2BlockForPayout: ks[:],
 			})
 			if err != nil {
 				t.Logf("error: %s", err)
