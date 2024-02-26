@@ -2,6 +2,8 @@ package e2e
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,7 +15,6 @@ import (
 	"time"
 
 	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/testcontainers/testcontainers-go"
@@ -25,6 +26,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 const (
@@ -79,7 +81,7 @@ func TestFullNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runBitcoinCommand(
+	_, err = runBitcoinCommand(
 		ctx,
 		t,
 		bitcoindContainer,
@@ -165,9 +167,6 @@ func TestFullNetwork(t *testing.T) {
 			t.Logf("error closing websocket: %s", err)
 		}
 	}()
-	bws := &bssWs{
-		conn: protocol.NewWSConn(c),
-	}
 
 	createPopm(ctx, t, bfgPublicEndpoint)
 
@@ -181,63 +180,193 @@ func TestFullNetwork(t *testing.T) {
 		EPHash:             fillOutBytes("ephash", 32),
 	}
 
-	popPayoutReceived := make(chan struct{})
+	bws := bssWs{
+		conn: protocol.NewWSConn(c),
+	}
 
-	go func() {
-		for {
-			// add Max's test cases here
-			// read responses from bss as we perform actions
-			cmd, _, response, err := bssapi.Read(ctx, bws.conn)
+	// flush ping
+	_, _, _, err = bssapi.Read(ctx, bws.conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var popPayoutsResponse bssapi.PopPayoutsResponse
+	for {
+		if err := bssapi.Write(ctx, bws.conn, "someid", &bssapi.L2KeystoneRequest{
+			L2Keystone: l2Keystone,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// flush the l2 keystone response
+		_, _, _, err = bssapi.Read(ctx, bws.conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// give time for the L2 Keystone to propogate to bitcoin tx mempool
+		select {
+		case <-time.After(10 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+
+		// before being published to btc, finality should be -9
+		if err := bssapi.Write(ctx, bws.conn, "someid", &bssapi.BTCFinalityByKeystonesRequest{
+			L2Keystones: []hemi.L2Keystone{l2Keystone},
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// flush the l2 keystone response
+		_, _, response, err := bssapi.Read(ctx, bws.conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		btcFinalityByKeystonesResponse, ok := response.(*bssapi.BTCFinalityByKeystonesResponse)
+		if !ok {
+			t.Fatal("not a finality response")
+		}
+
+		if len(btcFinalityByKeystonesResponse.L2BTCFinalities) != 1 {
+			t.Fatalf("expected only one finality, received %d", len(btcFinalityByKeystonesResponse.L2BTCFinalities))
+		}
+
+		if btcFinalityByKeystonesResponse.L2BTCFinalities[0].BTCFinality != -9 {
+			t.Fatalf("expected finality to be -9, received %d", btcFinalityByKeystonesResponse.L2BTCFinalities[0].BTCFinality)
+		}
+
+		// generate a new btc block, this should include the l2 keystone
+		_, err = runBitcoinCommand(ctx,
+			t,
+			bitcoindContainer,
+			[]string{
+				"bitcoin-cli",
+				"-regtest=1",
+				"-rpcuser=user",
+				"-rpcpassword=password",
+				"generatetoaddress",
+				"1",
+				btcAddress.EncodeAddress(),
+			},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// give time for bfg to see the new block
+		select {
+		case <-time.After(20 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+
+		// flush finality notification and block notification
+		for i := 0; i < 2; i++ {
+			_, _, _, err := bssapi.Read(ctx, bws.conn)
 			if err != nil {
-				return
-			}
-
-			t.Logf("received command %s", cmd)
-			t.Logf("%v", spew.Sdump(response))
-
-			if cmd == bssapi.CmdPopPayoutResponse {
-				popPayoutResponse := response.(*bssapi.PopPayoutsResponse)
-				if len(popPayoutResponse.PopPayouts) == 0 {
-					continue
-				}
-				publicKeyB := publicKey.SerializeUncompressed()
-				minerAddress := ethereum.PublicKeyToAddress(publicKeyB)
-				t.Logf("equal addresses? %s ?= %s", minerAddress.String(), popPayoutResponse.PopPayouts[0].MinerAddress.String())
-				if slices.Equal(minerAddress.Bytes(), popPayoutResponse.PopPayouts[0].MinerAddress.Bytes()) {
-					select {
-					case popPayoutReceived <- struct{}{}:
-					default:
-					}
-				}
+				t.Fatal(err)
 			}
 		}
-	}()
 
-	go func() {
-		for {
-			l2Keystone.L2BlockNumber++
-			l2Keystone.L1BlockNumber++
+		ks := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
+		id := "poppayouts1"
+		if err := bssapi.Write(ctx, bws.conn, id, &bssapi.PopPayoutsRequest{
+			L2BlockForPayout: ks[:],
+		}); err != nil {
+			t.Fatal(err)
+		}
 
-			l2KeystoneRequest := bssapi.L2KeystoneRequest{
-				L2Keystone: l2Keystone,
-			}
+		_, _, response, err = bssapi.Read(ctx, bws.conn)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-			err = bssapi.Write(ctx, bws.conn, "someid", l2KeystoneRequest)
-			if err != nil {
-				t.Logf("error: %s", err)
-				return
-			}
+		popPayoutsResponseTmp, ok := response.(*bssapi.PopPayoutsResponse)
+		if !ok {
+			t.Fatal("not pop payout response")
+		}
 
-			// give time for the L2 Keystone to propogate to bitcoin tx mempool
-			select {
-			case <-time.After(10 * time.Second):
-			case <-ctx.Done():
-				t.Log(ctx.Err())
-				return
-			}
+		if len(popPayoutsResponseTmp.PopPayouts) == 0 {
+			t.Log("pop payout not found, retrying")
+			continue
+		}
 
-			// generate a new btc block, this should include the l2 keystone
-			err = runBitcoinCommand(ctx,
+		popPayoutsResponse = *popPayoutsResponseTmp
+		break
+	}
+
+	publicKeyB := publicKey.SerializeUncompressed()
+	minerAddress := ethereum.PublicKeyToAddress(publicKeyB)
+	t.Logf("equal addresses? %s ?= %s", minerAddress.String(), popPayoutsResponse.PopPayouts[0].MinerAddress.String())
+	// acceptance test case: PoP payouts are calculated for each keystone starting at 25, and payout address matches PoP miner ETH address
+	if !slices.Equal(minerAddress.Bytes(), popPayoutsResponse.PopPayouts[0].MinerAddress.Bytes()) {
+		t.Fatalf("unexpected address")
+	}
+
+	// ok, now that there is a pop payout, find it and perform tests
+	t.Logf("getting bitcoin transactions")
+	cliResponse, err := runBitcoinCommand(ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"-rpcuser=user",
+			"-rpcpassword=password",
+			"getchaintips",
+		},
+	)
+	if err != nil {
+		t.Log(err)
+	}
+
+	t.Logf("chain tips: %s", cliResponse)
+	chainTips := []struct {
+		Hash string `json:"hash"`
+	}{}
+
+	if err := json.Unmarshal([]byte(cliResponse), &chainTips); err != nil {
+		t.Fatal(err)
+	}
+
+	// popTxCounts is used to check for duplicate publications after going down
+	// the chain
+	popTxCounts := map[string]int{}
+
+	hash := chainTips[0].Hash
+	for {
+		t.Logf("getting block at : %s", hash)
+		var block struct {
+			Tx                []string `json:"tx"`
+			PreviousBlockHash string   `json:"previousBlockHash"`
+			Height            int      `json:"height"`
+		}
+		response, err := runBitcoinCommand(ctx,
+			t,
+			bitcoindContainer,
+			[]string{
+				"bitcoin-cli",
+				"-regtest=1",
+				"-rpcuser=user",
+				"-rpcpassword=password",
+				"getblock",
+				hash,
+			},
+		)
+		if err != nil {
+			t.Log(err)
+		}
+
+		if err := json.Unmarshal([]byte(response), &block); err != nil {
+			panic(err)
+		}
+
+		foundFee := false
+		for _, tx := range block.Tx {
+			t.Log(tx)
+			response, err = runBitcoinCommand(ctx,
 				t,
 				bitcoindContainer,
 				[]string{
@@ -245,41 +374,217 @@ func TestFullNetwork(t *testing.T) {
 					"-regtest=1",
 					"-rpcuser=user",
 					"-rpcpassword=password",
-					"generatetoaddress",
-					"1",
-					btcAddress.EncodeAddress(),
+					"getrawtransaction",
+					tx,
+					"true",
 				},
 			)
 			if err != nil {
 				t.Log(err)
-				return
 			}
 
-			// give time for bfg to see the new block
-			select {
-			case <-time.After(10 * time.Second):
-			case <-ctx.Done():
-				t.Log(ctx.Err())
-				return
+			verboseResponse := struct {
+				Vout []struct {
+					Value float64 `json:"value"`
+				} `json:"vout"`
+			}{}
+
+			if err := json.Unmarshal([]byte(response), &verboseResponse); err != nil {
+				t.Fatal(err)
 			}
 
-			// ensure the l2 keystone is in the chain
-			ks := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
-			err = bssapi.Write(ctx, bws.conn, "someotherid", bssapi.PopPayoutsRequest{
-				L2BlockForPayout: ks[:],
-			})
+			// we would have been rewarded 25 btc for coinbase, our fee
+			// is that minute the values of the outputs
+			vout := float64(0)
+			for _, v := range verboseResponse.Vout {
+				vout += v.Value
+			}
+
+			response, err = runBitcoinCommand(ctx,
+				t,
+				bitcoindContainer,
+				[]string{
+					"bitcoin-cli",
+					"-regtest=1",
+					"-rpcuser=user",
+					"-rpcpassword=password",
+					"getrawtransaction",
+					tx,
+				},
+			)
 			if err != nil {
-				t.Logf("error: %s", err)
-				return
+				t.Log(err)
+			}
+
+			abbrev := hemi.L2KeystoneAbbreviate(l2Keystone)
+			popTx := pop.TransactionL2{L2Keystone: abbrev}
+			popTxOpReturn, err := popTx.EncodeToOpReturn()
+			if err != nil {
+				panic(err)
+			}
+
+			t.Logf("contains HEMI in OPRETURN? %s > %s", response, hex.EncodeToString(popTxOpReturn))
+
+			// acceptance test case: PoP transactions get published to Bitcoin, and each contains an OP_RETURN starting with 'HEMI"
+			if strings.Contains(response, hex.EncodeToString(popTxOpReturn)) {
+				popTxCounts[hex.EncodeToString(popTxOpReturn)]++
+				// acceptance test case: PoP transactions are using the correct fee (approx 1 sat/vB)
+
+				// blocks half every 150 blocks in regtest mode, and we can't guarantee
+				// what UTXO was picked (it's selected randomly at the time of writing this)
+				// so we need to check any of the following
+				possibleCoinbases := []float64{50, 25, 12.5, 6.25, 3.125, 1.5625}
+				found := false
+				expectedFee := float64(0.00000285)
+				for _, possibleCoinbase := range possibleCoinbases {
+					t.Logf("checking fee: %f - %f == %f?", possibleCoinbase, expectedFee, vout)
+					if possibleCoinbase-expectedFee == vout {
+						found = true
+						break
+					}
+				}
+				if found == false {
+					t.Fatal("was not able to find expected fee")
+				} else {
+					t.Logf("found correct fee")
+					foundFee = true
+					break
+				}
+			}
+			if foundFee {
+				break
 			}
 		}
-	}()
 
-	select {
-	case <-popPayoutReceived:
-		t.Logf("got the pop payout!")
-	case <-ctx.Done():
-		t.Fatal(ctx.Err().Error())
+		if foundFee {
+			break
+		}
+		hash = block.PreviousBlockHash
+		// change this to a constant, this is the pre-keystone block height
+		if block.Height <= 5000 {
+			break
+		}
+	}
+
+	// acceptance test case: PoP miner only creates one BTC transaction for each keystone
+	for k, v := range popTxCounts {
+		if v != 1 {
+			t.Fatalf("unexpected number of publications %d for %s", v, k)
+		}
+	}
+
+	// acceptance test case: Bitcoin Finality for blocks starts at -9 and progresses in step with new Bitcoin blocks
+	// note we check for "unconfirmed" btc finality earlier at -9, so this starts at -8
+	// check that, as we add btc blocks, finality goes up
+	otherL2Keystone := l2Keystone
+	for i := 0; i < 10; i++ {
+		otherL2Keystone.L1BlockNumber++
+		otherL2Keystone.L2BlockNumber++
+
+		if err := bssapi.Write(ctx, bws.conn, "someid", &bssapi.BTCFinalityByKeystonesRequest{
+			L2Keystones: []hemi.L2Keystone{l2Keystone},
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		_, _, response, err := bssapi.Read(ctx, bws.conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		btcFinalityByKeystonesResponse, ok := response.(*bssapi.BTCFinalityByKeystonesResponse)
+		if !ok {
+			t.Fatal("not a finality response")
+		}
+
+		if len(btcFinalityByKeystonesResponse.L2BTCFinalities) != 1 {
+			t.Fatalf("expected only one finality, received %d", len(btcFinalityByKeystonesResponse.L2BTCFinalities))
+		}
+
+		expectedFinality := -9 + i + 1
+		if btcFinalityByKeystonesResponse.L2BTCFinalities[0].BTCFinality != int32(expectedFinality) {
+			t.Fatalf("expected finality to be %d, received %d", expectedFinality, btcFinalityByKeystonesResponse.L2BTCFinalities[0].BTCFinality)
+		}
+
+		if err := bssapi.Write(ctx, bws.conn, "someid", &bssapi.BTCFinalityByRecentKeystonesRequest{
+			NumRecentKeystones: 100,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		_, _, response, err = bssapi.Read(ctx, bws.conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		btcFinalityByRecentKeystonesResponse, ok := response.(*bssapi.BTCFinalityByRecentKeystonesResponse)
+		if !ok {
+			t.Fatal("not a recent keystone response")
+		}
+
+		if len(btcFinalityByRecentKeystonesResponse.L2BTCFinalities) != 1+i {
+			t.Fatalf("missing keystones, expecting %d received %d", 1+i, len(btcFinalityByRecentKeystonesResponse.L2BTCFinalities))
+		}
+
+		// acceptance test case: Bitcoin Finality returns same result for last 10 blocks and querying for specific block in that list
+		// check down the list of recent finalities, the should be in descending order
+		// for example: -8, -7...
+		// NOTE: these are only confirmed finalities
+		for k, v := range btcFinalityByRecentKeystonesResponse.L2BTCFinalities {
+			if v.BTCFinality != int32(-9+1+k) {
+				t.Fatalf("expected finality at index %d to be %d, got %d", k, -9+k, v.BTCFinality)
+			}
+		}
+
+		if err := bssapi.Write(ctx, bws.conn, "someid", &bssapi.L2KeystoneRequest{
+			L2Keystone: otherL2Keystone,
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// flush the l2 keystone response
+		_, _, _, err = bssapi.Read(ctx, bws.conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// let the keystone make it into the tx mempool
+		select {
+		case <-time.After(10 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+
+		_, err = runBitcoinCommand(ctx,
+			t,
+			bitcoindContainer,
+			[]string{
+				"bitcoin-cli",
+				"-regtest=1",
+				"-rpcuser=user",
+				"-rpcpassword=password",
+				"generatetoaddress",
+				"1",
+				btcAddress.EncodeAddress(),
+			},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-time.After(20 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+
+		// flush finality notification and block notification
+		for i := 0; i < 2; i++ {
+			_, _, _, err := bssapi.Read(ctx, bws.conn)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
 	}
 }
 
@@ -467,7 +772,7 @@ func createPopm(ctx context.Context, t *testing.T, bfgUrl string) testcontainers
 		Env: map[string]string{
 			"POPM_BTC_PRIVKEY": privateKey,
 			"POPM_BFG_URL":     bfgUrl,
-			"POPM_LOG_LEVEL":   "TRACE",
+			"POPM_LOG_LEVEL":   "INFO",
 		},
 		WaitingFor: wait.ForLog("Starting PoP miner with BTC address").WithPollInterval(1 * time.Second),
 		FromDockerfile: testcontainers.FromDockerfile{
@@ -544,24 +849,25 @@ func fillOutBytes(prefix string, size int) []byte {
 	return result
 }
 
-func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, cmd []string) error {
+func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, cmd []string) (string, error) {
 	exitCode, result, err := bitcoindContainer.Exec(ctx, cmd)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	buf := new(strings.Builder)
 	_, err = io.Copy(buf, result)
 	if err != nil {
-		return err
+		return "", err
 	}
-
 	t.Logf(buf.String())
+
 	if exitCode != 0 {
-		return fmt.Errorf("error code received: %d", exitCode)
+		return "", fmt.Errorf("error code received: %d", exitCode)
 	}
 
-	return nil
+	// first 8 bytes are header
+	return buf.String()[8:], nil
 }
 
 // replaceHost will replace the host that is returned from .Endpoint() with

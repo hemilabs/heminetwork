@@ -260,8 +260,10 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	)
 	for _, v := range mb.TxOut {
 		tl2, err = pop.ParseTransactionL2FromOpReturn(v.PkScript)
-		if err == nil {
-			break // Found the pop transaction.
+		if err != nil {
+			log.Errorf(err.Error()) // handle real error below
+		} else {
+			break
 		}
 	}
 
