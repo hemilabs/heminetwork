@@ -50,14 +50,14 @@ jobs:
           check-latest: true
 
       - name: "Download and verify dependencies"
+        id: deps
         run: make deps
 
       - name: "make race"
-        continue-on-error: true
         run: make race
 
       - name: "make"
-        continue-on-error: true
+        if: (success() || failure()) && steps.deps.outcome == 'success'
         env:
           PGTESTURI: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
         run: |
@@ -65,6 +65,6 @@ jobs:
           git diff --exit-code
 
       - name: "make web popm"
-        continue-on-error: true
+        if: (success() || failure()) && steps.deps.outcome == 'success'
         run: |
           cd web && make
