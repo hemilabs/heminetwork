@@ -124,12 +124,13 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 
 	c.mtx.Lock()
 	c.id++
+	id := c.id
 	c.mtx.Unlock()
 
 	req := &JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  method,
-		ID:      c.id,
+		ID:      id,
 	}
 	if params != any(nil) {
 		b, err := json.Marshal(params)
