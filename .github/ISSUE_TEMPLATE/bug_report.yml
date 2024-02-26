@@ -1,0 +1,49 @@
+name: "Bug Report"
+description: "Report a bug to help us improve."
+labels: [ "status: triage", "type: bug" ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please **do not** use this template for questions.
+        Have a question or need help? Join our [Discord server](https://discord.gg/8z9antYtus)!
+
+  - type: checkboxes
+    attributes:
+      label: "Confirmation"
+      description: "Please confirm that you have done the following before creating this issue."
+      options:
+        - label: "I have checked for similar issues."
+          required: true
+
+  - type: textarea
+    attributes:
+      label: "Describe the bug"
+      description: "Please provide a clear and concise description of what the issue is."
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: "Expected behaviour"
+      description: "What should have happened?"
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: "Environment"
+      description: |
+        Please provide information about your operating environment here.
+      value: |
+        Version: <!-- Hemi Network v1.2.3 -->
+        Operating System: <!-- e.g. Windows 11, macOS 14.2.1, Ubuntu 24.04 -->
+        Architecture: <!-- amd64, arm64 -->
+
+  - type: textarea
+    attributes:
+      label: "Additional Information"
+      description: |
+        Please provide any additional information that could help with reproducing and fixing this bug.
+    validations:
+      required: false

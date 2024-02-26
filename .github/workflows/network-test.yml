@@ -1,0 +1,39 @@
+# Copyright (c) 2024 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+# GitHub Actions workflow to run e2e network tests.
+name: "E2E Network Test"
+on:
+  workflow_dispatch: # Manually triggered
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: "Test"
+    runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        go-version: [ "1.22.x" ]
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Setup Go ${{ matrix.go-version }}"
+        uses: actions/setup-go@v5
+        with:
+          go-version: "${{ matrix.go-version }}"
+          cache: true
+          check-latest: true
+
+      - name: "Download and verify dependencies"
+        run: make deps
+
+      - name: "make networktest"
+        run: make networktest

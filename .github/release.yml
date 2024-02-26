@@ -1,0 +1,28 @@
+changelog:
+  exclude:
+    labels:
+      - "type: dependencies"
+      - "area: ci"
+  categories:
+    - title: "⚠️ Breaking changes"
+      labels:
+        - "status: breaking"
+    - title: "✨ Additions"
+      labels:
+        - "type: feature"
+    - title: "🐛 Fixes"
+      labels:
+        - "type: bug"
+    - title: "🔧 Improvements"
+      labels:
+        - "type: enhancement"
+        - "type: refactor"
+    - title: "📖 Documentation"
+      labels:
+        - "type: documentation"
+    - title: "🧪 Test coverage"
+      labels:
+        - "type: test"
+    - title: "⚙️ Other"
+      labels:
+        - "*"

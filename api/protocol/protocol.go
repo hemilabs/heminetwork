@@ -1,0 +1,549 @@
+// Copyright (c) 2024 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
+package protocol
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/url"
+	"reflect"
+	"sync"
+	"time"
+
+	"github.com/juju/loggo"
+	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
+)
+
+var log = loggo.GetLogger("protocol")
+
+const (
+	logLevel           = "protocol=INFO"
+	WSConnectTimeout   = 20 * time.Second
+	WSHandshakeTimeout = 15 * time.Second
+)
+
+const (
+	StatusHandshakeErr websocket.StatusCode = 4100 // XXX can we just hijack 4100?
+)
+
+type HandshakeError string
+
+func (he HandshakeError) Error() string {
+	return string(he)
+}
+
+func (he HandshakeError) Is(target error) bool {
+	_, ok := target.(HandshakeError)
+	return ok
+}
+
+var PublicKeyAuthError = websocket.CloseError{
+	Code:   StatusHandshakeErr,
+	Reason: HandshakeError("invalid public key").Error(),
+}
+
+func init() {
+	loggo.ConfigureLoggers(logLevel)
+}
+
+// random returns a variable number of random bytes.
+func random(n int) ([]byte, error) {
+	buffer := make([]byte, n)
+	_, err := io.ReadFull(rand.Reader, buffer)
+	if err != nil {
+		return nil, err
+	}
+	return buffer, nil
+}
+
+var ErrInvalidCommand = errors.New("invalid command")
+
+type Command string
+
+// commandPayload returns the data structure corresponding to the given command.
+func commandPayload(cmd Command, api API) (reflect.Type, bool) {
+	commands := api.Commands()
+	payload, ok := commands[cmd]
+	return payload, ok
+}
+
+// commandFromPayload returns the command for the given data structure.
+func commandFromPayload(payload any, api API) (Command, bool) {
+	payloadType := reflect.TypeOf(payload)
+	for cmd, cmdPayloadType := range api.Commands() {
+		cmdPayloadPtrType := reflect.PointerTo(cmdPayloadType)
+		if payloadType == cmdPayloadType || payloadType == cmdPayloadPtrType {
+			return cmd, true
+		}
+	}
+	return "", false
+}
+
+// fixupStruct iterates over a struct in order to fix up nil slices.
+func fixupStruct(v reflect.Value) {
+	if v.Type().Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < v.NumField(); i++ {
+		fv := v.Field(i)
+		fk := fv.Type().Kind()
+		if fk == reflect.Ptr {
+			if fv.IsNil() {
+				continue
+			}
+			fv = reflect.Indirect(fv)
+			fk = fv.Type().Kind()
+		}
+		switch fk {
+		case reflect.Slice:
+			fixupNilSlice(fv)
+		case reflect.Struct:
+			fixupStruct(fv)
+		}
+	}
+}
+
+// fixupNilSlice changes a nil slice to an empty slice if it is setable.
+func fixupNilSlice(v reflect.Value) {
+	if v.Type().Kind() != reflect.Slice {
+		return
+	}
+	if !v.IsNil() || !v.CanSet() {
+		return
+	}
+	v.Set(reflect.MakeSlice(v.Type(), 0, 0))
+}
+
+// fixupNilSlices fixes up nil slices to empty slices in a struct and any
+// nested structs.
+func fixupNilSlices(i any) {
+	v := reflect.Indirect(reflect.ValueOf(i))
+	switch v.Type().Kind() {
+	case reflect.Slice:
+		fixupNilSlice(v)
+	case reflect.Struct:
+		fixupStruct(v)
+	}
+}
+
+type API interface {
+	Commands() map[Command]reflect.Type
+}
+
+func Read(ctx context.Context, c APIConn, api API) (Command, string, interface{}, error) {
+	var msg Message
+	if err := c.ReadJSON(ctx, &msg); err != nil {
+		return "", "", nil, err
+	}
+	cmdPayload, ok := commandPayload(msg.Header.Command, api)
+	if !ok {
+		return "", "", nil, ErrInvalidCommand
+	}
+
+	payload := reflect.New(cmdPayload).Interface()
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		return "", "", nil, ErrInvalidCommand
+	}
+
+	return msg.Header.Command, msg.Header.ID, payload, nil
+}
+
+// Write encodes and sends a payload over the API connection.
+func Write(ctx context.Context, c APIConn, api API, id string, payload interface{}) error {
+	cmd, ok := commandFromPayload(payload, api)
+	if !ok {
+		return fmt.Errorf("command unknown for payload %T", payload)
+	}
+
+	// Go's JSON encoder encodes a nil slice as "null" and an empty
+	// array as "[]" - react does not cope with this, so convert nil
+	// slices to empty slices. In order to do this we need to copy
+	// the payload so as not to modify the original. Yay.
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	clone := reflect.New(reflect.TypeOf(payload)).Interface()
+	if err := json.Unmarshal(b, clone); err != nil {
+		return err
+	}
+	fixupNilSlices(clone)
+
+	msg := &Message{
+		Header: Header{Command: cmd, ID: id},
+	}
+	msg.Payload, err = json.Marshal(clone)
+	if err != nil {
+		return err
+	}
+
+	return c.WriteJSON(ctx, msg)
+}
+
+// Authenticator implements authentication between a client and a server.
+type Authenticator interface {
+	HandshakeClient(ctx context.Context, ac APIConn) error
+	HandshakeServer(ctx context.Context, ac APIConn) error
+}
+
+type WSConn struct {
+	conn *websocket.Conn
+}
+
+func (wsc *WSConn) ReadJSON(ctx context.Context, v any) error {
+	return wsjson.Read(ctx, wsc.conn, v)
+}
+
+func (wsc *WSConn) WriteJSON(ctx context.Context, v any) error {
+	return wsjson.Write(ctx, wsc.conn, v)
+}
+
+func (wsc *WSConn) Close() error {
+	return wsc.conn.Close(websocket.StatusNormalClosure, "")
+}
+
+func (wsc *WSConn) CloseStatus(code websocket.StatusCode, reason string) error {
+	return wsc.conn.Close(code, reason)
+}
+
+func NewWSConn(conn *websocket.Conn) *WSConn {
+	return &WSConn{conn: conn}
+}
+
+// Header prefixes all websocket commands.
+type Header struct {
+	Command Command `json:"command"`      // Command to execute
+	ID      string  `json:"id,omitempty"` // Command identifier
+}
+
+// Message represents a websocket message.
+type Message struct {
+	Header  Header          `json:"header"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// Error is a protocol Error type that can be used for additional error
+// context. It embeds an 8 byte number that can be used to trace calls on both the
+// client and server side.
+type Error struct {
+	Timestamp int64  `json:"timestamp"`
+	Trace     string `json:"trace"`
+	Message   string `json:"error"`
+}
+
+// Errorf is a client induced protocol error (e.g. "invalid height"). This is a
+// pretty printable error on the client and server and is not fatal.
+func Errorf(msg string, args ...interface{}) *Error {
+	trace, _ := random(8)
+	return &Error{
+		Timestamp: time.Now().Unix(),
+		Trace:     hex.EncodeToString(trace),
+		Message:   fmt.Sprintf(msg, args...),
+	}
+}
+
+func (e Error) String() string {
+	return fmt.Sprintf("%v [%v:%v]", e.Message, e.Trace, e.Timestamp)
+}
+
+// Ping
+type PingRequest struct {
+	Timestamp int64 `json:"timestamp"` // Local timestamp
+}
+
+// PingResponse
+type PingResponse struct {
+	OriginTimestamp int64 `json:"origintimestamp"` // Timestamp from origin
+	Timestamp       int64 `json:"timestamp"`       // Local timestamp
+}
+
+// APIConn provides an API connection.
+type APIConn interface {
+	ReadJSON(ctx context.Context, v any) error
+	WriteJSON(ctx context.Context, v any) error
+}
+
+// readResult is the result of a client side read.
+type readResult struct {
+	cmd     Command
+	id      string
+	payload interface{}
+	err     error
+}
+
+// Conn is a client side connection.
+type Conn struct {
+	sync.RWMutex
+
+	serverURL string
+	auth      Authenticator
+	msgID     uint64
+
+	wsc          *websocket.Conn
+	wscReadLock  sync.Mutex
+	wscWriteLock sync.Mutex
+
+	calls map[string]chan *readResult
+}
+
+// NewConn returns a client side connection object.
+func NewConn(urlStr string, authenticator Authenticator) (*Conn, error) {
+	log.Tracef("NewConn: %v", urlStr)
+	defer log.Tracef("NewConn exit: %v", urlStr)
+
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return nil, err
+	}
+
+	ac := &Conn{
+		serverURL: u.String(),
+		auth:      authenticator,
+		calls:     make(map[string]chan *readResult),
+		msgID:     1,
+	}
+
+	return ac, nil
+}
+
+func (ac *Conn) Connect(ctx context.Context) error {
+	log.Tracef("Connect")
+	defer log.Tracef("Connect exit")
+
+	ac.Lock()
+	defer ac.Unlock()
+	if ac.wsc != nil {
+		return nil
+	}
+
+	// Connection and handshake must complete in less than WSConnectTimeout.
+	connectCtx, cancel := context.WithTimeout(ctx, WSConnectTimeout)
+	defer cancel()
+
+	// XXX Dial does not return a parasable error. This is an issue in the
+	// package.
+	// Note that we cannot have DialOptions on a WASM websocket
+	log.Tracef("Connect: dialing %v", ac.serverURL)
+	conn, _, err := websocket.Dial(connectCtx, ac.serverURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to dial server: %v", err)
+	}
+	conn.SetReadLimit(512 * 1024) // XXX - default is 32KB
+	defer func() {
+		if ac.wsc == nil {
+			conn.Close(websocket.StatusNormalClosure, "")
+		}
+	}()
+
+	handshakeCtx, cancel := context.WithTimeout(ctx, WSHandshakeTimeout)
+	defer cancel()
+
+	if ac.auth != nil {
+		log.Tracef("Connect: handshaking with %v", ac.serverURL)
+		if err := ac.auth.HandshakeClient(handshakeCtx, NewWSConn(conn)); err != nil {
+			return HandshakeError(fmt.Sprintf("failed to handshake with server: %v", err))
+		}
+	}
+
+	// done as an API message and it should be done at the protocol
+	// level instead...
+	var msg Message
+	if err := NewWSConn(conn).ReadJSON(connectCtx, &msg); err != nil {
+		var ce websocket.CloseError
+		if errors.As(err, &ce) {
+			switch ce.Code {
+			// case 4000:
+			// log.Errorf("Connection rejected - user account not found")
+			// return ErrUserAccountNotFound
+			default:
+				log.Errorf("unknown close error: %v", err)
+				return err
+			}
+		}
+		log.Errorf("Connection to %v failed: %v", ac.serverURL, err)
+		return err
+	}
+
+	log.Debugf("Connection established with %v", ac.serverURL)
+	ac.wsc = conn
+
+	return nil
+}
+
+// wsConn returns the underlying webscket connection.
+func (ac *Conn) wsConn() *websocket.Conn {
+	ac.RLock()
+	defer ac.RUnlock()
+	return ac.wsc
+}
+
+// conn (re)connects an existing websocket connection.
+func (ac *Conn) conn(ctx context.Context) (*websocket.Conn, error) {
+	wsc := ac.wsConn()
+	if wsc != nil {
+		return wsc, nil
+	}
+	if err := ac.Connect(ctx); err != nil {
+		return nil, err
+	}
+	return ac.wsConn(), nil
+}
+
+// CloseStatus close the connection with the provided StatusCode.
+func (ac *Conn) CloseStatus(code websocket.StatusCode, reason string) error {
+	ac.Lock()
+	defer ac.Unlock()
+	if ac.wsc == nil {
+		return nil
+	}
+	err := ac.wsc.Close(code, reason)
+	ac.wsc = nil
+
+	return err
+}
+
+func (ac *Conn) IsOnline() bool {
+	ac.Lock()
+	defer ac.Unlock()
+	return ac.wsc != nil
+}
+
+// Close close a websocket connection with normal status.
+func (ac *Conn) Close() error {
+	return ac.CloseStatus(websocket.StatusNormalClosure, "")
+}
+
+// ReadJSON returns JSON of the wire and unmarshals it into v.
+func (ac *Conn) ReadJSON(ctx context.Context, v any) error {
+	conn, err := ac.conn(ctx)
+	if err != nil {
+		return err
+	}
+	ac.wscReadLock.Lock()
+	defer ac.wscReadLock.Unlock()
+	if err := wsjson.Read(ctx, conn, v); err != nil {
+		ac.Close()
+		return err
+	}
+	return nil
+}
+
+// WriteJSON writes marshals v and writes it to the wire.
+func (ac *Conn) WriteJSON(ctx context.Context, v any) error {
+	conn, err := ac.conn(ctx)
+	if err != nil {
+		return err
+	}
+
+	ac.wscWriteLock.Lock()
+	defer ac.wscWriteLock.Unlock()
+	if err := wsjson.Write(ctx, conn, v); err != nil {
+		ac.Close()
+		return err
+	}
+	return nil
+}
+
+// read calls the underlying Read function and returns the command, id and
+// unmarshaled payload.
+func (ac *Conn) read(ctx context.Context, api API) (Command, string, interface{}, error) {
+	return Read(ctx, ac, api)
+}
+
+// nextMsgID returns the next available message identifier. This identifier
+// travels as part of the header with the command.
+func (ac *Conn) nextMsgID() uint64 {
+	ac.Lock()
+	defer ac.Unlock()
+	msgID := ac.msgID
+	ac.msgID++
+	if ac.msgID == 0 {
+		ac.msgID++
+	}
+	return msgID
+}
+
+// Call is a blocking call that returns the command, id and unmarshaled payload.
+func (ac *Conn) Call(ctx context.Context, api API, payload interface{}) (Command, string, interface{}, error) {
+	log.Tracef("Call: %T", payload)
+	defer log.Tracef("Call exit: %T", payload)
+
+	msgID := fmt.Sprintf("%d", ac.nextMsgID())
+	resultCh := make(chan *readResult, 1)
+
+	ac.Lock()
+	ac.calls[msgID] = resultCh
+	ac.Unlock()
+
+	defer func() {
+		ac.Lock()
+		delete(ac.calls, msgID)
+		ac.Unlock()
+	}()
+
+	if err := ac.Write(ctx, api, msgID, payload); err != nil {
+		return "", "", nil, err
+	}
+	var result *readResult
+	select {
+	case <-ctx.Done():
+		return "", "", nil, ctx.Err()
+	case result = <-resultCh:
+	}
+
+	if result.err == nil && result.payload == nil {
+		result.err = errors.New("reply payload is nil")
+	}
+
+	return result.cmd, result.id, result.payload, result.err
+}
+
+// errorAll fails all outstanding commands in order to shutdown the websocket.
+func (ac *Conn) errorAll(err error) {
+	ac.RLock()
+	defer ac.RUnlock()
+	for _, call := range ac.calls {
+		rr := &readResult{err: err}
+		select {
+		case call <- rr:
+		default:
+		}
+	}
+}
+
+// Read reads and returns the next command from the API connection.
+func (ac *Conn) Read(ctx context.Context, api API) (Command, string, interface{}, error) {
+	for {
+		cmd, id, payload, err := ac.read(ctx, api)
+		if id == "" || err != nil {
+			if err != nil {
+				ac.errorAll(err)
+			}
+			return cmd, id, payload, err
+		}
+		ac.RLock()
+		call, ok := ac.calls[id]
+		ac.RUnlock()
+		if !ok {
+			return cmd, id, payload, err
+		}
+		rr := &readResult{cmd, id, payload, err}
+		select {
+		case call <- rr:
+		default:
+		}
+	}
+}
+
+// Write encodes and sends a payload over the API connection.
+func (ac *Conn) Write(ctx context.Context, api API, id string, payload interface{}) error {
+	return Write(ctx, ac, api, id, payload)
+}

@@ -1,0 +1,120 @@
+version: '3'
+services:
+  bitcoind:
+    image: 'kylemanna/bitcoind'
+    command:
+      - 'bitcoind'
+      - '-regtest=1'
+      - '-rpcuser=user'
+      - '-rpcpassword=password'
+      - '-rpcallowip=0.0.0.0/0'
+      - '-rpcbind=0.0.0.0:18443'
+      - '-txindex=1'
+    ports:
+      - 18443:18443
+
+  initialblocks:
+    image: 'kylemanna/bitcoind'
+    command:
+      - 'bitcoin-cli'
+      - '-regtest=1'
+      - '-rpcuser=user'
+      - '-rpcpassword=password'
+      - '-rpcport=18443'
+      - '-rpcconnect=bitcoind'
+      - 'generatetoaddress'
+      - '300' # need to generate a lot for greater chance to not spend coinbase
+      - 'mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG'
+    depends_on:
+      - bitcoind
+
+  moreblocks:
+    image: 'kylemanna/bitcoind'
+    command:
+      - 'bitcoin-cli'
+      - '-regtest=1'
+      - '-rpcuser=user'
+      - '-rpcpassword=password'
+      - '-rpcport=18443'
+      - '-rpcconnect=bitcoind'
+      - 'generatetoaddress'
+      - '1'
+      - 'mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG'
+    deploy:
+      restart_policy:
+        condition: any
+        delay: 5s
+    depends_on:
+      - bitcoind
+
+  electrumx:
+    image: 'lukechilds/electrumx'
+    environment:
+      DAEMON_URL: 'http://user:password@bitcoind:18443'
+      COIN: 'BitcoinSegwit'
+      NET: 'regtest'
+    ports:
+      - 50001:50001
+    depends_on: 
+      - bitcoind
+
+  postgres:
+    build:
+      dockerfile: ./e2e/postgres.Dockerfile
+      context: ./..
+    environment:
+      POSTGRES_DB: "bfg"
+      POSTGRES_HOST_AUTH_METHOD: "trust"
+    ports:
+      - 5432:5432
+
+  bfgd:
+    build:
+      dockerfile: ./docker/bfgd/Dockerfile
+      context: ./..
+    environment:
+      BFG_POSTGRES_URI: postgres://postgres@postgres:5432/bfg?sslmode=disable
+      BFG_BTC_START_HEIGHT: "100"
+      BFG_EXBTC_ADDRESS: electrumx:50001
+      BFG_LOG_LEVEL: TRACE
+      BFG_PUBLIC_ADDRESS: ":8383"
+      BFG_PRIVATE_ADDRESS: ":8080"
+    ports:
+      - 8080:8080
+      - 8383:8383
+    depends_on:
+      - postgres
+
+  bssd:
+    build:
+      dockerfile: ./docker/bssd/Dockerfile
+      context: ./..
+    environment:
+      BSS_BFG_URL: 'ws://bfgd:8080/v1/ws/private'
+      BSS_LOG_LEVEL: TRACE
+      BSS_ADDRESS: ':8081'
+    ports:
+      - 8081:8081
+    depends_on:
+      - bfgd
+
+  popmd:
+    build:
+      dockerfile: ./docker/popmd/Dockerfile
+      context: ./..
+    environment:
+      POPM_BTC_PRIVKEY: '72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219740f'
+      POPM_BFG_URL: http://bfgd:8383/v1/ws/public
+      POPM_LOG_LEVEL: TRACE
+    depends_on:
+      - bfgd
+
+  mocktimism:
+    build:
+      dockerfile: ./e2e/mocktimism/Dockerfile
+      context: ./..
+    environment:
+      MOCKTIMISM_BSS_URL: http://bssd:8081/v1/ws
+    depends_on:
+      - bssd
+

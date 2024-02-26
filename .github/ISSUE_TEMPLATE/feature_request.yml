@@ -1,0 +1,39 @@
+name: "Feature Request"
+description: "Suggest a new feature or a change to existing functionality"
+labels: [ "status: triage", "type: enhancement" ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please **do not** use this template for questions.
+        Have a question or need help? Join our [Discord server](https://discord.gg/8z9antYtus)!
+
+  - type: checkboxes
+    attributes:
+      label: "Confirmation"
+      description: "Please confirm that you have done the following before creating this issue."
+      options:
+        - label: "I have checked for similar issues."
+          required: true
+
+  - type: textarea
+    attributes:
+      label: "Problem"
+      description: "Please provide a clear and concise description of what the problem is."
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: "Suggested solution"
+      description: "How do you suggest we solve this problem?"
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: "Additional Information"
+      description: |
+        Please provide any additional information that could help us understand the requested change.
+    validations:
+      required: false

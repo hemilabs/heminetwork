@@ -1,0 +1,70 @@
+# Copyright (c) 2024 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+# GitHub Actions workflow to lint, build and test.
+name: "Go"
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: "go-${{ github.workflow }}-${{ github.event.number || github.ref }}"
+  cancel-in-progress: "${{ github.event.action == 'push' || github.event.action == 'pull_request' }}"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Build"
+    runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        go-version: [ "1.22.x" ]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_PASSWORD: "postgres"
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Setup Go ${{ matrix.go-version }}"
+        uses: actions/setup-go@v5
+        with:
+          go-version: "${{ matrix.go-version }}"
+          cache: true
+          check-latest: true
+
+      - name: "Download and verify dependencies"
+        run: make deps
+
+      - name: "make race"
+        continue-on-error: true
+        run: make race
+
+      - name: "make"
+        continue-on-error: true
+        env:
+          PGTESTURI: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+        run: |
+          make
+          git diff --exit-code
+
+      - name: "make web popm"
+        continue-on-error: true
+        run: |
+          cd web && make
