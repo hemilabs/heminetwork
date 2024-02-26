@@ -10,7 +10,7 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
 	github.com/docker/docker v25.0.3+incompatible
 	github.com/docker/go-connections v0.5.0
-	github.com/ethereum/go-ethereum v1.13.5
+	github.com/ethereum/go-ethereum v1.13.13
 	github.com/go-test/deep v1.1.0
 	github.com/juju/loggo v1.0.0
 	github.com/lib/pq v1.10.9
@@ -58,7 +58,7 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/prometheus/client_model v0.6.0 // indirect
-	github.com/prometheus/common v0.47.0 // indirect
+	github.com/prometheus/common v0.48.0 // indirect
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/shirou/gopsutil/v3 v3.24.1 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
