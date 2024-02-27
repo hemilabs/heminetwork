@@ -280,9 +280,10 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 
 	txHash, err := s.btcClient.Broadcast(ctx, bbr.Transaction)
 	if err != nil {
+		// This may not alwyas be an internal error.
 		e := protocol.NewInternalErrorf("broadcast tx: %s", err)
 		return &bfgapi.BitcoinBroadcastResponse{
-			Error: e.WireError(), // XXX is this always an internal error?
+			Error: e.WireError(),
 		}, e
 	}
 
