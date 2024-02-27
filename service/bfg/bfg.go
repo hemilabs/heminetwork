@@ -62,40 +62,6 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-// InternalError is an error type to differentiates between caller and callee
-// errors. An internal error is used whne something internal to the application
-// fails.
-type InternalError struct {
-	internal *protocol.Error
-	actual   error
-}
-
-// Err return the protocol.Error that can be sent over the wire.
-func (ie InternalError) Err() *protocol.Error {
-	return ie.internal
-}
-
-// String return the actual underlying error.
-func (ie InternalError) String() string {
-	i := ie.internal
-	return fmt.Sprintf("%v [%v:%v]", ie.actual.Error(), i.Trace, i.Timestamp)
-}
-
-// Error satifies the error interface.
-func (ie InternalError) Error() string {
-	if ie.internal == nil {
-		return "internal error"
-	}
-	return ie.internal.String()
-}
-
-func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
-	return &InternalError{
-		internal: protocol.Errorf("internal error"),
-		actual:   fmt.Errorf(msg, args...),
-	}
-}
-
 func NewDefaultConfig() *Config {
 	return &Config{
 		EXBTCAddress:         "localhost:18001",
@@ -230,19 +196,18 @@ func (s *Server) handleBitcoinBalance(ctx context.Context, bws *bfgWs, payload a
 		return nil, fmt.Errorf("not BitcoinBalanceRequest: %T", br)
 	}
 
-	bResp := &bfgapi.BitcoinBalanceResponse{}
-
 	balance, err := s.btcClient.Balance(ctx, br.ScriptHash)
 	if err != nil {
-		ie := NewInternalErrorf("error getting bitcoin balance: %s", err)
-		log.Errorf(ie.actual.Error())
-		bResp.Error = ie.internal
-		return bResp, nil
+		e := protocol.NewInternalErrorf("bitcoin balance: %v", err)
+		return &bfgapi.BitcoinBalanceResponse{
+			Error: e.WireError(),
+		}, e
 	}
-	bResp.Confirmed = balance.Confirmed
-	bResp.Unconfirmed = balance.Unconfirmed
 
-	return bResp, nil
+	return &bfgapi.BitcoinBalanceResponse{
+		Confirmed:   balance.Confirmed,
+		Unconfirmed: balance.Unconfirmed,
+	}, nil
 }
 
 func (s *Server) handleBitcoinBroadcast(ctx context.Context, bws *bfgWs, payload any, id string) (any, error) {
@@ -256,42 +221,42 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bws *bfgWs, payload
 		return nil, fmt.Errorf("not a BitcoinBroadcastRequest: %T", bbr)
 	}
 
-	bbResp := &bfgapi.BitcoinBroadcastResponse{}
-
 	rr := bytes.NewReader(bbr.Transaction)
 	mb := wire.MsgTx{}
 	if err := mb.Deserialize(rr); err != nil {
-		bbResp.Error = protocol.Errorf("failed to deserialized tx: %s", err)
-		return bbResp, nil
+		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.WireError(err)}, nil
 	}
 
 	var tl2 *pop.TransactionL2
 	var err error
-	for _, v := range mb.TxOut {
+	for k, v := range mb.TxOut {
 		tl2, err = pop.ParseTransactionL2FromOpReturn(v.PkScript)
 		if err != nil {
-			log.Errorf(err.Error()) // handle real error below
+			return &bfgapi.BitcoinBroadcastResponse{
+				Error: protocol.WireErrorf("tx %v: %v", k, err),
+			}, nil
 		}
 	}
 	if tl2 == nil {
-		bbResp.Error = protocol.Errorf("could not find l2 keystone abbrev in btc tx")
-		return bbResp, nil
+		return &bfgapi.BitcoinBroadcastResponse{
+			Error: protocol.WireErrorf("could not find l2 keystone abbrev in btc tx"),
+		}, nil
 	}
 
 	publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
 	if err != nil {
-		bbResp.Error = protocol.Errorf("could not parse signature script: %s", err)
-		return bbResp, nil
+		return &bfgapi.BitcoinBroadcastResponse{
+			Error: protocol.WireErrorf("could not parse signature script: %v", err),
+		}, nil
 	}
 
 	txHash, err := s.btcClient.Broadcast(context.TODO(), bbr.Transaction)
 	if err != nil {
-		ie := NewInternalErrorf("error broadcasting to bitcoin: %s", err)
-		log.Errorf(ie.actual.Error())
-		bbResp.Error = ie.internal
-		return bbResp, nil
+		e := protocol.NewInternalErrorf("broadcast tx: %s", err)
+		return &bfgapi.BitcoinBroadcastResponse{
+			Error: e.WireError(), // XXX is this always an internal error?
+		}, e
 	}
-	bbResp.TXID = txHash
 
 	if err := s.db.PopBasisInsertPopMFields(ctx, &bfgd.PopBasis{
 		BtcTxId:             txHash,
@@ -300,23 +265,25 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bws *bfgWs, payload
 		L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
 	}); err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
-			bbResp.Error = protocol.Errorf("pop_basis already exists")
-			return bbResp, nil
+			return &bfgapi.BitcoinBroadcastResponse{
+				Error: protocol.WireErrorf("pop basis already exists"),
+			}, nil
 		}
 
 		if errors.Is(err, database.ErrValidation) {
-			log.Errorf("invalid pop basis: %s", err)
-			bbResp.Error = protocol.Errorf("invalid pop_basis")
-			return bbResp, nil
+			e := protocol.NewInternalErrorf("invalid pop basis: %v", err)
+			return &bfgapi.BitcoinBroadcastResponse{
+				Error: e.WireError(),
+			}, e
 		}
 
-		ie := NewInternalErrorf("error inserting pop basis: %s", err)
-		bbResp.Error = ie.internal
-		log.Errorf(ie.actual.Error())
-		return bbResp, nil
+		e := protocol.NewInternalErrorf("insert pop basis: %v", err)
+		return &bfgapi.BitcoinBroadcastResponse{
+			Error: e.WireError(),
+		}, e
 	}
 
-	return bbResp, nil
+	return &bfgapi.BitcoinBroadcastResponse{TXID: txHash}, nil
 }
 
 func (s *Server) handleBitcoinInfo(ctx context.Context, bws *bfgWs, payload any, id string) (any, error) {
@@ -330,18 +297,17 @@ func (s *Server) handleBitcoinInfo(ctx context.Context, bws *bfgWs, payload any,
 		return nil, fmt.Errorf("not a BitcoinInfoRequest %T", payload)
 	}
 
-	biResp := &bfgapi.BitcoinInfoResponse{}
-
 	height, err := s.btcClient.Height(ctx)
 	if err != nil {
-		ie := NewInternalErrorf("error getting bitcoin height: %s", err)
-		log.Errorf(ie.actual.Error())
-		biResp.Error = ie.internal
-		return biResp, nil
+		e := protocol.NewInternalErrorf("bitcoin height: %v", err)
+		return &bfgapi.BitcoinInfoResponse{
+			Error: e.WireError(),
+		}, e
 	}
-	biResp.Height = height
 
-	return biResp, nil
+	return &bfgapi.BitcoinInfoResponse{
+		Height: height,
+	}, nil
 }
 
 func (s *Server) handleBitcoinUTXOs(ctx context.Context, bws *bfgWs, payload any, id string) (any, error) {
@@ -357,15 +323,15 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bws *bfgWs, payload any
 		return nil, err
 	}
 
-	buResp := &bfgapi.BitcoinUTXOsResponse{}
-
 	utxos, err := s.btcClient.UTXOs(context.TODO(), bur.ScriptHash)
 	if err != nil {
-		ie := NewInternalErrorf("error getting bitcoin utxos: %s", err)
-		log.Errorf(ie.actual.Error())
-		buResp.Error = ie.internal
-		return buResp, nil
+		e := protocol.NewInternalErrorf("bitcoin utxos: %v", err)
+		return &bfgapi.BitcoinUTXOsResponse{
+			Error: e.WireError(),
+		}, e
+
 	}
+	buResp := bfgapi.BitcoinUTXOsResponse{}
 	for _, utxo := range utxos {
 		buResp.UTXOs = append(buResp.UTXOs, &bfgapi.BitcoinUTXO{
 			Hash:  utxo.Hash,
@@ -387,34 +353,35 @@ func (s *Server) handleAccessPublicKeyCreateRequest(ctx context.Context, bws *bf
 		return nil, err
 	}
 
-	response := &bfgapi.AccessPublicKeyCreateResponse{}
-
 	publicKey, err := hex.DecodeString(accessPublicKeyCreateRequest.PublicKey)
 	if err != nil {
-		response.Error = protocol.Errorf(err.Error())
-		return response, nil
+		return &bfgapi.AccessPublicKeyCreateResponse{
+			Error: protocol.WireErrorf("public key decode: %v", err),
+		}, nil
 	}
 
 	if err := s.db.AccessPublicKeyInsert(ctx, &bfgd.AccessPublicKey{
 		PublicKey: publicKey,
 	}); err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
-			response.Error = protocol.Errorf("public key already exists")
-			return response, nil
+			return &bfgapi.AccessPublicKeyCreateResponse{
+				Error: protocol.WireErrorf("public key already exists"),
+			}, nil
 		}
 
 		if errors.Is(err, database.ErrValidation) {
-			response.Error = protocol.Errorf("invalid access public key")
-			return response, nil
+			return &bfgapi.AccessPublicKeyCreateResponse{
+				Error: protocol.WireErrorf("invalid access public key"),
+			}, nil
 		}
 
-		ie := NewInternalErrorf("error inserting access public key: %s", err)
-		response.Error = ie.internal
-		log.Errorf(ie.actual.Error())
-		return response, nil
+		e := protocol.NewInternalErrorf("insert public key: %v", err)
+		return &bfgapi.AccessPublicKeyCreateResponse{
+			Error: protocol.WireErrorf("invalid access public key"),
+		}, e
 	}
 
-	return response, nil
+	return &bfgapi.AccessPublicKeyCreateResponse{}, nil
 }
 
 func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, bws *bfgWs, payload any, id string) (any, error) {
@@ -426,32 +393,34 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, bws *bfgWs, pa
 		return nil, fmt.Errorf("incorrect type %T", payload)
 	}
 
-	response := &bfgapi.AccessPublicKeyDeleteResponse{}
-
 	b, err := hex.DecodeString(accessPublicKeyDeleteRequest.PublicKey)
 	if err != nil {
-		response.Error = protocol.Errorf(err.Error())
-		return response, nil
+		return &bfgapi.AccessPublicKeyDeleteResponse{
+			Error: protocol.WireErrorf("public key decode: %v", err),
+		}, nil
 	}
 
 	if err := s.db.AccessPublicKeyDelete(ctx, &bfgd.AccessPublicKey{
 		PublicKey: b,
 	}); err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			response.Error = protocol.Errorf("public key not found")
-			return response, nil
+			// XXX not sure I like giving this information away.
+			return &bfgapi.AccessPublicKeyDeleteResponse{
+				Error: protocol.WireErrorf("public key not found"),
+			}, nil
 		}
-		ie := NewInternalErrorf("error deleting access public key: %s", err)
-		response.Error = ie.internal
-		log.Errorf(ie.actual.Error())
-		return response, nil
+		e := protocol.NewInternalErrorf("error deleting access public key: %v",
+			err)
+		return &bfgapi.AccessPublicKeyDeleteResponse{
+			Error: e.WireError(),
+		}, e
 	}
 
-	return response, nil
+	return &bfgapi.AccessPublicKeyDeleteResponse{}, nil
 }
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
-	log.Infof("Processing Bitcoin block at height %d...", height)
+	log.Tracef("Processing Bitcoin block at height %d...", height)
 
 	rbh, err := s.btcClient.RawBlockHeader(ctx, height)
 	if err != nil {
@@ -707,6 +676,7 @@ func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
 		// can't continue
 		if err != nil {
 			log.Errorf("handleWebsocketPrivateRead error %v %v: %v", bws.addr, cmd, err)
+			// XXX this should be handled in the caller
 			bws.conn.CloseStatus(websocket.StatusProtocolError,
 				err.Error())
 			return
@@ -768,6 +738,7 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 			return
 		} else {
 			if err := s.writeResponse(ctx, bws.conn, response, id); err != nil {
+				// XXX this should be handled in the caller
 				bws.conn.CloseStatus(websocket.StatusProtocolError, err.Error())
 				return
 			}
@@ -989,21 +960,19 @@ func (s *Server) handlePopTxForL2Block(ctx context.Context, bws *bfgWs, payload 
 			payload)
 	}
 
-	response := bfgapi.PopTxsForL2BlockResponse{}
-
 	hash := hemi.HashSerializedL2KeystoneAbrev(p.L2Block)
 	var h [32]byte
 	copy(h[:], hash)
 	popTxs, err := s.db.PopBasisByL2KeystoneAbrevHash(ctx, h, true)
 	if err != nil {
-		ie := NewInternalErrorf("error getting pop basis: %s", err)
-		response.Error = ie.internal
-		log.Errorf(ie.actual.Error())
-		return response, nil
+		e := protocol.NewInternalErrorf("error getting pop basis: %v", err)
+		return &bfgapi.PopTxsForL2BlockResponse{
+			Error: e.WireError(),
+		}, e
 	}
 
+	response := &bfgapi.PopTxsForL2BlockResponse{}
 	response.PopTxs = make([]bfgapi.PopTx, 0, len(popTxs))
-
 	for k := range popTxs {
 		response.PopTxs = append(response.PopTxs, bfgapi.PopTx{
 			BtcTxId:             api.ByteSlice(popTxs[k].BtcTxId),
@@ -1023,53 +992,54 @@ func (s *Server) handlePopTxForL2Block(ctx context.Context, bws *bfgWs, payload 
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, bws *bfgWs, payload any, id string) (any, error) {
 	p, ok := payload.(*bfgapi.BTCFinalityByRecentKeystonesRequest)
 	if ok == false {
+		// XXX this isn't right
 		return nil, fmt.Errorf(
 			"handleBtcFinalityByRecentKeystonesRequest invalid payload type %T",
 			payload,
 		)
 	}
 
-	response := bfgapi.BTCFinalityByRecentKeystonesResponse{}
-
 	finalities, err := s.db.L2BTCFinalityMostRecent(ctx, p.NumRecentKeystones)
 	if err != nil {
-		ie := NewInternalErrorf("error getting finality: %s", err)
-		response.Error = ie.internal
-		log.Errorf(ie.actual.Error())
-		return response, nil
+		e := protocol.NewInternalErrorf("error getting finality: %v", err)
+		return &bfgapi.BTCFinalityByRecentKeystonesResponse{
+			Error: e.WireError(),
+		}, e
 	}
 
-	apiFinalities := []hemi.L2BTCFinality{}
-	for _, finality := range finalities {
+	apiFinalities := make([]hemi.L2BTCFinality, 0, len(finalities))
+	for k, finality := range finalities {
 		apiFinality, err := hemi.L2BTCFinalityFromBfgd(
 			&finality,
 			finality.BTCTipHeight,
 			finality.EffectiveHeight,
 		)
 		if err != nil {
-			return nil, err
+			e := protocol.NewInternalErrorf("error getting finality (%v): %v",
+				k, err)
+			return &bfgapi.BTCFinalityByRecentKeystonesResponse{
+				Error: e.WireError(),
+			}, e
 		}
 		apiFinalities = append(apiFinalities, *apiFinality)
 	}
 
-	response.L2BTCFinalities = apiFinalities
-
-	return response, nil
+	return &bfgapi.BTCFinalityByRecentKeystonesResponse{
+		L2BTCFinalities: apiFinalities,
+	}, nil
 }
 
 func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bws *bfgWs, payload any, id string) (any, error) {
 	p, ok := payload.(*bfgapi.BTCFinalityByKeystonesRequest)
-	if ok == false {
+	if !ok {
+		// XXX this isn't right
 		return nil, fmt.Errorf(
 			"handleBtcFinalityByKeystonesRequest invalid payload type %T",
 			payload,
 		)
 	}
 
-	response := bfgapi.BTCFinalityByKeystonesResponse{}
-
-	l2KeystoneAbrevHashes := []database.ByteArray{}
-
+	l2KeystoneAbrevHashes := make([]database.ByteArray, 0, len(p.L2Keystones))
 	for _, l := range p.L2Keystones {
 		a := hemi.L2KeystoneAbbreviate(l)
 		l2KeystoneAbrevHashes = append(l2KeystoneAbrevHashes, a.Hash())
@@ -1080,13 +1050,13 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bws *b
 		l2KeystoneAbrevHashes,
 	)
 	if err != nil {
-		ie := NewInternalErrorf("error getting l2 keystones: %s", err)
-		response.Error = ie.internal
-		log.Errorf(ie.actual.Error())
-		return response, nil
+		e := protocol.NewInternalErrorf("l2 keystones: %v", err)
+		return &bfgapi.BTCFinalityByKeystonesResponse{
+			Error: e.WireError(),
+		}, e
 	}
 
-	apiFinalities := []hemi.L2BTCFinality{}
+	apiFinalities := make([]hemi.L2BTCFinality, 0, len(finalities))
 	for _, finality := range finalities {
 		apiFinality, err := hemi.L2BTCFinalityFromBfgd(
 			&finality,
@@ -1094,38 +1064,40 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bws *b
 			finality.EffectiveHeight,
 		)
 		if err != nil {
-			return nil, err
+			e := protocol.NewInternalErrorf("l2 btc finality: %v", err)
+			return &bfgapi.BTCFinalityByKeystonesResponse{
+				Error: e.WireError(),
+			}, e
 		}
 		apiFinalities = append(apiFinalities, *apiFinality)
 	}
 
-	response.L2BTCFinalities = apiFinalities
-
-	return response, nil
+	return &bfgapi.BTCFinalityByKeystonesResponse{
+		L2BTCFinalities: apiFinalities,
+	}, nil
 }
 
 func (s *Server) handleL2KeystonesRequest(ctx context.Context, bws *bfgWs, payload any, id string) (any, error) {
 	p, ok := payload.(*bfgapi.L2KeystonesRequest)
-	if ok == false {
+	if !ok {
+		// XXX this isn't right
 		return nil, fmt.Errorf(
 			"handleL2KeystonesRequest invalid payload type %T",
 			payload,
 		)
 	}
 
-	gkhResp := &bfgapi.L2KeystonesResponse{}
-
-	results, err := s.db.L2KeystonesMostRecentN(ctx,
-		uint32(p.NumL2Keystones))
+	results, err := s.db.L2KeystonesMostRecentN(ctx, uint32(p.NumL2Keystones))
 	if err != nil {
-		ie := NewInternalErrorf("error getting l2 keystones: %s", err)
-		gkhResp.Error = ie.internal
-		log.Errorf(ie.actual.Error())
-		return gkhResp, nil
+		e := protocol.NewInternalErrorf("error getting l2 keystones: %s", err)
+		return &bfgapi.L2KeystonesResponse{
+			Error: e.WireError(),
+		}, e
 	}
 
+	l2Keystones := make([]hemi.L2Keystone, 0, len(results))
 	for _, v := range results {
-		gkhResp.L2Keystones = append(gkhResp.L2Keystones, hemi.L2Keystone{
+		l2Keystones = append(l2Keystones, hemi.L2Keystone{
 			Version:            uint8(v.Version),
 			L1BlockNumber:      v.L1BlockNumber,
 			L2BlockNumber:      v.L2BlockNumber,
@@ -1136,7 +1108,9 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, bws *bfgWs, paylo
 		})
 	}
 
-	return gkhResp, nil
+	return &bfgapi.L2KeystonesResponse{
+		L2Keystones: l2Keystones,
+	}, nil
 }
 
 func writeNotificationResponse(bws *bfgWs, response any) {

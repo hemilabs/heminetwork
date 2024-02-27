@@ -267,6 +267,14 @@ func WireError(err error) *Error {
 	}
 }
 
+// WireErrorf creates a protocol error for the client.
+func WireErrorf(msg string, args ...any) *Error {
+	return &Error{
+		Timestamp: time.Now().Unix(),
+		Message:   fmt.Sprintf(msg, args...),
+	}
+}
+
 // InternalError is an error type that differentiates between caller and callee
 // errors. An internal error is used when something internal to the application
 // fails. The client should not see the actual error message as those are
