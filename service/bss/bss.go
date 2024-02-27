@@ -254,19 +254,17 @@ func (s *Server) handleL2KeytoneRequest(ctx context.Context, msg *bssapi.L2Keyst
 	log.Tracef("handleL2KeytoneRequest")
 	defer log.Tracef("handleL2KeytoneRequest exit")
 
-	newKeystoneHeadersRequest := bfgapi.NewL2KeystonesRequest{
-		L2Keystones: []hemi.L2Keystone{
-			msg.L2Keystone,
-		},
-	}
-
-	resp := &bssapi.L2KeystoneResponse{}
-	_, err := s.callBFG(ctx, &newKeystoneHeadersRequest)
+	_, err := s.callBFG(ctx, &bfgapi.NewL2KeystonesRequest{
+		L2Keystones: []hemi.L2Keystone{msg.L2Keystone},
+	})
 	if err != nil {
-		resp.Error = protocol.Errorf("%v", err)
+		e := protocol.NewInternalErrorf("new l2 keytsones: %v", err)
+		return &bssapi.L2KeystoneResponse{
+			Error: e.WireError(),
+		}, e
 	}
 
-	return resp, err
+	return &bssapi.L2KeystoneResponse{}, nil
 }
 
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByRecentKeystonesRequest) (*bssapi.BTCFinalityByRecentKeystonesResponse, error) {
