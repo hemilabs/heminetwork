@@ -43,40 +43,6 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-// InternalError is an error type to differentiates between caller and callee
-// errors. An internal error is used whne something internal to the application
-// fails.
-type InternalError struct {
-	internal *protocol.Error
-	actual   error
-}
-
-// Err return the protocol.Error that can be sent over the wire.
-func (ie InternalError) Err() *protocol.Error {
-	return ie.internal
-}
-
-// String return the actual underlying error.
-func (ie InternalError) String() string {
-	i := ie.internal
-	return fmt.Sprintf("%v [%v:%v]", ie.actual.Error(), i.Trace, i.Timestamp)
-}
-
-// Error satifies the error interface.
-func (ie InternalError) Error() string {
-	if ie.internal == nil {
-		return "internal error"
-	}
-	return ie.internal.String()
-}
-
-func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
-	return &InternalError{
-		internal: protocol.Errorf("internal error"),
-		actual:   fmt.Errorf(msg, args...),
-	}
-}
-
 // Wrap for calling bfg commands
 type bfgCmd struct {
 	msg any
@@ -213,18 +179,8 @@ func (s *Server) handleRequest(parrentCtx context.Context, bws *bssWs, wsid stri
 
 	response, err := handler(ctx)
 	if err != nil {
-		// XXX these errors print an invalid trace for some reason. It
-		// mostly works but have a look at it and compare with client
-		// output and fix.
-		var ie *InternalError
-		if errors.As(err, &ie) {
-			log.Errorf("[INTERNAL ERROR] Failed to handle %v request %v: %v",
-				requestType, bws.addr, ie.String())
-		} else {
-			// This may be too loud and can be silenced once in production.
-			log.Errorf("Failed to handle %v request %v: %v",
-				requestType, bws.addr, err)
-		}
+		log.Errorf("Failed to handle %v request %v: %v",
+			requestType, bws.addr, err)
 	}
 	if response == nil {
 		return
@@ -233,7 +189,8 @@ func (s *Server) handleRequest(parrentCtx context.Context, bws *bssWs, wsid stri
 	log.Debugf("Responding to %v request with %v", requestType, spew.Sdump(response))
 
 	if err := bssapi.Write(ctx, bws.conn, wsid, response); err != nil {
-		log.Errorf("Failed to handle %v request: protocol write failed: %v", requestType, err)
+		log.Errorf("Failed to handle %v request: protocol write failed: %v",
+			requestType, err)
 	}
 }
 
@@ -652,17 +609,17 @@ func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
 	// attempt to send
 	select {
 	case <-ctx.Done():
-		return nil, NewInternalErrorf("callBFG send context error: %v",
+		return nil, protocol.NewInternalErrorf("callBFG send context error: %v",
 			ctx.Err())
 	case s.bfgCmdCh <- bc:
 	default:
-		return nil, NewInternalErrorf("bfg command queue full")
+		return nil, protocol.NewInternalErrorf("bfg command queue full")
 	}
 
 	// Wait for response
 	select {
 	case <-ctx.Done():
-		return nil, NewInternalErrorf("callBFG received context error: %v",
+		return nil, protocol.NewInternalErrorf("callBFG received context error: %v",
 			ctx.Err())
 	case payload := <-bc.ch:
 		if err, ok := payload.(error); ok {
