@@ -263,15 +263,16 @@ func (s *Server) handleL2KeytoneRequest(ctx context.Context, msg *bssapi.L2Keyst
 }
 
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByRecentKeystonesRequest) (*bssapi.BTCFinalityByRecentKeystonesResponse, error) {
-	request := bfgapi.BTCFinalityByRecentKeystonesRequest{
-		NumRecentKeystones: msg.NumRecentKeystones,
-	}
+	log.Tracef("handleBtcFinalityByRecentKeystonesRequest")
+	defer log.Tracef("handleBtcFinalityByRecentKeystonesRequest exit")
 
-	// XXX FIXME
-	response, err := s.callBFG(ctx, &request)
+	response, err := s.callBFG(ctx, &bfgapi.BTCFinalityByRecentKeystonesRequest{
+		NumRecentKeystones: msg.NumRecentKeystones,
+	})
 	if err != nil {
+		e := protocol.NewInternalErrorf("btc finality recent: %v", err)
 		return &bssapi.BTCFinalityByRecentKeystonesResponse{
-			Error: protocol.Errorf("%v", err),
+			Error: e.WireError(),
 		}, err
 	}
 
@@ -281,15 +282,16 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 }
 
 func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByKeystonesRequest) (*bssapi.BTCFinalityByKeystonesResponse, error) {
-	request := bfgapi.BTCFinalityByKeystonesRequest{
-		L2Keystones: msg.L2Keystones,
-	}
+	log.Tracef("handleBtcFinalityByKeystonesRequest")
+	defer log.Tracef("handleBtcFinalityByKeystonesRequest exit")
 
-	// XXX FIXME
-	response, err := s.callBFG(ctx, &request)
+	response, err := s.callBFG(ctx, &bfgapi.BTCFinalityByKeystonesRequest{
+		L2Keystones: msg.L2Keystones,
+	})
 	if err != nil {
+		e := protocol.NewInternalErrorf("btc finality keystones: %v", err)
 		return &bssapi.BTCFinalityByKeystonesResponse{
-			Error: protocol.Errorf("%v", err),
+			Error: e.WireError(),
 		}, err
 	}
 
