@@ -1027,6 +1027,9 @@ func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxs
 }
 
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, bfrk *bfgapi.BTCFinalityByRecentKeystonesRequest) (any, error) {
+	log.Tracef("handleBtcFinalityByRecentKeystonesRequest")
+	defer log.Tracef("handleBtcFinalityByRecentKeystonesRequest exit")
+
 	finalities, err := s.db.L2BTCFinalityMostRecent(ctx, bfrk.NumRecentKeystones)
 	if err != nil {
 		e := protocol.NewInternalErrorf("error getting finality: %v", err)
@@ -1058,6 +1061,9 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 }
 
 func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *bfgapi.BTCFinalityByKeystonesRequest) (any, error) {
+	log.Tracef("handleBtcFinalityByKeystonesRequest")
+	defer log.Tracef("handleBtcFinalityByKeystonesRequest exit")
+
 	l2KeystoneAbrevHashes := make([]database.ByteArray, 0, len(bfkr.L2Keystones))
 	for _, l := range bfkr.L2Keystones {
 		a := hemi.L2KeystoneAbbreviate(l)
@@ -1128,23 +1134,20 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2Ke
 
 func writeNotificationResponse(bws *bfgWs, response any) {
 	if err := bfgapi.Write(bws.requestContext, bws.conn, "", response); err != nil {
-		log.Errorf(
-			"handleBtcFinalityNotification write: %v %v",
-			bws.addr,
-			err,
-		)
+		log.Errorf("handleBtcFinalityNotification write: %v %v", bws.addr, err)
 	}
 }
 
 func (s *Server) handleBtcFinalityNotification() error {
-	response := bfgapi.BTCFinalityNotification{}
+	log.Tracef("handleBtcFinalityNotification")
+	defer log.Tracef("handleBtcFinalityNotification exit")
 
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
 		if _, ok := bws.notify[notifyBtcFinalities]; !ok {
 			continue
 		}
-		go writeNotificationResponse(bws, response)
+		go writeNotificationResponse(bws, &bfgapi.BTCFinalityNotification{})
 	}
 	s.mtx.Unlock()
 
@@ -1152,14 +1155,15 @@ func (s *Server) handleBtcFinalityNotification() error {
 }
 
 func (s *Server) handleBtcBlockNotification() error {
-	response := bfgapi.BTCNewBlockNotification{}
+	log.Tracef("handleBtcBlockNotification")
+	defer log.Tracef("handleBtcBlockNotification exit")
 
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
 		if _, ok := bws.notify[notifyBtcBlocks]; !ok {
 			continue
 		}
-		go writeNotificationResponse(bws, response)
+		go writeNotificationResponse(bws, &bfgapi.BTCNewBlockNotification{})
 	}
 	s.mtx.Unlock()
 
@@ -1167,14 +1171,15 @@ func (s *Server) handleBtcBlockNotification() error {
 }
 
 func (s *Server) handleL2KeystonesNotification() error {
-	response := bfgapi.L2KeystonesNotification{}
+	log.Tracef("handleL2KeystonesNotification")
+	defer log.Tracef("handleL2KeystonesNotification exit")
 
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
 		if _, ok := bws.notify[notifyL2Keystones]; !ok {
 			continue
 		}
-		go writeNotificationResponse(bws, response)
+		go writeNotificationResponse(bws, &bfgapi.L2KeystonesNotification{})
 	}
 	s.mtx.Unlock()
 
@@ -1203,6 +1208,9 @@ func hemiL2KeystonesToDb(l2ks []hemi.L2Keystone) []bfgd.L2Keystone {
 }
 
 func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
+	log.Tracef("handleNewL2Keystones")
+	defer log.Tracef("handleNewL2Keystones exit")
+
 	ks := hemiL2KeystonesToDb(nlkr.L2Keystones)
 	err := s.db.L2KeystonesInsert(ctx, ks)
 	response := bfgapi.NewL2KeystonesResponse{}
