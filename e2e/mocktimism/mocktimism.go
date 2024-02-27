@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/juju/loggo"
+	"nhooyr.io/websocket"
+
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/juju/loggo"
-	"nhooyr.io/websocket"
 )
 
 const logLevel = "INFO"

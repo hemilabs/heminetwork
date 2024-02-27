@@ -51,7 +51,7 @@ build:
 install: $(cmds)
 
 lint:
-	$(shell go env GOPATH)/bin/goimports -w -l .
+	$(shell go env GOPATH)/bin/goimports -local github.com/hemilabs/heminetwork -w -l .
 	$(shell go env GOPATH)/bin/gofumpt -w -l .
 	go vet ./...
 

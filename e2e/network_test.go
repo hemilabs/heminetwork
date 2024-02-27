@@ -16,14 +16,15 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
+	"nhooyr.io/websocket"
+
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
-	"nhooyr.io/websocket"
 )
 
 const (
