@@ -313,6 +313,9 @@ func (s *Server) handleL2KeytoneRequest(ctx context.Context, msg *bssapi.L2Keyst
 }
 
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByRecentKeystonesRequest) (*bssapi.BTCFinalityByRecentKeystonesResponse, error) {
+	log.Tracef("handleBtcFinalityByRecentKeystonesRequest")
+	defer log.Tracef("handleBtcFinalityByRecentKeystonesRequest exit")
+
 	request := bfgapi.BTCFinalityByRecentKeystonesRequest{
 		NumRecentKeystones: msg.NumRecentKeystones,
 	}
@@ -330,6 +333,9 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 }
 
 func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByKeystonesRequest) (*bssapi.BTCFinalityByKeystonesResponse, error) {
+	log.Tracef("handleBtcFinalityByKeystonesRequest")
+	defer log.Tracef("handleBtcFinalityByKeystonesRequest exit")
+
 	request := bfgapi.BTCFinalityByKeystonesRequest{
 		L2Keystones: msg.L2Keystones,
 	}

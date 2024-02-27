@@ -19,13 +19,13 @@ endif
 project = heminetwork
 version = $(shell git describe --tags 2>/dev/null || echo "v0.0.0")
 
-cmds = \
-	bfgd \
-	bssd \
-	extool \
-	keygen \
-	popmd \
-	hemictl
+cmds =	bfgd	\
+	bssd	\
+	dashd	\
+	extool	\
+	hemictl \
+	keygen	\
+	popmd
 
 .PHONY: all clean clean-dist deps $(cmds) build install lint lint-deps tidy race test vulncheck \
 	vulncheck-deps dist archive sources checksums networktest
