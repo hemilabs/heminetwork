@@ -231,16 +231,15 @@ type Message struct {
 }
 
 // Error is a protocol Error type that can be used for additional error
-// context. It embeds an 8 byte number that can be used to trace calls on both the
-// client and server side.
+// context. It embeds an 8 byte number that can be used to trace calls on both
+// the client and server side.
 type Error struct {
 	Timestamp int64  `json:"timestamp"`
-	Trace     string `json:"trace"`
-	Message   string `json:"error"`
+	Trace     string `json:"trace,omitempty"`
+	Message   string `json:"message"`
 }
 
-// Errorf is a client induced protocol error (e.g. "invalid height"). This is a
-// pretty printable error on the client and server and is not fatal.
+// Errorf returns a protocol Error type with an embedded trace.
 func Errorf(msg string, args ...interface{}) *Error {
 	trace, _ := random(8)
 	return &Error{
@@ -250,8 +249,62 @@ func Errorf(msg string, args ...interface{}) *Error {
 	}
 }
 
+// String pretty prints a protocol error.
 func (e Error) String() string {
+	if len(e.Trace) == 0 {
+		return e.Message
+	}
 	return fmt.Sprintf("%v [%v:%v]", e.Message, e.Trace, e.Timestamp)
+}
+
+// WireError converts an application error to a protocol Error. This does not
+// embed a trace since the error is essentially pass through and therefore won't
+// be logged server side.
+func WireError(err error) *Error {
+	return &Error{
+		Timestamp: time.Now().Unix(),
+		Message:   err.Error(),
+	}
+}
+
+// InternalError is an error type that differentiates between caller and callee
+// errors. An internal error is used when something internal to the application
+// fails. The client should not see the actual error message as those are
+// server operator specific.
+//
+// One can argue that this not belong here but to prevent heavy copy/paste that
+// will not age well it has been moved here.
+type InternalError struct {
+	internal *Error
+	actual   error
+}
+
+// WireError returns the protocol error representation.
+func (ie InternalError) WireError() *Error {
+	return ie.internal
+}
+
+// Error satisfies the error interface.
+func (ie InternalError) Error() string {
+	if ie.actual != nil {
+		return fmt.Sprintf("%v [%v:%v]", ie.actual.Error(),
+			ie.internal.Timestamp, ie.internal.Trace)
+	}
+	return ie.internal.String()
+}
+
+// NewInternalErrorf returns an InternalError constructed from the passed
+// message and arguments.
+func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
+	return &InternalError{
+		internal: Errorf("internal error"),
+		actual:   fmt.Errorf(msg, args...),
+	}
+}
+
+// NewInternalError returns an InternalError representation of the passed in error.
+func NewInternalError(err error) *InternalError {
+	return NewInternalErrorf("internal error: %v", err)
 }
 
 // Ping
