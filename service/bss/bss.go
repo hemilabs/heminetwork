@@ -228,6 +228,7 @@ func (s *Server) handlePopPayoutsRequest(ctx context.Context, msg *bssapi.PopPay
 	log.Tracef("handlePopPayoutsRequest")
 	defer log.Tracef("handlePopPayoutsRequest exit")
 
+	// XXX FIXME
 	popTxsForL2BlockRequest := bfgapi.PopTxsForL2BlockRequest{
 		L2Block: msg.L2BlockForPayout,
 	}
@@ -272,6 +273,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 		NumRecentKeystones: msg.NumRecentKeystones,
 	}
 
+	// XXX FIXME
 	response, err := s.callBFG(ctx, &request)
 	if err != nil {
 		return &bssapi.BTCFinalityByRecentKeystonesResponse{
@@ -289,6 +291,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, msg *b
 		L2Keystones: msg.L2Keystones,
 	}
 
+	// XXX FIXME
 	response, err := s.callBFG(ctx, &request)
 	if err != nil {
 		return &bssapi.BTCFinalityByKeystonesResponse{
