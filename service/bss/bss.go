@@ -228,27 +228,21 @@ func (s *Server) handlePopPayoutsRequest(ctx context.Context, msg *bssapi.PopPay
 	log.Tracef("handlePopPayoutsRequest")
 	defer log.Tracef("handlePopPayoutsRequest exit")
 
-	// XXX FIXME
-	popTxsForL2BlockRequest := bfgapi.PopTxsForL2BlockRequest{
+	popTxsForL2BlockRes, err := s.callBFG(ctx, bfgapi.PopTxsForL2BlockRequest{
 		L2Block: msg.L2BlockForPayout,
-	}
-
-	popTxsForL2BlockRes, err := s.callBFG(ctx, &popTxsForL2BlockRequest)
+	})
 	if err != nil {
+		e := protocol.NewInternalErrorf("pop tx for l2: block %v", err)
 		return &bssapi.PopPayoutsResponse{
-			Error: protocol.Errorf("%v", err),
-		}, err
+			Error: e.WireError(),
+		}, e
 	}
 
-	popPayouts := ConvertPopTxsToPopPayouts(
-		(popTxsForL2BlockRes.(*bfgapi.PopTxsForL2BlockResponse)).PopTxs,
-	)
-
-	popPayoutsResponse := bssapi.PopPayoutsResponse{
-		PopPayouts: popPayouts,
-	}
-
-	return &popPayoutsResponse, nil
+	return &bssapi.PopPayoutsResponse{
+		PopPayouts: ConvertPopTxsToPopPayouts(
+			(popTxsForL2BlockRes.(*bfgapi.PopTxsForL2BlockResponse)).PopTxs,
+		),
+	}, nil
 }
 
 func (s *Server) handleL2KeytoneRequest(ctx context.Context, msg *bssapi.L2KeystoneRequest) (*bssapi.L2KeystoneResponse, error) {
