@@ -372,6 +372,7 @@ func (s *Server) handleWebsocketRead(ctx context.Context, bws *bssWs) {
 		if err != nil {
 			log.Errorf("handleWebsocketRead %v %v %v: %v",
 				bws.addr, cmd, id, err)
+			// XXX this needs to be handled by the caller
 			bws.conn.CloseStatus(websocket.StatusProtocolError,
 				err.Error())
 			return
