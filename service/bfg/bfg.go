@@ -249,22 +249,33 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	rr := bytes.NewReader(bbr.Transaction)
 	mb := wire.MsgTx{}
 	if err := mb.Deserialize(rr); err != nil {
-		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.WireError(err)}, nil
+		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.WireError(
+			fmt.Errorf("failed to deserialize tx: %s", err),
+		)}, nil
 	}
 
 	var tl2 *pop.TransactionL2
 	var err error
+	var tx int
 	for k, v := range mb.TxOut {
 		tl2, err = pop.ParseTransactionL2FromOpReturn(v.PkScript)
+		tx = k
 		if err != nil {
-			return &bfgapi.BitcoinBroadcastResponse{
-				Error: protocol.WireErrorf("tx %v: %v", k, err),
-			}, nil
+			log.Errorf("error parsing op return: %s", err)
+		} else {
+			break
 		}
 	}
+
 	if tl2 == nil {
 		return &bfgapi.BitcoinBroadcastResponse{
 			Error: protocol.WireErrorf("could not find l2 keystone abbrev in btc tx"),
+		}, nil
+	}
+
+	if err != nil {
+		return &bfgapi.BitcoinBroadcastResponse{
+			Error: protocol.WireErrorf("tx %v: %v", tx, err),
 		}, nil
 	}
 
