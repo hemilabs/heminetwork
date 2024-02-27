@@ -27,6 +27,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
+	"github.com/hemilabs/heminetwork/api/dashapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
@@ -79,6 +80,16 @@ func handleBSSWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 func handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 	for {
 		if _, _, _, err := bfgapi.ReadConn(ctx, conn); err != nil {
+			return
+		}
+	}
+}
+
+// handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
+// be able to use dashapi.Call.
+func handleDashWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
+	for {
+		if _, _, _, err := dashapi.ReadConn(ctx, conn); err != nil {
 			return
 		}
 	}
@@ -304,6 +315,9 @@ func init() {
 	for k, v := range bfgapi.APICommands() {
 		allCommands[string(k)] = v
 	}
+	for k, v := range dashapi.APICommands() {
+		allCommands[string(k)] = v
+	}
 
 	sortedCommands = make([]string, 0, len(allCommands))
 	for k := range allCommands {
@@ -410,6 +424,10 @@ func _main() error {
 		u = bfgapi.DefaultPrivateURL
 		callHandler = handleBFGWebsocketReadUnauth
 		call = bfgapi.Call // XXX yuck
+	case strings.HasPrefix(cmd, "dashapi"):
+		u = dashapi.DefaultURL
+		callHandler = handleDashWebsocketReadUnauth
+		call = dashapi.Call // XXX yuck
 	default:
 		return fmt.Errorf("can't derive URL from command: %v", cmd)
 	}
