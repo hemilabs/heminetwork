@@ -67,6 +67,17 @@ func APICommands() map[protocol.Command]reflect.Type {
 	return commands // XXX make copy
 }
 
+// Error is the dash protocol error type
+type Error protocol.Error
+
+func (e Error) String() string {
+	return (protocol.Error)(e).String()
+}
+
+func Errorf(msg string, args ...interface{}) *Error {
+	return (*Error)(protocol.Errorf(msg, args...))
+}
+
 // Read reads a command from an APIConn. This is used server side.
 func Read(ctx context.Context, c protocol.APIConn) (protocol.Command, string, any, error) {
 	return protocol.Read(ctx, c, &apiCmd{})

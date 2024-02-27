@@ -35,40 +35,6 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-// InternalError is an error type to differentiates between caller and callee
-// errors. An internal error is used whne something internal to the application
-// fails.
-type InternalError struct {
-	internal *protocol.Error
-	actual   error
-}
-
-// Err return the protocol.Error that can be sent over the wire.
-func (ie InternalError) Err() *protocol.Error {
-	return ie.internal
-}
-
-// String return the actual underlying error.
-func (ie InternalError) String() string {
-	i := ie.internal
-	return fmt.Sprintf("%v [%v:%v]", ie.actual.Error(), i.Trace, i.Timestamp)
-}
-
-// Error satifies the error interface.
-func (ie InternalError) Error() string {
-	if ie.internal == nil {
-		return "internal error"
-	}
-	return ie.internal.String()
-}
-
-func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
-	return &InternalError{
-		internal: protocol.Errorf("internal error"),
-		actual:   fmt.Errorf(msg, args...),
-	}
-}
-
 func NewDefaultConfig() *Config {
 	return &Config{
 		ListenAddress: dashapi.DefaultListen,
@@ -90,6 +56,10 @@ type Server struct {
 	cfg *Config
 
 	requestTimeout time.Duration // Request timeout
+
+	// requests
+	requestLimit   int       // Request limiter queue depth
+	requestLimiter chan bool // Maximum in progress websocket commands
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -97,9 +67,15 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 	defaultRequestTimeout := 11 * time.Second // XXX
+	requestLimit := 1000                      // XXX
 	s := &Server{
 		cfg:            cfg,
+		requestLimiter: make(chan bool, requestLimit),
 		requestTimeout: defaultRequestTimeout,
+		requestLimit:   requestLimit,
+	}
+	for i := 0; i < requestLimit; i++ {
+		s.requestLimiter <- true
 	}
 
 	return s, nil
@@ -108,6 +84,40 @@ func NewServer(cfg *Config) (*Server, error) {
 func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.HandleFunc(pattern, handler)
 	log.Infof("handle (%v): %v", service, pattern)
+}
+
+// handleRequest is called as a go routine to handle a long lived command.
+func (s *Server) handleRequest(parrentCtx context.Context, dws *dashWs, wsid string, requestType string, handler func(ctx context.Context) (any, error)) {
+	log.Tracef("handleRequest: %v", dws.addr)
+	defer log.Tracef("handleRequest exit: %v", dws.addr)
+
+	ctx, cancel := context.WithTimeout(parrentCtx, s.requestTimeout)
+	defer cancel()
+
+	select {
+	case <-s.requestLimiter:
+	default:
+		log.Infof("Request limiter hit %v: %v", dws.addr, requestType)
+		<-s.requestLimiter
+	}
+	defer func() { s.requestLimiter <- true }()
+
+	log.Tracef("Handling request %v: %v", dws.addr, requestType)
+
+	response, err := handler(ctx)
+	if err != nil {
+		log.Errorf("Failed to handle %v request %v: %v",
+			requestType, dws.addr, err)
+	}
+	if response == nil {
+		return
+	}
+
+	log.Debugf("Responding to %v request with %v", requestType, spew.Sdump(response))
+
+	if err := dashapi.Write(ctx, dws.conn, wsid, response); err != nil {
+		log.Errorf("Failed to handle %v request: protocol write failed: %v", requestType, err)
+	}
 }
 
 type dashWs struct {
@@ -138,6 +148,34 @@ func (s *Server) handlePingRequest(ctx context.Context, dws *dashWs, payload any
 			dws.addr, err)
 	}
 	return nil
+}
+
+func (s *Server) handleHeartbeatRequest(ctx context.Context, msg *dashapi.HeartbeatRequest) (*dashapi.HeartbeatResponse, error) {
+	log.Tracef("handleHeartbeatRequest")
+	defer log.Tracef("handleHeartbeatRequest exit")
+
+	err := errors.New("fuck off")
+	errorType := 0
+	switch errorType {
+	case 0:
+		// internal error
+		x := 1
+		var e *protocol.InternalError
+		if x == 0 {
+			e = protocol.NewInternalErrorf("my error: %v", err)
+		} else {
+			e = protocol.NewInternalError(err)
+		}
+
+		return &dashapi.HeartbeatResponse{
+			Error: e.WireError(),
+		}, e
+	case 1:
+		// user error
+		return &dashapi.HeartbeatResponse{Error: protocol.WireError(err)}, nil
+	}
+
+	return &dashapi.HeartbeatResponse{}, nil
 }
 
 func (s *Server) handleWebsocketRead(ctx context.Context, dws *dashWs) {
@@ -173,6 +211,14 @@ func (s *Server) handleWebsocketRead(ctx context.Context, dws *dashWs) {
 		case dashapi.CmdPingRequest:
 			// quick call
 			err = s.handlePingRequest(ctx, dws, payload, id)
+		case dashapi.CmdHeartbeatRequest:
+			handler := func(c context.Context) (any, error) {
+				msg := payload.(*dashapi.HeartbeatRequest)
+				return s.handleHeartbeatRequest(c, msg)
+			}
+
+			go s.handleRequest(ctx, dws, id, "handle handleHeartbeatRequest",
+				handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -181,8 +227,6 @@ func (s *Server) handleWebsocketRead(ctx context.Context, dws *dashWs) {
 		if err != nil {
 			log.Errorf("handleWebsocketRead %v %v %v: %v",
 				dws.addr, cmd, id, err)
-			dws.conn.CloseStatus(websocket.StatusProtocolError,
-				err.Error())
 			return
 		}
 	}
@@ -214,13 +258,7 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		requestContext: r.Context(),
 	}
 
-	//if dws.sessionId, err = s.newSession(dws); err != nil {
-	//	log.Errorf("error occurred creating key: %s", err)
-	//	return
-	//}
-
 	defer func() {
-		// s.deleteSession(dws.sessionId)
 		conn.Close(websocket.StatusNormalClosure, "") // Force shutdown connection
 	}()
 
