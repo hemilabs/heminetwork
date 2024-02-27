@@ -249,8 +249,8 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	rr := bytes.NewReader(bbr.Transaction)
 	mb := wire.MsgTx{}
 	if err := mb.Deserialize(rr); err != nil {
-		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.WireError(
-			fmt.Errorf("failed to deserialize tx: %s", err),
+		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.WireErrorf(
+			"failed to deserialize tx: %s", err,
 		)}, nil
 	}
 
