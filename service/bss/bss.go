@@ -372,9 +372,6 @@ func (s *Server) handleWebsocketRead(ctx context.Context, bws *bssWs) {
 		if err != nil {
 			log.Errorf("handleWebsocketRead %v %v %v: %v",
 				bws.addr, cmd, id, err)
-			// XXX this needs to be handled by the caller
-			bws.conn.CloseStatus(websocket.StatusProtocolError,
-				err.Error())
 			return
 		}
 
@@ -416,7 +413,6 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		s.deleteSession(bws.sessionId)
-		conn.Close(websocket.StatusNormalClosure, "") // Force shutdown connection
 	}()
 
 	bws.wg.Add(1)
@@ -466,11 +462,13 @@ func (s *Server) newSession(bws *bssWs) (string, error) {
 
 func (s *Server) deleteSession(id string) {
 	s.mtx.Lock()
-	if _, ok := s.sessions[id]; !ok {
-		log.Errorf("id not found in sessions %s", id)
-	}
+	_, ok := s.sessions[id]
 	delete(s.sessions, id)
 	s.mtx.Unlock()
+
+	if !ok {
+		log.Errorf("id not found in sessions %s", id)
+	}
 }
 
 func writeNotificationResponse(bws *bssWs, response any) {
