@@ -254,28 +254,20 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 		)}, nil
 	}
 
-	var tl2 *pop.TransactionL2
-	var err error
-	var tx int
-	for k, v := range mb.TxOut {
+	var (
+		tl2 *pop.TransactionL2
+		err error
+	)
+	for _, v := range mb.TxOut {
 		tl2, err = pop.ParseTransactionL2FromOpReturn(v.PkScript)
-		tx = k
-		if err != nil {
-			log.Errorf("error parsing op return: %s", err)
-		} else {
-			break
+		if err == nil {
+			break // Found the pop transaction.
 		}
 	}
 
 	if tl2 == nil {
 		return &bfgapi.BitcoinBroadcastResponse{
 			Error: protocol.WireErrorf("could not find l2 keystone abbrev in btc tx"),
-		}, nil
-	}
-
-	if err != nil {
-		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.WireErrorf("tx %v: %v", tx, err),
 		}, nil
 	}
 
