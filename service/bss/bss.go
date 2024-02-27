@@ -482,11 +482,9 @@ func writeNotificationResponse(bws *bssWs, response any) {
 }
 
 func (s *Server) handleBtcFinalityNotification() error {
-	response := bssapi.BTCFinalityNotification{}
-
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
-		go writeNotificationResponse(bws, response)
+		go writeNotificationResponse(bws, &bssapi.BTCFinalityNotification{})
 	}
 	s.mtx.Unlock()
 
@@ -494,11 +492,9 @@ func (s *Server) handleBtcFinalityNotification() error {
 }
 
 func (s *Server) handleBtcBlockNotification() error {
-	response := bssapi.BTCNewBlockNotification{}
-
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
-		go writeNotificationResponse(bws, response)
+		go writeNotificationResponse(bws, &bssapi.BTCNewBlockNotification{})
 	}
 	s.mtx.Unlock()
 
@@ -549,7 +545,7 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 			go s.handleBtcBlockNotification()
 		default:
 			log.Errorf("unknown command: %v", cmd)
-			return // XXX exit for now to cause a ruckus in the logs
+			return
 		}
 	}
 }
