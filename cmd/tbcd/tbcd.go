@@ -19,6 +19,7 @@ import (
 const (
 	daemonName      = "tbcd"
 	defaultLogLevel = daemonName + "=INFO;postgres=INFO;tbcpostgres=INFO;tbc=INFO"
+	defaultNetwork  = "testnet3" // XXX make this mainnet
 )
 
 var (
@@ -31,6 +32,12 @@ var (
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
+			Print:        config.PrintAll,
+		},
+		"TBC_NETWORK": config.Config{
+			Value:        &cfg.Network,
+			DefaultValue: defaultNetwork,
+			Help:         "bitcoin network; mainnet or testnet",
 			Print:        config.PrintAll,
 		},
 		"TBC_POSTGRES_URI": config.Config{
