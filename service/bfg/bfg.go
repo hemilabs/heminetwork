@@ -230,7 +230,7 @@ func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBa
 
 	balance, err := s.btcClient.Balance(ctx, bbr.ScriptHash)
 	if err != nil {
-		e := protocol.NewInternalErrorf("bitcoin balance: %v", err)
+		e := protocol.NewInternalErrorf("bitcoin balance: %w", err)
 		return &bfgapi.BitcoinBalanceResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -281,7 +281,7 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	txHash, err := s.btcClient.Broadcast(ctx, bbr.Transaction)
 	if err != nil {
 		// This may not alwyas be an internal error.
-		e := protocol.NewInternalErrorf("broadcast tx: %s", err)
+		e := protocol.NewInternalErrorf("broadcast tx: %w", err)
 		return &bfgapi.BitcoinBroadcastResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -300,13 +300,13 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 		}
 
 		if errors.Is(err, database.ErrValidation) {
-			e := protocol.NewInternalErrorf("invalid pop basis: %v", err)
+			e := protocol.NewInternalErrorf("invalid pop basis: %w", err)
 			return &bfgapi.BitcoinBroadcastResponse{
 				Error: e.ProtocolError(),
 			}, e
 		}
 
-		e := protocol.NewInternalErrorf("insert pop basis: %v", err)
+		e := protocol.NewInternalErrorf("insert pop basis: %w", err)
 		return &bfgapi.BitcoinBroadcastResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -321,7 +321,7 @@ func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoR
 
 	height, err := s.btcClient.Height(ctx)
 	if err != nil {
-		e := protocol.NewInternalErrorf("bitcoin height: %v", err)
+		e := protocol.NewInternalErrorf("bitcoin height: %w", err)
 		return &bfgapi.BitcoinInfoResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -338,7 +338,7 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 
 	utxos, err := s.btcClient.UTXOs(ctx, bur.ScriptHash)
 	if err != nil {
-		e := protocol.NewInternalErrorf("bitcoin utxos: %v", err)
+		e := protocol.NewInternalErrorf("bitcoin utxos: %w", err)
 		return &bfgapi.BitcoinUTXOsResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -382,7 +382,7 @@ func (s *Server) handleAccessPublicKeyCreateRequest(ctx context.Context, acpkc *
 			}, nil
 		}
 
-		e := protocol.NewInternalErrorf("insert public key: %v", err)
+		e := protocol.NewInternalErrorf("insert public key: %w", err)
 		return &bfgapi.AccessPublicKeyCreateResponse{
 			Error: protocol.RequestErrorf("invalid access public key"),
 		}, e
@@ -416,7 +416,7 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 				Error: protocol.RequestErrorf("public key not found"),
 			}, nil
 		}
-		e := protocol.NewInternalErrorf("error deleting access public key: %v",
+		e := protocol.NewInternalErrorf("error deleting access public key: %w",
 			err)
 		return &bfgapi.AccessPublicKeyDeleteResponse{
 			Error: e.ProtocolError(),
@@ -1006,7 +1006,7 @@ func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxs
 	copy(h[:], hash)
 	popTxs, err := s.db.PopBasisByL2KeystoneAbrevHash(ctx, h, true)
 	if err != nil {
-		e := protocol.NewInternalErrorf("error getting pop basis: %v", err)
+		e := protocol.NewInternalErrorf("error getting pop basis: %w", err)
 		return &bfgapi.PopTxsForL2BlockResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -1036,7 +1036,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 
 	finalities, err := s.db.L2BTCFinalityMostRecent(ctx, bfrk.NumRecentKeystones)
 	if err != nil {
-		e := protocol.NewInternalErrorf("error getting finality: %v", err)
+		e := protocol.NewInternalErrorf("error getting finality: %w", err)
 		return &bfgapi.BTCFinalityByRecentKeystonesResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -1050,7 +1050,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 			finality.EffectiveHeight,
 		)
 		if err != nil {
-			e := protocol.NewInternalErrorf("error getting finality (%v): %v",
+			e := protocol.NewInternalErrorf("error getting finality (%v): %w",
 				k, err)
 			return &bfgapi.BTCFinalityByRecentKeystonesResponse{
 				Error: e.ProtocolError(),
@@ -1079,7 +1079,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 		l2KeystoneAbrevHashes,
 	)
 	if err != nil {
-		e := protocol.NewInternalErrorf("l2 keystones: %v", err)
+		e := protocol.NewInternalErrorf("l2 keystones: %w", err)
 		return &bfgapi.BTCFinalityByKeystonesResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -1093,7 +1093,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 			finality.EffectiveHeight,
 		)
 		if err != nil {
-			e := protocol.NewInternalErrorf("l2 btc finality: %v", err)
+			e := protocol.NewInternalErrorf("l2 btc finality: %w", err)
 			return &bfgapi.BTCFinalityByKeystonesResponse{
 				Error: e.ProtocolError(),
 			}, e
@@ -1112,7 +1112,7 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2Ke
 
 	results, err := s.db.L2KeystonesMostRecentN(ctx, uint32(l2kr.NumL2Keystones))
 	if err != nil {
-		e := protocol.NewInternalErrorf("error getting l2 keystones: %s", err)
+		e := protocol.NewInternalErrorf("error getting l2 keystones: %w", err)
 		return &bfgapi.L2KeystonesResponse{
 			Error: e.ProtocolError(),
 		}, e

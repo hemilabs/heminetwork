@@ -232,7 +232,7 @@ func (s *Server) handlePopPayoutsRequest(ctx context.Context, msg *bssapi.PopPay
 		L2Block: msg.L2BlockForPayout,
 	})
 	if err != nil {
-		e := protocol.NewInternalErrorf("pop tx for l2: block %v", err)
+		e := protocol.NewInternalErrorf("pop tx for l2: block %w", err)
 		return &bssapi.PopPayoutsResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -253,7 +253,7 @@ func (s *Server) handleL2KeytoneRequest(ctx context.Context, msg *bssapi.L2Keyst
 		L2Keystones: []hemi.L2Keystone{msg.L2Keystone},
 	})
 	if err != nil {
-		e := protocol.NewInternalErrorf("new l2 keytsones: %v", err)
+		e := protocol.NewInternalErrorf("new l2 keytsones: %w", err)
 		return &bssapi.L2KeystoneResponse{
 			Error: e.ProtocolError(),
 		}, e
@@ -270,7 +270,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 		NumRecentKeystones: msg.NumRecentKeystones,
 	})
 	if err != nil {
-		e := protocol.NewInternalErrorf("btc finality recent: %v", err)
+		e := protocol.NewInternalErrorf("btc finality recent: %w", err)
 		return &bssapi.BTCFinalityByRecentKeystonesResponse{
 			Error: e.ProtocolError(),
 		}, err
@@ -289,7 +289,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, msg *b
 		L2Keystones: msg.L2Keystones,
 	})
 	if err != nil {
-		e := protocol.NewInternalErrorf("btc finality keystones: %v", err)
+		e := protocol.NewInternalErrorf("btc finality keystones: %w", err)
 		return &bssapi.BTCFinalityByKeystonesResponse{
 			Error: e.ProtocolError(),
 		}, err
@@ -601,7 +601,7 @@ func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
 	// attempt to send
 	select {
 	case <-ctx.Done():
-		return nil, protocol.NewInternalErrorf("callBFG send context error: %v",
+		return nil, protocol.NewInternalErrorf("callBFG send context error: %w",
 			ctx.Err())
 	case s.bfgCmdCh <- bc:
 	default:
@@ -611,7 +611,7 @@ func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
 	// Wait for response
 	select {
 	case <-ctx.Done():
-		return nil, protocol.NewInternalErrorf("callBFG received context error: %v",
+		return nil, protocol.NewInternalErrorf("callBFG received context error: %w",
 			ctx.Err())
 	case payload := <-bc.ch:
 		if err, ok := payload.(error); ok {
