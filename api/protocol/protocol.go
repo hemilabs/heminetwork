@@ -232,7 +232,7 @@ type Message struct {
 // Error is a protocol error type that is used to provide additional error
 // information between a server and client.
 //
-// A unique "trace" string may be embedded, which can be used to trace calls
+// A unique "trace" string may be embedded, which can be used to trace errors
 // between a server and client.
 type Error struct {
 	Timestamp int64  `json:"timestamp"`
