@@ -308,6 +308,11 @@ func (ie InternalError) Error() string {
 	return ie.protocol.String()
 }
 
+// Unwrap returns the error wrapped by this internal error.
+func (ie InternalError) Unwrap() error {
+	return ie.internal
+}
+
 // NewInternalError returns an InternalError wrapping the given error.
 func NewInternalError(err error) *InternalError {
 	return NewInternalErrorf("internal error: %w", err)
