@@ -27,9 +27,7 @@ const (
 	HeightFilename = "height"
 )
 
-var (
-	DefaultDataDir = filepath.Join(DefaultNet, "bitcoin_headers")
-)
+var DefaultDataDir = filepath.Join(DefaultNet, "bitcoin_headers")
 
 type LastHeight struct {
 	Height int    `json:"height"`
@@ -167,7 +165,7 @@ func writeHeight(height int, hash, dir string) error {
 		log.Tracef("not overwriting height: %v > %v", lh.Height, height)
 		return nil
 	}
-	fw, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	fw, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return fmt.Errorf("OpenFile: %v", err)
 	}
