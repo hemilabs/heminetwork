@@ -89,7 +89,7 @@ func TestFullNetwork(t *testing.T) {
 			"-rpcuser=user",
 			"-rpcpassword=password",
 			"generatetoaddress",
-			"5000", // need to generate a lot for greater chance to not spend coinbase
+			"200", // need to generate a lot for greater chance to not spend coinbase
 			btcAddress.EncodeAddress(),
 		})
 	if err != nil {
