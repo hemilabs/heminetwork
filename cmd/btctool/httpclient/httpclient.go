@@ -43,5 +43,4 @@ func Request(ctx context.Context, method, url string, body any) ([]byte, error) 
 
 		return io.ReadAll(resp.Body)
 	}
-	panic("not reached")
 }
