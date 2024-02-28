@@ -994,7 +994,7 @@ func (s *Server) handlePopTxForL2Block(ctx context.Context, bws *bfgWs, payload 
 	hash := hemi.HashSerializedL2KeystoneAbrev(p.L2Block)
 	var h [32]byte
 	copy(h[:], hash)
-	popTxs, err := s.db.PopBasisByL2KeystoneAbrevHash(ctx, h, true)
+	popTxs, err := s.db.PopBasisByL2KeystoneAbrevHash(ctx, h, !p.IncludeUnconfirmed)
 	if err != nil {
 		ie := NewInternalErrorf("error getting pop basis: %s", err)
 		response.Error = ie.internal

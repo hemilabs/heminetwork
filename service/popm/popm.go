@@ -50,6 +50,32 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
+type CircularFifo struct {
+	buf chan hemi.L2Keystone
+}
+
+func NewCircularFifo(n int) *CircularFifo {
+	return &CircularFifo{
+		buf: make(chan hemi.L2Keystone, n),
+	}
+}
+
+func (r *CircularFifo) Push(val hemi.L2Keystone) {
+	// if the channel is full, remove the oldest item.  according to Go's docs
+	// "A single channel may be used in send statements, receive operations, and
+	//  calls to the built-in functions cap and len by any number of
+	// goroutines without further synchronization"
+	if len(r.buf) == cap(r.buf) {
+		<-r.buf
+	}
+
+	r.buf <- val
+}
+
+func (r *CircularFifo) Pop() <-chan hemi.L2Keystone {
+	return r.buf
+}
+
 type Config struct {
 	// BFGWSURL specifies the URL of the BFG private websocket endpoint
 	BFGWSURL string
@@ -94,7 +120,7 @@ type Miner struct {
 	btcAddress     *btcutil.AddressPubKeyHash
 
 	lastKeystone *hemi.L2Keystone
-	keystoneCh   chan *hemi.L2Keystone
+	keystoneBuf  *CircularFifo
 
 	// Prometheus
 	isRunning bool
@@ -110,7 +136,7 @@ func NewMiner(cfg *Config) (*Miner, error) {
 
 	m := &Miner{
 		cfg:            cfg,
-		keystoneCh:     make(chan *hemi.L2Keystone, 3),
+		keystoneBuf:    NewCircularFifo(10),
 		bfgCmdCh:       make(chan bfgCmd, 10),
 		holdoffTimeout: 5 * time.Second,
 		requestTimeout: 5 * time.Second,
@@ -251,6 +277,33 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
 
 	return &btx, nil
+}
+
+func (m *Miner) shouldMineKeystone(ctx context.Context, ks *hemi.L2Keystone) (bool, error) {
+	serialized := hemi.L2KeystoneAbbreviate(*ks).Serialize()
+	response, err := m.callBFG(ctx, 5*time.Second, &bfgapi.PopTxsForL2BlockRequest{
+		L2Block: hemi.HashSerializedL2KeystoneAbrev(
+			serialized[:],
+		),
+		IncludeUnconfirmed: false,
+	})
+	if err != nil {
+		return false, err
+	}
+
+	popTxsForL2BlockResponse, ok := response.(*bfgapi.PopTxsForL2BlockResponse)
+	if !ok {
+		return false, errors.New("not bfgapi.PopTxsForL2BlockResponse")
+	}
+
+	// this response only returns confirmed keystones, if there any then do not
+	// mine this block
+	if popTxsForL2BlockResponse.PopTxs != nil && len(popTxsForL2BlockResponse.PopTxs) > 0 {
+		log.Infof("l2 keystone already confirmed in btc chain, skipping")
+		return false, nil
+	}
+
+	return true, nil
 }
 
 // XXX this function is not right. Clean it up and ensure we make this in at
@@ -438,23 +491,40 @@ func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.Bi
 func (m *Miner) mine(ctx context.Context) {
 	defer m.wg.Done()
 	for {
+		log.Infof("checking keystone...")
 		select {
 		case <-ctx.Done():
 			return
-		case ks := <-m.keystoneCh:
-			log.Tracef("Received new keystone header for mining with height %v...", ks.L2BlockNumber)
-			if err := m.mineKeystone(ctx, ks); err != nil {
-				log.Errorf("Failed to mine keystone: %v", err)
+		case ks := <-m.keystoneBuf.Pop():
+			log.Infof("Received new keystone header for mining with height %v...", ks.L2BlockNumber)
+			for {
+				shouldMine, err := m.shouldMineKeystone(ctx, &ks)
+				if err != nil {
+					log.Errorf("error determining if should mine keystone: %s", err)
+					continue
+				}
+
+				if !shouldMine {
+					break
+				}
+
+				if err := m.mineKeystone(ctx, &ks); err != nil {
+					log.Errorf("Failed to mine keystone: %v", err)
+					select {
+					case <-time.After(500 * time.Millisecond):
+					case <-ctx.Done():
+						return
+					}
+				} else {
+					break
+				}
 			}
 		}
 	}
 }
 
 func (m *Miner) queueKeystoneForMining(keystone *hemi.L2Keystone) {
-	select {
-	case m.keystoneCh <- keystone:
-	default:
-	}
+	m.keystoneBuf.Push(*keystone)
 }
 
 func sortL2KeystonesByL2BlockNumberAsc(a, b hemi.L2Keystone) int {

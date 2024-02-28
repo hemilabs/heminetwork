@@ -138,7 +138,9 @@ func TestProcessReceivedKeystones(t *testing.T) {
 		},
 	}
 
-	miner := Miner{}
+	miner := Miner{
+		keystoneBuf: NewCircularFifo(10),
+	}
 
 	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
 	diff := deep.Equal(*miner.lastKeystone, hemi.L2Keystone{
@@ -498,8 +500,8 @@ func TestProcessReceivedInAscOrder(t *testing.T) {
 
 	for {
 		select {
-		case l2Keystone := <-miner.keystoneCh:
-			receivedKeystones = append(receivedKeystones, *l2Keystone)
+		case l2Keystone := <-miner.keystoneBuf.Pop():
+			receivedKeystones = append(receivedKeystones, l2Keystone)
 			continue
 		default:
 			break
@@ -508,6 +510,87 @@ func TestProcessReceivedInAscOrder(t *testing.T) {
 	}
 
 	diff := deep.Equal(firstBatchOfL2Keystones, receivedKeystones)
+	if len(diff) != 0 {
+		t.Fatalf("received unexpected diff: %s", diff)
+	}
+}
+
+// TestProcessReceivedInAscOrder ensures that if we queue more than 10 keystones
+// for mining, that we override the oldest
+func TestProcessReceivedInAscOrderOverride(t *testing.T) {
+	keystones := []hemi.L2Keystone{
+		{
+			L2BlockNumber: 1,
+			EPHash:        []byte{1},
+		},
+		{
+			L2BlockNumber: 2,
+			EPHash:        []byte{2},
+		},
+		{
+			L2BlockNumber: 3,
+			EPHash:        []byte{3},
+		},
+		{
+			L2BlockNumber: 4,
+			EPHash:        []byte{4},
+		},
+		{
+			L2BlockNumber: 5,
+			EPHash:        []byte{5},
+		},
+		{
+			L2BlockNumber: 6,
+			EPHash:        []byte{6},
+		},
+		{
+			L2BlockNumber: 7,
+			EPHash:        []byte{7},
+		},
+		{
+			L2BlockNumber: 8,
+			EPHash:        []byte{8},
+		},
+		{
+			L2BlockNumber: 9,
+			EPHash:        []byte{9},
+		},
+		{
+			L2BlockNumber: 10,
+			EPHash:        []byte{10},
+		},
+		{
+			L2BlockNumber: 11,
+			EPHash:        []byte{11},
+		},
+	}
+
+	miner, err := NewMiner(&Config{
+		BTCPrivateKey: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
+		BTCChainName:  "testnet3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, keystone := range keystones {
+		miner.processReceivedKeystones(context.Background(), []hemi.L2Keystone{keystone})
+	}
+
+	receivedKeystones := []hemi.L2Keystone{}
+
+	for {
+		select {
+		case l2Keystone := <-miner.keystoneBuf.Pop():
+			receivedKeystones = append(receivedKeystones, l2Keystone)
+			continue
+		default:
+			break
+		}
+		break
+	}
+
+	diff := deep.Equal(keystones[len(keystones)-10:], receivedKeystones)
 	if len(diff) != 0 {
 		t.Fatalf("received unexpected diff: %s", diff)
 	}
@@ -523,7 +606,7 @@ func TestConnectToBFGAndPerformMineWithAuth(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	server, msgCh, cleanup := createMockBFG(ctx, t, []string{publicKey})
+	server, msgCh, cleanup := createMockBFG(ctx, t, []string{publicKey}, false, 1)
 	defer cleanup()
 
 	go func() {
@@ -554,6 +637,7 @@ func TestConnectToBFGAndPerformMineWithAuth(t *testing.T) {
 		bfgapi.CmdBitcoinBalanceRequest,
 		bfgapi.CmdBitcoinUTXOsRequest,
 		bfgapi.CmdBitcoinBroadcastRequest,
+		bfgapi.CmdPopTxForL2BlockRequest,
 	}
 
 	for {
@@ -587,7 +671,7 @@ func TestConnectToBFGAndPerformMine(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	server, msgCh, cleanup := createMockBFG(ctx, t, []string{})
+	server, msgCh, cleanup := createMockBFG(ctx, t, []string{}, false, 1)
 	defer cleanup()
 
 	go func() {
@@ -618,6 +702,7 @@ func TestConnectToBFGAndPerformMine(t *testing.T) {
 		bfgapi.CmdBitcoinBalanceRequest,
 		bfgapi.CmdBitcoinUTXOsRequest,
 		bfgapi.CmdBitcoinBroadcastRequest,
+		bfgapi.CmdPopTxForL2BlockRequest,
 	}
 
 	for {
@@ -643,6 +728,112 @@ func TestConnectToBFGAndPerformMine(t *testing.T) {
 	}
 }
 
+func TestConnectToBFGAndPerformMineMultiple(t *testing.T) {
+	privateKey, err := dcrsecp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	server, msgCh, cleanup := createMockBFG(ctx, t, []string{}, false, 2)
+	defer cleanup()
+
+	go func() {
+		miner, err := NewMiner(&Config{
+			BFGWSURL:      server.URL + bfgapi.RouteWebsocketPublic,
+			BTCChainName:  "testnet3",
+			BTCPrivateKey: hex.EncodeToString(privateKey.Serialize()),
+		})
+		if err != nil {
+			panic(err)
+		}
+
+		err = miner.Run(ctx)
+		if err != nil && err != context.Canceled {
+			panic(err)
+		}
+	}()
+
+	// we can't guarantee order here, so test that we get all expected messages
+	// from popm within the timeout
+
+	messagesReceived := make(map[string]int)
+
+	messagesExpected := map[protocol.Command]int{
+		EventConnected:                    1,
+		bfgapi.CmdL2KeystonesRequest:      1,
+		bfgapi.CmdBitcoinInfoRequest:      2,
+		bfgapi.CmdBitcoinBalanceRequest:   2,
+		bfgapi.CmdBitcoinUTXOsRequest:     2,
+		bfgapi.CmdBitcoinBroadcastRequest: 2,
+		bfgapi.CmdPopTxForL2BlockRequest:  2,
+	}
+
+	for {
+		select {
+		case msg := <-msgCh:
+			t.Logf("received message %v", msg)
+			messagesReceived[msg]++
+		case <-ctx.Done():
+			if ctx.Err() != nil {
+				t.Fatal(ctx.Err())
+			}
+		}
+		missing := false
+		for m := range messagesExpected {
+			message := fmt.Sprintf("%s", m)
+			if messagesReceived[message] != messagesExpected[m] {
+				t.Logf("still missing message %v, found %d want %d", m, messagesReceived[message], messagesExpected[m])
+				missing = true
+			}
+		}
+		if missing == false {
+			break
+		}
+	}
+}
+
+func TestConnectToBFGAndDoNotMineBecauseKeystoneExists(t *testing.T) {
+	privateKey, err := dcrsecp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server, msgCh, cleanup := createMockBFG(ctx, t, []string{}, true, 1)
+	defer cleanup()
+
+	go func() {
+		miner, err := NewMiner(&Config{
+			BFGWSURL:      server.URL + bfgapi.RouteWebsocketPublic,
+			BTCChainName:  "testnet3",
+			BTCPrivateKey: hex.EncodeToString(privateKey.Serialize()),
+		})
+		if err != nil {
+			panic(err)
+		}
+
+		err = miner.Run(ctx)
+	}()
+
+	var lastMessageReceived string
+
+	for {
+		select {
+		case lastMessageReceived = <-msgCh:
+			t.Logf("received message %v", lastMessageReceived)
+		case <-ctx.Done():
+			if lastMessageReceived != bfgapi.CmdPopTxForL2BlockRequest {
+				t.Fatalf("incorrect last message %s", lastMessageReceived)
+			} else {
+				return
+			}
+		}
+	}
+}
+
 func TestConnectToBFGAndPerformMineWithAuthError(t *testing.T) {
 	privateKey, err := dcrsecp256k1.GeneratePrivateKey()
 	if err != nil {
@@ -651,7 +842,7 @@ func TestConnectToBFGAndPerformMineWithAuthError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	server, msgCh, cleanup := createMockBFG(ctx, t, []string{"incorrect"})
+	server, msgCh, cleanup := createMockBFG(ctx, t, []string{"incorrect"}, false, 1)
 	defer cleanup()
 
 	miner, err := NewMiner(&Config{
@@ -683,7 +874,7 @@ func TestConnectToBFGAndPerformMineWithAuthError(t *testing.T) {
 	}
 }
 
-func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string) (*httptest.Server, chan string, func()) {
+func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string, keystoneMined bool, keystoneCount int) (*httptest.Server, chan string, func()) {
 	msgCh := make(chan string)
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -770,13 +961,13 @@ func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string) (*htt
 			}()
 
 			if command == bfgapi.CmdL2KeystonesRequest {
-				if err := bfgapi.Write(ctx, conn, id, bfgapi.L2KeystonesResponse{
-					L2Keystones: []hemi.L2Keystone{
-						{
-							L2BlockNumber: 100,
-						},
-					},
-				}); err != nil {
+				response := bfgapi.L2KeystonesResponse{}
+				for i := 0; i < keystoneCount; i++ {
+					response.L2Keystones = append(response.L2Keystones, hemi.L2Keystone{
+						L2BlockNumber: uint32(100 + i),
+					})
+				}
+				if err := bfgapi.Write(ctx, conn, id, response); err != nil {
 					if !errors.Is(ctx.Err(), context.Canceled) {
 						panic(err)
 					}
@@ -829,6 +1020,20 @@ func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string) (*htt
 						7, 6, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
 					},
 				}); err != nil {
+					if !errors.Is(ctx.Err(), context.Canceled) {
+						panic(err)
+					}
+				}
+			}
+
+			if command == bfgapi.CmdPopTxForL2BlockRequest {
+				response := bfgapi.PopTxsForL2BlockResponse{}
+				if keystoneMined {
+					response.PopTxs = []bfgapi.PopTx{
+						{},
+					}
+				}
+				if err := bfgapi.Write(ctx, conn, id, response); err != nil {
 					if !errors.Is(ctx.Err(), context.Canceled) {
 						panic(err)
 					}
