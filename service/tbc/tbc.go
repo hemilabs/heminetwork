@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -33,6 +36,7 @@ type Config struct {
 	LogLevel                string
 	PgURI                   string
 	PrometheusListenAddress string
+	Network                 string
 }
 
 func NewDefaultConfig() *Config {
@@ -46,6 +50,11 @@ type Server struct {
 	wg  sync.WaitGroup
 
 	cfg *Config
+
+	// bitcoin network
+	wireNet     wire.BitcoinNet
+	chainParams *chaincfg.Params
+	peer        *peer // make plural
 
 	db tbcd.Database
 
@@ -61,6 +70,29 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg: cfg,
 	}
 	// We could use a PGURI verification here.
+	// single peer for now
+
+	mainnetPort := "8333"
+	testnetPort := "18333"
+	var port string
+	switch cfg.Network {
+	case "mainnet":
+		port = mainnetPort
+		s.wireNet = wire.MainNet
+		s.chainParams = &chaincfg.MainNetParams
+	case "testnet", "testnet3":
+		port = testnetPort
+		s.wireNet = wire.TestNet3
+		s.chainParams = &chaincfg.TestNet3Params
+	default:
+		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
+	}
+
+	var err error
+	s.peer, err = NewPeer(s.wireNet, "140.238.169.133:"+port)
+	if err != nil {
+		return nil, fmt.Errorf("new peer: %v", err)
+	}
 
 	return s, nil
 }
@@ -85,6 +117,70 @@ func (s *Server) promRunning() float64 {
 		return 1
 	}
 	return 0
+}
+
+func (s *Server) p2p(ctx context.Context, btcNet string) {
+	defer s.wg.Done()
+
+	log.Tracef("p2p")
+	defer log.Tracef("p2p exit")
+
+	err := s.peer.connect(ctx)
+	if err != nil {
+		// XXX use a pool
+		log.Errorf("connect: %v", err)
+		return
+	}
+
+	log.Debugf("p2p handshake complete with: %v\n", s.peer.address)
+
+	// send ibd start using get blocks
+	fmt.Printf("genesis hash: %v\n", s.chainParams.GenesisHash)
+	getBlocks := wire.NewMsgGetBlocks(s.chainParams.GenesisHash)
+	err = s.peer.write(getBlocks)
+	if err != nil {
+		log.Errorf("write getBlocks: %v", err)
+		return
+	}
+
+	verbose := false
+	for {
+		// see if we were interrupted
+		select {
+		case <-ctx.Done():
+			log.Errorf("p2p: %v", ctx.Err())
+			return
+		default:
+		}
+
+		msg, err := s.peer.read()
+		if err == wire.ErrUnknownMessage {
+			// skip unknown
+			continue
+		} else if err != nil {
+			// XXX this is why we need a pool
+			log.Errorf("read: %w", err)
+			return
+		}
+
+		if verbose {
+			spew.Dump(msg)
+		}
+
+		switch m := msg.(type) {
+		case *wire.MsgPing:
+			go handlePing(s.peer, m)
+
+		case *wire.MsgInv:
+			go handleInv(s.peer, m)
+
+		case *wire.MsgBlock:
+			go handleBlock(s.peer, m)
+
+		default:
+			log.Errorf("unhandled message type: %T\n", msg)
+		}
+	}
 }
 
 func (s *Server) Run(pctx context.Context) error {
@@ -133,6 +229,9 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Infof("prometheus clean shutdown")
 		}()
 	}
+
+	s.wg.Add(1)
+	go s.p2p(ctx, "testnet3")
 
 	select {
 	case <-ctx.Done():
