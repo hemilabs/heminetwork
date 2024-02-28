@@ -234,7 +234,7 @@ func (s *Server) handlePopPayoutsRequest(ctx context.Context, msg *bssapi.PopPay
 	if err != nil {
 		e := protocol.NewInternalErrorf("pop tx for l2: block %v", err)
 		return &bssapi.PopPayoutsResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -255,7 +255,7 @@ func (s *Server) handleL2KeytoneRequest(ctx context.Context, msg *bssapi.L2Keyst
 	if err != nil {
 		e := protocol.NewInternalErrorf("new l2 keytsones: %v", err)
 		return &bssapi.L2KeystoneResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -272,7 +272,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 	if err != nil {
 		e := protocol.NewInternalErrorf("btc finality recent: %v", err)
 		return &bssapi.BTCFinalityByRecentKeystonesResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, err
 	}
 
@@ -291,7 +291,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, msg *b
 	if err != nil {
 		e := protocol.NewInternalErrorf("btc finality keystones: %v", err)
 		return &bssapi.BTCFinalityByKeystonesResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, err
 	}
 

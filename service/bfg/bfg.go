@@ -232,7 +232,7 @@ func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBa
 	if err != nil {
 		e := protocol.NewInternalErrorf("bitcoin balance: %v", err)
 		return &bfgapi.BitcoinBalanceResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -249,7 +249,7 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	rr := bytes.NewReader(bbr.Transaction)
 	mb := wire.MsgTx{}
 	if err := mb.Deserialize(rr); err != nil {
-		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.WireErrorf(
+		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.RequestErrorf(
 			"failed to deserialize tx: %s", err,
 		)}, nil
 	}
@@ -267,14 +267,14 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 
 	if tl2 == nil {
 		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.WireErrorf("could not find l2 keystone abbrev in btc tx"),
+			Error: protocol.RequestErrorf("could not find l2 keystone abbrev in btc tx"),
 		}, nil
 	}
 
 	publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
 	if err != nil {
 		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.WireErrorf("could not parse signature script: %v", err),
+			Error: protocol.RequestErrorf("could not parse signature script: %v", err),
 		}, nil
 	}
 
@@ -283,7 +283,7 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 		// This may not alwyas be an internal error.
 		e := protocol.NewInternalErrorf("broadcast tx: %s", err)
 		return &bfgapi.BitcoinBroadcastResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -295,20 +295,20 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	}); err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
 			return &bfgapi.BitcoinBroadcastResponse{
-				Error: protocol.WireErrorf("pop basis already exists"),
+				Error: protocol.RequestErrorf("pop basis already exists"),
 			}, nil
 		}
 
 		if errors.Is(err, database.ErrValidation) {
 			e := protocol.NewInternalErrorf("invalid pop basis: %v", err)
 			return &bfgapi.BitcoinBroadcastResponse{
-				Error: e.WireError(),
+				Error: e.ProtocolError(),
 			}, e
 		}
 
 		e := protocol.NewInternalErrorf("insert pop basis: %v", err)
 		return &bfgapi.BitcoinBroadcastResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -323,7 +323,7 @@ func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoR
 	if err != nil {
 		e := protocol.NewInternalErrorf("bitcoin height: %v", err)
 		return &bfgapi.BitcoinInfoResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -340,7 +340,7 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 	if err != nil {
 		e := protocol.NewInternalErrorf("bitcoin utxos: %v", err)
 		return &bfgapi.BitcoinUTXOsResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 
 	}
@@ -363,7 +363,7 @@ func (s *Server) handleAccessPublicKeyCreateRequest(ctx context.Context, acpkc *
 	publicKey, err := hex.DecodeString(acpkc.PublicKey)
 	if err != nil {
 		return &bfgapi.AccessPublicKeyCreateResponse{
-			Error: protocol.WireErrorf("public key decode: %v", err),
+			Error: protocol.RequestErrorf("public key decode: %v", err),
 		}, nil
 	}
 
@@ -372,19 +372,19 @@ func (s *Server) handleAccessPublicKeyCreateRequest(ctx context.Context, acpkc *
 	}); err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
 			return &bfgapi.AccessPublicKeyCreateResponse{
-				Error: protocol.WireErrorf("public key already exists"),
+				Error: protocol.RequestErrorf("public key already exists"),
 			}, nil
 		}
 
 		if errors.Is(err, database.ErrValidation) {
 			return &bfgapi.AccessPublicKeyCreateResponse{
-				Error: protocol.WireErrorf("invalid access public key"),
+				Error: protocol.RequestErrorf("invalid access public key"),
 			}, nil
 		}
 
 		e := protocol.NewInternalErrorf("insert public key: %v", err)
 		return &bfgapi.AccessPublicKeyCreateResponse{
-			Error: protocol.WireErrorf("invalid access public key"),
+			Error: protocol.RequestErrorf("invalid access public key"),
 		}, e
 	}
 
@@ -403,7 +403,7 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 	b, err := hex.DecodeString(accessPublicKeyDeleteRequest.PublicKey)
 	if err != nil {
 		return &bfgapi.AccessPublicKeyDeleteResponse{
-			Error: protocol.WireErrorf("public key decode: %v", err),
+			Error: protocol.RequestErrorf("public key decode: %v", err),
 		}, nil
 	}
 
@@ -413,13 +413,13 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 		if errors.Is(err, database.ErrNotFound) {
 			// XXX not sure I like giving this information away.
 			return &bfgapi.AccessPublicKeyDeleteResponse{
-				Error: protocol.WireErrorf("public key not found"),
+				Error: protocol.RequestErrorf("public key not found"),
 			}, nil
 		}
 		e := protocol.NewInternalErrorf("error deleting access public key: %v",
 			err)
 		return &bfgapi.AccessPublicKeyDeleteResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -1008,7 +1008,7 @@ func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxs
 	if err != nil {
 		e := protocol.NewInternalErrorf("error getting pop basis: %v", err)
 		return &bfgapi.PopTxsForL2BlockResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -1038,7 +1038,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 	if err != nil {
 		e := protocol.NewInternalErrorf("error getting finality: %v", err)
 		return &bfgapi.BTCFinalityByRecentKeystonesResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -1053,7 +1053,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 			e := protocol.NewInternalErrorf("error getting finality (%v): %v",
 				k, err)
 			return &bfgapi.BTCFinalityByRecentKeystonesResponse{
-				Error: e.WireError(),
+				Error: e.ProtocolError(),
 			}, e
 		}
 		apiFinalities = append(apiFinalities, *apiFinality)
@@ -1081,7 +1081,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	if err != nil {
 		e := protocol.NewInternalErrorf("l2 keystones: %v", err)
 		return &bfgapi.BTCFinalityByKeystonesResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
@@ -1095,7 +1095,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 		if err != nil {
 			e := protocol.NewInternalErrorf("l2 btc finality: %v", err)
 			return &bfgapi.BTCFinalityByKeystonesResponse{
-				Error: e.WireError(),
+				Error: e.ProtocolError(),
 			}, e
 		}
 		apiFinalities = append(apiFinalities, *apiFinality)
@@ -1114,7 +1114,7 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2Ke
 	if err != nil {
 		e := protocol.NewInternalErrorf("error getting l2 keystones: %s", err)
 		return &bfgapi.L2KeystonesResponse{
-			Error: e.WireError(),
+			Error: e.ProtocolError(),
 		}, e
 	}
 
