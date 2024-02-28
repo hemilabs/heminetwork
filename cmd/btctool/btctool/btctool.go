@@ -9,9 +9,7 @@ import (
 	"github.com/juju/loggo"
 )
 
-var (
-	log = loggo.GetLogger("btctool")
-)
+var log = loggo.GetLogger("btctool")
 
 func GetAndStoreBlockHeader(ctx context.Context, height int, dir string) (string, error) {
 	hash, err := blockstream.BlockHeightHash(ctx, fmt.Sprintf("%v", height))

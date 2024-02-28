@@ -26,9 +26,7 @@ import (
 	"github.com/mitchellh/go-homedir"
 )
 
-var (
-	log = loggo.GetLogger("bdf")
-)
+var log = loggo.GetLogger("bdf")
 
 func parseBlock(ctx context.Context, filename string) (*btcutil.Block, error) {
 	heb, err := os.ReadFile(filename)
@@ -73,8 +71,8 @@ func NewPeer(network wire.BitcoinNet, address string) (*peer, error) {
 func (p *peer) connect(ctx context.Context) error {
 	p.mtx.Lock()
 	if p.conn != nil {
-		return fmt.Errorf("already open")
 		p.mtx.Unlock()
+		return fmt.Errorf("already open")
 	}
 	p.mtx.Unlock()
 	// XXX this races
@@ -112,6 +110,7 @@ func (p *peer) read() (wire.Message, error) {
 		p.network, wire.LatestEncoding)
 	return msg, err
 }
+
 func (p *peer) handshake(ctx context.Context) error {
 	// 1. send our version
 	// 2. receive version
@@ -226,10 +225,10 @@ func handleBlock(p *peer, msg *wire.MsgBlock) {
 }
 
 func btcConnect(ctx context.Context, btcNet string) error {
-	ips, err := net.LookupIP("seed.bitcoin.sipa.be")
-	if err != nil {
-		return err
-	}
+	//ips, err := net.LookupIP("seed.bitcoin.sipa.be")
+	//if err != nil {
+	//	return err
+	//}
 
 	mainnetPort := "8333"
 	testnetPort := "18333"
@@ -251,7 +250,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 		return fmt.Errorf("invalid network: %v", btcNet)
 	}
 
-	p, err := NewPeer(wireNet, "140.238.169.133:18333")
+	p, err := NewPeer(wireNet, "140.238.169.133"+port)
 	if err != nil {
 		return fmt.Errorf("new peer: %v", err)
 	}
@@ -312,119 +311,119 @@ func btcConnect(ctx context.Context, btcNet string) error {
 		}
 	}
 
-	fmt.Printf("waiting for exit\n")
-	<-ctx.Done()
-	return nil
+	//fmt.Printf("waiting for exit\n")
+	//<-ctx.Done()
+	//return nil
 
-	peers := make(map[string]*peer, len(ips))
-	ips = []net.IP{
-		net.ParseIP("140.238.169.133"),
-		//net.ParseIP("84.250.91.34"),
-		//net.ParseIP("3.14.15.90"),
-		//net.ParseIP("104.182.210.230"),
-	}
-	for _, ip := range ips {
-		address := ip.To4()
-		if address == nil {
-			continue
-		}
-		// XXX this does not test for link local and other exclusions
+	//peers := make(map[string]*peer, len(ips))
+	//ips = []net.IP{
+	//	net.ParseIP("140.238.169.133"),
+	//	// net.ParseIP("84.250.91.34"),
+	//	// net.ParseIP("3.14.15.90"),
+	//	// net.ParseIP("104.182.210.230"),
+	//}
+	//for _, ip := range ips {
+	//	address := ip.To4()
+	//	if address == nil {
+	//		continue
+	//	}
+	//	// XXX this does not test for link local and other exclusions
 
-		// Should be an IPv4 address here
-		ma := fmt.Sprintf("%v:%v", address, port)
-		p := &peer{address: ma}
-		peers[ma] = p
+	//	// Should be an IPv4 address here
+	//	ma := fmt.Sprintf("%v:%v", address, port)
+	//	p := &peer{address: ma}
+	//	peers[ma] = p
 
-		// connect
-		go func(pp *peer) {
-			err := pp.connect(ctx)
-			if err != nil {
-				fmt.Printf("err: %v\n", err)
-			} else {
-				fmt.Printf("connected: %v\n", pp.address)
+	//	// connect
+	//	go func(pp *peer) {
+	//		err := pp.connect(ctx)
+	//		if err != nil {
+	//			fmt.Printf("err: %v\n", err)
+	//		} else {
+	//			fmt.Printf("connected: %v\n", pp.address)
 
-				pver := wire.ProtocolVersion
+	//			pver := wire.ProtocolVersion
 
-				// write ver
-				me := &wire.NetAddress{
-					Timestamp: time.Now(),
-					Services:  wire.SFNodeNetwork,
-					//IP: net.ParseIP("193.218.159.178"),
-					//Port:      18333,
+	//			// write ver
+	//			me := &wire.NetAddress{
+	//				Timestamp: time.Now(),
+	//				Services:  wire.SFNodeNetwork,
+	//				// IP: net.ParseIP("193.218.159.178"),
+	//				// Port:      18333,
 
-				}
-				//spew.Dump(pp.conn.LocalAddr())
-				//theirIP := pp.conn.RemoteAddr().String()
-				you := &wire.NetAddress{
-					Timestamp: time.Now(),
-					//IP:        ips[0],
-					//Port:      18333,
-					//Services:  wire.SFNodeNetwork,
-				}
-				//spew.Dump(me)
-				//spew.Dump(theirIP)
-				wmsg := wire.NewMsgVersion(me, you, uint64(rand.Int63()), 0)
-				wmsg.Services = wire.SFNodeNetwork
-				wmsg.DisableRelayTx = true
-				spew.Dump(wmsg)
-				n, err := wire.WriteMessageWithEncodingN(pp.conn, wmsg, pver, wireNet, wire.LatestEncoding)
-				if err != nil {
-					fmt.Printf("write error: %v\n", err)
-					return
-				}
-				fmt.Printf("write n NewMsgVersion: %v\n", n)
+	//			}
+	//			// spew.Dump(pp.conn.LocalAddr())
+	//			// theirIP := pp.conn.RemoteAddr().String()
+	//			you := &wire.NetAddress{
+	//				Timestamp: time.Now(),
+	//				// IP:        ips[0],
+	//				// Port:      18333,
+	//				// Services:  wire.SFNodeNetwork,
+	//			}
+	//			// spew.Dump(me)
+	//			// spew.Dump(theirIP)
+	//			wmsg := wire.NewMsgVersion(me, you, uint64(rand.Int63()), 0)
+	//			wmsg.Services = wire.SFNodeNetwork
+	//			wmsg.DisableRelayTx = true
+	//			spew.Dump(wmsg)
+	//			n, err := wire.WriteMessageWithEncodingN(pp.conn, wmsg, pver, wireNet, wire.LatestEncoding)
+	//			if err != nil {
+	//				fmt.Printf("write error: %v\n", err)
+	//				return
+	//			}
+	//			fmt.Printf("write n NewMsgVersion: %v\n", n)
 
-				n, rmsg, rawPayload, err := wire.ReadMessageWithEncodingN(pp.conn, pver, wireNet, wire.LatestEncoding)
-				fmt.Printf("read n %T: %v\n", rmsg, n)
-				if err != nil {
-					fmt.Printf("read error: %v\n", err)
-					return
+	//			n, rmsg, rawPayload, err := wire.ReadMessageWithEncodingN(pp.conn, pver, wireNet, wire.LatestEncoding)
+	//			fmt.Printf("read n %T: %v\n", rmsg, n)
+	//			if err != nil {
+	//				fmt.Printf("read error: %v\n", err)
+	//				return
 
-				}
-				_ = rawPayload
-				fmt.Printf("%v\n", spew.Sdump(rmsg))
-				//fmt.Printf("%v\n", spew.Sdump(rawPayload))
-				v := rmsg.(*wire.MsgVersion)
-				if v.ProtocolVersion >= 70016 {
-					fmt.Printf("sendaddrv2\n")
-					sendAddrMsg := wire.NewMsgSendAddrV2()
-					n, err := wire.WriteMessageWithEncodingN(pp.conn, sendAddrMsg, pver, wireNet, wire.LatestEncoding)
-					if err != nil {
-						fmt.Printf("write error: %v\n", err)
-						return
-					}
-					fmt.Printf("write n MsgSendAddrV2: %v\n", n)
-				}
+	//			}
+	//			_ = rawPayload
+	//			fmt.Printf("%v\n", spew.Sdump(rmsg))
+	//			// fmt.Printf("%v\n", spew.Sdump(rawPayload))
+	//			v := rmsg.(*wire.MsgVersion)
+	//			if v.ProtocolVersion >= 70016 {
+	//				fmt.Printf("sendaddrv2\n")
+	//				sendAddrMsg := wire.NewMsgSendAddrV2()
+	//				n, err := wire.WriteMessageWithEncodingN(pp.conn, sendAddrMsg, pver, wireNet, wire.LatestEncoding)
+	//				if err != nil {
+	//					fmt.Printf("write error: %v\n", err)
+	//					return
+	//				}
+	//				fmt.Printf("write n MsgSendAddrV2: %v\n", n)
+	//			}
 
-				// send verack
-				verack := wire.NewMsgVerAck()
-				n, err = wire.WriteMessageWithEncodingN(pp.conn, verack, pver, wireNet, wire.LatestEncoding)
-				if err != nil {
-					fmt.Printf("write error: %v\n", err)
-					return
-				}
-				fmt.Printf("write n MsgVerAck: %v\n", n)
+	//			// send verack
+	//			verack := wire.NewMsgVerAck()
+	//			n, err = wire.WriteMessageWithEncodingN(pp.conn, verack, pver, wireNet, wire.LatestEncoding)
+	//			if err != nil {
+	//				fmt.Printf("write error: %v\n", err)
+	//				return
+	//			}
+	//			fmt.Printf("write n MsgVerAck: %v\n", n)
 
-				for {
-					// read what comes back
-					n, rmsg, rawPayload, err = wire.ReadMessageWithEncodingN(pp.conn, pver, wireNet, wire.LatestEncoding)
-					fmt.Printf("read n %T: %v\n", rmsg, n)
-					if err != nil {
-						fmt.Printf("read error continue: %v\n", err)
-						// XXX exit if eof
-						continue
+	//			for {
+	//				// read what comes back
+	//				n, rmsg, rawPayload, err = wire.ReadMessageWithEncodingN(pp.conn, pver, wireNet, wire.LatestEncoding)
+	//				fmt.Printf("read n %T: %v\n", rmsg, n)
+	//				if err != nil {
+	//					fmt.Printf("read error continue: %v\n", err)
+	//					// XXX exit if eof
+	//					continue
 
-					}
-					_ = rawPayload
-					fmt.Printf("%v\n", spew.Sdump(rmsg))
-				}
-			}
-		}(p)
-	}
+	//				}
+	//				_ = rawPayload
+	//				fmt.Printf("%v\n", spew.Sdump(rmsg))
+	//			}
+	//		}
+	//	}(p)
+	//}
 
-	<-ctx.Done()
+	//<-ctx.Done()
 
-	return nil
+	// return nil
 }
 
 func StoreBlockHeaders(ctx context.Context, endHeight, blockCount int, dir string) error {
@@ -567,7 +566,7 @@ func _main() error {
 			return fmt.Errorf("invalid directory: %v", err)
 		}
 
-		err = os.MkdirAll(downloadDir, 0700)
+		err = os.MkdirAll(downloadDir, 0o700)
 		if err != nil {
 			return fmt.Errorf("MkdirAll: %v", err)
 		}
