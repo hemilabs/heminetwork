@@ -980,7 +980,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 		},
 		{
 			name:          "bitcoin broadcast deserialize error",
-			expectedError: "failed to deserialized tx: unexpected EOF",
+			expectedError: "failed to deserialize tx: unexpected EOF",
 			requests: []bfgapi.BitcoinBroadcastRequest{
 				{
 					Transaction: []byte("invalid..."),
@@ -1000,7 +1000,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 		},
 		{
 			name:          "bitcoin broadcast database error",
-			expectedError: "pop_basis already exists",
+			expectedError: "pop basis already exists",
 			requests: []bfgapi.BitcoinBroadcastRequest{
 				{
 					Transaction: btx,
@@ -1158,7 +1158,7 @@ func TestBFGPrivateErrorCases(t *testing.T) {
 		},
 		{
 			name:          "public key is invalid",
-			expectedError: "encoding/hex: invalid byte: U+006C 'l'",
+			expectedError: "public key decode: encoding/hex: invalid byte: U+006C 'l'",
 			requests: []bfgapi.AccessPublicKeyCreateRequest{
 				{
 					PublicKey: "blahblahblah",
@@ -3315,7 +3315,7 @@ func TestBFGAuthPingThenRemoval(t *testing.T) {
 
 	var v interface{}
 	err = wsjson.Read(ctx, c, &v)
-	if err != nil && !strings.Contains(err.Error(), "status = StatusCode(4100)") {
+	if err != nil && !strings.Contains(err.Error(), "status = StatusProtocolError and reason = \"killed\"") {
 		t.Fatal(err)
 	}
 

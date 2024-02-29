@@ -41,8 +41,7 @@ func (he HandshakeError) Error() string {
 }
 
 func (he HandshakeError) Is(target error) bool {
-	_, ok := target.(HandshakeError)
-	return ok
+	return errors.Is(he, target)
 }
 
 var PublicKeyAuthError = websocket.CloseError{
@@ -230,17 +229,18 @@ type Message struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// Error is a protocol Error type that can be used for additional error
-// context. It embeds an 8 byte number that can be used to trace calls on both the
-// client and server side.
+// Error is a protocol error type that is used to provide additional error
+// information between a server and client.
+//
+// A unique "trace" string may be embedded, which can be used to trace errors
+// between a server and client.
 type Error struct {
 	Timestamp int64  `json:"timestamp"`
-	Trace     string `json:"trace"`
-	Message   string `json:"error"`
+	Trace     string `json:"trace,omitempty"`
+	Message   string `json:"message"`
 }
 
-// Errorf is a client induced protocol error (e.g. "invalid height"). This is a
-// pretty printable error on the client and server and is not fatal.
+// Errorf returns a protocol Error type with an embedded trace.
 func Errorf(msg string, args ...interface{}) *Error {
 	trace, _ := random(8)
 	return &Error{
@@ -250,8 +250,81 @@ func Errorf(msg string, args ...interface{}) *Error {
 	}
 }
 
+// String pretty prints a protocol error.
 func (e Error) String() string {
+	if len(e.Trace) == 0 {
+		return e.Message
+	}
 	return fmt.Sprintf("%v [%v:%v]", e.Message, e.Trace, e.Timestamp)
+}
+
+// RequestError wraps an error to create a protocol request error.
+//
+// Request errors are usually something caused by a client, e.g. validation or
+// input errors, and therefore should not be logged server-side and do not
+// contain an embedded trace.
+func RequestError(err error) *Error {
+	return &Error{
+		Timestamp: time.Now().Unix(),
+		Message:   err.Error(),
+	}
+}
+
+// RequestErrorf creates a new protocol request error.
+//
+// Request errors are usually something caused by a client, e.g. validation or
+// input errors, and therefore should not be logged server-side and do not
+// contain an embedded trace.
+func RequestErrorf(msg string, args ...any) *Error {
+	return &Error{
+		Timestamp: time.Now().Unix(),
+		Message:   fmt.Sprintf(msg, args...),
+	}
+}
+
+// InternalError represents an internal application error.
+//
+// Internal errors are errors that occurred within the application and are not
+// caused by a client (e.g. validation or input errors). The actual error
+// message should not be sent to clients, as it is internal to the application,
+// and may be server-operator specific.
+type InternalError struct {
+	protocol *Error
+	internal error
+}
+
+// ProtocolError returns the protocol error representation.
+// This error is intended to be sent to clients.
+func (ie InternalError) ProtocolError() *Error {
+	return ie.protocol
+}
+
+// Error satisfies the error interface.
+func (ie InternalError) Error() string {
+	if ie.internal != nil {
+		return fmt.Sprintf("%v [%v:%v]", ie.internal.Error(),
+			ie.protocol.Timestamp, ie.protocol.Trace)
+	}
+	return ie.protocol.String()
+}
+
+// Unwrap returns the error wrapped by this internal error.
+func (ie InternalError) Unwrap() error {
+	return ie.internal
+}
+
+// NewInternalError returns an InternalError wrapping the given error.
+func NewInternalError(err error) *InternalError {
+	return NewInternalErrorf("internal error: %w", err)
+}
+
+// NewInternalErrorf returns an InternalError constructed from the passed
+// message and arguments.
+func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
+	return &InternalError{
+		protocol: Errorf("internal error"),
+		internal: fmt.Errorf(msg, args...),
+	}
 }
 
 // Ping
@@ -416,7 +489,7 @@ func (ac *Conn) IsOnline() bool {
 	return ac.wsc != nil
 }
 
-// Close close a websocket connection with normal status.
+// Close closes a websocket connection with normal status.
 func (ac *Conn) Close() error {
 	return ac.CloseStatus(websocket.StatusNormalClosure, "")
 }

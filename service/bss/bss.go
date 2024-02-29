@@ -43,40 +43,6 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-// InternalError is an error type to differentiates between caller and callee
-// errors. An internal error is used whne something internal to the application
-// fails.
-type InternalError struct {
-	internal *protocol.Error
-	actual   error
-}
-
-// Err return the protocol.Error that can be sent over the wire.
-func (ie InternalError) Err() *protocol.Error {
-	return ie.internal
-}
-
-// String return the actual underlying error.
-func (ie InternalError) String() string {
-	i := ie.internal
-	return fmt.Sprintf("%v [%v:%v]", ie.actual.Error(), i.Trace, i.Timestamp)
-}
-
-// Error satifies the error interface.
-func (ie InternalError) Error() string {
-	if ie.internal == nil {
-		return "internal error"
-	}
-	return ie.internal.String()
-}
-
-func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
-	return &InternalError{
-		internal: protocol.Errorf("internal error"),
-		actual:   fmt.Errorf(msg, args...),
-	}
-}
-
 // Wrap for calling bfg commands
 type bfgCmd struct {
 	msg any
@@ -213,18 +179,8 @@ func (s *Server) handleRequest(parrentCtx context.Context, bws *bssWs, wsid stri
 
 	response, err := handler(ctx)
 	if err != nil {
-		// XXX these errors print an invalid trace for some reason. It
-		// mostly works but have a look at it and compare with client
-		// output and fix.
-		var ie *InternalError
-		if errors.As(err, &ie) {
-			log.Errorf("[INTERNAL ERROR] Failed to handle %v request %v: %v",
-				requestType, bws.addr, ie.String())
-		} else {
-			// This may be too loud and can be silenced once in production.
-			log.Errorf("Failed to handle %v request %v: %v",
-				requestType, bws.addr, err)
-		}
+		log.Errorf("Failed to handle %v request %v: %v",
+			requestType, bws.addr, err)
 	}
 	if response == nil {
 		return
@@ -233,7 +189,8 @@ func (s *Server) handleRequest(parrentCtx context.Context, bws *bssWs, wsid stri
 	log.Debugf("Responding to %v request with %v", requestType, spew.Sdump(response))
 
 	if err := bssapi.Write(ctx, bws.conn, wsid, response); err != nil {
-		log.Errorf("Failed to handle %v request: protocol write failed: %v", requestType, err)
+		log.Errorf("Failed to handle %v request: protocol write failed: %v",
+			requestType, err)
 	}
 }
 
@@ -271,56 +228,51 @@ func (s *Server) handlePopPayoutsRequest(ctx context.Context, msg *bssapi.PopPay
 	log.Tracef("handlePopPayoutsRequest")
 	defer log.Tracef("handlePopPayoutsRequest exit")
 
-	popTxsForL2BlockRequest := bfgapi.PopTxsForL2BlockRequest{
+	popTxsForL2BlockRes, err := s.callBFG(ctx, bfgapi.PopTxsForL2BlockRequest{
 		L2Block: msg.L2BlockForPayout,
-	}
-
-	popTxsForL2BlockRes, err := s.callBFG(ctx, &popTxsForL2BlockRequest)
+	})
 	if err != nil {
+		e := protocol.NewInternalErrorf("pop tx for l2: block %w", err)
 		return &bssapi.PopPayoutsResponse{
-			Error: protocol.Errorf("%v", err),
-		}, err
+			Error: e.ProtocolError(),
+		}, e
 	}
 
-	popPayouts := ConvertPopTxsToPopPayouts(
-		(popTxsForL2BlockRes.(*bfgapi.PopTxsForL2BlockResponse)).PopTxs,
-	)
-
-	popPayoutsResponse := bssapi.PopPayoutsResponse{
-		PopPayouts: popPayouts,
-	}
-
-	return &popPayoutsResponse, nil
+	return &bssapi.PopPayoutsResponse{
+		PopPayouts: ConvertPopTxsToPopPayouts(
+			(popTxsForL2BlockRes.(*bfgapi.PopTxsForL2BlockResponse)).PopTxs,
+		),
+	}, nil
 }
 
 func (s *Server) handleL2KeytoneRequest(ctx context.Context, msg *bssapi.L2KeystoneRequest) (*bssapi.L2KeystoneResponse, error) {
 	log.Tracef("handleL2KeytoneRequest")
 	defer log.Tracef("handleL2KeytoneRequest exit")
 
-	newKeystoneHeadersRequest := bfgapi.NewL2KeystonesRequest{
-		L2Keystones: []hemi.L2Keystone{
-			msg.L2Keystone,
-		},
-	}
-
-	resp := &bssapi.L2KeystoneResponse{}
-	_, err := s.callBFG(ctx, &newKeystoneHeadersRequest)
+	_, err := s.callBFG(ctx, &bfgapi.NewL2KeystonesRequest{
+		L2Keystones: []hemi.L2Keystone{msg.L2Keystone},
+	})
 	if err != nil {
-		resp.Error = protocol.Errorf("%v", err)
+		e := protocol.NewInternalErrorf("new l2 keytsones: %w", err)
+		return &bssapi.L2KeystoneResponse{
+			Error: e.ProtocolError(),
+		}, e
 	}
 
-	return resp, err
+	return &bssapi.L2KeystoneResponse{}, nil
 }
 
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByRecentKeystonesRequest) (*bssapi.BTCFinalityByRecentKeystonesResponse, error) {
-	request := bfgapi.BTCFinalityByRecentKeystonesRequest{
-		NumRecentKeystones: msg.NumRecentKeystones,
-	}
+	log.Tracef("handleBtcFinalityByRecentKeystonesRequest")
+	defer log.Tracef("handleBtcFinalityByRecentKeystonesRequest exit")
 
-	response, err := s.callBFG(ctx, &request)
+	response, err := s.callBFG(ctx, &bfgapi.BTCFinalityByRecentKeystonesRequest{
+		NumRecentKeystones: msg.NumRecentKeystones,
+	})
 	if err != nil {
+		e := protocol.NewInternalErrorf("btc finality recent: %w", err)
 		return &bssapi.BTCFinalityByRecentKeystonesResponse{
-			Error: protocol.Errorf("%v", err),
+			Error: e.ProtocolError(),
 		}, err
 	}
 
@@ -330,14 +282,16 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 }
 
 func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByKeystonesRequest) (*bssapi.BTCFinalityByKeystonesResponse, error) {
-	request := bfgapi.BTCFinalityByKeystonesRequest{
-		L2Keystones: msg.L2Keystones,
-	}
+	log.Tracef("handleBtcFinalityByKeystonesRequest")
+	defer log.Tracef("handleBtcFinalityByKeystonesRequest exit")
 
-	response, err := s.callBFG(ctx, &request)
+	response, err := s.callBFG(ctx, &bfgapi.BTCFinalityByKeystonesRequest{
+		L2Keystones: msg.L2Keystones,
+	})
 	if err != nil {
+		e := protocol.NewInternalErrorf("btc finality keystones: %w", err)
 		return &bssapi.BTCFinalityByKeystonesResponse{
-			Error: protocol.Errorf("%v", err),
+			Error: e.ProtocolError(),
 		}, err
 	}
 
@@ -415,8 +369,6 @@ func (s *Server) handleWebsocketRead(ctx context.Context, bws *bssWs) {
 		if err != nil {
 			log.Errorf("handleWebsocketRead %v %v %v: %v",
 				bws.addr, cmd, id, err)
-			bws.conn.CloseStatus(websocket.StatusProtocolError,
-				err.Error())
 			return
 		}
 
@@ -458,7 +410,6 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		s.deleteSession(bws.sessionId)
-		conn.Close(websocket.StatusNormalClosure, "") // Force shutdown connection
 	}()
 
 	bws.wg.Add(1)
@@ -508,11 +459,13 @@ func (s *Server) newSession(bws *bssWs) (string, error) {
 
 func (s *Server) deleteSession(id string) {
 	s.mtx.Lock()
-	if _, ok := s.sessions[id]; !ok {
-		log.Errorf("id not found in sessions %s", id)
-	}
+	_, ok := s.sessions[id]
 	delete(s.sessions, id)
 	s.mtx.Unlock()
+
+	if !ok {
+		log.Errorf("id not found in sessions %s", id)
+	}
 }
 
 func writeNotificationResponse(bws *bssWs, response any) {
@@ -526,11 +479,9 @@ func writeNotificationResponse(bws *bssWs, response any) {
 }
 
 func (s *Server) handleBtcFinalityNotification() error {
-	response := bssapi.BTCFinalityNotification{}
-
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
-		go writeNotificationResponse(bws, response)
+		go writeNotificationResponse(bws, &bssapi.BTCFinalityNotification{})
 	}
 	s.mtx.Unlock()
 
@@ -538,11 +489,9 @@ func (s *Server) handleBtcFinalityNotification() error {
 }
 
 func (s *Server) handleBtcBlockNotification() error {
-	response := bssapi.BTCNewBlockNotification{}
-
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
-		go writeNotificationResponse(bws, response)
+		go writeNotificationResponse(bws, &bssapi.BTCNewBlockNotification{})
 	}
 	s.mtx.Unlock()
 
@@ -593,7 +542,7 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 			go s.handleBtcBlockNotification()
 		default:
 			log.Errorf("unknown command: %v", cmd)
-			return // XXX exit for now to cause a ruckus in the logs
+			return
 		}
 	}
 }
@@ -652,17 +601,17 @@ func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
 	// attempt to send
 	select {
 	case <-ctx.Done():
-		return nil, NewInternalErrorf("callBFG send context error: %v",
+		return nil, protocol.NewInternalErrorf("callBFG send context error: %w",
 			ctx.Err())
 	case s.bfgCmdCh <- bc:
 	default:
-		return nil, NewInternalErrorf("bfg command queue full")
+		return nil, protocol.NewInternalErrorf("bfg command queue full")
 	}
 
 	// Wait for response
 	select {
 	case <-ctx.Done():
-		return nil, NewInternalErrorf("callBFG received context error: %v",
+		return nil, protocol.NewInternalErrorf("callBFG received context error: %w",
 			ctx.Err())
 	case payload := <-bc.ch:
 		if err, ok := payload.(error); ok {
