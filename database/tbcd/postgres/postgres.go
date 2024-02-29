@@ -7,6 +7,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/hemilabs/heminetwork/database"
@@ -119,6 +120,42 @@ func (p *pgdb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error)
 	return bhs, nil
 }
 
+func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeadersMissing")
+	defer log.Tracef("BlockHeadersMissing exit")
+
+	const selectHeadersMissing = `
+		SELECT bh.hash,bh.height,bh.header,bh.created_at FROM block_headers bh
+		WHERE NOT EXISTS (SELECT * FROM blocks b WHERE b.hash=bh.hash)
+		ORDER BY bh.height ASC
+		LIMIT $1;`
+
+	bhs := make([]tbcd.BlockHeader, 0, count)
+	rows, err := p.db.QueryContext(ctx, selectHeadersMissing, count)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var bh tbcd.BlockHeader
+		if err := rows.Scan(&bh.Hash, &bh.Height, &bh.Header, &bh.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, database.NotFoundError("block header data not found")
+			}
+			return nil, err
+		}
+		bhs = append(bhs, bh)
+	}
+
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return bhs, nil
+}
+
 func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) error {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
@@ -169,4 +206,33 @@ func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) e
 	}
 
 	return nil
+}
+
+func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
+	log.Tracef("BlockInsert")
+	defer log.Tracef("BlockInsert exit")
+
+	const qBlockInsert = `
+		WITH inserted AS (
+			INSERT INTO blocks (hash, block)
+			VALUES ($1, $2) RETURNING hash
+		) SELECT bh.height FROM inserted i INNER JOIN block_headers bh ON bh.hash=i.hash;
+	`
+	rows, err := p.db.QueryContext(ctx, qBlockInsert, b.Hash, b.Block)
+	if err != nil {
+		if err, ok := err.(*pq.Error); ok && err.Code.Class().Name() == "integrity_constraint_violation" {
+			return -1, database.DuplicateError(fmt.Sprintf("duplicate block entry: %s", err))
+		}
+		return -1, fmt.Errorf("failed to insert block: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var height int64
+		if err := rows.Scan(&height); err != nil {
+			return 0, err
+		}
+		return height, nil
+	}
+
+	return -1, errors.New("should not get here")
 }
