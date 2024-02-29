@@ -92,4 +92,4 @@ checksums: dist
 
 networktest:
 	HEMI_RUN_NETWORK_TEST=1	\
-		go test -count=1 -v -run TestFullNetwork -v ./e2e/network_test.go
+		go test -count=1 -v -run TestFullNetwork -v -timeout 25m ./e2e/network_test.go

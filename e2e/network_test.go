@@ -59,7 +59,7 @@ func TestFullNetwork(t *testing.T) {
 	}
 
 	// this test runs for a long time, give it a large timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	defer cancel()
 
 	// create the key pair for the pop miner
