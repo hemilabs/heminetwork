@@ -16,11 +16,14 @@ type Database interface {
 	// Version table
 	Version(ctx context.Context) (int, error)
 
-	BtcHashHeightInsert(ctx context.Context, bhh []BtcHashHeight) error
+	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
+	BlockHeadersBest(ctx context.Context) ([]BlockHeader, error)
+	BlockHeadersInsert(ctx context.Context, bhs []BlockHeader) error
 }
 
-type BtcHashHeight struct {
-	Hash      database.ByteArray `json:"hash"`
-	Height    uint64             `json:"height"`
+type BlockHeader struct {
+	Hash      database.ByteArray
+	Height    uint64
+	Header    database.ByteArray
 	CreatedAt database.Timestamp `deep:"-"`
 }
