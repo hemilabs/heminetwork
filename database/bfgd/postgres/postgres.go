@@ -275,6 +275,7 @@ func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32) ([]bfgd.L2K
 func (p *pgdb) BtcBlockInsert(ctx context.Context, bb *bfgd.BtcBlock) error {
 	log.Tracef("BtcBlockInsert")
 	defer log.Tracef("BtcBlockInsert exit")
+
 	const qBtcBlockInsert = `
 		INSERT INTO btc_blocks (hash, header, height)
 		VALUES ($1, $2, $3)

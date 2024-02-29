@@ -16,14 +16,26 @@ type Database interface {
 	// Version table
 	Version(ctx context.Context) (int, error)
 
+	// Block header
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
 	BlockHeadersBest(ctx context.Context) ([]BlockHeader, error)
+	BlockHeadersMissing(ctx context.Context, count int) ([]BlockHeader, error)
+
 	BlockHeadersInsert(ctx context.Context, bhs []BlockHeader) error
+
+	// Block
+	BlockInsert(ctx context.Context, b *Block) (int64, error)
 }
 
 type BlockHeader struct {
 	Hash      database.ByteArray
 	Height    uint64
 	Header    database.ByteArray
+	CreatedAt database.Timestamp `deep:"-"`
+}
+
+type Block struct {
+	Hash      database.ByteArray
+	Block     database.ByteArray
 	CreatedAt database.Timestamp `deep:"-"`
 }

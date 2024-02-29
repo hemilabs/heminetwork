@@ -120,6 +120,9 @@ type Server struct {
 	chainParams *chaincfg.Params
 	peer        *peer // make plural
 
+	expire  time.Time
+	pending map[string]time.Time
+
 	db tbcd.Database
 
 	// Prometheus
@@ -131,7 +134,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 	s := &Server{
-		cfg: cfg,
+		cfg:     cfg,
+		pending: make(map[string]time.Time, 16), // XXX this sucks, kill
 	}
 	// We could use a PGURI verification here.
 	// single peer for now
@@ -183,12 +187,12 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func (s *Server) handlePing(p *peer, msg *wire.MsgPing) {
+func (s *Server) handlePing(ctx context.Context, msg *wire.MsgPing) {
 	log.Tracef("handlePing")
 	defer log.Tracef("handlePing exit")
 
 	pong := wire.NewMsgPong(msg.Nonce)
-	err := p.write(pong)
+	err := s.peer.write(pong)
 	if err != nil {
 		fmt.Printf("could not write pong message: %v", err)
 		return
@@ -199,11 +203,11 @@ func (s *Server) handlePing(p *peer, msg *wire.MsgPing) {
 func (s *Server) handleInvBlock(p *peer, msg *wire.MsgInv) {
 }
 
-func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
+func (s *Server) handleInv(ctx context.Context, msg *wire.MsgInv) {
 	log.Tracef("handleInv")
 	defer log.Tracef("handleInv exit")
 
-	log.Debugf("handleInv: %v", len(msg.InvList))
+	log.Infof("handleInv: %v %v", len(msg.InvList), msg.InvList[0].Type) // XXX this will crash with no items
 
 	//// XXX fix height
 	//blocks := make([]tbcd.BlockHeaders, 0, len(msg.InvList))
@@ -234,7 +238,7 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	//}
 }
 
-func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeaders) {
+func (s *Server) handleHeaders(ctx context.Context, msg *wire.MsgHeaders) {
 	log.Tracef("handleHeaders")
 	defer log.Tracef("handleHeaders exit")
 
@@ -242,6 +246,16 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 	if len(msg.Headers) == 0 {
 		// We have all headers, retrieve missing blocks
+		mb, err := s.db.BlockHeadersMissing(ctx, 16)
+		if err != nil {
+			log.Errorf("block headers missing: %v", err)
+			return
+		}
+		err = s.downloadBlocks(mb)
+		if err != nil {
+			log.Errorf("download blocks: %v", err)
+			return
+		}
 		return
 	}
 
@@ -298,12 +312,54 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	}
 }
 
-func (s *Server) handleBlock(p *peer, msg *wire.MsgBlock) {
+func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 	log.Tracef("handleBlock")
 	defer log.Tracef("handleBlock exit")
 
-	log.Debugf("handleBlock: %v txs %v\n", msg.Header.BlockHash(),
-		len(msg.Transactions))
+	block := &bytes.Buffer{}
+	err := msg.Serialize(block) // XXX we should not being doing this twice
+	if err != nil {
+		log.Errorf("block serialize: %v", err)
+		return
+	}
+
+	bh := msg.Header.BlockHash()
+	b := &tbcd.Block{
+		Hash:  sliceChainHash(bh),
+		Block: block.Bytes(),
+	}
+
+	height, err := s.db.BlockInsert(ctx, b)
+	if err != nil {
+		log.Errorf("block insert: %v", err)
+		return
+	}
+
+	bhs := bh.String()
+	log.Infof("Insert block %v at %v txs %v", bhs, height, len(msg.Transactions))
+
+	// Poor man's cache that sucks
+	s.mtx.Lock()
+	delete(s.pending, bhs)
+	pendingLen := len(s.pending)
+	expire := s.expire
+	s.mtx.Unlock()
+
+	// XXX this needs a time component as well
+	if pendingLen <= 0 || time.Now().After(expire) {
+		log.Infof("now %v expire %v length %v", time.Now(), expire, pendingLen)
+		// We have all headers, retrieve missing blocks
+		mb, err := s.db.BlockHeadersMissing(ctx, 16)
+		if err != nil {
+			log.Errorf("block headers missing: %v", err)
+			return
+		}
+		err = s.downloadBlocks(mb)
+		if err != nil {
+			log.Errorf("download blocks: %v", err)
+			return
+		}
+	}
 }
 
 func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
@@ -343,20 +399,29 @@ func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, erro
 	return bhs, nil
 }
 
-// XXX remove/fix
-func downloadBlock(p *peer, height int, hash chainhash.Hash) error {
-	log.Tracef("downloadBlock")
-	defer log.Tracef("downloadBlock exit")
-
-	log.Debugf("downloadBlock at %v: %v", height, hash)
+func (s *Server) downloadBlocks(bhs []tbcd.BlockHeader) error {
+	log.Tracef("downloadBlocks")
+	defer log.Tracef("downloadBlocks exit")
 
 	getData := wire.NewMsgGetData()
-	getData.InvList = append(getData.InvList,
-		&wire.InvVect{
-			Type: wire.InvTypeBlock,
-			Hash: hash,
-		})
-	err := p.write(getData)
+	for k := range bhs {
+		bh := bhs[k]
+		hash, _ := chainhash.NewHash(bh.Hash[:])
+		getData.InvList = append(getData.InvList,
+			&wire.InvVect{
+				Type: wire.InvTypeBlock,
+				Hash: *hash,
+			})
+		// poor man's cache outstanding blocks
+		// XXX this sucks, make better
+		hs := hash.String()
+		expire := time.Now().Add(30 * time.Second) // expiration
+		s.mtx.Lock()
+		s.pending[hs] = expire
+		s.expire = expire
+		s.mtx.Unlock()
+	}
+	err := s.peer.write(getData)
 	if err != nil {
 		return fmt.Errorf("could not write get block message: %v", err)
 	}
@@ -396,15 +461,6 @@ func (s *Server) p2p(ctx context.Context) {
 		return
 	}
 
-	//// send ibv start using get blocks
-	//log.Debugf("genesis hash: %v\n", s.chainParams.GenesisHash)
-	//getBlocks := wire.NewMsgGetBlocks(s.chainParams.GenesisHash)
-	//err = s.peer.write(getBlocks)
-	//if err != nil {
-	//	log.Errorf("write getBlocks: %v", err)
-	//	return
-	//}
-
 	verbose := false
 	for {
 		// see if we were interrupted
@@ -421,7 +477,7 @@ func (s *Server) p2p(ctx context.Context) {
 			continue
 		} else if err != nil {
 			// XXX this is why we need a pool
-			log.Errorf("read: %w", err)
+			log.Errorf("read: %v", err)
 			return
 		}
 
@@ -431,16 +487,16 @@ func (s *Server) p2p(ctx context.Context) {
 
 		switch m := msg.(type) {
 		case *wire.MsgPing:
-			go s.handlePing(s.peer, m)
+			go s.handlePing(ctx, m)
 
 		case *wire.MsgInv:
-			go s.handleInv(ctx, s.peer, m)
+			go s.handleInv(ctx, m)
 
 		case *wire.MsgBlock:
-			go s.handleBlock(s.peer, m)
+			go s.handleBlock(ctx, m)
 
 		case *wire.MsgHeaders:
-			go s.handleHeaders(ctx, s.peer, m)
+			go s.handleHeaders(ctx, m)
 
 		default:
 			log.Errorf("unhandled message type: %T\n", msg)
