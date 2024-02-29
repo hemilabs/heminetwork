@@ -92,12 +92,12 @@ func (r *CircularFifo) MineEach(cb func(ks hemi.L2Keystone) error) {
 		if !e.requiresMine {
 			continue
 		}
+		mined := hemi.L2KeystoneAbbreviate(e.l2Keystone).Serialize()
 
 		if err := cb(e.l2Keystone); err == nil {
 			r.mtx.Lock()
 			for i := 0; i < cap(r.buf); i++ {
 				queued := hemi.L2KeystoneAbbreviate(r.buf[i].l2Keystone).Serialize()
-				mined := hemi.L2KeystoneAbbreviate(e.l2Keystone).Serialize()
 				if slices.Equal(queued[:], mined[:]) {
 					r.buf[i].requiresMine = false
 				}
