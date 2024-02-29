@@ -7,10 +7,13 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/postgres"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/juju/loggo"
+	"github.com/lib/pq"
 )
 
 const (
@@ -65,4 +68,56 @@ func (pg *pgdb) Version(ctx context.Context) (int, error) {
 		return -1, err
 	}
 	return dbVersion, nil
+}
+
+func (p *pgdb) BtcHashHeightInsert(ctx context.Context, bhh []tbcd.BtcHashHeight) error {
+	log.Tracef("BtcHashHeightInsert")
+	defer log.Tracef("BtcHashHeightInsert exit")
+
+	if len(bhh) == 0 {
+		return nil
+	}
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && err != sql.ErrTxDone {
+			log.Errorf("BtcHashHeightInsert could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	const qBtcHashHeightInsert = `
+		INSERT INTO btc_hash_height (hash, height)
+		VALUES ($1, $2)
+	`
+	for k := range bhh {
+		result, err := tx.ExecContext(ctx, qBtcHashHeightInsert, bhh[k].Hash,
+			bhh[k].Height)
+		if err != nil {
+			if err, ok := err.(*pq.Error); ok && err.Code.Class().Name() == "integrity_constraint_violation" {
+				return database.DuplicateError(fmt.Sprintf("duplicate hash height entry: %s", err))
+			}
+			return fmt.Errorf("failed to insert hash height: %v", err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to insert hash height rows affected: %v", err)
+		}
+		if rows < 1 {
+			return fmt.Errorf("failed to insert hash height rows: %v", rows)
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

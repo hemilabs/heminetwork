@@ -135,7 +135,7 @@ func (s *Server) p2p(ctx context.Context, btcNet string) {
 	log.Debugf("p2p handshake complete with: %v\n", s.peer.address)
 
 	// send ibd start using get blocks
-	fmt.Printf("genesis hash: %v\n", s.chainParams.GenesisHash)
+	log.Debugf("genesis hash: %v\n", s.chainParams.GenesisHash)
 	getBlocks := wire.NewMsgGetBlocks(s.chainParams.GenesisHash)
 	err = s.peer.write(getBlocks)
 	if err != nil {
@@ -172,7 +172,7 @@ func (s *Server) p2p(ctx context.Context, btcNet string) {
 			go handlePing(s.peer, m)
 
 		case *wire.MsgInv:
-			go handleInv(s.peer, m)
+			go s.handleInv(ctx, s.peer, m)
 
 		case *wire.MsgBlock:
 			go handleBlock(s.peer, m)

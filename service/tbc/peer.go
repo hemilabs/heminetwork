@@ -14,6 +14,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 /// XXX wire could use some contexts
@@ -207,24 +208,39 @@ func downloadBlock(p *peer, height int, hash chainhash.Hash) error {
 	return nil
 }
 
-func handleInv(p *peer, msg *wire.MsgInv) {
+func (s *Server) handleInvBlock(p *peer, msg *wire.MsgInv) {
+}
+
+func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	log.Tracef("handleInv")
 	defer log.Tracef("handleInv exit")
 
 	log.Debugf("handleInv: %v", len(msg.InvList))
 
 	// XXX fix height
+	blocks := make([]tbcd.BtcHashHeight, 0, len(msg.InvList))
 	for k := range msg.InvList {
 		switch msg.InvList[k].Type {
 		case wire.InvTypeBlock:
 			log.Tracef("handleInv block: height %v hash %v",
 				k+1, msg.InvList[k].Hash)
-			err := downloadBlock(p, k+1, msg.InvList[k].Hash)
-			if err != nil {
-				log.Errorf("download block at %v: %v", k+1, err)
-			}
+			//err := downloadBlock(p, k+1, msg.InvList[k].Hash)
+			//if err != nil {
+			//	log.Errorf("download block at %v: %v", k+1, err)
+			//}
+			blocks = append(blocks, tbcd.BtcHashHeight{
+				Hash:   msg.InvList[k].Hash[:], // XXX this is wireformat
+				Height: uint64(k + 1),
+			})
 		default:
 			log.Tracef("handleInv: skipping inv type %v", msg.InvList[k].Type)
+		}
+	}
+
+	if len(blocks) > 0 {
+		err := s.db.BtcHashHeightInsert(ctx, blocks)
+		if err != nil {
+			log.Errorf("BtcHashHeightInsert: %v", err)
 		}
 	}
 }
