@@ -79,7 +79,7 @@ func (r *CircularFifo) Push(val hemi.L2Keystone) {
 	r.write = (r.write + 1) % uint(cap(r.buf))
 }
 
-func (r *CircularFifo) ForEach(cb func(ks hemi.L2Keystone) error) {
+func (r *CircularFifo) MineEach(cb func(ks hemi.L2Keystone) error) {
 	r.mtx.Lock()
 	copies := slices.Clone(r.buf)
 	r.mtx.Unlock()
@@ -156,6 +156,8 @@ type Miner struct {
 
 	bfgWg    sync.WaitGroup
 	bfgCmdCh chan bfgCmd // commands to send to bfg
+
+	mineNowCh chan struct{}
 }
 
 func NewMiner(cfg *Config) (*Miner, error) {
@@ -169,6 +171,7 @@ func NewMiner(cfg *Config) (*Miner, error) {
 		bfgCmdCh:       make(chan bfgCmd, 10),
 		holdoffTimeout: 5 * time.Second,
 		requestTimeout: 5 * time.Second,
+		mineNowCh:      make(chan struct{}),
 	}
 
 	switch strings.ToLower(cfg.BTCChainName) {
@@ -490,6 +493,17 @@ func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.Bi
 	return ir, nil
 }
 
+func (m *Miner) mineKnownKeystones(ctx context.Context) {
+	m.keystoneBuf.MineEach(func(ks hemi.L2Keystone) error {
+		log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
+		if err := m.mineKeystone(ctx, &ks); err != nil {
+			log.Errorf("Failed to mine keystone: %v", err)
+			return err
+		}
+		return nil
+	})
+}
+
 func (m *Miner) mine(ctx context.Context) {
 	defer m.wg.Done()
 	for {
@@ -497,21 +511,20 @@ func (m *Miner) mine(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(100 * time.Millisecond):
-			m.keystoneBuf.ForEach(func(ks hemi.L2Keystone) error {
-				log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
-				if err := m.mineKeystone(ctx, &ks); err != nil {
-					log.Errorf("Failed to mine keystone: %v", err)
-					return err
-				}
-				return nil
-			})
+		case <-m.mineNowCh:
+			go m.mineKnownKeystones(ctx)
+		case <-time.After(15 * time.Second):
+			go m.mineKnownKeystones(ctx)
 		}
 	}
 }
 
 func (m *Miner) queueKeystoneForMining(keystone *hemi.L2Keystone) {
 	m.keystoneBuf.Push(*keystone)
+	select {
+	case m.mineNowCh <- struct{}{}:
+	default:
+	}
 }
 
 func sortL2KeystonesByL2BlockNumberAsc(a, b hemi.L2Keystone) int {

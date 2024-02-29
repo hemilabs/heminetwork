@@ -498,7 +498,7 @@ func TestProcessReceivedInAscOrder(t *testing.T) {
 
 	receivedKeystones := []hemi.L2Keystone{}
 
-	miner.keystoneBuf.ForEach(func(ks hemi.L2Keystone) error {
+	miner.keystoneBuf.MineEach(func(ks hemi.L2Keystone) error {
 		receivedKeystones = append(receivedKeystones, ks)
 		return nil
 	})
@@ -573,7 +573,7 @@ func TestProcessReceivedInAscOrderOverride(t *testing.T) {
 
 	receivedKeystones := []hemi.L2Keystone{}
 
-	miner.keystoneBuf.ForEach(func(ks hemi.L2Keystone) error {
+	miner.keystoneBuf.MineEach(func(ks hemi.L2Keystone) error {
 		receivedKeystones = append(receivedKeystones, ks)
 		return nil
 	})
