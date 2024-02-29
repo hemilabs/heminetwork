@@ -51,29 +51,44 @@ func init() {
 }
 
 type CircularFifo struct {
-	buf chan hemi.L2Keystone
+	buf   []CircularFifoElement
+	write uint
+	mtx   sync.Mutex
+}
+
+type CircularFifoElement struct {
+	l2Keystone   hemi.L2Keystone
+	requiresMine bool
 }
 
 func NewCircularFifo(n int) *CircularFifo {
 	return &CircularFifo{
-		buf: make(chan hemi.L2Keystone, n),
+		buf: make([]CircularFifoElement, n),
 	}
 }
 
 func (r *CircularFifo) Push(val hemi.L2Keystone) {
-	// if the channel is full, remove the oldest item.  according to Go's docs
-	// "A single channel may be used in send statements, receive operations, and
-	//  calls to the built-in functions cap and len by any number of
-	// goroutines without further synchronization"
-	if len(r.buf) == cap(r.buf) {
-		<-r.buf
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	item := CircularFifoElement{
+		l2Keystone:   val,
+		requiresMine: true,
 	}
 
-	r.buf <- val
+	r.buf[r.write] = item
+	r.write = (r.write + 1) % uint(cap(r.buf))
 }
 
-func (r *CircularFifo) Pop() <-chan hemi.L2Keystone {
-	return r.buf
+func (r *CircularFifo) ForEach(cb func(ks hemi.L2Keystone) error) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	for _, e := range r.buf {
+		if e.requiresMine {
+			if err := cb(e.l2Keystone); err == nil {
+				e.requiresMine = false
+			}
+		}
+	}
 }
 
 type Config struct {
@@ -279,33 +294,6 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 	return &btx, nil
 }
 
-func (m *Miner) shouldMineKeystone(ctx context.Context, ks *hemi.L2Keystone) (bool, error) {
-	serialized := hemi.L2KeystoneAbbreviate(*ks).Serialize()
-	response, err := m.callBFG(ctx, 5*time.Second, &bfgapi.PopTxsForL2BlockRequest{
-		L2Block: hemi.HashSerializedL2KeystoneAbrev(
-			serialized[:],
-		),
-		IncludeUnconfirmed: false,
-	})
-	if err != nil {
-		return false, err
-	}
-
-	popTxsForL2BlockResponse, ok := response.(*bfgapi.PopTxsForL2BlockResponse)
-	if !ok {
-		return false, errors.New("not bfgapi.PopTxsForL2BlockResponse")
-	}
-
-	// this response only returns confirmed keystones, if there any then do not
-	// mine this block
-	if popTxsForL2BlockResponse.PopTxs != nil && len(popTxsForL2BlockResponse.PopTxs) > 0 {
-		log.Infof("l2 keystone already confirmed in btc chain, skipping")
-		return false, nil
-	}
-
-	return true, nil
-}
-
 // XXX this function is not right. Clean it up and ensure we make this in at
 // least 2 functions. This needs to create and sign a tx, and then broadcast
 // seperately. Also utxo picker needs to be fixed. Don't return a fake utxo
@@ -495,30 +483,15 @@ func (m *Miner) mine(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case ks := <-m.keystoneBuf.Pop():
-			log.Infof("Received new keystone header for mining with height %v...", ks.L2BlockNumber)
-			for {
-				shouldMine, err := m.shouldMineKeystone(ctx, &ks)
-				if err != nil {
-					log.Errorf("error determining if should mine keystone: %s", err)
-					continue
-				}
-
-				if !shouldMine {
-					break
-				}
-
+		case <-time.After(100 * time.Millisecond):
+			m.keystoneBuf.ForEach(func(ks hemi.L2Keystone) error {
+				log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
 				if err := m.mineKeystone(ctx, &ks); err != nil {
 					log.Errorf("Failed to mine keystone: %v", err)
-					select {
-					case <-time.After(500 * time.Millisecond):
-					case <-ctx.Done():
-						return
-					}
-				} else {
-					break
+					return err
 				}
-			}
+				return nil
+			})
 		}
 	}
 }

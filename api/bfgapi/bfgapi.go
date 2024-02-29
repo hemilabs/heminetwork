@@ -127,8 +127,7 @@ type BitcoinUTXOsResponse struct {
 }
 
 type PopTxsForL2BlockRequest struct {
-	L2Block            api.ByteSlice `json:"l2_block"`
-	IncludeUnconfirmed bool          `json:"include_unconfirmed"`
+	L2Block api.ByteSlice `json:"l2_block"`
 }
 
 type PopTxsForL2BlockResponse struct {
