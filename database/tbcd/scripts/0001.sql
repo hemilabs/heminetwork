@@ -19,4 +19,13 @@ CREATE TABLE block_headers (
 );
 CREATE INDEX block_headers_height_index  ON block_headers (height);
 
+-- blocks table
+CREATE TABLE blocks (
+	hash		BYTEA PRIMARY KEY UNIQUE NOT NULL,
+	block		BYTEA REFERENCES block_headers(hash) NOT NULL,
+	created_at	TIMESTAMP NOT NULL DEFAULT NOW(),
+
+	CONSTRAINT blocks_hash_length CHECK (octet_length(hash) = 32)
+);
+
 COMMIT;
