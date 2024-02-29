@@ -81,11 +81,25 @@ func (r *CircularFifo) Push(val hemi.L2Keystone) {
 
 func (r *CircularFifo) ForEach(cb func(ks hemi.L2Keystone) error) {
 	r.mtx.Lock()
-	defer r.mtx.Unlock()
-	for _, e := range r.buf {
+	copies := slices.Clone(r.buf)
+	r.mtx.Unlock()
+
+	slices.SortFunc(copies, func(a, b CircularFifoElement) int {
+		return int(a.l2Keystone.L2BlockNumber) - int(b.l2Keystone.L2BlockNumber)
+	})
+
+	for _, e := range copies {
 		if e.requiresMine {
 			if err := cb(e.l2Keystone); err == nil {
-				e.requiresMine = false
+				r.mtx.Lock()
+				for i := 0; i < cap(r.buf); i++ {
+					queued := hemi.L2KeystoneAbbreviate(r.buf[i].l2Keystone).Serialize()
+					mined := hemi.L2KeystoneAbbreviate(e.l2Keystone).Serialize()
+					if slices.Equal(queued[:], mined[:]) {
+						r.buf[i].requiresMine = false
+					}
+				}
+				r.mtx.Unlock()
 			}
 		}
 	}
