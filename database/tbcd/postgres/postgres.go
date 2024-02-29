@@ -70,11 +70,60 @@ func (pg *pgdb) Version(ctx context.Context) (int, error) {
 	return dbVersion, nil
 }
 
-func (p *pgdb) BtcHashHeightInsert(ctx context.Context, bhh []tbcd.BtcHashHeight) error {
-	log.Tracef("BtcHashHeightInsert")
-	defer log.Tracef("BtcHashHeightInsert exit")
+func (p *pgdb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeaderByHash")
+	defer log.Tracef("BlockHeaderByHash exit")
 
-	if len(bhh) == 0 {
+	const selectHeader = `SELECT * FROM block_headers WHERE hash = $1;`
+
+	var bh tbcd.BlockHeader
+	row := p.db.QueryRowContext(ctx, selectHeader, hash)
+	if err := row.Scan(&bh.Hash, &bh.Height, &bh.Header, &bh.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, database.NotFoundError("btc block not found")
+		}
+		return nil, err
+	}
+	return &bh, nil
+}
+
+func (p *pgdb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeadersBest")
+	defer log.Tracef("BlockHeadersBest exit")
+
+	const selectHeadersBest = `SELECT * FROM block_headers WHERE height = (SELECT max(height) FROM block_headers);`
+
+	bhs := make([]tbcd.BlockHeader, 0, 3)
+	rows, err := p.db.QueryContext(ctx, selectHeadersBest)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var bh tbcd.BlockHeader
+		if err := rows.Scan(&bh.Hash, &bh.Height, &bh.Header, &bh.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, database.NotFoundError("block header data not found")
+			}
+			return nil, err
+		}
+		bhs = append(bhs, bh)
+	}
+
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return bhs, nil
+}
+
+func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) error {
+	log.Tracef("BlockHeadersInsert")
+	defer log.Tracef("BlockHeadersInsert exit")
+
+	if len(bhs) == 0 {
 		return nil
 	}
 
@@ -86,19 +135,19 @@ func (p *pgdb) BtcHashHeightInsert(ctx context.Context, bhh []tbcd.BtcHashHeight
 	defer func() {
 		err := tx.Rollback()
 		if err != nil && err != sql.ErrTxDone {
-			log.Errorf("BtcHashHeightInsert could not rollback db tx: %v",
+			log.Errorf("BlockHeadersInsert could not rollback db tx: %v",
 				err)
 			return
 		}
 	}()
 
-	const qBtcHashHeightInsert = `
-		INSERT INTO btc_hash_height (hash, height)
-		VALUES ($1, $2)
+	const qBlockHeaderInsert = `
+		INSERT INTO block_headers (hash, height, header)
+		VALUES ($1, $2, $3)
 	`
-	for k := range bhh {
-		result, err := tx.ExecContext(ctx, qBtcHashHeightInsert, bhh[k].Hash,
-			bhh[k].Height)
+	for k := range bhs {
+		result, err := tx.ExecContext(ctx, qBlockHeaderInsert, bhs[k].Hash,
+			bhs[k].Height, bhs[k].Header)
 		if err != nil {
 			if err, ok := err.(*pq.Error); ok && err.Code.Class().Name() == "integrity_constraint_violation" {
 				return database.DuplicateError(fmt.Sprintf("duplicate hash height entry: %s", err))
