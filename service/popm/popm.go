@@ -124,10 +124,10 @@ func (r *L2KeystonePriorityBuffer) Push(val hemi.L2Keystone) {
 // mark the L2Keystone as processed
 func (r *L2KeystonePriorityBuffer) ForEach(cb func(ks hemi.L2Keystone) error) {
 	r.mtx.Lock()
-	copies := []L2KeystonePriorityBufferElement{}
+	copies := []hemi.L2Keystone{}
 	for _, v := range r.mapping {
 		if v.requiresProcessing {
-			copies = append(copies, *v)
+			copies = append(copies, v.l2Keystone)
 
 			// temporarily set this to false, so another goroutine doesn't
 			// try to process
@@ -137,15 +137,15 @@ func (r *L2KeystonePriorityBuffer) ForEach(cb func(ks hemi.L2Keystone) error) {
 	r.mtx.Unlock()
 
 	// mine the newest keystone first
-	slices.SortFunc(copies, func(a, b L2KeystonePriorityBufferElement) int {
-		return int(b.l2Keystone.L2BlockNumber) - int(a.l2Keystone.L2BlockNumber)
+	slices.SortFunc(copies, func(a, b hemi.L2Keystone) int {
+		return int(b.L2BlockNumber) - int(a.L2BlockNumber)
 	})
 
 	for _, e := range copies {
-		mined := hemi.L2KeystoneAbbreviate(e.l2Keystone).Serialize()
+		mined := hemi.L2KeystoneAbbreviate(e).Serialize()
 		key := hex.EncodeToString(mined[:])
 
-		err := cb(e.l2Keystone)
+		err := cb(e)
 		r.mtx.Lock()
 		// check to see if still in map before marking
 		if _, ok := r.mapping[key]; ok {
