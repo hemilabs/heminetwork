@@ -128,6 +128,10 @@ func (r *L2KeystonePriorityBuffer) ForEach(cb func(ks hemi.L2Keystone) error) {
 	for _, v := range r.mapping {
 		if v.requiresProcessing {
 			copies = append(copies, *v)
+
+			// temporarily set this to false, so another goroutine doesn't
+			// try to process
+			v.requiresProcessing = false
 		}
 	}
 	r.mtx.Unlock()
@@ -141,14 +145,14 @@ func (r *L2KeystonePriorityBuffer) ForEach(cb func(ks hemi.L2Keystone) error) {
 		mined := hemi.L2KeystoneAbbreviate(e.l2Keystone).Serialize()
 		key := hex.EncodeToString(mined[:])
 
-		if err := cb(e.l2Keystone); err == nil {
-			r.mtx.Lock()
-			// check to see if still in map before marking
-			if _, ok := r.mapping[key]; ok {
-				r.mapping[key].requiresProcessing = false
-			}
-			r.mtx.Unlock()
+		err := cb(e.l2Keystone)
+		r.mtx.Lock()
+		// check to see if still in map before marking
+		if _, ok := r.mapping[key]; ok {
+			// don't process again if callback succeeded
+			r.mapping[key].requiresProcessing = err != nil
 		}
+		r.mtx.Unlock()
 	}
 }
 
