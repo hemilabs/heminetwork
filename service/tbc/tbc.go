@@ -187,6 +187,20 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+func (s *Server) handleAddr(ctx context.Context, msg *wire.MsgAddr) {
+	log.Tracef("handleAddr")
+	defer log.Tracef("handleAddr exit")
+
+	log.Infof("handleAddr: %v", len(msg.AddrList))
+}
+
+func (s *Server) handleAddrV2(ctx context.Context, msg *wire.MsgAddrV2) {
+	log.Tracef("handleAddrV2")
+	defer log.Tracef("handleAddrV2 exit")
+
+	log.Infof("handleAddrV2: %v", len(msg.AddrList))
+}
+
 func (s *Server) handlePing(ctx context.Context, msg *wire.MsgPing) {
 	log.Tracef("handlePing")
 	defer log.Tracef("handlePing exit")
@@ -207,7 +221,7 @@ func (s *Server) handleInv(ctx context.Context, msg *wire.MsgInv) {
 	log.Tracef("handleInv")
 	defer log.Tracef("handleInv exit")
 
-	log.Infof("handleInv: %v %v", len(msg.InvList), msg.InvList[0].Type) // XXX this will crash with no items
+	log.Debugf("handleInv: %v %v", len(msg.InvList), msg.InvList[0].Type) // XXX this will crash with no items
 
 	//// XXX fix height
 	//blocks := make([]tbcd.BlockHeaders, 0, len(msg.InvList))
@@ -245,17 +259,21 @@ func (s *Server) handleHeaders(ctx context.Context, msg *wire.MsgHeaders) {
 	log.Debugf("handleHeaders: %v", len(msg.Headers))
 
 	if len(msg.Headers) == 0 {
-		// We have all headers, retrieve missing blocks
-		mb, err := s.db.BlockHeadersMissing(ctx, 16)
-		if err != nil {
-			log.Errorf("block headers missing: %v", err)
-			return
+		// XXX DEBUG SHIT
+		if false {
+			// We have all headers, retrieve missing blocks
+			mb, err := s.db.BlockHeadersMissing(ctx, 16)
+			if err != nil {
+				log.Errorf("block headers missing: %v", err)
+				return
+			}
+			err = s.downloadBlocks(mb)
+			if err != nil {
+				log.Errorf("download blocks: %v", err)
+				return
+			}
 		}
-		err = s.downloadBlocks(mb)
-		if err != nil {
-			log.Errorf("download blocks: %v", err)
-			return
-		}
+		log.Infof("=== DISABLED BLOCK DOWNLOAD ===")
 		return
 	}
 
@@ -331,6 +349,7 @@ func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 
 	height, err := s.db.BlockInsert(ctx, b)
 	if err != nil {
+		// XXX ignore duplicate error printing since we will hit that
 		log.Errorf("block insert: %v", err)
 		return
 	}
@@ -347,6 +366,7 @@ func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 
 	// XXX this needs a time component as well
 	if pendingLen <= 0 || time.Now().After(expire) {
+		// XXX this is duplicate code, make a function
 		log.Infof("now %v expire %v length %v", time.Now(), expire, pendingLen)
 		// We have all headers, retrieve missing blocks
 		mb, err := s.db.BlockHeadersMissing(ctx, 16)
@@ -443,6 +463,15 @@ func (s *Server) p2p(ctx context.Context) {
 	}
 	log.Debugf("p2p handshake complete with: %v\n", s.peer.address)
 
+	// Get network information
+	getAddr := wire.NewMsgGetAddr()
+	err = s.peer.write(getAddr)
+	if err != nil {
+		// XXX recover
+		log.Errorf("write getaddrv2: %v", err)
+	}
+
+	// Resume headers/blocks download
 	bhs, err := s.blockHeadersBest(ctx)
 	if err != nil {
 		log.Errorf("block headers best: %v", err)
@@ -486,17 +515,26 @@ func (s *Server) p2p(ctx context.Context) {
 		}
 
 		switch m := msg.(type) {
-		case *wire.MsgPing:
-			go s.handlePing(ctx, m)
+		case *wire.MsgAddr:
+			go s.handleAddr(ctx, m)
 
-		case *wire.MsgInv:
-			go s.handleInv(ctx, m)
+		case *wire.MsgAddrV2:
+			go s.handleAddrV2(ctx, m)
 
 		case *wire.MsgBlock:
 			go s.handleBlock(ctx, m)
 
+		case *wire.MsgFeeFilter:
+			// XXX shut up
+
+		case *wire.MsgInv:
+			go s.handleInv(ctx, m)
+
 		case *wire.MsgHeaders:
 			go s.handleHeaders(ctx, m)
+
+		case *wire.MsgPing:
+			go s.handlePing(ctx, m)
 
 		default:
 			log.Errorf("unhandled message type: %T\n", msg)
