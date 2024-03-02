@@ -236,3 +236,92 @@ func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 
 	return -1, errors.New("should not get here")
 }
+
+func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
+	log.Tracef("PeersInsert")
+	defer log.Tracef("PeersInsert exit")
+
+	if len(peers) == 0 {
+		return nil
+	}
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && err != sql.ErrTxDone {
+			log.Errorf("peers insert could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	const qPeersInsert = `
+		INSERT INTO peers (address, port, last_at)
+		VALUES ($1, $2, $3)
+	`
+	for k := range peers {
+		result, err := tx.ExecContext(ctx, qPeersInsert, peers[k].Address,
+			peers[k].Port, peers[k].LastAt)
+		if err != nil {
+			return fmt.Errorf("failed to insert peer: %v", err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("failed to insert peer rows affected: %v", err)
+		}
+		if rows < 1 {
+			return fmt.Errorf("failed to insert peers rows: %v", rows)
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *pgdb) PeerDelete(ctx context.Context, address string) error {
+	log.Tracef("PeerDelete")
+	defer log.Tracef("PeerDelete exit")
+
+	return fmt.Errorf("not yet")
+
+}
+
+func (p *pgdb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
+	log.Tracef("PeersRandom")
+	defer log.Tracef("PeersRandom exit")
+
+	const qSelectRandom = `SELECT * FROM peers ORDER BY RANDOM() LIMIT $1;`
+
+	peers := make([]tbcd.Peer, 0, count)
+	rows, err := p.db.QueryContext(ctx, qSelectRandom, count)
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var peer tbcd.Peer
+		if err := rows.Scan(&peer.Address, &peer.Port, &peer.LastAt, &peer.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, database.NotFoundError("peer data not found")
+			}
+			return nil, err
+		}
+		peers = append(peers, peer)
+	}
+
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return peers, nil
+}

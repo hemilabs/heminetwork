@@ -25,6 +25,11 @@ type Database interface {
 
 	// Block
 	BlockInsert(ctx context.Context, b *Block) (int64, error)
+
+	// Peer manager
+	PeersInsert(ctx context.Context, peers []Peer) error  // insert or update
+	PeerDelete(ctx context.Context, address string) error // remove peer
+	PeersRandom(ctx context.Context, count int) ([]Peer, error)
 }
 
 type BlockHeader struct {
@@ -37,5 +42,12 @@ type BlockHeader struct {
 type Block struct {
 	Hash      database.ByteArray
 	Block     database.ByteArray
+	CreatedAt database.Timestamp `deep:"-"`
+}
+
+type Peer struct {
+	Address   string
+	Port      string
+	LastAt    database.Timestamp `deep:"-"` // Last time connected
 	CreatedAt database.Timestamp `deep:"-"`
 }

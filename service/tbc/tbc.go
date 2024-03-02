@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,6 +29,18 @@ const (
 	logLevel = "INFO"
 
 	promSubsystem = "tbc_service" // Prometheus
+
+	mainnetPort = "8333"
+	testnetPort = "18333"
+)
+
+var (
+	testnetSeeds = []string{
+		"testnet-seed.bitcoin.jonasschnelli.ch",
+		"seed.tbtc.petertodd.org",
+		"seed.testnet.bitcoin.sprovoost.nl",
+		"testnet-seed.bluematt.me",
+	}
 )
 
 var log = loggo.GetLogger("tbc")
@@ -115,11 +129,19 @@ type Server struct {
 
 	cfg *Config
 
+	// Peer manager
+	peerMsgC chan *wire.Message
+
 	// bitcoin network
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
-	peer        *peer // make plural
+	port        string
 
+	// peers
+	seeds []string
+
+	// XXX garbage, remove
+	peer    *peer // make plural
 	expire  time.Time
 	pending map[string]time.Time
 
@@ -134,35 +156,200 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 	s := &Server{
-		cfg:     cfg,
+		cfg:      cfg,
+		peerMsgC: make(chan *wire.Message, 64), // ~64MB if it is all blocks
+		//peers:    make(map[string]*peer, 64),
 		pending: make(map[string]time.Time, 16), // XXX this sucks, kill
 	}
 	// We could use a PGURI verification here.
 	// single peer for now
 
-	mainnetPort := "8333"
-	testnetPort := "18333"
-	var port string
 	switch cfg.Network {
 	case "mainnet":
-		port = mainnetPort
+		s.port = mainnetPort
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
+		panic("no seeds")
 	case "testnet", "testnet3":
-		port = testnetPort
+		s.port = testnetPort
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
+		s.seeds = testnetSeeds
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
 	}
 
-	var err error
-	s.peer, err = NewPeer(s.wireNet, "140.238.169.133:"+port)
-	if err != nil {
-		return nil, fmt.Errorf("new peer: %v", err)
-	}
+	//var err error
+	//s.peer, err = NewPeer(s.wireNet, "140.238.169.133:"+port)
+	//if err != nil {
+	//	return nil, fmt.Errorf("new peer: %v", err)
+	//}
 
 	return s, nil
+}
+
+func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error) {
+	log.Tracef("seed")
+	defer log.Tracef("seed exit")
+
+	peers, err := s.db.PeersRandom(pctx, peersWanted)
+	if err != nil {
+		return nil, fmt.Errorf("peers random: %v", err)
+	}
+	if len(peers) > 16 {
+		return peers, nil
+	}
+
+	//// XXX this should run on a timed loop until we have some addresses
+
+	//// Seed
+	resolver := &net.Resolver{}
+	ctx, cancel := context.WithTimeout(pctx, 15*time.Second)
+	defer cancel()
+
+	errorsSeen := 0
+	var addrs []net.IP
+	for k := range s.seeds {
+		log.Infof("DNS seeding %v", s.seeds[k])
+		ips, err := resolver.LookupIP(ctx, "ip", s.seeds[k])
+		if err != nil {
+			log.Errorf("lookup: %v", err)
+			errorsSeen++
+			continue
+		}
+		addrs = append(addrs, ips...)
+	}
+	if errorsSeen == len(s.seeds) {
+		// XXX retry
+		return nil, fmt.Errorf("could not seed")
+	}
+
+	// insert into peers table
+	for k := range addrs {
+		peers = append(peers, tbcd.Peer{
+			Address: addrs[k].String(),
+			Port:    s.port,
+		})
+	}
+
+	//// retrun fake peers but don't save them to the database
+	return peers, nil
+
+}
+
+func (s *Server) peerManager(ctx context.Context) error {
+	log.Tracef("peerManager")
+	defer log.Tracef("peerManager exit")
+
+	// Channel for peering signals
+	peersWanted := 4 // 64
+	peerC := make(chan string, peersWanted)
+
+	seeds, err := s.seed(ctx, peersWanted)
+	if err != nil {
+		return fmt.Errorf("seed: %w", err)
+	}
+	if len(seeds) == 0 {
+		// probably retry
+		return fmt.Errorf("no seeds found")
+	}
+
+	peers := make(map[string]struct{}, peersWanted)
+	x := 0
+	for {
+		peersActive := len(peers)
+		if peersActive < peersWanted {
+			// XXX we may want to make peers play along with waitgroup
+
+			// Connect peer
+			for i := 0; i < peersWanted-peersActive; i++ {
+				address := net.JoinHostPort(seeds[x].Address, seeds[x].Port)
+				peers[address] = struct{}{}
+				go s.peerConnect(ctx, peerC, address)
+
+				x++
+				if x >= len(seeds) {
+					// XXX duplicate code from above
+					seeds, err := s.seed(ctx, peersWanted)
+					if err != nil {
+						return fmt.Errorf("seed: %w", err)
+					}
+					if len(seeds) == 0 {
+						// probably retry
+						return fmt.Errorf("no seeds found")
+					}
+					x = 0
+				}
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case address := <-peerC:
+			delete(peers, address)
+		}
+	}
+}
+
+func (s *Server) peerConnect(ctx context.Context, peerC chan string, address string) {
+	log.Tracef("peerConnect %v", address)
+	defer func() {
+		select {
+		case peerC <- address:
+		default:
+			log.Tracef("could not signal peer channel: %v", address)
+		}
+		log.Tracef("peerConnect exit %v", address)
+	}()
+
+	peer, err := NewPeer(s.wireNet, address)
+	if err != nil {
+		log.Errorf("new peer: %v", err)
+		return
+	}
+
+	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err = peer.connect(tctx)
+	if err != nil {
+		log.Errorf("connect: %v", err)
+		return
+	}
+	defer func() {
+		err := peer.close()
+		if err != nil {
+			log.Errorf("peer disconnect: %v %v", address, err)
+		}
+	}()
+	log.Infof("connected: %v", peer.address)
+
+	verbose := false
+	for {
+		// See if we were interrupted, for the love of pete add ctx to wire
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		msg, err := peer.read()
+		if err == wire.ErrUnknownMessage {
+			// skip unknown
+			continue
+		} else if err != nil {
+			// XXX this is why we need a pool
+			log.Errorf("read: %v", err)
+			return
+		}
+
+		if verbose {
+			spew.Dump(msg)
+		}
+
+		// XXX send wire message to pool reader
+		log.Infof("%v: %T", address, msg)
+	}
 }
 
 func (s *Server) running() bool {
@@ -198,7 +385,20 @@ func (s *Server) handleAddrV2(ctx context.Context, msg *wire.MsgAddrV2) {
 	log.Tracef("handleAddrV2")
 	defer log.Tracef("handleAddrV2 exit")
 
-	log.Infof("handleAddrV2: %v", len(msg.AddrList))
+	log.Debugf("handleAddrV2: %v", len(msg.AddrList))
+
+	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
+	for k := range msg.AddrList {
+		peers = append(peers, tbcd.Peer{
+			Address: msg.AddrList[k].Addr.String(),
+			Port:    strconv.Itoa(int(msg.AddrList[k].Port)),
+		})
+	}
+	err := s.db.PeersInsert(ctx, peers)
+	if err != nil {
+		log.Errorf("%v", err)
+		return
+	}
 }
 
 func (s *Server) handlePing(ctx context.Context, msg *wire.MsgPing) {
@@ -355,7 +555,8 @@ func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 	}
 
 	bhs := bh.String()
-	log.Infof("Insert block %v at %v txs %v", bhs, height, len(msg.Transactions))
+	log.Infof("Insert block %v at %v txs %v %v", bhs, height,
+		len(msg.Transactions), msg.Header.Timestamp)
 
 	// Poor man's cache that sucks
 	s.mtx.Lock()
@@ -449,11 +650,112 @@ func (s *Server) downloadBlocks(bhs []tbcd.BlockHeader) error {
 	return nil
 }
 
+func (s *Server) _seed(pctx context.Context) ([]tbcd.Peer, error) {
+	log.Tracef("seed")
+	defer log.Tracef("seed exit")
+
+	_peersWanted := 16
+	peers, err := s.db.PeersRandom(pctx, _peersWanted)
+	if err != nil {
+		return nil, fmt.Errorf("peers random: %v", err)
+	}
+	if len(peers) > 16 {
+		return peers, nil
+	}
+
+	// XXX this should run on a timed loop until we have some addresses
+
+	// Seed
+	resolver := &net.Resolver{}
+	ctx, cancel := context.WithTimeout(pctx, 15*time.Second)
+	defer cancel()
+
+	errorsSeen := 0
+	var addrs []net.IP
+	for k := range s.seeds {
+		log.Infof("DNS seeding %v", s.seeds[k])
+		ips, err := resolver.LookupIP(ctx, "ip", s.seeds[k])
+		if err != nil {
+			log.Errorf("lookup: %v", err)
+			errorsSeen++
+			continue
+		}
+		addrs = append(addrs, ips...)
+	}
+	if errorsSeen == len(s.seeds) {
+		// XXX retry
+		return nil, fmt.Errorf("could not seed")
+	}
+
+	// insert into peers table
+	for k := range addrs {
+		peers = append(peers, tbcd.Peer{
+			Address: addrs[k].String(),
+			Port:    s.port,
+		})
+	}
+
+	// retrun fake peers but don't save them to the database
+	return peers, nil
+
+}
+
 func (s *Server) p2p(ctx context.Context) {
 	defer s.wg.Done()
 
 	log.Tracef("p2p")
 	defer log.Tracef("p2p exit")
+
+	//// Peers
+	//seeds, err := s.seed(ctx)
+	//if err != nil {
+	//	// XXX fatal
+	//	log.Errorf("seed: %v", err)
+	//	return
+	//}
+	//log.Infof("%v", spew.Sdump(seeds))
+
+	//// XXX make this concurrent
+	//connected := 0
+	//for k := range seeds {
+	//	peer, err := NewPeer(s.wireNet, fmt.Sprintf("%v:%v",
+	//		seeds[k].Address, seeds[k].Port))
+	//	if err != nil {
+	//		log.Errorf("could not parse: %v", err)
+	//		continue
+	//	}
+
+	//	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	//	err = peer.connect(tctx)
+	//	if err != nil {
+	//		cancel()
+	//		log.Errorf("connect: %v", err)
+	//		continue
+	//	} else {
+	//		log.Infof("connected: %v", peer.address)
+	//		s.mtx.Lock()
+	//		s.peers[peer.address] = peer
+	//		connected = len(s.peers) // XXX if a peer disconnects it should be removed from map
+	//		s.mtx.Unlock()
+	//	}
+
+	//	if connected > 4 {
+	//		break
+	//	}
+	//}
+
+	//log.Infof("ready to go")
+
+	//for {
+	//	select {
+	//	case <-ctx.Done():
+	//		log.Errorf("ctx %v", ctx.Error())
+	//		return
+	//	case msg <- s.peerManager.read(ctx):
+	//	}
+	//}
+
+	return
 
 	err := s.peer.connect(ctx)
 	if err != nil {
@@ -589,12 +891,27 @@ func (s *Server) Run(pctx context.Context) error {
 		}()
 	}
 
+	errC := make(chan error)
 	s.wg.Add(1)
-	go s.p2p(ctx)
+	go func() {
+		defer s.wg.Done()
+		err := s.peerManager(ctx)
+		if err != nil {
+			select {
+			case errC <- err:
+			default:
+			}
+		}
+	}()
+
+	//s.wg.Add(1)
+	//go s.p2p(ctx)
 
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()
+	case e := <-errC:
+		err = e
 	}
 	cancel()
 
