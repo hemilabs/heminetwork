@@ -17,7 +17,7 @@ CREATE TABLE block_headers (
 	CONSTRAINT block_headers_hash_length CHECK (octet_length(hash) = 32),
 	CONSTRAINT block_headers_header_length CHECK (octet_length(header) = 80)
 );
-CREATE INDEX block_headers_height_index  ON block_headers (height);
+CREATE INDEX block_headers_height_index ON block_headers (height);
 
 -- blocks table
 CREATE TABLE blocks (
@@ -28,5 +28,17 @@ CREATE TABLE blocks (
 	CONSTRAINT blocks_foreign FOREIGN KEY(hash) REFERENCES block_headers(hash),
 	CONSTRAINT blocks_hash_length CHECK (octet_length(hash) = 32)
 );
+
+-- peers table
+-- probably add a score based on throughput/latency/misbehavior/flapping etc
+CREATE TABLE peers (
+	address		TEXT NOT NULL,
+	port		TEXT NOT NULL,
+	last_at		TIMESTAMP,
+	created_at	TIMESTAMP NOT NULL DEFAULT NOW(),
+
+	CONSTRAINT address_length CHECK (octet_length(address) < 80)
+);
+CREATE INDEX peers_index ON peers (address);
 
 COMMIT;

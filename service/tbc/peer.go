@@ -44,6 +44,7 @@ type peer struct {
 }
 
 func NewPeer(network wire.BitcoinNet, address string) (*peer, error) {
+	// XXX parse address and return failure if it's wrong
 	return &peer{
 		protocolVersion: wire.ProtocolVersion,
 		network:         network,
