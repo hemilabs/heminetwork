@@ -52,6 +52,10 @@ func NewPeer(network wire.BitcoinNet, address string) (*peer, error) {
 	}, nil
 }
 
+func (p peer) String() string {
+	return p.address
+}
+
 func (p *peer) write(msg wire.Message) error {
 	_, err := wire.WriteMessageWithEncodingN(p.conn, msg, p.protocolVersion,
 		p.network, wire.LatestEncoding)
@@ -173,7 +177,6 @@ func (p *peer) close() error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	if p.conn != nil {
-		defer func() { p.conn = nil }()
 		return p.conn.Close()
 	}
 	return fmt.Errorf("already closed")

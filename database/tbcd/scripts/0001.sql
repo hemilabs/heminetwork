@@ -37,6 +37,7 @@ CREATE TABLE peers (
 	last_at		TIMESTAMP,
 	created_at	TIMESTAMP NOT NULL DEFAULT NOW(),
 
+	CONSTRAINT peers_unique UNIQUE (address, port),
 	CONSTRAINT address_length CHECK (octet_length(address) < 80)
 );
 CREATE INDEX peers_index ON peers (address);
