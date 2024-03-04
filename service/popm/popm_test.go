@@ -140,7 +140,7 @@ func TestProcessReceivedKeystones(t *testing.T) {
 	}
 
 	miner := Miner{
-		mapping: make(map[string]hemi.L2Keystone),
+		l2Keystones: make(map[string]hemi.L2Keystone),
 	}
 
 	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
@@ -501,7 +501,6 @@ func TestProcessReceivedInAscOrder(t *testing.T) {
 
 	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		receivedKeystones = append(receivedKeystones, ks)
-		miner.PopL2Keystone(ks)
 	})
 
 	slices.Reverse(receivedKeystones)
@@ -541,7 +540,6 @@ func TestProcessReceivedOnlyOnce(t *testing.T) {
 	processedKeystonesFirstTime := 0
 	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		processedKeystonesFirstTime++
-		miner.PopL2Keystone(ks)
 	})
 	if processedKeystonesFirstTime != 3 {
 		t.Fatalf("should have processed 3 keystones, processed %d", processedKeystonesFirstTime)
@@ -586,6 +584,7 @@ func TestProcessReceivedOnlyOnceWithError(t *testing.T) {
 	processedKeystonesFirstTime := 0
 	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		processedKeystonesFirstTime++
+		miner.AddL2Keystone(ks)
 	})
 	if processedKeystonesFirstTime != 3 {
 		t.Fatalf("should have processed 3 keystones, processed %d", processedKeystonesFirstTime)
@@ -594,7 +593,6 @@ func TestProcessReceivedOnlyOnceWithError(t *testing.T) {
 	processedKeystonesSecondTime := 0
 	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		processedKeystonesSecondTime++
-		miner.PopL2Keystone(ks)
 	})
 
 	if processedKeystonesSecondTime != 3 {
@@ -642,7 +640,6 @@ func TestProcessReceivedNoDuplicates(t *testing.T) {
 
 	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		receivedKeystones = append(receivedKeystones, ks)
-		miner.PopL2Keystone(ks)
 	})
 
 	slices.Reverse(keystones)
@@ -728,7 +725,6 @@ func TestProcessReceivedInAscOrderOverride(t *testing.T) {
 
 	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		receivedKeystones = append(receivedKeystones, ks)
-		miner.PopL2Keystone(ks)
 	})
 
 	slices.Reverse(keystones)
@@ -814,7 +810,6 @@ func TestProcessReceivedInAscOrderNoInsertIfTooOld(t *testing.T) {
 
 	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		receivedKeystones = append(receivedKeystones, ks)
-		miner.PopL2Keystone(ks)
 	})
 
 	slices.Reverse(keystones)
@@ -1010,6 +1005,71 @@ func TestConnectToBFGAndPerformMineMultiple(t *testing.T) {
 		for m := range messagesExpected {
 			message := fmt.Sprintf("%s", m)
 			if messagesReceived[message] != messagesExpected[m] {
+				t.Logf("still missing message %v, found %d want %d", m, messagesReceived[message], messagesExpected[m])
+				missing = true
+			}
+		}
+		if missing == false {
+			break
+		}
+	}
+}
+
+func TestConnectToBFGAndPerformMineALot(t *testing.T) {
+	privateKey, err := dcrsecp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	server, msgCh, cleanup := createMockBFG(ctx, t, []string{}, false, 100)
+	defer cleanup()
+
+	go func() {
+		miner, err := NewMiner(&Config{
+			BFGWSURL:      server.URL + bfgapi.RouteWebsocketPublic,
+			BTCChainName:  "testnet3",
+			BTCPrivateKey: hex.EncodeToString(privateKey.Serialize()),
+		})
+		if err != nil {
+			panic(err)
+		}
+
+		err = miner.Run(ctx)
+		if err != nil && err != context.Canceled {
+			panic(err)
+		}
+	}()
+
+	// we can't guarantee order here, so test that we get all expected messages
+	// from popm within the timeout
+
+	messagesReceived := make(map[string]int)
+
+	messagesExpected := map[protocol.Command]int{
+		EventConnected:                    1,
+		bfgapi.CmdL2KeystonesRequest:      1,
+		bfgapi.CmdBitcoinInfoRequest:      l2KeystonePriorityBufferMaxSize,
+		bfgapi.CmdBitcoinBalanceRequest:   l2KeystonePriorityBufferMaxSize,
+		bfgapi.CmdBitcoinUTXOsRequest:     l2KeystonePriorityBufferMaxSize,
+		bfgapi.CmdBitcoinBroadcastRequest: l2KeystonePriorityBufferMaxSize,
+	}
+
+	for {
+		select {
+		case msg := <-msgCh:
+			t.Logf("received message %v", msg)
+			messagesReceived[msg]++
+		case <-ctx.Done():
+			if ctx.Err() != nil {
+				t.Fatal(ctx.Err())
+			}
+		}
+		missing := false
+		for m := range messagesExpected {
+			message := fmt.Sprintf("%s", m)
+			if messagesReceived[message] < messagesExpected[m] {
 				t.Logf("still missing message %v, found %d want %d", m, messagesReceived[message], messagesExpected[m])
 				missing = true
 			}

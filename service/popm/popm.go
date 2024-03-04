@@ -105,7 +105,7 @@ type Miner struct {
 
 	mineNowCh chan struct{}
 
-	mapping map[string]hemi.L2Keystone
+	l2Keystones map[string]hemi.L2Keystone
 }
 
 func NewMiner(cfg *Config) (*Miner, error) {
@@ -118,8 +118,8 @@ func NewMiner(cfg *Config) (*Miner, error) {
 		bfgCmdCh:       make(chan bfgCmd, 10),
 		holdoffTimeout: 5 * time.Second,
 		requestTimeout: 5 * time.Second,
-		mineNowCh:      make(chan struct{}),
-		mapping:        make(map[string]hemi.L2Keystone),
+		mineNowCh:      make(chan struct{}, 1),
+		l2Keystones:    make(map[string]hemi.L2Keystone),
 	}
 
 	switch strings.ToLower(cfg.BTCChainName) {
@@ -478,10 +478,8 @@ func (m *Miner) mineKnownKeystones(ctx context.Context) {
 		log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
 		if err := m.mineKeystone(ctx, &ks); err != nil {
 			log.Errorf("Failed to mine keystone: %v", err)
-			return
+			m.AddL2Keystone(ks)
 		}
-
-		m.PopL2Keystone(ks)
 	})
 }
 
@@ -500,7 +498,7 @@ func (m *Miner) mine(ctx context.Context) {
 }
 
 func (m *Miner) queueKeystoneForMining(keystone *hemi.L2Keystone) {
-	m.PushL2Keystone(*keystone)
+	m.AddL2Keystone(*keystone)
 	select {
 	case m.mineNowCh <- struct{}{}:
 	default:
@@ -841,7 +839,7 @@ func (m *Miner) Run(pctx context.Context) error {
 }
 
 // Push inserts an L2Keystone, dropping the oldest if full
-func (m *Miner) PushL2Keystone(val hemi.L2Keystone) {
+func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 	serialized := hemi.L2KeystoneAbbreviate(val).Serialize()
 	key := hex.EncodeToString(serialized[:])
 
@@ -849,14 +847,19 @@ func (m *Miner) PushL2Keystone(val hemi.L2Keystone) {
 	defer m.mtx.Unlock()
 
 	// keystone already exists, no-op
-	if _, ok := m.mapping[key]; ok {
+	if _, ok := m.l2Keystones[key]; ok {
+		return
+	}
+
+	if len(m.l2Keystones) < l2KeystonePriorityBufferMaxSize {
+		m.l2Keystones[key] = val
 		return
 	}
 
 	var smallestL2BlockNumber uint32
 	var smallestKey string
 
-	for k, v := range m.mapping {
+	for k, v := range m.l2Keystones {
 		if smallestL2BlockNumber == 0 || v.L2BlockNumber < smallestL2BlockNumber {
 			smallestL2BlockNumber = v.L2BlockNumber
 			smallestKey = k
@@ -869,31 +872,21 @@ func (m *Miner) PushL2Keystone(val hemi.L2Keystone) {
 		return
 	}
 
-	if len(m.mapping) < l2KeystonePriorityBufferMaxSize {
-		m.mapping[key] = val
-		return
-	}
+	delete(m.l2Keystones, smallestKey)
 
-	delete(m.mapping, smallestKey)
-
-	m.mapping[key] = val
-}
-
-func (m *Miner) PopL2Keystone(ks hemi.L2Keystone) {
-	serialized := hemi.L2KeystoneAbbreviate(ks).Serialize()
-	key := hex.EncodeToString(serialized[:])
-
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	delete(m.mapping, key)
+	m.l2Keystones[key] = val
 }
 
 func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone)) {
 	m.mtx.Lock()
 	copies := []hemi.L2Keystone{}
-	for _, v := range m.mapping {
+	for _, v := range m.l2Keystones {
 		copies = append(copies, v)
 	}
+
+	// clear the map, it is up to the caller to re-push keystones if
+	// neccessary, for example if a failure occurs
+	clear(m.l2Keystones)
 	m.mtx.Unlock()
 
 	// mine the newest keystone first
