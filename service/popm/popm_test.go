@@ -1050,10 +1050,10 @@ func TestConnectToBFGAndPerformMineALot(t *testing.T) {
 	messagesExpected := map[protocol.Command]int{
 		EventConnected:                    1,
 		bfgapi.CmdL2KeystonesRequest:      1,
-		bfgapi.CmdBitcoinInfoRequest:      l2KeystonePriorityBufferMaxSize,
-		bfgapi.CmdBitcoinBalanceRequest:   l2KeystonePriorityBufferMaxSize,
-		bfgapi.CmdBitcoinUTXOsRequest:     l2KeystonePriorityBufferMaxSize,
-		bfgapi.CmdBitcoinBroadcastRequest: l2KeystonePriorityBufferMaxSize,
+		bfgapi.CmdBitcoinInfoRequest:      l2KeystonesMaxSize,
+		bfgapi.CmdBitcoinBalanceRequest:   l2KeystonesMaxSize,
+		bfgapi.CmdBitcoinUTXOsRequest:     l2KeystonesMaxSize,
+		bfgapi.CmdBitcoinBroadcastRequest: l2KeystonesMaxSize,
 	}
 
 	for {

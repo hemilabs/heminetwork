@@ -43,10 +43,13 @@ const (
 
 	promSubsystem = "popm_service" // Prometheus
 
-	l2KeystonePriorityBufferMaxSize = 10
+	l2KeystonesMaxSize = 10
 )
 
-var log = loggo.GetLogger("popm")
+var (
+	log                    = loggo.GetLogger("popm")
+	l2KeystoneRetryTimeout = 15 * time.Second
+)
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
@@ -478,7 +481,17 @@ func (m *Miner) mineKnownKeystones(ctx context.Context) {
 		log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
 		if err := m.mineKeystone(ctx, &ks); err != nil {
 			log.Errorf("Failed to mine keystone: %v", err)
+
+			// we failed to mine the keystone for some reason, re-add it
+			// and instruct pop miner to retry after a short period of time
 			m.AddL2Keystone(ks)
+
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(l2KeystoneRetryTimeout):
+				go m.mineKnownKeystones(ctx)
+			}
 		}
 	})
 }
@@ -490,8 +503,6 @@ func (m *Miner) mine(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-m.mineNowCh:
-			go m.mineKnownKeystones(ctx)
-		case <-time.After(15 * time.Second):
 			go m.mineKnownKeystones(ctx)
 		}
 	}
@@ -838,7 +849,6 @@ func (m *Miner) Run(pctx context.Context) error {
 	return err
 }
 
-// Push inserts an L2Keystone, dropping the oldest if full
 func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 	serialized := hemi.L2KeystoneAbbreviate(val).Serialize()
 	key := hex.EncodeToString(serialized[:])
@@ -851,7 +861,7 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 		return
 	}
 
-	if len(m.l2Keystones) < l2KeystonePriorityBufferMaxSize {
+	if len(m.l2Keystones) < l2KeystonesMaxSize {
 		m.l2Keystones[key] = val
 		return
 	}
@@ -867,7 +877,7 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 	}
 
 	// do not insert an L2Keystone that is older than all of the ones already
-	// queued
+	// added
 	if val.L2BlockNumber < smallestL2BlockNumber {
 		return
 	}
