@@ -213,29 +213,26 @@ func TestFullNetwork(t *testing.T) {
 		}
 	}()
 
+	l2KeystoneRequest := bssapi.L2KeystoneRequest{
+		L2Keystone: l2Keystone,
+	}
+
+	err = bssapi.Write(ctx, bws.conn, "someid", l2KeystoneRequest)
+	if err != nil {
+		t.Logf("error: %s", err)
+		return
+	}
+
+	// give time for the L2 Keystone to propogate to bitcoin tx mempool
+	select {
+	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
+		t.Logf(ctx.Err().Error())
+		return
+	}
+
 	go func() {
 		for {
-			l2Keystone.L2BlockNumber++
-			l2Keystone.L1BlockNumber++
-
-			l2KeystoneRequest := bssapi.L2KeystoneRequest{
-				L2Keystone: l2Keystone,
-			}
-
-			err = bssapi.Write(ctx, bws.conn, "someid", l2KeystoneRequest)
-			if err != nil {
-				t.Logf("error: %s", err)
-				return
-			}
-
-			// give time for the L2 Keystone to propogate to bitcoin tx mempool
-			select {
-			case <-time.After(10 * time.Second):
-			case <-ctx.Done():
-				t.Log(ctx.Err())
-				return
-			}
-
 			// generate a new btc block, this should include the l2 keystone
 			err = runBitcoinCommand(ctx,
 				t,
