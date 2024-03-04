@@ -275,7 +275,7 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 			return fmt.Errorf("failed to insert peer rows affected: %v", err)
 		}
 		if rows < 1 {
-			return fmt.Errorf("failed to insert peers rows: %v", rows)
+			return database.ZeroRowsError(fmt.Sprintf("failed to insert peers rows: %v", rows))
 		}
 	}
 
