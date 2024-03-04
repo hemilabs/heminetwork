@@ -43,7 +43,7 @@ services:
     deploy:
       restart_policy:
         condition: any
-        delay: 5s
+        delay: "${HEMI_LOCAL_BTC_RATE_SECONDS:-5}s"
     depends_on:
       - bitcoind
 
@@ -74,7 +74,7 @@ services:
       context: ./..
     environment:
       BFG_POSTGRES_URI: postgres://postgres@postgres:5432/bfg?sslmode=disable
-      BFG_BTC_START_HEIGHT: "100"
+      BFG_BTC_START_HEIGHT: "1"
       BFG_EXBTC_ADDRESS: electrumx:50001
       BFG_LOG_LEVEL: TRACE
       BFG_PUBLIC_ADDRESS: ":8383"
@@ -115,6 +115,7 @@ services:
       context: ./..
     environment:
       MOCKTIMISM_BSS_URL: http://bssd:8081/v1/ws
+      MOCKTIMISM_L2K_RATE_SECONDS: ${HEMI_LOCAL_L2K_RATE_SECONDS}
     depends_on:
       - bssd
 
