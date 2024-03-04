@@ -262,6 +262,7 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	const qPeersInsert = `
 		INSERT INTO peers (address, port, last_at)
 		VALUES ($1, $2, $3)
+		ON CONFLICT DO NOTHING;
 	`
 	for k := range peers {
 		result, err := tx.ExecContext(ctx, qPeersInsert, peers[k].Address,
@@ -286,12 +287,30 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	return nil
 }
 
-func (p *pgdb) PeerDelete(ctx context.Context, address string) error {
+func (p *pgdb) PeerDelete(ctx context.Context, host, port string) error {
 	log.Tracef("PeerDelete")
 	defer log.Tracef("PeerDelete exit")
 
-	return fmt.Errorf("not yet")
+	qDeletePeer := fmt.Sprintf(`DELETE FROM peers WHERE address=$1 AND port=$2`)
+	rows, err := p.db.QueryContext(ctx, qDeletePeer, host, port)
+	if err != nil {
+		return err
+	}
 
+	for rows.Next() {
+		var count int
+		if err := rows.Scan(&count); err != nil {
+			return err
+		}
+
+		return database.NotFoundError("address not found")
+	}
+
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (p *pgdb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
