@@ -42,118 +42,14 @@ const (
 	logLevel = "INFO"
 
 	promSubsystem = "popm_service" // Prometheus
+
+	l2KeystonePriorityBufferMaxSize = 10
 )
 
 var log = loggo.GetLogger("popm")
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
-}
-
-// L2KeystonePriorityBuffer holds up to "size" L2Keystones. it allows a caller
-// to push to it and it will keep the most recent "size" keystones, overriding
-// the oldest if full.  we define "oldest" as "the smallest l2 block number"
-type L2KeystonePriorityBuffer struct {
-	mtx     sync.Mutex
-	mapping map[string]*L2KeystonePriorityBufferElement
-	size    int
-}
-
-// L2KeystonePriorityBufferElement holds an L2Keystone and whether it has been
-// "processed" or not
-type L2KeystonePriorityBufferElement struct {
-	l2Keystone         hemi.L2Keystone
-	requiresProcessing bool
-}
-
-// NewL2KeystonePriorityBuffer creates a L2KeystonePriorityBuffer with size n
-func NewL2KeystonePriorityBuffer(n int) *L2KeystonePriorityBuffer {
-	return &L2KeystonePriorityBuffer{
-		mapping: make(map[string]*L2KeystonePriorityBufferElement),
-		size:    n,
-	}
-}
-
-// Push inserts an L2Keystone, dropping the oldest if full
-func (r *L2KeystonePriorityBuffer) Push(val hemi.L2Keystone) {
-	r.mtx.Lock()
-	defer r.mtx.Unlock()
-
-	item := L2KeystonePriorityBufferElement{
-		l2Keystone:         val,
-		requiresProcessing: true,
-	}
-
-	serialized := hemi.L2KeystoneAbbreviate(val).Serialize()
-	key := hex.EncodeToString(serialized[:])
-
-	// keystone already exists, no-op
-	if _, ok := r.mapping[key]; ok {
-		return
-	}
-
-	if len(r.mapping) < r.size {
-		r.mapping[key] = &item
-		return
-	}
-
-	var smallestL2BlockNumber uint32
-	var smallestKey string
-
-	for k, v := range r.mapping {
-		if smallestL2BlockNumber == 0 || v.l2Keystone.L2BlockNumber < smallestL2BlockNumber {
-			smallestL2BlockNumber = v.l2Keystone.L2BlockNumber
-			smallestKey = k
-		}
-	}
-
-	// do not insert an L2Keystone that is older than all of the ones already
-	// queued
-	if item.l2Keystone.L2BlockNumber < smallestL2BlockNumber {
-		return
-	}
-
-	delete(r.mapping, smallestKey)
-
-	r.mapping[key] = &item
-}
-
-// ForEach is a thread-safe function that calls a callback function to "process"
-// each L2Keystone.  The callback function is called with a copy of the
-// L2Keystone to process.  if the callback returns an error, no-op, otherwise
-// mark the L2Keystone as processed
-func (r *L2KeystonePriorityBuffer) ForEach(cb func(ks hemi.L2Keystone) error) {
-	r.mtx.Lock()
-	copies := []hemi.L2Keystone{}
-	for _, v := range r.mapping {
-		if v.requiresProcessing {
-			copies = append(copies, v.l2Keystone)
-
-			// temporarily set this to false, so another goroutine doesn't
-			// try to process
-			v.requiresProcessing = false
-		}
-	}
-	r.mtx.Unlock()
-
-	// mine the newest keystone first
-	slices.SortFunc(copies, func(a, b hemi.L2Keystone) int {
-		return int(b.L2BlockNumber) - int(a.L2BlockNumber)
-	})
-
-	for _, e := range copies {
-		mined := hemi.L2KeystoneAbbreviate(e).Serialize()
-		key := hex.EncodeToString(mined[:])
-
-		err := cb(e)
-		r.mtx.Lock()
-		// check to see if still in map before marking
-		if _, ok := r.mapping[key]; ok {
-			// don't process again if callback succeeded
-			r.mapping[key].requiresProcessing = err != nil
-		}
-		r.mtx.Unlock()
-	}
 }
 
 type Config struct {
@@ -200,7 +96,6 @@ type Miner struct {
 	btcAddress     *btcutil.AddressPubKeyHash
 
 	lastKeystone *hemi.L2Keystone
-	keystoneBuf  *L2KeystonePriorityBuffer
 
 	// Prometheus
 	isRunning bool
@@ -209,6 +104,8 @@ type Miner struct {
 	bfgCmdCh chan bfgCmd // commands to send to bfg
 
 	mineNowCh chan struct{}
+
+	mapping map[string]hemi.L2Keystone
 }
 
 func NewMiner(cfg *Config) (*Miner, error) {
@@ -218,11 +115,11 @@ func NewMiner(cfg *Config) (*Miner, error) {
 
 	m := &Miner{
 		cfg:            cfg,
-		keystoneBuf:    NewL2KeystonePriorityBuffer(10),
 		bfgCmdCh:       make(chan bfgCmd, 10),
 		holdoffTimeout: 5 * time.Second,
 		requestTimeout: 5 * time.Second,
 		mineNowCh:      make(chan struct{}),
+		mapping:        make(map[string]hemi.L2Keystone),
 	}
 
 	switch strings.ToLower(cfg.BTCChainName) {
@@ -577,13 +474,14 @@ func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.Bi
 }
 
 func (m *Miner) mineKnownKeystones(ctx context.Context) {
-	m.keystoneBuf.ForEach(func(ks hemi.L2Keystone) error {
+	m.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
 		if err := m.mineKeystone(ctx, &ks); err != nil {
 			log.Errorf("Failed to mine keystone: %v", err)
-			return err
+			return
 		}
-		return nil
+
+		m.PopL2Keystone(ks)
 	})
 }
 
@@ -602,7 +500,7 @@ func (m *Miner) mine(ctx context.Context) {
 }
 
 func (m *Miner) queueKeystoneForMining(keystone *hemi.L2Keystone) {
-	m.keystoneBuf.Push(*keystone)
+	m.PushL2Keystone(*keystone)
 	select {
 	case m.mineNowCh <- struct{}{}:
 	default:
@@ -940,4 +838,70 @@ func (m *Miner) Run(pctx context.Context) error {
 	log.Infof("pop miner service clean shutdown")
 
 	return err
+}
+
+// Push inserts an L2Keystone, dropping the oldest if full
+func (m *Miner) PushL2Keystone(val hemi.L2Keystone) {
+	serialized := hemi.L2KeystoneAbbreviate(val).Serialize()
+	key := hex.EncodeToString(serialized[:])
+
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	// keystone already exists, no-op
+	if _, ok := m.mapping[key]; ok {
+		return
+	}
+
+	var smallestL2BlockNumber uint32
+	var smallestKey string
+
+	for k, v := range m.mapping {
+		if smallestL2BlockNumber == 0 || v.L2BlockNumber < smallestL2BlockNumber {
+			smallestL2BlockNumber = v.L2BlockNumber
+			smallestKey = k
+		}
+	}
+
+	// do not insert an L2Keystone that is older than all of the ones already
+	// queued
+	if val.L2BlockNumber < smallestL2BlockNumber {
+		return
+	}
+
+	if len(m.mapping) < l2KeystonePriorityBufferMaxSize {
+		m.mapping[key] = val
+		return
+	}
+
+	delete(m.mapping, smallestKey)
+
+	m.mapping[key] = val
+}
+
+func (m *Miner) PopL2Keystone(ks hemi.L2Keystone) {
+	serialized := hemi.L2KeystoneAbbreviate(ks).Serialize()
+	key := hex.EncodeToString(serialized[:])
+
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	delete(m.mapping, key)
+}
+
+func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone)) {
+	m.mtx.Lock()
+	copies := []hemi.L2Keystone{}
+	for _, v := range m.mapping {
+		copies = append(copies, v)
+	}
+	m.mtx.Unlock()
+
+	// mine the newest keystone first
+	slices.SortFunc(copies, func(a, b hemi.L2Keystone) int {
+		return int(b.L2BlockNumber) - int(a.L2BlockNumber)
+	})
+
+	for _, e := range copies {
+		cb(e)
+	}
 }
