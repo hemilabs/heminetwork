@@ -17,6 +17,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -137,14 +138,7 @@ type Server struct {
 	port        string
 	seeds       []string
 
-	peers map[string]*peer
-	//peersConnectedCount int
-	//peersReachedZero    bool
-
-	// XXX garbage, remove
-	//peer    *peer // make plural
-	//expire  time.Time
-	//pending map[string]time.Time
+	peers map[string]*peer // active but not necessarily connected
 
 	db tbcd.Database
 
@@ -159,8 +153,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	s := &Server{
 		cfg:   cfg,
 		peers: make(map[string]*peer, defaultPeersWanted),
-		//peersReachedZero: true, // Kick of getHeaders
-		//pending: make(map[string]time.Time, 16), // XXX this sucks, kill
 	}
 	// We could use a PGURI verification here.
 	// single peer for now
@@ -179,12 +171,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
 	}
-
-	//var err error
-	//s.peer, err = NewPeer(s.wireNet, "140.238.169.133:"+port)
-	//if err != nil {
-	//	return nil, fmt.Errorf("new peer: %v", err)
-	//}
 
 	return s, nil
 }
@@ -243,13 +229,14 @@ func (s *Server) peersWrite(ctx context.Context, msg wire.Message, count int) er
 	defer log.Tracef("peersWrite %v", count)
 
 	peers := make([]*peer, 0, count)
-	i := 0
-
 	s.mtx.Lock()
 	for _, v := range s.peers {
+		if v.conn == nil {
+			// Not connected yet
+			continue
+		}
 		peers = append(peers, v)
-		i++
-		if i >= len(peers) {
+		if len(peers) >= count {
 			break
 		}
 	}
@@ -266,7 +253,7 @@ func (s *Server) peersWrite(ctx context.Context, msg wire.Message, count int) er
 		}
 	}
 
-	return fmt.Errorf("not yet")
+	return nil
 }
 
 func (s *Server) peerAdd(p *peer) {
@@ -297,7 +284,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 	peersWanted := defaultPeersWanted
 	peerC := make(chan string, peersWanted)
 
-	log.Infof("peerManager seed %v", peersWanted)
+	log.Infof("Peer manager connecting to %v peers", peersWanted)
 	seeds, err := s.seed(ctx, peersWanted)
 	if err != nil {
 		return fmt.Errorf("seed: %w", err)
@@ -345,7 +332,8 @@ func (s *Server) peerManager(ctx context.Context) error {
 		}
 
 		// XXX unfortunately we need a timer here to halt looping when
-		// there is no internet connection.
+		// there is no internet connection but with a functioning DNS
+		// server.
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -391,7 +379,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 				log.Errorf("peer delete (%v): %v", pp, err)
 			}
 		}(p)
-		log.Errorf("connect: %v", err)
+		log.Debugf("connect: %v", err)
 		return
 	}
 	defer func() {
@@ -430,15 +418,6 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		return
 	}
 
-	//s.peersConnectedAdd(1)
-	//defer s.peersConnectedAdd(-1)
-
-	// restart IBD if we have reached 0 connected peers
-	//if s.needIBD() {
-	//	log.Infof("======= Resuming get blocks ======")
-
-	//}
-
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -453,8 +432,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// skip unknown
 			continue
 		} else if err != nil {
-			// XXX this is why we need a pool
-			log.Errorf("read: %v", err)
+			log.Errorf("read (%v): %v", p, err)
 			return
 		}
 
@@ -486,7 +464,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		case *wire.MsgPing:
 			go s.handlePing(ctx, p, m)
 		default:
-			log.Errorf("unhandled message type %v: %T\n", p, msg)
+			log.Tracef("unhandled message type %v: %T\n", p, msg)
 		}
 	}
 }
@@ -525,10 +503,9 @@ func (s *Server) handleAddr(ctx context.Context, msg *wire.MsgAddr) {
 		})
 	}
 	err := s.db.PeersInsert(ctx, peers)
-	if err != nil {
-		// XXX don't log insert 0, its a dup
+	// Don't log insert 0, its a dup.
+	if err != nil && !database.ErrZeroRows.Is(err) {
 		log.Errorf("%v", err)
-		return
 	}
 }
 
@@ -544,10 +521,9 @@ func (s *Server) handleAddrV2(ctx context.Context, msg *wire.MsgAddrV2) {
 		})
 	}
 	err := s.db.PeersInsert(ctx, peers)
-	if err != nil {
-		// XXX don't log insert 0, its a dup
+	// Don't log insert 0, its a dup.
+	if err != nil && !database.ErrZeroRows.Is(err) {
 		log.Errorf("%v", err)
-		return
 	}
 }
 
@@ -662,7 +638,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		err := s.db.BlockHeadersInsert(ctx, headers)
 		if err != nil {
 			// This ends the race between peers during IBD.
-			log.Errorf("block headers insert: %v", err)
+			if !database.ErrDuplicate.Is(err) {
+				log.Errorf("block headers insert: %v", err)
+			}
 			return
 		}
 
