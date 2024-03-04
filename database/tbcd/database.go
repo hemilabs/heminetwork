@@ -27,8 +27,8 @@ type Database interface {
 	BlockInsert(ctx context.Context, b *Block) (int64, error)
 
 	// Peer manager
-	PeersInsert(ctx context.Context, peers []Peer) error  // insert or update
-	PeerDelete(ctx context.Context, address string) error // remove peer
+	PeersInsert(ctx context.Context, peers []Peer) error        // insert or update
+	PeerDelete(ctx context.Context, address, port string) error // remove peer
 	PeersRandom(ctx context.Context, count int) ([]Peer, error)
 }
 

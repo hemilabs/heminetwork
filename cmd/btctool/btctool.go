@@ -93,7 +93,6 @@ func (p *peer) close() error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	if p.conn != nil {
-		defer func() { p.conn = nil }()
 		return p.conn.Close()
 	}
 	return fmt.Errorf("already closed")
