@@ -52,7 +52,7 @@ func NewPeer(network wire.BitcoinNet, address string) (*peer, error) {
 	}, nil
 }
 
-func (p peer) String() string {
+func (p *peer) String() string {
 	return p.address
 }
 

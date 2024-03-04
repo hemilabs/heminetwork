@@ -37,14 +37,12 @@ const (
 	defaultPeersWanted = 16 // XXX go with 64
 )
 
-var (
-	testnetSeeds = []string{
-		"testnet-seed.bitcoin.jonasschnelli.ch",
-		"seed.tbtc.petertodd.org",
-		"seed.testnet.bitcoin.sprovoost.nl",
-		"testnet-seed.bluematt.me",
-	}
-)
+var testnetSeeds = []string{
+	"testnet-seed.bitcoin.jonasschnelli.ch",
+	"seed.tbtc.petertodd.org",
+	"seed.testnet.bitcoin.sprovoost.nl",
+	"testnet-seed.bluematt.me",
+}
 
 var log = loggo.GetLogger("tbc")
 
@@ -219,7 +217,6 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 
 	// return fake peers but don't save them to the database
 	return peers, nil
-
 }
 
 // peersWrite randomly selects count peers and writes the provided message to
@@ -448,7 +445,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		case *wire.MsgAddrV2:
 			go s.handleAddrV2(ctx, m)
 
-		//case *wire.MsgBlock:
+		// case *wire.MsgBlock:
 		//	go s.handleBlock(ctx, m)
 
 		case *wire.MsgFeeFilter:
@@ -581,6 +578,11 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	defer log.Tracef("handleHeaders exit")
 
 	log.Debugf("handleHeaders (%v): %v", p, len(msg.Headers))
+
+	// XXX debug
+	if len(msg.Headers) > 0 && len(msg.Headers) < 2000 {
+		log.Infof("handleHeaders (%v): %v", p, len(msg.Headers))
+	}
 
 	if len(msg.Headers) == 0 {
 		//// XXX DEBUG SHIT
@@ -821,7 +823,7 @@ func (s *Server) p2p(ctx context.Context) {
 	//	}
 	//}
 
-	//log.Infof("ready to go")
+	// log.Infof("ready to go")
 
 	//for {
 	//	select {
@@ -869,8 +871,8 @@ func (s *Server) p2p(ctx context.Context) {
 	//	return
 	//}
 
-	//verbose := false
-	//for {
+	// verbose := false
+	// for {
 	//	// see if we were interrupted
 	//	select {
 	//	case <-ctx.Done():
@@ -981,8 +983,8 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	}()
 
-	//s.wg.Add(1)
-	//go s.p2p(ctx)
+	// s.wg.Add(1)
+	// go s.p2p(ctx)
 
 	select {
 	case <-ctx.Done():
