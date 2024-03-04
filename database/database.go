@@ -57,10 +57,22 @@ func (ve ValidationError) Is(target error) bool {
 	return ok
 }
 
+type ZeroRowsError string
+
+func (ze ZeroRowsError) Error() string {
+	return string(ze)
+}
+
+func (ze ZeroRowsError) Is(target error) bool {
+	_, ok := target.(ZeroRowsError)
+	return ok
+}
+
 var (
 	ErrDuplicate  = DuplicateError("duplicate")
 	ErrNotFound   = NotFoundError("not found")
 	ErrValidation = ValidationError("validation")
+	ErrZeroRows   = ZeroRowsError("zero rows affected")
 )
 
 // ByteArray is a type that corresponds to BYTEA in a database. It supports
