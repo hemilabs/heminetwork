@@ -729,7 +729,7 @@ func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
 
-	// Whatever happens,, delete from cashe and potentially try again
+	// Whatever happens,, delete from cache and potentially try again
 	s.mtx.Lock()
 	delete(s.blocks, bhs) // remove inserted block
 	s.mtx.Unlock()
@@ -782,6 +782,8 @@ func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, erro
 	}
 
 	// No entries means we are at genesis
+	// XXX this can hit several times on tart of day. Figure out if we want
+	// to insert geneis earlier to prevent this error.
 	if len(bhs) == 0 {
 		gbh, err := header2Bytes(&s.chainParams.GenesisBlock.Header)
 		if err != nil {
