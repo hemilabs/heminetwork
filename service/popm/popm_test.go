@@ -584,12 +584,13 @@ func TestProcessReceivedOnlyOnceWithError(t *testing.T) {
 	processedKeystonesFirstTime := 0
 	for _, c := range miner.l2KeystonesForProcessing() {
 		processedKeystonesFirstTime++
-		miner.mtx.Lock()
 		serialized := hemi.L2KeystoneAbbreviate(c).Serialize()
 		key := hex.EncodeToString(serialized[:])
-		v := miner.l2Keystones[key]
-		v.requiresProcessing = true
-		miner.l2Keystones[key] = v
+		miner.mtx.Lock()
+		if v, ok := miner.l2Keystones[key]; ok {
+			v.requiresProcessing = true
+			miner.l2Keystones[key] = v
+		}
 		miner.mtx.Unlock()
 	}
 	if processedKeystonesFirstTime != 3 {
