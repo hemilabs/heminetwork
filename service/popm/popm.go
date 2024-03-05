@@ -71,6 +71,8 @@ type Config struct {
 	LogLevel string
 
 	PrometheusListenAddress string
+
+	RetryMineThreshold uint
 }
 
 func NewDefaultConfig() *Config {
@@ -561,6 +563,12 @@ func (m *Miner) processReceivedKeystones(ctx context.Context, l2Keystones []hemi
 			m.lastKeystone = &tmp
 
 			m.queueKeystoneForMining(&tmp)
+		} else if (m.lastKeystone.L2BlockNumber - kh.L2BlockNumber) <= uint32(m.cfg.RetryMineThreshold)*hemi.KeystoneHeaderPeriod {
+			log.Tracef("received keystone older than latest, but within threshold, will remine l2 block number = %d", kh.L2BlockNumber)
+			tmp := kh
+			m.queueKeystoneForMining(&tmp)
+		} else {
+			log.Warningf("refusing to mine keystone with height %d, highest received: %d", kh.L2BlockNumber, m.lastKeystone.L2BlockNumber)
 		}
 	}
 }

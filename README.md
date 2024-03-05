@@ -124,14 +124,17 @@ Prerequisites: `docker`
 To run the full network locally, you can run the following.  Note that this will create
 L2Keytones and BTC Blocks at a high rate.  
 
-You can modify these via the env variables:
-* `HEMI_LOCAL_BTC_RATE_SECONDS`: generate new BTC Block at this rate of seconds
-* `HEMI_LOCAL_L2K_RATE_SECONDS`: generate new L2 Keystone at this rate of seconds
-
 note: the `--build` flag is optional if you want to rebuild your code
 
 ```
 docker-compose -f ./e2e/docker-compose.yml up --build
+```
+
+**IMPORTANT:** make sure you run the following to tear down, this will remove
+data and give you a fresh start
+
+```
+docker-compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 ```
 
 
