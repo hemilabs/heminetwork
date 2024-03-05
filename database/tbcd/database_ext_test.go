@@ -191,7 +191,7 @@ func TestDatabasePostgres(t *testing.T) {
 	}
 
 	// go concurrent
-	count = 100
+	count = 1000
 	peers = make([]tbcd.Peer, 0, count)
 	for i := 0; i < count; i++ {
 		peers = append(peers, tbcd.Peer{
@@ -201,7 +201,7 @@ func TestDatabasePostgres(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	fails := new(atomic.Uint32)
-	count = count - 10
+	count = 64
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		go func(ii int) {
