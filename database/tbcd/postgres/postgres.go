@@ -143,7 +143,7 @@ func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.Block
 	defer func() {
 		err := tx.Rollback()
 		if err != nil && err != sql.ErrTxDone {
-			log.Errorf("BlockHeadersInsert could not rollback db tx: %v",
+			log.Errorf("block headers missing could not rollback db tx: %v",
 				err)
 			return
 		}
@@ -156,7 +156,7 @@ func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.Block
 		LIMIT $1;
 	`)
 	if err != nil {
-		return nil, fmt.Errorf("could not prepare block headers insert: %v", err)
+		return nil, fmt.Errorf("could not prepare block headers missing: %v", err)
 	}
 
 	bhs := make([]tbcd.BlockHeader, 0, count)
@@ -213,7 +213,7 @@ func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) e
 	defer func() {
 		err := tx.Rollback()
 		if err != nil && err != sql.ErrTxDone {
-			log.Errorf("BlockHeadersInsert could not rollback db tx: %v",
+			log.Errorf("block headers insert could not rollback db tx: %v",
 				err)
 			return
 		}
@@ -270,7 +270,7 @@ func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	defer func() {
 		err := tx.Rollback()
 		if err != nil && err != sql.ErrTxDone {
-			log.Errorf("BlockInsert could not rollback db tx: %v",
+			log.Errorf("block insert could not rollback db tx: %v",
 				err)
 			return
 		}
