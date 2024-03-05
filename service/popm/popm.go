@@ -151,6 +151,10 @@ func (m *Miner) bitcoinBalance(ctx context.Context, scriptHash []byte) (uint64, 
 		return 0, 0, fmt.Errorf("not a BitcoinBalanceResponse %T", res)
 	}
 
+	if bResp.Error != nil {
+		return 0, 0, bResp.Error
+	}
+
 	return bResp.Confirmed, bResp.Unconfirmed, nil
 }
 
@@ -166,6 +170,10 @@ func (m *Miner) bitcoinBroadcast(ctx context.Context, tx []byte) ([]byte, error)
 	bbResp, ok := res.(*bfgapi.BitcoinBroadcastResponse)
 	if !ok {
 		return nil, fmt.Errorf("not a bitcoin broadcast response %T", res)
+	}
+
+	if bbResp.Error != nil {
+		return nil, bbResp.Error
 	}
 
 	return bbResp.TXID, nil
@@ -184,6 +192,10 @@ func (m *Miner) bitcoinHeight(ctx context.Context) (uint64, error) {
 		return 0, fmt.Errorf("not a BitcoinIfnoResponse")
 	}
 
+	if biResp.Error != nil {
+		return 0, biResp.Error
+	}
+
 	return biResp.Height, nil
 }
 
@@ -200,6 +212,10 @@ func (m *Miner) bitcoinUTXOs(ctx context.Context, scriptHash []byte) ([]*bfgapi.
 	buResp, ok := res.(*bfgapi.BitcoinUTXOsResponse)
 	if !ok {
 		return nil, fmt.Errorf("not a buResp %T", res)
+	}
+
+	if buResp.Error != nil {
+		return nil, buResp.Error
 	}
 
 	return buResp.UTXOs, nil
@@ -372,6 +388,10 @@ func (m *Miner) L2Keystones(ctx context.Context, count uint64) (*bfgapi.L2Keysto
 		return nil, fmt.Errorf("not a L2KeystonesResponse: %T", res)
 	}
 
+	if kr.Error != nil {
+		return nil, kr.Error
+	}
+
 	return kr, nil
 }
 
@@ -395,6 +415,10 @@ func (m *Miner) BitcoinBalance(ctx context.Context, scriptHash string) (*bfgapi.
 		return nil, fmt.Errorf("not a BitcoinBalanceResponse: %T", res)
 	}
 
+	if br.Error != nil {
+		return nil, br.Error
+	}
+
 	return br, nil
 }
 
@@ -407,6 +431,10 @@ func (m *Miner) BitcoinInfo(ctx context.Context) (*bfgapi.BitcoinInfoResponse, e
 	ir, ok := res.(*bfgapi.BitcoinInfoResponse)
 	if !ok {
 		return nil, fmt.Errorf("not a BitcoinInfoResponse: %T", res)
+	}
+
+	if ir.Error != nil {
+		return nil, ir.Error
 	}
 
 	return ir, nil
@@ -430,6 +458,10 @@ func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.Bi
 	ir, ok := res.(*bfgapi.BitcoinUTXOsResponse)
 	if !ok {
 		return nil, fmt.Errorf("not a BitcoinUTXOsResponse: %T", res)
+	}
+
+	if ir.Error != nil {
+		return nil, ir.Error
 	}
 
 	return ir, nil
@@ -540,6 +572,10 @@ func (m *Miner) checkForKeystones(ctx context.Context) error {
 	ghkrResp, ok := res.(*bfgapi.L2KeystonesResponse)
 	if !ok {
 		return fmt.Errorf("not an L2KeystonesResponse")
+	}
+
+	if ghkrResp.Error != nil {
+		return ghkrResp.Error
 	}
 
 	log.Tracef("Got response with %v keystones", len(ghkrResp.L2Keystones))
