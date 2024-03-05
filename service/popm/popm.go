@@ -482,8 +482,6 @@ func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.Bi
 }
 
 func (m *Miner) mineKnownKeystones(ctx context.Context) {
-	keystonesFailed := false
-
 	copies := m.l2KeystonesForProcessing()
 
 	for _, e := range copies {
@@ -495,7 +493,6 @@ func (m *Miner) mineKnownKeystones(ctx context.Context) {
 		err := m.mineKeystone(ctx, &e)
 		if err != nil {
 			log.Errorf("Failed to mine keystone: %v", err)
-			keystonesFailed = true
 		}
 
 		m.mtx.Lock()
@@ -510,19 +507,6 @@ func (m *Miner) mineKnownKeystones(ctx context.Context) {
 
 		m.mtx.Unlock()
 	}
-
-	// if no keystones failed, we're done
-	if !keystonesFailed {
-		return
-	}
-
-	// if a keystone failed, ensure that we retry
-	select {
-	case <-ctx.Done():
-		return
-	case <-time.After(l2KeystoneRetryTimeout):
-		go m.mineKnownKeystones(ctx)
-	}
 }
 
 func (m *Miner) mine(ctx context.Context) {
@@ -532,6 +516,8 @@ func (m *Miner) mine(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-m.mineNowCh:
+			go m.mineKnownKeystones(ctx)
+		case <-time.After(l2KeystoneRetryTimeout):
 			go m.mineKnownKeystones(ctx)
 		}
 	}
@@ -924,9 +910,10 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 // l2KeystonesForProcessing creates copies of the l2 keystones, set them to
 // "processing", then returns the copies with the newest first
 func (m *Miner) l2KeystonesForProcessing() []hemi.L2Keystone {
+	copies := make([]hemi.L2Keystone, 0)
+
 	m.mtx.Lock()
 
-	copies := []hemi.L2Keystone{}
 	for i, v := range m.l2Keystones {
 
 		// if we're currently processing, or we've already processed the keystone
