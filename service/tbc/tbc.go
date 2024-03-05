@@ -459,26 +459,25 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	// multiple answers come in the insert of the headers fails or
 	// succeeds. If it fails no more headers will be requested from that
 	// peer.
-	if false {
-		bhs, err := s.blockHeadersBest(ctx)
-		if err != nil {
-			// This should not happen
-			log.Errorf("block headers best: %v", err)
-			return
-		}
-		if len(bhs) != 1 {
-			// XXX fix multiple tips
-			panic(len(bhs))
-		}
-		err = s.getHeaders(ctx, p, bhs[0].Header)
-		if err != nil {
-			// This should not happen
-			log.Errorf("get headers: %v", err)
-			return
-		}
-
-		// XXX kickstart block download, should happen in getHeaders
+	bhs, err := s.blockHeadersBest(ctx)
+	if err != nil {
+		// This should not happen
+		log.Errorf("block headers best: %v", err)
+		return
 	}
+	if len(bhs) != 1 {
+		// XXX fix multiple tips
+		panic(len(bhs))
+	}
+	err = s.getHeaders(ctx, p, bhs[0].Header)
+	if err != nil {
+		// This should not happen
+		log.Errorf("get headers: %v", err)
+		return
+	}
+
+	// XXX kickstart block download, should happen in getHeaders
+
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
