@@ -499,10 +499,9 @@ func TestProcessReceivedInAscOrder(t *testing.T) {
 
 	receivedKeystones := []hemi.L2Keystone{}
 
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
-		receivedKeystones = append(receivedKeystones, ks)
-		return nil
-	})
+	for _, c := range miner.l2KeystonesForProcessing() {
+		receivedKeystones = append(receivedKeystones, c)
+	}
 
 	slices.Reverse(receivedKeystones)
 	diff := deep.Equal(firstBatchOfL2Keystones, receivedKeystones)
@@ -539,19 +538,17 @@ func TestProcessReceivedOnlyOnce(t *testing.T) {
 	miner.processReceivedKeystones(context.Background(), keystones)
 
 	processedKeystonesFirstTime := 0
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
+	for range miner.l2KeystonesForProcessing() {
 		processedKeystonesFirstTime++
-		return nil
-	})
+	}
 	if processedKeystonesFirstTime != 3 {
 		t.Fatalf("should have processed 3 keystones, processed %d", processedKeystonesFirstTime)
 	}
 
 	processedKeystonesSecondTime := 0
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
+	for range miner.l2KeystonesForProcessing() {
 		processedKeystonesSecondTime++
-		return nil
-	})
+	}
 
 	if processedKeystonesSecondTime != 0 {
 		t.Fatal("should have only processed the keystones once")
@@ -585,30 +582,33 @@ func TestProcessReceivedOnlyOnceWithError(t *testing.T) {
 	miner.processReceivedKeystones(context.Background(), keystones)
 
 	processedKeystonesFirstTime := 0
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
+	for _, c := range miner.l2KeystonesForProcessing() {
 		processedKeystonesFirstTime++
-		miner.AddL2Keystone(ks)
-		return errors.New("something wrong")
-	})
+		miner.mtx.Lock()
+		serialized := hemi.L2KeystoneAbbreviate(c).Serialize()
+		key := hex.EncodeToString(serialized[:])
+		v := miner.l2Keystones[key]
+		v.requiresProcessing = true
+		miner.l2Keystones[key] = v
+		miner.mtx.Unlock()
+	}
 	if processedKeystonesFirstTime != 3 {
 		t.Fatalf("should have processed 3 keystones, processed %d", processedKeystonesFirstTime)
 	}
 
 	processedKeystonesSecondTime := 0
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
+	for range miner.l2KeystonesForProcessing() {
 		processedKeystonesSecondTime++
-		return nil
-	})
+	}
 
 	if processedKeystonesSecondTime != 3 {
 		t.Fatalf("should have processed 3 keystones, processed %d", processedKeystonesSecondTime)
 	}
 
 	processedKeystonesThirdTime := 0
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
+	for range miner.l2KeystonesForProcessing() {
 		processedKeystonesThirdTime++
-		return nil
-	})
+	}
 
 	if processedKeystonesThirdTime != 0 {
 		t.Fatal("keystones should have already been processed")
@@ -644,10 +644,9 @@ func TestProcessReceivedNoDuplicates(t *testing.T) {
 
 	miner.processReceivedKeystones(context.Background(), keystones)
 
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
-		receivedKeystones = append(receivedKeystones, ks)
-		return nil
-	})
+	for _, c := range miner.l2KeystonesForProcessing() {
+		receivedKeystones = append(receivedKeystones, c)
+	}
 
 	slices.Reverse(keystones)
 
@@ -730,10 +729,9 @@ func TestProcessReceivedInAscOrderOverride(t *testing.T) {
 
 	receivedKeystones := []hemi.L2Keystone{}
 
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
-		receivedKeystones = append(receivedKeystones, ks)
-		return nil
-	})
+	for _, c := range miner.l2KeystonesForProcessing() {
+		receivedKeystones = append(receivedKeystones, c)
+	}
 
 	slices.Reverse(keystones)
 
@@ -816,10 +814,9 @@ func TestProcessReceivedInAscOrderNoInsertIfTooOld(t *testing.T) {
 
 	receivedKeystones := []hemi.L2Keystone{}
 
-	miner.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
-		receivedKeystones = append(receivedKeystones, ks)
-		return nil
-	})
+	for _, c := range miner.l2KeystonesForProcessing() {
+		receivedKeystones = append(receivedKeystones, c)
+	}
 
 	slices.Reverse(keystones)
 

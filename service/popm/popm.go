@@ -127,7 +127,7 @@ func NewMiner(cfg *Config) (*Miner, error) {
 		holdoffTimeout: 5 * time.Second,
 		requestTimeout: 5 * time.Second,
 		mineNowCh:      make(chan struct{}, 1),
-		l2Keystones:    make(map[string]L2KeystoneProcessingContainer),
+		l2Keystones:    make(map[string]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
 	}
 
 	switch strings.ToLower(cfg.BTCChainName) {
@@ -484,16 +484,32 @@ func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.Bi
 func (m *Miner) mineKnownKeystones(ctx context.Context) {
 	keystonesFailed := false
 
-	m.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
-		log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
-		if err := m.mineKeystone(ctx, &ks); err != nil {
+	copies := m.l2KeystonesForProcessing()
+
+	for _, e := range copies {
+		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
+		key := hex.EncodeToString(serialized[:])
+
+		log.Infof("Received keystone for mining with height %v...", e.L2BlockNumber)
+
+		err := m.mineKeystone(ctx, &e)
+		if err != nil {
 			log.Errorf("Failed to mine keystone: %v", err)
 			keystonesFailed = true
-			return err
 		}
 
-		return nil
-	})
+		m.mtx.Lock()
+
+		if v, ok := m.l2Keystones[key]; ok {
+			// if there is an error, mark keystone as "requires processing" so
+			// potentially gets retried, otherwise set this to false to
+			// nothing tries to process it
+			v.requiresProcessing = err != nil
+			m.l2Keystones[key] = v
+		}
+
+		m.mtx.Unlock()
+	}
 
 	// if no keystones failed, we're done
 	if !keystonesFailed {
@@ -905,8 +921,11 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 	m.l2Keystones[key] = toInsert
 }
 
-func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone) error) {
+// l2KeystonesForProcessing creates copies of the l2 keystones, set them to
+// "processing", then returns the copies
+func (m *Miner) l2KeystonesForProcessing() []hemi.L2Keystone {
 	m.mtx.Lock()
+
 	copies := []hemi.L2Keystone{}
 	for i, v := range m.l2Keystones {
 
@@ -924,27 +943,9 @@ func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone) error) {
 	}
 	m.mtx.Unlock()
 
-	// mine the newest keystone first
 	slices.SortFunc(copies, func(a, b hemi.L2Keystone) int {
 		return int(b.L2BlockNumber) - int(a.L2BlockNumber)
 	})
 
-	for _, e := range copies {
-		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
-		key := hex.EncodeToString(serialized[:])
-
-		err := cb(e)
-
-		m.mtx.Lock()
-
-		if v, ok := m.l2Keystones[key]; ok {
-			// if there is an error, mark keystone as "requires processing" so
-			// potentially gets retried, otherwise set this to false to
-			// nothing tries to process it
-			v.requiresProcessing = err != nil
-			m.l2Keystones[key] = v
-		}
-
-		m.mtx.Unlock()
-	}
+	return copies
 }
