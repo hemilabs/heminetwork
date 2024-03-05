@@ -14,9 +14,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/postgres"
 )
@@ -157,4 +161,61 @@ func TestDatabasePostgres(t *testing.T) {
 		t.Fatalf("Failed to get Version: %v", err)
 	}
 	t.Logf("db version: %v", version)
+
+	// Insert into peers
+	err = db.PeersInsert(ctx, []tbcd.Peer{{Host: "xx", Port: "yy"}})
+	if err != nil {
+		t.Fatalf("Failed to insert one record: %v", err)
+	}
+	err = db.PeersInsert(ctx, []tbcd.Peer{{Host: "xx", Port: "yy"}})
+	if !database.ErrZeroRows.Is(err) {
+		t.Fatalf("Failed to upsert zero rows")
+	}
+
+	// Insert 100 peers
+	count := 100
+	peers := make([]tbcd.Peer, 0, count)
+	for i := 0; i < count; i++ {
+		peers = append(peers, tbcd.Peer{
+			Host: strconv.Itoa(i),
+			Port: strconv.Itoa(i),
+		})
+	}
+	err = db.PeersInsert(ctx, peers)
+	if err != nil {
+		t.Fatalf("Failed to insert %v records: %v", count, err)
+	}
+	err = db.PeersInsert(ctx, peers)
+	if !database.ErrZeroRows.Is(err) {
+		t.Fatalf("Failed to upsert %v rows", count)
+	}
+
+	// go concurrent
+	count = 100
+	peers = make([]tbcd.Peer, 0, count)
+	for i := 0; i < count; i++ {
+		peers = append(peers, tbcd.Peer{
+			Host: strconv.Itoa(i + count),
+			Port: strconv.Itoa(i + count),
+		})
+	}
+	var wg sync.WaitGroup
+	fails := new(atomic.Uint32)
+	count = 20
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(ii int) {
+			defer wg.Done()
+			p := peers[ii:]
+			err = db.PeersInsert(ctx, p)
+			if err != nil {
+				fails.Add(1)
+				t.Logf("Failed to insert %v records: %v", len(p), err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if uint32(count-1) != fails.Load() {
+		t.Fatalf("invalid number of fails wanted %v, got %v", count-1, fails)
+	}
 }
