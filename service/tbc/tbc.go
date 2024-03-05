@@ -434,7 +434,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			err = s.db.PeerDelete(ctx, host, port)
 			if err != nil {
 				// XXX this is probably too loud
-				log.Errorf("peer delete (%v): %v", pp, err)
+				log.Debugf("peer delete (%v): %v", pp, err)
 			}
 		}(p)
 		log.Debugf("connect: %v", err)
