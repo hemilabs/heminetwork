@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -34,7 +35,8 @@ const (
 	mainnetPort = "8333"
 	testnetPort = "18333"
 
-	defaultPeersWanted = 16 // XXX go with 64
+	defaultPeersWanted   = 16 // XXX go with 64
+	defaultPendingBlocks = 16 // XXX go with 64
 )
 
 var testnetSeeds = []string{
@@ -94,21 +96,9 @@ func sliceChainHash(ch chainhash.Hash) []byte {
 	return ch[:]
 }
 
-func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte) error {
-	bh, err := bytes2Header(lastHeaderHash)
-	if err != nil {
-		return fmt.Errorf("invalid header: %v", err)
-	}
-	hash := bh.BlockHash()
-	ghs := wire.NewMsgGetHeaders()
-	ghs.AddBlockLocatorHash(&hash)
-	err = p.write(ghs)
-	if err != nil {
-		// XXX use pool
-		return fmt.Errorf("write get headers: %v", err)
-	}
-
-	return nil
+type blockPeer struct {
+	expire time.Time // when does this command expire
+	peer   string    // who was handling it
 }
 
 type Config struct {
@@ -136,7 +126,10 @@ type Server struct {
 	port        string
 	seeds       []string
 
-	peers map[string]*peer // active but not necessarily connected
+	peers  map[string]*peer      // active but not necessarily connected
+	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where
+
+	working bool // reentrant flag
 
 	db tbcd.Database
 
@@ -144,16 +137,82 @@ type Server struct {
 	isRunning bool
 }
 
+var (
+	errCacheFull     = errors.New("cache full")
+	errNoPeers       = errors.New("no peers")
+	errAlreadyCached = errors.New("already cached")
+	errExpiredPeer   = errors.New("expired peer")
+)
+
+// blockPeerAdd adds a block to the pending list at the selected peer. Lock
+// must be held.
+func (s *Server) blockPeerAdd(hash, peer string) error {
+	t := time.Now().Add(defaultPendingBlocks * time.Second) // ~1 block per second
+
+	if _, ok := s.peers[peer]; !ok {
+		return errExpiredPeer // XXX should not happen
+	}
+	if _, ok := s.blocks[hash]; ok {
+		return errAlreadyCached
+	}
+	s.blocks[hash] = &blockPeer{
+		expire: t,
+		peer:   peer,
+	}
+	return nil
+}
+
+//func (s *Server) blockPeerRemoveHash(hash string) {
+//	s.mtx.Lock()
+//	delete(s.blocks, hash)
+//	s.mtx.Unlock()
+//}
+
+//func (s *Server) blockPeerRemovePeer(p string) {
+//	s.mtx.Lock()
+//	defer s.mtx.Unlock()
+//
+//	for k, v := range s.blocks {
+//		if v.peer == p {
+//			delete(s.blocks, k)
+//		}
+//	}
+//}
+
+// blockPeerExpire removes expired block downloads from the cache and returns
+// the number of used cache slots.
+func (s *Server) blockPeerExpire() int {
+	now := time.Now()
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	for k, v := range s.blocks {
+		if !now.After(v.expire) {
+			continue
+		}
+		log.Infof("EXPIRED %v", k)
+		delete(s.blocks, k)
+
+		// kill peer as well since it is slow
+		if p := s.peers[v.peer]; p != nil && p.conn != nil {
+			log.Infof("KILL EXPIRED %v", v.peer)
+			p.conn.Close() // this will tear down peer
+		}
+	}
+	return len(s.blocks)
+}
+
 func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
 	s := &Server{
-		cfg:   cfg,
-		peers: make(map[string]*peer, defaultPeersWanted),
+		cfg:    cfg,
+		blocks: make(map[string]*blockPeer, defaultPendingBlocks),
+		peers:  make(map[string]*peer, defaultPeersWanted),
 	}
+
 	// We could use a PGURI verification here.
-	// single peer for now
 
 	switch cfg.Network {
 	case "mainnet":
@@ -171,6 +230,23 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	return s, nil
+}
+
+func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte) error {
+	bh, err := bytes2Header(lastHeaderHash)
+	if err != nil {
+		return fmt.Errorf("invalid header: %v", err)
+	}
+	hash := bh.BlockHash()
+	ghs := wire.NewMsgGetHeaders()
+	ghs.AddBlockLocatorHash(&hash)
+	err = p.write(ghs)
+	if err != nil {
+		// XXX use pool
+		return fmt.Errorf("write get headers: %v", err)
+	}
+
+	return nil
 }
 
 func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error) {
@@ -219,39 +295,73 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	return peers, nil
 }
 
-// peersWrite randomly selects count peers and writes the provided message to
-// it.
-func (s *Server) peersWrite(ctx context.Context, msg wire.Message, count int) error {
-	log.Tracef("peersWrite %v", count)
-	defer log.Tracef("peersWrite %v", count)
+func (s *Server) randPeerWrite(ctx context.Context, hash string, msg wire.Message) error {
+	log.Tracef("randPeerWrite")
+	defer log.Tracef("randPeerWrite")
 
-	peers := make([]*peer, 0, count)
+	var p *peer
+	// Select random peer
 	s.mtx.Lock()
-	for _, v := range s.peers {
+	if len(s.blocks) >= defaultPendingBlocks {
+		s.mtx.Unlock()
+		return errCacheFull
+	}
+	for k, v := range s.peers {
 		if v.conn == nil {
 			// Not connected yet
 			continue
 		}
-		peers = append(peers, v)
-		if len(peers) >= count {
-			break
-		}
-	}
-	s.mtx.Unlock()
-	log.Infof("got peers %v %v", len(peers), spew.Sdump(peers))
-	log.Infof("peers %v ", spew.Sdump(s.peers))
-	for i := 0; i < len(peers); i++ {
-		log.Infof("writing %v: %v", i, len(peers))
-		err := peers[i].write(msg)
+
+		// maybe insert into cache
+		err := s.blockPeerAdd(hash, k)
 		if err != nil {
-			// XXX this is probably too loud
-			log.Errorf("write %v %v", peers[i], err)
 			continue
 		}
-	}
 
-	return nil
+		// cached, now execute
+		p = v
+		break
+	}
+	s.mtx.Unlock()
+
+	if p == nil {
+		return errNoPeers
+	}
+	return p.write(msg)
 }
+
+//// peersWrite randomly selects count peers and writes the provided message to
+//// it.
+//func (s *Server) peersWrite(ctx context.Context, msg wire.Message, count int) error {
+//	log.Tracef("peersWrite %v", count)
+//	defer log.Tracef("peersWrite %v", count)
+//
+//	peers := make([]*peer, 0, count)
+//	s.mtx.Lock()
+//	for _, v := range s.peers {
+//		if v.conn == nil {
+//			// Not connected yet
+//			continue
+//		}
+//		peers = append(peers, v)
+//		if len(peers) >= count {
+//			break
+//		}
+//	}
+//	s.mtx.Unlock()
+//	//log.Infof("got peers %v %v", len(peers), spew.Sdump(peers))
+//	for i := 0; i < len(peers); i++ {
+//		//log.Infof("writing %v: %v", peers, spew.Sdump(msg))
+//		err := peers[i].write(msg)
+//		if err != nil {
+//			// XXX this is probably too loud
+//			log.Errorf("write %v %v", peers[i], err)
+//			continue
+//		}
+//	}
+//
+//	return nil
+//}
 
 func (s *Server) peerAdd(p *peer) {
 	log.Tracef("peerAdd: %v", p.address)
@@ -415,6 +525,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		return
 	}
 
+	// XXX kickstart block download, should happen in getHeaders
+
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -429,7 +541,9 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// skip unknown
 			continue
 		} else if err != nil {
-			log.Errorf("read (%v): %v", p, err)
+			// Expire pending block downloads from this host
+			cacheUsed := s.blockPeerExpire()
+			log.Errorf("read (%v): %v -- cache %v", p, err, cacheUsed)
 			return
 		}
 
@@ -445,15 +559,14 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		case *wire.MsgAddrV2:
 			go s.handleAddrV2(ctx, m)
 
-		// case *wire.MsgBlock:
-		//	go s.handleBlock(ctx, m)
+		case *wire.MsgBlock:
+			go s.handleBlock(ctx, m)
 
 		case *wire.MsgFeeFilter:
 			// XXX shut up
 
 		case *wire.MsgInv:
-			// XXX be quiet for now
-		//	go s.handleInv(ctx, m)
+			go s.handleInv(ctx, m)
 
 		case *wire.MsgHeaders:
 			go s.handleHeaders(ctx, p, m)
@@ -585,21 +698,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	}
 
 	if len(msg.Headers) == 0 {
-		//// XXX DEBUG SHIT
-		//if false {
-		//	// We have all headers, retrieve missing blocks
-		//	mb, err := s.db.BlockHeadersMissing(ctx, 16)
-		//	if err != nil {
-		//		log.Errorf("block headers missing: %v", err)
-		//		return
-		//	}
-		//	err = s.downloadBlocks(mb)
-		//	if err != nil {
-		//		log.Errorf("download blocks: %v", err)
-		//		return
-		//	}
-		//}
-		//log.Infof("=== DISABLED BLOCK DOWNLOAD ===")
+		s.checkBlockCache(ctx)
 		return
 	}
 
@@ -659,58 +758,74 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	}
 }
 
-//func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
-//	log.Tracef("handleBlock")
-//	defer log.Tracef("handleBlock exit")
-//
-//	block := &bytes.Buffer{}
-//	err := msg.Serialize(block) // XXX we should not being doing this twice
-//	if err != nil {
-//		log.Errorf("block serialize: %v", err)
-//		return
-//	}
-//
-//	bh := msg.Header.BlockHash()
-//	b := &tbcd.Block{
-//		Hash:  sliceChainHash(bh),
-//		Block: block.Bytes(),
-//	}
-//
-//	height, err := s.db.BlockInsert(ctx, b)
-//	if err != nil {
-//		// XXX ignore duplicate error printing since we will hit that
-//		log.Errorf("block insert: %v", err)
-//		return
-//	}
-//
-//	bhs := bh.String()
-//	log.Infof("Insert block %v at %v txs %v %v", bhs, height,
-//		len(msg.Transactions), msg.Header.Timestamp)
-//
-//	// Poor man's cache that sucks
-//	s.mtx.Lock()
-//	delete(s.pending, bhs)
-//	pendingLen := len(s.pending)
-//	expire := s.expire
-//	s.mtx.Unlock()
-//
-//	// XXX this needs a time component as well
-//	if pendingLen <= 0 || time.Now().After(expire) {
-//		// XXX this is duplicate code, make a function
-//		log.Infof("now %v expire %v length %v", time.Now(), expire, pendingLen)
-//		// We have all headers, retrieve missing blocks
-//		mb, err := s.db.BlockHeadersMissing(ctx, 16)
-//		if err != nil {
-//			log.Errorf("block headers missing: %v", err)
-//			return
-//		}
-//		err = s.downloadBlocks(mb)
-//		if err != nil {
-//			log.Errorf("download blocks: %v", err)
-//			return
-//		}
-//	}
-//}
+func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
+	log.Tracef("handleBlock")
+	defer log.Tracef("handleBlock exit")
+
+	block := &bytes.Buffer{}
+	err := msg.Serialize(block) // XXX we should not being doing this twice
+	if err != nil {
+		log.Errorf("block serialize: %v", err)
+		return
+	}
+
+	bh := msg.Header.BlockHash()
+	bhs := bh.String()
+	b := &tbcd.Block{
+		Hash:  sliceChainHash(bh),
+		Block: block.Bytes(),
+	}
+
+	height, err := s.db.BlockInsert(ctx, b)
+	if err != nil {
+		// XXX ignore duplicate error printing since we will hit that
+		log.Errorf("block insert %v: %v", bhs, err)
+	} else {
+		log.Infof("Insert block %v at %v txs %v %v", bhs, height,
+			len(msg.Transactions), msg.Header.Timestamp)
+	}
+
+	// Whatever happens,, delete from cashe and potentially try again
+	s.mtx.Lock()
+	delete(s.blocks, bhs) // remove inserted block
+	s.mtx.Unlock()
+
+	s.checkBlockCache(ctx)
+}
+
+func (s *Server) checkBlockCache(ctx context.Context) {
+	// Deal with expired block downloads
+	used := s.blockPeerExpire()
+	if defaultPendingBlocks-used <= 0 {
+		return
+	}
+
+	// XXX make better reentrant
+	s.mtx.Lock()
+	if s.working {
+		s.mtx.Unlock()
+		return
+	}
+	s.working = true
+	s.mtx.Unlock()
+	defer func() {
+		s.mtx.Lock()
+		s.working = false
+		s.mtx.Unlock()
+	}()
+
+	mb, err := s.db.BlockHeadersMissing(ctx, defaultPendingBlocks)
+	if err != nil {
+		log.Errorf("block headers missing: %v", err)
+		return
+	}
+	// downdloadBlocks will only insert unseen in the cache
+	err = s.downloadBlocks(ctx, mb)
+	if err != nil {
+		log.Errorf("download blocks: %v", err)
+		return
+	}
+}
 
 func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
 	log.Tracef("blockHeadersBest")
@@ -749,35 +864,40 @@ func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, erro
 	return bhs, nil
 }
 
-//func (s *Server) downloadBlocks(bhs []tbcd.BlockHeader) error {
-//	log.Tracef("downloadBlocks")
-//	defer log.Tracef("downloadBlocks exit")
-//
-//	getData := wire.NewMsgGetData()
-//	for k := range bhs {
-//		bh := bhs[k]
-//		hash, _ := chainhash.NewHash(bh.Hash[:])
-//		getData.InvList = append(getData.InvList,
-//			&wire.InvVect{
-//				Type: wire.InvTypeBlock,
-//				Hash: *hash,
-//			})
-//		// poor man's cache outstanding blocks
-//		// XXX this sucks, make better
-//		hs := hash.String()
-//		expire := time.Now().Add(30 * time.Second) // expiration
-//		s.mtx.Lock()
-//		s.pending[hs] = expire
-//		s.expire = expire
-//		s.mtx.Unlock()
-//	}
-//	err := s.peer.write(getData)
-//	if err != nil {
-//		return fmt.Errorf("could not write get block message: %v", err)
-//	}
-//
-//	return nil
-//}
+func (s *Server) downloadBlocks(ctx context.Context, bhs []tbcd.BlockHeader) error {
+	log.Tracef("downloadBlocks")
+	defer log.Tracef("downloadBlocks exit")
+
+	for k := range bhs {
+		bh := bhs[k]
+		hash, _ := chainhash.NewHash(bh.Hash[:])
+		bhs := hash.String()
+		getData := wire.NewMsgGetData()
+		getData.InvList = append(getData.InvList,
+			&wire.InvVect{
+				Type: wire.InvTypeBlock,
+				Hash: *hash,
+			})
+		err := s.randPeerWrite(ctx, bhs, getData)
+		switch err {
+		case nil:
+			continue
+		case errCacheFull:
+			// XXX certainly too loud
+			log.Tracef("cache full")
+			break
+		case errNoPeers:
+			// XXX certainly too loud
+			log.Tracef("could not write, no peers")
+			break
+		default:
+			// XXX probably too loud
+			log.Errorf("write error: %v", err)
+		}
+	}
+
+	return nil
+}
 
 func (s *Server) p2p(ctx context.Context) {
 	defer s.wg.Done()
