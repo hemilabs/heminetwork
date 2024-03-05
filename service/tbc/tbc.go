@@ -605,35 +605,29 @@ func (s *Server) handleInv(ctx context.Context, msg *wire.MsgInv) {
 	log.Tracef("handleInv")
 	defer log.Tracef("handleInv exit")
 
-	log.Debugf("handleInv: %v %v", len(msg.InvList), msg.InvList[0].Type) // XXX this will crash with no items
-
-	//// XXX fix height
-	//blocks := make([]tbcd.BlockHeaders, 0, len(msg.InvList))
+	var mb []tbcd.BlockHeader
 	for k := range msg.InvList {
 		switch msg.InvList[k].Type {
 		case wire.InvTypeBlock:
-			log.Infof("handleInv: block")
-			//log.Tracef("handleInv block: height %v hash %v",
-			//	k+1, msg.InvList[k].Hash)
-			////err := downloadBlock(p, k+1, msg.InvList[k].Hash)
-			////if err != nil {
-			////	log.Errorf("download block at %v: %v", k+1, err)
-			////}
-			//blocks = append(blocks, tbcd.BlockHeaders{
-			//	Hash:   msg.InvList[k].Hash[:], // XXX this is wireformat
-			//	Height: uint64(k + 1),
-			//})
+			log.Infof("handleInv: block %v", msg.InvList[k].Hash)
+
+			mb = append(mb, tbcd.BlockHeader{
+				Hash: msg.InvList[k].Hash[:], // fake out
+			})
+		case wire.InvTypeTx:
+			// XXX silence for now
 		default:
-			log.Tracef("handleInv: skipping inv type %v", msg.InvList[k].Type)
+			log.Infof("handleInv: skipping inv type %v", msg.InvList[k].Type)
 		}
 	}
 
-	//if len(blocks) > 0 {
-	//	err := s.db.BlockHeadersInsert(ctx, blocks)
-	//	if err != nil {
-	//		log.Errorf("BlockHeadersInsert: %v", err)
-	//	}
-	//}
+	if len(mb) > 0 {
+		err := s.downloadBlocks(ctx, mb)
+		if err != nil {
+			log.Errorf("download blocks: %v", err)
+			return
+		}
+	}
 }
 
 // XXX see how we send in peer, that is not what we want
@@ -822,14 +816,14 @@ func (s *Server) downloadBlocks(ctx context.Context, bhs []tbcd.BlockHeader) err
 	for k := range bhs {
 		bh := bhs[k]
 		hash, _ := chainhash.NewHash(bh.Hash[:])
-		bhs := hash.String()
+		hashS := hash.String()
 		getData := wire.NewMsgGetData()
 		getData.InvList = append(getData.InvList,
 			&wire.InvVect{
 				Type: wire.InvTypeBlock,
 				Hash: *hash,
 			})
-		err := s.randPeerWrite(ctx, bhs, getData)
+		err := s.randPeerWrite(ctx, hashS, getData)
 		switch err {
 		case nil:
 			continue
