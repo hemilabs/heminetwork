@@ -269,15 +269,15 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 		return nil
 	}
 
-	log.Infof("BEGIN")
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelReadCommitted,
+		//Isolation: sql.LevelRepeatableRead,
+		//Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
 		return err
 	}
 	defer func() {
-		log.Infof("ROLLBACK")
 		err := tx.Rollback()
 		if err != nil && err != sql.ErrTxDone {
 			log.Errorf("peers insert could not rollback db tx: %v",
@@ -315,7 +315,6 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("COMMIT")
 
 	return nil
 }
