@@ -198,6 +198,9 @@ func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) e
 		return nil
 	}
 
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelReadCommitted,
 		//Isolation: sql.LevelRepeatableRead,
