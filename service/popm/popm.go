@@ -85,9 +85,8 @@ type bfgCmd struct {
 }
 
 type L2KeystoneProcessingContainer struct {
-	l2Keystone hemi.L2Keystone
-	processing bool
-	processed  bool
+	l2Keystone         hemi.L2Keystone
+	requiresProcessing bool
 }
 
 type Miner struct {
@@ -868,7 +867,8 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 	key := hex.EncodeToString(serialized[:])
 
 	toInsert := L2KeystoneProcessingContainer{
-		l2Keystone: val,
+		l2Keystone:         val,
+		requiresProcessing: true,
 	}
 
 	m.mtx.Lock()
@@ -912,11 +912,13 @@ func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone) error) {
 
 		// if we're currently processing, or we've already processed the keystone
 		// then don't process
-		if v.processing || v.processed {
+		if !v.requiresProcessing {
 			continue
 		}
 
-		v.processing = true
+		// since we're about to process, mark this as false so others don't
+		// process the same
+		v.requiresProcessing = false
 		m.l2Keystones[i] = v
 		copies = append(copies, v.l2Keystone)
 	}
@@ -936,12 +938,10 @@ func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone) error) {
 		m.mtx.Lock()
 
 		if v, ok := m.l2Keystones[key]; ok {
-			v.processing = false
-			if err == nil {
-				// if there is no error, mark keystone as processed so it doesn't
-				// get processed again
-				v.processed = true
-			}
+			// if there is an error, mark keystone as "requires processing" so
+			// potentially gets retried, otherwise set this to false to
+			// nothing tries to process it
+			v.requiresProcessing = err != nil
 			m.l2Keystones[key] = v
 		}
 
