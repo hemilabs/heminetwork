@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"sync"
 
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/postgres"
@@ -32,6 +33,8 @@ func init() {
 }
 
 type pgdb struct {
+	mtx sync.Mutex
+
 	*postgres.Database
 	db *sql.DB
 }
@@ -125,14 +128,39 @@ func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.Block
 	log.Tracef("BlockHeadersMissing")
 	defer log.Tracef("BlockHeadersMissing exit")
 
-	const selectHeadersMissing = `
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelReadCommitted,
+		//Isolation: sql.LevelRepeatableRead,
+		//Isolation: sql.LevelSerializable,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && err != sql.ErrTxDone {
+			log.Errorf("BlockHeadersInsert could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	s, err := tx.PrepareContext(ctx, `
 		SELECT bh.hash,bh.height,bh.header,bh.created_at FROM block_headers bh
 		WHERE NOT EXISTS (SELECT * FROM blocks b WHERE b.hash=bh.hash)
 		ORDER BY bh.height ASC
-		LIMIT $1;`
+		LIMIT $1;
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("could not prepare block headers insert: %v", err)
+	}
 
 	bhs := make([]tbcd.BlockHeader, 0, count)
-	rows, err := p.db.QueryContext(ctx, selectHeadersMissing, count)
+	rows, err := s.QueryContext(ctx, count)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +182,11 @@ func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.Block
 		return nil, rows.Err()
 	}
 
+	err = tx.Commit()
+	if err != nil {
+		return nil, err
+	}
+
 	return bhs, nil
 }
 
@@ -165,7 +198,11 @@ func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) e
 		return nil
 	}
 
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelReadCommitted,
+		//Isolation: sql.LevelRepeatableRead,
+		//Isolation: sql.LevelSerializable,
+	})
 	if err != nil {
 		return err
 	}
@@ -179,13 +216,16 @@ func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) e
 		}
 	}()
 
-	const qBlockHeaderInsert = `
+	s, err := tx.PrepareContext(ctx, `
 		INSERT INTO block_headers (hash, height, header)
 		VALUES ($1, $2, $3)
-	`
+	`)
+	if err != nil {
+		return fmt.Errorf("could not prepare block headers insert: %v", err)
+	}
 	for k := range bhs {
-		result, err := tx.ExecContext(ctx, qBlockHeaderInsert, bhs[k].Hash,
-			bhs[k].Height, bhs[k].Header)
+		result, err := s.ExecContext(ctx, bhs[k].Hash, bhs[k].Height,
+			bhs[k].Header)
 		if err != nil {
 			if err, ok := err.(*pq.Error); ok && err.Code.Class().Name() == "integrity_constraint_violation" {
 				return database.DuplicateError(fmt.Sprintf("duplicate hash height entry: %s", err))
@@ -213,14 +253,14 @@ func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	log.Tracef("BlockInsert")
 	defer log.Tracef("BlockInsert exit")
 
-	const qBlockInsert = `
-		WITH inserted AS (
-			INSERT INTO blocks (hash, block)
-			VALUES ($1, $2) RETURNING hash
-		) SELECT bh.height FROM inserted i INNER JOIN block_headers bh ON bh.hash=i.hash;
-	`
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelReadCommitted,
+		//Isolation: sql.LevelRepeatableRead,
+		//Isolation: sql.LevelSerializable,
+	})
 	if err != nil {
 		return -1, err
 	}
@@ -233,7 +273,16 @@ func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		}
 	}()
 
-	rows, err := tx.QueryContext(ctx, qBlockInsert, b.Hash, b.Block)
+	s, err := tx.PrepareContext(ctx, `
+		WITH inserted AS (
+			INSERT INTO blocks (hash, block)
+			VALUES ($1, $2) RETURNING hash
+		) SELECT bh.height FROM inserted i INNER JOIN block_headers bh ON bh.hash=i.hash;
+	`)
+	if err != nil {
+		return -1, fmt.Errorf("could not prepare block insert: %v", err)
+	}
+	rows, err := s.QueryContext(ctx, b.Hash, b.Block)
 	if err != nil {
 		if err, ok := err.(*pq.Error); ok && err.Code.Class().Name() == "integrity_constraint_violation" {
 			return -1, database.DuplicateError(fmt.Sprintf("duplicate block entry: %s", err))
@@ -309,9 +358,9 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	}()
 
 	s, err := tx.PrepareContext(ctx, `
-		insert into peers (host, port, last_at)
-		values ($1, $2, $3)
-		on conflict do nothing;
+		INSERT INTO PEERS (host, port, last_at)
+		VALUES ($1, $2, $3)
+		ON CONFLICT DO NOTHING;
 	`)
 	if err != nil {
 		return fmt.Errorf("could not prepare peers insert: %v", err)
@@ -344,6 +393,7 @@ func (p *pgdb) PeerDelete(ctx context.Context, host, port string) error {
 	defer log.Tracef("PeerDelete exit")
 
 	qDeletePeer := fmt.Sprintf(`DELETE FROM peers WHERE host=$1 AND port=$2`)
+	// XXX add prepared statement here
 	rows, err := p.db.QueryContext(ctx, qDeletePeer, host, port)
 	if err != nil {
 		return err
@@ -372,6 +422,7 @@ func (p *pgdb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) 
 	const qSelectRandom = `SELECT * FROM peers ORDER BY RANDOM() LIMIT $1;`
 
 	peers := make([]tbcd.Peer, 0, count)
+	// XXX add prepared statement here
 	rows, err := p.db.QueryContext(ctx, qSelectRandom, count)
 	if err != nil {
 		return nil, err
