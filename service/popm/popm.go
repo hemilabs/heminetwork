@@ -84,6 +84,12 @@ type bfgCmd struct {
 	ch  chan any
 }
 
+type L2KeystoneProcessingContainer struct {
+	l2Keystone hemi.L2Keystone
+	processing bool
+	processed  bool
+}
+
 type Miner struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
@@ -108,7 +114,7 @@ type Miner struct {
 
 	mineNowCh chan struct{}
 
-	l2Keystones map[string]hemi.L2Keystone
+	l2Keystones map[string]L2KeystoneProcessingContainer
 }
 
 func NewMiner(cfg *Config) (*Miner, error) {
@@ -122,7 +128,7 @@ func NewMiner(cfg *Config) (*Miner, error) {
 		holdoffTimeout: 5 * time.Second,
 		requestTimeout: 5 * time.Second,
 		mineNowCh:      make(chan struct{}, 1),
-		l2Keystones:    make(map[string]hemi.L2Keystone),
+		l2Keystones:    make(map[string]L2KeystoneProcessingContainer),
 	}
 
 	switch strings.ToLower(cfg.BTCChainName) {
@@ -479,17 +485,15 @@ func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.Bi
 func (m *Miner) mineKnownKeystones(ctx context.Context) {
 	keystonesFailed := false
 
-	m.ForEachL2Keystone(func(ks hemi.L2Keystone) {
+	m.ForEachL2Keystone(func(ks hemi.L2Keystone) error {
 		log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
 		if err := m.mineKeystone(ctx, &ks); err != nil {
 			log.Errorf("Failed to mine keystone: %v", err)
-
-			// we failed to mine the keystone for some reason, re-add it
-			// and instruct pop miner to retry after a short period of time
-			m.AddL2Keystone(ks)
 			keystonesFailed = true
-
+			return err
 		}
+
+		return nil
 	})
 
 	// if no keystones failed, we're done
@@ -863,6 +867,10 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 	serialized := hemi.L2KeystoneAbbreviate(val).Serialize()
 	key := hex.EncodeToString(serialized[:])
 
+	toInsert := L2KeystoneProcessingContainer{
+		l2Keystone: val,
+	}
+
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -872,7 +880,7 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 	}
 
 	if len(m.l2Keystones) < l2KeystonesMaxSize {
-		m.l2Keystones[key] = val
+		m.l2Keystones[key] = toInsert
 		return
 	}
 
@@ -880,8 +888,8 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 	var smallestKey string
 
 	for k, v := range m.l2Keystones {
-		if smallestL2BlockNumber == 0 || v.L2BlockNumber < smallestL2BlockNumber {
-			smallestL2BlockNumber = v.L2BlockNumber
+		if smallestL2BlockNumber == 0 || v.l2Keystone.L2BlockNumber < smallestL2BlockNumber {
+			smallestL2BlockNumber = v.l2Keystone.L2BlockNumber
 			smallestKey = k
 		}
 	}
@@ -894,19 +902,24 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 
 	delete(m.l2Keystones, smallestKey)
 
-	m.l2Keystones[key] = val
+	m.l2Keystones[key] = toInsert
 }
 
-func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone)) {
+func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone) error) {
 	m.mtx.Lock()
 	copies := []hemi.L2Keystone{}
-	for _, v := range m.l2Keystones {
-		copies = append(copies, v)
-	}
+	for i, v := range m.l2Keystones {
 
-	// clear the map, it is up to the caller to re-push keystones if
-	// neccessary, for example if a failure occurs
-	clear(m.l2Keystones)
+		// if we're currently processing, or we've already processed the keystone
+		// then don't process
+		if v.processing || v.processed {
+			continue
+		}
+
+		v.processing = true
+		m.l2Keystones[i] = v
+		copies = append(copies, v.l2Keystone)
+	}
 	m.mtx.Unlock()
 
 	// mine the newest keystone first
@@ -915,6 +928,23 @@ func (m *Miner) ForEachL2Keystone(cb func(ks hemi.L2Keystone)) {
 	})
 
 	for _, e := range copies {
-		cb(e)
+		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
+		key := hex.EncodeToString(serialized[:])
+
+		err := cb(e)
+
+		m.mtx.Lock()
+
+		if v, ok := m.l2Keystones[key]; ok {
+			v.processing = false
+			if err == nil {
+				// if there is no error, mark keystone as processed so it doesn't
+				// get processed again
+				v.processed = true
+			}
+			m.l2Keystones[key] = v
+		}
+
+		m.mtx.Unlock()
 	}
 }
