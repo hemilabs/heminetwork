@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/hemilabs/heminetwork/database"
@@ -323,7 +324,7 @@ type ByAddress []tbcd.Peer
 
 func (a ByAddress) Len() int { return len(a) }
 func (a ByAddress) Less(i, j int) bool {
-	return hp(a[i].Host, a[i].Port) < hp(a[j].Host, a[j].Port)
+	return strings.Compare(hp(a[i].Host, a[i].Port), hp(a[j].Host, a[j].Port))
 }
 func (a ByAddress) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 
