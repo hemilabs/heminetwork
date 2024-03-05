@@ -477,6 +477,8 @@ func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.Bi
 }
 
 func (m *Miner) mineKnownKeystones(ctx context.Context) {
+	keystonesFailed := false
+
 	m.ForEachL2Keystone(func(ks hemi.L2Keystone) {
 		log.Infof("Received keystone for mining with height %v...", ks.L2BlockNumber)
 		if err := m.mineKeystone(ctx, &ks); err != nil {
@@ -485,15 +487,23 @@ func (m *Miner) mineKnownKeystones(ctx context.Context) {
 			// we failed to mine the keystone for some reason, re-add it
 			// and instruct pop miner to retry after a short period of time
 			m.AddL2Keystone(ks)
+			keystonesFailed = true
 
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(l2KeystoneRetryTimeout):
-				go m.mineKnownKeystones(ctx)
-			}
 		}
 	})
+
+	// if no keystones failed, we're done
+	if !keystonesFailed {
+		return
+	}
+
+	// if a keystone failed, ensure that we retry
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(l2KeystoneRetryTimeout):
+		go m.mineKnownKeystones(ctx)
+	}
 }
 
 func (m *Miner) mine(ctx context.Context) {
