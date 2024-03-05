@@ -8,6 +8,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
+	"sort"
 
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/postgres"
@@ -261,6 +263,18 @@ func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	return height, nil
 }
 
+func hp(host, port string) string {
+	return net.JoinHostPort(host, port)
+}
+
+type ByAddress []tbcd.Peer
+
+func (a ByAddress) Len() int { return len(a) }
+func (a ByAddress) Less(i, j int) bool {
+	return hp(a[i].Host, a[i].Port) < hp(a[j].Host, a[j].Port)
+}
+func (a ByAddress) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+
 func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	log.Tracef("PeersInsert")
 	defer log.Tracef("PeersInsert exit")
@@ -268,6 +282,14 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	if len(peers) == 0 {
 		return nil
 	}
+
+	// Sort peers to not upset pq when inserting large number of records
+	// that are out of order. This does not work 100% but the remaining failures
+	// will heal themselves due to all the retries.
+	//
+	// This looks pretty dumb but mostly works around this issue:
+	// https://dba.stackexchange.com/questions/194756/deadlock-with-multi-row-inserts-despite-on-conflict-do-nothing/195220#195220
+	sort.Sort(ByAddress(peers))
 
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelReadCommitted,
@@ -286,19 +308,17 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 		}
 	}()
 
-	const qPeersInsert = `
-		INSERT INTO peers (host, port, last_at)
-		VALUES ($1, $2, $3)
-		ON CONFLICT DO NOTHING;
-	`
-	// func (tx *Tx) PrepareContext(ctx context.Context, query string) (*Stmt, error) {
-	s, err := tx.PrepareContext(ctx, qPeersInsert)
+	s, err := tx.PrepareContext(ctx, `
+		insert into peers (host, port, last_at)
+		values ($1, $2, $3)
+		on conflict do nothing;
+	`)
 	if err != nil {
 		return fmt.Errorf("could not prepare peers insert: %v", err)
 	}
 	for k := range peers {
-		result, err := s.ExecContext(ctx, peers[k].Host,
-			peers[k].Port, peers[k].LastAt)
+		result, err := s.ExecContext(ctx, peers[k].Host, peers[k].Port,
+			peers[k].LastAt)
 		if err != nil {
 			return fmt.Errorf("failed to insert peer: %v", err)
 		}
