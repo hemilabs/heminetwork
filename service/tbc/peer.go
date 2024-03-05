@@ -15,7 +15,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-/// XXX wire could use some contexts
+// XXX wire could use some contexts
 
 func write(conn net.Conn, msg wire.Message, pver uint32, btcnet wire.BitcoinNet) error {
 	_, err := wire.WriteMessageWithEncodingN(conn, msg, pver, btcnet,
