@@ -7,7 +7,6 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/hemilabs/heminetwork/database"
@@ -218,7 +217,21 @@ func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 			VALUES ($1, $2) RETURNING hash
 		) SELECT bh.height FROM inserted i INNER JOIN block_headers bh ON bh.hash=i.hash;
 	`
-	rows, err := p.db.QueryContext(ctx, qBlockInsert, b.Hash, b.Block)
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return -1, err
+	}
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && err != sql.ErrTxDone {
+			log.Errorf("BlockInsert could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	rows, err := tx.QueryContext(ctx, qBlockInsert, b.Hash, b.Block)
 	if err != nil {
 		if err, ok := err.(*pq.Error); ok && err.Code.Class().Name() == "integrity_constraint_violation" {
 			return -1, database.DuplicateError(fmt.Sprintf("duplicate block entry: %s", err))
@@ -226,15 +239,26 @@ func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		return -1, fmt.Errorf("failed to insert block: %v", err)
 	}
 	defer rows.Close()
+
+	var height int64
 	for rows.Next() {
-		var height int64
 		if err := rows.Scan(&height); err != nil {
-			return 0, err
+			if err == sql.ErrNoRows {
+				return -1, database.NotFoundError("block not found")
+			}
+			return -1, err
 		}
-		return height, nil
+	}
+	if err := rows.Err(); err != nil {
+		return -1, err
 	}
 
-	return -1, errors.New("should not get here")
+	err = tx.Commit()
+	if err != nil {
+		return -1, err
+	}
+
+	return height, nil
 }
 
 func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
@@ -245,12 +269,15 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 		return nil
 	}
 
-	tx, err := p.db.BeginTx(ctx, nil)
+	log.Infof("BEGIN")
+	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelReadCommitted,
+	})
 	if err != nil {
 		return err
 	}
-
 	defer func() {
+		log.Infof("ROLLBACK")
 		err := tx.Rollback()
 		if err != nil && err != sql.ErrTxDone {
 			log.Errorf("peers insert could not rollback db tx: %v",
@@ -260,12 +287,17 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	}()
 
 	const qPeersInsert = `
-		INSERT INTO peers (address, port, last_at)
+		INSERT INTO peers (host, port, last_at)
 		VALUES ($1, $2, $3)
 		ON CONFLICT DO NOTHING;
 	`
+	// func (tx *Tx) PrepareContext(ctx context.Context, query string) (*Stmt, error) {
+	s, err := tx.PrepareContext(ctx, qPeersInsert)
+	if err != nil {
+		return fmt.Errorf("could not prepare peers insert: %v", err)
+	}
 	for k := range peers {
-		result, err := tx.ExecContext(ctx, qPeersInsert, peers[k].Address,
+		result, err := s.ExecContext(ctx, peers[k].Host,
 			peers[k].Port, peers[k].LastAt)
 		if err != nil {
 			return fmt.Errorf("failed to insert peer: %v", err)
@@ -283,6 +315,7 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	if err != nil {
 		return err
 	}
+	log.Infof("COMMIT")
 
 	return nil
 }
@@ -291,7 +324,7 @@ func (p *pgdb) PeerDelete(ctx context.Context, host, port string) error {
 	log.Tracef("PeerDelete")
 	defer log.Tracef("PeerDelete exit")
 
-	qDeletePeer := fmt.Sprintf(`DELETE FROM peers WHERE address=$1 AND port=$2`)
+	qDeletePeer := fmt.Sprintf(`DELETE FROM peers WHERE host=$1 AND port=$2`)
 	rows, err := p.db.QueryContext(ctx, qDeletePeer, host, port)
 	if err != nil {
 		return err
@@ -303,7 +336,7 @@ func (p *pgdb) PeerDelete(ctx context.Context, host, port string) error {
 			return err
 		}
 
-		return database.NotFoundError("address not found")
+		return database.NotFoundError("host not found")
 	}
 
 	if err := rows.Err(); err != nil {
@@ -329,7 +362,7 @@ func (p *pgdb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) 
 
 	for rows.Next() {
 		var peer tbcd.Peer
-		if err := rows.Scan(&peer.Address, &peer.Port, &peer.LastAt, &peer.CreatedAt); err != nil {
+		if err := rows.Scan(&peer.Host, &peer.Port, &peer.LastAt, &peer.CreatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, database.NotFoundError("peer data not found")
 			}

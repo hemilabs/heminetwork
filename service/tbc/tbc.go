@@ -129,7 +129,7 @@ type Server struct {
 	peers  map[string]*peer      // active but not necessarily connected
 	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where
 
-	working bool // reentrant flag
+	isWorking bool // reentrancy flag
 
 	db tbcd.Database
 
@@ -162,26 +162,12 @@ func (s *Server) blockPeerAdd(hash, peer string) error {
 	return nil
 }
 
-//func (s *Server) blockPeerRemoveHash(hash string) {
-//	s.mtx.Lock()
-//	delete(s.blocks, hash)
-//	s.mtx.Unlock()
-//}
-
-//func (s *Server) blockPeerRemovePeer(p string) {
-//	s.mtx.Lock()
-//	defer s.mtx.Unlock()
-//
-//	for k, v := range s.blocks {
-//		if v.peer == p {
-//			delete(s.blocks, k)
-//		}
-//	}
-//}
-
 // blockPeerExpire removes expired block downloads from the cache and returns
 // the number of used cache slots.
 func (s *Server) blockPeerExpire() int {
+	log.Tracef("blockPeerExpire exit")
+	defer log.Tracef("blockPeerExpire exit")
+
 	now := time.Now()
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -190,12 +176,10 @@ func (s *Server) blockPeerExpire() int {
 		if !now.After(v.expire) {
 			continue
 		}
-		log.Infof("EXPIRED %v", k)
 		delete(s.blocks, k)
 
 		// kill peer as well since it is slow
 		if p := s.peers[v.peer]; p != nil && p.conn != nil {
-			log.Infof("KILL EXPIRED %v", v.peer)
 			p.conn.Close() // this will tear down peer
 		}
 	}
@@ -286,8 +270,8 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	// insert into peers table
 	for k := range addrs {
 		peers = append(peers, tbcd.Peer{
-			Address: addrs[k].String(),
-			Port:    s.port,
+			Host: addrs[k].String(),
+			Port: s.port,
 		})
 	}
 
@@ -329,39 +313,6 @@ func (s *Server) randPeerWrite(ctx context.Context, hash string, msg wire.Messag
 	}
 	return p.write(msg)
 }
-
-//// peersWrite randomly selects count peers and writes the provided message to
-//// it.
-//func (s *Server) peersWrite(ctx context.Context, msg wire.Message, count int) error {
-//	log.Tracef("peersWrite %v", count)
-//	defer log.Tracef("peersWrite %v", count)
-//
-//	peers := make([]*peer, 0, count)
-//	s.mtx.Lock()
-//	for _, v := range s.peers {
-//		if v.conn == nil {
-//			// Not connected yet
-//			continue
-//		}
-//		peers = append(peers, v)
-//		if len(peers) >= count {
-//			break
-//		}
-//	}
-//	s.mtx.Unlock()
-//	//log.Infof("got peers %v %v", len(peers), spew.Sdump(peers))
-//	for i := 0; i < len(peers); i++ {
-//		//log.Infof("writing %v: %v", peers, spew.Sdump(msg))
-//		err := peers[i].write(msg)
-//		if err != nil {
-//			// XXX this is probably too loud
-//			log.Errorf("write %v %v", peers[i], err)
-//			continue
-//		}
-//	}
-//
-//	return nil
-//}
 
 func (s *Server) peerAdd(p *peer) {
 	log.Tracef("peerAdd: %v", p.address)
@@ -410,7 +361,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 
 			// Connect peer
 			for i := 0; i < peersWanted-peersActive; i++ {
-				address := net.JoinHostPort(seeds[x].Address, seeds[x].Port)
+				address := net.JoinHostPort(seeds[x].Host, seeds[x].Port)
 
 				peer, err := NewPeer(s.wireNet, address)
 				if err != nil {
@@ -508,25 +459,26 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	// multiple answers come in the insert of the headers fails or
 	// succeeds. If it fails no more headers will be requested from that
 	// peer.
-	bhs, err := s.blockHeadersBest(ctx)
-	if err != nil {
-		// This should not happen
-		log.Errorf("block headers best: %v", err)
-		return
-	}
-	if len(bhs) != 1 {
-		// XXX fix multiple tips
-		panic(len(bhs))
-	}
-	err = s.getHeaders(ctx, p, bhs[0].Header)
-	if err != nil {
-		// This should not happen
-		log.Errorf("get headers: %v", err)
-		return
-	}
+	if false {
+		bhs, err := s.blockHeadersBest(ctx)
+		if err != nil {
+			// This should not happen
+			log.Errorf("block headers best: %v", err)
+			return
+		}
+		if len(bhs) != 1 {
+			// XXX fix multiple tips
+			panic(len(bhs))
+		}
+		err = s.getHeaders(ctx, p, bhs[0].Header)
+		if err != nil {
+			// This should not happen
+			log.Errorf("get headers: %v", err)
+			return
+		}
 
-	// XXX kickstart block download, should happen in getHeaders
-
+		// XXX kickstart block download, should happen in getHeaders
+	}
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -608,8 +560,8 @@ func (s *Server) handleAddr(ctx context.Context, msg *wire.MsgAddr) {
 	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
 	for k := range msg.AddrList {
 		peers = append(peers, tbcd.Peer{
-			Address: msg.AddrList[k].IP.String(),
-			Port:    strconv.Itoa(int(msg.AddrList[k].Port)),
+			Host: msg.AddrList[k].IP.String(),
+			Port: strconv.Itoa(int(msg.AddrList[k].Port)),
 		})
 	}
 	err := s.db.PeersInsert(ctx, peers)
@@ -626,8 +578,8 @@ func (s *Server) handleAddrV2(ctx context.Context, msg *wire.MsgAddrV2) {
 	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
 	for k := range msg.AddrList {
 		peers = append(peers, tbcd.Peer{
-			Address: msg.AddrList[k].Addr.String(),
-			Port:    strconv.Itoa(int(msg.AddrList[k].Port)),
+			Host: msg.AddrList[k].Addr.String(),
+			Port: strconv.Itoa(int(msg.AddrList[k].Port)),
 		})
 	}
 	err := s.db.PeersInsert(ctx, peers)
@@ -802,15 +754,15 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 
 	// XXX make better reentrant
 	s.mtx.Lock()
-	if s.working {
+	if s.isWorking {
 		s.mtx.Unlock()
 		return
 	}
-	s.working = true
+	s.isWorking = true
 	s.mtx.Unlock()
 	defer func() {
 		s.mtx.Lock()
-		s.working = false
+		s.isWorking = false
 		s.mtx.Unlock()
 	}()
 
@@ -899,150 +851,6 @@ func (s *Server) downloadBlocks(ctx context.Context, bhs []tbcd.BlockHeader) err
 	return nil
 }
 
-func (s *Server) p2p(ctx context.Context) {
-	defer s.wg.Done()
-
-	log.Tracef("p2p")
-	defer log.Tracef("p2p exit")
-
-	//// Peers
-	//seeds, err := s.seed(ctx)
-	//if err != nil {
-	//	// XXX fatal
-	//	log.Errorf("seed: %v", err)
-	//	return
-	//}
-	//log.Infof("%v", spew.Sdump(seeds))
-
-	//// XXX make this concurrent
-	//connected := 0
-	//for k := range seeds {
-	//	peer, err := NewPeer(s.wireNet, fmt.Sprintf("%v:%v",
-	//		seeds[k].Address, seeds[k].Port))
-	//	if err != nil {
-	//		log.Errorf("could not parse: %v", err)
-	//		continue
-	//	}
-
-	//	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	//	err = peer.connect(tctx)
-	//	if err != nil {
-	//		cancel()
-	//		log.Errorf("connect: %v", err)
-	//		continue
-	//	} else {
-	//		log.Infof("connected: %v", peer.address)
-	//		s.mtx.Lock()
-	//		s.peers[peer.address] = peer
-	//		connected = len(s.peers) // XXX if a peer disconnects it should be removed from map
-	//		s.mtx.Unlock()
-	//	}
-
-	//	if connected > 4 {
-	//		break
-	//	}
-	//}
-
-	// log.Infof("ready to go")
-
-	//for {
-	//	select {
-	//	case <-ctx.Done():
-	//		log.Errorf("ctx %v", ctx.Error())
-	//		return
-	//	case msg <- s.peerManager.read(ctx):
-	//	}
-	//}
-
-	return
-
-	//err := s.peer.connect(ctx)
-	//if err != nil {
-	//	// XXX use a pool
-	//	log.Errorf("connect: %v", err)
-	//	return
-	//}
-	//log.Debugf("p2p handshake complete with: %v\n", s.peer.address)
-
-	//// Get network information
-	//getAddr := wire.NewMsgGetAddr()
-	//err = s.peer.write(getAddr)
-	//if err != nil {
-	//	// XXX recover
-	//	log.Errorf("write getaddrv2: %v", err)
-	//}
-
-	//// Resume headers/blocks download
-	//bhs, err := s.blockHeadersBest(ctx)
-	//if err != nil {
-	//	log.Errorf("block headers best: %v", err)
-	//	return
-	//}
-	//if len(bhs) != 1 {
-	//	// XXX fix multiple tips
-	//	panic(len(bhs))
-	//}
-
-	//log.Infof("Resume header download at height %v", bhs[0].Height)
-	//err = s.getHeaders(bhs[0].Header)
-	//if err != nil {
-	//	// XXX use pool
-	//	log.Errorf("write get headers: %v", err)
-	//	return
-	//}
-
-	// verbose := false
-	// for {
-	//	// see if we were interrupted
-	//	select {
-	//	case <-ctx.Done():
-	//		log.Errorf("p2p: %v", ctx.Err())
-	//		return
-	//	default:
-	//	}
-
-	//	msg, err := s.peer.read()
-	//	if err == wire.ErrUnknownMessage {
-	//		// skip unknown
-	//		continue
-	//	} else if err != nil {
-	//		// XXX this is why we need a pool
-	//		log.Errorf("read: %v", err)
-	//		return
-	//	}
-
-	//	if verbose {
-	//		spew.Dump(msg)
-	//	}
-
-	//	switch m := msg.(type) {
-	//	case *wire.MsgAddr:
-	//		go s.handleAddr(ctx, m)
-
-	//	case *wire.MsgAddrV2:
-	//		go s.handleAddrV2(ctx, m)
-
-	//	case *wire.MsgBlock:
-	//		go s.handleBlock(ctx, m)
-
-	//	case *wire.MsgFeeFilter:
-	//		// XXX shut up
-
-	//	case *wire.MsgInv:
-	//		go s.handleInv(ctx, m)
-
-	//	case *wire.MsgHeaders:
-	//		go s.handleHeaders(ctx, m)
-
-	//	case *wire.MsgPing:
-	//		go s.handlePing(ctx, peer, m)
-
-	//	default:
-	//		log.Errorf("unhandled message type: %T\n", msg)
-	//	}
-	//}
-}
-
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -1102,9 +910,6 @@ func (s *Server) Run(pctx context.Context) error {
 			}
 		}
 	}()
-
-	// s.wg.Add(1)
-	// go s.p2p(ctx)
 
 	select {
 	case <-ctx.Done():

@@ -32,14 +32,15 @@ CREATE TABLE blocks (
 -- peers table
 -- probably add a score based on throughput/latency/misbehavior/flapping etc
 CREATE TABLE peers (
-	address		TEXT NOT NULL,
+	host		TEXT NOT NULL,
 	port		TEXT NOT NULL,
 	last_at		TIMESTAMP,
 	created_at	TIMESTAMP NOT NULL DEFAULT NOW(),
 
-	CONSTRAINT peers_unique UNIQUE (address, port),
-	CONSTRAINT address_length CHECK (octet_length(address) < 80)
+	CONSTRAINT peers_unique UNIQUE (host, port),
+	CONSTRAINT host_length CHECK (octet_length(host) < 80),
+	CONSTRAINT port_length CHECK (octet_length(port) > 0)
 );
-CREATE INDEX peers_index ON peers (address);
+CREATE INDEX peers_index ON peers (host);
 
 COMMIT;
