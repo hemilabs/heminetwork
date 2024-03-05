@@ -922,7 +922,7 @@ func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
 }
 
 // l2KeystonesForProcessing creates copies of the l2 keystones, set them to
-// "processing", then returns the copies
+// "processing", then returns the copies with the newest first
 func (m *Miner) l2KeystonesForProcessing() []hemi.L2Keystone {
 	m.mtx.Lock()
 
