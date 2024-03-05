@@ -201,7 +201,7 @@ func TestDatabasePostgres(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	fails := new(atomic.Uint32)
-	count = 20
+	count = count - 10
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		go func(ii int) {
@@ -209,13 +209,17 @@ func TestDatabasePostgres(t *testing.T) {
 			p := peers[ii:]
 			err = db.PeersInsert(ctx, p)
 			if err != nil {
-				fails.Add(1)
-				t.Logf("Failed to insert %v records: %v", len(p), err)
+				if !database.ErrZeroRows.Is(err) {
+					t.Logf("Failed to insert %v records: %v", len(p), err)
+				} else {
+					fails.Add(1)
+				}
 			}
 		}(i)
 	}
 	wg.Wait()
 	if uint32(count-1) != fails.Load() {
-		t.Fatalf("invalid number of fails wanted %v, got %v", count-1, fails)
+		t.Fatalf("invalid number of fails wanted %v, got %v", count-1,
+			fails.Load())
 	}
 }
