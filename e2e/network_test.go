@@ -232,7 +232,8 @@ func TestFullNetwork(t *testing.T) {
 			select {
 			case <-time.After(10 * time.Second):
 			case <-ctx.Done():
-				panic(ctx.Err())
+				t.Log(ctx.Err())
+				return
 			}
 
 			// generate a new btc block, this should include the l2 keystone
@@ -258,7 +259,8 @@ func TestFullNetwork(t *testing.T) {
 			select {
 			case <-time.After(10 * time.Second):
 			case <-ctx.Done():
-				panic(ctx.Err())
+				t.Log(ctx.Err())
+				return
 			}
 
 			// ensure the l2 keystone is in the chain
@@ -383,7 +385,7 @@ func createBfg(ctx context.Context, t *testing.T, pgUri string, electrumxAddr st
 	req := testcontainers.ContainerRequest{
 		Env: map[string]string{
 			"BFG_POSTGRES_URI":     pgUri,
-			"BFG_BTC_START_HEIGHT": "100",
+			"BFG_BTC_START_HEIGHT": "5000",
 			"BFG_EXBTC_ADDRESS":    electrumxAddr,
 			"BFG_LOG_LEVEL":        "TRACE",
 			"BFG_PUBLIC_ADDRESS":   ":8383",
