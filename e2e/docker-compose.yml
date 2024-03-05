@@ -2,6 +2,7 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
+
 version: '3'
 services:
   bitcoind:
@@ -16,6 +17,9 @@ services:
       - '-txindex=1'
     ports:
       - 18443:18443
+    volumes:
+      - type: tmpfs
+        target: /bitcoin/.bitcoin
 
   initialblocks:
     image: 'kylemanna/bitcoind'
@@ -28,7 +32,7 @@ services:
       - '-rpcconnect=bitcoind'
       - 'generatetoaddress'
       - '300' # need to generate a lot for greater chance to not spend coinbase
-      - 'mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG'
+      - $BTC_ADDRESS
     depends_on:
       - bitcoind
 
@@ -43,14 +47,12 @@ services:
       - '-rpcconnect=bitcoind'
       - 'generatetoaddress'
       - '1'
-      - 'mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG'
+      - $BTC_ADDRESS
     deploy:
       restart_policy:
         condition: any
-        delay: "${HEMI_LOCAL_BTC_RATE_SECONDS:-5}s"
     depends_on:
       - bitcoind
-
   electrumx:
     image: 'lukechilds/electrumx'
     environment:
@@ -61,7 +63,7 @@ services:
       MAX_SEND: '8388608'
       NET: 'regtest'
     ports:
-      - 50001:50001
+      - 50001:8000
     depends_on: 
       - bitcoind
 
@@ -74,6 +76,9 @@ services:
       POSTGRES_HOST_AUTH_METHOD: "trust"
     ports:
       - 5432:5432
+    volumes:
+      - type: tmpfs
+        target: /var
 
   bfgd:
     build:
@@ -83,7 +88,7 @@ services:
       BFG_POSTGRES_URI: postgres://postgres@postgres:5432/bfg?sslmode=disable
       BFG_BTC_START_HEIGHT: "1"
       BFG_EXBTC_ADDRESS: electrumx:50001
-      BFG_LOG_LEVEL: TRACE
+      BFG_LOG_LEVEL: INFO
       BFG_PUBLIC_ADDRESS: ":8383"
       BFG_PRIVATE_ADDRESS: ":8080"
     ports:
@@ -91,6 +96,9 @@ services:
       - 8383:8383
     depends_on:
       - postgres
+    deploy:
+      restart_policy:
+        condition: any
 
   bssd:
     build:
@@ -98,7 +106,7 @@ services:
       context: ./..
     environment:
       BSS_BFG_URL: 'ws://bfgd:8080/v1/ws/private'
-      BSS_LOG_LEVEL: TRACE
+      BSS_LOG_LEVEL: INFO
       BSS_ADDRESS: ':8081'
     ports:
       - 8081:8081
@@ -110,19 +118,156 @@ services:
       dockerfile: ./docker/popmd/Dockerfile
       context: ./..
     environment:
-      POPM_BTC_PRIVKEY: '72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219740f'
+      POPM_BTC_PRIVKEY: ${POPM_BTC_PRIVATE_KEY}
       POPM_BFG_URL: http://bfgd:8383/v1/ws/public
-      POPM_LOG_LEVEL: TRACE
+      POPM_LOG_LEVEL: INFO
+      POPM_REMINE_THRESHOLD: '1'
     depends_on:
       - bfgd
-
-  mocktimism:
-    build:
-      dockerfile: ./e2e/mocktimism/Dockerfile
-      context: ./..
+  op-geth-l1:
+    image: ethereum/client-go:v1.13.14
+    command:
+      - --dev
+      - --dev.period
+      - '3'
+      - --keystore
+      - /tmp/keystore
+      - --password
+      - /tmp/passwords.txt
+      - --http
+      - --http.port=8545
+      - --http.addr
+      - '0.0.0.0'
+      - --http.vhosts
+      - '*'
+      - --syncmode=full 
+      - --gcmode=archive 
+      - --nodiscover 
+      - --maxpeers=0
+      - --authrpc.vhosts="*" 
+      - --rpc.allow-unprotected-txs
+      - --datadir
+      - /tmp/geth
+      - --gpo.percentile=0
+    ports:
+      - 8545:8545
+    working_dir: /tmp/geth
+    volumes:
+      - ./e2e/keystore:/tmp/keystore:ro
+      - ./e2e/passwords.txt:/tmp/passwords.txt:ro
+      - ./e2e/jwt.txt:/tmp/jwt.txt:ro
+      - geth:/tmp/geth
+      - type: tmpfs
+        target: /tmp
     environment:
-      MOCKTIMISM_BSS_URL: http://bssd:8081/v1/ws
-      MOCKTIMISM_L2K_RATE_SECONDS: ${HEMI_LOCAL_L2K_RATE_SECONDS}
+      CHAIN_ID: '900'
+  op-geth-l2:
+    build:
+      dockerfile: optimism-stack.Dockerfile
+      context: .
+    command:
+      - sh
+      - /tmp/entrypointl2.sh
+    environment:
+      ADMIN_PRIVATE_KEY: ${ADMIN_PRIVATE_KEY}
+      OP_GETH_L1_RPC: 'http://op-geth-l1:8545'
+    ports:
+      - 8551:8551
+      - 8546:8546
+    volumes:
+      - ./e2e/keystore:/tmp/keystore:ro
+      - ./e2e/passwords.txt:/tmp/passwords.txt:ro
+      - ./jwt.txt:/tmp/jwt.txt:ro
+      - ./entrypointl2.sh:/tmp/entrypointl2.sh
+      - ./genesisl2.sh:/tmp/genesisl2.sh
+      - ./output:/tmp/output
+      - l2configs:/l2configs
+      - ./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json
+      - ./deployments:/git/optimism/packages/contracts-bedrock/deployments
+      - ./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json
+      - type: tmpfs
+        target: /tmp
+    working_dir: /tmp
+    depends_on: 
+      - op-geth-l1
+  op-node:
+    build:
+      dockerfile: optimism-stack.Dockerfile
+      context: .
+    command: 
+      - op-node/bin/op-node
+      - --l2=ws://op-geth-l2:8551
+      - --l2.jwt-secret=/tmp/jwt.txt
+      - --sequencer.enabled
+      - --sequencer.l1-confs=0
+      - --verifier.l1-confs=0
+      - --rollup.config=/l2configs/rollup.json
+      - --rpc.addr=0.0.0.0
+      - --rpc.port=8547
+      - --p2p.disable
+      - --rpc.enable-admin 
+      - --l1=http://op-geth-l1:8545
+      - --l1.rpckind=standard
+      - --l1.trustrpc
+      - --log.level=trace
+      - --l1.trustrpc=true
+      - --l1.http-poll-interval=1s
+    volumes:
+      - l2configs:/l2configs
+      - ./jwt.txt:/tmp/jwt.txt
     depends_on:
-      - bssd
-
+      - op-geth-l1
+      - op-geth-l2
+    environment:
+      OP_NODE_BSS_WS: http://bssd:8081/v1/ws
+    deploy:
+      restart_policy:
+        condition: any
+  op-batcher:
+    build:
+      dockerfile: optimism-stack.Dockerfile
+      context: .
+    command: 
+      - op-batcher/bin/op-batcher
+      - --l2-eth-rpc=http://op-geth-l2:8546
+      - --rollup-rpc=http://op-node:8547
+      - --poll-interval=1s
+      - --sub-safety-margin=1
+      - --num-confirmations=1
+      - --safe-abort-nonce-too-low-count=3
+      - --resubmission-timeout=30s
+      - --rpc.addr=0.0.0.0
+      - --rpc.port=8548 
+      - --rpc.enable-admin
+      - --max-channel-duration=1
+      - --max-pending-tx=1
+      - --l1-eth-rpc=http://op-geth-l1:8545
+      - --private-key=${ADMIN_PRIVATE_KEY}
+      - op-geth-l1
+      - op-geth-l2
+      - op-node
+    deploy:
+      restart_policy:
+        condition: any
+  op-proposer:
+    build:
+      dockerfile: optimism-stack.Dockerfile
+      context: .
+    command: 
+      - op-proposer/bin/op-proposer
+      - --poll-interval=1s
+      - --rpc.port=8560
+      - --rollup-rpc=http://op-node:8547
+      - --l2oo-address=${L2OO_ADDRESS}
+      - --private-key=${ADMIN_PRIVATE_KEY}
+      - --l1-eth-rpc=http://op-geth-l1:8545
+    depends_on:
+      - op-geth-l1
+      - op-geth-l2
+      - op-node
+    deploy:
+      restart_policy:
+        condition: any
+volumes:
+  geth:
+  l2configs:
