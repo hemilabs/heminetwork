@@ -742,6 +742,30 @@ func TestProcessReceivedInAscOrderOverride(t *testing.T) {
 	}
 }
 
+func TestProcesAllKeystonesIfAble(t *testing.T) {
+	miner, err := NewMiner(&Config{
+		BTCPrivateKey: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
+		BTCChainName:  "testnet3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := uint32(1); i < 1000; i++ {
+		keystone := hemi.L2Keystone{
+			L2BlockNumber: i,
+			EPHash:        []byte{byte(i)},
+		}
+		miner.processReceivedKeystones(context.Background(), []hemi.L2Keystone{keystone})
+		for _, c := range miner.l2KeystonesForProcessing() {
+			diff := deep.Equal(c, keystone)
+			if len(diff) != 0 {
+				t.Fatalf("unexpected diff: %s", diff)
+			}
+		}
+	}
+}
+
 // TestProcessReceivedInAscOrderNoInsertIfTooOld ensures that if the queue
 // is full, and we try to insert a keystone that is older than every other
 // keystone, we don't insert it
