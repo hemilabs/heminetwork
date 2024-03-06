@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"net"
 	"strings"
-	"sync"
 	"time"
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -118,9 +117,6 @@ var (
 
 // Client implements an electrumx JSON RPC client.
 type Client struct {
-	id  uint64
-	mtx sync.Mutex
-
 	connPool *connPool
 }
 
@@ -310,7 +306,7 @@ func (c *Client) Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 	if err := c.call(ctx, "blockchain.transaction.get", &params, &txJSON); err != nil {
 		return nil, fmt.Errorf("failed to get transaction: %w", err)
 	}
-	return []byte(txJSON), nil
+	return txJSON, nil
 }
 
 func (c *Client) TransactionAtPosition(ctx context.Context, height, index uint64) ([]byte, []string, error) {

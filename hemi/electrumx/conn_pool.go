@@ -14,9 +14,16 @@ type connPool struct {
 	address string
 	dialer  net.Dialer
 
-	max  int
+	// max is the maximum number of connections this pool may hold.
+	max int
+
+	// poolMx is a mutex used for pool.
+	poolMx sync.Mutex
+
+	// pool is a queue used to store pooled connections.
+	// TODO(joshuasing): This is used as a basic queue, however there are much
+	//  more performant queue implementations that could be used.
 	pool []*clientConn
-	mx   sync.Mutex
 }
 
 // newConnPool creates a new connection pool.
@@ -61,12 +68,12 @@ func (p *connPool) onClose(conn *clientConn) {
 	log.Tracef("onClose")
 	defer log.Tracef("onClose exit")
 
-	p.mx.Lock()
+	p.poolMx.Lock()
 	// Remove the connection from the pool.
 	slices.DeleteFunc(p.pool, func(c *clientConn) bool {
 		return c == conn
 	})
-	p.mx.Unlock()
+	p.poolMx.Unlock()
 }
 
 // acquireConn returns a connection from the pool.
@@ -76,11 +83,11 @@ func (p *connPool) acquireConn() (*clientConn, error) {
 	defer log.Tracef("acquireConn exit")
 
 	var c *clientConn
-	p.mx.Lock()
+	p.poolMx.Lock()
 	if len(p.pool) > 0 {
 		c, p.pool = p.pool[0], p.pool[1:]
 	}
-	p.mx.Unlock()
+	p.poolMx.Unlock()
 
 	if c == nil {
 		// The connection pool is empty, create a new connection.
@@ -103,22 +110,22 @@ func (p *connPool) freeConn(conn *clientConn) {
 		return
 	}
 
-	p.mx.Lock()
+	p.poolMx.Lock()
 	if len(p.pool) >= p.max {
 		p.pool = append(p.pool, conn)
-		p.mx.Unlock()
+		p.poolMx.Unlock()
 		// The connection pool is full, close the connection.
 		_ = conn.Close()
 		return
 	}
 	p.pool = append(p.pool, conn)
-	p.mx.Unlock()
+	p.poolMx.Unlock()
 }
 
 // Close closes the connection pool and all stored connections.
 func (p *connPool) Close() error {
-	p.mx.Lock()
-	defer p.mx.Unlock()
+	p.poolMx.Lock()
+	defer p.poolMx.Unlock()
 
 	p.max = 0
 	for _, c := range p.pool {

@@ -20,12 +20,13 @@ const (
 
 // clientConn is a connection with an ElectrumX server.
 type clientConn struct {
-	conn net.Conn
-	mx   sync.Mutex
+	mx sync.Mutex
 
+	conn      net.Conn
 	requestID uint64
-	closeCh   chan struct{}
-	onClose   func(c *clientConn)
+
+	closeCh chan struct{}
+	onClose func(c *clientConn)
 }
 
 // newClientConn returns a new clientConn.
@@ -49,11 +50,11 @@ func (c *clientConn) call(ctx context.Context, method string, params, result any
 	c.requestID++
 
 	req := NewJSONRPCRequest(c.requestID, method, params)
-	if err := c.writeRequest(ctx, req); err != nil {
+	if err := writeRequest(ctx, c.conn, req); err != nil {
 		return fmt.Errorf("write request: %w", err)
 	}
 
-	res, err := c.readResponse(ctx, req.ID)
+	res, err := readResponse(ctx, c.conn, req.ID)
 	if err != nil {
 		var rpcErr RPCError
 		if errors.As(err, &rpcErr) {
@@ -72,7 +73,7 @@ func (c *clientConn) call(ctx context.Context, method string, params, result any
 }
 
 // writeRequest writes a request to the connection.
-func (c *clientConn) writeRequest(_ context.Context, req *JSONRPCRequest) error {
+func writeRequest(_ context.Context, w io.Writer, req *JSONRPCRequest) error {
 	log.Tracef("writeRequest")
 	defer log.Tracef("writeRequest exit")
 
@@ -82,7 +83,7 @@ func (c *clientConn) writeRequest(_ context.Context, req *JSONRPCRequest) error 
 	}
 	b = append(b, byte('\n'))
 
-	if _, err = io.Copy(c.conn, bytes.NewReader(b)); err != nil {
+	if _, err = io.Copy(w, bytes.NewReader(b)); err != nil {
 		return err
 	}
 
@@ -90,14 +91,14 @@ func (c *clientConn) writeRequest(_ context.Context, req *JSONRPCRequest) error 
 }
 
 // readResponse reads a response from the connection.
-func (c *clientConn) readResponse(ctx context.Context, reqID uint64) (*JSONRPCResponse, error) {
+func readResponse(ctx context.Context, r io.Reader, reqID uint64) (*JSONRPCResponse, error) {
 	log.Tracef("readResponse")
 	defer log.Tracef("readResponse exit")
 
-	reader := bufio.NewReader(c.conn)
+	reader := bufio.NewReader(r)
 	b, err := reader.ReadBytes('\n')
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return nil, err
 	}
 
 	var res JSONRPCResponse
@@ -119,7 +120,7 @@ func (c *clientConn) readResponse(ctx context.Context, reqID uint64) (*JSONRPCRe
 			default:
 			}
 			log.Debugf("Received a response from ElectrumX with ID 0, retrying read response...")
-			return c.readResponse(ctx, reqID)
+			return readResponse(ctx, r, reqID)
 		}
 		return nil, fmt.Errorf("response ID differs from request ID (%d != %d)", res.ID, reqID)
 	}
@@ -170,7 +171,9 @@ func (c *clientConn) Close() error {
 	c.mx.Lock()
 	defer c.mx.Unlock()
 
-	c.onClose(c)
+	if c.onClose != nil {
+		c.onClose(c)
+	}
 	close(c.closeCh)
 	return c.conn.Close()
 }
