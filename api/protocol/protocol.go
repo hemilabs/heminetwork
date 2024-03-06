@@ -258,6 +258,10 @@ func (e Error) String() string {
 	return fmt.Sprintf("%v [%v:%v]", e.Message, e.Trace, e.Timestamp)
 }
 
+func (e Error) Error() string {
+	return e.String()
+}
+
 // RequestError wraps an error to create a protocol request error.
 //
 // Request errors are usually something caused by a client, e.g. validation or
