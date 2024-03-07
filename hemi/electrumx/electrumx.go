@@ -150,10 +150,12 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 		return errors.New("connPool is nil")
 	}
 
-	return retry.Exponential(ctx, 1*time.Second, func(ctx context.Context) error {
+	backoff := retry.WithJitter(250*time.Millisecond,
+		retry.WithMaxRetries(5, retry.NewExponential(100*time.Millisecond)))
+	return retry.Do(ctx, backoff, func(ctx context.Context) error {
 		conn, err := c.connPool.acquireConn()
 		if err != nil {
-			return fmt.Errorf("acquire connection: %w", err) // TODO(joshuasing): retry this as well?
+			return retry.RetryableError(fmt.Errorf("acquire connection: %w", err))
 		}
 
 		if err = conn.call(ctx, method, params, result); err != nil {
