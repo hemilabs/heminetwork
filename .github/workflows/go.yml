@@ -14,7 +14,7 @@ on:
 
 concurrency:
   group: "go-${{ github.workflow }}-${{ github.event.number || github.ref }}"
-  cancel-in-progress: "${{ github.event.action == 'push' || github.event.action == 'pull_request' }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' }}"
 
 permissions:
   contents: read
