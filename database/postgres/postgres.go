@@ -50,6 +50,8 @@ type Database struct {
 	pool *sql.DB
 }
 
+var _ database.Database = (*Database)(nil)
+
 // Connect connects to a postgres database. This is only used in tests.
 func Connect(ctx context.Context, uri string) (*sql.DB, error) {
 	pool, err := sql.Open("postgres", uri)
