@@ -45,7 +45,7 @@ var (
 			DefaultValue: "",
 			Help:         "postgres connection URI",
 			Print:        config.PrintSecret,
-			Required:     true,
+			Required:     false,
 		},
 		"TBC_PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,
