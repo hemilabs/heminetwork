@@ -36,7 +36,7 @@ const (
 	mainnetPort = "8333"
 	testnetPort = "18333"
 
-	defaultPeersWanted   = 16 // XXX go with 64
+	defaultPeersWanted   = 64 // XXX go with 64
 	defaultPendingBlocks = 64 // XXX go with 64
 )
 
