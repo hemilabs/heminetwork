@@ -124,17 +124,17 @@ func (p *pgdb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error)
 	return bhs, nil
 }
 
-func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.BlockHeader, error) {
-	log.Tracef("BlockHeadersMissing")
-	defer log.Tracef("BlockHeadersMissing exit")
+func (p *pgdb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentifier, error) {
+	log.Tracef("BlocksMissing")
+	defer log.Tracef("BlocksMissing exit")
 
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelReadCommitted,
-		//Isolation: sql.LevelRepeatableRead,
-		//Isolation: sql.LevelSerializable,
+		// Isolation: sql.LevelRepeatableRead,
+		// Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
 		return nil, err
@@ -159,7 +159,7 @@ func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.Block
 		return nil, fmt.Errorf("could not prepare block headers missing: %v", err)
 	}
 
-	bhs := make([]tbcd.BlockHeader, 0, count)
+	bis := make([]tbcd.BlockIdentifier, 0, count)
 	rows, err := s.QueryContext(ctx, count)
 	if err != nil {
 		return nil, err
@@ -168,14 +168,14 @@ func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.Block
 	defer rows.Close()
 
 	for rows.Next() {
-		var bh tbcd.BlockHeader
-		if err := rows.Scan(&bh.Hash, &bh.Height, &bh.Header, &bh.CreatedAt); err != nil {
+		var bi tbcd.BlockIdentifier
+		if err := rows.Scan(&bi.Hash, &bi.Height); err != nil {
 			if err == sql.ErrNoRows {
-				return nil, database.NotFoundError("block header data not found")
+				return nil, database.NotFoundError("block missing data not found")
 			}
 			return nil, err
 		}
-		bhs = append(bhs, bh)
+		bis = append(bis, bi)
 	}
 
 	if rows.Err() != nil {
@@ -187,7 +187,7 @@ func (p *pgdb) BlockHeadersMissing(ctx context.Context, count int) ([]tbcd.Block
 		return nil, err
 	}
 
-	return bhs, nil
+	return bis, nil
 }
 
 func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) error {
@@ -203,8 +203,8 @@ func (p *pgdb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) e
 
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelReadCommitted,
-		//Isolation: sql.LevelRepeatableRead,
-		//Isolation: sql.LevelSerializable,
+		// Isolation: sql.LevelRepeatableRead,
+		// Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
 		return err
@@ -261,8 +261,8 @@ func (p *pgdb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelReadCommitted,
-		//Isolation: sql.LevelRepeatableRead,
-		//Isolation: sql.LevelSerializable,
+		// Isolation: sql.LevelRepeatableRead,
+		// Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
 		return -1, err
@@ -345,8 +345,8 @@ func (p *pgdb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 
 	tx, err := p.db.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelReadCommitted,
-		//Isolation: sql.LevelRepeatableRead,
-		//Isolation: sql.LevelSerializable,
+		// Isolation: sql.LevelRepeatableRead,
+		// Isolation: sql.LevelSerializable,
 	})
 	if err != nil {
 		return err

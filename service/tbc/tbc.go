@@ -24,6 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/database/tbcd/postgres"
 )
 
@@ -35,7 +36,7 @@ const (
 	mainnetPort = "8333"
 	testnetPort = "18333"
 
-	defaultPeersWanted   = 16 // XXX go with 64
+	defaultPeersWanted   = 1  // XXX go with 64
 	defaultPendingBlocks = 16 // XXX go with 64
 )
 
@@ -604,13 +605,13 @@ func (s *Server) handleInv(ctx context.Context, msg *wire.MsgInv) {
 	log.Tracef("handleInv")
 	defer log.Tracef("handleInv exit")
 
-	var mb []tbcd.BlockHeader
+	var bis []tbcd.BlockIdentifier
 	for k := range msg.InvList {
 		switch msg.InvList[k].Type {
 		case wire.InvTypeBlock:
 			log.Infof("handleInv: block %v", msg.InvList[k].Hash)
 
-			mb = append(mb, tbcd.BlockHeader{
+			bis = append(bis, tbcd.BlockIdentifier{
 				Hash: msg.InvList[k].Hash[:], // fake out
 			})
 		case wire.InvTypeTx:
@@ -620,8 +621,8 @@ func (s *Server) handleInv(ctx context.Context, msg *wire.MsgInv) {
 		}
 	}
 
-	if len(mb) > 0 {
-		err := s.downloadBlocks(ctx, mb)
+	if len(bis) > 0 {
+		err := s.downloadBlocks(ctx, bis)
 		if err != nil {
 			log.Errorf("download blocks: %v", err)
 			return
@@ -758,13 +759,13 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 		s.mtx.Unlock()
 	}()
 
-	mb, err := s.db.BlockHeadersMissing(ctx, defaultPendingBlocks)
+	bm, err := s.db.BlocksMissing(ctx, defaultPendingBlocks)
 	if err != nil {
 		log.Errorf("block headers missing: %v", err)
 		return
 	}
 	// downdloadBlocks will only insert unseen in the cache
-	err = s.downloadBlocks(ctx, mb)
+	err = s.downloadBlocks(ctx, bm)
 	if err != nil {
 		log.Errorf("download blocks: %v", err)
 		return
@@ -810,13 +811,13 @@ func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, erro
 	return bhs, nil
 }
 
-func (s *Server) downloadBlocks(ctx context.Context, bhs []tbcd.BlockHeader) error {
+func (s *Server) downloadBlocks(ctx context.Context, bis []tbcd.BlockIdentifier) error {
 	log.Tracef("downloadBlocks")
 	defer log.Tracef("downloadBlocks exit")
 
-	for k := range bhs {
-		bh := bhs[k]
-		hash, _ := chainhash.NewHash(bh.Hash[:])
+	for k := range bis {
+		bi := bis[k]
+		hash, _ := chainhash.NewHash(bi.Hash[:])
 		hashS := hash.String()
 		getData := wire.NewMsgGetData()
 		getData.InvList = append(getData.InvList,
@@ -859,8 +860,16 @@ func (s *Server) Run(pctx context.Context) error {
 
 	// Connect to db.
 	// XXX should we reconnect?
+	if false {
+		var err error
+		s.db, err = postgres.New(ctx, s.cfg.PgURI)
+		if err != nil {
+			return fmt.Errorf("Failed to connect to database: %v", err)
+		}
+		defer s.db.Close()
+	}
 	var err error
-	s.db, err = postgres.New(ctx, s.cfg.PgURI)
+	s.db, err = level.New(ctx, "~/.tbc")
 	if err != nil {
 		return fmt.Errorf("Failed to connect to database: %v", err)
 	}
