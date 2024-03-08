@@ -36,8 +36,8 @@ const (
 	mainnetPort = "8333"
 	testnetPort = "18333"
 
-	defaultPeersWanted   = 1  // XXX go with 64
-	defaultPendingBlocks = 16 // XXX go with 64
+	defaultPeersWanted   = 16 // XXX go with 64
+	defaultPendingBlocks = 64 // XXX go with 64
 )
 
 var testnetSeeds = []string{
