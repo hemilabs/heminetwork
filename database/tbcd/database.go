@@ -19,12 +19,12 @@ type Database interface {
 	// Block header
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
 	BlockHeadersBest(ctx context.Context) ([]BlockHeader, error)
-	BlockHeadersMissing(ctx context.Context, count int) ([]BlockHeader, error)
-
 	BlockHeadersInsert(ctx context.Context, bhs []BlockHeader) error
 
 	// Block
+	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
 	BlockInsert(ctx context.Context, b *Block) (int64, error)
+	// BlocksInsert(ctx context.Context, bs []*Block) (int64, error)
 
 	// Peer manager
 	PeersInsert(ctx context.Context, peers []Peer) error     // insert or update
@@ -43,6 +43,12 @@ type Block struct {
 	Hash      database.ByteArray
 	Block     database.ByteArray
 	CreatedAt database.Timestamp `deep:"-"`
+}
+
+// BlockIdentifier uniquely identifies a block using it's hash and height.
+type BlockIdentifier struct {
+	Height uint64
+	Hash   database.ByteArray
 }
 
 type Peer struct {
