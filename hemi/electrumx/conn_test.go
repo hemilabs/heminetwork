@@ -5,11 +5,69 @@
 package electrumx
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"strings"
 	"testing"
+
+	"github.com/phayes/freeport"
 )
+
+func TestClientConn(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server, cleanup := createMockServer(ctx, t)
+	defer cleanup()
+
+	conn, err := net.Dial("tcp", server.address)
+	if err != nil {
+		t.Fatalf("failed to dial server: %v", err)
+	}
+	defer conn.Close()
+
+	c := newClientConn(conn, nil)
+
+	tests := []struct {
+		name   string
+		method string
+
+		wantErr         bool
+		wantErrContains string
+	}{
+		{
+			name:   "ping",
+			method: "server.ping",
+		},
+		{
+			name:            "response id mismatch",
+			method:          "test.mismatch.res-id",
+			wantErr:         true,
+			wantErrContains: "response ID differs from request ID",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := c.call(ctx, tt.method, nil, nil)
+			switch {
+			case (err != nil) != tt.wantErr:
+				t.Errorf("call err = %v, want err %v",
+					err, tt.wantErr)
+			case err != nil && tt.wantErr:
+				if tt.wantErrContains != "" && !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Errorf("call err = %q, want contains %q",
+						err.Error(), tt.wantErrContains)
+				}
+			}
+		})
+	}
+}
 
 func TestWriteRequest(t *testing.T) {
 	tests := []struct {
@@ -23,7 +81,7 @@ func TestWriteRequest(t *testing.T) {
 			want: "{\"jsonrpc\":\"2.0\",\"method\":\"test\",\"id\":1}\n",
 		},
 		{
-			name: "with-params",
+			name: "with params",
 			req: NewJSONRPCRequest(2, "test", map[string]any{
 				"test": true,
 			}),
@@ -102,4 +160,121 @@ func TestReadResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+type mockServer struct {
+	address string
+
+	stateCh chan bool
+}
+
+func createMockServer(ctx context.Context, t *testing.T) (*mockServer, func()) {
+	addr := createAddress()
+	stateCh := make(chan bool, 25)
+
+	s := &mockServer{
+		address: addr,
+		stateCh: stateCh,
+	}
+
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleanup := func() {
+		_ = l.Close()
+		close(stateCh)
+	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			conn, err := l.Accept()
+			if err != nil && strings.Contains(err.Error(), "use of closed network connection") {
+				continue
+			}
+
+			go s.handleConnection(ctx, t, conn)
+		}
+	}()
+
+	return s, cleanup
+}
+
+func (s *mockServer) handleConnection(ctx context.Context, t *testing.T, conn net.Conn) {
+	select {
+	case s.stateCh <- true:
+	default:
+	}
+	defer func() {
+		select {
+		case s.stateCh <- false:
+		default:
+		}
+	}()
+
+	defer conn.Close()
+
+	t.Logf("Handling connection: %s", conn.RemoteAddr())
+	reader := bufio.NewReader(conn)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		b, err := reader.ReadBytes('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			t.Errorf("failed to read from connection: %v", err)
+			continue
+		}
+
+		var req JSONRPCRequest
+		if err := json.Unmarshal(b, &req); err != nil {
+			t.Errorf("failed to unmarshal request: %v", err)
+			continue
+		}
+
+		res := &JSONRPCResponse{}
+
+		if req.Method == "server.ping" {
+			res.ID = req.ID
+		}
+
+		if req.Method == "test.mismatch.res-id" {
+			res.ID = 0x4a6f73687561
+		}
+
+		if res.ID != 0 {
+			b, err = json.Marshal(res)
+			if err != nil {
+				t.Errorf("failed to marshal response: %v", err)
+				continue
+			}
+			b = append(b, '\n')
+
+			_, err = io.Copy(conn, bytes.NewReader(b))
+			if err != nil {
+				t.Errorf("failed to write response: %v", err)
+			}
+		}
+	}
+}
+
+func createAddress() string {
+	port, err := freeport.GetFreePort()
+	if err != nil {
+		panic(fmt.Errorf("find free port: %v", err))
+	}
+	return fmt.Sprintf("localhost:%d", port)
 }

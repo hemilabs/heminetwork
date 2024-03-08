@@ -116,26 +116,34 @@ func (p *connPool) freeConn(conn *clientConn) {
 
 	p.poolMx.Lock()
 	if len(p.pool) >= p.max {
-		p.pool = append(p.pool, conn)
 		p.poolMx.Unlock()
 		// The connection pool is full, close the connection.
 		_ = conn.Close()
 		return
 	}
+
 	p.pool = append(p.pool, conn)
 	p.poolMx.Unlock()
+}
+
+// size returns the number of connections in the pool.
+func (p *connPool) size() int {
+	p.poolMx.Lock()
+	defer p.poolMx.Unlock()
+	return len(p.pool)
 }
 
 // Close closes the connection pool and all stored connections.
 func (p *connPool) Close() error {
 	p.poolMx.Lock()
-	defer p.poolMx.Unlock()
-
+	var pool []*clientConn
+	copy(pool, p.pool)
+	p.pool = nil
 	p.max = 0
-	for _, c := range p.pool {
+	p.poolMx.Unlock()
+
+	for _, c := range pool {
 		_ = c.Close()
 	}
-	p.pool = nil
-
 	return nil
 }
