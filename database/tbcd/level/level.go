@@ -96,7 +96,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	j, err := tx.Get(hash, nil)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
-			return nil, nil
+			return nil, database.NotFoundError(fmt.Sprintf("header not found: %x", hash))
 		}
 		return nil, fmt.Errorf("block headers best: %w", err)
 	}
