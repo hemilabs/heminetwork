@@ -230,4 +230,8 @@ func TestLevelDB(t *testing.T) {
 	if len(missing) != 0 {
 		t.Fatalf("expected missing table to be empty: %v", spew.Sdump(missing))
 	}
+	if len(ldb.blocksMissingCache) != 0 {
+		t.Fatalf("expected missing blocks cache to be empty: %v",
+			spew.Sdump(ldb.blocksMissingCache))
+	}
 }
