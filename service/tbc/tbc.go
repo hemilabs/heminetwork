@@ -440,6 +440,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			if err != nil {
 				log.Debugf("peer delete (%v): %v", pp, err)
 			}
+			log.Infof("Peer delete: %v", pp) // XXX remove this later, debug for now
 		}(p)
 		log.Debugf("connect: %v", err)
 		return
