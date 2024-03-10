@@ -363,6 +363,10 @@ func (s *Server) peerManager(ctx context.Context) error {
 			// Connect peer
 			for i := 0; i < peersWanted-peersActive; i++ {
 				address := net.JoinHostPort(seeds[x].Host, seeds[x].Port)
+				if len(address) < 7 {
+					// weed out anything < len("0.0.0.0")
+					continue
+				}
 
 				peer, err := NewPeer(s.wireNet, address)
 				if err != nil {
