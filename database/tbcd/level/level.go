@@ -84,12 +84,12 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	bhsDB := l.pool[level.BlockHeadersDB]
 	tx, err := bhsDB.OpenTransaction()
 	if err != nil {
-		return nil, fmt.Errorf("block headers best transaction: %w", err)
+		return nil, fmt.Errorf("block headers by hash transaction: %w", err)
 	}
 	discard := true
 	defer func() {
 		if discard {
-			log.Debugf("BlockHeadersBest discarding transaction")
+			log.Debugf("BlockHeadersByHash discarding transaction")
 			tx.Discard()
 		}
 	}()
@@ -100,17 +100,17 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 		if err == leveldb.ErrNotFound {
 			return nil, database.NotFoundError(fmt.Sprintf("header not found: %x", hash))
 		}
-		return nil, fmt.Errorf("block headers best: %w", err)
+		return nil, fmt.Errorf("block headers by hash: %w", err)
 	}
 	var bh tbcd.BlockHeader
 	err = json.Unmarshal(j, &bh)
 	if err != nil {
-		return nil, fmt.Errorf("block headers best unmarshal: %w", err)
+		return nil, fmt.Errorf("block headers by hash unmarshal: %w", err)
 	}
 
 	err = tx.Commit()
 	if err != nil {
-		return nil, fmt.Errorf("block headers best: %w", err)
+		return nil, fmt.Errorf("block headers by hash: %w", err)
 	}
 
 	discard = false
