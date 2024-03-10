@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -561,6 +562,10 @@ func (l *ldb) PeerDelete(ctx context.Context, host, port string) error {
 	return nil
 }
 
+func init() {
+	rand.Seed(time.Now().Unix()) // XXX unfuck PeersRandom
+}
+
 func (l *ldb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
 	log.Tracef("PeersRandom")
 	defer log.Tracef("PeersRandom exit")
@@ -583,10 +588,16 @@ func (l *ldb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
 
 	// Read a record and skip some
 	x := 0
+	skip := int64(1)
 	peers := make([]tbcd.Peer, 0, count)
 	it := peersTx.NewIterator(nil, nil)
 	defer it.Release()
 	for it.Next() {
+		skip--
+		if skip > 0 {
+			continue
+		}
+		skip = rand.Int63n(32)
 		var peer tbcd.Peer
 		err := json.Unmarshal(it.Value(), &peer)
 		if err != nil {
