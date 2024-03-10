@@ -136,7 +136,6 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	err = l.openDB(BlocksMissingDB, &opt.Options{
 		BlockCacheCapacity: 256 * opt.MiB,
 	})
-
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
 	}
