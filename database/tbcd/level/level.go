@@ -45,7 +45,9 @@ func init() {
 }
 
 type ldb struct {
-	mtx sync.Mutex
+	mtx                       sync.Mutex
+	blocksMissingCacheEnabled bool
+	blocksMissingCache        map[string]*cacheEntry // XXX purge and manages cache size
 
 	*level.Database
 	pool level.Pool
@@ -63,8 +65,10 @@ func New(ctx context.Context, home string) (*ldb, error) {
 	}
 	log.Debugf("tbcdb database version: %v", ldbVersion)
 	l := &ldb{
-		Database: ld,
-		pool:     ld.DB(),
+		Database:                  ld,
+		pool:                      ld.DB(),
+		blocksMissingCacheEnabled: true, // XXX make setting
+		blocksMissingCache:        make(map[string]*cacheEntry, 1024),
 	}
 
 	return l, nil
@@ -285,10 +289,15 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) er
 	return nil
 }
 
+type cacheEntry struct {
+	height    uint64
+	timestamp time.Time
+}
+
 // XXX return hash and height only
 func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentifier, error) {
-	log.Tracef("BlockHeadersMissing")
-	defer log.Tracef("BlockHeadersMissing exit")
+	log.Tracef("BlocksMissing")
+	defer log.Tracef("BlocksMissing exit")
 
 	bmDB := l.pool[level.BlocksMissingDB]
 	bmTx, err := bmDB.OpenTransaction()
@@ -298,7 +307,7 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 	bmDiscard := true
 	defer func() {
 		if bmDiscard {
-			log.Debugf("BlockHeadersMissing discarding transaction")
+			log.Debugf("BlocksMissing discarding transaction")
 			bmTx.Discard()
 		}
 	}()
@@ -311,6 +320,16 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 		bh := tbcd.BlockIdentifier{}
 		bh.Height, bh.Hash = keyToHeightHash(it.Key())
 		bis = append(bis, bh)
+
+		// cache the reply
+		if l.blocksMissingCacheEnabled {
+			l.mtx.Lock()
+			l.blocksMissingCache[string(bh.Hash)] = &cacheEntry{
+				height:    bh.Height,
+				timestamp: time.Now(),
+			}
+			l.mtx.Unlock()
+		}
 
 		x++
 		if x >= count {
@@ -331,19 +350,36 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	log.Tracef("BlockInsert")
 	defer log.Tracef("BlockInsert exit")
 
-	// Open the block headers database transaction
-	bhsDB := l.pool[level.BlockHeadersDB]
-	bhsTx, err := bhsDB.OpenTransaction()
-	if err != nil {
-		return -1, fmt.Errorf("block headers open transaction: %w", err)
-	}
-	bhsDiscard := true
+	l.mtx.Lock()
+	ce := l.blocksMissingCache[string(b.Hash)]
+	l.mtx.Unlock()
 	defer func() {
-		if bhsDiscard {
-			log.Debugf("BlockInsert discarding transaction")
-			bhsTx.Discard()
-		}
+		// XXX purge cache as well
+		l.mtx.Lock()
+		delete(l.blocksMissingCache, string(b.Hash))
+		l.mtx.Unlock()
 	}()
+
+	var (
+		bhsTx      *leveldb.Transaction
+		err        error
+		bhsDiscard bool
+	)
+	if ce == nil {
+		// Open the block headers database transaction
+		bhsDB := l.pool[level.BlockHeadersDB]
+		bhsTx, err = bhsDB.OpenTransaction()
+		if err != nil {
+			return -1, fmt.Errorf("block headers open transaction: %w", err)
+		}
+		bhsDiscard = true
+		defer func() {
+			if bhsDiscard {
+				log.Debugf("BlockInsert discarding transaction")
+				bhsTx.Discard()
+			}
+		}()
+	}
 
 	// Open the blocks missing database transaction
 	bmDB := l.pool[level.BlocksMissingDB]
@@ -374,17 +410,22 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	}()
 
 	// Determine block height
-	bhj, err := bhsTx.Get(b.Hash[:], nil)
-	if err != nil {
-		if err == leveldb.ErrNotFound {
-			return -1, database.NotFoundError(fmt.Sprintf("block header not found: %x", b.Hash))
-		}
-		return -1, fmt.Errorf("block insert block header: %w", err)
-	}
 	var bh tbcd.BlockHeader
-	err = json.Unmarshal(bhj, &bh)
-	if err != nil {
-		return -1, fmt.Errorf("block insert unmarshal: %w", err)
+	if ce == nil {
+		bhj, err := bhsTx.Get(b.Hash[:], nil)
+		if err != nil {
+			if err == leveldb.ErrNotFound {
+				return -1, database.NotFoundError(fmt.Sprintf("block header not found: %x", b.Hash))
+			}
+			return -1, fmt.Errorf("block insert block header: %w", err)
+		}
+		err = json.Unmarshal(bhj, &bh)
+		if err != nil {
+			return -1, fmt.Errorf("block insert unmarshal: %w", err)
+		}
+	} else {
+		bh.Height = ce.height
+		bh.Hash = b.Hash
 	}
 
 	// Remove block identifier from blocks missing
@@ -422,11 +463,13 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	}
 	bmDiscard = false
 
-	err = bhsTx.Commit()
-	if err != nil {
-		return -1, fmt.Errorf("blocks headers commit: %w", err)
+	if ce == nil {
+		err = bhsTx.Commit()
+		if err != nil {
+			return -1, fmt.Errorf("blocks headers commit: %w", err)
+		}
+		bhsDiscard = false
 	}
-	bhsDiscard = false
 
 	// XXX think about Height type; why are we forced to mix types?
 	return int64(bh.Height), nil
