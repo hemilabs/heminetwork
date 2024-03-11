@@ -600,16 +600,17 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	// XXX It may be possible to remove the transaction for bmTx as well
 	// since the only risk would be duplicate work. Reason about this some more.
 
-	// blocks missing transaction
-	bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
-	if err != nil {
-		return -1, fmt.Errorf("blocks missing open transaction: %w", err)
-	}
-	defer bmDiscard()
+	//// blocks missing transaction
+	//bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
+	//if err != nil {
+	//	return -1, fmt.Errorf("blocks missing open transaction: %w", err)
+	//}
+	//defer bmDiscard()
 
 	// Remove block identifier from blocks missing
 	key := heightHashToKey(bh.Height, bh.Hash)
-	err = bmTx.Delete(key, nil)
+	bmDB := l.pool[level.BlocksMissingDB]
+	err = bmDB.Delete(key, nil)
 	if err != nil {
 		// Ignore not found
 		if err == leveldb.ErrNotFound {
@@ -619,11 +620,11 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		}
 	}
 
-	// blocks missing commit
-	err = bmCommit()
-	if err != nil {
-		return -1, fmt.Errorf("block missing commit: %w", err)
-	}
+	//// blocks missing commit
+	//err = bmCommit()
+	//if err != nil {
+	//	return -1, fmt.Errorf("block missing commit: %w", err)
+	//}
 
 	// XXX think about Height type; why are we forced to mix types?
 	return int64(bh.Height), nil
