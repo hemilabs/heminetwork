@@ -121,6 +121,10 @@ type Server struct {
 
 	cfg *Config
 
+	// stats
+	printTime      time.Time
+	blocksInserted uint64
+
 	// bitcoin network
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
@@ -192,9 +196,10 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 	s := &Server{
-		cfg:    cfg,
-		blocks: make(map[string]*blockPeer, defaultPendingBlocks),
-		peers:  make(map[string]*peer, defaultPeersWanted),
+		cfg:       cfg,
+		printTime: time.Now().Add(10 * time.Second),
+		blocks:    make(map[string]*blockPeer, defaultPendingBlocks),
+		peers:     make(map[string]*peer, defaultPeersWanted),
 	}
 
 	// We could use a PGURI verification here.
@@ -439,8 +444,9 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			err = s.db.PeerDelete(ctx, host, port)
 			if err != nil {
 				log.Debugf("peer delete (%v): %v", pp, err)
+			} else {
+				log.Debugf("Peer delete: %v", pp)
 			}
-			log.Infof("Peer delete: %v", pp) // XXX remove this later, debug for now
 		}(p)
 		log.Debugf("connect: %v", err)
 		return
@@ -652,6 +658,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		return
 	}
 
+	// XXX do some nominal height check and reject blocks we have seen.
+	// Maybe move host to peersBad as well.
+
 	// Make sure we can connect these headers in database
 	dbpbh, err := s.db.BlockHeaderByHash(ctx, msg.Headers[0].PrevBlock[:])
 	if err != nil {
@@ -736,9 +745,34 @@ func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 	}
 
 	// Whatever happens,, delete from cache and potentially try again
+	var (
+		printStats     bool
+		lastPrint      time.Time
+		delta          time.Duration
+		blocksInserted uint64
+	)
 	s.mtx.Lock()
 	delete(s.blocks, bhs) // remove inserted block
+
+	// Stats
+	if err == nil {
+		s.blocksInserted++
+	}
+	now := time.Now()
+	if now.After(s.printTime) {
+		printStats = true
+		blocksInserted = s.blocksInserted
+		lastPrint = s.printTime
+		delta = now.Sub(lastPrint)
+
+		s.blocksInserted = 0
+		s.printTime = now.Add(10 * time.Second)
+	}
 	s.mtx.Unlock()
+
+	if printStats {
+		log.Infof("Inserted %v blocks in the last %v", blocksInserted, delta)
+	}
 
 	s.checkBlockCache(ctx)
 }
