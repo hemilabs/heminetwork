@@ -9,13 +9,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -50,6 +49,10 @@ type ldb struct {
 	blocksMissingCacheEnabled bool
 	blocksMissingCache        map[string]*cacheEntry // XXX purge and manages cache size
 
+	// XXX remove this
+	peersGood map[string]struct{}
+	peersBad  map[string]struct{}
+
 	*level.Database
 	pool level.Pool
 }
@@ -70,6 +73,8 @@ func New(ctx context.Context, home string) (*ldb, error) {
 		pool:                      ld.DB(),
 		blocksMissingCacheEnabled: true, // XXX make setting
 		blocksMissingCache:        make(map[string]*cacheEntry, 1024),
+		peersGood:                 make(map[string]struct{}, 1000),
+		peersBad:                  make(map[string]struct{}, 1000),
 	}
 
 	return l, nil
@@ -480,144 +485,202 @@ func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	log.Tracef("PeersInsert")
 	defer log.Tracef("PeersInsert exit")
 
-	if len(peers) == 0 {
-		return fmt.Errorf("peers insert: no peers to insert")
-	}
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
 
-	// Open the block peers database
-	peersDB := l.pool[level.PeersDB]
-	peersTx, err := peersDB.OpenTransaction()
-	if err != nil {
-		return fmt.Errorf("peers open transaction: %w", err)
-	}
-	peersDiscard := true
-	defer func() {
-		if peersDiscard {
-			log.Debugf("PeersInsert discarding transaction: %v", len(peers))
-			peersTx.Discard()
-		}
-	}()
-
-	// Insert/update missing peers.
-	peersBatch := new(leveldb.Batch)
 	for k := range peers {
-		// Insert JSON encoded peer record
-		peers[k].CreatedAt = database.NewTimestamp(time.Now())
-		peerj, err := json.Marshal(peers[k])
-		if err != nil {
-			return fmt.Errorf("json marshal %v: %w", k, err)
+		p := peers[k]
+		a := net.JoinHostPort(p.Host, p.Port)
+		if len(a) < 7 {
+			// 0.0.0.0
+			continue
 		}
-		address := net.JoinHostPort(peers[k].Host, peers[k].Port)
-		peersBatch.Put([]byte(address), peerj)
-	}
+		if strings.HasPrefix(a, "[") {
+			// XXX skip v6 for now with crude test
+			continue
+		}
+		if _, ok := l.peersBad[a]; ok {
+			// Skip bad peers
+			continue
+		}
+		if _, ok := l.peersGood[a]; ok {
+			// Not strictly needed to skip but this os working pseudode code
+			continue
+		}
 
-	// Write peers batch
-	err = peersTx.Write(peersBatch, nil)
-	if err != nil {
-		return fmt.Errorf("peers insert: %w", err)
+		l.peersGood[a] = struct{}{}
 	}
-
-	// Commit peers table
-	err = peersTx.Commit()
-	if err != nil {
-		return fmt.Errorf("peers commit: %w", err)
-	}
-	peersDiscard = false
 
 	return nil
+
+	//if len(peers) == 0 {
+	//	return fmt.Errorf("peers insert: no peers to insert")
+	//}
+
+	//// Open the block peers database
+	//peersDB := l.pool[level.PeersDB]
+	//peersTx, err := peersDB.OpenTransaction()
+	//if err != nil {
+	//	return fmt.Errorf("peers open transaction: %w", err)
+	//}
+	//peersDiscard := true
+	//defer func() {
+	//	if peersDiscard {
+	//		log.Debugf("PeersInsert discarding transaction: %v", len(peers))
+	//		peersTx.Discard()
+	//	}
+	//}()
+
+	//// Insert/update missing peers.
+	//peersBatch := new(leveldb.Batch)
+	//for k := range peers {
+	//	address := net.JoinHostPort(peers[k].Host, peers[k].Port)
+	//	if ok, err := peersTx.Has([]byte(address), nil); err == nil && ok {
+	//		continue
+	//	}
+
+	//	// Insert JSON encoded peer record
+	//	peers[k].CreatedAt = database.NewTimestamp(time.Now())
+	//	peerj, err := json.Marshal(peers[k])
+	//	if err != nil {
+	//		return fmt.Errorf("json marshal %v: %w", k, err)
+	//	}
+	//	peersBatch.Put([]byte(address), peerj)
+	//}
+
+	//// Write peers batch
+	//err = peersTx.Write(peersBatch, nil)
+	//if err != nil {
+	//	return fmt.Errorf("peers insert: %w", err)
+	//}
+
+	//// Commit peers table
+	//err = peersTx.Commit()
+	//if err != nil {
+	//	return fmt.Errorf("peers commit: %w", err)
+	//}
+	//peersDiscard = false
+
+	//return nil
 }
 
 func (l *ldb) PeerDelete(ctx context.Context, host, port string) error {
 	log.Tracef("PeerDelete")
 	defer log.Tracef("PeerDelete exit")
 
-	address := net.JoinHostPort(host, port)
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
 
-	// Open the block peers database
-	peersDB := l.pool[level.PeersDB]
-	peersTx, err := peersDB.OpenTransaction()
-	if err != nil {
-		return fmt.Errorf("peers delete transaction: %w", err)
+	a := net.JoinHostPort(host, port)
+	if len(a) < 7 {
+		// 0.0.0.0
+		return nil
 	}
-	peersDiscard := true
-	defer func() {
-		if peersDiscard {
-			log.Debugf("PeerDelete discarding transaction: %v", address)
-			peersTx.Discard()
-		}
-	}()
-
-	err = peersTx.Delete([]byte(address), nil)
-	if err != nil {
-		return fmt.Errorf("peers delete: %w", err)
+	if strings.HasPrefix(a, "[") {
+		// XXX skip v6 for now with crude test
+		return nil
 	}
 
-	// Commit peers table
-	err = peersTx.Commit()
-	if err != nil {
-		return fmt.Errorf("peers commit: %w", err)
+	if _, ok := l.peersGood[a]; ok {
+		delete(l.peersGood, a)
+		l.peersBad[a] = struct{}{}
 	}
-	peersDiscard = false
-
 	return nil
-}
 
-func init() {
-	rand.Seed(time.Now().Unix()) // XXX unfuck PeersRandom
+	//// Open the block peers database
+	//peersDB := l.pool[level.PeersDB]
+	//peersTx, err := peersDB.OpenTransaction()
+	//if err != nil {
+	//	return fmt.Errorf("peers delete transaction: %w", err)
+	//}
+	//peersDiscard := true
+	//defer func() {
+	//	if peersDiscard {
+	//		log.Debugf("PeerDelete discarding transaction: %v", address)
+	//		peersTx.Discard()
+	//	}
+	//}()
+
+	//err = peersTx.Delete([]byte(address), nil)
+	//if err != nil {
+	//	return fmt.Errorf("peers delete: %w", err)
+	//}
+
+	//// Commit peers table
+	//err = peersTx.Commit()
+	//if err != nil {
+	//	return fmt.Errorf("peers commit: %w", err)
+	//}
+	//peersDiscard = false
+
+	//return nil
 }
 
 func (l *ldb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
 	log.Tracef("PeersRandom")
 	defer log.Tracef("PeersRandom exit")
 
-	// XXX For now return peers in order and let the stack above deal with it.
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
 
-	// Open the block peers database
-	peersDB := l.pool[level.PeersDB]
-	peersTx, err := peersDB.OpenTransaction()
-	if err != nil {
-		return nil, fmt.Errorf("peers random transaction: %w", err)
-	}
-	peersDiscard := true
-	defer func() {
-		if peersDiscard {
-			log.Debugf("PeersRandom discarding transaction: %v", count)
-			peersTx.Discard()
-		}
-	}()
-
-	// Read a record and skip some
 	x := 0
-	skip := int64(1)
 	peers := make([]tbcd.Peer, 0, count)
-	it := peersTx.NewIterator(nil, nil)
-	defer it.Release()
-	for it.Next() {
-		skip--
-		if skip > 0 {
+	for k := range l.peersGood {
+		h, p, err := net.SplitHostPort(k)
+		if err != nil {
 			continue
 		}
-		skip = rand.Int63n(32)
-		var peer tbcd.Peer
-		err := json.Unmarshal(it.Value(), &peer)
-		if err != nil {
-			return nil, fmt.Errorf("peers random unmarshal: %w", err)
-		}
-		peers = append(peers, peer)
-
+		peers = append(peers, tbcd.Peer{Host: h, Port: p})
 		x++
 		if x >= count {
 			break
 		}
 	}
-	log.Tracef(spew.Sdump(peers))
-
-	// Commit peers table
-	err = peersTx.Commit()
-	if err != nil {
-		return nil, fmt.Errorf("peers random commit: %w", err)
-	}
-	peersDiscard = false
 
 	return peers, nil
+
+	//// XXX For now return peers in order and let the stack above deal with it.
+
+	//// Open the block peers database
+	//peersDB := l.pool[level.PeersDB]
+	//peersTx, err := peersDB.OpenTransaction()
+	//if err != nil {
+	//	return nil, fmt.Errorf("peers random transaction: %w", err)
+	//}
+	//peersDiscard := true
+	//defer func() {
+	//	if peersDiscard {
+	//		log.Debugf("PeersRandom discarding transaction: %v", count)
+	//		peersTx.Discard()
+	//	}
+	//}()
+
+	//// Read a record and skip some
+	//x := 0
+	//peers := make([]tbcd.Peer, 0, count)
+	//it := peersTx.NewIterator(nil, nil)
+	//defer it.Release()
+	//for it.Next() {
+	//	var peer tbcd.Peer
+	//	err := json.Unmarshal(it.Value(), &peer)
+	//	if err != nil {
+	//		return nil, fmt.Errorf("peers random unmarshal: %w", err)
+	//	}
+	//	peers = append(peers, peer)
+
+	//	x++
+	//	if x >= count {
+	//		break
+	//	}
+	//}
+	//log.Tracef(spew.Sdump(peers))
+
+	//// Commit peers table
+	//err = peersTx.Commit()
+	//if err != nil {
+	//	return nil, fmt.Errorf("peers random commit: %w", err)
+	//}
+	//peersDiscard = false
+
+	//return peers, nil
 }
