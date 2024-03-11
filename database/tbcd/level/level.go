@@ -597,6 +597,9 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		}
 	}
 
+	// XXX It may be possible to remove the transaction for bmTx as well
+	// since the only risk would be duplicate work. Reason about this some more.
+
 	// blocks missing transaction
 	bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
 	if err != nil {
