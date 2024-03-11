@@ -578,6 +578,25 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		bh.Hash = b.Hash
 	}
 
+	// Insert block without transaction, if it succeeds and the missing
+	// does not it will be simply redone.
+	bDB := l.pool[level.BlocksDB]
+	has, err := bDB.Has(b.Hash[:], nil)
+	if err != nil {
+		return -1, fmt.Errorf("block insert has: %v", err)
+	}
+	if !has {
+		//Insert block since we do not have it yet
+		bj, err := json.Marshal(b)
+		if err != nil {
+			return -1, fmt.Errorf("blocks insert marshal: %v", err)
+		}
+		err = bDB.Put(b.Hash[:], bj, nil)
+		if err != nil {
+			return -1, fmt.Errorf("blocks insert put: %v", err)
+		}
+	}
+
 	// blocks missing transaction
 	bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
 	if err != nil {
@@ -595,29 +614,6 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		} else {
 			return -1, fmt.Errorf("block insert delete from missing: %v", err)
 		}
-	}
-
-	// blocks missing transaction
-	bTx, bCommit, bDiscard, err := l.startTransaction(level.BlocksDB)
-	if err != nil {
-		return -1, fmt.Errorf("blocks open transaction: %w", err)
-	}
-	defer bDiscard()
-
-	// Insert block
-	bj, err := json.Marshal(b)
-	if err != nil {
-		return -1, fmt.Errorf("blocks insert marshal: %v", err)
-	}
-	err = bTx.Put(b.Hash[:], bj, nil)
-	if err != nil {
-		return -1, fmt.Errorf("blocks insert put: %v", err)
-	}
-
-	// blocks missing commit
-	err = bCommit()
-	if err != nil {
-		return -1, fmt.Errorf("blocks missing commit: %w", err)
 	}
 
 	// blocks missing commit
