@@ -586,7 +586,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		return -1, fmt.Errorf("block insert has: %v", err)
 	}
 	if !has {
-		//Insert block since we do not have it yet
+		// Insert block since we do not have it yet
 		bj, err := json.Marshal(b)
 		if err != nil {
 			return -1, fmt.Errorf("blocks insert marshal: %v", err)
