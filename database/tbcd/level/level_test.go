@@ -15,6 +15,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/juju/loggo"
 )
 
 func bytes2Header(header []byte) (*wire.BlockHeader, error) {
@@ -103,6 +104,8 @@ func TestKeyOrder(t *testing.T) {
 func TestLevelDB(t *testing.T) {
 	// Missing blocks
 	// 1 000 000 000
+
+	loggo.ConfigureLoggers("TRACE")
 
 	dir, err := os.MkdirTemp("", "leveldbtest")
 	if err != nil {
