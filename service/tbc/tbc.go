@@ -747,9 +747,8 @@ func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 	// Whatever happens,, delete from cache and potentially try again
 	var (
 		printStats     bool
-		lastPrint      time.Time
-		delta          time.Duration
 		blocksInserted uint64
+		delta          time.Duration
 	)
 	s.mtx.Lock()
 	delete(s.blocks, bhs) // remove inserted block
@@ -762,8 +761,9 @@ func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 	if now.After(s.printTime) {
 		printStats = true
 		blocksInserted = s.blocksInserted
-		lastPrint = s.printTime
-		delta = now.Sub(lastPrint)
+		// This is super awkward but prevents calculating N inserts *
+		// time.Before(10*time.Second).
+		delta = now.Sub(s.printTime.Add(-10 * time.Second))
 
 		s.blocksInserted = 0
 		s.printTime = now.Add(10 * time.Second)
