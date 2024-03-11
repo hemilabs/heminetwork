@@ -382,7 +382,7 @@ func createBfg(ctx context.Context, t *testing.T, pgUri string, electrumxAddr st
 	req := testcontainers.ContainerRequest{
 		Env: map[string]string{
 			"BFG_POSTGRES_URI":     pgUri,
-			"BFG_BTC_START_HEIGHT": "5000",
+			"BFG_BTC_START_HEIGHT": "1",
 			"BFG_EXBTC_ADDRESS":    electrumxAddr,
 			"BFG_LOG_LEVEL":        "TRACE",
 			"BFG_PUBLIC_ADDRESS":   ":8383",
