@@ -95,7 +95,7 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	discard := &d
 	df := func() {
 		if *discard {
-			log.Debugf("BlockHeadersByHash discarding transaction")
+			log.Debugf("discarding transaction: %v", db)
 			tx.Discard()
 		}
 	}
@@ -109,11 +109,6 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	}
 
 	return tx, cf, df, nil
-}
-
-func (l *ldb) Version(ctx context.Context) (int, error) {
-	// XXX
-	return ldbVersion, nil
 }
 
 func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHeader, error) {

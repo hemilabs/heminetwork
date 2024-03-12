@@ -6,7 +6,10 @@ package level
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -21,10 +24,15 @@ import (
 const (
 	logLevel = "INFO"
 
-	PeersDB         = "peers"
 	BlockHeadersDB  = "blockheaders"
 	BlocksMissingDB = "blocksmissing"
 	BlocksDB        = "blocks"
+	MetadataDB      = "metadata"
+	HeightHashDB    = "heighthash"
+	PeersDB         = "peers"
+
+	versionKey      = "version"
+	databaseVersion = 1
 )
 
 var log = loggo.GetLogger("level")
@@ -51,6 +59,9 @@ var _ database.Database = (*Database)(nil)
 func (l *Database) Close() error {
 	log.Tracef("Close")
 	defer log.Tracef("Close exit")
+
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
 
 	var errSeen error // XXX return last error for now
 	for k, v := range l.pool {
@@ -100,6 +111,18 @@ func (l *Database) openDB(name string, options *opt.Options) error {
 	return nil
 }
 
+func (l *Database) Version(ctx context.Context) (int, error) {
+	mdDB := l.pool[MetadataDB]
+	value, err := mdDB.Get([]byte(versionKey), nil)
+	if err != nil {
+		return -1, fmt.Errorf("version: %w", err)
+	}
+	var dbVersion uint64
+	dbVersion = binary.BigEndian.Uint64(value)
+
+	return int(dbVersion), nil
+}
+
 func New(ctx context.Context, home string, version int) (*Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
@@ -120,29 +143,60 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 
 	// XXX missing version
 
-	// XXX unwind open on error exit
+	unwind := true
+	defer func() {
+		if unwind {
+			log.Errorf("new unwind exited with: %v", l.Close())
+		}
+	}()
 
 	// Peers table
+	err = l.openDB(BlockHeadersDB, &opt.Options{BlockCacheCapacity: 256 * opt.MiB})
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", BlockHeadersDB, err)
+	}
+	err = l.openDB(BlocksDB, nil)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", BlocksDB, err)
+	}
+	err = l.openDB(BlocksMissingDB, nil)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", BlocksMissingDB, err)
+	}
+	err = l.openDB(HeightHashDB, nil)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", HeightHashDB, err)
+	}
 	err = l.openDB(PeersDB, nil)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
 	}
-	err = l.openDB(BlockHeadersDB, &opt.Options{
-		BlockCacheCapacity: 256 * opt.MiB,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
+
+	// Treat metadata special so that we can insert some stuff.
+	err = l.openDB(MetadataDB, &opt.Options{ErrorIfMissing: true})
+	if errors.Is(err, fs.ErrNotExist) {
+		err = l.openDB(MetadataDB, &opt.Options{ErrorIfMissing: false})
+		if err != nil {
+			return nil, fmt.Errorf("leveldb initial %v: %w", MetadataDB, err)
+		}
+		versionData := make([]byte, 8)
+		binary.BigEndian.PutUint64(versionData, databaseVersion)
+		err = l.pool[MetadataDB].Put([]byte(versionKey), versionData, nil)
 	}
-	err = l.openDB(BlocksMissingDB, nil)
+	// Check metadata error
 	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
+		return nil, fmt.Errorf("leveldb %v: %w", MetadataDB, err)
 	}
-	err = l.openDB(BlocksDB, nil)
+	dbVersion, err := l.Version(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
+		return nil, err
+	}
+	if dbVersion != version {
+		return nil, fmt.Errorf("invalid version: wanted %v got %v",
+			dbVersion, version)
 	}
 
-	// XXX unwind open on error exit, no really, unwind
+	unwind = false
 
 	return l, nil
 }
