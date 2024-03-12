@@ -459,8 +459,8 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 	// handle that. If a block is inserted multiple time it will be silently
 	// ignored.
 
+	var blockCacheLen, x int
 	bmDB := l.pool[level.BlocksMissingDB]
-	x := 0
 	bis := make([]tbcd.BlockIdentifier, 0, count)
 	it := bmDB.NewIterator(nil, nil)
 	defer it.Release()
@@ -476,6 +476,7 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 				height:    bh.Height,
 				timestamp: time.Now(),
 			}
+			blockCacheLen = len(l.blocksMissingCache)
 			l.mtx.Unlock()
 		}
 
@@ -484,6 +485,8 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 			break
 		}
 	}
+
+	log.Debugf("BlocksMissing returning %v cached %v", len(bis), blockCacheLen)
 
 	return bis, nil
 
@@ -541,6 +544,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	// Try cache first
 	var ce *cacheEntry
 	if l.blocksMissingCacheEnabled {
+		// XXX explain here why using string(b.Hash) is acceptable
 		l.mtx.Lock()
 		ce = l.blocksMissingCache[string(b.Hash)]
 		l.mtx.Unlock()
@@ -549,7 +553,10 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 			// purge cache as well
 			l.mtx.Lock()
 			delete(l.blocksMissingCache, string(b.Hash))
+			bmcl := len(l.blocksMissingCache)
 			l.mtx.Unlock()
+			// XXX string b.Hash is shit
+			log.Debugf("BlockInsert cached %v", bmcl)
 		}()
 	}
 
@@ -881,13 +888,13 @@ func (l *ldb) PeerDelete(ctx context.Context, host, port string) error {
 
 func (l *ldb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
 	log.Tracef("PeersRandom")
-	defer log.Tracef("PeersRandom exit")
-
-	l.mtx.Lock()
-	defer l.mtx.Unlock()
 
 	x := 0
 	peers := make([]tbcd.Peer, 0, count)
+
+	l.mtx.Lock()
+	allGoodPeers := len(l.peersGood)
+	allBadPeers := len(l.peersBad)
 	for k := range l.peersGood {
 		h, p, err := net.SplitHostPort(k)
 		if err != nil {
@@ -899,6 +906,10 @@ func (l *ldb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
 			break
 		}
 	}
+	l.mtx.Unlock()
+
+	log.Tracef("PeersRandom exit %v (good %v bad %v)", len(peers),
+		allGoodPeers, allBadPeers)
 
 	return peers, nil
 

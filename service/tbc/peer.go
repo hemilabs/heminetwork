@@ -69,8 +69,8 @@ func (p *peer) read() (wire.Message, error) {
 }
 
 func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
-	log.Tracef("handshake")
-	defer log.Tracef("handshake exit")
+	log.Tracef("handshake %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
+	defer log.Tracef("handshake exit %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 
 	// 1. send our version
 	// 2. receive version
@@ -83,13 +83,13 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	msg := wire.NewMsgVersion(us, them, uint64(rand.Int63()), 0)
 	err := write(conn, msg, p.protocolVersion, p.network)
 	if err != nil {
-		return fmt.Errorf("could not write version message: %v", err)
+		return fmt.Errorf("could not write version message: %w", err)
 	}
 
 	// 2. receive version
 	rmsg, err := read(conn, p.protocolVersion, p.network)
 	if err != nil {
-		return fmt.Errorf("could not read version message: %v", err)
+		return fmt.Errorf("could not read version message: %w", err)
 	}
 	v, ok := rmsg.(*wire.MsgVersion)
 	if !ok {
@@ -101,7 +101,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	if v.ProtocolVersion >= 70016 {
 		err = write(conn, wire.NewMsgSendAddrV2(), p.protocolVersion, p.network)
 		if err != nil {
-			return fmt.Errorf("could not send sendaddrv2: %v", err)
+			return fmt.Errorf("could not send sendaddrv2: %w", err)
 		}
 	}
 
@@ -110,7 +110,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	// 4. send verack
 	err = write(conn, wire.NewMsgVerAck(), p.protocolVersion, p.network)
 	if err != nil {
-		return fmt.Errorf("could not send verack: %v", err)
+		return fmt.Errorf("could not send verack: %w", err)
 	}
 
 	for count := 0; count < 3; count++ {
@@ -118,7 +118,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 		if err == wire.ErrUnknownMessage {
 			continue
 		} else if err != nil {
-			return err
+			return fmt.Errorf("handshake read: %w", err)
 		}
 
 		switch msg.(type) {
@@ -136,17 +136,17 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 }
 
 func (p *peer) connect(ctx context.Context) error {
-	log.Tracef("connect")
-	defer log.Tracef("connect exit")
+	log.Tracef("connect %v", p.address) // not locked but ok
+	defer log.Tracef("connect exit %v", p.address)
 
 	p.mtx.Lock()
 	if p.isDialing {
 		p.mtx.Unlock()
-		return fmt.Errorf("already dialing")
+		return fmt.Errorf("already dialing %v", p.address)
 	}
 	if p.conn != nil {
 		p.mtx.Unlock()
-		return fmt.Errorf("already open")
+		return fmt.Errorf("already open %v", p.address)
 	}
 	p.isDialing = true
 	p.mtx.Unlock()
@@ -154,12 +154,12 @@ func (p *peer) connect(ctx context.Context) error {
 	d := net.Dialer{}
 	conn, err := d.DialContext(ctx, "tcp", p.address)
 	if err != nil {
-		return err
+		return fmt.Errorf("dial %v: %w", p.address, err)
 	}
 
 	err = p.handshake(ctx, conn)
 	if err != nil {
-		return err
+		return fmt.Errorf("handshake %v: %w", p.address, err)
 	}
 
 	p.mtx.Lock()

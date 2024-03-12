@@ -516,19 +516,19 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		// XXX send wire message to pool reader
 		switch m := msg.(type) {
 		case *wire.MsgAddr:
-			go s.handleAddr(ctx, m)
+			go s.handleAddr(ctx, p, m)
 
 		case *wire.MsgAddrV2:
-			go s.handleAddrV2(ctx, m)
+			go s.handleAddrV2(ctx, p, m)
 
 		case *wire.MsgBlock:
-			go s.handleBlock(ctx, m)
+			go s.handleBlock(ctx, p, m)
 
 		case *wire.MsgFeeFilter:
 			// XXX shut up
 
 		case *wire.MsgInv:
-			go s.handleInv(ctx, m)
+			go s.handleInv(ctx, p, m)
 
 		case *wire.MsgHeaders:
 			go s.handleHeaders(ctx, p, m)
@@ -563,9 +563,9 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func (s *Server) handleAddr(ctx context.Context, msg *wire.MsgAddr) {
-	log.Tracef("handleAddr: %v", len(msg.AddrList))
-	defer log.Tracef("handleAddr exit")
+func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
+	log.Tracef("handleAddr (%v): %v", p, len(msg.AddrList))
+	defer log.Tracef("handleAddr exit (%v)", p)
 
 	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
 	for k := range msg.AddrList {
@@ -581,9 +581,9 @@ func (s *Server) handleAddr(ctx context.Context, msg *wire.MsgAddr) {
 	}
 }
 
-func (s *Server) handleAddrV2(ctx context.Context, msg *wire.MsgAddrV2) {
-	log.Tracef("handleAddrV2: %v", len(msg.AddrList))
-	defer log.Tracef("handleAddrV2 exit")
+func (s *Server) handleAddrV2(ctx context.Context, p *peer, msg *wire.MsgAddrV2) {
+	log.Tracef("handleAddrV2 (%v): %v", p, len(msg.AddrList))
+	defer log.Tracef("handleAddrV2 exit (%v)", p)
 
 	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
 	for k := range msg.AddrList {
@@ -612,9 +612,9 @@ func (s *Server) handlePing(ctx context.Context, p *peer, msg *wire.MsgPing) {
 	log.Tracef("handlePing %v: pong %v", p.address, pong.Nonce)
 }
 
-func (s *Server) handleInv(ctx context.Context, msg *wire.MsgInv) {
-	log.Tracef("handleInv")
-	defer log.Tracef("handleInv exit")
+func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
+	log.Tracef("handleInv (%v)", p)
+	defer log.Tracef("handleInv exit (%v)", p)
 
 	var bis []tbcd.BlockIdentifier
 	for k := range msg.InvList {
@@ -643,8 +643,8 @@ func (s *Server) handleInv(ctx context.Context, msg *wire.MsgInv) {
 
 // XXX see how we send in peer, that is not what we want
 func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeaders) {
-	log.Tracef("handleHeaders")
-	defer log.Tracef("handleHeaders exit")
+	log.Tracef("handleHeaders %v", p)
+	defer log.Tracef("handleHeaders exit %v", p)
 
 	log.Debugf("handleHeaders (%v): %v", p, len(msg.Headers))
 
@@ -717,9 +717,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	}
 }
 
-func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
-	log.Tracef("handleBlock")
-	defer log.Tracef("handleBlock exit")
+func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
+	log.Tracef("handleBlock (%v)", p)
+	defer log.Tracef("handleBlock exit (%v)", p)
 
 	block := &bytes.Buffer{}
 	err := msg.Serialize(block) // XXX we should not being doing this twice
@@ -778,6 +778,9 @@ func (s *Server) handleBlock(ctx context.Context, msg *wire.MsgBlock) {
 }
 
 func (s *Server) checkBlockCache(ctx context.Context) {
+	log.Tracef("checkBlockCache")
+	defer log.Tracef("checkBlockCache exit")
+
 	// Deal with expired block downloads
 	used := s.blockPeerExpire()
 	if defaultPendingBlocks-used <= 0 {
