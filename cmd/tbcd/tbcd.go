@@ -20,6 +20,7 @@ const (
 	daemonName      = "tbcd"
 	defaultLogLevel = daemonName + "=INFO;postgres=INFO;tbcpostgres=INFO;tbc=INFO"
 	defaultNetwork  = "testnet3" // XXX make this mainnet
+	defaultHome     = "~/." + daemonName
 )
 
 var (
@@ -28,6 +29,12 @@ var (
 
 	cfg = tbc.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"TBC_LEVELDB_HOME": config.Config{
+			Value:        &cfg.LevelDBHome,
+			DefaultValue: defaultHome,
+			Help:         "data directory for leveldb",
+			Print:        config.PrintAll,
+		},
 		"TBC_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
