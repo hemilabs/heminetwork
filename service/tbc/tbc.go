@@ -621,11 +621,15 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	for k := range msg.InvList {
 		switch msg.InvList[k].Type {
 		case wire.InvTypeBlock:
+
+			// XXX height is missing here, looks right but assert
+			// that this isn't broken.
 			log.Infof("handleInv: block %v", msg.InvList[k].Hash)
 
 			bis = append(bis, tbcd.BlockIdentifier{
 				Hash: msg.InvList[k].Hash[:], // fake out
 			})
+			log.Infof("handleInv: block %v", msg.InvList[k].Hash)
 		case wire.InvTypeTx:
 			// XXX silence for now
 		default:

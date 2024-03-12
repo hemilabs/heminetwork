@@ -27,6 +27,7 @@ import (
 // Locking order:
 //	BlockHeaders
 // 	BlocksMissing
+// 	HeightHash
 // 	Blocks
 
 const (
@@ -288,17 +289,29 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) er
 	}
 	defer bmDiscard()
 
+	// height hash
+	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
+	if err != nil {
+		return fmt.Errorf("height hash open transaction: %w", err)
+	}
+	defer hhDiscard()
+
 	// Insert missing blocks and block headers
 	var lastRecord []byte
+	hhBatch := new(leveldb.Batch)
 	bmBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
 	for k := range bhs {
+		hhKey := heightHashToKey(bhs[k].Height, bhs[k].Hash[:])
 		// Height 0 is genesis, we do not want a missing block record for that.
 		if bhs[k].Height != 0 {
 			// Insert a synthesized height_hash key that serves as
 			// an index to see which blocks are missing.
-			bmBatch.Put(heightHashToKey(bhs[k].Height, bhs[k].Hash[:]), []byte{})
+			bmBatch.Put(hhKey, []byte{})
 		}
+
+		// Store height_hash for future reference
+		hhBatch.Put(hhKey, []byte{})
 
 		// XXX reason about pre processing JSON. Due to the caller code
 		// being heavily reentrant the odds are not good that encoding
@@ -318,16 +331,28 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) er
 	// Insert last height into block headers XXX this does not deal with forks
 	bhsBatch.Put([]byte(bhsLastKey), lastRecord)
 
+	// Write height hash batch
+	err = hhTx.Write(hhBatch, nil)
+	if err != nil {
+		return fmt.Errorf("height hash batch: %w", err)
+	}
+
 	// Write missing blocks batch
 	err = bmTx.Write(bmBatch, nil)
 	if err != nil {
-		return fmt.Errorf("blocks missing insert: %w", err)
+		return fmt.Errorf("blocks missing batch: %w", err)
 	}
 
 	// Write block headers batch
 	err = bhsTx.Write(bhsBatch, nil)
 	if err != nil {
 		return fmt.Errorf("block headers insert: %w", err)
+	}
+
+	// height hash commit
+	err = hhCommit()
+	if err != nil {
+		return fmt.Errorf("height hash commit: %w", err)
 	}
 
 	// blocks missing commit
@@ -751,8 +776,6 @@ func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	defer log.Tracef("PeersInsert exit")
 
 	l.mtx.Lock()
-	defer l.mtx.Unlock()
-
 	for k := range peers {
 		p := peers[k]
 		a := net.JoinHostPort(p.Host, p.Port)
@@ -775,6 +798,12 @@ func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 
 		l.peersGood[a] = struct{}{}
 	}
+	allGoodPeers := len(l.peersGood)
+	allBadPeers := len(l.peersBad)
+	l.mtx.Unlock()
+
+	log.Debugf("PeersInsert exit %v good %v bad %v",
+		len(peers), allGoodPeers, allBadPeers)
 
 	return nil
 
@@ -833,9 +862,6 @@ func (l *ldb) PeerDelete(ctx context.Context, host, port string) error {
 	log.Tracef("PeerDelete")
 	defer log.Tracef("PeerDelete exit")
 
-	l.mtx.Lock()
-	defer l.mtx.Unlock()
-
 	a := net.JoinHostPort(host, port)
 	if len(a) < 7 {
 		// 0.0.0.0
@@ -846,10 +872,17 @@ func (l *ldb) PeerDelete(ctx context.Context, host, port string) error {
 		return nil
 	}
 
+	l.mtx.Lock()
 	if _, ok := l.peersGood[a]; ok {
 		delete(l.peersGood, a)
 		l.peersBad[a] = struct{}{}
 	}
+	allGoodPeers := len(l.peersGood)
+	allBadPeers := len(l.peersBad)
+	l.mtx.Unlock()
+
+	log.Debugf("PeerDelete exit good %v bad %v", allGoodPeers, allBadPeers)
+
 	return nil
 
 	//// Open the block peers database
@@ -903,7 +936,7 @@ func (l *ldb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
 	}
 	l.mtx.Unlock()
 
-	log.Tracef("PeersRandom exit %v (good %v bad %v)", len(peers),
+	log.Debugf("PeersRandom exit %v (good %v bad %v)", len(peers),
 		allGoodPeers, allBadPeers)
 
 	return peers, nil
