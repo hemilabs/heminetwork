@@ -103,6 +103,7 @@ type blockPeer struct {
 }
 
 type Config struct {
+	LevelDBHome             string
 	LogLevel                string
 	PgURI                   string
 	PrometheusListenAddress string
@@ -911,7 +912,7 @@ func (s *Server) Run(pctx context.Context) error {
 		defer s.db.Close()
 	}
 	var err error
-	s.db, err = level.New(ctx, "~/.tbc")
+	s.db, err = level.New(ctx, s.cfg.LevelDBHome)
 	if err != nil {
 		return fmt.Errorf("Failed to connect to database: %v", err)
 	}
