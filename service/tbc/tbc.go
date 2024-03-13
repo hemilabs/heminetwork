@@ -796,6 +796,20 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 			log.Errorf("Unable to validate block hash %v: %v", bhs, err)
 			return
 		}
+
+		// Contextual check of block
+		//
+		// We do want these checks however we download the blockchain
+		// out of order this we will have to do something clever for
+		// prevNode.
+		//
+		//header := &block.MsgBlock().Header
+		//flags := blockchain.BFNone
+		//err := blockchain.CheckBlockHeaderContext(header, prevNode, flags, bctxt, false)
+		//if err != nil {
+		//	log.Errorf("Unable to validate context of block hash %v: %v", bhs, err)
+		//	return
+		//}
 	}
 
 	height, err := s.db.BlockInsert(ctx, b)
@@ -947,6 +961,40 @@ func (s *Server) downloadBlocks(ctx context.Context, bis []tbcd.BlockIdentifier)
 	}
 
 	return nil
+}
+
+func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*wire.BlockHeader, uint64, error) {
+	log.Tracef("BlockHeaderByHash")
+	defer log.Tracef("BlockHeaderByHash exit")
+
+	bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
+	if err != nil {
+		return nil, 0, fmt.Errorf("db block header by hash: %w", err)
+	}
+	bhw, err := bytes2Header(bh.Header)
+	if err != nil {
+		return nil, 0, fmt.Errorf("bytes to header: %w", err)
+	}
+	return bhw, bh.Height, nil
+}
+
+func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wire.BlockHeader, error) {
+	log.Tracef("BlockHeadersByHeight")
+	defer log.Tracef("BlockHeadersByHeight exit")
+
+	bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+	if err != nil {
+		return nil, fmt.Errorf("db block header by height: %w", err)
+	}
+	bhsw := make([]wire.BlockHeader, 0, len(bhs))
+	for k := range bhs {
+		bhw, err := bytes2Header(bhs[k].Header)
+		if err != nil {
+			return nil, fmt.Errorf("bytes to header: %w", err)
+		}
+		bhsw = append(bhsw, *bhw)
+	}
+	return bhsw, nil
 }
 
 func (s *Server) Run(pctx context.Context) error {
