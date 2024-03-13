@@ -14,8 +14,8 @@ func TestConnPool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	server, cleanup := createMockServer(ctx, t)
-	defer cleanup()
+	server := createMockServer(t)
+	defer server.Close()
 
 	pool, err := newConnPool("tcp", server.address,
 		clientInitialConnections, clientMaximumConnections)

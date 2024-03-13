@@ -13,8 +13,11 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/phayes/freeport"
 )
@@ -23,8 +26,8 @@ func TestClientConn(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	server, cleanup := createMockServer(ctx, t)
-	defer cleanup()
+	server := createMockServer(t)
+	defer server.Close()
 
 	conn, err := net.Dial("tcp", server.address)
 	if err != nil {
@@ -164,76 +167,97 @@ func TestReadResponse(t *testing.T) {
 
 type mockServer struct {
 	address string
-
+	ln      net.Listener
 	stateCh chan bool
+
+	stopCh chan struct{}
+	wg     sync.WaitGroup
 }
 
-func createMockServer(ctx context.Context, t *testing.T) (*mockServer, func()) {
+func createMockServer(t *testing.T) *mockServer {
 	addr := createAddress()
-	stateCh := make(chan bool, 25)
 
-	s := &mockServer{
-		address: addr,
-		stateCh: stateCh,
-	}
-
-	l, err := net.Listen("tcp", addr)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleanup := func() {
-		_ = l.Close()
-		close(stateCh)
+
+	s := &mockServer{
+		address: addr,
+		ln:      ln,
+		stateCh: make(chan bool, 25),
+		stopCh:  make(chan struct{}, 1),
 	}
 
+	s.wg.Add(1)
 	go func() {
+		defer s.wg.Done()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-s.stopCh:
 				return
 			default:
 			}
 
-			conn, err := l.Accept()
-			if err != nil && strings.Contains(err.Error(), "use of closed network connection") {
+			conn, err := ln.Accept()
+			if err != nil {
 				continue
 			}
 
-			go s.handleConnection(ctx, t, conn)
+			s.wg.Add(1)
+			go s.handleConnection(t, conn)
 		}
 	}()
 
-	return s, cleanup
+	return s
 }
 
-func (s *mockServer) handleConnection(ctx context.Context, t *testing.T, conn net.Conn) {
+func (s *mockServer) Close() {
+	close(s.stopCh)
+	_ = s.ln.Close()
+	s.wg.Wait()
+	close(s.stateCh)
+}
+
+func (s *mockServer) handleConnection(t *testing.T, conn net.Conn) {
 	select {
 	case s.stateCh <- true:
 	default:
 	}
+
 	defer func() {
 		select {
 		case s.stateCh <- false:
 		default:
 		}
-	}()
 
-	defer conn.Close()
+		_ = conn.Close()
+		s.wg.Done()
+	}()
 
 	t.Logf("Handling connection: %s", conn.RemoteAddr())
 	reader := bufio.NewReader(conn)
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-s.stopCh:
 			return
 		default:
+		}
+
+		err := conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if err != nil {
+			t.Errorf("failed to set read deadline: %v", err)
+			return
 		}
 
 		b, err := reader.ReadBytes('\n')
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				break
+				return
+			}
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				continue
 			}
 			t.Errorf("failed to read from connection: %v", err)
 			continue
