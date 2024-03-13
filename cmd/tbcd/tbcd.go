@@ -29,6 +29,12 @@ var (
 
 	cfg = tbc.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"TBC_BLOCK_SANITY": config.Config{
+			Value:        &cfg.BlockSanity,
+			DefaultValue: false,
+			Help:         "enable/disable block sanity checks before inserting",
+			Print:        config.PrintAll,
+		},
 		"TBC_LEVELDB_HOME": config.Config{
 			Value:        &cfg.LevelDBHome,
 			DefaultValue: defaultHome,
