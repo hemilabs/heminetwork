@@ -254,5 +254,9 @@ func TestBitcoinBits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	log.Infof("%v", spew.Sdump(b))
+	txs := b.Transactions()
+	for k := range txs {
+		tx := txs[k]
+		t.Logf("tx %v  %v", k, tx.Hash())
+	}
 }
