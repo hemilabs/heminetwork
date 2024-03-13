@@ -20,6 +20,7 @@ type Database interface {
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
 	BlockHeadersBest(ctx context.Context) ([]BlockHeader, error)
 	BlockHeadersInsert(ctx context.Context, bhs []BlockHeader) error
+	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)

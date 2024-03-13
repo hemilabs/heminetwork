@@ -20,6 +20,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // Locking order:
@@ -135,6 +136,34 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	}
 
 	return &bh, nil
+}
+
+func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeadersByHeight")
+	defer log.Tracef("BlockHeadersByHeight exit")
+
+	bhs := make([]tbcd.BlockHeader, 0, 4)
+	start := make([]byte, 8)
+	binary.BigEndian.PutUint64(start, height)
+	limit := make([]byte, 8)
+	binary.BigEndian.PutUint64(limit, height+2)
+
+	hhDB := l.pool[level.HeightHashDB]
+	it := hhDB.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
+	defer it.Release()
+	for it.Next() {
+		fh, hash := keyToHeightHash(it.Key())
+		if fh != height {
+			// all done
+			break
+		}
+		bh, err := l.BlockHeaderByHash(ctx, hash)
+		if err != nil {
+			return nil, fmt.Errorf("headers by height: %w", err)
+		}
+		bhs = append(bhs, *bh)
+	}
+	return bhs, nil
 }
 
 func (l *ldb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
