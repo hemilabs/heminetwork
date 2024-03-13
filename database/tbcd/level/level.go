@@ -48,7 +48,7 @@ type ldb struct {
 	blocksMissingCacheEnabled bool
 	blocksMissingCache        map[string]*cacheEntry // XXX purge and manages cache size
 
-	// XXX remove this
+	// maybe remove this because it eats a bit of memory
 	peersGood map[string]struct{}
 	peersBad  map[string]struct{}
 

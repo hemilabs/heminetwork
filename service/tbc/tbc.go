@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -40,12 +41,22 @@ const (
 	defaultPendingBlocks = 64 // XXX go with 64
 )
 
-var testnetSeeds = []string{
-	"testnet-seed.bitcoin.jonasschnelli.ch",
-	"seed.tbtc.petertodd.org",
-	"seed.testnet.bitcoin.sprovoost.nl",
-	"testnet-seed.bluematt.me",
-}
+var (
+	testnetSeeds = []string{
+		"testnet-seed.bitcoin.jonasschnelli.ch",
+		"seed.tbtc.petertodd.org",
+		"seed.testnet.bitcoin.sprovoost.nl",
+		"testnet-seed.bluematt.me",
+	}
+	mainnetSeeds = []string{
+		"seed.bitcoin.sipa.be",
+		"dnsseed.bluematt.me",
+		"dnsseed.bitcoin.dashjr.org",
+		"seed.bitcoinstats.com",
+		"seed.bitnodes.io",
+		"seed.bitcoin.jonasschnelli.ch",
+	}
+)
 
 var log = loggo.GetLogger("tbc")
 
@@ -210,8 +221,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.port = mainnetPort
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
-		panic("no seeds")
-	case "testnet", "testnet3":
+		s.seeds = mainnetSeeds
+	case "testnet3":
 		s.port = testnetPort
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
@@ -233,7 +244,6 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte)
 	ghs.AddBlockLocatorHash(&hash)
 	err = p.write(ghs)
 	if err != nil {
-		// XXX use pool
 		return fmt.Errorf("write get headers: %v", err)
 	}
 
@@ -504,9 +514,9 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// skip unknown
 			continue
 		} else if err != nil {
-			// Expire pending block downloads from this host
+			// reevaluate pending blocks cache
 			cacheUsed := s.blockPeerExpire()
-			log.Errorf("read (%v): %v -- cache %v", p, err, cacheUsed)
+			log.Errorf("read (%v): %v -- pending blocks %v", p, err, cacheUsed)
 			return
 		}
 
@@ -653,12 +663,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 	log.Debugf("handleHeaders (%v): %v", p, len(msg.Headers))
 
-	// XXX debug
-	if len(msg.Headers) > 0 && len(msg.Headers) < 2000 {
-		log.Infof("handleHeaders (%v): %v", p, len(msg.Headers))
-	}
-
 	if len(msg.Headers) == 0 {
+		// This signifies the end of IBD
 		s.checkBlockCache(ctx)
 		return
 	}
@@ -830,8 +836,8 @@ func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, erro
 	}
 
 	// No entries means we are at genesis
-	// XXX this can hit several times on tart of day. Figure out if we want
-	// to insert geneis earlier to prevent this error.
+	// XXX this can hit several times at start of day. Figure out if we
+	// want to insert genesis earlier to prevent this error.
 	if len(bhs) == 0 {
 		gbh, err := header2Bytes(&s.chainParams.GenesisBlock.Header)
 		if err != nil {
@@ -877,15 +883,12 @@ func (s *Server) downloadBlocks(ctx context.Context, bis []tbcd.BlockIdentifier)
 		case nil:
 			continue
 		case errCacheFull:
-			// XXX certainly too loud
 			log.Tracef("cache full")
 			break
 		case errNoPeers:
-			// XXX certainly too loud
 			log.Tracef("could not write, no peers")
 			break
 		default:
-			// XXX probably too loud
 			log.Errorf("write error: %v", err)
 		}
 	}
@@ -905,9 +908,18 @@ func (s *Server) Run(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
+	// This should have been verified but let's not make assumptions.
+	switch s.cfg.Network {
+	case "testnet3":
+	case "mainnet":
+	default:
+		return fmt.Errorf("unsuported network: %v", s.cfg.Network)
+	}
+
 	// Connect to db.
 	// XXX should we reconnect?
 	if false {
+		// XXX remove postgres?
 		var err error
 		s.db, err = postgres.New(ctx, s.cfg.PgURI)
 		if err != nil {
@@ -916,9 +928,9 @@ func (s *Server) Run(pctx context.Context) error {
 		defer s.db.Close()
 	}
 	var err error
-	s.db, err = level.New(ctx, s.cfg.LevelDBHome)
+	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
 	if err != nil {
-		return fmt.Errorf("Failed to connect to database: %v", err)
+		return fmt.Errorf("Failed to open level database: %v", err)
 	}
 	defer s.db.Close()
 
