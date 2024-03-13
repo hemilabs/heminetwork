@@ -47,7 +47,8 @@ const (
 )
 
 var (
-	log                    = loggo.GetLogger("popm")
+	log = loggo.GetLogger("popm")
+
 	l2KeystoneRetryTimeout = 15 * time.Second
 )
 
