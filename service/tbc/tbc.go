@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -121,6 +123,7 @@ type Config struct {
 	PgURI                   string
 	PrometheusListenAddress string
 	Network                 string
+	BlockSanity             bool
 }
 
 func NewDefaultConfig() *Config {
@@ -142,6 +145,7 @@ type Server struct {
 	// bitcoin network
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
+	timeSource  blockchain.MedianTimeSource
 	port        string
 	seeds       []string
 
@@ -154,6 +158,38 @@ type Server struct {
 
 	// Prometheus
 	isRunning bool
+}
+
+func NewServer(cfg *Config) (*Server, error) {
+	if cfg == nil {
+		cfg = NewDefaultConfig()
+	}
+	s := &Server{
+		cfg:        cfg,
+		printTime:  time.Now().Add(10 * time.Second),
+		blocks:     make(map[string]*blockPeer, defaultPendingBlocks),
+		peers:      make(map[string]*peer, defaultPeersWanted),
+		timeSource: blockchain.NewMedianTime(),
+	}
+
+	// We could use a PGURI verification here.
+
+	switch cfg.Network {
+	case "mainnet":
+		s.port = mainnetPort
+		s.wireNet = wire.MainNet
+		s.chainParams = &chaincfg.MainNetParams
+		s.seeds = mainnetSeeds
+	case "testnet3":
+		s.port = testnetPort
+		s.wireNet = wire.TestNet3
+		s.chainParams = &chaincfg.TestNet3Params
+		s.seeds = testnetSeeds
+	default:
+		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
+	}
+
+	return s, nil
 }
 
 var (
@@ -203,37 +239,6 @@ func (s *Server) blockPeerExpire() int {
 		}
 	}
 	return len(s.blocks)
-}
-
-func NewServer(cfg *Config) (*Server, error) {
-	if cfg == nil {
-		cfg = NewDefaultConfig()
-	}
-	s := &Server{
-		cfg:       cfg,
-		printTime: time.Now().Add(10 * time.Second),
-		blocks:    make(map[string]*blockPeer, defaultPendingBlocks),
-		peers:     make(map[string]*peer, defaultPeersWanted),
-	}
-
-	// We could use a PGURI verification here.
-
-	switch cfg.Network {
-	case "mainnet":
-		s.port = mainnetPort
-		s.wireNet = wire.MainNet
-		s.chainParams = &chaincfg.MainNetParams
-		s.seeds = mainnetSeeds
-	case "testnet3":
-		s.port = testnetPort
-		s.wireNet = wire.TestNet3
-		s.chainParams = &chaincfg.TestNet3Params
-		s.seeds = testnetSeeds
-	default:
-		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
-	}
-
-	return s, nil
 }
 
 func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte) error {
@@ -764,18 +769,33 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	log.Tracef("handleBlock (%v)", p)
 	defer log.Tracef("handleBlock exit (%v)", p)
 
-	block := &bytes.Buffer{}
-	err := msg.Serialize(block) // XXX we should not being doing this twice
+	block := btcutil.NewBlock(msg)
+	//err := msg.Serialize(block) // XXX we should not being doing this twice
+	//if err != nil {
+	//	log.Errorf("block serialize: %v", err)
+	//	return
+	//}
+
+	//bh := msg.Header.BlockHash()
+	//bhs := bh.String()
+	bhs := block.Hash().String()
+	bb, err := block.Bytes()
 	if err != nil {
-		log.Errorf("block serialize: %v", err)
+		log.Errorf("block bytes %v: %v", block.Hash(), err)
 		return
 	}
-
-	bh := msg.Header.BlockHash()
-	bhs := bh.String()
 	b := &tbcd.Block{
-		Hash:  sliceChainHash(bh),
-		Block: block.Bytes(),
+		Hash:  sliceChainHash(*block.Hash()),
+		Block: bb,
+	}
+
+	if s.cfg.BlockSanity {
+		err = blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
+			s.timeSource)
+		if err != nil {
+			log.Errorf("Unable to validate block hash %v: %v", bhs, err)
+			return
+		}
 	}
 
 	height, err := s.db.BlockInsert(ctx, b)
