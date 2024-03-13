@@ -38,8 +38,8 @@ const (
 	mainnetPort = "8333"
 	testnetPort = "18333"
 
-	defaultPeersWanted   = 64 // XXX go with 64
-	defaultPendingBlocks = 64 // XXX go with 64
+	defaultPeersWanted   = 64
+	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 )
 
 var (
@@ -166,7 +166,7 @@ var (
 // blockPeerAdd adds a block to the pending list at the selected peer. Lock
 // must be held.
 func (s *Server) blockPeerAdd(hash, peer string) error {
-	t := time.Now().Add(defaultPendingBlocks * time.Second) // ~1 block per second
+	t := time.Now().Add(23 * time.Second) // XXX make variable?
 
 	if _, ok := s.peers[peer]; !ok {
 		return errExpiredPeer // XXX should not happen
@@ -826,7 +826,8 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 
 	// Deal with expired block downloads
 	used := s.blockPeerExpire()
-	if defaultPendingBlocks-used <= 0 {
+	want := defaultPendingBlocks - used
+	if want <= 0 {
 		return
 	}
 
@@ -844,7 +845,7 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 		s.mtx.Unlock()
 	}()
 
-	bm, err := s.db.BlocksMissing(ctx, defaultPendingBlocks)
+	bm, err := s.db.BlocksMissing(ctx, want)
 	if err != nil {
 		log.Errorf("block headers missing: %v", err)
 		return
