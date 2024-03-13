@@ -916,7 +916,6 @@ func (m *Miner) l2KeystonesForProcessing() []hemi.L2Keystone {
 	m.mtx.Lock()
 
 	for i, v := range m.l2Keystones {
-
 		// if we're currently processing, or we've already processed the keystone
 		// then don't process
 		if !v.requiresProcessing {
