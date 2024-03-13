@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/heminetwork/database"
@@ -255,8 +256,24 @@ func TestBitcoinBits(t *testing.T) {
 		t.Fatal(err)
 	}
 	txs := b.Transactions()
+	chainParams := &chaincfg.TestNet3Params
 	for k := range txs {
 		tx := txs[k]
 		t.Logf("tx %v  %v", tx.Index(), tx.Hash())
+		for kk := range tx.MsgTx().TxOut {
+			p, err := txscript.ParsePkScript(tx.MsgTx().TxOut[kk].PkScript)
+			if err != nil {
+				t.Logf("ERROR: %v %v", kk, err)
+				continue
+			} else {
+				t.Logf("tx %v", spew.Sdump(p))
+			}
+			a, err := p.Address(chainParams)
+			if err != nil {
+				t.Logf("ERROR address: %v %v", kk, err)
+			} else {
+				t.Logf("tx address %v", spew.Sdump(a))
+			}
+		}
 	}
 }
