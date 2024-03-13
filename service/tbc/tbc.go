@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -62,6 +63,7 @@ var log = loggo.GetLogger("tbc")
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
+	rand.Seed(time.Now().UnixNano()) // used for seeding, ok to be math.rand
 }
 
 func header2Bytes(wbh *wire.BlockHeader) ([]byte, error) {
@@ -296,6 +298,32 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	return peers, nil
 }
 
+func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer, error) {
+	log.Tracef("seedForever")
+	defer log.Tracef("seedForever")
+
+	for {
+		holdOff := time.Duration(5+rand.Intn(59-5)) * time.Second
+		var em string
+		peers, err := s.seed(ctx, peersWanted)
+		if err != nil {
+			em = fmt.Sprintf("seed error: %v, retrying in %v", err, holdOff)
+		} else if peers != nil && len(peers) == 0 {
+			em = fmt.Sprintf("no peers found, retrying in %v", err, holdOff)
+		} else {
+			// great success!
+			return peers, nil
+		}
+		log.Errorf("%v", em)
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(holdOff):
+		}
+	}
+}
+
 func (s *Server) randPeerWrite(ctx context.Context, hash string, msg wire.Message) error {
 	log.Tracef("randPeerWrite")
 	defer log.Tracef("randPeerWrite")
@@ -360,12 +388,13 @@ func (s *Server) peerManager(ctx context.Context) error {
 	peerC := make(chan string, peersWanted)
 
 	log.Infof("Peer manager connecting to %v peers", peersWanted)
-	seeds, err := s.seed(ctx, peersWanted)
+	seeds, err := s.seedForever(ctx, peersWanted)
 	if err != nil {
+		// context canceled
 		return fmt.Errorf("seed: %w", err)
 	}
 	if len(seeds) == 0 {
-		// probably retry
+		// should not happen
 		return fmt.Errorf("no seeds found")
 	}
 
@@ -397,12 +426,13 @@ func (s *Server) peerManager(ctx context.Context) error {
 				x++
 				if x >= len(seeds) {
 					// XXX duplicate code from above
-					seeds, err = s.seed(ctx, peersWanted)
+					seeds, err = s.seedForever(ctx, peersWanted)
 					if err != nil {
+						// Context canceled
 						return fmt.Errorf("seed: %w", err)
 					}
 					if len(seeds) == 0 {
-						// probably retry
+						// should not happen
 						return fmt.Errorf("no seeds found")
 					}
 					x = 0
