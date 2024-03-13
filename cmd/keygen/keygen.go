@@ -48,7 +48,7 @@ func _main() error {
 	case *secp256k1KeyPair:
 		privKey, err := dcrsecpk256k1.GeneratePrivateKey()
 		if err != nil {
-			return fmt.Errorf("Failed to generate secp256k1 private key: %v", err)
+			return fmt.Errorf("failed to generate secp256k1 private key: %w", err)
 		}
 		btcAddress, err := btcutil.NewAddressPubKey(privKey.PubKey().SerializeCompressed(),
 			btcChainParams)
@@ -75,7 +75,7 @@ func _main() error {
 			}
 			js, err := json.MarshalIndent(s, "", "  ")
 			if err != nil {
-				return fmt.Errorf("marshal: %v", err)
+				return fmt.Errorf("marshal: %w", err)
 			}
 			fmt.Printf("%s\n", js)
 		} else {

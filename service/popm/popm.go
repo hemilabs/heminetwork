@@ -262,7 +262,7 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 	popTx := pop.TransactionL2{L2Keystone: aks}
 	popTxOpReturn, err := popTx.EncodeToOpReturn()
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode PoP transaction: %v", err)
+		return nil, fmt.Errorf("failed to encode PoP transaction: %w", err)
 	}
 	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
 
@@ -278,12 +278,12 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	btcHeight, err := m.bitcoinHeight(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get Bitcoin height: %v", err)
+		return fmt.Errorf("failed to get Bitcoin height: %w", err)
 	}
 
 	payToScript, err := btctxscript.PayToAddrScript(m.btcAddress)
 	if err != nil {
-		return fmt.Errorf("failed to get pay to address script: %v", err)
+		return fmt.Errorf("failed to get pay to address script: %w", err)
 	}
 	if len(payToScript) != 25 {
 		return fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
@@ -298,7 +298,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	// Check balance.
 	confirmed, unconfirmed, err := m.bitcoinBalance(ctx, scriptHash[:])
 	if err != nil {
-		return fmt.Errorf("failed to get Bitcoin balance: %v", err)
+		return fmt.Errorf("failed to get Bitcoin balance: %w", err)
 	}
 	log.Tracef("Bitcoin balance for miner is: %v confirmed, %v unconfirmed", confirmed, unconfirmed)
 
@@ -306,7 +306,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	log.Tracef("Looking for UTXOs for script hash %v", scriptHash)
 	utxos, err := m.bitcoinUTXOs(ctx, scriptHash[:])
 	if err != nil {
-		return fmt.Errorf("failed to get Bitcoin UTXOs: %v", err)
+		return fmt.Errorf("failed to get Bitcoin UTXOs: %w", err)
 	}
 
 	log.Tracef("Found %d UTXOs at Bitcoin height %d", len(utxos), btcHeight)
@@ -317,7 +317,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	utxos, err = pickUTXOs(utxos, feeAmount)
 	if err != nil {
-		return fmt.Errorf("failed to pick UTXOs: %v", err)
+		return fmt.Errorf("failed to pick UTXOs: %w", err)
 	}
 
 	if len(utxos) != 1 {
@@ -339,7 +339,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	// broadcast tx
 	var buf bytes.Buffer
 	if err := btx.Serialize(&buf); err != nil {
-		return fmt.Errorf("failed to serialize Bitcoin transaction: %v", err)
+		return fmt.Errorf("failed to serialize Bitcoin transaction: %w", err)
 	}
 	txb := buf.Bytes()
 
@@ -347,11 +347,11 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	txh, err := m.bitcoinBroadcast(ctx, txb)
 	if err != nil {
-		return fmt.Errorf("failed to broadcast PoP transaction: %v", err)
+		return fmt.Errorf("failed to broadcast PoP transaction: %w", err)
 	}
 	txHash, err := btcchainhash.NewHash(txh)
 	if err != nil {
-		return fmt.Errorf("failed to create BTC hash from transaction hash: %v", err)
+		return fmt.Errorf("failed to create BTC hash from transaction hash: %w", err)
 	}
 
 	log.Infof("Successfully broadcast PoP transaction to Bitcoin with TX hash %v", txHash)

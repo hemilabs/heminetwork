@@ -118,7 +118,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", c.address)
 	if err != nil {
-		return fmt.Errorf("failed to dial electrumx: %v", err)
+		return fmt.Errorf("failed to dial electrumx: %w", err)
 	}
 	defer conn.Close()
 
@@ -140,22 +140,22 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	}
 	b, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("failed to marshal request: %v", err)
+		return fmt.Errorf("failed to marshal request: %w", err)
 	}
 	b = append(b, byte('\n'))
 	if _, err := io.Copy(conn, bytes.NewReader(b)); err != nil {
-		return fmt.Errorf("failed to write request: %v", err)
+		return fmt.Errorf("failed to write request: %w", err)
 	}
 
 	reader := bufio.NewReader(conn)
 	b, err = reader.ReadBytes('\n')
 	if err != nil {
-		return fmt.Errorf("failed to read response: %v", err)
+		return fmt.Errorf("failed to read response: %w", err)
 	}
 
 	var resp JSONRPCResponse
 	if err := json.Unmarshal(b, &resp); err != nil {
-		return fmt.Errorf("failed to unmarshal response: %v", err)
+		return fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 	if resp.ID != req.ID {
 		return fmt.Errorf("response ID differs from request ID (%d != %d)", resp.ID, req.ID)
@@ -164,7 +164,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 		return RPCError(resp.Error.Message)
 	}
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return fmt.Errorf("failed to unmarshal result: %v", err)
+		return fmt.Errorf("failed to unmarshal result: %w", err)
 	}
 
 	return nil
@@ -197,7 +197,7 @@ type UTXO struct {
 func (c *Client) Balance(ctx context.Context, scriptHash []byte) (*Balance, error) {
 	hash, err := btcchainhash.NewHash(scriptHash)
 	if err != nil {
-		return nil, fmt.Errorf("invalid script hash: %v", err)
+		return nil, fmt.Errorf("invalid script hash: %w", err)
 	}
 	params := struct {
 		ScriptHash string `json:"scripthash"`
@@ -223,7 +223,7 @@ func (c *Client) Broadcast(ctx context.Context, rtx []byte) ([]byte, error) {
 	}
 	txHash, err := btcchainhash.NewHashFromStr(txHashStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode transaction hash: %v", err)
+		return nil, fmt.Errorf("failed to decode transaction hash: %w", err)
 	}
 	return txHash[:], nil
 }
@@ -246,11 +246,11 @@ func (c *Client) RawBlockHeader(ctx context.Context, height uint64) (*bitcoin.Bl
 	}
 	var rbhStr string
 	if err := c.call(ctx, "blockchain.block.header", &params, &rbhStr); err != nil {
-		return nil, fmt.Errorf("failed to get block header: %v", err)
+		return nil, fmt.Errorf("failed to get block header: %w", err)
 	}
 	rbh, err := hex.DecodeString(rbhStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode raw block header: %v", err)
+		return nil, fmt.Errorf("failed to decode raw block header: %w", err)
 	}
 	return bitcoin.RawBlockHeaderFromSlice(rbh)
 }
@@ -258,7 +258,7 @@ func (c *Client) RawBlockHeader(ctx context.Context, height uint64) (*bitcoin.Bl
 func (c *Client) RawTransaction(ctx context.Context, txHash []byte) ([]byte, error) {
 	hash, err := btcchainhash.NewHash(txHash)
 	if err != nil {
-		return nil, fmt.Errorf("invalid transaction hash: %v", err)
+		return nil, fmt.Errorf("invalid transaction hash: %w", err)
 	}
 	params := struct {
 		TXHash  string `json:"tx_hash"`
@@ -269,11 +269,11 @@ func (c *Client) RawTransaction(ctx context.Context, txHash []byte) ([]byte, err
 	}
 	var rtxStr string
 	if err := c.call(ctx, "blockchain.transaction.get", &params, &rtxStr); err != nil {
-		return nil, fmt.Errorf("failed to get transaction: %v", err)
+		return nil, fmt.Errorf("failed to get transaction: %w", err)
 	}
 	rtx, err := hex.DecodeString(rtxStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode raw transaction: %v", err)
+		return nil, fmt.Errorf("failed to decode raw transaction: %w", err)
 	}
 	return rtx, nil
 }
@@ -281,7 +281,7 @@ func (c *Client) RawTransaction(ctx context.Context, txHash []byte) ([]byte, err
 func (c *Client) Transaction(ctx context.Context, txHash []byte) ([]byte, error) {
 	hash, err := btcchainhash.NewHash(txHash)
 	if err != nil {
-		return nil, fmt.Errorf("invalid transaction hash: %v", err)
+		return nil, fmt.Errorf("invalid transaction hash: %w", err)
 	}
 	params := struct {
 		TXHash  string `json:"tx_hash"`
@@ -292,7 +292,7 @@ func (c *Client) Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 	}
 	var txJSON json.RawMessage
 	if err := c.call(ctx, "blockchain.transaction.get", &params, &txJSON); err != nil {
-		return nil, fmt.Errorf("failed to get transaction: %v", err)
+		return nil, fmt.Errorf("failed to get transaction: %w", err)
 	}
 	return []byte(txJSON), nil
 }
@@ -317,12 +317,12 @@ func (c *Client) TransactionAtPosition(ctx context.Context, height, index uint64
 		} else if strings.HasPrefix(err.Error(), "db error: DBError('block ") && strings.Contains(err.Error(), " not on disk ") {
 			return nil, nil, NewBlockNotOnDiskError(err)
 		}
-		return nil, nil, fmt.Errorf("failed to get transaction from block: %v", err)
+		return nil, nil, fmt.Errorf("failed to get transaction from block: %w", err)
 	}
 
 	txHash, err := btcchainhash.NewHashFromStr(result.TXHash)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decode transaction hash: %v", err)
+		return nil, nil, fmt.Errorf("failed to decode transaction hash: %w", err)
 	}
 
 	return txHash[:], result.Merkle, nil
@@ -331,7 +331,7 @@ func (c *Client) TransactionAtPosition(ctx context.Context, height, index uint64
 func (c *Client) UTXOs(ctx context.Context, scriptHash []byte) ([]*UTXO, error) {
 	hash, err := btcchainhash.NewHash(scriptHash)
 	if err != nil {
-		return nil, fmt.Errorf("invalid script hash: %v", err)
+		return nil, fmt.Errorf("invalid script hash: %w", err)
 	}
 	params := struct {
 		ScriptHash string `json:"scripthash"`
@@ -346,7 +346,7 @@ func (c *Client) UTXOs(ctx context.Context, scriptHash []byte) ([]*UTXO, error) 
 	for _, eutxo := range eutxos {
 		hash, err := btcchainhash.NewHashFromStr(eutxo.Hash)
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode UTXO hash: %v", err)
+			return nil, fmt.Errorf("failed to decode UTXO hash: %w", err)
 		}
 		utxos = append(utxos, &UTXO{
 			Hash:   hash[:],

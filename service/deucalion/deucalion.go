@@ -69,7 +69,7 @@ var (
 
 func init() {
 	if err := config.Parse(cm); err != nil {
-		panic(fmt.Errorf("could not parse config during init: %v", err))
+		panic(fmt.Errorf("could not parse config during init: %w", err))
 	}
 	if cfg.ListenAddress == "" {
 		return
@@ -81,7 +81,7 @@ func init() {
 	ctx := context.Background()
 	d, err := New(cfg)
 	if err != nil {
-		panic(fmt.Errorf("failed to create server: %v", err))
+		panic(fmt.Errorf("failed to create server: %w", err))
 	}
 	go func() {
 		if err = d.Run(ctx, nil); !errors.Is(err, context.Canceled) {

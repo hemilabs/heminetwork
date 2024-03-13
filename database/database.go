@@ -119,10 +119,10 @@ func (ba ByteArray) Value() (driver.Value, error) {
 	return []byte(ba), nil
 }
 
-//// XXX figure out why this doens't work
-//func (ba *ByteArray) Value() (driver.Value, error) {
+// // XXX figure out why this doens't work
+// func (ba *ByteArray) Value() (driver.Value, error) {
 //	return *ba, nil
-//}
+// }
 
 var _ driver.Valuer = (*ByteArray)(nil)
 
@@ -320,7 +320,7 @@ func (tz *TimeZone) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	if err := tz.Parse(s); err != nil {
-		return fmt.Errorf("invalid timezone: %v", err)
+		return fmt.Errorf("invalid timezone: %w", err)
 	}
 	return nil
 }
@@ -335,7 +335,7 @@ func (tz *TimeZone) Scan(value interface{}) error {
 		return fmt.Errorf("not a string (%T)", value)
 	}
 	if err := tz.Parse(s); err != nil {
-		return fmt.Errorf("invalid timezone: %v", err)
+		return fmt.Errorf("invalid timezone: %w", err)
 	}
 	return nil
 }

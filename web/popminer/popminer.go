@@ -85,7 +85,7 @@ func generateKey(this js.Value, args []js.Value) (any, error) {
 	}
 	privKey, err := dcrsecpk256k1.GeneratePrivateKey()
 	if err != nil {
-		return nil, fmt.Errorf("failed to generate secp256k1 private key: %v", err)
+		return nil, fmt.Errorf("failed to generate secp256k1 private key: %w", err)
 	}
 	btcAddress, err := btcutil.NewAddressPubKey(privKey.PubKey().SerializeCompressed(),
 		btcChainParams)
@@ -152,7 +152,7 @@ func runPopMiner(this js.Value, args []js.Value) (any, error) {
 	pm.miner, err = popm.NewMiner(cfg)
 	if err != nil {
 		globalMtx.Unlock()
-		return nil, fmt.Errorf("Failed to create POP miner: %v", err)
+		return nil, fmt.Errorf("failed to create POP miner: %w", err)
 	}
 	globalMtx.Unlock()
 

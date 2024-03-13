@@ -93,24 +93,24 @@ func bfgdb() error {
 		// construct pgURI based on reasonable defaults.
 		home, err := homedir.Dir()
 		if err != nil {
-			return fmt.Errorf("Dir: %v", err)
+			return fmt.Errorf("dir: %w", err)
 		}
 		user, err := user.Current()
 		if err != nil {
-			return fmt.Errorf("Current: %v", err)
+			return fmt.Errorf("current: %w", err)
 		}
 
 		filename := filepath.Join(home, ".pgsql-bfgdb-"+user.Username)
 		password, err := os.ReadFile(filename)
 		if err != nil {
-			return fmt.Errorf("ReadFile: %v", err)
+			return fmt.Errorf("read file: %w", err)
 		}
 		pgURI = fmt.Sprintf("database=bfgdb password=%s", password)
 	}
 
 	db, err := postgres.New(ctx, pgURI)
 	if err != nil {
-		return fmt.Errorf("New: %v", err)
+		return fmt.Errorf("new: %w", err)
 	}
 	defer db.Close()
 
@@ -130,7 +130,7 @@ func bfgdb() error {
 
 	o, err := json.Marshal(out)
 	if err != nil {
-		return fmt.Errorf("marshal: %v", err)
+		return fmt.Errorf("marshal: %w", err)
 	}
 	fmt.Printf("%s\n", o)
 
@@ -187,7 +187,7 @@ func (bsc *bssClient) connect(ctx context.Context) error {
 	//	Timestamp: time.Now().Unix(),
 	// })
 	// if err != nil {
-	//	return fmt.Errorf("ping error: %v", err)
+	//	return fmt.Errorf("ping error: %w", err)
 	// }
 
 	simulatePingPong := false
@@ -210,7 +210,7 @@ func (bsc *bssClient) connect(ctx context.Context) error {
 				if err != nil {
 					log.Errorf("ping error: %v", err)
 					continue
-					// return fmt.Errorf("ping error: %v", err)
+					// return fmt.Errorf("ping error: %w", err)
 				}
 			}
 		}()

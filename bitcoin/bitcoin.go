@@ -117,14 +117,14 @@ func SignTx(btx *wire.MsgTx, payToScript []byte, privateKey *dcrsecp256k1.Privat
 		txscript.SigHashAll, btx, 0,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to calculate signature hash: %v", err)
+		return fmt.Errorf("failed to calculate signature hash: %w", err)
 	}
 	pubKeyBytes := publicKey.SerializeCompressed()
 	sig := dcrecdsa.Sign(privateKey, sigHash)
 	sigBytes := append(sig.Serialize(), byte(txscript.SigHashAll))
 	sb := txscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes)
 	if btx.TxIn[0].SignatureScript, err = sb.Script(); err != nil {
-		return fmt.Errorf("failed to build signature script: %v", err)
+		return fmt.Errorf("failed to build signature script: %w", err)
 	}
 	return nil
 }
@@ -150,14 +150,14 @@ func PrivKeyFromHexString(s string) (*dcrsecp256k1.PrivateKey, error) {
 func KeysAndAddressFromHexString(s string, chainParams *chaincfg.Params) (*dcrsecp256k1.PrivateKey, *dcrsecp256k1.PublicKey, *btcutil.AddressPubKeyHash, error) {
 	privKey, err := PrivKeyFromHexString(s)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("invalid BTC private key: %v", err)
+		return nil, nil, nil, fmt.Errorf("invalid BTC private key: %w", err)
 	}
 
 	pubKeyBytes := privKey.PubKey().SerializeCompressed()
 	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, chainParams)
 	if err != nil {
 		return nil, nil, nil,
-			fmt.Errorf("failed to create BTC address from public key: %v", err)
+			fmt.Errorf("failed to create BTC address from public key: %w", err)
 	}
 
 	return privKey, privKey.PubKey(), btcAddress.AddressPubKeyHash(), nil
