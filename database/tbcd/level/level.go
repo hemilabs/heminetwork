@@ -35,6 +35,8 @@ const (
 	verbose  = false
 
 	bhsLastKey = "last"
+
+	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
 
 var log = loggo.GetLogger("level")
@@ -477,18 +479,26 @@ func (l *ldb) PeerDelete(ctx context.Context, host, port string) error {
 		// 0.0.0.0
 		return nil
 	}
-	if strings.HasPrefix(a, "[") {
-		// XXX skip v6 for now with crude test
-		return nil
-	}
 
 	l.mtx.Lock()
 	if _, ok := l.peersGood[a]; ok {
 		delete(l.peersGood, a)
 		l.peersBad[a] = struct{}{}
 	}
+
+	// Crude hammer to reset good/bad state of peers
+	if len(l.peersGood) < minPeersRequired {
+		// Kill all peers to force caller to reseed. This happens when
+		// network is down for a while and all peers are moved into
+		// bad map.
+		l.peersGood = make(map[string]struct{}, 1000)
+		l.peersBad = make(map[string]struct{}, 1000)
+		log.Tracef("peer cache purged")
+	}
+
 	allGoodPeers := len(l.peersGood)
 	allBadPeers := len(l.peersBad)
+
 	l.mtx.Unlock()
 
 	log.Debugf("PeerDelete exit good %v bad %v", allGoodPeers, allBadPeers)

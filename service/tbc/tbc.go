@@ -302,8 +302,10 @@ func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer,
 	log.Tracef("seedForever")
 	defer log.Tracef("seedForever")
 
+	minW := 5
+	maxW := 59
 	for {
-		holdOff := time.Duration(5+rand.Intn(59-5)) * time.Second
+		holdOff := time.Duration(minW+rand.Intn(maxW-minW)) * time.Second
 		var em string
 		peers, err := s.seed(ctx, peersWanted)
 		if err != nil {
