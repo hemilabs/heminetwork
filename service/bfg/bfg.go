@@ -1470,9 +1470,7 @@ func (s *Server) Run(pctx context.Context) error {
 		}()
 	}
 
-	s.wg.Add(1)
 	defer func() {
-		defer s.wg.Done()
 		if err := s.btcClient.Close(); err != nil {
 			log.Errorf("bitcoin client closed with error: %v", err)
 			return
