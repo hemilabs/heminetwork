@@ -141,8 +141,6 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 		pool: make(Pool),
 	}
 
-	// XXX missing version
-
 	unwind := true
 	defer func() {
 		if unwind {

@@ -151,7 +151,9 @@ func (p *peer) connect(ctx context.Context) error {
 	p.isDialing = true
 	p.mtx.Unlock()
 
-	d := net.Dialer{}
+	d := net.Dialer{
+		KeepAlive: 9 * time.Second,
+	}
 	conn, err := d.DialContext(ctx, "tcp", p.address)
 	if err != nil {
 		return fmt.Errorf("dial %v: %w", p.address, err)
