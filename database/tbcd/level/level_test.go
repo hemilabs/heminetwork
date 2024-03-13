@@ -257,6 +257,6 @@ func TestBitcoinBits(t *testing.T) {
 	txs := b.Transactions()
 	for k := range txs {
 		tx := txs[k]
-		t.Logf("tx %v  %v", k, tx.Hash())
+		t.Logf("tx %v  %v", tx.Index(), tx.Hash())
 	}
 }
