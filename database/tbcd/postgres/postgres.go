@@ -124,6 +124,13 @@ func (p *pgdb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error)
 	return bhs, nil
 }
 
+func (p *pgdb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeadersByHeight")
+	defer log.Tracef("BlockHeadersByHeight exit")
+
+	return nil, fmt.Errorf("BlockHeadersByHeight not yet")
+}
+
 func (p *pgdb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentifier, error) {
 	log.Tracef("BlocksMissing")
 	defer log.Tracef("BlocksMissing exit")

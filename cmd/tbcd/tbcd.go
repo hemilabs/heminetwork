@@ -113,6 +113,31 @@ func _main() error {
 	if err != nil {
 		return fmt.Errorf("Failed to create tbc server: %v", err)
 	}
+	// XXX remove, this is an illustration of calling the direct API of server
+	//go func() {
+	//	log.Infof("waiting for server to come online")
+	//	select {
+	//	case <-ctx.Done():
+	//		return
+	//	case <-time.After(2 * time.Second):
+	//	}
+	//	hashS := "000000001a4c2c64beded987790ab0c00675b4bc467cd3574ad455b1397c967c"
+	//	ch, err := chainhash.NewHashFromStr(hashS)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	bh, height, err := server.BlockHeaderByHash(ctx, ch)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	log.Infof("height %v hash %v%v", height, bh.BlockHash(), spew.Sdump(bh))
+
+	//	bhbh, err := server.BlockHeadersByHeight(ctx, height)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	log.Infof("height %v headers %v", height, spew.Sdump(bhbh))
+	//}()
 	if err := server.Run(ctx); err != context.Canceled {
 		return fmt.Errorf("tbc server terminated: %v", err)
 	}
