@@ -311,7 +311,7 @@ func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer,
 		if err != nil {
 			em = fmt.Sprintf("seed error: %v, retrying in %v", err, holdOff)
 		} else if peers != nil && len(peers) == 0 {
-			em = fmt.Sprintf("no peers found, retrying in %v", err, holdOff)
+			em = fmt.Sprintf("no peers found, retrying in %v", holdOff)
 		} else {
 			// great success!
 			return peers, nil
