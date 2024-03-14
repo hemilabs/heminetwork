@@ -41,7 +41,8 @@ func (he HandshakeError) Error() string {
 }
 
 func (he HandshakeError) Is(target error) bool {
-	return errors.Is(he, target)
+	_, ok := target.(HandshakeError)
+	return ok
 }
 
 var PublicKeyAuthError = websocket.CloseError{

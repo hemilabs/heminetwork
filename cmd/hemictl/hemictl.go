@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -255,7 +256,7 @@ func bssLong(ctx context.Context) error {
 	go bsc.connectBSS(ctx)
 
 	<-ctx.Done()
-	if context.Canceled != ctx.Err() && ctx.Err() != context.Canceled {
+	if !errors.Is(ctx.Err(), context.Canceled) {
 		return ctx.Err()
 	}
 
