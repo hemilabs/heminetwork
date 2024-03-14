@@ -23,7 +23,7 @@ type MinerAddress [20]byte
 func MinerAddressFromString(address string) (*MinerAddress, error) {
 	b, err := hex.DecodeString(address)
 	if err != nil {
-		return nil, fmt.Errorf("invalid miner address: %v", err)
+		return nil, fmt.Errorf("invalid miner address: %w", err)
 	}
 
 	var ma MinerAddress
@@ -87,7 +87,7 @@ func ParseTransactionL2FromOpReturn(script []byte) (*TransactionL2, error) {
 	}
 	ksh, err := hemi.NewL2KeystoneAbrevFromBytes(data[4:])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse keystone header: %v", err)
+		return nil, fmt.Errorf("failed to parse keystone header: %w", err)
 	}
 	return &TransactionL2{L2Keystone: ksh}, nil
 }
@@ -142,7 +142,7 @@ func ParseTransactionFromOpReturn(script []byte) (*Transaction, error) {
 	}
 	ksh, err := hemi.NewHeaderFromBytes(data[4:])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse keystone header: %v", err)
+		return nil, fmt.Errorf("failed to parse keystone header: %w", err)
 	}
 	return &Transaction{Keystone: ksh}, nil
 }

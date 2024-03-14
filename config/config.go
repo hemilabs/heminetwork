@@ -37,11 +37,11 @@ func Parse(c CfgMap) error {
 	for k, v := range c {
 		// Make sure v.Value is a pointer
 		if reflect.TypeOf(v.Value).Kind() != reflect.Pointer {
-			return fmt.Errorf("Value must be a pointer")
+			return fmt.Errorf("value must be a pointer")
 		}
 		// Make sure we are pointing to the same type
 		if reflect.TypeOf(v.Value).Elem() != reflect.TypeOf(v.DefaultValue) {
-			return fmt.Errorf("Value not the same type as DefaultValue, "+
+			return fmt.Errorf("value not the same type as DefaultValue, "+
 				"wanted %v got %v", reflect.TypeOf(v.Value).Elem(),
 				reflect.TypeOf(v.DefaultValue))
 		}

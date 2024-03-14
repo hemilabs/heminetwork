@@ -54,10 +54,10 @@ type Database struct {
 func Connect(ctx context.Context, uri string) (*sql.DB, error) {
 	pool, err := sql.Open("postgres", uri)
 	if err != nil {
-		return nil, fmt.Errorf("postgres open: %v", err)
+		return nil, fmt.Errorf("postgres open: %w", err)
 	}
 	if err := pool.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("unable to connect to database: %v", err)
+		return nil, fmt.Errorf("unable to connect to database: %w", err)
 	}
 	return pool, nil
 }
@@ -256,13 +256,13 @@ func New(ctx context.Context, puri string, version int) (*Database, error) {
 	// Setup and connect to database.
 	pool, err := sql.Open("postgres", puri)
 	if err != nil {
-		return nil, fmt.Errorf("postgres open: %v", err)
+		return nil, fmt.Errorf("postgres open: %w", err)
 	}
 	pool.SetConnMaxLifetime(0)
 	pool.SetMaxIdleConns(5)
 	pool.SetMaxOpenConns(5)
 	if err := pool.PingContext(ctx); err != nil {
-		return nil, fmt.Errorf("unable to connect to database: %v", err)
+		return nil, fmt.Errorf("unable to connect to database: %w", err)
 	}
 
 	// Verify version.

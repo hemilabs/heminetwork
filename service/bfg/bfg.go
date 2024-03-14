@@ -181,7 +181,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	var err error
 	s.btcClient, err = electrumx.NewClient(cfg.EXBTCAddress)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to create electrumx client: %v", err)
+		return nil, fmt.Errorf("failed to create electrumx client: %w", err)
 	}
 
 	// We could use a PGURI verification here.
@@ -468,7 +468,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 				// in a block, so hopefully we've got them all...
 				return nil
 			}
-			return fmt.Errorf("failed to get transaction at position (height %v, index %v): %v", height, index, err)
+			return fmt.Errorf("failed to get transaction at position (height %v, index %v): %w", height, index, err)
 		}
 
 		txHashEncoded := hex.EncodeToString(txHash)
@@ -491,7 +491,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 		rtx, err := s.btcClient.RawTransaction(ctx, txHash)
 		if err != nil {
-			return fmt.Errorf("failed to get raw transaction with txid %x: %v", txHash, err)
+			return fmt.Errorf("failed to get raw transaction with txid %x: %w", txHash, err)
 		}
 
 		log.Infof("got raw transaction with txid %x", txHash)
@@ -569,7 +569,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 func (s *Server) processBitcoinBlocks(ctx context.Context, start, end uint64) error {
 	for i := start; i <= end; i++ {
 		if err := s.processBitcoinBlock(ctx, i); err != nil {
-			return fmt.Errorf("failed to process bitcoin block at height %d: %v", i, err)
+			return fmt.Errorf("failed to process bitcoin block at height %d: %w", i, err)
 		}
 		s.btcHeight = i
 	}
@@ -1345,7 +1345,7 @@ func (s *Server) Run(pctx context.Context) error {
 	var err error
 	s.db, err = postgres.New(ctx, s.cfg.PgURI)
 	if err != nil {
-		return fmt.Errorf("Failed to connect to database: %v", err)
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 	defer s.db.Close()
 

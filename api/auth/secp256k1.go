@@ -145,7 +145,7 @@ func (s *Secp256k1Auth) HandshakeClient(ctx context.Context, conn protocol.APICo
 	for {
 		_, _, payload, err := protocol.Read(ctx, conn, s)
 		if err != nil {
-			return fmt.Errorf("read: %v", err)
+			return fmt.Errorf("read: %w", err)
 		}
 		log.Tracef(spew.Sdump(payload))
 
@@ -158,13 +158,13 @@ func (s *Secp256k1Auth) HandshakeClient(ctx context.Context, conn protocol.APICo
 
 			hca, err := handleSecp256k1HelloChallenge(s.privKey, c)
 			if err != nil {
-				return fmt.Errorf("handleSecp256k1HelloChallenge: %v", err)
+				return fmt.Errorf("handleSecp256k1HelloChallenge: %w", err)
 			}
 
 			requestID := "HelloChallengeAccepted:" + pubKey
 			err = protocol.Write(ctx, conn, s, requestID, hca)
 			if err != nil {
-				return fmt.Errorf("write HelloChallengeAccepted: %v", err)
+				return fmt.Errorf("write HelloChallengeAccepted: %w", err)
 			}
 
 			// Exit state machine
@@ -186,7 +186,7 @@ func (s *Secp256k1Auth) HandshakeServer(ctx context.Context, conn protocol.APICo
 	for {
 		_, _, payload, err := protocol.Read(ctx, conn, s)
 		if err != nil {
-			return fmt.Errorf("read: %v", err)
+			return fmt.Errorf("read: %w", err)
 		}
 		log.Tracef(spew.Sdump(payload))
 
@@ -206,7 +206,7 @@ func (s *Secp256k1Auth) HandshakeServer(ctx context.Context, conn protocol.APICo
 			err = protocol.Write(ctx, conn, s,
 				"HelloChallenge:"+c.PublicKey, hc)
 			if err != nil {
-				return fmt.Errorf("write HelloChallenge: %v", err)
+				return fmt.Errorf("write HelloChallenge: %w", err)
 			}
 
 		case *Secp256k1HelloChallengeAccepted:
@@ -220,7 +220,7 @@ func (s *Secp256k1Auth) HandshakeServer(ctx context.Context, conn protocol.APICo
 
 			derived, err := handleSecp256k1HelloChallengeAccepted(am, c)
 			if err != nil {
-				return fmt.Errorf("handleSecp256k1HelloChallengeAccepted: %v", err)
+				return fmt.Errorf("handleSecp256k1HelloChallengeAccepted: %w", err)
 			}
 
 			// Exit state machine
