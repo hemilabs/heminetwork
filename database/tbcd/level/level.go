@@ -462,6 +462,27 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	return int64(bh.Height), nil
 }
 
+func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error) {
+	log.Tracef("BlockByHash")
+	defer log.Tracef("BlockByHash exit")
+
+	bDB := l.pool[level.BlocksDB]
+	jbh, err := bDB.Get(hash, nil)
+	if err != nil {
+		if err == leveldb.ErrNotFound {
+			return nil, database.NotFoundError(fmt.Sprintf("block not found: %x", hash))
+		}
+		return nil, fmt.Errorf("block get: %w", err)
+	}
+	var b tbcd.Block
+	err = json.Unmarshal(jbh, &b)
+	if err != nil {
+		return nil, fmt.Errorf("block unmarshal: %w", err)
+	}
+
+	return &b, nil
+}
+
 func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 	log.Tracef("PeersInsert")
 	defer log.Tracef("PeersInsert exit")
