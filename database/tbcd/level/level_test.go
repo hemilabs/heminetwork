@@ -3,13 +3,17 @@ package level
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -20,6 +24,15 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/juju/loggo"
 )
+
+func bytes2Block(block []byte) (*wire.MsgBlock, error) {
+	var b wire.MsgBlock
+	err := b.Deserialize(bytes.NewReader(block))
+	if err != nil {
+		return nil, fmt.Errorf("Deserialize: %v", err)
+	}
+	return &b, nil
+}
 
 func bytes2Header(header []byte) (*wire.BlockHeader, error) {
 	var bh wire.BlockHeader
@@ -260,6 +273,9 @@ func TestBitcoinBits(t *testing.T) {
 	for k := range txs {
 		tx := txs[k]
 		t.Logf("tx %v  %v", tx.Index(), tx.Hash())
+		if blockchain.IsCoinBase(tx) {
+			t.Logf("coinbase! %v", spew.Sdump(tx.MsgTx()))
+		}
 		for kk := range tx.MsgTx().TxOut {
 			p, err := txscript.ParsePkScript(tx.MsgTx().TxOut[kk].PkScript)
 			if err != nil {
@@ -276,4 +292,108 @@ func TestBitcoinBits(t *testing.T) {
 			}
 		}
 	}
+}
+
+type TxKeyValue struct {
+	TxKey      [32 + 4 + 4]byte // hash + tx_index + tx_num
+	ScriptHash [32]byte         // script hash
+	Value      [8]byte          // satoshis
+}
+
+func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
+	b, err := btcutil.NewBlockFromBytes(bb)
+	if err != nil {
+		return nil, err
+	}
+
+	// 32+4 hash + big endian index
+	txs := b.Transactions()
+	etxs := make([]TxKeyValue, 0, len(txs))
+	for _, tx := range txs {
+		for k, txOut := range tx.MsgTx().TxOut {
+			if len(txOut.PkScript) == 0 {
+				// XXX just to see if it happens, probably
+				// needs to be a continue.
+				panic("pkscript zero length")
+			}
+
+			tkv := TxKeyValue{}
+
+			// TX hash
+			txCHash := tx.Hash()
+			txHash := txCHash[:]
+			copy(tkv.TxKey[0:], txHash[:])
+
+			// TX index
+			binary.BigEndian.PutUint32(tkv.TxKey[32:], uint32(tx.Index()))
+
+			// TX num
+			binary.BigEndian.PutUint32(tkv.TxKey[36:], uint32(k))
+
+			// Satoshis
+			binary.BigEndian.PutUint64(tkv.Value[:], uint64(txOut.Value))
+
+			tkv.ScriptHash = sha256.Sum256(txOut.PkScript)
+
+			etxs = append(etxs, tkv)
+		}
+
+		//for kk := range tx.MsgTx().TxOut {
+		//	p, err := txscript.ParsePkScript(tx.MsgTx().TxOut[kk].PkScript)
+		//	if err != nil {
+		//		t.Logf("ERROR: %v %v", kk, err)
+		//		continue
+		//	} else {
+		//		t.Logf("tx %v", spew.Sdump(p))
+		//	}
+		//	a, err := p.Address(chainParams)
+		//	if err != nil {
+		//		t.Logf("ERROR address: %v %v", kk, err)
+		//	} else {
+		//		t.Logf("tx address %v", spew.Sdump(a))
+		//	}
+		//}
+	}
+
+	return etxs, nil
+}
+
+func TestIndex(t *testing.T) {
+	// start block
+	levelDBHome := "~/.tbcd"
+	network := "testnet3"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Open existing DB
+	db, err := New(ctx, filepath.Join(levelDBHome, network))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Fatalf("close: %v", err)
+		}
+	}()
+
+	start := time.Now()
+	log.Infof("Starting to index %v", start)
+	for height := uint64(381); height < 382; height++ {
+		bhs, err := db.BlockHeadersByHeight(ctx, height)
+		if err != nil {
+			t.Fatalf("block headers by height %v: %v", height, err)
+		}
+		b, err := db.BlockByHash(ctx, bhs[0].Hash)
+		if err != nil {
+			t.Fatalf("block by hash %v: %v", height, err)
+		}
+		kv, err := decodeBlock(&chaincfg.TestNet3Params, b.Block)
+		if err != nil {
+			t.Fatalf("decode block %v: %v", height, err)
+		}
+		t.Logf("%v", spew.Sdump(kv))
+	}
+	log.Infof("Ending index %v", time.Now().Sub(start))
 }
