@@ -81,8 +81,13 @@ func TestConnPool(t *testing.T) {
 		if err != nil {
 			t.Errorf("acquire connection: %v", err)
 		}
+
 		_ = conn.Close()
-		<-server.stateCh // remove close notification
+		select {
+		case <-server.stateCh: // remove close notification
+		case <-ctx.Done():
+			t.Fatalf("remove close notification: %v", ctx.Err())
+		}
 	}
 
 	// Ensure connections were removed from the pool
@@ -103,7 +108,7 @@ func TestConnPool(t *testing.T) {
 				t.Errorf("unexpected connection")
 			}
 		case <-ctx.Done():
-			t.Errorf("waiting for all connections to close (%d): %v", i, ctx.Err())
+			t.Fatalf("waiting for all connections to close (%d): %v", i, ctx.Err())
 		}
 	}
 }
