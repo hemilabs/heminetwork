@@ -136,7 +136,7 @@ func (p *connPool) size() int {
 // Close closes the connection pool and all stored connections.
 func (p *connPool) Close() error {
 	p.poolMx.Lock()
-	var pool []*clientConn
+	pool := make([]*clientConn, len(p.pool))
 	copy(pool, p.pool)
 	p.pool = nil
 	p.max = 0

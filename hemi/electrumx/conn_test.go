@@ -220,6 +220,8 @@ func (s *mockServer) Close() {
 }
 
 func (s *mockServer) handleConnection(t *testing.T, conn net.Conn) {
+	t.Logf("Handling connection: %s", conn.RemoteAddr())
+
 	select {
 	case s.stateCh <- true:
 	default:
@@ -235,7 +237,6 @@ func (s *mockServer) handleConnection(t *testing.T, conn net.Conn) {
 		s.wg.Done()
 	}()
 
-	t.Logf("Handling connection: %s", conn.RemoteAddr())
 	reader := bufio.NewReader(conn)
 
 	for {

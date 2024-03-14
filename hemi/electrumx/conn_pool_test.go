@@ -55,9 +55,8 @@ func TestConnPool(t *testing.T) {
 	}
 
 	// Ensure extra connections were closed when returned to the pool
-	// TODO: There has to be a better way of doing this
 	var newConnCount int
-	for i := 0; i < clientMaximumConnections; i++ {
+	for i := 0; i < clientMaximumConnections+clientInitialConnections; i++ {
 		select {
 		case s := <-server.stateCh:
 			if !s {
@@ -83,6 +82,7 @@ func TestConnPool(t *testing.T) {
 			t.Errorf("acquire connection: %v", err)
 		}
 		_ = conn.Close()
+		<-server.stateCh // remove close notification
 	}
 
 	// Ensure connections were removed from the pool
@@ -96,5 +96,14 @@ func TestConnPool(t *testing.T) {
 	}
 
 	// Ensure all connections were closed
-	// TODO(joshuasing)
+	for i := 0; i < poolSize; i++ {
+		select {
+		case s := <-server.stateCh:
+			if s {
+				t.Errorf("unexpected connection")
+			}
+		case <-ctx.Done():
+			t.Errorf("waiting for all connections to close (%d): %v", i, ctx.Err())
+		}
+	}
 }
