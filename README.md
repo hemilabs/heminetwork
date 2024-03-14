@@ -53,6 +53,7 @@ git clone https://github.com/hemilabs/heminetwork.git
 Then build:
 
 ```shell
+cd heminetwork
 make
 ```
 
