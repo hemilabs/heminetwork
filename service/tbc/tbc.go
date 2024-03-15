@@ -520,10 +520,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	// peer.
 	bhs, err := s.blockHeadersBest(ctx)
 	if err != nil {
-		if err != ErrInsertedGenesis {
-			log.Errorf("block headers best: %v", err)
-		}
-		return
+		log.Errorf("block headers best: %v", err)
 	}
 	if len(bhs) != 1 {
 		// XXX fix multiple tips
@@ -893,7 +890,7 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 	}
 }
 
-var ErrInsertedGenesis = errors.New("genesis already inserted")
+var genesisBlockHeader *tbcd.BlockHeader // XXX
 
 func (s *Server) insertGenesis(ctx context.Context) error {
 	log.Tracef("insertGenesis")
@@ -904,7 +901,7 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	// itself is harmless, but may throw people looking at logs of.
 	s.mtx.Lock()
 	if s.insertedGenesis {
-		return ErrInsertedGenesis
+		return nil
 	}
 	s.insertedGenesis = true
 	defer s.mtx.Unlock()
@@ -918,11 +915,12 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 		return fmt.Errorf("serialize genesis block header: %v", err)
 	}
 
-	err = s.db.BlockHeadersInsert(ctx, []tbcd.BlockHeader{{
+	genesisBlockHeader = &tbcd.BlockHeader{
 		Height: 0,
 		Hash:   s.chainParams.GenesisHash[:],
 		Header: gbh,
-	}})
+	}
+	err = s.db.BlockHeadersInsert(ctx, []tbcd.BlockHeader{*genesisBlockHeader})
 	if err != nil {
 		return fmt.Errorf("genesis block header insert: %v", err)
 	}
@@ -961,7 +959,7 @@ func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, erro
 		if err != nil {
 			return nil, fmt.Errorf("insert genesis: %v", err)
 		}
-		return nil, ErrInsertedGenesis
+		bhs = append(bhs, *genesisBlockHeader)
 	}
 
 	if len(bhs) != 1 {
