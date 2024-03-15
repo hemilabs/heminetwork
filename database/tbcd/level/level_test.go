@@ -346,7 +346,7 @@ func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
 			if len(txOut.PkScript) == 0 {
 				// XXX just to see if it happens, probably
 				// needs to be a continue.
-				//panic("pkscript zero length")
+				// panic("pkscript zero length")
 				continue
 			}
 
@@ -377,6 +377,8 @@ func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
 }
 
 func TestIndex(t *testing.T) {
+	t.Skip()
+
 	// start block
 	levelDBHome := "~/.tbcd"
 	network := "testnet3"
@@ -412,7 +414,7 @@ func TestIndex(t *testing.T) {
 			t.Fatalf("decode block %v: %v", height, err)
 		}
 		_ = kv
-		//t.Logf("%v", spew.Sdump(kv))
+		// t.Logf("%v", spew.Sdump(kv))
 	}
 	log.Infof("Ending index %v", time.Now().Sub(start))
 }
