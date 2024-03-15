@@ -118,7 +118,7 @@ bssd has a few crucial requirements to run:
 
 ### Running Network
 
-Prerequisites: `docker`
+Prerequisites: `docker` change 
 
 To run the full network locally, you can run the following.  Note that this will create
 L2Keytones and BTC Blocks at a high rate.  
