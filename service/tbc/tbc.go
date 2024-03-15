@@ -151,7 +151,8 @@ type Server struct {
 	peers  map[string]*peer      // active but not necessarily connected
 	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where
 
-	isWorking bool // reentrancy flag
+	isWorking       bool // reentrancy flag
+	insertedGenesis bool // reentrancy flag
 
 	db tbcd.Database
 
@@ -519,8 +520,9 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	// peer.
 	bhs, err := s.blockHeadersBest(ctx)
 	if err != nil {
-		// This should not happen
-		log.Errorf("block headers best: %v", err)
+		if err != ErrInsertedGenesis {
+			log.Errorf("block headers best: %v", err)
+		}
 		return
 	}
 	if len(bhs) != 1 {
@@ -891,6 +893,56 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 	}
 }
 
+var ErrInsertedGenesis = errors.New("genesis already inserted")
+
+func (s *Server) insertGenesis(ctx context.Context) error {
+	log.Tracef("insertGenesis")
+	defer log.Tracef("insertGenesis exit")
+
+	// It's ok to take an expensive mutex here because this only happens at
+	// start-of-day. This mutex is to prevent excessive logging, which in
+	// itself is harmless, but may throw people looking at logs of.
+	s.mtx.Lock()
+	if s.insertedGenesis {
+		return ErrInsertedGenesis
+	}
+	s.insertedGenesis = true
+	defer s.mtx.Unlock()
+
+	// We really should be inserting the block first but block insert
+	// verifies that a block heade exists.
+	log.Infof("Inserting genesis block header hash: %v",
+		s.chainParams.GenesisHash)
+	gbh, err := header2Bytes(&s.chainParams.GenesisBlock.Header)
+	if err != nil {
+		return fmt.Errorf("serialize genesis block header: %v", err)
+	}
+
+	err = s.db.BlockHeadersInsert(ctx, []tbcd.BlockHeader{{
+		Height: 0,
+		Hash:   s.chainParams.GenesisHash[:],
+		Header: gbh,
+	}})
+	if err != nil {
+		return fmt.Errorf("genesis block header insert: %v", err)
+	}
+
+	log.Infof("Inserting genesis block")
+	gb, err := btcutil.NewBlock(s.chainParams.GenesisBlock).Bytes()
+	if err != nil {
+		return fmt.Errorf("genesis block encode: %v", err)
+	}
+	_, err = s.db.BlockInsert(ctx, &tbcd.Block{
+		Hash:  s.chainParams.GenesisHash[:],
+		Block: gb,
+	})
+	if err != nil {
+		return fmt.Errorf("genesis block insert: %v", err)
+	}
+
+	return nil
+}
+
 func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
 	log.Tracef("blockHeadersBest")
 	defer log.Tracef("blockHeadersBest exit")
@@ -905,21 +957,11 @@ func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, erro
 	// XXX this can hit several times at start of day. Figure out if we
 	// want to insert genesis earlier to prevent this error.
 	if len(bhs) == 0 {
-		gbh, err := header2Bytes(&s.chainParams.GenesisBlock.Header)
+		err := s.insertGenesis(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("serialize genesis block header: %v", err)
+			return nil, fmt.Errorf("insert genesis: %v", err)
 		}
-		bhs = append(bhs, tbcd.BlockHeader{
-			Height: 0,
-			Hash:   s.chainParams.GenesisHash[:],
-			Header: gbh,
-		})
-
-		log.Infof("Inserting genesis hash: %v", s.chainParams.GenesisHash)
-		err = s.db.BlockHeadersInsert(ctx, bhs)
-		if err != nil {
-			return nil, fmt.Errorf("genesis block header insert: %v", err)
-		}
+		return nil, ErrInsertedGenesis
 	}
 
 	if len(bhs) != 1 {

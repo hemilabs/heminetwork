@@ -190,8 +190,6 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 		versionData := make([]byte, 8)
 		binary.BigEndian.PutUint64(versionData, databaseVersion)
 		err = l.pool[MetadataDB].Put([]byte(versionKey), versionData, nil)
-
-		// XXX insert genesis block too
 	}
 	// Check metadata error
 	if err != nil {
