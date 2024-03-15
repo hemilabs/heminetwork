@@ -29,7 +29,6 @@ import (
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
-	"github.com/hemilabs/heminetwork/database/tbcd/postgres"
 )
 
 const (
@@ -776,8 +775,8 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	//	return
 	//}
 
-	//bh := msg.Header.BlockHash()
-	//bhs := bh.String()
+	// bh := msg.Header.BlockHash()
+	// bhs := bh.String()
 	bhs := block.Hash().String()
 	bb, err := block.Bytes()
 	if err != nil {
@@ -1017,17 +1016,7 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("unsuported network: %v", s.cfg.Network)
 	}
 
-	// Connect to db.
-	// XXX should we reconnect?
-	if false {
-		// XXX remove postgres?
-		var err error
-		s.db, err = postgres.New(ctx, s.cfg.PgURI)
-		if err != nil {
-			return fmt.Errorf("Failed to connect to database: %v", err)
-		}
-		defer s.db.Close()
-	}
+	// Open db.
 	var err error
 	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
 	if err != nil {

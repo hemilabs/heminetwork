@@ -114,7 +114,7 @@ func _main() error {
 		return fmt.Errorf("Failed to create tbc server: %v", err)
 	}
 	// XXX remove, this is an illustration of calling the direct API of server
-	//go func() {
+	// go func() {
 	//	log.Infof("waiting for server to come online")
 	//	select {
 	//	case <-ctx.Done():

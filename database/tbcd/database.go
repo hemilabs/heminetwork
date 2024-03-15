@@ -34,16 +34,14 @@ type Database interface {
 }
 
 type BlockHeader struct {
-	Hash      database.ByteArray
-	Height    uint64
-	Header    database.ByteArray
-	CreatedAt database.Timestamp `deep:"-"`
+	Hash   database.ByteArray
+	Height uint64
+	Header database.ByteArray
 }
 
 type Block struct {
-	Hash      database.ByteArray
-	Block     database.ByteArray
-	CreatedAt database.Timestamp `deep:"-"`
+	Hash  database.ByteArray
+	Block database.ByteArray
 }
 
 // BlockIdentifier uniquely identifies a block using it's hash and height.
@@ -52,6 +50,7 @@ type BlockIdentifier struct {
 	Hash   database.ByteArray
 }
 
+// Peer
 type Peer struct {
 	Host      string
 	Port      string

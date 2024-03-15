@@ -7,7 +7,6 @@ package level
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -122,20 +121,14 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	// not seem likely to be racing higher up in the stack.
 
 	bhsDB := l.pool[level.BlockHeadersDB]
-	jbh, err := bhsDB.Get(hash, nil)
+	ebh, err := bhsDB.Get(hash, nil)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
 			return nil, database.NotFoundError(fmt.Sprintf("block header not found: %x", hash))
 		}
 		return nil, fmt.Errorf("block header get: %w", err)
 	}
-	var bh tbcd.BlockHeader
-	err = json.Unmarshal(jbh, &bh)
-	if err != nil {
-		return nil, fmt.Errorf("block headers unmarshal: %w", err)
-	}
-
-	return &bh, nil
+	return decodeBlockHeader(hash, ebh), nil
 }
 
 func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.BlockHeader, error) {
@@ -178,19 +171,14 @@ func (l *ldb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) 
 
 	bhsDB := l.pool[level.BlockHeadersDB]
 	// Get last record
-	jbh, err := bhsDB.Get([]byte(bhsLastKey), nil)
+	ebh, err := bhsDB.Get([]byte(bhsLastKey), nil)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
 			return []tbcd.BlockHeader{}, nil
 		}
 		return nil, fmt.Errorf("block headers best: %w", err)
 	}
-	var bh tbcd.BlockHeader
-	err = json.Unmarshal(jbh, &bh)
-	if err != nil {
-		return nil, fmt.Errorf("block headers best unmarshal: %w", err)
-	}
-	return []tbcd.BlockHeader{bh}, nil
+	return []tbcd.BlockHeader{*decodeBlockHeader([]byte(bhsLastKey), ebh)}, nil
 }
 
 // heightHashToKey generates a sortable key from height and hash. With this key
@@ -214,6 +202,31 @@ func keyToHeightHash(key []byte) (uint64, []byte) {
 	hash := make([]byte, chainhash.HashSize) // must make copy!
 	copy(hash, key[9:])
 	return binary.BigEndian.Uint64(key[0:8]), hash
+}
+
+// encodeBlockHeader encodes a database block header as [height,header] or
+// [8+80] bytes. The hash is the leveldb table key.
+func encodeBlockHeader(bh *tbcd.BlockHeader) (ebhr [88]byte) {
+	binary.BigEndian.PutUint64(ebhr[0:8], bh.Height)
+	copy(ebhr[8:], bh.Header[:])
+	return
+}
+
+// decodeBlockHeader reverse the process of encodeBlockHeader. The hash must be
+// passed in but that is fine because it is the leveldb lookup key.
+func decodeBlockHeader(hashSlice []byte, ebh []byte) *tbcd.BlockHeader {
+	// copy the values to prevent slicing reentrancy problems.
+	var (
+		hash   [32]byte
+		header [80]byte
+	)
+	copy(hash[:], hashSlice)
+	copy(header[:], ebh[8:])
+	return &tbcd.BlockHeader{
+		Hash:   hash[:],
+		Height: binary.BigEndian.Uint64(ebh[0:8]),
+		Header: header[:],
+	}
 }
 
 func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) error {
@@ -271,19 +284,15 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) er
 		// Store height_hash for future reference
 		hhBatch.Put(hhKey, []byte{})
 
-		// XXX reason about pre processing JSON. Due to the caller code
-		// being heavily reentrant the odds are not good that encoding
-		// would only happens once. The downside is that this encoding
+		// XXX reason about pre encoding. Due to the caller code being
+		// heavily reentrant the odds are not good that encoding would
+		// only happens once. The downside is that this encoding
 		// happens in the database transaction and is thus locked.
 
-		// Insert JSON encoded block header record
-		bhs[k].CreatedAt = database.NewTimestamp(time.Now())
-		bhj, err := json.Marshal(bhs[k])
-		if err != nil {
-			return fmt.Errorf("json marshal %v: %w", k, err)
-		}
-		bhsBatch.Put(bhs[k].Hash, bhj)
-		lastRecord = bhj
+		// Encode block header as [hash][height,header] or [32][8+80] bytes
+		ebh := encodeBlockHeader(&bhs[k])
+		bhsBatch.Put(bhs[k].Hash, ebh[:])
+		lastRecord = ebh[:]
 	}
 
 	// Insert last height into block headers XXX this does not deal with forks
@@ -399,13 +408,13 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	}
 
 	// Determine block height either from cache or the database.
-	var bh tbcd.BlockHeader
+	var bh *tbcd.BlockHeader
 
 	// If cache entry is not found grab it from the database.
 	if ce == nil {
 		// Open the block headers database transaction
 		bhsDB := l.pool[level.BlockHeadersDB]
-		bhj, err := bhsDB.Get(b.Hash[:], nil)
+		ebh, err := bhsDB.Get(b.Hash, nil)
 		if err != nil {
 			if err == leveldb.ErrNotFound {
 				return -1, database.NotFoundError(fmt.Sprintf(
@@ -414,29 +423,25 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 			}
 			return -1, fmt.Errorf("block insert block header: %w", err)
 		}
-		err = json.Unmarshal(bhj, &bh)
-		if err != nil {
-			return -1, fmt.Errorf("block insert unmarshal: %w", err)
-		}
+		// XXX only do the big endian decoding here!, less bcopy
+		bh = decodeBlockHeader(b.Hash, ebh)
 	} else {
-		bh.Height = ce.height
-		bh.Hash = b.Hash
+		bh = &tbcd.BlockHeader{
+			Height: ce.height,
+			Hash:   b.Hash,
+		}
 	}
 
 	// Insert block without transaction, if it succeeds and the missing
 	// does not it will be simply redone.
 	bDB := l.pool[level.BlocksDB]
-	has, err := bDB.Has(b.Hash[:], nil)
+	has, err := bDB.Has(b.Hash, nil)
 	if err != nil {
 		return -1, fmt.Errorf("block insert has: %v", err)
 	}
 	if !has {
 		// Insert block since we do not have it yet
-		bj, err := json.Marshal(b)
-		if err != nil {
-			return -1, fmt.Errorf("blocks insert marshal: %v", err)
-		}
-		err = bDB.Put(b.Hash[:], bj, nil)
+		err = bDB.Put(b.Hash, b.Block, nil)
 		if err != nil {
 			return -1, fmt.Errorf("blocks insert put: %v", err)
 		}
@@ -467,20 +472,17 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	defer log.Tracef("BlockByHash exit")
 
 	bDB := l.pool[level.BlocksDB]
-	jbh, err := bDB.Get(hash, nil)
+	eb, err := bDB.Get(hash, nil)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
 			return nil, database.NotFoundError(fmt.Sprintf("block not found: %x", hash))
 		}
 		return nil, fmt.Errorf("block get: %w", err)
 	}
-	var b tbcd.Block
-	err = json.Unmarshal(jbh, &b)
-	if err != nil {
-		return nil, fmt.Errorf("block unmarshal: %w", err)
-	}
-
-	return &b, nil
+	return &tbcd.Block{
+		Hash:  hash,
+		Block: eb,
+	}, nil
 }
 
 func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {

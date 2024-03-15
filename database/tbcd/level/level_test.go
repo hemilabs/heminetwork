@@ -3,12 +3,15 @@ package level
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
@@ -58,6 +61,35 @@ func header2Bytes(wbh *wire.BlockHeader) ([]byte, error) {
 		return nil, err
 	}
 	return b.Bytes(), nil
+}
+
+// random returns a variable number of random bytes.
+func random(n int) []byte {
+	buffer := make([]byte, n)
+	_, err := io.ReadFull(rand.Reader, buffer)
+	if err != nil {
+		panic(err)
+	}
+	return buffer
+}
+
+func TestEncodeDecodeBlockHeader(t *testing.T) {
+	cp := chaincfg.TestNet3Params
+	genesisBH := cp.GenesisBlock.Header
+	genesisHash := cp.GenesisHash
+
+	bh := tbcd.BlockHeader{
+		Hash:   genesisHash[:],
+		Height: 0x1122334455667788, // we need not zero to test decoding of height
+		Header: h2b(&genesisBH),
+	}
+	t.Logf("%v", spew.Sdump(bh))
+	er := encodeBlockHeader(&bh)
+	dr := decodeBlockHeader(bh.Hash, er[:])
+	if !reflect.DeepEqual(bh, *dr) {
+		t.Fatalf("encode decode block header wanted %v got %v",
+			spew.Sdump(bh), spew.Sdump(*dr))
+	}
 }
 
 func TestKey(t *testing.T) {
@@ -121,7 +153,7 @@ func TestLevelDB(t *testing.T) {
 	// Missing blocks
 	// 1 000 000 000
 
-	loggo.ConfigureLoggers("TRACE")
+	loggo.ConfigureLoggers("INFO")
 
 	dir, err := os.MkdirTemp("", "leveldbtest")
 	if err != nil {
@@ -314,7 +346,8 @@ func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
 			if len(txOut.PkScript) == 0 {
 				// XXX just to see if it happens, probably
 				// needs to be a continue.
-				panic("pkscript zero length")
+				//panic("pkscript zero length")
+				continue
 			}
 
 			tkv := TxKeyValue{}
@@ -333,26 +366,11 @@ func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
 			// Satoshis
 			binary.BigEndian.PutUint64(tkv.Value[:], uint64(txOut.Value))
 
+			// Generate sha256 of script as an opaque pointer
 			tkv.ScriptHash = sha256.Sum256(txOut.PkScript)
 
 			etxs = append(etxs, tkv)
 		}
-
-		//for kk := range tx.MsgTx().TxOut {
-		//	p, err := txscript.ParsePkScript(tx.MsgTx().TxOut[kk].PkScript)
-		//	if err != nil {
-		//		t.Logf("ERROR: %v %v", kk, err)
-		//		continue
-		//	} else {
-		//		t.Logf("tx %v", spew.Sdump(p))
-		//	}
-		//	a, err := p.Address(chainParams)
-		//	if err != nil {
-		//		t.Logf("ERROR address: %v %v", kk, err)
-		//	} else {
-		//		t.Logf("tx address %v", spew.Sdump(a))
-		//	}
-		//}
 	}
 
 	return etxs, nil
@@ -380,7 +398,7 @@ func TestIndex(t *testing.T) {
 
 	start := time.Now()
 	log.Infof("Starting to index %v", start)
-	for height := uint64(381); height < 382; height++ {
+	for height := uint64(1); height < 100000; height++ {
 		bhs, err := db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
 			t.Fatalf("block headers by height %v: %v", height, err)
@@ -393,7 +411,8 @@ func TestIndex(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decode block %v: %v", height, err)
 		}
-		t.Logf("%v", spew.Sdump(kv))
+		_ = kv
+		//t.Logf("%v", spew.Sdump(kv))
 	}
 	log.Infof("Ending index %v", time.Now().Sub(start))
 }
