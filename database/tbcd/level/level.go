@@ -9,7 +9,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -495,10 +494,6 @@ func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
 		a := net.JoinHostPort(p.Host, p.Port)
 		if len(a) < 7 {
 			// 0.0.0.0
-			continue
-		}
-		if strings.HasPrefix(a, "[") {
-			// XXX skip v6 for now with crude test
 			continue
 		}
 		if _, ok := l.peersBad[a]; ok {
