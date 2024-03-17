@@ -846,6 +846,8 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	s.mtx.Unlock()
 
 	if printStats {
+		// XXX this coun't errors somehow after ibd, probably because
+		// duplicate blocks are downloaded when an inv comes in.
 		log.Infof("Inserted %v blocks in the last %v", blocksInserted, delta)
 	}
 
