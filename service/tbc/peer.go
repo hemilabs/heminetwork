@@ -33,6 +33,7 @@ type peer struct {
 	mtx       sync.RWMutex
 	isDialing bool
 	conn      net.Conn
+	connected time.Time
 
 	address string
 
@@ -167,6 +168,7 @@ func (p *peer) connect(ctx context.Context) error {
 	p.mtx.Lock()
 	p.conn = conn
 	p.isDialing = false
+	p.connected = time.Now()
 	p.mtx.Unlock()
 
 	return nil
