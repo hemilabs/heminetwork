@@ -150,7 +150,7 @@ type Server struct {
 	seeds       []string
 
 	peers  map[string]*peer      // active but not necessarily connected
-	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where
+	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where XXX audit
 
 	isWorking       bool // reentrancy flag
 	insertedGenesis bool // reentrancy flag
@@ -466,7 +466,6 @@ func (s *Server) peerManager(ctx context.Context) error {
 		case address := <-peerC:
 			// peer exited, connect to new one
 			s.peerDelete(address)
-			log.Infof("peer exited: %v", address)
 			log.Debugf("peer exited: %v", address)
 		case <-loopTicker.C:
 			log.Infof("peer manager wakeup") // XXX maybe too loud
@@ -868,6 +867,13 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		blocksInserted  int
 		blocksDuplicate int // keep track of this until have less of them
 		delta           time.Duration
+
+		// blocks pending
+		blocksPending int
+
+		// peers
+		activePeers    int
+		connectedPeers int
 	)
 	s.mtx.Lock()
 	delete(s.blocks, bhs) // remove inserted block
@@ -892,6 +898,18 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		s.blocksInserted = make(map[string]struct{}, 8192)
 		s.blocksDuplicate = 0
 		s.printTime = now.Add(10 * time.Second)
+
+		// Grab pending block cache stats
+		blocksPending = len(s.blocks)
+
+		// Grab some peer stats as well
+		activePeers = len(s.peers)
+		// Gonna take it right into the Danger Zone! (double mutex)
+		for _, peer := range s.peers {
+			if peer.isConnected() {
+				connectedPeers++
+			}
+		}
 	}
 	s.mtx.Unlock()
 
@@ -900,6 +918,8 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		// duplicate blocks are downloaded when an inv comes in.
 		log.Infof("Inserted %v blocks (%v duplicates) in the last %v",
 			blocksInserted, blocksDuplicate, delta)
+		log.Infof("Pending blocks %v/%v active peers %v connected peers %v",
+			blocksPending, defaultPendingBlocks, activePeers, connectedPeers)
 	}
 
 	s.checkBlockCache(ctx)
