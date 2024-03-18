@@ -340,9 +340,9 @@ func (s *Server) randPeerWrite(ctx context.Context, hash string, msg wire.Messag
 
 	var p *peer
 	// Select random peer
-	//s.mtx.Lock()
+	// s.mtx.Lock()
 	if len(s.blocks) >= defaultPendingBlocks {
-		//s.mtx.Unlock()
+		// s.mtx.Unlock()
 		return errCacheFull
 	}
 	for k, v := range s.peers {
@@ -361,7 +361,7 @@ func (s *Server) randPeerWrite(ctx context.Context, hash string, msg wire.Messag
 		p = v
 		break
 	}
-	//s.mtx.Unlock()
+	// s.mtx.Unlock()
 
 	if p == nil {
 		return errNoPeers
@@ -941,7 +941,7 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 		log.Errorf("block headers missing: %v", err)
 		return
 	}
-	//log.Infof("checkBlockCache db")
+	// log.Infof("checkBlockCache db")
 
 	// XXX prune list if outstanding but there are too many mutexes happening here
 	prunedBM := make([]tbcd.BlockIdentifier, 0, len(bm))
@@ -960,13 +960,13 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 	}
 
 	// downdloadBlocks will only insert unseen in the cache
-	//log.Infof("checkBlockCache download")
+	// log.Infof("checkBlockCache download")
 	err = s.downloadBlocks(ctx, prunedBM)
 	if err != nil {
 		log.Errorf("download blocks: %v", err)
 		return
 	}
-	//log.Infof("checkBlockCache AFTER download")
+	// log.Infof("checkBlockCache AFTER download")
 }
 
 var genesisBlockHeader *tbcd.BlockHeader // XXX
