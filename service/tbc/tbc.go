@@ -138,8 +138,9 @@ type Server struct {
 	cfg *Config
 
 	// stats
-	printTime      time.Time
-	blocksInserted uint64
+	printTime       time.Time
+	blocksInserted  map[string]struct{}
+	blocksDuplicate int
 
 	// bitcoin network
 	wireNet     wire.BitcoinNet
@@ -165,11 +166,12 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 	s := &Server{
-		cfg:        cfg,
-		printTime:  time.Now().Add(10 * time.Second),
-		blocks:     make(map[string]*blockPeer, defaultPendingBlocks),
-		peers:      make(map[string]*peer, defaultPeersWanted),
-		timeSource: blockchain.NewMedianTime(),
+		cfg:            cfg,
+		printTime:      time.Now().Add(10 * time.Second),
+		blocks:         make(map[string]*blockPeer, defaultPendingBlocks),
+		peers:          make(map[string]*peer, defaultPeersWanted),
+		blocksInserted: make(map[string]struct{}, 8192), // stats
+		timeSource:     blockchain.NewMedianTime(),
 	}
 
 	// We could use a PGURI verification here.
@@ -202,8 +204,6 @@ var (
 // blockPeerAdd adds a block to the pending list at the selected peer. Lock
 // must be held.
 func (s *Server) blockPeerAdd(hash, peer string) error {
-	t := time.Now().Add(23 * time.Second) // XXX make variable?
-
 	if _, ok := s.peers[peer]; !ok {
 		return errExpiredPeer // XXX should not happen
 	}
@@ -211,7 +211,7 @@ func (s *Server) blockPeerAdd(hash, peer string) error {
 		return errAlreadyCached
 	}
 	s.blocks[hash] = &blockPeer{
-		expire: t,
+		expire: time.Now().Add(37 * time.Second), // XXX make variable?
 		peer:   peer,
 	}
 	return nil
@@ -232,6 +232,7 @@ func (s *Server) blockPeerExpire() int {
 			continue
 		}
 		delete(s.blocks, k)
+		log.Infof("expired block: %v", k) // XXX remove
 
 		// kill peer as well since it is slow
 		if p := s.peers[v.peer]; p != nil && p.conn != nil {
@@ -331,15 +332,17 @@ func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer,
 	}
 }
 
+// randPeerWrite really is randPeerWrite block. Don't use it for other
+// commands. Lock must be held!
 func (s *Server) randPeerWrite(ctx context.Context, hash string, msg wire.Message) error {
 	log.Tracef("randPeerWrite")
 	defer log.Tracef("randPeerWrite")
 
 	var p *peer
 	// Select random peer
-	s.mtx.Lock()
+	//s.mtx.Lock()
 	if len(s.blocks) >= defaultPendingBlocks {
-		s.mtx.Unlock()
+		//s.mtx.Unlock()
 		return errCacheFull
 	}
 	for k, v := range s.peers {
@@ -358,7 +361,7 @@ func (s *Server) randPeerWrite(ctx context.Context, hash string, msg wire.Messag
 		p = v
 		break
 	}
-	s.mtx.Unlock()
+	//s.mtx.Unlock()
 
 	if p == nil {
 		return errNoPeers
@@ -861,26 +864,33 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 	// Whatever happens,, delete from cache and potentially try again
 	var (
-		printStats     bool
-		blocksInserted uint64
-		delta          time.Duration
+		printStats      bool
+		blocksInserted  int
+		blocksDuplicate int // keep track of this until have less of them
+		delta           time.Duration
 	)
 	s.mtx.Lock()
 	delete(s.blocks, bhs) // remove inserted block
 
 	// Stats
 	if err == nil {
-		s.blocksInserted++
+		if _, ok := s.blocksInserted[bhs]; ok {
+			s.blocksDuplicate++
+		} else {
+			s.blocksInserted[bhs] = struct{}{}
+		}
 	}
 	now := time.Now()
 	if now.After(s.printTime) {
 		printStats = true
-		blocksInserted = s.blocksInserted
+		blocksInserted = len(s.blocksInserted)
+		blocksDuplicate = s.blocksDuplicate
 		// This is super awkward but prevents calculating N inserts *
 		// time.Before(10*time.Second).
 		delta = now.Sub(s.printTime.Add(-10 * time.Second))
 
-		s.blocksInserted = 0
+		s.blocksInserted = make(map[string]struct{}, 8192)
+		s.blocksDuplicate = 0
 		s.printTime = now.Add(10 * time.Second)
 	}
 	s.mtx.Unlock()
@@ -888,7 +898,8 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	if printStats {
 		// XXX this coun't errors somehow after ibd, probably because
 		// duplicate blocks are downloaded when an inv comes in.
-		log.Infof("Inserted %v blocks in the last %v", blocksInserted, delta)
+		log.Infof("Inserted %v blocks (%v duplicates) in the last %v",
+			blocksInserted, blocksDuplicate, delta)
 	}
 
 	s.checkBlockCache(ctx)
@@ -905,31 +916,57 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 		return
 	}
 
-	// XXX make better reentrant
+	//log.Infof("checkBlockCache inside mutex")
+	//defer log.Infof("checkBlockCache outside mutex")
+	//// XXX make better reentrant
+	//s.mtx.Lock()
+	//if s.isWorking {
+	//	s.mtx.Unlock()
+	//	return
+	//}
+	//s.isWorking = true
+	//s.mtx.Unlock()
+	//defer func() {
+	//	s.mtx.Lock()
+	//	s.isWorking = false
+	//	s.mtx.Unlock()
+	//}()
+
+	// XXX is this too much lock?
 	s.mtx.Lock()
-	if s.isWorking {
-		s.mtx.Unlock()
-		return
-	}
-	s.isWorking = true
-	s.mtx.Unlock()
-	defer func() {
-		s.mtx.Lock()
-		s.isWorking = false
-		s.mtx.Unlock()
-	}()
+	defer s.mtx.Unlock()
 
 	bm, err := s.db.BlocksMissing(ctx, want)
 	if err != nil {
 		log.Errorf("block headers missing: %v", err)
 		return
 	}
+	//log.Infof("checkBlockCache db")
+
+	// XXX prune list if outstanding but there are too many mutexes happening here
+	prunedBM := make([]tbcd.BlockIdentifier, 0, len(bm))
+	for k := range bm {
+		if _, ok := s.blocks[string(bm[k].Hash)]; ok {
+			continue
+		}
+		prunedBM = append(prunedBM, bm[k])
+	}
+
+	if len(prunedBM) != len(bm) {
+		log.Infof("PRUNE %v BM %v", len(prunedBM), len(bm))
+	}
+	if len(prunedBM) == 0 {
+		log.Infof("everything pending %v", spew.Sdump(s.blocks))
+	}
+
 	// downdloadBlocks will only insert unseen in the cache
-	err = s.downloadBlocks(ctx, bm)
+	//log.Infof("checkBlockCache download")
+	err = s.downloadBlocks(ctx, prunedBM)
 	if err != nil {
 		log.Errorf("download blocks: %v", err)
 		return
 	}
+	//log.Infof("checkBlockCache AFTER download")
 }
 
 var genesisBlockHeader *tbcd.BlockHeader // XXX
@@ -1029,6 +1066,7 @@ func (s *Server) downloadBlocks(ctx context.Context, bis []tbcd.BlockIdentifier)
 		err := s.randPeerWrite(ctx, hashS, getData)
 		switch err {
 		case nil:
+			log.Debugf("downloadBlocks %v", hashS)
 			continue
 		case errCacheFull:
 			log.Tracef("cache full")
