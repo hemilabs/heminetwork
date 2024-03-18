@@ -234,7 +234,7 @@ func (s *Server) blockPeerExpire() int {
 			continue
 		}
 		delete(s.blocks, k)
-		log.Infof("expired block: %v", k) // XXX remove
+		log.Infof("expired block: %v", k) // XXX remove but add to stats
 
 		// kill peer as well since it is slow
 		if p := s.peers[v.peer]; p != nil && p.conn != nil {
@@ -792,9 +792,6 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			if !database.ErrDuplicate.Is(err) {
 				log.Errorf("block headers insert: %v", err)
 			}
-			//log.Errorf("block headers insert: %v", err)
-			//log.Infof("%v", spew.Sdump(headers))
-			log.Errorf("block headers insert peer not synced: %v", p.close())
 			return
 		}
 
