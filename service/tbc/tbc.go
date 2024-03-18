@@ -405,8 +405,13 @@ func (s *Server) peerManager(ctx context.Context) error {
 		return fmt.Errorf("no seeds found")
 	}
 
+	loopTimeout := 27 * time.Second
+	loopTicker := time.NewTicker(loopTimeout)
+
 	x := 0
 	for {
+		loopTicker.Reset(loopTimeout)
+
 		peersActive := s.peersLen()
 		log.Debugf("peerManager active %v wanted %v", peersActive, peersWanted)
 		if peersActive < peersWanted {
@@ -447,16 +452,51 @@ func (s *Server) peerManager(ctx context.Context) error {
 			}
 		}
 
-		// XXX unfortunately we need a timer here to halt looping when
-		// there is no internet connection but with a functioning DNS
-		// server.
+		// Unfortunately we need a timer here to restart the loop.  The
+		// error is a laptop goes to sleep, all peers disconnect, RSTs
+		// are not seen by sleeping laptop, laptop wakes up. Now the
+		// expiration timers are all expired but not noticed by the
+		// laptop.
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case address := <-peerC:
 			// peer exited, connect to new one
 			s.peerDelete(address)
+			log.Infof("peer exited: %v", address)
 			log.Debugf("peer exited: %v", address)
+		case <-loopTicker.C:
+			log.Infof("peer manager wakeup") // XXX maybe too loud
+			go s.pingAllPeers(ctx)
+		}
+	}
+}
+
+func (s *Server) pingAllPeers(ctx context.Context) {
+	log.Tracef("pingAllPeers")
+	defer log.Tracef("pingAllPeers exit")
+
+	// XXX reason and explain why this cannot be reentrant
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	for _, p := range s.peers {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		if p.conn == nil {
+			continue
+		}
+
+		// We don't really care about the response. We just want to
+		// write to the connection to make it fail if the other side
+		// went away.
+		log.Debugf("Pinging: %v", p)
+		err := p.write(wire.NewMsgPing(uint64(time.Now().Unix())))
+		if err != nil {
+			log.Errorf("ping %v: %v", p, err)
 		}
 	}
 }
