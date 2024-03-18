@@ -46,7 +46,7 @@ func init() {
 
 type ldb struct {
 	mtx                       sync.Mutex
-	blocksMissingCacheEnabled bool
+	blocksMissingCacheEnabled bool                   // XXX verify this code in tests
 	blocksMissingCache        map[string]*cacheEntry // XXX purge and manages cache size
 
 	// maybe remove this because it eats a bit of memory
@@ -482,6 +482,15 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 		Hash:  hash,
 		Block: eb,
 	}, nil
+}
+
+func (l *ldb) PeersStats(ctx context.Context) (int, int) {
+	log.Tracef("PeersInsert")
+	defer log.Tracef("PeersInsert exit")
+
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+	return len(l.peersGood), len(l.peersBad)
 }
 
 func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
