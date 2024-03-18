@@ -7,6 +7,7 @@ package bfgapi
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
 
 	"github.com/hemilabs/heminetwork/api"
@@ -223,7 +224,7 @@ func (a *bfgAPI) Commands() map[protocol.Command]reflect.Type {
 }
 
 func APICommands() map[protocol.Command]reflect.Type {
-	return commands // XXX make copy
+	return maps.Clone(commands)
 }
 
 // Write is the low level primitive of a protocol Write. One should generally

@@ -7,6 +7,7 @@ package bssapi
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math/big"
 	"reflect"
 
@@ -134,7 +135,7 @@ func (a *apiCmd) Commands() map[protocol.Command]reflect.Type {
 }
 
 func APICommands() map[protocol.Command]reflect.Type {
-	return commands // XXX make copy
+	return maps.Clone(commands)
 }
 
 // Read reads a command from an APIConn. This is used server side.
