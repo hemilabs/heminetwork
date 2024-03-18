@@ -177,7 +177,9 @@ func (l *ldb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) 
 		}
 		return nil, fmt.Errorf("block headers best: %w", err)
 	}
-	return []tbcd.BlockHeader{*decodeBlockHeader([]byte(bhsLastKey), ebh)}, nil
+
+	// Convert height to hash, cheat because we know where height lives in ebh.
+	return l.BlockHeadersByHeight(ctx, binary.BigEndian.Uint64(ebh[0:8]))
 }
 
 // heightHashToKey generates a sortable key from height and hash. With this key
@@ -417,7 +419,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		if err != nil {
 			if err == leveldb.ErrNotFound {
 				return -1, database.NotFoundError(fmt.Sprintf(
-					"block insert block header not found: %x",
+					"block insert block header not found: %v",
 					b.Hash))
 			}
 			return -1, fmt.Errorf("block insert block header: %w", err)
