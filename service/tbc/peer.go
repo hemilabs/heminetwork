@@ -185,3 +185,9 @@ func (p *peer) close() error {
 	}
 	return fmt.Errorf("already closed")
 }
+
+func (p *peer) isConnected() bool {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+	return !p.isDialing
+}
