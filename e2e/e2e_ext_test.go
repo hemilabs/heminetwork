@@ -389,183 +389,197 @@ func createMockElectrumxServer(ctx context.Context, t *testing.T, l2Keystone *he
 				panic(err)
 			}
 
-			buf := make([]byte, 1000)
-			n, err := conn.Read(buf)
-			if err != nil {
-				t.Logf(
-					"error occurred reading from conn, will listen again: %s",
-					err.Error(),
-				)
-				conn.Close()
-				continue
-			}
-
-			req := electrumx.JSONRPCRequest{}
-			err = json.Unmarshal(buf[:n], &req)
-			if err != nil {
-				panic(err)
-			}
-
-			res := electrumx.JSONRPCResponse{}
-			if req.Method == "blockchain.transaction.broadcast" {
-				res.ID = req.ID
-				res.Error = nil
-				res.Result = json.RawMessage([]byte(fmt.Sprintf("\"%s\"", mockTxHash)))
-			}
-
-			if req.Method == "blockchain.headers.subscribe" {
-				res.ID = req.ID
-				res.Error = nil
-				headerNotification := electrumx.HeaderNotification{
-					Height:       mockTxheight,
-					BinaryHeader: "aaaa",
-				}
-
-				b, err := json.Marshal(&headerNotification)
-				if err != nil {
-					panic(err)
-				}
-
-				res.Result = b
-			}
-
-			if req.Method == "blockchain.block.header" {
-				res.ID = req.ID
-				res.Error = nil
-				res.Result = json.RawMessage([]byte(mockEncodedBlockHeader))
-			}
-
-			if req.Method == "blockchain.transaction.id_from_pos" {
-				res.ID = req.ID
-				res.Error = nil
-				params := struct {
-					Height uint64 `json:"height"`
-					TXPos  uint64 `json:"tx_pos"`
-					Merkle bool   `json:"merkle"`
-				}{}
-
-				err := json.Unmarshal(req.Params, &params)
-				if err != nil {
-					panic(err)
-				}
-
-				result := struct {
-					TXHash string   `json:"tx_hash"`
-					Merkle []string `json:"merkle"`
-				}{}
-
-				t.Logf("checking height %d, pos %d", params.Height, params.TXPos)
-
-				if params.TXPos == mockTxPos && params.Height == mockTxheight {
-					result.TXHash = reverseAndEncodeEncodedHash(mockTxHash)
-					result.Merkle = mockMerkleHashes
-				}
-
-				// pretend that there are no transactions past mockTxHeight
-				// and mockTxPos
-				if params.Height >= mockTxheight && params.TXPos > mockTxPos {
-					res.Error = electrumx.NewJSONRPCError(1, "no tx at pos")
-				}
-
-				b, err := json.Marshal(&result)
-				if err != nil {
-					panic(err)
-				}
-
-				res.Result = b
-			}
-
-			if req.Method == "blockchain.transaction.get" {
-				res.ID = req.ID
-				res.Error = nil
-
-				params := struct {
-					TXHash  string `json:"tx_hash"`
-					Verbose bool   `json:"verbose"`
-				}{}
-
-				err := json.Unmarshal(req.Params, &params)
-				if err != nil {
-					panic(err)
-				}
-
-				if params.TXHash == reverseAndEncodeEncodedHash(mockTxHash) {
-					j, err := json.Marshal(hex.EncodeToString(btx))
-					if err != nil {
-						panic(err)
-					}
-					res.Result = j
-				}
-			}
-
-			if req.Method == "blockchain.scripthash.get_balance" {
-				res.ID = req.ID
-				res.Error = nil
-				j, err := json.Marshal(electrumx.Balance{
-					Confirmed:   1,
-					Unconfirmed: 2,
-				})
-				if err != nil {
-					panic(err)
-				}
-
-				res.Result = j
-			}
-
-			if req.Method == "blockchain.headers.subscribe" {
-				res.ID = req.ID
-				res.Error = nil
-				j, err := json.Marshal(electrumx.HeaderNotification{
-					Height: 10,
-				})
-				if err != nil {
-					panic(err)
-				}
-				res.Result = j
-			}
-
-			if req.Method == "blockchain.scripthash.listunspent" {
-				res.ID = req.ID
-				res.Error = nil
-				hash := []byte{
-					1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6,
-					7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2,
-				}
-				_j := []struct {
-					Hash   string `json:"tx_hash"`
-					Height uint64 `json:"height"`
-					Index  uint64 `json:"tx_pos"`
-					Value  uint64 `json:"value"`
-				}{{
-					Height: 99,
-					Hash:   hex.EncodeToString(hash),
-					Index:  9999,
-					Value:  999999,
-				}}
-				j, err := json.Marshal(_j)
-				if err != nil {
-					panic(err)
-				}
-
-				res.Result = j
-			}
-
-			b, err := json.Marshal(res)
-			if err != nil {
-				panic(err)
-			}
-
-			b = append(b, '\n')
-			_, err = io.Copy(conn, bytes.NewReader(b))
-			if err != nil {
-				panic(err)
-			}
-
-			conn.Close()
+			go handleMockElectrumxConnection(ctx, t, conn, btx)
 		}
 	}()
 
 	return addr, cleanup
+}
+
+func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.Conn, btx []byte) {
+	t.Helper()
+	defer conn.Close()
+
+	t.Logf("Handling connection: %s", conn.RemoteAddr())
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		buf := make([]byte, 1000)
+		n, err := conn.Read(buf)
+		if err != nil {
+			t.Logf(
+				"error occurred reading from conn, will listen again: %s",
+				err.Error(),
+			)
+			return
+		}
+
+		req := electrumx.JSONRPCRequest{}
+		err = json.Unmarshal(buf[:n], &req)
+		if err != nil {
+			panic(err)
+		}
+
+		res := electrumx.JSONRPCResponse{}
+		if req.Method == "blockchain.transaction.broadcast" {
+			res.ID = req.ID
+			res.Error = nil
+			res.Result = json.RawMessage([]byte(fmt.Sprintf("\"%s\"", mockTxHash)))
+		}
+
+		if req.Method == "blockchain.headers.subscribe" {
+			res.ID = req.ID
+			res.Error = nil
+			headerNotification := electrumx.HeaderNotification{
+				Height:       mockTxheight,
+				BinaryHeader: "aaaa",
+			}
+
+			b, err := json.Marshal(&headerNotification)
+			if err != nil {
+				panic(err)
+			}
+
+			res.Result = b
+		}
+
+		if req.Method == "blockchain.block.header" {
+			res.ID = req.ID
+			res.Error = nil
+			res.Result = json.RawMessage([]byte(mockEncodedBlockHeader))
+		}
+
+		if req.Method == "blockchain.transaction.id_from_pos" {
+			res.ID = req.ID
+			res.Error = nil
+			params := struct {
+				Height uint64 `json:"height"`
+				TXPos  uint64 `json:"tx_pos"`
+				Merkle bool   `json:"merkle"`
+			}{}
+
+			err := json.Unmarshal(req.Params, &params)
+			if err != nil {
+				panic(err)
+			}
+
+			result := struct {
+				TXHash string   `json:"tx_hash"`
+				Merkle []string `json:"merkle"`
+			}{}
+
+			t.Logf("checking height %d, pos %d", params.Height, params.TXPos)
+
+			if params.TXPos == mockTxPos && params.Height == mockTxheight {
+				result.TXHash = reverseAndEncodeEncodedHash(mockTxHash)
+				result.Merkle = mockMerkleHashes
+			}
+
+			// pretend that there are no transactions past mockTxHeight
+			// and mockTxPos
+			if params.Height >= mockTxheight && params.TXPos > mockTxPos {
+				res.Error = electrumx.NewJSONRPCError(1, "no tx at pos")
+			}
+
+			b, err := json.Marshal(&result)
+			if err != nil {
+				panic(err)
+			}
+
+			res.Result = b
+		}
+
+		if req.Method == "blockchain.transaction.get" {
+			res.ID = req.ID
+			res.Error = nil
+
+			params := struct {
+				TXHash  string `json:"tx_hash"`
+				Verbose bool   `json:"verbose"`
+			}{}
+
+			err := json.Unmarshal(req.Params, &params)
+			if err != nil {
+				panic(err)
+			}
+
+			if params.TXHash == reverseAndEncodeEncodedHash(mockTxHash) {
+				j, err := json.Marshal(hex.EncodeToString(btx))
+				if err != nil {
+					panic(err)
+				}
+				res.Result = j
+			}
+		}
+
+		if req.Method == "blockchain.scripthash.get_balance" {
+			res.ID = req.ID
+			res.Error = nil
+			j, err := json.Marshal(electrumx.Balance{
+				Confirmed:   1,
+				Unconfirmed: 2,
+			})
+			if err != nil {
+				panic(err)
+			}
+
+			res.Result = j
+		}
+
+		if req.Method == "blockchain.headers.subscribe" {
+			res.ID = req.ID
+			res.Error = nil
+			j, err := json.Marshal(electrumx.HeaderNotification{
+				Height: 10,
+			})
+			if err != nil {
+				panic(err)
+			}
+			res.Result = j
+		}
+
+		if req.Method == "blockchain.scripthash.listunspent" {
+			res.ID = req.ID
+			res.Error = nil
+			hash := []byte{
+				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6,
+				7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2,
+			}
+			_j := []struct {
+				Hash   string `json:"tx_hash"`
+				Height uint64 `json:"height"`
+				Index  uint64 `json:"tx_pos"`
+				Value  uint64 `json:"value"`
+			}{{
+				Height: 99,
+				Hash:   hex.EncodeToString(hash),
+				Index:  9999,
+				Value:  999999,
+			}}
+			j, err := json.Marshal(_j)
+			if err != nil {
+				panic(err)
+			}
+
+			res.Result = j
+		}
+
+		b, err := json.Marshal(res)
+		if err != nil {
+			panic(err)
+		}
+
+		b = append(b, '\n')
+		_, err = io.Copy(conn, bytes.NewReader(b))
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 func defaultTestContext() (context.Context, context.CancelFunc) {

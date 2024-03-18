@@ -5,19 +5,18 @@
 package electrumx
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"strings"
-	"sync"
+	"time"
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/juju/loggo"
+	"github.com/sethvargo/go-retry"
 
 	"github.com/hemilabs/heminetwork/bitcoin"
 )
@@ -34,6 +33,22 @@ type JSONRPCRequest struct {
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	ID      uint64          `json:"id"`
+}
+
+// NewJSONRPCRequest creates a new JSONRPCRequest.
+func NewJSONRPCRequest(id uint64, method string, params any) *JSONRPCRequest {
+	req := &JSONRPCRequest{
+		JSONRPC: "2.0",
+		Method:  method,
+		ID:      id,
+	}
+	if params != nil {
+		b, err := json.Marshal(params)
+		if err != nil {
+		}
+		req.Params = b
+	}
+	return req
 }
 
 type JSONRPCResponse struct {
@@ -102,71 +117,65 @@ var (
 
 // Client implements an electrumx JSON RPC client.
 type Client struct {
-	address string
-	id      uint64
-	mtx     sync.Mutex
+	connPool *connPool
 }
+
+var log = loggo.GetLogger("electrumx")
+
+const (
+	clientInitialConnections = 2
+	clientMaximumConnections = 5
+)
 
 // NewClient returns an initialised electrumx client.
 func NewClient(address string) (*Client, error) {
-	return &Client{
-		address: address,
-	}, nil
+	c := &Client{}
+
+	// The address may be empty during tests, ignore empty addresses.
+	if address != "" {
+		pool, err := newConnPool("tcp", address,
+			clientInitialConnections, clientMaximumConnections)
+		if err != nil {
+			return nil, fmt.Errorf("new connection pool: %w", err)
+		}
+		c.connPool = pool
+	}
+
+	return c, nil
 }
 
 func (c *Client) call(ctx context.Context, method string, params, result any) error {
-	var dialer net.Dialer
-	conn, err := dialer.DialContext(ctx, "tcp", c.address)
-	if err != nil {
-		return fmt.Errorf("failed to dial electrumx: %w", err)
+	if c.connPool == nil {
+		// connPool may be nil if the address given to NewClient is empty.
+		return errors.New("connPool is nil")
 	}
-	defer conn.Close()
 
-	c.mtx.Lock()
-	c.id++
-	id := c.id
-	c.mtx.Unlock()
-
-	req := &JSONRPCRequest{
-		JSONRPC: "2.0",
-		Method:  method,
-		ID:      id,
-	}
-	if params != any(nil) {
-		b, err := json.Marshal(params)
+	backoff := retry.WithJitter(250*time.Millisecond,
+		retry.WithMaxRetries(5, retry.NewExponential(100*time.Millisecond)))
+	return retry.Do(ctx, backoff, func(ctx context.Context) error {
+		conn, err := c.connPool.acquireConn()
 		if err != nil {
+			return retry.RetryableError(fmt.Errorf("acquire connection: %w", err))
 		}
-		req.Params = b
-	}
-	b, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-	b = append(b, byte('\n'))
-	if _, err := io.Copy(conn, bytes.NewReader(b)); err != nil {
-		return fmt.Errorf("failed to write request: %w", err)
-	}
 
-	reader := bufio.NewReader(conn)
-	b, err = reader.ReadBytes('\n')
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
+		if err = conn.call(ctx, method, params, result); err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return retry.RetryableError(err)
+			}
+			c.connPool.freeConn(conn)
+			return err
+		}
 
-	var resp JSONRPCResponse
-	if err := json.Unmarshal(b, &resp); err != nil {
-		return fmt.Errorf("failed to unmarshal response: %w", err)
-	}
-	if resp.ID != req.ID {
-		return fmt.Errorf("response ID differs from request ID (%d != %d)", resp.ID, req.ID)
-	}
-	if resp.Error != nil {
-		return RPCError(resp.Error.Message)
-	}
-	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return fmt.Errorf("failed to unmarshal result: %w", err)
-	}
+		c.connPool.freeConn(conn)
+		return nil
+	})
+}
 
+// Close closes the client.
+func (c *Client) Close() error {
+	if c.connPool != nil {
+		return c.connPool.Close()
+	}
 	return nil
 }
 
@@ -229,6 +238,11 @@ func (c *Client) Broadcast(ctx context.Context, rtx []byte) ([]byte, error) {
 }
 
 func (c *Client) Height(ctx context.Context) (uint64, error) {
+	// TODO: The way this function is used could be improved.
+	//  "blockchain.headers.subscribe" subscribes to receive notifications from
+	//  the ElectrumX server, however this function appears to be used for
+	//  polling instead, which could be replaced by handling the requests sent
+	//  from the ElectrumX server.
 	hn := &HeaderNotification{}
 	if err := c.call(ctx, "blockchain.headers.subscribe", nil, hn); err != nil {
 		return 0, err
@@ -294,7 +308,7 @@ func (c *Client) Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 	if err := c.call(ctx, "blockchain.transaction.get", &params, &txJSON); err != nil {
 		return nil, fmt.Errorf("failed to get transaction: %w", err)
 	}
-	return []byte(txJSON), nil
+	return txJSON, nil
 }
 
 func (c *Client) TransactionAtPosition(ctx context.Context, height, index uint64) ([]byte, []string, error) {

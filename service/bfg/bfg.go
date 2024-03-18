@@ -93,6 +93,7 @@ type btcClient interface {
 	Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 	TransactionAtPosition(ctx context.Context, height, index uint64) ([]byte, []string, error)
 	UTXOs(ctx context.Context, scriptHash []byte) ([]*electrumx.UTXO, error)
+	Close() error
 }
 
 type Config struct {
@@ -1468,6 +1469,14 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Infof("prometheus clean shutdown")
 		}()
 	}
+
+	defer func() {
+		if err := s.btcClient.Close(); err != nil {
+			log.Errorf("bitcoin client closed with error: %v", err)
+			return
+		}
+		log.Errorf("bitcoin client clean shutdown")
+	}()
 
 	s.wg.Add(1)
 	go s.trackBitcoin(ctx)
