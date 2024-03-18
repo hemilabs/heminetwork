@@ -22,6 +22,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/juju/loggo"
@@ -139,6 +140,7 @@ type Server struct {
 
 	// stats
 	printTime       time.Time
+	blocksSize      uint64 // cumulative block size written
 	blocksInserted  map[string]struct{}
 	blocksDuplicate int
 
@@ -568,6 +570,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		// XXX fix multiple tips
 		panic(len(bhs))
 	}
+
 	err = s.getHeaders(ctx, p, bhs[0].Header)
 	if err != nil {
 		// This should not happen
@@ -789,6 +792,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			if !database.ErrDuplicate.Is(err) {
 				log.Errorf("block headers insert: %v", err)
 			}
+			//log.Errorf("block headers insert: %v", err)
+			//log.Infof("%v", spew.Sdump(headers))
+			log.Errorf("block headers insert peer not synced: %v", p.close())
 			return
 		}
 
@@ -864,6 +870,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	// Whatever happens,, delete from cache and potentially try again
 	var (
 		printStats      bool
+		blocksSize      uint64
 		blocksInserted  int
 		blocksDuplicate int // keep track of this until have less of them
 		delta           time.Duration
@@ -882,6 +889,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 	// Stats
 	if err == nil {
+		s.blocksSize += uint64(len(b.Block) + len(b.Hash))
 		if _, ok := s.blocksInserted[bhs]; ok {
 			s.blocksDuplicate++
 		} else {
@@ -891,12 +899,15 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	now := time.Now()
 	if now.After(s.printTime) {
 		printStats = true
+
+		blocksSize = s.blocksSize
 		blocksInserted = len(s.blocksInserted)
 		blocksDuplicate = s.blocksDuplicate
 		// This is super awkward but prevents calculating N inserts *
 		// time.Before(10*time.Second).
 		delta = now.Sub(s.printTime.Add(-10 * time.Second))
 
+		s.blocksSize = 0
 		s.blocksInserted = make(map[string]struct{}, 8192)
 		s.blocksDuplicate = 0
 		s.printTime = now.Add(10 * time.Second)
@@ -919,8 +930,8 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	if printStats {
 		// XXX this coun't errors somehow after ibd, probably because
 		// duplicate blocks are downloaded when an inv comes in.
-		log.Infof("Inserted %v blocks (%v duplicates) in the last %v",
-			blocksInserted, blocksDuplicate, delta)
+		log.Infof("Inserted %v blocks (%v, %v duplicates) in the last %v",
+			blocksInserted, humanize.Bytes(blocksSize), blocksDuplicate, delta)
 		log.Infof("Pending blocks %v/%v active peers %v connected peers %v "+
 			"good peers %v bad peers %v",
 			blocksPending, defaultPendingBlocks, activePeers, connectedPeers,
@@ -1067,8 +1078,8 @@ func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, erro
 	}
 
 	if len(bhs) != 1 {
-		// XXX this needs to be handled.
-		return nil, fmt.Errorf("unhandled best tip count: %v", bhs)
+		// XXX this needs to be handled, for now try to just unfork
+		return nil, fmt.Errorf("unhandled best tip count: %v", spew.Sdump(bhs))
 	}
 
 	return bhs, nil
