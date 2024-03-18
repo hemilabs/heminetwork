@@ -872,6 +872,8 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		blocksPending int
 
 		// peers
+		goodPeers      int
+		badPeers       int
 		activePeers    int
 		connectedPeers int
 	)
@@ -904,6 +906,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 		// Grab some peer stats as well
 		activePeers = len(s.peers)
+		goodPeers, badPeers = s.db.PeersStats(ctx)
 		// Gonna take it right into the Danger Zone! (double mutex)
 		for _, peer := range s.peers {
 			if peer.isConnected() {
@@ -918,8 +921,10 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		// duplicate blocks are downloaded when an inv comes in.
 		log.Infof("Inserted %v blocks (%v duplicates) in the last %v",
 			blocksInserted, blocksDuplicate, delta)
-		log.Infof("Pending blocks %v/%v active peers %v connected peers %v",
-			blocksPending, defaultPendingBlocks, activePeers, connectedPeers)
+		log.Infof("Pending blocks %v/%v active peers %v connected peers %v "+
+			"good peers %v bad peers %v",
+			blocksPending, defaultPendingBlocks, activePeers, connectedPeers,
+			goodPeers, badPeers)
 	}
 
 	s.checkBlockCache(ctx)
