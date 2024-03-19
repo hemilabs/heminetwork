@@ -34,7 +34,7 @@ type Database interface {
 	// BlocksInsert(ctx context.Context, bs []*Block) (int64, error)
 
 	// Transactions
-	//UTxosInsert(ctx context.Context, butxos []BlockUtxo) error
+	// UTxosInsert(ctx context.Context, butxos []BlockUtxo) error
 	UTxosInsert(ctx context.Context, blockhash []byte, utxos []Utxo) error
 
 	// Peer manager
