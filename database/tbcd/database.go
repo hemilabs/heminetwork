@@ -16,8 +16,10 @@ import (
 type Database interface {
 	database.Database
 
-	// Version table
+	// Metadata
 	Version(ctx context.Context) (int, error)
+	MetadataGet(ctx context.Context, key []byte) ([]byte, error)
+	MetadataPut(ctx context.Context, key, value []byte) error
 
 	// Block header
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
@@ -32,7 +34,8 @@ type Database interface {
 	// BlocksInsert(ctx context.Context, bs []*Block) (int64, error)
 
 	// Transactions
-	UTxosInsert(ctx context.Context, blockhash []byte, utxos []BlockUtxo) error
+	//UTxosInsert(ctx context.Context, butxos []BlockUtxo) error
+	UTxosInsert(ctx context.Context, blockhash []byte, utxos []Utxo) error
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -57,7 +60,7 @@ type Block struct {
 //	Utxos     []BlockUtxo
 //}
 
-type BlockUtxo struct {
+type Utxo struct {
 	Hash        database.ByteArray
 	SpendScript database.ByteArray
 	Index       uint32
@@ -90,18 +93,18 @@ type Peer struct {
 
 // BlockUtxos extracts all unspent transaction scripts  from the provided
 // block.
-func BlockUtxos(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []BlockUtxo, error) {
+func BlockUtxos(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Utxo, error) {
 	b, err := btcutil.NewBlockFromBytes(bb)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	txs := b.Transactions()
-	butxos := make([]BlockUtxo, 0, len(txs))
+	utxos := make([]Utxo, 0, len(txs))
 	for _, tx := range txs {
 		for _, txOut := range tx.MsgTx().TxOut {
 			txCHash := tx.Hash()
-			butxos = append(butxos, BlockUtxo{
+			utxos = append(utxos, Utxo{
 				Hash:        txCHash[:],
 				SpendScript: txOut.PkScript,
 				Index:       uint32(tx.Index()),
@@ -110,5 +113,5 @@ func BlockUtxos(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []BlockUtxo, e
 		}
 	}
 
-	return b.Hash(), butxos, nil
+	return b.Hash(), utxos, nil
 }

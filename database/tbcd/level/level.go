@@ -116,6 +116,22 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	return tx, cf, df, nil
 }
 
+func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
+	log.Tracef("MetadataGet")
+	defer log.Tracef("MetadataGet exit")
+
+	mdDB := l.pool[level.MetadataDB]
+	return mdDB.Get(key, nil)
+}
+
+func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
+	log.Tracef("MetadataPut")
+	defer log.Tracef("MetadataPut exit")
+
+	mdDB := l.pool[level.MetadataDB]
+	return mdDB.Put(key, value, nil)
+}
+
 func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
@@ -498,7 +514,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	}, nil
 }
 
-func (l *ldb) UTxosInsert(ctx context.Context, blockhash []byte, utxos []tbcd.BlockUtxo) error {
+func (l *ldb) UTxosInsert(ctx context.Context, blockhash []byte, utxos []tbcd.Utxo) error {
 	log.Tracef("UTxosInsert")
 	defer log.Tracef("UTxosInsert exit")
 
