@@ -23,9 +23,10 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/juju/loggo"
+
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/juju/loggo"
 )
 
 func bytes2Block(block []byte) (*wire.MsgBlock, error) {

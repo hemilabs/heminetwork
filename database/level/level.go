@@ -14,11 +14,12 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/hemilabs/heminetwork/database"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+
+	"github.com/hemilabs/heminetwork/database"
 )
 
 const (
