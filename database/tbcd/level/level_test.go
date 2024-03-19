@@ -377,33 +377,8 @@ func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
 
 	return etxs, nil
 }
-func blockUtxos(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []tbcd.BlockUtxo, error) {
-	b, err := btcutil.NewBlockFromBytes(bb)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	butxos := make([]tbcd.BlockUtxo, 0, len(txs))
-	for _, tx := range b.Transactions() {
-		for k, txOut := range tx.MsgTx().TxOut {
-			if len(txOut.PkScript) == 0 {
-				log.Infof("zero length script in block: %v", b.Hash())
-				continue
-			}
-
-			butxos = append(butxos, BlockUtxo{
-				SpendScript: txOut.PkScript,
-				Index:       tx.Index(),
-				Value:       txOut.Value,
-			})
-		}
-	}
-
-	return b.Hash(), butxos, nil
-}
-
 func TestIndex(t *testing.T) {
-	t.Skip()
+	//	t.Skip()
 
 	// start block
 	levelDBHome := "~/.tbcd"
@@ -424,9 +399,10 @@ func TestIndex(t *testing.T) {
 		}
 	}()
 
+	count := uint64(10)
 	start := time.Now()
-	log.Infof("Starting to index %v", start)
-	for height := uint64(1); height < 100000; height++ {
+	log.Infof("Starting to index to height %v at %v", count, start)
+	for height := uint64(0); height < count; height++ {
 		bhs, err := db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
 			t.Fatalf("block headers by height %v: %v", height, err)
@@ -435,12 +411,20 @@ func TestIndex(t *testing.T) {
 		if err != nil {
 			t.Fatalf("block by hash %v: %v", height, err)
 		}
-		kv, err := decodeBlock(&chaincfg.TestNet3Params, b.Block)
+		bh, utxos, err := tbcd.BlockUtxos(&chaincfg.TestNet3Params, b.Block)
 		if err != nil {
-			t.Fatalf("decode block %v: %v", height, err)
+			t.Fatalf("block utxos %v: %v", height, err)
 		}
-		_ = kv
+		err = db.UTxosInsert(ctx, bh[:], utxos)
+		if err != nil {
+			t.Fatalf("block utxos %v: %v", height, err)
+		}
+		//kv, err := decodeBlock(&chaincfg.TestNet3Params, b.Block)
+		//if err != nil {
+		//	t.Fatalf("decode block %v: %v", height, err)
+		//}
+		//_ = kv
 		// t.Logf("%v", spew.Sdump(kv))
 	}
-	log.Infof("Ending index %v", time.Now().Sub(start))
+	log.Infof("Ending index height %v took %v", count, time.Now().Sub(start))
 }
