@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"net/http"
 	"path/filepath"
 	"strconv"
 	"sync"
@@ -23,13 +24,14 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
-	"github.com/hemilabs/heminetwork/database"
-	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/service/deucalion"
 )
 
 const (
@@ -119,6 +121,7 @@ type blockPeer struct {
 
 type Config struct {
 	LevelDBHome             string
+	ListenAddress           string
 	LogLevel                string
 	PgURI                   string
 	PrometheusListenAddress string
@@ -128,7 +131,8 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		LogLevel: logLevel,
+		ListenAddress: tbcapi.DefaultListen,
+		LogLevel:      logLevel,
 	}
 }
 
@@ -159,7 +163,11 @@ type Server struct {
 	db tbcd.Database
 
 	// Prometheus
-	isRunning bool
+	isRunning     bool
+	cmdsProcessed prometheus.Counter
+
+	// WebSockets
+	sessions map[string]*tbcWs
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -173,6 +181,12 @@ func NewServer(cfg *Config) (*Server, error) {
 		peers:          make(map[string]*peer, defaultPeersWanted),
 		blocksInserted: make(map[string]struct{}, 8192), // stats
 		timeSource:     blockchain.NewMedianTime(),
+		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
+			Subsystem: promSubsystem,
+			Name:      "rpc_calls_total",
+			Help:      "The total number of successful RPC commands",
+		}),
+		sessions: make(map[string]*tbcWs),
 	}
 
 	// We could use a PGURI verification here.
@@ -820,11 +834,11 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	defer log.Tracef("handleBlock exit (%v)", p)
 
 	block := btcutil.NewBlock(msg)
-	//err := msg.Serialize(block) // XXX we should not being doing this twice
-	//if err != nil {
+	// err := msg.Serialize(block) // XXX we should not being doing this twice
+	// if err != nil {
 	//	log.Errorf("block serialize: %v", err)
 	//	return
-	//}
+	// }
 
 	// bh := msg.Header.BlockHash()
 	// bhs := bh.String()
@@ -853,13 +867,13 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		// out of order this we will have to do something clever for
 		// prevNode.
 		//
-		//header := &block.MsgBlock().Header
-		//flags := blockchain.BFNone
-		//err := blockchain.CheckBlockHeaderContext(header, prevNode, flags, bctxt, false)
-		//if err != nil {
+		// header := &block.MsgBlock().Header
+		// flags := blockchain.BFNone
+		// err := blockchain.CheckBlockHeaderContext(header, prevNode, flags, bctxt, false)
+		// if err != nil {
 		//	log.Errorf("Unable to validate context of block hash %v: %v", bhs, err)
 		//	return
-		//}
+		// }
 	}
 
 	height, err := s.db.BlockInsert(ctx, b)
@@ -1149,6 +1163,29 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.db.Close()
 
+	// HTTP server
+	mux := http.NewServeMux()
+	log.Infof("handle (tbc): %s", tbcapi.RouteWebsocket)
+	mux.HandleFunc(tbcapi.RouteWebsocket, s.handleWebsocket)
+
+	httpServer := &http.Server{
+		Addr:        s.cfg.ListenAddress,
+		Handler:     mux,
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
+	}
+	httpErrCh := make(chan error)
+	go func() {
+		log.Infof("Listening: %s", s.cfg.ListenAddress)
+		httpErrCh <- httpServer.ListenAndServe()
+	}()
+	defer func() {
+		if err = httpServer.Shutdown(ctx); err != nil {
+			log.Errorf("http server exit: %v", err)
+			return
+		}
+		log.Infof("RPC server shutdown cleanly")
+	}()
+
 	// Prometheus
 	if s.cfg.PrometheusListenAddress != "" {
 		d, err := deucalion.New(&deucalion.Config{
@@ -1158,6 +1195,7 @@ func (s *Server) Run(pctx context.Context) error {
 			return fmt.Errorf("failed to create server: %w", err)
 		}
 		cs := []prometheus.Collector{
+			s.cmdsProcessed,
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Subsystem: promSubsystem,
 				Name:      "running",
@@ -1191,8 +1229,8 @@ func (s *Server) Run(pctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()
-	case e := <-errC:
-		err = e
+	case err = <-errC:
+	case err = <-httpErrCh:
 	}
 	cancel()
 

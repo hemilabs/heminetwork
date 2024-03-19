@@ -29,6 +29,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/version"
@@ -80,6 +81,16 @@ func handleBSSWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 func handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 	for {
 		if _, _, _, err := bfgapi.ReadConn(ctx, conn); err != nil {
+			return
+		}
+	}
+}
+
+// handleTBCWebsocketRead discards all reads but has to exist in order to
+// be able to use tbcapi.Call.
+func handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
+	for {
+		if _, _, _, err := tbcapi.ReadConn(ctx, conn); err != nil {
 			return
 		}
 	}
@@ -265,7 +276,7 @@ func bssLong(ctx context.Context) error {
 
 func client(which string) error {
 	log.Debugf("client %v", which)
-	defer log.Debugf("client exit", which)
+	defer log.Debugf("client %v exit", which)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -303,6 +314,9 @@ func init() {
 		allCommands[string(k)] = v
 	}
 	for k, v := range bfgapi.APICommands() {
+		allCommands[string(k)] = v
+	}
+	for k, v := range tbcapi.APICommands() {
 		allCommands[string(k)] = v
 	}
 
@@ -411,6 +425,10 @@ func _main() error {
 		u = bfgapi.DefaultPrivateURL
 		callHandler = handleBFGWebsocketReadUnauth
 		call = bfgapi.Call // XXX yuck
+	case strings.HasPrefix(cmd, "tbcapi"):
+		u = tbcapi.DefaultURL
+		callHandler = handleTBCWebsocketRead
+		call = tbcapi.Call // XXX yuck?
 	default:
 		return fmt.Errorf("can't derive URL from command: %v", cmd)
 	}

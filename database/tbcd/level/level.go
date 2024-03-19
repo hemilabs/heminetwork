@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/hemilabs/heminetwork/database"
-	"github.com/hemilabs/heminetwork/database/level"
-	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+
+	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/database/level"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 // Locking order:

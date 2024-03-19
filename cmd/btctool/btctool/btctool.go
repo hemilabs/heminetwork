@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/juju/loggo"
+
 	"github.com/hemilabs/heminetwork/cmd/btctool/bdf"
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
-	"github.com/juju/loggo"
 )
 
 var log = loggo.GetLogger("btctool")
