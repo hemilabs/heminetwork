@@ -379,7 +379,7 @@ func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
 }
 
 func TestIndex(t *testing.T) {
-	//	t.Skip()
+	t.Skip()
 
 	// start block
 	levelDBHome := "~/.tbcd"
