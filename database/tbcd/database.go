@@ -25,7 +25,11 @@ type Database interface {
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
 	BlockInsert(ctx context.Context, b *Block) (int64, error)
+	// XXX replace BlockInsert with plural version
 	// BlocksInsert(ctx context.Context, bs []*Block) (int64, error)
+
+	// Transactions
+	UTxosInsert(ctx context.Context, blockhash []byte, utxos []BlockUtxo) error
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -44,6 +48,27 @@ type Block struct {
 	Hash  database.ByteArray
 	Block database.ByteArray
 }
+
+//type BlockUtxos struct {
+//	BlockHash database.ByteArray
+//	Utxos     []BlockUtxo
+//}
+
+type BlockUtxo struct {
+	SpendScript database.ByteArray
+	Index       uint32
+	Value       uint64
+}
+
+//type UtxoLocation struct {
+//	BlockHash database.ByteArray
+//	Index     uint32
+//}
+//
+//type UtxoBalance struct {
+//	SpendScript database.ByteArray
+//	Value       uint64
+//}
 
 // BlockIdentifier uniquely identifies a block using it's hash and height.
 type BlockIdentifier struct {
