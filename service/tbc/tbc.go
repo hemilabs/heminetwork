@@ -202,6 +202,14 @@ var (
 	errExpiredPeer   = errors.New("expired peer")
 )
 
+func (s *Server) indexBlock(ctx context.Context) error {
+	return nil
+}
+
+func (s *Server) indexUtxos(ctx context.Context) error {
+	return nil
+}
+
 // blockPeerAdd adds a block to the pending list at the selected peer. Lock
 // must be held.
 func (s *Server) blockPeerAdd(hash, peer string) error {
