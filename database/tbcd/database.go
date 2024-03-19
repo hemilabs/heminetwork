@@ -7,6 +7,9 @@ package tbcd
 import (
 	"context"
 
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/hemilabs/heminetwork/database"
 )
 
@@ -55,6 +58,7 @@ type Block struct {
 //}
 
 type BlockUtxo struct {
+	Hash        database.ByteArray
 	SpendScript database.ByteArray
 	Index       uint32
 	Value       uint64
@@ -82,4 +86,29 @@ type Peer struct {
 	Port      string
 	LastAt    database.Timestamp `deep:"-"` // Last time connected
 	CreatedAt database.Timestamp `deep:"-"`
+}
+
+// BlockUtxos extracts all unspent transaction scripts  from the provided
+// block.
+func BlockUtxos(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []BlockUtxo, error) {
+	b, err := btcutil.NewBlockFromBytes(bb)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	txs := b.Transactions()
+	butxos := make([]BlockUtxo, 0, len(txs))
+	for _, tx := range txs {
+		for _, txOut := range tx.MsgTx().TxOut {
+			txCHash := tx.Hash()
+			butxos = append(butxos, BlockUtxo{
+				Hash:        txCHash[:],
+				SpendScript: txOut.PkScript,
+				Index:       uint32(tx.Index()),
+				Value:       uint64(txOut.Value),
+			})
+		}
+	}
+
+	return b.Hash(), butxos, nil
 }

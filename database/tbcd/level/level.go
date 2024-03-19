@@ -6,6 +6,7 @@ package level
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -527,15 +528,39 @@ func (l *ldb) UTxosInsert(ctx context.Context, blockhash []byte, utxos []tbcd.Bl
 	}
 	defer utxosDiscard()
 
+	bsBatch := new(leveldb.Batch)
+	utxosBatch := new(leveldb.Batch)
 	for k := range utxos {
-		if len(txOut.PkScript) == 0 {
+		if len(utxos[k].SpendScript) == 0 {
 			log.Infof("0 length script in block: %v", bh)
 			continue
 		}
+		if len(utxos[k].Hash[:]) != 32 {
+			return fmt.Errorf("utxo %v: invalid hash", k)
+		}
 
 		// Setup TxsDB record
+		// Key [32 + 4 + 4]byte ->  hash + tx_index + tx_num
+		// Value sha256(spend_script)
+		var utxoKey [32 + 4 + 4]byte // hash + tx_index + tx_num
+		// TX Hash
+		copy(utxoKey[0:32], utxos[k].Hash[:])
+		// TX index
+		binary.BigEndian.PutUint32(utxoKey[32:], utxos[k].Index)
+		// TX num
+		binary.BigEndian.PutUint32(utxoKey[36:], uint32(k))
+		// Generate sha256 of script as an opaque pointer
+		utxoValue := sha256.Sum256(utxos[k].SpendScript)
+		utxosBatch.Put(utxoKey[:], utxoValue[:])
 
 		// Setup BalancesDB record
+		// Key [32]byte -> sha256(spend_script)
+		// Value [8 + 32]byte -> satoshis + block_hash
+		balanceKey := utxoValue
+		var balanceValue [8 + 32]byte
+		binary.BigEndian.PutUint64(balanceValue[0:8], utxos[k].Value)
+		copy(balanceValue[8:], bh[:])
+		bsBatch.Put(balanceKey[:], balanceValue[:])
 	}
 
 	// Write utxos batch
@@ -562,6 +587,7 @@ func (l *ldb) UTxosInsert(ctx context.Context, blockhash []byte, utxos []tbcd.Bl
 		return fmt.Errorf("balances ncommit: %w", err)
 	}
 
+	return nil
 }
 
 func (l *ldb) PeersStats(ctx context.Context) (int, int) {
