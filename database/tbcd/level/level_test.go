@@ -326,6 +326,8 @@ func TestBitcoinBits(t *testing.T) {
 	}
 }
 
+// TxKey -> ScriptHash
+// ScriptHash -> Value
 type TxKeyValue struct {
 	TxKey      [32 + 4 + 4]byte // hash + tx_index + tx_num
 	ScriptHash [32]byte         // script hash
@@ -374,6 +376,30 @@ func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
 	}
 
 	return etxs, nil
+}
+func blockUtxos(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []tbcd.BlockUtxo, error) {
+	b, err := btcutil.NewBlockFromBytes(bb)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	butxos := make([]tbcd.BlockUtxo, 0, len(txs))
+	for _, tx := range b.Transactions() {
+		for k, txOut := range tx.MsgTx().TxOut {
+			if len(txOut.PkScript) == 0 {
+				log.Infof("zero length script in block: %v", b.Hash())
+				continue
+			}
+
+			butxos = append(butxos, BlockUtxo{
+				SpendScript: txOut.PkScript,
+				Index:       tx.Index(),
+				Value:       txOut.Value,
+			})
+		}
+	}
+
+	return b.Hash(), butxos, nil
 }
 
 func TestIndex(t *testing.T) {

@@ -22,10 +22,14 @@ import (
 )
 
 // Locking order:
+//
 //	BlockHeaders
-// 	BlocksMissing
-// 	HeightHash
-// 	Blocks
+//	BlocksMissing
+//	HeightHash
+//	Blocks
+//
+//	Balances
+//	Utxos
 
 const (
 	ldbVersion = 1
@@ -491,6 +495,73 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 		Hash:  hash,
 		Block: eb,
 	}, nil
+}
+
+func (l *ldb) UTxosInsert(ctx context.Context, blockhash []byte, utxos []tbcd.BlockUtxo) error {
+	log.Tracef("UTxosInsert")
+	defer log.Tracef("UTxosInsert exit")
+
+	// TxKey -> ScriptHash
+	// ScriptHash -> (Value, BlockHash)
+	//type TxKeyValue struct {
+	//	TxKey      [32 + 4 + 4]byte // hash + tx_index + tx_num
+	//	ScriptHash [32]byte         // script hash
+	//	Value      [8]byte          // satoshis
+	//}
+	bh, err := chainhash.NewHash(blockhash)
+	if err != nil {
+		return fmt.Errorf("utxos insert invalid block hash: %w", err)
+	}
+
+	// balances
+	bsTx, bsCommit, bsDiscard, err := l.startTransaction(level.BalancesDB)
+	if err != nil {
+		return fmt.Errorf("balances open transaction: %w", err)
+	}
+	defer bsDiscard()
+
+	// utxos
+	utxosTx, utxosCommit, utxosDiscard, err := l.startTransaction(level.TxsDB)
+	if err != nil {
+		return fmt.Errorf("utxos open transaction: %w", err)
+	}
+	defer utxosDiscard()
+
+	for k := range utxos {
+		if len(txOut.PkScript) == 0 {
+			log.Infof("0 length script in block: %v", bh)
+			continue
+		}
+
+		// Setup TxsDB record
+
+		// Setup BalancesDB record
+	}
+
+	// Write utxos batch
+	err = utxosTx.Write(utxosBatch, nil)
+	if err != nil {
+		return fmt.Errorf("utxos insert: %w", err)
+	}
+
+	// Write balances batch
+	err = bsTx.Write(bsBatch, nil)
+	if err != nil {
+		return fmt.Errorf("balances insert: %w", err)
+	}
+
+	// utxos commit
+	err = utxosCommit()
+	if err != nil {
+		return fmt.Errorf("utxos commit: %w", err)
+	}
+
+	// balances commit
+	err = bsCommit()
+	if err != nil {
+		return fmt.Errorf("balances ncommit: %w", err)
+	}
+
 }
 
 func (l *ldb) PeersStats(ctx context.Context) (int, int) {
