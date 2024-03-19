@@ -366,13 +366,20 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 		// cache the reply
 		if l.blocksMissingCacheEnabled {
 			l.mtx.Lock()
-			l.blocksMissingCache[string(bh.Hash)] = &cacheEntry{
-				height:    bh.Height,
-				timestamp: time.Now(),
+			// XXX we MUST bind this map but for now let it be piggy
+			if _, ok := l.blocksMissingCache[string(bh.Hash)]; !ok {
+				l.blocksMissingCache[string(bh.Hash)] = &cacheEntry{
+					height:    bh.Height,
+					timestamp: time.Now(),
+				}
 			}
 			blockCacheLen = len(l.blocksMissingCache)
 			l.mtx.Unlock()
 		}
+		//if blockCacheLen >= 128 {
+		//	log.Tracef("max cache %v", blockCacheLen)
+		//	break
+		//}
 
 		x++
 		if x >= count {

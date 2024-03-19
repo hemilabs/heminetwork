@@ -154,7 +154,6 @@ type Server struct {
 	peers  map[string]*peer      // active but not necessarily connected
 	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where XXX audit
 
-	isWorking       bool // reentrancy flag
 	insertedGenesis bool // reentrancy flag
 
 	db tbcd.Database
@@ -949,22 +948,6 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 		return
 	}
 
-	//log.Infof("checkBlockCache inside mutex")
-	//defer log.Infof("checkBlockCache outside mutex")
-	//// XXX make better reentrant
-	//s.mtx.Lock()
-	//if s.isWorking {
-	//	s.mtx.Unlock()
-	//	return
-	//}
-	//s.isWorking = true
-	//s.mtx.Unlock()
-	//defer func() {
-	//	s.mtx.Lock()
-	//	s.isWorking = false
-	//	s.mtx.Unlock()
-	//}()
-
 	// XXX is this too much lock?
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -974,32 +957,13 @@ func (s *Server) checkBlockCache(ctx context.Context) {
 		log.Errorf("block headers missing: %v", err)
 		return
 	}
-	// log.Infof("checkBlockCache db")
-
-	// XXX prune list if outstanding but there are too many mutexes happening here
-	prunedBM := make([]tbcd.BlockIdentifier, 0, len(bm))
-	for k := range bm {
-		if _, ok := s.blocks[string(bm[k].Hash)]; ok {
-			continue
-		}
-		prunedBM = append(prunedBM, bm[k])
-	}
-
-	if len(prunedBM) != len(bm) {
-		log.Infof("PRUNE %v BM %v", len(prunedBM), len(bm))
-	}
-	if len(prunedBM) == 0 {
-		log.Infof("everything pending %v", spew.Sdump(s.blocks))
-	}
 
 	// downdloadBlocks will only insert unseen in the cache
-	// log.Infof("checkBlockCache download")
-	err = s.downloadBlocks(ctx, prunedBM)
+	err = s.downloadBlocks(ctx, bm)
 	if err != nil {
 		log.Errorf("download blocks: %v", err)
 		return
 	}
-	// log.Infof("checkBlockCache AFTER download")
 }
 
 var genesisBlockHeader *tbcd.BlockHeader // XXX
