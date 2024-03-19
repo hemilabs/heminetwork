@@ -377,6 +377,7 @@ func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
 
 	return etxs, nil
 }
+
 func TestIndex(t *testing.T) {
 	//	t.Skip()
 
