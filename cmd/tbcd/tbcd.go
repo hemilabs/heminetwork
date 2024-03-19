@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/juju/loggo"
+
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/version"
-	"github.com/juju/loggo"
 )
 
 const (
@@ -29,6 +31,12 @@ var (
 
 	cfg = tbc.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"TBC_ADDRESS": config.Config{
+			Value:        &cfg.ListenAddress,
+			DefaultValue: tbcapi.DefaultListen,
+			Help:         "address port to listen on",
+			Print:        config.PrintAll,
+		},
 		"TBC_BLOCK_SANITY": config.Config{
 			Value:        &cfg.BlockSanity,
 			DefaultValue: false,
@@ -137,7 +145,7 @@ func _main() error {
 	//		panic(err)
 	//	}
 	//	log.Infof("height %v headers %v", height, spew.Sdump(bhbh))
-	//}()
+	// }()
 	if err := server.Run(ctx); err != context.Canceled {
 		return fmt.Errorf("tbc server terminated: %v", err)
 	}

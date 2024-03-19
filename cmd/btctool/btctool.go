@@ -19,11 +19,12 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/juju/loggo"
+	"github.com/mitchellh/go-homedir"
+
 	"github.com/hemilabs/heminetwork/cmd/btctool/bdf"
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
 	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
-	"github.com/juju/loggo"
-	"github.com/mitchellh/go-homedir"
 )
 
 var log = loggo.GetLogger("bdf")
