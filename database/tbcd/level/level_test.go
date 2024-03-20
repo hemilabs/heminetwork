@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -24,8 +23,10 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
+	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
@@ -310,6 +311,11 @@ func TestBitcoinBits(t *testing.T) {
 			t.Logf("coinbase! %v", spew.Sdump(tx.MsgTx()))
 		}
 		for kk := range tx.MsgTx().TxOut {
+			scriptClass, _, _, err := txscript.ExtractPkScriptAddrs(
+				tx.MsgTx().TxOut[kk].PkScript, &chaincfg.TestNet3Params,
+			)
+			t.Logf("---- %v", spew.Sdump(scriptClass))
+
 			p, err := txscript.ParsePkScript(tx.MsgTx().TxOut[kk].PkScript)
 			if err != nil {
 				t.Logf("ERROR: %v %v", kk, err)
@@ -327,60 +333,42 @@ func TestBitcoinBits(t *testing.T) {
 	}
 }
 
-// TxKey -> ScriptHash
-// ScriptHash -> Value
-type TxKeyValue struct {
-	TxKey      [32 + 4 + 4]byte // hash + tx_index + tx_num
-	ScriptHash [32]byte         // script hash
-	Value      [8]byte          // satoshis
-}
+func TestDumpIndex(t *testing.T) {
+	levelDBHome := "~/.tbcd"
+	network := "testnet3"
 
-func decodeBlock(cp *chaincfg.Params, bb []byte) ([]TxKeyValue, error) {
-	b, err := btcutil.NewBlockFromBytes(bb)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Open existing DB
+	db, err := New(ctx, filepath.Join(levelDBHome, network))
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
-
-	// 32+4 hash + big endian index
-	txs := b.Transactions()
-	etxs := make([]TxKeyValue, 0, len(txs))
-	for _, tx := range txs {
-		for k, txOut := range tx.MsgTx().TxOut {
-			if len(txOut.PkScript) == 0 {
-				// XXX just to see if it happens, probably
-				// needs to be a continue.
-				// panic("pkscript zero length")
-				continue
-			}
-
-			tkv := TxKeyValue{}
-
-			// TX hash
-			txCHash := tx.Hash()
-			txHash := txCHash[:]
-			copy(tkv.TxKey[0:], txHash[:])
-
-			// TX index
-			binary.BigEndian.PutUint32(tkv.TxKey[32:], uint32(tx.Index()))
-
-			// TX num
-			binary.BigEndian.PutUint32(tkv.TxKey[36:], uint32(k))
-
-			// Satoshis
-			binary.BigEndian.PutUint64(tkv.Value[:], uint64(txOut.Value))
-
-			// Generate sha256 of script as an opaque pointer
-			tkv.ScriptHash = sha256.Sum256(txOut.PkScript)
-
-			etxs = append(etxs, tkv)
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Fatalf("close: %v", err)
 		}
+	}()
+
+	outsDB := db.pool[level.OutputsDB]
+	it := outsDB.NewIterator(nil, nil)
+	defer it.Release()
+	for it.Next() {
+		t.Logf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
 	}
 
-	return etxs, nil
+	bsDB := db.pool[level.BalancesDB]
+	bsIt := bsDB.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
+	defer bsIt.Release()
+	for bsIt.Next() {
+		t.Logf("balances key %vvalue %v", spew.Sdump(bsIt.Key()), spew.Sdump(bsIt.Value()))
+	}
 }
 
 func TestIndex(t *testing.T) {
-	t.Skip()
+	// t.Skip()
 
 	// start block
 	levelDBHome := "~/.tbcd"
@@ -401,10 +389,11 @@ func TestIndex(t *testing.T) {
 		}
 	}()
 
-	count := uint64(10)
+	startHeight := uint64(0)
+	count := uint64(381) // block 381 is the first to spend transactions
 	start := time.Now()
 	log.Infof("Starting to index to height %v at %v", count, start)
-	for height := uint64(0); height < count; height++ {
+	for height := startHeight; height < startHeight+count; height++ {
 		bhs, err := db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
 			t.Fatalf("block headers by height %v: %v", height, err)
@@ -413,20 +402,14 @@ func TestIndex(t *testing.T) {
 		if err != nil {
 			t.Fatalf("block by hash %v: %v", height, err)
 		}
-		bh, utxos, err := tbcd.BlockUtxos(&chaincfg.TestNet3Params, b.Block)
+		bh, btxs, err := tbcd.BlockTxs(&chaincfg.TestNet3Params, b.Block)
+		if err != nil {
+			t.Fatalf("block transactions %v: %v", height, err)
+		}
+		err = db.BlockTxUpdate(ctx, bh[:], btxs)
 		if err != nil {
 			t.Fatalf("block utxos %v: %v", height, err)
 		}
-		err = db.UTxosInsert(ctx, bh[:], utxos)
-		if err != nil {
-			t.Fatalf("block utxos %v: %v", height, err)
-		}
-		//kv, err := decodeBlock(&chaincfg.TestNet3Params, b.Block)
-		//if err != nil {
-		//	t.Fatalf("decode block %v: %v", height, err)
-		//}
-		//_ = kv
-		// t.Logf("%v", spew.Sdump(kv))
 	}
 	log.Infof("Ending index height %v took %v", count, time.Now().Sub(start))
 }

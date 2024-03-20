@@ -1,4 +1,4 @@
-package main
+package main // XXX wrap in structure
 
 import (
 	"context"
@@ -25,9 +25,25 @@ import (
 	"github.com/hemilabs/heminetwork/cmd/btctool/bdf"
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
 	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 var log = loggo.GetLogger("bdf")
+
+func parseBlockFromHex(blk string) (*btcutil.Block, error) {
+	eb, err := hex.DecodeString(strings.Trim(blk, "\n"))
+	if err != nil {
+		return nil, err
+	}
+
+	// decode
+	b, err := btcutil.NewBlockFromBytes(eb)
+	if err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
 
 func parseBlock(ctx context.Context, filename string) (*btcutil.Block, error) {
 	heb, err := os.ReadFile(filename)
@@ -471,7 +487,7 @@ func _main() error {
 		fmt.Fprintf(f, "Flags:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(f, "Actions:\n")
-		fmt.Fprintf(f, "  block <hash=hash> [json=bool]             - retrieve block for hash\n")
+		fmt.Fprintf(f, "  block <hash=hash> [json=bool] [wire=bool] - retrieve block for hash\n")
 		fmt.Fprintf(f, "  blockheader <hash=string>                 - retrieve blockheader for hash\n")
 		fmt.Fprintf(f, "  blockheighthash <heigh=int>               - block hash at height\n")
 		fmt.Fprintf(f, "  storeblockheaders [start=int] [count=int] - store block headers\n")
@@ -503,10 +519,19 @@ func _main() error {
 	switch action {
 	case "block":
 		raw := true
+
+		wireSpew := false
+		wireSet := args["wire"]
+		if wireSet == "1" || strings.ToLower(wireSet) == "true" {
+			wireSpew = true
+		}
+
 		jsonSet := args["json"]
-		// When set we'll try to catch up to tip
 		if jsonSet == "1" || strings.ToLower(jsonSet) == "true" {
 			raw = false
+			if wireSpew {
+				return fmt.Errorf("wire and json may not be both set")
+			}
 		}
 		hash := args["hash"]
 		if hash == "" {
@@ -515,7 +540,21 @@ func _main() error {
 		var b string
 		b, err = blockstream.Block(ctx, hash, raw)
 		if err == nil {
-			fmt.Printf("%v\n", b)
+			if wireSpew {
+				eb, err := hex.DecodeString(strings.Trim(b, "\n"))
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%v", spew.Sdump(tbcd.BlockTxs(&chaincfg.MainNetParams, eb)))
+
+				//blk, err := parseBlockFromHex(b)
+				//if err != nil {
+				//	return err
+				//}
+				//fmt.Printf("%v", spew.Sdump(blk.MsgBlock()))
+			} else {
+				fmt.Printf("%v\n", b)
+			}
 		}
 	case "blockheader":
 		hash := args["hash"]
