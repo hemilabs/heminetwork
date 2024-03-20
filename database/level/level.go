@@ -31,7 +31,7 @@ const (
 	MetadataDB      = "metadata"
 	HeightHashDB    = "heighthash"
 	PeersDB         = "peers"
-	TxsDB           = "txs"
+	OutputsDB       = "outputs"
 	BalancesDB      = "balances"
 
 	versionKey      = "version"
@@ -172,9 +172,9 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
 	}
-	err = l.openDB(TxsDB, nil)
+	err = l.openDB(OutputsDB, nil)
 	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", TxsDB, err)
+		return nil, fmt.Errorf("leveldb %v: %w", OutputsDB, err)
 	}
 	err = l.openDB(BalancesDB, nil)
 	if err != nil {
