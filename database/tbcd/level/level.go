@@ -556,29 +556,74 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []tbcd.T
 	// insert into UnspentOutputsByScript(sha256(B.output0.pkscript) + B.txid + B.output0.tx_idx) => B.output0.value
 	// (And repeat the same for B.output1)
 
+	txIds := make(map[string]struct{})
 	bsBatch := new(leveldb.Batch)
 	outsBatch := new(leveldb.Batch)
 	for k, tx := range btxs {
+		// memoize inputs in block in case they are spent in
+		// the same block
+		//for midx := 0; midx < len(tx.In); midx++ {
+		//	var mPrevOut [32 + 4]byte
+		//	copy(mPrevOut[0:32], tx.Id[:])
+		//	binary.BigEndian.PutUint32(mPrevOut[32:], uint32(midx))
+		//	txIds[string(mPrevOut[:])] = struct{}{}
+		//}
+		txIds[string(tx.Id[:])] = struct{}{}
 		for _, txIn := range tx.In {
 			if k == 0 {
 				// Skip inputs on coinbase transaction
 				continue
 			}
-			// find previous output
+
+			// find previous output, first try memoized then db
 			var prevOut [32 + 4]byte
 			copy(prevOut[0:32], txIn.Hash[:])
 			binary.BigEndian.PutUint32(prevOut[32:], uint32(txIn.Index))
+			if _, ok := txIds[string(txIn.Hash[:])]; ok {
+				// XXX revisit this
+
+				//ch, cerr := chainhash.NewHash(txIn.Hash[:])
+				//if cerr != nil {
+				//	return fmt.Errorf("invalid hash: %v", cerr)
+				//}
+				//for mt := range txIds {
+				//	log.Infof("%x", mt)
+				//}
+				// log.Infof("%v", spew.Sdump(txIds))
+				//log.Errorf("not db deleting memoized tx: (%v:%v): %v",
+				//	ch, txIn.Index, err)
+				// block 16296: on testnet spends the same
+				// input twice and to not keep track of value
+				// don't delete prevOut.
+				//
+				// XXX this should be dealt with correctly by
+				// finding the value and subtractring it.
+				// delete(txIds, string(prevOut[:]))
+				continue
+			}
+
 			pkScriptHash, err := outsTx.Get(prevOut[:], nil)
 			if err != nil {
-				// XXX this is almost certainly wrong
-				return fmt.Errorf("previous out point: %v", err)
+				ch, cerr := chainhash.NewHash(txIn.Hash[:])
+				if cerr != nil {
+					return fmt.Errorf("invalid hash: %v", cerr)
+				}
+				for mt := range txIds {
+					log.Infof("%x", mt)
+				}
+				// log.Infof("%v", spew.Sdump(txIds))
+				return fmt.Errorf("previous out point (%v:%v): %v",
+					ch, txIn.Index, err)
 			}
+			// TxIn should exist in db since it wasn't
+			// generated this block
 			outsBatch.Delete(prevOut[:])
 
 			var balanceKey [32 + 32 + 4]byte
 			copy(balanceKey[0:32], pkScriptHash)
 			copy(balanceKey[32:], prevOut[:])
 			bsBatch.Delete(balanceKey[:])
+
 		}
 		for kk, txOut := range tx.Out {
 			// Generate sha256(PkScipt) and insert it in the table
