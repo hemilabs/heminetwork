@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -105,7 +106,7 @@ func _main() error {
 	if err != nil {
 		return fmt.Errorf("failed to create POP miner: %w", err)
 	}
-	if err := miner.Run(ctx); err != context.Canceled {
+	if err := miner.Run(ctx); !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("POP miner terminated: %w", err)
 	}
 

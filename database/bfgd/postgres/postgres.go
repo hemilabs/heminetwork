@@ -124,7 +124,7 @@ func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) er
 
 	defer func() {
 		err := tx.Rollback()
-		if err != nil && err != sql.ErrTxDone {
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
 			log.Errorf("L2KeystonesInsert could not rollback db tx: %v",
 				err)
 			return
@@ -210,7 +210,7 @@ func (p *pgdb) L2KeystoneByAbrevHash(ctx context.Context, aHash [32]byte) (*bfgd
 		&l2ks.ParentEPHash, &l2ks.PrevKeystoneEPHash, &l2ks.StateRoot,
 		&l2ks.EPHash, &l2ks.Version, &l2ks.CreatedAt, &l2ks.UpdatedAt,
 	); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, database.NotFoundError("l2 keystone not found")
 		}
 		return nil, err
@@ -257,7 +257,7 @@ func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32) ([]bfgd.L2K
 			&k.ParentEPHash, &k.PrevKeystoneEPHash, &k.StateRoot,
 			&k.EPHash, &k.Version, &k.CreatedAt, &k.UpdatedAt,
 		); err != nil {
-			if err == sql.ErrNoRows {
+			if errors.Is(err, sql.ErrNoRows) {
 				return nil, database.NotFoundError("pop data not found")
 			}
 			return nil, err
@@ -312,7 +312,7 @@ func (p *pgdb) BtcBlockByHash(ctx context.Context, hash [32]byte) (*bfgd.BtcBloc
 	row := p.db.QueryRowContext(ctx, q, hash[:])
 	if err := row.Scan(&bb.Hash, &bb.Header, &bb.Height, &bb.CreatedAt,
 		&bb.UpdatedAt); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, database.NotFoundError("btc block not found")
 		}
 		return nil, err
@@ -333,7 +333,7 @@ func (p *pgdb) BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64,
 	var height uint64
 	row := p.db.QueryRowContext(ctx, q, hash[:])
 	if err := row.Scan(&height); err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return 0, database.NotFoundError("btc block height not found")
 		}
 		return 0, err

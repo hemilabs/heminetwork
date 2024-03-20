@@ -11,6 +11,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -260,7 +261,7 @@ func createTestDB(ctx context.Context, t *testing.T) (bfgd.Database, string, *sq
 
 func nextPort() int {
 	port, err := freeport.GetFreePort()
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		panic(err)
 	}
 
@@ -298,7 +299,7 @@ func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, el
 
 	go func() {
 		err := bfgServer.Run(ctx)
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
@@ -334,7 +335,7 @@ func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.S
 
 	go func() {
 		err := bssServer.Run(ctx)
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
