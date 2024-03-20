@@ -24,9 +24,7 @@ ARG OP_GETH_CACHE_BREAK=1
 
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-
-# remove this before merge
-RUN git checkout clayton/local-eth
+RUN git checkout hemi
 
 RUN make
 RUN go install ./...
@@ -37,18 +35,17 @@ ARG OPTIMISM_CACHE_BREAK=1
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-
-# remove this before merge
-RUN git checkout clayton/local-eth
+RUN git checkout hemi
 
 RUN git submodule update --init --recursive
 RUN pnpm install
+WORKDIR /git/optimism/packages/contracts-bedrock
+RUN sed -e '/build_info/d' -i ./foundry.toml
+WORKDIR /git/optimism
 RUN make op-bindings op-node op-batcher op-proposer
 RUN pnpm build
 
 WORKDIR /git/optimism/packages/contracts-bedrock
-RUN sed -e '/build_info/d' -i ./foundry.toml
-
 RUN forge install
 RUN forge build
 

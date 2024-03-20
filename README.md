@@ -130,6 +130,20 @@ note: the `--build` flag is optional if you want to rebuild your code
 docker-compose -f ./e2e/docker-compose.yml up --build
 ```
 
+This will take a while upon first build, but following builds should be cached.  
+When rebuilding, popmd, bssd, and bfgd will rebuild (due to `COPY` command breaking
+ the cache).  However if you want to break the cache for the op-stack, use the following args:
+
+For op-geth + optimism (op-node)
+```
+docker compose -f ./e2e/docker-compose.yml build --build-arg OP_GETH_CACHE_BREAK="$(date)"
+```
+
+For optimism cache break only:
+```
+docker compose -f ./e2e/docker-compose.yml build --build-arg OPTIMISM_CACHE_BREAK="$(date)"
+```
+
 **IMPORTANT:** make sure you run the following to tear down, this will remove
 data and give you a fresh start
 
