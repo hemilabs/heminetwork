@@ -515,75 +515,93 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	}, nil
 }
 
-func (l *ldb) UTxosInsert(ctx context.Context, blockhash []byte, utxos []tbcd.Utxo) error {
-	log.Tracef("UTxosInsert")
-	defer log.Tracef("UTxosInsert exit")
+func (l *ldb) BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []tbcd.Tx) error {
+	log.Tracef("BlockTxUpdate")
+	defer log.Tracef("BlockTxUpdate exit")
 
-	// TxKey -> ScriptHash
-	// ScriptHash -> (Value, BlockHash)
-	//type TxKeyValue struct {
-	//	TxKey      [32 + 4 + 4]byte // hash + tx_index + tx_num
-	//	ScriptHash [32]byte         // script hash
-	//	Value      [8]byte          // satoshis
-	//}
 	bh, err := chainhash.NewHash(blockhash)
 	if err != nil {
-		return fmt.Errorf("utxos insert invalid block hash: %w", err)
+		return fmt.Errorf("block tx update invalid block hash: %w", err)
 	}
+	_ = bh // Unused for now but can be used to create txid <-> block_hash lookup
 
 	// balances
 	bsTx, bsCommit, bsDiscard, err := l.startTransaction(level.BalancesDB)
 	if err != nil {
-		return fmt.Errorf("balances open transaction: %w", err)
+		return fmt.Errorf("balances open db transaction: %w", err)
 	}
 	defer bsDiscard()
 
-	// utxos
-	utxosTx, utxosCommit, utxosDiscard, err := l.startTransaction(level.TxsDB)
+	// outputs
+	outsTx, outsCommit, outsDiscard, err := l.startTransaction(level.OutputsDB)
 	if err != nil {
-		return fmt.Errorf("utxos open transaction: %w", err)
+		return fmt.Errorf("outputs open db transaction: %w", err)
 	}
-	defer utxosDiscard()
+	defer outsDiscard()
+
+	// UnspentOutputsByTx: Key=tx_id + tx_idx, Value=sha256(pk_script)
+	// UnspentOutputsByScript: Key=sha256(pk_scirpt) + tx_id + tx_idx, Value=outputValue (ex: 50 BTC)
+	// Transaction A is a Coinbase transaction, with only a coinbase input and a single output (A.output0).
+	// When processing Transaction A, we insert into UnspentOutputsByTx and UnspentOutputsByScript:
+	// insert into UnspentOutputsByTx (A.tx_id + A.output0.tx_idx) => sha256(A.output0.pk_script)
+	// insert into UnspentOutputsByScript(sha256(A.output0.pkscript) + A.tx_id + A.output0.tx_idx) => A.output0.value
+	// Transaction B spends the output of transaction A and creates two new outputs (B.output0, B.output1).
+	// When processing Transaction B, we remove the corresponding entry for the spent input from UnspentOutputsByTx and UnspentOutputsByScript:
+	// Process removal of outputs consumed as inputs:
+	// lookup value from UnspentOutputsByTx(B.input0.tx_id + B.input0.tx_idx) to get input0_pk_hash
+	// Then remove UnspentOutputsByTx(B.input0.tx_id + B.input0.tx_idx)
+	// Then remove UnspentOutputsByScript(input_pk_hash + B.input0.tx_id + B.input0.tx_idx)
+	// Process insertion of new outputs:
+	// insert into UnspentOutputsByTx(B.tx_id + B.output0.tx_idx) => sha256(B.output0.pk_script)
+	// insert into UnspentOutputsByScript(sha256(B.output0.pkscript) + B.txid + B.output0.tx_idx) => B.output0.value
+	// (And repeat the same for B.output1)
 
 	bsBatch := new(leveldb.Batch)
-	utxosBatch := new(leveldb.Batch)
-	for k := range utxos {
-		if len(utxos[k].SpendScript) == 0 {
-			log.Infof("0 length script in block: %v", bh)
-			continue
-		}
-		if len(utxos[k].Hash[:]) != 32 {
-			return fmt.Errorf("utxo %v: invalid hash", k)
-		}
+	outsBatch := new(leveldb.Batch)
+	for k, tx := range btxs {
+		for _, txIn := range tx.In {
+			if k == 0 {
+				// Skip inputs on coinbase transaction
+				continue
+			}
+			// find previous output
+			var prevOut [32 + 4]byte
+			copy(prevOut[0:32], txIn.Hash[:])
+			binary.BigEndian.PutUint32(prevOut[32:], uint32(txIn.Index))
+			pkScriptHash, err := outsTx.Get(prevOut[:], nil)
+			if err != nil {
+				// XXX this is almost certainly wrong
+				return fmt.Errorf("previous out point: %v", err)
+			}
+			outsBatch.Delete(prevOut[:])
 
-		// Setup TxsDB record
-		// Key [32 + 4 + 4]byte ->  hash + tx_index + tx_num
-		// Value sha256(spend_script)
-		var utxoKey [32 + 4 + 4]byte // hash + tx_index + tx_num
-		// TX Hash
-		copy(utxoKey[0:32], utxos[k].Hash[:])
-		// TX index
-		binary.BigEndian.PutUint32(utxoKey[32:], utxos[k].Index)
-		// TX num
-		binary.BigEndian.PutUint32(utxoKey[36:], uint32(k))
-		// Generate sha256 of script as an opaque pointer
-		utxoValue := sha256.Sum256(utxos[k].SpendScript)
-		utxosBatch.Put(utxoKey[:], utxoValue[:])
+			var balanceKey [32 + 32 + 4]byte
+			copy(balanceKey[0:32], pkScriptHash)
+			copy(balanceKey[32:], prevOut[:])
+			bsBatch.Delete(balanceKey[:])
+		}
+		for kk, txOut := range tx.Out {
+			// Generate sha256(PkScipt) and insert it in the table
+			pkScriptHash := sha256.Sum256(txOut.PkScript)
 
-		// Setup BalancesDB record
-		// Key [32]byte -> sha256(spend_script)
-		// Value [8 + 32]byte -> satoshis + block_hash
-		balanceKey := utxoValue
-		var balanceValue [8 + 32]byte
-		binary.BigEndian.PutUint64(balanceValue[0:8], utxos[k].Value)
-		copy(balanceValue[8:], bh[:])
-		bsBatch.Put(balanceKey[:], balanceValue[:])
+			// Only generate one key and then slice it for lookups
+			var outKey [32 + 32 + 4]byte
+			copy(outKey[0:32], pkScriptHash[:])                 // script hash
+			copy(outKey[32:64], tx.Id[:])                       // TxId
+			binary.BigEndian.PutUint32(outKey[64:], uint32(kk)) // tx_output_index
+
+			outsBatch.Put(outKey[32:], pkScriptHash[:]) // store pkscript hash
+
+			var balance [8]byte
+			binary.BigEndian.PutUint64(balance[:], txOut.Value) // balance
+			bsBatch.Put(outKey[:], balance[:])                  // store balance
+		}
 	}
 
-	// Write utxos batch
-	err = utxosTx.Write(utxosBatch, nil)
+	// Write outputs batch
+	err = outsTx.Write(outsBatch, nil)
 	if err != nil {
-		return fmt.Errorf("utxos insert: %w", err)
+		return fmt.Errorf("outputs insert: %w", err)
 	}
 
 	// Write balances batch
@@ -592,16 +610,16 @@ func (l *ldb) UTxosInsert(ctx context.Context, blockhash []byte, utxos []tbcd.Ut
 		return fmt.Errorf("balances insert: %w", err)
 	}
 
-	// utxos commit
-	err = utxosCommit()
+	// outputs commit
+	err = outsCommit()
 	if err != nil {
-		return fmt.Errorf("utxos commit: %w", err)
+		return fmt.Errorf("outputs commit: %w", err)
 	}
 
 	// balances commit
 	err = bsCommit()
 	if err != nil {
-		return fmt.Errorf("balances ncommit: %w", err)
+		return fmt.Errorf("balances commit: %w", err)
 	}
 
 	return nil

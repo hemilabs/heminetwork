@@ -9,7 +9,11 @@ import (
 	"github.com/hemilabs/heminetwork/cmd/btctool/httpclient"
 )
 
-var bsURL = "https://blockstream.info/testnet/api" // XXX wrap in structure
+var (
+	bsTestnetURL = "https://blockstream.info/testnet/api" // XXX wrap in structure
+	bsMainnetURL = "https://blockstream.info/api"         // XXX wrap in structure
+	bsURL        = bsMainnetURL                           // XXX wrap in structure
+)
 
 type TBlock struct {
 	ID                string `json:"id"`
