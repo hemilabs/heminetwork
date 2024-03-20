@@ -310,7 +310,7 @@ func createElectrumx(ctx context.Context, t *testing.T, bitcoindEndpoint string)
 		Image: "lukechilds/electrumx",
 		Env: map[string]string{
 			"DAEMON_URL":      bitcoindEndpoint,
-			"COIN":            "BitcoinSegwit",
+			"COIN":            "Bitcoin",
 			"COST_HARD_LIMIT": "0",
 			"COST_SOFT_LIMIT": "0",
 			"MAX_SEND":        "8388608",
