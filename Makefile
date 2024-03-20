@@ -53,11 +53,14 @@ install: $(cmds)
 lint:
 	$(shell go env GOPATH)/bin/goimports -local github.com/hemilabs/heminetwork -w -l .
 	$(shell go env GOPATH)/bin/gofumpt -w -l .
+	$(shell go env GOPATH)/bin/addlicense -c "Hemi Labs, Inc." -f $(PROJECTPATH)/license_header.txt \
+		-ignore "{.idea,.vscode}/**" -ignore ".github/release.yml" -ignore ".github/ISSUE_TEMPLATE/**" -v .
 	go vet ./...
 
 lint-deps:
 	GOBIN=$(shell go env GOPATH)/bin go install golang.org/x/tools/cmd/goimports@latest
 	GOBIN=$(shell go env GOPATH)/bin go install mvdan.cc/gofumpt@latest
+	GOBIN=$(shell go env GOPATH)/bin go install github.com/google/addlicense@latest
 
 tidy:
 	go mod tidy

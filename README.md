@@ -54,6 +54,7 @@ Then build:
 
 ```shell
 cd heminetwork
+make deps
 make
 ```
 
