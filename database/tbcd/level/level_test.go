@@ -389,10 +389,11 @@ func TestIndex(t *testing.T) {
 		}
 	}()
 
-	startHeight := uint64(0)
-	count := uint64(381) // block 381 is the first to spend transactions
+	startHeight := uint64(0o000)
+	count := uint64(100000) // block 381 is the first to spend transactions
 	start := time.Now()
-	log.Infof("Starting to index to height %v at %v", count, start)
+	log.Infof("Starting to index to height %v at %v", startHeight, start)
+	elapsed := time.Now()
 	for height := startHeight; height < startHeight+count; height++ {
 		bhs, err := db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
@@ -408,7 +409,12 @@ func TestIndex(t *testing.T) {
 		}
 		err = db.BlockTxUpdate(ctx, bh[:], btxs)
 		if err != nil {
+			// t.Fatalf("%v", spew.Sdump(btxs))
 			t.Fatalf("block utxos %v: %v", height, err)
+		}
+		if height%1000 == 0 {
+			log.Infof("height %v %v", height, time.Now().Sub(elapsed))
+			elapsed = time.Now()
 		}
 	}
 	log.Infof("Ending index height %v took %v", count, time.Now().Sub(start))
