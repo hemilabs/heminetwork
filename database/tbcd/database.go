@@ -33,6 +33,7 @@ type Database interface {
 	BlockInsert(ctx context.Context, b *Block) (int64, error)
 	// XXX replace BlockInsert with plural version
 	// BlocksInsert(ctx context.Context, bs []*Block) (int64, error)
+	BlockByHash(ctx context.Context, hash []byte) (*Block, error)
 
 	// Transactions
 	// UTxosInsert(ctx context.Context, butxos []BlockUtxo) error

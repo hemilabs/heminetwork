@@ -389,7 +389,7 @@ func TestIndex(t *testing.T) {
 		}
 	}()
 
-	startHeight := uint64(0o000)
+	startHeight := uint64(100000)
 	count := uint64(100000) // block 381 is the first to spend transactions
 	start := time.Now()
 	log.Infof("Starting to index to height %v at %v", startHeight, start)

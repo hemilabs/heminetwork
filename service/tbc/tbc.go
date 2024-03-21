@@ -168,6 +168,9 @@ type Server struct {
 
 	// WebSockets
 	sessions map[string]*tbcWs
+
+	// utxo cache. XXX do we need a seperate mutex?
+	utxos map[Outpoint]Utxo
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -215,14 +218,6 @@ var (
 	errAlreadyCached = errors.New("already cached")
 	errExpiredPeer   = errors.New("expired peer")
 )
-
-func (s *Server) indexBlock(ctx context.Context) error {
-	return nil
-}
-
-func (s *Server) indexUtxos(ctx context.Context) error {
-	return nil
-}
 
 // blockPeerAdd adds a block to the pending list at the selected peer. Lock
 // must be held.
