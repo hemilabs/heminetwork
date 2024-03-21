@@ -176,6 +176,9 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 		}
 		bhs = append(bhs, *bh)
 	}
+	if len(bhs) == 0 {
+		return nil, fmt.Errorf("not found")
+	}
 	return bhs, nil
 }
 

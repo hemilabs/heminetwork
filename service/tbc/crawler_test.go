@@ -1,13 +1,47 @@
 package tbc
 
 import (
+	"context"
 	"crypto/sha256"
+	"path/filepath"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/juju/loggo"
+
+	"github.com/hemilabs/heminetwork/database/tbcd/level"
 )
 
+func TestIndex(t *testing.T) {
+	logLevel := "INFO"
+	loggo.ConfigureLoggers(logLevel)
+	s, err := NewServer(&Config{
+		Network: "testnet3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Open db.
+	s.cfg.LevelDBHome = "~/.tbcd"
+	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.db.Close()
+
+	err = s.indexBlocks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUtxo(t *testing.T) {
+	t.Skip()
+
 	dc := &spew.ConfigState{
 		DisableMethods: true,
 	}

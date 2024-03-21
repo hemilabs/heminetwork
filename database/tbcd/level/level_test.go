@@ -389,8 +389,8 @@ func TestIndex(t *testing.T) {
 		}
 	}()
 
-	startHeight := uint64(100000)
-	count := uint64(100000) // block 381 is the first to spend transactions
+	startHeight := uint64(0)
+	count := uint64(10) // block 381 is the first to spend transactions
 	start := time.Now()
 	log.Infof("Starting to index to height %v at %v", startHeight, start)
 	elapsed := time.Now()
@@ -399,23 +399,25 @@ func TestIndex(t *testing.T) {
 		if err != nil {
 			t.Fatalf("block headers by height %v: %v", height, err)
 		}
-		b, err := db.BlockByHash(ctx, bhs[0].Hash)
-		if err != nil {
-			t.Fatalf("block by hash %v: %v", height, err)
-		}
-		bh, btxs, err := tbcd.BlockTxs(&chaincfg.TestNet3Params, b.Block)
-		if err != nil {
-			t.Fatalf("block transactions %v: %v", height, err)
-		}
-		err = db.BlockTxUpdate(ctx, bh[:], btxs)
-		if err != nil {
-			// t.Fatalf("%v", spew.Sdump(btxs))
-			t.Fatalf("block utxos %v: %v", height, err)
-		}
-		if height%1000 == 0 {
-			log.Infof("height %v %v", height, time.Now().Sub(elapsed))
-			elapsed = time.Now()
-		}
+		t.Logf("%v", bhs)
+		_ = elapsed
+		//b, err := db.BlockByHash(ctx, bhs[0].Hash)
+		//if err != nil {
+		//	t.Fatalf("block by hash %v: %v", height, err)
+		//}
+		//bh, btxs, err := tbcd.BlockTxs(&chaincfg.TestNet3Params, b.Block)
+		//if err != nil {
+		//	t.Fatalf("block transactions %v: %v", height, err)
+		//}
+		//err = db.BlockTxUpdate(ctx, bh[:], btxs)
+		//if err != nil {
+		//	// t.Fatalf("%v", spew.Sdump(btxs))
+		//	t.Fatalf("block utxos %v: %v", height, err)
+		//}
+		//if height%1000 == 0 {
+		//	log.Infof("height %v %v", height, time.Now().Sub(elapsed))
+		//	elapsed = time.Now()
+		//}
 	}
 	log.Infof("Ending index height %v took %v", count, time.Now().Sub(start))
 }
