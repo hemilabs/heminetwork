@@ -64,7 +64,7 @@ cat /tmp/blockl1.json
     genesis \
     l2 \
     --deploy-config  \
-    /tmp/deploy-config.json \
+    /git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json \
     --deployment-dir  \
     /git/optimism/packages/contracts-bedrock/deployments/devnetL1 \
     --outfile.l2  \

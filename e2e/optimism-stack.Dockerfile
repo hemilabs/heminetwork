@@ -24,9 +24,7 @@ ARG OP_GETH_CACHE_BREAK=1
 
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-
-# remove this before merge
-RUN git checkout clayton/local-eth
+RUN git checkout hemi
 
 RUN make
 RUN go install ./...
@@ -37,10 +35,7 @@ ARG OPTIMISM_CACHE_BREAK=1
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-
-# remove this before merge
-RUN git checkout clayton/local-eth
-
+RUN git checkout hemi
 RUN git submodule update --init --recursive
 RUN pnpm install
 WORKDIR /git/optimism/packages/contracts-bedrock
@@ -54,7 +49,3 @@ RUN forge install
 RUN forge build
 
 WORKDIR /git/optimism
-
-# this is not great, but this command generates the needed files for devnet
-# and runs a failing test, ignore the failure but use the files
-RUN make devnet-allocs || :

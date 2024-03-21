@@ -190,7 +190,9 @@ services:
       - ./genesisl2.sh:/tmp/genesisl2.sh
       - ./output:/tmp/output
       - l2configs:/l2configs
-      - ./deploy-config.json:/tmp/deploy-config.json:ro
+      - ./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json
+      - ./deployments:/git/optimism/packages/contracts-bedrock/deployments
+      - ./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json
       - type: tmpfs
         target: /tmp
     working_dir: /tmp
