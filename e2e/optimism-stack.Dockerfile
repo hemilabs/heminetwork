@@ -24,7 +24,9 @@ ARG OP_GETH_CACHE_BREAK=1
 
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout hemi
+
+# remove this before merge
+RUN git checkout clayton/local-eth
 
 RUN make
 RUN go install ./...
@@ -35,7 +37,9 @@ ARG OPTIMISM_CACHE_BREAK=1
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout hemi
+
+# remove this before merge
+RUN git checkout clayton/local-eth
 
 RUN git submodule update --init --recursive
 RUN pnpm install
