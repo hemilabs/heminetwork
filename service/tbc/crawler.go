@@ -2,9 +2,12 @@ package tbc
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -66,10 +69,52 @@ func NewUtxo(scriptHash [32]byte, value uint64, outIndex uint32) (utxo Utxo) {
 	return
 }
 
-func (s *Server) indexBlock(ctx context.Context, b *tbcd.Block) error {
+type Tx struct {
+	Id    chainhash.Hash // TxId
+	Index int            // Transaction index in block
+	In    []Outpoint     // Inputs
+	Out   []Utxo         // Outputs
+}
+
+func parseBlock(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
 	log.Tracef("indexBlock")
 	defer log.Tracef("indexBlock")
 
+	b, err := btcutil.NewBlockFromBytes(bb)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	txs := b.Transactions()
+	btxs := make([]Tx, 0, len(txs))
+	for _, tx := range txs {
+
+		btx := Tx{
+			Id:    *tx.Hash(),
+			Index: tx.Index(),
+			In:    make([]Outpoint, 0, len(tx.MsgTx().TxIn)),
+			Out:   make([]Utxo, 0, len(tx.MsgTx().TxOut)),
+		}
+		for _, txIn := range tx.MsgTx().TxIn {
+			btx.In = append(btx.In, NewOutpoint(
+				txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index,
+			))
+		}
+		for outIndex, txOut := range tx.MsgTx().TxOut {
+			btx.Out = append(btx.Out, NewUtxo(
+				sha256.Sum256(txOut.PkScript),
+				uint64(txOut.Value),
+				uint32(outIndex),
+			))
+		}
+		btxs = append(btxs, btx)
+	}
+
+	return b.Hash(), btxs, nil
+}
+
+func (s *Server) indexBlock(ctx context.Context, b *tbcd.Block) error {
 	return nil
 }
 
