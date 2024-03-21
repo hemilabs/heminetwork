@@ -7,10 +7,6 @@ package tbcd
 import (
 	"context"
 
-	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-
 	"github.com/hemilabs/heminetwork/database"
 )
 
@@ -37,7 +33,7 @@ type Database interface {
 
 	// Transactions
 	// UTxosInsert(ctx context.Context, butxos []BlockUtxo) error
-	BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []Tx) error
+	// BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []Tx) error
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -74,58 +70,58 @@ type Peer struct {
 	CreatedAt database.Timestamp `deep:"-"`
 }
 
-// TxIn is a cooked bitcoin input.
-type TxIn struct {
-	Hash  database.ByteArray // Previous hash
-	Index uint32             // Previous index
-}
-
-// TxIn is a cooked bitcoin output.
-type TxOut struct {
-	PkScript database.ByteArray // Spend script
-	Value    uint64             // Satoshis
-}
-
-// Tx is a cooked bitcoin transaction.
-type Tx struct {
-	Id    database.ByteArray // TxId
-	Index uint32             // Transaction index in block
-	In    []TxIn             // Inputs
-	Out   []TxOut            // Outputs
-}
-
-// Utxos extracts all transactions from the provided block and returns the
-// block and a, in sequence, list of all transactions.
-func BlockTxs(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
-	b, err := btcutil.NewBlockFromBytes(bb)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	txs := b.Transactions()
-	btxs := make([]Tx, 0, len(txs))
-	for _, tx := range txs {
-		txCHash := tx.Hash()
-		btx := Tx{
-			Id:    txCHash[:],
-			Index: uint32(tx.Index()),
-			In:    make([]TxIn, 0, len(tx.MsgTx().TxIn)),
-			Out:   make([]TxOut, 0, len(tx.MsgTx().TxOut)),
-		}
-		for _, txIn := range tx.MsgTx().TxIn {
-			btx.In = append(btx.In, TxIn{
-				Hash:  txIn.PreviousOutPoint.Hash[:],
-				Index: txIn.PreviousOutPoint.Index,
-			})
-		}
-		for _, txOut := range tx.MsgTx().TxOut {
-			btx.Out = append(btx.Out, TxOut{
-				PkScript: txOut.PkScript,
-				Value:    uint64(txOut.Value),
-			})
-		}
-		btxs = append(btxs, btx)
-	}
-
-	return b.Hash(), btxs, nil
-}
+//// TxIn is a cooked bitcoin input.
+//type TxIn struct {
+//	Hash  database.ByteArray // Previous hash
+//	Index uint32             // Previous index
+//}
+//
+//// TxIn is a cooked bitcoin output.
+//type TxOut struct {
+//	PkScript database.ByteArray // Spend script
+//	Value    uint64             // Satoshis
+//}
+//
+//// Tx is a cooked bitcoin transaction.
+//type Tx struct {
+//	Id    database.ByteArray // TxId
+//	Index uint32             // Transaction index in block
+//	In    []TxIn             // Inputs
+//	Out   []TxOut            // Outputs
+//}
+//
+//// Utxos extracts all transactions from the provided block and returns the
+//// block and a, in sequence, list of all transactions.
+//func BlockTxs(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
+//	b, err := btcutil.NewBlockFromBytes(bb)
+//	if err != nil {
+//		return nil, nil, err
+//	}
+//
+//	txs := b.Transactions()
+//	btxs := make([]Tx, 0, len(txs))
+//	for _, tx := range txs {
+//		txCHash := tx.Hash()
+//		btx := Tx{
+//			Id:    txCHash[:],
+//			Index: uint32(tx.Index()),
+//			In:    make([]TxIn, 0, len(tx.MsgTx().TxIn)),
+//			Out:   make([]TxOut, 0, len(tx.MsgTx().TxOut)),
+//		}
+//		for _, txIn := range tx.MsgTx().TxIn {
+//			btx.In = append(btx.In, TxIn{
+//				Hash:  txIn.PreviousOutPoint.Hash[:],
+//				Index: txIn.PreviousOutPoint.Index,
+//			})
+//		}
+//		for , txOut := range tx.MsgTx().TxOut {
+//			btx.Out = append(btx.Out, TxOut{
+//				PkScript: txOut.PkScript,
+//				Value:    uint64(txOut.Value),
+//			})
+//		}
+//		btxs = append(btxs, btx)
+//	}
+//
+//	return b.Hash(), btxs, nil
+//}
