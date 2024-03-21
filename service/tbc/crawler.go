@@ -76,6 +76,10 @@ type Tx struct {
 	Out   []Utxo         // Outputs
 }
 
+// parseBlock walks a iraw bitcoin block's transactions and generates an in
+// order list of execution parameters to update the utxo cache. This function
+// should not be creating an intermediate data structure but take functios to
+// add/remove/update entries in the cache instead.
 func parseBlock(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
 	log.Tracef("indexBlock")
 	defer log.Tracef("indexBlock")
@@ -88,7 +92,6 @@ func parseBlock(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
 	txs := b.Transactions()
 	btxs := make([]Tx, 0, len(txs))
 	for _, tx := range txs {
-
 		btx := Tx{
 			Id:    *tx.Hash(),
 			Index: tx.Index(),
