@@ -6,7 +6,6 @@ package level
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"net"
@@ -515,160 +514,160 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	}, nil
 }
 
-func (l *ldb) BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []tbcd.Tx) error {
-	log.Tracef("BlockTxUpdate")
-	defer log.Tracef("BlockTxUpdate exit")
-
-	bh, err := chainhash.NewHash(blockhash)
-	if err != nil {
-		return fmt.Errorf("block tx update invalid block hash: %w", err)
-	}
-	_ = bh // Unused for now but can be used to create txid <-> block_hash lookup
-
-	// balances
-	bsTx, bsCommit, bsDiscard, err := l.startTransaction(level.BalancesDB)
-	if err != nil {
-		return fmt.Errorf("balances open db transaction: %w", err)
-	}
-	defer bsDiscard()
-
-	// outputs
-	outsTx, outsCommit, outsDiscard, err := l.startTransaction(level.OutputsDB)
-	if err != nil {
-		return fmt.Errorf("outputs open db transaction: %w", err)
-	}
-	defer outsDiscard()
-
-	// UnspentOutputsByTx: Key=tx_id + tx_idx, Value=sha256(pk_script)
-	// UnspentOutputsByScript: Key=sha256(pk_scirpt) + tx_id + tx_idx, Value=outputValue (ex: 50 BTC)
-	// Transaction A is a Coinbase transaction, with only a coinbase input and a single output (A.output0).
-	// When processing Transaction A, we insert into UnspentOutputsByTx and UnspentOutputsByScript:
-	// insert into UnspentOutputsByTx (A.tx_id + A.output0.tx_idx) => sha256(A.output0.pk_script)
-	// insert into UnspentOutputsByScript(sha256(A.output0.pkscript) + A.tx_id + A.output0.tx_idx) => A.output0.value
-	// Transaction B spends the output of transaction A and creates two new outputs (B.output0, B.output1).
-	// When processing Transaction B, we remove the corresponding entry for the spent input from UnspentOutputsByTx and UnspentOutputsByScript:
-	// Process removal of outputs consumed as inputs:
-	// lookup value from UnspentOutputsByTx(B.input0.tx_id + B.input0.tx_idx) to get input0_pk_hash
-	// Then remove UnspentOutputsByTx(B.input0.tx_id + B.input0.tx_idx)
-	// Then remove UnspentOutputsByScript(input_pk_hash + B.input0.tx_id + B.input0.tx_idx)
-	// Process insertion of new outputs:
-	// insert into UnspentOutputsByTx(B.tx_id + B.output0.tx_idx) => sha256(B.output0.pk_script)
-	// insert into UnspentOutputsByScript(sha256(B.output0.pkscript) + B.txid + B.output0.tx_idx) => B.output0.value
-	// (And repeat the same for B.output1)
-
-	txIds := make(map[string]struct{})
-	bsBatch := new(leveldb.Batch)
-	outsBatch := new(leveldb.Batch)
-	for k, tx := range btxs {
-		// memoize inputs in block in case they are spent in
-		// the same block
-		//for midx := 0; midx < len(tx.In); midx++ {
-		//	var mPrevOut [32 + 4]byte
-		//	copy(mPrevOut[0:32], tx.Id[:])
-		//	binary.BigEndian.PutUint32(mPrevOut[32:], uint32(midx))
-		//	txIds[string(mPrevOut[:])] = struct{}{}
-		//}
-		txIds[string(tx.Id[:])] = struct{}{}
-		for _, txIn := range tx.In {
-			if k == 0 {
-				// Skip inputs on coinbase transaction
-				continue
-			}
-
-			// find previous output, first try memoized then db
-			var prevOut [32 + 4]byte
-			copy(prevOut[0:32], txIn.Hash[:])
-			binary.BigEndian.PutUint32(prevOut[32:], uint32(txIn.Index))
-			if _, ok := txIds[string(txIn.Hash[:])]; ok {
-				// XXX revisit this
-
-				//ch, cerr := chainhash.NewHash(txIn.Hash[:])
-				//if cerr != nil {
-				//	return fmt.Errorf("invalid hash: %v", cerr)
-				//}
-				//for mt := range txIds {
-				//	log.Infof("%x", mt)
-				//}
-				// log.Infof("%v", spew.Sdump(txIds))
-				//log.Errorf("not db deleting memoized tx: (%v:%v): %v",
-				//	ch, txIn.Index, err)
-				// block 16296: on testnet spends the same
-				// input twice and to not keep track of value
-				// don't delete prevOut.
-				//
-				// XXX this should be dealt with correctly by
-				// finding the value and subtractring it.
-				// delete(txIds, string(prevOut[:]))
-				continue
-			}
-
-			pkScriptHash, err := outsTx.Get(prevOut[:], nil)
-			if err != nil {
-				ch, cerr := chainhash.NewHash(txIn.Hash[:])
-				if cerr != nil {
-					return fmt.Errorf("invalid hash: %v", cerr)
-				}
-				for mt := range txIds {
-					log.Infof("%x", mt)
-				}
-				// log.Infof("%v", spew.Sdump(txIds))
-				return fmt.Errorf("previous out point (%v:%v): %v",
-					ch, txIn.Index, err)
-			}
-			// TxIn should exist in db since it wasn't
-			// generated this block
-			outsBatch.Delete(prevOut[:])
-
-			var balanceKey [32 + 32 + 4]byte
-			copy(balanceKey[0:32], pkScriptHash)
-			copy(balanceKey[32:], prevOut[:])
-			bsBatch.Delete(balanceKey[:])
-
-		}
-		for kk, txOut := range tx.Out {
-			// Generate sha256(PkScipt) and insert it in the table
-			pkScriptHash := sha256.Sum256(txOut.PkScript)
-
-			// Only generate one key and then slice it for lookups
-			var outKey [32 + 32 + 4]byte
-			copy(outKey[0:32], pkScriptHash[:])                 // script hash
-			copy(outKey[32:64], tx.Id[:])                       // TxId
-			binary.BigEndian.PutUint32(outKey[64:], uint32(kk)) // tx_output_index
-
-			outsBatch.Put(outKey[32:], pkScriptHash[:]) // store pkscript hash
-
-			var balance [8]byte
-			binary.BigEndian.PutUint64(balance[:], txOut.Value) // balance
-			bsBatch.Put(outKey[:], balance[:])                  // store balance
-		}
-	}
-
-	// Write outputs batch
-	err = outsTx.Write(outsBatch, nil)
-	if err != nil {
-		return fmt.Errorf("outputs insert: %w", err)
-	}
-
-	// Write balances batch
-	err = bsTx.Write(bsBatch, nil)
-	if err != nil {
-		return fmt.Errorf("balances insert: %w", err)
-	}
-
-	// outputs commit
-	err = outsCommit()
-	if err != nil {
-		return fmt.Errorf("outputs commit: %w", err)
-	}
-
-	// balances commit
-	err = bsCommit()
-	if err != nil {
-		return fmt.Errorf("balances commit: %w", err)
-	}
-
-	return nil
-}
+//func (l *ldb) BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []tbcd.Tx) error {
+//	log.Tracef("BlockTxUpdate")
+//	defer log.Tracef("BlockTxUpdate exit")
+//
+//	bh, err := chainhash.NewHash(blockhash)
+//	if err != nil {
+//		return fmt.Errorf("block tx update invalid block hash: %w", err)
+//	}
+//	_ = bh // Unused for now but can be used to create txid <-> block_hash lookup
+//
+//	// balances
+//	bsTx, bsCommit, bsDiscard, err := l.startTransaction(level.BalancesDB)
+//	if err != nil {
+//		return fmt.Errorf("balances open db transaction: %w", err)
+//	}
+//	defer bsDiscard()
+//
+//	// outputs
+//	outsTx, outsCommit, outsDiscard, err := l.startTransaction(level.OutputsDB)
+//	if err != nil {
+//		return fmt.Errorf("outputs open db transaction: %w", err)
+//	}
+//	defer outsDiscard()
+//
+//	// UnspentOutputsByTx: Key=tx_id + tx_idx, Value=sha256(pk_script)
+//	// UnspentOutputsByScript: Key=sha256(pk_scirpt) + tx_id + tx_idx, Value=outputValue (ex: 50 BTC)
+//	// Transaction A is a Coinbase transaction, with only a coinbase input and a single output (A.output0).
+//	// When processing Transaction A, we insert into UnspentOutputsByTx and UnspentOutputsByScript:
+//	// insert into UnspentOutputsByTx (A.tx_id + A.output0.tx_idx) => sha256(A.output0.pk_script)
+//	// insert into UnspentOutputsByScript(sha256(A.output0.pkscript) + A.tx_id + A.output0.tx_idx) => A.output0.value
+//	// Transaction B spends the output of transaction A and creates two new outputs (B.output0, B.output1).
+//	// When processing Transaction B, we remove the corresponding entry for the spent input from UnspentOutputsByTx and UnspentOutputsByScript:
+//	// Process removal of outputs consumed as inputs:
+//	// lookup value from UnspentOutputsByTx(B.input0.tx_id + B.input0.tx_idx) to get input0_pk_hash
+//	// Then remove UnspentOutputsByTx(B.input0.tx_id + B.input0.tx_idx)
+//	// Then remove UnspentOutputsByScript(input_pk_hash + B.input0.tx_id + B.input0.tx_idx)
+//	// Process insertion of new outputs:
+//	// insert into UnspentOutputsByTx(B.tx_id + B.output0.tx_idx) => sha256(B.output0.pk_script)
+//	// insert into UnspentOutputsByScript(sha256(B.output0.pkscript) + B.txid + B.output0.tx_idx) => B.output0.value
+//	// (And repeat the same for B.output1)
+//
+//	txIds := make(map[string]struct{})
+//	bsBatch := new(leveldb.Batch)
+//	outsBatch := new(leveldb.Batch)
+//	for k, tx := range btxs {
+//		// memoize inputs in block in case they are spent in
+//		// the same block
+//		//for midx := 0; midx < len(tx.In); midx++ {
+//		//	var mPrevOut [32 + 4]byte
+//		//	copy(mPrevOut[0:32], tx.Id[:])
+//		//	binary.BigEndian.PutUint32(mPrevOut[32:], uint32(midx))
+//		//	txIds[string(mPrevOut[:])] = struct{}{}
+//		//}
+//		txIds[string(tx.Id[:])] = struct{}{}
+//		for _, txIn := range tx.In {
+//			if k == 0 {
+//				// Skip inputs on coinbase transaction
+//				continue
+//			}
+//
+//			// find previous output, first try memoized then db
+//			var prevOut [32 + 4]byte
+//			copy(prevOut[0:32], txIn.Hash[:])
+//			binary.BigEndian.PutUint32(prevOut[32:], uint32(txIn.Index))
+//			if _, ok := txIds[string(txIn.Hash[:])]; ok {
+//				// XXX revisit this
+//
+//				//ch, cerr := chainhash.NewHash(txIn.Hash[:])
+//				//if cerr != nil {
+//				//	return fmt.Errorf("invalid hash: %v", cerr)
+//				//}
+//				//for mt := range txIds {
+//				//	log.Infof("%x", mt)
+//				//}
+//				// log.Infof("%v", spew.Sdump(txIds))
+//				//log.Errorf("not db deleting memoized tx: (%v:%v): %v",
+//				//	ch, txIn.Index, err)
+//				// block 16296: on testnet spends the same
+//				// input twice and to not keep track of value
+//				// don't delete prevOut.
+//				//
+//				// XXX this should be dealt with correctly by
+//				// finding the value and subtractring it.
+//				// delete(txIds, string(prevOut[:]))
+//				continue
+//			}
+//
+//			pkScriptHash, err := outsTx.Get(prevOut[:], nil)
+//			if err != nil {
+//				ch, cerr := chainhash.NewHash(txIn.Hash[:])
+//				if cerr != nil {
+//					return fmt.Errorf("invalid hash: %v", cerr)
+//				}
+//				for mt := range txIds {
+//					log.Infof("%x", mt)
+//				}
+//				// log.Infof("%v", spew.Sdump(txIds))
+//				return fmt.Errorf("previous out point (%v:%v): %v",
+//					ch, txIn.Index, err)
+//			}
+//			// TxIn should exist in db since it wasn't
+//			// generated this block
+//			outsBatch.Delete(prevOut[:])
+//
+//			var balanceKey [32 + 32 + 4]byte
+//			copy(balanceKey[0:32], pkScriptHash)
+//			copy(balanceKey[32:], prevOut[:])
+//			bsBatch.Delete(balanceKey[:])
+//
+//		}
+//		for kk, txOut := range tx.Out {
+//			// Generate sha256(PkScipt) and insert it in the table
+//			pkScriptHash := sha256.Sum256(txOut.PkScript)
+//
+//			// Only generate one key and then slice it for lookups
+//			var outKey [32 + 32 + 4]byte
+//			copy(outKey[0:32], pkScriptHash[:])                 // script hash
+//			copy(outKey[32:64], tx.Id[:])                       // TxId
+//			binary.BigEndian.PutUint32(outKey[64:], uint32(kk)) // tx_output_index
+//
+//			outsBatch.Put(outKey[32:], pkScriptHash[:]) // store pkscript hash
+//
+//			var balance [8]byte
+//			binary.BigEndian.PutUint64(balance[:], txOut.Value) // balance
+//			bsBatch.Put(outKey[:], balance[:])                  // store balance
+//		}
+//	}
+//
+//	// Write outputs batch
+//	err = outsTx.Write(outsBatch, nil)
+//	if err != nil {
+//		return fmt.Errorf("outputs insert: %w", err)
+//	}
+//
+//	// Write balances batch
+//	err = bsTx.Write(bsBatch, nil)
+//	if err != nil {
+//		return fmt.Errorf("balances insert: %w", err)
+//	}
+//
+//	// outputs commit
+//	err = outsCommit()
+//	if err != nil {
+//		return fmt.Errorf("outputs commit: %w", err)
+//	}
+//
+//	// balances commit
+//	err = bsCommit()
+//	if err != nil {
+//		return fmt.Errorf("balances commit: %w", err)
+//	}
+//
+//	return nil
+//}
 
 func (l *ldb) PeersStats(ctx context.Context) (int, int) {
 	log.Tracef("PeersInsert")
