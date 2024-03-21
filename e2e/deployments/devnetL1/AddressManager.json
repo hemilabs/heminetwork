@@ -158,12 +158,12 @@
     }
   },
   "metadata": "{\"compiler\":{\"version\":\"0.8.15+commit.e14f2714\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[{\"internalType\":\"string\",\"name\":\"name\",\"type\":\"string\",\"indexed\":true},{\"internalType\":\"address\",\"name\":\"newAddress\",\"type\":\"address\",\"indexed\":false},{\"internalType\":\"address\",\"name\":\"oldAddress\",\"type\":\"address\",\"indexed\":false}],\"type\":\"event\",\"name\":\"AddressSet\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"previousOwner\",\"type\":\"address\",\"indexed\":true},{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\",\"indexed\":true}],\"type\":\"event\",\"name\":\"OwnershipTransferred\",\"anonymous\":false},{\"inputs\":[{\"internalType\":\"string\",\"name\":\"_name\",\"type\":\"string\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"getAddress\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"owner\",\"outputs\":[{\"internalType\":\"address\",\"name\":\"\",\"type\":\"address\"}]},{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"renounceOwnership\"},{\"inputs\":[{\"internalType\":\"string\",\"name\":\"_name\",\"type\":\"string\"},{\"internalType\":\"address\",\"name\":\"_address\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"setAddress\"},{\"inputs\":[{\"internalType\":\"address\",\"name\":\"newOwner\",\"type\":\"address\"}],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"transferOwnership\"}],\"devdoc\":{\"kind\":\"dev\",\"methods\":{\"getAddress(string)\":{\"params\":{\"_name\":\"Name to retrieve an address for.\"},\"returns\":{\"_0\":\"Address associated with the given name.\"}},\"owner()\":{\"details\":\"Returns the address of the current owner.\"},\"renounceOwnership()\":{\"details\":\"Leaves the contract without owner. It will not be possible to call `onlyOwner` functions anymore. Can only be called by the current owner. NOTE: Renouncing ownership will leave the contract without an owner, thereby removing any functionality that is only available to the owner.\"},\"setAddress(string,address)\":{\"params\":{\"_address\":\"Address to associate with the name.\",\"_name\":\"String name to associate an address with.\"}},\"transferOwnership(address)\":{\"details\":\"Transfers ownership of the contract to a new account (`newOwner`). Can only be called by the current owner.\"}},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{\"getAddress(string)\":{\"notice\":\"Retrieves the address associated with a given name.\"},\"setAddress(string,address)\":{\"notice\":\"Changes the address associated with a particular name.\"}},\"version\":1}},\"settings\":{\"remappings\":[\"@cwia/=lib/clones-with-immutable-args/src/\",\"@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/\",\"@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/\",\"@rari-capital/solmate/=lib/solmate/\",\"clones-with-immutable-args/=lib/clones-with-immutable-args/src/\",\"ds-test/=lib/forge-std/lib/ds-test/src/\",\"forge-std/=lib/forge-std/src/\",\"openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/\",\"openzeppelin-contracts/=lib/openzeppelin-contracts/\",\"safe-contracts/=lib/safe-contracts/contracts/\",\"solmate/=lib/solmate/src/\"],\"optimizer\":{\"enabled\":true,\"runs\":999999},\"metadata\":{\"bytecodeHash\":\"none\"},\"compilationTarget\":{\"src/legacy/AddressManager.sol\":\"AddressManager\"},\"evmVersion\":\"london\",\"libraries\":{}},\"sources\":{\"lib/openzeppelin-contracts/contracts/access/Ownable.sol\":{\"keccak256\":\"0xa94b34880e3c1b0b931662cb1c09e5dfa6662f31cba80e07c5ee71cd135c9673\",\"urls\":[\"bzz-raw://40fb1b5102468f783961d0af743f91b9980cf66b50d1d12009f6bb1869cea4d2\",\"dweb:/ipfs/QmYqEbJML4jB1GHbzD4cUZDtJg5wVwNm3vDJq1GbyDus8y\"],\"license\":\"MIT\"},\"lib/openzeppelin-contracts/contracts/utils/Context.sol\":{\"keccak256\":\"0xe2e337e6dde9ef6b680e07338c493ebea1b5fd09b43424112868e9cc1706bca7\",\"urls\":[\"bzz-raw://6df0ddf21ce9f58271bdfaa85cde98b200ef242a05a3f85c2bc10a8294800a92\",\"dweb:/ipfs/QmRK2Y5Yc6BK7tGKkgsgn3aJEQGi5aakeSPZvS65PV8Xp3\"],\"license\":\"MIT\"},\"src/legacy/AddressManager.sol\":{\"keccak256\":\"0x1fcb990df6473f7fa360d5924d62d39ce2ca97d45668e3901e5405cfbe598b19\",\"urls\":[\"bzz-raw://9d08358b60dea54dbc32e988a1bb7ea909488063eaae3c5ae28a322f125c9b34\",\"dweb:/ipfs/QmZPQwdjLh9gaamNAoTUmWwwbRKj3yHovBYfnTPnfuKvUt\"],\"license\":\"MIT\"}},\"version\":1}",
-  "numDeployments": 9,
+  "numDeployments": 11,
   "receipt": {
-    "transactionHash": "0x73a91bacc39a0954c34f009aa17cd64bb7ec36508565a71bbadf9c157ac32167",
+    "transactionHash": "0xce90165ad572174eb5db03ed98282a4b6b76b136905131e50b65d8ed6eab5bf9",
     "transactionIndex": "0x3",
-    "blockHash": "0xd258d7ba1b0078976b2e528137bb95b79c944d269128d484f17cc1f930462282",
-    "blockNumber": "0xc",
+    "blockHash": "0xf835abe5a59efebb456c8d972309a1f91f3968f4a746711f6fbca435bbd97263",
+    "blockNumber": "0x9",
     "from": "0x78697c88847DFbbB40523E42c1f2e28a13A170bE",
     "to": null,
     "cumulativeGasUsed": "0x4a5fae",
@@ -178,9 +178,9 @@
           "0x00000000000000000000000078697c88847dfbbb40523e42c1f2e28a13a170be"
         ],
         "data": "0x",
-        "blockHash": "0xd258d7ba1b0078976b2e528137bb95b79c944d269128d484f17cc1f930462282",
-        "blockNumber": "0xc",
-        "transactionHash": "0x73a91bacc39a0954c34f009aa17cd64bb7ec36508565a71bbadf9c157ac32167",
+        "blockHash": "0xf835abe5a59efebb456c8d972309a1f91f3968f4a746711f6fbca435bbd97263",
+        "blockNumber": "0x9",
+        "transactionHash": "0xce90165ad572174eb5db03ed98282a4b6b76b136905131e50b65d8ed6eab5bf9",
         "transactionIndex": "0x3",
         "logIndex": "0x2",
         "removed": false
@@ -189,7 +189,7 @@
     "status": "0x1",
     "logsBloom": "0x00000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000020000001000000000000000000000000000000000000020000010000000000000808000000000000000000000000000000400001000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000000",
     "type": "0x2",
-    "effectiveGasPrice": "0xbedec726"
+    "effectiveGasPrice": "0xc4cf7cd1"
   },
   "solcInputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
   "storageLayout": {
@@ -231,7 +231,7 @@
       }
     }
   },
-  "transactionHash": "0x73a91bacc39a0954c34f009aa17cd64bb7ec36508565a71bbadf9c157ac32167",
+  "transactionHash": "0xce90165ad572174eb5db03ed98282a4b6b76b136905131e50b65d8ed6eab5bf9",
   "userdoc": {
     "version": 1,
     "kind": "user",
