@@ -9,6 +9,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
@@ -81,9 +82,6 @@ type Tx struct {
 // should not be creating an intermediate data structure but take functios to
 // add/remove/update entries in the cache instead.
 func parseBlock(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
-	log.Tracef("indexBlock")
-	defer log.Tracef("indexBlock")
-
 	b, err := btcutil.NewBlockFromBytes(bb)
 	if err != nil {
 		return nil, nil, err
@@ -117,26 +115,41 @@ func parseBlock(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
 	return b.Hash(), btxs, nil
 }
 
-func (s *Server) indexBlock(ctx context.Context, b *tbcd.Block) error {
+func (s *Server) indexBlock(ctx context.Context, height uint64, b *tbcd.Block) error {
+	log.Tracef("indexBlock")
+	defer log.Tracef("indexBlock")
+
+	bh, txs, err := parseBlock(s.chainParams, b.Block)
+	if err != nil {
+		return fmt.Errorf("index block: %w", err)
+	}
+	log.Infof("%v: %v", bh)
+	log.Infof("%%v", txs)
+
 	return nil
 }
 
-func (s *Server) indexBlocks(ctx context.Context, b *tbcd.Block) error {
+func (s *Server) indexBlocks(ctx context.Context) error {
 	log.Tracef("indexBlocks")
 	defer log.Tracef("indexBlocks")
 
 	startHeight := uint64(0)
-	count := uint64(382)
+	count := uint64(1)
 	for height := startHeight; height < startHeight+count; height++ {
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
-			fmt.Errorf("block headers by height %v: %v", height, err)
+			return fmt.Errorf("block headers by height %v: %v", height, err)
 		}
 		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
-			fmt.Errorf("block by hash %v: %v", height, err)
+			return fmt.Errorf("block by hash %v: %v", height, err)
 		}
-		_ = b
+		bh, btxs, err := parseBlock(s.chainParams, b.Block)
+		if err != nil {
+			return fmt.Errorf("parse block %v: %v", height, err)
+		}
+		_ = bh
+		log.Infof("%v", spew.Sdump(btxs))
 		//bh, btxs, err := tbcd.BlockTxs(&chaincfg.TestNet3Params, b.Block)
 		//if err != nil {
 		//	t.Fatalf("block transactions %v: %v", height, err)
