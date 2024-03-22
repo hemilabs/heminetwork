@@ -17,6 +17,7 @@ services:
       - '-txindex=1'
     ports:
       - 18443:18443
+      - 18444:18444
     volumes:
       - type: tmpfs
         target: /bitcoin/.bitcoin
