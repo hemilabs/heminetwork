@@ -39,16 +39,22 @@ const (
 
 	promSubsystem = "tbc_service" // Prometheus
 
-	mainnetPort = "8333"
-	testnetPort = "18333"
+	mainnetPort  = "8333"
+	testnetPort  = "18333"
+	localnetPort = "18443"
 
 	defaultPeersWanted   = 64
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
 	defaultUtxoSize = 1e6 // ~174MB
+
+	networkLocalnet = "localnet"
 )
 
 var (
+	localnetSeeds = []string{
+		"localhost",
+	}
 	testnetSeeds = []string{
 		"testnet-seed.bitcoin.jonasschnelli.ch",
 		"seed.tbtc.petertodd.org",
@@ -129,12 +135,15 @@ type Config struct {
 	PrometheusListenAddress string
 	Network                 string
 	BlockSanity             bool
+	ForceSeedPort           string
+	PeersWanted             int
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
 		ListenAddress: tbcapi.DefaultListen,
 		LogLevel:      logLevel,
+		PeersWanted:   defaultPeersWanted,
 	}
 }
 
@@ -185,7 +194,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg:             cfg,
 		printTime:       time.Now().Add(10 * time.Second),
 		blocks:          make(map[string]*blockPeer, defaultPendingBlocks),
-		peers:           make(map[string]*peer, defaultPeersWanted),
+		peers:           make(map[string]*peer, cfg.PeersWanted),
 		blocksInserted:  make(map[string]struct{}, 8192), // stats
 		utxos:           make(map[tbcd.Outpoint]tbcd.Utxo, defaultUtxoSize),
 		utxosPercentage: 95,              // flush cache at >95% capacity
@@ -212,6 +221,15 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
 		s.seeds = testnetSeeds
+	case networkLocalnet:
+		if s.cfg.ForceSeedPort != "" {
+			s.port = s.cfg.ForceSeedPort
+		} else {
+			s.port = localnetPort
+		}
+		s.wireNet = wire.TestNet
+		s.chainParams = &chaincfg.RegressionNetParams
+		s.seeds = localnetSeeds
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
 	}
@@ -305,13 +323,18 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	var addrs []net.IP
 	for k := range s.seeds {
 		log.Infof("DNS seeding %v", s.seeds[k])
-		ips, err := resolver.LookupIP(ctx, "ip", s.seeds[k])
-		if err != nil {
-			log.Errorf("lookup: %v", err)
-			errorsSeen++
-			continue
+		if s.seeds[k] == "localhost" {
+			log.Infof("seed is localhost, using 127.0.0.1")
+			addrs = append(addrs, net.IPv4(127, 0, 0, 1))
+		} else {
+			ips, err := resolver.LookupIP(ctx, "ip", s.seeds[k])
+			if err != nil {
+				log.Errorf("lookup: %v", err)
+				errorsSeen++
+				continue
+			}
+			addrs = append(addrs, ips...)
 		}
-		addrs = append(addrs, ips...)
 	}
 	if errorsSeen == len(s.seeds) {
 		return nil, fmt.Errorf("could not seed")
@@ -419,7 +442,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 	defer log.Tracef("peerManager exit")
 
 	// Channel for peering signals
-	peersWanted := defaultPeersWanted
+	peersWanted := s.cfg.PeersWanted
 	peerC := make(chan string, peersWanted)
 
 	log.Infof("Peer manager connecting to %v peers", peersWanted)
@@ -541,7 +564,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	err := p.connect(tctx)
+	err := p.connect(tctx, s.cfg.Network == networkLocalnet)
 	if err != nil {
 		go func(pp *peer) {
 			// Remove from database; it's ok to be aggressive if it
@@ -593,6 +616,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		// XXX fix multiple tips
 		panic(len(bhs))
 	}
+
+	log.Infof("block header best hash: %s", bhs[0].Hash)
 
 	err = s.getHeaders(ctx, p, bhs[0].Header)
 	if err != nil {
@@ -1153,6 +1178,7 @@ func (s *Server) Run(pctx context.Context) error {
 	switch s.cfg.Network {
 	case "testnet3":
 	case "mainnet":
+	case networkLocalnet:
 	default:
 		return fmt.Errorf("unsuported network: %v", s.cfg.Network)
 	}

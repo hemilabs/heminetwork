@@ -136,7 +136,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	return fmt.Errorf("handshake failed")
 }
 
-func (p *peer) connect(ctx context.Context) error {
+func (p *peer) connect(ctx context.Context, skipHandshake bool) error {
 	log.Tracef("connect %v", p.address) // not locked but ok
 	defer log.Tracef("connect exit %v", p.address)
 
@@ -155,14 +155,19 @@ func (p *peer) connect(ctx context.Context) error {
 	d := net.Dialer{
 		KeepAlive: 9 * time.Second,
 	}
+
+	log.Infof("dialing %s", p.address)
 	conn, err := d.DialContext(ctx, "tcp", p.address)
 	if err != nil {
 		return fmt.Errorf("dial %v: %w", p.address, err)
 	}
+	log.Infof("done")
 
-	err = p.handshake(ctx, conn)
-	if err != nil {
-		return fmt.Errorf("handshake %v: %w", p.address, err)
+	if !skipHandshake {
+		err = p.handshake(ctx, conn)
+		if err != nil {
+			return fmt.Errorf("handshake %v: %w", p.address, err)
+		}
 	}
 
 	p.mtx.Lock()
