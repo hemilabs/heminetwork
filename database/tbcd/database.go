@@ -5,6 +5,7 @@
 package tbcd
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -94,6 +95,10 @@ func (o Outpoint) TxIndex() uint32 {
 	return binary.BigEndian.Uint32(o[32:])
 }
 
+func (o Outpoint) TxIndexBytes() []byte {
+	return o[32:]
+}
+
 func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 	copy(op[0:32], txid[:])
 	binary.BigEndian.PutUint32(op[32:], index)
@@ -103,7 +108,7 @@ func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 // Utxo is a densely packed representation of a bitcoin UTXo. The fields are
 // script_hash + value + out_index. It is packed for
 // memory conservation reasons.
-type Utxo [32 + 8 + 4]byte // scipt_hash + value + out_idx
+type Utxo [32 + 8 + 4]byte // script_hash + value + out_idx
 
 // String reutrns pretty printable Utxo. Hash is not reversed since it is an
 // opaque pointer. It prints satoshis@script_hash:output_index
@@ -120,8 +125,20 @@ func (u Utxo) Value() uint64 {
 	return binary.BigEndian.Uint64(u[32:40])
 }
 
+func (u Utxo) ValueBytes() []byte {
+	return u[32:40]
+}
+
 func (u Utxo) OutputIndex() uint32 {
 	return binary.BigEndian.Uint32(u[40:])
+}
+
+func (u Utxo) OutputIndexBytes() []byte {
+	return u[40:44]
+}
+
+func (u Utxo) Equal(x Utxo) bool {
+	return bytes.Equal(u[:], x[:])
 }
 
 func NewUtxo(scriptHash [32]byte, value uint64, outIndex uint32) (utxo Utxo) {

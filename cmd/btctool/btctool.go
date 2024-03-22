@@ -25,7 +25,6 @@ import (
 	"github.com/hemilabs/heminetwork/cmd/btctool/bdf"
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
 	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
-	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 var log = loggo.GetLogger("bdf")
@@ -545,7 +544,7 @@ func _main() error {
 				if err != nil {
 					return err
 				}
-				fmt.Printf("%v", spew.Sdump(tbcd.BlockTxs(&chaincfg.MainNetParams, eb)))
+				fmt.Printf("%v", spew.Sdump(eb))
 
 				//blk, err := parseBlockFromHex(b)
 				//if err != nil {
