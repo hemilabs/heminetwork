@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
@@ -33,10 +34,12 @@ func TestIndex(t *testing.T) {
 	}
 	defer s.db.Close()
 
+	start := time.Now()
 	err = s.indexBlocks(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("done at %v", time.Now().Sub(start))
 }
 
 func TestUtxo(t *testing.T) {
@@ -77,4 +80,48 @@ func TestUtxo(t *testing.T) {
 	t.Logf("%v", dc.Sdump(mm))
 
 	t.Logf("%v", spew.Sdump(utxos))
+}
+
+// Test the various mapsizes
+// run with go test -v -bench . -benchmem -run=BenchmarkMap
+func allocateMap(size int) map[Outpoint]Utxo {
+	m := make(map[Outpoint]Utxo, size)
+	for i := 0; i < size; i++ {
+		m[Outpoint{}] = Utxo{}
+	}
+	return m
+}
+
+func BenchmarkMap10(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		allocateMap(10)
+	}
+}
+
+func BenchmarkMap100(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		allocateMap(100)
+	}
+}
+
+func BenchmarkMap10000(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		allocateMap(10000)
+	}
+}
+
+func BenchmarkMap100000(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		allocateMap(100000)
+	}
+}
+
+// BenchmarkMap1000000 seems to indicate that 1 million utxos use about
+// 182714418 bytes which is about 174MB on linux/arm64.
+// Or, about 183 per cache entry. 100 bytes for the key and value (36+44) and
+// 83 in overhead.
+func BenchmarkMap1000000(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		allocateMap(1e6)
+	}
 }
