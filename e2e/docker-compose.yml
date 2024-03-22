@@ -12,6 +12,7 @@ services:
       - '-txindex=1'
     ports:
       - 18443:18443
+      - 18444:18444
 
   initialblocks:
     image: 'kylemanna/bitcoind'
