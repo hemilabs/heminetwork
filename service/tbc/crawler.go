@@ -104,14 +104,22 @@ func (s *Server) indexer(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
 		}
+		utxosCached := len(s.utxos)
 		log.Infof("blocks processed %v in %v utxos cached %v cache unused %v avg tx/blk %v",
-			blocksProcessed, time.Now().Sub(start), len(s.utxos),
-			s.utxosMax-len(s.utxos), len(s.utxos)/blocksProcessed)
+			blocksProcessed, time.Now().Sub(start), utxosCached,
+			s.utxosMax-utxosCached, utxosCached/blocksProcessed)
 
 		// This is where we flush, simulate behavior by deleting utxos
-		for k := range s.utxos {
-			delete(s.utxos, k)
+		//for k := range s.utxos {
+		//	delete(s.utxos, k)
+		//}
+		start = time.Now()
+		err = s.db.BlockTxUpdate(ctx, s.utxos)
+		if err != nil {
+			return fmt.Errorf("block tx update: %w", err)
 		}
+		log.Infof("Flushing complete utxos %v took %v",
+			utxosCached, time.Now().Sub(start))
 
 		height += uint64(blocksProcessed)
 	}
