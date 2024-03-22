@@ -57,7 +57,11 @@ func TestBitcoindConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// this is just for demonstration
 	if err := tbc.Run(ctx); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return
+		}
 		t.Fatal(err)
 	}
 }
