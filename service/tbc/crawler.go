@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
@@ -174,33 +176,32 @@ func (s *Server) indexBlock(ctx context.Context, height uint64, b *tbcd.Block) e
 	return err
 }
 
-func (s *Server) indexBlocks(ctx context.Context) error {
+func (s *Server) indexBlocks(ctx context.Context, startHeight uint64) (int, error) {
 	log.Tracef("indexBlocks")
 	defer log.Tracef("indexBlocks")
 
 	blocksProcessed := 0
-	startHeight := uint64(180764)
-	count := uint64(100000)
-	for height := startHeight; height < startHeight+count; height++ {
+	for height := startHeight; ; height++ {
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
-			return fmt.Errorf("block headers by height %v: %v", height, err)
+			return 0, fmt.Errorf("block headers by height %v: %v", height, err)
 		}
 		eb, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
-			return fmt.Errorf("block by hash %v: %v", height, err)
+			return 0, fmt.Errorf("block by hash %v: %v", height, err)
 		}
 		b, err := parseBlockAndCache(s.chainParams, eb.Block, s.utxos)
 		if err != nil {
-			return fmt.Errorf("parse block %v: %v", height, err)
+			return 0, fmt.Errorf("parse block %v: %v", height, err)
 		}
 		_ = b
 
 		blocksProcessed++
+
 		// Try not to overshoot the cache to prevent costly allocations
 		cp := len(s.utxos) * 100 / s.utxosMax
-		if height%10000 == 0 || cp > s.utxosPercentage {
-			log.Infof("Height: %v %v%%", height, cp)
+		if height%10000 == 0 || cp > s.utxosPercentage || blocksProcessed == 1 {
+			log.Infof("Height: %v utxo cache %v%%", height, cp)
 		}
 		if cp > s.utxosPercentage {
 			// Set utxosMax to the largest utxo capacity seen
@@ -209,8 +210,32 @@ func (s *Server) indexBlocks(ctx context.Context) error {
 			break
 		}
 	}
-	log.Infof("Utxo cache: blocks %v cached %v empty %v avg tx/blk %v",
-		blocksProcessed, len(s.utxos), s.utxosMax-len(s.utxos),
-		len(s.utxos)/blocksProcessed)
-	return nil
+
+	return blocksProcessed, nil
+}
+
+func (s *Server) indexer(ctx context.Context) error {
+	height := uint64(0)
+	log.Infof("Start indexing at height %v", height)
+	for {
+		start := time.Now()
+		blocksProcessed, err := s.indexBlocks(ctx, height)
+		if err != nil {
+			return fmt.Errorf("index blocks: %w", err)
+		}
+		log.Infof("blocks processed %v in %v utxos cached %v cache unused %v avg tx/blk %v",
+			blocksProcessed, time.Now().Sub(start), len(s.utxos),
+			s.utxosMax-len(s.utxos), len(s.utxos)/blocksProcessed)
+
+		// This is where we flush, simulate behavior by deleting utxos
+		for k := range s.utxos {
+			delete(s.utxos, k)
+		}
+		if len(s.utxos) != 0 {
+			// XXX remove
+			panic(spew.Sdump(s.utxos))
+		}
+
+		height += uint64(blocksProcessed)
+	}
 }

@@ -35,7 +35,7 @@ func TestIndex(t *testing.T) {
 	defer s.db.Close()
 
 	start := time.Now()
-	err = s.indexBlocks(ctx)
+	err = s.indexer(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

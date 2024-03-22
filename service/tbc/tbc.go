@@ -188,7 +188,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		peers:           make(map[string]*peer, defaultPeersWanted),
 		blocksInserted:  make(map[string]struct{}, 8192), // stats
 		utxos:           make(map[Outpoint]Utxo, defaultUtxoSize),
-		utxosPercentage: 90,              // flush cache
+		utxosPercentage: 95,              // flush cache at >95% capacity
 		utxosMax:        defaultUtxoSize, // largest utxo set seen
 		timeSource:      blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
