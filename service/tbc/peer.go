@@ -92,6 +92,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	if err != nil {
 		return fmt.Errorf("could not read version message: %w", err)
 	}
+
 	v, ok := rmsg.(*wire.MsgVersion)
 	if !ok {
 		return fmt.Errorf("expected version message")

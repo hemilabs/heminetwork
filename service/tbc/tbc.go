@@ -41,7 +41,7 @@ const (
 
 	mainnetPort  = "8333"
 	testnetPort  = "18333"
-	localnetPort = "18443"
+	localnetPort = "18444"
 
 	defaultPeersWanted   = 64
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
@@ -136,14 +136,12 @@ type Config struct {
 	Network                 string
 	BlockSanity             bool
 	ForceSeedPort           string
-	PeersWanted             int
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
 		ListenAddress: tbcapi.DefaultListen,
 		LogLevel:      logLevel,
-		PeersWanted:   defaultPeersWanted,
 	}
 }
 
@@ -194,7 +192,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg:             cfg,
 		printTime:       time.Now().Add(10 * time.Second),
 		blocks:          make(map[string]*blockPeer, defaultPendingBlocks),
-		peers:           make(map[string]*peer, cfg.PeersWanted),
+		peers:           make(map[string]*peer, defaultPeersWanted),
 		blocksInserted:  make(map[string]struct{}, 8192), // stats
 		utxos:           make(map[tbcd.Outpoint]tbcd.Utxo, defaultUtxoSize),
 		utxosPercentage: 95,              // flush cache at >95% capacity
@@ -442,7 +440,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 	defer log.Tracef("peerManager exit")
 
 	// Channel for peering signals
-	peersWanted := s.cfg.PeersWanted
+	peersWanted := defaultPeersWanted
 	peerC := make(chan string, peersWanted)
 
 	log.Infof("Peer manager connecting to %v peers", peersWanted)
