@@ -9,8 +9,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/docker/go-connections/nat"
+	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+)
+
+const (
+	privateKey = "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219740f"
 )
 
 type StdoutLogConsumer struct {
@@ -37,21 +44,57 @@ func TestBitcoindConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	endpoint, err := getEndpointWithRetries(ctx, bitcoindContainer, 5)
+	peerPort, err := nat.NewPort("tcp", "18444")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// there is a better way to do this, like MappedPort, but I am in a rush
-	port := strings.Split(endpoint, ":")[1]
+	rpcPort, err := nat.NewPort("tcp", "18443")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, peerPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mappedRpcPort, err := bitcoindContainer.MappedPort(ctx, rpcPort)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("bitcoind host is: %s", bitcoindHost)
-	t.Logf("bitcoind port is: %s", port)
+	t.Logf("bitcoind peer port is: %s", mappedPeerPort.Port())
+	t.Logf("bitcoind rpc port is: %s", mappedRpcPort.Port())
+
+	// create the key pair for the pop miner
+	_, _, btcAddress, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"generatetoaddress",
+			"2", // need to generate a lot for greater chance to not spend coinbase
+			btcAddress.EncodeAddress(),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := NewDefaultConfig()
-	cfg.ForceSeedPort = port
 	cfg.Network = networkLocalnet
-	cfg.PeersWanted = 1
+	cfg.ForceSeedPort = mappedPeerPort.Port()
 	tbc, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -69,8 +112,8 @@ func TestBitcoindConnection(t *testing.T) {
 func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
 	req := testcontainers.ContainerRequest{
 		Image:        "kylemanna/bitcoind",
-		Cmd:          []string{"bitcoind", "-rest", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1"},
-		ExposedPorts: []string{"18443/tcp"},
+		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1"},
+		ExposedPorts: []string{"18443/tcp", "18444/tcp"},
 		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{
 			Consumers: []testcontainers.LogConsumer{&StdoutLogConsumer{
