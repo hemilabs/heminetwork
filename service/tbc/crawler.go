@@ -10,7 +10,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/davecgh/go-spew/spew"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
@@ -230,10 +229,6 @@ func (s *Server) indexer(ctx context.Context) error {
 		// This is where we flush, simulate behavior by deleting utxos
 		for k := range s.utxos {
 			delete(s.utxos, k)
-		}
-		if len(s.utxos) != 0 {
-			// XXX remove
-			panic(spew.Sdump(s.utxos))
 		}
 
 		height += uint64(blocksProcessed)
