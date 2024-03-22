@@ -127,7 +127,7 @@ L2Keytones and BTC Blocks at a high rate.
 note: the `--build` flag is optional if you want to rebuild your code
 
 ```
-docker-compose -f ./e2e/docker-compose.yml up --build
+docker compose -f ./e2e/docker-compose.yml up --build
 ```
 
 This will take a while upon first build, but following builds should be cached.  
@@ -148,7 +148,7 @@ docker compose -f ./e2e/docker-compose.yml build --build-arg OPTIMISM_CACHE_BREA
 data and give you a fresh start
 
 ```
-docker-compose -f ./e2e/docker-compose.yml down -v --remove-orphans
+docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 ```
 
 
