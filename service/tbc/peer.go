@@ -136,7 +136,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	return fmt.Errorf("handshake failed")
 }
 
-func (p *peer) connect(ctx context.Context, skipHandshake bool) error {
+func (p *peer) connect(ctx context.Context) error {
 	log.Tracef("connect %v", p.address) // not locked but ok
 	defer log.Tracef("connect exit %v", p.address)
 
@@ -163,11 +163,9 @@ func (p *peer) connect(ctx context.Context, skipHandshake bool) error {
 	}
 	log.Infof("done")
 
-	if !skipHandshake {
-		err = p.handshake(ctx, conn)
-		if err != nil {
-			return fmt.Errorf("handshake %v: %w", p.address, err)
-		}
+	err = p.handshake(ctx, conn)
+	if err != nil {
+		return fmt.Errorf("handshake %v: %w", p.address, err)
 	}
 
 	p.mtx.Lock()
