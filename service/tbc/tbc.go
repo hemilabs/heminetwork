@@ -564,7 +564,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	err := p.connect(tctx, s.cfg.Network == networkLocalnet)
+	err := p.connect(tctx)
 	if err != nil {
 		go func(pp *peer) {
 			// Remove from database; it's ok to be aggressive if it
