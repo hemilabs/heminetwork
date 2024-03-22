@@ -133,11 +133,8 @@ services:
     depends_on:
       - bfgd
   op-geth-l1:
-    build:
-      dockerfile: optimism-stack.Dockerfile
-      context: .
+    image: ethereum/client-go:v1.13.14
     command:
-      - /git/op-geth/build/bin/geth
       - --dev
       - --dev.period
       - '3'
