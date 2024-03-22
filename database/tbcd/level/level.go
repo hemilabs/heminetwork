@@ -518,7 +518,54 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 }
 
 func (l *ldb) BlockTxUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
-	return fmt.Errorf("not yet")
+	log.Tracef("BlockTxUpdate")
+	defer log.Tracef("BlockTxUpdate exit")
+
+	// outputs
+	outsTx, outsCommit, outsDiscard, err := l.startTransaction(level.OutputsDB)
+	if err != nil {
+		return fmt.Errorf("outputs open db transaction: %w", err)
+	}
+	defer outsDiscard()
+
+	outsBatch := new(leveldb.Batch)
+	for op, utxo := range utxos {
+		var uop [37]byte
+		uop[0] = 'u' // outpoint
+		copy(uop[1:], op[:])
+
+		var hop [69]byte // 69 DUDE!
+		hop[0] = 'h'
+		copy(hop[1:33], utxo.ScriptHash())
+		copy(hop[33:65], op.TxId())
+		copy(hop[65:], utxo.OutputIndexBytes())
+
+		if utxo.Equal(tbcd.DeleteUtxo) {
+			// Delete balance and utxos
+			outsBatch.Delete(uop[:])
+			outsBatch.Delete(hop[:])
+		} else {
+			// Add utxo to balance and utxos
+			outsBatch.Put(uop[:], utxo.ScriptHash())
+			outsBatch.Put(hop[:], utxo.ValueBytes())
+		}
+		_ = utxo
+		delete(utxos, op) // XXX this probably should be done by the caller
+	}
+
+	// Write outputs batch
+	err = outsTx.Write(outsBatch, nil)
+	if err != nil {
+		return fmt.Errorf("outputs insert: %w", err)
+	}
+
+	// outputs commit
+	err = outsCommit()
+	if err != nil {
+		return fmt.Errorf("outputs commit: %w", err)
+	}
+
+	return nil
 }
 
 //func (l *ldb) BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []tbcd.Tx) error {
