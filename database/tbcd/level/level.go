@@ -517,6 +517,10 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	}, nil
 }
 
+func (l *ldb) BlockTxUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
+	return fmt.Errorf("not yet")
+}
+
 //func (l *ldb) BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []tbcd.Tx) error {
 //	log.Tracef("BlockTxUpdate")
 //	defer log.Tracef("BlockTxUpdate exit")
