@@ -44,6 +44,8 @@ const (
 
 	defaultPeersWanted   = 64
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
+
+	defaultUtxoSize = 1e6 // ~174MB
 )
 
 var (
@@ -170,7 +172,9 @@ type Server struct {
 	sessions map[string]*tbcWs
 
 	// utxo cache. XXX do we need a seperate mutex?
-	utxos map[Outpoint]Utxo
+	utxos           map[Outpoint]Utxo
+	utxosPercentage int
+	utxosMax        int
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -178,12 +182,15 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 	s := &Server{
-		cfg:            cfg,
-		printTime:      time.Now().Add(10 * time.Second),
-		blocks:         make(map[string]*blockPeer, defaultPendingBlocks),
-		peers:          make(map[string]*peer, defaultPeersWanted),
-		blocksInserted: make(map[string]struct{}, 8192), // stats
-		timeSource:     blockchain.NewMedianTime(),
+		cfg:             cfg,
+		printTime:       time.Now().Add(10 * time.Second),
+		blocks:          make(map[string]*blockPeer, defaultPendingBlocks),
+		peers:           make(map[string]*peer, defaultPeersWanted),
+		blocksInserted:  make(map[string]struct{}, 8192), // stats
+		utxos:           make(map[Outpoint]Utxo, defaultUtxoSize),
+		utxosPercentage: 90,              // flush cache
+		utxosMax:        defaultUtxoSize, // largest utxo set seen
+		timeSource:      blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Subsystem: promSubsystem,
 			Name:      "rpc_calls_total",

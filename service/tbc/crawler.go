@@ -9,7 +9,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/davecgh/go-spew/spew"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
@@ -70,100 +69,148 @@ func NewUtxo(scriptHash [32]byte, value uint64, outIndex uint32) (utxo Utxo) {
 	return
 }
 
-type Tx struct {
-	Id    chainhash.Hash // TxId
-	Index int            // Transaction index in block
-	In    []Outpoint     // Inputs
-	Out   []Utxo         // Outputs
+//type Tx struct {
+//	Id    chainhash.Hash // TxId
+//	Index int            // Transaction index in block
+//	In    []Outpoint     // Inputs
+//	Out   []Utxo         // Outputs
+//}
+
+var DeleteUtxo Utxo
+
+func init() {
+	// Initialize sentinel that marks utxo cache entries for deletion
+	for i := 0; i < len(DeleteUtxo); i++ {
+		DeleteUtxo[i] = 0xff
+	}
 }
 
-// parseBlock walks a iraw bitcoin block's transactions and generates an in
-// order list of execution parameters to update the utxo cache. This function
-// should not be creating an intermediate data structure but take functios to
-// add/remove/update entries in the cache instead.
-func parseBlock(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
+//// parseBlock walks a iraw bitcoin block's transactions and generates an in
+//// order list of execution parameters to update the utxo cache. This function
+//// should not be creating an intermediate data structure but take functios to
+//// add/remove/update entries in the cache instead.
+//func parseBlock(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
+//	b, err := btcutil.NewBlockFromBytes(bb)
+//	if err != nil {
+//		return nil, nil, err
+//	}
+//
+//	txs := b.Transactions()
+//	btxs := make([]Tx, 0, len(txs))
+//	for _, tx := range txs {
+//		btx := Tx{
+//			Id:    *tx.Hash(),
+//			Index: tx.Index(),
+//			In:    make([]Outpoint, 0, len(tx.MsgTx().TxIn)),
+//			Out:   make([]Utxo, 0, len(tx.MsgTx().TxOut)),
+//		}
+//		for _, txIn := range tx.MsgTx().TxIn {
+//			btx.In = append(btx.In, NewOutpoint(
+//				txIn.PreviousOutPoint.Hash,
+//				txIn.PreviousOutPoint.Index,
+//			))
+//		}
+//		for outIndex, txOut := range tx.MsgTx().TxOut {
+//			btx.Out = append(btx.Out, NewUtxo(
+//				sha256.Sum256(txOut.PkScript),
+//				uint64(txOut.Value),
+//				uint32(outIndex),
+//			))
+//		}
+//		btxs = append(btxs, btx)
+//	}
+//
+//	return b.Hash(), btxs, nil
+//}
+
+func OutpointFromTx(tx *btcutil.Tx) Outpoint {
+	return NewOutpoint(*tx.Hash(), uint32(tx.Index()))
+}
+
+func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[Outpoint]Utxo) (*btcutil.Block, error) {
 	b, err := btcutil.NewBlockFromBytes(bb)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	txs := b.Transactions()
-	btxs := make([]Tx, 0, len(txs))
-	for _, tx := range txs {
-		btx := Tx{
-			Id:    *tx.Hash(),
-			Index: tx.Index(),
-			In:    make([]Outpoint, 0, len(tx.MsgTx().TxIn)),
-			Out:   make([]Utxo, 0, len(tx.MsgTx().TxOut)),
-		}
+	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
-			btx.In = append(btx.In, NewOutpoint(
-				txIn.PreviousOutPoint.Hash,
-				txIn.PreviousOutPoint.Index,
-			))
+			if idx == 0 {
+				// Skip coinbase inputs
+			}
+			op := NewOutpoint(txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index)
+			if _, ok := utxos[op]; ok {
+				delete(utxos, op)
+				continue
+			}
+			// mark for deletion
+			utxos[op] = DeleteUtxo
 		}
 		for outIndex, txOut := range tx.MsgTx().TxOut {
-			btx.Out = append(btx.Out, NewUtxo(
+			utxos[OutpointFromTx(tx)] = NewUtxo(
 				sha256.Sum256(txOut.PkScript),
 				uint64(txOut.Value),
-				uint32(outIndex),
-			))
+				uint32(outIndex))
 		}
-		btxs = append(btxs, btx)
 	}
-
-	return b.Hash(), btxs, nil
+	// log.Infof("%v", spew.Sdump(utxos))
+	return b, nil
 }
 
 func (s *Server) indexBlock(ctx context.Context, height uint64, b *tbcd.Block) error {
 	log.Tracef("indexBlock")
 	defer log.Tracef("indexBlock")
 
-	bh, txs, err := parseBlock(s.chainParams, b.Block)
-	if err != nil {
-		return fmt.Errorf("index block: %w", err)
-	}
-	log.Infof("%v: %v", bh)
-	log.Infof("%%v", txs)
+	_, err := parseBlockAndCache(s.chainParams, b.Block, s.utxos)
+	//bh, txs, err := parseBlock(s.chainParams, b.Block)
+	//if err != nil {
+	//	return fmt.Errorf("index block: %w", err)
+	//}
+	//log.Infof("%v: %v", bh)
+	//log.Infof("%%v", txs)
 
-	return nil
+	return err
 }
 
 func (s *Server) indexBlocks(ctx context.Context) error {
 	log.Tracef("indexBlocks")
 	defer log.Tracef("indexBlocks")
 
-	startHeight := uint64(0)
-	count := uint64(1)
+	blocksProcessed := 0
+	startHeight := uint64(180764)
+	count := uint64(100000)
 	for height := startHeight; height < startHeight+count; height++ {
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
 			return fmt.Errorf("block headers by height %v: %v", height, err)
 		}
-		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
+		eb, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
 			return fmt.Errorf("block by hash %v: %v", height, err)
 		}
-		bh, btxs, err := parseBlock(s.chainParams, b.Block)
+		b, err := parseBlockAndCache(s.chainParams, eb.Block, s.utxos)
 		if err != nil {
 			return fmt.Errorf("parse block %v: %v", height, err)
 		}
-		_ = bh
-		log.Infof("%v", spew.Sdump(btxs))
-		//bh, btxs, err := tbcd.BlockTxs(&chaincfg.TestNet3Params, b.Block)
-		//if err != nil {
-		//	t.Fatalf("block transactions %v: %v", height, err)
-		//}
-		//err = db.BlockTxUpdate(ctx, bh[:], btxs)
-		//if err != nil {
-		//	// t.Fatalf("%v", spew.Sdump(btxs))
-		//	t.Fatalf("block utxos %v: %v", height, err)
-		//}
-		//if height%1000 == 0 {
-		//	log.Infof("height %v %v", height, time.Now().Sub(elapsed))
-		//	elapsed = time.Now()
-		//}
-	}
+		_ = b
 
+		blocksProcessed++
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := len(s.utxos) * 100 / s.utxosMax
+		if height%10000 == 0 || cp > s.utxosPercentage {
+			log.Infof("Height: %v %v%%", height, cp)
+		}
+		if cp > s.utxosPercentage {
+			// Set utxosMax to the largest utxo capacity seen
+			s.utxosMax = max(len(s.utxos), s.utxosMax)
+			// Flush
+			break
+		}
+	}
+	log.Infof("Utxo cache: blocks %v cached %v empty %v avg tx/blk %v",
+		blocksProcessed, len(s.utxos), s.utxosMax-len(s.utxos),
+		len(s.utxos)/blocksProcessed)
 	return nil
 }
