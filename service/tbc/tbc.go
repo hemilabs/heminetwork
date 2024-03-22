@@ -172,7 +172,7 @@ type Server struct {
 	sessions map[string]*tbcWs
 
 	// utxo cache. XXX do we need a seperate mutex?
-	utxos           map[Outpoint]Utxo
+	utxos           map[tbcd.Outpoint]tbcd.Utxo
 	utxosPercentage int
 	utxosMax        int
 }
@@ -187,7 +187,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		blocks:          make(map[string]*blockPeer, defaultPendingBlocks),
 		peers:           make(map[string]*peer, defaultPeersWanted),
 		blocksInserted:  make(map[string]struct{}, 8192), // stats
-		utxos:           make(map[Outpoint]Utxo, defaultUtxoSize),
+		utxos:           make(map[tbcd.Outpoint]tbcd.Utxo, defaultUtxoSize),
 		utxosPercentage: 95,              // flush cache at >95% capacity
 		utxosMax:        defaultUtxoSize, // largest utxo set seen
 		timeSource:      blockchain.NewMedianTime(),

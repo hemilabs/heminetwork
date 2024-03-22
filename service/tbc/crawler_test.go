@@ -10,6 +10,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
+	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 )
 
@@ -49,13 +50,13 @@ func TestUtxo(t *testing.T) {
 		DisableMethods: true,
 	}
 
-	utxos := make(map[Outpoint]Utxo, 100)
+	utxos := make(map[tbcd.Outpoint]tbcd.Utxo, 100)
 	hash := sha256.Sum256([]byte("Hello, world!"))
 	index := uint32(1)
-	op := NewOutpoint(hash, index)
+	op := tbcd.NewOutpoint(hash, index)
 	hash2 := sha256.Sum256([]byte("Hello, world!2"))
-	op2 := NewOutpoint(hash2, index)
-	utxo := Utxo{}
+	op2 := tbcd.NewOutpoint(hash2, index)
+	utxo := tbcd.Utxo{}
 	utxos[op] = utxo
 	utxos[op2] = utxo
 	t.Logf("%v", dc.Sdump(utxos))
@@ -84,10 +85,10 @@ func TestUtxo(t *testing.T) {
 
 // Test the various mapsizes
 // run with go test -v -bench . -benchmem -run=BenchmarkMap
-func allocateMap(size int) map[Outpoint]Utxo {
-	m := make(map[Outpoint]Utxo, size)
+func allocateMap(size int) map[tbcd.Outpoint]tbcd.Utxo {
+	m := make(map[tbcd.Outpoint]tbcd.Utxo, size)
 	for i := 0; i < size; i++ {
-		m[Outpoint{}] = Utxo{}
+		m[tbcd.Outpoint{}] = tbcd.Utxo{}
 	}
 	return m
 }

@@ -6,6 +6,10 @@ package tbcd
 
 import (
 	"context"
+	"encoding/binary"
+	"fmt"
+
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/database"
 )
@@ -34,6 +38,7 @@ type Database interface {
 	// Transactions
 	// UTxosInsert(ctx context.Context, butxos []BlockUtxo) error
 	// BlockTxUpdate(ctx context.Context, blockhash []byte, btxs []Tx) error
+	BlockTxUpdate(ctx context.Context, utxos map[Outpoint]Utxo) error
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -70,58 +75,67 @@ type Peer struct {
 	CreatedAt database.Timestamp `deep:"-"`
 }
 
-//// TxIn is a cooked bitcoin input.
-//type TxIn struct {
-//	Hash  database.ByteArray // Previous hash
-//	Index uint32             // Previous index
-//}
-//
-//// TxIn is a cooked bitcoin output.
-//type TxOut struct {
-//	PkScript database.ByteArray // Spend script
-//	Value    uint64             // Satoshis
-//}
-//
-//// Tx is a cooked bitcoin transaction.
-//type Tx struct {
-//	Id    database.ByteArray // TxId
-//	Index uint32             // Transaction index in block
-//	In    []TxIn             // Inputs
-//	Out   []TxOut            // Outputs
-//}
-//
-//// Utxos extracts all transactions from the provided block and returns the
-//// block and a, in sequence, list of all transactions.
-//func BlockTxs(cp *chaincfg.Params, bb []byte) (*chainhash.Hash, []Tx, error) {
-//	b, err := btcutil.NewBlockFromBytes(bb)
-//	if err != nil {
-//		return nil, nil, err
-//	}
-//
-//	txs := b.Transactions()
-//	btxs := make([]Tx, 0, len(txs))
-//	for _, tx := range txs {
-//		txCHash := tx.Hash()
-//		btx := Tx{
-//			Id:    txCHash[:],
-//			Index: uint32(tx.Index()),
-//			In:    make([]TxIn, 0, len(tx.MsgTx().TxIn)),
-//			Out:   make([]TxOut, 0, len(tx.MsgTx().TxOut)),
-//		}
-//		for _, txIn := range tx.MsgTx().TxIn {
-//			btx.In = append(btx.In, TxIn{
-//				Hash:  txIn.PreviousOutPoint.Hash[:],
-//				Index: txIn.PreviousOutPoint.Index,
-//			})
-//		}
-//		for , txOut := range tx.MsgTx().TxOut {
-//			btx.Out = append(btx.Out, TxOut{
-//				PkScript: txOut.PkScript,
-//				Value:    uint64(txOut.Value),
-//			})
-//		}
-//		btxs = append(btxs, btx)
-//	}
-//
-//	return b.Hash(), btxs, nil
-//}
+// Outpoint is a bitcoin structure that points to a transaction in a block. It
+// is expressed as an array of bytes in order to pack it as dense as possible
+// for memory conservation reasons.
+type Outpoint [36]byte // Outpoint Tx id
+
+// String returns a reversed pretty printed outpoint.
+func (o Outpoint) String() string {
+	hash, _ := chainhash.NewHash(o[0:32])
+	return fmt.Sprintf("%s:%d", hash, binary.BigEndian.Uint32(o[32:]))
+}
+
+func (o Outpoint) TxId() []byte {
+	return o[0:32]
+}
+
+func (o Outpoint) TxIndex() uint32 {
+	return binary.BigEndian.Uint32(o[32:])
+}
+
+func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
+	copy(op[0:32], txid[:])
+	binary.BigEndian.PutUint32(op[32:], index)
+	return
+}
+
+// Utxo is a densely packed representation of a bitcoin UTXo. The fields are
+// script_hash + value + out_index. It is packed for
+// memory conservation reasons.
+type Utxo [32 + 8 + 4]byte // scipt_hash + value + out_idx
+
+// String reutrns pretty printable Utxo. Hash is not reversed since it is an
+// opaque pointer. It prints satoshis@script_hash:output_index
+func (u Utxo) String() string {
+	return fmt.Sprintf("%d @ %x:%d", binary.BigEndian.Uint64(u[32:40]),
+		u[0:32], binary.BigEndian.Uint32(u[40:]))
+}
+
+func (u Utxo) ScriptHash() []byte {
+	return u[0:32]
+}
+
+func (u Utxo) Value() uint64 {
+	return binary.BigEndian.Uint64(u[32:40])
+}
+
+func (u Utxo) OutputIndex() uint32 {
+	return binary.BigEndian.Uint32(u[40:])
+}
+
+func NewUtxo(scriptHash [32]byte, value uint64, outIndex uint32) (utxo Utxo) {
+	copy(utxo[0:32], scriptHash[:])
+	binary.BigEndian.PutUint64(utxo[32:40], value)
+	binary.BigEndian.PutUint32(utxo[40:], outIndex)
+	return
+}
+
+var DeleteUtxo Utxo
+
+func init() {
+	// Initialize sentinel that marks utxo cache entries for deletion
+	for i := 0; i < len(DeleteUtxo); i++ {
+		DeleteUtxo[i] = 0xff
+	}
+}
