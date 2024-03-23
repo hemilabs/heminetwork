@@ -774,6 +774,8 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	}
 
 	if len(bis) > 0 {
+		s.mtx.Lock()
+		defer s.mtx.Unlock()
 		err := s.downloadBlocks(ctx, bis)
 		if err != nil {
 			log.Errorf("download blocks: %v", err)
