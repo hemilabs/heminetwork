@@ -173,12 +173,12 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 		}
 		bh, err := l.BlockHeaderByHash(ctx, hash)
 		if err != nil {
-			return nil, fmt.Errorf("headers by height: %w", err)
+			return nil, fmt.Errorf("headers by height: %v", err)
 		}
 		bhs = append(bhs, *bh)
 	}
 	if len(bhs) == 0 {
-		return nil, fmt.Errorf("not found")
+		return nil, database.NotFoundError(fmt.Sprintf("not found"))
 	}
 	return bhs, nil
 }
