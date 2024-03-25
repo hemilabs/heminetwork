@@ -51,8 +51,8 @@ curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\
 
 cd /git/optimism/packages/contracts-bedrock
 
-forge script ./scripts/Deploy.s.sol:Deploy --private-key=dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530 --broadcast --rpc-url $JSON_RPC
-forge script ./scripts/Deploy.s.sol:Deploy --sig 'sync()' --private-key=dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530 --broadcast --rpc-url $JSON_RPC
+forge script ./scripts/Deploy.s.sol:Deploy --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
+forge script ./scripts/Deploy.s.sol:Deploy --sig 'sync()' --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
 
 curl -H 'Content-Type: application/json' -X POST --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x2", true],"id":1}' $JSON_RPC > /tmp/blockl1.json
 
