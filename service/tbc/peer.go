@@ -157,12 +157,12 @@ func (p *peer) connect(ctx context.Context) error {
 		KeepAlive: 9 * time.Second,
 	}
 
-	log.Infof("dialing %s", p.address)
+	log.Debugf("dialing %s", p.address)
 	conn, err := d.DialContext(ctx, "tcp", p.address)
 	if err != nil {
 		return fmt.Errorf("dial %v: %w", p.address, err)
 	}
-	log.Infof("done")
+	log.Debugf("done dialing %s", p.address)
 
 	err = p.handshake(ctx, conn)
 	if err != nil {
