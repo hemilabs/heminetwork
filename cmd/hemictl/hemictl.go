@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -336,6 +337,7 @@ func tbcdb() error {
 		fmt.Printf("\tdumpoutputs <prefix>\n")
 		fmt.Printf("\thelp\n")
 		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
+		fmt.Printf("\tbalancebyscripthash [hash]\n")
 		fmt.Printf("\ttxindex <height> <count>\n")
 
 	case "txindex":
@@ -389,6 +391,23 @@ func tbcdb() error {
 			return fmt.Errorf("block by hash: %w", err)
 		}
 		spew.Dump(sh)
+
+	case "balancebyscripthash":
+		hash := args["hash"]
+		if hash == "" {
+			return fmt.Errorf("hash: must be set")
+		}
+		h, err := hex.DecodeString(hash)
+		if err != nil {
+			return fmt.Errorf("decode hex: %w", err)
+		}
+		var hh [32]byte
+		copy(hh[:], h)
+		balance, err := s.DB().BalanceByScriptHash(ctx, hh)
+		if err != nil {
+			return fmt.Errorf("block by hash: %w", err)
+		}
+		spew.Dump(balance)
 
 	default:
 		return fmt.Errorf("invalid action: %v", action)
