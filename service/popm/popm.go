@@ -701,7 +701,7 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			case <-time.After(m.holdoffTimeout):
 			}
 			// XXX this is too noisy
-			log.Errorf("Retrying connectiong to BFG")
+			log.Errorf("Retrying connecting to BFG")
 			continue
 		}
 		switch cmd {
