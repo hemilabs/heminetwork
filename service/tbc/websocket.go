@@ -7,14 +7,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/davecgh/go-spew/spew"
 	"nhooyr.io/websocket"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 type tbcWs struct {
@@ -44,6 +47,63 @@ func (ws *tbcWs) handlePingRequest(ctx context.Context, payload any, id string) 
 		return fmt.Errorf("handlePingRequest write: %v %v",
 			ws.addr, err)
 	}
+	return nil
+}
+
+func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, db tbcd.Database) error {
+	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
+	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
+
+	p, ok := payload.(*tbcapi.BtcBlockMetadataByNumRequest)
+	if !ok {
+		return fmt.Errorf("handleBtcBlockMetadataByNumRequest invalid payload type: %T", payload)
+	}
+
+	bh, err := db.BlockHeadersByHeight(ctx, uint64(p.Height))
+	if err != nil {
+		return fmt.Errorf("error getting block header by height: %s", err)
+	}
+
+	if len(bh) == 0 {
+		return fmt.Errorf("no block headers found at height %d", p.Height)
+	}
+
+	b, err := db.BlockByHash(ctx, bh[0].Hash)
+	if err != nil {
+		return fmt.Errorf("no blocks found for hash: %v", bh[0].Hash)
+	}
+
+	block, err := btcutil.NewBlockFromBytes(b.Block)
+	if err != nil {
+		return err
+	}
+
+	prevHash := block.MsgBlock().Header.PrevBlock[:]
+	slices.Reverse(prevHash)
+
+	merkleRoot := block.MsgBlock().Header.MerkleRoot[:]
+	slices.Reverse(merkleRoot)
+
+	res := tbcapi.BtcBlockMetadataByNumResponse{
+		Block: tbcapi.BtcBlockMetadata{
+			Height: uint32(bh[0].Height),
+			NumTx:  uint32(len(block.Transactions())),
+			Header: tbcapi.BtcHeader{
+				Version:    uint32(block.MsgBlock().Header.Version),
+				PrevHash:   hex.EncodeToString(prevHash),
+				MerkleRoot: hex.EncodeToString(merkleRoot),
+				Timestamp:  uint32(block.MsgBlock().Header.Timestamp.Unix()),
+				Bits:       fmt.Sprintf("%x", block.MsgBlock().Header.Bits),
+				Nonce:      block.MsgBlock().Header.Nonce,
+			},
+		},
+	}
+
+	if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
+		return fmt.Errorf("handleBtcBlockMetadataByNumRequest write: %v %v",
+			ws.addr, err)
+	}
+
 	return nil
 }
 
@@ -116,6 +176,8 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 		switch cmd {
 		case tbcapi.CmdPingRequest:
 			err = ws.handlePingRequest(ctx, payload, id)
+		case tbcapi.CmdBtcBlockMetadataByNumRequest:
+			err = ws.handleBtcBlockMetadataByNumRequest(ctx, payload, id, s.db)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}

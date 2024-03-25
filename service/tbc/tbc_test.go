@@ -2,23 +2,32 @@ package tbc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/docker/go-connections/nat"
+	"github.com/go-test/deep"
+	"github.com/phayes/freeport"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+	"nhooyr.io/websocket"
+	"nhooyr.io/websocket/wsjson"
 
+	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
 )
 
 const (
-	privateKey = "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219740f"
+	privateKey  = "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219740f"
+	levelDbHome = ".testleveldb"
 )
 
 type StdoutLogConsumer struct {
@@ -30,14 +39,21 @@ func (t *StdoutLogConsumer) Accept(l testcontainers.Log) {
 }
 
 func skipIfNoDocker(t *testing.T) {
-	if os.Getenv("HEMI_DOCKER_TESTS") != "1" {
-		t.Skip("not running docker test")
+	envValue := os.Getenv("HEMI_DOCKER_TESTS")
+	val, err := strconv.ParseBool(envValue)
+	if envValue != "" && err != nil {
+		t.Fatal(err)
+	}
+
+	if !val {
+		t.Skip("skipping docker tests")
 	}
 }
 
-func TestBitcoindConnection(t *testing.T) {
+func TestBtcBlockMetadataByNum(t *testing.T) {
 	skipIfNoDocker(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 	bitcoindContainer := createBitcoind(ctx, t)
 	bitcoindHost, err := bitcoindContainer.Host(ctx)
@@ -69,7 +85,6 @@ func TestBitcoindConnection(t *testing.T) {
 	t.Logf("bitcoind peer port is: %s", mappedPeerPort.Port())
 	t.Logf("bitcoind rpc port is: %s", mappedRpcPort.Port())
 
-	// create the key pair for the pop miner
 	_, _, btcAddress, err := bitcoin.KeysAndAddressFromHexString(
 		privateKey,
 		&chaincfg.RegressionNetParams,
@@ -78,7 +93,7 @@ func TestBitcoindConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = runBitcoinCommand(
+	_, err = runBitcoinCommand(
 		ctx,
 		t,
 		bitcoindContainer,
@@ -86,31 +101,75 @@ func TestBitcoindConnection(t *testing.T) {
 			"bitcoin-cli",
 			"-regtest=1",
 			"generatetoaddress",
-			"2", // need to generate a lot for greater chance to not spend coinbase
+			"100",
 			btcAddress.EncodeAddress(),
 		})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	cfg := NewDefaultConfig()
-	cfg.Network = networkLocalnet
-	cfg.ForceSeedPort = mappedPeerPort.Port()
-	tbc, err := NewServer(cfg)
+	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer c.CloseNow()
 
-	// this is just for demonstration
-	if err := tbc.Run(ctx); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.BtcBlockMetadataByNumResponse
+	for {
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
 		}
-		t.Fatal(err)
+		lastErr = nil
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcBlockMetadataByNumRequest{
+			Height: 55,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdBtcBlockMetadataByNumResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+
+	cliBtcBlock := blockAtHeight(ctx, t, bitcoindContainer, 55)
+	expected := cliBlockToResponse(cliBtcBlock)
+	if diff := deep.Equal(expected, response); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
 	}
 }
 
 func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
+	name := fmt.Sprintf("bitcoind-%d", time.Now().Unix())
 	req := testcontainers.ContainerRequest{
 		Image:        "kylemanna/bitcoind",
 		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1"},
@@ -118,10 +177,10 @@ func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container 
 		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{
 			Consumers: []testcontainers.LogConsumer{&StdoutLogConsumer{
-				Name: "bitcoind",
+				Name: name,
 			}},
 		},
-		Name: "bitcoind",
+		Name: name,
 	}
 	bitcoindContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -134,24 +193,25 @@ func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container 
 	return bitcoindContainer
 }
 
-func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, cmd []string) error {
+func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, cmd []string) (string, error) {
 	exitCode, result, err := bitcoindContainer.Exec(ctx, cmd)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	buf := new(strings.Builder)
 	_, err = io.Copy(buf, result)
 	if err != nil {
-		return err
+		return "", err
 	}
-
 	t.Logf(buf.String())
+
 	if exitCode != 0 {
-		return fmt.Errorf("error code received: %d", exitCode)
+		return "", fmt.Errorf("error code received: %d", exitCode)
 	}
 
-	return nil
+	// first 8 bytes are header, there is also a newline character at the end of the response
+	return buf.String()[8 : len(buf.String())-1], nil
 }
 
 func getEndpointWithRetries(ctx context.Context, container testcontainers.Container, retries int) (string, error) {
@@ -169,4 +229,173 @@ func getEndpointWithRetries(ctx context.Context, container testcontainers.Contai
 	}
 
 	return "", lastError
+}
+
+func nextPort() int {
+	port, err := freeport.GetFreePort()
+	if err != nil && err != context.Canceled {
+		panic(err)
+	}
+
+	return port
+}
+
+func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home := fmt.Sprintf("%s/%s", wd, levelDbHome)
+
+	if err := os.RemoveAll(home); err != nil {
+		t.Fatal(err)
+	}
+	tcbListenAddress := fmt.Sprintf(":%d", nextPort())
+
+	cfg := NewDefaultConfig()
+	cfg.LevelDBHome = home
+	cfg.Network = networkLocalnet
+	cfg.ForceSeedPort = mappedPeerPort.Port()
+	cfg.ListenAddress = tcbListenAddress
+	tbcServer, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := tbcServer.Run(ctx)
+		if err != nil && err != context.Canceled {
+			panic(err)
+		}
+	}()
+
+	// let tbc index
+	select {
+	case <-time.After(10 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+
+	tbcUrl := fmt.Sprintf("http://localhost%s%s", tcbListenAddress, tbcapi.RouteWebsocket)
+	err = EnsureCanConnect(t, tbcUrl, 5*time.Second)
+	if err != nil {
+		t.Fatalf("could not connect to %s: %s", tbcUrl, err.Error())
+	}
+
+	return tbcServer, tbcUrl
+}
+
+func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	t.Logf("connecting to %s", url)
+
+	var err error
+
+	doneCh := make(chan bool)
+	go func() {
+		for {
+			c, _, err := websocket.Dial(ctx, url, nil)
+			if err != nil {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			c.CloseNow()
+			doneCh <- true
+		}
+	}()
+
+	select {
+	case <-doneCh:
+	case <-ctx.Done():
+		return fmt.Errorf("timed out trying to reach WS server in tests, last error: %s", err)
+	}
+
+	return nil
+}
+
+func assertPing(ctx context.Context, t *testing.T, c *websocket.Conn, cmd protocol.Command) {
+	var v protocol.Message
+	err := wsjson.Read(ctx, c, &v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if v.Header.Command != cmd {
+		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+}
+
+type BtcCliBlockHeader struct {
+	Hash              string  `json:"hash"`
+	Confirmations     int     `json:"confirmations"`
+	Height            uint32  `json:"height"`
+	Version           uint64  `json:"version"`
+	VersionHex        string  `json:"versionHex"`
+	MerkleRoot        string  `json:"merkleroot"`
+	Time              uint64  `json:"time"`
+	MedianTime        uint64  `json:"mediantime"`
+	Nonce             uint64  `json:"nonce"`
+	Bits              string  `json:"bits"`
+	Difficulty        float64 `json:"difficulty"`
+	Chainwork         string  `json:"chainwork"`
+	NTx               uint64  `json:"nTx"`
+	PreviousBlockHash string  `json:"previousblockhash"`
+	NextBlockHash     string  `json:"nextblockhash"`
+}
+
+func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader) tbcapi.BtcBlockMetadataByNumResponse {
+	return tbcapi.BtcBlockMetadataByNumResponse{
+		Block: tbcapi.BtcBlockMetadata{
+			Height: uint32(btcCliBlockHeader.Height),
+			NumTx:  uint32(btcCliBlockHeader.NTx),
+			Header: tbcapi.BtcHeader{
+				Version:    uint32(btcCliBlockHeader.Version),
+				PrevHash:   btcCliBlockHeader.PreviousBlockHash,
+				MerkleRoot: btcCliBlockHeader.MerkleRoot,
+				Timestamp:  uint32(btcCliBlockHeader.Time),
+				Bits:       btcCliBlockHeader.Bits,
+				Nonce:      uint32(btcCliBlockHeader.Nonce),
+			},
+		},
+	}
+}
+
+func blockAtHeight(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, height uint64) BtcCliBlockHeader {
+	blockHash, err := runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"getblockhash",
+			fmt.Sprintf("%d", height),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockHeaderJson, err := runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"getblockheader",
+			blockHash,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var btcCliBlockHeader BtcCliBlockHeader
+	if err := json.Unmarshal([]byte(blockHeaderJson), &btcCliBlockHeader); err != nil {
+		t.Fatal(err)
+	}
+
+	return btcCliBlockHeader
 }

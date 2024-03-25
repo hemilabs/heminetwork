@@ -14,6 +14,9 @@ const (
 
 	CmdPingRequest  = "tbcapi-ping-request"
 	CmdPingResponse = "tbcapi-ping-response"
+
+	CmdBtcBlockMetadataByNumRequest  = "tbcapi-btc-block-metadata-by-num-request"
+	CmdBtcBlockMetadataByNumResponse = "tbcapi-btc-block-metadata-by-num-response"
 )
 
 var (
@@ -27,11 +30,40 @@ var (
 type (
 	PingRequest  protocol.PingRequest
 	PingResponse protocol.PingResponse
+	BtcHeader    struct {
+		Version uint32 `json:"version"`
+
+		// hex encoded byte array
+		PrevHash string `json:"prev_hash"`
+
+		// hex encoded byte array
+		MerkleRoot string `json:"merkle_root"`
+
+		Timestamp uint32 `json:"timestamp"`
+
+		// hex encoded int
+		Bits string `json:"bits"`
+
+		Nonce uint32 `json:"nonce"`
+	}
+	BtcBlockMetadata struct {
+		Height uint32    `json:"height"`
+		NumTx  uint32    `json:"num_tx"`
+		Header BtcHeader `json:"header"`
+	}
+	BtcBlockMetadataByNumRequest struct {
+		Height uint32 `json:"height"`
+	}
+	BtcBlockMetadataByNumResponse struct {
+		Block BtcBlockMetadata `json:"block"`
+	}
 )
 
 var commands = map[protocol.Command]reflect.Type{
-	CmdPingRequest:  reflect.TypeOf(PingRequest{}),
-	CmdPingResponse: reflect.TypeOf(PingResponse{}),
+	CmdPingRequest:                   reflect.TypeOf(PingRequest{}),
+	CmdPingResponse:                  reflect.TypeOf(PingResponse{}),
+	CmdBtcBlockMetadataByNumRequest:  reflect.TypeOf(BtcBlockMetadataByNumRequest{}),
+	CmdBtcBlockMetadataByNumResponse: reflect.TypeOf(BtcBlockMetadataByNumResponse{}),
 }
 
 type tbcAPI struct{}
