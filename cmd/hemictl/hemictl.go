@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,7 +27,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
-	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
@@ -34,9 +34,8 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
-	ldb "github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -186,14 +185,33 @@ func tbcdb() error {
 		return err
 	}
 
-	// Open db.
-	levelDBHome := "~/.tbcd" // XXX
-	network := "testnet3"
-	db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+	// create fake service to call crawler
+	cfg := tbc.NewDefaultConfig()
+	cfg.LevelDBHome = "~/.tbcd"
+	cfg.Network = "testnet3"
+	s, err := tbc.NewServer(cfg)
 	if err != nil {
-		return err
+		return fmt.Errorf("new server: %w", err)
 	}
-	defer db.Close()
+	// Open db.
+	err = s.DBOpen(ctx)
+	if err != nil {
+		return fmt.Errorf("db open: %w", err)
+	}
+	defer func() {
+		err := s.DBClose()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "db close: %w\n", err)
+			os.Exit(1)
+		}
+	}()
+	// levelDBHome := "~/.tbcd" // XXX
+	// network := "testnet3"
+	// db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+	// if err != nil {
+	// 	return err
+	// }
+	// defer db.Close()
 
 	// commands
 	switch action {
@@ -206,14 +224,14 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		bh, err := db.BlockHeaderByHash(ctx, ch[:])
+		bh, err := s.DB().BlockHeaderByHash(ctx, ch[:])
 		if err != nil {
 			return fmt.Errorf("block header by hash: %w", err)
 		}
 		spew.Dump(bh)
 
 	case "blockheadersbest":
-		bhs, err := db.BlockHeadersBest(ctx)
+		bhs, err := s.DB().BlockHeadersBest(ctx)
 		if err != nil {
 			return fmt.Errorf("block headers best: %w", err)
 		}
@@ -228,7 +246,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("parse uint: %w", err)
 		}
-		bh, err := db.BlockHeadersByHeight(ctx, h)
+		bh, err := s.DB().BlockHeadersByHeight(ctx, h)
 		if err != nil {
 			return fmt.Errorf("block header by height: %w", err)
 		}
@@ -245,7 +263,7 @@ func tbcdb() error {
 		if c == 0 {
 			c = 1
 		}
-		bh, err := db.BlocksMissing(ctx, int(c))
+		bh, err := s.DB().BlocksMissing(ctx, int(c))
 		if err != nil {
 			return fmt.Errorf("block header by height: %w", err)
 		}
@@ -262,11 +280,71 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		b, err := db.BlockByHash(ctx, ch[:])
+		b, err := s.DB().BlockByHash(ctx, ch[:])
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
 		spew.Dump(b)
+
+	case "dumpmetadata":
+		//pool := db.DB()
+		//mdDB := pool[ldb.MetadataDB]
+		//it := mdDB.NewIterator(nil, nil)
+		//defer it.Release()
+		//for it.Next() {
+		//	fmt.Printf("metadata key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		//}
+
+	case "dumpoutputs":
+		//prefix := args["prefix"]
+		//if len(prefix) > 1 {
+		//	return fmt.Errorf("prefix must be one byte")
+		//} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
+		//	return fmt.Errorf("prefix must be h or u")
+		//}
+		//pool := db.DB()
+		//outsDB := pool[ldb.OutputsDB]
+		//it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
+		//defer it.Release()
+		//for it.Next() {
+		//	fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		//}
+
+	case "help", "h":
+		fmt.Printf("tbcd db manipulator commands:\n")
+		fmt.Printf("\tblockheaderbyhash [hash]\n")
+		fmt.Printf("\tblockheadersbest\n")
+		fmt.Printf("\tblockheadersbyheight [height]\n")
+		fmt.Printf("\tblocksmissing [count]\n")
+		fmt.Printf("\tblockbyhash [hash]\n")
+		fmt.Printf("\tdumpmetadata\n")
+		fmt.Printf("\tdumpoutputs <prefix>\n")
+		fmt.Printf("\thelp\n")
+		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
+
+	case "txindex":
+		var h, c uint64
+		height := args["height"]
+		if height == "" {
+			// Get height from db
+			he, err := s.DB().MetadataGet(ctx, tbc.IndexHeightKey)
+			if err != nil {
+				return fmt.Errorf("metadata %v: %w",
+					string(tbc.IndexHeightKey), err)
+			}
+			h = binary.BigEndian.Uint64(he)
+		}
+		count := args["count"]
+		if count == "" {
+			c = 1
+		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
+			return fmt.Errorf("count: %w", err)
+		}
+		fmt.Printf("%v %v\n", h, c)
+		err = s.Indexer(ctx, h, c)
+		if err != nil {
+			return fmt.Errorf("indexer: %w", err)
+		}
 
 	case "scripthashbyoutpoint":
 		txid := args["txid"]
@@ -289,26 +367,12 @@ func tbcdb() error {
 			return fmt.Errorf("index: %w", err)
 		}
 		op := tbcd.NewOutpoint(revTxId, uint32(idx))
-		sh, err := db.ScriptHashByOutpoint(ctx, op)
+		sh, err := s.DB().ScriptHashByOutpoint(ctx, op)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
 		spew.Dump(sh)
 
-	case "dumpoutputs":
-		prefix := args["prefix"]
-		if len(prefix) > 1 {
-			return fmt.Errorf("prefix must be one byte")
-		} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
-			return fmt.Errorf("prefix must be h or u")
-		}
-		pool := db.DB()
-		outsDB := pool[ldb.OutputsDB]
-		it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
-		defer it.Release()
-		for it.Next() {
-			fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
-		}
 	default:
 		return fmt.Errorf("invalid action: %v", action)
 	}
