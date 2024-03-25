@@ -3,6 +3,7 @@ package tbc
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
+
+var IndexHeightKey = []byte("indexheight") // last indexed height key
 
 func OutpointFromTx(tx *btcutil.Tx) tbcd.Outpoint {
 	return tbcd.NewOutpoint(*tx.Hash(), uint32(tx.Index()))
@@ -57,9 +60,14 @@ func (s *Server) indexBlock(ctx context.Context, height uint64, b *tbcd.Block) e
 	return err
 }
 
-func (s *Server) indexBlocks(ctx context.Context, startHeight uint64) (int, error) {
+func (s *Server) indexBlocks(ctx context.Context, startHeight, count uint64) (int, error) {
 	log.Tracef("indexBlocks")
 	defer log.Tracef("indexBlocks")
+
+	circuitBreaker := false
+	if count != 0 {
+		circuitBreaker = true
+	}
 
 	blocksProcessed := 0
 	for height := startHeight; ; height++ {
@@ -90,17 +98,31 @@ func (s *Server) indexBlocks(ctx context.Context, startHeight uint64) (int, erro
 			// Flush
 			break
 		}
+
+		// If set we may have to exit early
+		if circuitBreaker {
+			count--
+			if count <= 0 {
+				break
+			}
+		}
 	}
 
 	return blocksProcessed, nil
 }
 
-func (s *Server) indexer(ctx context.Context) error {
-	height := uint64(0)
-	log.Infof("Start indexing at height %v", height)
+func (s *Server) Indexer(ctx context.Context, height, count uint64) error {
+	var maxHeight uint64
+	circuitBreaker := false
+	if count != 0 {
+		circuitBreaker = true
+		maxHeight = height + count
+	}
+
+	log.Infof("Start indexing at height %v blocks %v", height, count)
 	for {
 		start := time.Now()
-		blocksProcessed, err := s.indexBlocks(ctx, height)
+		blocksProcessed, err := s.indexBlocks(ctx, height, count)
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
 		}
@@ -122,5 +144,21 @@ func (s *Server) indexer(ctx context.Context) error {
 			utxosCached, time.Now().Sub(start))
 
 		height += uint64(blocksProcessed)
+
+		// Record height in metadata
+		var dbHeight [8]byte
+		binary.BigEndian.PutUint64(dbHeight[:], height)
+		err = s.db.MetadataPut(ctx, IndexHeightKey, dbHeight[:])
+		if err != nil {
+			return fmt.Errorf("metadata height: %w", err)
+		}
+
+		// If set we may have to exit early
+		if circuitBreaker {
+			log.Infof("%v %v", height, maxHeight)
+			if height >= maxHeight {
+				return nil
+			}
+		}
 	}
 }

@@ -235,6 +235,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
+// DB exports the underlying database. This should only be used in tests.
+func (s *Server) DB() tbcd.Database {
+	return s.db
+}
+
 var (
 	errCacheFull     = errors.New("cache full")
 	errNoPeers       = errors.New("no peers")
@@ -1162,6 +1167,38 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wir
 	return bhsw, nil
 }
 
+// DBOpen opens the undelying server database. It has been put in its own
+// function to make it available during tests and hemictl.
+func (s *Server) DBOpen(ctx context.Context) error {
+	log.Tracef("DBOpen")
+	defer log.Tracef("DBOpen exit")
+
+	// This should have been verified but let's not make assumptions.
+	switch s.cfg.Network {
+	case "testnet3":
+	case "mainnet":
+	case networkLocalnet: // XXX why is this here?, this breaks the filepath.Join
+	default:
+		return fmt.Errorf("unsuported network: %v", s.cfg.Network)
+	}
+
+	// Open db.
+	var err error
+	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
+	if err != nil {
+		return fmt.Errorf("Failed to open level database: %v", err)
+	}
+
+	return nil
+}
+
+func (s *Server) DBClose() error {
+	log.Tracef("DBClose")
+	defer log.Tracef("DBClose")
+
+	return s.db.Close()
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -1174,22 +1211,16 @@ func (s *Server) Run(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	// This should have been verified but let's not make assumptions.
-	switch s.cfg.Network {
-	case "testnet3":
-	case "mainnet":
-	case networkLocalnet:
-	default:
-		return fmt.Errorf("unsuported network: %v", s.cfg.Network)
-	}
-
-	// Open db.
-	var err error
-	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
+	err := s.DBOpen(ctx)
 	if err != nil {
-		return fmt.Errorf("Failed to open level database: %v", err)
+		return fmt.Errorf("Failed to open level database: %w", err)
 	}
-	defer s.db.Close()
+	defer func() {
+		err := s.DBClose()
+		if err != nil {
+			log.Errorf("db close: %v", err)
+		}
+	}()
 
 	// HTTP server
 	mux := http.NewServeMux()
