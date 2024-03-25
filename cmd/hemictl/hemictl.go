@@ -35,7 +35,9 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
+	ldb "github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/version"
 )
@@ -206,13 +208,6 @@ func tbcdb() error {
 			os.Exit(1)
 		}
 	}()
-	// levelDBHome := "~/.tbcd" // XXX
-	// network := "testnet3"
-	// db, err := level.New(ctx, filepath.Join(levelDBHome, network))
-	// if err != nil {
-	// 	return err
-	// }
-	// defer db.Close()
 
 	// commands
 	switch action {
@@ -288,13 +283,22 @@ func tbcdb() error {
 		spew.Dump(b)
 
 	case "dumpmetadata":
-		//pool := db.DB()
-		//mdDB := pool[ldb.MetadataDB]
-		//it := mdDB.NewIterator(nil, nil)
-		//defer it.Release()
-		//for it.Next() {
-		//	fmt.Printf("metadata key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
-		//}
+		s.DBClose()
+
+		levelDBHome := "~/.tbcd" // XXX
+		network := "testnet3"
+		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		pool := db.DB()
+		mdDB := pool[ldb.MetadataDB]
+		it := mdDB.NewIterator(nil, nil)
+		defer it.Release()
+		for it.Next() {
+			fmt.Printf("metadata key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		}
 
 	case "dumpoutputs":
 		//prefix := args["prefix"]
@@ -335,10 +339,12 @@ func tbcdb() error {
 					string(tbc.IndexHeightKey), err)
 			}
 			h = binary.BigEndian.Uint64(he)
+		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
+			return fmt.Errorf("height: %w", err)
 		}
 		count := args["count"]
 		if count == "" {
-			c = 1
+			c = 0
 		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
 			return fmt.Errorf("count: %w", err)
 		}
