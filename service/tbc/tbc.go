@@ -620,7 +620,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		panic(len(bhs))
 	}
 
-	log.Infof("block header best hash: %s", bhs[0].Hash)
+	log.Debugf("block header best hash: %s", bhs[0].Hash)
 
 	err = s.getHeaders(ctx, p, bhs[0].Header)
 	if err != nil {
