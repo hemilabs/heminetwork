@@ -60,12 +60,12 @@ func (s *Server) indexBlock(ctx context.Context, height uint64, b *tbcd.Block) e
 	return err
 }
 
-func (s *Server) indexBlocks(ctx context.Context, startHeight, count uint64) (int, error) {
+func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
 	log.Tracef("indexBlocks")
 	defer log.Tracef("indexBlocks")
 
 	circuitBreaker := false
-	if count != 0 {
+	if maxHeight != 0 {
 		circuitBreaker = true
 	}
 
@@ -101,8 +101,7 @@ func (s *Server) indexBlocks(ctx context.Context, startHeight, count uint64) (in
 
 		// If set we may have to exit early
 		if circuitBreaker {
-			count--
-			if count <= 0 {
+			if height >= maxHeight-1 {
 				break
 			}
 		}
@@ -119,10 +118,10 @@ func (s *Server) Indexer(ctx context.Context, height, count uint64) error {
 		maxHeight = height + count
 	}
 
-	log.Infof("Start indexing at height %v blocks %v", height, count)
+	log.Infof("Start indexing at height %v count %v", height, count)
 	for {
 		start := time.Now()
-		blocksProcessed, err := s.indexBlocks(ctx, height, count)
+		blocksProcessed, err := s.indexBlocks(ctx, height, maxHeight)
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
 		}
@@ -155,10 +154,11 @@ func (s *Server) Indexer(ctx context.Context, height, count uint64) error {
 
 		// If set we may have to exit early
 		if circuitBreaker {
-			log.Infof("%v %v", height, maxHeight)
+			log.Infof("Indexed to height: %v", height-1)
 			if height >= maxHeight {
 				return nil
 			}
 		}
+
 	}
 }
