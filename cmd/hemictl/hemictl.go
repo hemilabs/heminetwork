@@ -201,7 +201,7 @@ func tbcdb() error {
 	defer func() {
 		err := s.DBClose()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "db close: %w\n", err)
+			fmt.Fprintf(os.Stderr, "db close: %v\n", err)
 			os.Exit(1)
 		}
 	}()
