@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
@@ -70,6 +72,10 @@ func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64)
 	for height := startHeight; ; height++ {
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				log.Infof("No more blocks at: %v", height)
+				break
+			}
 			return 0, fmt.Errorf("block headers by height %v: %v", height, err)
 		}
 		eb, err := s.db.BlockByHash(ctx, bhs[0].Hash)
@@ -121,6 +127,9 @@ func (s *Server) Indexer(ctx context.Context, height, count uint64) error {
 		blocksProcessed, err := s.indexBlocks(ctx, height, maxHeight)
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
+		}
+		if blocksProcessed == 0 {
+			return nil
 		}
 		utxosCached := len(s.utxos)
 		log.Infof("blocks processed %v in %v utxos cached %v cache unused %v avg tx/blk %v",
