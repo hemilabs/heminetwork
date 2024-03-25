@@ -15,10 +15,6 @@ import (
 
 var IndexHeightKey = []byte("indexheight") // last indexed height key
 
-func OutpointFromTx(tx *btcutil.Tx) tbcd.Outpoint {
-	return tbcd.NewOutpoint(*tx.Hash(), uint32(tx.Index()))
-}
-
 func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]tbcd.Utxo) (*btcutil.Block, error) {
 	b, err := btcutil.NewBlockFromBytes(bb)
 	if err != nil {
@@ -30,6 +26,7 @@ func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]
 		for _, txIn := range tx.MsgTx().TxIn {
 			if idx == 0 {
 				// Skip coinbase inputs
+				continue
 			}
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
@@ -41,7 +38,7 @@ func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]
 			utxos[op] = tbcd.DeleteUtxo
 		}
 		for outIndex, txOut := range tx.MsgTx().TxOut {
-			utxos[OutpointFromTx(tx)] = tbcd.NewUtxo(
+			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewUtxo(
 				sha256.Sum256(txOut.PkScript),
 				uint64(txOut.Value),
 				uint32(outIndex))
@@ -134,6 +131,7 @@ func (s *Server) Indexer(ctx context.Context, height, count uint64) error {
 		//for k := range s.utxos {
 		//	delete(s.utxos, k)
 		//}
+		//log.Infof("%v", spew.Sdump(s.utxos))
 		start = time.Now()
 		err = s.db.BlockTxUpdate(ctx, s.utxos)
 		if err != nil {
@@ -159,6 +157,5 @@ func (s *Server) Indexer(ctx context.Context, height, count uint64) error {
 				return nil
 			}
 		}
-
 	}
 }
