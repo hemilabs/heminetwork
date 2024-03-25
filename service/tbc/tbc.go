@@ -1030,11 +1030,11 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	// start-of-day. This mutex is to prevent excessive logging, which in
 	// itself is harmless, but may throw people looking at logs of.
 	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	if s.insertedGenesis {
 		return nil
 	}
 	s.insertedGenesis = true
-	defer s.mtx.Unlock()
 
 	// We really should be inserting the block first but block insert
 	// verifies that a block heade exists.
