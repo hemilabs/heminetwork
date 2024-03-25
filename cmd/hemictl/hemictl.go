@@ -28,6 +28,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
+	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
@@ -301,19 +302,28 @@ func tbcdb() error {
 		}
 
 	case "dumpoutputs":
-		//prefix := args["prefix"]
-		//if len(prefix) > 1 {
-		//	return fmt.Errorf("prefix must be one byte")
-		//} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
-		//	return fmt.Errorf("prefix must be h or u")
-		//}
-		//pool := db.DB()
-		//outsDB := pool[ldb.OutputsDB]
-		//it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
-		//defer it.Release()
-		//for it.Next() {
-		//	fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
-		//}
+		s.DBClose()
+
+		levelDBHome := "~/.tbcd" // XXX
+		network := "testnet3"
+		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		prefix := args["prefix"]
+		if len(prefix) > 1 {
+			return fmt.Errorf("prefix must be one byte")
+		} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
+			return fmt.Errorf("prefix must be h or u")
+		}
+		pool := db.DB()
+		outsDB := pool[ldb.OutputsDB]
+		it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
+		defer it.Release()
+		for it.Next() {
+			fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		}
 
 	case "help", "h":
 		fmt.Printf("tbcd db manipulator commands:\n")
