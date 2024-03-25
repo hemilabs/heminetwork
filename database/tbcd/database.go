@@ -26,8 +26,8 @@ type Database interface {
 	// Block header
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
 	BlockHeadersBest(ctx context.Context) ([]BlockHeader, error)
-	BlockHeadersInsert(ctx context.Context, bhs []BlockHeader) error
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
+	BlockHeadersInsert(ctx context.Context, bhs []BlockHeader) error
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
@@ -46,6 +46,9 @@ type Database interface {
 	PeersInsert(ctx context.Context, peers []Peer) error     // insert or update
 	PeerDelete(ctx context.Context, host, port string) error // remove peer
 	PeersRandom(ctx context.Context, count int) ([]Peer, error)
+
+	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
+	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*[32]byte, error)
 }
 
 // BlockHeader contains the first 80 raw bytes of a bitcoin block and its

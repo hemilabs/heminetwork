@@ -517,6 +517,26 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	}, nil
 }
 
+func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*[32]byte, error) {
+	log.Tracef("ScriptHashByOutpoint")
+	defer log.Tracef("ScriptHashByOutpoint exit")
+
+	var uop [37]byte // 'u' tx_id idx
+	uop[0] = 'u'
+	copy(uop[1:], op[:])
+
+	uDB := l.pool[level.OutputsDB]
+	scriptHash, err := uDB.Get(uop[:], nil)
+	if err != nil {
+		return nil, fmt.Errorf("script hash by outpoint: %w", err)
+	}
+
+	var sh [32]byte
+	copy(sh[:], scriptHash)
+
+	return &sh, nil
+}
+
 func (l *ldb) BlockTxUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
@@ -530,11 +550,11 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Ut
 
 	outsBatch := new(leveldb.Batch)
 	for op, utxo := range utxos {
-		var uop [37]byte
-		uop[0] = 'u' // outpoint
+		var uop [37]byte // 'u' tx_id idx
+		uop[0] = 'u'
 		copy(uop[1:], op[:])
 
-		var hop [69]byte // 69 DUDE!
+		var hop [69]byte // 'h' script_hash tx_id tx_output_idx
 		hop[0] = 'h'
 		copy(hop[1:33], utxo.ScriptHash())
 		copy(hop[33:65], op.TxId())
@@ -549,7 +569,6 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Ut
 			outsBatch.Put(uop[:], utxo.ScriptHash())
 			outsBatch.Put(hop[:], utxo.ValueBytes())
 		}
-		_ = utxo
 		delete(utxos, op) // XXX this probably should be done by the caller
 	}
 

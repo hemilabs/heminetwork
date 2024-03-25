@@ -17,13 +17,16 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
+	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
@@ -31,6 +34,9 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
+	ldb "github.com/hemilabs/heminetwork/database/level"
+	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -144,6 +150,168 @@ func bfgdb() error {
 		return fmt.Errorf("marshal: %w", err)
 	}
 	fmt.Printf("%s\n", o)
+
+	return nil
+}
+
+func parseArgs(args []string) (string, map[string]string, error) {
+	if len(args) < 1 {
+		flag.Usage()
+		return "", nil, fmt.Errorf("action required")
+	}
+
+	action := args[0]
+	parsed := make(map[string]string, 10)
+
+	for _, v := range args[1:] {
+		s := strings.Split(v, "=")
+		if len(s) != 2 {
+			return "", nil, fmt.Errorf("invalid argument: %v", v)
+		}
+		if len(s[0]) == 0 || len(s[1]) == 0 {
+			return "", nil, fmt.Errorf("expected a=b, got %v", v)
+		}
+		parsed[s[0]] = s[1]
+	}
+
+	return action, parsed, nil
+}
+
+func tbcdb() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	action, args, err := parseArgs(flag.Args()[1:])
+	if err != nil {
+		return err
+	}
+
+	// Open db.
+	levelDBHome := "~/.tbcd" // XXX
+	network := "testnet3"
+	db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	// commands
+	switch action {
+	case "blockheaderbyhash":
+		hash := args["hash"]
+		if hash == "" {
+			return fmt.Errorf("hash: must be set")
+		}
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		bh, err := db.BlockHeaderByHash(ctx, ch[:])
+		if err != nil {
+			return fmt.Errorf("block header by hash: %w", err)
+		}
+		spew.Dump(bh)
+
+	case "blockheadersbest":
+		bhs, err := db.BlockHeadersBest(ctx)
+		if err != nil {
+			return fmt.Errorf("block headers best: %w", err)
+		}
+		spew.Dump(bhs)
+
+	case "blockheadersbyheight":
+		height := args["height"]
+		if height == "" {
+			return fmt.Errorf("height: must be set")
+		}
+		h, err := strconv.ParseUint(height, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+		bh, err := db.BlockHeadersByHeight(ctx, h)
+		if err != nil {
+			return fmt.Errorf("block header by height: %w", err)
+		}
+		spew.Dump(bh)
+
+	// case "blockheadersinsert":
+
+	case "blocksmissing":
+		count := args["count"]
+		c, err := strconv.ParseUint(count, 10, 64)
+		if len(count) > 0 && err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+		if c == 0 {
+			c = 1
+		}
+		bh, err := db.BlocksMissing(ctx, int(c))
+		if err != nil {
+			return fmt.Errorf("block header by height: %w", err)
+		}
+		spew.Dump(bh)
+
+	// case "blockinsert":
+
+	case "blockbyhash":
+		hash := args["hash"]
+		if hash == "" {
+			return fmt.Errorf("hash: must be set")
+		}
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		b, err := db.BlockByHash(ctx, ch[:])
+		if err != nil {
+			return fmt.Errorf("block by hash: %w", err)
+		}
+		spew.Dump(b)
+
+	case "scripthashbyoutpoint":
+		txid := args["txid"]
+		if txid == "" {
+			return fmt.Errorf("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		var revTxId [32]byte
+		copy(revTxId[:], chtxid[:])
+
+		index := args["index"]
+		if index == "" {
+			return fmt.Errorf("index: must be set")
+		}
+		idx, err := strconv.ParseUint(index, 10, 32)
+		if err != nil {
+			return fmt.Errorf("index: %w", err)
+		}
+		op := tbcd.NewOutpoint(revTxId, uint32(idx))
+		sh, err := db.ScriptHashByOutpoint(ctx, op)
+		if err != nil {
+			return fmt.Errorf("block by hash: %w", err)
+		}
+		spew.Dump(sh)
+
+	case "dumpoutputs":
+		prefix := args["prefix"]
+		if len(prefix) > 1 {
+			return fmt.Errorf("prefix must be one byte")
+		} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
+			return fmt.Errorf("prefix must be h or u")
+		}
+		pool := db.DB()
+		outsDB := pool[ldb.OutputsDB]
+		it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
+		defer it.Release()
+		for it.Next() {
+			fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		}
+	default:
+		return fmt.Errorf("invalid action: %v", action)
+	}
 
 	return nil
 }
@@ -334,6 +502,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
 	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
 	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
+	fmt.Fprintf(os.Stderr, "\ttbcdb datase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "Environment:\n")
 	config.Help(os.Stderr, cm)
 	fmt.Fprintf(os.Stderr, "Commands:\n")
@@ -402,6 +571,8 @@ func _main() error {
 	case "help-verbose":
 		helpVerbose()
 		return nil
+	case "tbcdb":
+		return tbcdb()
 	}
 
 	// Deal with generic commands
