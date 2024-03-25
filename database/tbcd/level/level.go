@@ -5,6 +5,7 @@
 package level
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -535,6 +536,29 @@ func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*[32]
 	copy(sh[:], scriptHash)
 
 	return &sh, nil
+}
+
+func (l *ldb) BalanceByScriptHash(ctx context.Context, sh [32]byte) (uint64, error) {
+	log.Tracef("BalanceByScriptHash")
+	defer log.Tracef("BalanceByScriptHash exit")
+
+	var (
+		start   [33]byte
+		balance uint64
+	)
+	start[0] = 'h'
+	copy(start[1:], sh[:])
+	oDB := l.pool[level.OutputsDB]
+	it := oDB.NewIterator(&util.Range{Start: start[:]}, nil)
+	defer it.Release()
+	for it.Next() {
+		if !bytes.Equal(it.Key()[1:33], sh[:]) {
+			break
+		}
+		balance += binary.BigEndian.Uint64(it.Value())
+	}
+
+	return balance, nil
 }
 
 func (l *ldb) BlockTxUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
