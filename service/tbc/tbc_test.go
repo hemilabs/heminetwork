@@ -11,9 +11,10 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/docker/go-connections/nat"
-	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
+
+	"github.com/hemilabs/heminetwork/bitcoin"
 )
 
 const (
