@@ -168,6 +168,122 @@ func TestBtcBlockMetadataByNum(t *testing.T) {
 	}
 }
 
+func TestBtcBlockMetadataByNumDoesNotExist(t *testing.T) {
+	skipIfNoDocker(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+	bitcoindContainer := createBitcoind(ctx, t)
+	bitcoindHost, err := bitcoindContainer.Host(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peerPort, err := nat.NewPort("tcp", "18444")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rpcPort, err := nat.NewPort("tcp", "18443")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, peerPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mappedRpcPort, err := bitcoindContainer.MappedPort(ctx, rpcPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("bitcoind host is: %s", bitcoindHost)
+	t.Logf("bitcoind peer port is: %s", mappedPeerPort.Port())
+	t.Logf("bitcoind rpc port is: %s", mappedRpcPort.Port())
+
+	_, _, btcAddress, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"generatetoaddress",
+			"100",
+			btcAddress.EncodeAddress(),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.BtcBlockMetadataByNumResponse
+	for {
+		select {
+		case <-time.After(5 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		lastErr = nil
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcBlockMetadataByNumRequest{
+			Height: 550,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdBtcBlockMetadataByNumResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+
+	if response.Error.Message != "could not get block header at height 550" {
+		t.Fatalf("unexpected error message: %s", response.Error.Message)
+	}
+}
+
 func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
 	name := fmt.Sprintf("bitcoind-%d", time.Now().Unix())
 	req := testcontainers.ContainerRequest{

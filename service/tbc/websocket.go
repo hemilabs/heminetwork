@@ -54,6 +54,15 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
 
+	writeHandleBtcBlockMetadataByNumResponse := func(res tbcapi.BtcBlockMetadataByNumResponse) error {
+		if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
+			return fmt.Errorf("handleBtcBlockMetadataByNumRequest write: %v %v",
+				ws.addr, err)
+		}
+
+		return nil
+	}
+
 	p, ok := payload.(*tbcapi.BtcBlockMetadataByNumRequest)
 	if !ok {
 		return fmt.Errorf("handleBtcBlockMetadataByNumRequest invalid payload type: %T", payload)
@@ -61,21 +70,25 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 
 	bh, err := db.BlockHeadersByHeight(ctx, uint64(p.Height))
 	if err != nil {
-		return fmt.Errorf("error getting block header by height: %s", err)
-	}
-
-	if len(bh) == 0 {
-		return fmt.Errorf("no block headers found at height %d", p.Height)
+		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+			Error: protocol.Errorf("could not get block header at height %d", p.Height),
+		})
 	}
 
 	b, err := db.BlockByHash(ctx, bh[0].Hash)
 	if err != nil {
-		return fmt.Errorf("no blocks found for hash: %v", bh[0].Hash)
+		log.Errorf("error getting block by hash: %s", err)
+		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+			Error: protocol.NewInternalError(err).ProtocolError(),
+		})
 	}
 
 	block, err := btcutil.NewBlockFromBytes(b.Block)
 	if err != nil {
-		return err
+		log.Errorf("error parsing block from bytes: %s", err)
+		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+			Error: protocol.NewInternalError(err).ProtocolError(),
+		})
 	}
 
 	prevHash := block.MsgBlock().Header.PrevBlock[:]
@@ -84,7 +97,7 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	merkleRoot := block.MsgBlock().Header.MerkleRoot[:]
 	slices.Reverse(merkleRoot)
 
-	res := tbcapi.BtcBlockMetadataByNumResponse{
+	return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
 		Block: tbcapi.BtcBlockMetadata{
 			Height: uint32(bh[0].Height),
 			NumTx:  uint32(len(block.Transactions())),
@@ -97,14 +110,7 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 				Nonce:      block.MsgBlock().Header.Nonce,
 			},
 		},
-	}
-
-	if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
-		return fmt.Errorf("handleBtcBlockMetadataByNumRequest write: %v %v",
-			ws.addr, err)
-	}
-
-	return nil
+	})
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
