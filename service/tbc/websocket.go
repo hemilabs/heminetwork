@@ -105,7 +105,7 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 				Version:    uint32(block.MsgBlock().Header.Version),
 				PrevHash:   hex.EncodeToString(prevHash),
 				MerkleRoot: hex.EncodeToString(merkleRoot),
-				Timestamp:  uint32(block.MsgBlock().Header.Timestamp.Unix()),
+				Timestamp:  uint64(block.MsgBlock().Header.Timestamp.Unix()),
 				Bits:       fmt.Sprintf("%x", block.MsgBlock().Header.Bits),
 				Nonce:      block.MsgBlock().Header.Nonce,
 			},

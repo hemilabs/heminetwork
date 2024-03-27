@@ -471,7 +471,7 @@ func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader) tbcapi.BtcBlockMeta
 				Version:    uint32(btcCliBlockHeader.Version),
 				PrevHash:   btcCliBlockHeader.PreviousBlockHash,
 				MerkleRoot: btcCliBlockHeader.MerkleRoot,
-				Timestamp:  uint32(btcCliBlockHeader.Time),
+				Timestamp:  btcCliBlockHeader.Time,
 				Bits:       btcCliBlockHeader.Bits,
 				Nonce:      uint32(btcCliBlockHeader.Nonce),
 			},

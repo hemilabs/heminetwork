@@ -41,7 +41,7 @@ type BtcHeader struct {
 	// hex encoded byte array
 	MerkleRoot string `json:"merkle_root"`
 
-	Timestamp uint32 `json:"timestamp"`
+	Timestamp uint64 `json:"timestamp"`
 
 	// hex encoded int
 	Bits string `json:"bits"`
