@@ -60,6 +60,7 @@ jobs:
         if: (success() || failure()) && steps.deps.outcome == 'success'
         env:
           PGTESTURI: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+          HEMI_DOCKER_TESTS: "1"
         run: |
           make
           git diff --exit-code
