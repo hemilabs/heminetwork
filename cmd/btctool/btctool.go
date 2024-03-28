@@ -540,17 +540,17 @@ func _main() error {
 		b, err = blockstream.Block(ctx, hash, raw)
 		if err == nil {
 			if wireSpew {
-				eb, err := hex.DecodeString(strings.Trim(b, "\n"))
-				if err != nil {
-					return err
-				}
-				fmt.Printf("%v", spew.Sdump(eb))
-
-				//blk, err := parseBlockFromHex(b)
+				//eb, err := hex.DecodeString(strings.Trim(b, "\n"))
 				//if err != nil {
 				//	return err
 				//}
-				//fmt.Printf("%v", spew.Sdump(blk.MsgBlock()))
+				//fmt.Printf("%v", spew.Sdump(eb))
+
+				blk, err := parseBlockFromHex(b)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%v", spew.Sdump(blk.MsgBlock()))
 			} else {
 				fmt.Printf("%v\n", b)
 			}
