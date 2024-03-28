@@ -10,6 +10,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
 
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -40,6 +41,9 @@ func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]
 			utxos[op] = tbcd.DeleteUtxo
 		}
 		for outIndex, txOut := range tx.MsgTx().TxOut {
+			if txscript.IsUnspendable(txOut.PkScript) {
+				continue
+			}
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewUtxo(
 				sha256.Sum256(txOut.PkScript),
 				uint64(txOut.Value),
