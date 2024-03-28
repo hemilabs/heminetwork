@@ -17,7 +17,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
 
-type db interface {
+type storage interface {
 	BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
 }
 
@@ -51,7 +51,7 @@ func (ws *tbcWs) handlePingRequest(ctx context.Context, payload any, id string) 
 	return nil
 }
 
-func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, d db) error {
+func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, s storage) error {
 	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
 
@@ -72,7 +72,7 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	}
 
 	// use the api to get the block metadata by height
-	btcBlockMetadata, err := d.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
+	btcBlockMetadata, err := s.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
 	if err != nil {
 		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
 			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
