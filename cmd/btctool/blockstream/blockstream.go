@@ -12,7 +12,7 @@ import (
 var (
 	bsTestnetURL = "https://blockstream.info/testnet/api" // XXX wrap in structure
 	bsMainnetURL = "https://blockstream.info/api"         // XXX wrap in structure
-	bsURL        = bsMainnetURL                           // XXX wrap in structure
+	bsURL        = bsTestnetURL                           // XXX wrap in structure
 )
 
 type TBlock struct {
@@ -81,4 +81,13 @@ func Block(ctx context.Context, hash string, raw bool) (string, error) {
 		return hex.EncodeToString(b), nil
 	}
 	return string(b), nil
+}
+
+func BlockBytes(ctx context.Context, hash string) ([]byte, error) {
+	suffix := "/raw"
+	b, err := httpclient.Request(ctx, "GET", bsURL+"/block/"+hash+suffix, nil)
+	if err != nil {
+		return nil, fmt.Errorf("request: %v", err)
+	}
+	return b, nil
 }
