@@ -15,8 +15,11 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/database/tbcd"
 )
+
+type db interface {
+	BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
+}
 
 type tbcWs struct {
 	wg             sync.WaitGroup
@@ -48,7 +51,7 @@ func (ws *tbcWs) handlePingRequest(ctx context.Context, payload any, id string) 
 	return nil
 }
 
-func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, db tbcd.Database) error {
+func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, d db) error {
 	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
 
@@ -68,11 +71,8 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 		return fmt.Errorf("handleBtcBlockMetadataByNumRequest invalid payload type: %T", payload)
 	}
 
-	// get an instance of the "api"
-	api := NewApi(db)
-
 	// use the api to get the block metadata by height
-	btcBlockMetadata, err := api.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
+	btcBlockMetadata, err := d.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
 	if err != nil {
 		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
 			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
@@ -155,7 +155,7 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 		case tbcapi.CmdPingRequest:
 			err = ws.handlePingRequest(ctx, payload, id)
 		case tbcapi.CmdBtcBlockMetadataByNumRequest:
-			err = ws.handleBtcBlockMetadataByNumRequest(ctx, payload, id, s.db)
+			err = ws.handleBtcBlockMetadataByNumRequest(ctx, payload, id, s)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
