@@ -19,6 +19,7 @@ import (
 
 type storage interface {
 	BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
+	BtcAddressBalance(ctx context.Context, encodedAddress string) (uint64, error)
 }
 
 type tbcWs struct {
@@ -82,6 +83,39 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	// "encode" output and write response
 	return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
 		Block: *btcBlockMetadata,
+	})
+}
+
+func (ws *tbcWs) handleBtcBalanceByAddrRequest(ctx context.Context, payload any, id string, s storage) error {
+	log.Tracef("handleBtcBalanceByAddrRequest: %v", ws.addr)
+	defer log.Tracef("handleBtcBalanceByAddrRequest exit: %v", ws.addr)
+
+	// helper to write ws response or return error
+	writeHandleBtcBalanceByAddrResponse := func(res tbcapi.BtcAddrBalanceResponse) error {
+		if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
+			return fmt.Errorf("writeHandleBtcBalanceByAddrResponse write: %v %v",
+				ws.addr, err)
+		}
+
+		return nil
+	}
+
+	// "decode" the input
+	p, ok := payload.(*tbcapi.BtcAddrBalanceRequest)
+	if !ok {
+		return fmt.Errorf("handleBtcBalanceByAddrRequest invalid payload type: %T", payload)
+	}
+
+	balance, err := s.BtcAddressBalance(ctx, p.Address)
+	if err != nil {
+		return writeHandleBtcBalanceByAddrResponse(tbcapi.BtcAddrBalanceResponse{
+			Error: protocol.Errorf("error getting balance for address %s: %s", p.Address, err),
+		})
+	}
+
+	// "encode" output and write response
+	return writeHandleBtcBalanceByAddrResponse(tbcapi.BtcAddrBalanceResponse{
+		Balance: balance,
 	})
 }
 
@@ -156,6 +190,8 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			err = ws.handlePingRequest(ctx, payload, id)
 		case tbcapi.CmdBtcBlockMetadataByNumRequest:
 			err = ws.handleBtcBlockMetadataByNumRequest(ctx, payload, id, s)
+		case tbcapi.CmdBtcAddrBalanceRequest:
+			err = ws.handleBtcBalanceByAddrRequest(ctx, payload, id, s)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}

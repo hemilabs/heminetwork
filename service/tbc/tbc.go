@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
@@ -1210,6 +1212,27 @@ func (s *Server) BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*
 			Nonce:      block.MsgBlock().Header.Nonce,
 		},
 	}, nil
+}
+
+func (s *Server) BtcAddressBalance(ctx context.Context, encodedAddress string) (uint64, error) {
+	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
+	if err != nil {
+		return 0, err
+	}
+
+	script, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return 0, err
+	}
+
+	scriptHash := sha256.Sum256(script)
+
+	balance, err := s.db.BalanceByScriptHash(ctx, scriptHash)
+	if err != nil {
+		return 0, err
+	}
+
+	return balance, nil
 }
 
 // DBOpen opens the undelying server database. It has been put in its own
