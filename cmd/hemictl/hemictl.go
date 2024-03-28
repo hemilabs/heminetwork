@@ -190,6 +190,12 @@ func tbcdb() error {
 		return err
 	}
 
+	// special commands
+	switch action {
+	case "crossreference":
+		return crossReference(ctx)
+	}
+
 	// create fake service to call crawler
 	cfg := tbc.NewDefaultConfig()
 	cfg.LevelDBHome = "~/.tbcd"
