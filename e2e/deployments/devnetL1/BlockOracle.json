@@ -1,0 +1,207 @@
+{
+  "abi": [
+    {
+      "type": "function",
+      "name": "checkpoint",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "blockNumber_",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "load",
+      "inputs": [
+        {
+          "name": "_blockNumber",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "blockInfo_",
+          "type": "tuple",
+          "internalType": "struct BlockOracle.BlockInfo",
+          "components": [
+            {
+              "name": "hash",
+              "type": "bytes32",
+              "internalType": "Hash"
+            },
+            {
+              "name": "childTimestamp",
+              "type": "uint64",
+              "internalType": "Timestamp"
+            }
+          ]
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "version",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "string",
+          "internalType": "string"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "event",
+      "name": "Checkpoint",
+      "inputs": [
+        {
+          "name": "blockNumber",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "blockHash",
+          "type": "bytes32",
+          "indexed": true,
+          "internalType": "Hash"
+        },
+        {
+          "name": "childTimestamp",
+          "type": "uint64",
+          "indexed": true,
+          "internalType": "Timestamp"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "error",
+      "name": "BlockHashNotPresent",
+      "inputs": []
+    }
+  ],
+  "address": "0x042deb7f12Dad67215b7dD433f53B50C1C1bcb85",
+  "args": [],
+  "bytecode": "0x608060405234801561001057600080fd5b506102e7806100206000396000f3fe608060405234801561001057600080fd5b50600436106100415760003560e01c806354fd4d501461004657806399d548aa14610098578063c2c4c5c1146100d0575b600080fd5b6100826040518060400160405280600581526020017f302e302e3100000000000000000000000000000000000000000000000000000081525081565b60405161008f9190610210565b60405180910390f35b6100ab6100a6366004610283565b6100e6565b604080518251815260209283015167ffffffffffffffff16928101929092520161008f565b6100d8610165565b60405190815260200161008f565b604080518082018252600080825260209182018190528381528082528281208351808501909452805480855260019091015467ffffffffffffffff169284019290925203610160576040517f37cf270500000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b919050565b600061017260014361029c565b60408051808201825282408082524267ffffffffffffffff81811660208086018281526000898152918290528782209651875551600190960180547fffffffffffffffffffffffffffffffffffffffffffffffff000000000000000016969093169590951790915593519495509093909291849186917fb67ff58b33060fd371a35ae2d9f1c3cdaec9b8197969f6efe2594a1ff4ba68c691a4505090565b600060208083528351808285015260005b8181101561023d57858101830151858201604001528201610221565b8181111561024f576000604083870101525b50601f017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe016929092016040019392505050565b60006020828403121561029557600080fd5b5035919050565b6000828210156102d5577f4e487b7100000000000000000000000000000000000000000000000000000000600052601160045260246000fd5b50039056fea164736f6c634300080f000a",
+  "deployedBytecode": "0x608060405234801561001057600080fd5b50600436106100415760003560e01c806354fd4d501461004657806399d548aa14610098578063c2c4c5c1146100d0575b600080fd5b6100826040518060400160405280600581526020017f302e302e3100000000000000000000000000000000000000000000000000000081525081565b60405161008f9190610210565b60405180910390f35b6100ab6100a6366004610283565b6100e6565b604080518251815260209283015167ffffffffffffffff16928101929092520161008f565b6100d8610165565b60405190815260200161008f565b604080518082018252600080825260209182018190528381528082528281208351808501909452805480855260019091015467ffffffffffffffff169284019290925203610160576040517f37cf270500000000000000000000000000000000000000000000000000000000815260040160405180910390fd5b919050565b600061017260014361029c565b60408051808201825282408082524267ffffffffffffffff81811660208086018281526000898152918290528782209651875551600190960180547fffffffffffffffffffffffffffffffffffffffffffffffff000000000000000016969093169590951790915593519495509093909291849186917fb67ff58b33060fd371a35ae2d9f1c3cdaec9b8197969f6efe2594a1ff4ba68c691a4505090565b600060208083528351808285015260005b8181101561023d57858101830151858201604001528201610221565b8181111561024f576000604083870101525b50601f017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe016929092016040019392505050565b60006020828403121561029557600080fd5b5035919050565b6000828210156102d5577f4e487b7100000000000000000000000000000000000000000000000000000000600052601160045260246000fd5b50039056fea164736f6c634300080f000a",
+  "devdoc": {
+    "version": 1,
+    "kind": "dev",
+    "methods": {
+      "checkpoint()": {
+        "returns": {
+          "blockNumber_": "The block number that was checkpointed, which is always                      `block.number - 1`."
+        }
+      },
+      "load(uint256)": {
+        "params": {
+          "_blockNumber": "The block number to load the block hash and timestamp for."
+        },
+        "returns": {
+          "blockInfo_": "The block hash and timestamp for the given block number."
+        }
+      }
+    },
+    "title": "BlockOracle"
+  },
+  "metadata": "{\"compiler\":{\"version\":\"0.8.15+commit.e14f2714\"},\"language\":\"Solidity\",\"output\":{\"abi\":[{\"inputs\":[],\"type\":\"error\",\"name\":\"BlockHashNotPresent\"},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"blockNumber\",\"type\":\"uint256\",\"indexed\":true},{\"internalType\":\"Hash\",\"name\":\"blockHash\",\"type\":\"bytes32\",\"indexed\":true},{\"internalType\":\"Timestamp\",\"name\":\"childTimestamp\",\"type\":\"uint64\",\"indexed\":true}],\"type\":\"event\",\"name\":\"Checkpoint\",\"anonymous\":false},{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\",\"name\":\"checkpoint\",\"outputs\":[{\"internalType\":\"uint256\",\"name\":\"blockNumber_\",\"type\":\"uint256\"}]},{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"_blockNumber\",\"type\":\"uint256\"}],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"load\",\"outputs\":[{\"internalType\":\"struct BlockOracle.BlockInfo\",\"name\":\"blockInfo_\",\"type\":\"tuple\",\"components\":[{\"internalType\":\"Hash\",\"name\":\"hash\",\"type\":\"bytes32\"},{\"internalType\":\"Timestamp\",\"name\":\"childTimestamp\",\"type\":\"uint64\"}]}]},{\"inputs\":[],\"stateMutability\":\"view\",\"type\":\"function\",\"name\":\"version\",\"outputs\":[{\"internalType\":\"string\",\"name\":\"\",\"type\":\"string\"}]}],\"devdoc\":{\"kind\":\"dev\",\"methods\":{\"checkpoint()\":{\"returns\":{\"blockNumber_\":\"The block number that was checkpointed, which is always                      `block.number - 1`.\"}},\"load(uint256)\":{\"params\":{\"_blockNumber\":\"The block number to load the block hash and timestamp for.\"},\"returns\":{\"blockInfo_\":\"The block hash and timestamp for the given block number.\"}}},\"version\":1},\"userdoc\":{\"kind\":\"user\",\"methods\":{\"checkpoint()\":{\"notice\":\"Stores a block hash for the previous block number.\"},\"load(uint256)\":{\"notice\":\"Loads a block hash for a given block number, assuming that the block number         has been stored in the oracle.\"},\"version()\":{\"notice\":\"Semantic version.\"}},\"version\":1}},\"settings\":{\"remappings\":[\"@cwia/=lib/clones-with-immutable-args/src/\",\"@openzeppelin/contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/contracts/\",\"@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/\",\"@rari-capital/solmate/=lib/solmate/\",\"clones-with-immutable-args/=lib/clones-with-immutable-args/src/\",\"ds-test/=lib/forge-std/lib/ds-test/src/\",\"forge-std/=lib/forge-std/src/\",\"openzeppelin-contracts-upgradeable/=lib/openzeppelin-contracts-upgradeable/\",\"openzeppelin-contracts/=lib/openzeppelin-contracts/\",\"safe-contracts/=lib/safe-contracts/contracts/\",\"solmate/=lib/solmate/src/\"],\"optimizer\":{\"enabled\":true,\"runs\":999999},\"metadata\":{\"bytecodeHash\":\"none\"},\"compilationTarget\":{\"src/dispute/BlockOracle.sol\":\"BlockOracle\"},\"evmVersion\":\"london\",\"libraries\":{}},\"sources\":{\"src/dispute/BlockOracle.sol\":{\"keccak256\":\"0x2ab47226bc30d4bd33b6cac7ae60dfa053cbd6539fc0857fd8787d583a8fd68d\",\"urls\":[\"bzz-raw://d9790254415c0bacf491914c69eacae2a06d5f9a97a6378200c2bd1e0ddfca8f\",\"dweb:/ipfs/QmZStZ4rZcctPzo72BefUKaAzmNNX5u3zXvUf16HwKkWL6\"],\"license\":\"MIT\"},\"src/dispute/interfaces/IBondManager.sol\":{\"keccak256\":\"0x31db84bf7a701125719c0bdaed316c8ec3d32e774a70b9bac3045d3ed272da8b\",\"urls\":[\"bzz-raw://35ef3970234b9a2d85ca800c5257398fd92a6959b0daa088b402a493ebf18d88\",\"dweb:/ipfs/QmWr1ZCBjRJPTUWyNcDv3G2Jb72cYG2p4rQA55WuUPUjao\"],\"license\":\"MIT\"},\"src/dispute/interfaces/IDisputeGame.sol\":{\"keccak256\":\"0xd9cebb758474716504ba281e8c9e007ead5be676a835729c236afec47dfb1e7f\",\"urls\":[\"bzz-raw://fba945be8dbca576b6765fccc5fe8e31109562b0f2e9f943fc8b6c65fffc9829\",\"dweb:/ipfs/QmTWcBnmMhb3odqu2kkJbKZK7HNeiE7SvfD9tjKv8F4qWF\"],\"license\":\"MIT\"},\"src/dispute/interfaces/IInitializable.sol\":{\"keccak256\":\"0xf021b03c9e887e227102b037595e0917b76546e796bec7aa4fdced61090267ce\",\"urls\":[\"bzz-raw://bcfbad382815e37355b7cc318fa333b9b5b08223d4315951fd0881430ab8d3df\",\"dweb:/ipfs/QmRng31WWpYeApQUcXJXhSdqL797drdtBwvUD6D9giCyy2\"],\"license\":\"MIT\"},\"src/dispute/lib/LibClock.sol\":{\"keccak256\":\"0x4599b150b8a3d53a9db22698666320e62261765e3ad5b58105bc93097b1a4690\",\"urls\":[\"bzz-raw://a0ab2d277fd4607510a5cafb91235a0fc3e47c3c0cdb45b2c185188ce888a1c5\",\"dweb:/ipfs/QmQ2bM3YmZCbN8uhKigSBh6j9VKrfxg61tjihwY7fdpARs\"],\"license\":\"MIT\"},\"src/dispute/lib/LibGameId.sol\":{\"keccak256\":\"0xa61b8562def4834607b733240e8eb4f924a75250df45852c9af1aea628f6b58d\",\"urls\":[\"bzz-raw://2853075b45f634db083ea5f495f0cb9c28eb2401e2c18fd5fb7bce2500ed78ad\",\"dweb:/ipfs/QmaJpEg5z6tZ3niZY6N3f8AZ89FRnUVZJHNUDs66sq97j6\"],\"license\":\"MIT\"},\"src/dispute/lib/LibHashing.sol\":{\"keccak256\":\"0x5a072cd028094eee55acb84ed8d08d7422b1fb46658b7e043e916781530a383b\",\"urls\":[\"bzz-raw://b67e54f1318f1fd67b28b16c6861a56e27217c26a12aaea5c446e2ec53143920\",\"dweb:/ipfs/QmVLSTP3PwXzRkR3A4qV9fjZhca9v8J1EnEYuVGUsSirAq\"],\"license\":\"MIT\"},\"src/dispute/lib/LibPosition.sol\":{\"keccak256\":\"0xccb2b2daeb72cafdd5a3b318043ea0a4795d2679728d275084731eefa2f1dc89\",\"urls\":[\"bzz-raw://69b71c71445d5bb770150d70cd5ae630e5df5fad5007620c28faa6d13db5063c\",\"dweb:/ipfs/QmY5TWPZdgziXF2oaaPpjuffboFddcDiKogsktYxFzi2LD\"],\"license\":\"MIT\"},\"src/libraries/DisputeErrors.sol\":{\"keccak256\":\"0xa8933cd2eb2b3e69fe93ce7ef97290fa89f7c3dc40e786c66e8b9ef4223617d4\",\"urls\":[\"bzz-raw://d227b64956cf1281a73eac5ec0876cad2e543443196096690b05ce1e921d7368\",\"dweb:/ipfs/QmfYQVZ9nW1hryhjqZz2vvR1aMr46kfPVybNhyDbbKo2R5\"],\"license\":\"MIT\"},\"src/libraries/DisputeTypes.sol\":{\"keccak256\":\"0xb7331579c5f9c29b9242a08ea3ab7cfa86eccabfbf19f30aa6b33e5da016adf3\",\"urls\":[\"bzz-raw://95e312750fa98e0f785131e951ed8d14577b18901dac7b63e1a6c8771796b9a8\",\"dweb:/ipfs/QmP4cYgHwW5d3wmKQkneNseSUYgPfQrmGRBEXen34iHTVy\"],\"license\":\"MIT\"},\"src/universal/ISemver.sol\":{\"keccak256\":\"0xba34562a8026f59886d2e07d1d58d90b9691d00e0788c6263cef6c22740cab44\",\"urls\":[\"bzz-raw://0826f998632f83c103c3085bf2e872db79a69022b6d2e0444c83a64ca5283c2a\",\"dweb:/ipfs/QmcJ7PNqkAfKqbjFGRordtAg1v9DvcBSKvdTkVvciLyvQR\"],\"license\":\"MIT\"}},\"version\":1}",
+  "numDeployments": 12,
+  "receipt": "",
+  "solcInputHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "storageLayout": {
+    "storage": [
+      {
+        "astId": 84189,
+        "contract": "src/dispute/BlockOracle.sol:BlockOracle",
+        "label": "blocks",
+        "offset": 0,
+        "slot": "0",
+        "type": "t_mapping(t_uint256,t_struct(BlockInfo)84172_storage)"
+      }
+    ],
+    "types": {
+      "t_mapping(t_uint256,t_struct(BlockInfo)84172_storage)": {
+        "encoding": "mapping",
+        "key": "t_uint256",
+        "label": "mapping(uint256 => struct BlockOracle.BlockInfo)",
+        "numberOfBytes": "32",
+        "value": "t_struct(BlockInfo)84172_storage"
+      },
+      "t_struct(BlockInfo)84172_storage": {
+        "encoding": "inplace",
+        "label": "struct BlockOracle.BlockInfo",
+        "numberOfBytes": "64",
+        "members": [
+          {
+            "astId": 84168,
+            "contract": "src/dispute/BlockOracle.sol:BlockOracle",
+            "label": "hash",
+            "offset": 0,
+            "slot": "0",
+            "type": "t_userDefinedValueType(Hash)89991"
+          },
+          {
+            "astId": 84171,
+            "contract": "src/dispute/BlockOracle.sol:BlockOracle",
+            "label": "childTimestamp",
+            "offset": 0,
+            "slot": "1",
+            "type": "t_userDefinedValueType(Timestamp)89999"
+          }
+        ]
+      },
+      "t_uint256": {
+        "encoding": "inplace",
+        "label": "uint256",
+        "numberOfBytes": "32"
+      },
+      "t_userDefinedValueType(Hash)89991": {
+        "encoding": "inplace",
+        "label": "Hash",
+        "numberOfBytes": "32"
+      },
+      "t_userDefinedValueType(Timestamp)89999": {
+        "encoding": "inplace",
+        "label": "Timestamp",
+        "numberOfBytes": "8"
+      }
+    }
+  },
+  "transactionHash": "0x8aea6a70f5aa03ffd7f3f49f81ea5489401839bb66d6425ea29f24098d19d881",
+  "userdoc": {
+    "version": 1,
+    "kind": "user",
+    "methods": {
+      "checkpoint()": {
+        "notice": "Stores a block hash for the previous block number."
+      },
+      "load(uint256)": {
+        "notice": "Loads a block hash for a given block number, assuming that the block number         has been stored in the oracle."
+      },
+      "version()": {
+        "notice": "Semantic version."
+      }
+    },
+    "events": {
+      "Checkpoint(uint256,bytes32,uint64)": {
+        "notice": "Emitted when a block is checkpointed."
+      }
+    },
+    "errors": {
+      "BlockHashNotPresent()": [
+        {
+          "notice": "Thrown when a block hash is attempted to be loaded that has not been stored."
+        }
+      ]
+    },
+    "notice": "Stores a map of block numbers => block hashes for use in dispute resolution"
+  }
+}

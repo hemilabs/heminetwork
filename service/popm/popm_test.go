@@ -164,6 +164,126 @@ func TestProcessReceivedKeystones(t *testing.T) {
 	}
 }
 
+// TestProcessReceivedKeystonesSameL2BlockNumber ensures that we process
+// an l2 keystone with the same l2 block number that we saw before if it
+// has changed and less than threshold
+func TestProcessReceivedKeystonesSameL2BlockNumber(t *testing.T) {
+	firstBatchOfL2Keystones := []hemi.L2Keystone{
+		{
+			L2BlockNumber: 3,
+			EPHash:        []byte{3},
+		},
+		{
+			L2BlockNumber: 2,
+			EPHash:        []byte{2},
+		},
+		{
+			L2BlockNumber: 1,
+			EPHash:        []byte{1},
+		},
+		{
+			L2BlockNumber: 6,
+			EPHash:        []byte{6},
+		},
+		{
+			L2BlockNumber: 5,
+			EPHash:        []byte{5},
+		},
+		{
+			L2BlockNumber: 4,
+			EPHash:        []byte{4},
+		},
+	}
+
+	secondBatchOfL2Keystones := []hemi.L2Keystone{
+		{
+			L2BlockNumber: 3,
+			EPHash:        []byte{44},
+		},
+	}
+
+	miner := Miner{
+		l2Keystones: make(map[string]L2KeystoneProcessingContainer),
+		cfg:         NewDefaultConfig(),
+	}
+	miner.cfg.RetryMineThreshold = 1
+
+	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
+	miner.processReceivedKeystones(context.Background(), secondBatchOfL2Keystones)
+
+	for _, v := range append(firstBatchOfL2Keystones, secondBatchOfL2Keystones...) {
+		serialized := hemi.L2KeystoneAbbreviate(v).Serialize()
+		key := hex.EncodeToString(serialized[:])
+		if diff := deep.Equal(miner.l2Keystones[key].l2Keystone, v); len(diff) > 0 {
+			t.Fatalf("unexpected diff: %s", diff)
+		}
+
+	}
+}
+
+// TestProcessReceivedKeystonesOverThreshold tests that we don't re-queue
+// an l2 keystone that is beyond threshold config
+func TestProcessReceivedKeystonesOverThreshold(t *testing.T) {
+	firstBatchOfL2Keystones := []hemi.L2Keystone{
+		{
+			L2BlockNumber: 300,
+			EPHash:        []byte{3},
+		},
+		{
+			L2BlockNumber: 301,
+			EPHash:        []byte{2},
+		},
+		{
+			L2BlockNumber: 302,
+			EPHash:        []byte{1},
+		},
+		{
+			L2BlockNumber: 306,
+			EPHash:        []byte{6},
+		},
+		{
+			L2BlockNumber: 320,
+			EPHash:        []byte{5},
+		},
+		{
+			L2BlockNumber: 310,
+			EPHash:        []byte{4},
+		},
+	}
+
+	secondBatchOfL2Keystones := []hemi.L2Keystone{
+		{
+			L2BlockNumber: 3,
+			EPHash:        []byte{44},
+		},
+	}
+
+	miner := Miner{
+		l2Keystones: make(map[string]L2KeystoneProcessingContainer),
+		cfg:         NewDefaultConfig(),
+	}
+	miner.cfg.RetryMineThreshold = 1
+
+	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
+	miner.processReceivedKeystones(context.Background(), secondBatchOfL2Keystones)
+
+	for _, v := range firstBatchOfL2Keystones {
+		serialized := hemi.L2KeystoneAbbreviate(v).Serialize()
+		key := hex.EncodeToString(serialized[:])
+		if diff := deep.Equal(miner.l2Keystones[key].l2Keystone, v); len(diff) > 0 {
+			t.Fatalf("unexpected diff: %s", diff)
+		}
+	}
+
+	for _, v := range secondBatchOfL2Keystones {
+		serialized := hemi.L2KeystoneAbbreviate(v).Serialize()
+		key := hex.EncodeToString(serialized[:])
+		if _, ok := miner.l2Keystones[key]; ok {
+			t.Fatalf("should not have queued keystone")
+		}
+	}
+}
+
 func TestCreateTxVersion2(t *testing.T) {
 	l2Keystone := hemi.L2Keystone{}
 
