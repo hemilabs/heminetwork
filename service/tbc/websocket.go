@@ -7,11 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/davecgh/go-spew/spew"
 	"nhooyr.io/websocket"
 
@@ -54,6 +52,7 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
 
+	// helper to write ws response or return error
 	writeHandleBtcBlockMetadataByNumResponse := func(res tbcapi.BtcBlockMetadataByNumResponse) error {
 		if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
 			return fmt.Errorf("handleBtcBlockMetadataByNumRequest write: %v %v",
@@ -63,53 +62,26 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 		return nil
 	}
 
+	// "decode" the input
 	p, ok := payload.(*tbcapi.BtcBlockMetadataByNumRequest)
 	if !ok {
 		return fmt.Errorf("handleBtcBlockMetadataByNumRequest invalid payload type: %T", payload)
 	}
 
-	bh, err := db.BlockHeadersByHeight(ctx, uint64(p.Height))
+	// get an instance of the "api"
+	api := NewApi(db)
+
+	// use the api to get the block metadata by height
+	btcBlockMetadata, err := api.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
 	if err != nil {
 		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
-			Error: protocol.Errorf("could not get block header at height %d", p.Height),
+			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
 		})
 	}
 
-	b, err := db.BlockByHash(ctx, bh[0].Hash)
-	if err != nil {
-		log.Errorf("error getting block by hash: %s", err)
-		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
-			Error: protocol.NewInternalError(err).ProtocolError(),
-		})
-	}
-
-	block, err := btcutil.NewBlockFromBytes(b.Block)
-	if err != nil {
-		log.Errorf("error parsing block from bytes: %s", err)
-		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
-			Error: protocol.NewInternalError(err).ProtocolError(),
-		})
-	}
-
-	prevHash := block.MsgBlock().Header.PrevBlock[:]
-	slices.Reverse(prevHash)
-
-	merkleRoot := block.MsgBlock().Header.MerkleRoot[:]
-	slices.Reverse(merkleRoot)
-
+	// "encode" output and write response
 	return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
-		Block: tbcapi.BtcBlockMetadata{
-			Height: uint32(bh[0].Height),
-			NumTx:  uint32(len(block.Transactions())),
-			Header: tbcapi.BtcHeader{
-				Version:    uint32(block.MsgBlock().Header.Version),
-				PrevHash:   hex.EncodeToString(prevHash),
-				MerkleRoot: hex.EncodeToString(merkleRoot),
-				Timestamp:  uint64(block.MsgBlock().Header.Timestamp.Unix()),
-				Bits:       fmt.Sprintf("%x", block.MsgBlock().Header.Bits),
-				Nonce:      block.MsgBlock().Header.Nonce,
-			},
-		},
+		Block: *btcBlockMetadata,
 	})
 }
 

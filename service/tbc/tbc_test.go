@@ -279,7 +279,7 @@ func TestBtcBlockMetadataByNumDoesNotExist(t *testing.T) {
 		t.Fatal(lastErr)
 	}
 
-	if response.Error.Message != "could not get block header at height 550" {
+	if response.Error.Message != "error getting block at height 550: not found" {
 		t.Fatalf("unexpected error message: %s", response.Error.Message)
 	}
 }
