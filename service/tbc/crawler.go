@@ -46,8 +46,8 @@ func (s *Server) parseBlockAndCache(ctx context.Context, cp *chaincfg.Params, bb
 				// needs thinking through.
 				return nil, fmt.Errorf("db missing pkscript: %v", op)
 			}
-			utxos[op] = tbcd.NewDeleteUtxo(*pkScript, txIn.PreviousOutPoint.Index)
-			log.Infof("deleting op %v delete utxo %v", op, utxos[op])
+			utxos[op] = tbcd.NewDeleteUtxo(*pkScript,
+				txIn.PreviousOutPoint.Index)
 		}
 		for outIndex, txOut := range tx.MsgTx().TxOut {
 			if txscript.IsUnspendable(txOut.PkScript) {
