@@ -11,6 +11,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 
 	"github.com/hemilabs/heminetwork/database"
@@ -19,8 +20,7 @@ import (
 
 var IndexHeightKey = []byte("indexheight") // last indexed height key
 
-// parseBlockAndCache XXX renasme
-func parseBlockAndCache(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
+func processTransactions(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if idx == 0 {
@@ -74,12 +74,7 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 	s.mtx.Unlock()
 }
 
-func (s *Server) fixupCache(ctx context.Context, bb []byte) (*btcutil.Block, error) {
-	b, err := btcutil.NewBlockFromBytes(bb)
-	if err != nil {
-		return nil, err
-	}
-
+func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block) error {
 	w := new(sync.WaitGroup)
 	txs := b.Transactions()
 	for idx, tx := range txs {
@@ -105,7 +100,7 @@ func (s *Server) fixupCache(ctx context.Context, bb []byte) (*btcutil.Block, err
 
 	w.Wait()
 
-	return b, nil
+	return nil
 }
 
 func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
@@ -131,18 +126,24 @@ func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64)
 		if err != nil {
 			return 0, fmt.Errorf("block by hash %v: %v", height, err)
 		}
-
-		b, err := s.fixupCache(ctx, eb.Block)
+		b, err := btcutil.NewBlockFromBytes(eb.Block)
+		if err != nil {
+			ch, _ := chainhash.NewHash(bhs[0].Hash)
+			return 0, fmt.Errorf("could not decode block %v %v: %v",
+				height, ch, err)
+		}
+		err = s.fixupCache(ctx, b)
 		if err != nil {
 			return 0, fmt.Errorf("parse block %v: %v", height, err)
 		}
-		// XXX MAY NOT TOUCH s.utxos once in this routine!
-		err = parseBlockAndCache(s.chainParams, b.Transactions(), s.utxos)
+
+		// XXX MAY NOT TOUCH s.utxos once in this routine! this is by
+		// design, do document it.
+		err = processTransactions(s.chainParams, b.Transactions(), s.utxos)
 		if err != nil {
 			// XXX fix errorr after rename
 			return 0, fmt.Errorf("xxxparse block %v: %v", height, err)
 		}
-		_ = b
 
 		blocksProcessed++
 
