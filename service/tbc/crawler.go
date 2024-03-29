@@ -65,9 +65,12 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 
 	pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
 	if err != nil {
-		// XXX this should not happen but can. This
-		// needs thinking through.
-		panic(fmt.Errorf("db missing pkscript: %v", op))
+		// This happens when a transaction is created and spent in the
+		// same block.
+		// XXX this is probably too loud but log for investigation and
+		// remove later.
+		log.Errorf("db missing pkscript: %v", op)
+		return
 	}
 	s.mtx.Lock()
 	s.utxos[op] = tbcd.NewDeleteUtxo(*pkScript, op.TxIndex())
