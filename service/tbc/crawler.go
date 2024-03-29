@@ -33,12 +33,15 @@ func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]
 			}
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
-			if _, ok := utxos[op]; ok {
+			utxo, ok := utxos[op]
+			if ok {
 				delete(utxos, op)
 				continue
 			}
 			// mark for deletion
-			utxos[op] = tbcd.DeleteUtxo
+			utxos[op] = tbcd.NewDeleteUtxo(utxo.ScriptHash(),
+				utxo.OutputIndex())
+			log.Infof("deleting op %v delete utxo %v", op, utxo)
 		}
 		for outIndex, txOut := range tx.MsgTx().TxOut {
 			if txscript.IsUnspendable(txOut.PkScript) {

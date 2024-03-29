@@ -580,17 +580,17 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Ut
 
 		var hop [69]byte // 'h' script_hash tx_id tx_output_idx
 		hop[0] = 'h'
-		copy(hop[1:33], utxo.ScriptHash())
+		copy(hop[1:33], utxo.ScriptHashSlice())
 		copy(hop[33:65], op.TxId())
 		copy(hop[65:], utxo.OutputIndexBytes())
 
-		if utxo.Equal(tbcd.DeleteUtxo) {
+		if utxo.IsDelete() {
 			// Delete balance and utxos
 			outsBatch.Delete(uop[:])
 			outsBatch.Delete(hop[:])
 		} else {
 			// Add utxo to balance and utxos
-			outsBatch.Put(uop[:], utxo.ScriptHash())
+			outsBatch.Put(uop[:], utxo.ScriptHashSlice())
 			outsBatch.Put(hop[:], utxo.ValueBytes())
 		}
 		delete(utxos, op) // XXX this probably should be done by the caller
