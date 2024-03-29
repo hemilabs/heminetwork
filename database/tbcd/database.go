@@ -121,7 +121,12 @@ func (u Utxo) String() string {
 		u[0:32], binary.BigEndian.Uint32(u[40:]))
 }
 
-func (u Utxo) ScriptHash() []byte {
+func (u Utxo) ScriptHash() (hash [32]byte) {
+	copy(hash[:], u[0:32])
+	return
+}
+
+func (u Utxo) ScriptHashSlice() []byte {
 	return u[0:32]
 }
 
@@ -145,6 +150,15 @@ func (u Utxo) Equal(x Utxo) bool {
 	return bytes.Equal(u[:], x[:])
 }
 
+// DeleteUtxo is the max uint64 value which is used as a sentinel to indicate
+// that a utxo should be reaped. The remaining fields must remain untouched
+// since they are part of the lookup key of the utxo balance.
+var DeleteUtxo = [8]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+
+func (u Utxo) IsDelete() bool {
+	return bytes.Equal(u[32:40], DeleteUtxo[:])
+}
+
 func NewUtxo(scriptHash [32]byte, value uint64, outIndex uint32) (utxo Utxo) {
 	copy(utxo[0:32], scriptHash[:])
 	binary.BigEndian.PutUint64(utxo[32:40], value)
@@ -152,11 +166,9 @@ func NewUtxo(scriptHash [32]byte, value uint64, outIndex uint32) (utxo Utxo) {
 	return
 }
 
-var DeleteUtxo Utxo
-
-func init() {
-	// Initialize sentinel that marks utxo cache entries for deletion
-	for i := 0; i < len(DeleteUtxo); i++ {
-		DeleteUtxo[i] = 0xff
-	}
+func NewDeleteUtxo(scriptHash [32]byte, outIndex uint32) (utxo Utxo) {
+	copy(utxo[0:32], scriptHash[:])
+	copy(utxo[32:40], DeleteUtxo[:])
+	binary.BigEndian.PutUint32(utxo[40:], outIndex)
+	return
 }
