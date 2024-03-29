@@ -190,10 +190,10 @@ func tbcdb() error {
 	}
 
 	// special commands
-	switch action {
-	case "crossreference":
-		return crossReference(ctx)
-	}
+	//switch action {
+	//case "crossreference":
+	//	return crossReference(ctx)
+	//}
 
 	// create fake service to call crawler
 	cfg := tbc.NewDefaultConfig()
