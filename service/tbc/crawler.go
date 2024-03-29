@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -18,13 +19,8 @@ import (
 
 var IndexHeightKey = []byte("indexheight") // last indexed height key
 
-func (s *Server) parseBlockAndCache(ctx context.Context, cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]tbcd.Utxo) (*btcutil.Block, error) {
-	b, err := btcutil.NewBlockFromBytes(bb)
-	if err != nil {
-		return nil, err
-	}
-
-	txs := b.Transactions()
+// parseBlockAndCache XXX renasme
+func parseBlockAndCache(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if idx == 0 {
@@ -33,21 +29,10 @@ func (s *Server) parseBlockAndCache(ctx context.Context, cp *chaincfg.Params, bb
 			}
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
-			if _, ok := utxos[op]; ok {
+			if utxo, ok := utxos[op]; ok && !utxo.IsDelete() {
 				delete(utxos, op)
 				continue
 			}
-			// utxo not found, retrieve pkscript from database.
-			// XXX maybe we should walk TxIn twice and on the first
-			// loop we make the cache coherent.
-			pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
-			if err != nil {
-				// XXX this should not happen but can. This
-				// needs thinking through.
-				return nil, fmt.Errorf("db missing pkscript: %v", op)
-			}
-			utxos[op] = tbcd.NewDeleteUtxo(*pkScript,
-				txIn.PreviousOutPoint.Index)
 		}
 		for outIndex, txOut := range tx.MsgTx().TxOut {
 			if txscript.IsUnspendable(txOut.PkScript) {
@@ -60,7 +45,7 @@ func (s *Server) parseBlockAndCache(ctx context.Context, cp *chaincfg.Params, bb
 		}
 	}
 	// log.Infof("%v", spew.Sdump(utxos))
-	return b, nil
+	return nil
 }
 
 //// indexBlock XXX this function may need to become parseBlockAndCache. The idea
@@ -74,6 +59,54 @@ func (s *Server) parseBlockAndCache(ctx context.Context, cp *chaincfg.Params, bb
 //
 //	return err
 //}
+
+func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint) {
+	defer w.Done()
+
+	pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
+	if err != nil {
+		// XXX this should not happen but can. This
+		// needs thinking through.
+		panic(fmt.Errorf("db missing pkscript: %v", op))
+	}
+	s.mtx.Lock()
+	s.utxos[op] = tbcd.NewDeleteUtxo(*pkScript, op.TxIndex())
+	s.mtx.Unlock()
+}
+
+func (s *Server) fixupCache(ctx context.Context, bb []byte) (*btcutil.Block, error) {
+	b, err := btcutil.NewBlockFromBytes(bb)
+	if err != nil {
+		return nil, err
+	}
+
+	w := new(sync.WaitGroup)
+	txs := b.Transactions()
+	for idx, tx := range txs {
+		for _, txIn := range tx.MsgTx().TxIn {
+			if idx == 0 {
+				// Skip coinbase inputs
+				continue
+			}
+			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index)
+			s.mtx.Lock()
+			if _, ok := s.utxos[op]; ok {
+				s.mtx.Unlock()
+				continue
+			}
+			s.mtx.Unlock()
+
+			// utxo not found, retrieve pkscript from database.
+			w.Add(1)
+			go s.fetchOP(ctx, w, op)
+		}
+	}
+
+	w.Wait()
+
+	return b, nil
+}
 
 func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
 	log.Tracef("indexBlocks")
@@ -98,9 +131,16 @@ func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64)
 		if err != nil {
 			return 0, fmt.Errorf("block by hash %v: %v", height, err)
 		}
-		b, err := s.parseBlockAndCache(ctx, s.chainParams, eb.Block, s.utxos)
+
+		b, err := s.fixupCache(ctx, eb.Block)
 		if err != nil {
 			return 0, fmt.Errorf("parse block %v: %v", height, err)
+		}
+		// XXX MAY NOT TOUCH s.utxos once in this routine!
+		err = parseBlockAndCache(s.chainParams, b.Transactions(), s.utxos)
+		if err != nil {
+			// XXX fix errorr after rename
+			return 0, fmt.Errorf("xxxparse block %v: %v", height, err)
 		}
 		_ = b
 
