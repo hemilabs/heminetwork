@@ -18,7 +18,7 @@ import (
 
 var IndexHeightKey = []byte("indexheight") // last indexed height key
 
-func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]tbcd.Utxo) (*btcutil.Block, error) {
+func (s *Server) parseBlockAndCache(ctx context.Context, cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]tbcd.Utxo) (*btcutil.Block, error) {
 	b, err := btcutil.NewBlockFromBytes(bb)
 	if err != nil {
 		return nil, err
@@ -33,15 +33,21 @@ func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]
 			}
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
-			utxo, ok := utxos[op]
-			if ok {
+			if _, ok := utxos[op]; ok {
 				delete(utxos, op)
 				continue
 			}
-			// mark for deletion
-			utxos[op] = tbcd.NewDeleteUtxo(utxo.ScriptHash(),
-				utxo.OutputIndex())
-			log.Infof("deleting op %v delete utxo %v", op, utxo)
+			// utxo not found, retrieve pkscript from database.
+			// XXX maybe we should walk TxIn twice and on the first
+			// loop we make the cache coherent.
+			pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
+			if err != nil {
+				// XXX this should not happen but can. This
+				// needs thinking through.
+				return nil, fmt.Errorf("db missing pkscript: %v", op)
+			}
+			utxos[op] = tbcd.NewDeleteUtxo(*pkScript, txIn.PreviousOutPoint.Index)
+			log.Infof("deleting op %v delete utxo %v", op, utxos[op])
 		}
 		for outIndex, txOut := range tx.MsgTx().TxOut {
 			if txscript.IsUnspendable(txOut.PkScript) {
@@ -57,14 +63,17 @@ func parseBlockAndCache(cp *chaincfg.Params, bb []byte, utxos map[tbcd.Outpoint]
 	return b, nil
 }
 
-func (s *Server) indexBlock(ctx context.Context, height uint64, b *tbcd.Block) error {
-	log.Tracef("indexBlock")
-	defer log.Tracef("indexBlock")
-
-	_, err := parseBlockAndCache(s.chainParams, b.Block, s.utxos)
-
-	return err
-}
+//// indexBlock XXX this function may need to become parseBlockAndCache. The idea
+//// was to separate parseBlockAndCache for tests but we need a db lookup. Debate
+//// if moving the lookup in the db makes sense or not.
+//func (s *Server) indexBlock(ctx context.Context, height uint64, b *tbcd.Block) error {
+//	log.Tracef("indexBlock")
+//	defer log.Tracef("indexBlock")
+//
+//	_, err := s.parseBlockAndCache(ctx, s.chainParams, b.Block, s.utxos)
+//
+//	return err
+//}
 
 func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
 	log.Tracef("indexBlocks")
@@ -89,7 +98,7 @@ func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64)
 		if err != nil {
 			return 0, fmt.Errorf("block by hash %v: %v", height, err)
 		}
-		b, err := parseBlockAndCache(s.chainParams, eb.Block, s.utxos)
+		b, err := s.parseBlockAndCache(ctx, s.chainParams, eb.Block, s.utxos)
 		if err != nil {
 			return 0, fmt.Errorf("parse block %v: %v", height, err)
 		}
