@@ -17,6 +17,10 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
 
+type storageApi interface {
+	BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
+}
+
 type tbcWs struct {
 	wg             sync.WaitGroup
 	addr           string
@@ -45,6 +49,40 @@ func (ws *tbcWs) handlePingRequest(ctx context.Context, payload any, id string) 
 			ws.addr, err)
 	}
 	return nil
+}
+
+func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, s storageApi) error {
+	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
+	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
+
+	// helper to write ws response or return error
+	writeHandleBtcBlockMetadataByNumResponse := func(res tbcapi.BtcBlockMetadataByNumResponse) error {
+		if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
+			return fmt.Errorf("handleBtcBlockMetadataByNumRequest write: %v %v",
+				ws.addr, err)
+		}
+
+		return nil
+	}
+
+	// "decode" the input
+	p, ok := payload.(*tbcapi.BtcBlockMetadataByNumRequest)
+	if !ok {
+		return fmt.Errorf("handleBtcBlockMetadataByNumRequest invalid payload type: %T", payload)
+	}
+
+	// use the api to get the block metadata by height
+	btcBlockMetadata, err := s.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
+	if err != nil {
+		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
+		})
+	}
+
+	// "encode" output and write response
+	return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+		Block: *btcBlockMetadata,
+	})
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
@@ -116,6 +154,8 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 		switch cmd {
 		case tbcapi.CmdPingRequest:
 			err = ws.handlePingRequest(ctx, payload, id)
+		case tbcapi.CmdBtcBlockMetadataByNumRequest:
+			err = ws.handleBtcBlockMetadataByNumRequest(ctx, payload, id, s)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
