@@ -7,12 +7,14 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -1165,6 +1167,49 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wir
 		bhsw = append(bhsw, *bhw)
 	}
 	return bhsw, nil
+}
+
+func (s *Server) BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error) {
+	log.Tracef("BtcBlockMetadataByHeight")
+	defer log.Tracef("BtcBlockMetadataByHeight exit")
+
+	bh, err := s.db.BlockHeadersByHeight(ctx, height)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(bh) == 0 {
+		return nil, fmt.Errorf("no block headers found for height %d", height)
+	}
+
+	b, err := s.db.BlockByHash(ctx, bh[0].Hash)
+	if err != nil {
+		return nil, err
+	}
+
+	block, err := btcutil.NewBlockFromBytes(b.Block)
+	if err != nil {
+		return nil, err
+	}
+
+	prevHash := block.MsgBlock().Header.PrevBlock[:]
+	slices.Reverse(prevHash)
+
+	merkleRoot := block.MsgBlock().Header.MerkleRoot[:]
+	slices.Reverse(merkleRoot)
+
+	return &tbcapi.BtcBlockMetadata{
+		Height: uint32(bh[0].Height),
+		NumTx:  uint32(len(block.Transactions())),
+		Header: tbcapi.BtcHeader{
+			Version:    uint32(block.MsgBlock().Header.Version),
+			PrevHash:   hex.EncodeToString(prevHash),
+			MerkleRoot: hex.EncodeToString(merkleRoot),
+			Timestamp:  uint64(block.MsgBlock().Header.Timestamp.Unix()),
+			Bits:       fmt.Sprintf("%x", block.MsgBlock().Header.Bits),
+			Nonce:      block.MsgBlock().Header.Nonce,
+		},
+	}, nil
 }
 
 // DBOpen opens the undelying server database. It has been put in its own
