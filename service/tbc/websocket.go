@@ -17,7 +17,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
 
-type storage interface {
+type storageApi interface {
 	BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
 }
 
@@ -51,7 +51,7 @@ func (ws *tbcWs) handlePingRequest(ctx context.Context, payload any, id string) 
 	return nil
 }
 
-func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, s storage) error {
+func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, s storageApi) error {
 	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
 
