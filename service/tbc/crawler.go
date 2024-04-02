@@ -18,7 +18,10 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
-var IndexHeightKey = []byte("indexheight") // last indexed height key
+var (
+	UtxoIndexHeightKey = []byte("utxoindexheight") // last indexed utxo height key
+	TxIndexHeightKey   = []byte("txindexheight")   // last indexed tx height key
+)
 
 func processTransactions(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
 	for idx, tx := range txs {
@@ -107,8 +110,8 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block) error {
 }
 
 func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
-	log.Tracef("indexBlocks")
-	defer log.Tracef("indexBlocks")
+	log.Tracef("indexUtxoBlocks")
+	defer log.Tracef("indexUtxoBlocks")
 
 	circuitBreaker := false
 	if maxHeight != 0 {
@@ -174,6 +177,9 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 }
 
 func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
+	log.Tracef("UtxoIndexer")
+	defer log.Tracef("UtxoIndexer")
+
 	var maxHeight uint64
 	circuitBreaker := false
 	if count != 0 {
@@ -209,7 +215,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		// Record height in metadata
 		var dbHeight [8]byte
 		binary.BigEndian.PutUint64(dbHeight[:], height)
-		err = s.db.MetadataPut(ctx, IndexHeightKey, dbHeight[:])
+		err = s.db.MetadataPut(ctx, UtxoIndexHeightKey, dbHeight[:])
 		if err != nil {
 			return fmt.Errorf("metadata height: %w", err)
 		}
@@ -222,4 +228,11 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 			}
 		}
 	}
+}
+
+func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
+	log.Tracef("TxIndexer")
+	defer log.Tracef("TxIndexer")
+
+	return fmt.Errorf("stub")
 }
