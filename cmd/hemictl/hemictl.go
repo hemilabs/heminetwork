@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -25,7 +26,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
@@ -473,16 +477,36 @@ func tbcdb() error {
 		spew.Dump(sh)
 
 	case "balancebyscripthash":
+		address := args["address"]
 		hash := args["hash"]
-		if hash == "" {
-			return fmt.Errorf("hash: must be set")
+		if address == "" && hash == "" {
+			return fmt.Errorf("hash or address: must be set")
+		} else if address != "" && hash != "" {
+			return fmt.Errorf("hash or address: both set")
 		}
-		h, err := hex.DecodeString(hash)
-		if err != nil {
-			return fmt.Errorf("decode hex: %w", err)
-		}
+
 		var hh [32]byte
-		copy(hh[:], h)
+		if hash != "" {
+			h, err := hex.DecodeString(hash)
+			if err != nil {
+				return fmt.Errorf("decode hex: %w", err)
+			}
+			copy(hh[:], h)
+		}
+		if address != "" {
+			// XXX set params
+			a, err := btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			if err != nil {
+				return err
+			}
+			h, err := txscript.PayToAddrScript(a)
+			if err != nil {
+				return err
+			}
+			sh := sha256.Sum256(h)
+			copy(hh[:], sh[:])
+		}
+
 		balance, err := s.DB().BalanceByScriptHash(ctx, hh)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
