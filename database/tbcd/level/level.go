@@ -566,8 +566,8 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh [32]byte) (uint64, err
 }
 
 func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
-	log.Tracef("BlockTxUpdate")
-	defer log.Tracef("BlockTxUpdate exit")
+	log.Tracef("BlockUtxoUpdate")
+	defer log.Tracef("BlockUtxoUpdate exit")
 
 	// outputs
 	outsTx, outsCommit, outsDiscard, err := l.startTransaction(level.OutputsDB)
@@ -613,6 +613,44 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 	err = outsCommit()
 	if err != nil {
 		return fmt.Errorf("outputs commit: %w", err)
+	}
+
+	return nil
+}
+
+func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[[32]byte][32]byte) error {
+	log.Tracef("BlockTxUpdate")
+	defer log.Tracef("BlockTxUpdate exit")
+
+	// transactions
+	txsTx, txsCommit, txsDiscard, err := l.startTransaction(level.TransactionsDB)
+	if err != nil {
+		return fmt.Errorf("transactions open db transaction: %w", err)
+	}
+	defer txsDiscard()
+
+	txsBatch := new(leveldb.Batch)
+	for txId, blockHash := range txs {
+		var key [32 + 32]byte
+		copy(key[0:32], txId[:])
+		copy(key[32:64], blockHash[:])
+		txsBatch.Put(key[:], []byte{})
+		// XXX this probably should be done by the caller but we do it
+		// here to lower memory pressure as large gobs of data are
+		// written to disk.
+		delete(txs, txId)
+	}
+
+	// Write transactions batch
+	err = txsTx.Write(txsBatch, nil)
+	if err != nil {
+		return fmt.Errorf("transactions insert: %w", err)
+	}
+
+	// transactions commit
+	err = txsCommit()
+	if err != nil {
+		return fmt.Errorf("transactions commit: %w", err)
 	}
 
 	return nil
