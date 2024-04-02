@@ -329,12 +329,9 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 			s.txsMax-txsCached, txsCached/blocksProcessed)
 
 		start = time.Now()
-		//err = s.db.BlockTxUpdate(ctx, s.txs)
-		//if err != nil {
-		//	return fmt.Errorf("block tx update: %w", err)
-		//}
-		for k := range s.txs {
-			delete(s.txs, k)
+		err = s.db.BlockTxUpdate(ctx, s.txs)
+		if err != nil {
+			return fmt.Errorf("block tx update: %w", err)
 		}
 		log.Infof("Flushing txs complete %v took %v",
 			txsCached, time.Now().Sub(start))

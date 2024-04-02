@@ -32,7 +32,7 @@ const (
 	HeightHashDB    = "heighthash"
 	PeersDB         = "peers"
 	OutputsDB       = "outputs"
-	BalancesDB      = "balances"
+	TransactionsDB  = "transactions"
 
 	versionKey      = "version"
 	databaseVersion = 1
@@ -176,9 +176,9 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", OutputsDB, err)
 	}
-	err = l.openDB(BalancesDB, nil)
+	err = l.openDB(TransactionsDB, nil)
 	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", BalancesDB, err)
+		return nil, fmt.Errorf("leveldb %v: %w", TransactionsDB, err)
 	}
 
 	// Treat metadata special so that we can insert some stuff.
