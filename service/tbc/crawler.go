@@ -196,13 +196,8 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 			blocksProcessed, time.Now().Sub(start), utxosCached,
 			s.utxosMax-utxosCached, utxosCached/blocksProcessed)
 
-		// This is where we flush, simulate behavior by deleting utxos
-		//for k := range s.utxos {
-		//	delete(s.utxos, k)
-		//}
-		//log.Infof("%v", spew.Sdump(s.utxos))
 		start = time.Now()
-		err = s.db.BlockTxUpdate(ctx, s.utxos)
+		err = s.db.BlockUtxoUpdate(ctx, s.utxos)
 		if err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
