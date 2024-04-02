@@ -346,6 +346,7 @@ func tbcdb() error {
 		fmt.Printf("\tdumpoutputs <prefix>\n")
 		fmt.Printf("\thelp\n")
 		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
+		fmt.Printf("\tspendoutputsbytxid [txid] [index]\n")
 		fmt.Printf("\tutxoindex <height> <count>\n")
 
 	case "utxoindex":
@@ -422,6 +423,26 @@ func tbcdb() error {
 		}
 		for k := range bh {
 			fmt.Printf("%v\n", bh[k])
+		}
+
+	case "spendoutputsbytxid":
+		txid := args["txid"]
+		if txid == "" {
+			return fmt.Errorf("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		var revTxId [32]byte
+		copy(revTxId[:], chtxid[:])
+
+		si, err := s.DB().SpendOutputsByTxId(ctx, revTxId)
+		if err != nil {
+			return fmt.Errorf("spend outputs by txid: %w", err)
+		}
+		for k := range si {
+			fmt.Printf("%v\n", si[k])
 		}
 
 	case "scripthashbyoutpoint":
