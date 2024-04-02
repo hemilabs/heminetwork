@@ -344,9 +344,9 @@ func tbcdb() error {
 		fmt.Printf("\thelp\n")
 		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
 		fmt.Printf("\tbalancebyscripthash [hash]\n")
-		fmt.Printf("\ttxindex <height> <count>\n")
+		fmt.Printf("\tutxoindex <height> <count>\n")
 
-	case "txindex":
+	case "utxoindex":
 		var h, c uint64
 		height := args["height"]
 		if height == "" {
@@ -366,7 +366,7 @@ func tbcdb() error {
 		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
 			return fmt.Errorf("count: %w", err)
 		}
-		err = s.Indexer(ctx, h, c)
+		err = s.UtxoIndexer(ctx, h, c)
 		if err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
