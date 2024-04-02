@@ -106,7 +106,7 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block) error {
 	return nil
 }
 
-func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
+func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
 	log.Tracef("indexBlocks")
 	defer log.Tracef("indexBlocks")
 
@@ -173,7 +173,7 @@ func (s *Server) indexBlocks(ctx context.Context, startHeight, maxHeight uint64)
 	return blocksProcessed, nil
 }
 
-func (s *Server) Indexer(ctx context.Context, height, count uint64) error {
+func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 	var maxHeight uint64
 	circuitBreaker := false
 	if count != 0 {
@@ -184,7 +184,7 @@ func (s *Server) Indexer(ctx context.Context, height, count uint64) error {
 	log.Infof("Start indexing at height %v count %v", height, count)
 	for {
 		start := time.Now()
-		blocksProcessed, err := s.indexBlocks(ctx, height, maxHeight)
+		blocksProcessed, err := s.indexUtxosInBlocks(ctx, height, maxHeight)
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
 		}
