@@ -519,22 +519,24 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	}, nil
 }
 
-func (l *ldb) BlocksByTxId(ctx context.Context, txId [32]byte) ([][32]byte, error) {
+func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHash, error) {
 	log.Tracef("BlocksByTxId")
 	defer log.Tracef("BlocksByTxId exit")
 
-	blocks := make([][32]byte, 0, 2)
+	blocks := make([]tbcd.BlockHash, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
 	it := txDB.NewIterator(&util.Range{Start: txId[:]}, nil)
+	defer it.Release()
 	for it.Next() {
 		if !bytes.Equal(it.Key()[0:32], txId[0:32]) {
 			break
 		}
-		var block [32]byte
-		copy(block[:], it.Key()[32:])
+		block, err := tbcd.NewBlockHashFromBytes(it.Key()[32:])
+		if err != nil {
+			return nil, err
+		}
 		blocks = append(blocks, block)
 	}
-	it.Release()
 	if err := it.Error(); err != nil {
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}

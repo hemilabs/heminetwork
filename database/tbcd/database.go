@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -39,7 +40,7 @@ type Database interface {
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, utxos map[Outpoint]Utxo) error
 	BlockTxUpdate(ctx context.Context, txs map[[32]byte][32]byte) error
-	BlocksByTxId(ctx context.Context, txId [32]byte) ([][32]byte, error)
+	BlocksByTxId(ctx context.Context, txId TxId) ([]BlockHash, error)
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -170,5 +171,57 @@ func NewDeleteUtxo(scriptHash [32]byte, outIndex uint32) (utxo Utxo) {
 	copy(utxo[0:32], scriptHash[:])
 	copy(utxo[32:40], DeleteUtxo[:])
 	binary.BigEndian.PutUint32(utxo[40:], outIndex)
+	return
+}
+
+// TxId is a bitcoin transaction id. The underlying slice is reversed, only
+// when using the stringer does it apear in human readable format.
+type TxId [32]byte
+
+func (t TxId) String() string {
+	var rev [32]byte
+	for k := range t {
+		rev[32-k-1] = t[k]
+	}
+	return hex.EncodeToString(rev[:])
+}
+
+func NewTxId(x [32]byte) (txId TxId) {
+	copy(txId[:], x[:])
+	return
+}
+
+func NewTxIdFromBytes(x []byte) (txId TxId, err error) {
+	if len(x) != 32 {
+		err = fmt.Errorf("invalid transaction hash length")
+		return
+	}
+	copy(txId[:], x[:])
+	return
+}
+
+// BlockHash is a bitcoin transaction id. The underlying slice is reversed, only
+// when using the stringer does it apear in human readable format.
+type BlockHash [32]byte
+
+func (bh BlockHash) String() string {
+	var rev [32]byte
+	for k := range bh {
+		rev[32-k-1] = bh[k]
+	}
+	return hex.EncodeToString(rev[:])
+}
+
+func NewBlockHash(x [32]byte) (blockHash BlockHash) {
+	copy(blockHash[:], x[:])
+	return
+}
+
+func NewBlockHashFromBytes(x []byte) (blockHash BlockHash, err error) {
+	if len(x) != 32 {
+		err = fmt.Errorf("invalid block hash length")
+		return
+	}
+	copy(blockHash[:], x[:])
 	return
 }
