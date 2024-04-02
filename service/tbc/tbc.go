@@ -50,7 +50,7 @@ const (
 
 	defaultUtxoSize = 1e6 // 36 + 44 + overhead
 
-	defaultTxSize = 1e6 // 32 + 32 + overhead
+	defaultTxSize = 1e6 // dual purpose cache, max key 69, max value 36
 
 	networkLocalnet = "localnet"
 )
@@ -188,7 +188,7 @@ type Server struct {
 	utxosMax        int
 
 	// tx cache. XXX do we need a seperate mutex?
-	txs           map[tbcd.TxId]tbcd.BlockHash
+	txs           map[tbcd.TxKey]*tbcd.TxValue
 	txsPercentage int
 	txsMax        int
 }
@@ -217,7 +217,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		utxosMax:        defaultUtxoSize, // largest utxo set seen
 
 		// tx cache
-		txs:           make(map[tbcd.TxId]tbcd.BlockHash, defaultTxSize),
+		txs:           make(map[tbcd.TxKey]*tbcd.TxValue, defaultTxSize),
 		txsPercentage: 95,            // flush cache at >95% capacity
 		txsMax:        defaultTxSize, // largest utxo set seen
 	}
