@@ -420,7 +420,9 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
-		spew.Dump(bh)
+		for k := range bh {
+			fmt.Printf("%v\n", bh[k])
+		}
 
 	case "scripthashbyoutpoint":
 		txid := args["txid"]
