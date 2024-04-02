@@ -351,10 +351,10 @@ func tbcdb() error {
 		height := args["height"]
 		if height == "" {
 			// Get height from db
-			he, err := s.DB().MetadataGet(ctx, tbc.IndexHeightKey)
+			he, err := s.DB().MetadataGet(ctx, tbc.UtxoIndexHeightKey)
 			if err != nil {
 				return fmt.Errorf("metadata %v: %w",
-					string(tbc.IndexHeightKey), err)
+					string(tbc.UtxoIndexHeightKey), err)
 			}
 			h = binary.BigEndian.Uint64(he)
 		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
@@ -367,6 +367,31 @@ func tbcdb() error {
 			return fmt.Errorf("count: %w", err)
 		}
 		err = s.UtxoIndexer(ctx, h, c)
+		if err != nil {
+			return fmt.Errorf("indexer: %w", err)
+		}
+
+	case "txindex":
+		var h, c uint64
+		height := args["height"]
+		if height == "" {
+			// Get height from db
+			he, err := s.DB().MetadataGet(ctx, tbc.TxIndexHeightKey)
+			if err != nil {
+				return fmt.Errorf("metadata %v: %w",
+					string(tbc.TxIndexHeightKey), err)
+			}
+			h = binary.BigEndian.Uint64(he)
+		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
+			return fmt.Errorf("height: %w", err)
+		}
+		count := args["count"]
+		if count == "" {
+			c = 0
+		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
+			return fmt.Errorf("count: %w", err)
+		}
+		err = s.TxIndexer(ctx, h, c)
 		if err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
