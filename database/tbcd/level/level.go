@@ -548,7 +548,7 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 	return blocks, nil
 }
 
-func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*[32]byte, error) {
+func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
 	log.Tracef("ScriptHashByOutpoint")
 	defer log.Tracef("ScriptHashByOutpoint exit")
 
@@ -562,13 +562,11 @@ func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*[32]
 		return nil, fmt.Errorf("script hash by outpoint: %w", err)
 	}
 
-	var sh [32]byte
-	copy(sh[:], scriptHash)
-
-	return &sh, nil
+	sh, err := tbcd.NewScriptHashFromBytes(scriptHash)
+	return &sh, err
 }
 
-func (l *ldb) BalanceByScriptHash(ctx context.Context, sh [32]byte) (uint64, error) {
+func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
 	log.Tracef("BalanceByScriptHash")
 	defer log.Tracef("BalanceByScriptHash exit")
 
@@ -647,7 +645,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 	return nil
 }
 
-func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[[32]byte][32]byte) error {
+func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxId]tbcd.BlockHash) error {
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
 
