@@ -2,6 +2,7 @@ package main // XXX wrap in structure
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
@@ -476,6 +478,10 @@ func parseArgs(args []string) (string, map[string]string, error) {
 	return action, parsed, nil
 }
 
+func addressToScript(addr string) (btcutil.Address, error) {
+	return btcutil.DecodeAddress(addr, &chaincfg.TestNet3Params)
+}
+
 func init() {
 }
 
@@ -516,6 +522,23 @@ func _main() error {
 	}
 
 	switch action {
+	case "standardscript":
+		address := args["address"]
+		if address == "" {
+			return fmt.Errorf("address: must be set")
+		}
+		var (
+			a  btcutil.Address
+			h  []byte
+			sh [32]byte
+		)
+		a, err = addressToScript(address)
+		h, err = txscript.PayToAddrScript(a)
+		sh = sha256.Sum256(h)
+		spew.Dump(a)
+		spew.Dump(h)
+		spew.Dump(sh)
+
 	case "block":
 		raw := true
 

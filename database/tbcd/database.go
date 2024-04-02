@@ -241,11 +241,7 @@ func NewBlockHashFromBytes(x []byte) (blockHash BlockHash, err error) {
 type ScriptHash [32]byte
 
 func (bh ScriptHash) String() string {
-	var rev [32]byte
-	for k := range bh {
-		rev[32-k-1] = bh[k]
-	}
-	return hex.EncodeToString(rev[:])
+	return hex.EncodeToString(bh[:])
 }
 
 func NewScriptHash(x [32]byte) (scriptHash ScriptHash) {

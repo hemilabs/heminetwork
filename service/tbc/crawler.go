@@ -72,7 +72,7 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 		// same block.
 		// XXX this is probably too loud but log for investigation and
 		// remove later.
-		log.Errorf("db missing pkscript: %v", op)
+		log.Debugf("db missing pkscript: %v", op)
 		return
 	}
 	s.mtx.Lock()
