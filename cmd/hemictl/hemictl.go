@@ -335,6 +335,7 @@ func tbcdb() error {
 
 	case "help", "h":
 		fmt.Printf("tbcd db manipulator commands:\n")
+		fmt.Printf("\tbalancebyscripthash [hash]\n")
 		fmt.Printf("\tblockbyhash [hash]\n")
 		fmt.Printf("\tblockheaderbyhash [hash]\n")
 		fmt.Printf("\tblockheadersbest\n")
@@ -345,7 +346,6 @@ func tbcdb() error {
 		fmt.Printf("\tdumpoutputs <prefix>\n")
 		fmt.Printf("\thelp\n")
 		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
-		fmt.Printf("\tbalancebyscripthash [hash]\n")
 		fmt.Printf("\tutxoindex <height> <count>\n")
 
 	case "utxoindex":
