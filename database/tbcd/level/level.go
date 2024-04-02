@@ -508,7 +508,8 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	eb, err := bDB.Get(hash, nil)
 	if err != nil {
 		if err == leveldb.ErrNotFound {
-			return nil, database.NotFoundError(fmt.Sprintf("block not found: %x", hash))
+			ch, _ := chainhash.NewHash(hash)
+			return nil, database.NotFoundError(fmt.Sprintf("block not found: %v", ch))
 		}
 		return nil, fmt.Errorf("block get: %w", err)
 	}
@@ -516,6 +517,33 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 		Hash:  hash,
 		Block: eb,
 	}, nil
+}
+
+func (l *ldb) BlocksByTxId(ctx context.Context, txId [32]byte) ([][32]byte, error) {
+	log.Tracef("BlocksByTxId")
+	defer log.Tracef("BlocksByTxId exit")
+
+	blocks := make([][32]byte, 0, 2)
+	txDB := l.pool[level.TransactionsDB]
+	it := txDB.NewIterator(&util.Range{Start: txId[:]}, nil)
+	for it.Next() {
+		if !bytes.Equal(it.Key()[0:32], txId[0:32]) {
+			break
+		}
+		var block [32]byte
+		copy(block[:], it.Key()[32:])
+		blocks = append(blocks, block)
+	}
+	it.Release()
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("blocks by id iterator: %w", err)
+	}
+	if len(blocks) == 0 {
+		ch, _ := chainhash.NewHash(txId[:])
+		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", ch))
+	}
+
+	return blocks, nil
 }
 
 func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*[32]byte, error) {
@@ -556,10 +584,9 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh [32]byte) (uint64, err
 		}
 		balance += binary.BigEndian.Uint64(it.Value())
 	}
-
 	it.Release()
 	if err := it.Error(); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("balance by script hash iterator: %w", err)
 	}
 
 	return balance, nil

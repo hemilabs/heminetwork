@@ -335,11 +335,12 @@ func tbcdb() error {
 
 	case "help", "h":
 		fmt.Printf("tbcd db manipulator commands:\n")
+		fmt.Printf("\tblockbyhash [hash]\n")
 		fmt.Printf("\tblockheaderbyhash [hash]\n")
 		fmt.Printf("\tblockheadersbest\n")
 		fmt.Printf("\tblockheadersbyheight [height]\n")
+		fmt.Printf("\tblocksbytxid [hash]\n")
 		fmt.Printf("\tblocksmissing [count]\n")
-		fmt.Printf("\tblockbyhash [hash]\n")
 		fmt.Printf("\tdumpmetadata\n")
 		fmt.Printf("\tdumpoutputs <prefix>\n")
 		fmt.Printf("\thelp\n")
@@ -402,6 +403,24 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
+
+	case "blocksbytxid":
+		txid := args["txid"]
+		if txid == "" {
+			return fmt.Errorf("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		var revTxId [32]byte
+		copy(revTxId[:], chtxid[:])
+
+		bh, err := s.DB().BlocksByTxId(ctx, revTxId)
+		if err != nil {
+			return fmt.Errorf("block by txid: %w", err)
+		}
+		spew.Dump(bh)
 
 	case "scripthashbyoutpoint":
 		txid := args["txid"]

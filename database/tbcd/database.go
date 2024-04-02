@@ -39,6 +39,7 @@ type Database interface {
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, utxos map[Outpoint]Utxo) error
 	BlockTxUpdate(ctx context.Context, txs map[[32]byte][32]byte) error
+	BlocksByTxId(ctx context.Context, txId [32]byte) ([][32]byte, error)
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
