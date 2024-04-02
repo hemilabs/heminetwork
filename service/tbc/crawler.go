@@ -23,7 +23,7 @@ var (
 	TxIndexHeightKey   = []byte("txindexheight")   // last indexed tx height key
 )
 
-func processTransactions(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
+func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if idx == 0 {
@@ -138,17 +138,18 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 			return 0, fmt.Errorf("could not decode block %v %v: %v",
 				height, ch, err)
 		}
+
+		// fixupCache is executed in parallel meaning that the utxos
+		// map must be locked as it is being processed.
 		err = s.fixupCache(ctx, b)
 		if err != nil {
 			return 0, fmt.Errorf("parse block %v: %v", height, err)
 		}
-
-		// XXX MAY NOT TOUCH s.utxos once in this routine! this is by
-		// design, do document it.
-		err = processTransactions(s.chainParams, b.Transactions(), s.utxos)
+		// At this point we can lockless since it is all single
+		// threaded again.
+		err = processUtxos(s.chainParams, b.Transactions(), s.utxos)
 		if err != nil {
-			// XXX fix errorr after rename
-			return 0, fmt.Errorf("xxxparse block %v: %v", height, err)
+			return 0, fmt.Errorf("process utxos %v: %v", height, err)
 		}
 
 		blocksProcessed++
@@ -187,7 +188,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		maxHeight = height + count
 	}
 
-	log.Infof("Start indexing at height %v count %v", height, count)
+	log.Infof("Start indexing UTxos at height %v count %v", height, count)
 	for {
 		start := time.Now()
 		blocksProcessed, err := s.indexUtxosInBlocks(ctx, height, maxHeight)
@@ -207,7 +208,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		if err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
-		log.Infof("Flushing complete utxos %v took %v",
+		log.Infof("Flushing utxos complete %v took %v",
 			utxosCached, time.Now().Sub(start))
 
 		height += uint64(blocksProcessed)
@@ -217,12 +218,12 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		binary.BigEndian.PutUint64(dbHeight[:], height)
 		err = s.db.MetadataPut(ctx, UtxoIndexHeightKey, dbHeight[:])
 		if err != nil {
-			return fmt.Errorf("metadata height: %w", err)
+			return fmt.Errorf("metadata utxo height: %w", err)
 		}
 
 		// If set we may have to exit early
 		if circuitBreaker {
-			log.Infof("Indexed to height: %v", height-1)
+			log.Infof("Indexed utxos to height: %v", height-1)
 			if height >= maxHeight {
 				return nil
 			}
@@ -230,9 +231,130 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 	}
 }
 
+func processTxs(cp *chaincfg.Params, blockHash [32]byte, txs []*btcutil.Tx, txsCache map[[32]byte][32]byte) error {
+	for _, tx := range txs {
+		var txId [32]byte
+		copy(txId[:], tx.Hash()[:])
+		txsCache[txId] = blockHash
+	}
+	return nil
+}
+
+func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
+	log.Tracef("indexTxsInBlocks")
+	defer log.Tracef("indexTxsInBlocks")
+
+	circuitBreaker := false
+	if maxHeight != 0 {
+		circuitBreaker = true
+	}
+
+	blocksProcessed := 0
+	for height := startHeight; ; height++ {
+		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				log.Infof("No more blocks at: %v", height)
+				break
+			}
+			return 0, fmt.Errorf("block headers by height %v: %v", height, err)
+		}
+		eb, err := s.db.BlockByHash(ctx, bhs[0].Hash)
+		if err != nil {
+			return 0, fmt.Errorf("block by hash %v: %v", height, err)
+		}
+		b, err := btcutil.NewBlockFromBytes(eb.Block)
+		if err != nil {
+			ch, _ := chainhash.NewHash(bhs[0].Hash)
+			return 0, fmt.Errorf("could not decode block %v %v: %v",
+				height, ch, err)
+		}
+
+		var blockHash [32]byte
+		copy(blockHash[:], bhs[0].Hash)
+		err = processTxs(s.chainParams, blockHash, b.Transactions(), s.txs)
+		if err != nil {
+			return 0, fmt.Errorf("process txs %v: %v", height, err)
+		}
+
+		blocksProcessed++
+
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := len(s.txs) * 100 / s.txsMax
+		if height%10000 == 0 || cp > s.txsPercentage || blocksProcessed == 1 {
+			log.Infof("Height: %v tx cache %v%%", height, cp)
+		}
+		if cp > s.txsPercentage {
+			// Set txsMax to the largest tx capacity seen
+			s.txsMax = max(len(s.txs), s.txsMax)
+			// Flush
+			break
+		}
+
+		// If set we may have to exit early
+		if circuitBreaker {
+			if height >= maxHeight-1 {
+				break
+			}
+		}
+	}
+
+	return blocksProcessed, nil
+}
+
 func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 	log.Tracef("TxIndexer")
 	defer log.Tracef("TxIndexer")
 
-	return fmt.Errorf("stub")
+	var maxHeight uint64
+	circuitBreaker := false
+	if count != 0 {
+		circuitBreaker = true
+		maxHeight = height + count
+	}
+
+	log.Infof("Start indexing transactions at height %v count %v", height, count)
+	for {
+		start := time.Now()
+		blocksProcessed, err := s.indexTxsInBlocks(ctx, height, maxHeight)
+		if err != nil {
+			return fmt.Errorf("index blocks: %w", err)
+		}
+		if blocksProcessed == 0 {
+			return nil
+		}
+		txsCached := len(s.txs)
+		log.Infof("blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
+			blocksProcessed, time.Now().Sub(start), txsCached,
+			s.txsMax-txsCached, txsCached/blocksProcessed)
+
+		start = time.Now()
+		//err = s.db.BlockTxUpdate(ctx, s.txs)
+		//if err != nil {
+		//	return fmt.Errorf("block tx update: %w", err)
+		//}
+		for k := range s.txs {
+			delete(s.txs, k)
+		}
+		log.Infof("Flushing txs complete %v took %v",
+			txsCached, time.Now().Sub(start))
+
+		height += uint64(blocksProcessed)
+
+		// Record height in metadata
+		var dbHeight [8]byte
+		binary.BigEndian.PutUint64(dbHeight[:], height)
+		err = s.db.MetadataPut(ctx, TxIndexHeightKey, dbHeight[:])
+		if err != nil {
+			return fmt.Errorf("metadata tx height: %w", err)
+		}
+
+		// If set we may have to exit early
+		if circuitBreaker {
+			log.Infof("Indexed transactions to height: %v", height-1)
+			if height >= maxHeight {
+				return nil
+			}
+		}
+	}
 }
