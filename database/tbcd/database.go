@@ -39,7 +39,7 @@ type Database interface {
 
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, utxos map[Outpoint]Utxo) error
-	BlockTxUpdate(ctx context.Context, txs map[[32]byte][32]byte) error
+	BlockTxUpdate(ctx context.Context, txs map[TxId]BlockHash) error
 	BlocksByTxId(ctx context.Context, txId TxId) ([]BlockHash, error)
 
 	// Peer manager
@@ -49,8 +49,8 @@ type Database interface {
 	PeersRandom(ctx context.Context, count int) ([]Peer, error)
 
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
-	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*[32]byte, error)
-	BalanceByScriptHash(ctx context.Context, sh [32]byte) (uint64, error)
+	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
+	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 }
 
 // BlockHeader contains the first 80 raw bytes of a bitcoin block and its
@@ -223,5 +223,31 @@ func NewBlockHashFromBytes(x []byte) (blockHash BlockHash, err error) {
 		return
 	}
 	copy(blockHash[:], x[:])
+	return
+}
+
+// ScriptHash is a bitcoin transaction id. The underlying slice is reversed, only
+// when using the stringer does it apear in human readable format.
+type ScriptHash [32]byte
+
+func (bh ScriptHash) String() string {
+	var rev [32]byte
+	for k := range bh {
+		rev[32-k-1] = bh[k]
+	}
+	return hex.EncodeToString(rev[:])
+}
+
+func NewScriptHash(x [32]byte) (scriptHash ScriptHash) {
+	copy(scriptHash[:], x[:])
+	return
+}
+
+func NewScriptHashFromBytes(x []byte) (scriptHash ScriptHash, err error) {
+	if len(x) != 32 {
+		err = fmt.Errorf("invalid script hash length")
+		return
+	}
+	copy(scriptHash[:], x[:])
 	return
 }
