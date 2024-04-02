@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -525,13 +526,16 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 
 	blocks := make([]tbcd.BlockHash, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
-	it := txDB.NewIterator(&util.Range{Start: txId[:]}, nil)
+	var txid [33]byte
+	txid[0] = 't'
+	copy(txid[1:], txId[:])
+	it := txDB.NewIterator(&util.Range{Start: txid[:]}, nil)
 	defer it.Release()
 	for it.Next() {
-		if !bytes.Equal(it.Key()[0:32], txId[0:32]) {
+		if !bytes.Equal(it.Key()[1:33], txid[1:33]) {
 			break
 		}
-		block, err := tbcd.NewBlockHashFromBytes(it.Key()[32:])
+		block, err := tbcd.NewBlockHashFromBytes(it.Key()[33:])
 		if err != nil {
 			return nil, err
 		}
@@ -546,6 +550,38 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 	}
 
 	return blocks, nil
+}
+
+func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.SpendInfo, error) {
+	log.Tracef("SpendOutputByOutpoint")
+	defer log.Tracef("SpendOutputByOutpoint exit")
+
+	si := make([]tbcd.SpendInfo, 0, 2)
+	txDB := l.pool[level.TransactionsDB]
+	var key [1 + 32]byte
+	key[0] = 's'
+	copy(key[1:], txId[:])
+	it := txDB.NewIterator(&util.Range{Start: key[:]}, nil)
+	defer it.Release()
+	for it.Next() {
+		if !bytes.Equal(it.Key()[1:33], key[1:33]) {
+			break
+		}
+		var s tbcd.SpendInfo
+		copy(s.TxId[:], it.Value()[0:32])
+		copy(s.BlockHash[:], it.Key()[37:])
+		s.InputIndex = binary.BigEndian.Uint32(it.Value()[32:36])
+		si = append(si, s)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("blocks by id iterator: %w", err)
+	}
+	if len(si) == 0 {
+		ch, _ := chainhash.NewHash(txId[:])
+		return nil, database.NotFoundError(fmt.Sprintf("not found %v", ch))
+	}
+
+	return si, nil
 }
 
 func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
@@ -645,7 +681,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 	return nil
 }
 
-func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxId]tbcd.BlockHash) error {
+func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxKey]*tbcd.TxValue) error {
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
 
@@ -657,15 +693,26 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxId]tbcd.BlockHas
 	defer txsDiscard()
 
 	txsBatch := new(leveldb.Batch)
-	for txId, blockHash := range txs {
-		var key [32 + 32]byte
-		copy(key[0:32], txId[:])
-		copy(key[32:64], blockHash[:])
-		txsBatch.Put(key[:], []byte{})
-		// XXX this probably should be done by the caller but we do it
-		// here to lower memory pressure as large gobs of data are
-		// written to disk.
-		delete(txs, txId)
+	for k, v := range txs {
+		// cache is being emptied so we can slice it here.
+		var key, value []byte
+		switch k[0] {
+		case 't':
+			key = k[0:65]
+			value = nil
+
+		case 's':
+			key = k[:]
+			value = v[:]
+		default:
+			return fmt.Errorf("invalid cache entry: %v", spew.Sdump(k))
+		}
+		txsBatch.Put(key, value)
+		//log.Infof("%v:%v", spew.Sdump(key), spew.Sdump(value))
+		//// XXX this probably should be done by the caller but we do it
+		//// here to lower memory pressure as large gobs of data are
+		//// written to disk.
+		delete(txs, k)
 	}
 
 	// Write transactions batch

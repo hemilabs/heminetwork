@@ -231,11 +231,21 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 	}
 }
 
-func processTxs(cp *chaincfg.Params, blockHash tbcd.BlockHash, txs []*btcutil.Tx, txsCache map[tbcd.TxId]tbcd.BlockHash) error {
+func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
 	for _, tx := range txs {
-		var txId [32]byte
-		copy(txId[:], tx.Hash()[:])
-		txsCache[txId] = blockHash
+		// cache txid <-> block
+		txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
+
+		// cache spent transactions
+		for txInIdx, txIn := range tx.MsgTx().TxIn {
+			txk, txv := tbcd.NewTxSpent(
+				blockHash,
+				tx.Hash(),
+				&txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index,
+				uint32(txInIdx))
+			txsCache[txk] = &txv
+		}
 	}
 	return nil
 }
@@ -270,9 +280,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight ui
 				height, ch, err)
 		}
 
-		var blockHash [32]byte
-		copy(blockHash[:], bhs[0].Hash)
-		err = processTxs(s.chainParams, blockHash, b.Transactions(), s.txs)
+		err = processTxs(s.chainParams, b.Hash(), b.Transactions(), s.txs)
 		if err != nil {
 			return 0, fmt.Errorf("process txs %v: %v", height, err)
 		}

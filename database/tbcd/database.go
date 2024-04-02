@@ -39,8 +39,9 @@ type Database interface {
 
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, utxos map[Outpoint]Utxo) error
-	BlockTxUpdate(ctx context.Context, txs map[TxId]BlockHash) error
+	BlockTxUpdate(ctx context.Context, txs map[TxKey]*TxValue) error
 	BlocksByTxId(ctx context.Context, txId TxId) ([]BlockHash, error)
+	SpendOutputsByTxId(ctx context.Context, txId TxId) ([]SpendInfo, error)
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -73,6 +74,12 @@ type BlockIdentifier struct {
 	Hash   database.ByteArray
 }
 
+type SpendInfo struct {
+	BlockHash  BlockHash
+	TxId       TxId
+	InputIndex uint32
+}
+
 // Peer
 type Peer struct {
 	Host      string
@@ -80,6 +87,9 @@ type Peer struct {
 	LastAt    database.Timestamp `deep:"-"` // Last time connected
 	CreatedAt database.Timestamp `deep:"-"`
 }
+
+// XXX we can probably save a bunch of bcopy if we construct the key directly
+// for the db. Peek at the s + t cache which does this.
 
 // Outpoint is a bitcoin structure that points to a transaction in a block. It
 // is expressed as an array of bytes in order to pack it as dense as possible
@@ -250,4 +260,42 @@ func NewScriptHashFromBytes(x []byte) (scriptHash ScriptHash, err error) {
 	}
 	copy(scriptHash[:], x[:])
 	return
+}
+
+// Spent Transaction:
+//
+//	s + txin.PrevOutPoint.Hash + txin.PrevOutPoint.Index + blockhash = txid + txin_index + blockhash | [1 + 32 + 4 + 32] = [32 + 4]
+//
+// Transaction ID to Block mapping:
+//
+//	t + txid + blockhash = nil | [1 + 32 + 32] = nil
+type (
+	TxKey   [69]byte // Allocate max sized key, the prefix byte determines the lengths
+	TxValue [36]byte // allocate max sized value
+)
+
+// NewTxSpent returns a TxKey and TxValue that maps a spent transaction to a
+// location in a block.
+func NewTxSpent(blockHash, txId, inPrevHash *chainhash.Hash, inPrevIndex, txInIndex uint32) (txKey TxKey, txValue TxValue) {
+	// Construct key
+	txKey[0] = 's'
+	copy(txKey[1:33], inPrevHash[:])
+	binary.BigEndian.PutUint32(txKey[33:37], inPrevIndex)
+	copy(txKey[37:], blockHash[:])
+
+	// Construct value
+	copy(txValue[0:], txId[:])
+	binary.BigEndian.PutUint32(txValue[32:36], txInIndex)
+
+	return txKey, txValue
+}
+
+// NewTxMapping returns a TxKey and TxValue that maps a tx id to a block hash.
+func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
+	// Construct key
+	txKey[0] = 't'
+	copy(txKey[1:33], txId[:])
+	copy(txKey[33:], blockHash[:])
+
+	return txKey
 }
