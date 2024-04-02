@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -35,6 +36,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	ldb "github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -352,8 +354,11 @@ func tbcdb() error {
 			// Get height from db
 			he, err := s.DB().MetadataGet(ctx, tbc.UtxoIndexHeightKey)
 			if err != nil {
-				return fmt.Errorf("metadata %v: %w",
-					string(tbc.UtxoIndexHeightKey), err)
+				if errors.Is(err, database.ErrNotFound) {
+					return fmt.Errorf("metadata %v: %w",
+						string(tbc.UtxoIndexHeightKey), err)
+				}
+				he = make([]byte, 8)
 			}
 			h = binary.BigEndian.Uint64(he)
 		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
@@ -377,8 +382,11 @@ func tbcdb() error {
 			// Get height from db
 			he, err := s.DB().MetadataGet(ctx, tbc.TxIndexHeightKey)
 			if err != nil {
-				return fmt.Errorf("metadata %v: %w",
-					string(tbc.TxIndexHeightKey), err)
+				if errors.Is(err, database.ErrNotFound) {
+					return fmt.Errorf("metadata %v: %w",
+						string(tbc.TxIndexHeightKey), err)
+				}
+				he = make([]byte, 8)
 			}
 			h = binary.BigEndian.Uint64(he)
 		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
