@@ -231,7 +231,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 	}
 }
 
-func processTxs(cp *chaincfg.Params, blockHash [32]byte, txs []*btcutil.Tx, txsCache map[[32]byte][32]byte) error {
+func processTxs(cp *chaincfg.Params, blockHash tbcd.BlockHash, txs []*btcutil.Tx, txsCache map[tbcd.TxId]tbcd.BlockHash) error {
 	for _, tx := range txs {
 		var txId [32]byte
 		copy(txId[:], tx.Hash()[:])
