@@ -351,7 +351,8 @@ func tbcdb() error {
 		fmt.Printf("\thelp\n")
 		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
 		fmt.Printf("\tspendoutputsbytxid [txid] [index]\n")
-		fmt.Printf("\tutxoindex <height> <count>\n")
+		fmt.Printf("\ttxindex <height> <count> <maxcache>\n")
+		fmt.Printf("\tutxoindex <height> <count> <maxcache>\n")
 		fmt.Printf("\tutxosbyscripthash [hash]\n")
 
 	case "utxoindex":
