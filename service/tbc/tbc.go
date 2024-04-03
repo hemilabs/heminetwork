@@ -50,9 +50,7 @@ const (
 	defaultPeersWanted   = 64
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
-	defaultUtxoSize = 1e6 // 36 + 44 + overhead
-
-	defaultTxSize = 1e6 // dual purpose cache, max key 69, max value 36
+	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
 
 	networkLocalnet = "localnet"
 )
@@ -142,12 +140,14 @@ type Config struct {
 	Network                 string
 	BlockSanity             bool
 	ForceSeedPort           string
+	MaxCachedTxs            int
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
 		ListenAddress: tbcapi.DefaultListen,
 		LogLevel:      logLevel,
+		MaxCachedTxs:  defaultMaxCachedTxs,
 	}
 }
 
@@ -183,16 +183,6 @@ type Server struct {
 
 	// WebSockets
 	sessions map[string]*tbcWs
-
-	// utxo cache. XXX do we need a seperate mutex?
-	utxos           map[tbcd.Outpoint]tbcd.Utxo
-	utxosPercentage int
-	utxosMax        int
-
-	// tx cache. XXX do we need a seperate mutex?
-	txs           map[tbcd.TxKey]*tbcd.TxValue
-	txsPercentage int
-	txsMax        int
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -212,18 +202,6 @@ func NewServer(cfg *Config) (*Server, error) {
 			Help:      "The total number of successful RPC commands",
 		}),
 		sessions: make(map[string]*tbcWs),
-
-		// XXX these cache maps should be made on demand, if we are not
-		// indexing we shouldnt allocate all this memory.
-		// utxo cache
-		// utxos:           make(map[tbcd.Outpoint]tbcd.Utxo, defaultUtxoSize),
-		utxosPercentage: 95,              // flush cache at >95% capacity
-		utxosMax:        defaultUtxoSize, // largest utxo set seen
-
-		// tx cache
-		// txs:           make(map[tbcd.TxKey]*tbcd.TxValue, defaultTxSize),
-		txsPercentage: 95,            // flush cache at >95% capacity
-		txsMax:        defaultTxSize, // largest utxo set seen
 	}
 
 	// We could use a PGURI verification here.
