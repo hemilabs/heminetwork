@@ -613,11 +613,8 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint
 	start[0] = 'h'
 	copy(start[1:], sh[:])
 	oDB := l.pool[level.OutputsDB]
-	it := oDB.NewIterator(&util.Range{Start: start[:]}, nil)
+	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
 	for it.Next() {
-		if !bytes.Equal(it.Key()[1:33], sh[:]) {
-			break
-		}
 		balance += binary.BigEndian.Uint64(it.Value())
 	}
 	it.Release()
