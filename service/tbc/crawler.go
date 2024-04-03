@@ -51,7 +51,7 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 	return nil
 }
 
-func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint) {
+func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.Utxo) {
 	defer w.Done()
 
 	pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
@@ -64,11 +64,11 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 		return
 	}
 	s.mtx.Lock()
-	s.utxos[op] = tbcd.NewDeleteUtxo(*pkScript, op.TxIndex())
+	utxos[op] = tbcd.NewDeleteUtxo(*pkScript, op.TxIndex())
 	s.mtx.Unlock()
 }
 
-func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block) error {
+func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
 	w := new(sync.WaitGroup)
 	txs := b.Transactions()
 	for idx, tx := range txs {
@@ -80,7 +80,7 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block) error {
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			s.mtx.Lock()
-			if _, ok := s.utxos[op]; ok {
+			if _, ok := utxos[op]; ok {
 				s.mtx.Unlock()
 				continue
 			}
@@ -88,7 +88,7 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block) error {
 
 			// utxo not found, retrieve pkscript from database.
 			w.Add(1)
-			go s.fetchOP(ctx, w, op)
+			go s.fetchOP(ctx, w, op, utxos)
 		}
 	}
 
@@ -97,7 +97,7 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block) error {
 	return nil
 }
 
-func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
+func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight uint64, utxos map[tbcd.Outpoint]tbcd.Utxo) (int, error) {
 	log.Tracef("indexUtxoBlocks")
 	defer log.Tracef("indexUtxoBlocks")
 
@@ -106,6 +106,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 		circuitBreaker = true
 	}
 
+	utxosPercentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
 	for height := startHeight; ; height++ {
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
@@ -129,13 +130,13 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 
 		// fixupCache is executed in parallel meaning that the utxos
 		// map must be locked as it is being processed.
-		err = s.fixupCache(ctx, b)
+		err = s.fixupCache(ctx, b, utxos)
 		if err != nil {
 			return 0, fmt.Errorf("parse block %v: %v", height, err)
 		}
 		// At this point we can lockless since it is all single
 		// threaded again.
-		err = processUtxos(s.chainParams, b.Transactions(), s.utxos)
+		err = processUtxos(s.chainParams, b.Transactions(), utxos)
 		if err != nil {
 			return 0, fmt.Errorf("process utxos %v: %v", height, err)
 		}
@@ -143,13 +144,13 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
-		cp := len(s.utxos) * 100 / s.utxosMax
-		if height%10000 == 0 || cp > s.utxosPercentage || blocksProcessed == 1 {
+		cp := len(utxos) * 100 / s.cfg.MaxCachedTxs
+		if height%10000 == 0 || cp > utxosPercentage || blocksProcessed == 1 {
 			log.Infof("Height: %v utxo cache %v%%", height, cp)
 		}
-		if cp > s.utxosPercentage {
+		if cp > utxosPercentage {
 			// Set utxosMax to the largest utxo capacity seen
-			s.utxosMax = max(len(s.utxos), s.utxosMax)
+			s.cfg.MaxCachedTxs = max(len(utxos), s.cfg.MaxCachedTxs)
 			// Flush
 			break
 		}
@@ -176,31 +177,27 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		maxHeight = height + count
 	}
 
-	// Allocate here so that we don't waste space
-	// XXX remove from struct altogether?
-	s.utxos = make(map[tbcd.Outpoint]tbcd.Utxo, defaultUtxoSize)
-	defer func() {
-		clear(s.utxos)
-		s.utxos = nil
-	}()
+	// Allocate here so that we don't waste space when not indexing.
+	utxos := make(map[tbcd.Outpoint]tbcd.Utxo, s.cfg.MaxCachedTxs)
+	defer clear(utxos)
 
 	log.Infof("Start indexing UTxos at height %v count %v", height, count)
 	for {
 		start := time.Now()
-		blocksProcessed, err := s.indexUtxosInBlocks(ctx, height, maxHeight)
+		blocksProcessed, err := s.indexUtxosInBlocks(ctx, height, maxHeight, utxos)
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
 		}
 		if blocksProcessed == 0 {
 			return nil
 		}
-		utxosCached := len(s.utxos)
+		utxosCached := len(utxos)
 		log.Infof("blocks processed %v in %v utxos cached %v cache unused %v avg tx/blk %v",
 			blocksProcessed, time.Now().Sub(start), utxosCached,
-			s.utxosMax-utxosCached, utxosCached/blocksProcessed)
+			s.cfg.MaxCachedTxs-utxosCached, utxosCached/blocksProcessed)
 
 		start = time.Now()
-		err = s.db.BlockUtxoUpdate(ctx, s.utxos)
+		err = s.db.BlockUtxoUpdate(ctx, utxos)
 		if err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
@@ -246,7 +243,7 @@ func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.T
 	return nil
 }
 
-func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight uint64) (int, error) {
+func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight uint64, txs map[tbcd.TxKey]*tbcd.TxValue) (int, error) {
 	log.Tracef("indexTxsInBlocks")
 	defer log.Tracef("indexTxsInBlocks")
 
@@ -255,6 +252,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight ui
 		circuitBreaker = true
 	}
 
+	txsPercentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
 	for height := startHeight; ; height++ {
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
@@ -276,7 +274,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight ui
 				height, ch, err)
 		}
 
-		err = processTxs(s.chainParams, b.Hash(), b.Transactions(), s.txs)
+		err = processTxs(s.chainParams, b.Hash(), b.Transactions(), txs)
 		if err != nil {
 			return 0, fmt.Errorf("process txs %v: %v", height, err)
 		}
@@ -284,13 +282,13 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight ui
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
-		cp := len(s.txs) * 100 / s.txsMax
-		if height%10000 == 0 || cp > s.txsPercentage || blocksProcessed == 1 {
+		cp := len(txs) * 100 / s.cfg.MaxCachedTxs
+		if height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
 			log.Infof("Height: %v tx cache %v%%", height, cp)
 		}
-		if cp > s.txsPercentage {
+		if cp > txsPercentage {
 			// Set txsMax to the largest tx capacity seen
-			s.txsMax = max(len(s.txs), s.txsMax)
+			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
 			// Flush
 			break
 		}
@@ -317,31 +315,29 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 		maxHeight = height + count
 	}
 
-	// Allocate here so that we don't waste space
-	// XXX remove from struct altogether?
-	s.txs = make(map[tbcd.TxKey]*tbcd.TxValue, defaultTxSize)
-	defer func() {
-		clear(s.txs)
-		s.txs = nil
-	}()
+	// Allocate here so that we don't waste space when not indexing.
+	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
+	// log.Infof("max %v %v", s.cfg.MaxCachedTxs, s.cfg.MaxCachedTxs*(105))
+	// return nil
+	defer clear(txs)
 
 	log.Infof("Start indexing transactions at height %v count %v", height, count)
 	for {
 		start := time.Now()
-		blocksProcessed, err := s.indexTxsInBlocks(ctx, height, maxHeight)
+		blocksProcessed, err := s.indexTxsInBlocks(ctx, height, maxHeight, txs)
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
 		}
 		if blocksProcessed == 0 {
 			return nil
 		}
-		txsCached := len(s.txs)
+		txsCached := len(txs)
 		log.Infof("blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
 			blocksProcessed, time.Now().Sub(start), txsCached,
-			s.txsMax-txsCached, txsCached/blocksProcessed)
+			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
 
 		start = time.Now()
-		err = s.db.BlockTxUpdate(ctx, s.txs)
+		err = s.db.BlockTxUpdate(ctx, txs)
 		if err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}

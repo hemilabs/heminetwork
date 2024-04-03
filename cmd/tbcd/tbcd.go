@@ -61,6 +61,12 @@ var (
 			Help:         "bitcoin network; mainnet or testnet3",
 			Print:        config.PrintAll,
 		},
+		"TBC_MAX_CACHED_TXS": config.Config{
+			Value:        &cfg.MaxCachedTxs,
+			DefaultValue: 1e6,
+			Help:         "maximum cached utxos and/or txs during indexing",
+			Print:        config.PrintAll,
+		},
 		"TBC_POSTGRES_URI": config.Config{
 			Value:        &cfg.PgURI,
 			DefaultValue: "",

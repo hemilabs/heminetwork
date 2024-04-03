@@ -355,7 +355,7 @@ func tbcdb() error {
 		fmt.Printf("\tutxosbyscripthash [hash]\n")
 
 	case "utxoindex":
-		var h, c uint64
+		var h, c, mc uint64
 		height := args["height"]
 		if height == "" {
 			// Get height from db
@@ -377,13 +377,20 @@ func tbcdb() error {
 		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
 			return fmt.Errorf("count: %w", err)
 		}
+		maxCache := args["maxcache"]
+		if maxCache != "" {
+			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
+				return fmt.Errorf("maxCache: %w", err)
+			}
+			cfg.MaxCachedTxs = int(mc)
+		}
 		err = s.UtxoIndexer(ctx, h, c)
 		if err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
 
 	case "txindex":
-		var h, c uint64
+		var h, c, mc uint64
 		height := args["height"]
 		if height == "" {
 			// Get height from db
@@ -404,6 +411,13 @@ func tbcdb() error {
 			c = 0
 		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
 			return fmt.Errorf("count: %w", err)
+		}
+		maxCache := args["maxcache"]
+		if maxCache != "" {
+			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
+				return fmt.Errorf("maxCache: %w", err)
+			}
+			cfg.MaxCachedTxs = int(mc)
 		}
 		err = s.TxIndexer(ctx, h, c)
 		if err != nil {
