@@ -1186,9 +1186,9 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wir
 	return bhsw, nil
 }
 
-func (s *Server) BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error) {
-	log.Tracef("BtcBlockMetadataByHeight")
-	defer log.Tracef("BtcBlockMetadataByHeight exit")
+func (s *Server) BlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error) {
+	log.Tracef("BlockMetadataByHeight")
+	defer log.Tracef("BlockMetadataByHeight exit")
 
 	bh, err := s.db.BlockHeadersByHeight(ctx, height)
 	if err != nil {
@@ -1229,7 +1229,7 @@ func (s *Server) BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*
 	}, nil
 }
 
-func (s *Server) BtcAddressBalance(ctx context.Context, encodedAddress string) (uint64, error) {
+func (s *Server) AddressBalance(ctx context.Context, encodedAddress string) (uint64, error) {
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
 	if err != nil {
 		return 0, err

@@ -18,8 +18,8 @@ import (
 )
 
 type storageApi interface {
-	BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
-	BtcAddressBalance(ctx context.Context, encodedAddress string) (uint64, error)
+	BlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
+	AddressBalance(ctx context.Context, encodedAddress string) (uint64, error)
 }
 
 type tbcWs struct {
@@ -63,7 +63,7 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	}
 
 	// use the api to get the block metadata by height
-	btcBlockMetadata, err := s.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
+	btcBlockMetadata, err := s.BlockMetadataByHeight(ctx, uint64(p.Height))
 	if err != nil {
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockMetadataByNumResponse{
 			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
@@ -85,7 +85,7 @@ func (ws *tbcWs) handleBtcBalanceByAddrRequest(ctx context.Context, payload any,
 		return fmt.Errorf("handleBtcBlockMetadataByNumRequest invalid payload type: %T", payload)
 	}
 
-	balance, err := s.BtcAddressBalance(ctx, p.Address)
+	balance, err := s.AddressBalance(ctx, p.Address)
 	if err != nil {
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcAddrBalanceResponse{
 			Error: protocol.Errorf("error getting balance for address: %s", err),
