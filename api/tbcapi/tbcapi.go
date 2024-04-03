@@ -17,6 +17,9 @@ const (
 
 	CmdBtcBlockMetadataByNumRequest  = "tbcapi-btc-block-metadata-by-num-request"
 	CmdBtcBlockMetadataByNumResponse = "tbcapi-btc-block-metadata-by-num-response"
+
+	CmdBtcAddrBalanceRequest  = "tbcapi-btc-addr-bal-request"
+	CmdBtcAddrBalanceResponse = "tbcapi-btc-addr-bal-response"
 )
 
 var (
@@ -64,11 +67,22 @@ type BtcBlockMetadataByNumResponse struct {
 	Block BtcBlockMetadata `json:"block"`
 }
 
+type BtcAddrBalanceRequest struct {
+	Address string `json:"address"`
+}
+
+type BtcAddrBalanceResponse struct {
+	Balance uint64          `json:"balance"`
+	Error   *protocol.Error `json:"error"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                   reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                  reflect.TypeOf(PingResponse{}),
 	CmdBtcBlockMetadataByNumRequest:  reflect.TypeOf(BtcBlockMetadataByNumRequest{}),
 	CmdBtcBlockMetadataByNumResponse: reflect.TypeOf(BtcBlockMetadataByNumResponse{}),
+	CmdBtcAddrBalanceRequest:         reflect.TypeOf(BtcAddrBalanceRequest{}),
+	CmdBtcAddrBalanceResponse:        reflect.TypeOf(BtcAddrBalanceResponse{}),
 }
 
 type tbcAPI struct{}
