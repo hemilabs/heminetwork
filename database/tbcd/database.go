@@ -50,8 +50,9 @@ type Database interface {
 	PeersRandom(ctx context.Context, count int) ([]Peer, error)
 
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
-	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
+	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
+	UtxosByScriptHash(ctx context.Context, sh ScriptHash) ([]Utxo, error)
 }
 
 // BlockHeader contains the first 80 raw bytes of a bitcoin block and its
