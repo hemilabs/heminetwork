@@ -13,6 +13,9 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/phayes/freeport"
@@ -51,7 +54,7 @@ func skipIfNoDocker(t *testing.T) {
 	}
 }
 
-func TestBtcBlockMetadataByNum(t *testing.T) {
+func TestBtcBlockHeaderByHeight(t *testing.T) {
 	skipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
@@ -124,7 +127,7 @@ func TestBtcBlockMetadataByNum(t *testing.T) {
 	}
 
 	var lastErr error
-	var response tbcapi.BtcBlockMetadataByNumResponse
+	var response tbcapi.BtcBlockHeaderByHeightResponse
 	for {
 		select {
 		case <-time.After(1 * time.Second):
@@ -132,7 +135,7 @@ func TestBtcBlockMetadataByNum(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		lastErr = nil
-		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcBlockMetadataByNumRequest{
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcBlockHeaderByHeightRequest{
 			Height: 55,
 		})
 		if err != nil {
@@ -147,7 +150,7 @@ func TestBtcBlockMetadataByNum(t *testing.T) {
 			continue
 		}
 
-		if v.Header.Command == tbcapi.CmdBtcBlockMetadataByNumResponse {
+		if v.Header.Command == tbcapi.CmdBtcBlockHeaderByHeightResponse {
 			if err := json.Unmarshal(v.Payload, &response); err != nil {
 				t.Fatal(err)
 			}
@@ -162,14 +165,21 @@ func TestBtcBlockMetadataByNum(t *testing.T) {
 		t.Fatal(lastErr)
 	}
 
+	bh, err := bytes2Header(response.BlockHeaders[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf(spew.Sdump(bh))
+
 	cliBtcBlock := blockAtHeight(ctx, t, bitcoindContainer, 55)
-	expected := cliBlockToResponse(cliBtcBlock)
+	expected := cliBlockToResponse(cliBtcBlock, t)
 	if diff := deep.Equal(expected, response); len(diff) > 0 {
 		t.Fatalf("unexpected diff: %s", diff)
 	}
 }
 
-func TestBtcBlockMetadataByNumDoesNotExist(t *testing.T) {
+func TestBtcBlockHeaderByHeightDoesNotExist(t *testing.T) {
 	skipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
@@ -242,7 +252,7 @@ func TestBtcBlockMetadataByNumDoesNotExist(t *testing.T) {
 	}
 
 	var lastErr error
-	var response tbcapi.BtcBlockMetadataByNumResponse
+	var response tbcapi.BtcBlockHeaderByHeightResponse
 	for {
 		select {
 		case <-time.After(1 * time.Second):
@@ -250,7 +260,7 @@ func TestBtcBlockMetadataByNumDoesNotExist(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		lastErr = nil
-		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcBlockMetadataByNumRequest{
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcBlockHeaderByHeightRequest{
 			Height: 550,
 		})
 		if err != nil {
@@ -265,7 +275,7 @@ func TestBtcBlockMetadataByNumDoesNotExist(t *testing.T) {
 			continue
 		}
 
-		if v.Header.Command == tbcapi.CmdBtcBlockMetadataByNumResponse {
+		if v.Header.Command == tbcapi.CmdBtcBlockHeaderByHeightResponse {
 			if err := json.Unmarshal(v.Payload, &response); err != nil {
 				t.Fatal(err)
 			}
@@ -280,7 +290,7 @@ func TestBtcBlockMetadataByNumDoesNotExist(t *testing.T) {
 		t.Fatal(lastErr)
 	}
 
-	if response.Error.Message != "error getting block at height 550: not found" {
+	if response.Error.Message != "error getting block at height 550: db block header by height: not found" {
 		t.Fatalf("unexpected error message: %s", response.Error.Message)
 	}
 }
@@ -482,7 +492,7 @@ func TestBalanceByAddress(t *testing.T) {
 					continue
 				}
 
-				if v.Header.Command == tbcapi.CmdBtcAddrBalanceResponse {
+				if v.Header.Command == tbcapi.CmdBtcBalanceByAddressResponse {
 					if err := json.Unmarshal(v.Payload, &response); err != nil {
 						t.Fatal(err)
 					}
@@ -700,20 +710,28 @@ type BtcCliBlockHeader struct {
 	NextBlockHash     string  `json:"nextblockhash"`
 }
 
-func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader) tbcapi.BtcBlockMetadataByNumResponse {
-	return tbcapi.BtcBlockMetadataByNumResponse{
-		Block: tbcapi.BtcBlockMetadata{
-			Height: uint32(btcCliBlockHeader.Height),
-			NumTx:  uint32(btcCliBlockHeader.NTx),
-			Header: tbcapi.BtcHeader{
-				Version:    uint32(btcCliBlockHeader.Version),
-				PrevHash:   btcCliBlockHeader.PreviousBlockHash,
-				MerkleRoot: btcCliBlockHeader.MerkleRoot,
-				Timestamp:  btcCliBlockHeader.Time,
-				Bits:       btcCliBlockHeader.Bits,
-				Nonce:      uint32(btcCliBlockHeader.Nonce),
-			},
-		},
+func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcapi.BtcBlockHeaderByHeightResponse {
+	prevBlockHash, err := chainhash.NewHashFromStr(btcCliBlockHeader.PreviousBlockHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merkleRoot, err := chainhash.NewHashFromStr(btcCliBlockHeader.MerkleRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bits, err := strconv.ParseUint(btcCliBlockHeader.Bits, 16, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bh := wire.NewBlockHeader(int32(btcCliBlockHeader.Version), prevBlockHash, merkleRoot, uint32(bits), uint32(btcCliBlockHeader.Nonce))
+	bh.Timestamp = time.Unix(int64(btcCliBlockHeader.Time), 0)
+	t.Logf(spew.Sdump(bh))
+	bytes, err := header2Bytes(bh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tbcapi.BtcBlockHeaderByHeightResponse{
+		BlockHeaders: [][]byte{bytes},
 	}
 }
 
