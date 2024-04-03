@@ -38,7 +38,7 @@ type Database interface {
 	BlockByHash(ctx context.Context, hash []byte) (*Block, error)
 
 	// Transactions
-	BlockUtxoUpdate(ctx context.Context, utxos map[Outpoint]Utxo) error
+	BlockUtxoUpdate(ctx context.Context, utxos map[Outpoint]CacheOutput) error
 	BlockTxUpdate(ctx context.Context, txs map[TxKey]*TxValue) error
 	BlocksByTxId(ctx context.Context, txId TxId) ([]BlockHash, error)
 	SpendOutputsByTxId(ctx context.Context, txId TxId) ([]SpendInfo, error)
@@ -122,16 +122,79 @@ func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 	return
 }
 
-// Utxo is a densely packed representation of a bitcoin UTXo. The fields are
+// CacheOutput is a densely packed representation of a bitcoin UTXo. The fields are
 // script_hash + value + out_index. It is packed for
 // memory conservation reasons.
-type Utxo [32 + 8 + 4]byte // script_hash + value + out_idx
+type CacheOutput [32 + 8 + 4]byte // script_hash + value + out_idx
 
-// String reutrns pretty printable Utxo. Hash is not reversed since it is an
+// String reutrns pretty printable CacheOutput. Hash is not reversed since it is an
+// opaque pointer. It prints satoshis@script_hash:output_index
+func (c CacheOutput) String() string {
+	return fmt.Sprintf("%d @ %v:%d", binary.BigEndian.Uint64(c[32:40]),
+		c[0:32], binary.BigEndian.Uint32(c[40:]))
+}
+
+func (c CacheOutput) ScriptHash() (hash [32]byte) {
+	copy(hash[:], c[0:32])
+	return
+}
+
+func (c CacheOutput) ScriptHashSlice() []byte {
+	return c[0:32]
+}
+
+func (c CacheOutput) Value() uint64 {
+	return binary.BigEndian.Uint64(c[32:40])
+}
+
+func (c CacheOutput) ValueBytes() []byte {
+	return c[32:40]
+}
+
+func (c CacheOutput) OutputIndex() uint32 {
+	return binary.BigEndian.Uint32(c[40:])
+}
+
+func (c CacheOutput) OutputIndexBytes() []byte {
+	return c[40:44]
+}
+
+func (c CacheOutput) Equal(x CacheOutput) bool {
+	return bytes.Equal(c[:], x[:])
+}
+
+// DeleteUtxo is the max uint64 value which is used as a sentinel to indicate
+// that a utxo should be reaped. The remaining fields must remain untouched
+// since they are part of the lookup key of the utxo balance.
+var DeleteUtxo = [8]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
+
+func (c CacheOutput) IsDelete() bool {
+	return bytes.Equal(c[32:40], DeleteUtxo[:])
+}
+
+func NewCacheOutput(hash [32]byte, value uint64, outIndex uint32) (co CacheOutput) {
+	copy(co[0:32], hash[:]) // scripthash
+	binary.BigEndian.PutUint64(co[32:40], value)
+	binary.BigEndian.PutUint32(co[40:], outIndex)
+	return
+}
+
+func NewDeleteCacheOutput(hash [32]byte, outIndex uint32) (co CacheOutput) {
+	copy(co[0:32], hash[:]) // scripthash or txid
+	copy(co[32:40], DeleteUtxo[:])
+	binary.BigEndian.PutUint32(co[40:], outIndex)
+	return
+}
+
+// Utxo packs a transaction id, the value and the out index.
+type Utxo [32 + 8 + 4]byte // tx_id + value + out_idx
+
+// String reutrns pretty printable CacheOutput. Hash is not reversed since it is an
 // opaque pointer. It prints satoshis@script_hash:output_index
 func (u Utxo) String() string {
-	return fmt.Sprintf("%d @ %x:%d", binary.BigEndian.Uint64(u[32:40]),
-		u[0:32], binary.BigEndian.Uint32(u[40:]))
+	ch, _ := chainhash.NewHash(u[0:32])
+	return fmt.Sprintf("%d @ %v:%d", binary.BigEndian.Uint64(u[32:40]),
+		ch, binary.BigEndian.Uint32(u[40:]))
 }
 
 func (u Utxo) ScriptHash() (hash [32]byte) {
@@ -159,30 +222,14 @@ func (u Utxo) OutputIndexBytes() []byte {
 	return u[40:44]
 }
 
-func (u Utxo) Equal(x Utxo) bool {
+func (u Utxo) Equal(x CacheOutput) bool {
 	return bytes.Equal(u[:], x[:])
 }
 
-// DeleteUtxo is the max uint64 value which is used as a sentinel to indicate
-// that a utxo should be reaped. The remaining fields must remain untouched
-// since they are part of the lookup key of the utxo balance.
-var DeleteUtxo = [8]byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
-
-func (u Utxo) IsDelete() bool {
-	return bytes.Equal(u[32:40], DeleteUtxo[:])
-}
-
-func NewUtxo(scriptHash [32]byte, value uint64, outIndex uint32) (utxo Utxo) {
-	copy(utxo[0:32], scriptHash[:])
-	binary.BigEndian.PutUint64(utxo[32:40], value)
-	binary.BigEndian.PutUint32(utxo[40:], outIndex)
-	return
-}
-
-func NewDeleteUtxo(scriptHash [32]byte, outIndex uint32) (utxo Utxo) {
-	copy(utxo[0:32], scriptHash[:])
-	copy(utxo[32:40], DeleteUtxo[:])
-	binary.BigEndian.PutUint32(utxo[40:], outIndex)
+func NewUtxo(hash [32]byte, value uint64, outIndex uint32) (u Utxo) {
+	copy(u[0:32], hash[:]) // txid
+	binary.BigEndian.PutUint64(u[32:40], value)
+	binary.BigEndian.PutUint32(u[40:], outIndex)
 	return
 }
 
