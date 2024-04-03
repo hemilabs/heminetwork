@@ -298,7 +298,7 @@ func TestBalanceByAddress(t *testing.T) {
 		{
 			name: "Pay to public key hash",
 			address: func() string {
-				_, _, btcAddress, err := bitcoin.KeysAndAddressFromHexString(
+				_, _, address, err := bitcoin.KeysAndAddressFromHexString(
 					privateKey,
 					&chaincfg.RegressionNetParams,
 				)
@@ -306,62 +306,62 @@ func TestBalanceByAddress(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				return btcAddress.EncodeAddress()
+				return address.EncodeAddress()
 			},
 		},
 		{
 			name: "Pay to script hash",
 			address: func() string {
-				addressScriptHash, err := btcutil.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
+				address, err := btcutil.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				return addressScriptHash.EncodeAddress()
+				return address.EncodeAddress()
 			},
 		},
 		{
 			name: "Pay to witness public key hash",
 			address: func() string {
-				addressScriptHash, err := btcutil.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
+				address, err := btcutil.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				return addressScriptHash.EncodeAddress()
+				return address.EncodeAddress()
 			},
 		},
 		{
 			name: "Pay to witness script hash",
 			address: func() string {
-				addressScriptHash, err := btcutil.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcutil.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				return addressScriptHash.EncodeAddress()
+				return address.EncodeAddress()
 			},
 		},
 		{
 			name: "Pay to taproot",
 			address: func() string {
-				addressScriptHash, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				return addressScriptHash.EncodeAddress()
+				return address.EncodeAddress()
 			},
 		},
 		{
 			name: "no balance",
 			address: func() string {
-				addressScriptHash, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				return addressScriptHash.EncodeAddress()
+				return address.EncodeAddress()
 			},
 			doNotGenerate: true,
 		},
