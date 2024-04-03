@@ -616,7 +616,6 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint
 	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
 	for it.Next() {
 		balance += binary.BigEndian.Uint64(it.Value())
-		log.Infof("balance %v : %v", balance, binary.BigEndian.Uint64(it.Value()))
 	}
 	it.Release()
 	if err := it.Error(); err != nil {
@@ -624,6 +623,33 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint
 	}
 
 	return balance, nil
+}
+
+func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.Utxo, error) {
+	log.Tracef("UtxosByScriptHash")
+	defer log.Tracef("UtxosByScriptHash exit")
+
+	var start [33]byte
+	utxos := make([]tbcd.Utxo, 0, 32)
+	start[0] = 'h'
+	copy(start[1:], sh[:])
+	oDB := l.pool[level.OutputsDB]
+	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
+	for it.Next() {
+		if !bytes.Equal(it.Key()[1:33], sh[:]) {
+			panic(spew.Sdump(it.Key()[1:33]))
+		}
+		index := binary.BigEndian.Uint32(it.Key()[65:])
+		value := binary.BigEndian.Uint64(it.Value())
+		utxo := tbcd.NewUtxo(sh, value, index)
+		utxos = append(utxos, utxo)
+	}
+	it.Release()
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("utxos by script hash iterator: %w", err)
+	}
+
+	return utxos, nil
 }
 
 func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
