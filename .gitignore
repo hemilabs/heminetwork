@@ -3,3 +3,6 @@
 /pkg/
 .gocache
 *.sw?
+
+# Tests
+/service/tbc/.testleveldb/
