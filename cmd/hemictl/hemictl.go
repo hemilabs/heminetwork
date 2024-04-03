@@ -337,7 +337,7 @@ func tbcdb() error {
 			fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
 		}
 
-	case "feessbyheight":
+	case "feesbyheight":
 		height := args["height"]
 		if height == "" {
 			return fmt.Errorf("height: must be set")
