@@ -352,6 +352,7 @@ func tbcdb() error {
 		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
 		fmt.Printf("\tspendoutputsbytxid [txid] [index]\n")
 		fmt.Printf("\tutxoindex <height> <count>\n")
+		fmt.Printf("\tutxosbyscripthash [hash]\n")
 
 	case "utxoindex":
 		var h, c uint64
@@ -512,6 +513,48 @@ func tbcdb() error {
 			return fmt.Errorf("block by hash: %w", err)
 		}
 		spew.Dump(balance)
+
+	case "utxosbyscripthash":
+		address := args["address"]
+		hash := args["hash"]
+		if address == "" && hash == "" {
+			return fmt.Errorf("hash or address: must be set")
+		} else if address != "" && hash != "" {
+			return fmt.Errorf("hash or address: both set")
+		}
+
+		var hh [32]byte
+		if hash != "" {
+			h, err := hex.DecodeString(hash)
+			if err != nil {
+				return fmt.Errorf("decode hex: %w", err)
+			}
+			copy(hh[:], h)
+		}
+		if address != "" {
+			// XXX set params
+			a, err := btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			if err != nil {
+				return err
+			}
+			h, err := txscript.PayToAddrScript(a)
+			if err != nil {
+				return err
+			}
+			sh := sha256.Sum256(h)
+			copy(hh[:], sh[:])
+		}
+
+		utxos, err := s.DB().UtxosByScriptHash(ctx, hh)
+		if err != nil {
+			return fmt.Errorf("block by hash: %w", err)
+		}
+		var balance uint64
+		for k := range utxos {
+			fmt.Printf("%v\n", utxos[k])
+			balance += utxos[k].Value()
+		}
+		fmt.Printf("utxos: %v total: %v\n", len(utxos), balance)
 
 	default:
 		return fmt.Errorf("invalid action: %v", action)
