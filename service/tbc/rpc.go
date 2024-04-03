@@ -2,10 +2,10 @@ package tbc
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -17,11 +17,6 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
 
-type storageApi interface {
-	BlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
-	AddressBalance(ctx context.Context, encodedAddress string) (uint64, error)
-}
-
 type tbcWs struct {
 	wg             sync.WaitGroup
 	addr           string
@@ -30,7 +25,7 @@ type tbcWs struct {
 	requestContext context.Context
 }
 
-func (ws *tbcWs) handlePingRequest(ctx context.Context, payload any, id string) error {
+func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
 	log.Tracef("handlePingRequest: %v", ws.addr)
 	defer log.Tracef("handlePingRequest exit: %v", ws.addr)
 
@@ -52,7 +47,7 @@ func (ws *tbcWs) handlePingRequest(ctx context.Context, payload any, id string) 
 	return nil
 }
 
-func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload any, id string, s storageApi) error {
+func (s *Server) handleBtcBlockMetadataByNumRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
 	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
 
@@ -76,7 +71,7 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	})
 }
 
-func (ws *tbcWs) handleBtcBalanceByAddrRequest(ctx context.Context, payload any, id string, s storageApi) error {
+func (s *Server) handleBtcBalanceByAddrRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
 	log.Tracef("handleBtcBalanceByAddrRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBalanceByAddrRequest exit: %v", ws.addr)
 
@@ -165,11 +160,11 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 
 		switch cmd {
 		case tbcapi.CmdPingRequest:
-			err = ws.handlePingRequest(ctx, payload, id)
+			err = s.handlePingRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBtcBlockMetadataByNumRequest:
-			err = ws.handleBtcBlockMetadataByNumRequest(ctx, payload, id, s)
+			err = s.handleBtcBlockMetadataByNumRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBtcAddrBalanceRequest:
-			err = ws.handleBtcBalanceByAddrRequest(ctx, payload, id, s)
+			err = s.handleBtcBalanceByAddrRequest(ctx, ws, payload, id)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
