@@ -661,9 +661,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 
 	outsBatch := new(leveldb.Batch)
 	for op, utxo := range utxos {
-		var uop [37]byte // 'u' tx_id idx
-		uop[0] = 'u'
-		copy(uop[1:], op[:])
+		// op is already 'u' tx_id idx
 
 		var hop [69]byte // 'h' script_hash tx_id tx_output_idx
 		hop[0] = 'h'
@@ -673,11 +671,11 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 
 		if utxo.IsDelete() {
 			// Delete balance and utxos
-			outsBatch.Delete(uop[:])
+			outsBatch.Delete(op[:][:])
 			outsBatch.Delete(hop[:])
 		} else {
 			// Add utxo to balance and utxos
-			outsBatch.Put(uop[:], utxo.ScriptHashSlice())
+			outsBatch.Put(op[:], utxo.ScriptHashSlice())
 			outsBatch.Put(hop[:], utxo.ValueBytes())
 		}
 		// XXX this probably should be done by the caller but we do it
