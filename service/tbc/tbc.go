@@ -1241,7 +1241,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 		}
 	}
 
-	return fees, nil
+	return fees, fmt.Errorf("not yet")
 }
 
 // DBOpen opens the undelying server database. It has been put in its own
