@@ -213,13 +213,15 @@ func NewServer(cfg *Config) (*Server, error) {
 		}),
 		sessions: make(map[string]*tbcWs),
 
+		// XXX these cache maps should be made on demand, if we are not
+		// indexing we shouldnt allocate all this memory.
 		// utxo cache
-		utxos:           make(map[tbcd.Outpoint]tbcd.Utxo, defaultUtxoSize),
+		// utxos:           make(map[tbcd.Outpoint]tbcd.Utxo, defaultUtxoSize),
 		utxosPercentage: 95,              // flush cache at >95% capacity
 		utxosMax:        defaultUtxoSize, // largest utxo set seen
 
 		// tx cache
-		txs:           make(map[tbcd.TxKey]*tbcd.TxValue, defaultTxSize),
+		// txs:           make(map[tbcd.TxKey]*tbcd.TxValue, defaultTxSize),
 		txsPercentage: 95,            // flush cache at >95% capacity
 		txsMax:        defaultTxSize, // largest utxo set seen
 	}
