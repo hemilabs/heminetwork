@@ -616,6 +616,7 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint
 	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
 	for it.Next() {
 		balance += binary.BigEndian.Uint64(it.Value())
+		log.Infof("balance %v : %v", balance, binary.BigEndian.Uint64(it.Value()))
 	}
 	it.Release()
 	if err := it.Error(); err != nil {
