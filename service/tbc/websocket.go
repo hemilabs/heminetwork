@@ -56,16 +56,6 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
 
-	// helper to write ws response or return error
-	writeHandleBtcBlockMetadataByNumResponse := func(res tbcapi.BtcBlockMetadataByNumResponse) error {
-		if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
-			return fmt.Errorf("handleBtcBlockMetadataByNumRequest write: %v %v",
-				ws.addr, err)
-		}
-
-		return nil
-	}
-
 	// "decode" the input
 	p, ok := payload.(*tbcapi.BtcBlockMetadataByNumRequest)
 	if !ok {
@@ -75,13 +65,13 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	// use the api to get the block metadata by height
 	btcBlockMetadata, err := s.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
 	if err != nil {
-		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockMetadataByNumResponse{
 			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
 		})
 	}
 
 	// "encode" output and write response
-	return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockMetadataByNumResponse{
 		Block: *btcBlockMetadata,
 	})
 }
