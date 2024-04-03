@@ -636,9 +636,6 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd
 	oDB := l.pool[level.OutputsDB]
 	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
 	for it.Next() {
-		if !bytes.Equal(it.Key()[1:33], sh[:]) {
-			panic(spew.Sdump(it.Key()[1:33]))
-		}
 		index := binary.BigEndian.Uint32(it.Key()[65:])
 		value := binary.BigEndian.Uint64(it.Value())
 		utxo := tbcd.NewUtxo(sh, value, index)
