@@ -1185,6 +1185,65 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 	return balance, nil
 }
 
+func feesFromTransactions(txs []*btcutil.Tx) error {
+	for idx, tx := range txs {
+		for _, txIn := range tx.MsgTx().TxIn {
+			if idx == 0 {
+				// Skip coinbase inputs
+				continue
+			}
+			_ = txIn
+		}
+		for outIndex, txOut := range tx.MsgTx().TxOut {
+			if txscript.IsUnspendable(txOut.PkScript) {
+				continue
+			}
+			_ = outIndex
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64, error) {
+	log.Tracef("FeesAtHeight")
+	defer log.Tracef("FeesAtHeight exit")
+
+	if height-count < 0 {
+		return 0, fmt.Errorf("height - count is less than 0")
+	}
+	var fees uint64
+	for i := int64(0); i < int64(count); i++ {
+		log.Infof("%v", uint64(height-i))
+		bhs, err := s.db.BlockHeadersByHeight(ctx, uint64(height-i))
+		if err != nil {
+			return 0, fmt.Errorf("headers by height: %w", err)
+		}
+		if len(bhs) != 1 {
+			return 0, fmt.Errorf("too many block headers: %v", len(bhs))
+		}
+		be, err := s.db.BlockByHash(ctx, bhs[0].Hash)
+		if err != nil {
+			return 0, fmt.Errorf("block by hash: %w", err)
+		}
+		b, err := btcutil.NewBlockFromBytes(be.Block)
+		if err != nil {
+			ch, _ := chainhash.NewHash(bhs[0].Hash)
+			return 0, fmt.Errorf("could not decode block %v %v: %v",
+				height, ch, err)
+		}
+
+		// walk block tx'
+		err = feesFromTransactions(b.Transactions())
+		if err != nil {
+			return 0, fmt.Errorf("fees from transactions %v %v: %v",
+				height, b.Hash(), err)
+		}
+	}
+
+	return fees, nil
+}
+
 // DBOpen opens the undelying server database. It has been put in its own
 // function to make it available during tests and hemictl.
 func (s *Server) DBOpen(ctx context.Context) error {

@@ -638,7 +638,9 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd
 	for it.Next() {
 		index := binary.BigEndian.Uint32(it.Key()[65:])
 		value := binary.BigEndian.Uint64(it.Value())
-		utxos = append(utxos, tbcd.NewUtxo(sh, value, index))
+		var txId tbcd.TxId
+		copy(txId[:], it.Key()[33:65])
+		utxos = append(utxos, tbcd.NewUtxo(txId, value, index))
 	}
 	it.Release()
 	if err := it.Error(); err != nil {
@@ -648,7 +650,7 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd
 	return utxos, nil
 }
 
-func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
+func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	log.Tracef("BlockUtxoUpdate")
 	defer log.Tracef("BlockUtxoUpdate exit")
 

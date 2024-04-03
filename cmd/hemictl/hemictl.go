@@ -337,6 +337,29 @@ func tbcdb() error {
 			fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
 		}
 
+	case "feessbyheight":
+		height := args["height"]
+		if height == "" {
+			return fmt.Errorf("height: must be set")
+		}
+		h, err := strconv.ParseInt(height, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+		count := args["count"]
+		c, err := strconv.ParseInt(count, 10, 64)
+		if len(count) > 0 && err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+		if c == 0 {
+			c = 1
+		}
+		bh, err := s.FeesAtHeight(ctx, h, c)
+		if err != nil {
+			return fmt.Errorf("fees by height: %w", err)
+		}
+		spew.Dump(bh)
+
 	case "help", "h":
 		fmt.Printf("tbcd db manipulator commands:\n")
 		fmt.Printf("\tbalancebyscripthash [hash]\n")
