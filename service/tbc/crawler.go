@@ -51,18 +51,6 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 	return nil
 }
 
-//// indexBlock XXX this function may need to become parseBlockAndCache. The idea
-//// was to separate parseBlockAndCache for tests but we need a db lookup. Debate
-//// if moving the lookup in the db makes sense or not.
-//func (s *Server) indexBlock(ctx context.Context, height uint64, b *tbcd.Block) error {
-//	log.Tracef("indexBlock")
-//	defer log.Tracef("indexBlock")
-//
-//	_, err := s.parseBlockAndCache(ctx, s.chainParams, b.Block, s.utxos)
-//
-//	return err
-//}
-
 func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint) {
 	defer w.Done()
 
@@ -187,6 +175,14 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		circuitBreaker = true
 		maxHeight = height + count
 	}
+
+	// Allocate here so that we don't waste space
+	// XXX remove from struct altogether?
+	s.utxos = make(map[tbcd.Outpoint]tbcd.Utxo, defaultUtxoSize)
+	defer func() {
+		clear(s.utxos)
+		s.utxos = nil
+	}()
 
 	log.Infof("Start indexing UTxos at height %v count %v", height, count)
 	for {
@@ -320,6 +316,14 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 		circuitBreaker = true
 		maxHeight = height + count
 	}
+
+	// Allocate here so that we don't waste space
+	// XXX remove from struct altogether?
+	s.txs = make(map[tbcd.TxKey]*tbcd.TxValue, defaultTxSize)
+	defer func() {
+		clear(s.txs)
+		s.txs = nil
+	}()
 
 	log.Infof("Start indexing transactions at height %v count %v", height, count)
 	for {
