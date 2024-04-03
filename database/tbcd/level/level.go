@@ -638,8 +638,7 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd
 	for it.Next() {
 		index := binary.BigEndian.Uint32(it.Key()[65:])
 		value := binary.BigEndian.Uint64(it.Value())
-		utxo := tbcd.NewUtxo(sh, value, index)
-		utxos = append(utxos, utxo)
+		utxos = append(utxos, tbcd.NewUtxo(sh, value, index))
 	}
 	it.Release()
 	if err := it.Error(); err != nil {
