@@ -47,14 +47,14 @@ func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, 
 	return nil
 }
 
-func (s *Server) handleBtcBlockHeaderByHeightRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
-	log.Tracef("handleBtcBlockHeaderByHeightRequest: %v", ws.addr)
-	defer log.Tracef("handleBtcBlockHeaderByHeightRequest exit: %v", ws.addr)
+func (s *Server) handleBtcBlockHeadersByHeightRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
+	log.Tracef("handleBtcBlockHeadersByHeightRequest: %v", ws.addr)
+	defer log.Tracef("handleBtcBlockHeadersByHeightRequest exit: %v", ws.addr)
 
 	// "decode" the input
 	p, ok := payload.(*tbcapi.BtcBlockHeaderByHeightRequest)
 	if !ok {
-		return fmt.Errorf("handleBtcBlockHeaderByHeightRequest invalid payload type: %T", payload)
+		return fmt.Errorf("handleBtcBlockHeadersByHeightRequest invalid payload type: %T", payload)
 	}
 
 	blockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(p.Height))
@@ -85,7 +85,7 @@ func (s *Server) handleBtcBalanceByAddrRequest(ctx context.Context, ws *tbcWs, p
 
 	p, ok := payload.(*tbcapi.BtcAddrBalanceRequest)
 	if !ok {
-		return fmt.Errorf("handleBtcBlockHeaderByHeightRequest invalid payload type: %T", payload)
+		return fmt.Errorf("handleBtcBlockHeadersByHeightRequest invalid payload type: %T", payload)
 	}
 
 	balance, err := s.BalanceByAddress(ctx, p.Address)
@@ -170,7 +170,7 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 		case tbcapi.CmdPingRequest:
 			err = s.handlePingRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBtcBlockHeaderByHeightRequest:
-			err = s.handleBtcBlockHeaderByHeightRequest(ctx, ws, payload, id)
+			err = s.handleBtcBlockHeadersByHeightRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBtcBalanceByAddressRequest:
 			err = s.handleBtcBalanceByAddrRequest(ctx, ws, payload, id)
 		default:
