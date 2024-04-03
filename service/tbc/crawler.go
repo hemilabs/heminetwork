@@ -23,7 +23,7 @@ var (
 	TxIndexHeightKey   = []byte("txindexheight")   // last indexed tx height key
 )
 
-func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
+func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if idx == 0 {
@@ -41,7 +41,7 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
-			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewUtxo(
+			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
 				sha256.Sum256(txOut.PkScript),
 				uint64(txOut.Value),
 				uint32(outIndex))
@@ -51,7 +51,7 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 	return nil
 }
 
-func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.Utxo) {
+func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
 	defer w.Done()
 
 	pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
@@ -64,11 +64,11 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 		return
 	}
 	s.mtx.Lock()
-	utxos[op] = tbcd.NewDeleteUtxo(*pkScript, op.TxIndex())
+	utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
 	s.mtx.Unlock()
 }
 
-func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.Utxo) error {
+func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	w := new(sync.WaitGroup)
 	txs := b.Transactions()
 	for idx, tx := range txs {
@@ -97,7 +97,7 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbc
 	return nil
 }
 
-func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight uint64, utxos map[tbcd.Outpoint]tbcd.Utxo) (int, error) {
+func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight uint64, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, error) {
 	log.Tracef("indexUtxoBlocks")
 	defer log.Tracef("indexUtxoBlocks")
 
@@ -178,7 +178,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 	}
 
 	// Allocate here so that we don't waste space when not indexing.
-	utxos := make(map[tbcd.Outpoint]tbcd.Utxo, s.cfg.MaxCachedTxs)
+	utxos := make(map[tbcd.Outpoint]tbcd.CacheOutput, s.cfg.MaxCachedTxs)
 	defer clear(utxos)
 
 	log.Infof("Start indexing UTxos at height %v count %v", height, count)
