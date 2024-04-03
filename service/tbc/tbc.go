@@ -8,14 +8,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -1166,50 +1164,7 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wir
 	return bhsw, nil
 }
 
-func (s *Server) BlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error) {
-	log.Tracef("BlockMetadataByHeight")
-	defer log.Tracef("BlockMetadataByHeight exit")
-
-	bh, err := s.db.BlockHeadersByHeight(ctx, height)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(bh) == 0 {
-		return nil, fmt.Errorf("no block headers found for height %d", height)
-	}
-
-	b, err := s.db.BlockByHash(ctx, bh[0].Hash)
-	if err != nil {
-		return nil, err
-	}
-
-	block, err := btcutil.NewBlockFromBytes(b.Block)
-	if err != nil {
-		return nil, err
-	}
-
-	prevHash := block.MsgBlock().Header.PrevBlock[:]
-	slices.Reverse(prevHash)
-
-	merkleRoot := block.MsgBlock().Header.MerkleRoot[:]
-	slices.Reverse(merkleRoot)
-
-	return &tbcapi.BtcBlockMetadata{
-		Height: uint32(bh[0].Height),
-		NumTx:  uint32(len(block.Transactions())),
-		Header: tbcapi.BtcHeader{
-			Version:    uint32(block.MsgBlock().Header.Version),
-			PrevHash:   hex.EncodeToString(prevHash),
-			MerkleRoot: hex.EncodeToString(merkleRoot),
-			Timestamp:  uint64(block.MsgBlock().Header.Timestamp.Unix()),
-			Bits:       fmt.Sprintf("%x", block.MsgBlock().Header.Bits),
-			Nonce:      block.MsgBlock().Header.Nonce,
-		},
-	}, nil
-}
-
-func (s *Server) AddressBalance(ctx context.Context, encodedAddress string) (uint64, error) {
+func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (uint64, error) {
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
 	if err != nil {
 		return 0, err
