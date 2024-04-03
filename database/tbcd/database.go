@@ -95,29 +95,30 @@ type Peer struct {
 // Outpoint is a bitcoin structure that points to a transaction in a block. It
 // is expressed as an array of bytes in order to pack it as dense as possible
 // for memory conservation reasons.
-type Outpoint [36]byte // Outpoint Tx id
+type Outpoint [37]byte // Outpoint Tx id
 
 // String returns a reversed pretty printed outpoint.
 func (o Outpoint) String() string {
-	hash, _ := chainhash.NewHash(o[0:32])
-	return fmt.Sprintf("%s:%d", hash, binary.BigEndian.Uint32(o[32:]))
+	hash, _ := chainhash.NewHash(o[1:33])
+	return fmt.Sprintf("%s:%d", hash, binary.BigEndian.Uint32(o[33:]))
 }
 
 func (o Outpoint) TxId() []byte {
-	return o[0:32]
+	return o[1:33]
 }
 
 func (o Outpoint) TxIndex() uint32 {
-	return binary.BigEndian.Uint32(o[32:])
+	return binary.BigEndian.Uint32(o[33:])
 }
 
 func (o Outpoint) TxIndexBytes() []byte {
-	return o[32:]
+	return o[33:]
 }
 
 func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
-	copy(op[0:32], txid[:])
-	binary.BigEndian.PutUint32(op[32:], index)
+	op[0] = 'u' // match leveldb cache so that we preven a bunch of bcopy
+	copy(op[1:33], txid[:])
+	binary.BigEndian.PutUint32(op[33:], index)
 	return
 }
 
