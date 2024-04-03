@@ -18,7 +18,8 @@ import (
 )
 
 type storageApi interface {
-	BtcBlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
+	BlockMetadataByHeight(ctx context.Context, height uint64) (*tbcapi.BtcBlockMetadata, error)
+	AddressBalance(ctx context.Context, encodedAddress string) (uint64, error)
 }
 
 type tbcWs struct {
@@ -55,16 +56,6 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	log.Tracef("handleBtcBlockMetadataByNumRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockMetadataByNumRequest exit: %v", ws.addr)
 
-	// helper to write ws response or return error
-	writeHandleBtcBlockMetadataByNumResponse := func(res tbcapi.BtcBlockMetadataByNumResponse) error {
-		if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
-			return fmt.Errorf("handleBtcBlockMetadataByNumRequest write: %v %v",
-				ws.addr, err)
-		}
-
-		return nil
-	}
-
 	// "decode" the input
 	p, ok := payload.(*tbcapi.BtcBlockMetadataByNumRequest)
 	if !ok {
@@ -72,16 +63,37 @@ func (ws *tbcWs) handleBtcBlockMetadataByNumRequest(ctx context.Context, payload
 	}
 
 	// use the api to get the block metadata by height
-	btcBlockMetadata, err := s.BtcBlockMetadataByHeight(ctx, uint64(p.Height))
+	btcBlockMetadata, err := s.BlockMetadataByHeight(ctx, uint64(p.Height))
 	if err != nil {
-		return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockMetadataByNumResponse{
 			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
 		})
 	}
 
 	// "encode" output and write response
-	return writeHandleBtcBlockMetadataByNumResponse(tbcapi.BtcBlockMetadataByNumResponse{
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockMetadataByNumResponse{
 		Block: *btcBlockMetadata,
+	})
+}
+
+func (ws *tbcWs) handleBtcBalanceByAddrRequest(ctx context.Context, payload any, id string, s storageApi) error {
+	log.Tracef("handleBtcBalanceByAddrRequest: %v", ws.addr)
+	defer log.Tracef("handleBtcBalanceByAddrRequest exit: %v", ws.addr)
+
+	p, ok := payload.(*tbcapi.BtcAddrBalanceRequest)
+	if !ok {
+		return fmt.Errorf("handleBtcBlockMetadataByNumRequest invalid payload type: %T", payload)
+	}
+
+	balance, err := s.AddressBalance(ctx, p.Address)
+	if err != nil {
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcAddrBalanceResponse{
+			Error: protocol.Errorf("error getting balance for address: %s", err),
+		})
+	}
+
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcAddrBalanceResponse{
+		Balance: balance,
 	})
 }
 
@@ -156,6 +168,8 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			err = ws.handlePingRequest(ctx, payload, id)
 		case tbcapi.CmdBtcBlockMetadataByNumRequest:
 			err = ws.handleBtcBlockMetadataByNumRequest(ctx, payload, id, s)
+		case tbcapi.CmdBtcAddrBalanceRequest:
+			err = ws.handleBtcBalanceByAddrRequest(ctx, payload, id, s)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
