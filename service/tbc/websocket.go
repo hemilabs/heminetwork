@@ -90,15 +90,6 @@ func (ws *tbcWs) handleBtcBalanceByAddrRequest(ctx context.Context, payload any,
 	log.Tracef("handleBtcBalanceByAddrRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBalanceByAddrRequest exit: %v", ws.addr)
 
-	writeHandleBtcBalanceByAddrRequestResponse := func(res tbcapi.BtcAddrBalanceResponse) error {
-		if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
-			return fmt.Errorf("handleBtcBalanceByAddrRequest write: %v %v",
-				ws.addr, err)
-		}
-
-		return nil
-	}
-
 	p, ok := payload.(*tbcapi.BtcAddrBalanceRequest)
 	if !ok {
 		return fmt.Errorf("handleBtcBlockMetadataByNumRequest invalid payload type: %T", payload)
@@ -106,12 +97,12 @@ func (ws *tbcWs) handleBtcBalanceByAddrRequest(ctx context.Context, payload any,
 
 	balance, err := s.BtcAddressBalance(ctx, p.Address)
 	if err != nil {
-		return writeHandleBtcBalanceByAddrRequestResponse(tbcapi.BtcAddrBalanceResponse{
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcAddrBalanceResponse{
 			Error: protocol.Errorf("error getting balance for address: %s", err),
 		})
 	}
 
-	return writeHandleBtcBalanceByAddrRequestResponse(tbcapi.BtcAddrBalanceResponse{
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcAddrBalanceResponse{
 		Balance: balance,
 	})
 }
