@@ -2,8 +2,10 @@ package tbc
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -176,5 +178,40 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 
 		// Command successfully completed
 		s.cmdsProcessed.Inc()
+	}
+}
+
+func (s *Server) newSession(ws *tbcWs) (string, error) {
+	b := make([]byte, 16)
+
+	for {
+		// Create random hexadecimal string to use as an ID
+		_, err := rand.Read(b)
+		if err != nil {
+			return "", err
+		}
+		id := hex.EncodeToString(b)
+
+		// Ensure the key is not already in use, if it is then try again.
+		s.mtx.Lock()
+		if _, ok := s.sessions[id]; ok {
+			s.mtx.Unlock()
+			continue
+		}
+		s.sessions[id] = ws
+		s.mtx.Unlock()
+
+		return id, nil
+	}
+}
+
+func (s *Server) deleteSession(id string) {
+	s.mtx.Lock()
+	_, ok := s.sessions[id]
+	delete(s.sessions, id)
+	s.mtx.Unlock()
+
+	if !ok {
+		log.Errorf("id not found in sessions %s", id)
 	}
 }
