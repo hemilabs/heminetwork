@@ -5,6 +5,7 @@
 package level
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
