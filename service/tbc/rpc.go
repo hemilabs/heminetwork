@@ -1,12 +1,14 @@
 package tbc
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 type tbcWs struct {
@@ -145,6 +148,12 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 			Error: protocol.Errorf("error getting utxos for address: %s", err),
 		})
 	}
+
+	// XXX - I am almost positive that order is guaranteed when coming from the db
+	// but just in case let's sort before we paginate for consistency
+	slices.SortFunc(utxos, func(one tbcd.Utxo, two tbcd.Utxo) int {
+		return cmp.Compare(hex.EncodeToString(one[:]), hex.EncodeToString(two[:]))
+	})
 
 	// XXX - we should paginate at the db query, but I am in a rush
 	skip := p.Start
