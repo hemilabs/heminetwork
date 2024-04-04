@@ -786,10 +786,16 @@ func TestTxById(t *testing.T) {
 
 			// XXX - write a better test than this, we should be able to compare
 			// against bitcoin-cli response fields
+
 			// did we get the tx and can we parse it?
-			_, err := bytes2Tx(response.Tx)
+			tx, err := bytes2Tx(response.Tx)
 			if err != nil {
 				t.Fatal(err)
+			}
+
+			// is the hash equal to what we queried for?
+			if tx.TxHash().String() != txId {
+				t.Fatalf("id mismatch: %s != %s", tx.TxHash().String(), txId)
 			}
 
 			break
