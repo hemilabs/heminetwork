@@ -2,10 +2,12 @@ package tbc
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -440,7 +442,7 @@ func TestBalanceByAddress(t *testing.T) {
 						if response.Error != nil {
 							t.Error(response.Error.Message)
 						}
-						t.Logf("unexpected diff, : %s", diff)
+						t.Logf("unexpected diff: %s", diff)
 
 						// there is a chance we just haven't finished indexing
 						// the blocks and txs, retry until timeout
@@ -666,6 +668,148 @@ func TestUtxosByAddress(t *testing.T) {
 	}
 }
 
+func TestTxById(t *testing.T) {
+	skipIfNoDocker(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+	bitcoindContainer := createBitcoind(ctx, t)
+	bitcoindHost, err := bitcoindContainer.Host(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	peerPort, err := nat.NewPort("tcp", "18444")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rpcPort, err := nat.NewPort("tcp", "18443")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, peerPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mappedRpcPort, err := bitcoindContainer.MappedPort(ctx, rpcPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("bitcoind host is: %s", bitcoindHost)
+	t.Logf("bitcoind peer port is: %s", mappedPeerPort.Port())
+	t.Logf("bitcoind rpc port is: %s", mappedRpcPort.Port())
+
+	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"generatetoaddress",
+			"4",
+			address.EncodeAddress(),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.TxByIdResponse
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lastErr = nil
+		txId := getRandomTxId(ctx, t, bitcoindContainer)
+		txIdBytes, err := hex.DecodeString(txId)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		slices.Reverse(txIdBytes)
+
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+			TxId: [32]byte(txIdBytes),
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdTxByIdResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+
+			if response.Error != nil {
+				t.Fatal(response.Error.Message)
+			}
+
+			// XXX - write a better test than this, we should be able to compare
+			// against bitcoin-cli response fields
+
+			// did we get the tx and can we parse it?
+			tx, err := bytes2Tx(response.Tx)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// is the hash equal to what we queried for?
+			if tx.TxHash().String() != txId {
+				t.Fatalf("id mismatch: %s != %s", tx.TxHash().String(), txId)
+			}
+
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+}
+
 func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
 	name := fmt.Sprintf("bitcoind-%d", time.Now().Unix())
 	req := testcontainers.ContainerRequest{
@@ -710,6 +854,49 @@ func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer test
 
 	// first 8 bytes are header, there is also a newline character at the end of the response
 	return buf.String()[8 : len(buf.String())-1], nil
+}
+
+func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container) string {
+	blockHash, err := runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"getblockhash",
+			fmt.Sprintf("%d", 1),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockJson, err := runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"getblock",
+			blockHash,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var parsed struct {
+		Tx []string `json:"tx"`
+	}
+	if err := json.Unmarshal([]byte(blockJson), &parsed); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(parsed.Tx) == 0 {
+		t.Fatal("was expecting at least 1 transaction")
+	}
+
+	return parsed.Tx[0]
 }
 
 func getEndpointWithRetries(ctx context.Context, container testcontainers.Container, retries int) (string, error) {
