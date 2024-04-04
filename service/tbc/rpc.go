@@ -79,6 +79,36 @@ func (s *Server) handleBtcBlockHeadersByHeightRequest(ctx context.Context, ws *t
 	})
 }
 
+func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
+	log.Tracef("handleBlockHeadersBestRequest: %v", ws.addr)
+	defer log.Tracef("handleBlockHeadersBestRequest exit: %v", ws.addr)
+
+	if _, ok := payload.(*tbcapi.BlockHeadersBestRequest); !ok {
+		return fmt.Errorf("handleBlockHeadersBestRequest invalid payload type: %T", payload)
+	}
+
+	height, blockHeaders, err := s.BlockHeadersBest(ctx)
+	if err != nil {
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BlockHeadersBestResponse{
+			Error: protocol.Errorf("error getting best block headers: %v", err),
+		})
+	}
+
+	var encodedBlockHeaders [][]byte
+	for _, bh := range blockHeaders {
+		bytes, err := header2Bytes(&bh)
+		if err != nil {
+			return err
+		}
+		encodedBlockHeaders = append(encodedBlockHeaders, bytes)
+	}
+
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BlockHeadersBestResponse{
+		Height:       height,
+		BlockHeaders: encodedBlockHeaders,
+	})
+}
+
 func (s *Server) handleBtcBalanceByAddrRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
 	log.Tracef("handleBtcBalanceByAddrRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBalanceByAddrRequest exit: %v", ws.addr)
@@ -171,6 +201,8 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			err = s.handlePingRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBtcBlockHeaderByHeightRequest:
 			err = s.handleBtcBlockHeadersByHeightRequest(ctx, ws, payload, id)
+		case tbcapi.CmdBlockHeadersBestRequest:
+			err = s.handleBlockHeadersBestRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBtcBalanceByAddressRequest:
 			err = s.handleBtcBalanceByAddrRequest(ctx, ws, payload, id)
 		default:
