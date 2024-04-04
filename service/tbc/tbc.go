@@ -1225,6 +1225,27 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 	return balance, nil
 }
 
+func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string) ([]tbcd.Utxo, error) {
+	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	script, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	scriptHash := sha256.Sum256(script)
+
+	utxos, err := s.db.UtxosByScriptHash(ctx, scriptHash)
+	if err != nil {
+		return nil, err
+	}
+
+	return utxos, nil
+}
+
 func feesFromTransactions(txs []*btcutil.Tx) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
