@@ -1395,6 +1395,10 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("insert genesis: %v", err)
 		}
+		bhs, err = s.db.BlockHeadersBest(ctx)
+		if err != nil {
+			return err
+		}
 	} else if len(bhs) > 1 {
 		return fmt.Errorf("blockheaders best: unsupported fork")
 	}
