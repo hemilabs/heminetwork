@@ -1,3 +1,7 @@
+# Copyright (c) 2024 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
 version: '3'
 services:
   bitcoind:
@@ -52,7 +56,10 @@ services:
     image: 'lukechilds/electrumx'
     environment:
       DAEMON_URL: 'http://user:password@bitcoind:18443'
-      COIN: 'BitcoinSegwit'
+      COIN: 'Bitcoin'
+      COST_HARD_LIMIT: '0'
+      COST_SOFT_LIMIT: '0'
+      MAX_SEND: '8388608'
       NET: 'regtest'
     ports:
       - 50001:50001

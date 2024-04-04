@@ -1,3 +1,7 @@
+// Copyright (c) 2024 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package e2e
 
 import (
@@ -309,9 +313,12 @@ func createElectrumx(ctx context.Context, t *testing.T, bitcoindEndpoint string)
 	req := testcontainers.ContainerRequest{
 		Image: "lukechilds/electrumx",
 		Env: map[string]string{
-			"DAEMON_URL": bitcoindEndpoint,
-			"COIN":       "BitcoinSegwit",
-			"NET":        "regtest",
+			"DAEMON_URL":      bitcoindEndpoint,
+			"COIN":            "Bitcoin",
+			"COST_HARD_LIMIT": "0",
+			"COST_SOFT_LIMIT": "0",
+			"MAX_SEND":        "8388608",
+			"NET":             "regtest",
 		},
 		ExposedPorts: []string{"50001/tcp"},
 		WaitingFor:   wait.ForLog("INFO:Daemon:daemon #1").WithPollInterval(1 * time.Second),

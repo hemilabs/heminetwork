@@ -8,6 +8,7 @@ package popm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -32,7 +33,7 @@ func (m *Miner) handlePrometheus(ctx context.Context) error {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		if err := d.Run(ctx, cs); err != context.Canceled {
+		if err := d.Run(ctx, cs); !errors.Is(err, context.Canceled) {
 			log.Errorf("prometheus terminated with error: %v", err)
 			return
 		}

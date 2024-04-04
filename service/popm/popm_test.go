@@ -875,7 +875,7 @@ func TestConnectToBFGAndPerformMineWithAuth(t *testing.T) {
 		}
 
 		err = miner.Run(ctx)
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
@@ -939,7 +939,7 @@ func TestConnectToBFGAndPerformMine(t *testing.T) {
 		}
 
 		err = miner.Run(ctx)
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
@@ -1003,7 +1003,7 @@ func TestConnectToBFGAndPerformMineMultiple(t *testing.T) {
 		}
 
 		err = miner.Run(ctx)
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
@@ -1068,7 +1068,7 @@ func TestConnectToBFGAndPerformMineALot(t *testing.T) {
 		}
 
 		err = miner.Run(ctx)
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
