@@ -193,7 +193,7 @@ func TestBtcBlockHeaderByHeightDoesNotExist(t *testing.T) {
 	}
 }
 
-func TestServer_BlockHeadersBest(t *testing.T) {
+func TestServerBlockHeadersBest(t *testing.T) {
 	skipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
