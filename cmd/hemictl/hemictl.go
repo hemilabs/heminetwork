@@ -555,10 +555,31 @@ func tbcdb() error {
 	case "utxosbyscripthash":
 		address := args["address"]
 		hash := args["hash"]
+		count := args["count"]
+		start := args["start"]
+
 		if address == "" && hash == "" {
 			return fmt.Errorf("hash or address: must be set")
 		} else if address != "" && hash != "" {
 			return fmt.Errorf("hash or address: both set")
+		}
+
+		if count == "" {
+			count = "100"
+		}
+
+		if start == "" {
+			start = "0"
+		}
+
+		countNum, err := strconv.ParseUint(count, 10, 64)
+		if err != nil {
+			return err
+		}
+
+		startNum, err := strconv.ParseUint(start, 10, 64)
+		if err != nil {
+			return err
 		}
 
 		var hh [32]byte
@@ -583,7 +604,7 @@ func tbcdb() error {
 			copy(hh[:], sh[:])
 		}
 
-		utxos, err := s.DB().UtxosByScriptHash(ctx, hh)
+		utxos, err := s.DB().UtxosByScriptHash(ctx, hh, startNum, countNum)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
