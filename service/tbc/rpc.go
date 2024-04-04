@@ -164,11 +164,11 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 			continue
 		}
 
+		encodedUtxos = append(encodedUtxos, utxo[:])
+
 		if len(encodedUtxos) >= int(p.Count) {
 			break
 		}
-
-		encodedUtxos = append(encodedUtxos, utxo[:])
 	}
 
 	return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
