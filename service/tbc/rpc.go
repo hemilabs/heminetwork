@@ -1,12 +1,14 @@
 package tbc
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 type tbcWs struct {
@@ -130,6 +133,49 @@ func (s *Server) handleBtcBalanceByAddrRequest(ctx context.Context, ws *tbcWs, p
 	})
 }
 
+func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
+	log.Tracef("handleUtxosByAddressRequest: %v", ws.addr)
+	defer log.Tracef("handleUtxosByAddressRequest exit: %v", ws.addr)
+
+	p, ok := payload.(*tbcapi.UtxosByAddressRequest)
+	if !ok {
+		return fmt.Errorf("handleUtxosByAddressRequest invalid payload type: %T", payload)
+	}
+
+	utxos, err := s.UtxosByAddress(ctx, p.Address)
+	if err != nil {
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
+			Error: protocol.Errorf("error getting utxos for address: %s", err),
+		})
+	}
+
+	// XXX - I am almost positive that order is guaranteed when coming from the db
+	// but just in case let's sort before we paginate for consistency
+	slices.SortFunc(utxos, func(one tbcd.Utxo, two tbcd.Utxo) int {
+		return cmp.Compare(hex.EncodeToString(one[:]), hex.EncodeToString(two[:]))
+	})
+
+	// XXX - we should paginate at the db query, but I am in a rush
+	skip := p.Start
+	encodedUtxos := [][]byte{}
+	for _, utxo := range utxos {
+		if skip > 0 {
+			skip--
+			continue
+		}
+
+		encodedUtxos = append(encodedUtxos, utxo[:])
+
+		if len(encodedUtxos) >= int(p.Count) {
+			break
+		}
+	}
+
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
+		Utxos: encodedUtxos,
+	})
+}
+
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleWebsocket: %v", r.RemoteAddr)
 	defer log.Tracef("handleWebsocket exit: %v", r.RemoteAddr)
@@ -205,6 +251,8 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			err = s.handleBlockHeadersBestRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBtcBalanceByAddressRequest:
 			err = s.handleBtcBalanceByAddrRequest(ctx, ws, payload, id)
+		case tbcapi.CmdUtxosByAddressRequest:
+			err = s.handleUtxosByAddressRequest(ctx, ws, payload, id)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}

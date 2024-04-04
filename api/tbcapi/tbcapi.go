@@ -23,6 +23,9 @@ const (
 
 	CmdBtcBalanceByAddressRequest  = "tbcapi-btc-balance-by-address-request"
 	CmdBtcBalanceByAddressResponse = "tbcapi-btc-balance-by-address-response"
+
+	CmdUtxosByAddressRequest  = "tbcapi-utxos-by-address-request"
+	CmdUtxosByAddressResponse = "tbcapi-utxos-by-address-response"
 )
 
 var (
@@ -87,6 +90,17 @@ type BtcAddrBalanceResponse struct {
 	Error   *protocol.Error `json:"error,omitempty"`
 }
 
+type UtxosByAddressRequest struct {
+	Address string `json:"address"`
+	Start   uint   `json:"start"`
+	Count   uint   `json:"count"`
+}
+
+type UtxosByAddressResponse struct {
+	Utxos [][]byte        `json:"utxos"`
+	Error *protocol.Error `json:"error"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                    reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                   reflect.TypeOf(PingResponse{}),
@@ -96,6 +110,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockHeadersBestResponse:       reflect.TypeOf(BlockHeadersBestResponse{}),
 	CmdBtcBalanceByAddressRequest:     reflect.TypeOf(BtcAddrBalanceRequest{}),
 	CmdBtcBalanceByAddressResponse:    reflect.TypeOf(BtcAddrBalanceResponse{}),
+	CmdUtxosByAddressRequest:          reflect.TypeOf(UtxosByAddressRequest{}),
+	CmdUtxosByAddressResponse:         reflect.TypeOf(UtxosByAddressResponse{}),
 }
 
 type tbcAPI struct{}
