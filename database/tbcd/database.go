@@ -10,8 +10,10 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 
 	"github.com/hemilabs/heminetwork/database"
 )
@@ -61,6 +63,29 @@ type BlockHeader struct {
 	Hash   database.ByteArray
 	Height uint64
 	Header database.ByteArray
+}
+
+func (bh BlockHeader) String() string {
+	ch, _ := chainhash.NewHash(bh.Hash)
+	return ch.String()
+}
+
+func (bh BlockHeader) Timestamp() time.Time {
+	var wbh wire.BlockHeader
+	err := wbh.Deserialize(bytes.NewReader(bh.Header))
+	if err != nil {
+		return time.Time{}
+	}
+	return wbh.Timestamp
+}
+
+func (bh BlockHeader) Wire() (*wire.BlockHeader, error) {
+	var wbh wire.BlockHeader
+	err := wbh.Deserialize(bytes.NewReader(bh.Header))
+	if err != nil {
+		return nil, fmt.Errorf("deserialize: %w", err)
+	}
+	return &wbh, nil
 }
 
 // Block contains a raw bitcoin block and its corresponding hash.
