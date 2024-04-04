@@ -784,6 +784,8 @@ func TestTxById(t *testing.T) {
 				t.Fatal(response.Error.Message)
 			}
 
+			// XXX - write a better test than this, we should be able to compare
+			// against bitcoin-cli response fields
 			// did we get the tx and can we parse it?
 			_, err := bytes2Tx(response.Tx)
 			if err != nil {
