@@ -607,7 +607,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	// multiple answers come in the insert of the headers fails or
 	// succeeds. If it fails no more headers will be requested from that
 	// peer.
-	bhs, err := s.blockHeadersBest(ctx)
+	bhs, err := s.ibdBlockheadersBest(ctx)
 	if err != nil {
 		log.Errorf("block headers best: %v", err)
 		return
@@ -1068,9 +1068,9 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) blockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
-	log.Tracef("blockHeadersBest")
-	defer log.Tracef("blockHeadersBest exit")
+func (s *Server) ibdBlockheadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
+	log.Tracef("ibdBlockheadersBest")
+	defer log.Tracef("ibdBlockheadersBest exit")
 
 	// Find out where IBD is at
 	bhs, err := s.db.BlockHeadersBest(ctx)
@@ -1145,14 +1145,27 @@ func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*
 	return bhw, bh.Height, nil
 }
 
-func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wire.BlockHeader, error) {
-	log.Tracef("BlockHeadersByHeight")
-	defer log.Tracef("BlockHeadersByHeight exit")
+func (s *Server) blockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.BlockHeader, error) {
+	log.Tracef("blockHeadersByHeight")
+	defer log.Tracef("blockHeadersByHeight exit")
 
 	bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 	if err != nil {
 		return nil, fmt.Errorf("db block header by height: %w", err)
 	}
+
+	return bhs, nil
+}
+
+func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wire.BlockHeader, error) {
+	log.Tracef("BlockHeadersByHeight")
+	defer log.Tracef("BlockHeadersByHeight exit")
+
+	bhs, err := s.blockHeadersByHeight(ctx, height)
+	if err != nil {
+		return nil, err
+	}
+
 	bhsw := make([]wire.BlockHeader, 0, len(bhs))
 	for k := range bhs {
 		bhw, err := bytes2Header(bhs[k].Header)
