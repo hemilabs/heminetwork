@@ -63,7 +63,7 @@ var (
 		},
 		"TBC_MAX_CACHED_TXS": config.Config{
 			Value:        &cfg.MaxCachedTxs,
-			DefaultValue: 1e6,
+			DefaultValue: 1000000,
 			Help:         "maximum cached utxos and/or txs during indexing",
 			Print:        config.PrintAll,
 		},
