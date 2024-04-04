@@ -26,6 +26,9 @@ const (
 
 	CmdUtxosByAddressRequest  = "tbcapi-utxos-by-address-request"
 	CmdUtxosByAddressResponse = "tbcapi-utxos-by-address-response"
+
+	CmdTxByIdRequest  = "tbcapi-tx-by-id-request"
+	CmdTxByIdResponse = "tbcapi-tx-by-id-response"
 )
 
 var (
@@ -101,6 +104,15 @@ type UtxosByAddressResponse struct {
 	Error *protocol.Error `json:"error"`
 }
 
+type TxByIdRequest struct {
+	TxId [32]byte `json:"tx_id"`
+}
+
+type TxByIdResponse struct {
+	Tx    []byte          `json:"tx"`
+	Error *protocol.Error `json:"error"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                    reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                   reflect.TypeOf(PingResponse{}),
@@ -112,6 +124,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBtcBalanceByAddressResponse:    reflect.TypeOf(BtcAddrBalanceResponse{}),
 	CmdUtxosByAddressRequest:          reflect.TypeOf(UtxosByAddressRequest{}),
 	CmdUtxosByAddressResponse:         reflect.TypeOf(UtxosByAddressResponse{}),
+	CmdTxByIdRequest:                  reflect.TypeOf(TxByIdRequest{}),
+	CmdTxByIdResponse:                 reflect.TypeOf(TxByIdResponse{}),
 }
 
 type tbcAPI struct{}

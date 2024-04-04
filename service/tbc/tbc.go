@@ -8,12 +8,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
 	"net"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -78,6 +80,24 @@ var log = loggo.GetLogger("tbc")
 func init() {
 	loggo.ConfigureLoggers(logLevel)
 	rand.Seed(time.Now().UnixNano()) // used for seeding, ok to be math.rand
+}
+
+func tx2Bytes(tx *wire.MsgTx) ([]byte, error) {
+	var b bytes.Buffer
+	if err := tx.Serialize(&b); err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
+}
+
+func bytes2Tx(b []byte) (*wire.MsgTx, error) {
+	var w wire.MsgTx
+	if err := w.Deserialize(bytes.NewReader(b)); err != nil {
+		return nil, err
+	}
+
+	return &w, nil
 }
 
 func header2Bytes(wbh *wire.BlockHeader) ([]byte, error) {
@@ -1242,8 +1262,42 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string) ([]t
 	if err != nil {
 		return nil, err
 	}
-
 	return utxos, nil
+}
+
+func (s *Server) TxById(ctx context.Context, txId tbcd.TxId) (*wire.MsgTx, error) {
+	blockHashes, err := s.db.BlocksByTxId(ctx, txId)
+	if err != nil {
+		return nil, err
+	}
+
+	// chain hash stores the bytes in reverse order
+	revTxId := bytes.Clone(txId[:])
+	slices.Reverse(revTxId)
+	ch, err := chainhash.NewHashFromStr(hex.EncodeToString(revTxId[:]))
+	if err != nil {
+		return nil, err
+	}
+
+	for _, blockHash := range blockHashes {
+		block, err := s.db.BlockByHash(ctx, blockHash[:])
+		if err != nil {
+			return nil, err
+		}
+
+		parsedBlock, err := btcutil.NewBlockFromBytes(block.Block)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, tx := range parsedBlock.Transactions() {
+			if tx.Hash().IsEqual(ch) {
+				return tx.MsgTx(), nil
+			}
+		}
+	}
+
+	return nil, errors.New("tx not found")
 }
 
 func feesFromTransactions(txs []*btcutil.Tx) error {

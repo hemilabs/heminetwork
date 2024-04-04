@@ -176,6 +176,34 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 	})
 }
 
+func (s *Server) handleTxByIdRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
+	log.Tracef("handleTxByIdRequest: %v", ws.addr)
+	defer log.Tracef("handleTxByIdRequest exit: %v", ws.addr)
+
+	p, ok := payload.(*tbcapi.TxByIdRequest)
+	if !ok {
+		return fmt.Errorf("handleTxByIdRequest invalid payload type: %T", payload)
+	}
+
+	tx, err := s.TxById(ctx, p.TxId)
+	if err != nil {
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
+			Error: protocol.Errorf("error getting tx by id: %s", err),
+		})
+	}
+
+	b, err := tx2Bytes(tx)
+	if err != nil {
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
+			Error: protocol.NewInternalError(err).ProtocolError(),
+		})
+	}
+
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
+		Tx: b,
+	})
+}
+
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleWebsocket: %v", r.RemoteAddr)
 	defer log.Tracef("handleWebsocket exit: %v", r.RemoteAddr)
@@ -253,6 +281,8 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			err = s.handleBtcBalanceByAddrRequest(ctx, ws, payload, id)
 		case tbcapi.CmdUtxosByAddressRequest:
 			err = s.handleUtxosByAddressRequest(ctx, ws, payload, id)
+		case tbcapi.CmdTxByIdRequest:
+			err = s.handleTxByIdRequest(ctx, ws, payload, id)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
