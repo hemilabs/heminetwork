@@ -18,6 +18,9 @@ const (
 	CmdBtcBlockHeaderByHeightRequest  = "tbcapi-btc-block-header-by-height-request"
 	CmdBtcBlockHeaderByHeightResponse = "tbcapi-btc-block-header-by-height-response"
 
+	CmdBlockHeadersBestRequest  = "tbcapi-block-headers-best-request"
+	CmdBlockHeadersBestResponse = "tbcapi-block-headers-best-response"
+
 	CmdBtcBalanceByAddressRequest  = "tbcapi-btc-balance-by-address-request"
 	CmdBtcBalanceByAddressResponse = "tbcapi-btc-balance-by-address-response"
 )
@@ -63,8 +66,16 @@ type BtcBlockHeaderByHeightRequest struct {
 }
 
 type BtcBlockHeaderByHeightResponse struct {
-	Error        *protocol.Error `json:"error"`
 	BlockHeaders [][]byte        `json:"block_headers"`
+	Error        *protocol.Error `json:"error,omitempty"`
+}
+
+type BlockHeadersBestRequest struct{}
+
+type BlockHeadersBestResponse struct {
+	Height       uint64          `json:"height"`
+	BlockHeaders [][]byte        `json:"block_headers"`
+	Error        *protocol.Error `json:"error,omitempty"`
 }
 
 type BtcAddrBalanceRequest struct {
@@ -73,7 +84,7 @@ type BtcAddrBalanceRequest struct {
 
 type BtcAddrBalanceResponse struct {
 	Balance uint64          `json:"balance"`
-	Error   *protocol.Error `json:"error"`
+	Error   *protocol.Error `json:"error,omitempty"`
 }
 
 var commands = map[protocol.Command]reflect.Type{
@@ -81,6 +92,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdPingResponse:                   reflect.TypeOf(PingResponse{}),
 	CmdBtcBlockHeaderByHeightRequest:  reflect.TypeOf(BtcBlockHeaderByHeightRequest{}),
 	CmdBtcBlockHeaderByHeightResponse: reflect.TypeOf(BtcBlockHeaderByHeightResponse{}),
+	CmdBlockHeadersBestRequest:        reflect.TypeOf(BlockHeadersBestRequest{}),
+	CmdBlockHeadersBestResponse:       reflect.TypeOf(BlockHeadersBestResponse{}),
 	CmdBtcBalanceByAddressRequest:     reflect.TypeOf(BtcAddrBalanceRequest{}),
 	CmdBtcBalanceByAddressResponse:    reflect.TypeOf(BtcAddrBalanceResponse{}),
 }

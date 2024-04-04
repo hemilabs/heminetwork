@@ -1177,6 +1177,33 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wir
 	return bhsw, nil
 }
 
+// BlockHeadersBest returns the headers for the best known blocks.
+func (s *Server) BlockHeadersBest(ctx context.Context) (uint64, []wire.BlockHeader, error) {
+	log.Tracef("LastBlockMetadata")
+	defer log.Tracef("LastBlockMetadata exit")
+
+	bhs, err := s.db.BlockHeadersBest(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	var height uint64
+	if len(bhs) > 0 {
+		height = bhs[0].Height
+	}
+
+	bhsw := make([]wire.BlockHeader, 0, len(bhs))
+	for k := range bhs {
+		bhw, err := bytes2Header(bhs[k].Header)
+		if err != nil {
+			return 0, nil, fmt.Errorf("bytes to header: %w", err)
+		}
+		bhsw = append(bhsw, *bhw)
+	}
+
+	return height, bhsw, nil
+}
+
 func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (uint64, error) {
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
 	if err != nil {
@@ -1257,7 +1284,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 	return fees, fmt.Errorf("not yet")
 }
 
-// DBOpen opens the undelying server database. It has been put in its own
+// DBOpen opens the underlying server database. It has been put in its own
 // function to make it available during tests and hemictl.
 func (s *Server) DBOpen(ctx context.Context) error {
 	log.Tracef("DBOpen")
@@ -1269,14 +1296,14 @@ func (s *Server) DBOpen(ctx context.Context) error {
 	case "mainnet":
 	case networkLocalnet: // XXX why is this here?, this breaks the filepath.Join
 	default:
-		return fmt.Errorf("unsuported network: %v", s.cfg.Network)
+		return fmt.Errorf("unsupported network: %v", s.cfg.Network)
 	}
 
 	// Open db.
 	var err error
 	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
 	if err != nil {
-		return fmt.Errorf("Failed to open level database: %v", err)
+		return fmt.Errorf("open level database: %v", err)
 	}
 
 	return nil
