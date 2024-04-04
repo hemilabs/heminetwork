@@ -107,8 +107,6 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 		}
 	}
 
-	// XXX send sendheaders?
-
 	// 4. send verack
 	err = write(conn, wire.NewMsgVerAck(), p.protocolVersion, p.network)
 	if err != nil {

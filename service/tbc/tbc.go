@@ -600,7 +600,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			}
 			err = s.db.PeerDelete(ctx, host, port)
 			if err != nil {
-				log.Debugf("peer delete (%v): %v", pp, err)
+				log.Errorf("peer delete (%v): %v", pp, err)
 			} else {
 				log.Debugf("Peer delete: %v", pp)
 			}
@@ -618,7 +618,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	_ = p.write(wire.NewMsgSendHeaders()) // Ask peer to send headers
 	_ = p.write(wire.NewMsgGetAddr())     // Try to get network information
 
-	log.Infof("Peer connected: %v", p)
+	log.Debugf("Peer connected: %v", p)
 
 	// Pretend we are always in IBD.
 	//
@@ -627,16 +627,14 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	// multiple answers come in the insert of the headers fails or
 	// succeeds. If it fails no more headers will be requested from that
 	// peer.
-	bhs, err := s.ibdBlockheadersBest(ctx)
+	bhs, err := s.db.BlockHeadersBest(ctx)
 	if err != nil {
 		log.Errorf("block headers best: %v", err)
-		return
 	}
 	if len(bhs) != 1 {
 		// XXX fix multiple tips
 		panic(len(bhs))
 	}
-
 	log.Debugf("block header best hash: %s", bhs[0].Hash)
 
 	err = s.getHeaders(ctx, p, bhs[0].Header)
@@ -664,7 +662,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		} else if err != nil {
 			// reevaluate pending blocks cache
 			cacheUsed := s.blockPeerExpire()
-			log.Errorf("read (%v): %v -- pending blocks %v", p, err, cacheUsed)
+			log.Debugf("read (%v): %v -- pending blocks %v",
+				p, err, cacheUsed)
 			return
 		}
 
@@ -1088,35 +1087,6 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) ibdBlockheadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
-	log.Tracef("ibdBlockheadersBest")
-	defer log.Tracef("ibdBlockheadersBest exit")
-
-	// Find out where IBD is at
-	bhs, err := s.db.BlockHeadersBest(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("block headers best: %v", err)
-	}
-
-	// No entries means we are at genesis
-	// XXX this can hit several times at start of day. Figure out if we
-	// want to insert genesis earlier to prevent this error.
-	if len(bhs) == 0 {
-		err := s.insertGenesis(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("insert genesis: %v", err)
-		}
-		bhs = append(bhs, *genesisBlockHeader)
-	}
-
-	if len(bhs) != 1 {
-		// XXX this needs to be handled, for now try to just unfork
-		return nil, fmt.Errorf("unhandled best tip count: %v", spew.Sdump(bhs))
-	}
-
-	return bhs, nil
-}
-
 func (s *Server) downloadBlocks(ctx context.Context, bis []tbcd.BlockIdentifier) error {
 	log.Tracef("downloadBlocks")
 	defer log.Tracef("downloadBlocks exit")
@@ -1413,6 +1383,23 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Errorf("db close: %v", err)
 		}
 	}()
+
+	// Find out where IBD is at
+	bhs, err := s.db.BlockHeadersBest(ctx)
+	if err != nil {
+		return fmt.Errorf("block headers best: %v", err)
+	}
+	// No entries means we are at genesis
+	if len(bhs) == 0 {
+		err := s.insertGenesis(ctx)
+		if err != nil {
+			return fmt.Errorf("insert genesis: %v", err)
+		}
+	} else if len(bhs) > 1 {
+		return fmt.Errorf("blockheaders best: unsupported fork")
+	}
+	log.Infof("Starting block headers sync at height: %v time %v",
+		bhs[0].Height, bhs[0].Timestamp())
 
 	// HTTP server
 	mux := http.NewServeMux()
