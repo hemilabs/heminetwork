@@ -5,14 +5,12 @@
 package tbc
 
 import (
-	"cmp"
 	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 
@@ -21,7 +19,6 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 type tbcWs struct {
@@ -146,37 +143,20 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 		return fmt.Errorf("handleUtxosByAddressRequest invalid payload type: %T", payload)
 	}
 
-	utxos, err := s.UtxosByAddress(ctx, p.Address)
+	utxos, err := s.UtxosByAddress(ctx, p.Address, uint64(p.Start), uint64(p.Count))
 	if err != nil {
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
 			Error: protocol.Errorf("error getting utxos for address: %s", err),
 		})
 	}
 
-	// XXX - I am almost positive that order is guaranteed when coming from the db
-	// but just in case let's sort before we paginate for consistency
-	slices.SortFunc(utxos, func(one tbcd.Utxo, two tbcd.Utxo) int {
-		return cmp.Compare(hex.EncodeToString(one[:]), hex.EncodeToString(two[:]))
-	})
-
-	// XXX - we should paginate at the db query, but I am in a rush
-	skip := p.Start
-	encodedUtxos := [][]byte{}
+	responseUtxos := [][]byte{}
 	for _, utxo := range utxos {
-		if skip > 0 {
-			skip--
-			continue
-		}
-
-		encodedUtxos = append(encodedUtxos, utxo[:])
-
-		if len(encodedUtxos) >= int(p.Count) {
-			break
-		}
+		responseUtxos = append(responseUtxos, utxo[:])
 	}
 
 	return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
-		Utxos: encodedUtxos,
+		Utxos: responseUtxos,
 	})
 }
 

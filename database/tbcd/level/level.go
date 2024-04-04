@@ -622,23 +622,32 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint
 	return balance, nil
 }
 
-func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.Utxo, error) {
+func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	log.Tracef("UtxosByScriptHash")
 	defer log.Tracef("UtxosByScriptHash exit")
 
-	var start [33]byte
+	var prefix [33]byte
 	utxos := make([]tbcd.Utxo, 0, 32)
-	start[0] = 'h'
-	copy(start[1:], sh[:])
+	prefix[0] = 'h'
+	copy(prefix[1:], sh[:])
 	oDB := l.pool[level.OutputsDB]
-	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
+	it := oDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
 	defer it.Release()
+	skip := start
 	for it.Next() {
+		if skip > 0 {
+			skip--
+			continue
+		}
 		index := binary.BigEndian.Uint32(it.Key()[65:])
 		value := binary.BigEndian.Uint64(it.Value())
 		var txId tbcd.TxId
 		copy(txId[:], it.Key()[33:65])
 		utxos = append(utxos, tbcd.NewUtxo(txId, value, index))
+
+		if len(utxos) >= int(count) {
+			break
+		}
 	}
 	if err := it.Error(); err != nil {
 		return nil, fmt.Errorf("utxos by script hash iterator: %w", err)
