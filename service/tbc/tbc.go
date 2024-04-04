@@ -1215,7 +1215,7 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 	return balance, nil
 }
 
-func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string) ([]tbcd.Utxo, error) {
+func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
 	if err != nil {
 		return nil, err
@@ -1228,7 +1228,7 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string) ([]t
 
 	scriptHash := sha256.Sum256(script)
 
-	utxos, err := s.db.UtxosByScriptHash(ctx, scriptHash)
+	utxos, err := s.db.UtxosByScriptHash(ctx, scriptHash, start, count)
 	if err != nil {
 		return nil, err
 	}

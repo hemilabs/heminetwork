@@ -473,6 +473,8 @@ func TestUtxosByAddress(t *testing.T) {
 		name          string
 		address       func() string
 		doNotGenerate bool
+		limit         uint64
+		start         uint64
 	}
 
 	testTable := []testTableItem{
@@ -489,6 +491,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 				return address.EncodeAddress()
 			},
+			limit: 10,
 		},
 		{
 			name: "Pay to script hash",
@@ -500,6 +503,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 				return address.EncodeAddress()
 			},
+			limit: 10,
 		},
 		{
 			name: "Pay to witness public key hash",
@@ -511,6 +515,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 				return address.EncodeAddress()
 			},
+			limit: 10,
 		},
 		{
 			name: "Pay to witness script hash",
@@ -522,6 +527,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 				return address.EncodeAddress()
 			},
+			limit: 10,
 		},
 		{
 			name: "Pay to taproot",
@@ -533,6 +539,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 				return address.EncodeAddress()
 			},
+			limit: 10,
 		},
 		{
 			name: "no balance",
@@ -545,6 +552,32 @@ func TestUtxosByAddress(t *testing.T) {
 				return address.EncodeAddress()
 			},
 			doNotGenerate: true,
+			limit:         10,
+		},
+		{
+			name: "small limit",
+			address: func() string {
+				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			limit: 2,
+		},
+		{
+			name: "offset",
+			address: func() string {
+				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			start: 3,
+			limit: 10,
 		},
 	}
 
@@ -631,8 +664,8 @@ func TestUtxosByAddress(t *testing.T) {
 				lastErr = nil
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRequest{
 					Address: address,
-					Start:   0,
-					Count:   100,
+					Start:   uint(tti.start),
+					Count:   uint(tti.limit),
 				})
 				if err != nil {
 					lastErr = err
@@ -653,8 +686,13 @@ func TestUtxosByAddress(t *testing.T) {
 
 					// we generated 4 blocks to this address previously, therefore
 					// there should be 4 utxos
-					if !tti.doNotGenerate && len(response.Utxos) != 4 {
-						t.Fatalf("should have 4 utxos, received: %d", len(response.Utxos))
+					expectedCount := 4 - tti.start
+					if tti.limit < uint64(expectedCount) {
+						expectedCount = tti.limit
+					}
+
+					if !tti.doNotGenerate && len(response.Utxos) != int(expectedCount) {
+						t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.Utxos))
 					} else if tti.doNotGenerate && len(response.Utxos) != 0 {
 						t.Fatalf("did not generate any blocks for address, should not have utxos")
 					}
