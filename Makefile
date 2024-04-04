@@ -33,11 +33,14 @@ cmds = \
 
 all: lint tidy test build install
 
-clean: clean-dist
+clean: clean-dist clean-test
 	rm -rf $(GOBIN) $(GOCACHE) $(GOPKG)
 
 clean-dist:
 	rm -rf $(DIST)
+
+clean-test:
+	rm -rf $(PROJECTPATH)/service/tbc/.testleveldb/
 
 deps: lint-deps vulncheck-deps
 	go mod download
