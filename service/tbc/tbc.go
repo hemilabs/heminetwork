@@ -1173,6 +1173,12 @@ func (s *Server) BlockHeadersBest(ctx context.Context) (uint64, []wire.BlockHead
 	if err != nil {
 		return 0, nil, err
 	}
+
+	var height uint64
+	if len(bhs) > 0 {
+		height = bhs[0].Height
+	}
+
 	bhsw := make([]wire.BlockHeader, 0, len(bhs))
 	for k := range bhs {
 		bhw, err := bytes2Header(bhs[k].Header)
@@ -1181,7 +1187,8 @@ func (s *Server) BlockHeadersBest(ctx context.Context) (uint64, []wire.BlockHead
 		}
 		bhsw = append(bhsw, *bhw)
 	}
-	return bhs[0].Height, bhsw, nil
+
+	return height, bhsw, nil
 }
 
 func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (uint64, error) {
