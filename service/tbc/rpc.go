@@ -130,6 +130,43 @@ func (s *Server) handleBtcBalanceByAddrRequest(ctx context.Context, ws *tbcWs, p
 	})
 }
 
+func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
+	log.Tracef("handleUtxosByAddressRequest: %v", ws.addr)
+	defer log.Tracef("handleUtxosByAddressRequest exit: %v", ws.addr)
+
+	p, ok := payload.(*tbcapi.UtxosByAddressRequest)
+	if !ok {
+		return fmt.Errorf("handleUtxosByAddressRequest invalid payload type: %T", payload)
+	}
+
+	utxos, err := s.UtxosByAddress(ctx, p.Address)
+	if err != nil {
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
+			Error: protocol.Errorf("error getting utxos for address: %s", err),
+		})
+	}
+
+	// XXX - we should paginate at the db query, but I am in a rush
+	skip := p.Start
+	encodedUtxos := [][]byte{}
+	for _, utxo := range utxos {
+		if skip > 0 {
+			skip--
+			continue
+		}
+
+		if len(encodedUtxos) >= int(p.Count) {
+			break
+		}
+
+		encodedUtxos = append(encodedUtxos, utxo[:])
+	}
+
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
+		Utxos: encodedUtxos,
+	})
+}
+
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleWebsocket: %v", r.RemoteAddr)
 	defer log.Tracef("handleWebsocket exit: %v", r.RemoteAddr)
@@ -205,6 +242,8 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			err = s.handleBlockHeadersBestRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBtcBalanceByAddressRequest:
 			err = s.handleBtcBalanceByAddrRequest(ctx, ws, payload, id)
+		case tbcapi.CmdUtxosByAddressRequest:
+			err = s.handleUtxosByAddressRequest(ctx, ws, payload, id)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
