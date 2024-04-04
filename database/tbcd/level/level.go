@@ -529,17 +529,17 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 	var txid [33]byte
 	txid[0] = 't'
 	copy(txid[1:], txId[:])
-	it := txDB.NewIterator(&util.Range{Start: txid[:]}, nil)
-	defer it.Release()
+	it := txDB.NewIterator(util.BytesPrefix(txid[:]), nil)
 	for it.Next() {
-		if !bytes.Equal(it.Key()[1:33], txid[1:33]) {
-			break
-		}
 		block, err := tbcd.NewBlockHashFromBytes(it.Key()[33:])
 		if err != nil {
 			return nil, err
 		}
 		blocks = append(blocks, block)
+	}
+	it.Release()
+	if err := it.Error(); err != nil {
+		return nil, err
 	}
 	if err := it.Error(); err != nil {
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
@@ -727,6 +727,7 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxKey]*tbcd.TxValu
 		default:
 			return fmt.Errorf("invalid cache entry: %v", spew.Sdump(k))
 		}
+
 		txsBatch.Put(key, value)
 		//log.Infof("%v:%v", spew.Sdump(key), spew.Sdump(value))
 		//// XXX this probably should be done by the caller but we do it
