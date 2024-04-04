@@ -530,16 +530,13 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 	txid[0] = 't'
 	copy(txid[1:], txId[:])
 	it := txDB.NewIterator(util.BytesPrefix(txid[:]), nil)
+	defer it.Release()
 	for it.Next() {
 		block, err := tbcd.NewBlockHashFromBytes(it.Key()[33:])
 		if err != nil {
 			return nil, err
 		}
 		blocks = append(blocks, block)
-	}
-	it.Release()
-	if err := it.Error(); err != nil {
-		return nil, err
 	}
 	if err := it.Error(); err != nil {
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
@@ -614,10 +611,10 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint
 	copy(start[1:], sh[:])
 	oDB := l.pool[level.OutputsDB]
 	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
+	defer it.Release()
 	for it.Next() {
 		balance += binary.BigEndian.Uint64(it.Value())
 	}
-	it.Release()
 	if err := it.Error(); err != nil {
 		return 0, fmt.Errorf("balance by script hash iterator: %w", err)
 	}
@@ -635,6 +632,7 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd
 	copy(start[1:], sh[:])
 	oDB := l.pool[level.OutputsDB]
 	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
+	defer it.Release()
 	for it.Next() {
 		index := binary.BigEndian.Uint32(it.Key()[65:])
 		value := binary.BigEndian.Uint64(it.Value())
@@ -642,7 +640,6 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd
 		copy(txId[:], it.Key()[33:65])
 		utxos = append(utxos, tbcd.NewUtxo(txId, value, index))
 	}
-	it.Release()
 	if err := it.Error(); err != nil {
 		return nil, fmt.Errorf("utxos by script hash iterator: %w", err)
 	}
