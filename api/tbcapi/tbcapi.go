@@ -66,8 +66,8 @@ type BtcBlockHeaderByHeightRequest struct {
 }
 
 type BtcBlockHeaderByHeightResponse struct {
-	Error        *protocol.Error `json:"error"`
 	BlockHeaders [][]byte        `json:"block_headers"`
+	Error        *protocol.Error `json:"error,omitempty"`
 }
 
 type BlockHeadersBestRequest struct{}
@@ -75,7 +75,7 @@ type BlockHeadersBestRequest struct{}
 type BlockHeadersBestResponse struct {
 	Height       uint64          `json:"height"`
 	BlockHeaders [][]byte        `json:"block_headers"`
-	Error        *protocol.Error `json:"error"`
+	Error        *protocol.Error `json:"error,omitempty"`
 }
 
 type BtcAddrBalanceRequest struct {
@@ -84,7 +84,7 @@ type BtcAddrBalanceRequest struct {
 
 type BtcAddrBalanceResponse struct {
 	Balance uint64          `json:"balance"`
-	Error   *protocol.Error `json:"error"`
+	Error   *protocol.Error `json:"error,omitempty"`
 }
 
 var commands = map[protocol.Command]reflect.Type{
