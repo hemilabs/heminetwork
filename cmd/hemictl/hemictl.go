@@ -237,14 +237,18 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("block header by hash: %w", err)
 		}
-		spew.Dump(bh)
+		fmt.Printf("hash  : %v\n", bh)
+		fmt.Printf("height: %v\n", bh.Height)
 
 	case "blockheadersbest":
 		bhs, err := s.DB().BlockHeadersBest(ctx)
 		if err != nil {
 			return fmt.Errorf("block headers best: %w", err)
 		}
-		spew.Dump(bhs)
+		for k := range bhs {
+			fmt.Printf("hash   (%v): %v\n", k, bhs[k])
+			fmt.Printf("height (%v): %v\n", k, bhs[k].Height)
+		}
 
 	case "blockheadersbyheight":
 		height := args["height"]

@@ -821,7 +821,7 @@ func (s *Server) txIndexer(ctx context.Context) {
 		return
 	}
 
-	if h < bhs[0].Height {
+	if bhs[0].Height != h-1 {
 		err = s.TxIndexer(ctx, h, 0)
 		if err != nil {
 			log.Errorf("tx indexer: %v", err)
@@ -879,7 +879,7 @@ func (s *Server) utxoIndexer(ctx context.Context) {
 		return
 	}
 
-	if h < bhs[0].Height {
+	if bhs[0].Height != h-1 {
 		err = s.UtxoIndexer(ctx, h, 0)
 		if err != nil {
 			log.Errorf("utxo indexer: %v", err)
@@ -1469,6 +1469,37 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 	}
 
 	return fees, fmt.Errorf("not yet")
+}
+
+type SyncInfo struct {
+	Synced            bool   // True when all indexing is caught up
+	BlockHeaderHeight uint64 // last block header height
+	UtxoHeight        uint64 // last indexed utxo block height
+	TxHeight          uint64 // last indexed tx block height
+}
+
+func (s *Server) Synced(ctx context.Context) (si SyncInfo) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	si.BlockHeaderHeight = s.lastBlockHeader.Height
+
+	// These values are cached in leveldb so it is ok to call with mutex
+	// held.
+	//
+	// Note that index heights are start indexing values thus they are off
+	// by one from the last block height seen.
+	uh, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey)
+	if err == nil {
+		si.UtxoHeight = binary.BigEndian.Uint64(uh) - 1
+	}
+	th, err := s.db.MetadataGet(ctx, TxIndexHeightKey)
+	if err == nil {
+		si.TxHeight = binary.BigEndian.Uint64(th) - 1
+	}
+	if si.UtxoHeight == si.TxHeight && si.UtxoHeight == si.BlockHeaderHeight {
+		si.Synced = true
+	}
+	return
 }
 
 // DBOpen opens the underlying server database. It has been put in its own
