@@ -322,6 +322,8 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	var addrs []net.IP
 	for k := range s.seeds {
 		log.Infof("DNS seeding %v", s.seeds[k])
+		// XXX localhost ipv4 and ipv6 is invalid in p2p.Add a
+		// localhost mode to peermanager.
 		if s.seeds[k] == "localhost" {
 			log.Infof("seed is localhost, using 127.0.0.1")
 			addrs = append(addrs, net.IPv4(127, 0, 0, 1))
@@ -772,6 +774,12 @@ func (s *Server) downloadBlocks(ctx context.Context) {
 	defer log.Tracef("downloadBlocks exit")
 
 	now := time.Now()
+
+	defer func() {
+		// if we are complete we need to kick off utxo sync
+
+		// When utxo sync completes kick off addresses
+	}()
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
