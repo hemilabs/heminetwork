@@ -295,6 +295,28 @@ func tbcdb() error {
 		}
 		spew.Dump(b)
 
+	case "deletemetadata":
+		key := args["key"]
+		if key == "" {
+			return fmt.Errorf("key: must be set")
+		}
+
+		s.DBClose()
+
+		levelDBHome := "~/.tbcd" // XXX
+		network := "testnet3"
+		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		pool := db.DB()
+		mdDB := pool[ldb.MetadataDB]
+		err = mdDB.Delete([]byte(key), nil)
+		if err != nil {
+			return err
+		}
+
 	case "dumpmetadata":
 		s.DBClose()
 
@@ -369,6 +391,7 @@ func tbcdb() error {
 		fmt.Printf("\tblockheadersbyheight [height]\n")
 		fmt.Printf("\tblocksbytxid [hash]\n")
 		fmt.Printf("\tblocksmissing [count]\n")
+		fmt.Printf("\tdeletemetadata\n")
 		fmt.Printf("\tdumpmetadata\n")
 		fmt.Printf("\tdumpoutputs <prefix>\n")
 		fmt.Printf("\thelp\n")
@@ -385,7 +408,7 @@ func tbcdb() error {
 			// Get height from db
 			he, err := s.DB().MetadataGet(ctx, tbc.UtxoIndexHeightKey)
 			if err != nil {
-				if errors.Is(err, database.ErrNotFound) {
+				if !errors.Is(err, database.ErrNotFound) {
 					return fmt.Errorf("metadata %v: %w",
 						string(tbc.UtxoIndexHeightKey), err)
 				}
@@ -420,7 +443,7 @@ func tbcdb() error {
 			// Get height from db
 			he, err := s.DB().MetadataGet(ctx, tbc.TxIndexHeightKey)
 			if err != nil {
-				if errors.Is(err, database.ErrNotFound) {
+				if !errors.Is(err, database.ErrNotFound) {
 					return fmt.Errorf("metadata %v: %w",
 						string(tbc.TxIndexHeightKey), err)
 				}
