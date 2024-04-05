@@ -123,7 +123,12 @@ func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 	defer log.Tracef("MetadataGet exit")
 
 	mdDB := l.pool[level.MetadataDB]
-	return mdDB.Get(key, nil)
+	v, err := mdDB.Get(key, nil)
+	if err == leveldb.ErrNotFound {
+		return nil, database.NotFoundError(fmt.Sprintf("key not found: %v",
+			string(key)))
+	}
+	return v, err
 }
 
 func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {

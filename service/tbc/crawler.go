@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/dustin/go-humanize"
 
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -26,6 +28,22 @@ var (
 	UtxoIndexHeightKey = []byte("utxoindexheight") // last indexed utxo height key
 	TxIndexHeightKey   = []byte("txindexheight")   // last indexed tx height key
 )
+
+func logMemStats() {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
+	// Go memory statistics are hard to interpret but the following list is
+	// an aproximation:
+	//	Alloc is currently allocated memory
+	// 	TotalAlloc is all memory allocated over time
+	// 	Sys is basicaly a peak memory use
+	log.Infof("Alloc = %v, TotalAlloc = %v, Sys = %v, NumGC = %v\n",
+		humanize.IBytes(mem.Alloc),
+		humanize.IBytes(mem.TotalAlloc),
+		humanize.IBytes(mem.Sys),
+		mem.NumGC)
+}
 
 func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	for idx, tx := range txs {
@@ -150,7 +168,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 		// Try not to overshoot the cache to prevent costly allocations
 		cp := len(utxos) * 100 / s.cfg.MaxCachedTxs
 		if height%10000 == 0 || cp > utxosPercentage || blocksProcessed == 1 {
-			log.Infof("Height: %v utxo cache %v%%", height, cp)
+			log.Infof("Utxo indexer height: %v utxo cache %v%%", height, cp)
 		}
 		if cp > utxosPercentage {
 			// Set utxosMax to the largest utxo capacity seen
@@ -196,7 +214,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 			return nil
 		}
 		utxosCached := len(utxos)
-		log.Infof("blocks processed %v in %v utxos cached %v cache unused %v avg tx/blk %v",
+		log.Infof("Utxo indexer blocks processed %v in %v utxos cached %v cache unused %v avg tx/blk %v",
 			blocksProcessed, time.Now().Sub(start), utxosCached,
 			s.cfg.MaxCachedTxs-utxosCached, utxosCached/blocksProcessed)
 
@@ -205,6 +223,11 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		if err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
+		// leveldb does all kinds of allocations, force GC to lower
+		// memory preassure.
+		logMemStats()
+		runtime.GC()
+
 		log.Infof("Flushing utxos complete %v took %v",
 			utxosCached, time.Now().Sub(start))
 
@@ -288,7 +311,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight ui
 		// Try not to overshoot the cache to prevent costly allocations
 		cp := len(txs) * 100 / s.cfg.MaxCachedTxs
 		if height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
-			log.Infof("Height: %v tx cache %v%%", height, cp)
+			log.Infof("Tx indexer height: %v tx cache %v%%", height, cp)
 		}
 		if cp > txsPercentage {
 			// Set txsMax to the largest tx capacity seen
@@ -336,7 +359,7 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 			return nil
 		}
 		txsCached := len(txs)
-		log.Infof("blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
+		log.Infof("Tx indexer blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
 			blocksProcessed, time.Now().Sub(start), txsCached,
 			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
 
@@ -345,6 +368,11 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 		if err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
+		// leveldb does all kinds of allocations, force GC to lower
+		// memory preassure.
+		logMemStats()
+		runtime.GC()
+
 		log.Infof("Flushing txs complete %v took %v",
 			txsCached, time.Now().Sub(start))
 
