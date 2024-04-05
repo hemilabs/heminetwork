@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -48,11 +49,11 @@ const (
 	localnetPort = "18444"
 
 	defaultPeersWanted   = 64
-	defaultPendingBlocks = 256 // 128 * ~4MB max memory use
+	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
 
-	networkLocalnet = "localnet"
+	networkLocalnet = "localnet" // XXX this needs to be rethought
 )
 
 var (
@@ -190,8 +191,13 @@ type Server struct {
 
 	peers  map[string]*peer      // active but not necessarily connected
 	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where
+
 	// IBD hints
 	lastBlockHeader tbcd.BlockHeader
+
+	// reentrancy flags for the indexers
+	utxoIndexerRunning bool
+	txIndexerRunning   bool
 
 	db tbcd.Database
 
@@ -662,6 +668,24 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+func (s *Server) blocksMissing(ctx context.Context) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	// Do cheap memory check first
+	if len(s.blocks) != 0 {
+		return true
+	}
+
+	// Do expensive database check
+	bm, err := s.db.BlocksMissing(ctx, 1)
+	if err != nil {
+		log.Errorf("blocks missing: %v", err)
+		return true // this is really kind of terminal
+	}
+	return len(bm) > 0
+}
+
 func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
 	log.Tracef("handleAddr (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddr exit (%v)", p)
@@ -751,6 +775,122 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	//}
 }
 
+func (s *Server) txIndexer(ctx context.Context) {
+	log.Tracef("txIndexer")
+	defer log.Tracef("txIndexer exit")
+
+	// only one txIndexer may run at any given time
+	s.mtx.Lock()
+	if s.txIndexerRunning {
+		s.mtx.Unlock()
+		return
+	}
+	s.txIndexerRunning = true
+	s.mtx.Unlock()
+
+	// mark txIndexer not running on exit
+	defer func() {
+		s.mtx.Lock()
+		s.txIndexerRunning = false
+		s.mtx.Unlock()
+	}()
+
+	if s.blocksMissing(ctx) {
+		return
+	}
+
+	// Get height from db
+	he, err := s.db.MetadataGet(ctx, TxIndexHeightKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			log.Errorf("tx indexer metadata get: %v", err)
+			return
+		}
+		he = make([]byte, 8)
+	}
+	h := binary.BigEndian.Uint64(he)
+
+	// Skip txIndexer if we are at best block height. This is a bit racy.
+	bhs, err := s.db.BlockHeadersBest(ctx)
+	if err != nil {
+		log.Errorf("utxo indexer block headers best: %v", err)
+		return
+	}
+	if len(bhs) != 1 {
+		log.Errorf("utxo indexer block headers best: unsuported fork")
+		return
+	}
+
+	if h < bhs[0].Height {
+		err = s.TxIndexer(ctx, h, 0)
+		if err != nil {
+			log.Errorf("tx indexer: %v", err)
+			return
+		}
+	}
+}
+
+func (s *Server) utxoIndexer(ctx context.Context) {
+	log.Tracef("utxoIndexer")
+	defer log.Tracef("utxoIndexer exit")
+
+	// only one utxoIndexer may run at any given time
+	s.mtx.Lock()
+	if s.utxoIndexerRunning {
+		s.mtx.Unlock()
+		return
+	}
+	s.utxoIndexerRunning = true
+	s.mtx.Unlock()
+
+	// mark utxoIndexer not running on exit
+	defer func() {
+		s.mtx.Lock()
+		s.utxoIndexerRunning = false
+		s.mtx.Unlock()
+	}()
+
+	// exit if we aren't synced
+	if s.blocksMissing(ctx) {
+		return
+	}
+
+	// Index all utxos
+
+	// Get height from db
+	he, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			log.Errorf("utxo indexer metadata get: %v", err)
+			return
+		}
+		he = make([]byte, 8)
+	}
+	h := binary.BigEndian.Uint64(he)
+
+	// Skip UtxoIndex if we are at best block height. This is a bit racy.
+	bhs, err := s.db.BlockHeadersBest(ctx)
+	if err != nil {
+		log.Errorf("utxo indexer block headers best: %v", err)
+		return
+	}
+	if len(bhs) != 1 {
+		log.Errorf("utxo indexer block headers best: unsuported fork")
+		return
+	}
+
+	if h < bhs[0].Height {
+		err = s.UtxoIndexer(ctx, h, 0)
+		if err != nil {
+			log.Errorf("utxo indexer: %v", err)
+			return
+		}
+	}
+
+	// When utxo sync completes kick off tx sync
+	go s.txIndexer(ctx)
+}
+
 func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash) {
 	log.Tracef("downloadBlock")
 	defer log.Tracef("downloadBlock exit")
@@ -777,8 +917,7 @@ func (s *Server) downloadBlocks(ctx context.Context) {
 
 	defer func() {
 		// if we are complete we need to kick off utxo sync
-
-		// When utxo sync completes kick off addresses
+		go s.utxoIndexer(ctx)
 	}()
 
 	s.mtx.Lock()
