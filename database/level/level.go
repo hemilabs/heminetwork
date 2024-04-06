@@ -152,7 +152,7 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	}()
 
 	// Peers table
-	err = l.openDB(BlockHeadersDB, &opt.Options{BlockCacheCapacity: 256 * opt.MiB})
+	err = l.openDB(BlockHeadersDB, nil)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", BlockHeadersDB, err)
 	}
