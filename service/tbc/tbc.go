@@ -31,6 +31,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database"
@@ -578,6 +579,11 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	bhs, err := s.db.BlockHeadersBest(ctx)
 	if err != nil {
 		log.Errorf("block headers best: %v", err)
+		// database is closed, nothing we can do, return here to avoid below
+		// panic
+		if errors.Is(err, leveldb.ErrClosed) {
+			return
+		}
 	}
 	if len(bhs) != 1 {
 		// XXX fix multiple tips
@@ -901,6 +907,9 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 			Type: wire.InvTypeBlock,
 			Hash: *ch,
 		})
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	err := p.write(getData)
 	if err != nil {
 		// peer dead, make sure it is reaped
