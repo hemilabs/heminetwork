@@ -21,6 +21,7 @@ require (
 	github.com/sethvargo/go-retry v0.2.4
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.28.0
+	golang.org/x/sys v0.17.0
 	nhooyr.io/websocket v1.8.10
 )
 
@@ -78,7 +79,6 @@ require (
 	golang.org/x/crypto v0.19.0 // indirect
 	golang.org/x/exp v0.0.0-20240213143201-ec583247a57a // indirect
 	golang.org/x/mod v0.15.0 // indirect
-	golang.org/x/sys v0.17.0 // indirect
 	golang.org/x/tools v0.18.1-0.20240311201521-78fbdeb61842 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240221002015-b0ce06bbee7c // indirect
 	google.golang.org/grpc v1.62.0 // indirect
