@@ -56,14 +56,14 @@ func (s *Server) handleBtcBlockHeadersByHeightRequest(ctx context.Context, ws *t
 	defer log.Tracef("handleBtcBlockHeadersByHeightRequest exit: %v", ws.addr)
 
 	// "decode" the input
-	p, ok := payload.(*tbcapi.BtcBlockHeaderByHeightRequest)
+	p, ok := payload.(*tbcapi.BtcBlockHeadersByHeightRequest)
 	if !ok {
 		return fmt.Errorf("invalid payload type: %T", payload)
 	}
 
 	blockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(p.Height))
 	if err != nil {
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockHeaderByHeightResponse{
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockHeadersByHeightResponse{
 			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
 		})
 	}
@@ -78,7 +78,7 @@ func (s *Server) handleBtcBlockHeadersByHeightRequest(ctx context.Context, ws *t
 	}
 
 	// "encode" output and write response
-	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockHeaderByHeightResponse{
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockHeadersByHeightResponse{
 		BlockHeaders: encodedBlockHeaders,
 	})
 }
@@ -257,7 +257,7 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 		switch cmd {
 		case tbcapi.CmdPingRequest:
 			err = s.handlePingRequest(ctx, ws, payload, id)
-		case tbcapi.CmdBtcBlockHeaderByHeightRequest:
+		case tbcapi.CmdBtcBlockHeadersByHeightRequest:
 			err = s.handleBtcBlockHeadersByHeightRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBlockHeadersBestRequest:
 			err = s.handleBlockHeadersBestRequest(ctx, ws, payload, id)
