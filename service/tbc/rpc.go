@@ -17,6 +17,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"nhooyr.io/websocket"
 
+	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
@@ -68,7 +69,7 @@ func (s *Server) handleBtcBlockHeadersByHeightRequest(ctx context.Context, ws *t
 		})
 	}
 
-	encodedBlockHeaders := [][]byte{}
+	var encodedBlockHeaders []api.ByteSlice
 	for _, bh := range blockHeaders {
 		bytes, err := header2Bytes(&bh)
 		if err != nil {
@@ -98,7 +99,7 @@ func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, ws *tbcWs, p
 		})
 	}
 
-	var encodedBlockHeaders [][]byte
+	var encodedBlockHeaders []api.ByteSlice
 	for _, bh := range blockHeaders {
 		bytes, err := header2Bytes(&bh)
 		if err != nil {
@@ -150,7 +151,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 		})
 	}
 
-	responseUtxos := [][]byte{}
+	var responseUtxos []api.ByteSlice
 	for _, utxo := range utxos {
 		responseUtxos = append(responseUtxos, utxo[:])
 	}
@@ -169,7 +170,13 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, ws *tbcWs, payload any
 		return fmt.Errorf("handleTxByIdRequest invalid payload type: %T", payload)
 	}
 
-	tx, err := s.TxById(ctx, p.TxId)
+	if len(p.TxId) != 32 {
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
+			Error: protocol.Errorf("invalid tx id"),
+		})
+	}
+
+	tx, err := s.TxById(ctx, [32]byte(p.TxId))
 	if err != nil {
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
 			Error: protocol.Errorf("error getting tx by id: %s", err),

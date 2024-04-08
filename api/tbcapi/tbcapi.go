@@ -10,6 +10,7 @@ import (
 	"maps"
 	"reflect"
 
+	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 )
 
@@ -76,7 +77,7 @@ type BtcBlockHeadersByHeightRequest struct {
 }
 
 type BtcBlockHeadersByHeightResponse struct {
-	BlockHeaders [][]byte        `json:"block_headers"`
+	BlockHeaders []api.ByteSlice `json:"block_headers"`
 	Error        *protocol.Error `json:"error,omitempty"`
 }
 
@@ -84,7 +85,7 @@ type BlockHeadersBestRequest struct{}
 
 type BlockHeadersBestResponse struct {
 	Height       uint64          `json:"height"`
-	BlockHeaders [][]byte        `json:"block_headers"`
+	BlockHeaders []api.ByteSlice `json:"block_headers"`
 	Error        *protocol.Error `json:"error,omitempty"`
 }
 
@@ -104,16 +105,16 @@ type UtxosByAddressRequest struct {
 }
 
 type UtxosByAddressResponse struct {
-	Utxos [][]byte        `json:"utxos"`
+	Utxos []api.ByteSlice `json:"utxos"`
 	Error *protocol.Error `json:"error"`
 }
 
 type TxByIdRequest struct {
-	TxId [32]byte `json:"tx_id"`
+	TxId api.ByteSlice `json:"tx_id"`
 }
 
 type TxByIdResponse struct {
-	Tx    []byte          `json:"tx"`
+	Tx    api.ByteSlice   `json:"tx"`
 	Error *protocol.Error `json:"error"`
 }
 
