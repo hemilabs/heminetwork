@@ -563,7 +563,7 @@ func (m *Miner) processReceivedKeystones(ctx context.Context, l2Keystones []hemi
 			m.lastKeystone = &tmp
 
 			m.queueKeystoneForMining(&tmp)
-		} else if (m.lastKeystone.L2BlockNumber - kh.L2BlockNumber) <= uint32(m.cfg.RetryMineThreshold)*hemi.KeystoneHeaderPeriod {
+		} else if m.cfg.RetryMineThreshold > 0 && (m.lastKeystone.L2BlockNumber-kh.L2BlockNumber) <= uint32(m.cfg.RetryMineThreshold)*hemi.KeystoneHeaderPeriod {
 			log.Tracef("received keystone older than latest, but within threshold, will remine l2 block number = %d", kh.L2BlockNumber)
 			tmp := kh
 			m.queueKeystoneForMining(&tmp)
