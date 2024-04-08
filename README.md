@@ -124,14 +124,31 @@ Prerequisites: `docker`
 To run the full network locally, you can run the following.  Note that this will create
 L2Keytones and BTC Blocks at a high rate.  
 
-You can modify these via the env variables:
-* `HEMI_LOCAL_BTC_RATE_SECONDS`: generate new BTC Block at this rate of seconds
-* `HEMI_LOCAL_L2K_RATE_SECONDS`: generate new L2 Keystone at this rate of seconds
-
 note: the `--build` flag is optional if you want to rebuild your code
 
 ```
-docker-compose -f ./e2e/docker-compose.yml up --build
+docker compose -f ./e2e/docker-compose.yml up --build
+```
+
+This will take a while upon first build, but following builds should be cached.  
+When rebuilding, popmd, bssd, and bfgd will rebuild (due to `COPY` command breaking
+ the cache).  However if you want to break the cache for the op-stack, use the following args:
+
+For op-geth + optimism (op-node)
+```
+docker compose -f ./e2e/docker-compose.yml build --build-arg OP_GETH_CACHE_BREAK="$(date)"
+```
+
+For optimism cache break only:
+```
+docker compose -f ./e2e/docker-compose.yml build --build-arg OPTIMISM_CACHE_BREAK="$(date)"
+```
+
+**IMPORTANT:** make sure you run the following to tear down, this will remove
+data and give you a fresh start
+
+```
+docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 ```
 
 
