@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// hexDecode decodes a string that may be prefixed with " and/or 0x. Thus
+// hexDecode decodes a string that may be prefixed with " and/or 0x. Thus,
 // "0x00" and 0x00 or 00 are all valid hex encodings. If length is provided the
 // decoded size must exactly match. The length parameter will be ignored if it
 // is less than 0.

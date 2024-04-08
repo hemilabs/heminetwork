@@ -30,6 +30,7 @@ import (
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
+	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
@@ -803,7 +804,7 @@ func TestTxById(t *testing.T) {
 		slices.Reverse(txIdBytes)
 
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-			TxId: [32]byte(txIdBytes),
+			TxId: txIdBytes,
 		})
 		if err != nil {
 			lastErr = err
@@ -1094,7 +1095,7 @@ func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcap
 		t.Fatal(err)
 	}
 	return tbcapi.BtcBlockHeadersByHeightResponse{
-		BlockHeaders: [][]byte{bytes},
+		BlockHeaders: []api.ByteSlice{bytes},
 	}
 }
 
