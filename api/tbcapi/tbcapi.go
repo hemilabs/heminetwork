@@ -19,8 +19,8 @@ const (
 	CmdPingRequest  = "tbcapi-ping-request"
 	CmdPingResponse = "tbcapi-ping-response"
 
-	CmdBtcBlockHeaderByHeightRequest  = "tbcapi-btc-block-header-by-height-request"
-	CmdBtcBlockHeaderByHeightResponse = "tbcapi-btc-block-header-by-height-response"
+	CmdBtcBlockHeadersByHeightRequest  = "tbcapi-btc-block-headers-by-height-request"
+	CmdBtcBlockHeadersByHeightResponse = "tbcapi-btc-block-headers-by-height-response"
 
 	CmdBlockHeadersBestRequest  = "tbcapi-block-headers-best-request"
 	CmdBlockHeadersBestResponse = "tbcapi-block-headers-best-response"
@@ -71,11 +71,11 @@ type BtcBlockHeader struct {
 	Header BtcHeader `json:"header"`
 }
 
-type BtcBlockHeaderByHeightRequest struct {
+type BtcBlockHeadersByHeightRequest struct {
 	Height uint32 `json:"height"`
 }
 
-type BtcBlockHeaderByHeightResponse struct {
+type BtcBlockHeadersByHeightResponse struct {
 	BlockHeaders [][]byte        `json:"block_headers"`
 	Error        *protocol.Error `json:"error,omitempty"`
 }
@@ -118,18 +118,18 @@ type TxByIdResponse struct {
 }
 
 var commands = map[protocol.Command]reflect.Type{
-	CmdPingRequest:                    reflect.TypeOf(PingRequest{}),
-	CmdPingResponse:                   reflect.TypeOf(PingResponse{}),
-	CmdBtcBlockHeaderByHeightRequest:  reflect.TypeOf(BtcBlockHeaderByHeightRequest{}),
-	CmdBtcBlockHeaderByHeightResponse: reflect.TypeOf(BtcBlockHeaderByHeightResponse{}),
-	CmdBlockHeadersBestRequest:        reflect.TypeOf(BlockHeadersBestRequest{}),
-	CmdBlockHeadersBestResponse:       reflect.TypeOf(BlockHeadersBestResponse{}),
-	CmdBtcBalanceByAddressRequest:     reflect.TypeOf(BtcAddrBalanceRequest{}),
-	CmdBtcBalanceByAddressResponse:    reflect.TypeOf(BtcAddrBalanceResponse{}),
-	CmdUtxosByAddressRequest:          reflect.TypeOf(UtxosByAddressRequest{}),
-	CmdUtxosByAddressResponse:         reflect.TypeOf(UtxosByAddressResponse{}),
-	CmdTxByIdRequest:                  reflect.TypeOf(TxByIdRequest{}),
-	CmdTxByIdResponse:                 reflect.TypeOf(TxByIdResponse{}),
+	CmdPingRequest:                     reflect.TypeOf(PingRequest{}),
+	CmdPingResponse:                    reflect.TypeOf(PingResponse{}),
+	CmdBtcBlockHeadersByHeightRequest:  reflect.TypeOf(BtcBlockHeadersByHeightRequest{}),
+	CmdBtcBlockHeadersByHeightResponse: reflect.TypeOf(BtcBlockHeadersByHeightResponse{}),
+	CmdBlockHeadersBestRequest:         reflect.TypeOf(BlockHeadersBestRequest{}),
+	CmdBlockHeadersBestResponse:        reflect.TypeOf(BlockHeadersBestResponse{}),
+	CmdBtcBalanceByAddressRequest:      reflect.TypeOf(BtcAddrBalanceRequest{}),
+	CmdBtcBalanceByAddressResponse:     reflect.TypeOf(BtcAddrBalanceResponse{}),
+	CmdUtxosByAddressRequest:           reflect.TypeOf(UtxosByAddressRequest{}),
+	CmdUtxosByAddressResponse:          reflect.TypeOf(UtxosByAddressResponse{}),
+	CmdTxByIdRequest:                   reflect.TypeOf(TxByIdRequest{}),
+	CmdTxByIdResponse:                  reflect.TypeOf(TxByIdResponse{}),
 }
 
 type tbcAPI struct{}
