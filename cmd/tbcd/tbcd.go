@@ -123,6 +123,14 @@ func _main() error {
 		log.Infof("tbc service received signal: %s", s)
 	})
 
+	// We need a lot of open files and memory for the indexes. Try to help
+	// the use by doing this here instead of relying on ulimit being set
+	// properly.
+	err := setUlimits()
+	if err != nil {
+		return fmt.Errorf("log ulimits: %w", err)
+	}
+
 	server, err := tbc.NewServer(cfg)
 	if err != nil {
 		return fmt.Errorf("Failed to create tbc server: %v", err)
