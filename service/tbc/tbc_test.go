@@ -804,7 +804,7 @@ func TestTxById(t *testing.T) {
 		slices.Reverse(txIdBytes)
 
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-			TxId: [32]byte(txIdBytes),
+			TxId: txIdBytes,
 		})
 		if err != nil {
 			lastErr = err
