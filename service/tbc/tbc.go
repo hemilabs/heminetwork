@@ -926,7 +926,7 @@ func (s *Server) downloadBlocks(ctx context.Context) {
 
 	defer func() {
 		// if we are complete we need to kick off utxo sync
-		go s.utxoIndexer(ctx)
+		// go s.utxoIndexer(ctx)
 	}()
 
 	s.mtx.Lock()
