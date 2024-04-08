@@ -170,6 +170,12 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, ws *tbcWs, payload any
 		return fmt.Errorf("handleTxByIdRequest invalid payload type: %T", payload)
 	}
 
+	if len(p.TxId) != 32 {
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
+			Error: protocol.Errorf("invalid tx id"),
+		})
+	}
+
 	tx, err := s.TxById(ctx, [32]byte(p.TxId))
 	if err != nil {
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{

@@ -6,8 +6,6 @@ package tbcapi
 
 import (
 	"context"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"reflect"
@@ -111,26 +109,8 @@ type UtxosByAddressResponse struct {
 	Error *protocol.Error `json:"error"`
 }
 
-type TxId [32]byte
-
-func (tx TxId) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hex.EncodeToString(tx[:]))
-}
-
-func (tx *TxId) UnmarshalJSON(data []byte) error {
-	if string(data) == "null" || string(data) == `""` {
-		return nil
-	}
-	s, err := api.HexDecode(data, 32)
-	if err != nil {
-		return err
-	}
-	*tx = [32]byte(s)
-	return nil
-}
-
 type TxByIdRequest struct {
-	TxId TxId `json:"tx_id"`
+	TxId api.ByteSlice `json:"tx_id"`
 }
 
 type TxByIdResponse struct {
