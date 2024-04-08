@@ -28,6 +28,11 @@ const (
 	logLevel           = "protocol=INFO"
 	WSConnectTimeout   = 20 * time.Second
 	WSHandshakeTimeout = 15 * time.Second
+
+	ErrCodeUnknown    = 0
+	ErrCodeNotFound   = 1
+	ErrCodeBadRequest = 2
+	ErrInternalError  = 3
 )
 
 const (
@@ -239,6 +244,7 @@ type Error struct {
 	Timestamp int64  `json:"timestamp"`
 	Trace     string `json:"trace,omitempty"`
 	Message   string `json:"message"`
+	Code      uint8  `json:"code"`
 }
 
 // Errorf returns a protocol Error type with an embedded trace.
@@ -280,10 +286,11 @@ func RequestError(err error) *Error {
 // Request errors are usually something caused by a client, e.g. validation or
 // input errors, and therefore should not be logged server-side and do not
 // contain an embedded trace.
-func RequestErrorf(msg string, args ...any) *Error {
+func RequestErrorf(code uint8, msg string, args ...any) *Error {
 	return &Error{
 		Timestamp: time.Now().Unix(),
 		Message:   fmt.Sprintf(msg, args...),
+		Code:      code,
 	}
 }
 
@@ -326,8 +333,10 @@ func NewInternalError(err error) *InternalError {
 // NewInternalErrorf returns an InternalError constructed from the passed
 // message and arguments.
 func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
+	protocolError := Errorf("internal error")
+	protocolError.Code = ErrInternalError
 	return &InternalError{
-		protocol: Errorf("internal error"),
+		protocol: protocolError,
 		internal: fmt.Errorf(msg, args...),
 	}
 }

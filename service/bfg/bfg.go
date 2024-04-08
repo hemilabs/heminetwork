@@ -251,7 +251,7 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	mb := wire.MsgTx{}
 	if err := mb.Deserialize(rr); err != nil {
 		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.RequestErrorf(
-			"failed to deserialize tx: %s", err,
+			protocol.ErrCodeBadRequest, "failed to deserialize tx: %s", err,
 		)}, nil
 	}
 
@@ -268,14 +268,14 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 
 	if tl2 == nil {
 		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.RequestErrorf("could not find l2 keystone abbrev in btc tx"),
+			Error: protocol.RequestErrorf(protocol.ErrCodeNotFound, "could not find l2 keystone abbrev in btc tx"),
 		}, nil
 	}
 
 	publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
 	if err != nil {
 		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.RequestErrorf("could not parse signature script: %v", err),
+			Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "could not parse signature script: %v", err),
 		}, nil
 	}
 
@@ -296,7 +296,7 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	}); err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
 			return &bfgapi.BitcoinBroadcastResponse{
-				Error: protocol.RequestErrorf("pop basis already exists"),
+				Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "pop basis already exists"),
 			}, nil
 		}
 
@@ -364,7 +364,7 @@ func (s *Server) handleAccessPublicKeyCreateRequest(ctx context.Context, acpkc *
 	publicKey, err := hex.DecodeString(acpkc.PublicKey)
 	if err != nil {
 		return &bfgapi.AccessPublicKeyCreateResponse{
-			Error: protocol.RequestErrorf("public key decode: %v", err),
+			Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "public key decode: %v", err),
 		}, nil
 	}
 
@@ -373,19 +373,19 @@ func (s *Server) handleAccessPublicKeyCreateRequest(ctx context.Context, acpkc *
 	}); err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
 			return &bfgapi.AccessPublicKeyCreateResponse{
-				Error: protocol.RequestErrorf("public key already exists"),
+				Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "public key already exists"),
 			}, nil
 		}
 
 		if errors.Is(err, database.ErrValidation) {
 			return &bfgapi.AccessPublicKeyCreateResponse{
-				Error: protocol.RequestErrorf("invalid access public key"),
+				Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "invalid access public key"),
 			}, nil
 		}
 
 		e := protocol.NewInternalErrorf("insert public key: %w", err)
 		return &bfgapi.AccessPublicKeyCreateResponse{
-			Error: protocol.RequestErrorf("invalid access public key"),
+			Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "invalid access public key"),
 		}, e
 	}
 
@@ -404,7 +404,7 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 	b, err := hex.DecodeString(accessPublicKeyDeleteRequest.PublicKey)
 	if err != nil {
 		return &bfgapi.AccessPublicKeyDeleteResponse{
-			Error: protocol.RequestErrorf("public key decode: %v", err),
+			Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "public key decode: %v", err),
 		}, nil
 	}
 
@@ -414,7 +414,7 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 		if errors.Is(err, database.ErrNotFound) {
 			// XXX not sure I like giving this information away.
 			return &bfgapi.AccessPublicKeyDeleteResponse{
-				Error: protocol.RequestErrorf("public key not found"),
+				Error: protocol.RequestErrorf(protocol.ErrCodeNotFound, "public key not found"),
 			}, nil
 		}
 		e := protocol.NewInternalErrorf("error deleting access public key: %w",
@@ -1221,12 +1221,12 @@ func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2Key
 	response := bfgapi.NewL2KeystonesResponse{}
 	if err != nil {
 		if errors.Is(err, database.ErrDuplicate) {
-			response.Error = protocol.Errorf("l2 keystone already exists")
+			response.Error = protocol.RequestErrorf(protocol.ErrCodeBadRequest, "l2 keystone already exists")
 			return response, nil
 		}
 		if errors.Is(err, database.ErrValidation) {
 			log.Errorf("error inserting l2 keystone: %s", err)
-			response.Error = protocol.Errorf("invalid l2 keystone")
+			response.Error = protocol.RequestErrorf(protocol.ErrCodeBadRequest, "invalid l2 keystone")
 			return response, nil
 		}
 

@@ -20,6 +20,8 @@ import (
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/database/tbcd/level"
 )
 
 type tbcWs struct {
@@ -146,8 +148,14 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 
 	utxos, err := s.UtxosByAddress(ctx, p.Address, uint64(p.Start), uint64(p.Count))
 	if err != nil {
+		if errors.Is(err, level.ErrIterator) {
+			return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
+				Error: protocol.NewInternalErrorf("error iterating utxos: %s", err).ProtocolError(),
+			})
+		}
+
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
-			Error: protocol.Errorf("error getting utxos for address: %s", err),
+			Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "error getting utxos for address: %s", err),
 		})
 	}
 
@@ -172,14 +180,20 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, ws *tbcWs, payload any
 
 	if len(p.TxId) != 32 {
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
-			Error: protocol.Errorf("invalid tx id"),
+			Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "invalid tx id"),
 		})
 	}
 
 	tx, err := s.TxById(ctx, [32]byte(p.TxId))
 	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
+				Error: protocol.RequestErrorf(protocol.ErrCodeNotFound, "not found: %s", err),
+			})
+		}
+
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
-			Error: protocol.Errorf("error getting tx by id: %s", err),
+			Error: protocol.NewInternalError(err).ProtocolError(),
 		})
 	}
 
