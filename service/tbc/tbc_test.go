@@ -30,6 +30,7 @@ import (
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
+	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
@@ -1094,7 +1095,7 @@ func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcap
 		t.Fatal(err)
 	}
 	return tbcapi.BtcBlockHeadersByHeightResponse{
-		BlockHeaders: [][]byte{bytes},
+		BlockHeaders: []api.ByteSlice{bytes},
 	}
 }
 
