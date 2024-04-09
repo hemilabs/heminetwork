@@ -37,6 +37,12 @@ var (
 			Help:         "address port to listen on",
 			Print:        config.PrintAll,
 		},
+		"TBC_AUTO_INDEX": config.Config{
+			Value:        &cfg.AutoIndex,
+			DefaultValue: true,
+			Help:         "enable auto utxo and tx indexes",
+			Print:        config.PrintAll,
+		},
 		"TBC_BLOCK_SANITY": config.Config{
 			Value:        &cfg.BlockSanity,
 			DefaultValue: false,
@@ -55,24 +61,17 @@ var (
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
 		},
-		"TBC_NETWORK": config.Config{
-			Value:        &cfg.Network,
-			DefaultValue: defaultNetwork,
-			Help:         "bitcoin network; mainnet or testnet3",
-			Print:        config.PrintAll,
-		},
 		"TBC_MAX_CACHED_TXS": config.Config{
 			Value:        &cfg.MaxCachedTxs,
 			DefaultValue: 1000000,
 			Help:         "maximum cached utxos and/or txs during indexing",
 			Print:        config.PrintAll,
 		},
-		"TBC_POSTGRES_URI": config.Config{
-			Value:        &cfg.PgURI,
-			DefaultValue: "",
-			Help:         "postgres connection URI",
-			Print:        config.PrintSecret,
-			Required:     false,
+		"TBC_NETWORK": config.Config{
+			Value:        &cfg.Network,
+			DefaultValue: defaultNetwork,
+			Help:         "bitcoin network; mainnet or testnet3",
+			Print:        config.PrintAll,
 		},
 		"TBC_PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,
