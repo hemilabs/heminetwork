@@ -2,7 +2,7 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-//go:build unix && !windows
+//go:build linux
 
 package main
 
@@ -35,26 +35,22 @@ var (
 		unix.RLIMIT_NPROC:   {Cur: 4196, Max: 4196},
 		unix.RLIMIT_RSS:     {Cur: math.MaxUint64, Max: math.MaxUint64},
 	}
+
+	ulimitSupported = true
 )
 
-func setUlimits() error {
+func verifyUlimits() error {
 	var p int
 	for k, resource := range resources {
 		var limit unix.Rlimit
 		if err := unix.Getrlimit(resource, &limit); err != nil {
 			return fmt.Errorf("ulimit %v: %w", k, err)
 		}
-		// Set to Max
-		l := unix.Rlimit{Cur: limit.Max, Max: limit.Max}
-		if err := unix.Setrlimit(resource, &l); err != nil {
-			return fmt.Errorf("set ulimit %v: %v",
-				resourceName[resource], err)
-		}
 
 		// Make sure it is a reasonable value
 		limitRequired := resourceWant[resource]
 		if limitRequired.Cur > limit.Cur || limitRequired.Max > limit.Max {
-			return fmt.Errorf("set ulimit %v: limit too low got %v, need %v",
+			return fmt.Errorf("ulimit %v: limit too low got %v, need %v",
 				resourceName[resource], limit.Max, limitRequired.Max)
 		}
 
