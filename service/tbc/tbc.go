@@ -219,6 +219,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
+	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
@@ -231,7 +232,8 @@ func NewServer(cfg *Config) (*Server, error) {
 			Name:      "rpc_calls_total",
 			Help:      "The total number of successful RPC commands",
 		}),
-		sessions: make(map[string]*tbcWs),
+		sessions:       make(map[string]*tbcWs),
+		requestTimeout: defaultRequestTimeout,
 	}
 
 	// We could use a PGURI verification here.
