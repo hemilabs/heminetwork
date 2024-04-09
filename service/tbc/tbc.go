@@ -1560,6 +1560,17 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.testAndSetRunning(false)
 
+	// We need a lot of open files and memory for the indexes. Best effort
+	// to echo to the user what the ulimits are.
+	if ulimitSupported {
+		if err := verifyUlimits(); err != nil {
+			return fmt.Errorf("verify ulimits: %w", err)
+		}
+	} else {
+		log.Errorf("This architecture does not supported ulimit verification. " +
+			"Consult the README for minimum values.")
+	}
+
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 

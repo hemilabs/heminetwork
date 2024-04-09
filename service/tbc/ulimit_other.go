@@ -4,7 +4,7 @@
 
 //go:build !linux && !darwin
 
-package main
+package tbc
 
 const ulimitSupported = false
 

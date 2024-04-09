@@ -2,9 +2,9 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-//go:build linux
+//go:build darwin
 
-package main
+package tbc
 
 import (
 	"fmt"
@@ -19,21 +19,18 @@ var (
 		unix.RLIMIT_MEMLOCK,
 		unix.RLIMIT_NOFILE,
 		unix.RLIMIT_NPROC,
-		unix.RLIMIT_RSS,
 	}
 	resourceName = map[int]string{
 		unix.RLIMIT_AS:      "memory",
 		unix.RLIMIT_MEMLOCK: "lockedmem",
 		unix.RLIMIT_NOFILE:  "nofiles",
 		unix.RLIMIT_NPROC:   "processes",
-		unix.RLIMIT_RSS:     "rss",
 	}
 	resourceWant = map[int]unix.Rlimit{
 		unix.RLIMIT_AS:      {Cur: math.MaxUint64, Max: math.MaxUint64},
 		unix.RLIMIT_MEMLOCK: {Cur: 775258112, Max: 775258112},
 		unix.RLIMIT_NOFILE:  {Cur: 16384, Max: 16384},
 		unix.RLIMIT_NPROC:   {Cur: 4196, Max: 4196},
-		unix.RLIMIT_RSS:     {Cur: math.MaxUint64, Max: math.MaxUint64},
 	}
 )
 
