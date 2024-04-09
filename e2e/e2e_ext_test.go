@@ -989,7 +989,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 	testTable := []testTableItem{
 		{
 			name:              "bitcoin balance error",
-			expectedErrorCode: protocol.ErrInternalError,
+			expectedErrorCode: protocol.ErrCodeInternal,
 			requests:          []bfgapi.BitcoinBalanceRequest{},
 			electrumx:         false,
 		},
@@ -1005,7 +1005,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 		},
 		{
 			name:              "bitcoin broadcast electrumx error",
-			expectedErrorCode: protocol.ErrInternalError,
+			expectedErrorCode: protocol.ErrCodeInternal,
 			requests: []bfgapi.BitcoinBroadcastRequest{
 				{
 					Transaction: btx,
@@ -1028,7 +1028,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 		},
 		{
 			name:              "bitcoin info electrumx error",
-			expectedErrorCode: protocol.ErrInternalError,
+			expectedErrorCode: protocol.ErrCodeInternal,
 			requests: []bfgapi.BitcoinInfoRequest{
 				{},
 			},
@@ -1036,7 +1036,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 		},
 		{
 			name:              "bitcoin utxos electrumx error",
-			expectedErrorCode: protocol.ErrInternalError,
+			expectedErrorCode: protocol.ErrCodeInternal,
 			requests: []bfgapi.BitcoinUTXOsRequest{
 				{},
 			},

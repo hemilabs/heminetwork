@@ -32,7 +32,7 @@ const (
 	ErrCodeUnknown    = 0
 	ErrCodeNotFound   = 1
 	ErrCodeBadRequest = 2
-	ErrInternalError  = 3
+	ErrCodeInternal   = 3
 )
 
 const (
@@ -334,7 +334,7 @@ func NewInternalError(err error) *InternalError {
 // message and arguments.
 func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
 	protocolError := Errorf("internal error")
-	protocolError.Code = ErrInternalError
+	protocolError.Code = ErrCodeInternal
 	return &InternalError{
 		protocol: protocolError,
 		internal: fmt.Errorf(msg, args...),
