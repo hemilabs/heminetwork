@@ -29,6 +29,9 @@ const (
 	WSConnectTimeout   = 20 * time.Second
 	WSHandshakeTimeout = 15 * time.Second
 
+	// don't change these, I am explicitly avoided iota here so we don't have
+	// any unexpected downstream issues where a consumer may test against the
+	// number value directly
 	ErrCodeUnknown    = 0
 	ErrCodeNotFound   = 1
 	ErrCodeBadRequest = 2
