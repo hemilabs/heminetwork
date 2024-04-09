@@ -2,11 +2,12 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-//go:build windows && !unix
+//go:build !linux
 
 package main
 
-// setUlimits always "rollseyes: succeds :rofl: on on windows.
-func setUlimits() error {
+var ulimitSupported = false
+
+func verifyUlimits() error {
 	return nil
 }
