@@ -155,7 +155,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 		}
 
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
-			Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "error getting utxos for address: %s", err),
+			Error: protocol.RequestErrorf("error getting utxos for address: %s", err),
 		})
 	}
 
@@ -180,7 +180,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, ws *tbcWs, payload any
 
 	if len(p.TxId) != 32 {
 		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
-			Error: protocol.RequestErrorf(protocol.ErrCodeBadRequest, "invalid tx id"),
+			Error: protocol.RequestErrorf("invalid tx id"),
 		})
 	}
 
@@ -188,7 +188,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, ws *tbcWs, payload any
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
-				Error: protocol.RequestErrorf(protocol.ErrCodeNotFound, "not found: %s", err),
+				Error: protocol.RequestErrorf("not found: %s", err),
 			})
 		}
 

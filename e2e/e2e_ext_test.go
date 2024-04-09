@@ -980,22 +980,22 @@ func TestBFGPublicErrorCases(t *testing.T) {
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	type testTableItem struct {
-		name              string
-		expectedErrorCode uint8
-		requests          any
-		electrumx         bool
+		name          string
+		expectedError string
+		requests      any
+		electrumx     bool
 	}
 
 	testTable := []testTableItem{
 		{
-			name:              "bitcoin balance error",
-			expectedErrorCode: protocol.ErrCodeInternal,
-			requests:          []bfgapi.BitcoinBalanceRequest{},
-			electrumx:         false,
+			name:          "bitcoin balance error",
+			expectedError: "internal error",
+			requests:      []bfgapi.BitcoinBalanceRequest{},
+			electrumx:     false,
 		},
 		{
-			name:              "bitcoin broadcast deserialize error",
-			expectedErrorCode: protocol.ErrCodeBadRequest,
+			name:          "bitcoin broadcast deserialize error",
+			expectedError: "failed to deserialize tx: unexpected EOF",
 			requests: []bfgapi.BitcoinBroadcastRequest{
 				{
 					Transaction: []byte("invalid..."),
@@ -1004,8 +1004,8 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			electrumx: false,
 		},
 		{
-			name:              "bitcoin broadcast electrumx error",
-			expectedErrorCode: protocol.ErrCodeInternal,
+			name:          "bitcoin broadcast electrumx error",
+			expectedError: "internal error",
 			requests: []bfgapi.BitcoinBroadcastRequest{
 				{
 					Transaction: btx,
@@ -1014,8 +1014,8 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			electrumx: false,
 		},
 		{
-			name:              "bitcoin broadcast database error",
-			expectedErrorCode: protocol.ErrCodeBadRequest,
+			name:          "bitcoin broadcast database error",
+			expectedError: "pop basis already exists",
 			requests: []bfgapi.BitcoinBroadcastRequest{
 				{
 					Transaction: btx,
@@ -1027,16 +1027,16 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			electrumx: true,
 		},
 		{
-			name:              "bitcoin info electrumx error",
-			expectedErrorCode: protocol.ErrCodeInternal,
+			name:          "bitcoin info electrumx error",
+			expectedError: "internal error",
 			requests: []bfgapi.BitcoinInfoRequest{
 				{},
 			},
 			electrumx: false,
 		},
 		{
-			name:              "bitcoin utxos electrumx error",
-			expectedErrorCode: protocol.ErrCodeInternal,
+			name:          "bitcoin utxos electrumx error",
+			expectedError: "internal error",
 			requests: []bfgapi.BitcoinUTXOsRequest{
 				{},
 			},
@@ -1119,20 +1119,20 @@ func TestBFGPublicErrorCases(t *testing.T) {
 
 				switch v := response.(type) {
 				case *bfgapi.BitcoinBalanceResponse:
-					if v.Error.Code != tti.expectedErrorCode {
-						t.Fatalf("%d != %d", v.Error.Code, tti.expectedErrorCode)
+					if v.Error.Message != tti.expectedError {
+						t.Fatalf("%s != %s", v.Error.Message, tti.expectedError)
 					}
 				case *bfgapi.BitcoinBroadcastResponse:
-					if v.Error.Code != tti.expectedErrorCode {
-						t.Fatalf("%d != %d", v.Error.Code, tti.expectedErrorCode)
+					if v.Error.Message != tti.expectedError {
+						t.Fatalf("%s != %s", v.Error.Message, tti.expectedError)
 					}
 				case *bfgapi.BitcoinInfoResponse:
-					if v.Error.Code != tti.expectedErrorCode {
-						t.Fatalf("%d != %d", v.Error.Code, tti.expectedErrorCode)
+					if v.Error.Message != tti.expectedError {
+						t.Fatalf("%s != %s", v.Error.Message, tti.expectedError)
 					}
 				case *bfgapi.BitcoinUTXOsResponse:
-					if v.Error.Code != tti.expectedErrorCode {
-						t.Fatalf("%d != %d", v.Error.Code, tti.expectedErrorCode)
+					if v.Error.Message != tti.expectedError {
+						t.Fatalf("%s != %s", v.Error.Message, tti.expectedError)
 					}
 				default:
 					t.Fatalf("cannot determine type %T", v)
@@ -1144,15 +1144,15 @@ func TestBFGPublicErrorCases(t *testing.T) {
 
 func TestBFGPrivateErrorCases(t *testing.T) {
 	type testTableItem struct {
-		name              string
-		expectedErrorCode uint8
-		requests          any
+		name          string
+		expectedError string
+		requests      any
 	}
 
 	testTable := []testTableItem{
 		{
-			name:              "public key create duplicate",
-			expectedErrorCode: protocol.ErrCodeBadRequest,
+			name:          "public key create duplicate",
+			expectedError: "public key already exists",
 			requests: []bfgapi.AccessPublicKeyCreateRequest{
 				{
 					PublicKey: hex.EncodeToString(privateKey.PubKey().SerializeCompressed()),
@@ -1163,8 +1163,8 @@ func TestBFGPrivateErrorCases(t *testing.T) {
 			},
 		},
 		{
-			name:              "public key does not exist when deleting",
-			expectedErrorCode: protocol.ErrCodeNotFound,
+			name:          "public key does not exist when deleting",
+			expectedError: "public key not found",
 			requests: []bfgapi.AccessPublicKeyDeleteRequest{
 				{
 					PublicKey: hex.EncodeToString(privateKey.PubKey().SerializeCompressed()),
@@ -1172,8 +1172,8 @@ func TestBFGPrivateErrorCases(t *testing.T) {
 			},
 		},
 		{
-			name:              "public key is invalid",
-			expectedErrorCode: protocol.ErrCodeBadRequest,
+			name:          "public key is invalid",
+			expectedError: "public key decode: encoding/hex: invalid byte: U+006C 'l'",
 			requests: []bfgapi.AccessPublicKeyCreateRequest{
 				{
 					PublicKey: "blahblahblah",
@@ -1228,12 +1228,12 @@ func TestBFGPrivateErrorCases(t *testing.T) {
 
 				switch v := response.(type) {
 				case *bfgapi.AccessPublicKeyCreateResponse:
-					if v.Error.Code != tti.expectedErrorCode {
-						t.Fatalf("%d != %d", v.Error.Code, tti.expectedErrorCode)
+					if v.Error.Message != tti.expectedError {
+						t.Fatalf("%s != %s", v.Error.Message, tti.expectedError)
 					}
 				case *bfgapi.AccessPublicKeyDeleteResponse:
-					if v.Error.Code != tti.expectedErrorCode {
-						t.Fatalf("%d != %d", v.Error.Code, tti.expectedErrorCode)
+					if v.Error.Message != tti.expectedError {
+						t.Fatalf("%s != %s", v.Error.Message, tti.expectedError)
 					}
 				default:
 					t.Fatalf("cannot determine type %T", v)

@@ -825,8 +825,8 @@ func TestTxByIdInvalid(t *testing.T) {
 			}
 
 			if response.Error != nil {
-				if response.Error.Code != protocol.ErrCodeNotFound {
-					t.Fatalf("incorrect error code found %d", response.Error.Code)
+				if !strings.Contains(response.Error.Message, "not found:") {
+					t.Fatalf("incorrect error found %s", response.Error.Message)
 				}
 			}
 
@@ -933,8 +933,8 @@ func TestTxByIdNotFound(t *testing.T) {
 			}
 
 			if response.Error != nil {
-				if response.Error.Code != protocol.ErrCodeBadRequest {
-					t.Fatalf("incorrect error code found %d", response.Error.Code)
+				if !strings.Contains(response.Error.Message, "invalid tx id") {
+					t.Fatalf("incorrect error found: %s", response.Error.Message)
 				}
 			}
 

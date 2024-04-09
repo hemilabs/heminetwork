@@ -31,16 +31,6 @@ const (
 )
 
 const (
-	// don't change these, I am explicitly avoided iota here so we don't have
-	// any unexpected downstream issues where a consumer may test against the
-	// number value directly
-	ErrCodeUnknown    = 0
-	ErrCodeNotFound   = 1
-	ErrCodeBadRequest = 2
-	ErrCodeInternal   = 3
-)
-
-const (
 	StatusHandshakeErr websocket.StatusCode = 4100 // XXX can we just hijack 4100?
 )
 
@@ -249,7 +239,6 @@ type Error struct {
 	Timestamp int64  `json:"timestamp"`
 	Trace     string `json:"trace,omitempty"`
 	Message   string `json:"message"`
-	Code      uint8  `json:"code"`
 }
 
 // Errorf returns a protocol Error type with an embedded trace.
@@ -291,11 +280,10 @@ func RequestError(err error) *Error {
 // Request errors are usually something caused by a client, e.g. validation or
 // input errors, and therefore should not be logged server-side and do not
 // contain an embedded trace.
-func RequestErrorf(code uint8, msg string, args ...any) *Error {
+func RequestErrorf(msg string, args ...any) *Error {
 	return &Error{
 		Timestamp: time.Now().Unix(),
 		Message:   fmt.Sprintf(msg, args...),
-		Code:      code,
 	}
 }
 
@@ -338,10 +326,8 @@ func NewInternalError(err error) *InternalError {
 // NewInternalErrorf returns an InternalError constructed from the passed
 // message and arguments.
 func NewInternalErrorf(msg string, args ...interface{}) *InternalError {
-	protocolError := Errorf("internal error")
-	protocolError.Code = ErrCodeInternal
 	return &InternalError{
-		protocol: protocolError,
+		protocol: Errorf("internal error"),
 		internal: fmt.Errorf(msg, args...),
 	}
 }
