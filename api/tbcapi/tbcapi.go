@@ -20,14 +20,14 @@ const (
 	CmdPingRequest  = "tbcapi-ping-request"
 	CmdPingResponse = "tbcapi-ping-response"
 
-	CmdBtcBlockHeadersByHeightRequest  = "tbcapi-btc-block-headers-by-height-request"
-	CmdBtcBlockHeadersByHeightResponse = "tbcapi-btc-block-headers-by-height-response"
+	CmdBlockHeadersByHeightRequest  = "tbcapi-block-headers-by-height-request"
+	CmdBlockHeadersByHeightResponse = "tbcapi-block-headers-by-height-response"
 
 	CmdBlockHeadersBestRequest  = "tbcapi-block-headers-best-request"
 	CmdBlockHeadersBestResponse = "tbcapi-block-headers-best-response"
 
-	CmdBtcBalanceByAddressRequest  = "tbcapi-btc-balance-by-address-request"
-	CmdBtcBalanceByAddressResponse = "tbcapi-btc-balance-by-address-response"
+	CmdBalanceByAddressRequest  = "tbcapi-balance-by-address-request"
+	CmdBalanceByAddressResponse = "tbcapi-balance-by-address-response"
 
 	CmdUtxosByAddressRequest  = "tbcapi-utxos-by-address-request"
 	CmdUtxosByAddressResponse = "tbcapi-utxos-by-address-response"
@@ -49,7 +49,7 @@ type (
 	PingResponse protocol.PingResponse
 )
 
-type BtcHeader struct {
+type Header struct {
 	Version uint32 `json:"version"`
 
 	// hex encoded byte array
@@ -66,17 +66,17 @@ type BtcHeader struct {
 	Nonce uint32 `json:"nonce"`
 }
 
-type BtcBlockHeader struct {
-	Height uint32    `json:"height"`
-	NumTx  uint32    `json:"num_tx"`
-	Header BtcHeader `json:"header"`
+type BlockHeader struct {
+	Height uint32 `json:"height"`
+	NumTx  uint32 `json:"num_tx"`
+	Header Header `json:"header"`
 }
 
-type BtcBlockHeadersByHeightRequest struct {
+type BlockHeadersByHeightRequest struct {
 	Height uint32 `json:"height"`
 }
 
-type BtcBlockHeadersByHeightResponse struct {
+type BlockHeadersByHeightResponse struct {
 	BlockHeaders []api.ByteSlice `json:"block_headers"`
 	Error        *protocol.Error `json:"error,omitempty"`
 }
@@ -89,11 +89,11 @@ type BlockHeadersBestResponse struct {
 	Error        *protocol.Error `json:"error,omitempty"`
 }
 
-type BtcAddrBalanceRequest struct {
+type BalanceByAddressRequest struct {
 	Address string `json:"address"`
 }
 
-type BtcAddrBalanceResponse struct {
+type BalanceByAddressResponse struct {
 	Balance uint64          `json:"balance"`
 	Error   *protocol.Error `json:"error,omitempty"`
 }
@@ -119,18 +119,18 @@ type TxByIdResponse struct {
 }
 
 var commands = map[protocol.Command]reflect.Type{
-	CmdPingRequest:                     reflect.TypeOf(PingRequest{}),
-	CmdPingResponse:                    reflect.TypeOf(PingResponse{}),
-	CmdBtcBlockHeadersByHeightRequest:  reflect.TypeOf(BtcBlockHeadersByHeightRequest{}),
-	CmdBtcBlockHeadersByHeightResponse: reflect.TypeOf(BtcBlockHeadersByHeightResponse{}),
-	CmdBlockHeadersBestRequest:         reflect.TypeOf(BlockHeadersBestRequest{}),
-	CmdBlockHeadersBestResponse:        reflect.TypeOf(BlockHeadersBestResponse{}),
-	CmdBtcBalanceByAddressRequest:      reflect.TypeOf(BtcAddrBalanceRequest{}),
-	CmdBtcBalanceByAddressResponse:     reflect.TypeOf(BtcAddrBalanceResponse{}),
-	CmdUtxosByAddressRequest:           reflect.TypeOf(UtxosByAddressRequest{}),
-	CmdUtxosByAddressResponse:          reflect.TypeOf(UtxosByAddressResponse{}),
-	CmdTxByIdRequest:                   reflect.TypeOf(TxByIdRequest{}),
-	CmdTxByIdResponse:                  reflect.TypeOf(TxByIdResponse{}),
+	CmdPingRequest:                  reflect.TypeOf(PingRequest{}),
+	CmdPingResponse:                 reflect.TypeOf(PingResponse{}),
+	CmdBlockHeadersByHeightRequest:  reflect.TypeOf(BlockHeadersByHeightRequest{}),
+	CmdBlockHeadersByHeightResponse: reflect.TypeOf(BlockHeadersByHeightResponse{}),
+	CmdBlockHeadersBestRequest:      reflect.TypeOf(BlockHeadersBestRequest{}),
+	CmdBlockHeadersBestResponse:     reflect.TypeOf(BlockHeadersBestResponse{}),
+	CmdBalanceByAddressRequest:      reflect.TypeOf(BalanceByAddressRequest{}),
+	CmdBalanceByAddressResponse:     reflect.TypeOf(BalanceByAddressResponse{}),
+	CmdUtxosByAddressRequest:        reflect.TypeOf(UtxosByAddressRequest{}),
+	CmdUtxosByAddressResponse:       reflect.TypeOf(UtxosByAddressResponse{}),
+	CmdTxByIdRequest:                reflect.TypeOf(TxByIdRequest{}),
+	CmdTxByIdResponse:               reflect.TypeOf(TxByIdResponse{}),
 }
 
 type tbcAPI struct{}
