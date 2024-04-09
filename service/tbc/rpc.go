@@ -150,7 +150,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 	if err != nil {
 		if errors.Is(err, level.ErrIterator) {
 			return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
-				Error: protocol.NewInternalErrorf("error iterating utxos: %s", err).ProtocolError(),
+				Error: protocol.NewInternalErrorf("error iterating utxos: %w", err).ProtocolError(),
 			})
 		}
 
