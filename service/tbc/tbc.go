@@ -674,10 +674,7 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func (s *Server) blocksMissing(ctx context.Context) bool {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
+func (s *Server) blksMissing(ctx context.Context) bool {
 	// Do cheap memory check first
 	if len(s.blocks) != 0 {
 		return true
@@ -690,6 +687,13 @@ func (s *Server) blocksMissing(ctx context.Context) bool {
 		return true // this is really kind of terminal
 	}
 	return len(bm) > 0
+}
+
+func (s *Server) blocksMissing(ctx context.Context) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	return s.blksMissing(ctx)
 }
 
 func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
@@ -1513,7 +1517,8 @@ func (s *Server) Synced(ctx context.Context) (si SyncInfo) {
 	if err == nil {
 		si.TxHeight = binary.BigEndian.Uint64(th) - 1
 	}
-	if si.UtxoHeight == si.TxHeight && si.UtxoHeight == si.BlockHeaderHeight {
+	if si.UtxoHeight == si.TxHeight && si.UtxoHeight == si.BlockHeaderHeight &&
+		!s.blksMissing(ctx) {
 		si.Synced = true
 	}
 	return
