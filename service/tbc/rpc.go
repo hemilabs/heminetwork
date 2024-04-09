@@ -54,19 +54,19 @@ func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, 
 	return nil
 }
 
-func (s *Server) handleBtcBlockHeadersByHeightRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
+func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
 	log.Tracef("handleBtcBlockHeadersByHeightRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBlockHeadersByHeightRequest exit: %v", ws.addr)
 
 	// "decode" the input
-	p, ok := payload.(*tbcapi.BtcBlockHeadersByHeightRequest)
+	p, ok := payload.(*tbcapi.BlockHeadersByHeightRequest)
 	if !ok {
 		return fmt.Errorf("invalid payload type: %T", payload)
 	}
 
 	blockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(p.Height))
 	if err != nil {
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockHeadersByHeightResponse{
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BlockHeadersByHeightResponse{
 			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
 		})
 	}
@@ -81,7 +81,7 @@ func (s *Server) handleBtcBlockHeadersByHeightRequest(ctx context.Context, ws *t
 	}
 
 	// "encode" output and write response
-	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcBlockHeadersByHeightResponse{
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BlockHeadersByHeightResponse{
 		BlockHeaders: encodedBlockHeaders,
 	})
 }
@@ -116,23 +116,23 @@ func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, ws *tbcWs, p
 	})
 }
 
-func (s *Server) handleBtcBalanceByAddrRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
+func (s *Server) handleBalanceByAddrRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
 	log.Tracef("handleBtcBalanceByAddrRequest: %v", ws.addr)
 	defer log.Tracef("handleBtcBalanceByAddrRequest exit: %v", ws.addr)
 
-	p, ok := payload.(*tbcapi.BtcAddrBalanceRequest)
+	p, ok := payload.(*tbcapi.BalanceByAddressRequest)
 	if !ok {
 		return fmt.Errorf("invalid payload type: %T", payload)
 	}
 
 	balance, err := s.BalanceByAddress(ctx, p.Address)
 	if err != nil {
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcAddrBalanceResponse{
+		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BalanceByAddressResponse{
 			Error: protocol.Errorf("error getting balance for address: %s", err),
 		})
 	}
 
-	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BtcAddrBalanceResponse{
+	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BalanceByAddressResponse{
 		Balance: balance,
 	})
 }
@@ -278,12 +278,12 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 		switch cmd {
 		case tbcapi.CmdPingRequest:
 			err = s.handlePingRequest(ctx, ws, payload, id)
-		case tbcapi.CmdBtcBlockHeadersByHeightRequest:
-			err = s.handleBtcBlockHeadersByHeightRequest(ctx, ws, payload, id)
+		case tbcapi.CmdBlockHeadersByHeightRequest:
+			err = s.handleBlockHeadersByHeightRequest(ctx, ws, payload, id)
 		case tbcapi.CmdBlockHeadersBestRequest:
 			err = s.handleBlockHeadersBestRequest(ctx, ws, payload, id)
-		case tbcapi.CmdBtcBalanceByAddressRequest:
-			err = s.handleBtcBalanceByAddrRequest(ctx, ws, payload, id)
+		case tbcapi.CmdBalanceByAddressRequest:
+			err = s.handleBalanceByAddrRequest(ctx, ws, payload, id)
 		case tbcapi.CmdUtxosByAddressRequest:
 			err = s.handleUtxosByAddressRequest(ctx, ws, payload, id)
 		case tbcapi.CmdTxByIdRequest:
