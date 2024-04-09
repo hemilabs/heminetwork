@@ -2,7 +2,7 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-//go:build unix && !windows
+//go:build unix && !darwin && !windows
 
 package main
 
