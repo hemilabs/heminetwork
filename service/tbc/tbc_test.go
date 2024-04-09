@@ -83,7 +83,7 @@ func TestBtcBlockHeadersByHeight(t *testing.T) {
 	}
 
 	var lastErr error
-	var response tbcapi.BtcBlockHeadersByHeightResponse
+	var response tbcapi.BlockHeadersByHeightResponse
 	for {
 		select {
 		case <-time.After(1 * time.Second):
@@ -91,7 +91,7 @@ func TestBtcBlockHeadersByHeight(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		lastErr = nil
-		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcBlockHeadersByHeightRequest{
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
 			Height: 55,
 		})
 		if err != nil {
@@ -106,7 +106,7 @@ func TestBtcBlockHeadersByHeight(t *testing.T) {
 			continue
 		}
 
-		if v.Header.Command == tbcapi.CmdBtcBlockHeadersByHeightResponse {
+		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightResponse {
 			if err := json.Unmarshal(v.Payload, &response); err != nil {
 				t.Fatal(err)
 			}
@@ -157,7 +157,7 @@ func TestBtcBlockHeadersByHeightDoesNotExist(t *testing.T) {
 	}
 
 	var lastErr error
-	var response tbcapi.BtcBlockHeadersByHeightResponse
+	var response tbcapi.BlockHeadersByHeightResponse
 	for {
 		select {
 		case <-time.After(1 * time.Second):
@@ -165,7 +165,7 @@ func TestBtcBlockHeadersByHeightDoesNotExist(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		lastErr = nil
-		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcBlockHeadersByHeightRequest{
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
 			Height: 550,
 		})
 		if err != nil {
@@ -180,7 +180,7 @@ func TestBtcBlockHeadersByHeightDoesNotExist(t *testing.T) {
 			continue
 		}
 
-		if v.Header.Command == tbcapi.CmdBtcBlockHeadersByHeightResponse {
+		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightResponse {
 			if err := json.Unmarshal(v.Payload, &response); err != nil {
 				t.Fatal(err)
 			}
@@ -359,7 +359,7 @@ func TestBalanceByAddress(t *testing.T) {
 			}
 
 			var lastErr error
-			var response tbcapi.BtcAddrBalanceResponse
+			var response tbcapi.BalanceByAddressResponse
 			for {
 				select {
 				case <-time.After(1 * time.Second):
@@ -371,7 +371,7 @@ func TestBalanceByAddress(t *testing.T) {
 					t.Fatal(err)
 				}
 				lastErr = nil
-				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcAddrBalanceRequest{
+				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BalanceByAddressRequest{
 					Address: tti.address(),
 				})
 				if err != nil {
@@ -386,7 +386,7 @@ func TestBalanceByAddress(t *testing.T) {
 					continue
 				}
 
-				if v.Header.Command == tbcapi.CmdBtcBalanceByAddressResponse {
+				if v.Header.Command == tbcapi.CmdBalanceByAddressResponse {
 					if err := json.Unmarshal(v.Payload, &response); err != nil {
 						t.Fatal(err)
 					}
@@ -398,7 +398,7 @@ func TestBalanceByAddress(t *testing.T) {
 						expectedBalance = pricePerBlock * blocks
 					}
 
-					expected := tbcapi.BtcAddrBalanceResponse{
+					expected := tbcapi.BalanceByAddressResponse{
 						Balance: expectedBalance,
 						Error:   nil,
 					}
@@ -1171,7 +1171,7 @@ type BtcCliBlockHeader struct {
 	NextBlockHash     string  `json:"nextblockhash"`
 }
 
-func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcapi.BtcBlockHeadersByHeightResponse {
+func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcapi.BlockHeadersByHeightResponse {
 	prevBlockHash, err := chainhash.NewHashFromStr(btcCliBlockHeader.PreviousBlockHash)
 	if err != nil {
 		t.Fatal(err)
@@ -1191,7 +1191,7 @@ func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcap
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tbcapi.BtcBlockHeadersByHeightResponse{
+	return tbcapi.BlockHeadersByHeightResponse{
 		BlockHeaders: []api.ByteSlice{bytes},
 	}
 }
