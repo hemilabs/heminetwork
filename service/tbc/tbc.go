@@ -785,6 +785,10 @@ func (s *Server) txIndexer(ctx context.Context) {
 	log.Tracef("txIndexer")
 	defer log.Tracef("txIndexer exit")
 
+	if !s.cfg.AutoIndex {
+		return
+	}
+
 	// only one txIndexer may run at any given time
 	s.mtx.Lock()
 	if s.txIndexerRunning {
@@ -839,6 +843,10 @@ func (s *Server) txIndexer(ctx context.Context) {
 func (s *Server) utxoIndexer(ctx context.Context) {
 	log.Tracef("utxoIndexer")
 	defer log.Tracef("utxoIndexer exit")
+
+	if !s.cfg.AutoIndex {
+		return
+	}
 
 	// only one utxoIndexer may run at any given time
 	s.mtx.Lock()
