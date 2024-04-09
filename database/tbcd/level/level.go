@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -45,7 +46,11 @@ const (
 	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
 
+type IteratorError error
+
 var log = loggo.GetLogger("level")
+
+var ErrIterator = IteratorError(errors.New("iteration error"))
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
@@ -655,7 +660,7 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start u
 		}
 	}
 	if err := it.Error(); err != nil {
-		return nil, fmt.Errorf("utxos by script hash iterator: %w", err)
+		return nil, IteratorError(err)
 	}
 
 	return utxos, nil
