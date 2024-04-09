@@ -6,10 +6,10 @@ package tbc
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"sync"
 	"time"
