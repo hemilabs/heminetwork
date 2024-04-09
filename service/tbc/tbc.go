@@ -1418,7 +1418,7 @@ func (s *Server) TxById(ctx context.Context, txId tbcd.TxId) (*wire.MsgTx, error
 		}
 	}
 
-	return nil, errors.New("tx not found")
+	return nil, database.ErrNotFound
 }
 
 func feesFromTransactions(txs []*btcutil.Tx) error {
