@@ -28,7 +28,9 @@ const (
 	logLevel           = "protocol=INFO"
 	WSConnectTimeout   = 20 * time.Second
 	WSHandshakeTimeout = 15 * time.Second
+)
 
+const (
 	// don't change these, I am explicitly avoided iota here so we don't have
 	// any unexpected downstream issues where a consumer may test against the
 	// number value directly
