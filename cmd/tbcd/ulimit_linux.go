@@ -37,12 +37,9 @@ var (
 	}
 )
 
-var (
-	ulimitSupported = true
-	verifyUlimits   = linuxVerifyUlimits
-)
+const ulimitSupported = true
 
-func linuxVerifyUlimits() error {
+func verifyUlimits() error {
 	var p int
 	for k, resource := range resources {
 		var limit unix.Rlimit
