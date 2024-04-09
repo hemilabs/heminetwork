@@ -316,54 +316,13 @@ func TestBalanceByAddress(t *testing.T) {
 		t.Run(tti.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 			defer cancel()
-			bitcoindContainer := createBitcoind(ctx, t)
-			bitcoindHost, err := bitcoindContainer.Host(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
 
-			peerPort, err := nat.NewPort("tcp", "18444")
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			rpcPort, err := nat.NewPort("tcp", "18443")
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, peerPort)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			mappedRpcPort, err := bitcoindContainer.MappedPort(ctx, rpcPort)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			t.Logf("bitcoind host is: %s", bitcoindHost)
-			t.Logf("bitcoind peer port is: %s", mappedPeerPort.Port())
-			t.Logf("bitcoind rpc port is: %s", mappedRpcPort.Port())
-
-			address := tti.address()
-
+			initialBlocks := 0
 			if !tti.doNotGenerate {
-				_, err = runBitcoinCommand(
-					ctx,
-					t,
-					bitcoindContainer,
-					[]string{
-						"bitcoin-cli",
-						"-regtest=1",
-						"generatetoaddress",
-						"4",
-						address,
-					})
-				if err != nil {
-					t.Fatal(err)
-				}
+				initialBlocks = 4
 			}
+
+			bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, uint64(initialBlocks), tti.address())
 
 			// generate to another address to ensure it's not included in our query
 			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
@@ -413,7 +372,7 @@ func TestBalanceByAddress(t *testing.T) {
 				}
 				lastErr = nil
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BtcAddrBalanceRequest{
-					Address: address,
+					Address: tti.address(),
 				})
 				if err != nil {
 					lastErr = err
@@ -589,32 +548,11 @@ func TestUtxosByAddress(t *testing.T) {
 
 			var bitcoindContainer testcontainers.Container
 			var mappedPeerPort nat.Port
+			initialBlocks := 0
 			if !tti.doNotGenerate {
-				bitcoindContainer, mappedPeerPort = createBitcoindWithInitialBlocks(ctx, t, 4, tti.address())
-			} else {
-				bitcoindContainer = createBitcoind(ctx, t)
+				initialBlocks = 4
 			}
-
-			bitcoindHost, err := bitcoindContainer.Host(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			rpcPort, err := nat.NewPort("tcp", "18443")
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			mappedRpcPort, err := bitcoindContainer.MappedPort(ctx, rpcPort)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			t.Logf("bitcoind host is: %s", bitcoindHost)
-			t.Logf("bitcoind peer port is: %s", mappedPeerPort.Port())
-			t.Logf("bitcoind rpc port is: %s", mappedRpcPort.Port())
-
-			address := tti.address()
+			bitcoindContainer, mappedPeerPort = createBitcoindWithInitialBlocks(ctx, t, uint64(initialBlocks), tti.address())
 
 			// generate to another address to ensure it's not included in our query
 			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
@@ -664,7 +602,7 @@ func TestUtxosByAddress(t *testing.T) {
 				}
 				lastErr = nil
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRequest{
-					Address: address,
+					Address: tti.address(),
 					Start:   uint(tti.start),
 					Count:   uint(tti.limit),
 				})
@@ -715,35 +653,6 @@ func TestTxById(t *testing.T) {
 	skipIfNoDocker(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
-	bitcoindContainer := createBitcoind(ctx, t)
-	bitcoindHost, err := bitcoindContainer.Host(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	peerPort, err := nat.NewPort("tcp", "18444")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rpcPort, err := nat.NewPort("tcp", "18443")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, peerPort)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mappedRpcPort, err := bitcoindContainer.MappedPort(ctx, rpcPort)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Logf("bitcoind host is: %s", bitcoindHost)
-	t.Logf("bitcoind peer port is: %s", mappedPeerPort.Port())
-	t.Logf("bitcoind rpc port is: %s", mappedRpcPort.Port())
 
 	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
 		privateKey,
@@ -753,20 +662,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = runBitcoinCommand(
-		ctx,
-		t,
-		bitcoindContainer,
-		[]string{
-			"bitcoin-cli",
-			"-regtest=1",
-			"generatetoaddress",
-			"4",
-			address.EncodeAddress(),
-		})
-	if err != nil {
-		t.Fatal(err)
-	}
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 4, address.String())
 
 	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
 
@@ -839,6 +735,207 @@ func TestTxById(t *testing.T) {
 			// is the hash equal to what we queried for?
 			if tx.TxHash().String() != txId {
 				t.Fatalf("id mismatch: %s != %s", tx.TxHash().String(), txId)
+			}
+
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+}
+
+func TestTxByIdInvalid(t *testing.T) {
+	skipIfNoDocker(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 4, address.String())
+
+	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.TxByIdResponse
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lastErr = nil
+		txId := getRandomTxId(ctx, t, bitcoindContainer)
+		txIdBytes, err := hex.DecodeString(txId)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		txIdBytes[0]++
+
+		slices.Reverse(txIdBytes)
+
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+			TxId: txIdBytes,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdTxByIdResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+
+			if response.Error == nil {
+				t.Fatal("expecting error")
+			}
+
+			if response.Error != nil {
+				if !strings.Contains(response.Error.Message, "not found:") {
+					t.Fatalf("incorrect error found %s", response.Error.Message)
+				}
+			}
+
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+}
+
+func TestTxByIdNotFound(t *testing.T) {
+	skipIfNoDocker(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 0, "")
+
+	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"generatetoaddress",
+			"4",
+			address.EncodeAddress(),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.TxByIdResponse
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lastErr = nil
+		txId := getRandomTxId(ctx, t, bitcoindContainer)
+		txIdBytes, err := hex.DecodeString(txId)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		txIdBytes = append(txIdBytes, 8)
+
+		slices.Reverse(txIdBytes)
+
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+			TxId: txIdBytes,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdTxByIdResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+
+			if response.Error == nil {
+				t.Fatal("expecting error")
+			}
+
+			if response.Error != nil {
+				if !strings.Contains(response.Error.Message, "invalid tx id") {
+					t.Fatalf("incorrect error found: %s", response.Error.Message)
+				}
 			}
 
 			break
