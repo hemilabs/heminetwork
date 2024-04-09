@@ -34,12 +34,9 @@ var (
 	}
 )
 
-func init() {
-	ulimitSupported = true
-	verifyUlimits = darwinVerifyUlimits
-}
+const ulimitSupported = true
 
-func darwinVerifyUlimits() error {
+func verifyUlimits() error {
 	var p int
 	for k, resource := range resources {
 		var limit unix.Rlimit

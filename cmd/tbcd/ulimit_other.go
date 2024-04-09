@@ -2,13 +2,12 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-//go:build !linux
+//go:build !linux && !darwin
 
 package main
 
-var (
-	ulimitSupported = false
-	verifyUlimits   = func() error {
-		return nil
-	}
-)
+const ulimitSupported = false
+
+func verifyUlimits() error {
+	return nil
+}
