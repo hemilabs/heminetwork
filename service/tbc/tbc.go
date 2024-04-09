@@ -207,7 +207,8 @@ type Server struct {
 	cmdsProcessed prometheus.Counter
 
 	// WebSockets
-	sessions map[string]*tbcWs
+	sessions       map[string]*tbcWs
+	requestTimeout time.Duration
 
 	// ignoreUlimit will explicitly not check ulimit settings on the host
 	// machine, this is useful for very small datasets/chains
@@ -778,7 +779,7 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	// XXX This happens during block header download, we should not react
 	// Probably move into the invtype switch
 	log.Infof("download blocks if we like them")
-	//if len(bis) > 0 {
+	// if len(bis) > 0 {
 	//	s.mtx.Lock()
 	//	defer s.mtx.Unlock()
 	//	err := s.downloadBlocks(ctx, bis)
@@ -786,7 +787,7 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	//		log.Errorf("download blocks: %v", err)
 	//		return
 	//	}
-	//}
+	// }
 }
 
 func (s *Server) txIndexer(ctx context.Context) {
