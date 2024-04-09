@@ -122,12 +122,16 @@ func _main() error {
 		log.Infof("tbc service received signal: %s", s)
 	})
 
-	// We need a lot of open files and memory for the indexes. Try to help
-	// the use by doing this here instead of relying on ulimit being set
-	// properly.
-	err := setUlimits()
-	if err != nil {
-		return fmt.Errorf("log ulimits: %w", err)
+	// We need a lot of open files and memory for the indexes. Best effort
+	// to echo to the user what the ulimits are.
+	if ulimitSupported {
+		err := verifyUlimits()
+		if err != nil {
+			return fmt.Errorf("log ulimits: %w", err)
+		}
+	} else {
+		log.Errorf("This architecture does not supported ulimit verification. " +
+			"Consult the README for minimum values.")
 	}
 
 	server, err := tbc.NewServer(cfg)
