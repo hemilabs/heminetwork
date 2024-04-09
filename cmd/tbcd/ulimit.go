@@ -6,8 +6,9 @@
 
 package main
 
-var ulimitSupported = false
-
-func verifyUlimits() error {
-	return nil
-}
+var (
+	ulimitSupported = false
+	verifyUlimits   = func() error {
+		return nil
+	}
+)

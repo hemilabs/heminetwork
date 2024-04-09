@@ -35,11 +35,14 @@ var (
 		unix.RLIMIT_NPROC:   {Cur: 4196, Max: 4196},
 		unix.RLIMIT_RSS:     {Cur: math.MaxUint64, Max: math.MaxUint64},
 	}
-
-	ulimitSupported = true
 )
 
-func verifyUlimits() error {
+var (
+	ulimitSupported = true
+	verifyUlimits   = linuxVerifyUlimits
+)
+
+func linuxVerifyUlimits() error {
 	var p int
 	for k, resource := range resources {
 		var limit unix.Rlimit

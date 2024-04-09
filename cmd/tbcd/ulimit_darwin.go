@@ -32,11 +32,14 @@ var (
 		unix.RLIMIT_NOFILE:  {Cur: 16384, Max: 16384},
 		unix.RLIMIT_NPROC:   {Cur: 4196, Max: 4196},
 	}
-
-	ulimitSupported = true
 )
 
-func verifyUlimits() error {
+func init() {
+	ulimitSupported = true
+	verifyUlimits = darwinVerifyUlimits
+}
+
+func darwinVerifyUlimits() error {
 	var p int
 	for k, resource := range resources {
 		var limit unix.Rlimit
