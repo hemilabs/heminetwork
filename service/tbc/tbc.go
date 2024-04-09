@@ -152,15 +152,15 @@ type blockPeer struct {
 }
 
 type Config struct {
+	AutoIndex               bool
+	BlockSanity             bool
+	ForceSeedPort           string
 	LevelDBHome             string
 	ListenAddress           string
 	LogLevel                string
-	PgURI                   string
-	PrometheusListenAddress string
-	Network                 string
-	BlockSanity             bool
-	ForceSeedPort           string
 	MaxCachedTxs            int
+	Network                 string
+	PrometheusListenAddress string
 }
 
 func NewDefaultConfig() *Config {
