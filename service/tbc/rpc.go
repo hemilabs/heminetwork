@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"nhooyr.io/websocket"
 
@@ -86,6 +87,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.TxByIdRequest)
 				return s.handleTxByIdRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdTxByIdRawRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.TxByIdRawRequest)
+				return s.handleTxByIdRawRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -257,41 +265,95 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.Ut
 	}, nil
 }
 
-func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequest) (any, error) {
-	log.Tracef("handleTxByIdRequest")
-	defer log.Tracef("handleTxByIdRequest exit")
+func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdRawRequest) (any, error) {
+	log.Tracef("handleTxByIdRawRequest")
+	defer log.Tracef("handleTxByIdRawRequest exit")
 
-	if len(req.TxId) != 32 {
-		return &tbcapi.TxByIdResponse{
-			Error: protocol.RequestErrorf("invalid tx id"),
-		}, nil
-	}
-
-	tx, err := s.TxById(ctx, [32]byte(req.TxId))
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.TxByIdResponse{
-				Error: protocol.RequestErrorf("tx not found: %s", err),
-			}, err
-		}
-
-		e := protocol.NewInternalError(err)
-		return &tbcapi.TxByIdResponse{
-			Error: e.ProtocolError(),
-		}, e
+	tx, responseErr := s.txById(ctx, req.TxId)
+	if responseErr != nil {
+		return &tbcapi.TxByIdRawResponse{
+			Error: responseErr,
+		}, responseErr
 	}
 
 	b, err := tx2Bytes(tx)
 	if err != nil {
 		e := protocol.NewInternalError(err)
-		return &tbcapi.TxByIdResponse{
+		return &tbcapi.TxByIdRawResponse{
 			Error: e.ProtocolError(),
 		}, e
 	}
 
-	return &tbcapi.TxByIdResponse{
+	return &tbcapi.TxByIdRawResponse{
 		Tx: b,
 	}, nil
+}
+
+func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequest) (any, error) {
+	log.Tracef("handleTxByIdRequest")
+	defer log.Tracef("handleTxByIdRequest exit")
+
+	tx, responseErr := s.txById(ctx, req.TxId)
+	if responseErr != nil {
+		return &tbcapi.TxByIdResponse{
+			Error: responseErr,
+		}, responseErr
+	}
+
+	return &tbcapi.TxByIdResponse{
+		Tx: *wireTxToTbcapiTx(tx),
+	}, nil
+}
+
+func (s *Server) txById(ctx context.Context, txId api.ByteSlice) (*wire.MsgTx, *protocol.Error) {
+	if len(txId) != 32 {
+		return nil, protocol.RequestErrorf("invalid tx id")
+	}
+
+	tx, err := s.TxById(ctx, [32]byte(txId))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, protocol.RequestErrorf("not found: %s", err)
+		}
+
+		return nil, protocol.NewInternalError(err).ProtocolError()
+	}
+
+	return tx, nil
+}
+
+func wireTxToTbcapiTx(w *wire.MsgTx) *tbcapi.Tx {
+	a := &tbcapi.Tx{
+		Version:  w.Version,
+		LockTime: w.LockTime,
+		TxIn:     []*tbcapi.TxIn{},
+		TxOut:    []*tbcapi.TxOut{},
+	}
+
+	for _, v := range w.TxIn {
+		a.TxIn = append(a.TxIn, &tbcapi.TxIn{
+			Sequence:        v.Sequence,
+			SignatureScript: api.ByteSlice(v.SignatureScript),
+			PreviousOutPoint: tbcapi.OutPoint{
+				Hash:  api.ByteSlice(v.PreviousOutPoint.Hash[:]),
+				Index: v.PreviousOutPoint.Index,
+			},
+		})
+
+		for _, b := range v.Witness {
+			a.TxIn[len(a.TxIn)-1].Witness = append(a.TxIn[len(a.TxIn)-1].Witness,
+				api.ByteSlice(b))
+		}
+	}
+
+	for _, v := range w.TxOut {
+		a.TxOut = append(a.TxOut, &tbcapi.TxOut{
+			Value:    v.Value,
+			PkScript: api.ByteSlice(v.PkScript),
+		})
+	}
+
+	return a
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
