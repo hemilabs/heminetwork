@@ -99,9 +99,6 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 				ws.addr, cmd, id, err)
 			return
 		}
-
-		// Command successfully completed
-		s.cmdsProcessed.Inc()
 	}
 }
 
@@ -130,6 +127,9 @@ func (s *Server) handleRequest(ctx context.Context, ws *tbcWs, id string, cmd pr
 		log.Errorf("Failed to handle %s request for %s: protocol write failed: %v",
 			cmd, ws.addr, err)
 	}
+
+	// Request processed successfully
+	s.cmdsProcessed.Inc()
 }
 
 func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
@@ -153,6 +153,9 @@ func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, 
 		return fmt.Errorf("handlePingRequest write: %v %v",
 			ws.addr, err)
 	}
+
+	// Ping request processed successfully
+	s.cmdsProcessed.Inc()
 	return nil
 }
 
