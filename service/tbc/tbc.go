@@ -678,6 +678,9 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+// blksMissing checks the block cache and the database and returns true if all
+// blocks have not been downloaded. This function must be called with the lock
+// held.
 func (s *Server) blksMissing(ctx context.Context) bool {
 	// Do cheap memory check first
 	if len(s.blocks) != 0 {
@@ -693,6 +696,8 @@ func (s *Server) blksMissing(ctx context.Context) bool {
 	return len(bm) > 0
 }
 
+// blocksMissing checks the block cache and the database and returns true if all
+// blocks have not been downloaded.
 func (s *Server) blocksMissing(ctx context.Context) bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
