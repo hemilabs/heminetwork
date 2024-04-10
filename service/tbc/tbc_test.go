@@ -34,6 +34,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 const (
@@ -649,6 +650,307 @@ func TestUtxosByAddress(t *testing.T) {
 	}
 }
 
+func TestTxByIdRaw(t *testing.T) {
+	skipIfNoDocker(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 4, address.String())
+
+	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.TxByIdRawResponse
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lastErr = nil
+		txId := getRandomTxId(ctx, t, bitcoindContainer)
+		txIdBytes, err := hex.DecodeString(txId)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		slices.Reverse(txIdBytes)
+
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+			TxId: txIdBytes,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdTxByIdRawResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+
+			if response.Error != nil {
+				t.Fatal(response.Error.Message)
+			}
+
+			// XXX - write a better test than this, we should be able to compare
+			// against bitcoin-cli response fields
+
+			// did we get the tx and can we parse it?
+			tx, err := bytes2Tx(response.Tx)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// is the hash equal to what we queried for?
+			if tx.TxHash().String() != txId {
+				t.Fatalf("id mismatch: %s != %s", tx.TxHash().String(), txId)
+			}
+
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+}
+
+func TestTxByIdRawInvalid(t *testing.T) {
+	skipIfNoDocker(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 4, address.String())
+
+	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.TxByIdRawResponse
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lastErr = nil
+		txId := getRandomTxId(ctx, t, bitcoindContainer)
+		txIdBytes, err := hex.DecodeString(txId)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		txIdBytes[0]++
+
+		slices.Reverse(txIdBytes)
+
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+			TxId: txIdBytes,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdTxByIdRawResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+
+			if response.Error == nil {
+				t.Fatal("expecting error")
+			}
+
+			if response.Error != nil {
+				if !strings.Contains(response.Error.Message, "not found:") {
+					t.Fatalf("incorrect error found %s", response.Error.Message)
+				}
+			}
+
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+}
+
+func TestTxByIdRawNotFound(t *testing.T) {
+	skipIfNoDocker(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 0, "")
+
+	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"generatetoaddress",
+			"4",
+			address.EncodeAddress(),
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.TxByIdRawResponse
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lastErr = nil
+		txId := getRandomTxId(ctx, t, bitcoindContainer)
+		txIdBytes, err := hex.DecodeString(txId)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		txIdBytes = append(txIdBytes, 8)
+
+		slices.Reverse(txIdBytes)
+
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+			TxId: txIdBytes,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdTxByIdRawResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+
+			if response.Error == nil {
+				t.Fatal("expecting error")
+			}
+
+			if response.Error != nil {
+				if !strings.Contains(response.Error.Message, "invalid tx id") {
+					t.Fatalf("incorrect error found: %s", response.Error.Message)
+				}
+			}
+
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+}
+
 func TestTxById(t *testing.T) {
 	skipIfNoDocker(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
@@ -723,18 +1025,15 @@ func TestTxById(t *testing.T) {
 				t.Fatal(response.Error.Message)
 			}
 
-			// XXX - write a better test than this, we should be able to compare
-			// against bitcoin-cli response fields
-
-			// did we get the tx and can we parse it?
-			tx, err := bytes2Tx(response.Tx)
+			tx, err := tbcServer.TxById(ctx, tbcd.TxId(txIdBytes))
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			// is the hash equal to what we queried for?
-			if tx.TxHash().String() != txId {
-				t.Fatalf("id mismatch: %s != %s", tx.TxHash().String(), txId)
+			w := wireTxToTbcapiTx(tx)
+
+			if diff := deep.Equal(w, &response.Tx); len(diff) > 0 {
+				t.Fatal(diff)
 			}
 
 			break
