@@ -32,131 +32,219 @@ type tbcWs struct {
 	requestContext context.Context
 }
 
+func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
+	defer ws.wg.Done()
+
+	log.Tracef("handleWebsocketRead: %v", ws.addr)
+	defer log.Tracef("handleWebsocketRead exit: %v", ws.addr)
+
+	for {
+		cmd, id, payload, err := tbcapi.Read(ctx, ws.conn)
+		if err != nil {
+			var ce websocket.CloseError
+			if errors.As(err, &ce) {
+				log.Tracef("handleWebsocketRead: %v", err)
+				return
+			}
+
+			log.Errorf("handleWebsocketRead: %v", err)
+			return
+		}
+
+		switch cmd {
+		case tbcapi.CmdPingRequest:
+			err = s.handlePingRequest(ctx, ws, payload, id)
+		case tbcapi.CmdBlockHeadersByHeightRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockHeadersByHeightRequest)
+				return s.handleBlockHeadersByHeightRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBlockHeadersBestRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockHeadersBestRequest)
+				return s.handleBlockHeadersBestRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBalanceByAddressRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BalanceByAddressRequest)
+				return s.handleBalanceByAddressRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdUtxosByAddressRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.UtxosByAddressRequest)
+				return s.handleUtxosByAddressRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdTxByIdRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.TxByIdRequest)
+				return s.handleTxByIdRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		default:
+			err = fmt.Errorf("unknown command: %v", cmd)
+		}
+
+		// Command failed
+		if err != nil {
+			log.Errorf("handleWebsocketRead %s %s %s: %v",
+				ws.addr, cmd, id, err)
+			return
+		}
+	}
+}
+
+func (s *Server) handleRequest(ctx context.Context, ws *tbcWs, id string, cmd protocol.Command, handler func(ctx context.Context) (any, error)) {
+	log.Tracef("handleRequest: %s: %s", ws.addr, cmd)
+	defer log.Tracef("handleRequest exit: %s: %s", ws.addr, cmd)
+
+	ctx, cancel := context.WithTimeout(ctx, s.requestTimeout)
+	defer cancel()
+
+	// TODO(joshuasing): add rate limiting?
+
+	res, err := handler(ctx)
+	if err != nil {
+		log.Errorf("Failed to handle %s request for %s: %v", cmd, ws.addr, err)
+	}
+
+	if res == nil {
+		return
+	}
+
+	// XXX: spew.Sdump should only be called when the log level is enabled.
+	log.Debugf("Responding to %s request with %v", cmd, spew.Sdump(res))
+
+	if err = tbcapi.Write(ctx, ws.conn, id, res); err != nil {
+		log.Errorf("Failed to handle %s request for %s: protocol write failed: %v",
+			cmd, ws.addr, err)
+	}
+
+	// Request processed successfully
+	s.cmdsProcessed.Inc()
+}
+
 func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
 	log.Tracef("handlePingRequest: %v", ws.addr)
 	defer log.Tracef("handlePingRequest exit: %v", ws.addr)
 
 	p, ok := payload.(*tbcapi.PingRequest)
 	if !ok {
-		return fmt.Errorf("handlePingRequest invalid payload type: %T", payload)
+		return fmt.Errorf("invalid payload type: %T", payload)
 	}
-	response := &tbcapi.PingResponse{
+
+	res := &tbcapi.PingResponse{
 		OriginTimestamp: p.Timestamp,
 		Timestamp:       time.Now().Unix(),
 	}
 
-	log.Tracef("responding with %v", spew.Sdump(response))
+	// XXX: spew.Sdump should only be called when the log level is enabled.
+	log.Tracef("responding with %v", spew.Sdump(res))
 
-	if err := tbcapi.Write(ctx, ws.conn, id, response); err != nil {
+	if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
 		return fmt.Errorf("handlePingRequest write: %v %v",
 			ws.addr, err)
 	}
+
+	// Ping request processed successfully
+	s.cmdsProcessed.Inc()
 	return nil
 }
 
-func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
-	log.Tracef("handleBtcBlockHeadersByHeightRequest: %v", ws.addr)
-	defer log.Tracef("handleBtcBlockHeadersByHeightRequest exit: %v", ws.addr)
+func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbcapi.BlockHeadersByHeightRequest) (any, error) {
+	log.Tracef("handleBtcBlockHeadersByHeightRequest")
+	defer log.Tracef("handleBtcBlockHeadersByHeightRequest exit")
 
-	// "decode" the input
-	p, ok := payload.(*tbcapi.BlockHeadersByHeightRequest)
-	if !ok {
-		return fmt.Errorf("invalid payload type: %T", payload)
-	}
-
-	blockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(p.Height))
+	blockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(req.Height))
 	if err != nil {
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BlockHeadersByHeightResponse{
-			Error: protocol.Errorf("error getting block at height %d: %s", p.Height, err),
-		})
+		// TODO(joshuasing): handle internal errors
+		return &tbcapi.BlockHeadersByHeightResponse{
+			Error: protocol.Errorf("error getting block at height %d: %s", req.Height, err),
+		}, nil
 	}
 
 	var encodedBlockHeaders []api.ByteSlice
 	for _, bh := range blockHeaders {
 		bytes, err := header2Bytes(&bh)
 		if err != nil {
-			return err
+			return nil, err // TODO(joshuasing): should be internal error
 		}
 		encodedBlockHeaders = append(encodedBlockHeaders, bytes)
 	}
 
-	// "encode" output and write response
-	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BlockHeadersByHeightResponse{
+	return tbcapi.BlockHeadersByHeightResponse{
 		BlockHeaders: encodedBlockHeaders,
-	})
+	}, nil
 }
 
-func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
-	log.Tracef("handleBlockHeadersBestRequest: %v", ws.addr)
-	defer log.Tracef("handleBlockHeadersBestRequest exit: %v", ws.addr)
-
-	if _, ok := payload.(*tbcapi.BlockHeadersBestRequest); !ok {
-		return fmt.Errorf("invalid payload type: %T", payload)
-	}
+func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, _ *tbcapi.BlockHeadersBestRequest) (any, error) {
+	log.Tracef("handleBlockHeadersBestRequest")
+	defer log.Tracef("handleBlockHeadersBestRequest exit")
 
 	height, blockHeaders, err := s.BlockHeadersBest(ctx)
 	if err != nil {
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BlockHeadersBestResponse{
+		// TODO(joshuasing): handle internal errors
+		return &tbcapi.BlockHeadersBestResponse{
 			Error: protocol.Errorf("error getting best block headers: %v", err),
-		})
+		}, nil
 	}
 
 	var encodedBlockHeaders []api.ByteSlice
 	for _, bh := range blockHeaders {
 		bytes, err := header2Bytes(&bh)
 		if err != nil {
-			return err
+			return nil, err // TODO(joshuasing): should be internal error
 		}
 		encodedBlockHeaders = append(encodedBlockHeaders, bytes)
 	}
 
-	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BlockHeadersBestResponse{
+	return &tbcapi.BlockHeadersBestResponse{
 		Height:       height,
 		BlockHeaders: encodedBlockHeaders,
-	})
+	}, nil
 }
 
-func (s *Server) handleBalanceByAddrRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
-	log.Tracef("handleBtcBalanceByAddrRequest: %v", ws.addr)
-	defer log.Tracef("handleBtcBalanceByAddrRequest exit: %v", ws.addr)
+func (s *Server) handleBalanceByAddressRequest(ctx context.Context, req *tbcapi.BalanceByAddressRequest) (any, error) {
+	log.Tracef("handleBalanceByAddressRequest")
+	defer log.Tracef("handleBalanceByAddressRequest exit")
 
-	p, ok := payload.(*tbcapi.BalanceByAddressRequest)
-	if !ok {
-		return fmt.Errorf("invalid payload type: %T", payload)
-	}
-
-	balance, err := s.BalanceByAddress(ctx, p.Address)
+	balance, err := s.BalanceByAddress(ctx, req.Address)
 	if err != nil {
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.BalanceByAddressResponse{
+		// TODO(joshuasing): handle internal errors
+		return &tbcapi.BalanceByAddressResponse{
 			Error: protocol.Errorf("error getting balance for address: %s", err),
-		})
+		}, nil
 	}
 
-	return tbcapi.Write(ctx, ws.conn, id, tbcapi.BalanceByAddressResponse{
+	return &tbcapi.BalanceByAddressResponse{
 		Balance: balance,
-	})
+	}, nil
 }
 
-func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
-	log.Tracef("handleUtxosByAddressRequest: %v", ws.addr)
-	defer log.Tracef("handleUtxosByAddressRequest exit: %v", ws.addr)
+func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UtxosByAddressRequest) (any, error) {
+	log.Tracef("handleUtxosByAddressRequest")
+	defer log.Tracef("handleUtxosByAddressRequest exit")
 
-	p, ok := payload.(*tbcapi.UtxosByAddressRequest)
-	if !ok {
-		return fmt.Errorf("handleUtxosByAddressRequest invalid payload type: %T", payload)
-	}
-
-	utxos, err := s.UtxosByAddress(ctx, p.Address, uint64(p.Start), uint64(p.Count))
+	utxos, err := s.UtxosByAddress(ctx, req.Address, uint64(req.Start), uint64(req.Count))
 	if err != nil {
 		if errors.Is(err, level.ErrIterator) {
-			return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
-				Error: protocol.NewInternalErrorf("error iterating utxos: %w", err).ProtocolError(),
-			})
+			e := protocol.NewInternalError(err)
+			return &tbcapi.UtxosByAddressResponse{
+				Error: e.ProtocolError(),
+			}, e
 		}
 
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
+		return &tbcapi.UtxosByAddressResponse{
 			Error: protocol.RequestErrorf("error getting utxos for address: %s", err),
-		})
+		}, nil
 	}
 
 	var responseUtxos []api.ByteSlice
@@ -164,49 +252,46 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, ws *tbcWs, pay
 		responseUtxos = append(responseUtxos, utxo[:])
 	}
 
-	return tbcapi.Write(ctx, ws.conn, id, tbcapi.UtxosByAddressResponse{
+	return &tbcapi.UtxosByAddressResponse{
 		Utxos: responseUtxos,
-	})
+	}, nil
 }
 
-func (s *Server) handleTxByIdRequest(ctx context.Context, ws *tbcWs, payload any, id string) error {
-	log.Tracef("handleTxByIdRequest: %v", ws.addr)
-	defer log.Tracef("handleTxByIdRequest exit: %v", ws.addr)
+func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequest) (any, error) {
+	log.Tracef("handleTxByIdRequest")
+	defer log.Tracef("handleTxByIdRequest exit")
 
-	p, ok := payload.(*tbcapi.TxByIdRequest)
-	if !ok {
-		return fmt.Errorf("handleTxByIdRequest invalid payload type: %T", payload)
-	}
-
-	if len(p.TxId) != 32 {
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
+	if len(req.TxId) != 32 {
+		return &tbcapi.TxByIdResponse{
 			Error: protocol.RequestErrorf("invalid tx id"),
-		})
+		}, nil
 	}
 
-	tx, err := s.TxById(ctx, [32]byte(p.TxId))
+	tx, err := s.TxById(ctx, [32]byte(req.TxId))
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
-				Error: protocol.RequestErrorf("not found: %s", err),
-			})
+			return &tbcapi.TxByIdResponse{
+				Error: protocol.RequestErrorf("tx not found: %s", err),
+			}, err
 		}
 
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
-			Error: protocol.NewInternalError(err).ProtocolError(),
-		})
+		e := protocol.NewInternalError(err)
+		return &tbcapi.TxByIdResponse{
+			Error: e.ProtocolError(),
+		}, e
 	}
 
 	b, err := tx2Bytes(tx)
 	if err != nil {
-		return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
-			Error: protocol.NewInternalError(err).ProtocolError(),
-		})
+		e := protocol.NewInternalError(err)
+		return &tbcapi.TxByIdResponse{
+			Error: e.ProtocolError(),
+		}, e
 	}
 
-	return tbcapi.Write(ctx, ws.conn, id, tbcapi.TxByIdResponse{
+	return &tbcapi.TxByIdResponse{
 		Tx: b,
-	})
+	}, nil
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
@@ -254,54 +339,6 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	ws.wg.Wait()
 
 	log.Infof("Connection terminated from %v", r.RemoteAddr)
-}
-
-func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
-	defer ws.wg.Done()
-
-	log.Tracef("handleWebsocketRead: %v", ws.addr)
-	defer log.Tracef("handleWebsocketRead exit: %v", ws.addr)
-
-	for {
-		cmd, id, payload, err := tbcapi.Read(ctx, ws.conn)
-		if err != nil {
-			var ce websocket.CloseError
-			if errors.As(err, &ce) {
-				log.Tracef("handleWebsocketRead: %v", err)
-				return
-			}
-
-			log.Errorf("handleWebsocketRead: %v", err)
-			return
-		}
-
-		switch cmd {
-		case tbcapi.CmdPingRequest:
-			err = s.handlePingRequest(ctx, ws, payload, id)
-		case tbcapi.CmdBlockHeadersByHeightRequest:
-			err = s.handleBlockHeadersByHeightRequest(ctx, ws, payload, id)
-		case tbcapi.CmdBlockHeadersBestRequest:
-			err = s.handleBlockHeadersBestRequest(ctx, ws, payload, id)
-		case tbcapi.CmdBalanceByAddressRequest:
-			err = s.handleBalanceByAddrRequest(ctx, ws, payload, id)
-		case tbcapi.CmdUtxosByAddressRequest:
-			err = s.handleUtxosByAddressRequest(ctx, ws, payload, id)
-		case tbcapi.CmdTxByIdRequest:
-			err = s.handleTxByIdRequest(ctx, ws, payload, id)
-		default:
-			err = fmt.Errorf("unknown command: %v", cmd)
-		}
-
-		// Command failed
-		if err != nil {
-			log.Errorf("handleWebsocketRead %s %s %s: %v",
-				ws.addr, cmd, id, err)
-			return
-		}
-
-		// Command successfully completed
-		s.cmdsProcessed.Inc()
-	}
 }
 
 func (s *Server) newSession(ws *tbcWs) (string, error) {
