@@ -121,7 +121,7 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbc
 
 func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight uint64, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, error) {
 	log.Tracef("indexUtxoBlocks")
-	defer log.Tracef("indexUtxoBlocks")
+	defer log.Tracef("indexUtxoBlocks exit")
 
 	circuitBreaker := false
 	if maxHeight != 0 {
@@ -190,7 +190,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 
 func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 	log.Tracef("UtxoIndexer")
-	defer log.Tracef("UtxoIndexer")
+	defer log.Tracef("UtxoIndexer exit")
 
 	var maxHeight uint64
 	circuitBreaker := false
@@ -272,7 +272,7 @@ func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.T
 
 func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight uint64, txs map[tbcd.TxKey]*tbcd.TxValue) (int, error) {
 	log.Tracef("indexTxsInBlocks")
-	defer log.Tracef("indexTxsInBlocks")
+	defer log.Tracef("indexTxsInBlocks exit")
 
 	circuitBreaker := false
 	if maxHeight != 0 {
@@ -331,9 +331,13 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight ui
 	return blocksProcessed, nil
 }
 
+// TxIndexer starts indexing at start height for count blocks. If count is 0
+// the indexers will index to tip. It does NOT verify that the provided start
+// height is correct. This is the version of the function that has no training
+// wheels and is meant for internal use only.
 func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 	log.Tracef("TxIndexer")
-	defer log.Tracef("TxIndexer")
+	defer log.Tracef("TxIndexer exit")
 
 	var maxHeight uint64
 	circuitBreaker := false
@@ -394,4 +398,47 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 			}
 		}
 	}
+}
+
+// SyncIndexersToHeight tries to move the various indexers to the suplied
+// height (inclusive).
+func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error {
+	log.Tracef("SyncIndexersToHeight")
+	defer log.Tracef("SyncIndexersToHeight exit")
+
+	// Outputs index
+	uhBE, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("utxo indexer metadata get: %w", err)
+		}
+		uhBE = make([]byte, 8)
+	}
+	heightUtxo := binary.BigEndian.Uint64(uhBE)
+	countUtxo := int64(height) - int64(heightUtxo)
+	if countUtxo > 0 {
+		err := s.UtxoIndexer(ctx, heightUtxo, uint64(countUtxo+1))
+		if err != nil {
+			return fmt.Errorf("utxo indexer: %w", err)
+		}
+	}
+
+	// Transactions index
+	thBE, err := s.db.MetadataGet(ctx, TxIndexHeightKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("tx indexer metadata get: %w", err)
+		}
+		thBE = make([]byte, 8)
+	}
+	heightTx := binary.BigEndian.Uint64(thBE)
+	countTx := int64(height) - int64(heightTx)
+	if countTx > 0 {
+		err := s.TxIndexer(ctx, heightTx, uint64(countTx+1))
+		if err != nil {
+			return fmt.Errorf("tx indexer: %w", err)
+		}
+	}
+
+	return nil
 }
