@@ -29,7 +29,7 @@ var (
 		unix.RLIMIT_RSS:     "rss",
 	}
 	resourceWant = map[int]unix.Rlimit{
-		unix.RLIMIT_AS:      {Cur: math.MaxUint64, Max: math.MaxUint64},
+		unix.RLIMIT_AS:      {Cur: unix.RLIM_INFINITY, Max: unix.RLIM_INFINITY},
 		unix.RLIMIT_MEMLOCK: {Cur: 775258112, Max: 775258112},
 		unix.RLIMIT_NOFILE:  {Cur: 16384, Max: 16384},
 		unix.RLIMIT_NPROC:   {Cur: 4196, Max: 4196},
