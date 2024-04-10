@@ -32,6 +32,9 @@ const (
 	CmdUtxosByAddressRequest  = "tbcapi-utxos-by-address-request"
 	CmdUtxosByAddressResponse = "tbcapi-utxos-by-address-response"
 
+	CmdTxByIdRawRequest  = "tbcapi-tx-by-id-raw-request"
+	CmdTxByIdRawResponse = "tbcapi-tx-by-id-raw-response"
+
 	CmdTxByIdRequest  = "tbcapi-tx-by-id-request"
 	CmdTxByIdResponse = "tbcapi-tx-by-id-response"
 )
@@ -109,13 +112,48 @@ type UtxosByAddressResponse struct {
 	Error *protocol.Error `json:"error"`
 }
 
+type TxByIdRawRequest struct {
+	TxId api.ByteSlice `json:"tx_id"`
+}
+
+type TxByIdRawResponse struct {
+	Tx    api.ByteSlice   `json:"tx"`
+	Error *protocol.Error `json:"error"`
+}
+
 type TxByIdRequest struct {
 	TxId api.ByteSlice `json:"tx_id"`
 }
 
 type TxByIdResponse struct {
-	Tx    api.ByteSlice   `json:"tx"`
+	Tx    Tx              `json:"tx"`
 	Error *protocol.Error `json:"error"`
+}
+
+type OutPoint struct {
+	Hash  api.ByteSlice `json:"hash"`
+	Index uint32        `json:"index"`
+}
+
+type TxWitness []api.ByteSlice
+
+type TxIn struct {
+	PreviousOutPoint OutPoint      `json:"outpoint"`
+	SignatureScript  api.ByteSlice `json:"signature_script"`
+	Witness          TxWitness     `json:"tx_witness"`
+	Sequence         uint32        `json:"sequence"`
+}
+
+type TxOut struct {
+	Value    int64         `json:"value"`
+	PkScript api.ByteSlice `json:"pk_script"`
+}
+
+type Tx struct {
+	Version  int32    `json:"version"`
+	LockTime uint32   `json:"lock_time"`
+	TxIn     []*TxIn  `json:"tx_in"`
+	TxOut    []*TxOut `json:"tx_out"`
 }
 
 var commands = map[protocol.Command]reflect.Type{
@@ -129,6 +167,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBalanceByAddressResponse:     reflect.TypeOf(BalanceByAddressResponse{}),
 	CmdUtxosByAddressRequest:        reflect.TypeOf(UtxosByAddressRequest{}),
 	CmdUtxosByAddressResponse:       reflect.TypeOf(UtxosByAddressResponse{}),
+	CmdTxByIdRawRequest:             reflect.TypeOf(TxByIdRawRequest{}),
+	CmdTxByIdRawResponse:            reflect.TypeOf(TxByIdRawResponse{}),
 	CmdTxByIdRequest:                reflect.TypeOf(TxByIdRequest{}),
 	CmdTxByIdResponse:               reflect.TypeOf(TxByIdResponse{}),
 }
