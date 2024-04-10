@@ -322,40 +322,6 @@ func (s *Server) txById(ctx context.Context, txId api.ByteSlice) (*wire.MsgTx, *
 	return tx, nil
 }
 
-func wireTxToTbcapiTx(w *wire.MsgTx) *tbcapi.Tx {
-	a := &tbcapi.Tx{
-		Version:  w.Version,
-		LockTime: w.LockTime,
-		TxIn:     []*tbcapi.TxIn{},
-		TxOut:    []*tbcapi.TxOut{},
-	}
-
-	for _, v := range w.TxIn {
-		a.TxIn = append(a.TxIn, &tbcapi.TxIn{
-			Sequence:        v.Sequence,
-			SignatureScript: api.ByteSlice(v.SignatureScript),
-			PreviousOutPoint: tbcapi.OutPoint{
-				Hash:  api.ByteSlice(v.PreviousOutPoint.Hash[:]),
-				Index: v.PreviousOutPoint.Index,
-			},
-		})
-
-		for _, b := range v.Witness {
-			a.TxIn[len(a.TxIn)-1].Witness = append(a.TxIn[len(a.TxIn)-1].Witness,
-				api.ByteSlice(b))
-		}
-	}
-
-	for _, v := range w.TxOut {
-		a.TxOut = append(a.TxOut, &tbcapi.TxOut{
-			Value:    v.Value,
-			PkScript: api.ByteSlice(v.PkScript),
-		})
-	}
-
-	return a
-}
-
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleWebsocket: %v", r.RemoteAddr)
 	defer log.Tracef("handleWebsocket exit: %v", r.RemoteAddr)
@@ -436,4 +402,38 @@ func (s *Server) deleteSession(id string) {
 	if !ok {
 		log.Errorf("id not found in sessions %s", id)
 	}
+}
+
+func wireTxToTbcapiTx(w *wire.MsgTx) *tbcapi.Tx {
+	a := &tbcapi.Tx{
+		Version:  w.Version,
+		LockTime: w.LockTime,
+		TxIn:     []*tbcapi.TxIn{},
+		TxOut:    []*tbcapi.TxOut{},
+	}
+
+	for _, v := range w.TxIn {
+		a.TxIn = append(a.TxIn, &tbcapi.TxIn{
+			Sequence:        v.Sequence,
+			SignatureScript: api.ByteSlice(v.SignatureScript),
+			PreviousOutPoint: tbcapi.OutPoint{
+				Hash:  api.ByteSlice(v.PreviousOutPoint.Hash[:]),
+				Index: v.PreviousOutPoint.Index,
+			},
+		})
+
+		for _, b := range v.Witness {
+			a.TxIn[len(a.TxIn)-1].Witness = append(a.TxIn[len(a.TxIn)-1].Witness,
+				api.ByteSlice(b))
+		}
+	}
+
+	for _, v := range w.TxOut {
+		a.TxOut = append(a.TxOut, &tbcapi.TxOut{
+			Value:    v.Value,
+			PkScript: api.ByteSlice(v.PkScript),
+		})
+	}
+
+	return a
 }
