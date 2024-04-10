@@ -1088,6 +1088,8 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 		t.Fatal(err)
 	}
 
+	tbcServer.ignoreUlimit = true
+
 	go func() {
 		err := tbcServer.Run(ctx)
 		if err != nil && err != context.Canceled {
