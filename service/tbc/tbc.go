@@ -208,6 +208,10 @@ type Server struct {
 
 	// WebSockets
 	sessions map[string]*tbcWs
+
+	// ignoreUlimit will explicitly not check ulimit settings on the host
+	// machine, this is useful for very small datasets/chains
+	ignoreUlimit bool
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -1567,7 +1571,9 @@ func (s *Server) Run(pctx context.Context) error {
 
 	// We need a lot of open files and memory for the indexes. Best effort
 	// to echo to the user what the ulimits are.
-	if ulimitSupported {
+	if s.ignoreUlimit {
+		log.Warningf("ignoring ulimit requirements")
+	} else if ulimitSupported {
 		if err := verifyUlimits(); err != nil {
 			return fmt.Errorf("verify ulimits: %w", err)
 		}
