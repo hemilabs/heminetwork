@@ -173,17 +173,26 @@ func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbc
 
 	blockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(req.Height))
 	if err != nil {
-		// TODO(joshuasing): handle internal errors
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.BlockHeadersByHeightResponse{
+				Error: protocol.RequestErrorf("block headers not found at height %d", req.Height),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockHeadersByHeightResponse{
-			Error: protocol.Errorf("error getting block at height %d: %s", req.Height, err),
-		}, nil
+			Error: e.ProtocolError(),
+		}, e
 	}
 
 	var encodedBlockHeaders []api.ByteSlice
 	for _, bh := range blockHeaders {
 		bytes, err := header2Bytes(&bh)
 		if err != nil {
-			return nil, err // TODO(joshuasing): should be internal error
+			e := protocol.NewInternalError(err)
+			return &tbcapi.BlockHeadersByHeightResponse{
+				Error: e.ProtocolError(),
+			}, e
 		}
 		encodedBlockHeaders = append(encodedBlockHeaders, bytes)
 	}
@@ -199,17 +208,20 @@ func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, _ *tbcapi.Bl
 
 	height, blockHeaders, err := s.BlockHeadersBest(ctx)
 	if err != nil {
-		// TODO(joshuasing): handle internal errors
+		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockHeadersBestResponse{
-			Error: protocol.Errorf("error getting best block headers: %v", err),
-		}, nil
+			Error: e.ProtocolError(),
+		}, e
 	}
 
 	var encodedBlockHeaders []api.ByteSlice
 	for _, bh := range blockHeaders {
 		bytes, err := header2Bytes(&bh)
 		if err != nil {
-			return nil, err // TODO(joshuasing): should be internal error
+			e := protocol.NewInternalError(err)
+			return &tbcapi.BlockHeadersByHeightResponse{
+				Error: e.ProtocolError(),
+			}, e
 		}
 		encodedBlockHeaders = append(encodedBlockHeaders, bytes)
 	}
@@ -226,10 +238,10 @@ func (s *Server) handleBalanceByAddressRequest(ctx context.Context, req *tbcapi.
 
 	balance, err := s.BalanceByAddress(ctx, req.Address)
 	if err != nil {
-		// TODO(joshuasing): handle internal errors
+		e := protocol.NewInternalError(err)
 		return &tbcapi.BalanceByAddressResponse{
-			Error: protocol.Errorf("error getting balance for address: %s", err),
-		}, nil
+			Error: e.ProtocolError(),
+		}, e
 	}
 
 	return &tbcapi.BalanceByAddressResponse{
@@ -250,6 +262,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.Ut
 			}, e
 		}
 
+		// TODO(joshuasing): do not include raw err in errors sent to client
 		return &tbcapi.UtxosByAddressResponse{
 			Error: protocol.RequestErrorf("error getting utxos for address: %s", err),
 		}, nil
@@ -312,6 +325,7 @@ func (s *Server) txById(ctx context.Context, txId api.ByteSlice) (*wire.MsgTx, *
 
 	tx, err := s.TxById(ctx, [32]byte(txId))
 	if err != nil {
+		// TODO(joshuasing): do not include raw err in errors sent to client
 		if errors.Is(err, database.ErrNotFound) {
 			return nil, protocol.RequestErrorf("not found: %s", err)
 		}
