@@ -20,6 +20,9 @@ const (
 	CmdPingRequest  = "tbcapi-ping-request"
 	CmdPingResponse = "tbcapi-ping-response"
 
+	CmdBlockHeadersByHeightRawRequest  = "tbcapi-block-headers-by-height-raw-request"
+	CmdBlockHeadersByHeightRawResponse = "tbcapi-block-headers-by-height-raw-response"
+
 	CmdBlockHeadersByHeightRequest  = "tbcapi-block-headers-by-height-request"
 	CmdBlockHeadersByHeightResponse = "tbcapi-block-headers-by-height-response"
 
@@ -55,27 +58,22 @@ type (
 	PingResponse protocol.PingResponse
 )
 
-type Header struct {
-	Version uint32 `json:"version"`
-
-	// hex encoded byte array
-	PrevHash string `json:"prev_hash"`
-
-	// hex encoded byte array
+type BlockHeader struct {
+	Version    int32  `json:"version"`
+	PrevHash   string `json:"prev_hash"`
 	MerkleRoot string `json:"merkle_root"`
-
-	Timestamp uint64 `json:"timestamp"`
-
-	// hex encoded int
-	Bits string `json:"bits"`
-
-	Nonce uint32 `json:"nonce"`
+	Timestamp  int64  `json:"timestamp"`
+	Bits       string `json:"bits"`
+	Nonce      uint32 `json:"nonce"`
 }
 
-type BlockHeader struct {
+type BlockHeadersByHeightRawRequest struct {
 	Height uint32 `json:"height"`
-	NumTx  uint32 `json:"num_tx"`
-	Header Header `json:"header"`
+}
+
+type BlockHeadersByHeightRawResponse struct {
+	BlockHeaders []api.ByteSlice `json:"block_headers"`
+	Error        *protocol.Error `json:"error,omitempty"`
 }
 
 type BlockHeadersByHeightRequest struct {
@@ -83,7 +81,7 @@ type BlockHeadersByHeightRequest struct {
 }
 
 type BlockHeadersByHeightResponse struct {
-	BlockHeaders []api.ByteSlice `json:"block_headers"`
+	BlockHeaders []*BlockHeader  `json:"block_headers"`
 	Error        *protocol.Error `json:"error,omitempty"`
 }
 
@@ -177,22 +175,24 @@ type Tx struct {
 }
 
 var commands = map[protocol.Command]reflect.Type{
-	CmdPingRequest:                  reflect.TypeOf(PingRequest{}),
-	CmdPingResponse:                 reflect.TypeOf(PingResponse{}),
-	CmdBlockHeadersByHeightRequest:  reflect.TypeOf(BlockHeadersByHeightRequest{}),
-	CmdBlockHeadersByHeightResponse: reflect.TypeOf(BlockHeadersByHeightResponse{}),
-	CmdBlockHeadersBestRequest:      reflect.TypeOf(BlockHeadersBestRequest{}),
-	CmdBlockHeadersBestResponse:     reflect.TypeOf(BlockHeadersBestResponse{}),
-	CmdBalanceByAddressRequest:      reflect.TypeOf(BalanceByAddressRequest{}),
-	CmdBalanceByAddressResponse:     reflect.TypeOf(BalanceByAddressResponse{}),
-	CmdUtxosByAddressRawRequest:     reflect.TypeOf(UtxosByAddressRawRequest{}),
-	CmdUtxosByAddressRawResponse:    reflect.TypeOf(UtxosByAddressRawResponse{}),
-	CmdUtxosByAddressRequest:        reflect.TypeOf(UtxosByAddressRequest{}),
-	CmdUtxosByAddressResponse:       reflect.TypeOf(UtxosByAddressResponse{}),
-	CmdTxByIdRawRequest:             reflect.TypeOf(TxByIdRawRequest{}),
-	CmdTxByIdRawResponse:            reflect.TypeOf(TxByIdRawResponse{}),
-	CmdTxByIdRequest:                reflect.TypeOf(TxByIdRequest{}),
-	CmdTxByIdResponse:               reflect.TypeOf(TxByIdResponse{}),
+	CmdPingRequest:                     reflect.TypeOf(PingRequest{}),
+	CmdPingResponse:                    reflect.TypeOf(PingResponse{}),
+	CmdBlockHeadersByHeightRawRequest:  reflect.TypeOf(BlockHeadersByHeightRawRequest{}),
+	CmdBlockHeadersByHeightRawResponse: reflect.TypeOf(BlockHeadersByHeightRawResponse{}),
+	CmdBlockHeadersByHeightRequest:     reflect.TypeOf(BlockHeadersByHeightRequest{}),
+	CmdBlockHeadersByHeightResponse:    reflect.TypeOf(BlockHeadersByHeightResponse{}),
+	CmdBlockHeadersBestRequest:         reflect.TypeOf(BlockHeadersBestRequest{}),
+	CmdBlockHeadersBestResponse:        reflect.TypeOf(BlockHeadersBestResponse{}),
+	CmdBalanceByAddressRequest:         reflect.TypeOf(BalanceByAddressRequest{}),
+	CmdBalanceByAddressResponse:        reflect.TypeOf(BalanceByAddressResponse{}),
+	CmdUtxosByAddressRawRequest:        reflect.TypeOf(UtxosByAddressRawRequest{}),
+	CmdUtxosByAddressRawResponse:       reflect.TypeOf(UtxosByAddressRawResponse{}),
+	CmdUtxosByAddressRequest:           reflect.TypeOf(UtxosByAddressRequest{}),
+	CmdUtxosByAddressResponse:          reflect.TypeOf(UtxosByAddressResponse{}),
+	CmdTxByIdRawRequest:                reflect.TypeOf(TxByIdRawRequest{}),
+	CmdTxByIdRawResponse:               reflect.TypeOf(TxByIdRawResponse{}),
+	CmdTxByIdRequest:                   reflect.TypeOf(TxByIdRequest{}),
+	CmdTxByIdResponse:                  reflect.TypeOf(TxByIdResponse{}),
 }
 
 type tbcAPI struct{}
