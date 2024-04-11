@@ -189,6 +189,7 @@ type Server struct {
 	timeSource  blockchain.MedianTimeSource
 	port        string
 	seeds       []string
+	peersWanted int
 
 	peers  map[string]*peer      // active but not necessarily connected
 	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where
@@ -224,6 +225,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
 		blocks:         make(map[string]*blockPeer, defaultPendingBlocks),
+		peersWanted:    defaultPeersWanted,
 		peers:          make(map[string]*peer, defaultPeersWanted),
 		blocksInserted: make(map[string]struct{}, 8192), // stats
 		timeSource:     blockchain.NewMedianTime(),
@@ -255,6 +257,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		} else {
 			s.port = localnetPort
 		}
+		s.peersWanted = 1
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
 		s.seeds = localnetSeeds
@@ -420,7 +423,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 	defer log.Tracef("peerManager exit")
 
 	// Channel for peering signals
-	peersWanted := defaultPeersWanted
+	peersWanted := s.peersWanted
 	peerC := make(chan string, peersWanted)
 
 	log.Infof("Peer manager connecting to %v peers", peersWanted)
