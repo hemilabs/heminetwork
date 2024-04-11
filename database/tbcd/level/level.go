@@ -412,10 +412,10 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 			blockCacheLen = len(l.blocksMissingCache)
 			l.mtx.Unlock()
 		}
-		//if blockCacheLen >= 128 {
+		// if blockCacheLen >= 128 {
 		//	log.Tracef("max cache %v", blockCacheLen)
 		//	break
-		//}
+		// }
 
 		x++
 		if x >= count {
@@ -626,7 +626,7 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint
 		balance += binary.BigEndian.Uint64(it.Value())
 	}
 	if err := it.Error(); err != nil {
-		return 0, fmt.Errorf("balance by script hash iterator: %w", err)
+		return 0, IteratorError(err)
 	}
 
 	return balance, nil
@@ -745,10 +745,10 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxKey]*tbcd.TxValu
 		}
 
 		txsBatch.Put(key, value)
-		//log.Infof("%v:%v", spew.Sdump(key), spew.Sdump(value))
-		//// XXX this probably should be done by the caller but we do it
-		//// here to lower memory pressure as large gobs of data are
-		//// written to disk.
+		// log.Infof("%v:%v", spew.Sdump(key), spew.Sdump(value))
+		// // XXX this probably should be done by the caller but we do it
+		// // here to lower memory pressure as large gobs of data are
+		// // written to disk.
 		delete(txs, k)
 	}
 
