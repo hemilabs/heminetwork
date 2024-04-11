@@ -196,7 +196,7 @@ func TestBtcBlockHeadersByHeightDoesNotExist(t *testing.T) {
 		t.Fatal(lastErr)
 	}
 
-	if response.Error.Message != "error getting block at height 550: db block header by height: not found" {
+	if response.Error.Message != "block headers not found at height 550" {
 		t.Fatalf("unexpected error message: %s", response.Error.Message)
 	}
 }
