@@ -416,7 +416,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 	}
 	heightUtxo := binary.BigEndian.Uint64(uhBE)
 	countUtxo := int64(height) - int64(heightUtxo)
-	if countUtxo > 0 {
+	if countUtxo >= 0 {
 		err := s.UtxoIndexer(ctx, heightUtxo, uint64(countUtxo+1))
 		if err != nil {
 			return fmt.Errorf("utxo indexer: %w", err)
@@ -433,7 +433,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 	}
 	heightTx := binary.BigEndian.Uint64(thBE)
 	countTx := int64(height) - int64(heightTx)
-	if countTx > 0 {
+	if countTx >= 0 {
 		err := s.TxIndexer(ctx, heightTx, uint64(countTx+1))
 		if err != nil {
 			return fmt.Errorf("tx indexer: %w", err)
