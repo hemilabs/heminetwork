@@ -112,7 +112,7 @@ type UtxosByAddressRawRequest struct {
 
 type UtxosByAddressRawResponse struct {
 	Utxos []api.ByteSlice `json:"utxos"`
-	Error *protocol.Error `json:"error"`
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type UtxosByAddressRequest struct {
@@ -129,7 +129,7 @@ type Utxo struct {
 
 type UtxosByAddressResponse struct {
 	Utxos []Utxo          `json:"utxos"`
-	Error *protocol.Error `json:"error"`
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type TxByIdRawRequest struct {
@@ -138,7 +138,7 @@ type TxByIdRawRequest struct {
 
 type TxByIdRawResponse struct {
 	Tx    api.ByteSlice   `json:"tx"`
-	Error *protocol.Error `json:"error"`
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type TxByIdRequest struct {
@@ -147,7 +147,7 @@ type TxByIdRequest struct {
 
 type TxByIdResponse struct {
 	Tx    Tx              `json:"tx"`
-	Error *protocol.Error `json:"error"`
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type OutPoint struct {

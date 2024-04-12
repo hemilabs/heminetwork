@@ -271,7 +271,7 @@ func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi
 
 		return &tbcapi.UtxosByAddressRawResponse{
 			Error: protocol.RequestErrorf("error getting utxos for address: %s", req.Address),
-		}, err
+		}, nil
 	}
 
 	var responseUtxos []api.ByteSlice
@@ -294,12 +294,12 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.Ut
 			e := protocol.NewInternalError(err)
 			return &tbcapi.UtxosByAddressResponse{
 				Error: e.ProtocolError(),
-			}, err
+			}, e
 		}
 
 		return &tbcapi.UtxosByAddressResponse{
 			Error: protocol.RequestErrorf("error getting utxos for address: %s", req.Address),
-		}, err
+		}, nil
 	}
 
 	var responseUtxos []tbcapi.Utxo
@@ -324,16 +324,16 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 		responseErr := protocol.RequestErrorf("invalid tx id")
 		return &tbcapi.TxByIdRawResponse{
 			Error: responseErr,
-		}, responseErr
+		}, nil
 	}
 
 	tx, err := s.TxById(ctx, [32]byte(req.TxId))
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			responseErr := protocol.RequestErrorf("not found: %s", hex.EncodeToString(req.TxId))
+			responseErr := protocol.RequestErrorf("tx not found: %s", hex.EncodeToString(req.TxId))
 			return &tbcapi.TxByIdRawResponse{
 				Error: responseErr,
-			}, responseErr
+			}, nil
 		}
 
 		responseErr := protocol.NewInternalError(err)
@@ -363,7 +363,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 		responseErr := protocol.RequestErrorf("invalid tx id")
 		return &tbcapi.TxByIdResponse{
 			Error: responseErr,
-		}, responseErr
+		}, nil
 	}
 
 	tx, err := s.TxById(ctx, [32]byte(req.TxId))
@@ -372,7 +372,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 			responseErr := protocol.RequestErrorf("not found: %s", hex.EncodeToString(req.TxId))
 			return &tbcapi.TxByIdResponse{
 				Error: responseErr,
-			}, responseErr
+			}, nil
 		}
 
 		responseErr := protocol.NewInternalError(err)
