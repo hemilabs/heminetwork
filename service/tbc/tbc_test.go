@@ -62,6 +62,80 @@ func skipIfNoDocker(t *testing.T) {
 	}
 }
 
+func TestBtcBlockHeadersByHeightRaw(t *testing.T) {
+	skipIfNoDocker(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
+	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	var lastErr error
+	var response tbcapi.BlockHeadersByHeightRawResponse
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		lastErr = nil
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRawRequest{
+			Height: 55,
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightRawResponse {
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+			break
+		} else {
+			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+		}
+
+	}
+
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+
+	bh, err := bytes2Header(response.BlockHeaders[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf(spew.Sdump(bh))
+
+	cliBtcBlock := blockAtHeight(ctx, t, bitcoindContainer, 55)
+	expected := cliBlockToRawResponse(cliBtcBlock, t)
+	if diff := deep.Equal(expected, response); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
+	}
+}
+
 func TestBtcBlockHeadersByHeight(t *testing.T) {
 	skipIfNoDocker(t)
 
@@ -107,7 +181,7 @@ func TestBtcBlockHeadersByHeight(t *testing.T) {
 			continue
 		}
 
-		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightResponse {
+		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightRawResponse {
 			if err := json.Unmarshal(v.Payload, &response); err != nil {
 				t.Fatal(err)
 			}
@@ -121,13 +195,6 @@ func TestBtcBlockHeadersByHeight(t *testing.T) {
 	if lastErr != nil {
 		t.Fatal(lastErr)
 	}
-
-	bh, err := bytes2Header(response.BlockHeaders[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Logf(spew.Sdump(bh))
 
 	cliBtcBlock := blockAtHeight(ctx, t, bitcoindContainer, 55)
 	expected := cliBlockToResponse(cliBtcBlock, t)
@@ -1695,7 +1762,7 @@ type BtcCliBlockHeader struct {
 	NextBlockHash     string  `json:"nextblockhash"`
 }
 
-func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcapi.BlockHeadersByHeightResponse {
+func cliBlockToRawResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcapi.BlockHeadersByHeightRawResponse {
 	prevBlockHash, err := chainhash.NewHashFromStr(btcCliBlockHeader.PreviousBlockHash)
 	if err != nil {
 		t.Fatal(err)
@@ -1715,8 +1782,29 @@ func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcap
 	if err != nil {
 		t.Fatal(err)
 	}
-	return tbcapi.BlockHeadersByHeightResponse{
+	return tbcapi.BlockHeadersByHeightRawResponse{
 		BlockHeaders: []api.ByteSlice{bytes},
+	}
+}
+
+func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcapi.BlockHeadersByHeightResponse {
+	prevBlockHash, err := chainhash.NewHashFromStr(btcCliBlockHeader.PreviousBlockHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merkleRoot, err := chainhash.NewHashFromStr(btcCliBlockHeader.MerkleRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bits, err := strconv.ParseUint(btcCliBlockHeader.Bits, 16, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bh := wire.NewBlockHeader(int32(btcCliBlockHeader.Version), prevBlockHash, merkleRoot, uint32(bits), uint32(btcCliBlockHeader.Nonce))
+	bh.Timestamp = time.Unix(int64(btcCliBlockHeader.Time), 0)
+	t.Logf(spew.Sdump(bh))
+	return tbcapi.BlockHeadersByHeightResponse{
+		BlockHeaders: wireBlockHeaderToTBC([]*wire.BlockHeader{bh}),
 	}
 }
 

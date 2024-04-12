@@ -199,16 +199,8 @@ func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbc
 		}, e
 	}
 
-	blockHeaders, err := wireBlockHeaderToTBC(wireBlockHeaders)
-	if err != nil {
-		e := protocol.NewInternalError(err)
-		return &tbcapi.BlockHeadersByHeightResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
 	return &tbcapi.BlockHeadersByHeightResponse{
-		BlockHeaders: blockHeaders,
+		BlockHeaders: wireBlockHeaderToTBC(wireBlockHeaders),
 	}, nil
 }
 
@@ -494,19 +486,19 @@ func (s *Server) deleteSession(id string) {
 	}
 }
 
-func wireBlockHeaderToTBC(w []*wire.BlockHeader) ([]*tbcapi.BlockHeader, error) {
-	var blockHeaders []*tbcapi.BlockHeader
-	for _, bh := range w {
-		blockHeaders = append(blockHeaders, &tbcapi.BlockHeader{
+func wireBlockHeaderToTBC(w []*wire.BlockHeader) []*tbcapi.BlockHeader {
+	blockHeaders := make([]*tbcapi.BlockHeader, len(w))
+	for i, bh := range w {
+		blockHeaders[i] = &tbcapi.BlockHeader{
 			Version:    bh.Version,
 			PrevHash:   bh.PrevBlock.String(),
 			MerkleRoot: bh.MerkleRoot.String(),
 			Timestamp:  bh.Timestamp.Unix(),
 			Bits:       fmt.Sprintf("%x", bh.Bits),
 			Nonce:      bh.Nonce,
-		})
+		}
 	}
-	return blockHeaders, nil
+	return blockHeaders
 }
 
 func wireTxToTbcapiTx(w *wire.MsgTx) *tbcapi.Tx {
