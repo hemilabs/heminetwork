@@ -200,7 +200,7 @@ func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbc
 	}
 
 	return &tbcapi.BlockHeadersByHeightResponse{
-		BlockHeaders: wireBlockHeaderToTBC(wireBlockHeaders),
+		BlockHeaders: wireBlockHeadersToTBC(wireBlockHeaders),
 	}, nil
 }
 
@@ -486,7 +486,7 @@ func (s *Server) deleteSession(id string) {
 	}
 }
 
-func wireBlockHeaderToTBC(w []*wire.BlockHeader) []*tbcapi.BlockHeader {
+func wireBlockHeadersToTBC(w []*wire.BlockHeader) []*tbcapi.BlockHeader {
 	blockHeaders := make([]*tbcapi.BlockHeader, len(w))
 	for i, bh := range w {
 		blockHeaders[i] = &tbcapi.BlockHeader{

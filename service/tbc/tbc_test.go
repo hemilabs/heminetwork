@@ -1804,7 +1804,7 @@ func cliBlockToResponse(btcCliBlockHeader BtcCliBlockHeader, t *testing.T) tbcap
 	bh.Timestamp = time.Unix(int64(btcCliBlockHeader.Time), 0)
 	t.Logf(spew.Sdump(bh))
 	return tbcapi.BlockHeadersByHeightResponse{
-		BlockHeaders: wireBlockHeaderToTBC([]*wire.BlockHeader{bh}),
+		BlockHeaders: wireBlockHeadersToTBC([]*wire.BlockHeader{bh}),
 	}
 }
 
