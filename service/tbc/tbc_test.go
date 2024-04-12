@@ -181,7 +181,7 @@ func TestBtcBlockHeadersByHeight(t *testing.T) {
 			continue
 		}
 
-		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightRawResponse {
+		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightResponse {
 			if err := json.Unmarshal(v.Payload, &response); err != nil {
 				t.Fatal(err)
 			}
