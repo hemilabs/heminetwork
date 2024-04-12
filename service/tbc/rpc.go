@@ -76,6 +76,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdUtxosByAddressRawRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.UtxosByAddressRawRequest)
+				return s.handleUtxosByAddressRawRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		case tbcapi.CmdUtxosByAddressRequest:
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.UtxosByAddressRequest)
@@ -249,6 +256,34 @@ func (s *Server) handleBalanceByAddressRequest(ctx context.Context, req *tbcapi.
 	}, nil
 }
 
+func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi.UtxosByAddressRawRequest) (any, error) {
+	log.Tracef("handleUtxosByAddressRawRequest")
+	defer log.Tracef("handleUtxosByAddressRawRequest exit")
+
+	utxos, err := s.UtxosByAddress(ctx, req.Address, uint64(req.Start), uint64(req.Count))
+	if err != nil {
+		if errors.Is(err, level.ErrIterator) {
+			e := protocol.NewInternalError(err)
+			return &tbcapi.UtxosByAddressRawResponse{
+				Error: e.ProtocolError(),
+			}, err
+		}
+
+		return &tbcapi.UtxosByAddressRawResponse{
+			Error: protocol.RequestErrorf("error getting utxos for address: %s", req.Address),
+		}, nil
+	}
+
+	var responseUtxos []api.ByteSlice
+	for _, utxo := range utxos {
+		responseUtxos = append(responseUtxos, utxo[:])
+	}
+
+	return &tbcapi.UtxosByAddressRawResponse{
+		Utxos: responseUtxos,
+	}, nil
+}
+
 func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UtxosByAddressRequest) (any, error) {
 	log.Tracef("handleUtxosByAddressRequest")
 	defer log.Tracef("handleUtxosByAddressRequest exit")
@@ -262,15 +297,18 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.Ut
 			}, e
 		}
 
-		// TODO(joshuasing): do not include raw err in errors sent to client
 		return &tbcapi.UtxosByAddressResponse{
-			Error: protocol.RequestErrorf("error getting utxos for address: %s", err),
+			Error: protocol.RequestErrorf("error getting utxos for address: %s", req.Address),
 		}, nil
 	}
 
-	var responseUtxos []api.ByteSlice
+	var responseUtxos []tbcapi.Utxo
 	for _, utxo := range utxos {
-		responseUtxos = append(responseUtxos, utxo[:])
+		responseUtxos = append(responseUtxos, tbcapi.Utxo{
+			TxId:     api.ByteSlice(utxo.ScriptHashSlice()),
+			Value:    utxo.Value(),
+			OutIndex: utxo.OutputIndex(),
+		})
 	}
 
 	return &tbcapi.UtxosByAddressResponse{
@@ -282,10 +320,25 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	log.Tracef("handleTxByIdRawRequest")
 	defer log.Tracef("handleTxByIdRawRequest exit")
 
-	tx, responseErr := s.txById(ctx, req.TxId)
-	if responseErr != nil {
+	if len(req.TxId) != 32 {
+		responseErr := protocol.RequestErrorf("invalid tx id")
 		return &tbcapi.TxByIdRawResponse{
 			Error: responseErr,
+		}, nil
+	}
+
+	tx, err := s.TxById(ctx, [32]byte(req.TxId))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			responseErr := protocol.RequestErrorf("tx not found: %s", hex.EncodeToString(req.TxId))
+			return &tbcapi.TxByIdRawResponse{
+				Error: responseErr,
+			}, nil
+		}
+
+		responseErr := protocol.NewInternalError(err)
+		return &tbcapi.TxByIdRawResponse{
+			Error: responseErr.ProtocolError(),
 		}, responseErr
 	}
 
@@ -306,34 +359,31 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	log.Tracef("handleTxByIdRequest")
 	defer log.Tracef("handleTxByIdRequest exit")
 
-	tx, responseErr := s.txById(ctx, req.TxId)
-	if responseErr != nil {
+	if len(req.TxId) != 32 {
+		responseErr := protocol.RequestErrorf("invalid tx id")
 		return &tbcapi.TxByIdResponse{
 			Error: responseErr,
+		}, nil
+	}
+
+	tx, err := s.TxById(ctx, [32]byte(req.TxId))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			responseErr := protocol.RequestErrorf("not found: %s", hex.EncodeToString(req.TxId))
+			return &tbcapi.TxByIdResponse{
+				Error: responseErr,
+			}, nil
+		}
+
+		responseErr := protocol.NewInternalError(err)
+		return &tbcapi.TxByIdResponse{
+			Error: responseErr.ProtocolError(),
 		}, responseErr
 	}
 
 	return &tbcapi.TxByIdResponse{
 		Tx: *wireTxToTbcapiTx(tx),
 	}, nil
-}
-
-func (s *Server) txById(ctx context.Context, txId api.ByteSlice) (*wire.MsgTx, *protocol.Error) {
-	if len(txId) != 32 {
-		return nil, protocol.RequestErrorf("invalid tx id")
-	}
-
-	tx, err := s.TxById(ctx, [32]byte(txId))
-	if err != nil {
-		// TODO(joshuasing): do not include raw err in errors sent to client
-		if errors.Is(err, database.ErrNotFound) {
-			return nil, protocol.RequestErrorf("not found: %s", err)
-		}
-
-		return nil, protocol.NewInternalError(err).ProtocolError()
-	}
-
-	return tx, nil
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
