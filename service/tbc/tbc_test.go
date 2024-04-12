@@ -427,6 +427,229 @@ func TestBalanceByAddress(t *testing.T) {
 	}
 }
 
+func TestUtxosByAddressRaw(t *testing.T) {
+	skipIfNoDocker(t)
+
+	type testTableItem struct {
+		name          string
+		address       func() string
+		doNotGenerate bool
+		limit         uint64
+		start         uint64
+	}
+
+	testTable := []testTableItem{
+		{
+			name: "Pay to public key hash",
+			address: func() string {
+				_, _, address, err := bitcoin.KeysAndAddressFromHexString(
+					privateKey,
+					&chaincfg.RegressionNetParams,
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			limit: 10,
+		},
+		{
+			name: "Pay to script hash",
+			address: func() string {
+				address, err := btcutil.NewAddressScriptHash([]byte("blahblahscripthash"), &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			limit: 10,
+		},
+		{
+			name: "Pay to witness public key hash",
+			address: func() string {
+				address, err := btcutil.NewAddressWitnessPubKeyHash([]byte("blahblahwitnesspublickeyhash")[:20], &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			limit: 10,
+		},
+		{
+			name: "Pay to witness script hash",
+			address: func() string {
+				address, err := btcutil.NewAddressWitnessScriptHash([]byte("blahblahwitnessscripthashblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			limit: 10,
+		},
+		{
+			name: "Pay to taproot",
+			address: func() string {
+				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			limit: 10,
+		},
+		{
+			name: "no balance",
+			address: func() string {
+				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblah")[:32], &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			doNotGenerate: true,
+			limit:         10,
+		},
+		{
+			name: "small limit",
+			address: func() string {
+				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			limit: 2,
+		},
+		{
+			name: "offset",
+			address: func() string {
+				address, err := btcutil.NewAddressTaproot([]byte("blahblahwtaprootblahblahblahblahsmalllimit")[:32], &chaincfg.RegressionNetParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				return address.EncodeAddress()
+			},
+			start: 3,
+			limit: 10,
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+			defer cancel()
+
+			var bitcoindContainer testcontainers.Container
+			var mappedPeerPort nat.Port
+			initialBlocks := 0
+			if !tti.doNotGenerate {
+				initialBlocks = 4
+			}
+			bitcoindContainer, mappedPeerPort = createBitcoindWithInitialBlocks(ctx, t, uint64(initialBlocks), tti.address())
+
+			// generate to another address to ensure it's not included in our query
+			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = runBitcoinCommand(
+				ctx,
+				t,
+				bitcoindContainer,
+				[]string{
+					"bitcoin-cli",
+					"-regtest=1",
+					"generatetoaddress",
+					"3",
+					someOtherAddress.EncodeAddress(),
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
+
+			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.CloseNow()
+
+			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+			tws := &tbcWs{
+				conn: protocol.NewWSConn(c),
+			}
+
+			var lastErr error
+			var response tbcapi.UtxosByAddressRawResponse
+			for {
+				select {
+				case <-time.After(1 * time.Second):
+				case <-ctx.Done():
+					t.Fatal(ctx.Err())
+				}
+				err = tbcServer.UtxoIndexer(ctx, 0, 1000)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lastErr = nil
+				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRawRequest{
+					Address: tti.address(),
+					Start:   uint(tti.start),
+					Count:   uint(tti.limit),
+				})
+				if err != nil {
+					lastErr = err
+					continue
+				}
+
+				var v protocol.Message
+				err = wsjson.Read(ctx, c, &v)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+
+				if v.Header.Command == tbcapi.CmdUtxosByAddressRawResponse {
+					if err := json.Unmarshal(v.Payload, &response); err != nil {
+						t.Fatal(err)
+					}
+
+					// we generated 4 blocks to this address previously, therefore
+					// there should be 4 utxos
+					expectedCount := 4 - tti.start
+					if tti.limit < uint64(expectedCount) {
+						expectedCount = tti.limit
+					}
+
+					if !tti.doNotGenerate && len(response.Utxos) != int(expectedCount) {
+						t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.Utxos))
+					} else if tti.doNotGenerate && len(response.Utxos) != 0 {
+						t.Fatalf("did not generate any blocks for address, should not have utxos")
+					}
+					break
+				} else {
+					lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+				}
+
+			}
+
+			if lastErr != nil {
+				t.Fatal(lastErr)
+			}
+		})
+	}
+}
+
 func TestUtxosByAddress(t *testing.T) {
 	skipIfNoDocker(t)
 

@@ -29,6 +29,9 @@ const (
 	CmdBalanceByAddressRequest  = "tbcapi-balance-by-address-request"
 	CmdBalanceByAddressResponse = "tbcapi-balance-by-address-response"
 
+	CmdUtxosByAddressRawRequest  = "tbcapi-utxos-by-address-raw-request"
+	CmdUtxosByAddressRawResponse = "tbcapi-utxos-by-address-raw-response"
+
 	CmdUtxosByAddressRequest  = "tbcapi-utxos-by-address-request"
 	CmdUtxosByAddressResponse = "tbcapi-utxos-by-address-response"
 
@@ -101,15 +104,32 @@ type BalanceByAddressResponse struct {
 	Error   *protocol.Error `json:"error,omitempty"`
 }
 
+type UtxosByAddressRawRequest struct {
+	Address string `json:"address"`
+	Start   uint   `json:"start"`
+	Count   uint   `json:"count"`
+}
+
+type UtxosByAddressRawResponse struct {
+	Utxos []api.ByteSlice `json:"utxos"`
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
 type UtxosByAddressRequest struct {
 	Address string `json:"address"`
 	Start   uint   `json:"start"`
 	Count   uint   `json:"count"`
 }
 
+type Utxo struct {
+	TxId     api.ByteSlice `json:"tx_id"`
+	Value    uint64        `json:"value"`
+	OutIndex uint32        `json:"out_index"`
+}
+
 type UtxosByAddressResponse struct {
-	Utxos []api.ByteSlice `json:"utxos"`
-	Error *protocol.Error `json:"error"`
+	Utxos []Utxo          `json:"utxos"`
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type TxByIdRawRequest struct {
@@ -118,7 +138,7 @@ type TxByIdRawRequest struct {
 
 type TxByIdRawResponse struct {
 	Tx    api.ByteSlice   `json:"tx"`
-	Error *protocol.Error `json:"error"`
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type TxByIdRequest struct {
@@ -127,7 +147,7 @@ type TxByIdRequest struct {
 
 type TxByIdResponse struct {
 	Tx    Tx              `json:"tx"`
-	Error *protocol.Error `json:"error"`
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type OutPoint struct {
@@ -165,6 +185,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockHeadersBestResponse:     reflect.TypeOf(BlockHeadersBestResponse{}),
 	CmdBalanceByAddressRequest:      reflect.TypeOf(BalanceByAddressRequest{}),
 	CmdBalanceByAddressResponse:     reflect.TypeOf(BalanceByAddressResponse{}),
+	CmdUtxosByAddressRawRequest:     reflect.TypeOf(UtxosByAddressRawRequest{}),
+	CmdUtxosByAddressRawResponse:    reflect.TypeOf(UtxosByAddressRawResponse{}),
 	CmdUtxosByAddressRequest:        reflect.TypeOf(UtxosByAddressRequest{}),
 	CmdUtxosByAddressResponse:       reflect.TypeOf(UtxosByAddressResponse{}),
 	CmdTxByIdRawRequest:             reflect.TypeOf(TxByIdRawRequest{}),
