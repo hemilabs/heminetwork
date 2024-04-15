@@ -62,6 +62,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBlockHeadersByHeightRawRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockHeadersByHeightRawRequest)
+				return s.handleBlockHeadersByHeightRawRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		case tbcapi.CmdBlockHeadersBestRequest:
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.BlockHeadersBestRequest)
@@ -178,7 +185,7 @@ func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbc
 	log.Tracef("handleBtcBlockHeadersByHeightRequest")
 	defer log.Tracef("handleBtcBlockHeadersByHeightRequest exit")
 
-	blockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(req.Height))
+	wireBlockHeaders, err := s.BlockHeadersByHeight(ctx, uint64(req.Height))
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockHeadersByHeightResponse{
@@ -192,20 +199,31 @@ func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbc
 		}, e
 	}
 
-	var encodedBlockHeaders []api.ByteSlice
-	for _, bh := range blockHeaders {
-		bytes, err := header2Bytes(&bh)
-		if err != nil {
-			e := protocol.NewInternalError(err)
-			return &tbcapi.BlockHeadersByHeightResponse{
-				Error: e.ProtocolError(),
-			}, e
+	return &tbcapi.BlockHeadersByHeightResponse{
+		BlockHeaders: wireBlockHeadersToTBC(wireBlockHeaders),
+	}, nil
+}
+
+func (s *Server) handleBlockHeadersByHeightRawRequest(ctx context.Context, req *tbcapi.BlockHeadersByHeightRawRequest) (any, error) {
+	log.Tracef("handleBtcBlockHeadersByHeightRawRequest")
+	defer log.Tracef("handleBtcBlockHeadersByHeightRawRequest exit")
+
+	rawBlockHeaders, err := s.RawBlockHeadersByHeight(ctx, uint64(req.Height))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.BlockHeadersByHeightRawResponse{
+				Error: protocol.RequestErrorf("block headers not found at height %d", req.Height),
+			}, nil
 		}
-		encodedBlockHeaders = append(encodedBlockHeaders, bytes)
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockHeadersByHeightRawResponse{
+			Error: e.ProtocolError(),
+		}, e
 	}
 
-	return tbcapi.BlockHeadersByHeightResponse{
-		BlockHeaders: encodedBlockHeaders,
+	return &tbcapi.BlockHeadersByHeightRawResponse{
+		BlockHeaders: rawBlockHeaders,
 	}, nil
 }
 
@@ -466,6 +484,21 @@ func (s *Server) deleteSession(id string) {
 	if !ok {
 		log.Errorf("id not found in sessions %s", id)
 	}
+}
+
+func wireBlockHeadersToTBC(w []*wire.BlockHeader) []*tbcapi.BlockHeader {
+	blockHeaders := make([]*tbcapi.BlockHeader, len(w))
+	for i, bh := range w {
+		blockHeaders[i] = &tbcapi.BlockHeader{
+			Version:    bh.Version,
+			PrevHash:   bh.PrevBlock.String(),
+			MerkleRoot: bh.MerkleRoot.String(),
+			Timestamp:  bh.Timestamp.Unix(),
+			Bits:       fmt.Sprintf("%x", bh.Bits),
+			Nonce:      bh.Nonce,
+		}
+	}
+	return blockHeaders
 }
 
 func wireTxToTbcapiTx(w *wire.MsgTx) *tbcapi.Tx {
