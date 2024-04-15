@@ -56,12 +56,11 @@ const (
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
+
+	defaultCmdTimeout = 4 * time.Second
 )
 
 var (
-	localnetSeeds = []string{
-		"localhost",
-	}
 	testnetSeeds = []string{
 		"testnet-seed.bitcoin.jonasschnelli.ch",
 		"seed.tbtc.petertodd.org",
@@ -252,13 +251,13 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.seeds = testnetSeeds
 	case networkLocalnet:
 		if s.cfg.ForceSeedPort != "" {
-			s.port = s.cfg.ForceSeedPort
+			// XXX this knob needs to go
+			s.port = s.cfg.ForceSeedPort // this has to be deduced from uri
 		} else {
 			s.port = localnetPort
 		}
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
-		s.seeds = localnetSeeds
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
 	}
@@ -307,7 +306,7 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte)
 	hash := bh.BlockHash()
 	ghs := wire.NewMsgGetHeaders()
 	ghs.AddBlockLocatorHash(&hash)
-	err = p.write(ghs)
+	err = p.write(defaultCmdTimeout, ghs)
 	if err != nil {
 		return fmt.Errorf("write get headers: %v", err)
 	}
@@ -336,21 +335,13 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	errorsSeen := 0
 	var addrs []net.IP
 	for k := range s.seeds {
-		log.Infof("DNS seeding %v", s.seeds[k])
-		// XXX localhost ipv4 and ipv6 is invalid in p2p.Add a
-		// localhost mode to peermanager.
-		if s.seeds[k] == "localhost" {
-			log.Infof("seed is localhost, using 127.0.0.1")
-			addrs = append(addrs, net.IPv4(127, 0, 0, 1))
-		} else {
-			ips, err := resolver.LookupIP(ctx, "ip", s.seeds[k])
-			if err != nil {
-				log.Errorf("lookup: %v", err)
-				errorsSeen++
-				continue
-			}
-			addrs = append(addrs, ips...)
+		ips, err := resolver.LookupIP(ctx, "ip", s.seeds[k])
+		if err != nil {
+			log.Errorf("lookup: %v", err)
+			errorsSeen++
+			continue
 		}
+		addrs = append(addrs, ips...)
 	}
 	if errorsSeen == len(s.seeds) {
 		return nil, fmt.Errorf("could not seed")
@@ -498,6 +489,53 @@ func (s *Server) peerManager(ctx context.Context) error {
 	}
 }
 
+func (s *Server) localPeerManager(ctx context.Context) error {
+	log.Tracef("localPeerManager")
+	defer log.Tracef("localPeerManager exit")
+
+	peersWanted := 1
+	peerC := make(chan string, peersWanted)
+	address := net.JoinHostPort("127.0.0.1", "18444")
+	peer, err := NewPeer(s.wireNet, address)
+	if err != nil {
+		return fmt.Errorf("new peer: %w", err)
+	}
+
+	log.Infof("Local peer manager connecting to %v peers", peersWanted)
+
+	for {
+		s.peerAdd(peer)
+		go s.peerConnect(ctx, peerC, peer)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case address := <-peerC:
+			s.peerDelete(address)
+			log.Infof("peer exited: %v", address)
+		}
+
+		// hold off on reconnect
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Second):
+			log.Infof("peer exited: %v", "hold of timeout")
+		}
+	}
+}
+
+func (s *Server) startPeerManager(ctx context.Context) error {
+	log.Tracef("startPeerManager")
+	defer log.Tracef("startPeerManager exit")
+
+	switch s.cfg.Network {
+	case networkLocalnet:
+		return s.localPeerManager(ctx)
+	}
+	return s.peerManager(ctx)
+}
+
 func (s *Server) pingAllPeers(ctx context.Context) {
 	log.Tracef("pingAllPeers")
 	defer log.Tracef("pingAllPeers exit")
@@ -520,7 +558,7 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 		// write to the connection to make it fail if the other side
 		// went away.
 		log.Debugf("Pinging: %v", p)
-		err := p.write(wire.NewMsgPing(uint64(time.Now().Unix())))
+		err := p.write(defaultCmdTimeout, wire.NewMsgPing(uint64(time.Now().Unix())))
 		if err != nil {
 			log.Errorf("ping %v: %v", p, err)
 		}
@@ -572,8 +610,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}()
 
-	_ = p.write(wire.NewMsgSendHeaders()) // Ask peer to send headers
-	_ = p.write(wire.NewMsgGetAddr())     // Try to get network information
+	_ = p.write(defaultCmdTimeout, wire.NewMsgSendHeaders()) // Ask peer to send headers
+	_ = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())     // Try to get network information
 
 	log.Debugf("Peer connected: %v", p)
 
@@ -622,9 +660,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// skip unknown
 			continue
 		} else if err != nil {
-			// reevaluate pending blocks cache
 			log.Debugf("peer read %v: %v", p, err)
-			go s.syncBlocks(ctx)
 			return
 		}
 
@@ -750,7 +786,7 @@ func (s *Server) handlePing(ctx context.Context, p *peer, msg *wire.MsgPing) {
 	defer log.Tracef("handlePing exit %v", p.address)
 
 	pong := wire.NewMsgPong(msg.Nonce)
-	err := p.write(pong)
+	err := p.write(defaultCmdTimeout, pong)
 	if err != nil {
 		log.Errorf("could not write pong message %v: %v", p.address, err)
 		return
@@ -935,7 +971,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	err := p.write(getData)
+	err := p.write(defaultCmdTimeout, getData)
 	if err != nil {
 		// peer dead, make sure it is reaped
 		log.Errorf("write %v: %v", p, err)
@@ -1698,7 +1734,7 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		err := s.peerManager(ctx)
+		err := s.startPeerManager(ctx)
 		if err != nil {
 			select {
 			case errC <- err:

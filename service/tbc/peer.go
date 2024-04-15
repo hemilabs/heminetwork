@@ -15,15 +15,17 @@ import (
 	"github.com/btcsuite/btcd/wire"
 )
 
-// XXX wire could use some contexts
+// XXX wire could use some contexts,
 
-func write(conn net.Conn, msg wire.Message, pver uint32, btcnet wire.BitcoinNet) error {
+func writeTimeout(timeout time.Duration, conn net.Conn, msg wire.Message, pver uint32, btcnet wire.BitcoinNet) error {
+	conn.SetWriteDeadline(time.Now().Add(timeout))
 	_, err := wire.WriteMessageWithEncodingN(conn, msg, pver, btcnet,
 		wire.LatestEncoding)
 	return err
 }
 
-func read(conn net.Conn, pver uint32, btcnet wire.BitcoinNet) (wire.Message, error) {
+func readTimeout(timeout time.Duration, conn net.Conn, pver uint32, btcnet wire.BitcoinNet) (wire.Message, error) {
+	conn.SetReadDeadline(time.Now().Add(timeout))
 	_, msg, _, err := wire.ReadMessageWithEncodingN(conn, pver, btcnet,
 		wire.LatestEncoding)
 	return msg, err
@@ -57,13 +59,16 @@ func (p *peer) String() string {
 	return p.address
 }
 
-func (p *peer) write(msg wire.Message) error {
+func (p *peer) write(timeout time.Duration, msg wire.Message) error {
+	p.conn.SetWriteDeadline(time.Now().Add(timeout))
 	_, err := wire.WriteMessageWithEncodingN(p.conn, msg, p.protocolVersion,
 		p.network, wire.LatestEncoding)
 	return err
 }
 
 func (p *peer) read() (wire.Message, error) {
+	// XXX contexts would be nice
+	p.conn.SetReadDeadline(time.Time{}) // never timeout on reads
 	_, msg, _, err := wire.ReadMessageWithEncodingN(p.conn, p.protocolVersion,
 		p.network, wire.LatestEncoding)
 	return msg, err
@@ -79,16 +84,17 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	// 4. send verack
 	// 5. receive sendaddrv2, verack or ignore
 
+	defaultHandshakeTimeout := 5 * time.Second
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
 	msg := wire.NewMsgVersion(us, them, uint64(rand.Int63()), 0)
-	err := write(conn, msg, p.protocolVersion, p.network)
+	err := writeTimeout(defaultHandshakeTimeout, conn, msg, p.protocolVersion, p.network)
 	if err != nil {
 		return fmt.Errorf("could not write version message: %w", err)
 	}
 
 	// 2. receive version
-	rmsg, err := read(conn, p.protocolVersion, p.network)
+	rmsg, err := readTimeout(defaultHandshakeTimeout, conn, p.protocolVersion, p.network)
 	if err != nil {
 		return fmt.Errorf("could not read version message: %w", err)
 	}
@@ -101,20 +107,20 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 
 	// 3. send sendaddrv2
 	if v.ProtocolVersion >= 70016 {
-		err = write(conn, wire.NewMsgSendAddrV2(), p.protocolVersion, p.network)
+		err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgSendAddrV2(), p.protocolVersion, p.network)
 		if err != nil {
 			return fmt.Errorf("could not send sendaddrv2: %w", err)
 		}
 	}
 
 	// 4. send verack
-	err = write(conn, wire.NewMsgVerAck(), p.protocolVersion, p.network)
+	err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgVerAck(), p.protocolVersion, p.network)
 	if err != nil {
 		return fmt.Errorf("could not send verack: %w", err)
 	}
 
 	for count := 0; count < 3; count++ {
-		msg, err := read(conn, p.protocolVersion, p.network)
+		msg, err := readTimeout(defaultHandshakeTimeout, conn, p.protocolVersion, p.network)
 		if err == wire.ErrUnknownMessage {
 			continue
 		} else if err != nil {
@@ -152,6 +158,7 @@ func (p *peer) connect(ctx context.Context) error {
 	p.mtx.Unlock()
 
 	d := net.Dialer{
+		Timeout:   5 * time.Second,
 		KeepAlive: 9 * time.Second,
 	}
 
