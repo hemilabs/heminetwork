@@ -1709,12 +1709,12 @@ func getEndpointWithRetries(ctx context.Context, container testcontainers.Contai
 }
 
 func nextPort() int {
-	port, err := freeport.GetFreePort()
+	ports, err := freeport.GetFreePorts(1000)
 	if err != nil && err != context.Canceled {
 		panic(err)
 	}
 
-	return port
+	return ports[time.Now().Unix()%int64(len(ports))]
 }
 
 func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
