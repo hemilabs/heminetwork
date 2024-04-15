@@ -22,6 +22,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/phayes/freeport"
@@ -69,6 +70,11 @@ func TestBtcBlockHeadersByHeightRaw(t *testing.T) {
 	defer cancel()
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
 	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
 
 	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
@@ -143,6 +149,12 @@ func TestBtcBlockHeadersByHeight(t *testing.T) {
 	defer cancel()
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
+
 	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
 
 	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
@@ -209,7 +221,13 @@ func TestBtcBlockHeadersByHeightDoesNotExist(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
-	_, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
+
 	_, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
 
 	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
@@ -275,7 +293,13 @@ func TestServerBlockHeadersBest(t *testing.T) {
 	defer cancel()
 
 	blocks := uint64(100)
-	_, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, blocks, "")
+	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, blocks, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
+
 	tbcServer, _ := createTbcServer(ctx, t, mappedPeerPort)
 
 	select {
@@ -391,6 +415,11 @@ func TestBalanceByAddress(t *testing.T) {
 			}
 
 			bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, uint64(initialBlocks), tti.address())
+			defer func() {
+				if err := bitcoindContainer.Terminate(ctx); err != nil {
+					panic(err)
+				}
+			}()
 
 			// generate to another address to ensure it's not included in our query
 			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
@@ -621,6 +650,11 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				initialBlocks = 4
 			}
 			bitcoindContainer, mappedPeerPort = createBitcoindWithInitialBlocks(ctx, t, uint64(initialBlocks), tti.address())
+			defer func() {
+				if err := bitcoindContainer.Terminate(ctx); err != nil {
+					panic(err)
+				}
+			}()
 
 			// generate to another address to ensure it's not included in our query
 			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
@@ -844,6 +878,11 @@ func TestUtxosByAddress(t *testing.T) {
 				initialBlocks = 4
 			}
 			bitcoindContainer, mappedPeerPort = createBitcoindWithInitialBlocks(ctx, t, uint64(initialBlocks), tti.address())
+			defer func() {
+				if err := bitcoindContainer.Terminate(ctx); err != nil {
+					panic(err)
+				}
+			}()
 
 			// generate to another address to ensure it's not included in our query
 			someOtherAddress, err := btcutil.NewAddressScriptHash([]byte("blahblahotherscripthash"), &chaincfg.RegressionNetParams)
@@ -954,6 +993,11 @@ func TestTxByIdRaw(t *testing.T) {
 	}
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 4, address.String())
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
 
 	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
 
@@ -1053,6 +1097,11 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	}
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 4, address.String())
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
 
 	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
 
@@ -1138,6 +1187,11 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 0, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
 
 	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
 		privateKey,
@@ -1255,6 +1309,11 @@ func TestTxById(t *testing.T) {
 	}
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 4, address.String())
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
 
 	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
 
@@ -1351,6 +1410,11 @@ func TestTxByIdInvalid(t *testing.T) {
 	}
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 4, address.String())
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
 
 	tbcServer, tbcUrl := createTbcServer(ctx, t, mappedPeerPort)
 
@@ -1436,6 +1500,11 @@ func TestTxByIdNotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 0, "")
+	defer func() {
+		if err := bitcoindContainer.Terminate(ctx); err != nil {
+			panic(err)
+		}
+	}()
 
 	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
 		privateKey,
@@ -1539,12 +1608,15 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 }
 
+var noCollision = 0
+
 func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
-	name := fmt.Sprintf("bitcoind-%d", time.Now().Unix())
+	noCollision++
+	name := fmt.Sprintf("bitcoind-%d", noCollision)
 	req := testcontainers.ContainerRequest{
 		Image:        "kylemanna/bitcoind",
 		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1"},
-		ExposedPorts: []string{"18443/tcp", "18444/tcp"},
+		ExposedPorts: []string{"18443", "18444"},
 		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{
 			Consumers: []testcontainers.LogConsumer{&StdoutLogConsumer{
@@ -1552,6 +1624,20 @@ func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container 
 			}},
 		},
 		Name: name,
+		HostConfigModifier: func(hostConfig *container.HostConfig) {
+			hostConfig.PortBindings = nat.PortMap{
+				"18443/tcp": []nat.PortBinding{
+					{
+						HostPort: "18443",
+					},
+				},
+				"18444/tcp": []nat.PortBinding{
+					{
+						HostPort: "18444",
+					},
+				},
+			}
+		},
 	}
 	bitcoindContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
@@ -1646,12 +1732,12 @@ func getEndpointWithRetries(ctx context.Context, container testcontainers.Contai
 }
 
 func nextPort() int {
-	port, err := freeport.GetFreePort()
+	ports, err := freeport.GetFreePorts(1000)
 	if err != nil && err != context.Canceled {
 		panic(err)
 	}
 
-	return port
+	return ports[time.Now().Unix()%int64(len(ports))]
 }
 
 func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
@@ -1849,34 +1935,6 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 	t.Helper()
 
 	bitcoindContainer := createBitcoind(ctx, t)
-	bitcoindHost, err := bitcoindContainer.Host(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	peerPort, err := nat.NewPort("tcp", "18444")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rpcPort, err := nat.NewPort("tcp", "18443")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, peerPort)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	mappedRpcPort, err := bitcoindContainer.MappedPort(ctx, rpcPort)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Logf("bitcoind host is: %s", bitcoindHost)
-	t.Logf("bitcoind peer port is: %s", mappedPeerPort.Port())
-	t.Logf("bitcoind rpc port is: %s", mappedRpcPort.Port())
 
 	_, _, btcAddress, err := bitcoin.KeysAndAddressFromHexString(
 		privateKey,
@@ -1908,5 +1966,5 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 		t.Fatal(err)
 	}
 
-	return bitcoindContainer, mappedPeerPort
+	return bitcoindContainer, nat.Port(localnetPort)
 }
