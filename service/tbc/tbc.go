@@ -33,6 +33,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/syndtr/goleveldb/leveldb"
 
+	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -1330,24 +1331,41 @@ func (s *Server) blockHeadersByHeight(ctx context.Context, height uint64) ([]tbc
 	return bhs, nil
 }
 
-func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]wire.BlockHeader, error) {
-	log.Tracef("BlockHeadersByHeight")
-	defer log.Tracef("BlockHeadersByHeight exit")
+func (s *Server) RawBlockHeadersByHeight(ctx context.Context, height uint64) ([]api.ByteSlice, error) {
+	log.Tracef("RawBlockHeadersByHeight")
+	defer log.Tracef("RawBlockHeadersByHeight exit")
 
 	bhs, err := s.blockHeadersByHeight(ctx, height)
 	if err != nil {
 		return nil, err
 	}
 
-	bhsw := make([]wire.BlockHeader, 0, len(bhs))
-	for k := range bhs {
-		bhw, err := bytes2Header(bhs[k].Header)
-		if err != nil {
-			return nil, fmt.Errorf("bytes to header: %w", err)
-		}
-		bhsw = append(bhsw, *bhw)
+	var headers []api.ByteSlice
+	for _, bh := range bhs {
+		headers = append(headers, []byte(bh.Header))
 	}
-	return bhsw, nil
+
+	return headers, nil
+}
+
+func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]*wire.BlockHeader, error) {
+	log.Tracef("BlockHeadersByHeight")
+	defer log.Tracef("BlockHeadersByHeight exit")
+
+	blockHeaders, err := s.blockHeadersByHeight(ctx, height)
+	if err != nil {
+		return nil, err
+	}
+
+	wireBlockHeaders := make([]*wire.BlockHeader, 0, len(blockHeaders))
+	for _, bh := range blockHeaders {
+		w, err := bh.Wire()
+		if err != nil {
+			return nil, err
+		}
+		wireBlockHeaders = append(wireBlockHeaders, w)
+	}
+	return wireBlockHeaders, nil
 }
 
 // BlockHeadersBest returns the headers for the best known blocks.
