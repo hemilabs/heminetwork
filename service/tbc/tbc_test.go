@@ -1670,7 +1670,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	cfg := NewDefaultConfig()
 	cfg.LevelDBHome = home
 	cfg.Network = networkLocalnet
-	cfg.ForceSeedPort = mappedPeerPort.Port()
+	cfg.RegtestPort = mappedPeerPort.Port()
 	cfg.ListenAddress = tcbListenAddress
 	tbcServer, err := NewServer(cfg)
 	if err != nil {

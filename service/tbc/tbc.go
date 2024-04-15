@@ -154,7 +154,7 @@ type blockPeer struct {
 type Config struct {
 	AutoIndex               bool
 	BlockSanity             bool
-	ForceSeedPort           string
+	RegtestPort             string
 	LevelDBHome             string
 	ListenAddress           string
 	LogLevel                string
@@ -250,9 +250,9 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.chainParams = &chaincfg.TestNet3Params
 		s.seeds = testnetSeeds
 	case networkLocalnet:
-		if s.cfg.ForceSeedPort != "" {
+		if s.cfg.RegtestPort != "" {
 			// XXX this knob needs to go
-			s.port = s.cfg.ForceSeedPort // this has to be deduced from uri
+			s.port = s.cfg.RegtestPort // this has to be deduced from uri
 		} else {
 			s.port = localnetPort
 		}
@@ -495,7 +495,7 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 
 	peersWanted := 1
 	peerC := make(chan string, peersWanted)
-	address := net.JoinHostPort("127.0.0.1", "18444")
+	address := net.JoinHostPort("127.0.0.1", s.port)
 	peer, err := NewPeer(s.wireNet, address)
 	if err != nil {
 		return fmt.Errorf("new peer: %w", err)
