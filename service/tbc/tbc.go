@@ -250,12 +250,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.chainParams = &chaincfg.TestNet3Params
 		s.seeds = testnetSeeds
 	case networkLocalnet:
-		if s.cfg.RegtestPort != "" {
-			// XXX this knob needs to go
-			s.port = s.cfg.RegtestPort // this has to be deduced from uri
-		} else {
-			s.port = localnetPort
-		}
+		s.port = localnetPort
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
 	default:
