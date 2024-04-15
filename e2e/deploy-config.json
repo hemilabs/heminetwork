@@ -3,7 +3,7 @@
     "l2ChainID": 901,
     "l2BlockTime": 1,
     "maxSequencerDrift": 300,
-    "sequencerWindowSize": 2,
+    "sequencerWindowSize": 200,
     "channelTimeout": 120,
     "p2pSequencerAddress": "0x78697c88847dfbbb40523e42c1f2e28a13a170be",
     "batchInboxAddress": "0xff00000000000000000000000000000000000901",
@@ -52,7 +52,7 @@
     "outputBisectionGameGenesisBlock": 0,
     "outputBisectionGameGenesisOutputRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "outputBisectionGameSplitDepth": 14,
-    "systemConfigStartBlock": 1,
+    "systemConfigStartBlock": 0,
     "requiredProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "recommendedProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000"
 }
