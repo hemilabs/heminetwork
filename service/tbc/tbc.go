@@ -307,8 +307,6 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte)
 	hash := bh.BlockHash()
 	ghs := wire.NewMsgGetHeaders()
 	ghs.AddBlockLocatorHash(&hash)
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
 	err = p.write(ghs)
 	if err != nil {
 		return fmt.Errorf("write get headers: %v", err)
@@ -522,12 +520,10 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 		// write to the connection to make it fail if the other side
 		// went away.
 		log.Debugf("Pinging: %v", p)
-		s.mtx.Lock()
 		err := p.write(wire.NewMsgPing(uint64(time.Now().Unix())))
 		if err != nil {
 			log.Errorf("ping %v: %v", p, err)
 		}
-		s.mtx.Unlock()
 	}
 }
 
@@ -576,10 +572,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}()
 
-	s.mtx.Lock()
 	_ = p.write(wire.NewMsgSendHeaders()) // Ask peer to send headers
 	_ = p.write(wire.NewMsgGetAddr())     // Try to get network information
-	s.mtx.Unlock()
 
 	log.Debugf("Peer connected: %v", p)
 
@@ -756,8 +750,6 @@ func (s *Server) handlePing(ctx context.Context, p *peer, msg *wire.MsgPing) {
 	defer log.Tracef("handlePing exit %v", p.address)
 
 	pong := wire.NewMsgPong(msg.Nonce)
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
 	err := p.write(pong)
 	if err != nil {
 		log.Errorf("could not write pong message %v: %v", p.address, err)
