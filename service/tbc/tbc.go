@@ -1391,10 +1391,10 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]*wi
 	return wireBlockHeaders, nil
 }
 
-// BlockHeadersBest returns the headers for the best known blocks.
-func (s *Server) BlockHeadersBest(ctx context.Context) (uint64, []wire.BlockHeader, error) {
-	log.Tracef("LastBlockMetadata")
-	defer log.Tracef("LastBlockMetadata exit")
+// RawBlockHeadersBest returns the raw headers for the best known blocks.
+func (s *Server) RawBlockHeadersBest(ctx context.Context) (uint64, []api.ByteSlice, error) {
+	log.Tracef("RawBlockHeadersBest")
+	defer log.Tracef("RawBlockHeadersBest exit")
 
 	bhs, err := s.db.BlockHeadersBest(ctx)
 	if err != nil {
@@ -1406,16 +1406,39 @@ func (s *Server) BlockHeadersBest(ctx context.Context) (uint64, []wire.BlockHead
 		height = bhs[0].Height
 	}
 
-	bhsw := make([]wire.BlockHeader, 0, len(bhs))
-	for k := range bhs {
-		bhw, err := bytes2Header(bhs[k].Header)
-		if err != nil {
-			return 0, nil, fmt.Errorf("bytes to header: %w", err)
-		}
-		bhsw = append(bhsw, *bhw)
+	var headers []api.ByteSlice
+	for _, bh := range bhs {
+		headers = append(headers, []byte(bh.Header))
 	}
 
-	return height, bhsw, nil
+	return height, headers, nil
+}
+
+// BlockHeadersBest returns the headers for the best known blocks.
+func (s *Server) BlockHeadersBest(ctx context.Context) (uint64, []*wire.BlockHeader, error) {
+	log.Tracef("BlockHeadersBest")
+	defer log.Tracef("BlockHeadersBest exit")
+
+	blockHeaders, err := s.db.BlockHeadersBest(ctx)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	var height uint64
+	if len(blockHeaders) > 0 {
+		height = blockHeaders[0].Height
+	}
+
+	wireBlockHeaders := make([]*wire.BlockHeader, 0, len(blockHeaders))
+	for _, bh := range blockHeaders {
+		w, err := bh.Wire()
+		if err != nil {
+			return 0, nil, err
+		}
+		wireBlockHeaders = append(wireBlockHeaders, w)
+	}
+
+	return height, wireBlockHeaders, nil
 }
 
 func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (uint64, error) {

@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"sync"
 	"time"
@@ -47,6 +48,10 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 				log.Tracef("handleWebsocketRead: %v", err)
 				return
 			}
+			if errors.Is(err, io.EOF) {
+				log.Tracef("handleWebsocketRead: EOF")
+				return
+			}
 
 			log.Errorf("handleWebsocketRead: %v", err)
 			return
@@ -66,6 +71,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.BlockHeadersByHeightRawRequest)
 				return s.handleBlockHeadersByHeightRawRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBlockHeadersBestRawRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockHeadersBestRawRequest)
+				return s.handleBlockHeadersBestRawRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -227,6 +239,24 @@ func (s *Server) handleBlockHeadersByHeightRawRequest(ctx context.Context, req *
 	}, nil
 }
 
+func (s *Server) handleBlockHeadersBestRawRequest(ctx context.Context, _ *tbcapi.BlockHeadersBestRawRequest) (any, error) {
+	log.Tracef("handleBlockHeadersBestRawRequest")
+	defer log.Tracef("handleBlockHeadersBestRawRequest exit")
+
+	height, blockHeaders, err := s.RawBlockHeadersBest(ctx)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockHeadersBestRawResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.BlockHeadersBestRawResponse{
+		Height:       height,
+		BlockHeaders: blockHeaders,
+	}, nil
+}
+
 func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, _ *tbcapi.BlockHeadersBestRequest) (any, error) {
 	log.Tracef("handleBlockHeadersBestRequest")
 	defer log.Tracef("handleBlockHeadersBestRequest exit")
@@ -239,21 +269,9 @@ func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, _ *tbcapi.Bl
 		}, e
 	}
 
-	var encodedBlockHeaders []api.ByteSlice
-	for _, bh := range blockHeaders {
-		bytes, err := header2Bytes(&bh)
-		if err != nil {
-			e := protocol.NewInternalError(err)
-			return &tbcapi.BlockHeadersByHeightResponse{
-				Error: e.ProtocolError(),
-			}, e
-		}
-		encodedBlockHeaders = append(encodedBlockHeaders, bytes)
-	}
-
 	return &tbcapi.BlockHeadersBestResponse{
 		Height:       height,
-		BlockHeaders: encodedBlockHeaders,
+		BlockHeaders: wireBlockHeadersToTBC(blockHeaders),
 	}, nil
 }
 
@@ -452,15 +470,12 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) newSession(ws *tbcWs) (string, error) {
-	b := make([]byte, 16)
-
 	for {
 		// Create random hexadecimal string to use as an ID
-		_, err := rand.Read(b)
+		id, err := randHexId(16)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("generate session id: %w", err)
 		}
-		id := hex.EncodeToString(b)
 
 		// Ensure the key is not already in use, if it is then try again.
 		s.mtx.Lock()
@@ -484,6 +499,14 @@ func (s *Server) deleteSession(id string) {
 	if !ok {
 		log.Errorf("id not found in sessions %s", id)
 	}
+}
+
+func randHexId(length int) (string, error) {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("read random bytes: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func wireBlockHeadersToTBC(w []*wire.BlockHeader) []*tbcapi.BlockHeader {
