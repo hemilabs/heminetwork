@@ -6,10 +6,41 @@ package database
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
+
+	"github.com/davecgh/go-spew/spew"
 )
+
+func TestStructByteArrayJSON(t *testing.T) {
+	type X struct {
+		Y           BigInt
+		Ts          Timestamp
+		MyByteArray ByteArray
+	}
+
+	y := NewBigIntZero().SetUint64(15)
+	x := X{
+		Y:           *y,
+		Ts:          NewTimestamp(time.Now()),
+		MyByteArray: []byte{0x01, 0x02},
+	}
+	jx, err := json.Marshal(x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var xx X
+	err = json.Unmarshal(jx, &xx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(x, xx) {
+		t.Fatalf("not equal %v%v", spew.Sdump(x), spew.Sdump(xx))
+	}
+}
 
 func TestByteArrayJSON(t *testing.T) {
 	tests := []struct {

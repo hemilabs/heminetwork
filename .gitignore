@@ -4,6 +4,9 @@
 /pkg/
 /.gocache/
 
+## Tests
+/service/tbc/.testleveldb/
+
 ### Common editors
 ## Vim
 # Swap

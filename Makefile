@@ -20,23 +20,27 @@ project = heminetwork
 version = $(shell git describe --tags 2>/dev/null || echo "v0.0.0")
 
 cmds = \
-	bfgd \
-	bssd \
-	extool \
-	keygen \
-	popmd \
-	hemictl
+	bfgd	\
+	bssd	\
+	extool	\
+	hemictl	\
+	keygen	\
+	popmd	\
+	tbcd
 
 .PHONY: all clean clean-dist deps $(cmds) build install lint lint-deps tidy race test vulncheck \
 	vulncheck-deps dist archive sources checksums networktest
 
 all: lint tidy test build install
 
-clean: clean-dist
+clean: clean-dist clean-test
 	rm -rf $(GOBIN) $(GOCACHE) $(GOPKG)
 
 clean-dist:
 	rm -rf $(DIST)
+
+clean-test:
+	rm -rf $(PROJECTPATH)/service/tbc/.testleveldb/
 
 deps: lint-deps vulncheck-deps
 	go mod download
@@ -54,7 +58,7 @@ lint:
 	$(shell go env GOPATH)/bin/goimports -local github.com/hemilabs/heminetwork -w -l .
 	$(shell go env GOPATH)/bin/gofumpt -w -l .
 	$(shell go env GOPATH)/bin/addlicense -c "Hemi Labs, Inc." -f $(PROJECTPATH)/license_header.txt \
-		-ignore "{.idea,.vscode}/**" -ignore ".github/release.yml" -ignore ".github/ISSUE_TEMPLATE/**" -v .
+		-ignore "{.idea,.vscode}/**" -ignore ".github/release.yml" -ignore ".github/ISSUE_TEMPLATE/**" .
 	go vet ./...
 
 lint-deps:

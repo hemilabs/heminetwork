@@ -7,6 +7,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -18,19 +21,31 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
+	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
+	ldb "github.com/hemilabs/heminetwork/database/level"
+	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -85,6 +100,16 @@ func handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 	}
 }
 
+// handleTBCWebsocketRead discards all reads but has to exist in order to
+// be able to use tbcapi.Call.
+func handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
+	for {
+		if _, _, _, err := tbcapi.ReadConn(ctx, conn); err != nil {
+			return
+		}
+	}
+}
+
 func bfgdb() error {
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 	defer cancel()
@@ -134,6 +159,492 @@ func bfgdb() error {
 		return fmt.Errorf("marshal: %w", err)
 	}
 	fmt.Printf("%s\n", o)
+
+	return nil
+}
+
+func parseArgs(args []string) (string, map[string]string, error) {
+	if len(args) < 1 {
+		flag.Usage()
+		return "", nil, fmt.Errorf("action required")
+	}
+
+	action := args[0]
+	parsed := make(map[string]string, 10)
+
+	for _, v := range args[1:] {
+		s := strings.Split(v, "=")
+		if len(s) != 2 {
+			return "", nil, fmt.Errorf("invalid argument: %v", v)
+		}
+		if len(s[0]) == 0 || len(s[1]) == 0 {
+			return "", nil, fmt.Errorf("expected a=b, got %v", v)
+		}
+		parsed[s[0]] = s[1]
+	}
+
+	return action, parsed, nil
+}
+
+func tbcdb() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	action, args, err := parseArgs(flag.Args()[1:])
+	if err != nil {
+		return err
+	}
+
+	// special commands
+	//switch action {
+	//case "crossreference":
+	//	return crossReference(ctx)
+	//}
+
+	// create fake service to call crawler
+	cfg := tbc.NewDefaultConfig()
+	cfg.LevelDBHome = "~/.tbcd"
+	cfg.Network = "testnet3"
+	s, err := tbc.NewServer(cfg)
+	if err != nil {
+		return fmt.Errorf("new server: %w", err)
+	}
+	// Open db.
+	err = s.DBOpen(ctx)
+	if err != nil {
+		return fmt.Errorf("db open: %w", err)
+	}
+	defer func() {
+		err := s.DBClose()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "db close: %v\n", err)
+			os.Exit(1)
+		}
+	}()
+
+	// commands
+	switch action {
+	case "blockheaderbyhash":
+		hash := args["hash"]
+		if hash == "" {
+			return fmt.Errorf("hash: must be set")
+		}
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		bh, err := s.DB().BlockHeaderByHash(ctx, ch[:])
+		if err != nil {
+			return fmt.Errorf("block header by hash: %w", err)
+		}
+		fmt.Printf("hash  : %v\n", bh)
+		fmt.Printf("height: %v\n", bh.Height)
+
+	case "blockheadersbest":
+		bhs, err := s.DB().BlockHeadersBest(ctx)
+		if err != nil {
+			return fmt.Errorf("block headers best: %w", err)
+		}
+		for k := range bhs {
+			fmt.Printf("hash   (%v): %v\n", k, bhs[k])
+			fmt.Printf("height (%v): %v\n", k, bhs[k].Height)
+		}
+
+	case "blockheadersbyheight":
+		height := args["height"]
+		if height == "" {
+			return fmt.Errorf("height: must be set")
+		}
+		h, err := strconv.ParseUint(height, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+		bh, err := s.DB().BlockHeadersByHeight(ctx, h)
+		if err != nil {
+			return fmt.Errorf("block header by height: %w", err)
+		}
+		spew.Dump(bh)
+
+	// case "blockheadersinsert":
+
+	case "blocksmissing":
+		count := args["count"]
+		c, err := strconv.ParseUint(count, 10, 64)
+		if len(count) > 0 && err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+		if c == 0 {
+			c = 1
+		}
+		bh, err := s.DB().BlocksMissing(ctx, int(c))
+		if err != nil {
+			return fmt.Errorf("block header by height: %w", err)
+		}
+		spew.Dump(bh)
+
+	// case "blockinsert":
+
+	case "blockbyhash":
+		hash := args["hash"]
+		if hash == "" {
+			return fmt.Errorf("hash: must be set")
+		}
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		b, err := s.DB().BlockByHash(ctx, ch[:])
+		if err != nil {
+			return fmt.Errorf("block by hash: %w", err)
+		}
+		spew.Dump(b)
+
+	case "deletemetadata":
+		key := args["key"]
+		if key == "" {
+			return fmt.Errorf("key: must be set")
+		}
+
+		s.DBClose()
+
+		levelDBHome := "~/.tbcd" // XXX
+		network := "testnet3"
+		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		pool := db.DB()
+		mdDB := pool[ldb.MetadataDB]
+		err = mdDB.Delete([]byte(key), nil)
+		if err != nil {
+			return err
+		}
+
+	case "dumpmetadata":
+		s.DBClose()
+
+		levelDBHome := "~/.tbcd" // XXX
+		network := "testnet3"
+		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		pool := db.DB()
+		mdDB := pool[ldb.MetadataDB]
+		it := mdDB.NewIterator(nil, nil)
+		defer it.Release()
+		for it.Next() {
+			fmt.Printf("metadata key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		}
+
+	case "dumpoutputs":
+		s.DBClose()
+
+		levelDBHome := "~/.tbcd" // XXX
+		network := "testnet3"
+		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		prefix := args["prefix"]
+		if len(prefix) > 1 {
+			return fmt.Errorf("prefix must be one byte")
+		} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
+			return fmt.Errorf("prefix must be h or u")
+		}
+		pool := db.DB()
+		outsDB := pool[ldb.OutputsDB]
+		it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
+		defer it.Release()
+		for it.Next() {
+			fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		}
+
+	case "feesbyheight":
+		height := args["height"]
+		if height == "" {
+			return fmt.Errorf("height: must be set")
+		}
+		h, err := strconv.ParseInt(height, 10, 64)
+		if err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+		count := args["count"]
+		c, err := strconv.ParseInt(count, 10, 64)
+		if len(count) > 0 && err != nil {
+			return fmt.Errorf("parse uint: %w", err)
+		}
+		if c == 0 {
+			c = 1
+		}
+		bh, err := s.FeesAtHeight(ctx, h, c)
+		if err != nil {
+			return fmt.Errorf("fees by height: %w", err)
+		}
+		spew.Dump(bh)
+
+	case "help", "h":
+		fmt.Printf("tbcd db manipulator commands:\n")
+		fmt.Printf("\tbalancebyscripthash [hash]\n")
+		fmt.Printf("\tblockbyhash [hash]\n")
+		fmt.Printf("\tblockheaderbyhash [hash]\n")
+		fmt.Printf("\tblockheadersbest\n")
+		fmt.Printf("\tblockheadersbyheight [height]\n")
+		fmt.Printf("\tblocksbytxid [hash]\n")
+		fmt.Printf("\tblocksmissing [count]\n")
+		fmt.Printf("\tdeletemetadata\n")
+		fmt.Printf("\tdumpmetadata\n")
+		fmt.Printf("\tdumpoutputs <prefix>\n")
+		fmt.Printf("\thelp\n")
+		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
+		fmt.Printf("\tspendoutputsbytxid [txid] [index]\n")
+		fmt.Printf("\ttxindex <height> <count> <maxcache>\n")
+		fmt.Printf("\tutxoindex <height> <count> <maxcache>\n")
+		fmt.Printf("\tutxosbyscripthash [hash]\n")
+
+	case "utxoindex":
+		var h, c, mc uint64
+		height := args["height"]
+		if height == "" {
+			// Get height from db
+			he, err := s.DB().MetadataGet(ctx, tbc.UtxoIndexHeightKey)
+			if err != nil {
+				if !errors.Is(err, database.ErrNotFound) {
+					return fmt.Errorf("metadata %v: %w",
+						string(tbc.UtxoIndexHeightKey), err)
+				}
+				he = make([]byte, 8)
+			}
+			h = binary.BigEndian.Uint64(he)
+		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
+			return fmt.Errorf("height: %w", err)
+		}
+		count := args["count"]
+		if count == "" {
+			c = 0
+		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
+			return fmt.Errorf("count: %w", err)
+		}
+		maxCache := args["maxcache"]
+		if maxCache != "" {
+			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
+				return fmt.Errorf("maxCache: %w", err)
+			}
+			cfg.MaxCachedTxs = int(mc)
+		}
+		err = s.UtxoIndexer(ctx, h, c)
+		if err != nil {
+			return fmt.Errorf("indexer: %w", err)
+		}
+
+	case "txindex":
+		var h, c, mc uint64
+		height := args["height"]
+		if height == "" {
+			// Get height from db
+			he, err := s.DB().MetadataGet(ctx, tbc.TxIndexHeightKey)
+			if err != nil {
+				if !errors.Is(err, database.ErrNotFound) {
+					return fmt.Errorf("metadata %v: %w",
+						string(tbc.TxIndexHeightKey), err)
+				}
+				he = make([]byte, 8)
+			}
+			h = binary.BigEndian.Uint64(he)
+		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
+			return fmt.Errorf("height: %w", err)
+		}
+		count := args["count"]
+		if count == "" {
+			c = 0
+		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
+			return fmt.Errorf("count: %w", err)
+		}
+		maxCache := args["maxcache"]
+		if maxCache != "" {
+			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
+				return fmt.Errorf("maxCache: %w", err)
+			}
+			cfg.MaxCachedTxs = int(mc)
+		}
+		err = s.TxIndexer(ctx, h, c)
+		if err != nil {
+			return fmt.Errorf("indexer: %w", err)
+		}
+
+	case "blocksbytxid":
+		txid := args["txid"]
+		if txid == "" {
+			return fmt.Errorf("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		var revTxId [32]byte
+		copy(revTxId[:], chtxid[:])
+
+		bh, err := s.DB().BlocksByTxId(ctx, revTxId)
+		if err != nil {
+			return fmt.Errorf("block by txid: %w", err)
+		}
+		for k := range bh {
+			fmt.Printf("%v\n", bh[k])
+		}
+
+	case "spendoutputsbytxid":
+		txid := args["txid"]
+		if txid == "" {
+			return fmt.Errorf("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		var revTxId [32]byte
+		copy(revTxId[:], chtxid[:])
+
+		si, err := s.DB().SpendOutputsByTxId(ctx, revTxId)
+		if err != nil {
+			return fmt.Errorf("spend outputs by txid: %w", err)
+		}
+		for k := range si {
+			fmt.Printf("%v\n", si[k])
+		}
+
+	case "scripthashbyoutpoint":
+		txid := args["txid"]
+		if txid == "" {
+			return fmt.Errorf("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		var revTxId [32]byte
+		copy(revTxId[:], chtxid[:])
+
+		index := args["index"]
+		if index == "" {
+			return fmt.Errorf("index: must be set")
+		}
+		idx, err := strconv.ParseUint(index, 10, 32)
+		if err != nil {
+			return fmt.Errorf("index: %w", err)
+		}
+		op := tbcd.NewOutpoint(revTxId, uint32(idx))
+		sh, err := s.DB().ScriptHashByOutpoint(ctx, op)
+		if err != nil {
+			return fmt.Errorf("block by hash: %w", err)
+		}
+		spew.Dump(sh)
+
+	case "balancebyscripthash":
+		address := args["address"]
+		hash := args["hash"]
+		if address == "" && hash == "" {
+			return fmt.Errorf("hash or address: must be set")
+		} else if address != "" && hash != "" {
+			return fmt.Errorf("hash or address: both set")
+		}
+
+		var hh [32]byte
+		if hash != "" {
+			h, err := hex.DecodeString(hash)
+			if err != nil {
+				return fmt.Errorf("decode hex: %w", err)
+			}
+			copy(hh[:], h)
+		}
+		if address != "" {
+			// XXX set params
+			a, err := btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			if err != nil {
+				return err
+			}
+			h, err := txscript.PayToAddrScript(a)
+			if err != nil {
+				return err
+			}
+			sh := sha256.Sum256(h)
+			copy(hh[:], sh[:])
+		}
+
+		balance, err := s.DB().BalanceByScriptHash(ctx, hh)
+		if err != nil {
+			return fmt.Errorf("block by hash: %w", err)
+		}
+		spew.Dump(balance)
+
+	case "utxosbyscripthash":
+		address := args["address"]
+		hash := args["hash"]
+		count := args["count"]
+		start := args["start"]
+
+		if address == "" && hash == "" {
+			return fmt.Errorf("hash or address: must be set")
+		} else if address != "" && hash != "" {
+			return fmt.Errorf("hash or address: both set")
+		}
+
+		if count == "" {
+			count = "100"
+		}
+
+		if start == "" {
+			start = "0"
+		}
+
+		countNum, err := strconv.ParseUint(count, 10, 64)
+		if err != nil {
+			return err
+		}
+
+		startNum, err := strconv.ParseUint(start, 10, 64)
+		if err != nil {
+			return err
+		}
+
+		var hh [32]byte
+		if hash != "" {
+			h, err := hex.DecodeString(hash)
+			if err != nil {
+				return fmt.Errorf("decode hex: %w", err)
+			}
+			copy(hh[:], h)
+		}
+		if address != "" {
+			// XXX set params
+			a, err := btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			if err != nil {
+				return err
+			}
+			h, err := txscript.PayToAddrScript(a)
+			if err != nil {
+				return err
+			}
+			sh := sha256.Sum256(h)
+			copy(hh[:], sh[:])
+		}
+
+		utxos, err := s.DB().UtxosByScriptHash(ctx, hh, startNum, countNum)
+		if err != nil {
+			return fmt.Errorf("block by hash: %w", err)
+		}
+		var balance uint64
+		for k := range utxos {
+			fmt.Printf("%v\n", utxos[k])
+			balance += utxos[k].Value()
+		}
+		fmt.Printf("utxos: %v total: %v\n", len(utxos), balance)
+
+	default:
+		return fmt.Errorf("invalid action: %v", action)
+	}
 
 	return nil
 }
@@ -265,7 +776,7 @@ func bssLong(ctx context.Context) error {
 
 func client(which string) error {
 	log.Debugf("client %v", which)
-	defer log.Debugf("client exit", which)
+	defer log.Debugf("client %v exit", which)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -305,6 +816,9 @@ func init() {
 	for k, v := range bfgapi.APICommands() {
 		allCommands[string(k)] = v
 	}
+	for k, v := range tbcapi.APICommands() {
+		allCommands[string(k)] = v
+	}
 
 	sortedCommands = make([]string, 0, len(allCommands))
 	for k := range allCommands {
@@ -321,6 +835,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
 	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
 	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
+	fmt.Fprintf(os.Stderr, "\ttbcdb datase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "Environment:\n")
 	config.Help(os.Stderr, cm)
 	fmt.Fprintf(os.Stderr, "Commands:\n")
@@ -389,6 +904,8 @@ func _main() error {
 	case "help-verbose":
 		helpVerbose()
 		return nil
+	case "tbcdb":
+		return tbcdb()
 	}
 
 	// Deal with generic commands
@@ -411,6 +928,10 @@ func _main() error {
 		u = bfgapi.DefaultPrivateURL
 		callHandler = handleBFGWebsocketReadUnauth
 		call = bfgapi.Call // XXX yuck
+	case strings.HasPrefix(cmd, "tbcapi"):
+		u = tbcapi.DefaultURL
+		callHandler = handleTBCWebsocketRead
+		call = tbcapi.Call // XXX yuck?
 	default:
 		return fmt.Errorf("can't derive URL from command: %v", cmd)
 	}
