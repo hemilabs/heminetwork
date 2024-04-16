@@ -2,273 +2,282 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
+version: "3"
 
-version: '3'
 services:
   bitcoind:
-    image: 'kylemanna/bitcoind'
+    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
     command:
-      - 'bitcoind'
-      - '-regtest=1'
-      - '-rpcuser=user'
-      - '-rpcpassword=password'
-      - '-rpcallowip=0.0.0.0/0'
-      - '-rpcbind=0.0.0.0:18443'
-      - '-txindex=1'
+      - "bitcoind"
+      - "-regtest=1"
+      - "-rpcuser=user"
+      - "-rpcpassword=password"
+      - "-rpcallowip=0.0.0.0/0"
+      - "-rpcbind=0.0.0.0:18443"
+      - "-txindex=1"
     ports:
-      - 18443:18443
-      - 18444:18444
+      - "18443:18443"
+      - "18444:18444"
     volumes:
-      - type: tmpfs
-        target: /bitcoin/.bitcoin
+      - { type: "tmpfs", target: "/bitcoin/.bitcoin" }
 
-  initialblocks:
-    image: 'kylemanna/bitcoind'
-    command:
-      - 'bitcoin-cli'
-      - '-regtest=1'
-      - '-rpcuser=user'
-      - '-rpcpassword=password'
-      - '-rpcport=18443'
-      - '-rpcconnect=bitcoind'
-      - 'generatetoaddress'
-      - '300' # need to generate a lot for greater chance to not spend coinbase
-      - $BTC_ADDRESS
+  bitcoind-initialblocks:
+    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
     depends_on:
-      - bitcoind
-
-  moreblocks:
-    image: 'kylemanna/bitcoind'
+      - "bitcoind"
     command:
-      - 'bitcoin-cli'
-      - '-regtest=1'
-      - '-rpcuser=user'
-      - '-rpcpassword=password'
-      - '-rpcport=18443'
-      - '-rpcconnect=bitcoind'
-      - 'generatetoaddress'
-      - '1'
-      - $BTC_ADDRESS
+      - "bitcoin-cli"
+      - "-regtest=1"
+      - "-rpcuser=user"
+      - "-rpcpassword=password"
+      - "-rpcport=18443"
+      - "-rpcconnect=bitcoind"
+      - "generatetoaddress"
+      - "300" # need to generate a lot for greater chance to not spend coinbase
+      - "$BTC_ADDRESS"
+
+  bitcoind-moreblocks:
+    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
     deploy:
       restart_policy:
-        condition: any
+        condition: "any"
     depends_on:
-      - bitcoind
-  electrumx:
-    image: 'lukechilds/electrumx'
-    environment:
-      DAEMON_URL: 'http://user:password@bitcoind:18443'
-      COIN: 'Bitcoin'
-      COST_HARD_LIMIT: '0'
-      COST_SOFT_LIMIT: '0'
-      MAX_SEND: '8388608'
-      NET: 'regtest'
-    ports:
-      - 50001:8000
-    depends_on: 
-      - bitcoind
+      - "bitcoind"
+    command:
+      - "bitcoin-cli"
+      - "-regtest=1"
+      - "-rpcuser=user"
+      - "-rpcpassword=password"
+      - "-rpcport=18443"
+      - "-rpcconnect=bitcoind"
+      - "generatetoaddress"
+      - "1"
+      - "$BTC_ADDRESS"
 
-  postgres:
+  electrumx:
+    image: "lukechilds/electrumx@sha256:2949784536f8f85af229004e12e5b5c3a1d7428918a492f77b4e958035c2ae2a"
+    depends_on:
+      - "bitcoind"
+    ports:
+      - "50001:8000"
+    environment:
+      DAEMON_URL: "http://user:password@bitcoind:18443"
+      COIN: "Bitcoin"
+      COST_HARD_LIMIT: "0"
+      COST_SOFT_LIMIT: "0"
+      MAX_SEND: "8388608"
+      NET: "regtest"
+
+  bfgd-postgres:
     build:
-      dockerfile: ./e2e/postgres.Dockerfile
-      context: ./..
+      dockerfile: "./e2e/postgres.Dockerfile"
+      context: "./.."
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_DB: "bfg"
       POSTGRES_HOST_AUTH_METHOD: "trust"
-    ports:
-      - 5432:5432
     volumes:
-      - type: tmpfs
-        target: /var
+      - { type: "tmpfs", target: "/var" }
 
   bfgd:
     build:
-      dockerfile: ./docker/bfgd/Dockerfile
-      context: ./..
-    environment:
-      BFG_POSTGRES_URI: postgres://postgres@postgres:5432/bfg?sslmode=disable
-      BFG_BTC_START_HEIGHT: "1"
-      BFG_EXBTC_ADDRESS: electrumx:50001
-      BFG_LOG_LEVEL: INFO
-      BFG_PUBLIC_ADDRESS: ":8383"
-      BFG_PRIVATE_ADDRESS: ":8080"
-    ports:
-      - 8080:8080
-      - 8383:8383
-    depends_on:
-      - postgres
+      dockerfile: "./docker/bfgd/Dockerfile"
+      context: "./.."
     deploy:
       restart_policy:
-        condition: any
+        condition: "any"
+    depends_on:
+      - "bfgd-postgres"
+    ports:
+      - "8080:8080"
+      - "8383:8383"
+    environment:
+      BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
+      BFG_BTC_START_HEIGHT: "1"
+      BFG_EXBTC_ADDRESS: "electrumx:50001"
+      BFG_LOG_LEVEL: "INFO"
+      BFG_PUBLIC_ADDRESS: ":8383"
+      BFG_PRIVATE_ADDRESS: ":8080"
 
   bssd:
     build:
-      dockerfile: ./docker/bssd/Dockerfile
-      context: ./..
-    environment:
-      BSS_BFG_URL: 'ws://bfgd:8080/v1/ws/private'
-      BSS_LOG_LEVEL: INFO
-      BSS_ADDRESS: ':8081'
-    ports:
-      - 8081:8081
+      dockerfile: "./docker/bssd/Dockerfile"
+      context: "./.."
     depends_on:
-      - bfgd
+      - "bfgd"
+    ports:
+      - "8081:8081"
+    environment:
+      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
+      BSS_LOG_LEVEL: "INFO"
+      BSS_ADDRESS: ":8081"
 
   popmd:
     build:
-      dockerfile: ./docker/popmd/Dockerfile
-      context: ./..
-    environment:
-      POPM_BTC_PRIVKEY: ${POPM_BTC_PRIVATE_KEY}
-      POPM_BFG_URL: http://bfgd:8383/v1/ws/public
-      POPM_LOG_LEVEL: INFO
-      POPM_REMINE_THRESHOLD: '1'
+      dockerfile: "./docker/popmd/Dockerfile"
+      context: "./.."
     depends_on:
-      - bfgd
-  op-geth-l1:
-    image: ethereum/client-go:v1.13.14
-    command:
-      - --dev
-      - --dev.period
-      - '3'
-      - --keystore
-      - /tmp/keystore
-      - --password
-      - /tmp/passwords.txt
-      - --http
-      - --http.port=8545
-      - --http.addr
-      - '0.0.0.0'
-      - --http.vhosts
-      - '*'
-      - --syncmode=full 
-      - --gcmode=archive 
-      - --nodiscover 
-      - --maxpeers=0
-      - --authrpc.vhosts="*" 
-      - --rpc.allow-unprotected-txs
-      - --datadir
-      - /tmp/geth
-      - --gpo.percentile=0
-    ports:
-      - 8545:8545
-    working_dir: /tmp/geth
-    volumes:
-      - ./e2e/keystore:/tmp/keystore:ro
-      - ./e2e/passwords.txt:/tmp/passwords.txt:ro
-      - ./e2e/jwt.txt:/tmp/jwt.txt:ro
-      - geth:/tmp/geth
-      - type: tmpfs
-        target: /tmp
+      - "bfgd"
     environment:
-      CHAIN_ID: '900'
+      POPM_BTC_PRIVKEY: "${POPM_BTC_PRIVATE_KEY}"
+      POPM_BFG_URL: "http://bfgd:8383/v1/ws/public"
+      POPM_LOG_LEVEL: "INFO"
+      POPM_REMINE_THRESHOLD: "1"
+
+  op-geth-l1:
+    image: "ethereum/client-go@sha256:25ad59cc51af1cc232e2a770bbbffb52aec9499f128ff3eeb9159a677f4f7c11"
+    ports:
+      - "8545:8545"
+    environment:
+      CHAIN_ID: "900"
+    working_dir: "/tmp/geth"
+    command:
+      - "--dev"
+      - "--dev.period"
+      - "3"
+      - "--keystore"
+      - "/tmp/keystore"
+      - "--password"
+      - "/tmp/passwords.txt"
+      - "--http"
+      - "--http.port=8545"
+      - "--http.addr"
+      - "0.0.0.0"
+      - "--http.vhosts"
+      - "*"
+      - "--syncmode=full"
+      - "--gcmode=archive"
+      - "--nodiscover"
+      - "--maxpeers=0"
+      - "--authrpc.vhosts=\"*\""
+      - "--rpc.allow-unprotected-txs"
+      - "--datadir"
+      - "/tmp/geth"
+      - "--gpo.percentile=0"
+    volumes:
+      - "./e2e/keystore:/tmp/keystore:ro"
+      - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
+      - "./e2e/jwt.txt:/tmp/jwt.txt:ro"
+      - "geth:/tmp/geth"
+      - { type: "tmpfs", target: "/tmp" }
+
   op-geth-l2:
     build:
-      dockerfile: optimism-stack.Dockerfile
-      context: .
-    command:
-      - sh
-      - /tmp/entrypointl2.sh
-    environment:
-      ADMIN_PRIVATE_KEY: ${ADMIN_PRIVATE_KEY}
-      OP_GETH_L1_RPC: 'http://op-geth-l1:8545'
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    depends_on:
+      - "op-geth-l1"
+    healthcheck:
+      test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
     ports:
-      - 8551:8551
-      - 8546:8546
+      - "8551:8551"
+      - "8546:8546"
+    environment:
+      ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
+      OP_GETH_L1_RPC: "http://op-geth-l1:8545"
+    working_dir: "/tmp"
+    command:
+      - "sh"
+      - "/tmp/entrypointl2.sh"
     volumes:
-      - ./e2e/keystore:/tmp/keystore:ro
-      - ./e2e/passwords.txt:/tmp/passwords.txt:ro
-      - ./jwt.txt:/tmp/jwt.txt:ro
-      - ./entrypointl2.sh:/tmp/entrypointl2.sh
-      - ./genesisl2.sh:/tmp/genesisl2.sh
-      - ./output:/tmp/output
-      - l2configs:/l2configs
-      - ./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json
-      - ./deployments:/git/optimism/packages/contracts-bedrock/deployments
-      - ./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json
-      - type: tmpfs
-        target: /tmp
-    working_dir: /tmp
-    depends_on: 
-      - op-geth-l1
+      - "./e2e/keystore:/tmp/keystore:ro"
+      - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
+      - "./jwt.txt:/tmp/jwt.txt:ro"
+      - "./entrypointl2.sh:/tmp/entrypointl2.sh"
+      - "./genesisl2.sh:/tmp/genesisl2.sh"
+      - "./output:/tmp/output"
+      - "l2configs:/l2configs"
+      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
+      - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
+      - { type: "tmpfs", target: "/tmp" }
+
   op-node:
     build:
-      dockerfile: optimism-stack.Dockerfile
-      context: .
-    command: 
-      - op-node/bin/op-node
-      - --l2=ws://op-geth-l2:8551
-      - --l2.jwt-secret=/tmp/jwt.txt
-      - --sequencer.enabled
-      - --sequencer.l1-confs=0
-      - --verifier.l1-confs=0
-      - --rollup.config=/l2configs/rollup.json
-      - --rpc.addr=0.0.0.0
-      - --rpc.port=8547
-      - --p2p.disable
-      - --rpc.enable-admin 
-      - --l1=http://op-geth-l1:8545
-      - --l1.rpckind=standard
-      - --l1.trustrpc
-      - --log.level=trace
-      - --l1.trustrpc=true
-      - --l1.http-poll-interval=1s
-    volumes:
-      - l2configs:/l2configs
-      - ./jwt.txt:/tmp/jwt.txt
-    depends_on:
-      - op-geth-l1
-      - op-geth-l2
-    environment:
-      OP_NODE_BSS_WS: http://bssd:8081/v1/ws
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
     deploy:
       restart_policy:
-        condition: any
+        condition: "any"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2:
+        condition: "service_healthy"
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+    command:
+      - "op-node/bin/op-node"
+      - "--l2=ws://op-geth-l2:8551"
+      - "--l2.jwt-secret=/tmp/jwt.txt"
+      - "--sequencer.enabled"
+      - "--sequencer.l1-confs=0"
+      - "--verifier.l1-confs=0"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--p2p.disable"
+      - "--rpc.enable-admin"
+      - "--l1=http://op-geth-l1:8545"
+      - "--l1.rpckind=standard"
+      - "--l1.trustrpc"
+      - "--log.level=trace"
+      - "--l1.trustrpc=true"
+      - "--l1.http-poll-interval=1s"
+    volumes:
+      - "l2configs:/l2configs"
+      - "./jwt.txt:/tmp/jwt.txt"
+
   op-batcher:
     build:
-      dockerfile: optimism-stack.Dockerfile
-      context: .
-    command: 
-      - op-batcher/bin/op-batcher
-      - --l2-eth-rpc=http://op-geth-l2:8546
-      - --rollup-rpc=http://op-node:8547
-      - --poll-interval=1s
-      - --sub-safety-margin=1
-      - --num-confirmations=1
-      - --safe-abort-nonce-too-low-count=3
-      - --resubmission-timeout=30s
-      - --rpc.addr=0.0.0.0
-      - --rpc.port=8548 
-      - --rpc.enable-admin
-      - --max-channel-duration=1
-      - --max-pending-tx=1
-      - --l1-eth-rpc=http://op-geth-l1:8545
-      - --private-key=${ADMIN_PRIVATE_KEY}
-      - op-geth-l1
-      - op-geth-l2
-      - op-node
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
     deploy:
       restart_policy:
-        condition: any
+        condition: "any"
+    command:
+      - "op-batcher/bin/op-batcher"
+      - "--l2-eth-rpc=http://op-geth-l2:8546"
+      - "--rollup-rpc=http://op-node:8547"
+      - "--poll-interval=1s"
+      - "--sub-safety-margin=1"
+      - "--num-confirmations=1"
+      - "--safe-abort-nonce-too-low-count=3"
+      - "--resubmission-timeout=30s"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8548"
+      - "--rpc.enable-admin"
+      - "--max-channel-duration=1"
+      - "--max-pending-tx=1"
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--private-key=${ADMIN_PRIVATE_KEY}"
+      - "op-geth-l1"
+      - "op-geth-l2"
+      - "op-node"
+
   op-proposer:
     build:
-      dockerfile: optimism-stack.Dockerfile
-      context: .
-    command: 
-      - op-proposer/bin/op-proposer
-      - --poll-interval=1s
-      - --rpc.port=8560
-      - --rollup-rpc=http://op-node:8547
-      - --l2oo-address=${L2OO_ADDRESS}
-      - --private-key=${ADMIN_PRIVATE_KEY}
-      - --l1-eth-rpc=http://op-geth-l1:8545
-    depends_on:
-      - op-geth-l1
-      - op-geth-l2
-      - op-node
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
     deploy:
       restart_policy:
-        condition: any
+        condition: "any"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2:
+        condition: "service_healthy"
+      op-node:
+        condition: "service_healthy"
+    command:
+      - "op-proposer/bin/op-proposer"
+      - "--poll-interval=1s"
+      - "--rpc.port=8560"
+      - "--rollup-rpc=http://op-node:8547"
+      - "--l2oo-address=${L2OO_ADDRESS}"
+      - "--private-key=${ADMIN_PRIVATE_KEY}"
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
+
 volumes:
   geth:
   l2configs:

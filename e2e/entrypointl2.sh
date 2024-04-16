@@ -3,7 +3,6 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-
 set -xe
 
 sh /tmp/genesisl2.sh
@@ -40,4 +39,4 @@ sh /tmp/genesisl2.sh
  --authrpc.port=8551 \
  --authrpc.jwtsecret=/tmp/jwt.txt \
  --verbosity=5 \
- --gpo.maxprice=1 
+ --gpo.maxprice=1
