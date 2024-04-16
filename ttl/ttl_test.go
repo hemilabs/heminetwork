@@ -15,17 +15,11 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
-var (
-	tt *testing.T // ugly but serves a purpose
-	wg sync.WaitGroup
-)
-
 func callback(key any, value any) {
 	v, ok := value.(*sync.WaitGroup)
 	if !ok {
 		panic(fmt.Sprintf("invalid value type: %T", value))
 	}
-	tt.Logf("%v", spew.Sdump(key))
 	v.Done()
 }
 
@@ -34,8 +28,6 @@ func callbackPanic(key any, value any) {
 }
 
 func TestTTLExpire(t *testing.T) {
-	tt = t
-
 	count := 10
 	tm, err := New(count)
 	if err != nil {
@@ -45,6 +37,7 @@ func TestTTLExpire(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var wg sync.WaitGroup
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callback, nil)
@@ -60,14 +53,14 @@ func TestTTLExpire(t *testing.T) {
 	t.Logf("waiting for timeouts")
 	wg.Wait()
 
+	tm.mtx.Lock()
+	defer tm.mtx.Unlock()
 	if len(tm.m) != 0 {
 		t.Fatalf("map not empty: %v", len(tm.m))
 	}
 }
 
 func TestTTLCancel(t *testing.T) {
-	tt = t
-
 	count := 10
 	tm, err := New(count)
 	if err != nil {
@@ -77,6 +70,7 @@ func TestTTLCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var wg sync.WaitGroup
 	for i := 0; i < count; i++ {
 		wg.Add(1)
 		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callbackPanic, callback)
@@ -96,6 +90,8 @@ func TestTTLCancel(t *testing.T) {
 	t.Logf("waiting for cancels")
 	wg.Wait()
 
+	tm.mtx.Lock()
+	defer tm.mtx.Unlock()
 	if len(tm.m) != 0 {
 		t.Fatalf("map not empty: %v", len(tm.m))
 	}
