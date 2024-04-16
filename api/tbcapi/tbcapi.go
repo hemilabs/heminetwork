@@ -26,6 +26,9 @@ const (
 	CmdBlockHeadersByHeightRequest  = "tbcapi-block-headers-by-height-request"
 	CmdBlockHeadersByHeightResponse = "tbcapi-block-headers-by-height-response"
 
+	CmdBlockHeadersBestRawRequest  = "tbcapi-block-headers-best-raw-request"
+	CmdBlockHeadersBestRawResponse = "tbcapi-block-headers-best-raw-response"
+
 	CmdBlockHeadersBestRequest  = "tbcapi-block-headers-best-request"
 	CmdBlockHeadersBestResponse = "tbcapi-block-headers-best-response"
 
@@ -85,11 +88,19 @@ type BlockHeadersByHeightResponse struct {
 	Error        *protocol.Error `json:"error,omitempty"`
 }
 
+type BlockHeadersBestRawRequest struct{}
+
+type BlockHeadersBestRawResponse struct {
+	Height       uint64          `json:"height"`
+	BlockHeaders []api.ByteSlice `json:"block_headers"`
+	Error        *protocol.Error `json:"error,omitempty"`
+}
+
 type BlockHeadersBestRequest struct{}
 
 type BlockHeadersBestResponse struct {
 	Height       uint64          `json:"height"`
-	BlockHeaders []api.ByteSlice `json:"block_headers"`
+	BlockHeaders []*BlockHeader  `json:"block_headers"`
 	Error        *protocol.Error `json:"error,omitempty"`
 }
 
@@ -181,6 +192,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockHeadersByHeightRawResponse: reflect.TypeOf(BlockHeadersByHeightRawResponse{}),
 	CmdBlockHeadersByHeightRequest:     reflect.TypeOf(BlockHeadersByHeightRequest{}),
 	CmdBlockHeadersByHeightResponse:    reflect.TypeOf(BlockHeadersByHeightResponse{}),
+	CmdBlockHeadersBestRawRequest:      reflect.TypeOf(BlockHeadersBestRawRequest{}),
+	CmdBlockHeadersBestRawResponse:     reflect.TypeOf(BlockHeadersBestRawResponse{}),
 	CmdBlockHeadersBestRequest:         reflect.TypeOf(BlockHeadersBestRequest{}),
 	CmdBlockHeadersBestResponse:        reflect.TypeOf(BlockHeadersBestResponse{}),
 	CmdBalanceByAddressRequest:         reflect.TypeOf(BalanceByAddressRequest{}),
