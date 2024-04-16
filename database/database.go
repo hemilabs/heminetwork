@@ -200,7 +200,7 @@ func (bi *BigInt) Scan(value interface{}) error {
 	}
 	nbi := new(big.Int)
 	if _, ok := nbi.SetString(string(b), 10); !ok {
-		return fmt.Errorf("failed to convert %q to BigInt", string(b))
+		return fmt.Errorf("convert %q to BigInt", string(b))
 	}
 	bi.Int = nbi
 	return nil

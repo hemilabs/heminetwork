@@ -19,7 +19,7 @@ func Request(ctx context.Context, method, url string, body any) ([]byte, error) 
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return nil, fmt.Errorf("marshal body: %v", err)
+			return nil, fmt.Errorf("marshal body: %w", err)
 		}
 		r = bytes.NewReader(b)
 	}
@@ -27,11 +27,11 @@ func Request(ctx context.Context, method, url string, body any) ([]byte, error) 
 	for retry := 1; ; retry++ {
 		req, err := http.NewRequestWithContext(ctx, method, url, r)
 		if err != nil {
-			return nil, fmt.Errorf("NewRequestWithContext: %v", err)
+			return nil, fmt.Errorf("create request: %w", err)
 		}
 		resp, err := c.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("Do: %v", err)
+			return nil, fmt.Errorf("request: %w", err)
 		}
 		defer resp.Body.Close()
 

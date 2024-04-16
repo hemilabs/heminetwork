@@ -6,6 +6,7 @@ package tbc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -101,7 +102,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 
 	v, ok := rmsg.(*wire.MsgVersion)
 	if !ok {
-		return fmt.Errorf("expected version message")
+		return errors.New("expected version message")
 	}
 	p.remoteVersion = v
 
@@ -121,7 +122,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 
 	for count := 0; count < 3; count++ {
 		msg, err := readTimeout(defaultHandshakeTimeout, conn, p.protocolVersion, p.network)
-		if err == wire.ErrUnknownMessage {
+		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue
 		} else if err != nil {
 			return fmt.Errorf("handshake read: %w", err)
@@ -138,7 +139,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 		}
 	}
 
-	return fmt.Errorf("handshake failed")
+	return errors.New("handshake failed")
 }
 
 func (p *peer) connect(ctx context.Context) error {
@@ -192,7 +193,7 @@ func (p *peer) close() error {
 	if p.conn != nil {
 		return p.conn.Close()
 	}
-	return fmt.Errorf("already closed")
+	return errors.New("already closed")
 }
 
 func (p *peer) isConnected() bool {

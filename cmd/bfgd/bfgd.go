@@ -125,10 +125,10 @@ func _main() error {
 
 	server, err := bfg.NewServer(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to create BFG server: %w", err)
+		return fmt.Errorf("create BFG server: %w", err)
 	}
 	if err = server.Run(ctx); !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("BFG server terminated: %w", err)
+		return fmt.Errorf("bfg server terminated: %w", err)
 	}
 
 	return nil

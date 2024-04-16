@@ -70,13 +70,13 @@ func (tx *TransactionL2) EncodeToOpReturn() ([]byte, error) {
 func ParseTransactionL2FromOpReturn(script []byte) (*TransactionL2, error) {
 	txst := txscript.MakeScriptTokenizer(0, script)
 	if !txst.Next() {
-		return nil, errors.New("failed to parse script")
+		return nil, errors.New("parse script")
 	}
 	if txst.Opcode() != txscript.OP_RETURN {
 		return nil, fmt.Errorf("not a PoP transaction, found: 0x%X", txst.Opcode())
 	}
 	if !txst.Next() {
-		return nil, errors.New("failed to parse script")
+		return nil, errors.New("parse script")
 	}
 	data := txst.Data()
 	if len(data) < 5 {
@@ -87,7 +87,7 @@ func ParseTransactionL2FromOpReturn(script []byte) (*TransactionL2, error) {
 	}
 	ksh, err := hemi.NewL2KeystoneAbrevFromBytes(data[4:])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse keystone header: %w", err)
+		return nil, fmt.Errorf("parse keystone header: %w", err)
 	}
 	return &TransactionL2{L2Keystone: ksh}, nil
 }
@@ -125,13 +125,13 @@ func (tx *Transaction) EncodeToOpReturn() ([]byte, error) {
 func ParseTransactionFromOpReturn(script []byte) (*Transaction, error) {
 	txst := txscript.MakeScriptTokenizer(0, script)
 	if !txst.Next() {
-		return nil, errors.New("failed to parse script")
+		return nil, errors.New("parse script")
 	}
 	if txst.Opcode() != txscript.OP_RETURN {
 		return nil, errors.New("not a PoP transaction")
 	}
 	if !txst.Next() {
-		return nil, errors.New("failed to parse script")
+		return nil, errors.New("parse script")
 	}
 	data := txst.Data()
 	if len(data) < 4 {
@@ -142,7 +142,7 @@ func ParseTransactionFromOpReturn(script []byte) (*Transaction, error) {
 	}
 	ksh, err := hemi.NewHeaderFromBytes(data[4:])
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse keystone header: %w", err)
+		return nil, fmt.Errorf("parse keystone header: %w", err)
 	}
 	return &Transaction{Keystone: ksh}, nil
 }
@@ -151,13 +151,13 @@ func ParsePublicKeyFromSignatureScript(script []byte) ([]byte, error) {
 	var err error
 	txst := txscript.MakeScriptTokenizer(0, script)
 	if !txst.Next() {
-		return nil, errors.New("failed to parse script")
+		return nil, errors.New("parse script")
 	}
 	if txst.Opcode() != txscript.OP_DATA_72 && txst.Opcode() != txscript.OP_DATA_71 {
 		return nil, fmt.Errorf("not a signature , found: 0x%X", txst.Opcode())
 	}
 	if !txst.Next() {
-		return nil, errors.New("failed to parse script")
+		return nil, errors.New("parse script")
 	}
 	data := txst.Data()
 	if len(data) != 33 {

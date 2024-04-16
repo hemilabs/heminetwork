@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -124,7 +125,7 @@ func _main() error {
 
 	server, err := tbc.NewServer(cfg)
 	if err != nil {
-		return fmt.Errorf("Failed to create tbc server: %v", err)
+		return fmt.Errorf("create tbc server: %w", err)
 	}
 	// XXX remove, this is an illustration of calling the direct API of server
 	// go func() {
@@ -153,9 +154,9 @@ func _main() error {
 	//		}
 	//		log.Infof("height %v headers %v", height, spew.Sdump(bhbh))
 	//	}
-	//}()
-	if err := server.Run(ctx); err != context.Canceled {
-		return fmt.Errorf("tbc server terminated: %v", err)
+	// }()
+	if err := server.Run(ctx); !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("tbc server terminated: %w", err)
 	}
 
 	return nil

@@ -34,11 +34,11 @@ func checkBitcoinFinality(bf *BitcoinFinality) error {
 	// Parse BTC block header and transaction.
 	btcHeader := &btcwire.BlockHeader{}
 	if err := btcHeader.Deserialize(bytes.NewReader(bf.BTCRawBlockHeader)); err != nil {
-		return fmt.Errorf("failed to deserialize BTC header: %w", err)
+		return fmt.Errorf("deserialize BTC header: %w", err)
 	}
 	btcTransaction := &btcwire.MsgTx{}
 	if err := btcTransaction.Deserialize(bytes.NewReader(bf.BTCRawTransaction)); err != nil {
-		return fmt.Errorf("failed to deserialize BTC transaction: %w", err)
+		return fmt.Errorf("deserialize BTC transaction: %w", err)
 	}
 	btcTxHash := btcchainhash.DoubleHashB(bf.BTCRawTransaction)
 
@@ -48,7 +48,7 @@ func checkBitcoinFinality(bf *BitcoinFinality) error {
 		merkleHashes = append(merkleHashes, merkleHash)
 	}
 	if err := bitcoin.CheckMerkleChain(btcTxHash, bf.BTCTransactionIndex, merkleHashes, btcHeader.MerkleRoot[:]); err != nil {
-		return fmt.Errorf("failed to verify merkle path for transaction: %w", err)
+		return fmt.Errorf("verify merkle path for transaction: %w", err)
 	}
 
 	// XXX - verify HEMI keystone header and PoP miner public key.

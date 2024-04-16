@@ -299,7 +299,7 @@ func (s *mockServer) handleConnection(t *testing.T, conn net.Conn) {
 func createAddress() string {
 	port, err := freeport.GetFreePort()
 	if err != nil {
-		panic(fmt.Errorf("find free port: %v", err))
+		panic(fmt.Errorf("find free port: %w", err))
 	}
 	return fmt.Sprintf("localhost:%d", port)
 }

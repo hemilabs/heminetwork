@@ -412,7 +412,7 @@ func (ac *Conn) Connect(ctx context.Context) error {
 	log.Tracef("Connect: dialing %v", ac.serverURL)
 	conn, _, err := websocket.Dial(connectCtx, ac.serverURL, nil)
 	if err != nil {
-		return fmt.Errorf("failed to dial server: %w", err)
+		return fmt.Errorf("dial server: %w", err)
 	}
 	conn.SetReadLimit(512 * 1024) // XXX - default is 32KB
 	defer func() {

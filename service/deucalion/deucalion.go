@@ -81,7 +81,7 @@ func init() {
 	ctx := context.Background()
 	d, err := New(cfg)
 	if err != nil {
-		panic(fmt.Errorf("failed to create server: %w", err))
+		panic(fmt.Errorf("create server: %w", err))
 	}
 	go func() {
 		if err = d.Run(ctx, nil); !errors.Is(err, context.Canceled) {
@@ -134,12 +134,12 @@ func (d *Deucalion) testAndSetRunning(b bool) bool {
 
 func (d *Deucalion) Run(ctx context.Context, cs []prometheus.Collector) error {
 	if !d.testAndSetRunning(true) {
-		return fmt.Errorf("already running")
+		return errors.New("already running")
 	}
 	defer d.testAndSetRunning(false)
 
 	if d.cfg.ListenAddress == "" {
-		return fmt.Errorf("listen address is required")
+		return errors.New("listen address is required")
 	}
 
 	reg := prometheus.NewRegistry()

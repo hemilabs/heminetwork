@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1898,7 +1899,7 @@ func getEndpointWithRetries(ctx context.Context, container testcontainers.Contai
 
 func nextPort() int {
 	ports, err := freeport.GetFreePorts(1000)
-	if err != nil && err != context.Canceled {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		panic(err)
 	}
 
@@ -1932,7 +1933,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 
 	go func() {
 		err := tbcServer.Run(ctx)
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 
@@ -54,13 +55,13 @@ func MustNewAuthenticateMessage(message string) *AuthenticateMessage {
 
 func NewAuthenticateFromBytes(b []byte) (*AuthenticateMessage, error) {
 	if len(b) < nonceLength {
-		return nil, fmt.Errorf("authenicate message too short")
+		return nil, errors.New("authenicate message too short")
 	}
 	am := &AuthenticateMessage{}
 	copy(am.Nonce[0:], b[:nonceLength])
 	am.Message = string(b[nonceLength:])
 	if bytes.Equal(am.Nonce[:], zeroNonce[:]) {
-		return nil, fmt.Errorf("invalid nonce")
+		return nil, errors.New("invalid nonce")
 	}
 	return am, nil
 }
