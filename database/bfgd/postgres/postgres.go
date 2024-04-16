@@ -151,19 +151,19 @@ func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) er
 			v.L1BlockNumber, v.L2BlockNumber, v.ParentEPHash,
 			v.PrevKeystoneEPHash, v.StateRoot, v.EPHash, v.Version)
 		if err != nil {
-			var err *pq.Error
-			if errors.As(err, &err) && err.Code.Class().Name() == "integrity_constraint_violation" {
-				switch err.Constraint {
+			var pgErr *pq.Error
+			if errors.As(err, &pgErr) && pgErr.Code.Class().Name() == "integrity_constraint_violation" {
+				switch pgErr.Constraint {
 				case "l2_keystone_abrev_hash_length",
 					"state_root_length",
 					"parent_ep_hash_length",
 					"prev_keystone_ep_hash_length",
 					"ep_hash_length":
-					return database.ValidationError(err.Error())
+					return database.ValidationError(pgErr.Error())
 				}
 
-				log.Errorf("integrity violation occurred: %s", err.Constraint)
-				return database.DuplicateError(fmt.Sprintf("constraint error: %s", err))
+				log.Errorf("integrity violation occurred: %s", pgErr.Constraint)
+				return database.DuplicateError(fmt.Sprintf("constraint error: %s", pgErr))
 			}
 			return fmt.Errorf("insert l2 keystone: %w", err)
 		}
@@ -284,9 +284,9 @@ func (p *pgdb) BtcBlockInsert(ctx context.Context, bb *bfgd.BtcBlock) error {
 	result, err := p.db.ExecContext(ctx, qBtcBlockInsert, bb.Hash, bb.Header,
 		bb.Height)
 	if err != nil {
-		var err *pq.Error
-		if errors.As(err, &err) && err.Code.Class().Name() == "integrity_constraint_violation" {
-			return database.DuplicateError(fmt.Sprintf("duplicate btc block entry: %s", err))
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code.Class().Name() == "integrity_constraint_violation" {
+			return database.DuplicateError(fmt.Sprintf("duplicate btc block entry: %s", pgErr))
 		}
 		return fmt.Errorf("insert btc block: %w", err)
 	}
@@ -359,13 +359,13 @@ func (p *pgdb) PopBasisInsertPopMFields(ctx context.Context, pb *bfgd.PopBasis) 
 	result, err := p.db.ExecContext(ctx, qPopBlockInsert, pb.BtcTxId, pb.BtcRawTx,
 		pb.L2KeystoneAbrevHash, pb.PopMinerPublicKey)
 	if err != nil {
-		var err *pq.Error
-		if errors.As(err, &err) && err.Code.Class().Name() == "integrity_constraint_violation" {
-			switch err.Constraint {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code.Class().Name() == "integrity_constraint_violation" {
+			switch pgErr.Constraint {
 			case "btc_txid_length":
 				return database.ValidationError("BtcTxId must be length 32")
 			default:
-				return database.DuplicateError(fmt.Sprintf("duplicate pop block entry: %s", err.Error()))
+				return database.DuplicateError(fmt.Sprintf("duplicate pop block entry: %s", pgErr.Error()))
 			}
 		}
 		return fmt.Errorf("insert pop block: %w", err)
@@ -412,13 +412,13 @@ func (p *pgdb) PopBasisUpdateBTCFields(ctx context.Context, pb *bfgd.PopBasis) (
 		pb.BtcTxIndex, pb.BtcTxId,
 	)
 	if err != nil {
-		var err *pq.Error
-		if errors.As(err, &err) && err.Code.Class().Name() == "integrity_constraint_violation" {
-			switch err.Constraint {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code.Class().Name() == "integrity_constraint_violation" {
+			switch pgErr.Constraint {
 			case "pop_txid_length":
 				return 0, database.ValidationError("PopTxId must be length 32")
 			default:
-				return 0, database.DuplicateError(fmt.Sprintf("duplicate pop block entry: %s", err.Error()))
+				return 0, database.DuplicateError(fmt.Sprintf("duplicate pop block entry: %s", pgErr.Error()))
 			}
 		}
 		return 0, fmt.Errorf("insert pop block: %w", err)
@@ -459,15 +459,15 @@ func (p *pgdb) PopBasisInsertFull(ctx context.Context, pb *bfgd.PopBasis) error 
 		pb.BtcHeaderHash, pb.BtcTxIndex, string(b), pb.PopTxId,
 		pb.L2KeystoneAbrevHash, pb.PopMinerPublicKey)
 	if err != nil {
-		var err *pq.Error
-		if errors.As(err, &err) && err.Code.Class().Name() == "integrity_constraint_violation" {
-			switch err.Constraint {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code.Class().Name() == "integrity_constraint_violation" {
+			switch pgErr.Constraint {
 			case "btc_txid_length":
 				return database.ValidationError("BtcTxId must be length 32")
 			case "pop_txid_length":
 				return database.ValidationError("PopTxId must be length 32")
 			default:
-				return database.DuplicateError(fmt.Sprintf("duplicate pop block entry: %s", err.Error()))
+				return database.DuplicateError(fmt.Sprintf("duplicate pop block entry: %s", pgErr.Error()))
 			}
 		}
 		return fmt.Errorf("insert pop block: %w", err)
@@ -932,7 +932,7 @@ func (p *pgdb) AccessPublicKeyInsert(ctx context.Context, publicKey *bfgd.Access
 	_, err := p.db.ExecContext(ctx, sql, publicKey.PublicKey)
 	if err != nil {
 		var pqErr *pq.Error
-		if errors.As(err, &pqErr); pqErr.Constraint == "access_public_keys_pkey" {
+		if errors.As(err, &pqErr) && pqErr.Constraint == "access_public_keys_pkey" {
 			return database.DuplicateError("public key already exists")
 		}
 
