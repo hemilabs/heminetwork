@@ -549,8 +549,7 @@ func (s *Server) pingExpired(key any, value any) {
 		return
 	}
 	log.Debugf("pingExpired %v", key)
-	err := v.close()
-	if err != nil {
+	if err := v.close(); err != nil {
 		log.Errorf("ping %v: %v", key, err)
 	}
 }
