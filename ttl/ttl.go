@@ -39,11 +39,11 @@ func New(capacity int) (*TTL, error) {
 func (tm *TTL) ttl(ctx context.Context, key any) {
 	select {
 	case <-ctx.Done():
-		switch ctx.Err() {
-		case nil:
+		switch err := ctx.Err(); {
+		case err == nil:
 			// not yet closed
 
-		case context.DeadlineExceeded:
+		case errors.Is(err, context.DeadlineExceeded):
 			// expired
 			tm.mtx.Lock()
 			defer tm.mtx.Unlock()
@@ -55,10 +55,10 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 				go v.expired(key, v.value)
 			}
 
-			// For now assume we aways want to remove key
+			// For now assume we always want to remove key
 			delete(tm.m, key)
 
-		case context.Canceled:
+		case errors.Is(err, context.Canceled):
 			// This is the caller calling cancel
 			tm.mtx.Lock()
 			defer tm.mtx.Unlock()
@@ -70,7 +70,7 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 				go v.remove(key, v.value)
 			}
 
-			// For now assume we aways want to remove key
+			// For now assume we always want to remove key
 			delete(tm.m, key)
 		}
 	}
