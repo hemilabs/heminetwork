@@ -20,22 +20,27 @@ ENV PATH="${PATH}:/root/.foundry/bin"
 
 RUN foundryup
 
-ARG OP_GETH_CACHE_BREAK=1
 
+ARG OP_GETH_CACHE_BREAK=1
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout hemi
+RUN git checkout a012302a04f050d09c11a8fd5deb630ab7a376ad
+
+WORKDIR /git
+
+ARG OPTIMISM_CACHE_BREAK=1
+RUN git clone https://github.com/hemilabs/optimism
+WORKDIR /git/optimism
+RUN git checkout 50a6efe980e90751b47e2cb5a8e1146b16320959
+
+WORKDIR /git/op-geth
 
 RUN make
 RUN go install ./...
 RUN abigen --version
 
-ARG OPTIMISM_CACHE_BREAK=1
-
-WORKDIR /git
-RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout hemi
+
 RUN git submodule update --init --recursive
 RUN pnpm install
 WORKDIR /git/optimism/packages/contracts-bedrock
