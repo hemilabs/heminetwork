@@ -79,8 +79,7 @@ func TestTTLCancel(t *testing.T) {
 		if _, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)
 		}
-		err = tm.Cancel(key)
-		if err != nil {
+		if err = tm.Cancel(key); err != nil {
 			t.Fatal(err)
 		}
 	}
