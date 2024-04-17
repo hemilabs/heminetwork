@@ -37,42 +37,40 @@ func New(capacity int) (*TTL, error) {
 }
 
 func (tm *TTL) ttl(ctx context.Context, key any) {
-	select {
-	case <-ctx.Done():
-		switch err := ctx.Err(); {
-		case err == nil:
-			// not yet closed
+	<-ctx.Done()
+	switch err := ctx.Err(); {
+	case err == nil:
+		// not yet closed
 
-		case errors.Is(err, context.DeadlineExceeded):
-			// expired
-			tm.mtx.Lock()
-			defer tm.mtx.Unlock()
-			v, ok := tm.m[key]
-			if !ok {
-				return
-			}
-			if v.expired != nil {
-				go v.expired(key, v.value)
-			}
-
-			// For now assume we always want to remove key
-			delete(tm.m, key)
-
-		case errors.Is(err, context.Canceled):
-			// This is the caller calling cancel
-			tm.mtx.Lock()
-			defer tm.mtx.Unlock()
-			v, ok := tm.m[key]
-			if !ok {
-				return
-			}
-			if v.remove != nil {
-				go v.remove(key, v.value)
-			}
-
-			// For now assume we always want to remove key
-			delete(tm.m, key)
+	case errors.Is(err, context.DeadlineExceeded):
+		// expired
+		tm.mtx.Lock()
+		defer tm.mtx.Unlock()
+		v, ok := tm.m[key]
+		if !ok {
+			return
 		}
+		if v.expired != nil {
+			go v.expired(key, v.value)
+		}
+
+		// For now assume we always want to remove key
+		delete(tm.m, key)
+
+	case errors.Is(err, context.Canceled):
+		// This is the caller calling cancel
+		tm.mtx.Lock()
+		defer tm.mtx.Unlock()
+		v, ok := tm.m[key]
+		if !ok {
+			return
+		}
+		if v.remove != nil {
+			go v.remove(key, v.value)
+		}
+
+		// For now assume we always want to remove key
+		delete(tm.m, key)
 	}
 }
 

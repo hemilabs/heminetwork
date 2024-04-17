@@ -543,13 +543,13 @@ func (s *Server) pingExpired(key any, value any) {
 	log.Tracef("pingExpired")
 	defer log.Tracef("pingExpired exit")
 
-	v, ok := value.(*peer)
+	p, ok := value.(*peer)
 	if !ok {
 		log.Errorf("invalid ping expired type: %T", value)
 		return
 	}
 	log.Debugf("pingExpired %v", key)
-	if err := v.close(); err != nil {
+	if err := p.close(); err != nil {
 		log.Errorf("ping %v: %v", key, err)
 	}
 }
