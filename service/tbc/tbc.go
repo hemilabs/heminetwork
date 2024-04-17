@@ -39,6 +39,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/deucalion"
+	"github.com/hemilabs/heminetwork/ttl"
 )
 
 const (
@@ -57,7 +58,8 @@ const (
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
-	defaultCmdTimeout = 4 * time.Second
+	defaultCmdTimeout  = 4 * time.Second
+	defaultPingTimeout = 3 * time.Second
 )
 
 var (
@@ -192,6 +194,7 @@ type Server struct {
 
 	peers  map[string]*peer      // active but not necessarily connected
 	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where
+	pings  *ttl.TTL
 
 	// IBD hints
 	lastBlockHeader tbcd.BlockHeader
@@ -219,12 +222,17 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
+	pings, err := ttl.New(defaultPeersWanted)
+	if err != nil {
+		return nil, err
+	}
 	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
 		blocks:         make(map[string]*blockPeer, defaultPendingBlocks),
 		peers:          make(map[string]*peer, defaultPeersWanted),
+		pings:          pings,
 		blocksInserted: make(map[string]struct{}, 8192), // stats
 		timeSource:     blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
@@ -421,10 +429,10 @@ func (s *Server) peerManager(ctx context.Context) error {
 		return fmt.Errorf("no seeds found")
 	}
 
-	// Add a ticker that times out every 27 seconds regardless of what is
+	// Add a ticker that times out every 13 seconds regardless of what is
 	// going on. This will be nice and jittery and detect bad beers
 	// peridiocally.
-	loopTimeout := 27 * time.Second
+	loopTimeout := 13 * time.Second
 	loopTicker := time.NewTicker(loopTimeout)
 
 	x := 0
@@ -531,6 +539,21 @@ func (s *Server) startPeerManager(ctx context.Context) error {
 	return s.peerManager(ctx)
 }
 
+func (s *Server) pingExpired(key any, value any) {
+	log.Tracef("pingExpired")
+	defer log.Tracef("pingExpired exit")
+
+	p, ok := value.(*peer)
+	if !ok {
+		log.Errorf("invalid ping expired type: %T", value)
+		return
+	}
+	log.Debugf("pingExpired %v", key)
+	if err := p.close(); err != nil {
+		log.Errorf("ping %v: %v", key, err)
+	}
+}
+
 func (s *Server) pingAllPeers(ctx context.Context) {
 	log.Tracef("pingAllPeers")
 	defer log.Tracef("pingAllPeers exit")
@@ -549,6 +572,10 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 			continue
 		}
 
+		// Cancel outstanding ping, should not happen
+		peer := p.String()
+		s.pings.Cancel(peer)
+
 		// We don't really care about the response. We just want to
 		// write to the connection to make it fail if the other side
 		// went away.
@@ -557,6 +584,9 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 		if err != nil {
 			log.Errorf("ping %v: %v", p, err)
 		}
+
+		// Record outstanding ping
+		s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
 	}
 }
 
@@ -600,7 +630,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	}
 	defer func() {
 		err := p.close()
-		if err != nil {
+		if err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Errorf("peer disconnect: %v %v", p, err)
 		}
 	}()
@@ -685,6 +715,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 		case *wire.MsgPing:
 			go s.handlePing(ctx, p, m)
+		case *wire.MsgPong:
+			go s.handlePong(ctx, p, m)
 		default:
 			log.Tracef("unhandled message type %v: %T\n", p, msg)
 		}
@@ -787,6 +819,15 @@ func (s *Server) handlePing(ctx context.Context, p *peer, msg *wire.MsgPing) {
 		return
 	}
 	log.Tracef("handlePing %v: pong %v", p.address, pong.Nonce)
+}
+
+func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) {
+	log.Tracef("handlePong %v", p.address)
+	defer log.Tracef("handlePong exit %v", p.address)
+
+	s.pings.Cancel(p.String())
+
+	log.Tracef("handlePong %v: pong %v", p.address, pong.Nonce)
 }
 
 func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
