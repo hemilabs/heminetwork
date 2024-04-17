@@ -429,7 +429,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 		return fmt.Errorf("no seeds found")
 	}
 
-	// Add a ticker that times out every 27 seconds regardless of what is
+	// Add a ticker that times out every 13 seconds regardless of what is
 	// going on. This will be nice and jittery and detect bad beers
 	// peridiocally.
 	loopTimeout := 13 * time.Second
