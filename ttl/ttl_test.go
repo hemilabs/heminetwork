@@ -76,8 +76,7 @@ func TestTTLCancel(t *testing.T) {
 	}
 	for i := 0; i < count; i++ {
 		key := strconv.Itoa(i)
-		_, err := tm.Get(key)
-		if err != nil {
+		if _, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)
 		}
 		err = tm.Cancel(key)
