@@ -100,10 +100,10 @@ func _main() error {
 
 	server, err := bss.NewServer(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to create BSS server: %w", err)
+		return fmt.Errorf("create BSS server: %w", err)
 	}
 	if err := server.Run(ctx); !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("BSS server terminated with error: %w", err)
+		return fmt.Errorf("bss server terminated: %w", err)
 	}
 
 	return nil

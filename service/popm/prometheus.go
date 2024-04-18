@@ -21,7 +21,7 @@ func (m *Miner) handlePrometheus(ctx context.Context) error {
 		ListenAddress: m.cfg.PrometheusListenAddress,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create server: %w", err)
+		return fmt.Errorf("create server: %w", err)
 	}
 	cs := []prometheus.Collector{
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{

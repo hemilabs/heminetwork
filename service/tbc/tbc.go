@@ -125,7 +125,7 @@ func bytes2Header(header []byte) (*wire.BlockHeader, error) {
 	var bh wire.BlockHeader
 	err := bh.Deserialize(bytes.NewReader(header))
 	if err != nil {
-		return nil, fmt.Errorf("Deserialize: %v", err)
+		return nil, fmt.Errorf("deserialize block header: %w", err)
 	}
 	return &bh, nil
 }
@@ -304,14 +304,14 @@ func (s *Server) blockPeerExpire() int {
 func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte) error {
 	bh, err := bytes2Header(lastHeaderHash)
 	if err != nil {
-		return fmt.Errorf("invalid header: %v", err)
+		return fmt.Errorf("invalid header: %w", err)
 	}
 	hash := bh.BlockHash()
 	ghs := wire.NewMsgGetHeaders()
 	ghs.AddBlockLocatorHash(&hash)
 	err = p.write(defaultCmdTimeout, ghs)
 	if err != nil {
-		return fmt.Errorf("write get headers: %v", err)
+		return fmt.Errorf("write get headers: %w", err)
 	}
 
 	return nil
@@ -323,7 +323,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 
 	peers, err := s.db.PeersRandom(pctx, peersWanted)
 	if err != nil {
-		return nil, fmt.Errorf("peers random: %v", err)
+		return nil, fmt.Errorf("peers random: %w", err)
 	}
 	// return peers from db first
 	if len(peers) >= peersWanted {
@@ -347,7 +347,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 		addrs = append(addrs, ips...)
 	}
 	if errorsSeen == len(s.seeds) {
-		return nil, fmt.Errorf("could not seed")
+		return nil, errors.New("could not seed")
 	}
 
 	// insert into peers table
@@ -426,7 +426,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 	}
 	if len(seeds) == 0 {
 		// should not happen
-		return fmt.Errorf("no seeds found")
+		return errors.New("no seeds found")
 	}
 
 	// Add a ticker that times out every 13 seconds regardless of what is
@@ -465,7 +465,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 					}
 					if len(seeds) == 0 {
 						// should not happen
-						return fmt.Errorf("no seeds found")
+						return errors.New("no seeds found")
 					}
 					x = 0
 				}
@@ -681,7 +681,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 
 		msg, err := p.read()
-		if err == wire.ErrUnknownMessage {
+		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown
 			continue
 		} else if err != nil {
@@ -1337,7 +1337,7 @@ func (s *Server) insertGenesis(ctx context.Context) ([]tbcd.BlockHeader, error) 
 	log.Infof("Inserting genesis block and header: %v", s.chainParams.GenesisHash)
 	gbh, err := header2Bytes(&s.chainParams.GenesisBlock.Header)
 	if err != nil {
-		return nil, fmt.Errorf("serialize genesis block header: %v", err)
+		return nil, fmt.Errorf("serialize genesis block header: %w", err)
 	}
 
 	genesisBlockHeader := &tbcd.BlockHeader{
@@ -1347,20 +1347,20 @@ func (s *Server) insertGenesis(ctx context.Context) ([]tbcd.BlockHeader, error) 
 	}
 	err = s.db.BlockHeadersInsert(ctx, []tbcd.BlockHeader{*genesisBlockHeader})
 	if err != nil {
-		return nil, fmt.Errorf("genesis block header insert: %v", err)
+		return nil, fmt.Errorf("genesis block header insert: %w", err)
 	}
 
 	log.Debugf("Inserting genesis block")
 	gb, err := btcutil.NewBlock(s.chainParams.GenesisBlock).Bytes()
 	if err != nil {
-		return nil, fmt.Errorf("genesis block encode: %v", err)
+		return nil, fmt.Errorf("genesis block encode: %w", err)
 	}
 	_, err = s.db.BlockInsert(ctx, &tbcd.Block{
 		Hash:  s.chainParams.GenesisHash[:],
 		Block: gb,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("genesis block insert: %v", err)
+		return nil, fmt.Errorf("genesis block insert: %w", err)
 	}
 
 	return []tbcd.BlockHeader{*genesisBlockHeader}, nil
@@ -1583,7 +1583,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 	defer log.Tracef("FeesAtHeight exit")
 
 	if height-count < 0 {
-		return 0, fmt.Errorf("height - count is less than 0")
+		return 0, errors.New("height - count is less than 0")
 	}
 	var fees uint64
 	for i := int64(0); i < int64(count); i++ {
@@ -1614,7 +1614,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 		}
 	}
 
-	return fees, fmt.Errorf("not yet")
+	return fees, errors.New("not yet")
 }
 
 type SyncInfo struct {
@@ -1668,7 +1668,7 @@ func (s *Server) DBOpen(ctx context.Context) error {
 	var err error
 	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
 	if err != nil {
-		return fmt.Errorf("open level database: %v", err)
+		return fmt.Errorf("open level database: %w", err)
 	}
 
 	return nil
@@ -1686,7 +1686,7 @@ func (s *Server) Run(pctx context.Context) error {
 	defer log.Tracef("Run exit")
 
 	if !s.testAndSetRunning(true) {
-		return fmt.Errorf("tbc already running")
+		return errors.New("tbc already running")
 	}
 	defer s.testAndSetRunning(false)
 
@@ -1708,7 +1708,7 @@ func (s *Server) Run(pctx context.Context) error {
 
 	err := s.DBOpen(ctx)
 	if err != nil {
-		return fmt.Errorf("Failed to open level database: %w", err)
+		return fmt.Errorf("open level database: %w", err)
 	}
 	defer func() {
 		err := s.DBClose()
@@ -1720,20 +1720,20 @@ func (s *Server) Run(pctx context.Context) error {
 	// Find out where IBD is at
 	bhs, err := s.db.BlockHeadersBest(ctx)
 	if err != nil {
-		return fmt.Errorf("block headers best: %v", err)
+		return fmt.Errorf("block headers best: %w", err)
 	}
 	// No entries means we are at genesis
 	if len(bhs) == 0 {
 		bhs, err = s.insertGenesis(ctx)
 		if err != nil {
-			return fmt.Errorf("insert genesis: %v", err)
+			return fmt.Errorf("insert genesis: %w", err)
 		}
 		bhs, err = s.db.BlockHeadersBest(ctx)
 		if err != nil {
 			return err
 		}
 	} else if len(bhs) > 1 {
-		return fmt.Errorf("blockheaders best: unsupported fork")
+		return errors.New("blockheaders best: unsupported fork")
 	}
 	s.lastBlockHeader = bhs[0] // Prime last seen block header
 	log.Infof("Starting block headers sync at height: %v time %v",
@@ -1768,7 +1768,7 @@ func (s *Server) Run(pctx context.Context) error {
 			ListenAddress: s.cfg.PrometheusListenAddress,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
+			return fmt.Errorf("create server: %w", err)
 		}
 		cs := []prometheus.Collector{
 			s.cmdsProcessed,
@@ -1781,7 +1781,7 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, cs); err != context.Canceled {
+			if err := d.Run(ctx, cs); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}

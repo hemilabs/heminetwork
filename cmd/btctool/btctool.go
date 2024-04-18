@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -94,7 +95,7 @@ func (p *peer) connect(ctx context.Context) error {
 	p.mtx.Lock()
 	if p.conn != nil {
 		p.mtx.Unlock()
-		return fmt.Errorf("already open")
+		return errors.New("already open")
 	}
 	p.mtx.Unlock()
 	// XXX this races
@@ -117,7 +118,7 @@ func (p *peer) close() error {
 	if p.conn != nil {
 		return p.conn.Close()
 	}
-	return fmt.Errorf("already closed")
+	return errors.New("already closed")
 }
 
 func (p *peer) write(msg wire.Message) error {
@@ -144,17 +145,17 @@ func (p *peer) handshake(ctx context.Context) error {
 	msg := wire.NewMsgVersion(us, them, uint64(rand.Int63()), 0)
 	err := p.write(msg)
 	if err != nil {
-		return fmt.Errorf("could not write version message: %v", err)
+		return fmt.Errorf("could not write version message: %w", err)
 	}
 
 	// 2. receive version
 	rmsg, err := p.read()
 	if err != nil {
-		return fmt.Errorf("could not read version message: %v", err)
+		return fmt.Errorf("could not read version message: %w", err)
 	}
 	v, ok := rmsg.(*wire.MsgVersion)
 	if !ok {
-		return fmt.Errorf("expected version message")
+		return errors.New("expected version message")
 	}
 	p.remoteVersion = v
 
@@ -162,19 +163,19 @@ func (p *peer) handshake(ctx context.Context) error {
 	if v.ProtocolVersion >= 70016 {
 		err = p.write(wire.NewMsgSendAddrV2())
 		if err != nil {
-			return fmt.Errorf("could not send sendaddrv2: %v", err)
+			return fmt.Errorf("could not send sendaddrv2: %w", err)
 		}
 	}
 
 	// 4. send verack
 	err = p.write(wire.NewMsgVerAck())
 	if err != nil {
-		return fmt.Errorf("could not send verack: %v", err)
+		return fmt.Errorf("could not send verack: %w", err)
 	}
 
 	for count := 0; count < 3; count++ {
 		msg, err := p.read()
-		if err == wire.ErrUnknownMessage {
+		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue
 		} else if err != nil {
 			return err
@@ -191,7 +192,7 @@ func (p *peer) handshake(ctx context.Context) error {
 		}
 	}
 
-	return fmt.Errorf("handshake failed")
+	return errors.New("handshake failed")
 }
 
 func handlePing(p *peer, msg *wire.MsgPing) {
@@ -216,7 +217,7 @@ func downloadBlock(p *peer, height int, hash chainhash.Hash) error {
 		})
 	err := p.write(getData)
 	if err != nil {
-		return fmt.Errorf("could not write get block message: %v", err)
+		return fmt.Errorf("could not write get block message: %w", err)
 	}
 	fmt.Printf("wrote get block %v\n", hash)
 
@@ -246,10 +247,10 @@ func handleBlock(p *peer, msg *wire.MsgBlock) {
 }
 
 func btcConnect(ctx context.Context, btcNet string) error {
-	//ips, err := net.LookupIP("seed.bitcoin.sipa.be")
-	//if err != nil {
+	// ips, err := net.LookupIP("seed.bitcoin.sipa.be")
+	// if err != nil {
 	//	return err
-	//}
+	// }
 
 	mainnetPort := "8333"
 	testnetPort := "18333"
@@ -273,17 +274,17 @@ func btcConnect(ctx context.Context, btcNet string) error {
 
 	p, err := NewPeer(wireNet, "140.238.169.133"+port)
 	if err != nil {
-		return fmt.Errorf("new peer: %v", err)
+		return fmt.Errorf("new peer: %w", err)
 	}
 
 	err = p.connect(ctx)
 	if err != nil {
-		return fmt.Errorf("connect: %v", err)
+		return fmt.Errorf("connect: %w", err)
 	}
 
 	err = p.handshake(ctx)
 	if err != nil {
-		return fmt.Errorf("connect: %v", err)
+		return fmt.Errorf("connect: %w", err)
 	}
 
 	fmt.Printf("handshake complete with: %v\n", p.address)
@@ -306,7 +307,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 		}
 
 		msg, err := p.read()
-		if err == wire.ErrUnknownMessage {
+		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown
 			continue
 		} else if err != nil {
@@ -332,18 +333,18 @@ func btcConnect(ctx context.Context, btcNet string) error {
 		}
 	}
 
-	//fmt.Printf("waiting for exit\n")
-	//<-ctx.Done()
-	//return nil
+	// fmt.Printf("waiting for exit\n")
+	// <-ctx.Done()
+	// return nil
 
-	//peers := make(map[string]*peer, len(ips))
-	//ips = []net.IP{
+	// peers := make(map[string]*peer, len(ips))
+	// ips = []net.IP{
 	//	net.ParseIP("140.238.169.133"),
 	//	// net.ParseIP("84.250.91.34"),
 	//	// net.ParseIP("3.14.15.90"),
 	//	// net.ParseIP("104.182.210.230"),
-	//}
-	//for _, ip := range ips {
+	// }
+	// for _, ip := range ips {
 	//	address := ip.To4()
 	//	if address == nil {
 	//		continue
@@ -440,9 +441,9 @@ func btcConnect(ctx context.Context, btcNet string) error {
 	//			}
 	//		}
 	//	}(p)
-	//}
+	// }
 
-	//<-ctx.Done()
+	// <-ctx.Done()
 
 	// return nil
 }
@@ -462,7 +463,7 @@ func StoreBlockHeaders(ctx context.Context, endHeight, blockCount int, dir strin
 func parseArgs(args []string) (string, map[string]string, error) {
 	if len(args) < 1 {
 		flag.Usage()
-		return "", nil, fmt.Errorf("action required")
+		return "", nil, errors.New("action required")
 	}
 
 	action := args[0]
@@ -503,18 +504,18 @@ func _main() error {
 		fmt.Fprintf(f, "  tip                                       - retrieve tip height\n")
 	}
 
-	//var (
+	// var (
 	//	endHeight, blockCount int
 	//	downloadDir             string
-	//)
-	//flag.IntVar(&endHeight, "startblock", -1, "Height to start downloading, negative means start at current max height")
-	//flag.IntVar(&blockCount, "count", -1024, "number of blocks to download, negative goes backwards from height")
-	//flag.StringVar(&downloadDir, "downloaddir", "", "Directory to download block header and data to. Leave empty to dump to stdout.")
+	// )
+	// flag.IntVar(&endHeight, "startblock", -1, "Height to start downloading, negative means start at current max height")
+	// flag.IntVar(&blockCount, "count", -1024, "number of blocks to download, negative goes backwards from height")
+	// flag.StringVar(&downloadDir, "downloaddir", "", "Directory to download block header and data to. Leave empty to dump to stdout.")
 	flag.Parse()
 
 	err := loggo.ConfigureLoggers("info") // XXX make flag
 	if err != nil {
-		return fmt.Errorf("ConfigureLoggers: %v", err)
+		return fmt.Errorf("configure loggers: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -529,7 +530,7 @@ func _main() error {
 	case "standardscript":
 		address := args["address"]
 		if address == "" {
-			return fmt.Errorf("address: must be set")
+			return errors.New("address: must be set")
 		}
 		var (
 			a  btcutil.Address
@@ -556,22 +557,22 @@ func _main() error {
 		if jsonSet == "1" || strings.ToLower(jsonSet) == "true" {
 			raw = false
 			if wireSpew {
-				return fmt.Errorf("wire and json may not be both set")
+				return errors.New("wire and json may not be both set")
 			}
 		}
 		hash := args["hash"]
 		if hash == "" {
-			return fmt.Errorf("hash: must be set")
+			return errors.New("hash: must be set")
 		}
 		var b string
 		b, err = blockstream.Block(ctx, hash, raw)
 		if err == nil {
 			if wireSpew {
-				//eb, err := hex.DecodeString(strings.Trim(b, "\n"))
-				//if err != nil {
+				// eb, err := hex.DecodeString(strings.Trim(b, "\n"))
+				// if err != nil {
 				//	return err
-				//}
-				//fmt.Printf("%v", spew.Sdump(eb))
+				// }
+				// fmt.Printf("%v", spew.Sdump(eb))
 
 				blk, err := parseBlockFromHex(b)
 				if err != nil {
@@ -585,7 +586,7 @@ func _main() error {
 	case "blockheader":
 		hash := args["hash"]
 		if hash == "" {
-			return fmt.Errorf("hash: must be set")
+			return errors.New("hash: must be set")
 		}
 		var bh string
 		bh, err = blockstream.BlockHeader(ctx, hash)
@@ -595,7 +596,7 @@ func _main() error {
 	case "blockheighthash":
 		height := args["height"]
 		if height == "" {
-			return fmt.Errorf("height: must be set")
+			return errors.New("height: must be set")
 		}
 		var bh string
 		bh, err = blockstream.BlockHeightHash(ctx, height)
@@ -615,7 +616,7 @@ func _main() error {
 	case "parseblock":
 		filename := args["filename"]
 		if filename == "" {
-			return fmt.Errorf("filename: must be set")
+			return errors.New("filename: must be set")
 		}
 		var block *btcutil.Block
 		block, err = parseBlock(ctx, filename)
@@ -628,12 +629,12 @@ func _main() error {
 		downloadDir := filepath.Join("~/.mocksicle", bdf.DefaultDataDir)
 		downloadDir, err = homedir.Expand(downloadDir)
 		if err != nil {
-			return fmt.Errorf("invalid directory: %v", err)
+			return fmt.Errorf("invalid directory: %w", err)
 		}
 
 		err = os.MkdirAll(downloadDir, 0o700)
 		if err != nil {
-			return fmt.Errorf("MkdirAll: %v", err)
+			return fmt.Errorf("mkdir: %w", err)
 		}
 
 		blockCount := int(1024)
@@ -641,7 +642,7 @@ func _main() error {
 		if count != "" {
 			bc, err := strconv.ParseInt(count, 10, 64)
 			if err != nil {
-				return fmt.Errorf("count: %v", err)
+				return fmt.Errorf("count: %w", err)
 			}
 			if bc < 0 {
 				return fmt.Errorf("count must not be negative: %v", bc)
@@ -655,17 +656,17 @@ func _main() error {
 		if end == "" {
 			endHeight, err = blockstream.Tip(ctx)
 			if err != nil {
-				return fmt.Errorf("tip: %v", err)
+				return fmt.Errorf("tip: %w", err)
 			}
 		} else {
 			e, err := strconv.ParseInt(end, 10, 64)
 			if err != nil {
-				return fmt.Errorf("end: %v", err)
+				return fmt.Errorf("end: %w", err)
 			}
 			if e < 0 {
 				bh, err := blockstream.Tip(ctx)
 				if err != nil {
-					return fmt.Errorf("tip: %v", err)
+					return fmt.Errorf("tip: %w", err)
 				}
 				e = int64(bh) + e
 				if e < 0 {

@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 
@@ -277,7 +278,7 @@ func NewTxId(x [32]byte) (txId TxId) {
 
 func NewTxIdFromBytes(x []byte) (txId TxId, err error) {
 	if len(x) != 32 {
-		err = fmt.Errorf("invalid transaction hash length")
+		err = errors.New("invalid transaction hash length")
 		return
 	}
 	copy(txId[:], x[:])
@@ -303,7 +304,7 @@ func NewBlockHash(x [32]byte) (blockHash BlockHash) {
 
 func NewBlockHashFromBytes(x []byte) (blockHash BlockHash, err error) {
 	if len(x) != 32 {
-		err = fmt.Errorf("invalid block hash length")
+		err = errors.New("invalid block hash length")
 		return
 	}
 	copy(blockHash[:], x[:])
@@ -325,7 +326,7 @@ func NewScriptHash(x [32]byte) (scriptHash ScriptHash) {
 
 func NewScriptHashFromBytes(x []byte) (scriptHash ScriptHash, err error) {
 	if len(x) != 32 {
-		err = fmt.Errorf("invalid script hash length")
+		err = errors.New("invalid script hash length")
 		return
 	}
 	copy(scriptHash[:], x[:])

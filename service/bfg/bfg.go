@@ -182,7 +182,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	var err error
 	s.btcClient, err = electrumx.NewClient(cfg.EXBTCAddress)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create electrumx client: %w", err)
+		return nil, fmt.Errorf("create electrumx client: %w", err)
 	}
 
 	// We could use a PGURI verification here.
@@ -432,7 +432,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 	rbh, err := s.btcClient.RawBlockHeader(ctx, height)
 	if err != nil {
-		return fmt.Errorf("failed to get block header at height %v: %v",
+		return fmt.Errorf("get block header at height %v: %v",
 			height, err)
 	}
 
@@ -469,7 +469,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 				// in a block, so hopefully we've got them all...
 				return nil
 			}
-			return fmt.Errorf("failed to get transaction at position (height %v, index %v): %w", height, index, err)
+			return fmt.Errorf("get transaction at position (height %v, index %v): %w", height, index, err)
 		}
 
 		txHashEncoded := hex.EncodeToString(txHash)
@@ -492,7 +492,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 		rtx, err := s.btcClient.RawTransaction(ctx, txHash)
 		if err != nil {
-			return fmt.Errorf("failed to get raw transaction with txid %x: %w", txHash, err)
+			return fmt.Errorf("get raw transaction with txid %x: %w", txHash, err)
 		}
 
 		log.Infof("got raw transaction with txid %x", txHash)
@@ -570,7 +570,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 func (s *Server) processBitcoinBlocks(ctx context.Context, start, end uint64) error {
 	for i := start; i <= end; i++ {
 		if err := s.processBitcoinBlock(ctx, i); err != nil {
-			return fmt.Errorf("failed to process bitcoin block at height %d: %w", i, err)
+			return fmt.Errorf("process bitcoin block at height %d: %w", i, err)
 		}
 		s.btcHeight = i
 	}
@@ -702,7 +702,7 @@ func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
 
 			go s.handleRequest(ctx, bws, id, "handle access key delete request", handler)
 		default:
-			err = fmt.Errorf("unknown command")
+			err = errors.New("unknown command")
 		}
 
 		// If set, it is a terminal error.
@@ -776,7 +776,7 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 
 			go s.handleRequest(ctx, bws, id, "handle bitcoin utxos request", handler)
 		default:
-			err = fmt.Errorf("unknown command")
+			err = errors.New("unknown command")
 		}
 
 		// If set, it is a terminal error.
@@ -1333,7 +1333,7 @@ func (s *Server) Run(pctx context.Context) error {
 	defer log.Tracef("Run exit")
 
 	if !s.testAndSetRunning(true) {
-		return fmt.Errorf("bfg already running")
+		return errors.New("bfg already running")
 	}
 	defer s.testAndSetRunning(false)
 
@@ -1346,7 +1346,7 @@ func (s *Server) Run(pctx context.Context) error {
 	var err error
 	s.db, err = postgres.New(ctx, s.cfg.PgURI)
 	if err != nil {
-		return fmt.Errorf("failed to connect to database: %w", err)
+		return fmt.Errorf("connect to database: %w", err)
 	}
 	defer s.db.Close()
 
@@ -1449,7 +1449,7 @@ func (s *Server) Run(pctx context.Context) error {
 			ListenAddress: s.cfg.PrometheusListenAddress,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
+			return fmt.Errorf("create server: %w", err)
 		}
 		cs := []prometheus.Collector{
 			s.cmdsProcessed, // XXX should we make two counters? priv/pub

@@ -232,7 +232,7 @@ func (c *Client) Broadcast(ctx context.Context, rtx []byte) ([]byte, error) {
 	}
 	txHash, err := btcchainhash.NewHashFromStr(txHashStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode transaction hash: %w", err)
+		return nil, fmt.Errorf("decode transaction hash: %w", err)
 	}
 	return txHash[:], nil
 }
@@ -260,11 +260,11 @@ func (c *Client) RawBlockHeader(ctx context.Context, height uint64) (*bitcoin.Bl
 	}
 	var rbhStr string
 	if err := c.call(ctx, "blockchain.block.header", &params, &rbhStr); err != nil {
-		return nil, fmt.Errorf("failed to get block header: %w", err)
+		return nil, fmt.Errorf("get block header: %w", err)
 	}
 	rbh, err := hex.DecodeString(rbhStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode raw block header: %w", err)
+		return nil, fmt.Errorf("decode raw block header: %w", err)
 	}
 	return bitcoin.RawBlockHeaderFromSlice(rbh)
 }
@@ -283,11 +283,11 @@ func (c *Client) RawTransaction(ctx context.Context, txHash []byte) ([]byte, err
 	}
 	var rtxStr string
 	if err := c.call(ctx, "blockchain.transaction.get", &params, &rtxStr); err != nil {
-		return nil, fmt.Errorf("failed to get transaction: %w", err)
+		return nil, fmt.Errorf("get transaction: %w", err)
 	}
 	rtx, err := hex.DecodeString(rtxStr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode raw transaction: %w", err)
+		return nil, fmt.Errorf("decode raw transaction: %w", err)
 	}
 	return rtx, nil
 }
@@ -306,7 +306,7 @@ func (c *Client) Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 	}
 	var txJSON json.RawMessage
 	if err := c.call(ctx, "blockchain.transaction.get", &params, &txJSON); err != nil {
-		return nil, fmt.Errorf("failed to get transaction: %w", err)
+		return nil, fmt.Errorf("get transaction: %w", err)
 	}
 	return txJSON, nil
 }
@@ -331,12 +331,12 @@ func (c *Client) TransactionAtPosition(ctx context.Context, height, index uint64
 		} else if strings.HasPrefix(err.Error(), "db error: DBError('block ") && strings.Contains(err.Error(), " not on disk ") {
 			return nil, nil, NewBlockNotOnDiskError(err)
 		}
-		return nil, nil, fmt.Errorf("failed to get transaction from block: %w", err)
+		return nil, nil, fmt.Errorf("get transaction from block: %w", err)
 	}
 
 	txHash, err := btcchainhash.NewHashFromStr(result.TXHash)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decode transaction hash: %w", err)
+		return nil, nil, fmt.Errorf("decode transaction hash: %w", err)
 	}
 
 	return txHash[:], result.Merkle, nil
@@ -360,7 +360,7 @@ func (c *Client) UTXOs(ctx context.Context, scriptHash []byte) ([]*UTXO, error) 
 	for _, eutxo := range eutxos {
 		hash, err := btcchainhash.NewHashFromStr(eutxo.Hash)
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode UTXO hash: %w", err)
+			return nil, fmt.Errorf("decode UTXO hash: %w", err)
 		}
 		utxos = append(utxos, &UTXO{
 			Hash:   hash[:],

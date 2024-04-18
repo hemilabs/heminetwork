@@ -19,18 +19,18 @@ var log = loggo.GetLogger("btctool")
 func GetAndStoreBlockHeader(ctx context.Context, height int, dir string) (string, error) {
 	hash, err := blockstream.BlockHeightHash(ctx, fmt.Sprintf("%v", height))
 	if err != nil {
-		return "", fmt.Errorf("BlockHeightHash %v: %v", height, err)
+		return "", fmt.Errorf("retrieve block by hash %v: %w", height, err)
 	}
 
 	header, err := blockstream.BlockHeader(ctx, hash)
 	if err != nil {
-		return "", fmt.Errorf("BlockHeader %v: %v", hash, err)
+		return "", fmt.Errorf("retrieve block header %v: %w", hash, err)
 	}
 
 	// Write header
 	err = bdf.WriteHeader(height, header, dir)
 	if err != nil {
-		return "", fmt.Errorf("WriteHeight: %v", err)
+		return "", fmt.Errorf("write header: %w", err)
 	}
 
 	return hash, nil

@@ -166,7 +166,7 @@ func bfgdb() error {
 func parseArgs(args []string) (string, map[string]string, error) {
 	if len(args) < 1 {
 		flag.Usage()
-		return "", nil, fmt.Errorf("action required")
+		return "", nil, errors.New("action required")
 	}
 
 	action := args[0]
@@ -196,10 +196,10 @@ func tbcdb() error {
 	}
 
 	// special commands
-	//switch action {
-	//case "crossreference":
+	// switch action {
+	// case "crossreference":
 	//	return crossReference(ctx)
-	//}
+	// }
 
 	// create fake service to call crawler
 	cfg := tbc.NewDefaultConfig()
@@ -227,7 +227,7 @@ func tbcdb() error {
 	case "blockheaderbyhash":
 		hash := args["hash"]
 		if hash == "" {
-			return fmt.Errorf("hash: must be set")
+			return errors.New("hash: must be set")
 		}
 		ch, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
@@ -253,7 +253,7 @@ func tbcdb() error {
 	case "blockheadersbyheight":
 		height := args["height"]
 		if height == "" {
-			return fmt.Errorf("height: must be set")
+			return errors.New("height: must be set")
 		}
 		h, err := strconv.ParseUint(height, 10, 64)
 		if err != nil {
@@ -287,7 +287,7 @@ func tbcdb() error {
 	case "blockbyhash":
 		hash := args["hash"]
 		if hash == "" {
-			return fmt.Errorf("hash: must be set")
+			return errors.New("hash: must be set")
 		}
 		ch, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
@@ -302,7 +302,7 @@ func tbcdb() error {
 	case "deletemetadata":
 		key := args["key"]
 		if key == "" {
-			return fmt.Errorf("key: must be set")
+			return errors.New("key: must be set")
 		}
 
 		s.DBClose()
@@ -351,9 +351,9 @@ func tbcdb() error {
 		defer db.Close()
 		prefix := args["prefix"]
 		if len(prefix) > 1 {
-			return fmt.Errorf("prefix must be one byte")
+			return errors.New("prefix must be one byte")
 		} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
-			return fmt.Errorf("prefix must be h or u")
+			return errors.New("prefix must be h or u")
 		}
 		pool := db.DB()
 		outsDB := pool[ldb.OutputsDB]
@@ -366,7 +366,7 @@ func tbcdb() error {
 	case "feesbyheight":
 		height := args["height"]
 		if height == "" {
-			return fmt.Errorf("height: must be set")
+			return errors.New("height: must be set")
 		}
 		h, err := strconv.ParseInt(height, 10, 64)
 		if err != nil {
@@ -478,7 +478,7 @@ func tbcdb() error {
 	case "blocksbytxid":
 		txid := args["txid"]
 		if txid == "" {
-			return fmt.Errorf("txid: must be set")
+			return errors.New("txid: must be set")
 		}
 		chtxid, err := chainhash.NewHashFromStr(txid)
 		if err != nil {
@@ -498,7 +498,7 @@ func tbcdb() error {
 	case "spendoutputsbytxid":
 		txid := args["txid"]
 		if txid == "" {
-			return fmt.Errorf("txid: must be set")
+			return errors.New("txid: must be set")
 		}
 		chtxid, err := chainhash.NewHashFromStr(txid)
 		if err != nil {
@@ -518,7 +518,7 @@ func tbcdb() error {
 	case "scripthashbyoutpoint":
 		txid := args["txid"]
 		if txid == "" {
-			return fmt.Errorf("txid: must be set")
+			return errors.New("txid: must be set")
 		}
 		chtxid, err := chainhash.NewHashFromStr(txid)
 		if err != nil {
@@ -529,7 +529,7 @@ func tbcdb() error {
 
 		index := args["index"]
 		if index == "" {
-			return fmt.Errorf("index: must be set")
+			return errors.New("index: must be set")
 		}
 		idx, err := strconv.ParseUint(index, 10, 32)
 		if err != nil {
@@ -546,9 +546,9 @@ func tbcdb() error {
 		address := args["address"]
 		hash := args["hash"]
 		if address == "" && hash == "" {
-			return fmt.Errorf("hash or address: must be set")
+			return errors.New("hash or address: must be set")
 		} else if address != "" && hash != "" {
-			return fmt.Errorf("hash or address: both set")
+			return errors.New("hash or address: both set")
 		}
 
 		var hh [32]byte
@@ -586,9 +586,9 @@ func tbcdb() error {
 		start := args["start"]
 
 		if address == "" && hash == "" {
-			return fmt.Errorf("hash or address: must be set")
+			return errors.New("hash or address: must be set")
 		} else if address != "" && hash != "" {
-			return fmt.Errorf("hash or address: both set")
+			return errors.New("hash or address: both set")
 		}
 
 		if count == "" {
@@ -875,7 +875,7 @@ func printJSON(where io.Writer, indent string, payload any) error {
 func _main() error {
 	if len(os.Args) < 2 {
 		usage()
-		return fmt.Errorf("not enough parameters")
+		return errors.New("not enough parameters")
 	}
 
 	if err := config.Parse(cm); err != nil {

@@ -28,7 +28,7 @@ func (bh *BlockHeader) String() string {
 
 func RawBlockHeaderFromSlice(s []byte) (*BlockHeader, error) {
 	if len(s) != 80 {
-		return nil, fmt.Errorf("invalid blockheader size")
+		return nil, errors.New("invalid blockheader size")
 	}
 	var bh BlockHeader
 	copy(bh[:], s)
@@ -117,14 +117,14 @@ func SignTx(btx *wire.MsgTx, payToScript []byte, privateKey *dcrsecp256k1.Privat
 		txscript.SigHashAll, btx, 0,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to calculate signature hash: %w", err)
+		return fmt.Errorf("calculate signature hash: %w", err)
 	}
 	pubKeyBytes := publicKey.SerializeCompressed()
 	sig := dcrecdsa.Sign(privateKey, sigHash)
 	sigBytes := append(sig.Serialize(), byte(txscript.SigHashAll))
 	sb := txscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes)
 	if btx.TxIn[0].SignatureScript, err = sb.Script(); err != nil {
-		return fmt.Errorf("failed to build signature script: %w", err)
+		return fmt.Errorf("build signature script: %w", err)
 	}
 	return nil
 }
@@ -157,7 +157,7 @@ func KeysAndAddressFromHexString(s string, chainParams *chaincfg.Params) (*dcrse
 	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, chainParams)
 	if err != nil {
 		return nil, nil, nil,
-			fmt.Errorf("failed to create BTC address from public key: %w", err)
+			fmt.Errorf("create BTC address from public key: %w", err)
 	}
 
 	return privKey, privKey.PubKey(), btcAddress.AddressPubKeyHash(), nil

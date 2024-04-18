@@ -137,11 +137,11 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 				log.Infof("No more blocks at: %v", height)
 				break
 			}
-			return 0, fmt.Errorf("block headers by height %v: %v", height, err)
+			return 0, fmt.Errorf("block headers by height %v: %w", height, err)
 		}
 		eb, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
-			return 0, fmt.Errorf("block by hash %v: %v", height, err)
+			return 0, fmt.Errorf("block by hash %v: %w", height, err)
 		}
 		b, err := btcutil.NewBlockFromBytes(eb.Block)
 		if err != nil {
@@ -154,13 +154,13 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 		// map must be locked as it is being processed.
 		err = s.fixupCache(ctx, b, utxos)
 		if err != nil {
-			return 0, fmt.Errorf("parse block %v: %v", height, err)
+			return 0, fmt.Errorf("parse block %v: %w", height, err)
 		}
 		// At this point we can lockless since it is all single
 		// threaded again.
 		err = processUtxos(s.chainParams, b.Transactions(), utxos)
 		if err != nil {
-			return 0, fmt.Errorf("process utxos %v: %v", height, err)
+			return 0, fmt.Errorf("process utxos %v: %w", height, err)
 		}
 
 		blocksProcessed++
@@ -288,11 +288,11 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight ui
 				log.Infof("No more blocks at: %v", height)
 				break
 			}
-			return 0, fmt.Errorf("block headers by height %v: %v", height, err)
+			return 0, fmt.Errorf("block headers by height %v: %w", height, err)
 		}
 		eb, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
-			return 0, fmt.Errorf("block by hash %v: %v", height, err)
+			return 0, fmt.Errorf("block by hash %v: %w", height, err)
 		}
 		b, err := btcutil.NewBlockFromBytes(eb.Block)
 		if err != nil {
@@ -303,7 +303,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight ui
 
 		err = processTxs(s.chainParams, b.Hash(), b.Transactions(), txs)
 		if err != nil {
-			return 0, fmt.Errorf("process txs %v: %v", height, err)
+			return 0, fmt.Errorf("process txs %v: %w", height, err)
 		}
 
 		blocksProcessed++

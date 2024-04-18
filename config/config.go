@@ -5,6 +5,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,7 +38,7 @@ func Parse(c CfgMap) error {
 	for k, v := range c {
 		// Make sure v.Value is a pointer
 		if reflect.TypeOf(v.Value).Kind() != reflect.Pointer {
-			return fmt.Errorf("value must be a pointer")
+			return errors.New("value must be a pointer")
 		}
 		// Make sure we are pointing to the same type
 		if reflect.TypeOf(v.Value).Elem() != reflect.TypeOf(v.DefaultValue) {

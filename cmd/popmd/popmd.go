@@ -110,10 +110,10 @@ func _main() error {
 
 	miner, err := popm.NewMiner(cfg)
 	if err != nil {
-		return fmt.Errorf("failed to create POP miner: %w", err)
+		return fmt.Errorf("create POP miner: %w", err)
 	}
 	if err := miner.Run(ctx); !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("POP miner terminated: %w", err)
+		return fmt.Errorf("pop miner terminated: %w", err)
 	}
 
 	return nil

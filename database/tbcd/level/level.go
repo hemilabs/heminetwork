@@ -129,7 +129,7 @@ func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 
 	mdDB := l.pool[level.MetadataDB]
 	v, err := mdDB.Get(key, nil)
-	if err == leveldb.ErrNotFound {
+	if errors.Is(err, leveldb.ErrNotFound) {
 		return nil, database.NotFoundError(fmt.Sprintf("key not found: %v",
 			string(key)))
 	}
@@ -155,7 +155,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	bhsDB := l.pool[level.BlockHeadersDB]
 	ebh, err := bhsDB.Get(hash, nil)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("block header not found: %x", hash))
 		}
 		return nil, fmt.Errorf("block header get: %w", err)
@@ -184,7 +184,7 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 		}
 		bh, err := l.BlockHeaderByHash(ctx, hash)
 		if err != nil {
-			return nil, fmt.Errorf("headers by height: %v", err)
+			return nil, fmt.Errorf("headers by height: %w", err)
 		}
 		bhs = append(bhs, *bh)
 	}
@@ -208,7 +208,7 @@ func (l *ldb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) 
 	// Get last record
 	ebh, err := bhsDB.Get([]byte(bhsLastKey), nil)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if errors.Is(err, leveldb.ErrNotFound) {
 			return []tbcd.BlockHeader{}, nil
 		}
 		return nil, fmt.Errorf("block headers best: %w", err)
@@ -271,7 +271,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) er
 	defer log.Tracef("BlockHeadersInsert exit")
 
 	if len(bhs) == 0 {
-		return fmt.Errorf("block headers insert: no block headers to insert")
+		return errors.New("block headers insert: no block headers to insert")
 	}
 
 	// block headers
@@ -284,7 +284,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) er
 	// Make sure we are not inserting the same blocks
 	has, err := bhsTx.Has(bhs[0].Hash, nil)
 	if err != nil {
-		return fmt.Errorf("block headers insert has: %v", err)
+		return fmt.Errorf("block headers insert has: %w", err)
 	}
 	if has {
 		return database.DuplicateError("block headers insert duplicate")
@@ -460,7 +460,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		bhsDB := l.pool[level.BlockHeadersDB]
 		ebh, err := bhsDB.Get(b.Hash, nil)
 		if err != nil {
-			if err == leveldb.ErrNotFound {
+			if errors.Is(err, leveldb.ErrNotFound) {
 				return -1, database.NotFoundError(fmt.Sprintf(
 					"block insert block header not found: %v",
 					b.Hash))
@@ -481,13 +481,13 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	bDB := l.pool[level.BlocksDB]
 	has, err := bDB.Has(b.Hash, nil)
 	if err != nil {
-		return -1, fmt.Errorf("block insert has: %v", err)
+		return -1, fmt.Errorf("block insert has: %w", err)
 	}
 	if !has {
 		// Insert block since we do not have it yet
 		err = bDB.Put(b.Hash, b.Block, nil)
 		if err != nil {
-			return -1, fmt.Errorf("blocks insert put: %v", err)
+			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 	}
 
@@ -501,10 +501,10 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	err = bmDB.Delete(key, nil)
 	if err != nil {
 		// Ignore not found
-		if err == leveldb.ErrNotFound {
+		if errors.Is(err, leveldb.ErrNotFound) {
 			log.Errorf("block insert delete from missing: %v", err)
 		} else {
-			return -1, fmt.Errorf("block insert delete from missing: %v", err)
+			return -1, fmt.Errorf("block insert delete from missing: %w", err)
 		}
 	}
 	// XXX think about Height type; why are we forced to mix types?
@@ -518,7 +518,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	bDB := l.pool[level.BlocksDB]
 	eb, err := bDB.Get(hash, nil)
 	if err != nil {
-		if err == leveldb.ErrNotFound {
+		if errors.Is(err, leveldb.ErrNotFound) {
 			ch, _ := chainhash.NewHash(hash)
 			return nil, database.NotFoundError(fmt.Sprintf("block not found: %v", ch))
 		}

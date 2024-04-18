@@ -7,6 +7,7 @@ package main
 import (
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -48,12 +49,12 @@ func _main() error {
 	case *secp256k1KeyPair:
 		privKey, err := dcrsecpk256k1.GeneratePrivateKey()
 		if err != nil {
-			return fmt.Errorf("failed to generate secp256k1 private key: %w", err)
+			return fmt.Errorf("generate secp256k1 private key: %w", err)
 		}
 		btcAddress, err := btcutil.NewAddressPubKey(privKey.PubKey().SerializeCompressed(),
 			btcChainParams)
 		if err != nil {
-			return fmt.Errorf("failed to create BTC address from public key: %v",
+			return fmt.Errorf("create BTC address from public key: %v",
 				err)
 		}
 		hash := btcAddress.AddressPubKeyHash().String()
@@ -89,7 +90,7 @@ func _main() error {
 
 	default:
 		usage()
-		return fmt.Errorf("invalid flag")
+		return errors.New("invalid flag")
 	}
 
 	return nil

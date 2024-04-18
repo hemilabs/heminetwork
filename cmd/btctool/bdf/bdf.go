@@ -131,12 +131,12 @@ func Header2Hex(wbh *wire.BlockHeader) (string, error) {
 func Hex2Header(header string) (*wire.BlockHeader, error) {
 	blockHeader, err := hex.DecodeString(header)
 	if err != nil {
-		return nil, fmt.Errorf("DecodeString: %v", err)
+		return nil, fmt.Errorf("decode string: %w", err)
 	}
 	var bh wire.BlockHeader
 	err = bh.Deserialize(bytes.NewReader(blockHeader))
 	if err != nil {
-		return nil, fmt.Errorf("Deserialize: %v", err)
+		return nil, fmt.Errorf("deserialize block header: %w", err)
 	}
 	return &bh, nil
 }
@@ -155,14 +155,14 @@ func writeHeight(height int, hash, dir string) error {
 			// do nothing
 			defer f.Close()
 		} else {
-			return fmt.Errorf("Open: %v", err)
+			return fmt.Errorf("open file: %w", err)
 		}
 	} else {
 		defer f.Close()
 		d := json.NewDecoder(f)
 		err = d.Decode(&lh)
 		if err != nil {
-			return fmt.Errorf("%v corrupt: %v", filename, err)
+			return fmt.Errorf("%v corrupt: %w", filename, err)
 		}
 	}
 	if lh.Height > height {
@@ -171,14 +171,14 @@ func writeHeight(height int, hash, dir string) error {
 	}
 	fw, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
-		return fmt.Errorf("OpenFile: %v", err)
+		return fmt.Errorf("open file: %w", err)
 	}
 	e := json.NewEncoder(fw)
 	lh.Height = height
 	lh.Hash = hash
 	err = e.Encode(lh)
 	if err != nil {
-		return fmt.Errorf("Encode: %v", err)
+		return fmt.Errorf("encode: %w", err)
 	}
 	return fw.Close()
 }
@@ -195,7 +195,7 @@ func writeHeader(height int, hash, header, dir string) error {
 	}
 	f, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("Create: %v", err)
+		return fmt.Errorf("create file: %w", err)
 	}
 	e := json.NewEncoder(f)
 	err = e.Encode(Header{
@@ -204,7 +204,7 @@ func writeHeader(height int, hash, header, dir string) error {
 	})
 	if err != nil {
 		f.Close()
-		return fmt.Errorf("Encode: %v", err)
+		return fmt.Errorf("encode json: %w", err)
 	}
 
 	return f.Close()
@@ -213,7 +213,7 @@ func writeHeader(height int, hash, header, dir string) error {
 func WriteHeader(height int, header, dir string) error {
 	bh, err := Hex2Header(header)
 	if err != nil {
-		return fmt.Errorf("Hex2Header: %v", err)
+		return fmt.Errorf("convert hex to header: %w", err)
 	}
 
 	dfm.Lock()
@@ -221,11 +221,11 @@ func WriteHeader(height int, header, dir string) error {
 
 	err = writeHeader(height, bh.BlockHash().String(), header, dir)
 	if err != nil {
-		return fmt.Errorf("writeHeader: %v", err)
+		return fmt.Errorf("write header: %w", err)
 	}
 	err = writeHeight(height, bh.BlockHash().String(), dir)
 	if err != nil {
-		return fmt.Errorf("writeHeight: %v", err)
+		return fmt.Errorf("write height: %w", err)
 	}
 	return nil
 }

@@ -38,11 +38,11 @@ type TBlock struct {
 func Tip(ctx context.Context) (int, error) {
 	b, err := httpclient.Request(ctx, "GET", bsURL+"/blocks/tip/height", nil)
 	if err != nil {
-		return 0, fmt.Errorf("request: %v", err)
+		return 0, fmt.Errorf("request: %w", err)
 	}
 	height, err := strconv.ParseInt(string(b), 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("ParseUint: %v", err)
+		return 0, fmt.Errorf("parse uint: %w", err)
 	}
 
 	return int(height), nil
@@ -51,11 +51,11 @@ func Tip(ctx context.Context) (int, error) {
 func BlockHeader(ctx context.Context, hash string) (string, error) {
 	bh, err := httpclient.Request(ctx, "GET", bsURL+"/block/"+hash+"/header", nil)
 	if err != nil {
-		return "", fmt.Errorf("request: %v", err)
+		return "", fmt.Errorf("request: %w", err)
 	}
 	_, err = hex.DecodeString(string(bh))
 	if err != nil {
-		return "", fmt.Errorf("DecodeString: %v", err)
+		return "", fmt.Errorf("decode hex: %w", err)
 	}
 	return string(bh), nil
 }
@@ -63,11 +63,11 @@ func BlockHeader(ctx context.Context, hash string) (string, error) {
 func BlockHeightHash(ctx context.Context, height string) (string, error) {
 	bh, err := httpclient.Request(ctx, "GET", bsURL+"/block-height/"+height, nil)
 	if err != nil {
-		return "", fmt.Errorf("request: %v", err)
+		return "", fmt.Errorf("request: %w", err)
 	}
 	_, err = hex.DecodeString(string(bh))
 	if err != nil {
-		return "", fmt.Errorf("DecodeString: %v", err)
+		return "", fmt.Errorf("decode hex: %w", err)
 	}
 	return string(bh), nil
 }
@@ -79,7 +79,7 @@ func Block(ctx context.Context, hash string, raw bool) (string, error) {
 	}
 	b, err := httpclient.Request(ctx, "GET", bsURL+"/block/"+hash+suffix, nil)
 	if err != nil {
-		return "", fmt.Errorf("request: %v", err)
+		return "", fmt.Errorf("request: %w", err)
 	}
 	if raw {
 		return hex.EncodeToString(b), nil
@@ -91,7 +91,7 @@ func BlockBytes(ctx context.Context, hash string) ([]byte, error) {
 	suffix := "/raw"
 	b, err := httpclient.Request(ctx, "GET", bsURL+"/block/"+hash+suffix, nil)
 	if err != nil {
-		return nil, fmt.Errorf("request: %v", err)
+		return nil, fmt.Errorf("request: %w", err)
 	}
 	return b, nil
 }

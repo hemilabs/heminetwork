@@ -206,7 +206,7 @@ func (m *Miner) bitcoinHeight(ctx context.Context) (uint64, error) {
 
 	biResp, ok := res.(*bfgapi.BitcoinInfoResponse)
 	if !ok {
-		return 0, fmt.Errorf("not a BitcoinIfnoResponse")
+		return 0, errors.New("not a BitcoinIfnoResponse")
 	}
 
 	if biResp.Error != nil {
@@ -279,7 +279,7 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 	popTx := pop.TransactionL2{L2Keystone: aks}
 	popTxOpReturn, err := popTx.EncodeToOpReturn()
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode PoP transaction: %w", err)
+		return nil, fmt.Errorf("encode PoP transaction: %w", err)
 	}
 	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
 
@@ -295,12 +295,12 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	btcHeight, err := m.bitcoinHeight(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get Bitcoin height: %w", err)
+		return fmt.Errorf("get Bitcoin height: %w", err)
 	}
 
 	payToScript, err := btctxscript.PayToAddrScript(m.btcAddress)
 	if err != nil {
-		return fmt.Errorf("failed to get pay to address script: %w", err)
+		return fmt.Errorf("get pay to address script: %w", err)
 	}
 	if len(payToScript) != 25 {
 		return fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
@@ -315,7 +315,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	// Check balance.
 	confirmed, unconfirmed, err := m.bitcoinBalance(ctx, scriptHash[:])
 	if err != nil {
-		return fmt.Errorf("failed to get Bitcoin balance: %w", err)
+		return fmt.Errorf("get Bitcoin balance: %w", err)
 	}
 	log.Tracef("Bitcoin balance for miner is: %v confirmed, %v unconfirmed", confirmed, unconfirmed)
 
@@ -323,7 +323,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	log.Tracef("Looking for UTXOs for script hash %v", scriptHash)
 	utxos, err := m.bitcoinUTXOs(ctx, scriptHash[:])
 	if err != nil {
-		return fmt.Errorf("failed to get Bitcoin UTXOs: %w", err)
+		return fmt.Errorf("get Bitcoin UTXOs: %w", err)
 	}
 
 	log.Tracef("Found %d UTXOs at Bitcoin height %d", len(utxos), btcHeight)
@@ -334,7 +334,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	utxos, err = pickUTXOs(utxos, feeAmount)
 	if err != nil {
-		return fmt.Errorf("failed to pick UTXOs: %w", err)
+		return fmt.Errorf("pick UTXOs: %w", err)
 	}
 
 	if len(utxos) != 1 {
@@ -356,7 +356,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	// broadcast tx
 	var buf bytes.Buffer
 	if err := btx.Serialize(&buf); err != nil {
-		return fmt.Errorf("failed to serialize Bitcoin transaction: %w", err)
+		return fmt.Errorf("serialize Bitcoin transaction: %w", err)
 	}
 	txb := buf.Bytes()
 
@@ -364,11 +364,11 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	txh, err := m.bitcoinBroadcast(ctx, txb)
 	if err != nil {
-		return fmt.Errorf("failed to broadcast PoP transaction: %w", err)
+		return fmt.Errorf("broadcast PoP transaction: %w", err)
 	}
 	txHash, err := btcchainhash.NewHash(txh)
 	if err != nil {
-		return fmt.Errorf("failed to create BTC hash from transaction hash: %w", err)
+		return fmt.Errorf("create BTC hash from transaction hash: %w", err)
 	}
 
 	log.Infof("Successfully broadcast PoP transaction to Bitcoin with TX hash %v", txHash)
@@ -591,7 +591,7 @@ func (m *Miner) callBFG(parrentCtx context.Context, timeout time.Duration, msg a
 		return nil, ctx.Err()
 	case m.bfgCmdCh <- bc:
 	default:
-		return nil, fmt.Errorf("bfg command queue full")
+		return nil, errors.New("bfg command queue full")
 	}
 
 	// Wait for response
@@ -622,7 +622,7 @@ func (m *Miner) checkForKeystones(ctx context.Context) error {
 
 	ghkrResp, ok := res.(*bfgapi.L2KeystonesResponse)
 	if !ok {
-		return fmt.Errorf("not an L2KeystonesResponse")
+		return errors.New("not an L2KeystonesResponse")
 	}
 
 	if ghkrResp.Error != nil {
@@ -831,7 +831,7 @@ func (m *Miner) bfg(ctx context.Context) error {
 
 func (m *Miner) Run(pctx context.Context) error {
 	if !m.testAndSetRunning(true) {
-		return fmt.Errorf("popmd already running")
+		return errors.New("popmd already running")
 	}
 	defer m.testAndSetRunning(false)
 

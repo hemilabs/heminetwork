@@ -7,6 +7,7 @@ package auth
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -215,7 +216,7 @@ func (s *Secp256k1Auth) HandshakeServer(ctx context.Context, conn protocol.APICo
 				return fmt.Errorf("hello challenge accepted unexpected state: %v", state)
 			}
 			if am == nil {
-				return fmt.Errorf("hello challenge accepted message not set")
+				return errors.New("hello challenge accepted message not set")
 			}
 
 			derived, err := handleSecp256k1HelloChallengeAccepted(am, c)
@@ -225,7 +226,7 @@ func (s *Secp256k1Auth) HandshakeServer(ctx context.Context, conn protocol.APICo
 
 			// Exit state machine
 			if !derived.IsEqual(s.pubKey) {
-				return fmt.Errorf("handleSecp256k1HelloChallengeAccepted: not the same signer")
+				return errors.New("handleSecp256k1HelloChallengeAccepted: not the same signer")
 			}
 			s.remotePubKey = derived
 			log.Tracef("HandshakeServer complete: %x",

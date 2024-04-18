@@ -90,14 +90,14 @@ func (l *Database) RegisterNotification(ctx context.Context, n database.Notifica
 	log.Tracef("RegisterNotification")
 	defer log.Tracef("RegisterNotification exit")
 
-	return fmt.Errorf("RegisterNotification")
+	return errors.New("unsupported")
 }
 
 func (l *Database) UnregisterNotification(n database.NotificationName) error {
 	log.Tracef("UnregisterNotification")
 	defer log.Tracef("UnregisterNotification exit")
 
-	return fmt.Errorf("UnregisterNotification")
+	return errors.New("unsupported")
 }
 
 func (l *Database) openDB(name string, options *opt.Options) error {

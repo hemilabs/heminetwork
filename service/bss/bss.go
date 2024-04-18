@@ -715,7 +715,7 @@ func (s *Server) Run(parrentCtx context.Context) error {
 	defer log.Tracef("Run exit")
 
 	if !s.testAndSetRunning(true) {
-		return fmt.Errorf("bss already running")
+		return errors.New("bss already running")
 	}
 	defer s.testAndSetRunning(false)
 
@@ -752,7 +752,7 @@ func (s *Server) Run(parrentCtx context.Context) error {
 			ListenAddress: s.cfg.PrometheusListenAddress,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to create server: %w", err)
+			return fmt.Errorf("create server: %w", err)
 		}
 		cs := []prometheus.Collector{
 			s.cmdsProcessed,
