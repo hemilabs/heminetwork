@@ -95,6 +95,13 @@ You can start the `tbcd` server by running:
 /path/to/tbcd
 ```
 
+## RPC commands
+
+When the `TBC_ADDRESS` environment variable is set, the `tbcd` daemon listens on the provided address.
+The RPC protocol is WebSocket-based and uses a standard request/response model.
+
+[Read more about the RPC protocol and available commands](../../api/tbcapi/README.md).
+
 ### License
 
 This project is licensed under the [MIT License](../../LICENSE).
