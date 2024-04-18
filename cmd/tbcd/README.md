@@ -9,7 +9,7 @@ tbcd requires sufficient disk space for a full download of bitcoin block data on
 tbcd is build with the heminetwork makefile,  To build standalone (requires `go 1.21+`), type:
 
 ``` sh
-cd heminetowkr/cmd/tbcd
+cd heminetwork/cmd/tbcd
 go build
 ```
 
