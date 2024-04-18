@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"syscall"
 
 	"github.com/juju/loggo"
 
@@ -71,8 +72,7 @@ var (
 
 func handleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
 	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-	signal.Notify(signalChan, os.Kill)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	defer func() {
 		signal.Stop(signalChan)
 		cancel()
