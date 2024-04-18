@@ -13,29 +13,40 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
+// value is an opaque structure that wraps a value that is store in the TTL
+// key/value map.
 type value struct {
 	value any
 
-	expired func(any, any) // called when expired
-	remove  func(any, any) // called when removed
+	expired func(any, any) // called when TTL expires
+	remove  func(any, any) // called when removed from map
+
+	timeoutExpired bool // set when this value has expired
 
 	// Value context
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
+// TTL is an opaque structure that wraps the TTL key/value map.
 type TTL struct {
 	mtx sync.Mutex
 
-	m map[any]value
+	autoDelete bool
+	m          map[any]*value
 }
 
-func New(capacity int) (*TTL, error) {
+// New creates a new TTL map with the provided capacity. If autoDelete is set
+// then the key will be deleted from the map on either the cancel or timeout
+// event.
+func New(capacity int, autoDelete bool) (*TTL, error) {
 	return &TTL{
-		m: make(map[any]value, capacity),
+		autoDelete: autoDelete,
+		m:          make(map[any]*value, capacity),
 	}, nil
 }
 
+// ttl waits for a timeout or cancel. Should be called as a go routine.
 func (tm *TTL) ttl(ctx context.Context, key any) {
 	<-ctx.Done()
 	err := ctx.Err()
@@ -54,6 +65,7 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 	case errors.Is(err, context.DeadlineExceeded):
 		// expired
 		if v.expired != nil {
+			v.timeoutExpired = true
 			go v.expired(key, v.value)
 		}
 
@@ -64,15 +76,20 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 		}
 	}
 
-	// For now assume we always want to remove key
-	delete(tm.m, key)
+	if tm.autoDelete {
+		delete(tm.m, key)
+	}
 }
 
+// Put inserts the provided key and value into the TTL map. The ttl values
+// designates the duration of the validity of this key value pair. The expired
+// function is called when the duration expires and the remove callback is
+// called when the key is Canceled.
 func (tm *TTL) Put(pctx context.Context, ttl time.Duration, key any, val any, expired func(any, any), remove func(any, any)) {
 	tm.mtx.Lock()
 	defer tm.mtx.Unlock()
 
-	v := value{
+	v := &value{
 		value:   val,
 		expired: expired,
 		remove:  remove,
@@ -82,17 +99,20 @@ func (tm *TTL) Put(pctx context.Context, ttl time.Duration, key any, val any, ex
 	go tm.ttl(v.ctx, key)
 }
 
-func (tm *TTL) Get(key any) (any, error) {
+// Get returns the corresponding value for the provided key. It also returns
+// true if the value was expired.
+func (tm *TTL) Get(key any) (any, bool, error) {
 	tm.mtx.Lock()
 	defer tm.mtx.Unlock()
 
 	v, ok := tm.m[key]
 	if !ok {
-		return nil, ErrNotFound
+		return nil, false, ErrNotFound
 	}
-	return v.value, nil
+	return v.value, v.timeoutExpired, nil
 }
 
+// Cancel aborts the waiting function and calls the remove callback.
 func (tm *TTL) Cancel(key any) error {
 	tm.mtx.Lock()
 	defer tm.mtx.Unlock()
@@ -104,4 +124,31 @@ func (tm *TTL) Cancel(key any) error {
 	v.cancel()
 
 	return nil
+}
+
+// Delete removes the key from the TTL map and aborts the waiting function. It
+// also prevents callbacks from being called. It returns true if the key did
+// expire.
+func (tm *TTL) Delete(key any) (bool, error) {
+	tm.mtx.Lock()
+	defer tm.mtx.Unlock()
+
+	v, ok := tm.m[key]
+	if !ok {
+		return false, ErrNotFound
+	}
+	// By deleting the key prior to canceling the value context prevents
+	// the expired and remove callbacks from being called.
+	delete(tm.m, key)
+	v.cancel()
+
+	return v.timeoutExpired, nil
+}
+
+// Len return the length of the TTL map.
+func (tm *TTL) Len() int {
+	tm.mtx.Lock()
+	defer tm.mtx.Unlock()
+
+	return len(tm.m)
 }

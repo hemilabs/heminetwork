@@ -156,7 +156,6 @@ type blockPeer struct {
 type Config struct {
 	AutoIndex               bool
 	BlockSanity             bool
-	RegtestPort             string
 	LevelDBHome             string
 	ListenAddress           string
 	LogLevel                string
@@ -192,8 +191,8 @@ type Server struct {
 	port        string
 	seeds       []string
 
-	peers  map[string]*peer      // active but not necessarily connected
-	blocks map[string]*blockPeer // outstanding block downloads [hash]when/where
+	peers  map[string]*peer // active but not necessarily connected
+	blocks *ttl.TTL         // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL
 
 	// IBD hints
@@ -226,11 +225,15 @@ func NewServer(cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	blocks, err := ttl.New(defaultPendingBlocks)
+	if err != nil {
+		return nil, err
+	}
 	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
-		blocks:         make(map[string]*blockPeer, defaultPendingBlocks),
+		blocks:         blocks,
 		peers:          make(map[string]*peer, defaultPeersWanted),
 		pings:          pings,
 		blocksInserted: make(map[string]struct{}, 8192), // stats
