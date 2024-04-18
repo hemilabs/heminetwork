@@ -136,10 +136,10 @@ The payload type depends on the command being called.
 
 #### Raw data
 
-| Type     | `command` value                              |
-|----------|----------------------------------------------|
-| Request  | tbcapi-block-headers-by-height-raw-request`  |
-| Response | tbcapi-block-headers-by-height-raw-response` |
+| Type     | `command` value                               |
+|----------|-----------------------------------------------|
+| Request  | `tbcapi-block-headers-by-height-raw-request`  |
+| Response | `tbcapi-block-headers-by-height-raw-response` |
 
 Example request message:
 
@@ -171,10 +171,10 @@ Example response message:
 
 #### Serialised 
 
-| Type     | `command` value                          |
-|----------|------------------------------------------|
-| Request  | tbcapi-block-headers-by-height-request`  |
-| Response | tbcapi-block-headers-by-height-response` |
+| Type     | `command` value                           |
+|----------|-------------------------------------------|
+| Request  | `tbcapi-block-headers-by-height-request`  |
+| Response | `tbcapi-block-headers-by-height-response` |
 
 Example request message:
 
