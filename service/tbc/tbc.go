@@ -58,8 +58,9 @@ const (
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
-	defaultCmdTimeout  = 4 * time.Second
-	defaultPingTimeout = 3 * time.Second
+	defaultCmdTimeout          = 4 * time.Second
+	defaultPingTimeout         = 3 * time.Second
+	defaultBlockPendingTimeout = 17 * time.Second
 )
 
 var (
@@ -193,7 +194,7 @@ type Server struct {
 
 	peers  map[string]*peer // active but not necessarily connected
 	blocks *ttl.TTL         // outstanding block downloads [hash]when/where
-	pings  *ttl.TTL
+	pings  *ttl.TTL         // outstanding pings
 
 	// IBD hints
 	lastBlockHeader tbcd.BlockHeader
@@ -221,11 +222,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
-	pings, err := ttl.New(defaultPeersWanted)
+	pings, err := ttl.New(defaultPeersWanted, true)
 	if err != nil {
 		return nil, err
 	}
-	blocks, err := ttl.New(defaultPendingBlocks)
+	blocks, err := ttl.New(defaultPendingBlocks, true)
 	if err != nil {
 		return nil, err
 	}
@@ -236,7 +237,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		blocks:         blocks,
 		peers:          make(map[string]*peer, defaultPeersWanted),
 		pings:          pings,
-		blocksInserted: make(map[string]struct{}, 8192), // stats
+		blocksInserted: make(map[string]struct{}, 8192), // stats XXX rmeove?
 		timeSource:     blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Subsystem: promSubsystem,
@@ -274,34 +275,6 @@ func NewServer(cfg *Config) (*Server, error) {
 // DB exports the underlying database. This should only be used in tests.
 func (s *Server) DB() tbcd.Database {
 	return s.db
-}
-
-// blockPeerExpire removes expired block downloads from the cache and returns
-// the number of used cache slots. Lock must be held.
-func (s *Server) blockPeerExpire() int {
-	log.Tracef("blockPeerExpire exit")
-	defer log.Tracef("blockPeerExpire exit")
-
-	now := time.Now()
-	for k, v := range s.blocks {
-		if v == nil {
-			// not assigned a peer yet
-			continue
-		}
-		if !now.After(v.expire) {
-			continue
-		}
-
-		// mark block as unassigned but do not give up cache slot
-		s.blocks[k] = nil
-		log.Infof("expired block: %v", k) // XXX maybe remove but add to stats
-
-		// kill peer as well since it is slow
-		if p := s.peers[v.peer]; p != nil && p.conn != nil {
-			p.conn.Close() // this will tear down peer
-		}
-	}
-	return len(s.blocks)
 }
 
 func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte) error {
@@ -486,6 +459,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 		case address := <-peerC:
 			// peer exited, connect to new one
 			s.peerDelete(address)
+			// XXX remove all pending blocks for this peer
 			log.Debugf("peer exited: %v", address)
 		case <-loopTicker.C:
 			log.Debugf("pinging active peers: %v", s.peersLen())
@@ -751,9 +725,10 @@ func (s *Server) promRunning() float64 {
 // blksMissing checks the block cache and the database and returns true if all
 // blocks have not been downloaded. This function must be called with the lock
 // held.
+// XXX do we still need a locked/unlocked version of this code?
 func (s *Server) blksMissing(ctx context.Context) bool {
 	// Do cheap memory check first
-	if len(s.blocks) != 0 {
+	if s.blocks.Len() != 0 {
 		return true
 	}
 
@@ -1018,96 +993,80 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 	}
 }
 
-func (s *Server) downloadBlocks(ctx context.Context) {
-	log.Tracef("downloadBlocks")
-	defer log.Tracef("downloadBlocks exit")
+// blockExpired expires a block download and kills the peer.
+func (s *Server) blockExpired(key any, value any) {
+	log.Tracef("blockExpired")
+	defer log.Tracef("blockExpired exit")
 
-	now := time.Now()
+	p, ok := value.(*peer)
+	if !ok {
+		// this really should not happen
+		log.Errorf("block expired no peer: %v", key)
+		return
+	}
+	log.Infof("block expired %v: %v", p, key)
 
-	defer func() {
-		// if we are complete we need to kick off utxo sync
-		go s.utxoIndexer(ctx)
-	}()
+	p.close() // this will tear down peer
 
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
+	// XXX we really should scan all pending blocks here to remove all
+	// pending block on this peer. This does correct itself so may not be
+	// worth the trouble.
+}
 
-	for k, v := range s.blocks {
-		if v != nil && now.After(v.expire) {
-			// kill peer as well since it is slow
-			if p := s.peers[v.peer]; p != nil && p.conn != nil {
-				p.conn.Close() // this will tear down peer
-			}
+// randomPeer returns a random peer from the map. Must be called with lock
+// held.
+func (s *Server) randomPeer(ctx context.Context) (*peer, error) {
+	log.Tracef("randomPeer")
+	defer log.Tracef("randomPeer exit")
 
-			// block expired, download block
-			s.blocks[k] = nil
-			v = nil // this will redownload the block
-		}
-		if v != nil {
-			// block already being downloaded and is not expired
+	// unassigned slot, download block
+	for _, p := range s.peers {
+		if p.conn == nil {
+			// Not connected yet
 			continue
 		}
-		// unassigned slot, download block
-		for _, peer := range s.peers {
-			if peer.conn == nil {
-				// Not connected yet
-				continue
-			}
-			ch, err := chainhash.NewHashFromStr(k)
-			if err != nil {
-				// really should not happen
-				log.Errorf("download blocks hash: %v", err)
-				delete(s.blocks, k)
-				continue
-			}
-
-			// sufficiently validated, record in cache
-			s.blocks[k] = &blockPeer{
-				expire: time.Now().Add(37 * time.Second), // XXX make variable?
-				peer:   peer.String(),
-			}
-
-			go s.downloadBlock(ctx, peer, ch)
-
-			break
-		}
+		return p, nil
 	}
+	return nil, fmt.Errorf("no peers")
 }
 
 func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
 	defer log.Tracef("syncBlocks exit")
 
-	// regardless of cache being full or no more missing blocks kick the
-	// downloader just to make sure we are making forward progress.
-	defer func() {
-		go s.downloadBlocks(ctx)
-	}()
-
-	// Hold lock to fill blocks cache
+	// Don't let want race. If we do the cache capacity will be overshot.
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	// Deal with expired block downloads
-	used := s.blockPeerExpire()
-	want := defaultPendingBlocks - used
+	want := defaultPendingBlocks - s.blocks.Len()
 	if want <= 0 {
 		return
 	}
-
 	bm, err := s.db.BlocksMissing(ctx, want)
 	if err != nil {
 		log.Errorf("blocks missing: %v", err)
 		return
 	}
+
 	for k := range bm {
 		bi := bm[k]
 		hash, _ := chainhash.NewHash(bi.Hash[:])
 		hashS := hash.String()
-		if _, ok := s.blocks[hashS]; ok {
+		if _, _, err := s.blocks.Get(hashS); err == nil {
+			// Already being downloaded.
 			continue
 		}
-		s.blocks[hashS] = nil // pending block
+		rp, err := s.randomPeer(ctx)
+		if err != nil {
+			// This can happen during startup or when the network
+			// is starved.
+			// Probably too loud, remove later.
+			log.Errorf("random peer %v: %v", hashS, err)
+			return
+		}
+		s.blocks.Put(ctx, defaultBlockPendingTimeout, hashS, rp,
+			s.blockExpired, nil)
+		go s.downloadBlock(ctx, rp, hash)
 	}
 }
 
@@ -1273,8 +1232,10 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		activePeers    int
 		connectedPeers int
 	)
+	// XXX do we need these? s.mtx.Lock()
+	// XXX rethink lock here
 	s.mtx.Lock()
-	delete(s.blocks, bhs) // remove block from cache regardless of insert result
+	s.blocks.Delete(bhs) // remove block from cache regardless of insert result
 
 	// Stats
 	if err == nil {
@@ -1302,7 +1263,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		s.printTime = now.Add(10 * time.Second)
 
 		// Grab pending block cache stats
-		blocksPending = len(s.blocks)
+		blocksPending = s.blocks.Len()
 
 		// Grab some peer stats as well
 		activePeers = len(s.peers)
