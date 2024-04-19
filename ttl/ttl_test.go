@@ -215,3 +215,40 @@ func TestTTLDelete(t *testing.T) {
 		t.Fatalf("invalid len got %v want %v", l, 0)
 	}
 }
+
+func TestTTLDeleteByValue(t *testing.T) {
+	count := 10
+	tm, err := New(count, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	x := 1337
+	for i := 0; i < count; i++ {
+		tm.Put(ctx, time.Second, strconv.Itoa(i), x, callbackPanic,
+			callbackPanic)
+	}
+	l := tm.Len()
+	if l != count {
+		t.Fatalf("invalid len got %v want %v", l, count)
+	}
+
+	dontMatch := func(mv any) bool {
+		return x != mv.(int)
+	}
+	n := tm.DeleteByValue(dontMatch)
+	if n != 0 {
+		t.Fatalf("invalid dont match deleted count got %v want %v", n, count)
+	}
+
+	match := func(mv any) bool {
+		return x == mv.(int)
+	}
+	n = tm.DeleteByValue(match)
+	if n != count {
+		t.Fatalf("invalid match deleted count got %v want %v", n, count)
+	}
+}

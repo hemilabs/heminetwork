@@ -128,13 +128,11 @@ func (tm *TTL) Cancel(key any) error {
 	return nil
 }
 
-// Delete removes the key from the TTL map and aborts the waiting function. It
+// delete removes the key from the TTL map and aborts the waiting function. It
 // also prevents callbacks from being called. It returns true if the key did
 // expire.
-func (tm *TTL) Delete(key any) (bool, error) {
-	tm.mtx.Lock()
-	defer tm.mtx.Unlock()
-
+// Must be called with the mutex held.
+func (tm *TTL) delete(key any) (bool, error) {
 	v, ok := tm.m[key]
 	if !ok {
 		return false, ErrNotFound
@@ -147,10 +145,40 @@ func (tm *TTL) Delete(key any) (bool, error) {
 	return v.timeoutExpired, nil
 }
 
+// Delete removes the key from the TTL map and aborts the waiting function. It
+// also prevents callbacks from being called. It returns true if the key did
+// expire.
+func (tm *TTL) Delete(key any) (bool, error) {
+	tm.mtx.Lock()
+	defer tm.mtx.Unlock()
+
+	return tm.delete(key)
+}
+
 // Len return the length of the TTL map.
 func (tm *TTL) Len() int {
 	tm.mtx.Lock()
 	defer tm.mtx.Unlock()
 
 	return len(tm.m)
+}
+
+// DeleteByValue walks the TTL map and calls delete if the find callback
+// returns true. It returns the amount of deletes called.
+func (tm *TTL) DeleteByValue(find func(any) bool) int {
+	tm.mtx.Lock()
+	defer tm.mtx.Unlock()
+
+	var d int
+	for k, v := range tm.m {
+		if !find(v.value) {
+			continue
+		}
+		_, err := tm.delete(k)
+		if err != nil {
+			continue
+		}
+		d++
+	}
+	return d
 }
