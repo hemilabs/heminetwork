@@ -13,8 +13,7 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-// value is an opaque structure that wraps a value that is store in the TTL
-// key/value map.
+// value wraps a value stored in the TTL map and includes additional metadata.
 type value struct {
 	value any
 
