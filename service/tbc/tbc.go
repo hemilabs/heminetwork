@@ -459,8 +459,12 @@ func (s *Server) peerManager(ctx context.Context) error {
 		case address := <-peerC:
 			// peer exited, connect to new one
 			s.peerDelete(address)
-			// XXX remove all pending blocks for this peer
-			log.Debugf("peer exited: %v", address)
+
+			// Expire all blocks for peer
+			n := s.blocks.DeleteByValue(func(p any) bool {
+				return p.(*peer).address == address
+			})
+			log.Debugf("peer exited: %v blocks canceled: %v", address, n)
 		case <-loopTicker.C:
 			log.Debugf("pinging active peers: %v", s.peersLen())
 			go s.pingAllPeers(ctx)
@@ -1007,10 +1011,6 @@ func (s *Server) blockExpired(key any, value any) {
 	log.Infof("block expired %v: %v", p, key)
 
 	p.close() // this will tear down peer
-
-	// XXX we really should scan all pending blocks here to remove all
-	// pending block on this peer. This does correct itself so may not be
-	// worth the trouble.
 }
 
 // randomPeer returns a random peer from the map. Must be called with lock
