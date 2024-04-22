@@ -164,7 +164,7 @@ func (tm *TTL) Len() int {
 }
 
 // DeleteByValue walks the TTL map and calls delete if the find callback
-// returns true. It returns the amount of deletes called.
+// returns true. It returns the number of deletes called.
 func (tm *TTL) DeleteByValue(find func(any) bool) int {
 	tm.mtx.Lock()
 	defer tm.mtx.Unlock()
