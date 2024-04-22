@@ -27,7 +27,10 @@ type value struct {
 	cancel context.CancelFunc
 }
 
-// TTL is an opaque structure that wraps the TTL key/value map.
+// TTL is an opaque structure that stores key/values in an internal map. These
+// values have a time-to-live callback functioned associated with them.
+// Depending on configuration eiher these values are automatically deleted from
+// the map on expiration.
 type TTL struct {
 	mtx sync.Mutex
 
