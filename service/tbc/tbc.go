@@ -1068,6 +1068,11 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			s.blockExpired, nil)
 		go s.downloadBlock(ctx, rp, hash)
 	}
+
+	if len(bm) == 0 {
+		// if we are complete we need to kick off utxo sync
+		go s.utxoIndexer(ctx)
+	}
 }
 
 func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeaders) {
