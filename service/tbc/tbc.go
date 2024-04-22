@@ -1027,7 +1027,7 @@ func (s *Server) randomPeer(ctx context.Context) (*peer, error) {
 		}
 		return p, nil
 	}
-	return nil, fmt.Errorf("no peers")
+	return nil, errors.New("no peers")
 }
 
 func (s *Server) syncBlocks(ctx context.Context) {
