@@ -120,7 +120,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 		return fmt.Errorf("could not send verack: %w", err)
 	}
 
-	for count := 0; count < 3; count++ {
+	for range 3 {
 		msg, err := readTimeout(defaultHandshakeTimeout, conn, p.protocolVersion, p.network)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue

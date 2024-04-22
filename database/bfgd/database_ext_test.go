@@ -835,10 +835,9 @@ func TestL2KeystoneInsertMostRecentNLimit100(t *testing.T) {
 
 	toInsert := []bfgd.L2Keystone{}
 
-	for i := 0; i < 101; func() {
-		i++
+	for range 101 {
 		l2BlockNumber++
-	}() {
+
 		l2Keystone := bfgd.L2Keystone{
 			Version:            1,
 			L1BlockNumber:      11,
@@ -851,7 +850,6 @@ func TestL2KeystoneInsertMostRecentNLimit100(t *testing.T) {
 		}
 
 		toInsert = append(toInsert, l2Keystone)
-
 	}
 
 	err := db.L2KeystonesInsert(ctx, toInsert)
@@ -1761,7 +1759,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 func createBtcBlocksAtStaticHeight(ctx context.Context, t *testing.T, db bfgd.Database, count int, chain bool, height int, lastHash []byte, l2BlockNumber uint32) []bfgd.BtcBlock {
 	blocks := []bfgd.BtcBlock{}
 
-	for i := 0; i < count; i++ {
+	for range count {
 		btcBlock := createBtcBlock(
 			ctx,
 			t,
@@ -1782,7 +1780,7 @@ func createBtcBlocksAtStaticHeight(ctx context.Context, t *testing.T, db bfgd.Da
 func createBtcBlocksAtStartingHeight(ctx context.Context, t *testing.T, db bfgd.Database, count int, chain bool, height int, lastHash []byte, l2BlockNumber uint32) []bfgd.BtcBlock {
 	blocks := []bfgd.BtcBlock{}
 
-	for i := 0; i < count; i++ {
+	for range count {
 		btcBlock := createBtcBlock(
 			ctx,
 			t,

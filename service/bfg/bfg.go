@@ -175,7 +175,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		}),
 		sessions: make(map[string]*bfgWs),
 	}
-	for i := 0; i < requestLimit; i++ {
+	for range requestLimit {
 		s.requestLimiter <- true
 	}
 

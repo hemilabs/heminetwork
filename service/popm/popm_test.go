@@ -1359,7 +1359,7 @@ func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string, keyst
 
 			if command == bfgapi.CmdL2KeystonesRequest {
 				response := bfgapi.L2KeystonesResponse{}
-				for i := 0; i < keystoneCount; i++ {
+				for i := range keystoneCount {
 					response.L2Keystones = append(response.L2Keystones, hemi.L2Keystone{
 						L2BlockNumber: uint32(100 + i),
 					})

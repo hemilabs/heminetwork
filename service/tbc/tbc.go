@@ -419,7 +419,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 			// XXX we may want to make peers play along with waitgroup
 
 			// Connect peer
-			for i := 0; i < peersWanted-peersActive; i++ {
+			for range peersWanted - peersActive {
 				address := net.JoinHostPort(seeds[x].Host, seeds[x].Port)
 				peer, err := NewPeer(s.wireNet, address)
 				if err != nil {

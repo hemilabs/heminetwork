@@ -1100,7 +1100,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			}
 
 			requests := reflect.ValueOf(tti.requests)
-			for i := 0; i < requests.Len(); i++ {
+			for i := range requests.Len() {
 				req := requests.Index(i).Interface()
 				if err := bfgapi.Write(ctx, bws.conn, "someid", req); err != nil {
 					t.Fatal(err)
@@ -1209,7 +1209,7 @@ func TestBFGPrivateErrorCases(t *testing.T) {
 			}
 
 			requests := reflect.ValueOf(tti.requests)
-			for i := 0; i < requests.Len(); i++ {
+			for i := range requests.Len() {
 				req := requests.Index(i).Interface()
 				if err := bfgapi.Write(ctx, bws.conn, "someid", req); err != nil {
 					t.Fatal(err)
@@ -2237,7 +2237,7 @@ func TestPopPayouts(t *testing.T) {
 		var ab byte = 0
 		var bb byte = 0
 
-		for i := 0; i < len(a.MinerAddress); i++ {
+		for i := range len(a.MinerAddress) {
 			ab = a.MinerAddress[i]
 			bb = b.MinerAddress[i]
 			if ab != bb {
@@ -2764,7 +2764,7 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 	// 2
 	retries := 2
 	found := false
-	for i := 0; i < retries; i++ {
+	for range retries {
 		// 2
 		var v protocol.Message
 		if err = wsjson.Read(ctx, c, &v); err != nil {
@@ -2833,7 +2833,7 @@ func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
 
 	retries := 2
 	found := false
-	for i := 0; i < retries; i++ {
+	for range retries {
 		// 2
 		var v protocol.Message
 		if err = wsjson.Read(ctx, c, &v); err != nil {
@@ -2965,7 +2965,7 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 
 	retries := 2
 	found := false
-	for i := 0; i < retries; i++ {
+	for range retries {
 		// 2
 		var v protocol.Message
 		if err = wsjson.Read(ctx, c, &v); err != nil {
@@ -3035,7 +3035,7 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 
 	retries := 2
 	found := false
-	for i := 0; i < retries; i++ {
+	for range retries {
 		// 2
 		var v protocol.Message
 		if err = wsjson.Read(ctx, c, &v); err != nil {
@@ -3090,7 +3090,7 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(_i int) {
 			defer wg.Done()
@@ -3162,7 +3162,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(_i int) {
 			defer wg.Done()

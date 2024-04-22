@@ -29,7 +29,7 @@ func TestConnPool(t *testing.T) {
 	}
 
 	// Ensure initial connections were established
-	for i := 0; i < clientInitialConnections; i++ {
+	for i := range clientInitialConnections {
 		select {
 		case s := <-server.stateCh:
 			if !s {
@@ -41,7 +41,7 @@ func TestConnPool(t *testing.T) {
 	}
 
 	// Add more connections to the pool to hit the maximum limit
-	for i := 0; i < clientMaximumConnections; i++ {
+	for range clientMaximumConnections {
 		conn, err := pool.newConn()
 		if err != nil {
 			t.Errorf("new connection: %v", err)
@@ -56,7 +56,7 @@ func TestConnPool(t *testing.T) {
 
 	// Ensure extra connections were closed when returned to the pool
 	var newConnCount int
-	for i := 0; i < clientMaximumConnections+clientInitialConnections; i++ {
+	for i := range clientMaximumConnections + clientInitialConnections {
 		select {
 		case s := <-server.stateCh:
 			if !s {
@@ -76,7 +76,7 @@ func TestConnPool(t *testing.T) {
 	// Acquire connections from the pool
 	poolSize := pool.size()
 	removeConns := 2
-	for i := 0; i < removeConns; i++ {
+	for range removeConns {
 		conn, err := pool.acquireConn()
 		if err != nil {
 			t.Errorf("acquire connection: %v", err)
@@ -101,7 +101,7 @@ func TestConnPool(t *testing.T) {
 	}
 
 	// Ensure all connections were closed
-	for i := 0; i < poolSize; i++ {
+	for i := range poolSize {
 		select {
 		case s := <-server.stateCh:
 			if s {

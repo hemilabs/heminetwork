@@ -173,7 +173,7 @@ func (p *peer) handshake(ctx context.Context) error {
 		return fmt.Errorf("could not send verack: %w", err)
 	}
 
-	for count := 0; count < 3; count++ {
+	for range 3 {
 		msg, err := p.read()
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue
@@ -449,7 +449,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 }
 
 func StoreBlockHeaders(ctx context.Context, endHeight, blockCount int, dir string) error {
-	for h := 0; h < blockCount; h++ {
+	for h := range blockCount {
 		height := endHeight - blockCount + h + 1
 		hash, err := btctool.GetAndStoreBlockHeader(ctx, height, dir)
 		if err != nil {

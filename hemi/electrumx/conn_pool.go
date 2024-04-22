@@ -43,7 +43,7 @@ func newConnPool(network, address string, initial, max int) (*connPool, error) {
 	}
 
 	// Add initial connections to the pool.
-	for i := 0; i < initial; i++ {
+	for range initial {
 		conn, err := p.newConn()
 		if err != nil {
 			return nil, fmt.Errorf("new initial connection: %w", err)
