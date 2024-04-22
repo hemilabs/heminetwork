@@ -150,6 +150,8 @@ An example response for a request with id `68656d69` and height `43111`:
 
 #### Request
 
+##### Example
+
 An example request to retrieve the best block headers:
 
 ```json
@@ -196,6 +198,8 @@ An example response for a request with id `68656d69`, if the best height was `21
 
 #### Request
 
+##### Example
+
 An example request to retrieve the best block headers:
 
 ```json
@@ -236,6 +240,62 @@ An example response for a request with id `68656d69`, if the best height was `25
         "nonce": 3365605040
       }
     ]
+  }
+}
+```
+
+## Balance by Address
+
+Retrieve the balance for an address.
+
+### Raw
+
+| Type     | `command` value                      |
+|----------|--------------------------------------|
+| Request  | `tbcapi-balance-by-address-request`  |
+| Response | `tbcapi-balance-by-address-response` |
+
+#### Request
+
+##### Payload
+
+- `address` is the address to retrieve the balance for.
+  Supported address types are P2PKH, P2SH, P2WPKH, P2WSH, and P2TR.
+
+##### Example
+
+An example request to retrieve the balance for the address `mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa`:
+
+```json
+{
+  "header": {
+    "command": "tbcapi-balance-by-address-request",
+    "id": "68656d69"
+  },
+  "payload": {
+    "address": "mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa"
+  }
+}
+```
+
+#### Response
+
+##### Payload
+
+- `balance` is the known balance of the address, in satoshis.
+
+##### Example
+
+An example response for a request with id `68656d69`, if the address's balance is zero:
+
+```json
+{
+  "header": {
+    "command": "tbcapi-balance-by-address-response",
+    "id": "68656d69"
+  },
+  "payload": {
+    "balance": 0
   }
 }
 ```
