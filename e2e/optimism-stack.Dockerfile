@@ -2,7 +2,7 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-FROM golang:1.22
+FROM golang@sha256:450e3822c7a135e1463cd83e51c8e2eb03b86a02113c89424e6f0f8344bb4168
 
 RUN apt-get update
 
@@ -19,7 +19,6 @@ RUN . /root/.bashrc
 ENV PATH="${PATH}:/root/.foundry/bin"
 
 RUN foundryup
-
 
 ARG OP_GETH_CACHE_BREAK=1
 RUN git clone https://github.com/hemilabs/op-geth
@@ -52,5 +51,7 @@ RUN pnpm build
 WORKDIR /git/optimism/packages/contracts-bedrock
 RUN forge install
 RUN forge build
+
+COPY deployments /git/optimism/packages/contracts-bedrock/deployments
 
 WORKDIR /git/optimism
