@@ -7,6 +7,7 @@ package e2e_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
@@ -16,7 +17,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math/big"
-	"math/rand"
+	mathrand "math/rand/v2"
 	"net"
 	"net/url"
 	"os"
@@ -206,7 +207,7 @@ func createTestDB(ctx context.Context, t *testing.T) (bfgd.Database, string, *sq
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	dbn := rand.New(rand.NewSource(time.Now().UnixNano())).Intn(999999999)
+	dbn := mathrand.IntN(999999999)
 	dbName := fmt.Sprintf("%v_%d", testDBPrefix, dbn)
 
 	t.Logf("Creating test database %v", dbName)

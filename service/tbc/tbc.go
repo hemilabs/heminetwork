@@ -12,7 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -84,7 +84,6 @@ var log = loggo.GetLogger("tbc")
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
-	rand.Seed(time.Now().UnixNano()) // used for seeding, ok to be math.rand
 }
 
 func tx2Bytes(tx *wire.MsgTx) ([]byte, error) {
@@ -345,7 +344,7 @@ func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer,
 	minW := 5
 	maxW := 59
 	for {
-		holdOff := time.Duration(minW+rand.Intn(maxW-minW)) * time.Second
+		holdOff := time.Duration(minW+rand.IntN(maxW-minW)) * time.Second
 		var em string
 		peers, err := s.seed(ctx, peersWanted)
 		if err != nil {

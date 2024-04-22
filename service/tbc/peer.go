@@ -8,7 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"sync"
 	"time"
@@ -88,7 +88,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	defaultHandshakeTimeout := 5 * time.Second
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
-	msg := wire.NewMsgVersion(us, them, uint64(rand.Int63()), 0)
+	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
 	err := writeTimeout(defaultHandshakeTimeout, conn, msg, p.protocolVersion, p.network)
 	if err != nil {
 		return fmt.Errorf("could not write version message: %w", err)

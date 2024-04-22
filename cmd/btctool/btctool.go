@@ -11,7 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -142,7 +142,7 @@ func (p *peer) handshake(ctx context.Context) error {
 
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
-	msg := wire.NewMsgVersion(us, them, uint64(rand.Int63()), 0)
+	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
 	err := p.write(msg)
 	if err != nil {
 		return fmt.Errorf("could not write version message: %w", err)
@@ -384,7 +384,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 	//			}
 	//			// spew.Dump(me)
 	//			// spew.Dump(theirIP)
-	//			wmsg := wire.NewMsgVersion(me, you, uint64(rand.Int63()), 0)
+	//			wmsg := wire.NewMsgVersion(me, you, rand.Uint64(), 0)
 	//			wmsg.Services = wire.SFNodeNetwork
 	//			wmsg.DisableRelayTx = true
 	//			spew.Dump(wmsg)

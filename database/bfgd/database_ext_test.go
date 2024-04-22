@@ -6,12 +6,13 @@ package bfgd_test
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
+	mathrand "math/rand/v2"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -65,7 +66,7 @@ func createTestDB(ctx context.Context, t *testing.T) (bfgd.Database, *sql.DB, fu
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	dbn := rand.New(rand.NewSource(time.Now().UnixNano())).Intn(9999)
+	dbn := mathrand.IntN(9999)
 	dbName := fmt.Sprintf("%v_%d", testDBPrefix, dbn)
 
 	t.Logf("Creating test database %v", dbName)
