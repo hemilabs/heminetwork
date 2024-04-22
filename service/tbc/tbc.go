@@ -1034,7 +1034,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
 	defer log.Tracef("syncBlocks exit")
 
-	// Don't let want race. If we do the cache capacity will be overshot.
+	// Prevent race condition with 'want', which may cause the cache capacity to be exceeded.
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
