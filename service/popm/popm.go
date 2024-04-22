@@ -73,6 +73,8 @@ type Config struct {
 	PrometheusListenAddress string
 
 	RetryMineThreshold uint
+
+	StaticFee uint
 }
 
 func NewDefaultConfig() *Config {
@@ -309,7 +311,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	// Estimate BTC fees.
 	txLen := 285 // XXX for now all transactions are the same size
-	feePerKB := 1024
+	feePerKB := 1024 * m.cfg.StaticFee
 	feeAmount := (int64(txLen) * int64(feePerKB)) / 1024
 
 	// Check balance.

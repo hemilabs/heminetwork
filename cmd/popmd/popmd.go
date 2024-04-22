@@ -67,6 +67,12 @@ var (
 			Help:         "the number of L2 Keystones behind the latest seen that we are willing to remine, this is handy for re-orgs",
 			Print:        config.PrintAll,
 		},
+		"POPM_STATIC_FEE": config.Config{
+			Value:        &cfg.StaticFee,
+			DefaultValue: uint(1),
+			Help:         "specify the number of sats/vB the PoP Miner will pay for fees",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
