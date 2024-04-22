@@ -27,9 +27,9 @@ func callbackPanic(key any, value any) {
 	panic(fmt.Sprintf("unexpected callback: %v", spew.Sdump(key)))
 }
 
-func TestTTLExpire(t *testing.T) {
+func TestTTLExpireAuto(t *testing.T) {
 	count := 10
-	tm, err := New(count)
+	tm, err := New(count, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,24 +44,27 @@ func TestTTLExpire(t *testing.T) {
 	}
 	for i := 0; i < count; i++ {
 		key := strconv.Itoa(i)
-		if _, err := tm.Get(key); err != nil {
+		if _, _, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)
 		}
+	}
+	l := tm.Len()
+	if l != count {
+		t.Fatalf("invalid len got %v want %v", l, count)
 	}
 
 	t.Logf("waiting for timeouts")
 	wg.Wait()
 
-	tm.mtx.Lock()
-	defer tm.mtx.Unlock()
-	if len(tm.m) != 0 {
-		t.Fatalf("map not empty: %v", len(tm.m))
+	l = tm.Len()
+	if l != 0 {
+		t.Fatalf("invalid len got %v want %v", l, 0)
 	}
 }
 
-func TestTTLCancel(t *testing.T) {
+func TestTTLCancelAuto(t *testing.T) {
 	count := 10
-	tm, err := New(count)
+	tm, err := New(count, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,9 +77,13 @@ func TestTTLCancel(t *testing.T) {
 		wg.Add(1)
 		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callbackPanic, callback)
 	}
+	l := tm.Len()
+	if l != count {
+		t.Fatalf("invalid len got %v want %v", l, count)
+	}
 	for i := 0; i < count; i++ {
 		key := strconv.Itoa(i)
-		if _, err := tm.Get(key); err != nil {
+		if _, _, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)
 		}
 		if err = tm.Cancel(key); err != nil {
@@ -87,9 +94,124 @@ func TestTTLCancel(t *testing.T) {
 	t.Logf("waiting for cancels")
 	wg.Wait()
 
-	tm.mtx.Lock()
-	defer tm.mtx.Unlock()
-	if len(tm.m) != 0 {
-		t.Fatalf("map not empty: %v", len(tm.m))
+	l = tm.Len()
+	if l != 0 {
+		t.Fatalf("invalid len got %v want %v", l, 0)
+	}
+}
+
+func TestTTLExpire(t *testing.T) {
+	count := 10
+	tm, err := New(count, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callback, nil)
+	}
+	for i := 0; i < count; i++ {
+		key := strconv.Itoa(i)
+		if _, _, err := tm.Get(key); err != nil {
+			t.Fatalf("%v: %v", key, err)
+		}
+	}
+	l := tm.Len()
+	if l != count {
+		t.Fatalf("invalid len got %v want %v", l, count)
+	}
+
+	t.Logf("waiting for timeouts")
+	wg.Wait()
+
+	l = tm.Len()
+	if l != count {
+		t.Fatalf("invalid len got %v want %v", l, count)
+	}
+
+	// Check that all items are expired
+	for i := 0; i < count; i++ {
+		key := strconv.Itoa(i)
+		if _, expired, err := tm.Get(key); err != nil {
+			t.Fatalf("%v: %v", key, err)
+		} else if !expired {
+			t.Fatalf("%v: got %v want %v", key, expired, false)
+		}
+	}
+}
+
+func TestTTLCancel(t *testing.T) {
+	count := 10
+	tm, err := New(count, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callbackPanic, callback)
+	}
+	l := tm.Len()
+	if l != count {
+		t.Fatalf("invalid len got %v want %v", l, count)
+	}
+	for i := 0; i < count; i++ {
+		key := strconv.Itoa(i)
+		if _, _, err := tm.Get(key); err != nil {
+			t.Fatalf("%v: %v", key, err)
+		}
+		if err = tm.Cancel(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Logf("waiting for cancels")
+	wg.Wait()
+
+	l = tm.Len()
+	if l != count {
+		t.Fatalf("invalid len got %v want %v", l, count)
+	}
+}
+
+func TestTTLDelete(t *testing.T) {
+	count := 10
+	tm, err := New(count, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	for i := 0; i < count; i++ {
+		tm.Put(ctx, time.Second, strconv.Itoa(i), i, callbackPanic,
+			callbackPanic)
+	}
+	l := tm.Len()
+	if l != count {
+		t.Fatalf("invalid len got %v want %v", l, count)
+	}
+	for i := 0; i < count; i++ {
+		key := strconv.Itoa(i)
+		if expired, err := tm.Delete(key); err != nil {
+			t.Fatal(err)
+		} else if expired {
+			t.Fatalf("%v: expired got %v wamted %v", key, expired, false)
+		}
+	}
+
+	l = tm.Len()
+	if l != 0 {
+		t.Fatalf("invalid len got %v want %v", l, 0)
 	}
 }
