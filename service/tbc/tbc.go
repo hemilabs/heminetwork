@@ -1060,7 +1060,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		if err != nil {
 			// This can happen during startup or when the network
 			// is starved.
-			// Probably too loud, remove later.
+			// XXX: Probably too loud, remove later.
 			log.Errorf("random peer %v: %v", hashS, err)
 			return
 		}
