@@ -651,8 +651,6 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		return
 	}
 
-	// XXX kickstart block download, should happen in getHeaders
-
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -974,7 +972,7 @@ func (s *Server) utxoIndexer(ctx context.Context) {
 	}
 
 	// When utxo sync completes kick off tx sync
-	go s.txIndexer(ctx)
+	s.txIndexer(ctx)
 }
 
 func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash) {
@@ -1067,12 +1065,12 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		s.blocks.Put(ctx, defaultBlockPendingTimeout, hashS, rp,
 			s.blockExpired, nil)
-		go s.downloadBlock(ctx, rp, hash)
+		s.downloadBlock(ctx, rp, hash)
 	}
 
 	if len(bm) == 0 {
 		// if we are complete we need to kick off utxo sync
-		go s.utxoIndexer(ctx)
+		s.utxoIndexer(ctx)
 	}
 }
 
@@ -1096,7 +1094,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			return
 		}
 
-		go s.syncBlocks(ctx)
+		s.syncBlocks(ctx)
 
 		return
 	}
@@ -1295,7 +1293,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	}
 
 	// kick cache
-	go s.syncBlocks(ctx)
+	s.syncBlocks(ctx)
 }
 
 func (s *Server) insertGenesis(ctx context.Context) ([]tbcd.BlockHeader, error) {
