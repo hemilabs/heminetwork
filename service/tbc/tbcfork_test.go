@@ -3,6 +3,7 @@ package tbc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -21,30 +22,70 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
 
-type heightHeader struct {
-	height int
-	block  *btcutil.Block
-}
-
 type btcNode struct {
-	mtx    sync.RWMutex
-	t      *testing.T
-	port   string
-	chain  map[string]heightHeader
-	height int
-	best   *chainhash.Hash
-	params *chaincfg.Params
+	mtx            sync.RWMutex
+	t              *testing.T
+	port           string
+	chain          map[string]*btcutil.Block
+	blocksAtHeight map[int32][]*btcutil.Block
+	height         int
+	best           []*chainhash.Hash
+	params         *chaincfg.Params
 }
 
 func newFakeNode(t *testing.T, port string) (*btcNode, error) {
-	return &btcNode{
-		t:      t,
-		port:   port,
-		chain:  make(map[string]heightHeader, 10),
-		height: 0,
-		params: &chaincfg.RegressionNetParams,
-		best:   chaincfg.RegressionNetParams.GenesisHash,
-	}, nil
+	node := &btcNode{
+		t:              t,
+		port:           port,
+		chain:          make(map[string]*btcutil.Block, 10),
+		blocksAtHeight: make(map[int32][]*btcutil.Block, 10),
+		height:         0,
+		params:         &chaincfg.RegressionNetParams,
+		best:           []*chainhash.Hash{chaincfg.RegressionNetParams.GenesisHash},
+	}
+	genesis := btcutil.NewBlock(chaincfg.RegressionNetParams.GenesisBlock)
+	genesis.SetHeight(0)
+	node.chain[chaincfg.RegressionNetParams.GenesisHash.String()] = genesis
+
+	return node, nil
+}
+
+func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	if len(m.BlockLocatorHashes) != 1 {
+		return nil, fmt.Errorf("get headers: invalid count got %v wanted %v",
+			len(m.BlockLocatorHashes), 1)
+	}
+	locator := m.BlockLocatorHashes[0]
+	from, ok := b.chain[locator.String()]
+	if !ok {
+		return nil, fmt.Errorf("get headers: locator not found %v", locator)
+	}
+
+	b.t.Logf("start from %v", from.Height())
+	nmh := wire.NewMsgHeaders()
+	height := from.Height() + 1
+	for i := int32(0); i < 2000; i++ {
+		bs, ok := b.blocksAtHeight[height]
+		if !ok {
+			b.t.Logf("no more blocks at: %v", height)
+			return nmh, nil
+		}
+		if len(bs) != 1 {
+			return nil, fmt.Errorf("fork at height: %v", height)
+		}
+		err := nmh.AddBlockHeader(&bs[0].MsgBlock().Header)
+		if err != nil {
+			return nil, fmt.Errorf("add header: %v", err)
+		}
+
+		b.t.Logf("%v: %v", height, bs[0].MsgBlock().Header.BlockHash())
+		height++
+	}
+
+	return nmh, nil
 }
 
 func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
@@ -95,8 +136,44 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 			}
 			_ = m
 
+		case *wire.MsgGetHeaders:
+			b.t.Logf("get headers %v", spew.Sdump(m))
+			headers, err := b.handleGetHeaders(m)
+			if err != nil {
+				b.t.Logf("write %v: %v", p, err)
+				return
+			}
+			// b.t.Logf("%v", spew.Sdump(headers))
+			err = p.write(time.Second, headers)
+			if err != nil {
+				b.t.Logf("write %v: %v", p, err)
+				return
+			}
+
+		case *wire.MsgGetData:
+			panic(spew.Sdump(m))
+
 		default:
 			b.t.Logf("unhandled command: %v", spew.Sdump(msg))
+		}
+	}
+}
+
+func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	for {
+		block, ok := b.chain[parent.String()]
+		if !ok {
+			return fmt.Errorf("parent not found: %v", parent)
+		}
+		b.t.Logf("%v: %v", block.Height(), block.Hash())
+
+		bh := block.MsgBlock().Header
+		parent = &bh.PrevBlock
+		if block.Height() == 0 {
+			return nil
 		}
 	}
 }
@@ -106,7 +183,10 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 // Copyright (c) 2014-2016 The btcsuite developers
 // Use of this source code is governed by an ISC
 // license that can be found in the LICENSE file.
-var CoinbaseFlags = "/P2SH/btcd/"
+var (
+	CoinbaseFlags = "/P2SH/btcd/"
+	vbTopBits     = 0x20000000
+)
 
 func standardCoinbaseScript(nextBlockHeight int32, extraNonce uint64) ([]byte, error) {
 	return txscript.NewScriptBuilder().AddInt64(int64(nextBlockHeight)).
@@ -152,10 +232,7 @@ func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockH
 
 // end borrowed from btcd
 
-func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address) (*wire.MsgBlock, error) {
-	block := &wire.MsgBlock{}
-
-	nextBlockHeight := int32(1)
+func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash) (*btcutil.Block, error) {
 	extraNonce := uint64(0)
 	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
 	if err != nil {
@@ -167,33 +244,76 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address) (*w
 		return nil, err
 	}
 
-	return block, nil
+	reqDifficulty := uint32(0xffffff)
+
+	var blockTxns []*btcutil.Tx
+	blockTxns = append(blockTxns, coinbaseTx)
+
+	nextBlockVersion := int32(vbTopBits)
+	var msgBlock wire.MsgBlock
+	msgBlock.Header = wire.BlockHeader{
+		Version:    nextBlockVersion,
+		PrevBlock:  *parent,
+		MerkleRoot: blockchain.CalcMerkleRoot(blockTxns, false),
+		Timestamp:  time.Now(),
+		Bits:       reqDifficulty,
+	}
+	for _, tx := range blockTxns {
+		if err := msgBlock.AddTransaction(tx.MsgTx()); err != nil {
+			return nil, err
+		}
+	}
+
+	b := btcutil.NewBlock(&msgBlock)
+	b.SetHeight(nextBlockHeight)
+	return b, nil
 }
 
-func (b *btcNode) Best() *chainhash.Hash {
+func (b *btcNode) insertBlock(block *btcutil.Block) (int, error) {
+	b.chain[block.Hash().String()] = block
+	bAtHeight := b.blocksAtHeight[block.Height()]
+	b.blocksAtHeight[block.Height()] = append(bAtHeight, block)
+	return len(b.blocksAtHeight[block.Height()]), nil
+}
+
+func (b *btcNode) Best() []*chainhash.Hash {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	return b.best
 }
 
-func (b *btcNode) Mine(count int, from *chainhash.Hash) (*wire.MsgBlock, error) {
-	best := b.Best()
-	b.t.Logf("Best: %v", spew.Sdump(best))
+func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*btcutil.Block, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
 
-	block := &wire.MsgBlock{}
+	parent, ok := b.chain[from.String()]
+	if !ok {
+		return nil, errors.New("not found")
+	}
 
-	// bh := wire.NewBlockHeader(1, best, mrh, bits, nonce)
+	blocks := make([]*btcutil.Block, 0, count)
+	for i := 0; i < count; i++ {
+		nextBlockHeight := parent.Height() + 1
+		block, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
+			parent.Hash())
+		if err != nil {
+			return nil, fmt.Errorf("height %v: %v", nextBlockHeight, err)
+		}
+		blocks = append(blocks, block)
+		b.t.Logf("mined %v: %v", nextBlockHeight, block.Hash())
 
-	//var msgBlock wire.MsgBlock
-	//msgBlock.Header = wire.BlockHeader{
-	//	Version:    nextBlockVersion,
-	//	PrevBlock:  *from,
-	//	MerkleRoot: blockchain.CalcMerkleRoot(blockTxns, false),
-	//	Timestamp:  time.Now(),
-	//	Bits:       reqDifficulty,
-	//}
+		n, err := b.insertBlock(block)
+		if err != nil {
+			return nil, fmt.Errorf("inser height %v: %v", nextBlockHeight, err)
+		}
+		_ = n
 
-	return block, nil
+		parent = block
+	}
+	// b.t.Logf("Best: %v", spew.Sdump(blocks))
+	b.best = []*chainhash.Hash{parent.Hash()}
+
+	return blocks, nil
 }
 
 func (b *btcNode) Run(ctx context.Context) error {
@@ -251,11 +371,16 @@ func TestFork(t *testing.T) {
 	}()
 
 	startHash := n.Best()
-	_, err = n.Mine(10, startHash)
+	_, err = n.Mine(10, startHash[0], address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(3 * time.Second) // XXX
+	err = n.dumpChain(n.Best()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
+	time.Sleep(1 * time.Second) // XXX
 
 	//t.Logf("connecting")
 	//d := &net.Dialer{}
