@@ -433,7 +433,7 @@ func TestFork(t *testing.T) {
 		LevelDBHome:   "/tmp/xxx", // XXX
 		ListenAddress: tbcapi.DefaultListen,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
-		MaxCachedTxs:            1, // XXX
+		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PrometheusListenAddress: "",
 	}
