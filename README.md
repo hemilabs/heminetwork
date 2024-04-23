@@ -150,16 +150,3 @@ data and give you a fresh start
 ```
 docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 ```
-
-
-
-### Running the full network tests
-
-This runs a test with an entirely local heminet, it uses bitcoind in regtest
-mode for the bitcoin chain
-
-Prerequisites: `docker`
-
-```
-make networktest
-```
