@@ -38,11 +38,11 @@ func TestTTLExpireAuto(t *testing.T) {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
+	for i := range count {
 		wg.Add(1)
 		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callback, nil)
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		key := strconv.Itoa(i)
 		if _, _, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)
@@ -73,7 +73,7 @@ func TestTTLCancelAuto(t *testing.T) {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
+	for i := range count {
 		wg.Add(1)
 		tm.Put(ctx, time.Second, strconv.Itoa(i), &wg, callbackPanic, callback)
 	}
@@ -81,7 +81,7 @@ func TestTTLCancelAuto(t *testing.T) {
 	if l != count {
 		t.Fatalf("invalid len got %v want %v", l, count)
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		key := strconv.Itoa(i)
 		if _, _, err := tm.Get(key); err != nil {
 			t.Fatalf("%v: %v", key, err)

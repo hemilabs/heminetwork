@@ -92,7 +92,7 @@ func fixupStruct(v reflect.Value) {
 	if v.Type().Kind() != reflect.Struct {
 		return
 	}
-	for i := 0; i < v.NumField(); i++ {
+	for i := range v.NumField() {
 		fv := v.Field(i)
 		fk := fv.Type().Kind()
 		if fk == reflect.Ptr {

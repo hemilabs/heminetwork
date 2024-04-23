@@ -84,32 +84,32 @@ import (
 // run with go test -v -bench . -benchmem -run=BenchmarkMap
 func allocateMap(size int) map[tbcd.Outpoint]tbcd.Utxo {
 	m := make(map[tbcd.Outpoint]tbcd.Utxo, size)
-	for i := 0; i < size; i++ {
+	for range size {
 		m[tbcd.Outpoint{}] = tbcd.Utxo{}
 	}
 	return m
 }
 
 func BenchmarkMap10(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		allocateMap(10)
 	}
 }
 
 func BenchmarkMap100(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		allocateMap(100)
 	}
 }
 
 func BenchmarkMap10000(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		allocateMap(10000)
 	}
 }
 
 func BenchmarkMap100000(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		allocateMap(100000)
 	}
 }
@@ -119,7 +119,7 @@ func BenchmarkMap100000(b *testing.B) {
 // Or, about 183 per cache entry. 100 bytes for the key and value (36+44) and
 // 83 in overhead.
 func BenchmarkMap1000000(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		allocateMap(1e6)
 	}
 }

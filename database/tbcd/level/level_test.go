@@ -120,7 +120,7 @@ func TestKeyOrder(t *testing.T) {
 	// Create slice in reverse order
 	count := uint64(10)
 	keys := make(ByteSlice, count)
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		b := make([]byte, 8)
 		binary.BigEndian.PutUint64(b, i)
 		hash := chainhash.DoubleHashH(b)
@@ -132,7 +132,7 @@ func TestKeyOrder(t *testing.T) {
 	sort.Sort(keys)
 	log.Infof("%v", spew.Sdump(keys))
 
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		height, hash := keyToHeightHash(keys[i])
 		if i != height {
 			t.Fatalf("invalid height wanted %v got %v", i, height)

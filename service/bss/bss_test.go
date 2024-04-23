@@ -91,7 +91,7 @@ func TestConvertPopTxsToPopPayouts(t *testing.T) {
 				},
 			},
 			extraSetup: func(tcd *testCaseDef) {
-				for i := 0; i < 360; i++ {
+				for range 360 {
 					tcd.popTxs = append(tcd.popTxs, bfgapi.PopTx{
 						PopMinerPublicKey: popMinerPublicKeyOne,
 					})
@@ -116,7 +116,7 @@ func TestConvertPopTxsToPopPayouts(t *testing.T) {
 				var ab byte = 0
 				var bb byte = 0
 
-				for i := 0; i < len(a.MinerAddress); i++ {
+				for i := range len(a.MinerAddress) {
 					ab = a.MinerAddress[i]
 					bb = b.MinerAddress[i]
 					if ab != bb {

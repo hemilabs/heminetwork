@@ -42,7 +42,7 @@ To build, you must have the following installed:
 
 * `git`
 * `make`
-* `go 1.21+`
+* [Go v1.22+](https://go.dev/dl/)
 
 First, clone the repository:
 

@@ -1883,7 +1883,7 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 func getEndpointWithRetries(ctx context.Context, container testcontainers.Container, retries int) (string, error) {
 	backoff := 500 * time.Millisecond
 	var lastError error
-	for i := 0; i < retries; i++ {
+	for range retries {
 		endpoint, err := container.Endpoint(ctx, "")
 		if err != nil {
 			lastError = err

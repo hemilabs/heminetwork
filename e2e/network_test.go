@@ -506,7 +506,7 @@ func createPopm(ctx context.Context, t *testing.T, bfgUrl string) testcontainers
 func getEndpointWithRetries(ctx context.Context, container testcontainers.Container, retries int) (string, error) {
 	backoff := 500 * time.Millisecond
 	var lastError error
-	for i := 0; i < retries; i++ {
+	for range retries {
 		endpoint, err := container.Endpoint(ctx, "")
 		if err != nil {
 			lastError = err
@@ -523,7 +523,7 @@ func getEndpointWithRetries(ctx context.Context, container testcontainers.Contai
 func getEndpointWithPortAndRetries(ctx context.Context, container testcontainers.Container, retries int, port nat.Port) (string, error) {
 	backoff := 500 * time.Millisecond
 	var lastError error
-	for i := 0; i < retries; i++ {
+	for range retries {
 		endpoint, err := container.PortEndpoint(ctx, port, "")
 		if err != nil {
 			lastError = err
