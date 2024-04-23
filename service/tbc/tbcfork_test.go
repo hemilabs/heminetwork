@@ -1,3 +1,7 @@
+// Copyright (c) 2024 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package tbc
 
 import (
@@ -399,7 +403,7 @@ func TestFork(t *testing.T) {
 	go func() {
 		err = n.Run(ctx)
 		if err != nil {
-			t.Fatal(err)
+			panic(err)
 		}
 	}()
 
@@ -436,7 +440,7 @@ func TestFork(t *testing.T) {
 	go func() {
 		err = s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatal(err)
+			panic(err)
 		}
 	}()
 
