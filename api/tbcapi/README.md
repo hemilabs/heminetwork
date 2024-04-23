@@ -24,6 +24,19 @@ A serialised block header has the following data:
 - `bits` is the difficulty target for the block.
 - `nonce` is the nonce used to generate the block.
 
+#### Address
+
+An address is an encoded Bitcoin address.
+Supported address types are P2PKH, P2SH, P2WPKH, P2WSH, and P2TR.
+
+#### UTXO
+
+A serialised UTXO has the following data:
+
+- `tx_id` is the transaction ID encoded as a hexadecimal string.
+- `value` is the value of the UTXO.
+- `out_index` is the output index for the UTXO.
+
 ## Block Headers by Height
 
 ### Raw data
@@ -90,7 +103,7 @@ An example response for a request with id `68656d69` and height `43111`:
 
 ##### Payload
 
-- `height` is the height to at which block headers should be retrieved.
+- `height` is the height at which block headers should be retrieved.
 
 ##### Example
 
@@ -259,12 +272,11 @@ Retrieve the balance for an address.
 
 ##### Payload
 
-- `address` is the address to retrieve the balance for.
-  Supported address types are P2PKH, P2SH, P2WPKH, P2WSH, and P2TR.
+- `address` is the [address](#address) the balance should be retrieved for.
 
 ##### Example
 
-An example request to retrieve the balance for the address `mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa`:
+An example request to retrieve the balance for the address `myqzZmRvoXmrhsrM5STiMGtNRxCFArHWRd`:
 
 ```json
 {
@@ -298,4 +310,103 @@ An example response for a request with id `68656d69`, if the address's balance i
     "balance": 0
   }
 }
+```
+
+## UTXOs by Address
+
+### Raw data
+
+| Type     | `command` value                        |
+|----------|----------------------------------------|
+| Request  | `tbcapi-utxos-by-address-raw-request`  |
+| Response | `tbcapi-utxos-by-address-raw-response` |
+
+#### Request
+
+##### Payload
+
+- `address` is the [address](#address) to retrieve the UTXOs for.
+- `start` is the start index for the UTXOs that should be included in the response (or the number of UTXOs that should be skipped).
+- `count` is the maximum number of UTXOs that should be included in the response.
+
+##### Example
+
+An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa`:
+
+```json
+{
+  "header": {
+    "command": "tbcapi-utxos-by-address-raw-request",
+    "id": "68656d69"
+  },
+  "payload": {
+    "address": "mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa",
+    "start": 0,
+    "count": 5
+  }
+}
+```
+
+#### Response
+
+##### Payload
+
+- `utxos` is an array of the best known block headers encoded as hexadecimal strings, or `null` if there are no UTXOs
+  for the address.
+
+##### Example
+
+An example response for a request with id `68656d69`, requesting five UTXOs for the
+address `mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa`:
+
+```json
+TODO
+```
+
+### Serialised
+
+| Type     | `command` value                    |
+|----------|------------------------------------|
+| Request  | `tbcapi-utxos-by-address-request`  |
+| Response | `tbcapi-utxos-by-address-response` |
+
+#### Request
+
+##### Payload
+
+- `address` is the [address](#address) to retrieve the UTXOs for.
+- `start` is the start index for the UTXOs that should be included in the response (or the number of UTXOs that should be skipped).
+- `count` is the maximum number of UTXOs that should be included in the response.
+
+##### Example
+
+An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa`:
+
+```json
+{
+  "header": {
+    "command": "tbcapi-utxos-by-address-raw-request",
+    "id": "68656d69"
+  },
+  "payload": {
+    "address": "mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa",
+    "start": 0,
+    "count": 5
+  }
+}
+```
+
+#### Response
+
+##### Payload
+
+- `utxos` is an array of known [UTXOs](#utxo). The maximum number of items in this array can be changed
+  with `count` in the request.
+
+##### Example
+
+An example response for a request with id `68656d69`, if the best height was `2587400`:
+
+```json
+TODO
 ```
