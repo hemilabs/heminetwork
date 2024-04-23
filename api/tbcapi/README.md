@@ -1,11 +1,13 @@
 # Hemi Tiny Bitcoin Daemon RPC
 
-*Last updated April 19th, 2024.*
+*Last updated April 24th, 2024.*
 
 When the `TBC_ADDRESS` environment variable is set, the `tbcd` daemon listens on the provided address.
 The RPC protocol is WebSocket-based and uses a standard request/response model.
 
 [`hemictl`](../../cmd/hemictl) is a reference implementation of an RPC client.
+
+[View the raw Go types used in TBC's RPC commands `api/tbcapi/tbcapi.go`](tbcapi.go).
 
 ## Protocol
 
