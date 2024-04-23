@@ -15,7 +15,7 @@ Please see [protocol/README.md](../protocol/README.md) for more information abou
 
 #### Block Header
 
-A serialised block header has the following data:
+A serialised block header contains the following data:
 
 - `version` is the version of the block.
 - `prev_hash` is the hash of the previous block header in the blockchain.
@@ -31,11 +31,43 @@ Supported address types are P2PKH, P2SH, P2WPKH, P2WSH, and P2TR.
 
 #### UTXO
 
-A serialised UTXO has the following data:
+A serialised UTXO contains the following data:
 
 - `tx_id` is the transaction ID encoded as a hexadecimal string.
 - `value` is the value of the UTXO.
 - `out_index` is the output index for the UTXO.
+
+#### Transaction
+
+A serialised transaction contains the following data:
+
+- `version` is the transaction version.
+- `lock_time` is the block height or timestamp at which the transaction becomes final.
+- `tx_in` is an array of [transaction inputs](#transaction-input).
+- `tx_out` is an array of [transaction outputs](#transaction-output).
+
+#### Transaction Input
+
+A serialised transaction input contains the following data:
+
+- `outpoint` is the [outpoint](#outpoint) for the previous transaction output.
+- `signature_script` is the signature script for the transaction.
+- `witness` is an array of the transaction witnesses, encoded as hexadecimal strings.
+- `sequence` is the transaction sequence number.
+
+#### Transaction Output
+
+A serialised transaction output contains the following data:
+
+- `value` is the value of the transaction output in satoshis.
+- `pk_script` is the pubkey script of the transaction output, encoded as a hexadecimal string.
+
+#### Outpoint
+
+A serialised outpoint contains the following data:
+
+- `hash` is the ID of the transaction holding the output to be spent.
+- `index` is the index of the specific output to spend from the transaction.
 
 ## Block Headers by Height
 
@@ -351,7 +383,7 @@ An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSz
 
 ##### Payload
 
-- `utxos` is an array of the best known block headers encoded as hexadecimal strings, or `null` if there are no UTXOs
+- `utxos` is an array of known UTXOs for the address, encoded as hexadecimal strings, or `null` if there are no UTXOs
   for the address.
 
 ##### Example
@@ -406,6 +438,96 @@ An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSz
 ##### Example
 
 An example response for a request with id `68656d69`, if the best height was `2587400`:
+
+```json
+TODO
+```
+
+## Transaction by ID
+
+### Raw data
+
+| Type     | `command` value                 |
+|----------|---------------------------------|
+| Request  | `tbcapi-tx-by-id-raw-request`   |
+| Response | `ttbcapi-tx-by-id-raw-response` |
+
+#### Request
+
+##### Payload
+
+- `tx_id` is the ID of the transaction to retrieve, encoded as a hexadecimal string.
+
+##### Example
+
+An example request to retrieve the transaction `ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405`:
+
+```json
+{
+  "header": {
+    "command": "tbcapi-tx-by-id-raw-request",
+    "id": "68656d69"
+  },
+  "payload": {
+    "tx_id": "ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405"
+  }
+}
+```
+
+#### Response
+
+##### Payload
+
+- `tx` is the transaction, encoded as a hexadecimal string.
+
+##### Example
+
+An example response for a request with id `68656d69`, requesting the
+transaction `ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405`:
+
+```json
+TODO
+```
+
+### Serialised
+
+| Type     | `command` value            |
+|----------|----------------------------|
+| Request  | `tbcapi-tx-by-id-request`  |
+| Response | `tbcapi-tx-by-id-response` |
+
+#### Request
+
+##### Payload
+
+- `tx_id` is the ID of the transaction to retrieve, encoded as a hexadecimal string.
+
+##### Example
+
+An example request to retrieve the transaction `ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405`:
+
+```json
+{
+  "header": {
+    "command": "tbcapi-tx-by-id-request",
+    "id": "68656d69"
+  },
+  "payload": {
+    "tx_id": "ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405"
+  }
+}
+```
+
+#### Response
+
+##### Payload
+
+- `tx` is the requested [transaction](#transaction), if found, otherwise `null`.
+
+##### Example
+
+An example response for a request with id `68656d69`, requesting the
+transaction `ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405`:
 
 ```json
 TODO
