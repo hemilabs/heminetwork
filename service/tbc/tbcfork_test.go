@@ -92,7 +92,7 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
-	b.t.Logf("get data: %v", spew.Sdump(m))
+	// b.t.Logf("get data: %v", spew.Sdump(m))
 	if len(m.InvList) != 1 {
 		return nil, fmt.Errorf("not supported multi invlist requests")
 	}
@@ -428,11 +428,11 @@ func TestFork(t *testing.T) {
 	//}
 
 	cfg := &Config{
-		AutoIndex:               false, // XXX for now
-		BlockSanity:             false,
-		LevelDBHome:             "/tmp/xxx", // XXX
-		ListenAddress:           tbcapi.DefaultListen,
-		LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		AutoIndex:     true, // XXX for now
+		BlockSanity:   false,
+		LevelDBHome:   "/tmp/xxx", // XXX
+		ListenAddress: tbcapi.DefaultListen,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1, // XXX
 		Network:                 networkLocalnet,
 		PrometheusListenAddress: "",
