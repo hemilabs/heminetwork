@@ -404,6 +404,8 @@ func TestFork(t *testing.T) {
 	}()
 
 	startHash := n.Best()
+	count := 10
+	expectedHeight := uint64(count)
 	_, err = n.Mine(10, startHash[0], address)
 	if err != nil {
 		t.Fatal(err)
@@ -415,22 +417,11 @@ func TestFork(t *testing.T) {
 	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
 	time.Sleep(1 * time.Second) // XXX
 
-	//t.Logf("connecting")
-	//d := &net.Dialer{}
-	//conn, err := d.DialContext(ctx, "tcp", "127.0.0.1:18444")
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//t.Logf("writing")
-	//_, err = conn.Write([]byte("moo"))
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-
+	// Connect tbc service
 	cfg := &Config{
 		AutoIndex:     true, // XXX for now
 		BlockSanity:   false,
-		LevelDBHome:   "/tmp/xxx", // XXX
+		LevelDBHome:   t.TempDir(),
 		ListenAddress: tbcapi.DefaultListen,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
@@ -442,8 +433,29 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = s.Run(ctx)
-	if err != nil {
-		t.Fatal(err)
+	go func() {
+		err = s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+
+		// See if we are synced
+		si := s.Synced(ctx)
+		if !(si.Synced && si.BlockHeaderHeight == expectedHeight) {
+			log.Infof("not synced")
+			continue
+		}
+
+		// Execute tests
+		return
+
 	}
 }
