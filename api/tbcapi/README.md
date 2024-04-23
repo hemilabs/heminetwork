@@ -13,6 +13,14 @@ The RPC protocol is WebSocket-based and uses a standard request/response model.
 
 Please see [protocol/README.md](../protocol/README.md) for more information about the underlying RPC protocol.
 
+### Errors
+
+If an error occurs during a request, the payload of the response contain an `error` value with the following data:
+
+- `timestamp` is the time at which the error occurred, represented in Unix seconds.
+- `trace` (internal errors only) is a unique string which can be used to trace errors between a server and client.
+- `message` is the error message. If the error was an internal server error, this will be `internal error`.
+
 ### Serialised types
 
 #### Block Header
