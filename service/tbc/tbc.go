@@ -972,7 +972,7 @@ func (s *Server) utxoIndexer(ctx context.Context) {
 	}
 
 	// When utxo sync completes kick off tx sync
-	s.txIndexer(ctx)
+	go s.txIndexer(ctx)
 }
 
 func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash) {
@@ -986,6 +986,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 			Hash: *ch,
 		})
 
+	log.Infof("=== %v", spew.Sdump(getData))
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	err := p.write(defaultCmdTimeout, getData)
@@ -1065,12 +1066,12 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		s.blocks.Put(ctx, defaultBlockPendingTimeout, hashS, rp,
 			s.blockExpired, nil)
-		s.downloadBlock(ctx, rp, hash)
+		go s.downloadBlock(ctx, rp, hash)
 	}
 
 	if len(bm) == 0 {
 		// if we are complete we need to kick off utxo sync
-		s.utxoIndexer(ctx)
+		go s.utxoIndexer(ctx)
 	}
 }
 
@@ -1094,7 +1095,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			return
 		}
 
-		s.syncBlocks(ctx)
+		go s.syncBlocks(ctx)
 
 		return
 	}
@@ -1293,7 +1294,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	}
 
 	// kick cache
-	s.syncBlocks(ctx)
+	go s.syncBlocks(ctx)
 }
 
 func (s *Server) insertGenesis(ctx context.Context) ([]tbcd.BlockHeader, error) {
