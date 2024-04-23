@@ -88,6 +88,28 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 	return nmh, nil
 }
 
+func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	b.t.Logf("get data: %v", spew.Sdump(m))
+	if len(m.InvList) != 1 {
+		return nil, fmt.Errorf("not supported multi invlist requests")
+	}
+	for _, v := range m.InvList {
+		if v.Type != wire.InvTypeBlock {
+			return nil, fmt.Errorf("unsuported data type: %v", v.Type)
+		}
+		block, ok := b.chain[v.Hash.String()]
+		if !ok {
+			return nil, fmt.Errorf("block not found: %v", v.Hash)
+		}
+		return block.MsgBlock(), nil
+	}
+
+	return nil, errors.New("not reached")
+}
+
 func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 	b.t.Logf("got conn %v", conn.RemoteAddr())
 	defer b.t.Logf("exit conn %v", conn.RemoteAddr())
@@ -151,7 +173,18 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 			}
 
 		case *wire.MsgGetData:
-			panic(spew.Sdump(m))
+			b.t.Logf("get data %v", spew.Sdump(m))
+			data, err := b.handleGetData(m)
+			if err != nil {
+				b.t.Logf("write %v: %v", p, err)
+				return
+			}
+			// b.t.Logf("%v", spew.Sdump(data))
+			err = p.write(time.Second, data)
+			if err != nil {
+				b.t.Logf("write %v: %v", p, err)
+				return
+			}
 
 		default:
 			b.t.Logf("unhandled command: %v", spew.Sdump(msg))

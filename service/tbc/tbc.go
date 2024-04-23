@@ -986,7 +986,6 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 			Hash: *ch,
 		})
 
-	log.Infof("=== %v", spew.Sdump(getData))
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	err := p.write(defaultCmdTimeout, getData)
