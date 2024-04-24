@@ -86,14 +86,16 @@
 
 *Last updated April 24th, 2024.*
 
-When the `TBC_ADDRESS` environment variable is set, the `tbcd` daemon listens on the provided address.
-The RPC protocol is WebSocket-based and uses a standard request/response model.
+When the `TBC_ADDRESS` environment variable is set (e.g. `TBC_ADDRESS=localhost:8082`), the `tbcd` daemon listens on the
+provided address.
 
 [`hemictl`](../../cmd/hemictl) is a reference implementation of an RPC client.
 
 [View the raw Go types used in TBC's RPC commands `api/tbcapi/tbcapi.go`](tbcapi.go).
 
 ## Protocol
+
+The RPC protocol is WebSocket-based and uses a standard request/response model.
 
 Please see [protocol/README.md](../protocol/README.md) for more information about the underlying RPC protocol.
 
