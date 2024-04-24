@@ -50,21 +50,15 @@ go install ./cmd/tbcd/
 
 On some systems, you may need to increase the limits for the number of open files, memory and the maximum stack size.
 
-If you run into open file or OOM errors while running `tbcd`, run the following commands in the shell that you will
-run `tbcd` in:
+At startup, TBC will attempt to verify these limits on supported platforms, to ensure that they are set to values that
+will allow TBC to run without failing.
 
-```shell
-ulimit -n 8192
-ulimit -s 16384
-ulimit -m unlimited
-ulimit -d unlimited
+If you see an error similar to the following, you will need to adjust the limits on your system in order to run TBC.
+```
+ulimit: memory: limit too low got X, want X
 ```
 
-You can confirm these settings with:
-
-```shell
-ulimit -a
-```
+Changing limits is OS-specific, but can usually be done using the `ulimit` command.
 
 ## Runtime settings
 
