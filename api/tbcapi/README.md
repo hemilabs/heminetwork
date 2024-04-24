@@ -113,10 +113,10 @@ A serialised block header contains the following data:
 
 - `version` is the version of the block.
 - `prev_hash` is the hash of the previous block header in the blockchain.
-- `merkle_root` is the merkle tree reference to hash of all transactions for the block.
-- `timestamp` is the time the block was created, represented in Unix seconds.
+- `merkle_root` is the hash derived from the hashes of all transactions included in the block.
+- `timestamp` is the time the miner began hashing the header, represented in Unix seconds.
 - `bits` is the difficulty target for the block.
-- `nonce` is the nonce used to generate the block.
+- `nonce` is the nonce used to create the hash that is less than or equal to the target threshold.
 
 #### Address
 
