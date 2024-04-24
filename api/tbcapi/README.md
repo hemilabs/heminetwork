@@ -459,7 +459,7 @@ An example response for a request with id `68656d69`, if the address's balance i
 
 ##### Example
 
-An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa`:
+An example request to retrieve five UTXOs for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 
 ```json
 {
@@ -468,7 +468,7 @@ An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSz
     "id": "68656d69"
   },
   "payload": {
-    "address": "mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa",
+    "address": "mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk",
     "start": 0,
     "count": 5
   }
@@ -485,10 +485,24 @@ An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSz
 ##### Example
 
 An example response for a request with id `68656d69`, requesting five UTXOs for the
-address `mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa`:
+address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 
 ```json
-TODO
+{
+  "header": {
+    "command": "tbcapi-utxos-by-address-raw-response",
+    "id": "68656d69"
+  },
+  "payload": {
+    "utxos": [
+      "0073700282db1dcc4853dc64e5da5c8595d1204ea7d036b04ea6b8ba41093a770000000000000cab00000002",
+      "0073700282db1dcc4853dc64e5da5c8595d1204ea7d036b04ea6b8ba41093a770000000000000cab00000002",
+      "0073700282db1dcc4853dc64e5da5c8595d1204ea7d036b04ea6b8ba41093a770000000000000cab00000002",
+      "0073700282db1dcc4853dc64e5da5c8595d1204ea7d036b04ea6b8ba41093a770000000000000cab00000002",
+      "0073700282db1dcc4853dc64e5da5c8595d1204ea7d036b04ea6b8ba41093a770000000000000cab00000002"
+    ]
+  }
+}
 ```
 
 ### Serialised
@@ -508,16 +522,16 @@ TODO
 
 ##### Example
 
-An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa`:
+An example request to retrieve five UTXOs for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 
 ```json
 {
   "header": {
-    "command": "tbcapi-utxos-by-address-raw-request",
+    "command": "tbcapi-utxos-by-address-request",
     "id": "68656d69"
   },
   "payload": {
-    "address": "mhAfMWDjd8YV3RoWcpHSzqjkWi6q5Bfixa",
+    "address": "mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk",
     "start": 0,
     "count": 5
   }
@@ -536,7 +550,41 @@ An example request to retrieve five UTXOs for the address `mhAfMWDjd8YV3RoWcpHSz
 An example response for a request with id `68656d69`, if the best height was `2587400`:
 
 ```json
-TODO
+{
+  "header": {
+    "command": "tbcapi-utxos-by-address-response",
+    "id": "68656d69"
+  },
+  "payload": {
+    "utxos": [
+      {
+        "tx_id": "0012a33f3c301c90427d81f256d8a4848dcbfc289e8325725e7657e9a643d6fd",
+        "value": 2026,
+        "out_index": 1
+      },
+      {
+        "tx_id": "0066c9f87d012e75e390adb490794a746fefe05eb16d220515788f33d5b6b336",
+        "value": 10000,
+        "out_index": 1
+      },
+      {
+        "tx_id": "0066c9f87d012e75e390adb490794a746fefe05eb16d220515788f33d5b6b336",
+        "value": 10000,
+        "out_index": 2
+      },
+      {
+        "tx_id": "0073700282db1dcc4853dc64e5da5c8595d1204ea7d036b04ea6b8ba41093a77",
+        "value": 3243,
+        "out_index": 1
+      },
+      {
+        "tx_id": "0073700282db1dcc4853dc64e5da5c8595d1204ea7d036b04ea6b8ba41093a77",
+        "value": 3243,
+        "out_index": 2
+      }
+    ]
+  }
+}
 ```
 
 ## Transaction by ID
