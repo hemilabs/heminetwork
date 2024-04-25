@@ -35,6 +35,7 @@ services:
       - "generatetoaddress"
       - "3000" # need to generate a lot for greater chance to not spend coinbase
       - "$BTC_ADDRESS"
+    restart: on-failure
 
   bitcoind-moreblocks:
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
