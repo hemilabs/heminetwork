@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -1897,13 +1899,28 @@ func getEndpointWithRetries(ctx context.Context, container testcontainers.Contai
 	return "", lastError
 }
 
-func nextPort() int {
-	ports, err := freeport.GetFreePorts(1000)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		panic(err)
-	}
+func nextPort(ctx context.Context, t *testing.T) int {
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		default:
+		}
 
-	return ports[time.Now().Unix()%int64(len(ports))]
+		port, err := freeport.GetFreePort()
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+
+		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)), 1*time.Second); err != nil {
+			if errors.Is(err, syscall.ECONNREFUSED) {
+				// connection error, port is open
+				return port
+			}
+
+			t.Fatal(err)
+		}
+	}
 }
 
 func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port) (*Server, string) {
@@ -1917,7 +1934,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	if err := os.RemoveAll(home); err != nil {
 		t.Fatal(err)
 	}
-	tcbListenAddress := fmt.Sprintf(":%d", nextPort())
+	tcbListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
 	cfg := NewDefaultConfig()
 	cfg.LevelDBHome = home
