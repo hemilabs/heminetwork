@@ -137,7 +137,7 @@ type Utxo struct {
 }
 
 type UtxosByAddressResponse struct {
-	Utxos []Utxo          `json:"utxos"`
+	Utxos []*Utxo         `json:"utxos"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
@@ -155,7 +155,7 @@ type TxByIdRequest struct {
 }
 
 type TxByIdResponse struct {
-	Tx    Tx              `json:"tx"`
+	Tx    *Tx             `json:"tx"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
 

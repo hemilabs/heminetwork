@@ -1543,7 +1543,7 @@ func TestTxById(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			w := wireTxToTbcapiTx(tx)
+			w := wireTxToTBC(tx)
 
 			if diff := deep.Equal(w, &response.Tx); len(diff) > 0 {
 				t.Fatal(diff)
