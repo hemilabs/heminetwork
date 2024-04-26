@@ -604,7 +604,7 @@ An example response for a request with id `68656d69`, if the best height was `25
 
 ##### Example
 
-An example request to retrieve the transaction `ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405`:
+An example request to retrieve the transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 
 ```json
 {
@@ -613,7 +613,7 @@ An example request to retrieve the transaction `ac583148a532c94132adc09572ee075d
     "id": "68656d69"
   },
   "payload": {
-    "tx_id": "ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405"
+    "tx_id": "0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac"
   }
 }
 ```
@@ -627,10 +627,18 @@ An example request to retrieve the transaction `ac583148a532c94132adc09572ee075d
 ##### Example
 
 An example response for a request with id `68656d69`, requesting the
-transaction `ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405`:
+transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 
 ```json
-TODO
+{
+  "header": {
+    "command": "tbcapi-tx-by-id-raw-response",
+    "id": "68656d69"
+  },
+  "payload": {
+    "tx": "02000000019554a7eb8bc903ea957c87964ab04a58d177692f15d7271cccb95258202f14b5bd00000000fdffffff014a010000000000002251208ec88237b5978e75e93feaeeb1343ff86ae2f2c348a903c9c9c4ad081926773500000000"
+  }
+}
 ```
 
 ### Serialised
@@ -648,7 +656,7 @@ TODO
 
 ##### Example
 
-An example request to retrieve the transaction `ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405`:
+An example request to retrieve the transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 
 ```json
 {
@@ -657,7 +665,7 @@ An example request to retrieve the transaction `ac583148a532c94132adc09572ee075d
     "id": "68656d69"
   },
   "payload": {
-    "tx_id": "ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405"
+    "tx_id": "0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac"
   }
 }
 ```
@@ -671,8 +679,36 @@ An example request to retrieve the transaction `ac583148a532c94132adc09572ee075d
 ##### Example
 
 An example response for a request with id `68656d69`, requesting the
-transaction `ac583148a532c94132adc09572ee075dab86c9f72620952b703819bf53ad8405`:
+transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 
 ```json
-TODO
+{
+  "header": {
+    "command": "tbcapi-tx-by-id-response",
+    "id": "68656d69"
+  },
+  "payload": {
+    "tx": {
+      "version": 2,
+      "lock_time": 0,
+      "tx_in": [
+        {
+          "outpoint": {
+            "hash": "9554a7eb8bc903ea957c87964ab04a58d177692f15d7271cccb95258202f14b5",
+            "index": 189
+          },
+          "signature_script": "",
+          "tx_witness": null,
+          "sequence": 4294967293
+        }
+      ],
+      "tx_out": [
+        {
+          "value": 330,
+          "pk_script": "51208ec88237b5978e75e93feaeeb1343ff86ae2f2c348a903c9c9c4ad0819267735"
+        }
+      ]
+    }
+  }
+}
 ```
