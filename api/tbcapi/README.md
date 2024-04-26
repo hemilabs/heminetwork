@@ -1,188 +1,237 @@
-# Hemi Tiny Bitcoin Daemon RPC
+# 📡 Hemi Tiny Bitcoin Daemon RPC
+
+***Last updated:** April 25th, 2024*
+
+This document provides details on the RPC setup and client implementation for the Hemi Tiny Bitcoin Daemon **(`tbcd`).**
 
 <details>
-  <summary>Table of Contents</summary>
+  <summary style="color: #FF5F00; font-weight: 500; font-size: 1.5rem;">📜 Table of Contents</summary>
 
 <!-- TOC -->
-* [Hemi Tiny Bitcoin Daemon RPC](#hemi-tiny-bitcoin-daemon-rpc)
-  * [Protocol](#protocol)
-    * [Errors](#errors)
-    * [Serialised types](#serialised-types)
-      * [Block Header](#block-header)
-      * [Address](#address)
-      * [UTXO](#utxo)
-      * [Transaction](#transaction)
-      * [Transaction Input](#transaction-input)
-      * [Transaction Output](#transaction-output)
-      * [Outpoint](#outpoint)
-  * [Block Headers by Height](#block-headers-by-height)
-    * [Raw data](#raw-data)
-      * [Request](#request)
-        * [Payload](#payload)
-        * [Example](#example)
-      * [Response](#response)
-        * [Payload](#payload-1)
-        * [Example](#example-1)
-    * [Serialised](#serialised)
-      * [Request](#request-1)
-        * [Payload](#payload-2)
-        * [Example](#example-2)
-      * [Response](#response-1)
-        * [Payload](#payload-3)
-        * [Example](#example-3)
-  * [Best Block Headers](#best-block-headers)
-    * [Raw data](#raw-data-1)
-      * [Request](#request-2)
-        * [Example](#example-4)
-      * [Response](#response-2)
-        * [Payload](#payload-4)
-        * [Example](#example-5)
-    * [Serialised](#serialised-1)
-      * [Request](#request-3)
-        * [Example](#example-6)
-      * [Response](#response-3)
-        * [Payload](#payload-5)
-        * [Example](#example-7)
-  * [Balance by Address](#balance-by-address)
-    * [Raw](#raw)
-      * [Request](#request-4)
-        * [Payload](#payload-6)
-        * [Example](#example-8)
-      * [Response](#response-4)
-        * [Payload](#payload-7)
-        * [Example](#example-9)
-  * [UTXOs by Address](#utxos-by-address)
-    * [Raw data](#raw-data-2)
-      * [Request](#request-5)
-        * [Payload](#payload-8)
-        * [Example](#example-10)
-      * [Response](#response-5)
-        * [Payload](#payload-9)
-        * [Example](#example-11)
-    * [Serialised](#serialised-2)
-      * [Request](#request-6)
-        * [Payload](#payload-10)
-        * [Example](#example-12)
-      * [Response](#response-6)
-        * [Payload](#payload-11)
-        * [Example](#example-13)
-  * [Transaction by ID](#transaction-by-id)
-    * [Raw data](#raw-data-3)
-      * [Request](#request-7)
-        * [Payload](#payload-12)
-        * [Example](#example-14)
-      * [Response](#response-7)
-        * [Payload](#payload-13)
-        * [Example](#example-15)
-    * [Serialised](#serialised-3)
-      * [Request](#request-8)
-        * [Payload](#payload-14)
-        * [Example](#example-16)
-      * [Response](#response-8)
-        * [Payload](#payload-15)
-        * [Example](#example-17)
+- [📡 Hemi Tiny Bitcoin Daemon RPC](#-hemi-tiny-bitcoin-daemon-rpc)
+  - [⚙️ Configuration](#️-configuration)
+  - [👉 RPC Client](#-rpc-client)
+  - [📚 Resources](#-resources)
+  - [📡 Protocol](#-protocol)
+    - [🚫 Errors](#-errors)
+    - [🗄️ Serialized Types](#️-serialized-types)
+      - [Block Header](#block-header)
+      - [Address](#address)
+      - [UTXO](#utxo)
+      - [Transaction](#transaction)
+      - [Transaction Input](#transaction-input)
+      - [Transaction Output](#transaction-output)
+      - [Outpoint](#outpoint)
+  - [👉 Block Headers by Height](#-block-headers-by-height)
+    - [🗂 Raw Data](#-raw-data)
+    - [📤 Request](#-request)
+      - [Payload:](#payload)
+      - [Example Request:](#example-request)
+    - [📥 Response](#-response)
+      - [Payload:](#payload-1)
+      - [Example Response:](#example-response)
+    - [🗂 Serialized Data](#-serialized-data)
+    - [📤 Request](#-request-1)
+      - [Payload](#payload-2)
+      - [Example Request](#example-request-1)
+    - [📥 Response](#-response-1)
+      - [Payload](#payload-3)
+      - [Example Response](#example-response-1)
+  - [👉 Best Block Headers](#-best-block-headers)
+    - [🗂 Raw Data](#-raw-data-1)
+    - [📤 Request](#-request-2)
+      - [Example Request](#example-request-2)
+    - [📥 Response](#-response-2)
+      - [Payload](#payload-4)
+      - [Example Response](#example-response-2)
+    - [🗂 Serialized Data](#-serialized-data-1)
+    - [📤 Request](#-request-3)
+      - [Example Request](#example-request-3)
+    - [📥 Response](#-response-3)
+      - [Payload](#payload-5)
+      - [Example Response](#example-response-3)
+  - [👉 Balance by Address](#-balance-by-address)
+    - [🗂 Raw Data](#-raw-data-2)
+    - [📤 Request](#-request-4)
+      - [Payload](#payload-6)
+      - [Example Request](#example-request-4)
+    - [📥 Response](#-response-4)
+      - [Payload](#payload-7)
+      - [Example Response](#example-response-4)
+  - [👉 UTXOs by Address](#-utxos-by-address)
+    - [🗂 Raw Data](#-raw-data-3)
+    - [📤 Request](#-request-5)
+      - [Payload:](#payload-8)
+      - [Example Request:](#example-request-5)
+    - [📥 Response](#-response-5)
+      - [Payload:](#payload-9)
+      - [Example Response:](#example-response-5)
+    - [🗂 Serialized Data](#-serialized-data-2)
+    - [📤 Request](#-request-6)
+      - [Payload:](#payload-10)
+      - [Example Request:](#example-request-6)
+    - [📥 Response](#-response-6)
+      - [Payload:](#payload-11)
+      - [Example Response:](#example-response-6)
+  - [👉 Transaction by ID](#-transaction-by-id)
+    - [🗂 Raw Data](#-raw-data-4)
+    - [📤 Request](#-request-7)
+      - [Payload](#payload-12)
+      - [Example Request](#example-request-7)
+    - [📥 Response](#-response-7)
+      - [Payload](#payload-13)
+      - [Example Response](#example-response-7)
+    - [🗂 Serialized Data](#-serialized-data-3)
+    - [📤 Request](#-request-8)
+      - [Payload](#payload-14)
+      - [Example Request](#example-request-8)
+    - [📥 Response](#-response-8)
+      - [Payload](#payload-15)
+      - [Example Response](#example-response-8)
+  - [📄 License](#-license)
 <!-- TOC -->
 </details>
 
-*Last updated April 24th, 2024.*
+---
 
-When the `TBC_ADDRESS` environment variable is set (e.g. `TBC_ADDRESS=localhost:8082`), the `tbcd` daemon listens on the
-provided address.
+## ⚙️ Configuration
+To configure the daemon, set the `TBC_ADDRESS` environment variable. For example:
 
-[`hemictl`](../../cmd/hemictl) is a reference implementation of an RPC client.
+```
+TBC_ADDRESS=localhost:8082
+```
 
-[View the raw Go types used in TBC's RPC commands `api/tbcapi/tbcapi.go`](tbcapi.go).
+When set, `tbcd` listens on the provided address, allowing for RPC communications.
 
-## Protocol
+---
 
-The RPC protocol is WebSocket-based and uses a standard request/response model.
+## 👉 RPC Client
+[`hemictl`](../../cmd/hemictl) serves as a reference implementation of an RPC client tailored for interacting with `tbcd`.
 
-Please see [protocol/README.md](../protocol/README.md) for more information about the underlying RPC protocol.
+---
 
-### Errors
+## 📚 Resources
+For developers looking to integrate or extend functionality, view the raw Go types used in TBC's RPC commands:
+[View `tbcapi.go`](tbcapi.go).
 
-If an error occurs during a request, the payload of the response contain an `error` value with the following data:
+---
 
-- `timestamp` is the time at which the error occurred, represented in Unix seconds.
-- `trace` (internal errors only) is a unique string which can be used to trace errors between a server and client.
-- `message` is the error message. If the error was an internal server error, this will be `internal error`.
+## 📡 Protocol
 
-### Serialised types
+The **RPC protocol** is WebSocket-based and follows a standard request/response model. For more detailed information, refer to the [protocol documentation.](../protocol/README.md)
 
-#### Block Header
+---
+### 🚫 Errors
 
-A serialised block header contains the following data:
+If an error occurs during a request, the response payload will include an `error` value containing the following details:
 
-- `version` is the version of the block.
-- `prev_hash` is the hash of the previous block header in the blockchain.
-- `merkle_root` is the hash derived from the hashes of all transactions included in the block.
-- `timestamp` is the time the miner began hashing the header, represented in Unix seconds.
-- `bits` is the difficulty target for the block.
-- `nonce` is the nonce used to create the hash that is less than or equal to the target threshold.
+
+|Field      |Description                                                                             |
+|-----------|----------------------------------------------------------------------------------------|
+|`timestamp`|The time at which the error occurred, in Unix seconds.                                  |
+|`trace`    |A unique string for tracing errors between server and client (internal errors only).|
+|`message`  |The error message. For internal server errors, this will read `internal error`.         |
+
+---
+### 🗄️ Serialized Types
+
+####  Block Header
+
+A serialized block header includes:
+
+|Field        |Description                                                                    |
+|-------------|-------------------------------------------------------------------------------|
+|`version`    |The version of the block.                                                      |
+|`prev_hash`  |The hash of the previous block header in the blockchain.                       |
+|`merkle_root`|The hash derived from the hashes of all transactions in the block.             |
+|`timestamp`  |The time the miner began hashing the header, represented in Unix seconds.      |
+|`bits`       |The difficulty target for the block.                                           |
+|`nonce`      |The nonce used to create the hash that is **less than or equal to** the target threshold.|
 
 #### Address
 
-An address is an encoded Bitcoin address.
-Supported address types are P2PKH, P2SH, P2WPKH, P2WSH, and P2TR.
+Represents an encoded Bitcoin address, supporting these types:
 
-#### UTXO
+- `P2PKH`
+- `P2SH`
+- `P2WPKH`
+- `P2WSH`
+- `P2TR`
 
-A serialised UTXO contains the following data:
+####  UTXO
 
-- `tx_id` is the transaction ID encoded as a hexadecimal string.
-- `value` is the value of the UTXO.
-- `out_index` is the output index for the UTXO.
+A serialized UTXO includes:
+
+| Field       | Description                                |
+|-------------|--------------------------------------------|
+| `tx_id`     | The transaction ID, encoded as a hexadecimal string.|
+| `value`     | The value of the UTXO.                     |
+| `out_index` | The output index of the UTXO.              |
 
 #### Transaction
 
-A serialised transaction contains the following data:
+A serialized transaction contains the following data:
 
-- `version` is the transaction version.
-- `lock_time` is the block height or timestamp at which the transaction becomes final.
-- `tx_in` is an array of [transaction inputs](#transaction-input).
-- `tx_out` is an array of [transaction outputs](#transaction-output).
+| Field   | Description |
+|------------|----------------------------------------------------------------------------|
+| `version`  | The transaction version.                                                   |
+| `lock_time`| The block height or timestamp after which the transaction becomes final.   |
+| `tx_in`    | An array of [**transaction inputs**](#transaction-input).|
+| `tx_out`   | An array of [**transaction outputs**](#transaction-output).|
+
+
 
 #### Transaction Input
 
-A serialised transaction input contains the following data:
+A serialized transaction input contains the following data:
 
-- `outpoint` is the [outpoint](#outpoint) for the previous transaction output.
-- `signature_script` is the signature script for the transaction.
-- `witness` is an array of the transaction witnesses, encoded as hexadecimal strings.
-- `sequence` is the transaction sequence number.
+| Field             | Description                                                      |
+|-------------------|------------------------------------------------------------------|
+| `outpoint`        | The [**outpoint**](#outpoint) for the previous transaction output.   |
+| `signature_script`| The signature script for the transaction.                        |
+| `witness`         | An array of the transaction witnesses, encoded as hexadecimal strings. |
+| `sequence`        | The transaction sequence number.                                 |
+
 
 #### Transaction Output
 
-A serialised transaction output contains the following data:
+A serialized transaction output contains the following data:
 
-- `value` is the value of the transaction output in satoshis.
-- `pk_script` is the pubkey script of the transaction output, encoded as a hexadecimal string.
+| Field      | Description                                                            |
+|------------|------------------------------------------------------------------------|
+| `value`    | The value of the transaction output in satoshis.                       |
+| `pk_script`| The pubkey script of the transaction output, encoded as a hexadecimal string. |
+
 
 #### Outpoint
 
-A serialised outpoint contains the following data:
+A serialized outpoint contains the following data:
 
-- `hash` is the ID of the transaction holding the output to be spent.
-- `index` is the index of the specific output to spend from the transaction.
+| Field  | Description                                                  |
+|--------|--------------------------------------------------------------|
+| `hash` | The **ID** of the transaction holding the output to be spent.    |
+| `index`| The index of the specific output to spend from the transaction. |
 
-## Block Headers by Height
+---
+## 👉 Block Headers by Height
+Retrieve the block headers by height.
 
-### Raw data
+### 🗂 Raw Data
 
-| Type     | `command` value                               |
-|----------|-----------------------------------------------|
-| Request  | `tbcapi-block-headers-by-height-raw-request`  |
-| Response | `tbcapi-block-headers-by-height-raw-response` |
+| Type     | `command` value                              |
+|----------|---------------------------------------------|
+| Request  | `tbcapi-block-headers-by-height-raw-request`|
+| Response | `tbcapi-block-headers-by-height-raw-response`|
 
-#### Request
+### 📤 Request
 
-##### Payload
+#### Payload:
 
-- `height` is the height to at which block headers should be retrieved.
+- **`height`**: The height at which block headers should be retrieved.
 
-##### Example
+#### Example Request:
 
-An example request to retrieve block headers at height `43111`:
+Retrieve block headers at height `43111`:
 
 ```json
 {
@@ -196,15 +245,15 @@ An example request to retrieve block headers at height `43111`:
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload:
 
-- `block_headers` is an array of raw block headers encoded as hexadecimal strings.
+- **`block_headers`**: An array of raw block headers encoded as hexadecimal strings.
 
-##### Example
+#### Example Response:
 
-An example response for a request with id `68656d69` and height `43111`:
+Response for a request with **id** `68656d69` and **height** `43111`:
 
 ```json
 {
@@ -220,22 +269,23 @@ An example response for a request with id `68656d69` and height `43111`:
 }
 ```
 
-### Serialised
 
-| Type     | `command` value                           |
-|----------|-------------------------------------------|
-| Request  | `tbcapi-block-headers-by-height-request`  |
-| Response | `tbcapi-block-headers-by-height-response` |
+### 🗂 Serialized Data
 
-#### Request
+| Type     | `command` value                              |
+|----------|---------------------------------------------|
+| Request  | `tbcapi-block-headers-by-height-request`    |
+| Response | `tbcapi-block-headers-by-height-response`   |
 
-##### Payload
+### 📤 Request
 
-- `height` is the height at which block headers should be retrieved.
+#### Payload
 
-##### Example
+- **`height`**: The height at which block headers should be retrieved.
 
-An example request to retrieve the block headers at height `43111`:
+#### Example Request
+
+Retrieve block headers at height `43111`:
 
 ```json
 {
@@ -249,15 +299,15 @@ An example request to retrieve the block headers at height `43111`:
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload
 
-- `block_headers` is an array of [block headers](#block-header).
+- **`block_headers`**: An array of [block headers](#block-header).
 
-##### Example
+#### Example Response
 
-An example response for a request with id `68656d69` and height `43111`:
+Response for a request with **id** `68656d69` and **height** `43111`:
 
 ```json
 {
@@ -280,20 +330,24 @@ An example response for a request with id `68656d69` and height `43111`:
 }
 ```
 
-## Best Block Headers
+---
 
-### Raw data
+## 👉 Best Block Headers
 
-| Type     | `command` value                          |
-|----------|------------------------------------------|
-| Request  | `tbcapi-block-headers-best-raw-request`  |
-| Response | `tbcapi-block-headers-best-raw-response` |
+Retrieve the best block headers.
 
-#### Request
+### 🗂 Raw Data
 
-##### Example
+| Type     | `command` value                              |
+|----------|----------------------------------------------|
+| Request  | `tbcapi-block-headers-best-raw-request`      |
+| Response | `tbcapi-block-headers-best-raw-response`     |
 
-An example request to retrieve the best block headers:
+### 📤 Request
+
+#### Example Request
+
+Retrieve the best block headers:
 
 ```json
 {
@@ -304,16 +358,16 @@ An example request to retrieve the best block headers:
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload
 
-- `height` is the best known height.
-- `block_headers` is an array of the best known block headers encoded as hexadecimal strings.
+- **`height`**: The best-known height.
+- **`block_headers`**: An array of the best-known block headers encoded as hexadecimal strings.
 
-##### Example
+#### Example Response
 
-An example response for a request with id `68656d69`, if the best height was `2182000`:
+Response for a request with **id** `68656d69` and **best height** `2182000`:
 
 ```json
 {
@@ -330,18 +384,18 @@ An example response for a request with id `68656d69`, if the best height was `21
 }
 ```
 
-### Serialised
+### 🗂 Serialized Data
 
-| Type     | `command` value                      |
-|----------|--------------------------------------|
-| Request  | `tbcapi-block-headers-best-request`  |
-| Response | `tbcapi-block-headers-best-response` |
+| Type     | `command` value                          |
+|----------|------------------------------------------|
+| Request  | `tbcapi-block-headers-best-request`      |
+| Response | `tbcapi-block-headers-best-response`     |
 
-#### Request
+### 📤 Request
 
-##### Example
+#### Example Request
 
-An example request to retrieve the best block headers:
+Retrieve the best block headers:
 
 ```json
 {
@@ -352,16 +406,16 @@ An example request to retrieve the best block headers:
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload
 
-- `height` is the best known height.
-- `block_headers` is an array of best known [block headers](#block-header).
+- **`height`**: The best-known height.
+- **`block_headers`**: An array of best-known [block headers](#block-header).
 
-##### Example
+#### Example Response
 
-An example response for a request with id `68656d69`, if the best height was `2587400`:
+Response for a request with **id** `68656d69` and **height** `2587400`:
 
 ```json
 {
@@ -385,26 +439,25 @@ An example response for a request with id `68656d69`, if the best height was `25
 }
 ```
 
-## Balance by Address
-
+## 👉 Balance by Address
 Retrieve the balance for an address.
 
-### Raw
+### 🗂 Raw Data
 
-| Type     | `command` value                      |
-|----------|--------------------------------------|
-| Request  | `tbcapi-balance-by-address-request`  |
-| Response | `tbcapi-balance-by-address-response` |
+| Type     | `command` value                               |
+|----------|-----------------------------------------------|
+| Request  | `tbcapi-balance-by-address-request`           |
+| Response | `tbcapi-balance-by-address-response`          |
 
-#### Request
+### 📤 Request
 
-##### Payload
+#### Payload
 
-- `address` is the [address](#address) the balance should be retrieved for.
+- **`address`**: The [address](#address) for which the balance should be retrieved.
 
-##### Example
+#### Example Request
 
-An example request to retrieve the balance for the address `myqzZmRvoXmrhsrM5STiMGtNRxCFArHWRd`:
+Retrieve the balance for the address `myqzZmRvoXmrhsrM5STiMGtNRxCFArHWRd`:
 
 ```json
 {
@@ -418,48 +471,52 @@ An example request to retrieve the balance for the address `myqzZmRvoXmrhsrM5STi
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload
 
-- `balance` is the known balance of the address, in satoshis.
+- **`balance`**: The known balance of the address, in satoshis.
 
-##### Example
+#### Example Response
 
-An example response for a request with id `68656d69`, if the address's balance is zero:
+Response for a request with **id** `68656d69`, if the address's **balance** is `0`:
 
 ```json
 {
   "header": {
     "command": "tbcapi-balance-by-address-response",
     "id": "68656d69"
-  },
+ },
   "payload": {
     "balance": 0
   }
 }
 ```
 
-## UTXOs by Address
+---
 
-### Raw data
+## 👉 UTXOs by Address
 
-| Type     | `command` value                        |
-|----------|----------------------------------------|
-| Request  | `tbcapi-utxos-by-address-raw-request`  |
-| Response | `tbcapi-utxos-by-address-raw-response` |
+Retrieve UTXOs by address.
 
-#### Request
+### 🗂 Raw Data
 
-##### Payload
+| Type     | `command` value                         |
+|----------|-----------------------------------------|
+| Request  | `tbcapi-utxos-by-address-raw-request`   |
+| Response | `tbcapi-utxos-by-address-raw-response`  |
 
-- `address` is the [address](#address) to retrieve the UTXOs for.
-- `start` is the start index for the UTXOs that should be included in the response (or the number of UTXOs that should be skipped).
-- `count` is the maximum number of UTXOs that should be included in the response.
+### 📤 Request
 
-##### Example
+#### Payload:
 
-An example request to retrieve five UTXOs for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
+- **`address`**: The [address](#address) to retrieve the UTXOs for.
+- **`start`**: The start index for the UTXOs that should be included in the response (or the number of UTXOs that should be skipped).
+- **`count`**: The maximum number of UTXOs that should be included in the response.
+
+#### Example Request:
+
+Retrieve five UTXOs for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 
 ```json
 {
@@ -475,17 +532,15 @@ An example request to retrieve five UTXOs for the address `mxVFsFW5N4mu1HPkxPtto
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload:
 
-- `utxos` is an array of known UTXOs for the address, encoded as hexadecimal strings, or `null` if there are no UTXOs
-  for the address.
+- **`utxos`**: An array of **known UTXOs** for the address, encoded as hexadecimal strings, or **`null`** if there are **no UTXOs** for the address.
 
-##### Example
+#### Example Response:
 
-An example response for a request with id `68656d69`, requesting five UTXOs for the
-address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
+Response for a request with **id** `68656d69`, **requesting 5 UTXOs** for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 
 ```json
 {
@@ -505,24 +560,24 @@ address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 }
 ```
 
-### Serialised
+### 🗂 Serialized Data
 
-| Type     | `command` value                    |
-|----------|------------------------------------|
-| Request  | `tbcapi-utxos-by-address-request`  |
-| Response | `tbcapi-utxos-by-address-response` |
+| Type     | `command` value                   |
+|----------|-----------------------------------|
+| Request  | `tbcapi-utxos-by-address-request` |
+| Response | `tbcapi-utxos-by-address-response`|
 
-#### Request
+### 📤 Request
 
-##### Payload
+#### Payload:
 
-- `address` is the [address](#address) to retrieve the UTXOs for.
-- `start` is the start index for the UTXOs that should be included in the response (or the number of UTXOs that should be skipped).
-- `count` is the maximum number of UTXOs that should be included in the response.
+- **`address`**: The [address](#address) to retrieve the UTXOs for.
+- **`start`**: The start index for the UTXOs that should be included in the response (or the number of UTXOs that should be skipped).
+- **`count`**: The maximum number of UTXOs that should be included in the response.
 
-##### Example
+#### Example Request:
 
-An example request to retrieve five UTXOs for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
+**Retrieve 5 UTXOs** for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 
 ```json
 {
@@ -538,16 +593,15 @@ An example request to retrieve five UTXOs for the address `mxVFsFW5N4mu1HPkxPtto
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload:
 
-- `utxos` is an array of known [UTXOs](#utxo). The maximum number of items in this array can be changed
-  with `count` in the request.
+- **`utxos`**: An array of known [**UTXOs**](#utxo). The maximum number of items in this array can be changed with **`count`** in the request.
 
-##### Example
+#### Example Response:
 
-An example response for a request with id `68656d69`, if the best height was `2587400`:
+Response for a request with **id** `68656d69`, **showing 5 UTXOs** for the address:
 
 ```json
 {
@@ -586,23 +640,23 @@ An example response for a request with id `68656d69`, if the best height was `25
   }
 }
 ```
+---
 
-## Transaction by ID
 
-### Raw data
+## 👉 Transaction by ID
 
-| Type     | `command` value                 |
-|----------|---------------------------------|
-| Request  | `tbcapi-tx-by-id-raw-request`   |
-| Response | `ttbcapi-tx-by-id-raw-response` |
+### 🗂 Raw Data
 
-#### Request
+| Type     | `command` value                     |
+|----------|-------------------------------------|
+| Request  | `tbcapi-tx-by-id-raw-request`       |
+| Response | `ttbcapi-tx-by-id-raw-response`     |
 
-##### Payload
+### 📤 Request
 
-- `tx_id` is the ID of the transaction to retrieve, encoded as a hexadecimal string.
+#### Payload
 
-##### Example
+- **`tx_id`**: The ID of the transaction to retrieve, encoded as a hexadecimal string.
 
 An example request to retrieve the transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 
@@ -618,13 +672,13 @@ An example request to retrieve the transaction `0584ad53bf1938702b952026f7c986ab
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload
 
-- `tx` is the transaction, encoded as a hexadecimal string.
+- **`tx`**: The transaction (encoded as a hexadecimal string).
 
-##### Example
+#### Example Response
 
 An example response for a request with id `68656d69`, requesting the
 transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
@@ -641,20 +695,20 @@ transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 }
 ```
 
-### Serialised
+### 🗂 Serialized Data
 
-| Type     | `command` value            |
-|----------|----------------------------|
-| Request  | `tbcapi-tx-by-id-request`  |
-| Response | `tbcapi-tx-by-id-response` |
+| Type     | `command` value                |
+|----------|--------------------------------|
+| Request  | `tbcapi-tx-by-id-request`      |
+| Response | `tbcapi-tx-by-id-response`     |
 
-#### Request
+### 📤 Request
 
-##### Payload
+#### Payload
 
-- `tx_id` is the ID of the transaction to retrieve, encoded as a hexadecimal string.
+- **`tx_id`**: The ID of the transaction to retrieve, encoded as a hexadecimal string.
 
-##### Example
+#### Example Request
 
 An example request to retrieve the transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 
@@ -670,13 +724,13 @@ An example request to retrieve the transaction `0584ad53bf1938702b952026f7c986ab
 }
 ```
 
-#### Response
+### 📥 Response
 
-##### Payload
+#### Payload
 
-- `tx` is the requested [transaction](#transaction), if found, otherwise `null`.
+- **`tx`**: The requested [transaction](#transaction), if found, otherwise **`null`**.
 
-##### Example
+#### Example Response
 
 An example response for a request with id `68656d69`, requesting the
 transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
@@ -712,3 +766,8 @@ transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
   }
 }
 ```
+
+--
+## 📄 License
+
+This project is licensed under the [MIT License](../../LICENSE).

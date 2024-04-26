@@ -1,11 +1,13 @@
-# RPC Protocol
+# 👉 RPC Protocol
 
-The RPC protocol used by Hemi's daemons is WebSocket-based and uses JSON-encoded request/responses.
-The JSON data sent over WebSocket connections are called a "messages".
+The **RPC protocol** used by Hemi's daemons is WebSocket-based and uses **JSON-encoded requests/responses**.
 
-## Message format
+The JSON data sent over WebSocket connections are referred to as **"messages"**.
 
-An RPC message has the format:
+---
+## 📩 Message Format
+
+Every RPC message has the following format:
 
 ```json
 {
@@ -19,12 +21,19 @@ An RPC message has the format:
 
 ### Header
 
-The message header contains metadata:
+The message header includes metadata crucial for processing the message:
 
-- `command` is the name of the command being called.
-- `id` is a string used to uniquely identify each request. Responses will have the same `id` as the request,
-  making it possible to match requests to responses. Message IDs should be randomly generated.
+- **`command`**: Specifies the command being executed.
+- **`id`**: A string used to uniquely identify each request. Responses will have the same `id` as the request, making it possible to match requests to responses.
+
+  > [!NOTE]
+  > Message IDs should be randomly generated.
 
 ### Payload
 
-The payload type depends on the command being called. Please refer to the documentation for specific API you wish to use.
+The payload type depends on the command being called. Please refer to the documentation for more details on the specific API you wish to use.
+
+---
+## 📄 License
+
+This project is licensed under the [MIT License](../../LICENSE).
