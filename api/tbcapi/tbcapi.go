@@ -62,12 +62,12 @@ type (
 )
 
 type BlockHeader struct {
-	Version    int32  `json:"version"`
-	PrevHash   string `json:"prev_hash"`
-	MerkleRoot string `json:"merkle_root"`
-	Timestamp  int64  `json:"timestamp"`
-	Bits       string `json:"bits"`
-	Nonce      uint32 `json:"nonce"`
+	Version    int32         `json:"version"`
+	PrevHash   api.ByteSlice `json:"prev_hash"`   // reverse order
+	MerkleRoot api.ByteSlice `json:"merkle_root"` // reverse order
+	Timestamp  int64         `json:"timestamp"`
+	Bits       string        `json:"bits"`
+	Nonce      uint32        `json:"nonce"`
 }
 
 type BlockHeadersByHeightRawRequest struct {
@@ -131,7 +131,7 @@ type UtxosByAddressRequest struct {
 }
 
 type Utxo struct {
-	TxId     api.ByteSlice `json:"tx_id"`
+	TxId     api.ByteSlice `json:"tx_id"` // reverse order
 	Value    uint64        `json:"value"`
 	OutIndex uint32        `json:"out_index"`
 }
@@ -142,7 +142,7 @@ type UtxosByAddressResponse struct {
 }
 
 type TxByIdRawRequest struct {
-	TxId api.ByteSlice `json:"tx_id"`
+	TxId api.ByteSlice `json:"tx_id"` // natural order
 }
 
 type TxByIdRawResponse struct {
@@ -151,7 +151,7 @@ type TxByIdRawResponse struct {
 }
 
 type TxByIdRequest struct {
-	TxId api.ByteSlice `json:"tx_id"`
+	TxId api.ByteSlice `json:"tx_id"` // reverse order
 }
 
 type TxByIdResponse struct {
@@ -160,7 +160,7 @@ type TxByIdResponse struct {
 }
 
 type OutPoint struct {
-	Hash  api.ByteSlice `json:"hash"`
+	Hash  api.ByteSlice `json:"hash"` // reverse order
 	Index uint32        `json:"index"`
 }
 

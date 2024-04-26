@@ -30,8 +30,13 @@ func hexDecode(data []byte, length int) ([]byte, error) {
 // ByteSlice is used to hex encode addresses in JSON structs.
 type ByteSlice []byte
 
+// String returns the bytes as a hexadecimal string.
+func (bs ByteSlice) String() string {
+	return hex.EncodeToString(bs)
+}
+
 func (bs ByteSlice) MarshalJSON() ([]byte, error) {
-	return json.Marshal(hex.EncodeToString(bs))
+	return json.Marshal(bs.String())
 }
 
 func (bs *ByteSlice) UnmarshalJSON(data []byte) error {

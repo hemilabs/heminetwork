@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -341,7 +342,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.Ut
 	var responseUtxos []*tbcapi.Utxo
 	for _, utxo := range utxos {
 		responseUtxos = append(responseUtxos, &tbcapi.Utxo{
-			TxId:     utxo.ScriptHashSlice(),
+			TxId:     reverseBytes(utxo.ScriptHashSlice()),
 			Value:    utxo.Value(),
 			OutIndex: utxo.OutputIndex(),
 		})
@@ -366,7 +367,7 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	tx, err := s.TxById(ctx, [32]byte(req.TxId))
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			responseErr := protocol.RequestErrorf("tx not found: %s", hex.EncodeToString(req.TxId))
+			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxId)
 			return &tbcapi.TxByIdRawResponse{
 				Error: responseErr,
 			}, nil
@@ -402,10 +403,10 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 		}, nil
 	}
 
-	tx, err := s.TxById(ctx, [32]byte(req.TxId))
+	tx, err := s.TxById(ctx, [32]byte(reverseBytes(req.TxId)))
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			responseErr := protocol.RequestErrorf("not found: %s", hex.EncodeToString(req.TxId))
+			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxId)
 			return &tbcapi.TxByIdResponse{
 				Error: responseErr,
 			}, nil
@@ -514,8 +515,8 @@ func wireBlockHeadersToTBC(w []*wire.BlockHeader) []*tbcapi.BlockHeader {
 	for i, bh := range w {
 		blockHeaders[i] = &tbcapi.BlockHeader{
 			Version:    bh.Version,
-			PrevHash:   bh.PrevBlock.String(),
-			MerkleRoot: bh.MerkleRoot.String(),
+			PrevHash:   reverseBytes(bh.PrevBlock[:]),
+			MerkleRoot: reverseBytes(bh.MerkleRoot[:]),
 			Timestamp:  bh.Timestamp.Unix(),
 			Bits:       fmt.Sprintf("%x", bh.Bits),
 			Nonce:      bh.Nonce,
@@ -537,7 +538,7 @@ func wireTxToTBC(w *wire.MsgTx) *tbcapi.Tx {
 			Sequence:        txIn.Sequence,
 			SignatureScript: txIn.SignatureScript,
 			PreviousOutPoint: tbcapi.OutPoint{
-				Hash:  txIn.PreviousOutPoint.Hash[:],
+				Hash:  reverseBytes(txIn.PreviousOutPoint.Hash[:]),
 				Index: txIn.PreviousOutPoint.Index,
 			},
 			Witness: make(tbcapi.TxWitness, len(txIn.Witness)),
@@ -556,4 +557,9 @@ func wireTxToTBC(w *wire.MsgTx) *tbcapi.Tx {
 	}
 
 	return tx
+}
+
+func reverseBytes(b []byte) []byte {
+	slices.Reverse(b)
+	return b
 }
