@@ -1536,7 +1536,7 @@ func TestTxById(t *testing.T) {
 				t.Fatal(response.Error.Message)
 			}
 
-			tx, err := tbcServer.TxById(ctx, tbcd.TxId(txIdBytes))
+			tx, err := tbcServer.TxById(ctx, tbcd.TxId(reverseBytes(txIdBytes)))
 			if err != nil {
 				t.Fatal(err)
 			}
