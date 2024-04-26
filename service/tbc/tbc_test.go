@@ -1908,7 +1908,7 @@ func nextPort(ctx context.Context, t *testing.T) int {
 		}
 
 		port, err := freeport.GetFreePort()
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil {
 			t.Fatal(err)
 		}
 
