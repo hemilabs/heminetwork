@@ -81,6 +81,12 @@ var (
 			Help:         "address and port bfgd prometheus listens on",
 			Print:        config.PrintAll,
 		},
+		"BFG_PPROF_ADDRESS": config.Config{
+			Value:        &cfg.PprofListenAddress,
+			DefaultValue: "",
+			Help:         "address and port bfgd pprof listens on",
+			Print:        config.PrintAll,
+		},
 	}
 )
 

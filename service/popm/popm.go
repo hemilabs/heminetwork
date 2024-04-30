@@ -12,7 +12,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/http/pprof"
 	"slices"
 	"strings"
 	"sync"
@@ -71,6 +73,8 @@ type Config struct {
 	LogLevel string
 
 	PrometheusListenAddress string
+
+	PprofListenAddress string
 
 	RetryMineThreshold uint
 
@@ -845,6 +849,37 @@ func (m *Miner) Run(pctx context.Context) error {
 		if err := m.handlePrometheus(ctx); err != nil {
 			return fmt.Errorf("handlePrometheus: %w", err)
 		}
+	}
+
+	// pprof
+	if m.cfg.PprofListenAddress != "" {
+		pprofMux := http.NewServeMux()
+		pprofMux.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
+		pprofMux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
+		pprofMux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+		pprofMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+		pprofMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
+
+		pprofHttpServer := &http.Server{
+			Addr:        m.cfg.PprofListenAddress,
+			Handler:     pprofMux,
+			BaseContext: func(net.Listener) context.Context { return ctx },
+		}
+
+		go func() {
+			log.Infof("Listening (pprof): %s", m.cfg.PprofListenAddress)
+			err := pprofHttpServer.ListenAndServe()
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Errorf("pprof server exited with error: %v", err)
+			}
+		}()
+
+		defer func() {
+			if err := pprofHttpServer.Shutdown(ctx); err != nil {
+				log.Errorf("pprof server shutdown with error: %v", err)
+			}
+			log.Infof("pprof server shutdown cleanly")
+		}()
 	}
 
 	log.Infof("Starting PoP miner with BTC address %v (public key %x)",

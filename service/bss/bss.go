@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"sync"
 	"time"
 
@@ -61,6 +62,7 @@ type Config struct {
 	ListenAddress           string
 	LogLevel                string
 	PrometheusListenAddress string
+	PprofListenAddress      string
 }
 
 type Server struct {
@@ -742,6 +744,38 @@ func (s *Server) Run(parrentCtx context.Context) error {
 		}
 		log.Infof("RPC server shutdown cleanly")
 	}()
+
+	// pprof
+	if s.cfg.PprofListenAddress != "" {
+		pprofMux := http.NewServeMux()
+		pprofMux.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
+		pprofMux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
+		pprofMux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
+		pprofMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
+		pprofMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
+
+		pprofHttpServer := &http.Server{
+			Addr:        s.cfg.PprofListenAddress,
+			Handler:     pprofMux,
+			BaseContext: func(net.Listener) context.Context { return ctx },
+		}
+
+		go func() {
+			log.Infof("Listening (pprof): %s", s.cfg.PprofListenAddress)
+			err := pprofHttpServer.ListenAndServe()
+			if err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Errorf("pprof server exited with error: %v", err)
+			}
+		}()
+
+		defer func() {
+			if err := pprofHttpServer.Shutdown(ctx); err != nil {
+				log.Errorf("pprof server shutdown with error: %v", err)
+				return
+			}
+			log.Infof("pprof server shutdown cleanly")
+		}()
+	}
 
 	s.wg.Add(1)
 	go s.bfg(ctx) // Attempt to talk to bfg
