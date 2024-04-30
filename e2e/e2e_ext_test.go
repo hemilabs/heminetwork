@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -260,13 +261,28 @@ func createTestDB(ctx context.Context, t *testing.T) (bfgd.Database, string, *sq
 	return db, u.String(), sdb, cleanup
 }
 
-func nextPort() int {
-	port, err := freeport.GetFreePort()
-	if err != nil && !errors.Is(err, context.Canceled) {
-		panic(err)
-	}
+func nextPort(ctx context.Context, t *testing.T) int {
+	for {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		default:
+		}
 
-	return port
+		port, err := freeport.GetFreePort()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)), 1*time.Second); err != nil {
+			if errors.Is(err, syscall.ECONNREFUSED) {
+				// connection error, port is open
+				return port
+			}
+
+			t.Fatal(err)
+		}
+	}
 }
 
 func createPopm(ctx context.Context, t *testing.T, bfgUrl string, bfgPrivateWsUrl string) (*popm.Miner, error) {
@@ -283,8 +299,8 @@ func createPopm(ctx context.Context, t *testing.T, bfgUrl string, bfgPrivateWsUr
 }
 
 func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrumxAddr string, btcStartHeight uint64, auth bool) (*bfg.Server, string, string, string) {
-	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort())
-	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort())
+	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
+	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
 	bfgServer, err := bfg.NewServer(&bfg.Config{
 		PrivateListenAddress: bfgPrivateListenAddress,
@@ -324,7 +340,7 @@ func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrumxA
 }
 
 func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
-	bssListenAddress := fmt.Sprintf(":%d", nextPort())
+	bssListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
 	bssServer, err := bss.NewServer(&bss.Config{
 		BFGURL:        bfgWsurl,
@@ -362,7 +378,7 @@ func reverseAndEncodeEncodedHash(encodedHash string) string {
 }
 
 func createMockElectrumxServer(ctx context.Context, t *testing.T, l2Keystone *hemi.L2Keystone, btx []byte) (string, func()) {
-	addr := fmt.Sprintf("localhost:%d", nextPort())
+	addr := fmt.Sprintf("localhost:%d", nextPort(ctx, t))
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
