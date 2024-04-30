@@ -1196,7 +1196,7 @@ func TestTxByIdRaw(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		slices.Reverse(txIdBytes)
+		slices.Reverse(txIdBytes) // convert to natural order
 
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 			TxId: txIdBytes,
@@ -1302,7 +1302,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 
 		txIdBytes[0]++
 
-		slices.Reverse(txIdBytes)
+		slices.Reverse(txIdBytes) // convert to natural order
 
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 			TxId: txIdBytes,
@@ -1415,7 +1415,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 
 		txIdBytes = append(txIdBytes, 8)
 
-		slices.Reverse(txIdBytes)
+		slices.Reverse(txIdBytes) // convert to natural order
 
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 			TxId: txIdBytes,
@@ -1512,8 +1512,6 @@ func TestTxById(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		slices.Reverse(txIdBytes)
-
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 			TxId: txIdBytes,
 		})
@@ -1538,14 +1536,14 @@ func TestTxById(t *testing.T) {
 				t.Fatal(response.Error.Message)
 			}
 
-			tx, err := tbcServer.TxById(ctx, tbcd.TxId(txIdBytes))
+			tx, err := tbcServer.TxById(ctx, tbcd.TxId(reverseBytes(txIdBytes)))
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			w := wireTxToTbcapiTx(tx)
+			w := wireTxToTBC(tx)
 
-			if diff := deep.Equal(w, &response.Tx); len(diff) > 0 {
+			if diff := deep.Equal(w, response.Tx); len(diff) > 0 {
 				t.Fatal(diff)
 			}
 
@@ -1614,8 +1612,6 @@ func TestTxByIdInvalid(t *testing.T) {
 		}
 
 		txIdBytes[0]++
-
-		slices.Reverse(txIdBytes)
 
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 			TxId: txIdBytes,
@@ -1727,8 +1723,6 @@ func TestTxByIdNotFound(t *testing.T) {
 		}
 
 		txIdBytes = append(txIdBytes, 8)
-
-		slices.Reverse(txIdBytes)
 
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 			TxId: txIdBytes,
