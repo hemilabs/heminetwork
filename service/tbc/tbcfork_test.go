@@ -215,60 +215,6 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 	}
 }
 
-// borrowed from btcd
-//
-// Copyright (c) 2014-2016 The btcsuite developers
-// Use of this source code is governed by an ISC
-// license that can be found in the LICENSE file.
-var (
-	CoinbaseFlags = "/P2SH/btcd/"
-	vbTopBits     = 0x20000000
-)
-
-func standardCoinbaseScript(nextBlockHeight int32, extraNonce uint64) ([]byte, error) {
-	return txscript.NewScriptBuilder().AddInt64(int64(nextBlockHeight)).
-		AddInt64(int64(extraNonce)).AddData([]byte(CoinbaseFlags)).
-		Script()
-}
-
-func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockHeight int32, addr btcutil.Address) (*btcutil.Tx, error) {
-	// Create the script to pay to the provided payment address if one was
-	// specified.  Otherwise create a script that allows the coinbase to be
-	// redeemable by anyone.
-	var pkScript []byte
-	if addr != nil {
-		var err error
-		pkScript, err = txscript.PayToAddrScript(addr)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		var err error
-		scriptBuilder := txscript.NewScriptBuilder()
-		pkScript, err = scriptBuilder.AddOp(txscript.OP_TRUE).Script()
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	tx := wire.NewMsgTx(wire.TxVersion)
-	tx.AddTxIn(&wire.TxIn{
-		// Coinbase transactions have no inputs, so previous outpoint is
-		// zero hash and max index.
-		PreviousOutPoint: *wire.NewOutPoint(&chainhash.Hash{},
-			wire.MaxPrevOutIndex),
-		SignatureScript: coinbaseScript,
-		Sequence:        wire.MaxTxInSequenceNum,
-	})
-	tx.AddTxOut(&wire.TxOut{
-		Value:    blockchain.CalcBlockSubsidy(nextBlockHeight, params),
-		PkScript: pkScript,
-	})
-	return btcutil.NewTx(tx), nil
-}
-
-// end borrowed from btcd
-
 func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash) (*btcutil.Block, error) {
 	extraNonce := uint64(0)
 	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
@@ -317,6 +263,21 @@ func (b *btcNode) Best() []*chainhash.Hash {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 	return b.best
+}
+
+func (b *btcNode) BlockHeadersAtHeight(height int32) ([]*wire.BlockHeader, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	bs, ok := b.blocksAtHeight[height]
+	if !ok {
+		return nil, fmt.Errorf("no block headers at: %v", height)
+	}
+	bhs := make([]*wire.BlockHeader, 0, len(bs))
+	for _, v := range bs {
+		bhs = append(bhs, &v.MsgBlock().Header)
+	}
+	return bhs, nil
 }
 
 func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*btcutil.Block, error) {
@@ -384,7 +345,7 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressP
 	return key, address, nil
 }
 
-func TestFork(t *testing.T) {
+func TestBasic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -408,9 +369,9 @@ func TestFork(t *testing.T) {
 	}()
 
 	startHash := n.Best()
-	count := 10
+	count := 9
 	expectedHeight := uint64(count)
-	_, err = n.Mine(10, startHash[0], address)
+	_, err = n.Mine(count, startHash[0], address)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,6 +435,151 @@ func TestFork(t *testing.T) {
 		}
 		t.Logf("%v", spew.Sdump(utxos))
 		return
-
 	}
 }
+
+func TestFork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("key    : %v", key)
+	t.Logf("address: %v", address)
+
+	n, err := newFakeNode(t, "18444")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err = n.Run(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	startHash := n.Best()
+	count := 9
+	expectedHeight := uint64(count)
+	_, err = n.Mine(count, startHash[0], address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = n.dumpChain(n.Best()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
+	time.Sleep(1 * time.Second) // XXX
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:     false, // XXX for now
+		BlockSanity:   false,
+		LevelDBHome:   t.TempDir(),
+		ListenAddress: tbcapi.DefaultListen,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PrometheusListenAddress: "",
+	}
+	loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err = s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+
+		// See if we are at the right height
+		si := s.Synced(ctx)
+		if !(si.BlockHeaderHeight == expectedHeight) {
+			log.Infof("not synced")
+			continue
+		}
+
+		//// Execute tests
+		//balance, err := s.BalanceByAddress(ctx, address.String())
+		//if err != nil {
+		//	t.Fatal(err)
+		//}
+		//if balance != uint64(count*5000000000) {
+		//	t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
+		//}
+		//t.Logf("balance %v", spew.Sdump(balance))
+		//utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
+		//if err != nil {
+		//	t.Fatal(err)
+		//}
+		//t.Logf("%v", spew.Sdump(utxos))
+		break
+	}
+}
+
+// borrowed from btcd
+//
+// Copyright (c) 2014-2016 The btcsuite developers
+// Use of this source code is governed by an ISC
+// license that can be found in the LICENSE file.
+var (
+	CoinbaseFlags = "/P2SH/btcd/"
+	vbTopBits     = 0x20000000
+)
+
+func standardCoinbaseScript(nextBlockHeight int32, extraNonce uint64) ([]byte, error) {
+	return txscript.NewScriptBuilder().AddInt64(int64(nextBlockHeight)).
+		AddInt64(int64(extraNonce)).AddData([]byte(CoinbaseFlags)).
+		Script()
+}
+
+func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockHeight int32, addr btcutil.Address) (*btcutil.Tx, error) {
+	// Create the script to pay to the provided payment address if one was
+	// specified.  Otherwise create a script that allows the coinbase to be
+	// redeemable by anyone.
+	var pkScript []byte
+	if addr != nil {
+		var err error
+		pkScript, err = txscript.PayToAddrScript(addr)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		scriptBuilder := txscript.NewScriptBuilder()
+		pkScript, err = scriptBuilder.AddOp(txscript.OP_TRUE).Script()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	tx := wire.NewMsgTx(wire.TxVersion)
+	tx.AddTxIn(&wire.TxIn{
+		// Coinbase transactions have no inputs, so previous outpoint is
+		// zero hash and max index.
+		PreviousOutPoint: *wire.NewOutPoint(&chainhash.Hash{},
+			wire.MaxPrevOutIndex),
+		SignatureScript: coinbaseScript,
+		Sequence:        wire.MaxTxInSequenceNum,
+	})
+	tx.AddTxOut(&wire.TxOut{
+		Value:    blockchain.CalcBlockSubsidy(nextBlockHeight, params),
+		PkScript: pkScript,
+	})
+	return btcutil.NewTx(tx), nil
+}
+
+// end borrowed from btcd
