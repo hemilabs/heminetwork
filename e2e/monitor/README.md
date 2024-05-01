@@ -11,12 +11,20 @@ that we want to test against.
 ## Running
 
 You can run the Localnet Monitor like so, this will read from localnet
-and print a table that refreshes every 5 seconds.
+and print a table that refreshes every 1 second.
+
+Make sure you have localnet running:
+
+from the root of the repo:
+```
+docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
+docker compose -f ./e2e/docker-compose.yml up
+```
 
 ```
 $  go run ./... 
 +--------------------------------+------------------------------------------------------------------------+
-| refreshing every 5 seconds     |                                                                        |
+| refreshing every 1 seconds     |                                                                        |
 | bitcoin block count            | 3007                                                                   |
 | poptxs mined                   | 11                                                                     |
 | first batcher publication hash | 0x2b86a72b48668b7a35dcab99166f9330c884c50d1b19847c3c0569a0d0806465,21  |
