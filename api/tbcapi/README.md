@@ -5,7 +5,7 @@
 This document provides details on the RPC setup and client implementation for the Hemi Tiny Bitcoin Daemon **(`tbcd`).**
 
 <details>
-  <summary style="color: #FF5F00; font-weight: 500; font-size: 1.5rem;">📜 Table of Contents</summary>
+  <summary>📜 Table of Contents</summary>
 
 <!-- TOC -->
 - [📡 Hemi Tiny Bitcoin Daemon RPC](#-hemi-tiny-bitcoin-daemon-rpc)
@@ -77,14 +77,13 @@ This document provides details on the RPC setup and client implementation for th
     - [🗂 Raw Data](#-raw-data-4)
     - [📤 Request](#-request-7)
       - [Payload](#payload-12)
-      - [Example Request](#example-request-7)
     - [📥 Response](#-response-7)
       - [Payload](#payload-13)
       - [Example Response](#example-response-7)
     - [🗂 Serialized Data](#-serialized-data-3)
     - [📤 Request](#-request-8)
       - [Payload](#payload-14)
-      - [Example Request](#example-request-8)
+      - [Example Request](#example-request-7)
     - [📥 Response](#-response-8)
       - [Payload](#payload-15)
       - [Example Response](#example-response-8)

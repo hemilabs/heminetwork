@@ -3,7 +3,7 @@
 Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin with the programmability of Ethereum.
 
 <details>
-  <summary> Table of Contents</summary>
+  <summary>Table of Contents</summary>
 
 - [⚡️ The Hemi Network](#️-the-hemi-network)
   - [🔧 Services](#-services)
