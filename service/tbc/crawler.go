@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"runtime"
@@ -55,6 +56,7 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			if utxo, ok := utxos[op]; ok && !utxo.IsDelete() {
+				log.Infof("deleting utxo %s value %d", hex.EncodeToString(utxo.ScriptHashSlice()), utxo.Value())
 				delete(utxos, op)
 				continue
 			}
@@ -63,6 +65,10 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
+
+			scriptHash := sha256.Sum256(txOut.PkScript)
+			log.Infof("adding utxo %s value %d", hex.EncodeToString(scriptHash[:]), uint64(txOut.Value))
+
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
 				sha256.Sum256(txOut.PkScript),
 				uint64(txOut.Value),

@@ -1228,6 +1228,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	}
 
 	// Whatever happens, delete from cache and potentially try again
+	log.Infof("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
 	var (
 		printStats      bool
 		blocksSize      uint64
@@ -1475,6 +1476,7 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 	if err != nil {
 		return 0, err
 	}
+	log.Infof("checking script hash balance %s: %s: %d", encodedAddress, hex.EncodeToString(scriptHash[:]), balance)
 
 	return balance, nil
 }

@@ -537,6 +537,7 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.ignoreUlimit = true
 	go func() {
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
