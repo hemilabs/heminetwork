@@ -90,14 +90,9 @@ Start the server by running:
 
 ## 👉 RPC Commands
 
-When the `TBC_ADDRESS` is set (e.g., `localhost:8082`), the`tbcd` daemon listens on the provided address.
+When the `TBC_ADDRESS` is set to an address (e.g., `localhost:8082`), the `tbcd` daemon listens on the provided address.
 
 The RPC protocol is **WebSocket-based** and **uses a standard request/response model.**
 
 [Read more about the RPC protocol and available commands](../../api/tbcapi/README.md).
 
----
-
-## 📄 License
-
-This project is licensed under the [MIT License](../../LICENSE).

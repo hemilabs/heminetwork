@@ -1,23 +1,21 @@
-# 🌐 The Hemi Network
-
-
-***Last updated:** April 25th, 2024*
+# ⚡️ The Hemi Network
 
 Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin with the programmability of Ethereum.
 
 <details>
-  <summary style="color: #FF5F00; font-weight: 500; font-size: 1.5rem;"> Table of Contents</summary>
+  <summary> Table of Contents</summary>
 
-- [🌐 The Hemi Network](#-the-hemi-network)
+- [⚡️ The Hemi Network](#️-the-hemi-network)
   - [🔧 Services](#-services)
-  - [📜 TL;DR:](#-tldr)
-  - [⚡️ Getting Started](#️-getting-started)
+  - [🌐 Overview:](#-overview)
+- [⚡️ Getting Started](#️-getting-started)
+  - [🏗 Building from Source](#-building-from-source)
     - [🏁 Prerequisites](#-prerequisites)
     - [📚 Tutorial](#-tutorial)
-  - [📦 Downloading Binaries from Releases](#-downloading-binaries-from-releases)
+  - [📦 Downloading Release Binaries](#-downloading-release-binaries)
 - [🛠 Running the Services](#-running-the-services)
   - [▶️ Running popmd](#️-running-popmd)
-    - [🏁 Prerequisites:](#-prerequisites-1)
+    - [🏁 Prerequisites](#-prerequisites-1)
     - [CLI:](#cli)
     - [Web:](#web)
   - [▶️ Running bfgd](#️-running-bfgd)
@@ -46,7 +44,7 @@ The Hemi Network comprises three key services, each serving a unique function wi
 
 
 ---
-## 📜 TL;DR:
+## 🌐 Overview:
 
 - **extool**: A utility tool for extracting and processing data from various file formats, tailored for blockchain data analysis.
 - **hemictl**: The command-line interface for controlling and managing all Hemi Network services.
@@ -58,7 +56,9 @@ The Hemi Network comprises three key services, each serving a unique function wi
 
 ---
 
-## ⚡️ Getting Started
+# ⚡️ Getting Started
+
+## 🏗 Building from Source
 
 ### 🏁 Prerequisites
 
@@ -72,11 +72,11 @@ The Hemi Network comprises three key services, each serving a unique function wi
 
 
 1. Clone the Repository:
-   ```bash
+   ```shell
    git clone https://github.com/hemilabs/heminetwork.git
    ```
 2. Build:
-   ```bash
+   ```shell
    cd heminetwork
    make deps
    make
@@ -86,7 +86,7 @@ Binaries will be located in `<path-to-repo>/bin/`.
 
 ---
 
-## 📦 Downloading Binaries from Releases
+## 📦 Downloading Release Binaries
 
 Pre-built binaries are available on the [Releases Page](https://github.com/hemilabs/heminetwork/releases).
 
@@ -104,12 +104,12 @@ For any service, you can view configuration options by running:
 
 ## ▶️ Running popmd
 
-### 🏁 Prerequisites:
+### 🏁 Prerequisites
 
 - A funded BTC private key. This can be a testnet address if configured for test environments.
 - A BFG URL to establish a connection.
 
-Once properly configured and running, `popmd` will start **mining** L2 Keystones by adding them to Bitcoin blocks that make it into the chain.
+Once properly configured and running, `popmd` will start mining L2 Keystones by adding them to Bitcoin blocks that make it into the chain.
 
 ### CLI:
 
