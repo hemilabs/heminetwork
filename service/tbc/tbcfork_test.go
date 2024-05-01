@@ -362,8 +362,7 @@ func TestBasic(t *testing.T) {
 	}
 
 	go func() {
-		err = n.Run(ctx)
-		if err != nil {
+		if err := n.Run(ctx); err != nil {
 			panic(err)
 		}
 	}()
@@ -400,7 +399,7 @@ func TestBasic(t *testing.T) {
 	}
 	s.ignoreUlimit = true
 	go func() {
-		err = s.Run(ctx)
+		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
@@ -455,8 +454,7 @@ func TestFork(t *testing.T) {
 	}
 
 	go func() {
-		err = n.Run(ctx)
-		if err != nil {
+		if err := n.Run(ctx); err != nil {
 			panic(err)
 		}
 	}()
@@ -492,7 +490,7 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		err = s.Run(ctx)
+		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
@@ -512,20 +510,20 @@ func TestFork(t *testing.T) {
 			continue
 		}
 
-		//// Execute tests
-		//balance, err := s.BalanceByAddress(ctx, address.String())
-		//if err != nil {
+		// // Execute tests
+		// balance, err := s.BalanceByAddress(ctx, address.String())
+		// if err != nil {
 		//	t.Fatal(err)
-		//}
-		//if balance != uint64(count*5000000000) {
+		// }
+		// if balance != uint64(count*5000000000) {
 		//	t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
-		//}
-		//t.Logf("balance %v", spew.Sdump(balance))
-		//utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
-		//if err != nil {
+		// }
+		// t.Logf("balance %v", spew.Sdump(balance))
+		// utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
+		// if err != nil {
 		//	t.Fatal(err)
-		//}
-		//t.Logf("%v", spew.Sdump(utxos))
+		// }
+		// t.Logf("%v", spew.Sdump(utxos))
 		break
 	}
 }
