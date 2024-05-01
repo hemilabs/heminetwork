@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"sync"
 	"time"
 
@@ -37,6 +36,7 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/electrumx"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/hemi/pprof"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 )
 
@@ -1429,37 +1429,6 @@ func (s *Server) Run(pctx context.Context) error {
 		publicHttpErrCh <- publicHttpServer.ListenAndServe()
 	}()
 
-	if s.cfg.PprofListenAddress != "" {
-		pprofMux := http.NewServeMux()
-		pprofMux.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
-		pprofMux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
-		pprofMux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
-		pprofMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
-		pprofMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
-
-		pprofHttpServer := &http.Server{
-			Addr:        s.cfg.PprofListenAddress,
-			Handler:     pprofMux,
-			BaseContext: func(net.Listener) context.Context { return ctx },
-		}
-
-		go func() {
-			log.Infof("Listening (pprof): %v", s.cfg.PprofListenAddress)
-			err := pprofHttpServer.ListenAndServe()
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Errorf("pprof server exited with error: %v", err)
-			}
-		}()
-
-		defer func() {
-			if err := pprofHttpServer.Shutdown(ctx); err != nil {
-				log.Errorf("pprof server shutdown with error: %v", err)
-				return
-			}
-			log.Infof("pprof server shutdown cleanly")
-		}()
-	}
-
 	defer func() {
 		if err := privateHttpServer.Shutdown(ctx); err != nil {
 			log.Errorf("http private Server exit: %v", err)
@@ -1476,13 +1445,32 @@ func (s *Server) Run(pctx context.Context) error {
 		log.Infof("public RPC Server shutdown cleanly")
 	}()
 
+	// pprof
+	if s.cfg.PprofListenAddress != "" {
+		p, err := pprof.NewServer(&pprof.Config{
+			ListenAddress: s.cfg.PprofListenAddress,
+		})
+		if err != nil {
+			return fmt.Errorf("create pprof server: %w", err)
+		}
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
+				log.Errorf("pprof server terminated with error: %v", err)
+				return
+			}
+			log.Infof("pprof server clean shutdown")
+		}()
+	}
+
 	// Prometheus
 	if s.cfg.PrometheusListenAddress != "" {
 		d, err := deucalion.New(&deucalion.Config{
 			ListenAddress: s.cfg.PrometheusListenAddress,
 		})
 		if err != nil {
-			return fmt.Errorf("create server: %w", err)
+			return fmt.Errorf("create prometheus server: %w", err)
 		}
 		cs := []prometheus.Collector{
 			s.cmdsProcessed, // XXX should we make two counters? priv/pub

@@ -12,9 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"net/http/pprof"
 	"slices"
 	"strings"
 	"sync"
@@ -35,6 +33,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/hemi/pprof"
 )
 
 // XXX we should debate if we can make pop miner fully transient. It feels like
@@ -853,32 +852,20 @@ func (m *Miner) Run(pctx context.Context) error {
 
 	// pprof
 	if m.cfg.PprofListenAddress != "" {
-		pprofMux := http.NewServeMux()
-		pprofMux.Handle("/debug/pprof/", http.HandlerFunc(pprof.Index))
-		pprofMux.Handle("/debug/pprof/cmdline", http.HandlerFunc(pprof.Cmdline))
-		pprofMux.Handle("/debug/pprof/profile", http.HandlerFunc(pprof.Profile))
-		pprofMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
-		pprofMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
-
-		pprofHttpServer := &http.Server{
-			Addr:        m.cfg.PprofListenAddress,
-			Handler:     pprofMux,
-			BaseContext: func(net.Listener) context.Context { return ctx },
+		p, err := pprof.NewServer(&pprof.Config{
+			ListenAddress: m.cfg.PprofListenAddress,
+		})
+		if err != nil {
+			return fmt.Errorf("create pprof server: %w", err)
 		}
-
+		m.wg.Add(1)
 		go func() {
-			log.Infof("Listening (pprof): %s", m.cfg.PprofListenAddress)
-			err := pprofHttpServer.ListenAndServe()
-			if err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Errorf("pprof server exited with error: %v", err)
+			defer m.wg.Done()
+			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
+				log.Errorf("pprof server terminated with error: %v", err)
+				return
 			}
-		}()
-
-		defer func() {
-			if err := pprofHttpServer.Shutdown(ctx); err != nil {
-				log.Errorf("pprof server shutdown with error: %v", err)
-			}
-			log.Infof("pprof server shutdown cleanly")
+			log.Infof("pprof server clean shutdown")
 		}()
 	}
 
