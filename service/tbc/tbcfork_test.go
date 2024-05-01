@@ -27,9 +27,10 @@ import (
 )
 
 type btcNode struct {
+	t    *testing.T
+	port string
+
 	mtx            sync.RWMutex
-	t              *testing.T
-	port           string
 	chain          map[string]*btcutil.Block
 	blocksAtHeight map[int32][]*btcutil.Block
 	height         int
@@ -44,9 +45,10 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 		chain:          make(map[string]*btcutil.Block, 10),
 		blocksAtHeight: make(map[int32][]*btcutil.Block, 10),
 		height:         0,
-		params:         &chaincfg.RegressionNetParams,
 		best:           []*chainhash.Hash{chaincfg.RegressionNetParams.GenesisHash},
+		params:         &chaincfg.RegressionNetParams,
 	}
+
 	genesis := btcutil.NewBlock(chaincfg.RegressionNetParams.GenesisBlock)
 	genesis.SetHeight(0)
 	node.chain[chaincfg.RegressionNetParams.GenesisHash.String()] = genesis
@@ -71,7 +73,7 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 	b.t.Logf("start from %v", from.Height())
 	nmh := wire.NewMsgHeaders()
 	height := from.Height() + 1
-	for i := int32(0); i < 2000; i++ {
+	for range 2000 {
 		bs, ok := b.blocksAtHeight[height]
 		if !ok {
 			b.t.Logf("no more blocks at: %v", height)
@@ -100,6 +102,8 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 	if len(m.InvList) != 1 {
 		return nil, fmt.Errorf("not supported multi invlist requests")
 	}
+
+	// TODO: remove this redundant for loop if InvList is always exactly 1
 	for _, v := range m.InvList {
 		if v.Type != wire.InvTypeBlock {
 			return nil, fmt.Errorf("unsuported data type: %v", v.Type)
@@ -122,16 +126,15 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 		conn:            conn,
 		connected:       time.Now(),
 		address:         conn.RemoteAddr().String(),
-		protocolVersion: 70016,
+		protocolVersion: wire.AddrV2Version,
 		network:         wire.TestNet, // regtest == testnet
 	}
 
 	// Send version
 	mv := &wire.MsgVersion{
-		ProtocolVersion: 70016,
+		ProtocolVersion: int32(wire.AddrV2Version),
 	}
-	err := p.write(time.Second, mv)
-	if err != nil {
+	if err := p.write(time.Second, mv); err != nil {
 		b.t.Logf("write version %v: %v", p, err)
 		return
 	}
@@ -144,56 +147,58 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 		}
 
 		msg, err := p.read()
-		if errors.Is(err, wire.ErrUnknownMessage) {
-			// skip unknown
-			b.t.Log("wire: unknown message")
-			continue
-		} else if err != nil {
+		if err != nil {
+			if errors.Is(err, wire.ErrUnknownMessage) {
+				// ignore unknown
+				b.t.Log("wire: unknown message")
+				continue
+			}
 			b.t.Logf("peer read %v: %v", p, err)
 			return
 		}
-		switch m := msg.(type) {
-		case *wire.MsgVersion:
-			mva := &wire.MsgVerAck{}
-			err := p.write(time.Second, mva)
-			if err != nil {
-				b.t.Logf("write %v: %v", p, err)
-				return
-			}
-			_ = m
 
-		case *wire.MsgGetHeaders:
-			b.t.Logf("get headers %v", spew.Sdump(m))
-			headers, err := b.handleGetHeaders(m)
-			if err != nil {
-				b.t.Logf("write %v: %v", p, err)
-				return
-			}
-			// b.t.Logf("%v", spew.Sdump(headers))
-			err = p.write(time.Second, headers)
-			if err != nil {
-				b.t.Logf("write %v: %v", p, err)
-				return
-			}
-
-		case *wire.MsgGetData:
-			b.t.Logf("get data %v", spew.Sdump(m))
-			data, err := b.handleGetData(m)
-			if err != nil {
-				b.t.Logf("write %v: %v", p, err)
-				return
-			}
-			// b.t.Logf("%v", spew.Sdump(data))
-			err = p.write(time.Second, data)
-			if err != nil {
-				b.t.Logf("write %v: %v", p, err)
-				return
-			}
-
-		default:
-			b.t.Logf("unhandled command: %v", spew.Sdump(msg))
+		if err = b.handleMsg(ctx, p, msg); err != nil {
+			b.t.Logf("handle message %v: %v", p, err)
+			return
 		}
 	}
+}
+
+func (b *btcNode) handleMsg(_ context.Context, p *peer, msg wire.Message) error {
+	switch m := msg.(type) {
+	case *wire.MsgVersion:
+		mva := &wire.MsgVerAck{}
+		if err := p.write(time.Second, mva); err != nil {
+			return fmt.Errorf("write version ack: %w", err)
+		}
+
+	case *wire.MsgGetHeaders:
+		b.t.Logf("get headers %v", spew.Sdump(m))
+		headers, err := b.handleGetHeaders(m)
+		if err != nil {
+			return fmt.Errorf("handle get headers: %w", err)
+		}
+		// b.t.Logf("%v", spew.Sdump(headers))
+		if err = p.write(time.Second, headers); err != nil {
+			return fmt.Errorf("write headers: %w", err)
+		}
+
+	case *wire.MsgGetData:
+		b.t.Logf("get data %v", spew.Sdump(m))
+		data, err := b.handleGetData(m)
+		if err != nil {
+			return fmt.Errorf("handle get data: %w", err)
+		}
+		// b.t.Logf("%v", spew.Sdump(data))
+		if err = p.write(time.Second, data); err != nil {
+			return fmt.Errorf("write data: %w", err)
+		}
+
+	default:
+		b.t.Logf("unhandled command: %v", spew.Sdump(msg))
+	}
+
+	return nil
 }
 
 func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
@@ -216,8 +221,7 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 }
 
 func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash) (*btcutil.Block, error) {
-	extraNonce := uint64(0)
-	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
+	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, uint64(0))
 	if err != nil {
 		return nil, err
 	}
@@ -229,25 +233,25 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 
 	reqDifficulty := uint32(0xffffff)
 
-	var blockTxns []*btcutil.Tx
-	blockTxns = append(blockTxns, coinbaseTx)
+	var blockTxs []*btcutil.Tx
+	blockTxs = append(blockTxs, coinbaseTx)
 
-	nextBlockVersion := int32(vbTopBits)
-	var msgBlock wire.MsgBlock
-	msgBlock.Header = wire.BlockHeader{
-		Version:    nextBlockVersion,
-		PrevBlock:  *parent,
-		MerkleRoot: blockchain.CalcMerkleRoot(blockTxns, false),
-		Timestamp:  time.Now(),
-		Bits:       reqDifficulty,
+	msgBlock := &wire.MsgBlock{
+		Header: wire.BlockHeader{
+			Version:    int32(vbTopBits),
+			PrevBlock:  *parent,
+			MerkleRoot: blockchain.CalcMerkleRoot(blockTxs, false),
+			Timestamp:  time.Now(),
+			Bits:       reqDifficulty,
+		},
 	}
-	for _, tx := range blockTxns {
-		if err := msgBlock.AddTransaction(tx.MsgTx()); err != nil {
-			return nil, err
+	for _, tx := range blockTxs {
+		if err = msgBlock.AddTransaction(tx.MsgTx()); err != nil {
+			return nil, fmt.Errorf("add transaction to block: %w", err)
 		}
 	}
 
-	b := btcutil.NewBlock(&msgBlock)
+	b := btcutil.NewBlock(msgBlock)
 	b.SetHeight(nextBlockHeight)
 	return b, nil
 }
@@ -286,11 +290,11 @@ func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Add
 
 	parent, ok := b.chain[from.String()]
 	if !ok {
-		return nil, errors.New("not found")
+		return nil, errors.New("parent hash not found")
 	}
 
 	blocks := make([]*btcutil.Block, 0, count)
-	for i := 0; i < count; i++ {
+	for range count {
 		nextBlockHeight := parent.Height() + 1
 		block, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
 			parent.Hash())
@@ -302,12 +306,14 @@ func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Add
 
 		n, err := b.insertBlock(block)
 		if err != nil {
-			return nil, fmt.Errorf("inser height %v: %v", nextBlockHeight, err)
+			return nil, fmt.Errorf("insert block at height %v: %v",
+				nextBlockHeight, err)
 		}
 		_ = n
 
 		parent = block
 	}
+
 	// b.t.Logf("Best: %v", spew.Sdump(blocks))
 	b.best = []*chainhash.Hash{parent.Hash()}
 
@@ -356,27 +362,27 @@ func TestBasic(t *testing.T) {
 	t.Logf("key    : %v", key)
 	t.Logf("address: %v", address)
 
-	n, err := newFakeNode(t, "18444")
+	n, err := newFakeNode(t, "18444") // TODO: should use random free port
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	go func() {
 		if err := n.Run(ctx); err != nil {
-			panic(err)
+			panic(fmt.Errorf("node exited with error: %w", err))
 		}
 	}()
 
 	startHash := n.Best()
 	count := 9
 	expectedHeight := uint64(count)
-	_, err = n.Mine(count, startHash[0], address)
-	if err != nil {
-		t.Fatal(err)
+
+	if _, err = n.Mine(count, startHash[0], address); err != nil {
+		t.Fatal(fmt.Errorf("mine: %w", err))
 	}
-	err = n.dumpChain(n.Best()[0])
-	if err != nil {
-		t.Fatal(err)
+
+	if err = n.dumpChain(n.Best()[0]); err != nil {
+		t.Fatal(fmt.Errorf("dump chain: %w", err))
 	}
 	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
 	time.Sleep(1 * time.Second) // XXX
@@ -386,13 +392,13 @@ func TestBasic(t *testing.T) {
 		AutoIndex:     true, // XXX for now
 		BlockSanity:   false,
 		LevelDBHome:   t.TempDir(),
-		ListenAddress: tbcapi.DefaultListen,
+		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PrometheusListenAddress: "",
 	}
-	loggo.ConfigureLoggers(cfg.LogLevel)
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -424,10 +430,12 @@ func TestBasic(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// TODO: magic numbers should be extract into constants
 		if balance != uint64(count*5000000000) {
 			t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
 		}
 		t.Logf("balance %v", spew.Sdump(balance))
+
 		utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
 		if err != nil {
 			t.Fatal(err)
@@ -448,7 +456,7 @@ func TestFork(t *testing.T) {
 	t.Logf("key    : %v", key)
 	t.Logf("address: %v", address)
 
-	n, err := newFakeNode(t, "18444")
+	n, err := newFakeNode(t, "18444") // TODO: should use random free port
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,13 +486,13 @@ func TestFork(t *testing.T) {
 		AutoIndex:     false, // XXX for now
 		BlockSanity:   false,
 		LevelDBHome:   t.TempDir(),
-		ListenAddress: tbcapi.DefaultListen,
+		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PrometheusListenAddress: "",
 	}
-	loggo.ConfigureLoggers(cfg.LogLevel)
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -546,7 +554,7 @@ func standardCoinbaseScript(nextBlockHeight int32, extraNonce uint64) ([]byte, e
 
 func createCoinbaseTx(params *chaincfg.Params, coinbaseScript []byte, nextBlockHeight int32, addr btcutil.Address) (*btcutil.Tx, error) {
 	// Create the script to pay to the provided payment address if one was
-	// specified.  Otherwise create a script that allows the coinbase to be
+	// specified.  Otherwise, create a script that allows the coinbase to be
 	// redeemable by anyone.
 	var pkScript []byte
 	if addr != nil {
