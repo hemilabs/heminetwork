@@ -84,7 +84,7 @@ var (
 		"TBC_PPROF_ADDRESS": config.Config{
 			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",
-			Help:         "address and port tbcd pprof listens on (https://pkg.go.dev/net/http/pprof)",
+			Help:         "address and port tbcd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
 	}
