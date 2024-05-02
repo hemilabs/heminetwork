@@ -36,8 +36,8 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/electrumx"
 	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/hemilabs/heminetwork/hemi/pprof"
 	"github.com/hemilabs/heminetwork/service/deucalion"
+	"github.com/hemilabs/heminetwork/service/pprof"
 )
 
 // XXX this code needs to be a bit smarter when syncing bitcoin. We should

@@ -33,7 +33,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/hemilabs/heminetwork/hemi/pprof"
+	"github.com/hemilabs/heminetwork/service/pprof"
 )
 
 // XXX we should debate if we can make pop miner fully transient. It feels like

@@ -38,8 +38,8 @@ import (
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
-	"github.com/hemilabs/heminetwork/hemi/pprof"
 	"github.com/hemilabs/heminetwork/service/deucalion"
+	"github.com/hemilabs/heminetwork/service/pprof"
 	"github.com/hemilabs/heminetwork/ttl"
 )
 

@@ -26,8 +26,8 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/pprof"
 	"github.com/hemilabs/heminetwork/service/deucalion"
+	"github.com/hemilabs/heminetwork/service/pprof"
 )
 
 const (
