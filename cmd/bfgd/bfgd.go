@@ -84,7 +84,7 @@ var (
 		"BFG_PPROF_ADDRESS": config.Config{
 			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",
-			Help:         "address and port bfgd pprof listens on",
+			Help:         "address and port bfgd pprof listens on (https://pkg.go.dev/net/http/pprof)",
 			Print:        config.PrintAll,
 		},
 	}

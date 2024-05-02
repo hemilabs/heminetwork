@@ -64,7 +64,7 @@ var (
 		"POPM_PPROF_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,
 			DefaultValue: "",
-			Help:         "address and port popm pprof listens on",
+			Help:         "address and port popm pprof listens on (https://pkg.go.dev/net/http/pprof)",
 			Print:        config.PrintAll,
 		},
 		"POPM_REMINE_THRESHOLD": config.Config{
