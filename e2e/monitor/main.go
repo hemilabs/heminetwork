@@ -30,7 +30,7 @@ const (
 
 type state struct {
 	bitcoinBlockCount           uint64
-	containersRunnig            []string
+	containersRunning           []string
 	popTxCount                  uint64
 	firstBatcherPublicationHash string
 	lastBatcherPublicationHash  string
@@ -82,15 +82,11 @@ func monitor(dumpJsonAfterMs uint) string {
 			output := dumpJson(&mtx, &s)
 			return output
 		case <-ctx.Done():
+			return ""
 		}
 	} else {
-		for {
-			select {
-			case <-ctx.Done():
-				return ""
-			default:
-			}
-		}
+		<-ctx.Done()
+		return ""
 	}
 
 	return ""
@@ -117,7 +113,7 @@ func render(ctx context.Context, s *state, w table.Writer, mtx *sync.Mutex) {
 
 		w.AppendRow(table.Row{"pop miner $HEMI balance", fmt.Sprintf("%s", s.popMinerBalance)})
 
-		for _, c := range s.containersRunnig {
+		for _, c := range s.containersRunning {
 			w.AppendRow(table.Row{fmt.Sprintf("container %s", c), "running"})
 		}
 		w.Render()
@@ -141,12 +137,12 @@ func monitorBitcoinBlocksCreated(ctx context.Context, s *state, mtx *sync.Mutex)
 		}
 		c, err := client.New(&config, nil)
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("could not create new client from config %v: %v", config, err))
 		}
 
 		count, err := c.GetBlockCount()
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("could not get block count: %v", err))
 		}
 
 		mtx.Lock()
@@ -174,12 +170,12 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		}
 		c, err := client.New(&config, nil)
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("could not create new client with config %v: %v", config, err))
 		}
 
 		tips, err := c.GetChainTips()
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("could not get chain tips: %v", err))
 		}
 
 		if len(tips) != 1 {
@@ -189,12 +185,12 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 
 		hash, err := chainhash.NewHashFromStr(tips[0].Hash)
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("could not get hash from string %s: %v", tips[0].Hash, err))
 		}
 
 		block, err := c.GetBlock(hash)
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("could not get block from hash %v: %v", tips[0].Hash, err))
 		}
 
 		for block != nil {
@@ -300,7 +296,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		cmd := exec.Command("docker", "exec", fmt.Sprintf("e2e-op-geth-%s-1", layer), "geth", "attach", "--exec", jsi, ipcPath)
 		output, err := cmd.Output()
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("error executing command %s: %v", cmd.String(), err))
 		}
 
 		return strings.Split(string(output), "\n")[0]
@@ -320,7 +316,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		var err error
 		s.batcherPublicationCount, err = strconv.Atoi(count)
 		if err != nil {
-			panic(err)
+			panic(fmt.Sprintf("could not get batcher publication count %s: %v", count, err))
 		}
 		mtx.Unlock()
 		select {
@@ -340,7 +336,7 @@ func dumpJsonAfterMsFromEnv() uint {
 
 	num, err := strconv.Atoi(val)
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("could not convert value to int %s: %v", val, err))
 	}
 
 	if num < 1000*10 {
@@ -364,7 +360,7 @@ func dumpJson(mtx *sync.Mutex, s *state) string {
 
 	b, err := json.Marshal(output)
 	if err != nil {
-		panic(err)
+		panic(fmt.Sprintf("could not marsh output to json: %v", err))
 	}
 
 	return string(b)

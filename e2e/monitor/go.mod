@@ -1,4 +1,4 @@
-module monitor
+module github.com/hemilabs/heminetwork/e2e/monitor
 
 go 1.22.2
 
@@ -25,3 +25,5 @@ require (
 	golang.org/x/crypto v0.19.0 // indirect
 	golang.org/x/sys v0.17.0 // indirect
 )
+
+replace github.com/hemilabs/heminetwork => ../../

@@ -41,6 +41,5 @@ jobs:
       - name: "get localnet stats"
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
-        run: |
-          go test -v ./...
+        run: go test -v ./...
 

@@ -3,7 +3,7 @@
 The Localnet Monitor is a small program that simply polls localnet for values
 that we want to test against.  
 
-## Requirements
+## Prerequisites
 
 * Go 1.22+
 * `docker` available in your cli
