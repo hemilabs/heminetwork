@@ -58,7 +58,13 @@ var (
 		"POPM_PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,
 			DefaultValue: "",
-			Help:         "address and port bssd prometheus listens on",
+			Help:         "address and port popm prometheus listens on",
+			Print:        config.PrintAll,
+		},
+		"POPM_PPROF_ADDRESS": config.Config{
+			Value:        &cfg.PrometheusListenAddress,
+			DefaultValue: "",
+			Help:         "address and port popm pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
 		"POPM_REMINE_THRESHOLD": config.Config{

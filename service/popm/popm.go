@@ -33,6 +33,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/service/pprof"
 )
 
 // XXX we should debate if we can make pop miner fully transient. It feels like
@@ -71,6 +72,8 @@ type Config struct {
 	LogLevel string
 
 	PrometheusListenAddress string
+
+	PprofListenAddress string
 
 	RetryMineThreshold uint
 
@@ -845,6 +848,25 @@ func (m *Miner) Run(pctx context.Context) error {
 		if err := m.handlePrometheus(ctx); err != nil {
 			return fmt.Errorf("handlePrometheus: %w", err)
 		}
+	}
+
+	// pprof
+	if m.cfg.PprofListenAddress != "" {
+		p, err := pprof.NewServer(&pprof.Config{
+			ListenAddress: m.cfg.PprofListenAddress,
+		})
+		if err != nil {
+			return fmt.Errorf("create pprof server: %w", err)
+		}
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
+				log.Errorf("pprof server terminated with error: %v", err)
+				return
+			}
+			log.Infof("pprof server clean shutdown")
+		}()
 	}
 
 	log.Infof("Starting PoP miner with BTC address %v (public key %x)",

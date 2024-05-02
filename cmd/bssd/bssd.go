@@ -56,6 +56,12 @@ var (
 			Help:         "address and port bssd prometheus listens on",
 			Print:        config.PrintAll,
 		},
+		"BSS_PPROF_ADDRESS": config.Config{
+			Value:        &cfg.PprofListenAddress,
+			DefaultValue: "",
+			Help:         "address and port bssd pprof listens on (open <address>/debug/pprof to see available profiles)",
+			Print:        config.PrintAll,
+		},
 	}
 )
 

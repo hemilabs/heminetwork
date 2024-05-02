@@ -39,6 +39,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/deucalion"
+	"github.com/hemilabs/heminetwork/service/pprof"
 	"github.com/hemilabs/heminetwork/ttl"
 )
 
@@ -162,6 +163,7 @@ type Config struct {
 	MaxCachedTxs            int
 	Network                 string
 	PrometheusListenAddress string
+	PprofListenAddress      string
 }
 
 func NewDefaultConfig() *Config {
@@ -1729,6 +1731,25 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 		log.Infof("RPC server shutdown cleanly")
 	}()
+
+	// pprof
+	if s.cfg.PprofListenAddress != "" {
+		p, err := pprof.NewServer(&pprof.Config{
+			ListenAddress: s.cfg.PprofListenAddress,
+		})
+		if err != nil {
+			return fmt.Errorf("create pprof server: %w", err)
+		}
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
+				log.Errorf("pprof server terminated with error: %v", err)
+				return
+			}
+			log.Infof("pprof server clean shutdown")
+		}()
+	}
 
 	// Prometheus
 	if s.cfg.PrometheusListenAddress != "" {

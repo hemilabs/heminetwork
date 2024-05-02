@@ -37,6 +37,7 @@ import (
 	"github.com/hemilabs/heminetwork/hemi/electrumx"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/deucalion"
+	"github.com/hemilabs/heminetwork/service/pprof"
 )
 
 // XXX this code needs to be a bit smarter when syncing bitcoin. We should
@@ -104,6 +105,7 @@ type Config struct {
 	LogLevel                string
 	PgURI                   string
 	PrometheusListenAddress string
+	PprofListenAddress      string
 	PublicKeyAuth           bool
 }
 
@@ -1443,13 +1445,32 @@ func (s *Server) Run(pctx context.Context) error {
 		log.Infof("public RPC Server shutdown cleanly")
 	}()
 
+	// pprof
+	if s.cfg.PprofListenAddress != "" {
+		p, err := pprof.NewServer(&pprof.Config{
+			ListenAddress: s.cfg.PprofListenAddress,
+		})
+		if err != nil {
+			return fmt.Errorf("create pprof server: %w", err)
+		}
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
+				log.Errorf("pprof server terminated with error: %v", err)
+				return
+			}
+			log.Infof("pprof server clean shutdown")
+		}()
+	}
+
 	// Prometheus
 	if s.cfg.PrometheusListenAddress != "" {
 		d, err := deucalion.New(&deucalion.Config{
 			ListenAddress: s.cfg.PrometheusListenAddress,
 		})
 		if err != nil {
-			return fmt.Errorf("create server: %w", err)
+			return fmt.Errorf("create prometheus server: %w", err)
 		}
 		cs := []prometheus.Collector{
 			s.cmdsProcessed, // XXX should we make two counters? priv/pub
