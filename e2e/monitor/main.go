@@ -24,8 +24,10 @@ import (
 )
 
 const (
-	dataRefreshSeconds  = 1
-	tableRefreshSeconds = 1
+	dataRefreshSeconds   = 1
+	tableRefreshSeconds  = 1
+	batcherInboxAddress  = "0xff00000000000000000000000000000000000901"
+	batcherSenderAddress = "0x78697c88847dfbbb40523e42c1f2e28a13a170be"
 )
 
 type state struct {
@@ -224,9 +226,6 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 }
 
 func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
-	batcherInboxAddress := "0xff00000000000000000000000000000000000901"
-	batcherSenderAddress := "0x78697c88847dfbbb40523e42c1f2e28a13a170be"
-
 	firstBatcherTxBlockJs := fmt.Sprintf(`
 		let found = false;
 		for (let i = 0; i <= eth.blockNumber; i++) {
@@ -234,7 +233,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			for (const transactionHash of block.transactions) {
 				const transaction = eth.getTransaction(transactionHash);
 				if (transaction.from === '%s' && transaction.to === '%s') {
-					console.log(`+"${transaction.hash},  ${i}"+`);
+					console.log(`+"`${transaction.hash}, ${i}`"+`);
 					found = true;
 				}
 
@@ -256,7 +255,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			for (const transactionHash of block.transactions) {
 				const transaction = eth.getTransaction(transactionHash);
 				if (transaction.from === '%s' && transaction.to === '%s') {
-					console.log(transaction.hash + "," + i);
+					console.log(`+"`${transaction.hash}, ${i}`"+`);
 					found = true;
 				}
 
