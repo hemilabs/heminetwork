@@ -6,6 +6,8 @@ package tbc
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -33,8 +35,7 @@ type btcNode struct {
 	mtx            sync.RWMutex
 	chain          map[string]*btcutil.Block
 	blocksAtHeight map[int32][]*btcutil.Block
-	height         int
-	best           []*chainhash.Hash
+	height         int32
 	params         *chaincfg.Params
 }
 
@@ -45,14 +46,16 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 		chain:          make(map[string]*btcutil.Block, 10),
 		blocksAtHeight: make(map[int32][]*btcutil.Block, 10),
 		height:         0,
-		best:           []*chainhash.Hash{chaincfg.RegressionNetParams.GenesisHash},
 		params:         &chaincfg.RegressionNetParams,
 	}
 
 	genesis := btcutil.NewBlock(chaincfg.RegressionNetParams.GenesisBlock)
 	genesis.SetHeight(0)
-	node.chain[chaincfg.RegressionNetParams.GenesisHash.String()] = genesis
-
+	// node.chain[chaincfg.RegressionNetParams.GenesisHash.String()] = genesis
+	_, err := node.insertBlock(genesis)
+	if err != nil {
+		return nil, err
+	}
 	return node, nil
 }
 
@@ -220,8 +223,8 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 	}
 }
 
-func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash) (*btcutil.Block, error) {
-	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, uint64(0))
+func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64) (*btcutil.Block, error) {
+	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
 	if err != nil {
 		return nil, err
 	}
@@ -263,16 +266,7 @@ func (b *btcNode) insertBlock(block *btcutil.Block) (int, error) {
 	return len(b.blocksAtHeight[block.Height()]), nil
 }
 
-func (b *btcNode) Best() []*chainhash.Hash {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-	return b.best
-}
-
-func (b *btcNode) BlockHeadersAtHeight(height int32) ([]*wire.BlockHeader, error) {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-
+func (b *btcNode) blockHeadersAtHeight(height int32) ([]*wire.BlockHeader, error) {
 	bs, ok := b.blocksAtHeight[height]
 	if !ok {
 		return nil, fmt.Errorf("no block headers at: %v", height)
@@ -282,6 +276,38 @@ func (b *btcNode) BlockHeadersAtHeight(height int32) ([]*wire.BlockHeader, error
 		bhs = append(bhs, &v.MsgBlock().Header)
 	}
 	return bhs, nil
+}
+
+func (b *btcNode) BlockHeadersAtHeight(height int32) ([]*wire.BlockHeader, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	return b.blockHeadersAtHeight(height)
+}
+
+func (b *btcNode) Best() []*chainhash.Hash {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	bhs, err := b.blockHeadersAtHeight(b.height)
+	if err != nil {
+		panic(err)
+	}
+	chs := make([]*chainhash.Hash, 0, len(bhs))
+	for _, v := range bhs {
+		ch := v.BlockHash()
+		chs = append(chs, &ch)
+	}
+	return chs
+}
+
+func random(count int) []byte {
+	b := make([]byte, count)
+	_, err := rand.Read(b)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*btcutil.Block, error) {
@@ -295,9 +321,13 @@ func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Add
 
 	blocks := make([]*btcutil.Block, 0, count)
 	for range count {
+		// extra nonce is needed to prevent block collisions
+		en := random(8)
+		extraNonce := binary.BigEndian.Uint64(en)
+
 		nextBlockHeight := parent.Height() + 1
 		block, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
-			parent.Hash())
+			parent.Hash(), extraNonce)
 		if err != nil {
 			return nil, fmt.Errorf("height %v: %v", nextBlockHeight, err)
 		}
@@ -309,13 +339,12 @@ func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Add
 			return nil, fmt.Errorf("insert block at height %v: %v",
 				nextBlockHeight, err)
 		}
-		_ = n
-
+		if n != 1 {
+			b.t.Logf("fork at: %v blocks %v", nextBlockHeight, n)
+		}
 		parent = block
+		b.height = nextBlockHeight
 	}
-
-	// b.t.Logf("Best: %v", spew.Sdump(blocks))
-	b.best = []*chainhash.Hash{parent.Hash()}
 
 	return blocks, nil
 }
@@ -533,6 +562,25 @@ func TestFork(t *testing.T) {
 		// }
 		// t.Logf("%v", spew.Sdump(utxos))
 		break
+	}
+
+	// Advance both heads
+	b9 := n.Best()[0]
+	b10a, err := n.Mine(1, b9, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b10b, err := n.Mine(1, b9, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("b10a: %v", b10a[0].Hash())
+	t.Logf("b10b: %v", b10b[0].Hash())
+	t.Logf("%v", spew.Sdump(n))
+
+	b10s := n.Best()
+	if len(b10s) != 2 {
+		t.Fatalf("expected 2 best blocks, got %v", len(b10s))
 	}
 }
 
