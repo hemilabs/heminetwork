@@ -234,7 +234,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			for (const transactionHash of block.transactions) {
 				const transaction = eth.getTransaction(transactionHash);
 				if (transaction.from === '%s' && transaction.to === '%s') {
-					console.log(transaction.hash + "," + i);
+					console.log(\`${transaction.hash},  ${i}\`);
 					found = true;
 				}
 
