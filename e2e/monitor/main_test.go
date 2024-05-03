@@ -22,7 +22,6 @@ func TestMonitor(t *testing.T) {
 	t.Log(output)
 
 	var jo jsonOutput
-
 	if err := json.Unmarshal([]byte(output), &jo); err != nil {
 		t.Fatal(err)
 	}

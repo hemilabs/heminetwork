@@ -334,7 +334,6 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			return
 		case <-time.After(dataRefreshSeconds * time.Second):
 		}
-
 	}
 }
 
