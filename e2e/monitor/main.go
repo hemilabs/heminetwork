@@ -234,7 +234,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			for (const transactionHash of block.transactions) {
 				const transaction = eth.getTransaction(transactionHash);
 				if (transaction.from === '%s' && transaction.to === '%s') {
-					console.log(\`${transaction.hash},  ${i}\`);
+					console.log(`+"${transaction.hash},  ${i}"+`);
 					found = true;
 				}
 
@@ -295,7 +295,16 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 	`
 
 	runJs := func(jsi string, layer string, ipcPath string) string {
-		cmd := exec.Command("docker", "exec", fmt.Sprintf("e2e-op-geth-%s-1", layer), "geth", "attach", "--exec", jsi, ipcPath)
+		cmd := exec.Command(
+			"docker",
+			"exec",
+			fmt.Sprintf("e2e-op-geth-%s-1", layer),
+			"geth",
+			"attach",
+			"--exec",
+			jsi,
+			ipcPath,
+		)
 		output, err := cmd.Output()
 		if err != nil {
 			panic(fmt.Sprintf("error executing command %s: %v", cmd.String(), err))

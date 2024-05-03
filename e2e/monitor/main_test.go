@@ -56,6 +56,6 @@ func TestMonitor(t *testing.T) {
 	t.Logf("expecting actual balance %d to be greater than %d", balance, expectedPayoutBalance)
 
 	if expectedPayoutBalance.Cmp(balance) > 0 {
-		t.Fatalf("pop miner payout balance %d < %d", expectedPayoutBalance, balance)
+		t.Fatalf("pop miner payout balance received %d, want at least %d", balance, expectedPayoutBalance)
 	}
 }
