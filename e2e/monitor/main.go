@@ -84,11 +84,9 @@ func monitor(dumpJsonAfterMs uint) string {
 		case <-ctx.Done():
 			return ""
 		}
-	} else {
-		<-ctx.Done()
-		return ""
 	}
 
+	<-ctx.Done()
 	return ""
 }
 

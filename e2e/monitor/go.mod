@@ -2,6 +2,8 @@ module github.com/hemilabs/heminetwork/e2e/monitor
 
 go 1.22.2
 
+replace github.com/hemilabs/heminetwork => ../../
+
 require (
 	github.com/btcsuite/btcd v0.24.0
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
@@ -26,4 +28,3 @@ require (
 	golang.org/x/sys v0.17.0 // indirect
 )
 
-replace github.com/hemilabs/heminetwork => ../../
