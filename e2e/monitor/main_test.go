@@ -15,7 +15,7 @@ import (
 // Test_Monitor is a small, bare-bones test to dump the state of localnet
 // after 5 minutes and check that it has progressed at least to a certain
 // point
-func Test_Monitor(t *testing.T) {
+func TestMonitor(t *testing.T) {
 	ms := 1000 * 60 * 5 // dump after 5 minutes
 	output := monitor(uint(ms))
 
