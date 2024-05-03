@@ -286,7 +286,11 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 	`, batcherSenderAddress, batcherInboxAddress)
 
 	popMinerBalanceJs := `
-		const hexValue = eth.call({to: '0x4200000000000000000000000000000000000042', from: eth.accounts[0], data: '0x70a08231000000000000000000000000B275Ec0935e404BEe2d40622de13495F42F84d90'});
+		const hexValue = eth.call({
+		  to: '0x4200000000000000000000000000000000000042',
+		  from: eth.accounts[0],
+		  data: '0x70a08231000000000000000000000000B275Ec0935e404BEe2d40622de13495F42F84d90',
+		});
 		console.log(Number.parseInt(hexValue, 16));
 	`
 
