@@ -229,7 +229,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 
 	firstBatcherTxBlockJs := fmt.Sprintf(`
 		let found = false;
-		for (let i = 0;i <=eth.blockNumber; i++) {
+		for (let i = 0; i <= eth.blockNumber; i++) {
 			const block = eth.getBlock(i);
 			for (const transactionHash of block.transactions) {
 				const transaction = eth.getTransaction(transactionHash);
