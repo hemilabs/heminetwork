@@ -273,7 +273,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 
 	batcherPublicationCountJs := fmt.Sprintf(`
 		let count = 0;
-		for (let i = eth.blockNumber;i >= 0; i--) {
+		for (let i = eth.blockNumber; i >= 0; i--) {
 			const block = eth.getBlock(i);
 			for (const transactionHash of block.transactions) {
 				const transaction = eth.getTransaction(transactionHash);
