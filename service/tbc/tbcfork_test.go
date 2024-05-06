@@ -523,7 +523,7 @@ func TestFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:     false, // XXX for now
+		AutoIndex:     true, // XXX for now
 		BlockSanity:   false,
 		LevelDBHome:   t.TempDir(),
 		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
@@ -629,6 +629,16 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(time.Second)
+
+	// Let's see if tbcd agrees
+	si := s.Synced(ctx)
+	t.Logf("--- %v", si)
+	bhsAt11, err := s.BlockHeadersByHeight(ctx, 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("block headers at 11: %v", spew.Sdump(bhsAt11))
 	time.Sleep(time.Second)
 }
 

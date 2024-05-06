@@ -897,8 +897,8 @@ func (s *Server) txIndexer(ctx context.Context) {
 		return
 	}
 	if len(bhs) != 1 {
-		log.Errorf("utxo indexer block headers best: unsuported fork")
-		return
+		panic("utxo indexer block headers best: unsuported fork")
+		// return
 	}
 
 	if bhs[0].Height != h-1 {
@@ -959,8 +959,8 @@ func (s *Server) utxoIndexer(ctx context.Context) {
 		return
 	}
 	if len(bhs) != 1 {
-		log.Errorf("utxo indexer block headers best: unsuported fork")
-		return
+		panic("utxo indexer block headers best: unsuported fork")
+		// return
 	}
 
 	if bhs[0].Height != h-1 {
@@ -1219,7 +1219,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
 
-	// Whatever happens,, delete from cache and potentially try again
+	// Whatever happens, delete from cache and potentially try again
 	var (
 		printStats      bool
 		blocksSize      uint64
