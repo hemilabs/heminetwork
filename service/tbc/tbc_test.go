@@ -1389,7 +1389,6 @@ func TestForks(t *testing.T) {
 		name                    string
 		rawBlocks               []string
 		expectedBalancesAtBlock func(t *testing.T, b string) map[string]int
-		syncedBlocksNeeded      int
 	}
 
 	tbcForkTestTable := []tbcForkTestTableItem{
@@ -1419,7 +1418,6 @@ func TestForks(t *testing.T) {
 
 				return map[string]int{}
 			},
-			syncedBlocksNeeded: 204,
 		},
 	}
 
