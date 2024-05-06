@@ -31,6 +31,7 @@ import (
 type btcNode struct {
 	t    *testing.T
 	port string
+	p    *peer
 
 	mtx            sync.RWMutex
 	chain          map[string]*btcutil.Block
@@ -142,6 +143,10 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 		return
 	}
 
+	b.mtx.Lock()
+	b.p = p
+	b.mtx.Unlock()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -167,7 +172,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 	}
 }
 
-func (b *btcNode) handleMsg(_ context.Context, p *peer, msg wire.Message) error {
+func (b *btcNode) handleMsg(ctx context.Context, p *peer, msg wire.Message) error {
 	switch m := msg.(type) {
 	case *wire.MsgVersion:
 		mva := &wire.MsgVerAck{}
@@ -176,7 +181,7 @@ func (b *btcNode) handleMsg(_ context.Context, p *peer, msg wire.Message) error 
 		}
 
 	case *wire.MsgGetHeaders:
-		b.t.Logf("get headers %v", spew.Sdump(m))
+		// b.t.Logf("get headers %v", spew.Sdump(m))
 		headers, err := b.handleGetHeaders(m)
 		if err != nil {
 			return fmt.Errorf("handle get headers: %w", err)
@@ -202,6 +207,12 @@ func (b *btcNode) handleMsg(_ context.Context, p *peer, msg wire.Message) error 
 	}
 
 	return nil
+}
+
+func (b *btcNode) SendBlockheader(ctx context.Context, bh wire.BlockHeader) error {
+	msg := wire.NewMsgHeaders()
+	msg.AddBlockHeader(&bh)
+	return b.p.write(defaultCmdTimeout, msg)
 }
 
 func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
@@ -576,12 +587,49 @@ func TestFork(t *testing.T) {
 	}
 	t.Logf("b10a: %v", b10a[0].Hash())
 	t.Logf("b10b: %v", b10b[0].Hash())
-	t.Logf("%v", spew.Sdump(n))
-
 	b10s := n.Best()
 	if len(b10s) != 2 {
 		t.Fatalf("expected 2 best blocks, got %v", len(b10s))
 	}
+
+	// Tell tbcd
+	err = n.SendBlockheader(ctx, b10a[0].MsgBlock().Header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = n.SendBlockheader(ctx, b10b[0].MsgBlock().Header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
+
+	// Advance both heads again
+	b10aHash := b10a[0].MsgBlock().Header.BlockHash()
+	b11a, err := n.Mine(1, &b10aHash, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b10bHash := b10b[0].MsgBlock().Header.BlockHash()
+	b11b, err := n.Mine(1, &b10bHash, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("b11a: %v", b11a[0].Hash())
+	t.Logf("b11b: %v", b11b[0].Hash())
+	b11s := n.Best()
+	if len(b11s) != 2 {
+		t.Fatalf("expected 2 best blocks, got %v", len(b11s))
+	}
+	// Tell tbcd
+	err = n.SendBlockheader(ctx, b11a[0].MsgBlock().Header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = n.SendBlockheader(ctx, b11b[0].MsgBlock().Header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Second)
 }
 
 // borrowed from btcd
