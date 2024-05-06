@@ -333,6 +333,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) er
 	}
 
 	// Insert last height into block headers XXX this does not deal with forks
+	// XXX this is the resume bug
 	bhsBatch.Put([]byte(bhsLastKey), lastRecord)
 
 	// Write height hash batch

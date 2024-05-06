@@ -1107,6 +1107,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	// expensive calls so we just eat it.
 
 	// Make sure we can connect these headers in database
+	//
+	// XXX if we do the cumulative difficulty check in db this becomes
+	// moot, add new error type to catch this.
 	dbpbh, err := s.db.BlockHeaderByHash(ctx, msg.Headers[0].PrevBlock[:])
 	if err != nil {
 		log.Errorf("handle headers no previous block header: %v",
@@ -1120,6 +1123,10 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	}
 
 	// Construct insert list and nominally validate headers
+	//
+	// XXX as part of cumulative difficulty we can grab height as well
+	// since we need the parent for the difficulty anyway; thus this goes
+	// away too and ends up in db code
 	headers := make([]tbcd.BlockHeader, 0, len(msg.Headers))
 	height := dbpbh.Height + 1
 	for k := range msg.Headers {
@@ -1155,6 +1162,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		lbh := headers[len(headers)-1]
 
 		s.mtx.Lock()
+		// XXX this must be cumulative difficulty
 		if lbh.Height > s.lastBlockHeader.Height {
 			s.lastBlockHeader = lbh
 		}
@@ -1701,7 +1709,7 @@ func (s *Server) Run(pctx context.Context) error {
 			return err
 		}
 	} else if len(bhs) > 1 {
-		return errors.New("blockheaders best: unsupported fork")
+		panic("blockheaders best: unsupported fork")
 	}
 	s.lastBlockHeader = bhs[0] // Prime last seen block header
 	log.Infof("Starting block headers sync at height: %v time %v",
