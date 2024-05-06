@@ -1382,6 +1382,95 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 }
 
+func TestForks(t *testing.T) {
+	skipIfNoDocker(t)
+
+	type tbcForkTestTableItem struct {
+		name                    string
+		rawBlocks               []string
+		expectedBalancesAtBlock func(t *testing.T, b string) map[string]int
+		syncedBlocksNeeded      int
+	}
+
+	tbcForkTestTable := []tbcForkTestTableItem{
+		tbcForkTestTableItem{
+			name:      "TbcForkTest1",
+			rawBlocks: tbcForkTestData1,
+			expectedBalancesAtBlock: func(t *testing.T, b string) map[string]int {
+				if b == "00000030908841eba84836569857842b79f67d7274ca0192aee3402045fc8a1e8c756a50da4ec0d4d1996b8aacd7e18f926c175d275291c66dc14147b40cd067db1cdf14e5bf3266ffff7f200000000001020000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff0402cc0000ffffffff0200f9029500000000160014bfccec420c4ea43a36f354793609e0806b3e087e0000000000000000266a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf90120000000000000000000000000000000000000000000000000000000000000000000000000" {
+					return map[string]int{
+						"bcrt1q9jl9v3gwyhqts730l90u3nvjtkuxsu9mc7srje": 10000000000,
+						"bcrt1q3v7mwuxch2yl9rxpzqy7tkhezdlexda54uccsm": 10000000000,
+						"bcrt1qk3na83yp2aspc9q25ta05nxa02x9wwuueqt60t": 20000000000,
+						"bcrt1q8wl0dfl70cr0sy7pyy32th8v29e9kjl5dx9sp8": 50000000000,
+					}
+				}
+
+				if b == "0000003077075b7f64fb1eda2f1083121e007eec7c988991d1683809b622ee4cc8827c40329dd112aebc19dd7346be673a7a50013b70181d19b9a6fdaf140b1887513f1b20c43266ffff7f200000000002020000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff0402cd0000ffffffff02005b4096000000001600140961bff2951cc01349c8852e175dfdb0cd71b3fb0000000000000000266a24aa21a9ed53256c542013393ba2d188a3fc6f57e98c6c2bcca6e79a766ac5eb3f0908f2320120000000000000000000000000000000000000000000000000000000000000000000000000020000000001023a8ada23e38cd867c67a787425b82edf65e782f9bc679dc4f135b5a0e42a680d0000000000fdffffffd6a1696bc256f83061dbe1a5ae4b277a9ecdf1549c2da44de8c24fb49be81b890000000000fdffffff020097c59300000000160014d5b9011891dc81339f74d282b1fd3712c8341a4d00eb08bf010000001600141937673dc4079425339dc90eb8e095be45e6e5ca0247304402203f1a3a3a215a4765295457972ad384c8f1a852ac822cf08afdfe032e9ec4345802206ab7849d5ed9ee692aadd956ed01ae28e97c4b5e49b200acbba586cabc47ab8c0121022783f7c72ea4e5f919475a3f0d788df979b8be4a408b9ebcf679717d983a0ba9024730440220149f408554da5b0c149fe209830e5c3f371f538511a620ff43cb3962317f9fa9022003d5bbd51bc8bfdfa52a5c4bc309a4a7766d4c934758ce18949baa3c813f05ac0121022783f7c72ea4e5f919475a3f0d788df979b8be4a408b9ebcf679717d983a0ba9cc000000" {
+					return map[string]int{
+						"bcrt1qk3na83yp2aspc9q25ta05nxa02x9wwuueqt60t": 0,
+						"bcrt1q8wl0dfl70cr0sy7pyy32th8v29e9kjl5dx9sp8": 0,
+						"bcrt1qwf8a3z3h4wefgyhw050upcmkvva2ftjdrjvrch": 20000000000,
+						"bcrt1qfcxjagapu5mnys3480xt8ckp0d3wjym7wfuydy": 1000000000,
+						"bcrt1qdh9m3mskza9ez2v6z3nrcu7ntqw2pek50ak70p": 2500000000,
+						"bcrt1qrymkw0wyq72z2vuaey8t3cy4hez7dew2nxyrar": 7500000000,
+					}
+				}
+
+				return map[string]int{}
+			},
+			syncedBlocksNeeded: 204,
+		},
+	}
+
+	for _, tt := range tbcForkTestTable {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 0, "")
+			defer func() {
+				if err := bitcoindContainer.Terminate(ctx); err != nil {
+					panic(err)
+				}
+			}()
+
+			for i, b := range tt.rawBlocks {
+				t.Logf("submitting block at index %d", i)
+				submitBlock(ctx, t, b, bitcoindContainer)
+
+				expectedBalances := tt.expectedBalancesAtBlock(t, b)
+				if len(expectedBalances) == 0 {
+					continue
+				}
+
+				tbcServer, _ := createTbcServer(ctx, t, mappedPeerPort)
+
+				// XXX we may need to revisit this; this allows tbc to sync
+				// and index blocks and other resources
+				time.Sleep(5 * time.Second)
+				go tbcServer.syncBlocks(ctx)
+				time.Sleep(5 * time.Second)
+
+				err := tbcServer.SyncIndexersToHeight(ctx, uint64(i))
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				for k, v := range expectedBalances {
+					balance, err := tbcServer.BalanceByAddress(ctx, k)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					if uint64(v) != balance {
+						t.Errorf("unexpected balance: %d != %d", v, balance)
+					}
+				}
+			}
+		})
+	}
+}
+
 func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
 	id, err := randHexId(6)
 	if err != nil {
