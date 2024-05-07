@@ -67,7 +67,7 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 			}
 
 			scriptHash := sha256.Sum256(txOut.PkScript)
-			log.Infof("adding utxo %s value %d", hex.EncodeToString(scriptHash[:]), uint64(txOut.Value))
+			log.Infof("adding utxo to script hash %s value %d", hex.EncodeToString(scriptHash[:]), uint64(txOut.Value))
 
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
 				sha256.Sum256(txOut.PkScript),

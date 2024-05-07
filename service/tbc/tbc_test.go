@@ -1382,7 +1382,202 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 }
 
+func TestForksWithGen(t *testing.T) {
+	skipIfNoDocker(t)
+
+	otherPrivateKey := "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219ffff"
+	_, _, otherAddress, err := bitcoin.KeysAndAddressFromHexString(
+		otherPrivateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type tbcForkTestTableItem struct {
+		name             string
+		testForkScenario func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server)
+	}
+
+	testTable := []tbcForkTestTableItem{
+		{
+			name: "Split Tip, Single Block",
+			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+				_, err := runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"sendtoaddress",
+						otherAddress.EncodeAddress(),
+						"10",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				blockHashesResponse, err := runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"generatetoaddress",
+						"1",
+						walletAddress,
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				go tbcServer.syncBlocks(ctx)
+				time.Sleep(5 * time.Second)
+
+				err = tbcServer.SyncIndexersToHeight(ctx, 201)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				balance, err := tbcServer.BalanceByAddress(ctx, otherAddress.EncodeAddress())
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if balance != 1000000000 {
+					t.Fatalf("unexpected balance: %d", balance)
+				}
+
+				var blockHashes []string
+				if err := json.Unmarshal([]byte(blockHashesResponse), &blockHashes); err != nil {
+					t.Fatal(err)
+				}
+
+				// create fork
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"invalidateblock",
+						blockHashes[0],
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"sendtoaddress",
+						otherAddress.EncodeAddress(),
+						"120",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"generatetoaddress",
+						"1",
+						walletAddress,
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				// the new tip has the "otherAddress" given 120 btc
+				balance, err = tbcServer.BalanceByAddress(ctx, otherAddress.EncodeAddress())
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if balance != 12000000000 {
+					t.Fatalf("unexpected balance: %d", balance)
+				}
+			},
+		},
+	}
+
+	for _, tt := range testTable {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+
+			// generate 200 to btcAddress
+			bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 0, "")
+			defer func() {
+				if err := bitcoindContainer.Terminate(ctx); err != nil {
+					panic(err)
+				}
+			}()
+
+			_, err = runBitcoinCommand(
+				ctx,
+				t,
+				bitcoindContainer,
+				[]string{
+					"bitcoin-cli",
+					"-regtest=1",
+					"createwallet",
+					"mywallet",
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			walletAddress, err := runBitcoinCommand(
+				ctx,
+				t,
+				bitcoindContainer,
+				[]string{
+					"bitcoin-cli",
+					"-regtest=1",
+					"getnewaddress",
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = runBitcoinCommand(
+				ctx,
+				t,
+				bitcoindContainer,
+				[]string{
+					"bitcoin-cli",
+					"-regtest=1",
+					"generatetoaddress",
+					"200",
+					walletAddress,
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			tbcServer, _ := createTbcServer(ctx, t, mappedPeerPort)
+
+			tt.testForkScenario(t, ctx, bitcoindContainer, walletAddress, tbcServer)
+		})
+	}
+}
+
 func TestForks(t *testing.T) {
+	// I am likely not going to use this test setup
+	t.Skip()
 	skipIfNoDocker(t)
 
 	type tbcForkTestTableItem struct {
@@ -1392,7 +1587,7 @@ func TestForks(t *testing.T) {
 	}
 
 	tbcForkTestTable := []tbcForkTestTableItem{
-		tbcForkTestTableItem{
+		{
 			name:      "TbcForkTest1",
 			rawBlocks: tbcForkTestData1,
 			expectedBalancesAtBlock: func(t *testing.T, b string) map[string]int {
@@ -1419,6 +1614,27 @@ func TestForks(t *testing.T) {
 				return map[string]int{}
 			},
 		},
+		{
+			name:      "TbcForkTest2",
+			rawBlocks: tbcForkTestData2,
+			expectedBalancesAtBlock: func(t *testing.T, b string) map[string]int {
+				if b == "0000002080ff3fe68e24ccf97ec7075df124ca246fba79df9402f5b8b3252836a80c705414b1dc9ff92b6831c020822f14962c95bc6c1966cd452aa3d2b3dd96a7e89956f6623a66ffff7f200100000001020000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff03016400ffffffff0200f2052a010000001976a914aa6ec3bfb728624a078dc82798dcc807ab894ea488ac0000000000000000266a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf90120000000000000000000000000000000000000000000000000000000000000000000000000" {
+					return map[string]int{
+						"mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG": 500000000000,
+						"mrVWrkuzrGJRaYvAUB8d9fwJtegWevFQok": 0,
+					}
+				}
+
+				if b == "0000002034eba736fac2e9d0f4f03ee458414f9ec08d3557df9ca8f3432ef1abeb1a5c43d26809e044b3fa338ab5ba39bce43b8739d09de4d2d688ec5f2636e02953a350f6623a66ffff7f200100000001020000000001010000000000000000000000000000000000000000000000000000000000000000ffffffff03016600ffffffff0200f2052a010000001976a9147863bc115f71f0289db3b994eed4bfed8bd9898788ac0000000000000000266a24aa21a9ede2f61c3f71d1defd3fa999dfa36953755c690689799962b48bebd836974e8cf90120000000000000000000000000000000000000000000000000000000000000000000000000" {
+					return map[string]int{
+						"mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG": 495000000000,
+						"mrVWrkuzrGJRaYvAUB8d9fwJtegWevFQok": 10000000000,
+					}
+				}
+
+				return map[string]int{}
+			},
+		},
 	}
 
 	for _, tt := range tbcForkTestTable {
@@ -1432,6 +1648,8 @@ func TestForks(t *testing.T) {
 				}
 			}()
 
+			tbcServer, _ := createTbcServer(ctx, t, mappedPeerPort)
+
 			for i, b := range tt.rawBlocks {
 				t.Logf("submitting block at index %d", i)
 				submitBlock(ctx, t, b, bitcoindContainer)
@@ -1440,8 +1658,6 @@ func TestForks(t *testing.T) {
 				if len(expectedBalances) == 0 {
 					continue
 				}
-
-				tbcServer, _ := createTbcServer(ctx, t, mappedPeerPort)
 
 				// XXX we may need to revisit this; this allows tbc to sync
 				// and index blocks and other resources
@@ -1478,7 +1694,7 @@ func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container 
 	name := fmt.Sprintf("bitcoind-%s", id)
 	req := testcontainers.ContainerRequest{
 		Image:        "kylemanna/bitcoind",
-		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1", "-noonion", "-listenonion=0"},
+		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1", "-noonion", "-listenonion=0", "-fallbackfee=0.01"},
 		ExposedPorts: []string{"18443", "18444"},
 		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{

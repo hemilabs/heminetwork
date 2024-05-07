@@ -1078,7 +1078,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	log.Tracef("handleHeaders %v", p)
 	defer log.Tracef("handleHeaders exit %v", p)
 
-	log.Debugf("handleHeaders (%v): %v", p, len(msg.Headers))
+	log.Infof("handleHeaders (%v): %v", p, len(msg.Headers))
 
 	if len(msg.Headers) == 0 {
 		// This may signify the end of IBD but isn't 100%. We can fart
