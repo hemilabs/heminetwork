@@ -1433,9 +1433,6 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				go tbcServer.syncBlocks(ctx)
-				time.Sleep(5 * time.Second)
-
 				err = tbcServer.SyncIndexersToHeight(ctx, 201)
 				if err != nil {
 					t.Fatal(err)
