@@ -241,11 +241,13 @@ func keyToHeightHash(key []byte) (uint64, []byte) {
 	return binary.BigEndian.Uint64(key[0:8]), hash
 }
 
-// encodeBlockHeader encodes a database block header as [height,header] or
-// [8+80] bytes. The hash is the leveldb table key.
-func encodeBlockHeader(bh *tbcd.BlockHeader) (ebhr [88]byte) {
+// encodeBlockHeader encodes a database block header as
+// [height,header,difficulty] or [8+80+32] bytes. The hash is the leveldb table
+// key.
+func encodeBlockHeader(bh *tbcd.BlockHeader) (ebhr [120]byte) {
 	binary.BigEndian.PutUint64(ebhr[0:8], bh.Height)
-	copy(ebhr[8:], bh.Header[:])
+	copy(ebhr[8:88], bh.Header[:])
+	copy(ebhr[88:], bh.Difficulty.Bytes()) // big endian already
 	return
 }
 
@@ -258,12 +260,14 @@ func decodeBlockHeader(hashSlice []byte, ebh []byte) *tbcd.BlockHeader {
 		header [80]byte
 	)
 	copy(hash[:], hashSlice)
-	copy(header[:], ebh[8:])
-	return &tbcd.BlockHeader{
+	copy(header[:], ebh[8:88])
+	bh := &tbcd.BlockHeader{
 		Hash:   hash[:],
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 		Header: header[:],
 	}
+	(&bh.Difficulty).SetBytes(ebh[88:])
+	return bh
 }
 
 func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) error {
@@ -309,12 +313,20 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs []tbcd.BlockHeader) er
 	hhBatch := new(leveldb.Batch)
 	bmBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
+
+	// Fetch parent cumulative difficulty + height
+
+	// XXX this does a connection test impicitly
+
 	for k := range bhs {
 		hhKey := heightHashToKey(bhs[k].Height, bhs[k].Hash[:])
 		// Height 0 is genesis, we do not want a missing block record for that.
 		if bhs[k].Height != 0 {
 			// Insert a synthesized height_hash key that serves as
 			// an index to see which blocks are missing.
+			//
+			// XXX if we zap the blockheaders table we should only
+			// insdert *if* block indeed does not exist
 			bmBatch.Put(hhKey, []byte{})
 		}
 

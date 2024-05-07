@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"reflect"
 	"sort"
 	"testing"
 
@@ -20,6 +19,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/go-test/deep"
+	"github.com/holiman/uint256"
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/database"
@@ -76,17 +77,19 @@ func TestEncodeDecodeBlockHeader(t *testing.T) {
 	genesisBH := cp.GenesisBlock.Header
 	genesisHash := cp.GenesisHash
 
+	randDiff := random(32)
+	difficulty := new(uint256.Int).SetBytes(randDiff)
+
 	bh := tbcd.BlockHeader{
-		Hash:   genesisHash[:],
-		Height: 0x1122334455667788, // we need not zero to test decoding of height
-		Header: h2b(&genesisBH),
+		Hash:       genesisHash[:],
+		Height:     0x1122334455667788, // we need not zero to test decoding of height
+		Header:     h2b(&genesisBH),
+		Difficulty: *difficulty,
 	}
-	t.Logf("%v", spew.Sdump(bh))
 	er := encodeBlockHeader(&bh)
 	dr := decodeBlockHeader(bh.Hash, er[:])
-	if !reflect.DeepEqual(bh, *dr) {
-		t.Fatalf("encode decode block header wanted %v got %v",
-			spew.Sdump(bh), spew.Sdump(*dr))
+	if diff := deep.Equal(bh, *dr); len(diff) > 0 {
+		t.Errorf("unexpected diff: %s", diff)
 	}
 }
 

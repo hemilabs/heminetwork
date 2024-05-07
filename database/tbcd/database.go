@@ -15,6 +15,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/holiman/uint256"
 
 	"github.com/hemilabs/heminetwork/database"
 )
@@ -58,12 +59,13 @@ type Database interface {
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)
 }
 
-// BlockHeader contains the first 80 raw bytes of a bitcoin block and its
-// location information (hash+height).
+// BlockHeader contains the first 80 raw bytes of a bitcoin block plus its
+// location information (hash+height) and the cumulative difficulty.
 type BlockHeader struct {
-	Hash   database.ByteArray
-	Height uint64
-	Header database.ByteArray
+	Hash       database.ByteArray
+	Height     uint64
+	Header     database.ByteArray
+	Difficulty uint256.Int
 }
 
 func (bh BlockHeader) String() string {
