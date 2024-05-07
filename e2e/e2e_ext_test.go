@@ -3622,6 +3622,74 @@ func TestDeleteAccessPublicKeyThatDoesNotExist(t *testing.T) {
 	}
 }
 
+func TestDeleteAccessPublicKey(t *testing.T) {
+	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	privateKeyOne, err := dcrsecp256k1.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	publicKeyOne := hex.EncodeToString(privateKeyOne.PubKey().SerializeCompressed())
+
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	_, _, bfgPrivateWsUrl, _ := createBfgServer(ctx, t, pgUri, "", 1)
+
+	c, _, err := websocket.Dial(ctx, bfgPrivateWsUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	bws := &bfgWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+
+	if err := bfgapi.Write(ctx, bws.conn, "someid", &bfgapi.AccessPublicKeyCreateRequest{
+		PublicKey: publicKeyOne,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	command, _, _, err := bfgapi.Read(ctx, bws.conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if command != bfgapi.CmdAccessPublicKeyCreateResponse {
+		t.Fatalf("unexpected command %s", command)
+	}
+
+	if err := bfgapi.Write(ctx, bws.conn, "someid", &bfgapi.AccessPublicKeyDeleteRequest{
+		PublicKey: publicKeyOne,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	command, _, v, err := bfgapi.Read(ctx, bws.conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if command != bfgapi.CmdAccessPublicKeyDeleteResponse {
+		t.Fatalf("unexpected command %s", command)
+	}
+
+	resp := v.(*bfgapi.AccessPublicKeyDeleteResponse)
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %s", resp.Error.Message)
+	}
+}
+
 func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count int, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {
 	header := make([]byte, 80)
 	hash := make([]byte, 32)
