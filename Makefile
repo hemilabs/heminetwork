@@ -66,6 +66,12 @@ lint-deps:
 	GOBIN=$(shell go env GOPATH)/bin go install mvdan.cc/gofumpt@latest
 	GOBIN=$(shell go env GOPATH)/bin go install github.com/google/addlicense@latest
 
+staticcheck:
+	$(shell go env GOPATH)/bin/staticcheck ./...
+
+staticcheck-deps:
+	GOBIN=$(shell go env GOPATH)/bin go install honnef.co/go/tools/cmd/staticcheck@latest
+
 tidy:
 	go mod tidy
 
