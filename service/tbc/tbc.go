@@ -1571,7 +1571,8 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 			return 0, fmt.Errorf("headers by height: %w", err)
 		}
 		if len(bhs) != 1 {
-			return 0, fmt.Errorf("too many block headers: %v", len(bhs))
+			panic("fees at height: unsupported fork")
+			// return 0, fmt.Errorf("too many block headers: %v", len(bhs))
 		}
 		be, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
