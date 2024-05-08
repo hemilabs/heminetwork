@@ -21,6 +21,10 @@ docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 docker compose -f ./e2e/docker-compose.yml up
 ```
 
+**NOTE:** The `--remove-orphans` flag should remove other containers not defined
+in the docker compose file. This is mainly here to help ensure you start with a
+clean environment.  It can be ommited.
+
 from this directory:
 ```
 $  go run ./... 
