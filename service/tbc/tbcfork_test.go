@@ -107,19 +107,17 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 		return nil, fmt.Errorf("not supported multi invlist requests")
 	}
 
-	// TODO: remove this redundant for loop if InvList is always exactly 1
-	for _, v := range m.InvList {
-		if v.Type != wire.InvTypeBlock {
-			return nil, fmt.Errorf("unsuported data type: %v", v.Type)
-		}
-		block, ok := b.chain[v.Hash.String()]
-		if !ok {
-			return nil, fmt.Errorf("block not found: %v", v.Hash)
-		}
-		return block.MsgBlock(), nil
+	v := m.InvList[0]
+	if v.Type != wire.InvTypeBlock {
+		return nil, fmt.Errorf("unsuported data type: %v", v.Type)
 	}
 
-	return nil, errors.New("not reached")
+	block, ok := b.chain[v.Hash.String()]
+	if !ok {
+		return nil, fmt.Errorf("block not found: %v", v.Hash)
+	}
+
+	return block.MsgBlock(), nil
 }
 
 func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
