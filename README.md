@@ -151,15 +151,6 @@ data and give you a fresh start
 docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 ```
 
-
-
-### Running the full network tests
-
-This runs a test with an entirely local heminet, it uses bitcoind in regtest
-mode for the bitcoin chain
-
-Prerequisites: `docker`
-
-```
-make networktest
-```
+**NOTE:** The `--remove-orphans` flag should remove other containers not defined
+in the docker compose file. This is mainly here to help ensure you start with a
+clean environment.  It can be omitted.

@@ -3,7 +3,7 @@
 # which can be found in the LICENSE file.
 
 # GitHub Actions workflow to run e2e network tests.
-name: "E2E Network Test"
+name: "Localnet Test"
 on:
   workflow_dispatch: # Manually triggered
 
@@ -35,5 +35,11 @@ jobs:
       - name: "Download and verify dependencies"
         run: make deps
 
-      - name: "make networktest"
-        run: make networktest
+      - name: "run localnet"
+        run: docker compose -f ./e2e/docker-compose.yml up -d
+
+      - name: "get localnet stats"
+        working-directory: ./e2e/monitor
+        # XXX should this be a make command?
+        run: go test -v ./...
+
