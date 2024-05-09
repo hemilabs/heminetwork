@@ -1385,14 +1385,6 @@ func TestTxByIdNotFound(t *testing.T) {
 func TestForksWithGen(t *testing.T) {
 	skipIfNoDocker(t)
 
-	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
-		privateKey,
-		&chaincfg.RegressionNetParams,
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	otherPrivateKey := "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219ffff"
 	_, _, otherAddress, err := bitcoin.KeysAndAddressFromHexString(
 		otherPrivateKey,
@@ -1424,6 +1416,7 @@ func TestForksWithGen(t *testing.T) {
 						fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
 						"conf_target=1",
 						"amount=7",
+						"avoid_reuse=false",
 					})
 				if err != nil {
 					t.Fatal(err)
@@ -1466,19 +1459,7 @@ func TestForksWithGen(t *testing.T) {
 
 				// create fork, invalidate block 1A, this returns the tx back
 				// to the mempool
-				_, err = runBitcoinCommand(
-					ctx,
-					t,
-					bitcoindContainer,
-					[]string{
-						"bitcoin-cli",
-						"-regtest=1",
-						"invalidateblock",
-						blockHashes.Blocks[0],
-					})
-				if err != nil {
-					t.Fatal(err)
-				}
+				invalidateBlock(ctx, t, bitcoindContainer, blockHashes.Blocks[0])
 
 				_, err = runBitcoinCommand(
 					ctx,
@@ -1490,6 +1471,7 @@ func TestForksWithGen(t *testing.T) {
 						"sendtoaddress",
 						otherAddress.EncodeAddress(),
 						"15",
+						"avoid_reuse=false",
 					})
 				if err != nil {
 					t.Fatal(err)
@@ -1510,21 +1492,332 @@ func TestForksWithGen(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+			},
+		},
+		{
+			name: "Split Tip, Multiple Blocks",
+			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+				lastA := ""
+				lastB := ""
+				earliestA := ""
+				earliestB := ""
 
-				// do we need to call this a second time if we reorg?
+				for i := 0; i < 3; i++ {
+
+					// invalidate B and reconsider A to grow chain A
+					if earliestB != "" {
+						invalidateBlock(ctx, t, bitcoindContainer, earliestB)
+					}
+
+					if lastA != "" {
+						reconsiderBlock(ctx, t, bitcoindContainer, lastA)
+					}
+
+					// block i*1A, send 7 btc to otherAddress
+					_, err := runBitcoinCommand(
+						ctx,
+						t,
+						bitcoindContainer,
+						[]string{
+							"bitcoin-cli",
+							"-regtest=1",
+							"-named",
+							"sendtoaddress",
+							fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+							"conf_target=1",
+							"amount=3",
+							"subtractfeefromamount=true",
+							"avoid_reuse=false",
+						})
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					blockHashesResponse, err := runBitcoinCommand(
+						ctx,
+						t,
+						bitcoindContainer,
+						[]string{
+							"bitcoin-cli",
+							"-regtest=1",
+							"-generate",
+							fmt.Sprintf("%d", i*2+1),
+						})
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					var blockHashes struct {
+						Blocks []string `json:"blocks"`
+					}
+					if err := json.Unmarshal([]byte(blockHashesResponse), &blockHashes); err != nil {
+						t.Fatal(err)
+					}
+
+					lastA = blockHashes.Blocks[0]
+					if earliestA == "" {
+						earliestA = lastA
+					}
+
+					// invalidate A and reconsider B to grow chain B
+					if earliestA != "" {
+						invalidateBlock(ctx, t, bitcoindContainer, earliestA)
+					}
+
+					if lastB != "" {
+						reconsiderBlock(ctx, t, bitcoindContainer, lastB)
+					}
+
+					_, err = runBitcoinCommand(
+						ctx,
+						t,
+						bitcoindContainer,
+						[]string{
+							"bitcoin-cli",
+							"-regtest=1",
+							"-named",
+							"sendtoaddress",
+							fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+							"conf_target=1",
+							"amount=2",
+							"subtractfeefromamount=true",
+							"avoid_reuse=false",
+						})
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					blockHashesResponse, err = runBitcoinCommand(
+						ctx,
+						t,
+						bitcoindContainer,
+						[]string{
+							"bitcoin-cli",
+							"-regtest=1",
+							"-generate",
+							fmt.Sprintf("%d", i*2+2),
+						})
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					if err := json.Unmarshal([]byte(blockHashesResponse), &blockHashes); err != nil {
+						t.Fatal(err)
+					}
+
+					lastB := blockHashes.Blocks[0]
+					if earliestB == "" {
+						earliestB = lastB
+					}
+				}
+			},
+		},
+
+		{
+			name: "Long reorg",
+			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+				_, err := runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"-named",
+						"sendtoaddress",
+						fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+						"conf_target=1",
+						"amount=7",
+						"avoid_reuse=false",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"-generate",
+						"1",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
 				err = tbcServer.SyncIndexersToHeight(ctx, 201)
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				// the new tip has the "otherAddress" given 120 btc
-				balance, err = tbcServer.BalanceByAddress(ctx, otherAddress.EncodeAddress())
+				balance, err := tbcServer.BalanceByAddress(ctx, otherAddress.String())
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				if balance != 700000000+1500000000 {
+				if balance != 700000000 {
 					t.Fatalf("unexpected balance: %d", balance)
+				}
+
+				blockHash, err := runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"getblockhash",
+						"102",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				// create fork, invalidate block at height 10, this means we
+				// generate blocks starting at 10
+				invalidateBlock(ctx, t, bitcoindContainer, blockHash)
+
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"sendtoaddress",
+						otherAddress.EncodeAddress(),
+						"15",
+						"avoid_reuse=false",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				// create long new chain
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"-generate",
+						"300",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				err = tbcServer.SyncIndexersToHeight(ctx, 310)
+				if err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "Ancient orphan",
+			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+				_, err := runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"-named",
+						"sendtoaddress",
+						fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+						"conf_target=1",
+						"amount=7",
+						"avoid_reuse=false",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"-generate",
+						"1",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				err = tbcServer.SyncIndexersToHeight(ctx, 201)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				balance, err := tbcServer.BalanceByAddress(ctx, otherAddress.String())
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if balance != 700000000 {
+					t.Fatalf("unexpected balance: %d", balance)
+				}
+
+				blockHash, err := runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"getblockhash",
+						"102",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				// create fork, invalidate block at height 10, this means we
+				// generate blocks starting at 10
+				invalidateBlock(ctx, t, bitcoindContainer, blockHash)
+
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"sendtoaddress",
+						otherAddress.EncodeAddress(),
+						"15",
+						"avoid_reuse=false",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				// create long new chain
+				_, err = runBitcoinCommand(
+					ctx,
+					t,
+					bitcoindContainer,
+					[]string{
+						"bitcoin-cli",
+						"-regtest=1",
+						"-generate",
+						"10",
+					})
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				err = tbcServer.SyncIndexersToHeight(ctx, 310)
+				if err != nil {
+					t.Fatal(err)
 				}
 			},
 		},
@@ -1578,23 +1871,8 @@ func TestForksWithGen(t *testing.T) {
 					"bitcoin-cli",
 					"-regtest=1",
 					"generatetoaddress",
-					"1",
+					"200",
 					walletAddress,
-				})
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			_, err = runBitcoinCommand(
-				ctx,
-				t,
-				bitcoindContainer,
-				[]string{
-					"bitcoin-cli",
-					"-regtest=1",
-					"generatetoaddress",
-					"199",
-					address.EncodeAddress(),
 				})
 			if err != nil {
 				t.Fatal(err)
@@ -1604,6 +1882,38 @@ func TestForksWithGen(t *testing.T) {
 
 			tt.testForkScenario(t, ctx, bitcoindContainer, walletAddress, tbcServer)
 		})
+	}
+}
+
+func invalidateBlock(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, blockHash string) {
+	_, err := runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"invalidateblock",
+			blockHash,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func reconsiderBlock(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, blockHash string) {
+	_, err := runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"reconsiderblock",
+			blockHash,
+		})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
