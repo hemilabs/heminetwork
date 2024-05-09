@@ -596,8 +596,7 @@ func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd
 	defer log.Tracef("ScriptHashByOutpoint exit")
 
 	var uop [37]byte // 'u' tx_id idx
-	uop[0] = 'u'
-	copy(uop[1:], op[:])
+	copy(uop[0:], op[:])
 
 	uDB := l.pool[level.OutputsDB]
 	scriptHash, err := uDB.Get(uop[:], nil)
