@@ -1385,6 +1385,14 @@ func TestTxByIdNotFound(t *testing.T) {
 func TestForksWithGen(t *testing.T) {
 	skipIfNoDocker(t)
 
+	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
+		privateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	otherPrivateKey := "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219ffff"
 	_, _, otherAddress, err := bitcoin.KeysAndAddressFromHexString(
 		otherPrivateKey,
@@ -1403,6 +1411,7 @@ func TestForksWithGen(t *testing.T) {
 		{
 			name: "Split Tip, Single Block",
 			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
+				// block 1A, send 7 btc to otherAddress
 				_, err := runBitcoinCommand(
 					ctx,
 					t,
@@ -1410,9 +1419,11 @@ func TestForksWithGen(t *testing.T) {
 					[]string{
 						"bitcoin-cli",
 						"-regtest=1",
+						"-named",
 						"sendtoaddress",
-						otherAddress.EncodeAddress(),
-						"10",
+						fmt.Sprintf("address=%s", otherAddress.EncodeAddress()),
+						"conf_target=1",
+						"amount=7",
 					})
 				if err != nil {
 					t.Fatal(err)
@@ -1425,9 +1436,8 @@ func TestForksWithGen(t *testing.T) {
 					[]string{
 						"bitcoin-cli",
 						"-regtest=1",
-						"generatetoaddress",
+						"-generate",
 						"1",
-						walletAddress,
 					})
 				if err != nil {
 					t.Fatal(err)
@@ -1438,21 +1448,24 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				balance, err := tbcServer.BalanceByAddress(ctx, otherAddress.EncodeAddress())
+				balance, err := tbcServer.BalanceByAddress(ctx, otherAddress.String())
 				if err != nil {
 					t.Fatal(err)
 				}
 
-				if balance != 1000000000 {
+				if balance != 700000000 {
 					t.Fatalf("unexpected balance: %d", balance)
 				}
 
-				var blockHashes []string
+				var blockHashes struct {
+					Blocks []string `json:"blocks"`
+				}
 				if err := json.Unmarshal([]byte(blockHashesResponse), &blockHashes); err != nil {
 					t.Fatal(err)
 				}
 
-				// create fork
+				// create fork, invalidate block 1A, this returns the tx back
+				// to the mempool
 				_, err = runBitcoinCommand(
 					ctx,
 					t,
@@ -1461,7 +1474,7 @@ func TestForksWithGen(t *testing.T) {
 						"bitcoin-cli",
 						"-regtest=1",
 						"invalidateblock",
-						blockHashes[0],
+						blockHashes.Blocks[0],
 					})
 				if err != nil {
 					t.Fatal(err)
@@ -1476,12 +1489,14 @@ func TestForksWithGen(t *testing.T) {
 						"-regtest=1",
 						"sendtoaddress",
 						otherAddress.EncodeAddress(),
-						"120",
+						"15",
 					})
 				if err != nil {
 					t.Fatal(err)
 				}
 
+				// create block 1B and 2B, the txs should be included
+				// in 1B.  use 2B to move tbc forward
 				_, err = runBitcoinCommand(
 					ctx,
 					t,
@@ -1489,9 +1504,8 @@ func TestForksWithGen(t *testing.T) {
 					[]string{
 						"bitcoin-cli",
 						"-regtest=1",
-						"generatetoaddress",
-						"1",
-						walletAddress,
+						"-generate",
+						"2",
 					})
 				if err != nil {
 					t.Fatal(err)
@@ -1509,7 +1523,7 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				if balance != 12000000000 {
+				if balance != 700000000+1500000000 {
 					t.Fatalf("unexpected balance: %d", balance)
 				}
 			},
@@ -1564,8 +1578,23 @@ func TestForksWithGen(t *testing.T) {
 					"bitcoin-cli",
 					"-regtest=1",
 					"generatetoaddress",
-					"200",
+					"1",
 					walletAddress,
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = runBitcoinCommand(
+				ctx,
+				t,
+				bitcoindContainer,
+				[]string{
+					"bitcoin-cli",
+					"-regtest=1",
+					"generatetoaddress",
+					"199",
+					address.EncodeAddress(),
 				})
 			if err != nil {
 				t.Fatal(err)

@@ -164,6 +164,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 		}
 		// At this point we can lockless since it is all single
 		// threaded again.
+		log.Infof("processing utxo at height %d", height)
 		err = processUtxos(s.chainParams, b.Transactions(), utxos)
 		if err != nil {
 			return 0, fmt.Errorf("process utxos %v: %w", height, err)
