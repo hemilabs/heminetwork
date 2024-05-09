@@ -121,7 +121,9 @@ type Peer struct {
 // Outpoint is a bitcoin structure that points to a transaction in a block. It
 // is expressed as an array of bytes in order to pack it as dense as possible
 // for memory conservation reasons.
-type Outpoint [37]byte // Outpoint Tx id
+//
+// The bytes contained by Outpoint is 'u' + txid + index.
+type Outpoint [1 + 32 + 4]byte
 
 // String returns a reversed pretty printed outpoint.
 func (o Outpoint) String() string {
