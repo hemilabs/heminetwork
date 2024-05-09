@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"sync"
 	"testing"
@@ -243,7 +244,7 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 		return nil, err
 	}
 
-	reqDifficulty := uint32(0xffffff)
+	reqDifficulty := uint32(0x1d00ffff) // XXX
 
 	var blockTxs []*btcutil.Tx
 	blockTxs = append(blockTxs, coinbaseTx)
@@ -557,22 +558,30 @@ func TestFork(t *testing.T) {
 			continue
 		}
 
-		// // Execute tests
-		// balance, err := s.BalanceByAddress(ctx, address.String())
-		// if err != nil {
-		//	t.Fatal(err)
-		// }
-		// if balance != uint64(count*5000000000) {
-		//	t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
-		// }
-		// t.Logf("balance %v", spew.Sdump(balance))
-		// utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
-		// if err != nil {
-		//	t.Fatal(err)
-		// }
-		// t.Logf("%v", spew.Sdump(utxos))
+		// Execute tests
+		balance, err := s.BalanceByAddress(ctx, address.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if balance != uint64(count*5000000000) {
+			t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
+		}
+		t.Logf("balance %v", spew.Sdump(balance))
+		utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v", spew.Sdump(utxos))
 		break
 	}
+
+	// Check cumulative difficulty
+	difficulty, err := s.DifficultyAtHash(ctx, n.Best()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("----- %x", blockchain.BigToCompact(difficulty))
+	t.Fatalf("difficulty: 0x%064x", difficulty)
 
 	// Advance both heads
 	b9 := n.Best()[0]
@@ -639,6 +648,55 @@ func TestFork(t *testing.T) {
 	}
 	t.Logf("block headers at 11: %v", spew.Sdump(bhsAt11))
 	time.Sleep(time.Second)
+}
+
+func TestWork(t *testing.T) {
+	reqDifficulty := uint32(0x1d00ffff) // difficulty at genesis
+	hmm := (reqDifficulty & 0xf0000000) >> (7 * 4)
+	bits := uint32(419465580)
+	t.Logf("calc work: %x", hmm)
+	t.Logf("calc work: %x", blockchain.CalcWork(reqDifficulty))
+	t.Logf("calc work: %v", blockchain.CalcWork(reqDifficulty))
+	t.Logf("compact to big: %064x", blockchain.CompactToBig(reqDifficulty))
+	t.Logf("compact to big: %v", blockchain.CompactToBig(reqDifficulty))
+	targetDifficulty := blockchain.CompactToBig(bits)
+	t.Logf("%064x", targetDifficulty.Bytes())
+
+	x := uint32(0x1b0404cb) // difficulty at genesis
+	pp := new(big.Rat).SetInt(blockchain.CalcWork(x))
+	t.Logf("0x%x: %064x  %v", x, blockchain.CompactToBig(x), pp)
+
+	// big.Int
+	// big.Rat
+	// func (z *Rat) SetFrac(a, b *Int) *Rat {
+	y := "0x00000000ffff0000000000000000000000000000000000000000000000000000"
+	yy, ok := new(big.Int).SetString(y, 0)
+	if !ok {
+		t.Fatal("yy")
+	}
+	z := "0x00000000000404CB000000000000000000000000000000000000000000000000"
+	zz, ok := new(big.Int).SetString(z, 0)
+	if !ok {
+		t.Fatal("zz")
+	}
+
+	xx := new(big.Rat).SetFrac(yy, zz)
+	ff, _ := xx.Float64()
+	t.Logf("%v: %0.16f", xx, ff)
+
+	// minimum target / target of difficulty
+	aaa := blockchain.CalcWork(reqDifficulty)
+	_bbb := "0x0000000000000000000000000000000000000000000000000000000900090009"
+	bbb, ok := new(big.Int).SetString(_bbb, 0)
+	if !ok {
+		t.Fatal("bbb")
+	}
+	zzz := new(big.Rat).SetFrac(bbb, aaa)
+	fff, _ := zzz.Float64()
+	t.Logf("%v: %0.16f", zzz, fff)
+
+	t.Logf("calc work    : 0x%x 0x%x", 0x170331db, blockchain.CalcWork(0x170331db))
+	t.Logf("compact to big: 0x%x", blockchain.CompactToBig(0x170331db))
 }
 
 // borrowed from btcd

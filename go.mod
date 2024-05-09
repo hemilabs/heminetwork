@@ -14,7 +14,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.13.5
 	github.com/go-test/deep v1.1.0
-	github.com/holiman/uint256 v1.2.3
 	github.com/juju/loggo v1.0.0
 	github.com/lib/pq v1.10.9
 	github.com/mitchellh/go-homedir v1.1.0
@@ -50,6 +49,7 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/holiman/uint256 v1.2.3 // indirect
 	github.com/klauspost/compress v1.17.7 // indirect
 	github.com/lufia/plan9stats v0.0.0-20231016141302-07b5767bb0ed // indirect
 	github.com/magiconair/properties v1.8.7 // indirect

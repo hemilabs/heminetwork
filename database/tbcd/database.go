@@ -11,11 +11,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/holiman/uint256"
 
 	"github.com/hemilabs/heminetwork/database"
 )
@@ -32,7 +32,8 @@ type Database interface {
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
 	BlockHeadersBest(ctx context.Context) ([]BlockHeader, error)
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
-	BlockHeadersInsert(ctx context.Context, bhs []BlockHeader) error
+	BlockHeaderInsert(ctx context.Context, height uint64, bh [80]byte) error
+	BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*BlockHeader, error)
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
@@ -65,7 +66,7 @@ type BlockHeader struct {
 	Hash       database.ByteArray
 	Height     uint64
 	Header     database.ByteArray
-	Difficulty uint256.Int
+	Difficulty big.Int
 }
 
 func (bh BlockHeader) String() string {

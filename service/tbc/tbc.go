@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -137,11 +138,6 @@ func headerTime(header []byte) *time.Time {
 		return nil
 	}
 	return &h.Timestamp
-}
-
-func hashEqual(h1 chainhash.Hash, h2 chainhash.Hash) bool {
-	// Fuck you chainhash package
-	return h1.IsEqual(&h2)
 }
 
 func sliceChainHash(ch chainhash.Hash) []byte {
@@ -1105,49 +1101,21 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	//
 	// There really is no good way of determining if we can escape the
 	// expensive calls so we just eat it.
-
-	// Make sure we can connect these headers in database
-	//
-	// XXX if we do the cumulative difficulty check in db this becomes
-	// moot, add new error type to catch this.
-	dbpbh, err := s.db.BlockHeaderByHash(ctx, msg.Headers[0].PrevBlock[:])
-	if err != nil {
-		log.Errorf("handle headers no previous block header: %v",
-			msg.Headers[0].BlockHash())
-		return
-	}
-	pbh, err := bytes2Header(dbpbh.Header)
-	if err != nil {
-		log.Errorf("invalid block header: %v", err)
-		return
-	}
-
-	// Construct insert list and nominally validate headers
-	//
-	// XXX as part of cumulative difficulty we can grab height as well
-	// since we need the parent for the difficulty anyway; thus this goes
-	// away too and ends up in db code
-	headers := make([]tbcd.BlockHeader, 0, len(msg.Headers))
-	height := dbpbh.Height + 1
+	var pbhHash *chainhash.Hash
+	headers := make([][80]byte, len(msg.Headers))
 	for k := range msg.Headers {
-		if !hashEqual(msg.Headers[k].PrevBlock, pbh.BlockHash()) {
-			log.Errorf("cannot connect %v at height %v",
-				msg.Headers[k].PrevBlock, height)
+		if pbhHash != nil && pbhHash.IsEqual(&msg.Headers[k].PrevBlock) {
+			log.Errorf("cannot connect %v index %v",
+				msg.Headers[k].PrevBlock, k)
 			return
 		}
 
-		headers = append(headers, tbcd.BlockHeader{
-			Hash:   sliceChainHash(msg.Headers[k].BlockHash()),
-			Height: height,
-			Header: h2b(msg.Headers[k]),
-		})
-
-		pbh = msg.Headers[k]
-		height++
+		copy(headers[k][0:80], h2b(msg.Headers[k])) // XXX don't double copy
+		pbhHash = &msg.Headers[k].PrevBlock
 	}
 
 	if len(headers) > 0 {
-		err := s.db.BlockHeadersInsert(ctx, headers)
+		lbh, err := s.db.BlockHeadersInsert(ctx, headers)
 		if err != nil {
 			// This ends the race between peers during IBD.
 			if !database.ErrDuplicate.Is(err) {
@@ -1159,12 +1127,10 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		// If we get here try to store the last blockheader that was
 		// inserted. This may race so we have to take the mutex and
 		// check height.
-		lbh := headers[len(headers)-1]
-
 		s.mtx.Lock()
 		// XXX this must be cumulative difficulty
 		if lbh.Height > s.lastBlockHeader.Height {
-			s.lastBlockHeader = lbh
+			s.lastBlockHeader = *lbh
 		}
 		s.mtx.Unlock()
 
@@ -1305,7 +1271,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	go s.syncBlocks(ctx)
 }
 
-func (s *Server) insertGenesis(ctx context.Context) ([]tbcd.BlockHeader, error) {
+func (s *Server) insertGenesis(ctx context.Context) error {
 	log.Tracef("insertGenesis")
 	defer log.Tracef("insertGenesis exit")
 
@@ -1314,33 +1280,30 @@ func (s *Server) insertGenesis(ctx context.Context) ([]tbcd.BlockHeader, error) 
 	log.Infof("Inserting genesis block and header: %v", s.chainParams.GenesisHash)
 	gbh, err := header2Bytes(&s.chainParams.GenesisBlock.Header)
 	if err != nil {
-		return nil, fmt.Errorf("serialize genesis block header: %w", err)
+		return fmt.Errorf("serialize genesis block header: %w", err)
 	}
 
-	genesisBlockHeader := &tbcd.BlockHeader{
-		Height: 0,
-		Hash:   s.chainParams.GenesisHash[:],
-		Header: gbh,
-	}
-	err = s.db.BlockHeadersInsert(ctx, []tbcd.BlockHeader{*genesisBlockHeader})
+	var bh [80]byte
+	copy(bh[:], gbh)
+	err = s.db.BlockHeaderInsert(ctx, 0, bh)
 	if err != nil {
-		return nil, fmt.Errorf("genesis block header insert: %w", err)
+		return fmt.Errorf("genesis block header insert: %w", err)
 	}
 
 	log.Debugf("Inserting genesis block")
 	gb, err := btcutil.NewBlock(s.chainParams.GenesisBlock).Bytes()
 	if err != nil {
-		return nil, fmt.Errorf("genesis block encode: %w", err)
+		return fmt.Errorf("genesis block encode: %w", err)
 	}
 	_, err = s.db.BlockInsert(ctx, &tbcd.Block{
 		Hash:  s.chainParams.GenesisHash[:],
 		Block: gb,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("genesis block insert: %w", err)
+		return fmt.Errorf("genesis block insert: %w", err)
 	}
 
-	return []tbcd.BlockHeader{*genesisBlockHeader}, nil
+	return nil
 }
 
 //
@@ -1430,6 +1393,18 @@ func (s *Server) RawBlockHeadersBest(ctx context.Context) (uint64, []api.ByteSli
 	}
 
 	return height, headers, nil
+}
+
+func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*big.Int, error) {
+	log.Tracef("DifficultyAtHash")
+	defer log.Tracef("DifficultyAtHash exit")
+
+	blockHeader, err := s.db.BlockHeaderByHash(ctx, hash[:])
+	if err != nil {
+		return nil, err
+	}
+
+	return &blockHeader.Difficulty, nil
 }
 
 // BlockHeadersBest returns the headers for the best known blocks.
@@ -1703,7 +1678,7 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	// No entries means we are at genesis
 	if len(bhs) == 0 {
-		bhs, err = s.insertGenesis(ctx)
+		err = s.insertGenesis(ctx)
 		if err != nil {
 			return fmt.Errorf("insert genesis: %w", err)
 		}
