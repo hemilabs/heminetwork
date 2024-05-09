@@ -1085,7 +1085,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		s.mtx.Lock()
 		lastBH := s.lastBlockHeader.Timestamp()
 		s.mtx.Unlock()
-		if time.Now().Sub(lastBH) > 6*s.chainParams.TargetTimePerBlock {
+		if time.Since(lastBH) > 6*s.chainParams.TargetTimePerBlock {
 			log.Infof("peer not synced: %v", p)
 			return
 		}

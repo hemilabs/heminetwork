@@ -221,7 +221,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		}
 		utxosCached := len(utxos)
 		log.Infof("Utxo indexer blocks processed %v in %v utxos cached %v cache unused %v avg tx/blk %v",
-			blocksProcessed, time.Now().Sub(start), utxosCached,
+			blocksProcessed, time.Since(start), utxosCached,
 			s.cfg.MaxCachedTxs-utxosCached, utxosCached/blocksProcessed)
 
 		start = time.Now()
@@ -235,7 +235,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		runtime.GC()
 
 		log.Infof("Flushing utxos complete %v took %v",
-			utxosCached, time.Now().Sub(start))
+			utxosCached, time.Since(start))
 
 		height += uint64(blocksProcessed)
 
@@ -370,7 +370,7 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 		}
 		txsCached := len(txs)
 		log.Infof("Tx indexer blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
-			blocksProcessed, time.Now().Sub(start), txsCached,
+			blocksProcessed, time.Since(start), txsCached,
 			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
 
 		start = time.Now()
@@ -384,7 +384,7 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 		runtime.GC()
 
 		log.Infof("Flushing txs complete %v took %v",
-			txsCached, time.Now().Sub(start))
+			txsCached, time.Since(start))
 
 		height += uint64(blocksProcessed)
 
