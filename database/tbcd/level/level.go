@@ -263,22 +263,28 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 	return
 }
 
-// decodeBlockHeader reverse the process of encodeBlockHeader. The hash must be
-// passed in but that is fine because it is the leveldb lookup key.
-func decodeBlockHeader(hashSlice []byte, ebh []byte) *tbcd.BlockHeader {
+func decodeBlockHeaderNoHash(ebh []byte) *tbcd.BlockHeader {
 	// copy the values to prevent slicing reentrancy problems.
 	var (
-		hash   [32]byte
 		header [80]byte
 	)
-	copy(hash[:], hashSlice)
 	copy(header[:], ebh[8:88])
 	bh := &tbcd.BlockHeader{
-		Hash:   hash[:],
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 		Header: header[:],
 	}
 	(&bh.Difficulty).SetBytes(ebh[88:])
+	return bh
+}
+
+// decodeBlockHeader reverse the process of encodeBlockHeader. The hash must be
+// passed in but that is fine because it is the leveldb lookup key.
+func decodeBlockHeader(hashSlice []byte, ebh []byte) *tbcd.BlockHeader {
+	// copy the values to prevent slicing reentrancy problems.
+	bh := decodeBlockHeaderNoHash(ebh)
+	var hash [32]byte
+	copy(hash[:], hashSlice)
+	bh.Hash = hash[:]
 	return bh
 }
 
@@ -430,8 +436,18 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*tbcd.Blo
 	}
 	defer hhDiscard()
 
-	// Insert missing blocks and block headers
+	// retrieve best record
 	var lastRecord []byte
+	bbh, err := bhsTx.Get([]byte(bhsLastKey), nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError("best block header not found")
+		}
+		return nil, fmt.Errorf("best block header: %v", err)
+	}
+	bestBH := decodeBlockHeaderNoHash(bbh)
+
+	// Insert missing blocks and block headers
 	hhBatch := new(leveldb.Batch)
 	bmBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
@@ -476,10 +492,15 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*tbcd.Blo
 		lastRecord = ebh[:]
 	}
 
-	// Insert last height into block headers XXX this does not deal with forks
-	// XXX this is the resume bug
-	log.Infof("LAST height %v cdiff %v", height, cdiff)
-	bhsBatch.Put([]byte(bhsLastKey), lastRecord)
+	// Insert last height into block headers if the new cumulative
+	// difficulty exceeds the prior difficulty.
+	if cdiff.Cmp(&bestBH.Difficulty) > 0 {
+		log.Infof("LAST height %v cdiff %v", height, cdiff)
+		bhsBatch.Put([]byte(bhsLastKey), lastRecord)
+	} else {
+		// Extend fork
+		panic("extend fork")
+	}
 
 	// Create artificial last block header to return to caller
 	var header [80]byte
