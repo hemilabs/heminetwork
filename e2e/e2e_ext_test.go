@@ -855,13 +855,26 @@ func TestL2Keystone(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	command, _, response, err := bfgapi.Read(ctx, bws.conn)
-	if err != nil {
-		t.Fatal(err)
-	}
+	var response any
+	var command protocol.Command
 
-	if command != bfgapi.CmdL2KeystonesResponse {
-		t.Fatalf("unexpected command %s", command)
+	for {
+		command, _, response, err = bfgapi.Read(ctx, bws.conn)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// there is a chance we get notifications from the L2KeystonesInsert
+		// call above, if they haven't been broadcast yet.  ignore those.
+		if command == bfgapi.CmdL2KeystonesNotification {
+			continue
+		}
+
+		if command == bfgapi.CmdL2KeystonesResponse {
+			break
+		} else {
+			t.Fatalf("unexpected command %s", command)
+		}
 	}
 
 	l2KeystonesResponse := response.(*bfgapi.L2KeystonesResponse)
