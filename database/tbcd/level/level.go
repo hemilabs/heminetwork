@@ -478,6 +478,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*tbcd.Blo
 
 		// Insert a synthesized height_hash key that serves as an index
 		// to see which blocks are missing.
+		// XXX should we always insert or should we verify prior to insert?
 		bmBatch.Put(hhKey, []byte{})
 
 		// XXX reason about pre encoding. Due to the caller code being
