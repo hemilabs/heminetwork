@@ -478,6 +478,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*tbcd.Blo
 
 	// Insert last height into block headers XXX this does not deal with forks
 	// XXX this is the resume bug
+	log.Infof("LAST height %v cdiff %v", height, cdiff)
 	bhsBatch.Put([]byte(bhsLastKey), lastRecord)
 
 	// Create artificial last block header to return to caller

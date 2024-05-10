@@ -581,7 +581,7 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("----- %x", blockchain.BigToCompact(difficulty))
-	t.Fatalf("difficulty: 0x%064x", difficulty)
+	t.Logf("difficulty: 0x%064x", difficulty)
 
 	// Advance both heads
 	b9 := n.Best()[0]

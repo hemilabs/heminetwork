@@ -106,7 +106,7 @@ func bytes2Tx(b []byte) (*wire.MsgTx, error) {
 	return &w, nil
 }
 
-func header2Bytes(wbh *wire.BlockHeader) ([]byte, error) {
+func header2Slice(wbh *wire.BlockHeader) ([]byte, error) {
 	var b bytes.Buffer
 	err := wbh.Serialize(&b)
 	if err != nil {
@@ -115,12 +115,29 @@ func header2Bytes(wbh *wire.BlockHeader) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
+func header2Array(wbh *wire.BlockHeader) (b [80]byte, err error) {
+	var sb []byte
+	sb, err = header2Slice(wbh)
+	if err != nil {
+	}
+	copy(b[:], sb[:])
+	return
+}
+
 func h2b(wbh *wire.BlockHeader) []byte {
-	hb, err := header2Bytes(wbh)
+	hb, err := header2Slice(wbh)
 	if err != nil {
 		panic(err)
 	}
 	return hb
+}
+
+func h2b80(wbh *wire.BlockHeader) [80]byte {
+	b, err := header2Array(wbh)
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
 
 func bytes2Header(header []byte) (*wire.BlockHeader, error) {
@@ -1278,14 +1295,11 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	// We really should be inserting the block first but block insert
 	// verifies that a block header exists.
 	log.Infof("Inserting genesis block and header: %v", s.chainParams.GenesisHash)
-	gbh, err := header2Bytes(&s.chainParams.GenesisBlock.Header)
+	gbh, err := header2Array(&s.chainParams.GenesisBlock.Header)
 	if err != nil {
 		return fmt.Errorf("serialize genesis block header: %w", err)
 	}
-
-	var bh [80]byte
-	copy(bh[:], gbh)
-	err = s.db.BlockHeaderInsert(ctx, 0, bh)
+	err = s.db.BlockHeaderInsert(ctx, 0, gbh)
 	if err != nil {
 		return fmt.Errorf("genesis block header insert: %w", err)
 	}

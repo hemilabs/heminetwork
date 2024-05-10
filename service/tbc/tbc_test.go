@@ -66,6 +66,28 @@ func skipIfNoDocker(t *testing.T) {
 	}
 }
 
+func TestBlockHeaderEncodeDecode(t *testing.T) {
+	chainParams := &chaincfg.TestNet3Params
+	gwbh := chainParams.GenesisBlock.Header
+	sh, err := header2Slice(&gwbh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wbh, err := bytes2Header(sh)
+	if diff := deep.Equal(&gwbh, wbh); len(diff) > 0 {
+		t.Errorf("unexpected diff: %s", diff)
+	}
+
+	ash, err := header2Array(&gwbh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	awbh, err := bytes2Header(ash[:])
+	if diff := deep.Equal(&gwbh, awbh); len(diff) > 0 {
+		t.Errorf("unexpected diff: %s", diff)
+	}
+}
+
 func TestServerBlockHeadersBest(t *testing.T) {
 	skipIfNoDocker(t)
 
@@ -1930,11 +1952,9 @@ func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container 
 		ExposedPorts: []string{"18443", "18444"},
 		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
 		LogConsumerCfg: &testcontainers.LogConsumerConfig{
-			Consumers: []testcontainers.LogConsumer{
-				&StdoutLogConsumer{
-					Name: name,
-				},
-			},
+			Consumers: []testcontainers.LogConsumer{&StdoutLogConsumer{
+				Name: name,
+			}},
 		},
 		Name: name,
 		HostConfigModifier: func(hostConfig *container.HostConfig) {
@@ -2004,7 +2024,9 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 	}
 
 	blockJson, err := runBitcoinCommand(
-		ctx, t, bitcoindContainer,
+		ctx,
+		t,
+		bitcoindContainer,
 		[]string{
 			"bitcoin-cli",
 			"-regtest=1",
@@ -2182,7 +2204,7 @@ func cliBlockHeaderToRaw(t *testing.T, cliBlockHeader *BtcCliBlockHeader) []api.
 	blockHeader := cliBlockHeaderToWire(t, cliBlockHeader)
 	t.Logf(spew.Sdump(blockHeader))
 
-	bytes, err := header2Bytes(blockHeader)
+	bytes, err := header2Slice(blockHeader)
 	if err != nil {
 		t.Fatal(fmt.Errorf("header to bytes: %w", err))
 	}
