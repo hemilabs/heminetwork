@@ -61,12 +61,12 @@ import (
 )
 
 const (
-	testDBPrefix                       = "e2e_ext_test_db_"
-	mockEncodedBlockHeader             = "\"0000c02048cd664586152c3dcf356d010cbb9216fdeb3b1aeae256d59a0700000000000086182c855545356ec11d94972cf31b97ef01ae7c9887f4349ad3f0caf2d3c0b118e77665efdf2819367881fb\""
-	mockTxHash                         = "7fe9c3262f8fe26764b01955b4c996296f7c0c72945af1556038a084fcb37dbb"
-	mockTxPos                          = 3
-	mockTxheight                       = 2
-	mockElectrumxConnectTimeoutSeconds = 3 * time.Second
+	testDBPrefix                = "e2e_ext_test_db_"
+	mockEncodedBlockHeader      = "\"0000c02048cd664586152c3dcf356d010cbb9216fdeb3b1aeae256d59a0700000000000086182c855545356ec11d94972cf31b97ef01ae7c9887f4349ad3f0caf2d3c0b118e77665efdf2819367881fb\""
+	mockTxHash                  = "7fe9c3262f8fe26764b01955b4c996296f7c0c72945af1556038a084fcb37dbb"
+	mockTxPos                   = 3
+	mockTxheight                = 2
+	mockElectrumxConnectTimeout = 3 * time.Second
 )
 
 var mockMerkleHashes = []string{
@@ -930,7 +930,7 @@ func TestBitcoinBalance(t *testing.T) {
 
 	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1091,7 +1091,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 
 				electrumxAddr, cleanupE = createMockElectrumxServer(ctx, t, nil, btx)
 				defer cleanupE()
-				err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+				err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1285,7 +1285,7 @@ func TestBitcoinInfo(t *testing.T) {
 
 	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1362,7 +1362,7 @@ func TestBitcoinUTXOs(t *testing.T) {
 
 	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1454,7 +1454,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 
 	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1573,7 +1573,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 
 	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1732,7 +1732,7 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 	// 1
 	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, nil)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1821,7 +1821,7 @@ func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
 	// 2
 	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1939,7 +1939,7 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 	// 2
 	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeoutSeconds)
+	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2762,7 +2762,7 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 	if err := EnsureCanConnectTCP(
 		t,
 		electrumxAddr,
-		mockElectrumxConnectTimeoutSeconds,
+		mockElectrumxConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -2832,7 +2832,7 @@ func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
 	if err := EnsureCanConnectTCP(
 		t,
 		electrumxAddr,
-		mockElectrumxConnectTimeoutSeconds,
+		mockElectrumxConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -2963,7 +2963,7 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 	if err := EnsureCanConnectTCP(
 		t,
 		electrumxAddr,
-		mockElectrumxConnectTimeoutSeconds,
+		mockElectrumxConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -3033,7 +3033,7 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 	if err := EnsureCanConnectTCP(
 		t,
 		electrumxAddr,
-		mockElectrumxConnectTimeoutSeconds,
+		mockElectrumxConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -3098,7 +3098,7 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 	if err := EnsureCanConnectTCP(
 		t,
 		electrumxAddr,
-		mockElectrumxConnectTimeoutSeconds,
+		mockElectrumxConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -3169,7 +3169,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 	if err := EnsureCanConnectTCP(
 		t,
 		electrumxAddr,
-		mockElectrumxConnectTimeoutSeconds,
+		mockElectrumxConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
