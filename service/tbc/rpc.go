@@ -75,17 +75,17 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockHeadersBestRawRequest:
+		case tbcapi.CmdBlockHeaderBestRawRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockHeadersBestRawRequest)
-				return s.handleBlockHeadersBestRawRequest(ctx, req)
+				req := payload.(*tbcapi.BlockHeaderBestRawRequest)
+				return s.handleBlockHeaderBestRawRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockHeadersBestRequest:
+		case tbcapi.CmdBlockHeaderBestRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockHeadersBestRequest)
-				return s.handleBlockHeadersBestRequest(ctx, req)
+				req := payload.(*tbcapi.BlockHeaderBestRequest)
+				return s.handleBlockHeaderBestRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -240,42 +240,40 @@ func (s *Server) handleBlockHeadersByHeightRawRequest(ctx context.Context, req *
 	}, nil
 }
 
-func (s *Server) handleBlockHeadersBestRawRequest(ctx context.Context, _ *tbcapi.BlockHeadersBestRawRequest) (any, error) {
-	log.Tracef("handleBlockHeadersBestRawRequest")
-	defer log.Tracef("handleBlockHeadersBestRawRequest exit")
+func (s *Server) handleBlockHeaderBestRawRequest(ctx context.Context, _ *tbcapi.BlockHeaderBestRawRequest) (any, error) {
+	log.Tracef("handleBlockHeaderBestRawRequest")
+	defer log.Tracef("handleBlockHeaderBestRawRequest exit")
 
-	panic("fixme joshua, rename to singular Header as well")
-	//height, blockHeaders, err := s.RawBlockHeadersBest(ctx)
-	//if err != nil {
-	//	e := protocol.NewInternalError(err)
-	//	return &tbcapi.BlockHeadersBestRawResponse{
-	//		Error: e.ProtocolError(),
-	//	}, e
-	//}
+	height, blockHeader, err := s.RawBlockHeaderBest(ctx)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockHeaderBestRawResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
 
-	//return &tbcapi.BlockHeadersBestRawResponse{
-	//	Height:       height,
-	//	BlockHeaders: blockHeaders,
-	//}, nil
+	return &tbcapi.BlockHeaderBestRawResponse{
+		Height:      height,
+		BlockHeader: blockHeader,
+	}, nil
 }
 
-func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, _ *tbcapi.BlockHeadersBestRequest) (any, error) {
-	log.Tracef("handleBlockHeadersBestRequest")
-	defer log.Tracef("handleBlockHeadersBestRequest exit")
+func (s *Server) handleBlockHeaderBestRequest(ctx context.Context, _ *tbcapi.BlockHeaderBestRequest) (any, error) {
+	log.Tracef("handleBlockHeaderBestRequest")
+	defer log.Tracef("handleBlockHeaderBestRequest exit")
 
-	panic("fixme joshua, rename to singular Header as well")
-	//height, blockHeaders, err := s.BlockHeadersBest(ctx)
-	//if err != nil {
-	//	e := protocol.NewInternalError(err)
-	//	return &tbcapi.BlockHeadersBestResponse{
-	//		Error: e.ProtocolError(),
-	//	}, e
-	//}
+	height, blockHeader, err := s.BlockHeaderBest(ctx)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockHeaderBestResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
 
-	//return &tbcapi.BlockHeadersBestResponse{
-	//	Height:       height,
-	//	BlockHeaders: wireBlockHeadersToTBC(blockHeaders),
-	//}, nil
+	return &tbcapi.BlockHeaderBestResponse{
+		Height:      height,
+		BlockHeader: wireBlockHeaderToTBC(blockHeader),
+	}, nil
 }
 
 func (s *Server) handleBalanceByAddressRequest(ctx context.Context, req *tbcapi.BalanceByAddressRequest) (any, error) {
@@ -512,19 +510,23 @@ func randHexId(length int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func wireBlockHeadersToTBC(w []*wire.BlockHeader) []*tbcapi.BlockHeader {
-	blockHeaders := make([]*tbcapi.BlockHeader, len(w))
-	for i, bh := range w {
-		blockHeaders[i] = &tbcapi.BlockHeader{
-			Version:    bh.Version,
-			PrevHash:   reverseBytes(bh.PrevBlock[:]),
-			MerkleRoot: reverseBytes(bh.MerkleRoot[:]),
-			Timestamp:  bh.Timestamp.Unix(),
-			Bits:       fmt.Sprintf("%x", bh.Bits),
-			Nonce:      bh.Nonce,
-		}
+func wireBlockHeadersToTBC(bhs []*wire.BlockHeader) []*tbcapi.BlockHeader {
+	blockHeaders := make([]*tbcapi.BlockHeader, len(bhs))
+	for i, bh := range bhs {
+		blockHeaders[i] = wireBlockHeaderToTBC(bh)
 	}
 	return blockHeaders
+}
+
+func wireBlockHeaderToTBC(bh *wire.BlockHeader) *tbcapi.BlockHeader {
+	return &tbcapi.BlockHeader{
+		Version:    bh.Version,
+		PrevHash:   reverseBytes(bh.PrevBlock[:]),
+		MerkleRoot: reverseBytes(bh.MerkleRoot[:]),
+		Timestamp:  bh.Timestamp.Unix(),
+		Bits:       fmt.Sprintf("%x", bh.Bits),
+		Nonce:      bh.Nonce,
+	}
 }
 
 func wireTxToTBC(w *wire.MsgTx) *tbcapi.Tx {

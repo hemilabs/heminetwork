@@ -1381,11 +1381,11 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]*wi
 	return wireBlockHeaders, nil
 }
 
-// RawBlockHeadersBest returns the raw header for the best known block.
+// RawBlockHeaderBest returns the raw header for the best known block.
 // XXX should we return cumulative difficulty, hash?
-func (s *Server) RawBlockHeadersBest(ctx context.Context) (uint64, api.ByteSlice, error) {
-	log.Tracef("RawBlockHeadersBest")
-	defer log.Tracef("RawBlockHeadersBest exit")
+func (s *Server) RawBlockHeaderBest(ctx context.Context) (uint64, api.ByteSlice, error) {
+	log.Tracef("RawBlockHeaderBest")
+	defer log.Tracef("RawBlockHeaderBest exit")
 
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
@@ -1406,7 +1406,7 @@ func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*b
 	return &blockHeader.Difficulty, nil
 }
 
-// BlockHeadersBest returns the headers for the best known blocks.
+// BlockHeaderBest returns the headers for the best known blocks.
 func (s *Server) BlockHeaderBest(ctx context.Context) (uint64, *wire.BlockHeader, error) {
 	log.Tracef("BlockHeadersBest")
 	defer log.Tracef("BlockHeadersBest exit")
