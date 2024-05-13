@@ -157,6 +157,15 @@ func headerTime(header []byte) *time.Time {
 	return &h.Timestamp
 }
 
+func headerHash(header []byte) *chainhash.Hash {
+	h, err := bytes2Header(header)
+	if err != nil {
+		return nil
+	}
+	hash := h.BlockHash()
+	return &hash
+}
+
 func sliceChainHash(ch chainhash.Hash) []byte {
 	// Fuck you chainhash package
 	return ch[:]

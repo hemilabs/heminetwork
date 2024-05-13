@@ -68,6 +68,25 @@ func b2h(header []byte) (*wire.BlockHeader, error) {
 	return &bh, nil
 }
 
+func headerHash(header []byte) *chainhash.Hash {
+	h, err := b2h(header)
+	if err != nil {
+		// XXX panic?
+		return nil
+	}
+	hash := h.BlockHash()
+	return &hash
+}
+
+func headerParentHash(header []byte) *chainhash.Hash {
+	h, err := b2h(header)
+	if err != nil {
+		// XXX panic?
+		return nil
+	}
+	return &h.PrevBlock
+}
+
 type ldb struct {
 	mtx                       sync.Mutex
 	blocksMissingCacheEnabled bool                   // XXX verify this code in tests
@@ -495,12 +514,14 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*tbcd.Blo
 
 	// Insert last height into block headers if the new cumulative
 	// difficulty exceeds the prior difficulty.
+	// XXX we need to figure out if a fork overtakes current best here too.
 	if cdiff.Cmp(&bestBH.Difficulty) > 0 {
-		log.Infof("LAST height %v cdiff %v", height, cdiff)
 		bhsBatch.Put([]byte(bhsLastKey), lastRecord)
 	} else {
 		// Extend fork
-		panic("extend fork")
+		log.Infof("extend fork at height: %v %v --(parent)--> %v", height,
+			headerHash(bestBH.Header), // can't use Hash since it isn't filled in
+			headerParentHash(bhs[len(bhs)-1][:]))
 	}
 
 	// Create artificial last block header to return to caller
