@@ -71,8 +71,7 @@ func b2h(header []byte) (*wire.BlockHeader, error) {
 func headerHash(header []byte) *chainhash.Hash {
 	h, err := b2h(header)
 	if err != nil {
-		// XXX panic?
-		return nil
+		panic(err)
 	}
 	hash := h.BlockHash()
 	return &hash
@@ -81,8 +80,7 @@ func headerHash(header []byte) *chainhash.Hash {
 func headerParentHash(header []byte) *chainhash.Hash {
 	h, err := b2h(header)
 	if err != nil {
-		// XXX panic?
-		return nil
+		panic(err)
 	}
 	return &h.PrevBlock
 }
@@ -191,7 +189,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 		}
 		return nil, fmt.Errorf("block header get: %w", err)
 	}
-	return decodeBlockHeader(hash, ebh), nil
+	return decodeBlockHeader(ebh), nil
 }
 
 func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.BlockHeader, error) {
@@ -225,28 +223,24 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 	return bhs, nil
 }
 
-func (l *ldb) BlockHeadersBest(ctx context.Context) ([]tbcd.BlockHeader, error) {
-	log.Tracef("BlockHeadersBest")
-	defer log.Tracef("BlockHeadersBest exit")
+func (l *ldb) BlockHeaderBest(ctx context.Context) (*tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeaderBest")
+	defer log.Tracef("BlockHeaderBest exit")
 
 	// This function is a bit of a crapshoot. It will receive many calls
 	// and thus it is racing by definition. Avoid the lock and let the
 	// caller serialize the response.
-
-	// XXX this code does not handle multiple "best" block headers.
 
 	bhsDB := l.pool[level.BlockHeadersDB]
 	// Get last record
 	ebh, err := bhsDB.Get([]byte(bhsLastKey), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			return []tbcd.BlockHeader{}, nil
+			return nil, database.NotFoundError("best block header not found")
 		}
 		return nil, fmt.Errorf("block headers best: %w", err)
 	}
-
-	// Convert height to hash, cheat because we know where height lives in ebh.
-	return l.BlockHeadersByHeight(ctx, binary.BigEndian.Uint64(ebh[0:8]))
+	return decodeBlockHeader(ebh), nil
 }
 
 // heightHashToKey generates a sortable key from height and hash. With this key
@@ -282,28 +276,20 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 	return
 }
 
-func decodeBlockHeaderNoHash(ebh []byte) *tbcd.BlockHeader {
+// decodeBlockHeader reverse the process of encodeBlockHeader.
+// XXX should we have a function that does not call the expensive headerHash function?
+func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	// copy the values to prevent slicing reentrancy problems.
 	var (
 		header [80]byte
 	)
 	copy(header[:], ebh[8:88])
 	bh := &tbcd.BlockHeader{
+		Hash:   headerHash(header[:])[:],
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 		Header: header[:],
 	}
 	(&bh.Difficulty).SetBytes(ebh[88:])
-	return bh
-}
-
-// decodeBlockHeader reverse the process of encodeBlockHeader. The hash must be
-// passed in but that is fine because it is the leveldb lookup key.
-func decodeBlockHeader(hashSlice []byte, ebh []byte) *tbcd.BlockHeader {
-	// copy the values to prevent slicing reentrancy problems.
-	bh := decodeBlockHeaderNoHash(ebh)
-	var hash [32]byte
-	copy(hash[:], hashSlice)
-	bh.Hash = hash[:]
 	return bh
 }
 
@@ -464,7 +450,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*tbcd.Blo
 		}
 		return nil, fmt.Errorf("best block header: %v", err)
 	}
-	bestBH := decodeBlockHeaderNoHash(bbh)
+	bestBH := decodeBlockHeader(bbh)
 
 	// Insert missing blocks and block headers
 	hhBatch := new(leveldb.Batch)
@@ -666,8 +652,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 			}
 			return -1, fmt.Errorf("block insert block header: %w", err)
 		}
-		// XXX only do the big endian decoding here!, less bcopy
-		bh = decodeBlockHeader(b.Hash, ebh)
+		bh = decodeBlockHeader(ebh)
 	} else {
 		bh = &tbcd.BlockHeader{
 			Height: ce.height,

@@ -244,36 +244,38 @@ func (s *Server) handleBlockHeadersBestRawRequest(ctx context.Context, _ *tbcapi
 	log.Tracef("handleBlockHeadersBestRawRequest")
 	defer log.Tracef("handleBlockHeadersBestRawRequest exit")
 
-	height, blockHeaders, err := s.RawBlockHeadersBest(ctx)
-	if err != nil {
-		e := protocol.NewInternalError(err)
-		return &tbcapi.BlockHeadersBestRawResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
+	panic("fixme joshua, rename to singular Header as well")
+	//height, blockHeaders, err := s.RawBlockHeadersBest(ctx)
+	//if err != nil {
+	//	e := protocol.NewInternalError(err)
+	//	return &tbcapi.BlockHeadersBestRawResponse{
+	//		Error: e.ProtocolError(),
+	//	}, e
+	//}
 
-	return &tbcapi.BlockHeadersBestRawResponse{
-		Height:       height,
-		BlockHeaders: blockHeaders,
-	}, nil
+	//return &tbcapi.BlockHeadersBestRawResponse{
+	//	Height:       height,
+	//	BlockHeaders: blockHeaders,
+	//}, nil
 }
 
 func (s *Server) handleBlockHeadersBestRequest(ctx context.Context, _ *tbcapi.BlockHeadersBestRequest) (any, error) {
 	log.Tracef("handleBlockHeadersBestRequest")
 	defer log.Tracef("handleBlockHeadersBestRequest exit")
 
-	height, blockHeaders, err := s.BlockHeadersBest(ctx)
-	if err != nil {
-		e := protocol.NewInternalError(err)
-		return &tbcapi.BlockHeadersBestResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
+	panic("fixme joshua, rename to singular Header as well")
+	//height, blockHeaders, err := s.BlockHeadersBest(ctx)
+	//if err != nil {
+	//	e := protocol.NewInternalError(err)
+	//	return &tbcapi.BlockHeadersBestResponse{
+	//		Error: e.ProtocolError(),
+	//	}, e
+	//}
 
-	return &tbcapi.BlockHeadersBestResponse{
-		Height:       height,
-		BlockHeaders: wireBlockHeadersToTBC(blockHeaders),
-	}, nil
+	//return &tbcapi.BlockHeadersBestResponse{
+	//	Height:       height,
+	//	BlockHeaders: wireBlockHeadersToTBC(blockHeaders),
+	//}, nil
 }
 
 func (s *Server) handleBalanceByAddressRequest(ctx context.Context, req *tbcapi.BalanceByAddressRequest) (any, error) {

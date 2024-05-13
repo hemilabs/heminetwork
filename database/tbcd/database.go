@@ -29,10 +29,12 @@ type Database interface {
 	MetadataPut(ctx context.Context, key, value []byte) error
 
 	// Block header
+	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
-	BlockHeadersBest(ctx context.Context) ([]BlockHeader, error)
-	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
 	BlockHeaderInsert(ctx context.Context, height uint64, bh [80]byte) error
+
+	// Block headers
+	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
 	BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*BlockHeader, error)
 
 	// Block

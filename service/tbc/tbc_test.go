@@ -110,17 +110,13 @@ func TestServerBlockHeadersBest(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 
-	height, bhs, err := tbcServer.BlockHeadersBest(ctx)
+	height, bhb, err := tbcServer.BlockHeaderBest(ctx)
 	if err != nil {
-		t.Errorf("BlockHeadersBest() err = %v, want nil", err)
+		t.Errorf("BlockHeaderBest() err = %v, want nil", err)
 	}
-
-	if l := len(bhs); l != 1 {
-		t.Errorf("BlockHeadersBest() block len = %d, want 1", l)
-	}
-
+	_ = bhb // XXX probably should decode and test
 	if height != blocks {
-		t.Errorf("BlockHeadersBest() height = %d, want %d", height, blocks)
+		t.Errorf("BlockHeaderBest() height = %d, want %d", height, blocks)
 	}
 }
 

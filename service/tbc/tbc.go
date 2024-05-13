@@ -651,7 +651,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	// multiple answers come in the insert of the headers fails or
 	// succeeds. If it fails no more headers will be requested from that
 	// peer.
-	bhs, err := s.db.BlockHeadersBest(ctx)
+	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		log.Errorf("block headers best: %v", err)
 		// database is closed, nothing we can do, return here to avoid below
@@ -660,13 +660,9 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			return
 		}
 	}
-	if len(bhs) != 1 {
-		// XXX fix multiple tips
-		panic(len(bhs))
-	}
-	log.Debugf("block header best hash: %s", bhs[0].Hash)
+	log.Debugf("block header best hash: %s", bhb.Hash)
 
-	err = s.getHeaders(ctx, p, bhs[0].Header)
+	err = s.getHeaders(ctx, p, bhb.Header)
 	if err != nil {
 		// This should not happen
 		log.Errorf("get headers: %v", err)
@@ -913,17 +909,12 @@ func (s *Server) txIndexer(ctx context.Context) {
 	h := binary.BigEndian.Uint64(he)
 
 	// Skip txIndexer if we are at best block height. This is a bit racy.
-	bhs, err := s.db.BlockHeadersBest(ctx)
+	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		log.Errorf("utxo indexer block headers best: %v", err)
 		return
 	}
-	if len(bhs) != 1 {
-		panic("utxo indexer block headers best: unsuported fork")
-		// return
-	}
-
-	if bhs[0].Height != h-1 {
+	if bhb.Height != h-1 {
 		err = s.TxIndexer(ctx, h, 0)
 		if err != nil {
 			log.Errorf("tx indexer: %v", err)
@@ -975,17 +966,12 @@ func (s *Server) utxoIndexer(ctx context.Context) {
 	h := binary.BigEndian.Uint64(he)
 
 	// Skip UtxoIndex if we are at best block height. This is a bit racy.
-	bhs, err := s.db.BlockHeadersBest(ctx)
+	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		log.Errorf("utxo indexer block headers best: %v", err)
 		return
 	}
-	if len(bhs) != 1 {
-		panic("utxo indexer block headers best: unsuported fork")
-		// return
-	}
-
-	if bhs[0].Height != h-1 {
+	if bhb.Height != h-1 {
 		err = s.UtxoIndexer(ctx, h, 0)
 		if err != nil {
 			log.Errorf("utxo indexer: %v", err)
@@ -1395,27 +1381,17 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]*wi
 	return wireBlockHeaders, nil
 }
 
-// RawBlockHeadersBest returns the raw headers for the best known blocks.
-func (s *Server) RawBlockHeadersBest(ctx context.Context) (uint64, []api.ByteSlice, error) {
+// RawBlockHeadersBest returns the raw header for the best known block.
+// XXX should we return cumulative difficulty, hash?
+func (s *Server) RawBlockHeadersBest(ctx context.Context) (uint64, api.ByteSlice, error) {
 	log.Tracef("RawBlockHeadersBest")
 	defer log.Tracef("RawBlockHeadersBest exit")
 
-	bhs, err := s.db.BlockHeadersBest(ctx)
+	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
-
-	var height uint64
-	if len(bhs) > 0 {
-		height = bhs[0].Height
-	}
-
-	var headers []api.ByteSlice
-	for _, bh := range bhs {
-		headers = append(headers, []byte(bh.Header))
-	}
-
-	return height, headers, nil
+	return bhb.Height, api.ByteSlice(bhb.Header[:]), nil
 }
 
 func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*big.Int, error) {
@@ -1431,30 +1407,16 @@ func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*b
 }
 
 // BlockHeadersBest returns the headers for the best known blocks.
-func (s *Server) BlockHeadersBest(ctx context.Context) (uint64, []*wire.BlockHeader, error) {
+func (s *Server) BlockHeaderBest(ctx context.Context) (uint64, *wire.BlockHeader, error) {
 	log.Tracef("BlockHeadersBest")
 	defer log.Tracef("BlockHeadersBest exit")
 
-	blockHeaders, err := s.db.BlockHeadersBest(ctx)
+	blockHeader, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
-
-	var height uint64
-	if len(blockHeaders) > 0 {
-		height = blockHeaders[0].Height
-	}
-
-	wireBlockHeaders := make([]*wire.BlockHeader, 0, len(blockHeaders))
-	for _, bh := range blockHeaders {
-		w, err := bh.Wire()
-		if err != nil {
-			return 0, nil, err
-		}
-		wireBlockHeaders = append(wireBlockHeaders, w)
-	}
-
-	return height, wireBlockHeaders, nil
+	wbh, err := bytes2Header(blockHeader.Header)
+	return blockHeader.Height, wbh, err
 }
 
 func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (uint64, error) {
@@ -1695,26 +1657,24 @@ func (s *Server) Run(pctx context.Context) error {
 	}()
 
 	// Find out where IBD is at
-	bhs, err := s.db.BlockHeadersBest(ctx)
+	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		return fmt.Errorf("block headers best: %w", err)
-	}
-	// No entries means we are at genesis
-	if len(bhs) == 0 {
-		err = s.insertGenesis(ctx)
-		if err != nil {
-			return fmt.Errorf("insert genesis: %w", err)
+		if database.ErrNotFound.Is(err) {
+			err = s.insertGenesis(ctx)
+			if err != nil {
+				return fmt.Errorf("insert genesis: %w", err)
+			}
+			bhb, err = s.db.BlockHeaderBest(ctx)
+			if err != nil {
+				return err
+			}
+		} else {
+			return fmt.Errorf("block headers best: %v", err)
 		}
-		bhs, err = s.db.BlockHeadersBest(ctx)
-		if err != nil {
-			return err
-		}
-	} else if len(bhs) > 1 {
-		panic("blockheaders best: unsupported fork")
 	}
-	s.lastBlockHeader = bhs[0] // Prime last seen block header
+	s.lastBlockHeader = *bhb // Prime last seen block header
 	log.Infof("Starting block headers sync at height: %v time %v",
-		bhs[0].Height, bhs[0].Timestamp())
+		bhb.Height, bhb.Timestamp())
 
 	// HTTP server
 	mux := http.NewServeMux()

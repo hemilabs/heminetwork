@@ -92,7 +92,7 @@ func TestEncodeDecodeBlockHeader(t *testing.T) {
 		Difficulty: *difficulty,
 	}
 	er := encodeBlockHeader(bh.Height, h2b80(&genesisBH), &bh.Difficulty)
-	dr := decodeBlockHeader(bh.Hash, er[:])
+	dr := decodeBlockHeader(er[:])
 	if diff := deep.Equal(bh, *dr); len(diff) > 0 {
 		t.Errorf("unexpected diff: %s", diff)
 	}
