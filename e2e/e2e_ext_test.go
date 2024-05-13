@@ -870,11 +870,11 @@ func TestL2Keystone(t *testing.T) {
 			continue
 		}
 
-		if command == bfgapi.CmdL2KeystonesResponse {
-			break
-		} else {
+		if command != bfgapi.CmdL2KeystonesResponse {
 			t.Fatalf("unexpected command %s", command)
 		}
+
+		break
 	}
 
 	l2KeystonesResponse := response.(*bfgapi.L2KeystonesResponse)
