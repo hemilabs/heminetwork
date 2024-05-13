@@ -615,13 +615,9 @@ func TestProcessReceivedInAscOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
-
-	receivedKeystones := []hemi.L2Keystone{}
-
-	for _, c := range miner.l2KeystonesForProcessing() {
-		receivedKeystones = append(receivedKeystones, c)
-	}
+	receivedKeystones := miner.l2KeystonesForProcessing()
 
 	slices.Reverse(receivedKeystones)
 	diff := deep.Equal(firstBatchOfL2Keystones, receivedKeystones)
@@ -761,13 +757,8 @@ func TestProcessReceivedNoDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	receivedKeystones := []hemi.L2Keystone{}
-
 	miner.processReceivedKeystones(context.Background(), keystones)
-
-	for _, c := range miner.l2KeystonesForProcessing() {
-		receivedKeystones = append(receivedKeystones, c)
-	}
+	receivedKeystones := miner.l2KeystonesForProcessing()
 
 	slices.Reverse(keystones)
 
@@ -848,11 +839,7 @@ func TestProcessReceivedInAscOrderOverride(t *testing.T) {
 		miner.processReceivedKeystones(context.Background(), []hemi.L2Keystone{keystone})
 	}
 
-	receivedKeystones := []hemi.L2Keystone{}
-
-	for _, c := range miner.l2KeystonesForProcessing() {
-		receivedKeystones = append(receivedKeystones, c)
-	}
+	receivedKeystones := miner.l2KeystonesForProcessing()
 
 	slices.Reverse(keystones)
 
@@ -957,11 +944,7 @@ func TestProcessReceivedInAscOrderNoInsertIfTooOld(t *testing.T) {
 		},
 	})
 
-	receivedKeystones := []hemi.L2Keystone{}
-
-	for _, c := range miner.l2KeystonesForProcessing() {
-		receivedKeystones = append(receivedKeystones, c)
-	}
+	receivedKeystones := miner.l2KeystonesForProcessing()
 
 	slices.Reverse(keystones)
 
