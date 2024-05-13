@@ -123,7 +123,7 @@ func runPopMiner(this js.Value, args []js.Value) (any, error) {
 	cfg.BTCChainName = args[0].Get("network").String()
 	cfg.BTCPrivateKey = args[0].Get("privateKey").String()
 	cfg.LogLevel = args[0].Get("logLevel").String() // "popm=TRACE:protocol=TRACE"
-	cfg.StaticFee = (uint)(args[0].Get("staticFee").Int())
+	cfg.StaticFee = uint(args[0].Get("staticFee").Int())
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "popm=INFO"
 	}
