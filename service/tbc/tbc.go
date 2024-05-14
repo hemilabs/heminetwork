@@ -1099,6 +1099,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		s.mtx.Unlock()
 		if time.Since(lastBH) > 6*s.chainParams.TargetTimePerBlock {
 			log.Infof("peer not synced: %v", p)
+			p.close() // get rid of this peer
 			return
 		}
 
@@ -1119,6 +1120,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		if pbhHash != nil && pbhHash.IsEqual(&msg.Headers[k].PrevBlock) {
 			log.Errorf("cannot connect %v index %v",
 				msg.Headers[k].PrevBlock, k)
+			p.close() // get rid of this misbehaving peer
 			return
 		}
 
