@@ -1127,7 +1127,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	}
 
 	if len(headers) > 0 {
-		lbh, err := s.db.BlockHeadersInsert(ctx, headers)
+		it, lbh, err := s.db.BlockHeadersInsert(ctx, headers)
 		if err != nil {
 			// This ends the race between peers during IBD.
 			if !database.ErrDuplicate.Is(err) {
@@ -1146,8 +1146,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		}
 		s.mtx.Unlock()
 
-		log.Infof("Inserted %v block headers height %v",
-			len(headers), lbh.Height)
+		// XXX we probably don't want top print it
+		log.Infof("Inserted (%v) %v block headers height %v",
+			it, len(headers), lbh.Height)
 
 		// Ask for next batch of headers
 		err = s.getHeaders(ctx, p, lbh.Header)

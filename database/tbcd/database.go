@@ -20,6 +20,26 @@ import (
 	"github.com/hemilabs/heminetwork/database"
 )
 
+type InsertType int
+
+const (
+	ITInvalid     InsertType = 0 // Invalid insert
+	ITChainExtend            = 1 // Normal insert, does not require further action.
+	ITChainFork              = 2 // Chain forked, unwind and rewind indexes.
+	ITForkExtend             = 3 // Extended a fork, does not require further action.
+)
+
+var ITStrings = map[InsertType]string{
+	ITInvalid:     "invalid",
+	ITChainExtend: "chain extended",
+	ITChainFork:   "chain forked",
+	ITForkExtend:  "fork extended",
+}
+
+func (it InsertType) String() string {
+	return ITStrings[it]
+}
+
 type Database interface {
 	database.Database
 
@@ -31,11 +51,11 @@ type Database interface {
 	// Block header
 	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
-	BlockHeaderInsert(ctx context.Context, height uint64, bh [80]byte) error
+	BlockHeaderInsert(ctx context.Context, height uint64, bh [80]byte) error // do not use
 
 	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
-	BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (*BlockHeader, error)
+	BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (InsertType, *BlockHeader, error)
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
