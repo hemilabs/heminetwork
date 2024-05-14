@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	mathrand "math/rand/v2"
 	"net"
@@ -159,7 +158,7 @@ func applySQLFiles(ctx context.Context, t *testing.T, sdb *sql.DB, path string) 
 
 	for _, sqlFile := range sqlFiles {
 		t.Logf("Applying SQL file %v", filepath.Base(sqlFile))
-		sql, err := ioutil.ReadFile(sqlFile)
+		sql, err := os.ReadFile(sqlFile)
 		if err != nil {
 			t.Fatalf("Failed to read SQL file: %v", err)
 		}
