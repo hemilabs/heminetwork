@@ -1,16 +1,17 @@
 # 📡 Hemi Tiny Bitcoin Daemon RPC
 
-***Last updated:** April 25th, 2024*
+***Last updated:** May 16th, 2024*
 
-This document provides details on the RPC setup and client implementation for the Hemi Tiny Bitcoin Daemon **(`tbcd`).**
+This document provides details on the RPC protocol and commands for the Hemi Tiny Bitcoin Daemon (`tbcd`).
 
 <details>
   <summary>Table of Contents</summary>
 
 <!-- TOC -->
 * [📡 Hemi Tiny Bitcoin Daemon RPC](#-hemi-tiny-bitcoin-daemon-rpc)
-  * [⚙️ Configuration](#-configuration)
-  * [👉 RPC Client](#-rpc-client)
+  * [⚙️ Implementations](#-implementations)
+    * [⚙️ `tbcd` Daemon](#-tbcd-daemon)
+    * [👉 RPC Client](#-rpc-client)
   * [📚 Resources](#-resources)
   * [📡 Protocol](#-protocol)
     * [🚫 Errors](#-errors)
@@ -92,22 +93,21 @@ This document provides details on the RPC setup and client implementation for th
 
 ---
 
-## ⚙️ Configuration
+## ⚙️ Implementations
 
-To configure the daemon, set the `TBC_ADDRESS` environment variable. For example:
+### ⚙️ `tbcd` Daemon
 
+The `tbcd` daemon runs an RPC server that listens on the address provided by the `TBC_ADDRESS` environment variable.
+You can run the `tbcd` daemon with the RPC server enabled with the following command:
+
+```shell
+TBC_ADDRESS=localhost:8082 /path/to/tbcd
 ```
-TBC_ADDRESS=localhost:8082
-```
 
-When set, `tbcd` listens on the provided address, allowing for RPC communications.
-
----
-
-## 👉 RPC Client
+### 👉 RPC Client
 
 [`hemictl`](../../cmd/hemictl) serves as a reference implementation of an RPC client tailored for interacting
-with `tbcd`.
+with the `tbcd` daemon.
 
 ---
 
@@ -138,16 +138,16 @@ details:
 
 #### Block Header
 
-A serialized block header includes:
+A serialized block header contains the following data:
 
-| Field         | Description                                                                               |
-|---------------|-------------------------------------------------------------------------------------------|
-| `version`     | The version of the block.                                                                 |
-| `prev_hash`   | The hash of the previous block header in the blockchain.                                  |
-| `merkle_root` | The hash derived from the hashes of all transactions in the block.                        |
-| `timestamp`   | The time the miner began hashing the header, represented in Unix seconds.                 |
-| `bits`        | The difficulty target for the block.                                                      |
-| `nonce`       | The nonce used to create the hash that is **less than or equal to** the target threshold. |
+| Field         | Description                                                                                                                   |
+|---------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `version`     | The version of the block.                                                                                                     |
+| `prev_hash`   | The hash of the previous block header in the blockchain, in reverse byte order and encoded as a hexadecimal string.           |
+| `merkle_root` | The hash derived from the hashes of all transactions in the block, in reverse byte order and encoded as a hexadecimal string. |
+| `timestamp`   | The time the miner began hashing the header, represented in Unix seconds.                                                     |
+| `bits`        | The difficulty target for the block.                                                                                          |
+| `nonce`       | The nonce used to create the hash that is less than or equal to the target threshold.                                         |
 
 #### Address
 
@@ -161,13 +161,13 @@ Represents an encoded Bitcoin address, supporting these types:
 
 #### UTXO
 
-A serialized UTXO includes:
+A serialized UTXO contains the following data:
 
-| Field       | Description                                          |
-|-------------|------------------------------------------------------|
-| `tx_id`     | The transaction ID, encoded as a hexadecimal string. |
-| `value`     | The value of the UTXO.                               |
-| `out_index` | The output index of the UTXO.                        |
+| Field       | Description                                                                    |
+|-------------|--------------------------------------------------------------------------------|
+| `tx_id`     | The transaction ID, in reverse byte order and encoded as a hexadecimal string. |
+| `value`     | The value of the UTXO.                                                         |
+| `out_index` | The output index of the UTXO.                                                  |
 
 #### Transaction
 
@@ -204,10 +204,10 @@ A serialized transaction output contains the following data:
 
 A serialized outpoint contains the following data:
 
-| Field   | Description                                                     |
-|---------|-----------------------------------------------------------------|
-| `hash`  | The **ID** of the transaction holding the output to be spent.   |
-| `index` | The index of the specific output to spend from the transaction. |
+| Field   | Description                                                                                                          |
+|---------|----------------------------------------------------------------------------------------------------------------------|
+| `hash`  | The ID of the transaction holding the output to be spent, in reverse byte order and encoded as a hexadecimal string. |
+| `index` | The index of the specific output to spend from the transaction.                                                      |
 
 ---
 
