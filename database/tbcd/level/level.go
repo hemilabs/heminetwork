@@ -390,6 +390,10 @@ func (l *ldb) BlockHeaderInsert(ctx context.Context, height uint64, bh [80]byte)
 	return nil
 }
 
+// BlockHeadersInsert decodes and inserts the passed blockheaders into the
+// database. Additionally it updates the hight/hash and missing blocks table as
+// well.  On return it informs the caller about potential forking situations.
+// This call uses the database to prevent reentrancy.
 func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.InsertType, *tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
@@ -400,7 +404,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	}
 
 	// Ensure we can connect these blockheaders prior to starting database
-	// transactoin. This also obtains the starting cumulative difficulty
+	// transaction. This also obtains the starting cumulative difficulty
 	// and  height.
 	wbh, err := b2h(bhs[0][:])
 	if err != nil {
@@ -510,20 +514,24 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// Insert last height into block headers if the new cumulative
 	// difficulty exceeds the prior difficulty.
 	var it tbcd.InsertType
-	if cdiff.Cmp(&bestBH.Difficulty) > 0 {
+	switch cdiff.Cmp(&bestBH.Difficulty) {
+	case -1:
+		// Extend fork, fork won difficulty fight
+		it = tbcd.ITChainFork
+		panic("fork!!")
+	case 0:
+		// Extend fork to the same exact difficulty
+		it = tbcd.ITForkExtend
+	case 1:
+		// Extend current best tip
 		bhsBatch.Put([]byte(bhsLastKey), lastRecord)
 		it = tbcd.ITChainExtend
-
-		// XXX we need to figure out if a fork overtakes current best here too.
-	} else {
-		// Extend fork
-		log.Infof("extend fork at height: %v %v --(parent)--> %v", height,
-			headerHash(bestBH.Header), // can't use Hash since it isn't filled in
-			headerParentHash(bhs[len(bhs)-1][:]))
-		it = tbcd.ITForkExtend
+	default:
+		panic("impossible cmp")
 	}
 
-	// Create artificial last block header to return to caller
+	// Create artificial last block header to return to caller.
+	// Note that this *can be* a fork!
 	var header [80]byte
 	copy(header[:], bhs[len(bhs)-1][:])
 	lbh := &tbcd.BlockHeader{

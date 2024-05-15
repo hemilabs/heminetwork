@@ -833,6 +833,8 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	log.Tracef("handleInv (%v)", p)
 	defer log.Tracef("handleInv exit (%v)", p)
 
+	// XXX this currently does nothing. Blocks are requested elsewhere.
+
 	var bis []tbcd.BlockIdentifier
 	for k := range msg.InvList {
 		switch msg.InvList[k].Type {
@@ -857,7 +859,7 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 
 	// XXX This happens during block header download, we should not react
 	// Probably move into the invtype switch
-	log.Infof("download blocks if we like them")
+	// log.Infof("download blocks if we like them")
 	// if len(bis) > 0 {
 	//	s.mtx.Lock()
 	//	defer s.mtx.Unlock()
@@ -1133,31 +1135,63 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		if err != nil {
 			// This ends the race between peers during IBD.
 			if !database.ErrDuplicate.Is(err) {
+				// XXX do we need to ask for more headers?
+
 				log.Errorf("block headers insert: %v", err)
 			}
 			return
 		}
 
-		// If we get here try to store the last blockheader that was
-		// inserted. This may race so we have to take the mutex and
-		// check height.
-		s.mtx.Lock()
-		// XXX this must be cumulative difficulty
-		if lbh.Height > s.lastBlockHeader.Height {
+		switch it {
+		case tbcd.ITForkExtend:
+			// Ask for more fork headers.
+			err = s.getHeaders(ctx, p, lbh.Header)
+			if err != nil {
+				log.Errorf("get headers: %v", err)
+				return
+			}
+
+			// Also ask for more headers at tip
+			s.mtx.Lock()
+			header := make([]byte, len(lbh.Header))
+			copy(header, lbh.Header[:])
+			s.mtx.Unlock()
+			err = s.getHeaders(ctx, p, header)
+			if err != nil {
+				log.Errorf("get headers: %v", err)
+				return
+			}
+
+		case tbcd.ITChainExtend:
+			// If we get here try to store the last blockheader
+			// that was inserted. This may race so we have to take
+			// the mutex.
+			s.mtx.Lock()
 			s.lastBlockHeader = *lbh
+			header := make([]byte, len(lbh.Header))
+			copy(header, lbh.Header[:])
+			s.mtx.Unlock()
+
+			// Ask for next batch of headers
+			err = s.getHeaders(ctx, p, header)
+			if err != nil {
+				log.Errorf("get headers: %v", err)
+				return
+			}
+
+		case tbcd.ITChainFork:
+			panic("chain forked, unwind/rewind indexes")
+
+		default:
+			// XXX can't happen
+			log.Errorf("invalid insert type: %d", it)
+			return
 		}
-		s.mtx.Unlock()
 
 		// XXX we probably don't want top print it
 		log.Infof("Inserted (%v) %v block headers height %v",
 			it, len(headers), lbh.Height)
 
-		// Ask for next batch of headers
-		err = s.getHeaders(ctx, p, lbh.Header)
-		if err != nil {
-			log.Errorf("get headers: %v", err)
-			return
-		}
 	}
 }
 
