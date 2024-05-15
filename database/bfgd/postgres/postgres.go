@@ -91,6 +91,7 @@ func (p *pgdb) materializedViewRefresher(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
 		case <-p.refreshMaterializedViewCh:
 			if err := p.refreshBTCBlocksCanonical(ctx); err != nil {
 				log.Errorf("error refreshing btc blocks canonical materialized view %s", err)
