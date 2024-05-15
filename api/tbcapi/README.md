@@ -5,95 +5,95 @@
 This document provides details on the RPC setup and client implementation for the Hemi Tiny Bitcoin Daemon **(`tbcd`).**
 
 <details>
-  <summary>📜 Table of Contents</summary>
+  <summary>Table of Contents</summary>
 
 <!-- TOC -->
-- [📡 Hemi Tiny Bitcoin Daemon RPC](#-hemi-tiny-bitcoin-daemon-rpc)
-  - [⚙️ Configuration](#️-configuration)
-  - [👉 RPC Client](#-rpc-client)
-  - [📚 Resources](#-resources)
-  - [📡 Protocol](#-protocol)
-    - [🚫 Errors](#-errors)
-    - [🗄️ Serialized Types](#️-serialized-types)
-      - [Block Header](#block-header)
-      - [Address](#address)
-      - [UTXO](#utxo)
-      - [Transaction](#transaction)
-      - [Transaction Input](#transaction-input)
-      - [Transaction Output](#transaction-output)
-      - [Outpoint](#outpoint)
-  - [👉 Block Headers by Height](#-block-headers-by-height)
-    - [🗂 Raw Data](#-raw-data)
-    - [📤 Request](#-request)
-      - [Payload:](#payload)
-      - [Example Request:](#example-request)
-    - [📥 Response](#-response)
-      - [Payload:](#payload-1)
-      - [Example Response:](#example-response)
-    - [🗂 Serialized Data](#-serialized-data)
-    - [📤 Request](#-request-1)
-      - [Payload](#payload-2)
-      - [Example Request](#example-request-1)
-    - [📥 Response](#-response-1)
-      - [Payload](#payload-3)
-      - [Example Response](#example-response-1)
-  - [👉 Best Block Headers](#-best-block-headers)
-    - [🗂 Raw Data](#-raw-data-1)
-    - [📤 Request](#-request-2)
-      - [Example Request](#example-request-2)
-    - [📥 Response](#-response-2)
-      - [Payload](#payload-4)
-      - [Example Response](#example-response-2)
-    - [🗂 Serialized Data](#-serialized-data-1)
-    - [📤 Request](#-request-3)
-      - [Example Request](#example-request-3)
-    - [📥 Response](#-response-3)
-      - [Payload](#payload-5)
-      - [Example Response](#example-response-3)
-  - [👉 Balance by Address](#-balance-by-address)
-    - [🗂 Raw Data](#-raw-data-2)
-    - [📤 Request](#-request-4)
-      - [Payload](#payload-6)
-      - [Example Request](#example-request-4)
-    - [📥 Response](#-response-4)
-      - [Payload](#payload-7)
-      - [Example Response](#example-response-4)
-  - [👉 UTXOs by Address](#-utxos-by-address)
-    - [🗂 Raw Data](#-raw-data-3)
-    - [📤 Request](#-request-5)
-      - [Payload:](#payload-8)
-      - [Example Request:](#example-request-5)
-    - [📥 Response](#-response-5)
-      - [Payload:](#payload-9)
-      - [Example Response:](#example-response-5)
-    - [🗂 Serialized Data](#-serialized-data-2)
-    - [📤 Request](#-request-6)
-      - [Payload:](#payload-10)
-      - [Example Request:](#example-request-6)
-    - [📥 Response](#-response-6)
-      - [Payload:](#payload-11)
-      - [Example Response:](#example-response-6)
-  - [👉 Transaction by ID](#-transaction-by-id)
-    - [🗂 Raw Data](#-raw-data-4)
-    - [📤 Request](#-request-7)
-      - [Payload](#payload-12)
-    - [📥 Response](#-response-7)
-      - [Payload](#payload-13)
-      - [Example Response](#example-response-7)
-    - [🗂 Serialized Data](#-serialized-data-3)
-    - [📤 Request](#-request-8)
-      - [Payload](#payload-14)
-      - [Example Request](#example-request-7)
-    - [📥 Response](#-response-8)
-      - [Payload](#payload-15)
-      - [Example Response](#example-response-8)
-  - [📄 License](#-license)
+* [📡 Hemi Tiny Bitcoin Daemon RPC](#-hemi-tiny-bitcoin-daemon-rpc)
+  * [⚙️ Configuration](#-configuration)
+  * [👉 RPC Client](#-rpc-client)
+  * [📚 Resources](#-resources)
+  * [📡 Protocol](#-protocol)
+    * [🚫 Errors](#-errors)
+    * [🗄️ Serialized Types](#-serialized-types)
+      * [Block Header](#block-header)
+      * [Address](#address)
+      * [UTXO](#utxo)
+      * [Transaction](#transaction)
+      * [Transaction Input](#transaction-input)
+      * [Transaction Output](#transaction-output)
+      * [Outpoint](#outpoint)
+  * [👉 Block Headers by Height](#-block-headers-by-height)
+    * [🗂 Raw Data](#-raw-data)
+    * [📤 Request](#-request)
+      * [Payload:](#payload)
+      * [Example Request:](#example-request)
+    * [📥 Response](#-response)
+      * [Payload:](#payload-1)
+      * [Example Response:](#example-response)
+    * [🗂 Serialized Data](#-serialized-data)
+    * [📤 Request](#-request-1)
+      * [Payload](#payload-2)
+      * [Example Request](#example-request-1)
+    * [📥 Response](#-response-1)
+      * [Payload](#payload-3)
+      * [Example Response](#example-response-1)
+  * [👉 Best Block Headers](#-best-block-headers)
+    * [🗂 Raw Data](#-raw-data-1)
+    * [📤 Request](#-request-2)
+      * [Example Request](#example-request-2)
+    * [📥 Response](#-response-2)
+      * [Payload](#payload-4)
+      * [Example Response](#example-response-2)
+    * [🗂 Serialized Data](#-serialized-data-1)
+    * [📤 Request](#-request-3)
+      * [Example Request](#example-request-3)
+    * [📥 Response](#-response-3)
+      * [Payload](#payload-5)
+      * [Example Response](#example-response-3)
+  * [👉 Balance by Address](#-balance-by-address)
+    * [🗂 Raw Data](#-raw-data-2)
+    * [📤 Request](#-request-4)
+      * [Payload](#payload-6)
+      * [Example Request](#example-request-4)
+    * [📥 Response](#-response-4)
+      * [Payload](#payload-7)
+      * [Example Response](#example-response-4)
+  * [👉 UTXOs by Address](#-utxos-by-address)
+    * [🗂 Raw Data](#-raw-data-3)
+    * [📤 Request](#-request-5)
+      * [Payload:](#payload-8)
+      * [Example Request:](#example-request-5)
+    * [📥 Response](#-response-5)
+      * [Payload:](#payload-9)
+      * [Example Response:](#example-response-5)
+    * [🗂 Serialized Data](#-serialized-data-2)
+    * [📤 Request](#-request-6)
+      * [Payload:](#payload-10)
+      * [Example Request:](#example-request-6)
+    * [📥 Response](#-response-6)
+      * [Payload:](#payload-11)
+      * [Example Response:](#example-response-6)
+  * [👉 Transaction by ID](#-transaction-by-id)
+    * [🗂 Raw Data](#-raw-data-4)
+    * [📤 Request](#-request-7)
+      * [Payload](#payload-12)
+    * [📥 Response](#-response-7)
+      * [Payload](#payload-13)
+      * [Example Response](#example-response-7)
+    * [🗂 Serialized Data](#-serialized-data-3)
+    * [📤 Request](#-request-8)
+      * [Payload](#payload-14)
+      * [Example Request](#example-request-7)
+    * [📥 Response](#-response-8)
+      * [Payload](#payload-15)
+      * [Example Response](#example-response-8)
 <!-- TOC -->
 </details>
 
 ---
 
 ## ⚙️ Configuration
+
 To configure the daemon, set the `TBC_ADDRESS` environment variable. For example:
 
 ```
@@ -105,11 +105,14 @@ When set, `tbcd` listens on the provided address, allowing for RPC communication
 ---
 
 ## 👉 RPC Client
-[`hemictl`](../../cmd/hemictl) serves as a reference implementation of an RPC client tailored for interacting with `tbcd`.
+
+[`hemictl`](../../cmd/hemictl) serves as a reference implementation of an RPC client tailored for interacting
+with `tbcd`.
 
 ---
 
 ## 📚 Resources
+
 For developers looking to integrate or extend functionality, view the raw Go types used in TBC's RPC commands:
 [View `tbcapi.go`](tbcapi.go).
 
@@ -117,35 +120,38 @@ For developers looking to integrate or extend functionality, view the raw Go typ
 
 ## 📡 Protocol
 
-The **RPC protocol** is WebSocket-based and follows a standard request/response model. For more detailed information, refer to the [protocol documentation.](../protocol/README.md)
+The **RPC protocol** is WebSocket-based and follows a standard request/response model. For more detailed information,
+refer to the [protocol documentation.](../protocol/README.md)
 
 ---
+
 ### 🚫 Errors
 
-If an error occurs during a request, the response payload will include an `error` value containing the following details:
+If an error occurs during a request, the response payload will include an `error` value containing the following
+details:
 
-
-|Field      |Description                                                                             |
-|-----------|----------------------------------------------------------------------------------------|
-|`timestamp`|The time at which the error occurred, in Unix seconds.                                  |
-|`trace`    |A unique string for tracing errors between server and client (internal errors only).|
-|`message`  |The error message. For internal server errors, this will read `internal error`.         |
+| Field       | Description                                                                          |
+|-------------|--------------------------------------------------------------------------------------|
+| `timestamp` | The time at which the error occurred, in Unix seconds.                               |
+| `trace`     | A unique string for tracing errors between server and client (internal errors only). |
+| `message`   | The error message. For internal server errors, this will read `internal error`.      |
 
 ---
+
 ### 🗄️ Serialized Types
 
-####  Block Header
+#### Block Header
 
 A serialized block header includes:
 
-|Field        |Description                                                                    |
-|-------------|-------------------------------------------------------------------------------|
-|`version`    |The version of the block.                                                      |
-|`prev_hash`  |The hash of the previous block header in the blockchain.                       |
-|`merkle_root`|The hash derived from the hashes of all transactions in the block.             |
-|`timestamp`  |The time the miner began hashing the header, represented in Unix seconds.      |
-|`bits`       |The difficulty target for the block.                                           |
-|`nonce`      |The nonce used to create the hash that is **less than or equal to** the target threshold.|
+| Field         | Description                                                                               |
+|---------------|-------------------------------------------------------------------------------------------|
+| `version`     | The version of the block.                                                                 |
+| `prev_hash`   | The hash of the previous block header in the blockchain.                                  |
+| `merkle_root` | The hash derived from the hashes of all transactions in the block.                        |
+| `timestamp`   | The time the miner began hashing the header, represented in Unix seconds.                 |
+| `bits`        | The difficulty target for the block.                                                      |
+| `nonce`       | The nonce used to create the hash that is **less than or equal to** the target threshold. |
 
 #### Address
 
@@ -157,70 +163,68 @@ Represents an encoded Bitcoin address, supporting these types:
 - `P2WSH`
 - `P2TR`
 
-####  UTXO
+#### UTXO
 
 A serialized UTXO includes:
 
-| Field       | Description                                |
-|-------------|--------------------------------------------|
-| `tx_id`     | The transaction ID, encoded as a hexadecimal string.|
-| `value`     | The value of the UTXO.                     |
-| `out_index` | The output index of the UTXO.              |
+| Field       | Description                                          |
+|-------------|------------------------------------------------------|
+| `tx_id`     | The transaction ID, encoded as a hexadecimal string. |
+| `value`     | The value of the UTXO.                               |
+| `out_index` | The output index of the UTXO.                        |
 
 #### Transaction
 
 A serialized transaction contains the following data:
 
-| Field   | Description |
-|------------|----------------------------------------------------------------------------|
-| `version`  | The transaction version.                                                   |
-| `lock_time`| The block height or timestamp after which the transaction becomes final.   |
-| `tx_in`    | An array of [**transaction inputs**](#transaction-input).|
-| `tx_out`   | An array of [**transaction outputs**](#transaction-output).|
-
-
+| Field       | Description                                                              |
+|-------------|--------------------------------------------------------------------------|
+| `version`   | The transaction version.                                                 |
+| `lock_time` | The block height or timestamp after which the transaction becomes final. |
+| `tx_in`     | An array of [**transaction inputs**](#transaction-input).                |
+| `tx_out`    | An array of [**transaction outputs**](#transaction-output).              |
 
 #### Transaction Input
 
 A serialized transaction input contains the following data:
 
-| Field             | Description                                                      |
-|-------------------|------------------------------------------------------------------|
-| `outpoint`        | The [**outpoint**](#outpoint) for the previous transaction output.   |
-| `signature_script`| The signature script for the transaction.                        |
-| `witness`         | An array of the transaction witnesses, encoded as hexadecimal strings. |
-| `sequence`        | The transaction sequence number.                                 |
-
+| Field              | Description                                                            |
+|--------------------|------------------------------------------------------------------------|
+| `outpoint`         | The [**outpoint**](#outpoint) for the previous transaction output.     |
+| `signature_script` | The signature script for the transaction.                              |
+| `witness`          | An array of the transaction witnesses, encoded as hexadecimal strings. |
+| `sequence`         | The transaction sequence number.                                       |
 
 #### Transaction Output
 
 A serialized transaction output contains the following data:
 
-| Field      | Description                                                            |
-|------------|------------------------------------------------------------------------|
-| `value`    | The value of the transaction output in satoshis.                       |
-| `pk_script`| The pubkey script of the transaction output, encoded as a hexadecimal string. |
-
+| Field       | Description                                                                   |
+|-------------|-------------------------------------------------------------------------------|
+| `value`     | The value of the transaction output in satoshis.                              |
+| `pk_script` | The pubkey script of the transaction output, encoded as a hexadecimal string. |
 
 #### Outpoint
 
 A serialized outpoint contains the following data:
 
-| Field  | Description                                                  |
-|--------|--------------------------------------------------------------|
-| `hash` | The **ID** of the transaction holding the output to be spent.    |
-| `index`| The index of the specific output to spend from the transaction. |
+| Field   | Description                                                     |
+|---------|-----------------------------------------------------------------|
+| `hash`  | The **ID** of the transaction holding the output to be spent.   |
+| `index` | The index of the specific output to spend from the transaction. |
 
 ---
+
 ## 👉 Block Headers by Height
+
 Retrieve the block headers by height.
 
 ### 🗂 Raw Data
 
-| Type     | `command` value                              |
-|----------|---------------------------------------------|
-| Request  | `tbcapi-block-headers-by-height-raw-request`|
-| Response | `tbcapi-block-headers-by-height-raw-response`|
+| Type     | `command` value                               |
+|----------|-----------------------------------------------|
+| Request  | `tbcapi-block-headers-by-height-raw-request`  |
+| Response | `tbcapi-block-headers-by-height-raw-response` |
 
 ### 📤 Request
 
@@ -268,13 +272,12 @@ Response for a request with **id** `68656d69` and **height** `43111`:
 }
 ```
 
-
 ### 🗂 Serialized Data
 
-| Type     | `command` value                              |
-|----------|---------------------------------------------|
-| Request  | `tbcapi-block-headers-by-height-request`    |
-| Response | `tbcapi-block-headers-by-height-response`   |
+| Type     | `command` value                           |
+|----------|-------------------------------------------|
+| Request  | `tbcapi-block-headers-by-height-request`  |
+| Response | `tbcapi-block-headers-by-height-response` |
 
 ### 📤 Request
 
@@ -337,10 +340,10 @@ Retrieve the best block headers.
 
 ### 🗂 Raw Data
 
-| Type     | `command` value                              |
-|----------|----------------------------------------------|
-| Request  | `tbcapi-block-headers-best-raw-request`      |
-| Response | `tbcapi-block-headers-best-raw-response`     |
+| Type     | `command` value                          |
+|----------|------------------------------------------|
+| Request  | `tbcapi-block-headers-best-raw-request`  |
+| Response | `tbcapi-block-headers-best-raw-response` |
 
 ### 📤 Request
 
@@ -385,10 +388,10 @@ Response for a request with **id** `68656d69` and **best height** `2182000`:
 
 ### 🗂 Serialized Data
 
-| Type     | `command` value                          |
-|----------|------------------------------------------|
-| Request  | `tbcapi-block-headers-best-request`      |
-| Response | `tbcapi-block-headers-best-response`     |
+| Type     | `command` value                      |
+|----------|--------------------------------------|
+| Request  | `tbcapi-block-headers-best-request`  |
+| Response | `tbcapi-block-headers-best-response` |
 
 ### 📤 Request
 
@@ -439,14 +442,15 @@ Response for a request with **id** `68656d69` and **height** `2587400`:
 ```
 
 ## 👉 Balance by Address
+
 Retrieve the balance for an address.
 
 ### 🗂 Raw Data
 
-| Type     | `command` value                               |
-|----------|-----------------------------------------------|
-| Request  | `tbcapi-balance-by-address-request`           |
-| Response | `tbcapi-balance-by-address-response`          |
+| Type     | `command` value                      |
+|----------|--------------------------------------|
+| Request  | `tbcapi-balance-by-address-request`  |
+| Response | `tbcapi-balance-by-address-response` |
 
 ### 📤 Request
 
@@ -485,7 +489,7 @@ Response for a request with **id** `68656d69`, if the address's **balance** is `
   "header": {
     "command": "tbcapi-balance-by-address-response",
     "id": "68656d69"
- },
+  },
   "payload": {
     "balance": 0
   }
@@ -500,17 +504,18 @@ Retrieve UTXOs by address.
 
 ### 🗂 Raw Data
 
-| Type     | `command` value                         |
-|----------|-----------------------------------------|
-| Request  | `tbcapi-utxos-by-address-raw-request`   |
-| Response | `tbcapi-utxos-by-address-raw-response`  |
+| Type     | `command` value                        |
+|----------|----------------------------------------|
+| Request  | `tbcapi-utxos-by-address-raw-request`  |
+| Response | `tbcapi-utxos-by-address-raw-response` |
 
 ### 📤 Request
 
 #### Payload:
 
 - **`address`**: The [address](#address) to retrieve the UTXOs for.
-- **`start`**: The start index for the UTXOs that should be included in the response (or the number of UTXOs that should be skipped).
+- **`start`**: The start index for the UTXOs that should be included in the response (or the number of UTXOs that should
+  be skipped).
 - **`count`**: The maximum number of UTXOs that should be included in the response.
 
 #### Example Request:
@@ -535,11 +540,13 @@ Retrieve five UTXOs for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 
 #### Payload:
 
-- **`utxos`**: An array of **known UTXOs** for the address, encoded as hexadecimal strings, or **`null`** if there are **no UTXOs** for the address.
+- **`utxos`**: An array of **known UTXOs** for the address, encoded as hexadecimal strings, or **`null`** if there are *
+  *no UTXOs** for the address.
 
 #### Example Response:
 
-Response for a request with **id** `68656d69`, **requesting 5 UTXOs** for the address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
+Response for a request with **id** `68656d69`, **requesting 5 UTXOs** for the
+address `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk`:
 
 ```json
 {
@@ -561,17 +568,18 @@ Response for a request with **id** `68656d69`, **requesting 5 UTXOs** for the ad
 
 ### 🗂 Serialized Data
 
-| Type     | `command` value                   |
-|----------|-----------------------------------|
-| Request  | `tbcapi-utxos-by-address-request` |
-| Response | `tbcapi-utxos-by-address-response`|
+| Type     | `command` value                    |
+|----------|------------------------------------|
+| Request  | `tbcapi-utxos-by-address-request`  |
+| Response | `tbcapi-utxos-by-address-response` |
 
 ### 📤 Request
 
 #### Payload:
 
 - **`address`**: The [address](#address) to retrieve the UTXOs for.
-- **`start`**: The start index for the UTXOs that should be included in the response (or the number of UTXOs that should be skipped).
+- **`start`**: The start index for the UTXOs that should be included in the response (or the number of UTXOs that should
+  be skipped).
 - **`count`**: The maximum number of UTXOs that should be included in the response.
 
 #### Example Request:
@@ -596,7 +604,8 @@ Response for a request with **id** `68656d69`, **requesting 5 UTXOs** for the ad
 
 #### Payload:
 
-- **`utxos`**: An array of known [**UTXOs**](#utxo). The maximum number of items in this array can be changed with **`count`** in the request.
+- **`utxos`**: An array of known [**UTXOs**](#utxo). The maximum number of items in this array can be changed with *
+  *`count`** in the request.
 
 #### Example Response:
 
@@ -639,17 +648,17 @@ Response for a request with **id** `68656d69`, **showing 5 UTXOs** for the addre
   }
 }
 ```
----
 
+---
 
 ## 👉 Transaction by ID
 
 ### 🗂 Raw Data
 
-| Type     | `command` value                     |
-|----------|-------------------------------------|
-| Request  | `tbcapi-tx-by-id-raw-request`       |
-| Response | `ttbcapi-tx-by-id-raw-response`     |
+| Type     | `command` value                 |
+|----------|---------------------------------|
+| Request  | `tbcapi-tx-by-id-raw-request`   |
+| Response | `ttbcapi-tx-by-id-raw-response` |
 
 ### 📤 Request
 
@@ -696,10 +705,10 @@ transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 
 ### 🗂 Serialized Data
 
-| Type     | `command` value                |
-|----------|--------------------------------|
-| Request  | `tbcapi-tx-by-id-request`      |
-| Response | `tbcapi-tx-by-id-response`     |
+| Type     | `command` value            |
+|----------|----------------------------|
+| Request  | `tbcapi-tx-by-id-request`  |
+| Response | `tbcapi-tx-by-id-response` |
 
 ### 📤 Request
 
@@ -765,8 +774,3 @@ transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
   }
 }
 ```
-
---
-## 📄 License
-
-This project is licensed under the [MIT License](../../LICENSE).
