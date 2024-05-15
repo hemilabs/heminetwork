@@ -71,3 +71,7 @@ flycheck_*.el
 ## Visual Studio Code
 .vscode/
 .history/
+
+### Other files
+## macOS
+.DS_Store
