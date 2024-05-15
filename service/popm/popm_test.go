@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -1026,7 +1025,7 @@ func TestConnectToBFGAndPerformMineWithAuth(t *testing.T) {
 		}
 		missing := false
 		for _, m := range messagesExpected {
-			if !messagesReceived[fmt.Sprintf("%s", m)] {
+			if !messagesReceived[string(m)] {
 				t.Logf("still missing message %v", m)
 				missing = true
 			}
@@ -1090,7 +1089,7 @@ func TestConnectToBFGAndPerformMine(t *testing.T) {
 		}
 		missing := false
 		for _, m := range messagesExpected {
-			if !messagesReceived[fmt.Sprintf("%s", m)] {
+			if !messagesReceived[string(m)] {
 				t.Logf("still missing message %v", m)
 				missing = true
 			}
@@ -1154,7 +1153,7 @@ func TestConnectToBFGAndPerformMineMultiple(t *testing.T) {
 		}
 		missing := false
 		for m := range messagesExpected {
-			message := fmt.Sprintf("%s", m)
+			message := string(m)
 			if messagesReceived[message] != messagesExpected[m] {
 				t.Logf("still missing message %v, found %d want %d", m, messagesReceived[message], messagesExpected[m])
 				missing = true
@@ -1219,7 +1218,7 @@ func TestConnectToBFGAndPerformMineALot(t *testing.T) {
 		}
 		missing := false
 		for m := range messagesExpected {
-			message := fmt.Sprintf("%s", m)
+			message := string(m)
 			if messagesReceived[message] < messagesExpected[m] {
 				t.Logf("still missing message %v, found %d want %d", m, messagesReceived[message], messagesExpected[m])
 				missing = true
@@ -1351,7 +1350,7 @@ func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string, keyst
 
 			go func() {
 				select {
-				case msgCh <- fmt.Sprintf("%s", command):
+				case msgCh <- string(command):
 				case <-ctx.Done():
 					return
 				}
