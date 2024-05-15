@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 6
+	bfgdVersion = 7
 
 	logLevel = "INFO"
 	verbose  = false
@@ -49,7 +49,8 @@ func init() {
 
 type pgdb struct {
 	*postgres.Database
-	db *sql.DB
+	db                        *sql.DB
+	refreshMaterializedViewCh chan struct{}
 }
 
 var _ bfgd.Database = (*pgdb)(nil)
@@ -69,8 +70,9 @@ func New(ctx context.Context, uri string) (*pgdb, error) {
 	}
 	log.Debugf("bfgdb database version: %v", bfgdVersion)
 	p := &pgdb{
-		Database: pg,
-		db:       pg.DB(),
+		Database:                  pg,
+		db:                        pg.DB(),
+		refreshMaterializedViewCh: make(chan struct{}),
 	}
 
 	// first, refresh the materialized view so it can be used in case it was
@@ -80,7 +82,28 @@ func New(ctx context.Context, uri string) (*pgdb, error) {
 		return nil, err
 	}
 
+	go p.materializedViewRefresher(ctx)
+
 	return p, nil
+}
+
+func (p *pgdb) materializedViewRefresher(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+		case <-p.refreshMaterializedViewCh:
+			if err := p.refreshBTCBlocksCanonical(ctx); err != nil {
+				log.Errorf("error refreshing btc blocks canonical materialized view %s", err)
+			}
+		}
+	}
+}
+
+func (p *pgdb) queueMaterializedViewRefresh() {
+	select {
+	case p.refreshMaterializedViewCh <- struct{}{}:
+	default:
+	}
 }
 
 func (p *pgdb) Version(ctx context.Context) (int, error) {
@@ -297,6 +320,8 @@ func (p *pgdb) BtcBlockInsert(ctx context.Context, bb *bfgd.BtcBlock) error {
 	if rows < 1 {
 		return fmt.Errorf("insert btc block rows: %v", rows)
 	}
+
+	p.queueMaterializedViewRefresh()
 
 	return nil
 }

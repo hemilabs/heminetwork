@@ -2140,6 +2140,7 @@ func TestPopPayouts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	letMaterializedViewRefresh(ctx)
 
 	// insert 4 pop bases, 1 will have the "different" l2 keystone
 	// and be excluded from queries, the other 3 will be included,
@@ -2666,6 +2667,7 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
 	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
 	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -3785,6 +3787,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 	if err != nil {
 		t.Fatal(err)
 	}
+	letMaterializedViewRefresh(ctx)
 
 	err = db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
 	if err != nil {
@@ -3797,4 +3800,13 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 	}
 
 	return btcBlock
+}
+
+func letMaterializedViewRefresh(ctx context.Context) {
+	// materialized view refreshes concurrently, let it do so, if it takes
+	// longer than this then something is wrong
+	select {
+	case <-ctx.Done():
+	case <-time.After(1 * time.Second):
+	}
 }
