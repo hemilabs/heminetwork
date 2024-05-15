@@ -710,7 +710,7 @@ transaction `0584ad53bf1938702b952026f7c986ab5d07ee7295c0ad3241c932a5483158ac`:
 
 ##### Payload
 
-- **`tx_id`**: The ID of the transaction to retrieve, encoded as a hexadecimal string.
+- **`tx_id`**: The ID of the transaction to retrieve, in reverse byte order and encoded as a hexadecimal string.
 
 ##### Example Request
 
