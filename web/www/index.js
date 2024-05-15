@@ -54,6 +54,7 @@ async function RunPopMiner() {
       network: RunPopMinerNetworkInput.value,
       logLevel: RunPopMinerLogLevelInput.value,
       privateKey: RunPopMinerPrivateKeyInput.value,
+      staticFee: Number(RunPopMinerStaticFeeInput.value),
     });
     RunPopMinerShow.innerHTML = result;
   } catch (err) {
