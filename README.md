@@ -164,15 +164,15 @@ go run ./integrationtest
    docker compose -f ./e2e/docker-compose.yml up --build
    ```
 
-   > [!NOTE]
-   > The `--build` flag is optional if you wish to rebuild your code.
+> [!NOTE]
+> The `--build` flag is optional and should only be used if you want to rebuild the binaries.
 
 2. **Manage Caching:**
    This initial build may take some time, but subsequent builds should benefit from caching.
 
-   > [!NOTE]
-   > During rebuilding, `popmd`, `bssd`, and `bfgd` may force a rebuild due to the `COPY` command, which can break the
-   cache. If you need to deliberately break the cache for the op-stack, use the following arguments:
+> [!NOTE]
+> During rebuilding, `popmd`, `bssd`, and `bfgd` may force a rebuild due to the `COPY` command, which can break the 
+> cache. If you need to deliberately break the cache for the op-stack, use the following arguments:
 
    - For op-geth + optimism (op-node):
      ```bash
