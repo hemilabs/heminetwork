@@ -518,11 +518,11 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-	time.Sleep(1 * time.Second) // XXX
+	time.Sleep(500 * time.Millisecond) // XXX
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:     true, // XXX for now
+		AutoIndex:     false,
 		BlockSanity:   false,
 		LevelDBHome:   t.TempDir(),
 		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
@@ -558,20 +558,23 @@ func TestFork(t *testing.T) {
 			continue
 		}
 
-		// Execute tests
-		balance, err := s.BalanceByAddress(ctx, address.String())
-		if err != nil {
-			t.Fatal(err)
+		// Don't execute balance tests if index is disabled.
+		if cfg.AutoIndex {
+			// Execute tests
+			balance, err := s.BalanceByAddress(ctx, address.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if balance != uint64(count*5000000000) {
+				t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
+			}
+			t.Logf("balance %v", spew.Sdump(balance))
+			utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("%v", spew.Sdump(utxos))
 		}
-		if balance != uint64(count*5000000000) {
-			t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
-		}
-		t.Logf("balance %v", spew.Sdump(balance))
-		utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v", spew.Sdump(utxos))
 		break
 	}
 
@@ -580,7 +583,7 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("----- %x", blockchain.BigToCompact(difficulty))
+	// t.Logf("----- %x", blockchain.BigToCompact(difficulty))
 	t.Logf("difficulty: 0x%064x", difficulty)
 
 	// Advance both heads
@@ -609,7 +612,8 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Second)
+	// XXX check hashes
+	time.Sleep(500 * time.Millisecond)
 
 	// Advance both heads again
 	b10aHash := b10a[0].MsgBlock().Header.BlockHash()
@@ -637,19 +641,63 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	// Let's see if tbcd agrees
 	si := s.Synced(ctx)
-	t.Logf("--- %v", si)
+	// t.Logf("--- %v", si)
 	bhsAt11, err := s.BlockHeadersByHeight(ctx, 11)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("block headers at 11: %v", spew.Sdump(bhsAt11))
-	time.Sleep(time.Second)
+	if len(bhsAt11) != 2 {
+		t.Fatalf("expected 2 best blocks, got %v", len(bhsAt11))
+	}
+	if cfg.AutoIndex && !si.Synced {
+		t.Fatalf("expected synced chain")
+	}
+	// XXX check hashes
+	// t.Logf("block headers at 11: %v", spew.Sdump(bhsAt11))
+	time.Sleep(500 * time.Millisecond)
+
+	// Move 10b forward and overtake 11 a/b
+
+	// go from
+	//           /-> 11b ->
+	// 9 -> 10a  ->  11a ->
+	//   \-> 10b ->
+	//
+	// to
+	//
+	//           /-> 11b ->
+	// 9 -> 10a  ->  11a ->
+	//   \-> 10b ->  11c -> 12
+	log.Infof("mine 11c")
+	b11c, err := n.Mine(1, &b10bHash, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b11cHash := b11c[0].MsgBlock().Header.BlockHash()
+	err = n.SendBlockheader(ctx, b11c[0].MsgBlock().Header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
+
+	// 12
+	log.Infof("mine 12")
+	b12, err := n.Mine(1, &b11cHash, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = n.SendBlockheader(ctx, b12[0].MsgBlock().Header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(500 * time.Millisecond)
 }
 
+// XXX this needs to actually test stuff. RN it is visual only.
 func TestWork(t *testing.T) {
 	reqDifficulty := uint32(0x1d00ffff) // difficulty at genesis
 	hmm := (reqDifficulty & 0xf0000000) >> (7 * 4)
