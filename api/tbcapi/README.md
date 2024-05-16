@@ -2,7 +2,7 @@
 
 ***Last updated:** May 16th, 2024*
 
-This document provides details on the RPC protocol and commands for the Hemi Tiny Bitcoin Daemon (`tbcd`).
+This document provides details on the RPC protocol and available commands for the Hemi Tiny Bitcoin Daemon (`tbcd`).
 
 <details>
   <summary>Table of Contents</summary>

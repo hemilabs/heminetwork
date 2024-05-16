@@ -1,24 +1,27 @@
 # 🌐 Hemi Tiny Bitcoin Daemon (`tbcd`)
 
-`tbcd` is a **minimal Bitcoin block downloader** and **indexer daemon**. It is designed to wrap the `tbc` service, which provides Bitcoin data **(blocks and transactions)** for other applications. Primarily, **it functions as a network RPC endpoint.**
-
-
+`tbcd` is a **minimal Bitcoin block downloader** and **indexer daemon**. It is designed to wrap the `tbc` service, which
+provides Bitcoin data **(blocks and transactions)** for other applications. Primarily, **it functions as a network RPC
+endpoint.**
 
 ## 🖥️ System Requirements
+
 `tbcd` requires significant system resources due to its functionality:
 
-| Requirement     | Specification    |
-|-----------------|------------------|
-| **CPU Cores**   | 4                |
-| **RAM**         | 8 GiB            |
-| **Disk**        | NVMe recommended |
+| Requirement   | Specification    |
+|---------------|------------------|
+| **CPU Cores** | 4                |
+| **RAM**       | 8 GiB            |
+| **Disk**      | NVMe recommended |
 
 **As of April 18, 2024:**
+
 - **`testnet3`** requires approximately 40 GiB of disk space.
 - **`mainnet`** requires over 300 GiB of disk space. <!-- XXX: add exact number here -->
 
 ---
-## 🛠️ Building `tbcd`
+
+## 🛠️ Building `tbcd` from source
 
 ### 🏁 Prerequisites:
 
@@ -28,30 +31,44 @@ Ensure Go v1.22 or newer is installed on your system.
 
 To build `tbcd` using the provided Makefile
 
-  > [!NOTE]
-  > 🏁 Prerequisites: Install **`make`**
+#### 🏁 Prerequisites
+
+Ensure `make` is installed on your system.
+
+#### Build `tbcd` binary
 
 ```shell
 cd heminetwork
-make tbcd  # Output binary will be written to bin/tbcd or bin/tbcd.exe
+
+# Output binary will be written to bin/tbcd or bin/tbcd.exe
+make tbcd
 ```
 
-### Standalone Build
+### Standalone build
 
 If you prefer not to use the Makefile:
 
 ```shell
 cd heminetwork
-go build ./cmd/tbcd/      # Build the binary (output will be tbcd or tbcd.exe)
-go install ./cmd/tbcd/    # Install the binary (output will be in your GOBIN directory)
+
+# Build the binary (output will be tbcd or tbcd.exe)
+go build ./cmd/tbcd/
+
+# Install the binary (output will be in your GOBIN directory)
+go install ./cmd/tbcd/
 ```
+
 ---
+
 ## 🌐 Environment Settings
 
-`tbcd` **checks system limits at startup on supported platforms** to ensure that they are set to values that will allow TBC to run without failing.
+`tbcd` **checks system limits at startup on supported platforms** to ensure that they are set to values that will allow
+TBC to run without failing.
 
-  > [!WARNING]
-  > If you see an error similar to the following, you will need to adjust the limits for the number of open files, memory and the maximum stack size on your system to run TBC.
+> [!WARNING]
+> If you see an error similar to the following, you will need to adjust the limits for the number of open files, memory
+> and the maximum stack size on your system to run TBC.
+
 ```
 ulimit: memory: limit too low got X, want X
 ```
@@ -60,10 +77,7 @@ Changing limits is OS-specific, but can usually be done using the `ulimit` comma
 
 ## ⚙️ Runtime Settings
 
-
-`tbcd` is **designed to be run in cloud environments**, as such it only uses environment variables for runtime settings.
-
-They can either be exported or included in the evocation of the binary.
+`tbcd` is **designed to be run in cloud environments**, as such it uses environment variables for runtime settings.
 
 To see a full list of runtime settings, execute `tbcd` with the **`--help`** flag:
 
@@ -84,13 +98,14 @@ To see a full list of runtime settings, execute `tbcd` with the **`--help`** fla
 ```
 
 Start the server by running:
+
 ```shell
 /path/to/tbcd
 ```
 
 ## 👉 RPC Commands
 
-When the `TBC_ADDRESS` is set to an address (e.g., `localhost:8082`), the `tbcd` daemon listens on the provided address.
+The `tbcd` daemon runs an RPC server that listens on the address provided by the `TBC_ADDRESS` environment variable.
 
 The RPC protocol is **WebSocket-based** and **uses a standard request/response model.**
 
