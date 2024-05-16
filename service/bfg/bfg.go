@@ -560,7 +560,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			// that something else has inserted the row before us
 			// (i.e. a race condition), this is ok, as it should
 			// have the same values, so we no-op
-			if err != nil && errors.Is(database.ErrDuplicate, err) == false {
+			if err != nil && !errors.Is(database.ErrDuplicate, err) {
 				return err
 			}
 		}
