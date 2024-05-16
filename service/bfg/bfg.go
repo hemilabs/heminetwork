@@ -19,7 +19,6 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -192,12 +191,12 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
-// handleRequest is called as a go routine to handle a long lived command.
-func (s *Server) handleRequest(parrentCtx context.Context, bws *bfgWs, wsid string, requestType string, handler func(ctx context.Context) (any, error)) {
+// handleRequest is called as a go routine to handle a long-lived command.
+func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid string, requestType string, handler func(ctx context.Context) (any, error)) {
 	log.Tracef("handleRequest: %v", bws.addr)
 	defer log.Tracef("handleRequest exit: %v", bws.addr)
 
-	ctx, cancel := context.WithTimeout(parrentCtx, s.requestTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, s.requestTimeout)
 	defer cancel()
 
 	select {
@@ -499,7 +498,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 		log.Infof("got raw transaction with txid %x", txHash)
 
-		mtx := &btcwire.MsgTx{}
+		mtx := &wire.MsgTx{}
 		if err := mtx.Deserialize(bytes.NewReader(rtx)); err != nil {
 			log.Tracef("Failed to deserialize transaction: %v", err)
 			continue
