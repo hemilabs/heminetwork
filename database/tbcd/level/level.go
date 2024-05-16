@@ -517,8 +517,11 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	switch cdiff.Cmp(&bestBH.Difficulty) {
 	case -1:
 		// Extend fork, fork won difficulty fight
+		bhsBatch.Put([]byte(bhsLastKey), lastRecord)
 		it = tbcd.ITChainFork
-		panic("fork!!")
+
+		// XXX should we return old best block header here?
+		// That way the caller can do best vs previous best diff.
 	case 0:
 		// Extend fork to the same exact difficulty
 		it = tbcd.ITForkExtend

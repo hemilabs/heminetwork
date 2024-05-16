@@ -1163,9 +1163,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			}
 
 		case tbcd.ITChainExtend:
-			// If we get here try to store the last blockheader
-			// that was inserted. This may race so we have to take
-			// the mutex.
+			// If we get here store the last blockheader that was
+			// inserted. This may race so we have to take the
+			// mutex.
 			s.mtx.Lock()
 			s.lastBlockHeader = *lbh
 			header := make([]byte, len(lbh.Header))
@@ -1180,6 +1180,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			}
 
 		case tbcd.ITChainFork:
+			// We may have to pause everything here in order to
+			// unwind/rewind indexes.
 			panic("chain forked, unwind/rewind indexes")
 
 		default:
