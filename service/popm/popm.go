@@ -799,7 +799,7 @@ func (m *Miner) connectBFG(pctx context.Context) error {
 	log.Debugf("Connected to BFG: %s", m.cfg.BFGWSURL)
 	m.bfgWg.Wait()
 
-	return nil
+	return err
 }
 
 func (m *Miner) bfg(ctx context.Context) error {
