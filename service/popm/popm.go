@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -661,11 +660,6 @@ func (m *Miner) promRunning() float64 {
 		return 1
 	}
 	return 0
-}
-
-func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
-	mux.HandleFunc(pattern, handler)
-	log.Infof("handle (%v): %v", service, pattern)
 }
 
 func (m *Miner) handleBFGCallCompletion(parrentCtx context.Context, conn *protocol.Conn, bc bfgCmd) {
