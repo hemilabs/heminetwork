@@ -124,6 +124,8 @@ type Server struct {
 	// record the last known canonical chain height,
 	// if this grows we need to notify subscribers
 	canonicalChainHeight uint64
+
+	checkForInvalidBlocks chan struct{}
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -145,7 +147,8 @@ func NewServer(cfg *Config) (*Server, error) {
 			Name:      "rpc_calls_total",
 			Help:      "The total number of succesful RPC commands",
 		}),
-		sessions: make(map[string]*bfgWs),
+		sessions:              make(map[string]*bfgWs),
+		checkForInvalidBlocks: make(chan struct{}),
 	}
 	for range requestLimit {
 		s.requestLimiter <- true
@@ -160,6 +163,37 @@ func NewServer(cfg *Config) (*Server, error) {
 	// We could use a PGURI verification here.
 
 	return s, nil
+}
+
+func (s *Server) queueCheckForInvalidBlocks() {
+	select {
+	case s.checkForInvalidBlocks <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Server) invalidBlockChecker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.checkForInvalidBlocks:
+			heights, err := s.db.BtcBlocksHeightsWithNoChildren(ctx)
+			if err != nil {
+				log.Errorf("error trying to get heights for btc blocks: %s", err)
+				return
+			}
+
+			log.Infof("received %d heights with no children, will re-check", len(heights))
+			for _, height := range heights {
+				log.Infof("reprocessing block at height %d", height)
+				if err := s.processBitcoinBlock(ctx, height); err != nil {
+					log.Errorf("error processing bitcoin block: %s", err)
+				}
+			}
+
+		}
+	}
 }
 
 // handleRequest is called as a go routine to handle a long-lived command.
@@ -546,6 +580,7 @@ func (s *Server) processBitcoinBlocks(ctx context.Context, start, end uint64) er
 		}
 		s.btcHeight = i
 	}
+	s.queueCheckForInvalidBlocks()
 	return nil
 }
 
@@ -1471,6 +1506,7 @@ func (s *Server) Run(pctx context.Context) error {
 
 	s.wg.Add(1)
 	go s.trackBitcoin(ctx)
+	go s.invalidBlockChecker(ctx)
 
 	select {
 	case <-ctx.Done():

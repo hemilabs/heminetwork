@@ -965,6 +965,62 @@ func (p *pgdb) AccessPublicKeyDelete(ctx context.Context, publicKey *bfgd.Access
 	return nil
 }
 
+// BtcBlocksHeightsWithNoChildren returns the heights of blocks that have no
+// child blocks in our database, these represent possible forks that we have
+// not handled yet
+func (p *pgdb) BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, error) {
+	log.Tracef("BtcBlocksHeightsWithNoChildren")
+	defer log.Tracef("BtcBlocksHeightsWithNoChildren exit")
+
+	/*
+		give me all heights for btc blocks
+		where there does not exist a child of this block
+		and there are no other blocks at this height with children
+		exclude the tip because it won't have children by definition
+	*/
+	const q = `
+		SELECT height FROM btc_blocks bb1
+
+		WHERE NOT EXISTS (SELECT * FROM btc_blocks bb2 WHERE SUBSTR(bb2.header, 5, 32) = bb1.hash)
+		
+		AND NOT EXISTS (
+			SELECT * FROM btc_blocks bb3 WHERE bb1.height = bb3.height 
+			AND EXISTS(
+				SELECT * FROM btc_blocks bb4 WHERE substr(bb4.header, 5, 32) = bb3.hash
+			)
+		)
+		ORDER BY height DESC
+		OFFSET $1 + 1
+		LIMIT 100
+	`
+
+	var heights []uint64
+	for offset := 0; ; offset += 100 {
+		rows, err := p.db.QueryContext(ctx, q, offset)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		startingLength := len(heights)
+		for rows.Next() {
+			var v uint64
+			if err := rows.Scan(&v); err != nil {
+				return nil, err
+			}
+			heights = append(heights, v)
+		}
+
+		if startingLength == len(heights) {
+			return heights, nil
+		}
+
+		if rows.Err() != nil {
+			return nil, rows.Err()
+		}
+	}
+}
+
 // canonicalChainTipL2BlockNumber gets our best guess of the canonical tip
 // and returns it.  it finds the highest btc block with an associated
 // l2 keystone where only 1 btc block exists at that height
