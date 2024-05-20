@@ -21,9 +21,9 @@ endpoint.**
 
 ---
 
-## 🛠️ Building `tbcd` from source
+## 🛠️ Building `tbcd` From Source
 
-### 🏁 Prerequisites:
+### 🏁 Prerequisites
 
 Ensure Go v1.22 or newer is installed on your system.
 
@@ -44,7 +44,7 @@ cd heminetwork
 make tbcd
 ```
 
-### Standalone build
+### Standalone Build
 
 If you prefer not to use the Makefile:
 
