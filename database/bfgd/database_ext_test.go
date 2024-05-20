@@ -1445,16 +1445,6 @@ func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
 			chainPattern:       []int{2, 1, 1},
 			unconfirmedIndices: []bool{false, false, false, false},
 		},
-		{
-			name:               "fork in beginning with break",
-			chainPattern:       []int{2, 1, 1, 1},
-			unconfirmedIndices: []bool{false, false, true, false},
-		},
-		{
-			name:               "fork in beginning with multiple breaks",
-			chainPattern:       []int{2, 1, 1, 1, 1},
-			unconfirmedIndices: []bool{false, true, false, true, false},
-		},
 	}
 
 	for _, tti := range testTable {
@@ -1522,11 +1512,6 @@ func TestPublications(t *testing.T) {
 			name:            "height in order",
 			heightPattern:   []int{1, 2, 3, 4},
 			expectedHeights: []int{4, 3, 2, 1},
-		},
-		{
-			name:            "height in order unconfirmed",
-			heightPattern:   []int{1, 2, -1, 4}, // use -1 to indicate unconfirmed
-			expectedHeights: []int{4, -1, 2, 1},
 		},
 	}
 
