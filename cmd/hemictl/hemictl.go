@@ -824,7 +824,7 @@ func init() {
 	for k := range allCommands {
 		sortedCommands = append(sortedCommands, k)
 	}
-	sort.Sort(sort.StringSlice(sortedCommands))
+	sort.Strings(sortedCommands)
 }
 
 func usage() {
