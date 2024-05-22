@@ -53,8 +53,11 @@ func (c *clientConn) call(ctx context.Context, method string, params, result any
 	defer c.mx.Unlock()
 	c.requestID++
 
-	req := NewJSONRPCRequest(c.requestID, method, params)
-	if err := writeRequest(ctx, c.conn, req); err != nil {
+	req, err := NewJSONRPCRequest(c.requestID, method, params)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	if err = writeRequest(ctx, c.conn, req); err != nil {
 		return fmt.Errorf("write request: %w", err)
 	}
 
