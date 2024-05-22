@@ -49,8 +49,6 @@ const (
 
 	promSubsystem = "bfg_service" // Prometheus
 
-	btcFinalityDelay = 9
-
 	notifyBtcBlocks     notificationId = "btc_blocks"
 	notifyBtcFinalities notificationId = "btc_finalities"
 	notifyL2Keystones   notificationId = "l2_keystones"
@@ -68,19 +66,6 @@ func NewDefaultConfig() *Config {
 		PrivateListenAddress: ":8080",
 		PublicListenAddress:  ":8383",
 	}
-}
-
-// XXX this needs documenting. It isn't obvious if this needs tags or not
-// because of lack of documentation.
-type popTX struct {
-	btcHeight         uint64
-	keystone          *hemi.Header
-	merkleHashes      [][]byte
-	popMinerPublicKey []byte
-	rawBlockHeader    []byte
-	rawTransaction    []byte
-	txHash            []byte
-	txIndex           uint32
 }
 
 // XXX figure out if this needs to be moved out into the electrumx package.
@@ -119,20 +104,7 @@ type Server struct {
 	requestLimiter chan bool // Maximum in progress websocket commands
 	requestTimeout time.Duration
 
-	btcHeight  uint64
-	hemiHeight uint32
-
-	// PoP transactions by BTC finality block height.
-	popTXFinality map[uint64][]*popTX // XXX does this need to go away? either because of persistence (thus read from disk every time) or because bitcoin finality notifications are going away
-
-	// PoP transactions that have reached finality, sorted
-	// by HEMI keystone block height. PoP transactions will
-	// be added to this slice if they reach BTC finality,
-	// however we're missing a HEMI keystone.
-	popTXAtFinality []*popTX // XXX see previous XXX
-
-	keystonesLock sync.RWMutex // XXX this probably needs to be an sql query
-	keystones     []*hemi.Header
+	btcHeight uint64
 
 	server       *http.ServeMux
 	publicServer *http.ServeMux
@@ -165,7 +137,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		requestLimiter: make(chan bool, requestLimit),
 		requestLimit:   requestLimit,
 		requestTimeout: defaultRequestTimeout,
-		popTXFinality:  make(map[uint64][]*popTX),
 		btcHeight:      cfg.BTCStartHeight,
 		server:         http.NewServeMux(),
 		publicServer:   http.NewServeMux(),
