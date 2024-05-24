@@ -80,13 +80,11 @@ var mockMerkleHashes = []string{
 
 var minerPrivateKeyBytes = []byte{1, 2, 3, 4, 5, 6, 7, 199} // XXX make this a real hardcoded key
 
-type bssWs struct {
-	wg   sync.WaitGroup
-	addr string
+type bssWs struct { // XXX: use protocol.WSConn directly
 	conn *protocol.WSConn
 }
 
-type bfgWs bssWs
+type bfgWs bssWs // XXX: use protocol.WSConn directly unless
 
 // Setup some private keys and authenticators
 var (
