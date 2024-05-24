@@ -56,7 +56,6 @@ import (
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/bfg"
 	"github.com/hemilabs/heminetwork/service/bss"
-	"github.com/hemilabs/heminetwork/service/popm"
 )
 
 const (
@@ -280,19 +279,6 @@ func nextPort(ctx context.Context, t *testing.T) int {
 			t.Fatal(err)
 		}
 	}
-}
-
-func createPopm(ctx context.Context, t *testing.T, bfgUrl string, bfgPrivateWsUrl string) (*popm.Miner, error) {
-	m, err := popm.NewMiner(&popm.Config{
-		BFGWSURL:      bfgPrivateWsUrl,
-		BTCChainName:  "testnet3",
-		BTCPrivateKey: "FC4B44FDC798E5D11229B84EC6B21B98EF40B0E4E1D12C6488CB5967F8CE94C6",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return m, nil
 }
 
 func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrumxAddr string, btcStartHeight uint64, auth bool) (*bfg.Server, string, string, string) {
