@@ -1752,14 +1752,15 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 	defer _cancel()
 	var _err error
 	var _btcBlockHeader *bfgd.BtcBlock
+loop:
 	for {
 		select {
 		case <-_ctx.Done():
-			break
+			break loop
 		case <-time.After(1 * time.Second):
 			_btcBlockHeader, _err = db.BtcBlockByHash(ctx, [32]byte(btcHeaderHash))
 			if _err == nil {
-				break
+				break loop
 			}
 		}
 
@@ -1832,14 +1833,15 @@ func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
 	defer _cancel()
 	var _err error
 	var popBases []bfgd.PopBasis
+loop:
 	for {
 		select {
 		case <-_ctx.Done():
-			break
+			break loop
 		case <-time.After(1 * time.Second):
 			popBases, _err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false)
 			if _err == nil && len(popBases) > 0 {
-				break
+				break loop
 			}
 		}
 
@@ -2001,14 +2003,15 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 	defer _cancel()
 	var _err error
 	var popBases []bfgd.PopBasis
+loop:
 	for {
 		select {
 		case <-_ctx.Done():
-			break
+			break loop
 		case <-time.After(1 * time.Second):
 			popBases, _err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), true)
 			if _err == nil && len(popBases) > 0 {
-				break
+				break loop
 			}
 		}
 
