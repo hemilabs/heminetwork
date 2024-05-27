@@ -688,7 +688,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 
 		if verbose {
-			spew.Dump(msg)
+			spew.Sdump(msg)
 		}
 
 		// XXX send wire message to pool reader

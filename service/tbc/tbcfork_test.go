@@ -637,6 +637,7 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(500 * time.Millisecond)
 	err = n.SendBlockheader(ctx, b11b[0].MsgBlock().Header)
 	if err != nil {
 		t.Fatal(err)
