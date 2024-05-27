@@ -83,7 +83,7 @@ type bssWs struct { // XXX: use protocol.WSConn directly
 	conn *protocol.WSConn
 }
 
-type bfgWs bssWs // XXX: use protocol.WSConn directly unless
+type bfgWs bssWs // XXX: use protocol.WSConn directly
 
 // Setup some private keys and authenticators
 var (
