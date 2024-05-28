@@ -36,7 +36,7 @@ type JSONRPCRequest struct {
 }
 
 // NewJSONRPCRequest creates a new JSONRPCRequest.
-func NewJSONRPCRequest(id uint64, method string, params any) *JSONRPCRequest {
+func NewJSONRPCRequest(id uint64, method string, params any) (*JSONRPCRequest, error) {
 	req := &JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  method,
@@ -45,10 +45,11 @@ func NewJSONRPCRequest(id uint64, method string, params any) *JSONRPCRequest {
 	if params != nil {
 		b, err := json.Marshal(params)
 		if err != nil {
+			return nil, fmt.Errorf("marshal params: %w", err)
 		}
 		req.Params = b
 	}
-	return req
+	return req, nil
 }
 
 type JSONRPCResponse struct {

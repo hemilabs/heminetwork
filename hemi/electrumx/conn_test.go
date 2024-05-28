@@ -80,12 +80,12 @@ func TestWriteRequest(t *testing.T) {
 	}{
 		{
 			name: "simple",
-			req:  NewJSONRPCRequest(1, "test", nil),
+			req:  mustNewJSONRPCRequest(1, "test", nil),
 			want: "{\"jsonrpc\":\"2.0\",\"method\":\"test\",\"id\":1}\n",
 		},
 		{
 			name: "with params",
-			req: NewJSONRPCRequest(2, "test", map[string]any{
+			req: mustNewJSONRPCRequest(2, "test", map[string]any{
 				"test": true,
 			}),
 			want: "{\"jsonrpc\":\"2.0\",\"method\":\"test\",\"params\":{\"test\":true},\"id\":2}\n",
@@ -302,4 +302,12 @@ func createAddress() string {
 		panic(fmt.Errorf("find free port: %w", err))
 	}
 	return fmt.Sprintf("localhost:%d", port)
+}
+
+func mustNewJSONRPCRequest(id uint64, method string, params any) *JSONRPCRequest {
+	req, err := NewJSONRPCRequest(id, method, params)
+	if err != nil {
+		panic(fmt.Errorf("create JSON RPC request: %w", err))
+	}
+	return req
 }
