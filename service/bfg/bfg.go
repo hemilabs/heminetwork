@@ -19,7 +19,6 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,8 +49,6 @@ const (
 
 	promSubsystem = "bfg_service" // Prometheus
 
-	btcFinalityDelay = 9
-
 	notifyBtcBlocks     notificationId = "btc_blocks"
 	notifyBtcFinalities notificationId = "btc_finalities"
 	notifyL2Keystones   notificationId = "l2_keystones"
@@ -69,19 +66,6 @@ func NewDefaultConfig() *Config {
 		PrivateListenAddress: ":8080",
 		PublicListenAddress:  ":8383",
 	}
-}
-
-// XXX this needs documenting. It isn't obvious if this needs tags or not
-// because of lack of documentation.
-type popTX struct {
-	btcHeight         uint64
-	keystone          *hemi.Header
-	merkleHashes      [][]byte
-	popMinerPublicKey []byte
-	rawBlockHeader    []byte
-	rawTransaction    []byte
-	txHash            []byte
-	txIndex           uint32
 }
 
 // XXX figure out if this needs to be moved out into the electrumx package.
@@ -120,20 +104,7 @@ type Server struct {
 	requestLimiter chan bool // Maximum in progress websocket commands
 	requestTimeout time.Duration
 
-	btcHeight  uint64
-	hemiHeight uint32
-
-	// PoP transactions by BTC finality block height.
-	popTXFinality map[uint64][]*popTX // XXX does this need to go away? either because of persistence (thus read from disk every time) or because bitcoin finality notifications are going away
-
-	// PoP transactions that have reached finality, sorted
-	// by HEMI keystone block height. PoP transactions will
-	// be added to this slice if they reach BTC finality,
-	// however we're missing a HEMI keystone.
-	popTXAtFinality []*popTX // XXX see previous XXX
-
-	keystonesLock sync.RWMutex // XXX this probably needs to be an sql query
-	keystones     []*hemi.Header
+	btcHeight uint64
 
 	server       *http.ServeMux
 	publicServer *http.ServeMux
@@ -166,7 +137,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		requestLimiter: make(chan bool, requestLimit),
 		requestLimit:   requestLimit,
 		requestTimeout: defaultRequestTimeout,
-		popTXFinality:  make(map[uint64][]*popTX),
 		btcHeight:      cfg.BTCStartHeight,
 		server:         http.NewServeMux(),
 		publicServer:   http.NewServeMux(),
@@ -192,12 +162,12 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
-// handleRequest is called as a go routine to handle a long lived command.
-func (s *Server) handleRequest(parrentCtx context.Context, bws *bfgWs, wsid string, requestType string, handler func(ctx context.Context) (any, error)) {
+// handleRequest is called as a go routine to handle a long-lived command.
+func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid string, requestType string, handler func(ctx context.Context) (any, error)) {
 	log.Tracef("handleRequest: %v", bws.addr)
 	defer log.Tracef("handleRequest exit: %v", bws.addr)
 
-	ctx, cancel := context.WithTimeout(parrentCtx, s.requestTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, s.requestTimeout)
 	defer cancel()
 
 	select {
@@ -499,7 +469,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 		log.Infof("got raw transaction with txid %x", txHash)
 
-		mtx := &btcwire.MsgTx{}
+		mtx := &wire.MsgTx{}
 		if err := mtx.Deserialize(bytes.NewReader(rtx)); err != nil {
 			log.Tracef("Failed to deserialize transaction: %v", err)
 			continue
@@ -561,7 +531,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			// that something else has inserted the row before us
 			// (i.e. a race condition), this is ok, as it should
 			// have the same values, so we no-op
-			if err != nil && errors.Is(database.ErrDuplicate, err) == false {
+			if err != nil && !errors.Is(database.ErrDuplicate, err) {
 				return err
 			}
 		}
