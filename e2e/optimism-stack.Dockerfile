@@ -23,27 +23,31 @@ RUN foundryup
 ARG OP_GETH_CACHE_BREAK=1
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout a012302a04f050d09c11a8fd5deb630ab7a376ad
+RUN git checkout 23326a98b0dc14ade744890b548145657f5d3c5b
 
 WORKDIR /git
 
 ARG OPTIMISM_CACHE_BREAK=1
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout 50a6efe980e90751b47e2cb5a8e1146b16320959
+RUN git checkout 91aebc9c92801c22b1bb5886a0835a6f9d129c9a
 
 WORKDIR /git/op-geth
 
 RUN make
 RUN go install ./...
-RUN abigen --version
 
 WORKDIR /git/optimism
 
 RUN git submodule update --init --recursive
 RUN pnpm install
+RUN pnpm install:abigen
 WORKDIR /git/optimism/packages/contracts-bedrock
 RUN sed -e '/build_info/d' -i ./foundry.toml
+WORKDIR /git/optimism
+RUN go mod tidy
+WORKDIR /git/optimism/op-bindings
+RUN go mod tidy
 WORKDIR /git/optimism
 RUN make op-bindings op-node op-batcher op-proposer
 RUN pnpm build
@@ -52,6 +56,6 @@ WORKDIR /git/optimism/packages/contracts-bedrock
 RUN forge install
 RUN forge build
 
-COPY deployments /git/optimism/packages/contracts-bedrock/deployments
-
 WORKDIR /git/optimism
+
+RUN make devnet-allocs

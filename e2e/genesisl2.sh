@@ -52,7 +52,6 @@ curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\
 cd /git/optimism/packages/contracts-bedrock
 
 forge script ./scripts/Deploy.s.sol:Deploy --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
-forge script ./scripts/Deploy.s.sol:Deploy --sig 'sync()' --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
 
 curl -H 'Content-Type: application/json' -X POST --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x2", true],"id":1}' $JSON_RPC > /tmp/blockl1.json
 
@@ -65,8 +64,8 @@ cat /tmp/blockl1.json
     l2 \
     --deploy-config  \
     /git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json \
-    --deployment-dir  \
-    /git/optimism/packages/contracts-bedrock/deployments/devnetL1 \
+    --l1-deployments  \
+    /git/optimism/packages/contracts-bedrock/deployments/devnetL1/.deploy \
     --outfile.l2  \
     /l2configs/genesis.json \
     --outfile.rollup  \

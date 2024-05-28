@@ -73,6 +73,12 @@ services:
     build:
       dockerfile: "./e2e/postgres.Dockerfile"
       context: "./.."
+    command:
+      - "postgres"
+      # lower random_page_cost (opposed to default 4.0) to cause planner
+      # to choose index scans vs sequential scans when at fewer rows in a table
+      - "-c"
+      - "random_page_cost=1.0"
     ports:
       - "5432:5432"
     environment:
@@ -127,11 +133,9 @@ services:
       POPM_REMINE_THRESHOLD: "1"
 
   op-geth-l1:
-    image: "ethereum/client-go@sha256:25ad59cc51af1cc232e2a770bbbffb52aec9499f128ff3eeb9159a677f4f7c11"
+    image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
     ports:
       - "8545:8545"
-    environment:
-      CHAIN_ID: "900"
     working_dir: "/tmp/geth"
     command:
       - "--dev"
@@ -171,12 +175,10 @@ services:
       - "op-geth-l1"
     healthcheck:
       test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
-    ports:
-      - "8551:8551"
-      - "8546:8546"
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
-      OP_GETH_L1_RPC: "http://op-geth-l1:8545"
+      OP_GETH_L1_RPC: "http://127.0.0.1:8545"
+      TBC_NETWORK: "localnet"
     working_dir: "/tmp"
     command:
       - "sh"
@@ -192,6 +194,7 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - { type: "tmpfs", target: "/tmp" }
+    network_mode: host
 
   op-node:
     build:
@@ -206,10 +209,10 @@ services:
       op-geth-l2:
         condition: "service_healthy"
     environment:
-      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+      OP_NODE_BSS_WS: "http://127.0.0.1:8081/v1/ws"
     command:
       - "op-node/bin/op-node"
-      - "--l2=ws://op-geth-l2:8551"
+      - "--l2=ws://127.0.0.1:8551"
       - "--l2.jwt-secret=/tmp/jwt.txt"
       - "--sequencer.enabled"
       - "--sequencer.l1-confs=0"
@@ -219,15 +222,16 @@ services:
       - "--rpc.port=8547"
       - "--p2p.disable"
       - "--rpc.enable-admin"
-      - "--l1=http://op-geth-l1:8545"
+      - "--l1=http://127.0.0.1:8545"
       - "--l1.rpckind=standard"
       - "--l1.trustrpc"
-      - "--log.level=trace"
+      - "--log.level=info"
       - "--l1.trustrpc=true"
       - "--l1.http-poll-interval=1s"
     volumes:
       - "l2configs:/l2configs"
       - "./jwt.txt:/tmp/jwt.txt"
+    network_mode: host
 
   op-batcher:
     build:
@@ -238,8 +242,8 @@ services:
         condition: "any"
     command:
       - "op-batcher/bin/op-batcher"
-      - "--l2-eth-rpc=http://op-geth-l2:8546"
-      - "--rollup-rpc=http://op-node:8547"
+      - "--l2-eth-rpc=http://127.0.0.1:8546"
+      - "--rollup-rpc=http://127.0.0.1:8547"
       - "--poll-interval=1s"
       - "--sub-safety-margin=1"
       - "--num-confirmations=1"
@@ -250,11 +254,16 @@ services:
       - "--rpc.enable-admin"
       - "--max-channel-duration=1"
       - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--l1-eth-rpc=http://127.0.0.1:8545"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "op-geth-l1"
-      - "op-geth-l2"
-      - "op-node"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2:
+        condition: "service_healthy"
+      op-node:
+        condition: "service_started"
+    network_mode: host
 
   op-proposer:
     build:
@@ -274,10 +283,11 @@ services:
       - "op-proposer/bin/op-proposer"
       - "--poll-interval=1s"
       - "--rpc.port=8560"
-      - "--rollup-rpc=http://op-node:8547"
+      - "--rollup-rpc=http://127.0.0.1:8547"
       - "--l2oo-address=${L2OO_ADDRESS}"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--l1-eth-rpc=http://127.0.0.1:8545"
+    network_mode: host
 
 volumes:
   geth:
