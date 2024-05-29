@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 7
+	bfgdVersion = 8
 
 	logLevel = "INFO"
 	verbose  = false

@@ -1715,7 +1715,7 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 	}
 
 	createBlocksWithChildren := func(ctx context.Context, count int, db bfgd.Database, avoidHeights []int64, overlapHeights []int64) []int64 {
-		prevHash := []byte{}
+		var prevHash []byte
 		overlapHeightI := 0
 		heights := make([]int64, count)
 		for i := range count {
