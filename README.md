@@ -34,7 +34,7 @@ Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin wi
 
 ## 🔧 Services
 
-The Hemi Network comprises three key services, each serving a unique function within the network:
+The Hemi Network consists of three key services, each serving a unique and important function within the network:
 
 | Service                                                                                               | Description                                                                                                      |
 |-------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
