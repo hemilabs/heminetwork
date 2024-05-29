@@ -1736,9 +1736,16 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 			if _, err := rand.Read(hash); err != nil {
 				t.Fatal(err)
 			}
+
 			header := make([]byte, 80)
-			if _, err := rand.Read(header); err != nil {
-				t.Fatal(err)
+			for {
+				if _, err := rand.Read(header); err != nil {
+					t.Fatal(err)
+				}
+
+				if !slices.Equal(hash, header[5:37]) {
+					break
+				}
 			}
 
 			if len(prevHash) > 0 {
