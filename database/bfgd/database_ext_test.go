@@ -1803,7 +1803,7 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 			slices.Sort(heights)
 			slices.Sort(toCmp)
 
-			// we return a nil slice if emtpy, change that here for deep.Equal
+			// we return a nil slice if empty, change that here for deep.Equal
 			if len(heights) == 0 {
 				heights = []uint64{}
 			}
