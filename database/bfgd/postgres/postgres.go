@@ -965,9 +965,9 @@ func (p *pgdb) AccessPublicKeyDelete(ctx context.Context, publicKey *bfgd.Access
 	return nil
 }
 
-// BtcBlocksHeightsWithNoChildren returns the heights of blocks that have no
-// child blocks in our database, these represent possible forks that we have
-// not handled yet
+// BtcBlocksHeightsWithNoChildren returns the heights of blocks stored in the
+// database that do not have any children, these represent possible forks that
+// have not been handled yet.
 func (p *pgdb) BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, error) {
 	log.Tracef("BtcBlocksHeightsWithNoChildren")
 	defer log.Tracef("BtcBlocksHeightsWithNoChildren exit")
