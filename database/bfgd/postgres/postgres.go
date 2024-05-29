@@ -972,12 +972,9 @@ func (p *pgdb) BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, er
 	log.Tracef("BtcBlocksHeightsWithNoChildren")
 	defer log.Tracef("BtcBlocksHeightsWithNoChildren exit")
 
-	/*
-		give me all heights for btc blocks
-		where there does not exist a child of this block
-		and there are no other blocks at this height with children
-		exclude the tip because it won't have children by definition
-	*/
+	// Query all heights from btc_blocks where the block does not have any
+	// children and there are no other blocks at the same height with children.
+	// Excludes the tip because it will not have any children.
 	const q = `
 		SELECT height FROM btc_blocks bb1
 
