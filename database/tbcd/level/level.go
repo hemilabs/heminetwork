@@ -478,11 +478,10 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// XXX if we zap the blockheaders table we should only
 	// insert *if* block indeed does not exist
 
-	for k := range bhs {
-		if k == 0 {
-			// 0th element is pre decoded
-		} else {
-			wbh, err = b2h(bhs[k][:])
+	for k, bh := range bhs {
+		// The first element is skipped, as it is pre-decoded.
+		if k != 0 {
+			wbh, err = b2h(bh[:])
 			if err != nil {
 				return tbcd.ITInvalid, nil,
 					fmt.Errorf("block headers insert b2h: %w", err)
@@ -510,7 +509,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 		// Encode block header as [hash][height,header,cdiff] or,
 		// [32][8+80+32] bytes
-		ebh := encodeBlockHeader(height, bhs[k], cdiff)
+		ebh := encodeBlockHeader(height, bh, cdiff)
 		bhsBatch.Put(bhash[:], ebh[:])
 		lastRecord = ebh[:]
 	}
