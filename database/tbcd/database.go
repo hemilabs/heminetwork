@@ -24,9 +24,9 @@ type InsertType int
 
 const (
 	ITInvalid     InsertType = 0 // Invalid insert
-	ITChainExtend            = 1 // Normal insert, does not require further action.
-	ITChainFork              = 2 // Chain forked, unwind and rewind indexes.
-	ITForkExtend             = 3 // Extended a fork, does not require further action.
+	ITChainExtend InsertType = 1 // Normal insert, does not require further action.
+	ITChainFork   InsertType = 2 // Chain forked, unwind and rewind indexes.
+	ITForkExtend  InsertType = 3 // Extended a fork, does not require further action.
 )
 
 var ITStrings = map[InsertType]string{
