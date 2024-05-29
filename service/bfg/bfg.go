@@ -191,7 +191,6 @@ func (s *Server) invalidBlockChecker(ctx context.Context) {
 					log.Errorf("error processing bitcoin block: %s", err)
 				}
 			}
-
 		}
 	}
 }
