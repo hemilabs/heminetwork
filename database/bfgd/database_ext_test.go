@@ -1743,7 +1743,7 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				if !slices.Equal(hash, header[5:37]) {
+				if !slices.Equal(prevHash, header[5:37]) {
 					break
 				}
 			}
