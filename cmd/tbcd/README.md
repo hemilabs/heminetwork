@@ -82,7 +82,7 @@ Changing limits is OS-specific, but can usually be done using the `ulimit` comma
 To see a full list of runtime settings, execute `tbcd` with the **`--help`** flag:
 
 ```shell
-/path/to/tbcd --help
+./bin/tbcd --help
 # Hemi Tiny Bitcoin Daemon: v0.1.0-pre+3eb1bab15
 # Usage:
 #         help (this help)
