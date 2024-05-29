@@ -95,7 +95,7 @@ Output binaries will be written to the `bin/` directory.
 
 For any service, you can view configuration options by running:
 
-```bash
+```shell
 ./bin/popmd --help
 ./bin/bfgd --help
 ./bin/bssd --help
@@ -115,7 +115,7 @@ it into the chain.
 
 Set up and start popmd using:
 
-```bash
+```shell
 ./bin/popmd
 ```
 
@@ -127,7 +127,7 @@ Build and run the web interface with:
 > [!NOTE]
 > The web PoP Miner is currently a proof-of-concept.
 
-```bash
+```shell
 cd ./web
 make
 go run ./integrationtest
@@ -160,7 +160,7 @@ go run ./integrationtest
 1. **Start the Network:** Launch the entire Hemi network locally using Docker, which will generate L2 Keystones and BTC
    Blocks at a **high rate**:
 
-   ```bash
+   ```shell
    docker compose -f ./e2e/docker-compose.yml up --build
    ```
 
@@ -175,19 +175,19 @@ go run ./integrationtest
 > cache. If you need to deliberately break the cache for the op-stack, use the following arguments:
 
    - For op-geth + optimism (op-node):
-     ```bash
+     ```shell
      docker compose -f ./e2e/docker-compose.yml build --build-arg OP_GETH_CACHE_BREAK="$(date)"
      ```
 
    - For optimism cache break only:
-     ```bash
+     ```shell
      docker compose -f ./e2e/docker-compose.yml build --build-arg OPTIMISM_CACHE_BREAK="$(date)"
      ```
 
 > [!IMPORTANT]
 > Make sure you run the cleanup command to remove data and ensure a fresh start.
 
-```bash
+```shell
 docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 ```
 
