@@ -1687,6 +1687,7 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 
 	createBlocksWithNoChildren := func(ctx context.Context, count int, db bfgd.Database) []int64 {
 		heights := make([]int64, count)
+		var prevHash []byte
 		for i := range count {
 			height := mathrand.Int64()
 			hash := make([]byte, 32)
@@ -1694,8 +1695,14 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 				t.Fatal(err)
 			}
 			header := make([]byte, 80)
-			if _, err := rand.Read(header); err != nil {
-				t.Fatal(err)
+			for {
+				if _, err := rand.Read(header); err != nil {
+					t.Fatal(err)
+				}
+
+				if !slices.Equal(prevHash, header[5:37]) {
+					break
+				}
 			}
 
 			btcBlock := bfgd.BtcBlock{
@@ -1709,6 +1716,7 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 			}
 
 			heights[i] = height
+			prevHash = hash
 		}
 
 		return heights
@@ -1736,16 +1744,9 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 			if _, err := rand.Read(hash); err != nil {
 				t.Fatal(err)
 			}
-
 			header := make([]byte, 80)
-			for {
-				if _, err := rand.Read(header); err != nil {
-					t.Fatal(err)
-				}
-
-				if !slices.Equal(prevHash, header[5:37]) {
-					break
-				}
+			if _, err := rand.Read(header); err != nil {
+				t.Fatal(err)
 			}
 
 			if len(prevHash) > 0 {
@@ -1810,7 +1811,7 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 			slices.Sort(heights)
 			slices.Sort(toCmp)
 
-			// we return a nil slice if empty, change that here for deep.Equal
+			// we return a nil slice if emtpy, change that here for deep.Equal
 			if len(heights) == 0 {
 				heights = []uint64{}
 			}
