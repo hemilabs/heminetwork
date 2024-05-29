@@ -26,9 +26,6 @@ The message header contains metadata required for processing the message:
 - **`id`**: A string used to uniquely identify each request. Responses will have the same `id` as the request, making it
   possible to match requests to responses.
 
-> [!NOTE]
-> Request message IDs should be randomly generated or sequential.
-
 ### Payload
 
 The payload type depends on the command being called. Please refer to the documentation for more details on the specific
