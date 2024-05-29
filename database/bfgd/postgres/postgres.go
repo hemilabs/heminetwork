@@ -977,12 +977,10 @@ func (p *pgdb) BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, er
 	// Excludes the tip because it will not have any children.
 	const q = `
 		SELECT height FROM btc_blocks bb1
-
-		WHERE NOT EXISTS (SELECT * FROM btc_blocks bb2 WHERE SUBSTR(bb2.header, 5, 32) = bb1.hash)
-		
+		WHERE NOT EXISTS (SELECT * FROM btc_blocks bb2 WHERE substr(bb2.header, 5, 32) = bb1.hash)
 		AND NOT EXISTS (
 			SELECT * FROM btc_blocks bb3 WHERE bb1.height = bb3.height 
-			AND EXISTS(
+			AND EXISTS (
 				SELECT * FROM btc_blocks bb4 WHERE substr(bb4.header, 5, 32) = bb3.hash
 			)
 		)
