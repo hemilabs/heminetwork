@@ -1687,7 +1687,6 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 
 	createBlocksWithNoChildren := func(ctx context.Context, count int, db bfgd.Database) []int64 {
 		heights := make([]int64, count)
-		var prevHash []byte
 		for i := range count {
 			height := mathrand.Int64()
 			hash := make([]byte, 32)
@@ -1695,14 +1694,8 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 				t.Fatal(err)
 			}
 			header := make([]byte, 80)
-			for {
-				if _, err := rand.Read(header); err != nil {
-					t.Fatal(err)
-				}
-
-				if !slices.Equal(prevHash, header[5:37]) {
-					break
-				}
+			if _, err := rand.Read(header); err != nil {
+				t.Fatal(err)
 			}
 
 			btcBlock := bfgd.BtcBlock{
@@ -1716,7 +1709,6 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 			}
 
 			heights[i] = height
-			prevHash = hash
 		}
 
 		return heights
