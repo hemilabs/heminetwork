@@ -219,9 +219,6 @@ type Server struct {
 	blocks *ttl.TTL         // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL         // outstanding pings
 
-	// IBD hints
-	lastBlockHeader tbcd.BlockHeader
-
 	// reentrancy flags for the indexers
 	utxoIndexerRunning bool
 	txIndexerRunning   bool
@@ -834,6 +831,9 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
 	defer log.Tracef("handleInv exit (%v)", p)
 
 	// XXX this currently does nothing. Blocks are requested elsewhere.
+	if true {
+		return
+	}
 
 	var bis []tbcd.BlockIdentifier
 	for k := range msg.InvList {
@@ -1085,10 +1085,8 @@ func (s *Server) syncBlocks(ctx context.Context) {
 }
 
 func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeaders) {
-	log.Tracef("handleHeaders %v", p)
-	defer log.Tracef("handleHeaders exit %v", p)
-
-	log.Infof("handleHeaders (%v): %v", p, len(msg.Headers))
+	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
+	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
 	if len(msg.Headers) == 0 {
 		// This may signify the end of IBD but isn't 100%. We can fart
@@ -1096,14 +1094,16 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		// just behind or if we are nominally where we should be. This
 		// test will never be 100% accurate.
 
-		s.mtx.Lock()
-		lastBH := s.lastBlockHeader.Timestamp()
-		s.mtx.Unlock()
-		if time.Since(lastBH) > 6*s.chainParams.TargetTimePerBlock {
-			log.Infof("peer not synced: %v", p)
-			p.close() // get rid of this peer
-			return
-		}
+		//s.mtx.Lock()
+		//lastBH := s.lastBlockHeader.Timestamp()
+		//s.mtx.Unlock()
+		//if time.Since(lastBH) > 6*s.chainParams.TargetTimePerBlock {
+		//	log.Infof("peer not synced: %v", p)
+		//	p.close() // get rid of this peer
+		//	return
+		//}
+
+		// only do this if peer is synced
 
 		go s.syncBlocks(ctx)
 
@@ -1163,17 +1163,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			}
 
 		case tbcd.ITChainExtend:
-			// If we get here store the last blockheader that was
-			// inserted. This may race so we have to take the
-			// mutex.
-			s.mtx.Lock()
-			s.lastBlockHeader = *lbh
-			header := make([]byte, len(lbh.Header))
-			copy(header, lbh.Header[:])
-			s.mtx.Unlock()
-
 			// Ask for next batch of headers
-			err = s.getHeaders(ctx, p, header)
+			err = s.getHeaders(ctx, p, lbh.Header)
 			if err != nil {
 				log.Errorf("get headers: %v", err)
 				return
@@ -1603,9 +1594,17 @@ type SyncInfo struct {
 }
 
 func (s *Server) Synced(ctx context.Context) (si SyncInfo) {
+	// We do not strictly need the mutex but we do want all the data that
+	// is returned to the user to be atomically generated.
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	si.BlockHeaderHeight = s.lastBlockHeader.Height
+
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		// This should never happen.
+		panic(err)
+	}
+	si.BlockHeaderHeight = bhb.Height
 
 	// These values are cached in leveldb so it is ok to call with mutex
 	// held.
@@ -1711,7 +1710,6 @@ func (s *Server) Run(pctx context.Context) error {
 			return fmt.Errorf("block headers best: %v", err)
 		}
 	}
-	s.lastBlockHeader = *bhb // Prime last seen block header
 	log.Infof("Starting block headers sync at height: %v time %v",
 		bhb.Height, bhb.Timestamp())
 
