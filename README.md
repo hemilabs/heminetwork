@@ -1,102 +1,131 @@
-# Hemi Network
+# ⚡️ The Hemi Network
+
+Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin with the programmability of Ethereum.
 
 <details>
   <summary>Table of Contents</summary>
 
-* [What is the Hemi Network?](#what-is-the-hemi-network)
-  * [Services](#services)
-  * [License](#license)
-* [Getting Started](#getting-started)
-  * [Building from Source](#building-from-source)
-  * [Downloading Binaries from Releases](#downloading-binaries-from-releases)
-  * [Running](#running)
-  * [Running popmd](#running-popmd)
+<!-- TOC -->
+* [⚡️ The Hemi Network](#-the-hemi-network)
+  * [🔧 Services](#-services)
+  * [🌐 Binaries](#-binaries)
+* [⚡️ Getting Started](#-getting-started)
+  * [📦 Downloading Release Binaries](#-downloading-release-binaries)
+  * [🏗 Building from Source](#-building-from-source)
+    * [🏁 Prerequisites](#-prerequisites)
+    * [Building with Makefile](#building-with-makefile)
+* [🛠 Running the Services](#-running-the-services)
+  * [▶️ Running popmd](#-running-popmd)
+    * [🏁 Prerequisites](#-prerequisites-1)
     * [CLI](#cli)
     * [Web](#web)
-  * [Running bfgd](#running-bfgd)
-  * [Running bssd](#running-bssd)
-
+  * [▶️ Running bfgd](#-running-bfgd)
+    * [🏁 Prerequisites](#-prerequisites-2)
+  * [▶️ Running bssd](#-running-bssd)
+    * [🏁 Prerequisites](#-prerequisites-3)
+  * [▶️ Running the localnet network](#-running-the-localnet-network)
+    * [🏁 Prerequisites](#-prerequisites-4)
+    * [📚 Tutorial](#-tutorial)
+  * [📄 License](#-license)
+<!-- TOC -->
 </details>
 
-## What is the Hemi Network?
+---
 
-Hemi is an EVM compatible L2 blockchain that brings Bitcoin security and Ethereum programability together.
+## 🔧 Services
 
-### Services
+The Hemi Network consists of three key services, each serving a unique and important function within the network:
 
-Hemi Network consists of 3 services:
+| Service                                                                                               | Description                                                                                                      |
+|-------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| [**PoP Miner (popmd)**](https://github.com/hemilabs/heminetwork/blob/main/service/popm)               | **Mines** L2 Keystones into Bitcoin blocks for Proof-of-Proof.                                                   |
+| [**Bitcoin Finality Governor (bfgd)**](https://github.com/hemilabs/heminetwork/blob/main/service/bfg) | Acts as the gateway to the Bitcoin network.                                                                      |
+| [**Bitcoin Secure Sequencer (bssd)**](https://github.com/hemilabs/heminetwork/blob/main/service/bss)  | Acts as a gateway to the Bitcoin Finality Governor (BFG), managing the consensus mechanisms of the Hemi Network. |
 
-* [PoP Miner (popmd)](service/popm): "mines" L2 Keystones into BTC blocks for proof-of-proof
-* [Bitcoin Finality Governor (bfgd)](service/bfg): Hemi's gateway to the BTC network.
-* [Bitcoin Secure Sequencer (bssd)](service/bss): Optimism's gateway to BFG, manages Hemi Network's consensus
+## 🌐 Binaries
 
-### License
+- [**bfgd (Bitcoin Finality Governor Daemon)**](cmd/bfgd): Manages connections and data transfers between the Hemi
+  Network and the Bitcoin blockchain, ensuring finality.
+- [**bssd (Bitcoin Secure Sequencer Daemon)**](cmd/bssd): Coordinates and sequences blockchain operations, serving as a
+  bridge to the Bitcoin Finality Governor.
+- [**extool**](cmd/extool): A utility tool for extracting and processing data from various file formats, tailored for
+  blockchain data analysis.
+- [**hemictl**](cmd/hemictl): The command-line interface for controlling and managing all Hemi Network services.
+- [**keygen**](cmd/keygen): Generates and manages cryptographic keys used within the Hemi network, ensuring secure
+  operations.
+- [**popmd (Proof-of-Proof Miner Daemon)**](cmd/popmd): Embeds L2 Keystones into Bitcoin blocks for proof-of-proof,
+  integral to the network's security.
+- [**tbcd (Tiny Bitcoin Daemon)**](cmd/tbcd): A minimal Bitcoin block downloader and indexer daemon.
 
-This project is licensed under the [MIT License](LICENSE).
+---
 
-## Getting Started
+# ⚡️ Getting Started
 
-### Building from Source
+## 📦 Downloading Release Binaries
 
-To build, you must have the following installed:
+Pre-built binaries are available on the [Releases Page](https://github.com/hemilabs/heminetwork/releases).
 
-* `git`
-* `make`
-* [Go v1.22+](https://go.dev/dl/)
+## 🏗 Building from Source
 
-First, clone the repository:
+### 🏁 Prerequisites
 
-```shell
-git clone https://github.com/hemilabs/heminetwork.git
-```
+- `git`
+- `make`
+- [Go v1.22.2+](https://go.dev/dl/)
 
-Then build:
+### Building with Makefile
 
-```shell
-cd heminetwork
-make deps
-make
-```
+1. Clone the `heminetwork` repository:
+   ```shell
+   git clone https://github.com/hemilabs/heminetwork.git
+   cd heminetwork
+   ```
 
-This will put built binaries in `<path-to-repo>/bin/`
+2. Setup and build binaries:
+   ```shell
+   make deps    # Download and install dependencies
+   make install # Build binaries
+   ```
 
-### Downloading Binaries from Releases
+Output binaries will be written to the `bin/` directory.
 
-You can find releases on the [Releases Page](https://github.com/hemilabs/heminetwork/releases)
+---
 
-### Running
+# 🛠 Running the Services
 
-To view options for any of the services, you may run the following
+For any service, you can view configuration options by running:
 
 ```shell
 ./bin/popmd --help
-```
-
-```shell
 ./bin/bfgd --help
-```
-
-```shell
 ./bin/bssd --help
 ```
 
-### Running popmd
+## ▶️ Running popmd
 
-popmd has a few crucial requirements to run:
+### 🏁 Prerequisites
 
-* a BTC private key that is funded, this can be a testnet address if you configure popmd as such
-* a BFG URL to connect to
+- A funded BTC private key. This can be a testnet address if configured for test environments.
+- A BFG URL to establish a connection.
 
-if configured correctly and running, then popmd will start "mining" L2 Keystones by adding them to btc blocks that make
-it into the chain
+Once properly configured and running, `popmd` will start mining L2 Keystones by adding them to Bitcoin blocks that make
+it into the chain.
 
-#### CLI
+### CLI
+
+Set up and start popmd using:
 
 ```shell
 ./bin/popmd
 ```
 
-#### Web
+### Web
+
+There is also a web interface that can be used to run a PoP miner.
+Build and run the web interface with:
+
+> [!NOTE]
+> The web PoP Miner is currently a proof-of-concept.
 
 ```shell
 cd ./web
@@ -104,53 +133,70 @@ make
 go run ./integrationtest
 ```
 
-### Running bfgd
+## ▶️ Running bfgd
 
-bfgd has a few crucial requirements to run:
+### 🏁 Prerequisites
 
-* a postgres database, bfgd expects the sql scripts in `./database/bfgd/scripts/` to be run to set up your schema
-* an electrumx node connected to the proper bitcoin network (testnet vs mainnet, etc.)
+- A **PostgreSQL database**, bfgd expects the sql scripts in `./database/bfgd/scripts/` to be run to set up your schema.
+- A **connection to an ElectrumX node** on the proper Bitcoin network (testnet or mainnet).
 
-### Running bssd
+## ▶️ Running bssd
 
-bssd has a few crucial requirements to run:
+### 🏁 Prerequisites
 
-* a bfgd instance running to connect to
+- Connect to a live [bfgd](#-running-bfgd) instance.
 
-### Running Network
+## ▶️ Running the localnet network
 
-Prerequisites: `docker`
+> [!WARNING]
+> This is designed for use in testing and development environments only.
 
-To run the full network locally, you can run the following.  Note that this will create
-L2Keystones and BTC Blocks at a high rate.  
+### 🏁 Prerequisites
 
-note: the `--build` flag is optional if you want to rebuild your code
+- `docker`
 
-```
-docker compose -f ./e2e/docker-compose.yml up --build
-```
+### 📚 Tutorial
 
-This will take a while upon first build, but following builds should be cached.  
-When rebuilding, popmd, bssd, and bfgd will rebuild (due to `COPY` command breaking
- the cache).  However if you want to break the cache for the op-stack, use the following args:
+1. **Start the Network:** Launch the entire Hemi network locally using Docker, which will generate L2 Keystones and BTC
+   Blocks at a **high rate**:
 
-For op-geth + optimism (op-node)
-```
-docker compose -f ./e2e/docker-compose.yml build --build-arg OP_GETH_CACHE_BREAK="$(date)"
-```
+   ```shell
+   docker compose -f ./e2e/docker-compose.yml up --build
+   ```
 
-For optimism cache break only:
-```
-docker compose -f ./e2e/docker-compose.yml build --build-arg OPTIMISM_CACHE_BREAK="$(date)"
-```
+> [!NOTE]
+> The `--build` flag is optional and should only be used if you want to rebuild the binaries.
 
-**IMPORTANT:** make sure you run the following to tear down, this will remove
-data and give you a fresh start
+2. **Manage Caching:**
+   This initial build may take some time, but subsequent builds should benefit from caching.
 
-```
+> [!NOTE]
+> During rebuilding, `popmd`, `bssd`, and `bfgd` may force a rebuild due to the `COPY` command, which can break the 
+> cache. If you need to deliberately break the cache for the op-stack, use the following arguments:
+
+   - For op-geth + optimism (op-node):
+     ```shell
+     docker compose -f ./e2e/docker-compose.yml build --build-arg OP_GETH_CACHE_BREAK="$(date)"
+     ```
+
+   - For optimism cache break only:
+     ```shell
+     docker compose -f ./e2e/docker-compose.yml build --build-arg OPTIMISM_CACHE_BREAK="$(date)"
+     ```
+
+> [!IMPORTANT]
+> Make sure you run the cleanup command to remove data and ensure a fresh start.
+
+```shell
 docker compose -f ./e2e/docker-compose.yml down -v --remove-orphans
 ```
 
 **NOTE:** The `--remove-orphans` flag should remove other containers not defined
 in the docker compose file. This is mainly here to help ensure you start with a
-clean environment.  It can be omitted.
+clean environment. It can be omitted.
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](https://github.com/hemilabs/heminetwork/blob/main/LICENSE).

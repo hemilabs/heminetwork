@@ -1,56 +1,113 @@
-# tbcd
+# 🌐 Hemi Tiny Bitcoin Daemon (`tbcd`)
 
-## Hemi Tiny Bitcoin Daemon
+`tbcd` is a **minimal Bitcoin block downloader** and **indexer daemon**. It is designed to wrap the `tbc` service, which
+provides Bitcoin data **(blocks and transactions)** for other applications. Primarily, **it functions as a network RPC
+endpoint.**
 
-tbcd is a very minimal bitcoin block downloader and indexer meant for embedding in other applications that require access to bitcoin data (blocks and txes).
+## 🖥️ System Requirements
 
-tbcd requires sufficient disk space for a full download of bitcoin block data on a fast (preferably ssd or better disk.
+`tbcd` requires significant system resources due to its functionality:
 
-tbcd is build with the heminetwork makefile,  To build standalone (requires `go 1.21+`), type:
+| Requirement   | Specification    |
+|---------------|------------------|
+| **CPU Cores** | 4 minimum        |
+| **RAM**       | 8 GiB minimum    |
+| **Disk**      | NVMe recommended |
 
-``` sh
-cd heminetowkr/cmd/tbcd
-go build
+**As of April 18, 2024:**
+
+- **`testnet3`** requires approximately 40 GiB of disk space.
+- **`mainnet`** requires over 300 GiB of disk space. <!-- XXX: add exact number here -->
+
+---
+
+## 🛠️ Building `tbcd` From Source
+
+### 🏁 Prerequisites
+
+Ensure Go v1.22.2 or newer is installed on your system.
+
+### Using Makefile
+
+To build `tbcd` using the provided Makefile
+
+#### 🏁 Prerequisites
+
+Ensure `make` is installed on your system.
+
+#### Build `tbcd` binary
+
+```shell
+cd heminetwork
+
+# Output binary will be written to bin/tbcd or bin/tbcd.exe
+make tbcd
 ```
 
-On some linux systems you may need to increase the number of open files allowed (particularly with slower disks) and the maximum stack size.  If you run into open file or OOM errors, in the shell you are going to run tbcd, run:
+### Standalone Build
 
-```sh
-ulimit -n 8192
-ulimit -s 8192
+If you prefer not to use the Makefile:
+
+```shell
+cd heminetwork
+
+# Build the binary (output will be tbcd or tbcd.exe)
+go build ./cmd/tbcd/
+
+# Install the binary (output will be in your GOBIN directory)
+go install ./cmd/tbcd/
 ```
 
-You can confirm these settings wiht:
+---
 
-```sh
-ulimit -a
+## 🌐 Environment Settings
+
+`tbcd` **checks system limits at startup on supported platforms** to ensure that they are set to values that will allow
+TBC to run without failing.
+
+> [!WARNING]
+> If you see an error similar to the following, you will need to adjust the limits for the number of open files, memory
+> and the maximum stack size on your system to run TBC.
+
+```
+ulimit: memory: limit too low got X, want X
 ```
 
-For a full list of options:
+Changing limits is OS-specific, but can usually be done using the `ulimit` command.
 
-``` sh
+## ⚙️ Runtime Settings
+
+`tbcd` is **designed to be run in cloud environments**, as such it uses environment variables for runtime settings.
+
+To see a full list of runtime settings, execute `tbcd` with the **`--help`** flag:
+
+```shell
 ./bin/tbcd --help
+# Hemi Tiny Bitcoin Daemon: v0.1.0-pre+3eb1bab15
+# Usage:
+#         help (this help)
+# Environment:
+#         TBC_ADDRESS           : address port to listen on (default: localhost:8082)
+#         TBC_AUTO_INDEX        : enable auto utxo and tx indexes (default: true)
+#         TBC_BLOCK_SANITY      : enable/disable block sanity checks before inserting (default: false)
+#         TBC_LEVELDB_HOME      : data directory for leveldb (default: ~/.tbcd)
+#         TBC_LOG_LEVEL         : loglevel for various packages; INFO, DEBUG and TRACE (default: tbcd=INFO;tbc=INFO;level=INFO)
+#         TBC_MAX_CACHED_TXS    : maximum cached utxos and/or txs during indexing (default: 1000000)
+#         TBC_NETWORK           : bitcoin network; mainnet or testnet3 (default: testnet3)
+#         TBC_PROMETHEUS_ADDRESS: address and port tbcd prometheus listens on
 ```
 
-You can change the file storage with:
+Start the server by running:
 
-``` sh
-export TBC_LEVELDB_HOME=/path/to/files
+```shell
+/path/to/tbcd
 ```
 
-Specify the network with
+## 👉 RPC Commands
 
-``` sh
-export TBC_NETWORK=mainnet
-```
+The `tbcd` daemon runs an RPC server that listens on the address provided by the `TBC_ADDRESS` environment variable.
 
-Then run with:
+The RPC protocol is **WebSocket-based** and **uses a standard request/response model.**
 
-``` sh
-./bin/tbcd
-```
-
-### License
-
-This project is licensed under the [MIT License](../../LICENSE).
+[Read more about the RPC protocol and available commands](../../api/tbcapi/README.md).
 
