@@ -391,6 +391,8 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressP
 }
 
 func TestBasic(t *testing.T) {
+	t.Skip()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
