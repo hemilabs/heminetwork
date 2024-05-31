@@ -525,13 +525,13 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 		// XXX should we return old best block header here?
 		// That way the caller can do best vs previous best diff.
-		log.Infof("(%v) -1: %v < %v", height, cdiff, bestBH.Difficulty)
+		log.Debugf("(%v) -1: %v < %v", height, cdiff, bestBH.Difficulty)
 	case 0:
 		// Extend fork to the same exact difficulty
 		it = tbcd.ITForkExtend
-		log.Infof("(%v) 0: %v = %v", height, cdiff, bestBH.Difficulty)
+		log.Debugf("(%v) 0: %v = %v", height, cdiff, bestBH.Difficulty)
 	case 1:
-		log.Infof("(%v) 1: %v > %v", height, cdiff, bestBH.Difficulty)
+		log.Debugf("(%v) 1: %v > %v", height, cdiff, bestBH.Difficulty)
 		// log.Infof("%v", spew.Sdump(bestBH.Hash[:]))
 		// log.Infof("%v", spew.Sdump(firstHash))
 		// Extend current best tip

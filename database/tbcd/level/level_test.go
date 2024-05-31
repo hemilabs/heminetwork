@@ -134,11 +134,11 @@ func TestKeyOrder(t *testing.T) {
 		hash := chainhash.DoubleHashH(b)
 		keys[count-1-i] = heightHashToKey(i, hash[:])
 	}
-	log.Infof("%v", spew.Sdump(keys))
+	log.Debugf("%v", spew.Sdump(keys))
 
 	// Now sort
 	sort.Sort(keys)
-	log.Infof("%v", spew.Sdump(keys))
+	log.Debugf("%v", spew.Sdump(keys))
 
 	for i := range count {
 		height, hash := keyToHeightHash(keys[i])
