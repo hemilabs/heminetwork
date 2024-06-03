@@ -23,6 +23,7 @@ import (
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
+	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
@@ -259,7 +260,7 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 	}
 }
 
-func TestBlockHeadersBestRaw(t *testing.T) {
+func TestBlockHeaderBestRaw(t *testing.T) {
 	skipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
@@ -287,7 +288,7 @@ func TestBlockHeadersBestRaw(t *testing.T) {
 	}
 
 	var lastErr error
-	var response tbcapi.BlockHeadersBestRawResponse
+	var response tbcapi.BlockHeaderBestRawResponse
 	for {
 		select {
 		case <-time.After(1 * time.Second):
@@ -295,7 +296,7 @@ func TestBlockHeadersBestRaw(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		lastErr = nil
-		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersBestRawRequest{})
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeaderBestRawRequest{})
 		if err != nil {
 			lastErr = err
 			continue
@@ -308,7 +309,7 @@ func TestBlockHeadersBestRaw(t *testing.T) {
 			continue
 		}
 
-		if v.Header.Command == tbcapi.CmdBlockHeadersBestRawResponse {
+		if v.Header.Command == tbcapi.CmdBlockHeaderBestRawResponse {
 			if err := json.Unmarshal(v.Payload, &response); err != nil {
 				t.Fatal(err)
 			}
@@ -322,7 +323,7 @@ func TestBlockHeadersBestRaw(t *testing.T) {
 		t.Fatal(lastErr)
 	}
 
-	bh, err := bytes2Header(response.BlockHeaders[0])
+	bh, err := bytes2Header(response.BlockHeader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,12 +336,12 @@ func TestBlockHeadersBestRaw(t *testing.T) {
 
 	cliBlockHeader := bitcoindBestBlock(ctx, t, bitcoindContainer)
 	expected := cliBlockHeaderToRaw(t, cliBlockHeader)
-	if diff := deep.Equal(expected, response.BlockHeaders); len(diff) > 0 {
+	if diff := deep.Equal(expected, []api.ByteSlice{response.BlockHeader}); len(diff) > 0 {
 		t.Errorf("unexpected diff: %s", diff)
 	}
 }
 
-func TestBtcBlockHeadersBest(t *testing.T) {
+func TestBtcBlockHeaderBest(t *testing.T) {
 	skipIfNoDocker(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
@@ -368,7 +369,7 @@ func TestBtcBlockHeadersBest(t *testing.T) {
 	}
 
 	var lastErr error
-	var response tbcapi.BlockHeadersBestResponse
+	var response tbcapi.BlockHeaderBestResponse
 	for {
 		select {
 		case <-time.After(1 * time.Second):
@@ -376,7 +377,7 @@ func TestBtcBlockHeadersBest(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		lastErr = nil
-		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersBestRequest{})
+		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeaderBestRequest{})
 		if err != nil {
 			lastErr = err
 			continue
@@ -389,7 +390,7 @@ func TestBtcBlockHeadersBest(t *testing.T) {
 			continue
 		}
 
-		if v.Header.Command == tbcapi.CmdBlockHeadersBestResponse {
+		if v.Header.Command == tbcapi.CmdBlockHeaderBestResponse {
 			if err := json.Unmarshal(v.Payload, &response); err != nil {
 				t.Fatal(err)
 			}
@@ -410,7 +411,7 @@ func TestBtcBlockHeadersBest(t *testing.T) {
 
 	cliBlockHeader := bitcoindBestBlock(ctx, t, bitcoindContainer)
 	expected := cliBlockHeaderToTBC(t, cliBlockHeader)
-	if diff := deep.Equal(expected, response.BlockHeaders); len(diff) > 0 {
+	if diff := deep.Equal(expected, []*tbcapi.BlockHeader{response.BlockHeader}); len(diff) > 0 {
 		t.Errorf("unexpected diff: %s", diff)
 	}
 }
