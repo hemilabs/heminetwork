@@ -185,12 +185,24 @@ func (s *Server) invalidBlockChecker(ctx context.Context) {
 			}
 
 			log.Infof("received %d heights with no children, will re-check", len(heights))
+
+			// if all blocks have children, wait until next btc block to re-check
+			if len(heights) == 0 {
+				continue
+			}
+
+			// otherwise, reprocess blocks with missing children and re-check
+
 			for _, height := range heights {
 				log.Infof("reprocessing block at height %d", height)
 				if err := s.processBitcoinBlock(ctx, height); err != nil {
 					log.Errorf("error processing bitcoin block: %s", err)
 				}
 			}
+
+			go func() {
+				s.queueCheckForInvalidBlocks()
+			}()
 		}
 	}
 }
@@ -1506,6 +1518,8 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go s.trackBitcoin(ctx)
 	go s.invalidBlockChecker(ctx)
+
+	s.queueCheckForInvalidBlocks()
 
 	select {
 	case <-ctx.Done():

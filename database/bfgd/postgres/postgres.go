@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 8
+	bfgdVersion = 9
 
 	logLevel = "INFO"
 	verbose  = false
@@ -976,16 +976,8 @@ func (p *pgdb) BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, er
 	// children and there are no other blocks at the same height with children.
 	// Excludes the tip because it will not have any children.
 	const q = `
-		SELECT height FROM btc_blocks bb1
-		WHERE NOT EXISTS (SELECT * FROM btc_blocks bb2 WHERE substr(bb2.header, 5, 32) = bb1.hash)
-		AND NOT EXISTS (
-			SELECT * FROM btc_blocks bb3 WHERE bb1.height = bb3.height 
-			AND EXISTS (
-				SELECT * FROM btc_blocks bb4 WHERE substr(bb4.header, 5, 32) = bb3.hash
-			)
-		)
-		ORDER BY height DESC
-		OFFSET $1 + 1
+		SELECT height FROM heights_with_no_children
+		OFFSET $1
 		LIMIT 100
 	`
 

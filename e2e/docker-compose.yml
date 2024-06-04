@@ -33,7 +33,7 @@ services:
       - "-rpcport=18443"
       - "-rpcconnect=bitcoind"
       - "generatetoaddress"
-      - "3000" # need to generate a lot for greater chance to not spend coinbase
+      - "1000" # need to generate a lot for greater chance to not spend coinbase
       - "$BTC_ADDRESS"
     restart: on-failure
 
@@ -97,7 +97,7 @@ services:
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       BFG_BTC_START_HEIGHT: "1"
       BFG_EXBTC_ADDRESS: "electrumx:50001"
-      BFG_LOG_LEVEL: "INFO"
+      BFG_LOG_LEVEL: "TRACE"
       BFG_PUBLIC_ADDRESS: ":8383"
       BFG_PRIVATE_ADDRESS: ":8080"
 
