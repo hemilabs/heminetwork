@@ -1173,7 +1173,11 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		case tbcd.ITChainFork:
 			// We may have to pause everything here in order to
 			// unwind/rewind indexes.
-			panic("chain forked, unwind/rewind indexes")
+			if s.Synced(ctx).Synced {
+				// XXX this is racy but is a good enough test
+				// to get past most of this.
+				panic("chain forked, unwind/rewind indexes")
+			}
 
 		default:
 			// XXX can't happen
@@ -1593,12 +1597,7 @@ type SyncInfo struct {
 	TxHeight          uint64 // last indexed tx block height
 }
 
-func (s *Server) Synced(ctx context.Context) (si SyncInfo) {
-	// We do not strictly need the mutex but we do want all the data that
-	// is returned to the user to be atomically generated.
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
+func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		// This should never happen.
@@ -1624,6 +1623,14 @@ func (s *Server) Synced(ctx context.Context) (si SyncInfo) {
 		si.Synced = true
 	}
 	return
+}
+
+// Synced returns true if all block headers, blocks and all indexes are caught up.
+func (s *Server) Synced(ctx context.Context) SyncInfo {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	return s.synced(ctx)
 }
 
 // DBOpen opens the underlying server database. It has been put in its own
