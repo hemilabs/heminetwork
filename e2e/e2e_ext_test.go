@@ -56,7 +56,6 @@ import (
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/bfg"
 	"github.com/hemilabs/heminetwork/service/bss"
-	"github.com/hemilabs/heminetwork/service/popm"
 )
 
 const (
@@ -80,13 +79,11 @@ var mockMerkleHashes = []string{
 
 var minerPrivateKeyBytes = []byte{1, 2, 3, 4, 5, 6, 7, 199} // XXX make this a real hardcoded key
 
-type bssWs struct {
-	wg   sync.WaitGroup
-	addr string
+type bssWs struct { // XXX: use protocol.WSConn directly
 	conn *protocol.WSConn
 }
 
-type bfgWs bssWs
+type bfgWs bssWs // XXX: use protocol.WSConn directly
 
 // Setup some private keys and authenticators
 var (
@@ -282,19 +279,6 @@ func nextPort(ctx context.Context, t *testing.T) int {
 			t.Fatal(err)
 		}
 	}
-}
-
-func createPopm(ctx context.Context, t *testing.T, bfgUrl string, bfgPrivateWsUrl string) (*popm.Miner, error) {
-	m, err := popm.NewMiner(&popm.Config{
-		BFGWSURL:      bfgPrivateWsUrl,
-		BTCChainName:  "testnet3",
-		BTCPrivateKey: "FC4B44FDC798E5D11229B84EC6B21B98EF40B0E4E1D12C6488CB5967F8CE94C6",
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return m, nil
 }
 
 func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrumxAddr string, btcStartHeight uint64, auth bool) (*bfg.Server, string, string, string) {
@@ -567,7 +551,7 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6,
 				7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2,
 			}
-			_j := []struct {
+			j := []struct {
 				Hash   string `json:"tx_hash"`
 				Height uint64 `json:"height"`
 				Index  uint64 `json:"tx_pos"`
@@ -578,12 +562,12 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 				Index:  9999,
 				Value:  999999,
 			}}
-			j, err := json.Marshal(_j)
+			b, err := json.Marshal(j)
 			if err != nil {
 				panic(err)
 			}
 
-			res.Result = j
+			res.Result = b
 		}
 
 		b, err := json.Marshal(res)
@@ -1764,31 +1748,27 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 	// wait a max of 10 seconds (with a resolution of 1 second) for the
 	// btc_block to be inserted into the db.  this happens on a timer
 	// when checking electrumx
-	_ctx, _cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer _cancel()
-	var _err error
-	var _btcBlockHeader *bfgd.BtcBlock
+	lctx, lcancel := context.WithTimeout(ctx, 10*time.Second)
+	defer lcancel()
+	var btcBlockHeader *bfgd.BtcBlock
+loop:
 	for {
 		select {
-		case <-_ctx.Done():
-			break
+		case <-lctx.Done():
+			t.Fatal(lctx.Err())
 		case <-time.After(1 * time.Second):
-			_btcBlockHeader, _err = db.BtcBlockByHash(ctx, [32]byte(btcHeaderHash))
-			if _err == nil {
-				break
+			btcBlockHeader, err = db.BtcBlockByHash(ctx, [32]byte(btcHeaderHash))
+			if err == nil {
+				break loop
 			}
 		}
-
-		if _btcBlockHeader != nil {
-			break
-		}
 	}
 
-	if _err != nil {
-		t.Fatal(_err)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	diff := deep.Equal(_btcBlockHeader, &bfgd.BtcBlock{
+	diff := deep.Equal(btcBlockHeader, &bfgd.BtcBlock{
 		Hash:   btcHeaderHash,
 		Header: btcHeader,
 		Height: uint64(btcHeight),
@@ -1844,28 +1824,24 @@ func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
 	// wait a max of 10 seconds (with a resolution of 1 second) for the
 	// btc_block to be inserted into the db.  this happens on a timer
 	// when checking electrumx
-	_ctx, _cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer _cancel()
-	var _err error
+	lctx, lcancel := context.WithTimeout(ctx, 10*time.Second)
+	defer lcancel()
 	var popBases []bfgd.PopBasis
+loop:
 	for {
 		select {
-		case <-_ctx.Done():
-			break
+		case <-lctx.Done():
+			break loop
 		case <-time.After(1 * time.Second):
-			popBases, _err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false)
-			if _err == nil && len(popBases) > 0 {
-				break
+			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false)
+			if len(popBases) > 0 {
+				break loop
 			}
-		}
-
-		if len(popBases) > 0 {
-			break
 		}
 	}
 
-	if _err != nil {
-		t.Fatal(_err)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	btcTxId, err := btcchainhash.NewHashFromStr(mockTxHash)
@@ -2013,28 +1989,24 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 	// wait a max of 10 seconds (with a resolution of 1 second) for the
 	// btc_block to be inserted into the db.  this happens on a timer
 	// when checking electrumx
-	_ctx, _cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer _cancel()
-	var _err error
+	lctx, lcancel := context.WithTimeout(ctx, 10*time.Second)
+	defer lcancel()
 	var popBases []bfgd.PopBasis
+loop:
 	for {
 		select {
-		case <-_ctx.Done():
-			break
+		case <-lctx.Done():
+			break loop
 		case <-time.After(1 * time.Second):
-			popBases, _err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), true)
-			if _err == nil && len(popBases) > 0 {
-				break
+			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), true)
+			if len(popBases) > 0 {
+				break loop
 			}
-		}
-
-		if len(popBases) > 0 {
-			break
 		}
 	}
 
-	if _err != nil {
-		t.Fatal(_err)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	btcHeader, err := hex.DecodeString(strings.Replace(mockEncodedBlockHeader, "\"", "", 2))
@@ -3121,7 +3093,7 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 
 	for i := range 10 {
 		wg.Add(1)
-		go func(_i int) {
+		go func() {
 			defer wg.Done()
 			c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
 			if err != nil {
@@ -3129,7 +3101,7 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 			}
 
 			// ensure we can safely close 1 and handle the rest
-			if _i == 5 {
+			if i == 5 {
 				c.CloseNow()
 				return
 			} else {
@@ -3147,7 +3119,7 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 				v.Header.Command != bfgapi.CmdBTCFinalityNotification {
 				panic(fmt.Sprintf("wrong command: %s", v.Header.Command))
 			}
-		}(i)
+		}()
 	}
 
 	wg.Wait()
@@ -3193,7 +3165,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 
 	for i := range 10 {
 		wg.Add(1)
-		go func(_i int) {
+		go func() {
 			defer wg.Done()
 			c, _, err := websocket.Dial(ctx, bssWsurl, nil)
 			if err != nil {
@@ -3201,7 +3173,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 			}
 
 			// ensure we can safely close 1 and handle the rest
-			if _i == 5 {
+			if i == 5 {
 				c.CloseNow()
 				return
 			} else {
@@ -3219,7 +3191,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 				v.Header.Command != bssapi.CmdBTCFinalityNotification {
 				panic(fmt.Sprintf("wrong command: %s", v.Header.Command))
 			}
-		}(i)
+		}()
 	}
 
 	wg.Wait()
@@ -3741,7 +3713,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 		Height: uint64(height),
 	}
 
-	_l2Keystone := hemi.L2Keystone{
+	hemiL2Keystone := hemi.L2Keystone{
 		ParentEPHash:       parentEpHash,
 		PrevKeystoneEPHash: prevKeystoneEpHash,
 		StateRoot:          stateRoot,
@@ -3749,7 +3721,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 		L2BlockNumber:      l2BlockNumber,
 	}
 
-	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(_l2Keystone).Hash()
+	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(hemiL2Keystone).Hash()
 	l2Keystone := bfgd.L2Keystone{
 		Hash:               l2KeystoneAbrevHash,
 		ParentEPHash:       parentEpHash,
