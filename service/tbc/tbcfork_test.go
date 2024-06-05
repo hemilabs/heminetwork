@@ -524,7 +524,7 @@ func TestFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:     false,
+		AutoIndex:     true,
 		BlockSanity:   false,
 		LevelDBHome:   t.TempDir(),
 		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
