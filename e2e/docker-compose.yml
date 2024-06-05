@@ -33,7 +33,7 @@ services:
       - "-rpcport=18443"
       - "-rpcconnect=bitcoind"
       - "generatetoaddress"
-      - "1000" # need to generate a lot for greater chance to not spend coinbase
+      - "3000" # need to generate a lot for greater chance to not spend coinbase
       - "$BTC_ADDRESS"
     restart: on-failure
 
@@ -73,6 +73,12 @@ services:
     build:
       dockerfile: "./e2e/postgres.Dockerfile"
       context: "./.."
+    command:
+      - "postgres"
+      # lower random_page_cost (opposed to default 4.0) to cause planner
+      # to choose index scans vs sequential scans when at fewer rows in a table
+      - "-c"
+      - "random_page_cost=1.0"
     ports:
       - "5432:5432"
     environment:
