@@ -8,7 +8,7 @@ SET version = 9;
 
 DROP MATERIALIZED VIEW btc_blocks_can;
 -- this materialized view represents the canonical btc_blocks as we know it
-CREATE MATERIALIZED VIEW btc_blocks_can AS explain analyze WITH RECURSIVE bb AS (
+CREATE MATERIALIZED VIEW btc_blocks_can AS WITH RECURSIVE bb AS (
 	-- define the tip as the highest block in __highest, look below 
 	-- for definition of this result set
 	SELECT hash,
@@ -95,7 +95,7 @@ IF NOT EXISTS(
 		SELECT *
 		FROM heights_with_no_children
 	) 
-	
+
 -- then we refresh the materialized view of the canonical chain
 THEN REFRESH MATERIALIZED VIEW btc_blocks_can;
 END IF;
