@@ -8,7 +8,7 @@ SET version = 9;
 
 DROP MATERIALIZED VIEW btc_blocks_can;
 -- this materialized view represents the canonical btc_blocks as we know it
-CREATE MATERIALIZED VIEW btc_blocks_can AS WITH RECURSIVE bb AS (
+CREATE MATERIALIZED VIEW btc_blocks_can AS explain analyze WITH RECURSIVE bb AS (
 	-- define the tip as the highest block in __highest, look below 
 	-- for definition of this result set
 	SELECT hash,
@@ -59,12 +59,16 @@ FROM bb;
 CREATE VIEW heights_with_no_children AS
 SELECT height
 FROM btc_blocks bb1 
--- for all blocks, check if there exists no children
-WHERE NOT EXISTS (
+
+
+	-- for all blocks, check if there exists no children
+	WHERE NOT EXISTS (
 		SELECT *
 		FROM btc_blocks bb2
 		WHERE substr(bb2.header, 5, 32) = bb1.hash
-	) -- then, check if there exist no other blocks at this height with children
+	) 
+	
+	-- then, check if there exist no other blocks at this height with children
 	AND NOT EXISTS (
 		SELECT *
 		FROM btc_blocks bb3
@@ -74,14 +78,26 @@ WHERE NOT EXISTS (
 				FROM btc_blocks bb4
 				WHERE substr(bb4.header, 5, 32) = bb3.hash
 			)
-	) -- exclude the tip, as it will have no children by its nature
+	) 
+
+-- exclude the tip, as it will have no children by its nature, 
+-- since we use electrumx with simple incrementing, 
+-- we only get 1 block each time the height increases, we SHOULD only need to 
+-- offset 1 for the tip, but it doesn't hurt to check extra blocks 
+-- (just potentially slightly noisy)
 ORDER BY height DESC OFFSET 1;
 
 -- only refresh materialized view if there are no heights without children
-CREATE OR REPLACE FUNCTION refresh_btc_blocks_can() RETURNS TRIGGER LANGUAGE PLPGSQL AS $$ BEGIN IF NOT EXISTS(
+CREATE OR REPLACE FUNCTION refresh_btc_blocks_can() RETURNS TRIGGER LANGUAGE PLPGSQL AS $$ BEGIN 
+
+-- if there exist no heights without children
+IF NOT EXISTS(
 		SELECT *
 		FROM heights_with_no_children
-	) THEN REFRESH MATERIALIZED VIEW btc_blocks_can;
+	) 
+	
+-- then we refresh the materialized view of the canonical chain
+THEN REFRESH MATERIALIZED VIEW btc_blocks_can;
 END IF;
 RETURN NEW;
 END;

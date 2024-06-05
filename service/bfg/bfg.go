@@ -200,9 +200,7 @@ func (s *Server) invalidBlockChecker(ctx context.Context) {
 				}
 			}
 
-			go func() {
-				s.queueCheckForInvalidBlocks()
-			}()
+			s.queueCheckForInvalidBlocks()
 		}
 	}
 }
