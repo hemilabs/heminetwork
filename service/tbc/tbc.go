@@ -1662,7 +1662,7 @@ func (s *Server) Run(pctx context.Context) error {
 
 	// We need a lot of open files and memory for the indexes. Best effort
 	// to echo to the user what the ulimits are.
-	if s.ignoreUlimit {
+	if s.ignoreUlimit || s.cfg.Network == networkLocalnet {
 		log.Warningf("ignoring ulimit requirements")
 	} else if ulimitSupported {
 		if err := verifyUlimits(); err != nil {
