@@ -4,24 +4,37 @@
  * which can be found in the LICENSE file.
  */
 
-// wasm ping
-const WASMPingShow = document.querySelector('.WASMPingShow');
+let wasm; // This stores the global object created by the WASM binary.
 
-async function WASMPing() {
+// Called after the WASM binary has been loaded.
+async function init() {
+  wasm = globalThis['@hemilabs/pop-miner'];
+}
+
+async function dispatch(args) {
+  if (!wasm) {
+    throw new Error('WASM has not finished loading yet');
+  }
+  return wasm.dispatch(args);
+}
+
+// version
+const VersionShow = document.querySelector('.VersionShow');
+
+async function Version() {
   try {
     const result = await dispatch({
-      method: 'wasmping',
-      message: 'wasm ping',
+      method: 'version',
     });
-    WASMPingShow.innerHTML = result;
+    VersionShow.innerText = JSON.stringify(result);
   } catch (err) {
-    WASMPingShow.innerHTML = err;
+    VersionShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
 
-WASMPingButton.addEventListener('click', () => {
-  WASMPing();
+VersionButton.addEventListener('click', () => {
+  Version();
 });
 
 // generate key
@@ -30,12 +43,12 @@ const GenerateKeyShow = document.querySelector('.GenerateKeyShow');
 async function GenerateKey() {
   try {
     const result = await dispatch({
-      method: 'generatekey',
-      network:  GenerateKeyNetworkInput.value,
+      method: 'generateKey',
+      network: GenerateKeyNetworkInput.value,
     });
-    GenerateKeyShow.innerHTML = result;
+    GenerateKeyShow.innerText = JSON.stringify(result);
   } catch (err) {
-    GenerateKeyShow.innerHTML = err;
+    GenerateKeyShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
@@ -44,27 +57,27 @@ GenerateKeyButton.addEventListener('click', () => {
   GenerateKey();
 });
 
-// run pop miner
-const RunPopMinerShow = document.querySelector('.RunPopMinerShow');
+// start pop miner
+const StartPopMinerShow = document.querySelector('.StartPopMinerShow');
 
-async function RunPopMiner() {
+async function StartPopMiner() {
   try {
     const result = await dispatch({
-      method: 'runpopminer',
-      network: RunPopMinerNetworkInput.value,
-      logLevel: RunPopMinerLogLevelInput.value,
-      privateKey: RunPopMinerPrivateKeyInput.value,
-      staticFee: Number(RunPopMinerStaticFeeInput.value),
+      method: 'startPoPMiner',
+      network: StartPopMinerNetworkInput.value,
+      logLevel: StartPopMinerLogLevelInput.value,
+      privateKey: StartPopMinerPrivateKeyInput.value,
+      staticFee: Number(StartPopMinerStaticFeeInput.value),
     });
-    RunPopMinerShow.innerHTML = result;
+    StartPopMinerShow.innerText = JSON.stringify(result);
   } catch (err) {
-    RunPopMinerShow.innerHTML = err;
+    StartPopMinerShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
 
-RunPopMinerButton.addEventListener('click', () => {
-  RunPopMiner();
+StartPopMinerButton.addEventListener('click', () => {
+  StartPopMiner();
 });
 
 // stop pop miner
@@ -73,11 +86,11 @@ const StopPopMinerShow = document.querySelector('.StopPopMinerShow');
 async function StopPopMiner() {
   try {
     const result = await dispatch({
-      method: 'stoppopminer',
+      method: 'stopPoPMiner',
     });
-    StopPopMinerShow.innerHTML = result;
+    StopPopMinerShow.innerText = JSON.stringify(result);
   } catch (err) {
-    StopPopMinerShow.innerHTML = err;
+    StopPopMinerShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
@@ -92,12 +105,11 @@ const PingShow = document.querySelector('.PingShow');
 async function Ping() {
   try {
     const result = await dispatch({
-      method: 'ping',
-      timestamp:  0, // XXX pull timestamp
+      method: 'ping', // Timestamp is handled by Go.
     });
-    PingShow.innerHTML = result;
+    PingShow.innerText = JSON.stringify(result);
   } catch (err) {
-    PingShow.innerHTML = err;
+    PingShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
@@ -115,9 +127,9 @@ async function L2Keystones() {
       method: 'l2Keystones',
       numL2Keystones: Number(L2KeystonesNumL2KeystonesInput.value),
     });
-    L2KeystonesShow.innerHTML = result;
+    L2KeystonesShow.innerText = JSON.stringify(result);
   } catch (err) {
-    L2KeystonesShow.innerHTML = err;
+    L2KeystonesShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
@@ -133,11 +145,11 @@ async function BitcoinBalance() {
   try {
     const result = await dispatch({
       method: 'bitcoinBalance',
-      scriptHash: BitcoinBalanceScriptHashInput.value, 
+      scriptHash: BitcoinBalanceScriptHashInput.value,
     });
-    BitcoinBalanceShow.innerHTML = result;
+    BitcoinBalanceShow.innerText = JSON.stringify(result);
   } catch (err) {
-    BitcoinBalanceShow.innerHTML = err;
+    BitcoinBalanceShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
@@ -154,9 +166,9 @@ async function BitcoinInfo() {
     const result = await dispatch({
       method: 'bitcoinInfo',
     });
-    BitcoinInfoShow.innerHTML = result;
+    BitcoinInfoShow.innerText = JSON.stringify(result);
   } catch (err) {
-    BitcoinInfoShow.innerHTML = err;
+    BitcoinInfoShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
@@ -171,12 +183,12 @@ const BitcoinUTXOsShow = document.querySelector('.BitcoinUTXOsShow');
 async function BitcoinUTXOs() {
   try {
     const result = await dispatch({
-      method: 'bitcoinUtxos',
-      scriptHash: BitcoinUTXOsScriptHashInput.value, 
+      method: 'bitcoinUTXOs',
+      scriptHash: BitcoinUTXOsScriptHashInput.value,
     });
-    BitcoinUTXOsShow.innerHTML = result;
+    BitcoinUTXOsShow.innerText = JSON.stringify(result);
   } catch (err) {
-    BitcoinUTXOsShow.innerHTML = err;
+    BitcoinUTXOsShow.innerText = 'error: ' + JSON.stringify(err);
     console.error('Caught exception', err);
   }
 }
@@ -184,4 +196,3 @@ async function BitcoinUTXOs() {
 BitcoinUTXOsButton.addEventListener('click', () => {
   BitcoinUTXOs();
 });
-

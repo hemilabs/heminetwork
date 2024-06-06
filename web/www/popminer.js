@@ -20,9 +20,7 @@ WebAssembly.instantiateStreaming(fetch("popminer.wasm"), go.importObject).then((
 
 	// Always launch go runtime
 	go.run(inst);
-}).catch((err) => {
+}).then(() => init()).catch((err) => {
 	// XXX restart wasm instead
 	console.error(err);
 });
-
-console.error("hi there");

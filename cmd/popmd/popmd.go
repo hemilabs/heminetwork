@@ -52,7 +52,7 @@ var (
 		"POPM_BTC_CHAIN_NAME": config.Config{
 			Value:        &cfg.BTCChainName,
 			DefaultValue: popm.NewDefaultConfig().BTCChainName,
-			Help:         "the name of the bitcoing chain to connect to (ex. \"mainnet\", \"testnet3\")",
+			Help:         "the name of the bitcoin chain to connect to (ex. \"mainnet\", \"testnet3\")",
 			Print:        config.PrintAll,
 		},
 		"POPM_PROMETHEUS_ADDRESS": config.Config{
