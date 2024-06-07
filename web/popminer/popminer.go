@@ -25,7 +25,7 @@ var (
 	version   = ""
 	gitCommit = ""
 
-	logLevel = "ERROR" // Can be set with `-ldflags "-X main.logLevel=TRACE"`
+	logLevel = "WARN" // Can be set with `-ldflags "-X main.logLevel=TRACE"`
 	log      = loggo.GetLogger("@hemilabs/pop-miner")
 )
 
