@@ -6,6 +6,7 @@ PROJECTPATH = $(abspath $(dir $(realpath $(firstword $(MAKEFILE_LIST)))))
 
 GOROOT=$(shell go env GOROOT)
 WEBAPP=$(PROJECTPATH)/webapp
+WWW_DIR=$(PROJECTPATH)/www
 WASM_BINARY=$(WEBAPP)/popminer.wasm
 
 version = $(patsubst v%,%,$(shell git describe --tags 2>/dev/null || echo "v0.0.0"))
@@ -23,11 +24,11 @@ clean:
 wasm:
 	CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -trimpath -tags "$(BUILD_TAGS)" \
 		-ldflags "-s -w -X main.version=${version} -X main.gitCommit=${commit}" \
-		-o ${WASM_BINARY} ./popminer/...
+		-o ${WASM_BINARY} ${PROJECTPATH}/popminer/...
 
 www: wasm
 	mkdir -p ${WEBAPP}
-	cp www/index.html ${WEBAPP}
-	cp www/index.js ${WEBAPP}
-	cp www/popminer.js ${WEBAPP}
-	cp www/wasm_exec.js ${WEBAPP}
+	cp ${WWW_DIR}/index.html ${WEBAPP}
+	cp ${WWW_DIR}/index.js ${WEBAPP}
+	cp ${WWW_DIR}/popminer.js ${WEBAPP}
+	cp ${WWW_DIR}/wasm_exec.js ${WEBAPP}
