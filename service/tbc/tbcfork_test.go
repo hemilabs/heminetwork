@@ -75,9 +75,9 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 		return nil, fmt.Errorf("get headers: locator not found %v", locator)
 	}
 
-	b.t.Logf("start from %v", from.Height())
 	nmh := wire.NewMsgHeaders()
 	height := from.Height() + 1
+	b.t.Logf("start from %v", height)
 	for range 2000 {
 		bs, ok := b.blocksAtHeight[height]
 		if !ok {
@@ -191,7 +191,7 @@ func (b *btcNode) handleMsg(ctx context.Context, p *peer, msg wire.Message) erro
 		}
 
 	case *wire.MsgGetData:
-		b.t.Logf("get data %v", spew.Sdump(m))
+		// b.t.Logf("get data %v", spew.Sdump(m))
 		data, err := b.handleGetData(m)
 		if err != nil {
 			return fmt.Errorf("handle get data: %w", err)
@@ -531,6 +531,7 @@ func TestFork(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
+		PeersWanted:             1,
 		PrometheusListenAddress: "",
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)

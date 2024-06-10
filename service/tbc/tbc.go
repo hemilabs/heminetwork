@@ -184,6 +184,7 @@ type Config struct {
 	LogLevel                string
 	MaxCachedTxs            int
 	Network                 string
+	PeersWanted             int
 	PrometheusListenAddress string
 	PprofListenAddress      string
 }
@@ -193,6 +194,7 @@ func NewDefaultConfig() *Config {
 		ListenAddress: tbcapi.DefaultListen,
 		LogLevel:      logLevel,
 		MaxCachedTxs:  defaultMaxCachedTxs,
+		PeersWanted:   defaultPeersWanted,
 	}
 }
 
@@ -245,7 +247,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
-	pings, err := ttl.New(defaultPeersWanted, true)
+	pings, err := ttl.New(cfg.PeersWanted, true)
 	if err != nil {
 		return nil, err
 	}
@@ -258,7 +260,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
 		blocks:         blocks,
-		peers:          make(map[string]*peer, defaultPeersWanted),
+		peers:          make(map[string]*peer, cfg.PeersWanted),
 		pings:          pings,
 		blocksInserted: make(map[string]struct{}, 8192), // stats XXX rmeove?
 		timeSource:     blockchain.NewMedianTime(),
@@ -414,7 +416,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 	defer log.Tracef("peerManager exit")
 
 	// Channel for peering signals
-	peersWanted := defaultPeersWanted
+	peersWanted := s.cfg.PeersWanted
 	peerC := make(chan string, peersWanted)
 
 	log.Infof("Peer manager connecting to %v peers", peersWanted)
@@ -1072,18 +1074,26 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	}
 
 	if len(bm) == 0 {
-		// if we are complete we need to kick off utxo sync
-		s.quiesced = true // XXX if it's set and we exit with an error, what should we do??
+		// We can avoid quiescing by verifying if we are already done
+		// indexing.
+		if si := s.synced(ctx); si.Synced {
+			log.Tracef("already synced at %v", si.BlockHeaderHeight)
+			return
+		}
+
 		// XXX this really should be hash based
 		bhb, err := s.db.BlockHeaderBest(ctx)
 		if err != nil {
 			log.Errorf("sync blocks best block header: %v", err)
 			return
 		}
+
+		// if we are complete we need to kick off utxo sync
+		s.quiesced = true // XXX if it's set and we exit with an error, what should we do??
 		go func() {
 			// we really want to push the indexing reentrancy into this call
 			log.Infof("quiescing p2p and indexing to: %v", bhb.Height)
-			err = s.SyncIndexersToHeight(ctx, bhb.Height)
+			err = s.SyncIndexersToHeight(ctx, bhb.Height+1)
 			if err != nil {
 				log.Errorf("sync blocks: %v", err)
 				return
@@ -1118,12 +1128,12 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
-	s.mtx.Lock()
-	if s.clipped {
-		log.Infof("pretend we are at the height")
-		msg.Headers = msg.Headers[0:0]
-	}
-	s.mtx.Unlock()
+	//s.mtx.Lock()
+	//if s.clipped {
+	//	log.Infof("pretend we are at the height")
+	//	msg.Headers = msg.Headers[0:0]
+	//}
+	//s.mtx.Unlock()
 
 	if len(msg.Headers) == 0 {
 		// This may signify the end of IBD but isn't 100%. We can fart
@@ -1226,10 +1236,10 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		log.Infof("Inserted (%v) %v block headers height %v",
 			it, len(headers), lbh.Height)
 
-		s.mtx.Lock()
-		s.clipped = true
-		s.mtx.Unlock()
-		log.Infof("clipped at %v", lbh.Height)
+		// s.mtx.Lock()
+		// s.clipped = true
+		// s.mtx.Unlock()
+		// log.Infof("clipped at %v", lbh.Height)
 	}
 }
 
@@ -1281,7 +1291,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	}
 
 	// Whatever happens, delete from cache and potentially try again
-	log.Infof("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
+	// log.Infof("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
 	var (
 		printStats      bool
 		blocksSize      uint64
