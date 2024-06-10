@@ -1,0 +1,28 @@
+{
+  "name": "web-pop-miner",
+  "version": "1.0.0",
+  "description": "Web PoP miner",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tsc": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "react-router-dom": "6.23.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.2.45",
+    "@types/react-dom": "18.2.18",
+    "@vitejs/plugin-react": "4.3.0",
+    "autoprefixer": "10.4.16",
+    "tailwindcss": "3.4.0",
+    "typescript": "5.3.3",
+    "vite": "5.2.13",
+    "vite-tsconfig-paths": "4.3.2"
+  },
+  "type": "module"
+}
