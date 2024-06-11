@@ -212,6 +212,7 @@ func generateKey(_ js.Value, args []js.Value) (js.Value, error) {
 		return js.Null(), fmt.Errorf("invalid network: %v", net)
 	}
 
+	// TODO: consider alternative as dcrsecpk256k1 package is large.
 	privKey, err := dcrsecpk256k1.GeneratePrivateKey()
 	if err != nil {
 		log.Errorf("failed to generate private key: %v", err)
