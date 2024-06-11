@@ -428,7 +428,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 		s.mtx.Lock()
 		s.quiesced = false
 		s.indexing = false
-		s.clipped = false
+		// s.clipped = false
 		actualHeight, bhb, err := s.RawBlockHeaderBest(ctx)
 		if err != nil {
 			log.Errorf("sync indexers best: %v", err)

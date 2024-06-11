@@ -225,7 +225,7 @@ type Server struct {
 	// utxoIndexerRunning bool
 	// txIndexerRunning   bool
 	quiesced bool // when set do not accept blockheaders and ot blocks.
-	clipped  bool // XXX kill including all surrounding code, this is for test only
+	// clipped  bool // XXX kill including all surrounding code, this is for test only
 	indexing bool // prevent re-entrant indexing
 
 	db tbcd.Database
@@ -1081,14 +1081,17 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			return
 		}
 
+		// Exit if AutoIndez isn't enabled
+		if !s.cfg.AutoIndex {
+			return
+		}
+
 		// XXX this really should be hash based
 		bhb, err := s.db.BlockHeaderBest(ctx)
 		if err != nil {
 			log.Errorf("sync blocks best block header: %v", err)
 			return
 		}
-
-		// if we are complete we need to kick off utxo sync
 		s.quiesced = true // XXX if it's set and we exit with an error, what should we do??
 		go func() {
 			// we really want to push the indexing reentrancy into this call
