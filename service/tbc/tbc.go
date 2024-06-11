@@ -1291,7 +1291,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	}
 
 	// Whatever happens, delete from cache and potentially try again
-	// log.Infof("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
+	log.Infof("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
 	var (
 		printStats      bool
 		blocksSize      uint64

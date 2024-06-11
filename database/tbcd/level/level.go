@@ -44,7 +44,7 @@ const (
 	logLevel = "INFO"
 	verbose  = false
 
-	bhsLastKey = "last"
+	bhsLastKey = "last" // XXX rename best
 
 	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
@@ -462,11 +462,21 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		}
 		return tbcd.ITInvalid, nil, fmt.Errorf("best block header: %v", err)
 	}
-	bestBH := decodeBlockHeader(bbh)
+	bestBH := decodeBlockHeader(bbh) // XXX shouldn't this return chainhashes?
 
 	// Fork is set to true if the first blockheader does not connect to the
 	// canonical blockheader.
 	fork := !bytes.Equal(wbh.PrevBlock[:], bestBH.Hash[:])
+	if fork {
+		b, _ := chainhash.NewHash(bestBH.Hash[:])
+		log.Infof("=== FORK ===")
+		log.Infof("blockheader hash: %v", wbh.BlockHash())
+		log.Infof("previous hash   : %v", wbh.PrevBlock)
+		log.Infof("previous height : %v", pbh.Height)
+		log.Infof("best hash       : %v", b)
+		log.Infof("best height     : %v", bestBH.Height)
+		log.Infof("--- FORK ---")
+	}
 
 	// Insert missing blocks and block headers
 	hhBatch := new(leveldb.Batch)
@@ -536,11 +546,13 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		// log.Infof("%v", spew.Sdump(firstHash))
 		// Extend current best tip
 		bhsBatch.Put([]byte(bhsLastKey), lastRecord)
-		// pick the right return value based on ancestorA
-		if fork { // bytes.Equal(firstHash[:], bestBH.Hash[:]) {
+		// pick the right return value based on ancestor
+		if fork {
 			it = tbcd.ITChainFork
+			log.Infof("FORK FORK FORK")
 		} else {
 			it = tbcd.ITChainExtend
+			log.Infof("EXTENDED EXTENDED EXTENDED")
 		}
 	default:
 		panic("impossible cmp")

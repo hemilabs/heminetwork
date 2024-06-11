@@ -699,6 +699,13 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(500 * time.Millisecond)
+
+	log.Infof("did we fork?")
+
+	// Dump best chain
+	if err = n.dumpChain(n.Best()[0]); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // XXX this needs to actually test stuff. RN it is visual only.
