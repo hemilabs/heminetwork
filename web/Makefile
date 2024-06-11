@@ -12,7 +12,7 @@ WASM_BINARY=$(WEBAPP)/popminer.wasm
 version = $(patsubst v%,%,$(shell git describe --tags 2>/dev/null || echo "v0.0.0"))
 commit = $(shell git rev-parse --short HEAD)
 
-.PHONY: all clean wasm www
+.PHONY: all clean wasm wasm-opt www
 
 all: wasm www
 
@@ -20,11 +20,18 @@ clean:
 	rm -rf ${WEBAPP}
 	rm -rf ${WASM_BINARY}
 
-# TODO(joshuasing): research using binaryen (wasm-opt) to optimise output binary
 wasm:
 	CGO_ENABLED=0 GOOS=js GOARCH=wasm go build -trimpath -tags "$(BUILD_TAGS)" \
 		-ldflags "-s -w -X main.version=${version} -X main.gitCommit=${commit}" \
 		-o ${WASM_BINARY} ${PROJECTPATH}/popminer/...
+
+wasm-opt:
+	@which wasm-opt || {\
+		echo "wasm-opt: wasm-opt must be installed to use this target";\
+		echo "wasm-opt: https://github.com/WebAssembly/binaryen";\
+		exit 1; }
+	wasm-opt -Oz ${WASM_BINARY} -o ${WASM_BINARY}.opt --enable-bulk-memory --intrinsic-lowering
+	mv ${WASM_BINARY}.opt ${WASM_BINARY}
 
 www: wasm
 	mkdir -p ${WEBAPP}
