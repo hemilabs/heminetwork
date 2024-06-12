@@ -293,11 +293,9 @@ func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	return bh
 }
 
-// XXX this really is onlu use to insert genesis. Maybe make it a bit less db
-// tx or whatnot.
-func (l *ldb) BlockHeaderInsert(ctx context.Context, height uint64, bh [80]byte) error {
-	log.Tracef("BlockHeaderInsert")
-	defer log.Tracef("BlockHeaderInsert exit")
+func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
+	log.Tracef("BlockHeaderGenesisInsert")
+	defer log.Tracef("BlockHeaderGenesisInsert exit")
 
 	wbh, err := b2h(bh[:])
 	if err != nil {
@@ -340,16 +338,12 @@ func (l *ldb) BlockHeaderInsert(ctx context.Context, height uint64, bh [80]byte)
 	bmBatch := new(leveldb.Batch)
 	bhBatch := new(leveldb.Batch)
 
-	hhKey := heightHashToKey(height, bhash[:])
+	hhKey := heightHashToKey(0, bhash[:])
 	hhBatch.Put(hhKey, []byte{})
-	if height != 0 {
-		// XXX this is too magical and asumes genesis has been inserted
-		bmBatch.Put(hhKey, []byte{})
-	}
-	ebh := encodeBlockHeader(height, bh, new(big.Int)) // XXX this is not correct
+	ebh := encodeBlockHeader(0, bh, new(big.Int))
 	bhBatch.Put(bhash[:], ebh[:])
 
-	bhBatch.Put([]byte(bhsLastKey), ebh[:]) // XXX this is not correct
+	bhBatch.Put([]byte(bhsLastKey), ebh[:])
 
 	// Write height hash batch
 	err = hhTx.Write(hhBatch, nil)
@@ -462,7 +456,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		}
 		return tbcd.ITInvalid, nil, fmt.Errorf("best block header: %v", err)
 	}
-	bestBH := decodeBlockHeader(bbh) // XXX shouldn't this return chainhashes?
+	bestBH := decodeBlockHeader(bbh)
 
 	// Fork is set to true if the first blockheader does not connect to the
 	// canonical blockheader.
@@ -485,9 +479,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 	cdiff := &pbh.Difficulty
 	height := pbh.Height
-	// XXX if we zap the blockheaders table we should only
-	// insert *if* block indeed does not exist
-
 	for k, bh := range bhs {
 		// The first element is skipped, as it is pre-decoded.
 		if k != 0 {
@@ -505,7 +496,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 		// Store height_hash for future reference
 		hhKey := heightHashToKey(height, bhash[:])
-		hhBatch.Put(hhKey, []byte{})
+		hhBatch.Put(hhKey, []byte{}) // XXX nil?
 
 		// Insert a synthesized height_hash key that serves as an index
 		// to see which blocks are missing.
@@ -524,38 +515,35 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		lastRecord = ebh[:]
 	}
 
-	// Insert last height into block headers if the new cumulative
-	// difficulty exceeds the prior difficulty.
+	// Reason about needing to check fork flag. For now keep it here to
+	// distinguish between certain fork and maybe fork paths.
 	var it tbcd.InsertType
-	switch cdiff.Cmp(&bestBH.Difficulty) {
-	case -1:
-		// Extend fork, fork did not overcome difficulty
-		bhsBatch.Put([]byte(bhsLastKey), lastRecord)
-		it = tbcd.ITChainFork
+	if fork {
+		// Insert last height into block headers if the new cumulative
+		// difficulty exceeds the prior difficulty.
+		switch cdiff.Cmp(&bestBH.Difficulty) {
+		case -1, 0:
+			// Extend fork, fork did not overcome difficulty
+			it = tbcd.ITForkExtend
 
-		// XXX should we return old best block header here?
-		// That way the caller can do best vs previous best diff.
-		log.Debugf("(%v) -1: %v < %v", height, cdiff, bestBH.Difficulty)
-	case 0:
-		// Extend fork to the same exact difficulty
-		it = tbcd.ITForkExtend
-		log.Debugf("(%v) 0: %v = %v", height, cdiff, bestBH.Difficulty)
-	case 1:
-		log.Debugf("(%v) 1: %v > %v", height, cdiff, bestBH.Difficulty)
-		// log.Infof("%v", spew.Sdump(bestBH.Hash[:]))
-		// log.Infof("%v", spew.Sdump(firstHash))
+			// XXX should we return old best block header here?
+			// That way the caller can do best vs previous best diff.
+			log.Debugf("(%v) : %v <= %v", height, cdiff, bestBH.Difficulty)
+
+		case 1:
+			log.Debugf("(%v) 1: %v > %v", height, cdiff, bestBH.Difficulty)
+			// log.Infof("%v", spew.Sdump(bestBH.Hash[:]))
+			// log.Infof("%v", spew.Sdump(firstHash))
+			// pick the right return value based on ancestor
+			bhsBatch.Put([]byte(bhsLastKey), lastRecord)
+			it = tbcd.ITChainFork
+		default:
+			panic("bug: impossible cmp value")
+		}
+	} else {
 		// Extend current best tip
 		bhsBatch.Put([]byte(bhsLastKey), lastRecord)
-		// pick the right return value based on ancestor
-		if fork {
-			it = tbcd.ITChainFork
-			log.Infof("FORK FORK FORK")
-		} else {
-			it = tbcd.ITChainExtend
-			log.Infof("EXTENDED EXTENDED EXTENDED")
-		}
-	default:
-		panic("impossible cmp")
+		it = tbcd.ITChainExtend
 	}
 
 	// Create artificial last block header to return to caller.

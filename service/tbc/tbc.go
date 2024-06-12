@@ -115,13 +115,12 @@ func header2Slice(wbh *wire.BlockHeader) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func header2Array(wbh *wire.BlockHeader) (b [80]byte, err error) {
-	var sb []byte
-	sb, err = header2Slice(wbh)
+func header2Array(wbh *wire.BlockHeader) ([80]byte, error) {
+	sb, err := header2Slice(wbh)
 	if err != nil {
+		return [80]byte{}, err
 	}
-	copy(b[:], sb[:])
-	return
+	return [80]byte(sb), nil
 }
 
 func h2b(wbh *wire.BlockHeader) []byte {
@@ -1382,7 +1381,7 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("serialize genesis block header: %w", err)
 	}
-	err = s.db.BlockHeaderInsert(ctx, 0, gbh)
+	err = s.db.BlockHeaderGenesisInsert(ctx, gbh)
 	if err != nil {
 		return fmt.Errorf("genesis block header insert: %w", err)
 	}

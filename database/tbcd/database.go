@@ -51,7 +51,7 @@ type Database interface {
 	// Block header
 	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
-	BlockHeaderInsert(ctx context.Context, height uint64, bh [80]byte) error // do not use
+	BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error // do not use
 
 	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
