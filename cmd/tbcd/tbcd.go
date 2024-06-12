@@ -75,6 +75,12 @@ var (
 			Help:         "bitcoin network; mainnet or testnet3",
 			Print:        config.PrintAll,
 		},
+		"TBC_PEERS_WANTED": config.Config{
+			Value:        &cfg.PeersWanted,
+			DefaultValue: 64,
+			Help:         "number of wanted p2p peers",
+			Print:        config.PrintAll,
+		},
 		"TBC_PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,
 			DefaultValue: "",
