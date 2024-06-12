@@ -41,15 +41,6 @@ func bytes2Header(header []byte) (*wire.BlockHeader, error) {
 	return &bh, nil
 }
 
-func h2b80(wbh *wire.BlockHeader) (b [80]byte) {
-	w := bytes.NewBuffer(b[:])
-	err := wbh.Serialize(w)
-	if err != nil {
-		panic(err)
-	}
-	return
-}
-
 func h2b(wbh *wire.BlockHeader) []byte {
 	hb, err := header2Bytes(wbh)
 	if err != nil {
@@ -91,9 +82,10 @@ func TestEncodeDecodeBlockHeader(t *testing.T) {
 		Header:     h2b(&genesisBH),
 		Difficulty: *difficulty,
 	}
-	er := encodeBlockHeader(bh.Height, h2b80(&genesisBH), &bh.Difficulty)
+	er := encodeBlockHeader(bh.Height, [80]byte(h2b(&genesisBH)), &bh.Difficulty)
 	dr := decodeBlockHeader(er[:])
 	if diff := deep.Equal(bh, *dr); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %v%v", spew.Sdump(bh), spew.Sdump(dr))
 		t.Errorf("unexpected diff: %s", diff)
 	}
 }
