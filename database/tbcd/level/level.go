@@ -44,7 +44,7 @@ const (
 	logLevel = "INFO"
 	verbose  = false
 
-	bhsLastKey = "last" // XXX rename best
+	bhsCanonicalTipKey = "canonicaltip"
 
 	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
@@ -233,7 +233,7 @@ func (l *ldb) BlockHeaderBest(ctx context.Context) (*tbcd.BlockHeader, error) {
 
 	bhsDB := l.pool[level.BlockHeadersDB]
 	// Get last record
-	ebh, err := bhsDB.Get([]byte(bhsLastKey), nil)
+	ebh, err := bhsDB.Get([]byte(bhsCanonicalTipKey), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError("best block header not found")
@@ -343,7 +343,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 	ebh := encodeBlockHeader(0, bh, new(big.Int))
 	bhBatch.Put(bhash[:], ebh[:])
 
-	bhBatch.Put([]byte(bhsLastKey), ebh[:])
+	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
 
 	// Write height hash batch
 	err = hhTx.Write(hhBatch, nil)
@@ -454,9 +454,9 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	}
 	defer hhDiscard()
 
-	// retrieve best record
+	// retrieve best/canonical block header
 	var lastRecord []byte
-	bbh, err := bhsTx.Get([]byte(bhsLastKey), nil)
+	bbh, err := bhsTx.Get([]byte(bhsCanonicalTipKey), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return tbcd.ITInvalid, nil, nil,
@@ -471,6 +471,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// canonical blockheader.
 	fork := !bytes.Equal(wbh.PrevBlock[:], bestBH.Hash[:])
 	if fork {
+		// XXX make debug
 		b, _ := chainhash.NewHash(bestBH.Hash[:])
 		log.Infof("=== FORK ===")
 		log.Infof("blockheader hash: %v", wbh.BlockHash())
@@ -555,7 +556,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 			// log.Infof("%v", spew.Sdump(bestBH.Hash[:]))
 			// log.Infof("%v", spew.Sdump(firstHash))
 			// pick the right return value based on ancestor
-			bhsBatch.Put([]byte(bhsLastKey), lastRecord)
+			bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 			it = tbcd.ITChainFork
 
 			// XXX duplicate below
@@ -574,7 +575,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		}
 	} else {
 		// Extend current best tip
-		bhsBatch.Put([]byte(bhsLastKey), lastRecord)
+		bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 		it = tbcd.ITChainExtend
 
 		// XXX duplicate above
