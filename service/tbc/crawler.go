@@ -444,6 +444,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 		}
 		s.mtx.Unlock()
 
+		// XXX explain why we need to get more headers here
 		// continue getting headers, XXX this does not belong here either
 		// XXX if bh download fails we will get jammed. We need a queued "must execute this command" added to peer/service.
 		log.Infof("resuming block header download at: %v", actualHeight)
@@ -456,7 +457,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 
 	log.Infof("working")
 	// Outputs index
-	uhBE, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey)
+	uhBE, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey) // XXX this must be hash based
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return fmt.Errorf("utxo indexer metadata get: %w", err)
@@ -473,7 +474,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 	}
 
 	// Transactions index
-	thBE, err := s.db.MetadataGet(ctx, TxIndexHeightKey)
+	thBE, err := s.db.MetadataGet(ctx, TxIndexHeightKey) // XXX this must be hash based
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return fmt.Errorf("tx indexer metadata get: %w", err)

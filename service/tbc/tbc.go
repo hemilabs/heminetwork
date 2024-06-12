@@ -840,165 +840,6 @@ func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) {
 	log.Tracef("handlePong %v: pong %v", p.address, pong.Nonce)
 }
 
-//func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv) {
-//	log.Tracef("handleInv (%v)", p)
-//	defer log.Tracef("handleInv exit (%v)", p)
-//
-//	// XXX this currently does nothing. Blocks are requested elsewhere.
-//	if true {
-//		return
-//	}
-//
-//	var bis []tbcd.BlockIdentifier
-//	for k := range msg.InvList {
-//		switch msg.InvList[k].Type {
-//		case wire.InvTypeBlock:
-//
-//			// XXX height is missing here, looks right but assert
-//			// that this isn't broken.
-//			log.Infof("handleInv: block %v", msg.InvList[k].Hash)
-//
-//			bis = append(bis, tbcd.BlockIdentifier{
-//				Hash: msg.InvList[k].Hash[:], // fake out
-//			})
-//			log.Infof("handleInv: block %v", msg.InvList[k].Hash)
-//		case wire.InvTypeTx:
-//			// XXX silence mempool for now
-//			return
-//		default:
-//			log.Infof("handleInv: skipping inv type %v", msg.InvList[k].Type)
-//			return
-//		}
-//	}
-//
-//	// XXX This happens during block header download, we should not react
-//	// Probably move into the invtype switch
-//	// log.Infof("download blocks if we like them")
-//	// if len(bis) > 0 {
-//	//	s.mtx.Lock()
-//	//	defer s.mtx.Unlock()
-//	//	err := s.downloadBlocks(ctx, bis)
-//	//	if err != nil {
-//	//		log.Errorf("download blocks: %v", err)
-//	//		return
-//	//	}
-//	// }
-//}
-
-//func (s *Server) txIndexer(ctx context.Context) {
-//	log.Tracef("txIndexer")
-//	defer log.Tracef("txIndexer exit")
-//
-//	if !s.cfg.AutoIndex {
-//		return
-//	}
-//
-//	// only one txIndexer may run at any given time
-//	s.mtx.Lock()
-//	if s.txIndexerRunning {
-//		s.mtx.Unlock()
-//		return
-//	}
-//	s.txIndexerRunning = true
-//	s.mtx.Unlock()
-//
-//	// mark txIndexer not running on exit
-//	defer func() {
-//		s.mtx.Lock()
-//		s.txIndexerRunning = false
-//		s.mtx.Unlock()
-//	}()
-//
-//	if s.blocksMissing(ctx) {
-//		return
-//	}
-//
-//	// Get height from db
-//	he, err := s.db.MetadataGet(ctx, TxIndexHeightKey)
-//	if err != nil {
-//		if !errors.Is(err, database.ErrNotFound) {
-//			log.Errorf("tx indexer metadata get: %v", err)
-//			return
-//		}
-//		he = make([]byte, 8)
-//	}
-//	h := binary.BigEndian.Uint64(he)
-//
-//	// Skip txIndexer if we are at best block height. This is a bit racy.
-//	bhb, err := s.db.BlockHeaderBest(ctx)
-//	if err != nil {
-//		log.Errorf("utxo indexer block headers best: %v", err)
-//		return
-//	}
-//	if bhb.Height != h-1 {
-//		err = s.TxIndexer(ctx, h, 0)
-//		if err != nil {
-//			log.Errorf("tx indexer: %v", err)
-//			return
-//		}
-//	}
-//}
-
-//func (s *Server) utxoIndexer(ctx context.Context) {
-//	log.Tracef("utxoIndexer")
-//	defer log.Tracef("utxoIndexer exit")
-//
-//	if !s.cfg.AutoIndex {
-//		return
-//	}
-//
-//	// only one utxoIndexer may run at any given time
-//	s.mtx.Lock()
-//	if s.utxoIndexerRunning {
-//		s.mtx.Unlock()
-//		return
-//	}
-//	s.utxoIndexerRunning = true
-//	s.mtx.Unlock()
-//
-//	// mark utxoIndexer not running on exit
-//	defer func() {
-//		s.mtx.Lock()
-//		s.utxoIndexerRunning = false
-//		s.mtx.Unlock()
-//	}()
-//
-//	// exit if we aren't synced
-//	if s.blocksMissing(ctx) {
-//		return
-//	}
-//
-//	// Index all utxos
-//
-//	// Get height from db
-//	he, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey)
-//	if err != nil {
-//		if !errors.Is(err, database.ErrNotFound) {
-//			log.Errorf("utxo indexer metadata get: %v", err)
-//			return
-//		}
-//		he = make([]byte, 8)
-//	}
-//	h := binary.BigEndian.Uint64(he)
-//
-//	// Skip UtxoIndex if we are at best block height. This is a bit racy.
-//	bhb, err := s.db.BlockHeaderBest(ctx)
-//	if err != nil {
-//		log.Errorf("utxo indexer block headers best: %v", err)
-//		return
-//	}
-//	if bhb.Height != h-1 {
-//		err = s.UtxoIndexer(ctx, h, 0)
-//		if err != nil {
-//			log.Errorf("utxo indexer: %v", err)
-//			return
-//		}
-//	}
-//
-//	// When utxo sync completes kick off tx sync
-//	go s.txIndexer(ctx)
-//}
-
 func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash) {
 	log.Tracef("downloadBlock")
 	defer log.Tracef("downloadBlock exit")
@@ -1080,12 +921,11 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			return
 		}
 
-		// Exit if AutoIndez isn't enabled
+		// Exit if AutoIndex isn't enabled.
 		if !s.cfg.AutoIndex {
 			return
 		}
 
-		// XXX this really should be hash based
 		bhb, err := s.db.BlockHeaderBest(ctx)
 		if err != nil {
 			log.Errorf("sync blocks best block header: %v", err)
@@ -1095,7 +935,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		go func() {
 			// we really want to push the indexing reentrancy into this call
 			log.Infof("quiescing p2p and indexing to: %v", bhb.Height)
-			err = s.SyncIndexersToHeight(ctx, bhb.Height+1)
+			err = s.SyncIndexersToHeight(ctx, bhb.Height+1) // XXX make hash
 			if err != nil {
 				log.Errorf("sync blocks: %v", err)
 				return
@@ -1180,52 +1020,68 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	}
 
 	if len(headers) > 0 {
-		it, lbh, err := s.db.BlockHeadersInsert(ctx, headers)
+		it, cbh, lbh, err := s.db.BlockHeadersInsert(ctx, headers)
 		if err != nil {
 			// This ends the race between peers during IBD.
-			if !database.ErrDuplicate.Is(err) {
+			if !errors.Is(database.ErrDuplicate, err) {
 				// XXX do we need to ask for more headers?
-
 				log.Errorf("block headers insert: %v", err)
 			}
 			return
 		}
 
+		// Note that BlockHeadersInsert always returns the canonical
+		// tip blockheader.
+		var height uint64
 		switch it {
-		case tbcd.ITForkExtend:
-			// Ask for more fork headers.
-			err = s.getHeaders(ctx, p, lbh.Header)
-			if err != nil {
-				log.Errorf("get headers: %v", err)
-				return
-			}
-
-			// Also ask for more headers at tip
-			s.mtx.Lock()
-			header := make([]byte, len(lbh.Header))
-			copy(header, lbh.Header[:])
-			s.mtx.Unlock()
-			err = s.getHeaders(ctx, p, header)
-			if err != nil {
-				log.Errorf("get headers: %v", err)
-				return
-			}
-
 		case tbcd.ITChainExtend:
-			// Ask for next batch of headers
-			err = s.getHeaders(ctx, p, lbh.Header)
+			height = cbh.Height
+
+			// Ask for next batch of headers at canonical tip.
+			err = s.getHeaders(ctx, p, cbh.Header)
 			if err != nil {
 				log.Errorf("get headers: %v", err)
+				return
+			}
+
+		case tbcd.ITForkExtend:
+			height = lbh.Height
+
+			// Ask for more block headers at the fork tip.
+			err = s.getHeaders(ctx, p, lbh.Header)
+			if err != nil {
+				log.Errorf("get headers fork: %v", err)
+				return
+			}
+
+			// Also ask for more block headers at canonical tip
+			err = s.getHeaders(ctx, p, cbh.Header)
+			if err != nil {
+				log.Errorf("get headers canonical: %v", err)
 				return
 			}
 
 		case tbcd.ITChainFork:
-			// We may have to pause everything here in order to
-			// unwind/rewind indexes.
+			height = cbh.Height
+
 			if s.Synced(ctx).Synced {
 				// XXX this is racy but is a good enough test
 				// to get past most of this.
 				panic("chain forked, unwind/rewind indexes")
+			}
+
+			// Ask for more block headers at the fork tip.
+			err = s.getHeaders(ctx, p, lbh.Header)
+			if err != nil {
+				log.Errorf("get headers fork: %v", err)
+				return
+			}
+
+			// Also ask for more block headers at canonical tip
+			err = s.getHeaders(ctx, p, cbh.Header)
+			if err != nil {
+				log.Errorf("get headers canonical: %v", err)
+				return
 			}
 
 		default:
@@ -1236,7 +1092,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 		// XXX we probably don't want top print it
 		log.Infof("Inserted (%v) %v block headers height %v",
-			it, len(headers), lbh.Height)
+			it, len(headers), height)
 
 		// s.mtx.Lock()
 		// s.clipped = true

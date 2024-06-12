@@ -524,7 +524,7 @@ func TestFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:     true,
+		AutoIndex:     false,
 		BlockSanity:   false,
 		LevelDBHome:   t.TempDir(),
 		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
@@ -657,12 +657,12 @@ func TestFork(t *testing.T) {
 	if len(bhsAt11) != 2 {
 		t.Fatalf("expected 2 best blocks, got %v", len(bhsAt11))
 	}
-	if cfg.AutoIndex && !si.Synced {
-		t.Fatalf("expected synced chain")
-	}
 	// XXX check hashes
 	// t.Logf("block headers at 11: %v", spew.Sdump(bhsAt11))
 	time.Sleep(500 * time.Millisecond)
+	if cfg.AutoIndex && !si.Synced {
+		t.Fatalf("expected synced chain")
+	}
 
 	// Move 10b forward and overtake 11 a/b
 
@@ -676,7 +676,7 @@ func TestFork(t *testing.T) {
 	//           /-> 11b ->
 	// 9 -> 10a  ->  11a ->
 	//   \-> 10b ->  11c -> 12
-	log.Infof("mine 11c")
+	t.Logf("mine 11c")
 	b11c, err := n.Mine(1, &b10bHash, address)
 	if err != nil {
 		t.Fatal(err)
@@ -689,7 +689,7 @@ func TestFork(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	// 12
-	log.Infof("mine 12")
+	t.Logf("mine 12")
 	b12, err := n.Mine(1, &b11cHash, address)
 	if err != nil {
 		t.Fatal(err)
@@ -700,7 +700,7 @@ func TestFork(t *testing.T) {
 	}
 	time.Sleep(500 * time.Millisecond)
 
-	log.Infof("did we fork?")
+	t.Logf("did we fork?")
 
 	// Dump best chain
 	if err = n.dumpChain(n.Best()[0]); err != nil {
