@@ -145,11 +145,6 @@ func sliceChainHash(ch chainhash.Hash) []byte {
 	return ch[:]
 }
 
-type blockPeer struct {
-	expire time.Time // when does this command expire
-	peer   string    // who was handling it
-}
-
 type Config struct {
 	AutoIndex               bool
 	BlockSanity             bool
