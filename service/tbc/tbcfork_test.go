@@ -551,7 +551,7 @@ func TestFork(t *testing.T) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Second):
+		case <-time.After(2 * time.Second):
 		}
 
 		// See if we are at the right height
