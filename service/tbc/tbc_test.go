@@ -65,16 +65,19 @@ func TestBlockHeaderEncodeDecode(t *testing.T) {
 	gwbh := chainParams.GenesisBlock.Header
 	sh, err := header2Slice(&gwbh)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 	wbh, err := bytes2Header(sh)
+	if err != nil {
+		t.Error(err)
+	}
 	if diff := deep.Equal(&gwbh, wbh); len(diff) > 0 {
 		t.Errorf("unexpected diff: %s", diff)
 	}
 
 	ash, err := header2Array(&gwbh)
 	if err != nil {
-		t.Fatal(err)
+		t.Error(err)
 	}
 	awbh, err := bytes2Header(ash[:])
 	if diff := deep.Equal(&gwbh, awbh); len(diff) > 0 {
