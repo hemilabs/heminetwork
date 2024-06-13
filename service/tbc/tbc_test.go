@@ -766,23 +766,6 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 	return parsed.Tx[0]
 }
 
-func getEndpointWithRetries(ctx context.Context, container testcontainers.Container, retries int) (string, error) {
-	backoff := 500 * time.Millisecond
-	var lastError error
-	for range retries {
-		endpoint, err := container.Endpoint(ctx, "")
-		if err != nil {
-			lastError = err
-			time.Sleep(backoff)
-			backoff = backoff * 2
-			continue
-		}
-		return endpoint, nil
-	}
-
-	return "", lastError
-}
-
 func nextPort(ctx context.Context, t *testing.T) int {
 	for {
 		select {
