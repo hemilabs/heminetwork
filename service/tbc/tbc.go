@@ -131,14 +131,6 @@ func h2b(wbh *wire.BlockHeader) []byte {
 	return hb
 }
 
-func h2b80(wbh *wire.BlockHeader) [80]byte {
-	b, err := header2Array(wbh)
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
-
 func bytes2Header(header []byte) (*wire.BlockHeader, error) {
 	var bh wire.BlockHeader
 	err := bh.Deserialize(bytes.NewReader(header))
