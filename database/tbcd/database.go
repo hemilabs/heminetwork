@@ -29,7 +29,7 @@ const (
 	ITForkExtend  InsertType = 3 // Extended a fork, does not require further action.
 )
 
-var ITStrings = map[InsertType]string{
+var iTStrings = map[InsertType]string{
 	ITInvalid:     "invalid",
 	ITChainExtend: "chain extended",
 	ITChainFork:   "chain forked",
@@ -37,7 +37,7 @@ var ITStrings = map[InsertType]string{
 }
 
 func (it InsertType) String() string {
-	return ITStrings[it]
+	return iTStrings[it]
 }
 
 type Database interface {
