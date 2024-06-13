@@ -1020,20 +1020,3 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 
 	return bitcoindContainer, nat.Port(localnetPort)
 }
-
-func submitBlock(ctx context.Context, t *testing.T, rawBtcBlockHexEncoded string, bitcoindContainer testcontainers.Container) {
-	t.Helper()
-
-	if _, err := runBitcoinCommand(
-		ctx,
-		t,
-		bitcoindContainer,
-		[]string{
-			"bitcoin-cli",
-			"-regtest=1",
-			"submitblock",
-			rawBtcBlockHexEncoded,
-		}); err != nil {
-		t.Fatal(err)
-	}
-}
