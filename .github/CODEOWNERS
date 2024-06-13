@@ -1,0 +1,34 @@
+# This file exists to designate certain reviewers for certain areas of the
+# repository. This allows us to enhance security measures, streamline reviews
+# and help automate review requests.
+#
+# Most owners are people who have a lot of experience in a certain area of the
+# codebase, and as such are most suited to review changes to that area.
+#
+# Hemi Labs team members: If you feel you have a lot of experience in an area
+#  within the codebase, please add yourself as a code owner.
+
+# This is the default owner for all files in this repository.
+# Core Engineering is responsible for all source code in this repository.
+* @hemilabs/dev
+
+# GitHub Actions Workflows
+/.github/workflows/ @hemilabs/dev @joshuasing
+
+# Docker images
+/docker/ @hemilabs/dev @ClaytonNorthey92 @joshuasing
+
+# End-to-End testing
+/e2e/ @hemilabs/dev @ClaytonNorthey92
+
+# Pprof service
+/service/pprof/ @hemilabs/dev @joshuasing
+
+# Tiny Bitcoin Daemon (TBC)
+/api/tbcapi/    @hemilabs/dev @marcopeereboom @joshuasing
+/cmd/tbcd/      @hemilabs/dev @marcopeereboom
+/database/tbcd/ @hemilabs/dev @marcopeereboom
+/service/tbc/   @hemilabs/dev @marcopeereboom
+
+# WASM PoP Miner (popmd/wasm)
+/web/ @hemilabs/dev @joshuasing
