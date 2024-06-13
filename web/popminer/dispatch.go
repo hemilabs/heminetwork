@@ -24,23 +24,8 @@ import (
 	"github.com/hemilabs/heminetwork/service/popm"
 )
 
-const (
-	// The following can be dispatched at any time.
-	MethodVersion       = "version"       // Retrieve WASM version information
-	MethodGenerateKey   = "generateKey"   // Generate secp256k1 key pair
-	MethodStartPoPMiner = "startPoPMiner" // Start PoP Miner
-	MethodStopPoPMiner  = "stopPoPMiner"  // Stop PoP Miner
-
-	// The following can only be dispatched after the PoP Miner is running.
-	MethodPing           = "ping"           // Ping BFG
-	MethodL2Keystones    = "l2Keystones"    // Retrieve L2 keystones
-	MethodBitcoinBalance = "bitcoinBalance" // Retrieve bitcoin balance
-	MethodBitcoinInfo    = "bitcoinInfo"    // Retrieve bitcoin information
-	MethodBitcoinUTXOs   = "bitcoinUTXOs"   // Retrieve bitcoin UTXOs
-)
-
-// Dispatcher maps methods to the relative dispatch.
-var Dispatcher = map[string]*Dispatch{
+// handlers maps methods to the correct handler.
+var handlers = map[Method]*Dispatch{
 	MethodVersion: {
 		Handler: wasmVersion,
 	},
@@ -95,7 +80,7 @@ type DispatchArgs struct {
 }
 
 type Dispatch struct {
-	Handler  func(this js.Value, args []js.Value) (js.Value, error)
+	Handler  func(this js.Value, args []js.Value) (any, error)
 	Required []DispatchArgs
 }
 
@@ -139,7 +124,7 @@ func dispatch(this js.Value, args []js.Value) any {
 				reject.Invoke(jsError(err))
 				return
 			}
-			resolve.Invoke(rv)
+			resolve.Invoke(jsValueOf(rv))
 		}()
 
 		// The handler of a Promise doesn't return any value
@@ -165,7 +150,7 @@ func parseArgs(args []js.Value) (*Dispatch, error) {
 	if m.Type() != js.TypeString {
 		return nil, fmt.Errorf("expected method to be a string, got: %v", m.Type())
 	}
-	d, ok := Dispatcher[m.String()]
+	d, ok := handlers[Method(m.String())]
 	if !ok {
 		log.Warningf("method not found: %v", m.String())
 		return nil, fmt.Errorf("method not found: %v", m.String())
@@ -185,14 +170,14 @@ func parseArgs(args []js.Value) (*Dispatch, error) {
 	return d, nil
 }
 
-func wasmVersion(_ js.Value, _ []js.Value) (js.Value, error) {
-	return Object{
-		"version":   version,
-		"gitCommit": gitCommit,
-	}.Value(), nil
+func wasmVersion(_ js.Value, _ []js.Value) (any, error) {
+	return VersionResult{
+		Version:   version,
+		GitCommit: gitCommit,
+	}, nil
 }
 
-func generateKey(_ js.Value, args []js.Value) (js.Value, error) {
+func generateKey(_ js.Value, args []js.Value) (any, error) {
 	log.Tracef("generatekey")
 	defer log.Tracef("generatekey exit")
 
@@ -212,7 +197,7 @@ func generateKey(_ js.Value, args []js.Value) (js.Value, error) {
 		return js.Null(), fmt.Errorf("invalid network: %v", net)
 	}
 
-	// TODO: consider alternative as dcrsecpk256k1 package is large.
+	// TODO(joshuasing): consider alternative as dcrsecpk256k1 package is large.
 	privKey, err := dcrsecpk256k1.GeneratePrivateKey()
 	if err != nil {
 		log.Errorf("failed to generate private key: %v", err)
@@ -230,23 +215,23 @@ func generateKey(_ js.Value, args []js.Value) (js.Value, error) {
 	compressedPubKey := privKey.PubKey().SerializeCompressed()
 	ethereumAddress := ethereum.PublicKeyToAddress(compressedPubKey).String()
 
-	return Object{
-		"ethereumAddress": ethereumAddress,
-		"network":         netNormalized,
-		"privateKey":      hex.EncodeToString(privKey.Serialize()),
-		"publicKey":       hex.EncodeToString(compressedPubKey),
-		"publicKeyHash":   btcAddress.AddressPubKeyHash().String(),
-	}.Value(), nil
+	return GenerateKeyResult{
+		EthereumAddress: ethereumAddress,
+		Network:         netNormalized,
+		PrivateKey:      hex.EncodeToString(privKey.Serialize()),
+		PublicKey:       hex.EncodeToString(compressedPubKey),
+		PublicKeyHash:   btcAddress.AddressPubKeyHash().String(),
+	}, nil
 }
 
-func startPoPMiner(_ js.Value, args []js.Value) (js.Value, error) {
+func startPoPMiner(_ js.Value, args []js.Value) (any, error) {
 	log.Tracef("startPoPMiner")
 	defer log.Tracef("startPoPMiner exit")
 
 	pmMtx.Lock()
 	defer pmMtx.Unlock()
 	if pm != nil {
-		return js.Null(), errors.New("pop miner already started")
+		return nil, errors.New("pop miner already started")
 	}
 
 	pm = new(Miner)
@@ -260,12 +245,16 @@ func startPoPMiner(_ js.Value, args []js.Value) (js.Value, error) {
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "popm=ERROR"
 	}
-	loggo.ConfigureLoggers(cfg.LogLevel)
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		pm = nil
+		return nil, fmt.Errorf("configure logger: %w", err)
+	}
 
 	network := args[0].Get("network").String()
 	netOpts, ok := networks[network]
 	if !ok {
-		return js.Null(), fmt.Errorf("unknown network: %s", network)
+		pm = nil
+		return nil, fmt.Errorf("unknown network: %s", network)
 	}
 	cfg.BFGWSURL = netOpts.bfgURL
 	cfg.BTCChainName = netOpts.btcChainName
@@ -273,7 +262,8 @@ func startPoPMiner(_ js.Value, args []js.Value) (js.Value, error) {
 	var err error
 	pm.miner, err = popm.NewMiner(cfg)
 	if err != nil {
-		return js.Null(), fmt.Errorf("create PoP miner: %w", err)
+		pm = nil
+		return nil, fmt.Errorf("create PoP miner: %w", err)
 	}
 
 	// launch in background
@@ -281,24 +271,24 @@ func startPoPMiner(_ js.Value, args []js.Value) (js.Value, error) {
 	go func() {
 		defer pm.wg.Done()
 		if err := pm.miner.Run(pm.ctx); !errors.Is(err, context.Canceled) {
-			// TODO: dispatch event on failure
+			// TODO(joshuasing): dispatch event on failure
 			pmMtx.Lock()
 			defer pmMtx.Unlock()
 			pm.err = err // Theoretically this can logic race unless we unset om
 		}
 	}()
 
-	return js.Undefined(), nil
+	return js.Null(), nil
 }
 
-func stopPopMiner(_ js.Value, _ []js.Value) (js.Value, error) {
+func stopPopMiner(_ js.Value, _ []js.Value) (any, error) {
 	log.Tracef("stopPopMiner")
 	defer log.Tracef("stopPopMiner exit")
 
 	pmMtx.Lock()
 	if pm == nil {
 		pmMtx.Unlock()
-		return js.Null(), errors.New("pop miner not running")
+		return nil, errors.New("pop miner not running")
 	}
 
 	oldPM := pm
@@ -308,13 +298,13 @@ func stopPopMiner(_ js.Value, _ []js.Value) (js.Value, error) {
 	oldPM.wg.Wait()
 
 	if oldPM.err != nil {
-		return js.Null(), oldPM.err
+		return nil, oldPM.err
 	}
 
-	return js.Undefined(), nil
+	return js.Null(), nil
 }
 
-func ping(_ js.Value, _ []js.Value) (js.Value, error) {
+func ping(_ js.Value, _ []js.Value) (any, error) {
 	log.Tracef("ping")
 	defer log.Tracef("ping exit")
 
@@ -327,13 +317,15 @@ func ping(_ js.Value, _ []js.Value) (js.Value, error) {
 		return js.Null(), err
 	}
 
-	return Object{
-		"originTimestamp": pr.OriginTimestamp,
-		"timestamp":       pr.Timestamp,
-	}.Value(), nil
+	// TODO(joshuasing): protocol.PingResponse should really use a more accurate
+	//  time format instead of unix seconds.
+	return PingResult{
+		OriginTimestamp: time.Unix(pr.OriginTimestamp, 0).UnixNano(),
+		Timestamp:       time.Unix(pr.Timestamp, 0).UnixNano(),
+	}, nil
 }
 
-func l2Keystones(_ js.Value, args []js.Value) (js.Value, error) {
+func l2Keystones(_ js.Value, args []js.Value) (any, error) {
 	log.Tracef("l2Keystones")
 	defer log.Tracef("l2Keystones exit")
 
@@ -352,25 +344,25 @@ func l2Keystones(_ js.Value, args []js.Value) (js.Value, error) {
 		return js.Null(), err
 	}
 
-	keystones := make([]Object, len(pr.L2Keystones))
+	keystones := make([]L2Keystone, len(pr.L2Keystones))
 	for i, ks := range pr.L2Keystones {
-		keystones[i] = Object{
-			"version":            ks.Version,
-			"l1BlockNumber":      ks.L1BlockNumber,
-			"l2BlockNumber":      ks.L2BlockNumber,
-			"parentEPHash":       ks.ParentEPHash,
-			"prevKeystoneEPHash": ks.PrevKeystoneEPHash,
-			"stateRoot":          ks.StateRoot,
-			"epHash":             ks.EPHash,
+		keystones[i] = L2Keystone{
+			Version:            ks.Version,
+			L1BlockNumber:      ks.L1BlockNumber,
+			L2BlockNumber:      ks.L2BlockNumber,
+			ParentEPHash:       ks.ParentEPHash.String(),
+			PrevKeystoneEPHash: ks.PrevKeystoneEPHash.String(),
+			StateRoot:          ks.StateRoot.String(),
+			EPHash:             ks.EPHash.String(),
 		}
 	}
 
-	return Object{
-		"l2Keystones": pr.L2Keystones,
-	}.Value(), nil
+	return L2KeystoneResult{
+		L2Keystones: keystones,
+	}, nil
 }
 
-func bitcoinBalance(_ js.Value, args []js.Value) (js.Value, error) {
+func bitcoinBalance(_ js.Value, args []js.Value) (any, error) {
 	log.Tracef("bitcoinBalance")
 	defer log.Tracef("bitcoinBalance exit")
 
@@ -385,13 +377,13 @@ func bitcoinBalance(_ js.Value, args []js.Value) (js.Value, error) {
 		return js.Null(), err
 	}
 
-	return Object{
-		"confirmed":   pr.Confirmed,
-		"unconfirmed": pr.Unconfirmed,
-	}.Value(), nil
+	return BitcoinBalanceResult{
+		Confirmed:   pr.Confirmed,
+		Unconfirmed: pr.Unconfirmed,
+	}, nil
 }
 
-func bitcoinInfo(_ js.Value, _ []js.Value) (js.Value, error) {
+func bitcoinInfo(_ js.Value, _ []js.Value) (any, error) {
 	log.Tracef("bitcoinInfo")
 	defer log.Tracef("bitcoinInfo exit")
 
@@ -404,12 +396,12 @@ func bitcoinInfo(_ js.Value, _ []js.Value) (js.Value, error) {
 		return js.Null(), err
 	}
 
-	return Object{
-		"height": pr.Height,
-	}.Value(), nil
+	return BitcoinInfoResult{
+		Height: pr.Height,
+	}, nil
 }
 
-func bitcoinUTXOs(this js.Value, args []js.Value) (js.Value, error) {
+func bitcoinUTXOs(this js.Value, args []js.Value) (any, error) {
 	log.Tracef("bitcoinUTXOs")
 	defer log.Tracef("bitcoinUTXOs exit")
 
@@ -417,23 +409,23 @@ func bitcoinUTXOs(this js.Value, args []js.Value) (js.Value, error) {
 
 	activePM, err := activeMiner()
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 	pr, err := activePM.miner.BitcoinUTXOs(activePM.ctx, scriptHash)
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 
-	utxos := make([]Object, len(pr.UTXOs))
+	utxos := make([]BitcoinUTXO, len(pr.UTXOs))
 	for i, u := range pr.UTXOs {
-		utxos[i] = Object{
-			"hash":  u.Hash,
-			"index": u.Index,
-			"value": u.Value,
+		utxos[i] = BitcoinUTXO{
+			Hash:  u.Hash.String(),
+			Index: u.Index,
+			Value: u.Value,
 		}
 	}
 
-	return Object{
-		"utxos": utxos,
-	}.Value(), nil
+	return BitcoinUTXOsResult{
+		UTXOs: utxos,
+	}, nil
 }
