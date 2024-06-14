@@ -29,7 +29,7 @@ const (
 	ITForkExtend  InsertType = 3 // Extended a fork, does not require further action.
 )
 
-var iTStrings = map[InsertType]string{
+var itStrings = map[InsertType]string{
 	ITInvalid:     "invalid",
 	ITChainExtend: "chain extended",
 	ITChainFork:   "chain forked",
