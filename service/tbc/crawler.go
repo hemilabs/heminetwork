@@ -455,7 +455,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 		}
 	}()
 
-	log.Infof("working")
+	log.Debugf("Syncing to: %v", height)
 	// Outputs index
 	uhBE, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey) // XXX this must be hash based
 	if err != nil {
@@ -489,7 +489,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 			return fmt.Errorf("tx indexer: %w", err)
 		}
 	}
-	log.Infof("done working")
+	log.Debugf("Done syncing to: %v", height)
 
 	return nil
 }
