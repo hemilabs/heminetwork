@@ -61,8 +61,7 @@ func init() {
 
 func b2h(header []byte) (*wire.BlockHeader, error) {
 	var bh wire.BlockHeader
-	err := bh.Deserialize(bytes.NewReader(header))
-	if err != nil {
+	if err := bh.Deserialize(bytes.NewReader(header)); err != nil {
 		return nil, fmt.Errorf("deserialize block header: %w", err)
 	}
 	return &bh, nil
@@ -141,8 +140,7 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 		}
 	}
 	cf := func() error {
-		err = tx.Commit()
-		if err != nil {
+		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%v discard: %w", db, err)
 		}
 		*discard = false
@@ -346,38 +344,32 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
 
 	// Write height hash batch
-	err = hhTx.Write(hhBatch, nil)
-	if err != nil {
+	if err = hhTx.Write(hhBatch, nil); err != nil {
 		return fmt.Errorf("height hash batch: %w", err)
 	}
 
 	// Write missing blocks batch
-	err = bmTx.Write(bmBatch, nil)
-	if err != nil {
+	if err = bmTx.Write(bmBatch, nil); err != nil {
 		return fmt.Errorf("blocks missing batch: %w", err)
 	}
 
 	// Write block headers batch
-	err = bhsTx.Write(bhBatch, nil)
-	if err != nil {
+	if err = bhsTx.Write(bhBatch, nil); err != nil {
 		return fmt.Errorf("block header insert: %w", err)
 	}
 
 	// height hash commit
-	err = hhCommit()
-	if err != nil {
+	if err = hhCommit(); err != nil {
 		return fmt.Errorf("height hash commit: %w", err)
 	}
 
 	// blocks missing commit
-	err = bmCommit()
-	if err != nil {
+	if err = bmCommit(); err != nil {
 		return fmt.Errorf("blocks missing commit: %w", err)
 	}
 
 	// block headers commit
-	err = bhsCommit()
-	if err != nil {
+	if err = bhsCommit(); err != nil {
 		return fmt.Errorf("block header commit: %w", err)
 	}
 
@@ -590,43 +582,37 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	}
 
 	// Write height hash batch
-	err = hhTx.Write(hhBatch, nil)
-	if err != nil {
+	if err = hhTx.Write(hhBatch, nil); err != nil {
 		return tbcd.ITInvalid, nil, nil,
 			fmt.Errorf("height hash batch: %w", err)
 	}
 
 	// Write missing blocks batch
-	err = bmTx.Write(bmBatch, nil)
-	if err != nil {
+	if err = bmTx.Write(bmBatch, nil); err != nil {
 		return tbcd.ITInvalid, nil, nil,
 			fmt.Errorf("blocks missing batch: %w", err)
 	}
 
 	// Write block headers batch
-	err = bhsTx.Write(bhsBatch, nil)
-	if err != nil {
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
 		return tbcd.ITInvalid, nil, nil,
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// height hash commit
-	err = hhCommit()
-	if err != nil {
+	if err = hhCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil,
 			fmt.Errorf("height hash commit: %w", err)
 	}
 
 	// blocks missing commit
-	err = bmCommit()
-	if err != nil {
+	if err = bmCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil,
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
 
 	// block headers commit
-	err = bhsCommit()
-	if err != nil {
+	if err = bhsCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, fmt.Errorf("block headers commit: %w", err)
 	}
 
@@ -743,8 +729,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	}
 	if !has {
 		// Insert block since we do not have it yet
-		err = bDB.Put(b.Hash, b.Block, nil)
-		if err != nil {
+		if err = bDB.Put(b.Hash, b.Block, nil); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 	}
@@ -756,8 +741,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	// Remove block identifier from blocks missing
 	key := heightHashToKey(bh.Height, bh.Hash)
 	bmDB := l.pool[level.BlocksMissingDB]
-	err = bmDB.Delete(key, nil)
-	if err != nil {
+	if err = bmDB.Delete(key, nil); err != nil {
 		// Ignore not found
 		if errors.Is(err, leveldb.ErrNotFound) {
 			log.Errorf("block insert delete from missing: %v", err)
@@ -957,14 +941,12 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 	}
 
 	// Write outputs batch
-	err = outsTx.Write(outsBatch, nil)
-	if err != nil {
+	if err = outsTx.Write(outsBatch, nil); err != nil {
 		return fmt.Errorf("outputs insert: %w", err)
 	}
 
 	// outputs commit
-	err = outsCommit()
-	if err != nil {
+	if err = outsCommit(); err != nil {
 		return fmt.Errorf("outputs commit: %w", err)
 	}
 
@@ -1007,14 +989,12 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxKey]*tbcd.TxValu
 	}
 
 	// Write transactions batch
-	err = txsTx.Write(txsBatch, nil)
-	if err != nil {
+	if err = txsTx.Write(txsBatch, nil); err != nil {
 		return fmt.Errorf("transactions insert: %w", err)
 	}
 
 	// transactions commit
-	err = txsCommit()
-	if err != nil {
+	if err = txsCommit(); err != nil {
 		return fmt.Errorf("transactions commit: %w", err)
 	}
 
