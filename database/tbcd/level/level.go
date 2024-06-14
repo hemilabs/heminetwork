@@ -516,12 +516,19 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		lastRecord = ebh[:]
 	}
 
-	// Reason about needing to check fork flag. For now keep it here to
-	// distinguish between certain fork and maybe fork paths.
-	var (
-		it       tbcd.InsertType
-		cbh, lbh *tbcd.BlockHeader
-	)
+	var header [80]byte
+	copy(header[:], bhs[len(bhs)-1][:])
+	cbh := &tbcd.BlockHeader{
+		Hash:       bhash[:],
+		Height:     height,
+		Header:     header[:],
+		Difficulty: *cdiff,
+	}
+	lbh := cbh
+
+	// XXX: Reason about needing to check fork flag. For now keep it here to
+	//  distinguish between certain fork and maybe fork paths.
+	var it tbcd.InsertType
 	if fork {
 		// Insert last height into block headers if the new cumulative
 		// difficulty exceeds the prior difficulty.
@@ -534,13 +541,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 			// That way the caller can do best vs previous best diff.
 			log.Debugf("(%v) : %v <= %v", height, cdiff, bestBH.Difficulty)
 			cbh = bestBH
-			var header [80]byte
-			lbh = &tbcd.BlockHeader{
-				Hash:       bhash[:],
-				Height:     height,
-				Header:     header[:],
-				Difficulty: *cdiff,
-			}
 
 		case 1:
 			log.Debugf("(%v) 1: %v > %v", height, cdiff, bestBH.Difficulty)
@@ -550,17 +550,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 			bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 			it = tbcd.ITChainFork
 
-			// XXX duplicate below
-			var header [80]byte
-			copy(header[:], bhs[len(bhs)-1][:])
-			cbh = &tbcd.BlockHeader{
-				Hash:       bhash[:],
-				Height:     height,
-				Header:     header[:],
-				Difficulty: *cdiff,
-			}
-			lbh = cbh
-
 		default:
 			panic("bug: impossible cmp value")
 		}
@@ -568,17 +557,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		// Extend current best tip
 		bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 		it = tbcd.ITChainExtend
-
-		// XXX duplicate above
-		var header [80]byte
-		copy(header[:], bhs[len(bhs)-1][:])
-		cbh = &tbcd.BlockHeader{
-			Hash:       bhash[:],
-			Height:     height,
-			Header:     header[:],
-			Difficulty: *cdiff,
-		}
-		lbh = cbh
 	}
 
 	// Write height hash batch
