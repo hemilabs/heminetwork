@@ -157,8 +157,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 
 		// fixupCache is executed in parallel meaning that the utxos
 		// map must be locked as it is being processed.
-		err = s.fixupCache(ctx, b, utxos)
-		if err != nil {
+		if err = s.fixupCache(ctx, b, utxos); err != nil {
 			return 0, fmt.Errorf("parse block %v: %w", height, err)
 		}
 		// At this point we can lockless since it is all single
@@ -225,8 +224,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 			s.cfg.MaxCachedTxs-utxosCached, utxosCached/blocksProcessed)
 
 		start = time.Now()
-		err = s.db.BlockUtxoUpdate(ctx, utxos)
-		if err != nil {
+		if err = s.db.BlockUtxoUpdate(ctx, utxos); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -374,8 +372,7 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
 
 		start = time.Now()
-		err = s.db.BlockTxUpdate(ctx, txs)
-		if err != nil {
+		if err = s.db.BlockTxUpdate(ctx, txs); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -445,8 +442,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 		// continue getting headers, XXX this does not belong here either
 		// XXX if bh download fails we will get jammed. We need a queued "must execute this command" added to peer/service.
 		log.Infof("resuming block header download at: %v", actualHeight)
-		err = s.getHeaders(ctx, p, bhb)
-		if err != nil {
+		if err = s.getHeaders(ctx, p, bhb); err != nil {
 			log.Errorf("sync indexers: %v", err)
 			return
 		}
