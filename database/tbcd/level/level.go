@@ -471,15 +471,14 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// canonical blockheader.
 	fork := !bytes.Equal(wbh.PrevBlock[:], bestBH.Hash[:])
 	if fork {
-		// XXX make debug
 		b, _ := chainhash.NewHash(bestBH.Hash[:])
-		log.Infof("=== FORK ===")
-		log.Infof("blockheader hash: %v", wbh.BlockHash())
-		log.Infof("previous hash   : %v", wbh.PrevBlock)
-		log.Infof("previous height : %v", pbh.Height)
-		log.Infof("best hash       : %v", b)
-		log.Infof("best height     : %v", bestBH.Height)
-		log.Infof("--- FORK ---")
+		log.Debugf("=== FORK ===")
+		log.Debugf("blockheader hash: %v", wbh.BlockHash())
+		log.Debugf("previous hash   : %v", wbh.PrevBlock)
+		log.Debugf("previous height : %v", pbh.Height)
+		log.Debugf("best hash       : %v", b)
+		log.Debugf("best height     : %v", bestBH.Height)
+		log.Debugf("--- FORK ---")
 	}
 
 	// Insert missing blocks and block headers
