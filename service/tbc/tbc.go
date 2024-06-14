@@ -761,7 +761,7 @@ func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
 	}
 	err := s.db.PeersInsert(ctx, peers)
 	// Don't log insert 0, its a dup.
-	if err != nil && !database.ErrZeroRows.Is(err) {
+	if err != nil && !errors.Is(err, database.ErrZeroRows) {
 		log.Errorf("%v", err)
 	}
 }
@@ -779,7 +779,7 @@ func (s *Server) handleAddrV2(ctx context.Context, p *peer, msg *wire.MsgAddrV2)
 	}
 	err := s.db.PeersInsert(ctx, peers)
 	// Don't log insert 0, its a dup.
-	if err != nil && !database.ErrZeroRows.Is(err) {
+	if err != nil && !errors.Is(err, database.ErrZeroRows) {
 		log.Errorf("%v", err)
 	}
 }
@@ -1569,7 +1569,7 @@ func (s *Server) Run(pctx context.Context) error {
 	// Find out where IBD is at
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		if database.ErrNotFound.Is(err) {
+		if errors.Is(err, database.ErrNotFound) {
 			if err = s.insertGenesis(ctx); err != nil {
 				return fmt.Errorf("insert genesis: %w", err)
 			}
