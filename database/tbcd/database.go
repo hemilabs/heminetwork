@@ -37,7 +37,7 @@ var itStrings = map[InsertType]string{
 }
 
 func (it InsertType) String() string {
-	return iTStrings[it]
+	return itStrings[it]
 }
 
 type Database interface {

@@ -1343,13 +1343,10 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 		return 0, err
 	}
 
-	scriptHash := sha256.Sum256(script)
-
-	balance, err := s.db.BalanceByScriptHash(ctx, scriptHash)
+	balance, err := s.db.BalanceByScriptHash(ctx, sha256.Sum256(script))
 	if err != nil {
 		return 0, err
 	}
-	log.Infof("checking script hash balance %s: %s: %d", encodedAddress, hex.EncodeToString(scriptHash[:]), balance)
 
 	return balance, nil
 }
