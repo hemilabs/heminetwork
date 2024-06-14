@@ -279,8 +279,7 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte)
 	hash := bh.BlockHash()
 	ghs := wire.NewMsgGetHeaders()
 	ghs.AddBlockLocatorHash(&hash)
-	err = p.write(defaultCmdTimeout, ghs)
-	if err != nil {
+	if err = p.write(defaultCmdTimeout, ghs); err != nil {
 		return fmt.Errorf("write get headers: %w", err)
 	}
 
@@ -593,8 +592,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 				log.Errorf("split host port: %v", err)
 				return
 			}
-			err = s.db.PeerDelete(ctx, host, port)
-			if err != nil {
+			if err = s.db.PeerDelete(ctx, host, port); err != nil {
 				log.Errorf("peer delete (%v): %v", pp, err)
 			} else {
 				log.Debugf("Peer delete: %v", pp)
@@ -604,8 +602,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		return
 	}
 	defer func() {
-		err := p.close()
-		if err != nil && !errors.Is(err, net.ErrClosed) {
+		if err := p.close(); err != nil && !errors.Is(err, net.ErrClosed) {
 			log.Errorf("peer disconnect: %v %v", p, err)
 		}
 	}()
@@ -633,8 +630,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	}
 	log.Debugf("block header best hash: %s", bhb.Hash)
 
-	err = s.getHeaders(ctx, p, bhb.Header)
-	if err != nil {
+	if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
 		// This should not happen
 		log.Errorf("get headers: %v", err)
 		return
@@ -905,8 +901,8 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		go func() {
 			// we really want to push the indexing reentrancy into this call
 			log.Infof("quiescing p2p and indexing to: %v", bhb.Height)
-			err = s.SyncIndexersToHeight(ctx, bhb.Height+1) // XXX make hash
-			if err != nil {
+			// XXX make hash
+			if err = s.SyncIndexersToHeight(ctx, bhb.Height+1); err != nil {
 				log.Errorf("sync blocks: %v", err)
 				return
 			}
@@ -940,12 +936,12 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
-	//s.mtx.Lock()
-	//if s.clipped {
+	// s.mtx.Lock()
+	// if s.clipped {
 	//	log.Infof("pretend we are at the height")
 	//	msg.Headers = msg.Headers[0:0]
-	//}
-	//s.mtx.Unlock()
+	// }
+	// s.mtx.Unlock()
 
 	if len(msg.Headers) == 0 {
 		// This may signify the end of IBD but isn't 100%. We can fart
@@ -953,14 +949,14 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		// just behind or if we are nominally where we should be. This
 		// test will never be 100% accurate.
 
-		//s.mtx.Lock()
-		//lastBH := s.lastBlockHeader.Timestamp()
-		//s.mtx.Unlock()
-		//if time.Since(lastBH) > 6*s.chainParams.TargetTimePerBlock {
+		// s.mtx.Lock()
+		// lastBH := s.lastBlockHeader.Timestamp()
+		// s.mtx.Unlock()
+		// if time.Since(lastBH) > 6*s.chainParams.TargetTimePerBlock {
 		//	log.Infof("peer not synced: %v", p)
 		//	p.close() // get rid of this peer
 		//	return
-		//}
+		// }
 
 		// only do this if peer is synced
 
@@ -1008,8 +1004,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			height = cbh.Height
 
 			// Ask for next batch of headers at canonical tip.
-			err = s.getHeaders(ctx, p, cbh.Header)
-			if err != nil {
+			if err = s.getHeaders(ctx, p, cbh.Header); err != nil {
 				log.Errorf("get headers: %v", err)
 				return
 			}
@@ -1018,15 +1013,13 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			height = lbh.Height
 
 			// Ask for more block headers at the fork tip.
-			err = s.getHeaders(ctx, p, lbh.Header)
-			if err != nil {
+			if err = s.getHeaders(ctx, p, lbh.Header); err != nil {
 				log.Errorf("get headers fork: %v", err)
 				return
 			}
 
 			// Also ask for more block headers at canonical tip
-			err = s.getHeaders(ctx, p, cbh.Header)
-			if err != nil {
+			if err = s.getHeaders(ctx, p, cbh.Header); err != nil {
 				log.Errorf("get headers canonical: %v", err)
 				return
 			}
@@ -1041,15 +1034,13 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			}
 
 			// Ask for more block headers at the fork tip.
-			err = s.getHeaders(ctx, p, lbh.Header)
-			if err != nil {
+			if err = s.getHeaders(ctx, p, lbh.Header); err != nil {
 				log.Errorf("get headers fork: %v", err)
 				return
 			}
 
 			// Also ask for more block headers at canonical tip
-			err = s.getHeaders(ctx, p, cbh.Header)
-			if err != nil {
+			if err = s.getHeaders(ctx, p, cbh.Header); err != nil {
 				log.Errorf("get headers canonical: %v", err)
 				return
 			}
@@ -1207,8 +1198,7 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("serialize genesis block header: %w", err)
 	}
-	err = s.db.BlockHeaderGenesisInsert(ctx, gbh)
-	if err != nil {
+	if err = s.db.BlockHeaderGenesisInsert(ctx, gbh); err != nil {
 		return fmt.Errorf("genesis block header insert: %w", err)
 	}
 
@@ -1456,8 +1446,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 		}
 
 		// walk block tx'
-		err = feesFromTransactions(b.Transactions())
-		if err != nil {
+		if err = feesFromTransactions(b.Transactions()); err != nil {
 			return 0, fmt.Errorf("fees from transactions %v %v: %v",
 				height, b.Hash(), err)
 		}
@@ -1581,8 +1570,7 @@ func (s *Server) Run(pctx context.Context) error {
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		if database.ErrNotFound.Is(err) {
-			err = s.insertGenesis(ctx)
-			if err != nil {
+			if err = s.insertGenesis(ctx); err != nil {
 				return fmt.Errorf("insert genesis: %w", err)
 			}
 			bhb, err = s.db.BlockHeaderBest(ctx)
@@ -1669,8 +1657,7 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		err := s.startPeerManager(ctx)
-		if err != nil {
+		if err := s.startPeerManager(ctx); err != nil {
 			select {
 			case errC <- err:
 			default:
