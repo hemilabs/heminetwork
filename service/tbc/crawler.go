@@ -409,9 +409,6 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 // SyncIndexersToHeight tries to move the various indexers to the supplied
 // height (inclusive).
 func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error {
-	log.Infof("SyncIndexersToHeight %v", height)
-	defer log.Infof("SyncIndexersToHeight exit")
-
 	log.Tracef("SyncIndexersToHeight")
 	defer log.Tracef("SyncIndexersToHeight exit")
 
