@@ -142,9 +142,7 @@ func TestForksWithGen(t *testing.T) {
 			testForkScenario: func(t *testing.T, ctx context.Context, bitcoindContainer testcontainers.Container, walletAddress string, tbcServer *Server) {
 				// block 1A, send 7 btc to otherAddress
 				_, err := runBitcoinCommand(
-					ctx,
-					t,
-					bitcoindContainer,
+					ctx, t, bitcoindContainer,
 					[]string{
 						"bitcoin-cli",
 						"-regtest=1",
