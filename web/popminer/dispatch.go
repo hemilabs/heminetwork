@@ -274,7 +274,7 @@ func startPoPMiner(_ js.Value, args []js.Value) (any, error) {
 			// TODO(joshuasing): dispatch event on failure
 			pmMtx.Lock()
 			defer pmMtx.Unlock()
-			pm.err = err // Theoretically this can logic race unless we unset om
+			pm.err = err // Theoretically this can logic race unless we unset pm
 		}
 	}()
 
@@ -401,7 +401,7 @@ func bitcoinInfo(_ js.Value, _ []js.Value) (any, error) {
 	}, nil
 }
 
-func bitcoinUTXOs(this js.Value, args []js.Value) (any, error) {
+func bitcoinUTXOs(_ js.Value, args []js.Value) (any, error) {
 	log.Tracef("bitcoinUTXOs")
 	defer log.Tracef("bitcoinUTXOs exit")
 
