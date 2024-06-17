@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -18,6 +19,26 @@ import (
 
 	"github.com/hemilabs/heminetwork/database"
 )
+
+type InsertType int
+
+const (
+	ITInvalid     InsertType = 0 // Invalid insert
+	ITChainExtend InsertType = 1 // Normal insert, does not require further action.
+	ITChainFork   InsertType = 2 // Chain forked, unwind and rewind indexes.
+	ITForkExtend  InsertType = 3 // Extended a fork, does not require further action.
+)
+
+var itStrings = map[InsertType]string{
+	ITInvalid:     "invalid",
+	ITChainExtend: "chain extended",
+	ITChainFork:   "chain forked",
+	ITForkExtend:  "fork extended",
+}
+
+func (it InsertType) String() string {
+	return itStrings[it]
+}
 
 type Database interface {
 	database.Database
@@ -28,10 +49,13 @@ type Database interface {
 	MetadataPut(ctx context.Context, key, value []byte) error
 
 	// Block header
+	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
 	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
-	BlockHeadersBest(ctx context.Context) ([]BlockHeader, error)
+	BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error
+
+	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
-	BlockHeadersInsert(ctx context.Context, bhs []BlockHeader) error
+	BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (InsertType, *BlockHeader, *BlockHeader, error)
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
@@ -58,12 +82,13 @@ type Database interface {
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)
 }
 
-// BlockHeader contains the first 80 raw bytes of a bitcoin block and its
-// location information (hash+height).
+// BlockHeader contains the first 80 raw bytes of a bitcoin block plus its
+// location information (hash+height) and the cumulative difficulty.
 type BlockHeader struct {
-	Hash   database.ByteArray
-	Height uint64
-	Header database.ByteArray
+	Hash       database.ByteArray
+	Height     uint64
+	Header     database.ByteArray
+	Difficulty big.Int
 }
 
 func (bh BlockHeader) String() string {

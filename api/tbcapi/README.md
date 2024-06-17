@@ -38,7 +38,7 @@ This document provides details on the RPC protocol and available commands for th
       * [📥 Response](#-response-1)
         * [Payload](#payload-3)
         * [Example Response](#example-response-1)
-  * [👉 Best Block Headers](#-best-block-headers)
+  * [👉 Best Block Header](#-best-block-header)
     * [🗂 Raw Data](#-raw-data-1)
       * [📤 Request](#-request-2)
         * [Example Request](#example-request-2)
@@ -330,16 +330,16 @@ Response for a request with **id** `68656d69` and **height** `43111`:
 
 ---
 
-## 👉 Best Block Headers
+## 👉 Best Block Header
 
 Retrieve the best block headers.
 
 ### 🗂 Raw Data
 
-| Type     | `command` value                          |
-|----------|------------------------------------------|
-| Request  | `tbcapi-block-headers-best-raw-request`  |
-| Response | `tbcapi-block-headers-best-raw-response` |
+| Type     | `command` value                         |
+|----------|-----------------------------------------|
+| Request  | `tbcapi-block-header-best-raw-request`  |
+| Response | `tbcapi-block-header-best-raw-response` |
 
 #### 📤 Request
 
@@ -350,7 +350,7 @@ Retrieve the best block headers:
 ```json
 {
   "header": {
-    "command": "tbcapi-block-headers-best-raw-request",
+    "command": "tbcapi-block-header-best-raw-request",
     "id": "68656d69"
   }
 }
@@ -361,7 +361,7 @@ Retrieve the best block headers:
 ##### Payload
 
 - **`height`**: The best-known height.
-- **`block_headers`**: An array of the best-known block headers encoded as hexadecimal strings.
+- **`block_header`**: The best-known block header encoded as a hexadecimal string.
 
 ##### Example Response
 
@@ -370,24 +370,22 @@ Response for a request with **id** `68656d69` and **best height** `2182000`:
 ```json
 {
   "header": {
-    "command": "tbcapi-block-headers-best-raw-response",
+    "command": "tbcapi-block-header-best-raw-response",
     "id": "68656d69"
   },
   "payload": {
     "height": 2182000,
-    "block_headers": [
-      "0420002075089ac1ab1cab70cf6e6b774a86703a8d7127c0ebed1d3dfa2c00000000000086105509ec4a79457a400451290ad2a019fec4c76b47512623f1bb17a0ced76f38d82662bef4001b07d86700"
-    ]
+    "block_header": "0420002075089ac1ab1cab70cf6e6b774a86703a8d7127c0ebed1d3dfa2c00000000000086105509ec4a79457a400451290ad2a019fec4c76b47512623f1bb17a0ced76f38d82662bef4001b07d86700"
   }
 }
 ```
 
 #### 🗂 Serialized Data
 
-| Type     | `command` value                      |
-|----------|--------------------------------------|
-| Request  | `tbcapi-block-headers-best-request`  |
-| Response | `tbcapi-block-headers-best-response` |
+| Type     | `command` value                     |
+|----------|-------------------------------------|
+| Request  | `tbcapi-block-header-best-request`  |
+| Response | `tbcapi-block-header-best-response` |
 
 #### 📤 Request
 
@@ -398,7 +396,7 @@ Retrieve the best block headers:
 ```json
 {
   "header": {
-    "command": "tbcapi-block-headers-best-request",
+    "command": "tbcapi-block-header-best-request",
     "id": "68656d69"
   }
 }
@@ -409,7 +407,7 @@ Retrieve the best block headers:
 ##### Payload
 
 - **`height`**: The best-known height.
-- **`block_headers`**: An array of best-known [block headers](#block-header).
+- **`block_header`**: The best-known [block header](#block-header).
 
 ##### Example Response
 
@@ -418,21 +416,19 @@ Response for a request with **id** `68656d69` and **height** `2587400`:
 ```json
 {
   "header": {
-    "command": "tbcapi-block-headers-best-response",
+    "command": "tbcapi-block-header-best-response",
     "id": "68656d69"
   },
   "payload": {
     "height": 2587400,
-    "block_headers": [
-      {
-        "version": 536887296,
-        "prev_hash": "000000000000002bbbbec8f126dc76a82109d898383bca5013a2386c8675ce34",
-        "merkle_root": "b9d74efdafb5436330b47478b2df28251057da5a9bc11c5509410950253d4f0e",
-        "timestamp": 1713461092,
-        "bits": "192e17d5",
-        "nonce": 3365605040
-      }
-    ]
+    "block_header": {
+      "version": 536887296,
+      "prev_hash": "000000000000002bbbbec8f126dc76a82109d898383bca5013a2386c8675ce34",
+      "merkle_root": "b9d74efdafb5436330b47478b2df28251057da5a9bc11c5509410950253d4f0e",
+      "timestamp": 1713461092,
+      "bits": "192e17d5",
+      "nonce": 3365605040
+    }
   }
 }
 ```

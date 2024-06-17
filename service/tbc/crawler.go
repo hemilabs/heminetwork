@@ -55,6 +55,7 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			if utxo, ok := utxos[op]; ok && !utxo.IsDelete() {
+				// log.Infof("deleting utxo %s value %d", hex.EncodeToString(utxo.ScriptHashSlice()), utxo.Value())
 				delete(utxos, op)
 				continue
 			}
@@ -63,6 +64,10 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
+
+			// scriptHash := sha256.Sum256(txOut.PkScript)
+			// log.Infof("adding utxo to script hash %s value %d", hex.EncodeToString(scriptHash[:]), uint64(txOut.Value))
+
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
 				sha256.Sum256(txOut.PkScript),
 				uint64(txOut.Value),
@@ -152,12 +157,12 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight 
 
 		// fixupCache is executed in parallel meaning that the utxos
 		// map must be locked as it is being processed.
-		err = s.fixupCache(ctx, b, utxos)
-		if err != nil {
+		if err = s.fixupCache(ctx, b, utxos); err != nil {
 			return 0, fmt.Errorf("parse block %v: %w", height, err)
 		}
 		// At this point we can lockless since it is all single
 		// threaded again.
+		// log.Infof("processing utxo at height %d", height)
 		err = processUtxos(s.chainParams, b.Transactions(), utxos)
 		if err != nil {
 			return 0, fmt.Errorf("process utxos %v: %w", height, err)
@@ -215,12 +220,11 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		}
 		utxosCached := len(utxos)
 		log.Infof("Utxo indexer blocks processed %v in %v utxos cached %v cache unused %v avg tx/blk %v",
-			blocksProcessed, time.Now().Sub(start), utxosCached,
+			blocksProcessed, time.Since(start), utxosCached,
 			s.cfg.MaxCachedTxs-utxosCached, utxosCached/blocksProcessed)
 
 		start = time.Now()
-		err = s.db.BlockUtxoUpdate(ctx, utxos)
-		if err != nil {
+		if err = s.db.BlockUtxoUpdate(ctx, utxos); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -229,7 +233,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		runtime.GC()
 
 		log.Infof("Flushing utxos complete %v took %v",
-			utxosCached, time.Now().Sub(start))
+			utxosCached, time.Since(start))
 
 		height += uint64(blocksProcessed)
 
@@ -364,12 +368,11 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 		}
 		txsCached := len(txs)
 		log.Infof("Tx indexer blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
-			blocksProcessed, time.Now().Sub(start), txsCached,
+			blocksProcessed, time.Since(start), txsCached,
 			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
 
 		start = time.Now()
-		err = s.db.BlockTxUpdate(ctx, txs)
-		if err != nil {
+		if err = s.db.BlockTxUpdate(ctx, txs); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -378,7 +381,7 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 		runtime.GC()
 
 		log.Infof("Flushing txs complete %v took %v",
-			txsCached, time.Now().Sub(start))
+			txsCached, time.Since(start))
 
 		height += uint64(blocksProcessed)
 
@@ -400,14 +403,54 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 	}
 }
 
-// SyncIndexersToHeight tries to move the various indexers to the suplied
+// SyncIndexersToHeight tries to move the various indexers to the supplied
 // height (inclusive).
 func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error {
 	log.Tracef("SyncIndexersToHeight")
 	defer log.Tracef("SyncIndexersToHeight exit")
 
+	s.mtx.Lock()
+	if s.indexing {
+		s.mtx.Unlock()
+		return fmt.Errorf("already indexing")
+	}
+	s.indexing = true
+	s.mtx.Unlock()
+
+	defer func() {
+		// unquiesce
+		s.mtx.Lock()
+		s.quiesced = false
+		s.indexing = false
+		// s.clipped = false
+		actualHeight, bhb, err := s.RawBlockHeaderBest(ctx)
+		if err != nil {
+			log.Errorf("sync indexers best: %v", err)
+			s.mtx.Unlock()
+			return
+		}
+		// get a random peer
+		p, err := s.randomPeer(ctx)
+		if err != nil {
+			log.Errorf("sync indexers random peer: %v", err)
+			s.mtx.Unlock()
+			return
+		}
+		s.mtx.Unlock()
+
+		// XXX explain why we need to get more headers here
+		// continue getting headers, XXX this does not belong here either
+		// XXX if bh download fails we will get jammed. We need a queued "must execute this command" added to peer/service.
+		log.Infof("resuming block header download at: %v", actualHeight)
+		if err = s.getHeaders(ctx, p, bhb); err != nil {
+			log.Errorf("sync indexers: %v", err)
+			return
+		}
+	}()
+
+	log.Debugf("Syncing to: %v", height)
 	// Outputs index
-	uhBE, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey)
+	uhBE, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey) // XXX this must be hash based
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return fmt.Errorf("utxo indexer metadata get: %w", err)
@@ -424,7 +467,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 	}
 
 	// Transactions index
-	thBE, err := s.db.MetadataGet(ctx, TxIndexHeightKey)
+	thBE, err := s.db.MetadataGet(ctx, TxIndexHeightKey) // XXX this must be hash based
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return fmt.Errorf("tx indexer metadata get: %w", err)
@@ -439,6 +482,7 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 			return fmt.Errorf("tx indexer: %w", err)
 		}
 	}
+	log.Debugf("Done syncing to: %v", height)
 
 	return nil
 }
