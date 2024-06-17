@@ -15,8 +15,8 @@
     <script src="popminer.js"></script>
 
     <p>
-      <button id="WASMPingButton">wasm ping</button>
-      <span class="WASMPingShow"></span>
+      <button id="VersionButton">version</button>
+      <span class="VersionShow"></span>
     </p>
 
     <p>
@@ -29,23 +29,23 @@
     </p>
 
     <p>
-      <input id="RunPopMinerLogLevelInput" value="hemiwasm=INFO:popm=INFO:protocol=INFO">
-      <label for="RunPopMinerLogLevelInput">log level</label>
+      <input id="StartPopMinerLogLevelInput" value="hemiwasm=INFO:popm=INFO:protocol=INFO">
+      <label for="StartPopMinerLogLevelInput">log level</label>
       <br>
 
-      <input id="RunPopMinerNetworkInput" value="testnet3">
-      <label for="RunPopMinerNetworkInput">bitcoin network</label>
+      <input id="StartPopMinerNetworkInput" value="testnet">
+      <label for="StartPopMinerNetworkInput">Hemi network (testnet, devnet or mainnet)</label>
       <br>
 
-      <input id="RunPopMinerPrivateKeyInput" value="">
-      <label for="RunPopMinerPrivateKeyInput">bitcoin private key (must be funded)</label>
+      <input id="StartPopMinerPrivateKeyInput" type="password">
+      <label for="StartPopMinerPrivateKeyInput">bitcoin private key (must be funded)</label>
       <br>
-      <input id="RunPopMinerStaticFeeInput" value="50">
-      <label for="RunPopMinerStaticFeeInput">Fee to pay for PoP Mining (sat/vB)</label>
+      <input id="StartPopMinerStaticFeeInput" value="50">
+      <label for="StartPopMinerStaticFeeInput">Fee to pay for PoP Mining (sat/vB)</label>
       <br>
 
-      <button id="RunPopMinerButton">Run PoP Miner</button>
-      <span class="RunPopMinerShow"></span>
+      <button id="StartPopMinerButton">Run PoP Miner</button>
+      <span class="StartPopMinerShow"></span>
     </p>
 
     <p>
@@ -53,9 +53,9 @@
       <span class="StopPopMinerShow"></span>
     </p>
 
-    <!-- conected commands go here, run after RunPopMinerButton -->
+    <!-- connected commands go here, run after StartPopMinerButton -->
     <hr>
-    <div>The following commands require a live connection (after RunPopMinerButton)</div>
+    <div>The following commands require a live connection (after StartPopMinerButton)</div>
     <br>
 
     <p>
@@ -64,7 +64,7 @@
     </p>
 
     <p>
-      <input id="L2KeystonesNumL2KeystonesInput" value=2 type="number">
+      <input id="L2KeystonesNumL2KeystonesInput" value="2" type="number">
       <label for="L2KeystonesNumL2KeystonesInput">num l2 keystones</label>
       <br>
 
