@@ -122,8 +122,8 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 }
 
 func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
-	b.t.Logf("got conn %v", conn.RemoteAddr())
-	defer b.t.Logf("exit conn %v", conn.RemoteAddr())
+	b.t.Logf("handleRPC %v", conn.RemoteAddr())
+	defer b.t.Logf("handleRPC exit %v", conn.RemoteAddr())
 
 	p := &peer{
 		conn:            conn,
