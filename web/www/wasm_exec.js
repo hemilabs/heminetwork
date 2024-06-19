@@ -1,8 +1,9 @@
 // Copyright 2018 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
-//
+
 // Go LICENSE file: https://github.com/golang/go/blob/master/LICENSE
+// Original: https://github.com/golang/go/blob/639cc0dcc0948dd02c9d5fc12fbed730a21ebebc/misc/wasm/wasm_exec.js
 
 "use strict";
 
