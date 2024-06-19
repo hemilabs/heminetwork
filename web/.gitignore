@@ -1,1 +1,4 @@
-webapp
+webapp/
+node_modules/
+dist/
+packages/pop-miner/wasm/
