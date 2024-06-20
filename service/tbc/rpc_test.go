@@ -557,7 +557,9 @@ func TestBalanceByAddress(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				err = tbcServer.UtxoIndexer(ctx, 0, 1000)
+				// err = tbcServer.UtxoIndexer(ctx, 0, 1000)
+				_ = tbcServer
+				err = fmt.Errorf("fixme clayton")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -792,7 +794,9 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				err = tbcServer.UtxoIndexer(ctx, 0, 1000)
+				// err = tbcServer.UtxoIndexer(ctx, 0, 1000)
+				_ = tbcServer
+				err = fmt.Errorf("fixme clayton")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1020,7 +1024,9 @@ func TestUtxosByAddress(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				err = tbcServer.UtxoIndexer(ctx, 0, 1000)
+				// err = tbcServer.UtxoIndexer(ctx, 0, 1000)
+				_ = tbcServer
+				err = fmt.Errorf("fixme clayton")
 				if err != nil {
 					t.Fatal(err)
 				}

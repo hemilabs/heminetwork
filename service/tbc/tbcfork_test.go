@@ -390,101 +390,101 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressP
 	return key, address, nil
 }
 
-func TestBasic(t *testing.T) {
-	t.Skip()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("key    : %v", key)
-	t.Logf("address: %v", address)
-
-	n, err := newFakeNode(t, "18444") // TODO: should use random free port
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	go func() {
-		if err := n.Run(ctx); err != nil {
-			panic(fmt.Errorf("node exited with error: %w", err))
-		}
-	}()
-
-	startHash := n.Best()
-	count := 9
-	expectedHeight := uint64(count)
-
-	if _, err = n.Mine(count, startHash[0], address); err != nil {
-		t.Fatal(fmt.Errorf("mine: %w", err))
-	}
-
-	if err = n.dumpChain(n.Best()[0]); err != nil {
-		t.Fatal(fmt.Errorf("dump chain: %w", err))
-	}
-	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-	time.Sleep(1 * time.Second) // XXX
-
-	// Connect tbc service
-	cfg := &Config{
-		AutoIndex:     true, // XXX for now
-		BlockSanity:   false,
-		LevelDBHome:   t.TempDir(),
-		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
-		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
-		MaxCachedTxs:            1000, // XXX
-		Network:                 networkLocalnet,
-		PrometheusListenAddress: "",
-	}
-	_ = loggo.ConfigureLoggers(cfg.LogLevel)
-	s, err := NewServer(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.ignoreUlimit = true
-	go func() {
-		err := s.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			panic(err)
-		}
-	}()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(time.Second):
-		}
-
-		// See if we are synced
-		si := s.Synced(ctx)
-		if !(si.Synced && si.BlockHeaderHeight == expectedHeight) {
-			log.Infof("not synced")
-			continue
-		}
-
-		// Execute tests
-		balance, err := s.BalanceByAddress(ctx, address.String())
-		if err != nil {
-			t.Fatal(err)
-		}
-		// TODO: magic numbers should be extract into constants
-		if balance != uint64(count*5000000000) {
-			t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
-		}
-		t.Logf("balance %v", spew.Sdump(balance))
-
-		utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v", spew.Sdump(utxos))
-		return
-	}
-}
+//func TestBasic(t *testing.T) {
+//	t.Skip()
+//
+//	ctx, cancel := context.WithCancel(context.Background())
+//	defer cancel()
+//
+//	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	t.Logf("key    : %v", key)
+//	t.Logf("address: %v", address)
+//
+//	n, err := newFakeNode(t, "18444") // TODO: should use random free port
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//
+//	go func() {
+//		if err := n.Run(ctx); err != nil {
+//			panic(fmt.Errorf("node exited with error: %w", err))
+//		}
+//	}()
+//
+//	startHash := n.Best()
+//	count := 9
+//	expectedHeight := uint64(count)
+//
+//	if _, err = n.Mine(count, startHash[0], address); err != nil {
+//		t.Fatal(fmt.Errorf("mine: %w", err))
+//	}
+//
+//	if err = n.dumpChain(n.Best()[0]); err != nil {
+//		t.Fatal(fmt.Errorf("dump chain: %w", err))
+//	}
+//	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
+//	time.Sleep(1 * time.Second) // XXX
+//
+//	// Connect tbc service
+//	cfg := &Config{
+//		AutoIndex:     true, // XXX for now
+//		BlockSanity:   false,
+//		LevelDBHome:   t.TempDir(),
+//		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
+//		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+//		MaxCachedTxs:            1000, // XXX
+//		Network:                 networkLocalnet,
+//		PrometheusListenAddress: "",
+//	}
+//	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+//	s, err := NewServer(cfg)
+//	if err != nil {
+//		t.Fatal(err)
+//	}
+//	s.ignoreUlimit = true
+//	go func() {
+//		err := s.Run(ctx)
+//		if err != nil && !errors.Is(err, context.Canceled) {
+//			panic(err)
+//		}
+//	}()
+//
+//	for {
+//		select {
+//		case <-ctx.Done():
+//			return
+//		case <-time.After(time.Second):
+//		}
+//
+//		// See if we are synced
+//		si := s.Synced(ctx)
+//		if !(si.Synced && si.BlockHeaderHeight == expectedHeight) {
+//			log.Infof("not synced")
+//			continue
+//		}
+//
+//		// Execute tests
+//		balance, err := s.BalanceByAddress(ctx, address.String())
+//		if err != nil {
+//			t.Fatal(err)
+//		}
+//		// TODO: magic numbers should be extract into constants
+//		if balance != uint64(count*5000000000) {
+//			t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
+//		}
+//		t.Logf("balance %v", spew.Sdump(balance))
+//
+//		utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
+//		if err != nil {
+//			t.Fatal(err)
+//		}
+//		t.Logf("%v", spew.Sdump(utxos))
+//		return
+//	}
+//}
 
 func TestFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -556,7 +556,7 @@ func TestFork(t *testing.T) {
 
 		// See if we are at the right height
 		si := s.Synced(ctx)
-		if !(si.BlockHeaderHeight == expectedHeight) {
+		if !(si.BlockHeader.Height == expectedHeight) {
 			log.Infof("not synced")
 			continue
 		}
