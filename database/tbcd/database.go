@@ -114,6 +114,19 @@ func (bh BlockHeader) Wire() (*wire.BlockHeader, error) {
 	return &wbh, nil
 }
 
+func (bh BlockHeader) BlockHash() *chainhash.Hash {
+	ch, _ := chainhash.NewHash(bh.Hash)
+	return ch
+}
+
+func (bh BlockHeader) ParentHash() *chainhash.Hash {
+	wh, err := bh.Wire()
+	if err != nil {
+		panic(err)
+	}
+	return &wh.PrevBlock
+}
+
 // Block contains a raw bitcoin block and its corresponding hash.
 type Block struct {
 	Hash  database.ByteArray
@@ -396,4 +409,34 @@ func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 	copy(txKey[33:], blockHash[:])
 
 	return txKey
+}
+
+// Helper functions
+
+// B2H converts a raw bloc header to a wire block header structure.
+func B2H(header []byte) (*wire.BlockHeader, error) {
+	var bh wire.BlockHeader
+	if err := bh.Deserialize(bytes.NewReader(header)); err != nil {
+		return nil, fmt.Errorf("deserialize block header: %w", err)
+	}
+	return &bh, nil
+}
+
+// HeaderHash return the block hash from a raw block header.
+func HeaderHash(header []byte) *chainhash.Hash {
+	h, err := B2H(header)
+	if err != nil {
+		panic(err)
+	}
+	hash := h.BlockHash()
+	return &hash
+}
+
+// HeaderHash return the parent block hash from a raw block header.
+func HeaderParentHash(header []byte) *chainhash.Hash {
+	h, err := B2H(header)
+	if err != nil {
+		panic(err)
+	}
+	return &h.PrevBlock
 }
