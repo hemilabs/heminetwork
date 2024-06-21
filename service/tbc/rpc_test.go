@@ -1121,7 +1121,9 @@ func TestTxByIdRaw(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		// err = tbcServer.TxIndexer(ctx, 0, 1000)
+		_ = tbcServer
+		err = fmt.Errorf("fixme clayton")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1225,7 +1227,9 @@ func TestTxByIdRawInvalid(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		// err = tbcServer.TxIndexer(ctx, 0, 1000)
+		_ = tbcServer
+		err = fmt.Errorf("fixme clayton")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1338,7 +1342,9 @@ func TestTxByIdRawNotFound(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		// err = tbcServer.TxIndexer(ctx, 0, 1000)
+		_ = tbcServer
+		err = fmt.Errorf("fixme clayton")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1437,7 +1443,9 @@ func TestTxById(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		// err = tbcServer.TxIndexer(ctx, 0, 1000)
+		_ = tbcServer
+		err = fmt.Errorf("fixme clayton")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1536,7 +1544,9 @@ func TestTxByIdInvalid(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		// err = tbcServer.TxIndexer(ctx, 0, 1000)
+		_ = tbcServer
+		err = fmt.Errorf("fixme clayton")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1647,7 +1657,9 @@ func TestTxByIdNotFound(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		err = tbcServer.TxIndexer(ctx, 0, 1000)
+		// err = tbcServer.TxIndexer(ctx, 0, 1000)
+		_ = tbcServer
+		err = fmt.Errorf("fixme clayton")
 		if err != nil {
 			t.Fatal(err)
 		}

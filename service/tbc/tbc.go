@@ -1497,7 +1497,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	si.Utxo = *utxoHH
 
 	// tx index
-	txHH, err := s.txIndexHash(ctx)
+	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
 		txHH = &HashHeight{}
 	}

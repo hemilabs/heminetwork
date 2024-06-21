@@ -429,40 +429,27 @@ func tbcdb() error {
 		}
 
 	case "txindex":
-		panic("txindex")
-		//var h, c, mc uint64
-		//height := args["height"]
-		//if height == "" {
-		//	// Get height from db
-		//	he, err := s.DB().MetadataGet(ctx, tbc.TxIndexHeightKey)
-		//	if err != nil {
-		//		if !errors.Is(err, database.ErrNotFound) {
-		//			return fmt.Errorf("metadata %v: %w",
-		//				string(tbc.TxIndexHeightKey), err)
-		//		}
-		//		he = make([]byte, 8)
-		//	}
-		//	h = binary.BigEndian.Uint64(he)
-		//} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
-		//	return fmt.Errorf("height: %w", err)
-		//}
-		//count := args["count"]
-		//if count == "" {
-		//	c = 0
-		//} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
-		//	return fmt.Errorf("count: %w", err)
-		//}
-		//maxCache := args["maxcache"]
-		//if maxCache != "" {
-		//	if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
-		//		return fmt.Errorf("maxCache: %w", err)
-		//	}
-		//	cfg.MaxCachedTxs = int(mc)
-		//}
-		//err = s.TxIndexer(ctx, h, c)
-		//if err != nil {
-		//	return fmt.Errorf("indexer: %w", err)
-		//}
+		hash := args["hash"]
+		if hash == "" {
+			return fmt.Errorf("must provide hash")
+		}
+		eh, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %v", err)
+		}
+
+		maxCache := args["maxcache"]
+		var mc uint64
+		if maxCache != "" {
+			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
+				return fmt.Errorf("maxCache: %w", err)
+			}
+			cfg.MaxCachedTxs = int(mc)
+		}
+		err = s.TxIndexer(ctx, eh)
+		if err != nil {
+			return fmt.Errorf("indexer: %w", err)
+		}
 
 	case "blocksbytxid":
 		txid := args["txid"]
