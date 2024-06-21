@@ -1506,7 +1506,6 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		!s.blksMissing(ctx) {
 		si.Synced = true
 	}
-	log.Infof("=== synced %v", spew.Sdump(si))
 	return
 }
 
