@@ -901,13 +901,12 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		s.quiesced = true // XXX if it's set and we exit with an error, what should we do??
 		go func() {
 			// we really want to push the indexing reentrancy into this call
-			log.Infof("quiescing p2p and indexing to: %v", bhb.Height)
-			panic("quiescing p2p")
-			// XXX make hash
-			//if err = s.SyncIndexersToHeight(ctx, bhb.Height+1); err != nil {
-			//	log.Errorf("sync blocks: %v", err)
-			//	return
-			//}
+			log.Infof("quiescing p2p and indexing to: %v @ %v",
+				bhb, bhb.Height)
+			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != nil {
+				log.Errorf("sync blocks: %v", err)
+				return
+			}
 		}()
 		return
 	}

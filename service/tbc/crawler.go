@@ -581,40 +581,17 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		}
 	}()
 
-	log.Debugf("Syncing to: %v", hash)
-	//// Outputs index
-	//uhBE, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey) // XXX this must be hash based
-	//if err != nil {
-	//	if !errors.Is(err, database.ErrNotFound) {
-	//		return fmt.Errorf("utxo indexer metadata get: %w", err)
-	//	}
-	//	uhBE = make([]byte, 8)
-	//}
-	//heightUtxo := binary.BigEndian.Uint64(uhBE)
-	//countUtxo := int64(height) - int64(heightUtxo)
-	//if countUtxo >= 0 {
-	//	err := s.UtxoIndexer(ctx, heightUtxo, uint64(countUtxo+1))
-	//	if err != nil {
-	//		return fmt.Errorf("utxo indexer: %w", err)
-	//	}
-	//}
+	log.Debugf("Syncing indexes to: %v", hash)
+	err := s.UtxoIndexer(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("utxo indexer: %w", err)
+	}
 
-	//// Transactions index
-	//thBE, err := s.db.MetadataGet(ctx, TxIndexHeightKey) // XXX this must be hash based
-	//if err != nil {
-	//	if !errors.Is(err, database.ErrNotFound) {
-	//		return fmt.Errorf("tx indexer metadata get: %w", err)
-	//	}
-	//	thBE = make([]byte, 8)
-	//}
-	//heightTx := binary.BigEndian.Uint64(thBE)
-	//countTx := int64(height) - int64(heightTx)
-	//if countTx >= 0 {
-	//	err := s.TxIndexer(ctx, heightTx, uint64(countTx+1))
-	//	if err != nil {
-	//		return fmt.Errorf("tx indexer: %w", err)
-	//	}
-	//}
+	// Transactions index
+	err = s.TxIndexer(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("tx indexer: %w", err)
+	}
 	log.Debugf("Done syncing to: %v", hash)
 
 	return nil
