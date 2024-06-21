@@ -26,9 +26,9 @@ async function Version() {
     const result = await dispatch({
       method: 'version',
     });
-    VersionShow.innerText = JSON.stringify(result);
+    VersionShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    VersionShow.innerText = 'error: ' + JSON.stringify(err);
+    VersionShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }
@@ -46,9 +46,9 @@ async function GenerateKey() {
       method: 'generateKey',
       network: GenerateKeyNetworkInput.value,
     });
-    GenerateKeyShow.innerText = JSON.stringify(result);
+    GenerateKeyShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    GenerateKeyShow.innerText = 'error: ' + JSON.stringify(err);
+    GenerateKeyShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }
@@ -69,9 +69,9 @@ async function StartPopMiner() {
       privateKey: StartPopMinerPrivateKeyInput.value,
       staticFee: Number(StartPopMinerStaticFeeInput.value),
     });
-    StartPopMinerShow.innerText = JSON.stringify(result);
+    StartPopMinerShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    StartPopMinerShow.innerText = 'error: ' + JSON.stringify(err);
+    StartPopMinerShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }
@@ -88,9 +88,9 @@ async function StopPopMiner() {
     const result = await dispatch({
       method: 'stopPoPMiner',
     });
-    StopPopMinerShow.innerText = JSON.stringify(result);
+    StopPopMinerShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    StopPopMinerShow.innerText = 'error: ' + JSON.stringify(err);
+    StopPopMinerShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }
@@ -107,9 +107,9 @@ async function Ping() {
     const result = await dispatch({
       method: 'ping', // Timestamp is handled by Go.
     });
-    PingShow.innerText = JSON.stringify(result);
+    PingShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    PingShow.innerText = 'error: ' + JSON.stringify(err);
+    PingShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }
@@ -127,9 +127,9 @@ async function L2Keystones() {
       method: 'l2Keystones',
       numL2Keystones: Number(L2KeystonesNumL2KeystonesInput.value),
     });
-    L2KeystonesShow.innerText = JSON.stringify(result);
+    L2KeystonesShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    L2KeystonesShow.innerText = 'error: ' + JSON.stringify(err);
+    L2KeystonesShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }
@@ -147,9 +147,9 @@ async function BitcoinBalance() {
       method: 'bitcoinBalance',
       scriptHash: BitcoinBalanceScriptHashInput.value,
     });
-    BitcoinBalanceShow.innerText = JSON.stringify(result);
+    BitcoinBalanceShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    BitcoinBalanceShow.innerText = 'error: ' + JSON.stringify(err);
+    BitcoinBalanceShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }
@@ -166,9 +166,9 @@ async function BitcoinInfo() {
     const result = await dispatch({
       method: 'bitcoinInfo',
     });
-    BitcoinInfoShow.innerText = JSON.stringify(result);
+    BitcoinInfoShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    BitcoinInfoShow.innerText = 'error: ' + JSON.stringify(err);
+    BitcoinInfoShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }
@@ -186,9 +186,9 @@ async function BitcoinUTXOs() {
       method: 'bitcoinUTXOs',
       scriptHash: BitcoinUTXOsScriptHashInput.value,
     });
-    BitcoinUTXOsShow.innerText = JSON.stringify(result);
+    BitcoinUTXOsShow.innerText = JSON.stringify(result, null, 2);
   } catch (err) {
-    BitcoinUTXOsShow.innerText = 'error: ' + JSON.stringify(err);
+    BitcoinUTXOsShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
     console.error('Caught exception', err);
   }
 }

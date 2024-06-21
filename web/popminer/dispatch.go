@@ -107,7 +107,8 @@ func dispatch(this js.Value, args []js.Value) any {
 				if r := recover(); r != nil {
 					log.Criticalf("recovered panic: %v", r)
 					log.Criticalf(string(debug.Stack()))
-					reject.Invoke(jsError(fmt.Errorf("recovered panic: %v", r)))
+					reject.Invoke(jsErrorWithCode(ErrorCodeInternal,
+						fmt.Errorf("recovered panic: %v", r)))
 				}
 			}()
 
@@ -194,14 +195,15 @@ func generateKey(_ js.Value, args []js.Value) (any, error) {
 		btcChainParams = &btcchaincfg.MainNetParams
 		netNormalized = "mainnet"
 	default:
-		return js.Null(), fmt.Errorf("invalid network: %v", net)
+		return nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("invalid network: %s", net))
 	}
 
 	// TODO(joshuasing): consider alternative as dcrsecpk256k1 package is large.
 	privKey, err := dcrsecpk256k1.GeneratePrivateKey()
 	if err != nil {
 		log.Errorf("failed to generate private key: %v", err)
-		return js.Null(), fmt.Errorf("generate secp256k1 private key: %w", err)
+		return nil, fmt.Errorf("generate secp256k1 private key: %w", err)
 	}
 	btcAddress, err := btcutil.NewAddressPubKey(
 		privKey.PubKey().SerializeCompressed(),
@@ -209,7 +211,7 @@ func generateKey(_ js.Value, args []js.Value) (any, error) {
 	)
 	if err != nil {
 		log.Errorf("failed to generate btc address: %v", err)
-		return js.Null(), fmt.Errorf("create BTC address from public key: %w", err)
+		return nil, fmt.Errorf("create BTC address from public key: %w", err)
 	}
 
 	compressedPubKey := privKey.PubKey().SerializeCompressed()
@@ -310,11 +312,11 @@ func ping(_ js.Value, _ []js.Value) (any, error) {
 
 	activePM, err := activeMiner()
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 	pr, err := activePM.miner.Ping(activePM.ctx, time.Now().Unix())
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 
 	// TODO(joshuasing): protocol.PingResponse should really use a more accurate
@@ -337,11 +339,11 @@ func l2Keystones(_ js.Value, args []js.Value) (any, error) {
 
 	activePM, err := activeMiner()
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 	pr, err := activePM.miner.L2Keystones(activePM.ctx, count)
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 
 	keystones := make([]L2Keystone, len(pr.L2Keystones))
@@ -370,11 +372,11 @@ func bitcoinBalance(_ js.Value, args []js.Value) (any, error) {
 
 	activePM, err := activeMiner()
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 	pr, err := activePM.miner.BitcoinBalance(activePM.ctx, scriptHash)
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 
 	return BitcoinBalanceResult{
@@ -389,11 +391,11 @@ func bitcoinInfo(_ js.Value, _ []js.Value) (any, error) {
 
 	activePM, err := activeMiner()
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 	pr, err := activePM.miner.BitcoinInfo(activePM.ctx)
 	if err != nil {
-		return js.Null(), err
+		return nil, err
 	}
 
 	return BitcoinInfoResult{

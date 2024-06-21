@@ -7,6 +7,7 @@
 package main
 
 import (
+	"errors"
 	"reflect"
 	"runtime/debug"
 	"strings"
@@ -183,18 +184,71 @@ func jsValueSafe(v any) (jsv js.Value) {
 			jsv = js.Undefined()
 		}
 	}()
+
+	// Special handling
+	switch x := v.(type) {
+	case ErrorCode:
+		return js.ValueOf(string(x))
+	}
+
 	return js.ValueOf(v)
 }
 
-// jsError returns a [js.Value] representing the given error.
-func jsError(err error) js.Value {
-	log.Tracef("jsError: %v", err)
-	defer log.Tracef("jsError exit")
+// codedError represents an error that has a related [ErrorCode].
+type codedError struct {
+	code ErrorCode
+	err  error
+}
 
-	stack := string(debug.Stack())
+// errorWithCode returns an error containing the given error code.
+func errorWithCode(code ErrorCode, err error) error {
+	return codedError{
+		code: code,
+		err:  err,
+	}
+}
+
+// codeFromError returns the error code from the error, if possible, otherwise
+// ErrorCodeInternal will be returned.
+func codeFromError(err error) ErrorCode {
+	var ce codedError
+	if errors.As(err, &ce) {
+		return ce.code
+	}
+	return ErrorCodeInternal
+}
+
+// Error returns the error string.
+func (c codedError) Error() string {
+	return c.err.Error()
+}
+
+// Unwrap returns the wrapped error.
+func (c codedError) Unwrap() error {
+	return c.err
+}
+
+// jsError returns a [js.Value] representing the given error. The error code
+// will be extracted from the given error using codeFromError, if available,
+// otherwise the error code will be ErrorCodeInternal.
+func jsError(err error) js.Value {
+	return newJSError(codeFromError(err), err.Error())
+}
+
+// jsErrorWithCode returns a [js.Value] representing the given error with
+// an error code.
+func jsErrorWithCode(code ErrorCode, err error) js.Value {
+	return newJSError(code, err.Error())
+}
+
+// newJSError returns a new [js.Value] for an [Error] with the given code and
+// message. The stack will be generated, skipping stackSkip callers. The
+// timestamp will be set to time.Now() in Unix seconds.
+func newJSError(code ErrorCode, message string) js.Value {
 	return jsValueOf(Error{
-		Message:   err.Error(),
-		Stack:     stack,
+		Code:      code,
+		Message:   message,
+		Stack:     string(debug.Stack()),
 		Timestamp: time.Now().Unix(),
 	})
 }

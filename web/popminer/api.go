@@ -24,8 +24,24 @@ const (
 	MethodBitcoinUTXOs   Method = "bitcoinUTXOs"   // Retrieve bitcoin UTXOs
 )
 
+// ErrorCode is a unique identifier used to differentiate between error types.
+type ErrorCode string
+
+const (
+	// ErrorCodeInternal is used when the error is internal, either due to an
+	// invalid dispatch or a panic.
+	ErrorCodeInternal ErrorCode = "internal"
+
+	// ErrorCodeInvalidValue is used when an invalid value was provided for
+	// a dispatch argument.
+	ErrorCodeInvalidValue ErrorCode = "invalid-value"
+)
+
 // Error represents an error that has occurred within the WASM PoP Miner.
 type Error struct {
+	// Code is a unique identifier used to differentiate between error types.
+	Code ErrorCode `json:"code,omitempty"`
+
 	// Message is the error message.
 	Message string `json:"message"`
 

@@ -8,27 +8,25 @@
   <head>
     <meta charset="UTF-8" />
     <title>PoP miner integration tests</title>
-  </head>
-
-  <body>
     <script src="wasm_exec.js"></script>
     <script src="popminer.js"></script>
-
-    <p>
+  </head>
+  <body>
+    <div>
       <button id="VersionButton">version</button>
-      <span class="VersionShow"></span>
-    </p>
+      <pre class="VersionShow"></pre>
+    </div>
 
-    <p>
+    <div>
       <input id="GenerateKeyNetworkInput" value="testnet3">
       <label for="GenerateKeyNetworkInput">bitcoin network</label>
       <br>
 
       <button id="GenerateKeyButton">generate key</button>
-      <span class="GenerateKeyShow"></span>
-    </p>
+      <pre class="GenerateKeyShow"></pre>
+    </div>
 
-    <p>
+    <div>
       <input id="StartPopMinerLogLevelInput" value="hemiwasm=INFO:popm=INFO:protocol=INFO">
       <label for="StartPopMinerLogLevelInput">log level</label>
       <br>
@@ -45,55 +43,55 @@
       <br>
 
       <button id="StartPopMinerButton">Run PoP Miner</button>
-      <span class="StartPopMinerShow"></span>
-    </p>
+      <pre class="StartPopMinerShow"></pre>
+    </div>
 
-    <p>
+    <div>
       <button id="StopPopMinerButton">Stop PoP Miner</button>
-      <span class="StopPopMinerShow"></span>
-    </p>
+      <pre class="StopPopMinerShow"></pre>
+    </div>
 
     <!-- connected commands go here, run after StartPopMinerButton -->
     <hr>
-    <div>The following commands require a live connection (after StartPopMinerButton)</div>
+    <p>The following commands require a live connection (after StartPopMinerButton)</p>
     <br>
 
-    <p>
+    <div>
       <button id="PingButton">ping</button>
-      <span class="PingShow"></span>
-    </p>
+      <pre class="PingShow"></pre>
+    </div>
 
-    <p>
+    <div>
       <input id="L2KeystonesNumL2KeystonesInput" value="2" type="number">
       <label for="L2KeystonesNumL2KeystonesInput">num l2 keystones</label>
       <br>
 
       <button id="L2KeystonesButton">l2 keystones</button>
-      <span class="L2KeystonesShow"></span>
-    </p>
+      <pre class="L2KeystonesShow"></pre>
+    </div>
 
-    <p>
+    <div>
       <input id="BitcoinBalanceScriptHashInput" value="xxx">
       <label for="BitcoinBalanceScriptHashInput">script hash</label>
       <br>
 
       <button id="BitcoinBalanceButton">bitcoin balance</button>
-      <span class="BitcoinBalanceShow"></span>
-    </p>
+      <pre class="BitcoinBalanceShow"></pre>
+    </div>
 
-    <p>
+    <div>
       <button id="BitcoinInfoButton">bitcoin info</button>
-      <span class="BitcoinInfoShow"></span>
-    </p>
+      <pre class="BitcoinInfoShow"></pre>
+    </div>
 
-    <p>
+    <div>
       <input id="BitcoinUTXOsScriptHashInput" value="xxx">
       <label for="BitcoinUTXOsScriptHashInput">script hash</label>
       <br>
 
       <button id="BitcoinUTXOsButton">bitcoin utxos</button>
-      <span class="BitcoinUTXOsShow"></span>
-    </p>
+      <pre class="BitcoinUTXOsShow"></pre>
+    </div>
 
     <script src="index.js" defer></script>
   </body>
