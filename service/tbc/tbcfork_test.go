@@ -654,6 +654,8 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// XXX - this is fragile, audit.  we sometimes get a length of 1
 	if len(bhsAt11) != 2 {
 		t.Fatalf("expected 2 best blocks, got %v", len(bhsAt11))
 	}

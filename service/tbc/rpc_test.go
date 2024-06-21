@@ -557,12 +557,7 @@ func TestBalanceByAddress(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				// err = tbcServer.UtxoIndexer(ctx, 0, 1000)
-				_ = tbcServer
-				err = fmt.Errorf("fixme clayton")
-				if err != nil {
-					t.Fatal(err)
-				}
+				indexAll(ctx, t, tbcServer)
 				lastErr = nil
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BalanceByAddressRequest{
 					Address: tti.address(),
@@ -794,12 +789,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				// err = tbcServer.UtxoIndexer(ctx, 0, 1000)
-				_ = tbcServer
-				err = fmt.Errorf("fixme clayton")
-				if err != nil {
-					t.Fatal(err)
-				}
+				indexAll(ctx, t, tbcServer)
 				lastErr = nil
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRawRequest{
 					Address: tti.address(),
@@ -1024,12 +1014,7 @@ func TestUtxosByAddress(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
-				// err = tbcServer.UtxoIndexer(ctx, 0, 1000)
-				_ = tbcServer
-				err = fmt.Errorf("fixme clayton")
-				if err != nil {
-					t.Fatal(err)
-				}
+				indexAll(ctx, t, tbcServer)
 				lastErr = nil
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRequest{
 					Address: tti.address(),
@@ -1121,12 +1106,7 @@ func TestTxByIdRaw(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		// err = tbcServer.TxIndexer(ctx, 0, 1000)
-		_ = tbcServer
-		err = fmt.Errorf("fixme clayton")
-		if err != nil {
-			t.Fatal(err)
-		}
+		indexAll(ctx, t, tbcServer)
 		lastErr = nil
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
@@ -1227,12 +1207,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		// err = tbcServer.TxIndexer(ctx, 0, 1000)
-		_ = tbcServer
-		err = fmt.Errorf("fixme clayton")
-		if err != nil {
-			t.Fatal(err)
-		}
+		indexAll(ctx, t, tbcServer)
 		lastErr = nil
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
@@ -1342,12 +1317,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		// err = tbcServer.TxIndexer(ctx, 0, 1000)
-		_ = tbcServer
-		err = fmt.Errorf("fixme clayton")
-		if err != nil {
-			t.Fatal(err)
-		}
+		indexAll(ctx, t, tbcServer)
 		lastErr = nil
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
@@ -1443,12 +1413,9 @@ func TestTxById(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		// err = tbcServer.TxIndexer(ctx, 0, 1000)
-		_ = tbcServer
-		err = fmt.Errorf("fixme clayton")
-		if err != nil {
-			t.Fatal(err)
-		}
+
+		indexAll(ctx, t, tbcServer)
+
 		lastErr = nil
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
@@ -1544,12 +1511,7 @@ func TestTxByIdInvalid(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		// err = tbcServer.TxIndexer(ctx, 0, 1000)
-		_ = tbcServer
-		err = fmt.Errorf("fixme clayton")
-		if err != nil {
-			t.Fatal(err)
-		}
+		indexAll(ctx, t, tbcServer)
 		lastErr = nil
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
@@ -1657,12 +1619,9 @@ func TestTxByIdNotFound(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		// err = tbcServer.TxIndexer(ctx, 0, 1000)
-		_ = tbcServer
-		err = fmt.Errorf("fixme clayton")
-		if err != nil {
-			t.Fatal(err)
-		}
+
+		indexAll(ctx, t, tbcServer)
+
 		lastErr = nil
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
@@ -1723,5 +1682,22 @@ func assertPing(ctx context.Context, t *testing.T, c *websocket.Conn, cmd protoc
 
 	if v.Header.Command != cmd {
 		t.Fatalf("unexpected command: %s", v.Header.Command)
+	}
+}
+
+func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
+	_, bh, err := tbcServer.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hash := bh.BlockHash()
+
+	if err := tbcServer.TxIndexer(ctx, &hash); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := tbcServer.UtxoIndexer(ctx, &hash); err != nil {
+		t.Fatal(err)
 	}
 }
