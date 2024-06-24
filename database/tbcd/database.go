@@ -115,7 +115,10 @@ func (bh BlockHeader) Wire() (*wire.BlockHeader, error) {
 }
 
 func (bh BlockHeader) BlockHash() *chainhash.Hash {
-	ch, _ := chainhash.NewHash(bh.Hash)
+	ch, err := chainhash.NewHash(bh.Hash)
+	if err != nil {
+		panic(err)
+	}
 	return ch
 }
 
