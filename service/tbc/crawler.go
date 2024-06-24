@@ -272,7 +272,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 
 	// Verify exit condition hash
 	if endHash == nil {
-		return fmt.Errorf("must provide an end hash")
+		return errors.New("must provide an end hash")
 	}
 	_, endHeight, err := s.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
@@ -464,7 +464,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 
 	// Verify exit condition hash
 	if endHash == nil {
-		return fmt.Errorf("must provide an end hash")
+		return errors.New("must provide an end hash")
 	}
 	_, endHeight, err := s.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
@@ -545,7 +545,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	s.mtx.Lock()
 	if s.indexing {
 		s.mtx.Unlock()
-		return fmt.Errorf("already indexing")
+		return errors.New("already indexing")
 	}
 	s.indexing = true
 	s.mtx.Unlock()

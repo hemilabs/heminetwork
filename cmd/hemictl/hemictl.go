@@ -406,7 +406,7 @@ func tbcdb() error {
 	case "utxoindex":
 		hash := args["hash"]
 		if hash == "" {
-			return fmt.Errorf("must provide hash")
+			return errors.New("must provide hash")
 		}
 		eh, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
@@ -429,7 +429,7 @@ func tbcdb() error {
 	case "txindex":
 		hash := args["hash"]
 		if hash == "" {
-			return fmt.Errorf("must provide hash")
+			return errors.New("must provide hash")
 		}
 		eh, err := chainhash.NewHashFromStr(hash)
 		if err != nil {

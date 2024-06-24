@@ -105,7 +105,7 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 
 	// b.t.Logf("get data: %v", spew.Sdump(m))
 	if len(m.InvList) != 1 {
-		return nil, fmt.Errorf("not supported multi invlist requests")
+		return nil, errors.New("not supported multi invlist requests")
 	}
 
 	v := m.InvList[0]
