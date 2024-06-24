@@ -413,7 +413,7 @@ func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 
 // Helper functions
 
-// B2H converts a raw bloc header to a wire block header structure.
+// B2H converts a raw block header to a wire block header structure.
 func B2H(header []byte) (*wire.BlockHeader, error) {
 	var bh wire.BlockHeader
 	if err := bh.Deserialize(bytes.NewReader(header)); err != nil {
