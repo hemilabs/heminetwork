@@ -1589,16 +1589,16 @@ func (s *Server) Run(pctx context.Context) error {
 	// Find out where IBD is at
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			if err = s.insertGenesis(ctx); err != nil {
-				return fmt.Errorf("insert genesis: %w", err)
-			}
-			bhb, err = s.db.BlockHeaderBest(ctx)
-			if err != nil {
-				return err
-			}
-		} else {
+		if !errors.Is(err, database.ErrNotFound) {
 			return fmt.Errorf("block headers best: %w", err)
+		}
+
+		if err = s.insertGenesis(ctx); err != nil {
+			return fmt.Errorf("insert genesis: %w", err)
+		}
+		bhb, err = s.db.BlockHeaderBest(ctx)
+		if err != nil {
+			return err
 		}
 	}
 	log.Infof("Starting block headers sync at height: %v time %v",
