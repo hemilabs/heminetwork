@@ -557,7 +557,7 @@ func TestFork(t *testing.T) {
 
 		// See if we are at the right height
 		si := s.Synced(ctx)
-		if !(si.BlockHeader.Height == expectedHeight) {
+		if si.BlockHeader.Height != expectedHeight {
 			log.Infof("not synced")
 			continue
 		}
