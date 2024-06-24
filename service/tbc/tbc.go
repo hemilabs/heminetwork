@@ -67,22 +67,55 @@ const (
 var (
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
-	localnetSeeds = []string{
-		"bitcoind",
+	localnetSeeds = []Seed{
+		{
+			Host: "bitcoind",
+			Port: localnetPort,
+		},
 	}
-	testnetSeeds = []string{
-		"testnet-seed.bitcoin.jonasschnelli.ch",
-		"seed.tbtc.petertodd.org",
-		"seed.testnet.bitcoin.sprovoost.nl",
-		"testnet-seed.bluematt.me",
+	testnetSeeds = []Seed{
+		{
+			Host: "testnet-seed.bitcoin.jonasschnelli.ch",
+			Port: testnetPort,
+		},
+		{
+			Host: "seed.tbtc.petertodd.org",
+			Port: testnetPort,
+		},
+		{
+			Host: "seed.testnet.bitcoin.sprovoost.nl",
+			Port: testnetPort,
+		},
+		{
+			Host: "testnet-seed.bluematt.me",
+			Port: testnetPort,
+		},
 	}
-	mainnetSeeds = []string{
-		"seed.bitcoin.sipa.be",
-		"dnsseed.bluematt.me",
-		"dnsseed.bitcoin.dashjr.org",
-		"seed.bitcoinstats.com",
-		"seed.bitnodes.io",
-		"seed.bitcoin.jonasschnelli.ch",
+	mainnetSeeds = []Seed{
+		{
+			Host: "seed.bitcoin.sipa.be",
+			Port: mainnetPort,
+		},
+		{
+			Host: "dnsseed.bluematt.me",
+			Port: mainnetPort,
+		},
+		{
+			Host: "dnsseed.bitcoin.dashjr.org",
+			Port: mainnetPort,
+		},
+		{
+			Host: "seed.bitcoinstats.com",
+			Port: mainnetPort,
+		},
+		{
+			Host: "seed.bitnodes.io",
+			Port: mainnetPort,
+		},
+		{
+			Host: "seed.bitcoin.jonasschnelli.ch",
+			Port: mainnetPort,
+		},
 	}
 )
 
@@ -149,6 +182,11 @@ func sliceChainHash(ch chainhash.Hash) []byte {
 	return ch[:]
 }
 
+type Seed struct {
+	Host string
+	Port string
+}
+
 type Config struct {
 	AutoIndex               bool
 	BlockSanity             bool
@@ -160,7 +198,7 @@ type Config struct {
 	PeersWanted             int
 	PrometheusListenAddress string
 	PprofListenAddress      string
-	Seeds                   []string
+	Seeds                   []Seed
 }
 
 func NewDefaultConfig() *Config {
@@ -188,8 +226,7 @@ type Server struct {
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
-	port        string
-	seeds       []string
+	seeds       []Seed
 
 	peers  map[string]*peer // active but not necessarily connected
 	blocks *ttl.TTL         // outstanding block downloads [hash]when/where
@@ -251,17 +288,14 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	switch cfg.Network {
 	case "mainnet":
-		s.port = mainnetPort
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
 		s.seeds = mainnetSeeds
 	case "testnet3":
-		s.port = testnetPort
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
 		s.seeds = testnetSeeds
 	case networkLocalnet:
-		s.port = localnetPort
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
 		s.seeds = localnetSeeds
@@ -315,25 +349,32 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	defer cancel()
 
 	errorsSeen := 0
-	var addrs []net.IP
-	for k := range s.seeds {
-		ips, err := resolver.LookupIP(ctx, "ip", s.seeds[k])
+	var moreSeeds []Seed
+	for _, v := range s.seeds {
+		ips, err := resolver.LookupIP(ctx, "ip", net.JoinHostPort(v.Host, v.Port))
 		if err != nil {
 			log.Errorf("lookup: %v", err)
 			errorsSeen++
 			continue
 		}
-		addrs = append(addrs, ips...)
+
+		for _, ip := range ips {
+			moreSeeds = append(moreSeeds, Seed{
+				Host: ip.String(),
+				Port: v.Port,
+			})
+		}
 	}
+
 	if errorsSeen == len(s.seeds) {
 		return nil, errors.New("could not seed")
 	}
 
 	// insert into peers table
-	for k := range addrs {
+	for _, ms := range moreSeeds {
 		peers = append(peers, tbcd.Peer{
-			Host: addrs[k].String(),
-			Port: s.port,
+			Host: ms.Host,
+			Port: ms.Port,
 		})
 	}
 
@@ -486,7 +527,7 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 
 	peersWanted := 1
 	peerC := make(chan string, peersWanted)
-	address := net.JoinHostPort(s.seeds[0], s.port)
+	address := net.JoinHostPort(s.seeds[0].Host, s.seeds[0].Port)
 	peer, err := NewPeer(s.wireNet, address)
 	if err != nil {
 		return fmt.Errorf("new peer: %w", err)
