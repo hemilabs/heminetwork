@@ -23,7 +23,8 @@ export type InitOptions = {
  * Loads and configures the browser-based PoP Miner WASM binary.
  *
  * When running in the browser, it is necessary to call this function first and
- * wait for the returned promise to resolve before using any other API functions.
+ * wait for the returned promise to resolve before using any other API
+ * functions.
  *
  * @param options Initialisation options.
  * @returns a promise that resolves when WASM has been successfully loaded.
@@ -40,10 +41,38 @@ export declare function init(options: InitOptions): Promise<void>;
 export declare function close(): void;
 
 /**
+ * A number used to differentiate between error types.
+ *
+ * @see Error
+ */
+export enum ErrorCode {
+  /**
+   * Internal is used when the error is internal, either due to an invalid
+   * API function call or a panic. These errors are unlikely to be caused by a
+   * user and could be caused by a bug.
+   */
+  Internal = 0,
+
+  /**
+   * Invalid Value is used when an invalid value was provided in an API function
+   * call. Errors with this code are likely caused by incorrect usage of this
+   * package.
+   */
+  InvalidValue = 1000,
+}
+
+/**
  * Represents an error that occurred within the PoP Miner WASM.
- * If a Promise returned by an API function is rejected, it will be rejected with this type.
+ *
+ * If a Promise returned by an API function is rejected, it will be rejected
+ * with this type.
  */
 export type Error = {
+  /**
+   * The error code for this error, used to differentiate between error types.
+   */
+  readonly code: ErrorCode;
+
   /**
    * The error message.
    */
@@ -109,8 +138,8 @@ export type GenerateKeyResult = {
   readonly privateKey: string;
 
   /**
-   * The secpk256k1 public key for the generated key, in the 33-byte compressed format, encoded as
-   * a hexadecimal string.
+   * The secpk256k1 public key for the generated key, in the 33-byte compressed
+   * format, encoded as a hexadecimal string.
    */
   readonly publicKey: string;
 
@@ -121,8 +150,8 @@ export type GenerateKeyResult = {
 };
 
 /**
- * Generates returns a new secp256k1 private key and its corresponding public key and
- * addresses.
+ * Generates returns a new secp256k1 private key and its corresponding public
+ * key and addresses.
  *
  * @param args Key generation parameters.
  */
@@ -143,13 +172,15 @@ export type MinerStartArgs = {
   privateKey: string;
 
   /**
-   * The log level for the PoP miner. This controls the verbosity of logs sent to the console.
+   * The log level for the PoP miner. This controls the verbosity of logs sent
+   * to the console.
+   *
    * Options are 'trace', 'debug', 'info', 'warn', 'error' and 'critical'.
    *
    * @remarks
-   * The logging library used by the PoP miner allows more granular control over logging levels
-   * for individual components. For more information, please visit
-   * https://github.com/juju/loggo#func-configureloggers
+   * The logging library used by the PoP miner allows more granular control over
+   * logging levels for individual components. For more information, please
+   * see https://github.com/juju/loggo#func-configureloggers
    */
   logLevel?: string | undefined;
 
@@ -169,8 +200,8 @@ export declare function startPoPMiner(args: MinerStartArgs): Promise<void>;
 /**
  * Shuts down the PoP miner.
  *
- * The promise will be rejected if the PoP Miner is not running, or if the PoP Miner exited with an
- * error.
+ * The promise will be rejected if the PoP Miner is not running, or if the PoP
+ * Miner exited with an error.
  */
 export declare function stopPoPMiner(): Promise<void>;
 
@@ -202,7 +233,8 @@ export declare function ping(): Promise<PingResult>;
 export type L2KeystonesArgs = {
   /**
    * The number of L2 keystones to request.
-   * Must be between 0 and 10. Defaults to 2 if the number is outside of this range.
+   * Must be between 0 and 10. Defaults to 2 if the number is outside of this
+   * range.
    */
   numL2Keystones: number;
 };
