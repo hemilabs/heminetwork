@@ -65,7 +65,7 @@ const (
 )
 
 var (
-	zeroHash = new(chainhash.Hash) // used to validate invalid hashes
+	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
 	testnetSeeds = []string{
 		"testnet-seed.bitcoin.jonasschnelli.ch",
