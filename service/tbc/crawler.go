@@ -582,14 +582,12 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	}()
 
 	log.Debugf("Syncing indexes to: %v", hash)
-	err := s.UtxoIndexer(ctx, hash)
-	if err != nil {
+	if err := s.UtxoIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
 	// Transactions index
-	err = s.TxIndexer(ctx, hash)
-	if err != nil {
+	if err := s.TxIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 	log.Debugf("Done syncing to: %v", hash)

@@ -444,8 +444,7 @@ func tbcdb() error {
 			}
 			cfg.MaxCachedTxs = int(mc)
 		}
-		err = s.TxIndexer(ctx, eh)
-		if err != nil {
+		if err = s.TxIndexer(ctx, eh); err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
 
