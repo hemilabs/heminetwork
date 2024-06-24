@@ -188,7 +188,7 @@ func jsValueSafe(v any) (jsv js.Value) {
 	// Special handling
 	switch x := v.(type) {
 	case ErrorCode:
-		return js.ValueOf(string(x))
+		return js.ValueOf(uint32(x))
 	}
 
 	return js.ValueOf(v)
