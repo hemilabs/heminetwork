@@ -252,7 +252,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 				height, err)
 		}
 		if len(bhs) > 1 {
-			panic("FIXME handle multiple block headers")
+			panic("FIXME handle multiple block headers") // XXX: Handle correctly
 		}
 		// Verify it connects to parent
 		if !hash.IsEqual(bhs[0].ParentHash()) {
@@ -444,7 +444,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 				height, err)
 		}
 		if len(bhs) > 1 {
-			panic("FIXME handle multiple block headers")
+			panic("FIXME handle multiple block headers") // XXX: Handle correctly
 		}
 		// Verify it connects to parent
 		if !hash.IsEqual(bhs[0].ParentHash()) {

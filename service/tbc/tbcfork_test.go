@@ -390,6 +390,7 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressP
 	return key, address, nil
 }
 
+// XXX: Fix and re-enable test.
 // func TestBasic(t *testing.T) {
 //	t.Skip()
 //
