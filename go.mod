@@ -2,6 +2,10 @@ module github.com/hemilabs/heminetwork
 
 go 1.22.2
 
+toolchain go1.22.3
+
+replace nhooyr.io/websocket v1.8.11 => github.com/hemilabs/websocket v0.0.0-20240620132401-b5109a38f904
+
 require (
 	github.com/btcsuite/btcd v0.24.0
 	github.com/btcsuite/btcd/btcec/v2 v2.3.2
@@ -23,7 +27,7 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.28.0
 	golang.org/x/sys v0.17.0
-	nhooyr.io/websocket v1.8.10
+	nhooyr.io/websocket v1.8.11
 )
 
 require (
