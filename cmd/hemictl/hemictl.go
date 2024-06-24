@@ -410,7 +410,7 @@ func tbcdb() error {
 		}
 		eh, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
-			return fmt.Errorf("chainhash: %v", err)
+			return fmt.Errorf("parse hash: %w", err)
 		}
 
 		maxCache := args["maxcache"]
@@ -433,7 +433,7 @@ func tbcdb() error {
 		}
 		eh, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
-			return fmt.Errorf("chainhash: %v", err)
+			return fmt.Errorf("parse hash: %w", err)
 		}
 
 		maxCache := args["maxcache"]

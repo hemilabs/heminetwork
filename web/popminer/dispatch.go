@@ -209,7 +209,7 @@ func generateKey(_ js.Value, args []js.Value) (any, error) {
 	)
 	if err != nil {
 		log.Errorf("failed to generate btc address: %v", err)
-		return js.Null(), fmt.Errorf("create BTC address from public key: %v", err)
+		return js.Null(), fmt.Errorf("create BTC address from public key: %w", err)
 	}
 
 	compressedPubKey := privKey.PubKey().SerializeCompressed()

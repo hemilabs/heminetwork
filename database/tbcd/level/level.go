@@ -429,7 +429,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 				database.NotFoundError("best block header not found")
 		}
 		return tbcd.ITInvalid, nil, nil,
-			fmt.Errorf("best block header: %v", err)
+			fmt.Errorf("best block header: %w", err)
 	}
 	bestBH := decodeBlockHeader(bbh)
 

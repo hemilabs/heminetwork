@@ -89,7 +89,7 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 		}
 		err := nmh.AddBlockHeader(&bs[0].MsgBlock().Header)
 		if err != nil {
-			return nil, fmt.Errorf("add header: %v", err)
+			return nil, fmt.Errorf("add header: %w", err)
 		}
 
 		b.t.Logf("%v: %v", height, bs[0].MsgBlock().Header.BlockHash())
@@ -339,7 +339,7 @@ func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Add
 		block, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
 			parent.Hash(), extraNonce)
 		if err != nil {
-			return nil, fmt.Errorf("height %v: %v", nextBlockHeight, err)
+			return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
 		}
 		blocks = append(blocks, block)
 		b.t.Logf("mined %v: %v", nextBlockHeight, block.Hash())
@@ -390,7 +390,7 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressP
 	return key, address, nil
 }
 
-//func TestBasic(t *testing.T) {
+// func TestBasic(t *testing.T) {
 //	t.Skip()
 //
 //	ctx, cancel := context.WithCancel(context.Background())
@@ -484,7 +484,7 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressP
 //		t.Logf("%v", spew.Sdump(utxos))
 //		return
 //	}
-//}
+// }
 
 func TestFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

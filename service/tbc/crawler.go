@@ -203,7 +203,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 		b, err := btcutil.NewBlockFromBytes(eb.Block)
 		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %v", hh, err)
+			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		// fixupCache is executed in parallel meaning that the utxos
@@ -403,7 +403,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		}
 		b, err := btcutil.NewBlockFromBytes(eb.Block)
 		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %v", hh, err)
+			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		err = processTxs(s.chainParams, b.Hash(), b.Transactions(), txs)

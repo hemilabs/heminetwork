@@ -1598,7 +1598,7 @@ func (s *Server) Run(pctx context.Context) error {
 				return err
 			}
 		} else {
-			return fmt.Errorf("block headers best: %v", err)
+			return fmt.Errorf("block headers best: %w", err)
 		}
 	}
 	log.Infof("Starting block headers sync at height: %v time %v",
