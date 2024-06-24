@@ -171,10 +171,14 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				err = tbcServer.SyncIndexersToHeight(ctx, 201)
-				if err != nil {
-					t.Fatal(err)
+				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
+				if true {
+					panic("replace tbcServer.SyncIndexersToHeight with tbcServer.SyncIndexersToHash")
 				}
+				// err = tbcServer.SyncIndexersToHeight(ctx, 201)
+				// if err != nil {
+				//	t.Fatal(err)
+				// }
 
 				balance, err := tbcServer.BalanceByAddress(ctx, otherAddress.String())
 				if err != nil {
@@ -383,10 +387,14 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				err = tbcServer.SyncIndexersToHeight(ctx, 201)
-				if err != nil {
-					t.Fatal(err)
+				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
+				if true {
+					panic("replace tbcServer.SyncIndexersToHeight with tbcServer.SyncIndexersToHash")
 				}
+				// err = tbcServer.SyncIndexersToHeight(ctx, 201)
+				// if err != nil {
+				//	t.Fatal(err)
+				// }
 
 				balance, err := tbcServer.BalanceByAddress(ctx, otherAddress.String())
 				if err != nil {
@@ -446,10 +454,12 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				err = tbcServer.SyncIndexersToHeight(ctx, 310)
-				if err != nil {
-					t.Fatal(err)
-				}
+				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
+				panic("replace tbcServer.SyncIndexersToHeight with tbcServer.SyncIndexersToHash")
+				// err = tbcServer.SyncIndexersToHeight(ctx, 310)
+				// if err != nil {
+				//	t.Fatal(err)
+				// }
 			},
 		},
 		{
@@ -487,10 +497,14 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				err = tbcServer.SyncIndexersToHeight(ctx, 201)
-				if err != nil {
-					t.Fatal(err)
+				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
+				if true {
+					panic("replace tbcServer.SyncIndexersToHeight with tbcServer.SyncIndexersToHash")
 				}
+				// err = tbcServer.SyncIndexersToHeight(ctx, 201)
+				// if err != nil {
+				//	t.Fatal(err)
+				// }
 
 				balance, err := tbcServer.BalanceByAddress(ctx, otherAddress.String())
 				if err != nil {
@@ -550,10 +564,12 @@ func TestForksWithGen(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				err = tbcServer.SyncIndexersToHeight(ctx, 310)
-				if err != nil {
-					t.Fatal(err)
-				}
+				// XXX: Rewrite test to use tbcServer.SyncIndexersToHash
+				panic("replace tbcServer.SyncIndexersToHeight with tbcServer.SyncIndexersToHash")
+				// err = tbcServer.SyncIndexersToHeight(ctx, 310)
+				// if err != nil {
+				//	t.Fatal(err)
+				// }
 			},
 		},
 	}

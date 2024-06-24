@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -66,6 +65,8 @@ const (
 )
 
 var (
+	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
+
 	testnetSeeds = []string{
 		"testnet-seed.bitcoin.jonasschnelli.ch",
 		"seed.tbtc.petertodd.org",
@@ -883,7 +884,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		// We can avoid quiescing by verifying if we are already done
 		// indexing.
 		if si := s.synced(ctx); si.Synced {
-			log.Tracef("already synced at %v", si.BlockHeaderHeight)
+			log.Tracef("already synced at %v", si.BlockHeader)
 			return
 		}
 
@@ -900,9 +901,9 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		s.quiesced = true // XXX if it's set and we exit with an error, what should we do??
 		go func() {
 			// we really want to push the indexing reentrancy into this call
-			log.Infof("quiescing p2p and indexing to: %v", bhb.Height)
-			// XXX make hash
-			if err = s.SyncIndexersToHeight(ctx, bhb.Height+1); err != nil {
+			log.Infof("quiescing p2p and indexing to: %v @ %v",
+				bhb, bhb.Height)
+			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != nil {
 				log.Errorf("sync blocks: %v", err)
 				return
 			}
@@ -1456,34 +1457,52 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 }
 
 type SyncInfo struct {
-	Synced            bool   // True when all indexing is caught up
-	BlockHeaderHeight uint64 // last block header height
-	UtxoHeight        uint64 // last indexed utxo block height
-	TxHeight          uint64 // last indexed tx block height
+	Synced      bool // True when all indexing is caught up
+	BlockHeader HashHeight
+	Utxo        HashHeight
+	Tx          HashHeight
+	// BlockHeaderHeight uint64 // last block header height
+	// UtxoHeight        uint64 // last indexed utxo block height
+	// TxHeight          uint64 // last indexed tx block height
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
-	bhb, err := s.db.BlockHeaderBest(ctx)
-	if err != nil {
-		// This should never happen.
-		panic(err)
-	}
-	si.BlockHeaderHeight = bhb.Height
-
 	// These values are cached in leveldb so it is ok to call with mutex
 	// held.
 	//
 	// Note that index heights are start indexing values thus they are off
 	// by one from the last block height seen.
-	uh, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey)
-	if err == nil {
-		si.UtxoHeight = binary.BigEndian.Uint64(uh) - 1
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		panic(err)
 	}
-	th, err := s.db.MetadataGet(ctx, TxIndexHeightKey)
-	if err == nil {
-		si.TxHeight = binary.BigEndian.Uint64(th) - 1
+	bhHash, err := chainhash.NewHash(bhb.Hash)
+	if err != nil {
+		panic(err)
 	}
-	if si.UtxoHeight == si.TxHeight && si.UtxoHeight == si.BlockHeaderHeight &&
+	// Ensure we have genesis or the Synced flag will be true if metadata
+	// does not exist.
+	if zeroHash.IsEqual(bhHash) {
+		panic("no genesis")
+	}
+	si.BlockHeader.Hash = *bhHash
+	si.BlockHeader.Height = bhb.Height
+
+	// utxo index
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		utxoHH = &HashHeight{}
+	}
+	si.Utxo = *utxoHH
+
+	// tx index
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		txHH = &HashHeight{}
+	}
+	si.Tx = *txHH
+
+	if utxoHH.Hash.IsEqual(bhHash) && txHH.Hash.IsEqual(bhHash) &&
 		!s.blksMissing(ctx) {
 		si.Synced = true
 	}
@@ -1500,6 +1519,7 @@ func (s *Server) Synced(ctx context.Context) SyncInfo {
 
 // DBOpen opens the underlying server database. It has been put in its own
 // function to make it available during tests and hemictl.
+// It would be good if it can be deleted.
 func (s *Server) DBOpen(ctx context.Context) error {
 	log.Tracef("DBOpen")
 	defer log.Tracef("DBOpen exit")
@@ -1569,16 +1589,16 @@ func (s *Server) Run(pctx context.Context) error {
 	// Find out where IBD is at
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			if err = s.insertGenesis(ctx); err != nil {
-				return fmt.Errorf("insert genesis: %w", err)
-			}
-			bhb, err = s.db.BlockHeaderBest(ctx)
-			if err != nil {
-				return err
-			}
-		} else {
-			return fmt.Errorf("block headers best: %v", err)
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("block headers best: %w", err)
+		}
+
+		if err = s.insertGenesis(ctx); err != nil {
+			return fmt.Errorf("insert genesis: %w", err)
+		}
+		bhb, err = s.db.BlockHeaderBest(ctx)
+		if err != nil {
+			return err
 		}
 	}
 	log.Infof("Starting block headers sync at height: %v time %v",

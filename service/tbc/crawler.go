@@ -7,7 +7,6 @@ package tbc
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"runtime"
@@ -18,6 +17,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 
 	"github.com/hemilabs/heminetwork/database"
@@ -25,9 +25,46 @@ import (
 )
 
 var (
-	UtxoIndexHeightKey = []byte("utxoindexheight") // last indexed utxo height key
-	TxIndexHeightKey   = []byte("txindexheight")   // last indexed tx height key
+	UtxoIndexHashKey = []byte("utxoindexhash") // last indexed utxo hash
+	TxIndexHashKey   = []byte("txindexhash")   // last indexed tx hash
 )
+
+type HashHeight struct {
+	Hash   chainhash.Hash
+	Height uint64
+}
+
+func (h HashHeight) String() string {
+	return fmt.Sprintf("%v @ %v", h.Hash, h.Height)
+}
+
+func (s *Server) mdHashHeight(ctx context.Context, key []byte) (*HashHeight, error) {
+	log.Tracef("mdHashHeight %v ", spew.Sdump(key))
+
+	hh, err := s.db.MetadataGet(ctx, key)
+	if err != nil {
+		return nil, fmt.Errorf("metadata get: %w", err)
+	}
+	ch, err := chainhash.NewHash(hh)
+	if err != nil {
+		return nil, fmt.Errorf("metadata hash: %w", err)
+	}
+	bh, err := s.db.BlockHeaderByHash(ctx, ch[:])
+	if err != nil {
+		return nil, fmt.Errorf("metadata block header: %w", err)
+	}
+	return &HashHeight{Hash: *ch, Height: bh.Height}, nil
+}
+
+// UtxoIndexHash returns the last hash that has been been UTxO indexed.
+func (s *Server) UtxoIndexHash(ctx context.Context) (*HashHeight, error) {
+	return s.mdHashHeight(ctx, UtxoIndexHashKey)
+}
+
+// TxIndexHash returns the last hash that has been been Tx indexed.
+func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
+	return s.mdHashHeight(ctx, TxIndexHashKey)
+}
 
 func logMemStats() {
 	var mem runtime.MemStats
@@ -124,94 +161,149 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbc
 	return nil
 }
 
-func (s *Server) indexUtxosInBlocks(ctx context.Context, startHeight, maxHeight uint64, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, error) {
+// indexUtxosInBlocks indexes utxos from the last processed block until the
+// provided end hash, inclusive. It returns the number of blocks processed and
+// the last hash it has processedd.
+func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
 	log.Tracef("indexUtxoBlocks")
 	defer log.Tracef("indexUtxoBlocks exit")
 
-	circuitBreaker := false
-	if maxHeight != 0 {
-		circuitBreaker = true
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	// Find start hash
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return 0, last, fmt.Errorf("utxo index hash: %w", err)
+		}
+		utxoHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
 	}
 
 	utxosPercentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
-	for height := startHeight; ; height++ {
-		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+	hh := utxoHH
+	for {
+		log.Debugf("indexing utxos: %v", hh)
+
+		hash := hh.Hash
+		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
-			return 0, fmt.Errorf("block headers by height %v: %w", height, err)
+			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
-		eb, err := s.db.BlockByHash(ctx, bhs[0].Hash)
+
+		// Index block
+		eb, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
-			return 0, fmt.Errorf("block by hash %v: %w", height, err)
+			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
 		b, err := btcutil.NewBlockFromBytes(eb.Block)
 		if err != nil {
-			ch, _ := chainhash.NewHash(bhs[0].Hash)
-			return 0, fmt.Errorf("could not decode block %v %v: %v",
-				height, ch, err)
+			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		// fixupCache is executed in parallel meaning that the utxos
 		// map must be locked as it is being processed.
 		if err = s.fixupCache(ctx, b, utxos); err != nil {
-			return 0, fmt.Errorf("parse block %v: %w", height, err)
+			return 0, last, fmt.Errorf("parse block %v: %w", hh, err)
 		}
 		// At this point we can lockless since it is all single
 		// threaded again.
 		// log.Infof("processing utxo at height %d", height)
 		err = processUtxos(s.chainParams, b.Transactions(), utxos)
 		if err != nil {
-			return 0, fmt.Errorf("process utxos %v: %w", height, err)
+			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
 		}
 
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
 		cp := len(utxos) * 100 / s.cfg.MaxCachedTxs
-		if height%10000 == 0 || cp > utxosPercentage || blocksProcessed == 1 {
-			log.Infof("Utxo indexer height: %v utxo cache %v%%", height, cp)
+		if bh.Height%10000 == 0 || cp > utxosPercentage || blocksProcessed == 1 {
+			log.Infof("Utxo indexer: %v utxo cache %v%%", hh, cp)
 		}
 		if cp > utxosPercentage {
 			// Set utxosMax to the largest utxo capacity seen
 			s.cfg.MaxCachedTxs = max(len(utxos), s.cfg.MaxCachedTxs)
+			last = hh
 			// Flush
 			break
 		}
 
-		// If set we may have to exit early
-		if circuitBreaker {
-			if height >= maxHeight-1 {
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
+		// Move to next block
+		height := bh.Height + 1
+		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				log.Infof("No more blocks at: %v", height)
 				break
 			}
+			return 0, last, fmt.Errorf("block headers by height %v: %w",
+				height, err)
 		}
+		if len(bhs) > 1 {
+			panic("FIXME handle multiple block headers") // XXX: Handle correctly
+		}
+		// Verify it connects to parent
+		if !hash.IsEqual(bhs[0].ParentHash()) {
+			return 0, last, fmt.Errorf("%v does not connect to: %v",
+				bhs[0], hash)
+		}
+		hh.Hash = *bhs[0].BlockHash()
+		hh.Height = bhs[0].Height
 	}
 
-	return blocksProcessed, nil
+	return blocksProcessed, last, nil
 }
 
-func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
+func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	log.Tracef("UtxoIndexer")
 	defer log.Tracef("UtxoIndexer exit")
 
-	var maxHeight uint64
-	circuitBreaker := false
-	if count != 0 {
-		circuitBreaker = true
-		maxHeight = height + count
+	// Verify exit condition hash
+	if endHash == nil {
+		return errors.New("must provide an end hash")
 	}
+	_, endHeight, err := s.BlockHeaderByHash(ctx, endHash)
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+
+	// Verify start point is not after the end point
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("utxo indexer : %w", err)
+		}
+		utxoHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+	// XXX we need training wheels here. We can't blind accept the end
+	// without asserting if it is either ihigher in the chain or is a
+	// forced for.
+	// XXX check cumulative? check fork?
 
 	// Allocate here so that we don't waste space when not indexing.
 	utxos := make(map[tbcd.Outpoint]tbcd.CacheOutput, s.cfg.MaxCachedTxs)
 	defer clear(utxos)
 
-	log.Infof("Start indexing UTxos at height %v count %v", height, count)
+	log.Infof("Start indexing UTxos at hash %v height %v", utxoHH.Hash, utxoHH.Height)
+	log.Infof("End indexing UTxos at hash %v height %v", endHash, endHeight)
 	for {
 		start := time.Now()
-		blocksProcessed, err := s.indexUtxosInBlocks(ctx, height, maxHeight, utxos)
+		blocksProcessed, last, err := s.indexUtxosInBlocks(ctx, endHash, utxos)
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
 		}
@@ -223,6 +315,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 			blocksProcessed, time.Since(start), utxosCached,
 			s.cfg.MaxCachedTxs-utxosCached, utxosCached/blocksProcessed)
 
+		// Flush to disk
 		start = time.Now()
 		if err = s.db.BlockUtxoUpdate(ctx, utxos); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
@@ -235,24 +328,18 @@ func (s *Server) UtxoIndexer(ctx context.Context, height, count uint64) error {
 		log.Infof("Flushing utxos complete %v took %v",
 			utxosCached, time.Since(start))
 
-		height += uint64(blocksProcessed)
-
 		// Record height in metadata
-		var dbHeight [8]byte
-		binary.BigEndian.PutUint64(dbHeight[:], height)
-		err = s.db.MetadataPut(ctx, UtxoIndexHeightKey, dbHeight[:])
+		err = s.db.MetadataPut(ctx, UtxoIndexHashKey, last.Hash[:])
 		if err != nil {
-			return fmt.Errorf("metadata utxo height: %w", err)
+			return fmt.Errorf("metadata utxo hash: %w", err)
 		}
 
-		// If set we may have to exit early
-		if circuitBreaker {
-			log.Infof("Indexed utxos to height: %v", height-1)
-			if height >= maxHeight {
-				return nil
-			}
+		if endHash.IsEqual(&last.Hash) {
+			break
 		}
 	}
+
+	return nil
 }
 
 func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
@@ -274,92 +361,142 @@ func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.T
 	return nil
 }
 
-func (s *Server) indexTxsInBlocks(ctx context.Context, startHeight, maxHeight uint64, txs map[tbcd.TxKey]*tbcd.TxValue) (int, error) {
+// indexTxsInBlocks indexes txs from the last processed block until the
+// provided end hash, inclusive. It returns the number of blocks processed and
+// the last hash it has processedd.
+func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, txs map[tbcd.TxKey]*tbcd.TxValue) (int, *HashHeight, error) {
 	log.Tracef("indexTxsInBlocks")
 	defer log.Tracef("indexTxsInBlocks exit")
 
-	circuitBreaker := false
-	if maxHeight != 0 {
-		circuitBreaker = true
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	// Find start hash
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return 0, last, fmt.Errorf("tx index hash: %w", err)
+		}
+		txHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
 	}
 
 	txsPercentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
-	for height := startHeight; ; height++ {
-		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+	hh := txHH
+	for {
+		log.Debugf("indexing txs: %v", hh)
+
+		hash := hh.Hash
+		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
-			return 0, fmt.Errorf("block headers by height %v: %w", height, err)
+			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
-		eb, err := s.db.BlockByHash(ctx, bhs[0].Hash)
+
+		// Index block
+		eb, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
-			return 0, fmt.Errorf("block by hash %v: %w", height, err)
+			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
 		b, err := btcutil.NewBlockFromBytes(eb.Block)
 		if err != nil {
-			ch, _ := chainhash.NewHash(bhs[0].Hash)
-			return 0, fmt.Errorf("could not decode block %v %v: %v",
-				height, ch, err)
+			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		err = processTxs(s.chainParams, b.Hash(), b.Transactions(), txs)
 		if err != nil {
-			return 0, fmt.Errorf("process txs %v: %w", height, err)
+			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
 		}
 
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
 		cp := len(txs) * 100 / s.cfg.MaxCachedTxs
-		if height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
-			log.Infof("Tx indexer height: %v tx cache %v%%", height, cp)
+		if bh.Height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
+			log.Infof("Tx indexer: %v tx cache %v%%", hh, cp)
 		}
 		if cp > txsPercentage {
 			// Set txsMax to the largest tx capacity seen
 			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
+			last = hh
 			// Flush
 			break
 		}
 
-		// If set we may have to exit early
-		if circuitBreaker {
-			if height >= maxHeight-1 {
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
+		// Move to next block
+		height := bh.Height + 1
+		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				log.Infof("No more blocks at: %v", height)
 				break
 			}
+			return 0, last, fmt.Errorf("block headers by height %v: %w",
+				height, err)
 		}
+		if len(bhs) > 1 {
+			panic("FIXME handle multiple block headers") // XXX: Handle correctly
+		}
+		// Verify it connects to parent
+		if !hash.IsEqual(bhs[0].ParentHash()) {
+			return 0, last, fmt.Errorf("%v does not connect to: %v",
+				bhs[0], hash)
+		}
+		hh.Hash = *bhs[0].BlockHash()
+		hh.Height = bhs[0].Height
 	}
 
-	return blocksProcessed, nil
+	return blocksProcessed, last, nil
 }
 
-// TxIndexer starts indexing at start height for count blocks. If count is 0
-// the indexers will index to tip. It does NOT verify that the provided start
-// height is correct. This is the version of the function that has no training
-// wheels and is meant for internal use only.
-func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
+func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	log.Tracef("TxIndexer")
 	defer log.Tracef("TxIndexer exit")
 
-	var maxHeight uint64
-	circuitBreaker := false
-	if count != 0 {
-		circuitBreaker = true
-		maxHeight = height + count
+	// Verify exit condition hash
+	if endHash == nil {
+		return errors.New("must provide an end hash")
 	}
+	_, endHeight, err := s.BlockHeaderByHash(ctx, endHash)
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+
+	// Verify start point is not after the end point
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("tx indexer : %w", err)
+		}
+		txHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+
+	// XXX we need training wheels here. We can't blind accept the end
+	// without asserting if it is either ihigher in the chain or is a
+	// forced for.
+	// XXX check cumulative? check fork?
 
 	// Allocate here so that we don't waste space when not indexing.
 	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
-	// log.Infof("max %v %v", s.cfg.MaxCachedTxs, s.cfg.MaxCachedTxs*(105))
-	// return nil
 	defer clear(txs)
 
-	log.Infof("Start indexing transactions at height %v count %v", height, count)
+	log.Infof("Start indexing Txs at hash %v height %v", txHH.Hash, txHH.Height)
+	log.Infof("End indexing Txs at hash %v height %v", endHash, endHeight)
 	for {
 		start := time.Now()
-		blocksProcessed, err := s.indexTxsInBlocks(ctx, height, maxHeight, txs)
+		blocksProcessed, last, err := s.indexTxsInBlocks(ctx, endHash, txs)
 		if err != nil {
 			return fmt.Errorf("index blocks: %w", err)
 		}
@@ -371,6 +508,7 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 			blocksProcessed, time.Since(start), txsCached,
 			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
 
+		// Flush to disk
 		start = time.Now()
 		if err = s.db.BlockTxUpdate(ctx, txs); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
@@ -383,36 +521,31 @@ func (s *Server) TxIndexer(ctx context.Context, height, count uint64) error {
 		log.Infof("Flushing txs complete %v took %v",
 			txsCached, time.Since(start))
 
-		height += uint64(blocksProcessed)
-
 		// Record height in metadata
-		var dbHeight [8]byte
-		binary.BigEndian.PutUint64(dbHeight[:], height)
-		err = s.db.MetadataPut(ctx, TxIndexHeightKey, dbHeight[:])
+		err = s.db.MetadataPut(ctx, TxIndexHashKey, last.Hash[:])
 		if err != nil {
-			return fmt.Errorf("metadata tx height: %w", err)
+			return fmt.Errorf("metadata tx hash: %w", err)
 		}
 
-		// If set we may have to exit early
-		if circuitBreaker {
-			log.Infof("Indexed transactions to height: %v", height-1)
-			if height >= maxHeight {
-				return nil
-			}
+		if endHash.IsEqual(&last.Hash) {
+			break
 		}
+
 	}
+
+	return nil
 }
 
-// SyncIndexersToHeight tries to move the various indexers to the supplied
+// SyncIndexersToHash tries to move the various indexers to the supplied
 // height (inclusive).
-func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error {
-	log.Tracef("SyncIndexersToHeight")
-	defer log.Tracef("SyncIndexersToHeight exit")
+func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) error {
+	log.Tracef("SyncIndexersToHash")
+	defer log.Tracef("SyncIndexersToHash exit")
 
 	s.mtx.Lock()
 	if s.indexing {
 		s.mtx.Unlock()
-		return fmt.Errorf("already indexing")
+		return errors.New("already indexing")
 	}
 	s.indexing = true
 	s.mtx.Unlock()
@@ -448,41 +581,16 @@ func (s *Server) SyncIndexersToHeight(ctx context.Context, height uint64) error 
 		}
 	}()
 
-	log.Debugf("Syncing to: %v", height)
-	// Outputs index
-	uhBE, err := s.db.MetadataGet(ctx, UtxoIndexHeightKey) // XXX this must be hash based
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("utxo indexer metadata get: %w", err)
-		}
-		uhBE = make([]byte, 8)
-	}
-	heightUtxo := binary.BigEndian.Uint64(uhBE)
-	countUtxo := int64(height) - int64(heightUtxo)
-	if countUtxo >= 0 {
-		err := s.UtxoIndexer(ctx, heightUtxo, uint64(countUtxo+1))
-		if err != nil {
-			return fmt.Errorf("utxo indexer: %w", err)
-		}
+	log.Debugf("Syncing indexes to: %v", hash)
+	if err := s.UtxoIndexer(ctx, hash); err != nil {
+		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
 	// Transactions index
-	thBE, err := s.db.MetadataGet(ctx, TxIndexHeightKey) // XXX this must be hash based
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("tx indexer metadata get: %w", err)
-		}
-		thBE = make([]byte, 8)
+	if err := s.TxIndexer(ctx, hash); err != nil {
+		return fmt.Errorf("tx indexer: %w", err)
 	}
-	heightTx := binary.BigEndian.Uint64(thBE)
-	countTx := int64(height) - int64(heightTx)
-	if countTx >= 0 {
-		err := s.TxIndexer(ctx, heightTx, uint64(countTx+1))
-		if err != nil {
-			return fmt.Errorf("tx indexer: %w", err)
-		}
-	}
-	log.Debugf("Done syncing to: %v", height)
+	log.Debugf("Done syncing to: %v", hash)
 
 	return nil
 }

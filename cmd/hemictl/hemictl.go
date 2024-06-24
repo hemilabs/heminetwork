@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -40,7 +39,6 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
-	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	ldb "github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -77,8 +75,6 @@ var (
 
 	callTimeout = 100 * time.Second
 )
-
-var api string
 
 // handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
 // be able to use bssapi.Call.
@@ -240,7 +236,7 @@ func tbcdb() error {
 		fmt.Printf("hash  : %v\n", bh)
 		fmt.Printf("height: %v\n", bh.Height)
 
-	case "blockheadersbest":
+	case "blockheaderbest":
 		bhb, err := s.DB().BlockHeaderBest(ctx)
 		if err != nil {
 			return fmt.Errorf("block headers best: %w", err)
@@ -389,91 +385,66 @@ func tbcdb() error {
 		spew.Dump(bh)
 
 	case "help", "h":
-		fmt.Printf("tbcd db manipulator commands:\n")
-		fmt.Printf("\tbalancebyscripthash [hash]\n")
-		fmt.Printf("\tblockbyhash [hash]\n")
-		fmt.Printf("\tblockheaderbyhash [hash]\n")
-		fmt.Printf("\tblockheadersbest\n")
-		fmt.Printf("\tblockheadersbyheight [height]\n")
-		fmt.Printf("\tblocksbytxid [hash]\n")
-		fmt.Printf("\tblocksmissing [count]\n")
-		fmt.Printf("\tdeletemetadata\n")
-		fmt.Printf("\tdumpmetadata\n")
-		fmt.Printf("\tdumpoutputs <prefix>\n")
-		fmt.Printf("\thelp\n")
-		fmt.Printf("\tscripthashbyoutpoint [txid] [index]\n")
-		fmt.Printf("\tspendoutputsbytxid [txid] [index]\n")
-		fmt.Printf("\ttxindex <height> <count> <maxcache>\n")
-		fmt.Printf("\tutxoindex <height> <count> <maxcache>\n")
-		fmt.Printf("\tutxosbyscripthash [hash]\n")
+		fmt.Println("tbcd db manipulator commands:")
+		fmt.Println("\tbalancebyscripthash [hash]")
+		fmt.Println("\tblockbyhash [hash]")
+		fmt.Println("\tblockheaderbyhash [hash]")
+		fmt.Println("\tblockheaderbest")
+		fmt.Println("\tblockheadersbyheight [height]")
+		fmt.Println("\tblocksbytxid [hash]")
+		fmt.Println("\tblocksmissing [count]")
+		fmt.Println("\tdeletemetadata")
+		fmt.Println("\tdumpmetadata")
+		fmt.Println("\tdumpoutputs <prefix>")
+		fmt.Println("\thelp")
+		fmt.Println("\tscripthashbyoutpoint [txid] [index]")
+		fmt.Println("\tspendoutputsbytxid [txid] [index]")
+		fmt.Println("\ttxindex <height> <count> <maxcache>")
+		fmt.Println("\tutxoindex <height> <count> <maxcache>")
+		fmt.Println("\tutxosbyscripthash [hash]")
 
 	case "utxoindex":
-		var h, c, mc uint64
-		height := args["height"]
-		if height == "" {
-			// Get height from db
-			he, err := s.DB().MetadataGet(ctx, tbc.UtxoIndexHeightKey)
-			if err != nil {
-				if !errors.Is(err, database.ErrNotFound) {
-					return fmt.Errorf("metadata %v: %w",
-						string(tbc.UtxoIndexHeightKey), err)
-				}
-				he = make([]byte, 8)
-			}
-			h = binary.BigEndian.Uint64(he)
-		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
-			return fmt.Errorf("height: %w", err)
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("must provide hash")
 		}
-		count := args["count"]
-		if count == "" {
-			c = 0
-		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
-			return fmt.Errorf("count: %w", err)
+		eh, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("parse hash: %w", err)
 		}
+
 		maxCache := args["maxcache"]
+		var mc uint64
 		if maxCache != "" {
 			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
 				return fmt.Errorf("maxCache: %w", err)
 			}
 			cfg.MaxCachedTxs = int(mc)
 		}
-		err = s.UtxoIndexer(ctx, h, c)
+		err = s.UtxoIndexer(ctx, eh)
 		if err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
 
 	case "txindex":
-		var h, c, mc uint64
-		height := args["height"]
-		if height == "" {
-			// Get height from db
-			he, err := s.DB().MetadataGet(ctx, tbc.TxIndexHeightKey)
-			if err != nil {
-				if !errors.Is(err, database.ErrNotFound) {
-					return fmt.Errorf("metadata %v: %w",
-						string(tbc.TxIndexHeightKey), err)
-				}
-				he = make([]byte, 8)
-			}
-			h = binary.BigEndian.Uint64(he)
-		} else if h, err = strconv.ParseUint(height, 10, 64); err != nil {
-			return fmt.Errorf("height: %w", err)
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("must provide hash")
 		}
-		count := args["count"]
-		if count == "" {
-			c = 0
-		} else if c, err = strconv.ParseUint(count, 10, 64); err != nil {
-			return fmt.Errorf("count: %w", err)
+		eh, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("parse hash: %w", err)
 		}
+
 		maxCache := args["maxcache"]
+		var mc uint64
 		if maxCache != "" {
 			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
 				return fmt.Errorf("maxCache: %w", err)
 			}
 			cfg.MaxCachedTxs = int(mc)
 		}
-		err = s.TxIndexer(ctx, h, c)
-		if err != nil {
+		if err = s.TxIndexer(ctx, eh); err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
 

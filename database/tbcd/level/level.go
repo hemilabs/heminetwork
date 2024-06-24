@@ -17,7 +17,6 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -57,31 +56,6 @@ var ErrIterator = IteratorError(errors.New("iteration error"))
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
-}
-
-func b2h(header []byte) (*wire.BlockHeader, error) {
-	var bh wire.BlockHeader
-	if err := bh.Deserialize(bytes.NewReader(header)); err != nil {
-		return nil, fmt.Errorf("deserialize block header: %w", err)
-	}
-	return &bh, nil
-}
-
-func headerHash(header []byte) *chainhash.Hash {
-	h, err := b2h(header)
-	if err != nil {
-		panic(err)
-	}
-	hash := h.BlockHash()
-	return &hash
-}
-
-func headerParentHash(header []byte) *chainhash.Hash {
-	h, err := b2h(header)
-	if err != nil {
-		panic(err)
-	}
-	return &h.PrevBlock
 }
 
 type ldb struct {
@@ -283,7 +257,7 @@ func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	)
 	copy(header[:], ebh[8:88])
 	bh := &tbcd.BlockHeader{
-		Hash:   headerHash(header[:])[:],
+		Hash:   tbcd.HeaderHash(header[:])[:],
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 		Header: header[:],
 	}
@@ -295,7 +269,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 	log.Tracef("BlockHeaderGenesisInsert")
 	defer log.Tracef("BlockHeaderGenesisInsert exit")
 
-	wbh, err := b2h(bh[:])
+	wbh, err := tbcd.B2H(bh[:])
 	if err != nil {
 		return fmt.Errorf("block header insert b2h: %w", err)
 	}
@@ -399,7 +373,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// Ensure we can connect these blockheaders prior to starting database
 	// transaction. This also obtains the starting cumulative difficulty
 	// and  height.
-	wbh, err := b2h(bhs[0][:])
+	wbh, err := tbcd.B2H(bhs[0][:])
 	if err != nil {
 		return tbcd.ITInvalid, nil, nil,
 			fmt.Errorf("block headers insert b2h: %w", err)
@@ -455,7 +429,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 				database.NotFoundError("best block header not found")
 		}
 		return tbcd.ITInvalid, nil, nil,
-			fmt.Errorf("best block header: %v", err)
+			fmt.Errorf("best block header: %w", err)
 	}
 	bestBH := decodeBlockHeader(bbh)
 
@@ -483,7 +457,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	for k, bh := range bhs {
 		// The first element is skipped, as it is pre-decoded.
 		if k != 0 {
-			wbh, err = b2h(bh[:])
+			wbh, err = tbcd.B2H(bh[:])
 			if err != nil {
 				return tbcd.ITInvalid, nil, nil,
 					fmt.Errorf("block headers insert b2h: %w", err)
