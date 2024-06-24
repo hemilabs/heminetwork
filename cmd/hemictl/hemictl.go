@@ -76,8 +76,6 @@ var (
 	callTimeout = 100 * time.Second
 )
 
-var api string
-
 // handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
 // be able to use bssapi.Call.
 func handleBSSWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
