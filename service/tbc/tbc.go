@@ -67,6 +67,9 @@ const (
 var (
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
+	localnetSeeds = []string{
+		"bitcoind",
+	}
 	testnetSeeds = []string{
 		"testnet-seed.bitcoin.jonasschnelli.ch",
 		"seed.tbtc.petertodd.org",
@@ -157,6 +160,7 @@ type Config struct {
 	PeersWanted             int
 	PrometheusListenAddress string
 	PprofListenAddress      string
+	Seeds                   []string
 }
 
 func NewDefaultConfig() *Config {
@@ -260,8 +264,13 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.port = localnetPort
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
+		s.seeds = localnetSeeds
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
+	}
+
+	if len(cfg.Seeds) > 0 {
+		s.seeds = cfg.Seeds
 	}
 
 	return s, nil
@@ -471,9 +480,13 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 	log.Tracef("localPeerManager")
 	defer log.Tracef("localPeerManager exit")
 
+	if len(s.seeds) != 1 {
+		return fmt.Errorf("expecting 1 seed, received %d", len(s.seeds))
+	}
+
 	peersWanted := 1
 	peerC := make(chan string, peersWanted)
-	address := net.JoinHostPort("127.0.0.1", s.port)
+	address := net.JoinHostPort(s.seeds[0], s.port)
 	peer, err := NewPeer(s.wireNet, address)
 	if err != nil {
 		return fmt.Errorf("new peer: %w", err)
