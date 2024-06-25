@@ -493,13 +493,7 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 	peersWanted := 1
 	peerC := make(chan string, peersWanted)
 
-	host, port, err := net.SplitHostPort(s.seeds[0])
-	if err != nil {
-		return err
-	}
-
-	address := net.JoinHostPort(host, port)
-	peer, err := NewPeer(s.wireNet, address)
+	peer, err := NewPeer(s.wireNet, s.seeds[0])
 	if err != nil {
 		return fmt.Errorf("new peer: %w", err)
 	}
