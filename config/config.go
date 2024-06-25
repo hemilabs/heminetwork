@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 )
 
 type PrintMode int
@@ -88,6 +89,8 @@ func Parse(c CfgMap) error {
 				}
 
 				reflect.ValueOf(v.Value).Elem().SetBool(val)
+			case reflect.Slice:
+				*(v.Value.(*[]string)) = strings.Split(envValue, ",")
 
 			default:
 				return fmt.Errorf("unsuported type for %v: %v",
