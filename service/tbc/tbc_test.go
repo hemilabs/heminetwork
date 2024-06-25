@@ -821,7 +821,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	cfg.LevelDBHome = home
 	cfg.Network = networkLocalnet
 	cfg.ListenAddress = tcbListenAddress
-	cfg.Seeds = []string{fmt.Sprintf("127.0.0.1:%s", localnetPort)}
+	cfg.Seeds = []string{"127.0.0.1:18444"}
 	tbcServer, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -1033,5 +1033,5 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 		t.Fatal(err)
 	}
 
-	return bitcoindContainer, nat.Port(localnetPort)
+	return bitcoindContainer, nat.Port("18444")
 }

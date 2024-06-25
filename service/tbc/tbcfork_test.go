@@ -534,7 +534,7 @@ func TestFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{fmt.Sprintf("127.0.0.1:%s", localnetPort)},
+		Seeds:                   []string{"127.0.0.1:18444"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)

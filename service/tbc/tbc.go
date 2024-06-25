@@ -48,10 +48,6 @@ const (
 
 	promSubsystem = "tbc_service" // Prometheus
 
-	mainnetPort  = "8333"
-	testnetPort  = "18333"
-	localnetPort = "18444"
-
 	defaultPeersWanted   = 64
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
@@ -68,21 +64,21 @@ var (
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
 	localnetSeeds = []string{
-		fmt.Sprintf("bitcoind:%s", localnetPort),
+		"bitcoind:18444",
 	}
 	testnetSeeds = []string{
-		fmt.Sprintf("testnet-seed.bitcoin.jonasschnelli.ch:%s", testnetPort),
-		fmt.Sprintf("seed.tbtc.petertodd.org:%s", testnetPort),
-		fmt.Sprintf("seed.testnet.bitcoin.sprovoost.nl:%s", testnetPort),
-		fmt.Sprintf("testnet-seed.bluematt.me:%s", testnetPort),
+		"testnet-seed.bitcoin.jonasschnelli.ch:18333",
+		"seed.tbtc.petertodd.org:18333",
+		"seed.testnet.bitcoin.sprovoost.nl:18333",
+		"testnet-seed.bluematt.me:18333",
 	}
 	mainnetSeeds = []string{
-		fmt.Sprintf("seed.bitcoin.sipa.be:%s", mainnetPort),
-		fmt.Sprintf("dnsseed.bluematt.me:%s", mainnetPort),
-		fmt.Sprintf("dnsseed.bitcoin.dashjr.org:%s", mainnetPort),
-		fmt.Sprintf("seed.bitcoinstats.com:%s", mainnetPort),
-		fmt.Sprintf("seed.bitnodes.io:%s", mainnetPort),
-		fmt.Sprintf("seed.bitcoin.jonasschnelli.ch:%s", mainnetPort),
+		"seed.bitcoin.sipa.be:8333",
+		"dnsseed.bluematt.me:8333",
+		"dnsseed.bitcoin.dashjr.org:8333",
+		"seed.bitcoinstats.com:8333",
+		"seed.bitnodes.io:8333",
+		"seed.bitcoin.jonasschnelli.ch:8333",
 	}
 )
 
