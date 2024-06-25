@@ -96,7 +96,7 @@ var (
 		"TBC_SEEDS": config.Config{
 			Value:        &cfg.Seeds,
 			DefaultValue: []string{},
-			Help:         "list of tbc seeds, format of <host>:<port>",
+			Help:         "list of seed domains for Bitcoin P2P, in the format '<host>:<port>' (for localnet, must be a single host:port)",
 			Print:        config.PrintAll,
 		},
 	}
