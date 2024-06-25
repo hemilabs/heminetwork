@@ -315,7 +315,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	for _, v := range s.seeds {
 		host, port, err := net.SplitHostPort(v)
 		if err != nil {
-			log.Errorf("SplitHostPort: %v", err)
+			log.Errorf("Failed to parse host/port: %v", err)
 			errorsSeen++
 			continue
 		}
