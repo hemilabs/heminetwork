@@ -91,7 +91,8 @@ func Parse(c CfgMap) error {
 				reflect.ValueOf(v.Value).Elem().SetBool(val)
 			case reflect.Slice:
 				// we assume that the slice here can be appended to (ex. an empty slice)
-				reflect.AppendSlice(reflect.ValueOf(v.Value), reflect.ValueOf(strings.Split(envValue, ",")))
+				value := reflect.ValueOf(v.Value).Elem()
+				value.Set(reflect.AppendSlice(value, reflect.ValueOf(strings.Split(envValue, ","))))
 
 			default:
 				return fmt.Errorf("unsuported type for %v: %v",
