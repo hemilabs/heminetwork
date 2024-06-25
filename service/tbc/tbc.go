@@ -313,13 +313,13 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	errorsSeen := 0
 	var moreSeeds []tbcd.Peer
 	for _, v := range s.seeds {
-		_, port, err := net.SplitHostPort(v)
+		host, port, err := net.SplitHostPort(v)
 		if err != nil {
 			log.Errorf("SplitHostPort: %v", err)
 			errorsSeen++
 			continue
 		}
-		ips, err := resolver.LookupIP(ctx, "ip", v)
+		ips, err := resolver.LookupIP(ctx, "ip", host)
 		if err != nil {
 			log.Errorf("lookup: %v", err)
 			errorsSeen++
