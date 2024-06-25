@@ -67,55 +67,22 @@ const (
 var (
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
-	localnetSeeds = []Seed{
-		{
-			Host: "bitcoind",
-			Port: localnetPort,
-		},
+	localnetSeeds = []string{
+		fmt.Sprintf("bitcoind:%s", localnetPort),
 	}
-	testnetSeeds = []Seed{
-		{
-			Host: "testnet-seed.bitcoin.jonasschnelli.ch",
-			Port: testnetPort,
-		},
-		{
-			Host: "seed.tbtc.petertodd.org",
-			Port: testnetPort,
-		},
-		{
-			Host: "seed.testnet.bitcoin.sprovoost.nl",
-			Port: testnetPort,
-		},
-		{
-			Host: "testnet-seed.bluematt.me",
-			Port: testnetPort,
-		},
+	testnetSeeds = []string{
+		fmt.Sprintf("testnet-seed.bitcoin.jonasschnelli.ch:%s", testnetPort),
+		fmt.Sprintf("seed.tbtc.petertodd.org:%s", testnetPort),
+		fmt.Sprintf("seed.testnet.bitcoin.sprovoost.nl:%s", testnetPort),
+		fmt.Sprintf("testnet-seed.bluematt.me:%s", testnetPort),
 	}
-	mainnetSeeds = []Seed{
-		{
-			Host: "seed.bitcoin.sipa.be",
-			Port: mainnetPort,
-		},
-		{
-			Host: "dnsseed.bluematt.me",
-			Port: mainnetPort,
-		},
-		{
-			Host: "dnsseed.bitcoin.dashjr.org",
-			Port: mainnetPort,
-		},
-		{
-			Host: "seed.bitcoinstats.com",
-			Port: mainnetPort,
-		},
-		{
-			Host: "seed.bitnodes.io",
-			Port: mainnetPort,
-		},
-		{
-			Host: "seed.bitcoin.jonasschnelli.ch",
-			Port: mainnetPort,
-		},
+	mainnetSeeds = []string{
+		fmt.Sprintf("seed.bitcoin.sipa.be:%s", mainnetPort),
+		fmt.Sprintf("dnsseed.bluematt.me:%s", mainnetPort),
+		fmt.Sprintf("dnsseed.bitcoin.dashjr.org:%s", mainnetPort),
+		fmt.Sprintf("seed.bitcoinstats.com:%s", mainnetPort),
+		fmt.Sprintf("seed.bitnodes.io:%s", mainnetPort),
+		fmt.Sprintf("seed.bitcoin.jonasschnelli.ch:%s", mainnetPort),
 	}
 )
 
@@ -182,11 +149,6 @@ func sliceChainHash(ch chainhash.Hash) []byte {
 	return ch[:]
 }
 
-type Seed struct {
-	Host string
-	Port string
-}
-
 type Config struct {
 	AutoIndex               bool
 	BlockSanity             bool
@@ -198,7 +160,7 @@ type Config struct {
 	PeersWanted             int
 	PrometheusListenAddress string
 	PprofListenAddress      string
-	Seeds                   []Seed
+	Seeds                   []string
 }
 
 func NewDefaultConfig() *Config {
@@ -226,7 +188,7 @@ type Server struct {
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
-	seeds       []Seed
+	seeds       []string
 
 	peers  map[string]*peer // active but not necessarily connected
 	blocks *ttl.TTL         // outstanding block downloads [hash]when/where
@@ -349,9 +311,15 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	defer cancel()
 
 	errorsSeen := 0
-	var moreSeeds []Seed
+	var moreSeeds []tbcd.Peer
 	for _, v := range s.seeds {
-		ips, err := resolver.LookupIP(ctx, "ip", net.JoinHostPort(v.Host, v.Port))
+		_, port, err := net.SplitHostPort(v)
+		if err != nil {
+			log.Errorf("SplitHostPort: %v", err)
+			errorsSeen++
+			continue
+		}
+		ips, err := resolver.LookupIP(ctx, "ip", v)
 		if err != nil {
 			log.Errorf("lookup: %v", err)
 			errorsSeen++
@@ -359,9 +327,9 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 		}
 
 		for _, ip := range ips {
-			moreSeeds = append(moreSeeds, Seed{
+			moreSeeds = append(moreSeeds, tbcd.Peer{
 				Host: ip.String(),
-				Port: v.Port,
+				Port: port,
 			})
 		}
 	}
@@ -372,10 +340,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 
 	// insert into peers table
 	for _, ms := range moreSeeds {
-		peers = append(peers, tbcd.Peer{
-			Host: ms.Host,
-			Port: ms.Port,
-		})
+		peers = append(peers, ms)
 	}
 
 	// return fake peers but don't save them to the database
@@ -527,7 +492,13 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 
 	peersWanted := 1
 	peerC := make(chan string, peersWanted)
-	address := net.JoinHostPort(s.seeds[0].Host, s.seeds[0].Port)
+
+	host, port, err := net.SplitHostPort(s.seeds[0])
+	if err != nil {
+		return err
+	}
+
+	address := net.JoinHostPort(host, port)
 	peer, err := NewPeer(s.wireNet, address)
 	if err != nil {
 		return fmt.Errorf("new peer: %w", err)
