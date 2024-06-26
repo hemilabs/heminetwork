@@ -1032,5 +1032,5 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 		t.Fatal(err)
 	}
 
-	return bitcoindContainer, nat.Port(localnetPort)
+	return bitcoindContainer, nat.Port("18444")
 }

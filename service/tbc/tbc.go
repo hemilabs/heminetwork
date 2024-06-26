@@ -48,10 +48,6 @@ const (
 
 	promSubsystem = "tbc_service" // Prometheus
 
-	mainnetPort  = "8333"
-	testnetPort  = "18333"
-	localnetPort = "18444"
-
 	defaultPeersWanted   = 64
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
@@ -67,19 +63,22 @@ const (
 var (
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
+	localnetSeeds = []string{
+		"127.0.0.1:18444",
+	}
 	testnetSeeds = []string{
-		"testnet-seed.bitcoin.jonasschnelli.ch",
-		"seed.tbtc.petertodd.org",
-		"seed.testnet.bitcoin.sprovoost.nl",
-		"testnet-seed.bluematt.me",
+		"testnet-seed.bitcoin.jonasschnelli.ch:18333",
+		"seed.tbtc.petertodd.org:18333",
+		"seed.testnet.bitcoin.sprovoost.nl:18333",
+		"testnet-seed.bluematt.me:18333",
 	}
 	mainnetSeeds = []string{
-		"seed.bitcoin.sipa.be",
-		"dnsseed.bluematt.me",
-		"dnsseed.bitcoin.dashjr.org",
-		"seed.bitcoinstats.com",
-		"seed.bitnodes.io",
-		"seed.bitcoin.jonasschnelli.ch",
+		"seed.bitcoin.sipa.be:8333",
+		"dnsseed.bluematt.me:8333",
+		"dnsseed.bitcoin.dashjr.org:8333",
+		"seed.bitcoinstats.com:8333",
+		"seed.bitnodes.io:8333",
+		"seed.bitcoin.jonasschnelli.ch:8333",
 	}
 )
 
@@ -157,6 +156,7 @@ type Config struct {
 	PeersWanted             int
 	PrometheusListenAddress string
 	PprofListenAddress      string
+	Seeds                   []string
 }
 
 func NewDefaultConfig() *Config {
@@ -184,7 +184,6 @@ type Server struct {
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
-	port        string
 	seeds       []string
 
 	peers  map[string]*peer // active but not necessarily connected
@@ -247,21 +246,23 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	switch cfg.Network {
 	case "mainnet":
-		s.port = mainnetPort
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
 		s.seeds = mainnetSeeds
 	case "testnet3":
-		s.port = testnetPort
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
 		s.seeds = testnetSeeds
 	case networkLocalnet:
-		s.port = localnetPort
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
+		s.seeds = localnetSeeds
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
+	}
+
+	if len(cfg.Seeds) > 0 {
+		s.seeds = cfg.Seeds
 	}
 
 	return s, nil
@@ -306,26 +307,36 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	defer cancel()
 
 	errorsSeen := 0
-	var addrs []net.IP
-	for k := range s.seeds {
-		ips, err := resolver.LookupIP(ctx, "ip", s.seeds[k])
+	var moreSeeds []tbcd.Peer
+	for _, v := range s.seeds {
+		host, port, err := net.SplitHostPort(v)
+		if err != nil {
+			log.Errorf("Failed to parse host/port: %v", err)
+			errorsSeen++
+			continue
+		}
+		ips, err := resolver.LookupIP(ctx, "ip", host)
 		if err != nil {
 			log.Errorf("lookup: %v", err)
 			errorsSeen++
 			continue
 		}
-		addrs = append(addrs, ips...)
+
+		for _, ip := range ips {
+			moreSeeds = append(moreSeeds, tbcd.Peer{
+				Host: ip.String(),
+				Port: port,
+			})
+		}
 	}
+
 	if errorsSeen == len(s.seeds) {
 		return nil, errors.New("could not seed")
 	}
 
 	// insert into peers table
-	for k := range addrs {
-		peers = append(peers, tbcd.Peer{
-			Host: addrs[k].String(),
-			Port: s.port,
-		})
+	for _, ms := range moreSeeds {
+		peers = append(peers, ms)
 	}
 
 	// return fake peers but don't save them to the database
@@ -471,10 +482,14 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 	log.Tracef("localPeerManager")
 	defer log.Tracef("localPeerManager exit")
 
+	if len(s.seeds) != 1 {
+		return fmt.Errorf("expecting 1 seed, received %d", len(s.seeds))
+	}
+
 	peersWanted := 1
 	peerC := make(chan string, peersWanted)
-	address := net.JoinHostPort("127.0.0.1", s.port)
-	peer, err := NewPeer(s.wireNet, address)
+
+	peer, err := NewPeer(s.wireNet, s.seeds[0])
 	if err != nil {
 		return fmt.Errorf("new peer: %w", err)
 	}

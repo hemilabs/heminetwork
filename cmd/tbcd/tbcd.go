@@ -93,6 +93,12 @@ var (
 			Help:         "address and port tbcd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
+		"TBC_SEEDS": config.Config{
+			Value:        &cfg.Seeds,
+			DefaultValue: []string{},
+			Help:         "list of seed domains for Bitcoin P2P, in the format '<host>:<port>' (for localnet, must be a single host:port)",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
@@ -139,6 +145,7 @@ func _main() error {
 	if err != nil {
 		return fmt.Errorf("create tbc server: %w", err)
 	}
+
 	// XXX remove, this is an illustration of calling the direct API of server
 	// go func() {
 	//	for {
