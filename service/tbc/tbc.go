@@ -64,7 +64,7 @@ var (
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
 	localnetSeeds = []string{
-		"bitcoind:18444",
+		"127.0.0.1:18444",
 	}
 	testnetSeeds = []string{
 		"testnet-seed.bitcoin.jonasschnelli.ch:18333",
