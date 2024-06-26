@@ -90,7 +90,6 @@ func Parse(c CfgMap) error {
 
 				reflect.ValueOf(v.Value).Elem().SetBool(val)
 			case reflect.Slice:
-				// we assume that the slice here can be appended to (ex. an empty slice)
 				value := reflect.ValueOf(v.Value).Elem()
 				value.Set(reflect.AppendSlice(value, reflect.ValueOf(strings.Split(envValue, ","))))
 
