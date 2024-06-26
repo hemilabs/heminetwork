@@ -34,7 +34,7 @@ const (
 
 	// ErrorCodeInvalidValue is used when an invalid value was provided for
 	// a dispatch argument.
-	ErrorCodeInvalidValue ErrorCode = 1001
+	ErrorCodeInvalidValue ErrorCode = 2000
 )
 
 // String returns a string value representing the error code.
