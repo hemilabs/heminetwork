@@ -6,6 +6,8 @@
 
 package main
 
+import "syscall/js"
+
 // Method represents a method that can be dispatched.
 type Method string
 
@@ -47,6 +49,10 @@ func (e ErrorCode) String() string {
 	default:
 		return "unknown"
 	}
+}
+
+func (e ErrorCode) JSValue() js.Value {
+	return jsValueSafe(uint32(e))
 }
 
 // Error represents an error that has occurred within the WASM PoP Miner.

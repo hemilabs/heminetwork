@@ -43,6 +43,8 @@ func jsValueOf(x any) js.Value {
 		return t
 	case js.Func:
 		return t.Value
+	case interface{ JSValue() js.Value }:
+		return t.JSValue()
 	case bool,
 		int, int8, int16, int32, int64,
 		uint, uint8, uint16, uint32, uint64, uintptr,
@@ -187,8 +189,8 @@ func jsValueSafe(v any) (jsv js.Value) {
 
 	// Special handling
 	switch x := v.(type) {
-	case ErrorCode:
-		return js.ValueOf(uint32(x))
+	case interface{ JSValue() js.Value }:
+		return x.JSValue()
 	}
 
 	return js.ValueOf(v)
