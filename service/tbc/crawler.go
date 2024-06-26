@@ -66,6 +66,25 @@ func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
 	return s.mdHashHeight(ctx, TxIndexHashKey)
 }
 
+// findCanonicalHash determines which hash is on the canonical chain.by walking
+// back the chain from the provided end point. It returns the index in bhs of
+// the correct hash. On failure it returns -1 DELIBERATELY to crash the caller
+// if error is not checked.
+func (s *Server) findCanonicalHash(ctx context.Context, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
+	switch len(bhs) {
+	case 1:
+		return 1, nil // most common fast path
+	case 0:
+		return -1, fmt.Errorf("no blockheaders provided")
+	}
+
+	// When this happens we have to walk back from endHash to find the
+	// connecting block. There is no shortcut possible without hitting edge
+	// conditions.
+
+	return -1, fmt.Errorf("findCanonicalHash FIXME")
+}
+
 func logMemStats() {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -251,16 +270,18 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		if len(bhs) > 1 {
-			panic("FIXME handle multiple block headers") // XXX: Handle correctly
+		index, err := s.findCanonicalHash(ctx, endHash, bhs)
+		if err != nil {
+			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
+				height, err)
 		}
 		// Verify it connects to parent
-		if !hash.IsEqual(bhs[0].ParentHash()) {
+		if !hash.IsEqual(bhs[index].ParentHash()) {
 			return 0, last, fmt.Errorf("%v does not connect to: %v",
-				bhs[0], hash)
+				bhs[index], hash)
 		}
-		hh.Hash = *bhs[0].BlockHash()
-		hh.Height = bhs[0].Height
+		hh.Hash = *bhs[index].BlockHash()
+		hh.Height = bhs[index].Height
 	}
 
 	return blocksProcessed, last, nil
@@ -443,16 +464,18 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		if len(bhs) > 1 {
-			panic("FIXME handle multiple block headers") // XXX: Handle correctly
+		index, err := s.findCanonicalHash(ctx, endHash, bhs)
+		if err != nil {
+			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
+				height, err)
 		}
 		// Verify it connects to parent
-		if !hash.IsEqual(bhs[0].ParentHash()) {
+		if !hash.IsEqual(bhs[index].ParentHash()) {
 			return 0, last, fmt.Errorf("%v does not connect to: %v",
-				bhs[0], hash)
+				bhs[index], hash)
 		}
-		hh.Hash = *bhs[0].BlockHash()
-		hh.Height = bhs[0].Height
+		hh.Hash = *bhs[index].BlockHash()
+		hh.Height = bhs[index].Height
 	}
 
 	return blocksProcessed, last, nil
