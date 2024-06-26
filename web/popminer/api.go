@@ -30,11 +30,11 @@ type ErrorCode uint32
 const (
 	// ErrorCodeInternal is used when the error is internal, either due to an
 	// invalid dispatch or a panic.
-	ErrorCodeInternal ErrorCode = 0
+	ErrorCodeInternal ErrorCode = 1000
 
 	// ErrorCodeInvalidValue is used when an invalid value was provided for
 	// a dispatch argument.
-	ErrorCodeInvalidValue ErrorCode = 1000
+	ErrorCodeInvalidValue ErrorCode = 1001
 )
 
 // String returns a string value representing the error code.
