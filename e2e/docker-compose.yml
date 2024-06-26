@@ -177,8 +177,9 @@ services:
       test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
-      OP_GETH_L1_RPC: "http://127.0.0.1:8545"
+      OP_GETH_L1_RPC: "http://op-geth-l1:8545"
       TBC_NETWORK: "localnet"
+      TBC_SEEDS: "bitcoind:18444"
     working_dir: "/tmp"
     command:
       - "sh"
@@ -194,7 +195,6 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - { type: "tmpfs", target: "/tmp" }
-    network_mode: host
 
   op-node:
     build:
@@ -209,7 +209,7 @@ services:
       op-geth-l2:
         condition: "service_healthy"
     environment:
-      OP_NODE_BSS_WS: "http://127.0.0.1:8081/v1/ws"
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
       - "op-node/bin/op-node"
       - "--l2=ws://127.0.0.1:8551"
@@ -222,7 +222,7 @@ services:
       - "--rpc.port=8547"
       - "--p2p.disable"
       - "--rpc.enable-admin"
-      - "--l1=http://127.0.0.1:8545"
+      - "--l1=http://op-geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--l1.trustrpc"
       - "--log.level=info"
@@ -231,7 +231,6 @@ services:
     volumes:
       - "l2configs:/l2configs"
       - "./jwt.txt:/tmp/jwt.txt"
-    network_mode: host
 
   op-batcher:
     build:
@@ -242,8 +241,8 @@ services:
         condition: "any"
     command:
       - "op-batcher/bin/op-batcher"
-      - "--l2-eth-rpc=http://127.0.0.1:8546"
-      - "--rollup-rpc=http://127.0.0.1:8547"
+      - "--l2-eth-rpc=http://op-geth-l2:8546"
+      - "--rollup-rpc=http://op-node:8547"
       - "--poll-interval=1s"
       - "--sub-safety-margin=1"
       - "--num-confirmations=1"
@@ -254,7 +253,7 @@ services:
       - "--rpc.enable-admin"
       - "--max-channel-duration=1"
       - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://127.0.0.1:8545"
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
     depends_on:
       op-geth-l1:
@@ -263,7 +262,6 @@ services:
         condition: "service_healthy"
       op-node:
         condition: "service_started"
-    network_mode: host
 
   op-proposer:
     build:
@@ -283,11 +281,10 @@ services:
       - "op-proposer/bin/op-proposer"
       - "--poll-interval=1s"
       - "--rpc.port=8560"
-      - "--rollup-rpc=http://127.0.0.1:8547"
+      - "--rollup-rpc=http://op-node:8547"
       - "--l2oo-address=${L2OO_ADDRESS}"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://127.0.0.1:8545"
-    network_mode: host
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
 
 volumes:
   geth:
