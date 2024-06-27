@@ -8,11 +8,13 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"runtime/debug"
 	"strings"
 	"syscall/js"
 	"time"
+	"unsafe"
 )
 
 var (
@@ -21,17 +23,22 @@ var (
 	arrayConstructor   = js.Global().Get("Array")
 )
 
-type JSValuer interface {
-	JSValue() js.Value
+// JSMarshaler is the interface implemented by types that can marshal
+// themselves into a valid JavaScript value.
+type JSMarshaler interface {
+	MarshalJS() (js.Value, error)
 }
 
 // jsValueOf returns x as a JavaScript value.
+// If the x cannot be converted to a JavaScript value, js.Undefined() will be
+// returned and an error will be logged.
 //
 //	| Go                     | JavaScript             |
 //	| ---------------------- | ---------------------- |
 //	| nil                    | null                   |
 //	| js.Value               | [value]                |
 //	| js.Func                | function               |
+//	| JSMarshaler            | output of MarshalJS()  |
 //	| bool                   | boolean                |
 //	| integers and floats    | number                 |
 //	| string                 | string                 |
@@ -40,36 +47,12 @@ type JSValuer interface {
 //	| struct                 | Object                 |
 //	| all others             | undefined              |
 func jsValueOf(x any) js.Value {
-	switch t := x.(type) {
-	case nil:
-		return js.Null()
-	case js.Value:
-		return t
-	case js.Func:
-		return t.Value
-	case JSValuer:
-		return t.JSValue()
-	case bool,
-		int, int8, int16, int32, int64,
-		uint, uint8, uint16, uint32, uint64, uintptr,
-		float32, float64, string:
-		return js.ValueOf(t)
-	case []any:
-		a := arrayConstructor.New(len(t))
-		for i, s := range t {
-			a.SetIndex(i, s)
-		}
-		return a
-	case map[string]any:
-		o := objectConstructor.New()
-		for k, v := range t {
-			o.Set(k, v)
-		}
-		return o
-	default:
-		// Attempt reflection, will fall back to using jsValueSafe.
+	v, err := jsValueSafe(x)
+	if err != nil {
+		log.Debugf("jsValueOf: attempting reflection for %T: %v", x, err)
 		return jsReflectValueOf(reflect.ValueOf(x))
 	}
+	return v
 }
 
 func jsReflectValueOf(rv reflect.Value) js.Value {
@@ -98,7 +81,7 @@ func jsReflectValueOf(rv reflect.Value) js.Value {
 			k, ok := i.Key().Interface().(string)
 			if !ok {
 				// Non-string keys are unsupported.
-				log.Warningf("cannot encode map with non-string key %v",
+				log.Errorf("cannot encode map with non-string key %v",
 					i.Key().Type())
 				return js.Undefined()
 			}
@@ -109,10 +92,14 @@ func jsReflectValueOf(rv reflect.Value) js.Value {
 		return jsReflectStruct(rv)
 	default:
 		if !rv.CanInterface() {
-			log.Warningf("cannot encode reflect value of type %v", rv.Type())
+			log.Errorf("cannot encode reflect value of type %v", rv.Type())
 			return js.Undefined()
 		}
-		return jsValueSafe(rv.Interface())
+		v, err := jsValueSafe(rv.Interface())
+		if err != nil {
+			log.Errorf("cannot encode %v: %v", rv.Type(), err)
+		}
+		return v
 	}
 }
 
@@ -180,24 +167,62 @@ func isEmptyValue(rv reflect.Value) bool {
 	}
 }
 
-// jsValueSafe wraps js.ValueOf and recovers when js.ValueOf panics due to it
-// not being able to handle the type it is called with. js.Undefined() is
-// returned when a panic occurs and an error is logged.
-func jsValueSafe(v any) (jsv js.Value) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Errorf("recovered from js.ValueOf panic: %v: %T", r, v)
-			jsv = js.Undefined()
+// jsValueSafe returns a JavaScript value representing x.
+// It handles all types handled by js.ValueOf, and includes some special
+// handling for JSMarshaler. If a type cannot be converted to a js.Value,
+// js.Undefined() and an error will be returned.
+//
+// This function will not attempt reflection, use jsValueOf for
+// reflection-based handling for structs.
+//
+//	| Go                     | JavaScript             |
+//	| ---------------------- | ---------------------- |
+//	| nil                    | null                   |
+//	| js.Value               | [value]                |
+//	| js.Func                | function               |
+//	| JSMarshaler            | output of MarshalJS()  |
+//	| bool                   | boolean                |
+//	| integers and floats    | number                 |
+//	| string                 | string                 |
+//	| []any and [x]any       | Array                  |
+//	| map[string]any         | Object                 |
+//	| all others             | undefined (err != nil) |
+func jsValueSafe(x any) (js.Value, error) {
+	switch t := x.(type) {
+	case nil:
+		return js.Null(), nil
+	case js.Value:
+		return t, nil
+	case js.Func:
+		return t.Value, nil
+	case JSMarshaler:
+		jsv, err := t.MarshalJS()
+		if err != nil {
+			return js.Undefined(), err
 		}
-	}()
-
-	// Special handling
-	switch x := v.(type) {
-	case JSValuer:
-		return x.JSValue()
+		return jsv, nil
+	case bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		uintptr, unsafe.Pointer,
+		float32, float64, string:
+		return js.ValueOf(t), nil
+	case []any:
+		a := arrayConstructor.New(len(t))
+		for i, s := range t {
+			a.SetIndex(i, s)
+		}
+		return a, nil
+	case map[string]any:
+		o := objectConstructor.New()
+		for k, v := range t {
+			o.Set(k, v)
+		}
+		return o, nil
+	default:
+		err := fmt.Errorf("cannot create js.Value for %T: unsupported", x)
+		return js.Undefined(), err
 	}
-
-	return js.ValueOf(v)
 }
 
 // codedError represents an error that has a related [ErrorCode].
