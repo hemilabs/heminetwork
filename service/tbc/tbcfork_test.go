@@ -151,7 +151,10 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 	return blk.b.MsgBlock(), nil
 }
 
-func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
+func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
+	b.t.Logf("handleRPC %v", conn.RemoteAddr())
+	defer b.t.Logf("handleRPC exit %v", conn.RemoteAddr())
+
 	b.logf("handleRPC %v", conn.RemoteAddr())
 	defer b.logf("handleRPC exit %v", conn.RemoteAddr())
 
@@ -169,7 +172,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 	}
 	if err := p.write(time.Second, mv); err != nil {
 		b.logf("write version %v: %v", p, err)
-		return
+		return err
 	}
 
 	b.mtx.Lock()
@@ -179,7 +182,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		default:
 		}
 
@@ -190,13 +193,11 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 				b.t.Log("wire: unknown message")
 				continue
 			}
-			b.logf("peer read %v: %v", p, err)
-			return
+			return fmt.Errorf("peer read %v: %w", p, err)
 		}
 
 		if err = b.handleMsg(ctx, p, msg); err != nil {
-			b.logf("handle message %v: %v", p, err)
-			return
+			return fmt.Errorf("handle message %v: %w", p, err)
 		}
 	}
 }
@@ -449,14 +450,23 @@ func (b *btcNode) Run(ctx context.Context) error {
 		return err
 	}
 
-	for {
-		b.logf("waiting for connection")
-		conn, err := l.Accept()
-		if err != nil {
-			return err
-		}
-		go b.handleRPC(ctx, conn)
+	b.logf("waiting for connection")
+	conn, err := l.Accept()
+	if err != nil {
+		return err
 	}
+	return b.handleRPC(ctx, conn)
+}
+
+func (b *btcNode) Stop() error {
+	b.mtx.Lock()
+	p := b.p
+	b.p = nil
+	b.mtx.Unlock()
+	if p == nil {
+		return nil
+	}
+	return p.conn.Close()
 }
 
 func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressPubKey, error) {
@@ -572,7 +582,11 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressP
 
 func TestFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
 	if err != nil {
@@ -585,9 +599,18 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// n.le = true
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
 
+	wg.Add(1)
 	go func() {
-		if err := n.Run(ctx); err != nil {
+		defer wg.Done()
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
 			panic(err)
 		}
 	}()
@@ -624,7 +647,12 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.ignoreUlimit = true
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
+
+		log.Infof("s run")
+		defer log.Infof("s run done")
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
@@ -816,7 +844,11 @@ func TestWork(t *testing.T) {
 
 func TestIndexFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
 
 	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
 	if err != nil {
@@ -829,9 +861,15 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
 
 	go func() {
-		if err := n.Run(ctx); err != nil {
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
 			panic(err)
 		}
 	}()
@@ -848,8 +886,6 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-	time.Sleep(500 * time.Millisecond) // XXX
 
 	// Connect tbc service
 	cfg := &Config{
