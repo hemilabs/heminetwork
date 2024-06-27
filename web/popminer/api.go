@@ -29,6 +29,8 @@ const (
 // ErrorCode is used to differentiate between error types.
 type ErrorCode uint32
 
+var _ JSMarshaler = (*ErrorCode)(nil)
+
 const (
 	// errorCodeInvalid is the zero value of ErrorCode.
 	// This should not be used for anything.
@@ -57,8 +59,9 @@ func (e ErrorCode) String() string {
 	}
 }
 
-func (e ErrorCode) JSValue() js.Value {
-	return jsValueSafe(uint32(e))
+// MarshalJS returns a js.Value representing the error code.
+func (e ErrorCode) MarshalJS() (js.Value, error) {
+	return jsValueOf(uint32(e)), nil
 }
 
 // Error represents an error that has occurred within the WASM PoP Miner.
