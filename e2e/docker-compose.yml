@@ -164,7 +164,6 @@ services:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
       - "./e2e/jwt.txt:/tmp/jwt.txt:ro"
-      - "geth:/tmp/geth"
       - { type: "tmpfs", target: "/tmp" }
 
   op-geth-l2:
@@ -178,8 +177,6 @@ services:
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://op-geth-l1:8545"
-      TBC_NETWORK: "localnet"
-      TBC_SEEDS: "bitcoind:18444"
     working_dir: "/tmp"
     command:
       - "sh"
@@ -287,5 +284,4 @@ services:
       - "--l1-eth-rpc=http://op-geth-l1:8545"
 
 volumes:
-  geth:
   l2configs:
