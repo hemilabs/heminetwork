@@ -29,14 +29,32 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
 
+type block struct {
+	name string
+	b    *btcutil.Block
+}
+
+func (b block) Hash() *chainhash.Hash {
+	return b.b.Hash()
+}
+
+func (b block) Height() int32 {
+	return b.b.Height()
+}
+
+func (b block) MsgBlock() *wire.MsgBlock {
+	return b.b.MsgBlock()
+}
+
 type btcNode struct {
-	t    *testing.T
+	t    *testing.T // for logging
+	le   bool       // log enable
 	port string
 	p    *peer
 
 	mtx            sync.RWMutex
-	chain          map[string]*btcutil.Block
-	blocksAtHeight map[int32][]*btcutil.Block
+	chain          map[string]*block
+	blocksAtHeight map[int32][]*block
 	height         int32
 	params         *chaincfg.Params
 }
@@ -44,9 +62,10 @@ type btcNode struct {
 func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 	node := &btcNode{
 		t:              t,
+		le:             false,
 		port:           port,
-		chain:          make(map[string]*btcutil.Block, 10),
-		blocksAtHeight: make(map[int32][]*btcutil.Block, 10),
+		chain:          make(map[string]*block, 10),
+		blocksAtHeight: make(map[int32][]*block, 10),
 		height:         0,
 		params:         &chaincfg.RegressionNetParams,
 	}
@@ -54,11 +73,18 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 	genesis := btcutil.NewBlock(chaincfg.RegressionNetParams.GenesisBlock)
 	genesis.SetHeight(0)
 	// node.chain[chaincfg.RegressionNetParams.GenesisHash.String()] = genesis
-	_, err := node.insertBlock(genesis)
+	_, err := node.insertBlock(&block{name: "genesis", b: genesis})
 	if err != nil {
 		return nil, err
 	}
 	return node, nil
+}
+
+func (b *btcNode) logf(format string, args ...any) {
+	if !b.le {
+		return
+	}
+	b.t.Logf(format, args...)
 }
 
 func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, error) {
@@ -77,11 +103,11 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 
 	nmh := wire.NewMsgHeaders()
 	height := from.Height() + 1
-	b.t.Logf("start from %v", height)
+	b.logf("start from %v", height)
 	for range 2000 {
 		bs, ok := b.blocksAtHeight[height]
 		if !ok {
-			b.t.Logf("no more blocks at: %v", height)
+			b.logf("no more blocks at: %v", height)
 			return nmh, nil
 		}
 		if len(bs) != 1 {
@@ -92,7 +118,7 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 			return nil, fmt.Errorf("add header: %w", err)
 		}
 
-		b.t.Logf("%v: %v", height, bs[0].MsgBlock().Header.BlockHash())
+		b.logf("%v: %v", height, bs[0].MsgBlock().Header.BlockHash())
 		height++
 	}
 
@@ -103,7 +129,7 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
-	// b.t.Logf("get data: %v", spew.Sdump(m))
+	// b.logf("get data: %v", spew.Sdump(m))
 	if len(m.InvList) != 1 {
 		return nil, errors.New("not supported multi invlist requests")
 	}
@@ -113,17 +139,17 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 		return nil, fmt.Errorf("unsuported data type: %v", v.Type)
 	}
 
-	block, ok := b.chain[v.Hash.String()]
+	blk, ok := b.chain[v.Hash.String()]
 	if !ok {
 		return nil, fmt.Errorf("block not found: %v", v.Hash)
 	}
 
-	return block.MsgBlock(), nil
+	return blk.b.MsgBlock(), nil
 }
 
 func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
-	b.t.Logf("handleRPC %v", conn.RemoteAddr())
-	defer b.t.Logf("handleRPC exit %v", conn.RemoteAddr())
+	b.logf("handleRPC %v", conn.RemoteAddr())
+	defer b.logf("handleRPC exit %v", conn.RemoteAddr())
 
 	p := &peer{
 		conn:            conn,
@@ -138,7 +164,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 		ProtocolVersion: int32(wire.AddrV2Version),
 	}
 	if err := p.write(time.Second, mv); err != nil {
-		b.t.Logf("write version %v: %v", p, err)
+		b.logf("write version %v: %v", p, err)
 		return
 	}
 
@@ -160,12 +186,12 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) {
 				b.t.Log("wire: unknown message")
 				continue
 			}
-			b.t.Logf("peer read %v: %v", p, err)
+			b.logf("peer read %v: %v", p, err)
 			return
 		}
 
 		if err = b.handleMsg(ctx, p, msg); err != nil {
-			b.t.Logf("handle message %v: %v", p, err)
+			b.logf("handle message %v: %v", p, err)
 			return
 		}
 	}
@@ -180,29 +206,29 @@ func (b *btcNode) handleMsg(ctx context.Context, p *peer, msg wire.Message) erro
 		}
 
 	case *wire.MsgGetHeaders:
-		// b.t.Logf("get headers %v", spew.Sdump(m))
+		// b.logf("get headers %v", spew.Sdump(m))
 		headers, err := b.handleGetHeaders(m)
 		if err != nil {
 			return fmt.Errorf("handle get headers: %w", err)
 		}
-		// b.t.Logf("%v", spew.Sdump(headers))
+		// b.logf("%v", spew.Sdump(headers))
 		if err = p.write(time.Second, headers); err != nil {
 			return fmt.Errorf("write headers: %w", err)
 		}
 
 	case *wire.MsgGetData:
-		// b.t.Logf("get data %v", spew.Sdump(m))
+		// b.logf("get data %v", spew.Sdump(m))
 		data, err := b.handleGetData(m)
 		if err != nil {
 			return fmt.Errorf("handle get data: %w", err)
 		}
-		// b.t.Logf("%v", spew.Sdump(data))
+		// b.logf("%v", spew.Sdump(data))
 		if err = p.write(time.Second, data); err != nil {
 			return fmt.Errorf("write data: %w", err)
 		}
 
 	default:
-		b.t.Logf("unhandled command: %v", spew.Sdump(msg))
+		b.logf("unhandled command: %v", spew.Sdump(msg))
 	}
 
 	return nil
@@ -219,15 +245,15 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 	defer b.mtx.Unlock()
 
 	for {
-		block, ok := b.chain[parent.String()]
+		blk, ok := b.chain[parent.String()]
 		if !ok {
 			return fmt.Errorf("parent not found: %v", parent)
 		}
-		b.t.Logf("%v: %v", block.Height(), block.Hash())
+		b.t.Logf("%v: %v %v", blk.name, blk.Height(), blk.Hash())
 
-		bh := block.MsgBlock().Header
+		bh := blk.MsgBlock().Header
 		parent = &bh.PrevBlock
-		if block.Height() == 0 {
+		if blk.Height() == 0 {
 			return nil
 		}
 	}
@@ -269,11 +295,11 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 	return b, nil
 }
 
-func (b *btcNode) insertBlock(block *btcutil.Block) (int, error) {
-	b.chain[block.Hash().String()] = block
-	bAtHeight := b.blocksAtHeight[block.Height()]
-	b.blocksAtHeight[block.Height()] = append(bAtHeight, block)
-	return len(b.blocksAtHeight[block.Height()]), nil
+func (b *btcNode) insertBlock(blk *block) (int, error) {
+	b.chain[blk.Hash().String()] = blk
+	bAtHeight := b.blocksAtHeight[blk.Height()]
+	b.blocksAtHeight[blk.Height()] = append(bAtHeight, blk)
+	return len(b.blocksAtHeight[blk.Height()]), nil
 }
 
 func (b *btcNode) blockHeadersAtHeight(height int32) ([]*wire.BlockHeader, error) {
@@ -320,43 +346,61 @@ func random(count int) []byte {
 	return b
 }
 
-func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*btcutil.Block, error) {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-
+func (b *btcNode) mine(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
 		return nil, errors.New("parent hash not found")
 	}
 
-	blocks := make([]*btcutil.Block, 0, count)
+	blocks := make([]*block, 0, count)
 	for range count {
 		// extra nonce is needed to prevent block collisions
 		en := random(8)
 		extraNonce := binary.BigEndian.Uint64(en)
 
 		nextBlockHeight := parent.Height() + 1
-		block, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
+		bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
 			parent.Hash(), extraNonce)
 		if err != nil {
 			return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
 		}
-		blocks = append(blocks, block)
-		b.t.Logf("mined %v: %v", nextBlockHeight, block.Hash())
+		blk := &block{name: fmt.Sprintf("b%v", nextBlockHeight), b: bt}
+		blocks = append(blocks, blk)
+		b.logf("mined %v: %v", nextBlockHeight, blk.Hash())
 
-		n, err := b.insertBlock(block)
+		n, err := b.insertBlock(blk)
 		if err != nil {
 			return nil, fmt.Errorf("insert block at height %v: %v",
 				nextBlockHeight, err)
 		}
 		if n != 1 {
-			b.t.Logf("fork at: %v blocks %v", nextBlockHeight, n)
+			b.logf("fork at: %v blocks %v", nextBlockHeight, n)
 		}
-		parent = block
+		parent = blk
 		b.height = nextBlockHeight
 	}
 
 	return blocks, nil
+}
+
+func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	return b.mine(count, from, payToAddress)
+}
+
+func (b *btcNode) MineAndSend(ctx context.Context, parent *chainhash.Hash, payToAddress btcutil.Address) error {
+	blks, err := b.Mine(1, parent, payToAddress)
+	if err != nil {
+		return err
+	}
+
+	err = b.SendBlockheader(ctx, blks[0].MsgBlock().Header)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (b *btcNode) Run(ctx context.Context) error {
@@ -367,7 +411,7 @@ func (b *btcNode) Run(ctx context.Context) error {
 	}
 
 	for {
-		b.t.Logf("waiting for connection")
+		b.logf("waiting for connection")
 		conn, err := l.Accept()
 		if err != nil {
 			return err
@@ -759,6 +803,103 @@ func TestWork(t *testing.T) {
 
 	t.Logf("calc work    : 0x%x 0x%x", 0x170331db, blockchain.CalcWork(0x170331db))
 	t.Logf("compact to big: 0x%x", blockchain.CompactToBig(0x170331db))
+}
+
+func TestIndexFork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("key    : %v", key)
+	t.Logf("address: %v", address)
+
+	n, err := newFakeNode(t, "18444")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		if err := n.Run(ctx); err != nil {
+			panic(err)
+		}
+	}()
+
+	startHash := n.Best()
+	count := 9
+	expectedHeight := uint64(count)
+	_, err = n.Mine(count, startHash[0], address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// n.le = true
+	err = n.dumpChain(n.Best()[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
+	time.Sleep(500 * time.Millisecond) // XXX
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:     false,
+		BlockSanity:   false,
+		LevelDBHome:   t.TempDir(),
+		ListenAddress: tbcapi.DefaultListen,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ignoreUlimit = true
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+
+		// See if we are at the right height
+		si := s.Synced(ctx)
+		if si.BlockHeader.Height != expectedHeight {
+			log.Infof("not synced")
+			continue
+		}
+
+		// Don't execute balance tests if index is disabled.
+		if cfg.AutoIndex {
+			// Execute tests
+			balance, err := s.BalanceByAddress(ctx, address.String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if balance != uint64(count*5000000000) {
+				t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
+			}
+			t.Logf("balance %v", spew.Sdump(balance))
+			utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Logf("%v", spew.Sdump(utxos))
+		}
+		break
+	}
 }
 
 // borrowed from btcd
