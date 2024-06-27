@@ -187,7 +187,7 @@ func isEmptyValue(rv reflect.Value) bool {
 //	| []any and [x]any       | Array                  |
 //	| map[string]any         | Object                 |
 //	| all others             | undefined (err != nil) |
-func jsValueSafe(x any) (jsv js.Value, err error) {
+func jsValueSafe(x any) (js.Value, error) {
 	switch t := x.(type) {
 	case nil:
 		return js.Null(), nil
@@ -196,7 +196,7 @@ func jsValueSafe(x any) (jsv js.Value, err error) {
 	case js.Func:
 		return t.Value, nil
 	case JSMarshaler:
-		jsv, err = t.MarshalJS()
+		jsv, err := t.MarshalJS()
 		if err != nil {
 			return js.Undefined(), err
 		}
@@ -220,7 +220,7 @@ func jsValueSafe(x any) (jsv js.Value, err error) {
 		}
 		return o, nil
 	default:
-		err = fmt.Errorf("cannot create js.Value for %T: unsupported", x)
+		err := fmt.Errorf("cannot create js.Value for %T: unsupported", x)
 		return js.Undefined(), err
 	}
 }
