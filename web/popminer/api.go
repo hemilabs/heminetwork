@@ -30,6 +30,10 @@ const (
 type ErrorCode uint32
 
 const (
+	// errorCodeInvalid is the zero value of ErrorCode.
+	// This should not be used for anything.
+	errorCodeInvalid ErrorCode = 0
+
 	// ErrorCodeInternal is used when the error is internal, either due to an
 	// invalid dispatch or a panic.
 	ErrorCodeInternal ErrorCode = 1000
@@ -42,6 +46,8 @@ const (
 // String returns a string value representing the error code.
 func (e ErrorCode) String() string {
 	switch e {
+	case errorCodeInvalid:
+		return "invalid error code"
 	case ErrorCodeInternal:
 		return "internal error"
 	case ErrorCodeInvalidValue:
