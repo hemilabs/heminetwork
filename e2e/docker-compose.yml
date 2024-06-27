@@ -209,7 +209,7 @@ services:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
       - "op-node/bin/op-node"
-      - "--l2=ws://127.0.0.1:8551"
+      - "--l2=ws://op-geth-l2:8551"
       - "--l2.jwt-secret=/tmp/jwt.txt"
       - "--sequencer.enabled"
       - "--sequencer.l1-confs=0"
