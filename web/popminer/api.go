@@ -6,6 +6,8 @@
 
 package main
 
+import "syscall/js"
+
 // Method represents a method that can be dispatched.
 type Method string
 
@@ -24,8 +26,46 @@ const (
 	MethodBitcoinUTXOs   Method = "bitcoinUTXOs"   // Retrieve bitcoin UTXOs
 )
 
+// ErrorCode is used to differentiate between error types.
+type ErrorCode uint32
+
+const (
+	// errorCodeInvalid is the zero value of ErrorCode.
+	// This should not be used for anything.
+	errorCodeInvalid ErrorCode = 0
+
+	// ErrorCodeInternal is used when the error is internal, either due to an
+	// invalid dispatch or a panic.
+	ErrorCodeInternal ErrorCode = 1000
+
+	// ErrorCodeInvalidValue is used when an invalid value was provided for
+	// a dispatch argument.
+	ErrorCodeInvalidValue ErrorCode = 2000
+)
+
+// String returns a string value representing the error code.
+func (e ErrorCode) String() string {
+	switch e {
+	case errorCodeInvalid:
+		return "invalid error code"
+	case ErrorCodeInternal:
+		return "internal error"
+	case ErrorCodeInvalidValue:
+		return "invalid value"
+	default:
+		return "unknown"
+	}
+}
+
+func (e ErrorCode) JSValue() js.Value {
+	return jsValueSafe(uint32(e))
+}
+
 // Error represents an error that has occurred within the WASM PoP Miner.
 type Error struct {
+	// Code is a unique identifier used to differentiate between error types.
+	Code ErrorCode `json:"code"`
+
 	// Message is the error message.
 	Message string `json:"message"`
 
