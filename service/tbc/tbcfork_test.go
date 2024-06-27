@@ -46,6 +46,10 @@ func (b block) MsgBlock() *wire.MsgBlock {
 	return b.b.MsgBlock()
 }
 
+func (b block) String() string {
+	return fmt.Sprintf("%v: %v %v", b.name, b.Height(), b.Hash())
+}
+
 type btcNode struct {
 	t    *testing.T // for logging
 	le   bool       // log enable
@@ -249,7 +253,7 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 		if !ok {
 			return fmt.Errorf("parent not found: %v", parent)
 		}
-		b.t.Logf("%v: %v %v", blk.name, blk.Height(), blk.Hash())
+		b.t.Logf("%v", blk)
 
 		bh := blk.MsgBlock().Header
 		parent = &bh.PrevBlock
@@ -346,7 +350,7 @@ func random(count int) []byte {
 	return b
 }
 
-func (b *btcNode) mine(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
+func (b *btcNode) mineN(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
 		return nil, errors.New("parent hash not found")
@@ -383,24 +387,59 @@ func (b *btcNode) mine(count int, from *chainhash.Hash, payToAddress btcutil.Add
 	return blocks, nil
 }
 
-func (b *btcNode) Mine(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
-	return b.mine(count, from, payToAddress)
+func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+	parent, ok := b.chain[from.String()]
+	if !ok {
+		return nil, errors.New("parent hash not found")
+	}
+	// extra nonce is needed to prevent block collisions
+	en := random(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+
+	nextBlockHeight := parent.Height() + 1
+	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
+		parent.Hash(), extraNonce)
+	if err != nil {
+		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
+	}
+	blk := &block{name: name, b: bt}
+	_, err = b.insertBlock(blk)
+	if err != nil {
+		return nil, fmt.Errorf("insert block at height %v: %v",
+			nextBlockHeight, err)
+	}
+	// XXX this really sucks, we should get rid of height as a best indicator
+	if blk.Height() > b.height {
+		b.height = blk.Height()
+	}
+
+	return blk, nil
 }
 
-func (b *btcNode) MineAndSend(ctx context.Context, parent *chainhash.Hash, payToAddress btcutil.Address) error {
-	blks, err := b.Mine(1, parent, payToAddress)
+func (b *btcNode) Mine(name string, parent *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	return b.mine(name, parent, payToAddress)
+}
+
+func (b *btcNode) MineN(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	return b.mineN(count, from, payToAddress)
+}
+
+func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+	blk, err := b.Mine(name, parent, payToAddress)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	err = b.SendBlockheader(ctx, blks[0].MsgBlock().Header)
+	err = b.SendBlockheader(ctx, blk.MsgBlock().Header)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return blk, nil
 }
 
 func (b *btcNode) Run(ctx context.Context) error {
@@ -556,7 +595,7 @@ func TestFork(t *testing.T) {
 	startHash := n.Best()
 	count := 9
 	expectedHeight := uint64(count)
-	_, err = n.Mine(count, startHash[0], address)
+	_, err = n.MineN(count, startHash[0], address)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -636,61 +675,39 @@ func TestFork(t *testing.T) {
 
 	// Advance both heads
 	b9 := n.Best()[0]
-	b10a, err := n.Mine(1, b9, address)
+	b10a, err := n.MineAndSend(ctx, "b10a", b9, address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b10b, err := n.Mine(1, b9, address)
+	b10b, err := n.MineAndSend(ctx, "b10b", b9, address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("b10a: %v", b10a[0].Hash())
-	t.Logf("b10b: %v", b10b[0].Hash())
+	// XXX check hashes
+	time.Sleep(50 * time.Millisecond)
+	t.Logf("b10a: %v", b10a.Hash())
+	t.Logf("b10b: %v", b10b.Hash())
 	b10s := n.Best()
 	if len(b10s) != 2 {
 		t.Fatalf("expected 2 best blocks, got %v", len(b10s))
 	}
 
-	// Tell tbcd
-	err = n.SendBlockheader(ctx, b10a[0].MsgBlock().Header)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = n.SendBlockheader(ctx, b10b[0].MsgBlock().Header)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// XXX check hashes
-	time.Sleep(500 * time.Millisecond)
-
 	// Advance both heads again
-	b10aHash := b10a[0].MsgBlock().Header.BlockHash()
-	b11a, err := n.Mine(1, &b10aHash, address)
+	b11a, err := n.MineAndSend(ctx, "b11a", b10a.Hash(), address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b10bHash := b10b[0].MsgBlock().Header.BlockHash()
-	b11b, err := n.Mine(1, &b10bHash, address)
+	b11b, err := n.MineAndSend(ctx, "b11b", b10b.Hash(), address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("b11a: %v", b11a[0].Hash())
-	t.Logf("b11b: %v", b11b[0].Hash())
+	t.Logf("b11a: %v", b11a.Hash())
+	t.Logf("b11b: %v", b11b.Hash())
 	b11s := n.Best()
 	if len(b11s) != 2 {
 		t.Fatalf("expected 2 best blocks, got %v", len(b11s))
 	}
-	// Tell tbcd
-	err = n.SendBlockheader(ctx, b11a[0].MsgBlock().Header)
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(500 * time.Millisecond)
-	err = n.SendBlockheader(ctx, b11b[0].MsgBlock().Header)
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Let's see if tbcd agrees
 	si := s.Synced(ctx)
@@ -724,28 +741,20 @@ func TestFork(t *testing.T) {
 	// 9 -> 10a  ->  11a ->
 	//   \-> 10b ->  11c -> 12
 	t.Logf("mine 11c")
-	b11c, err := n.Mine(1, &b10bHash, address)
+	b11c, err := n.MineAndSend(ctx, "b11c", b10b.Hash(), address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b11cHash := b11c[0].MsgBlock().Header.BlockHash()
-	err = n.SendBlockheader(ctx, b11c[0].MsgBlock().Header)
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// 12
 	t.Logf("mine 12")
-	b12, err := n.Mine(1, &b11cHash, address)
+	b12, err := n.MineAndSend(ctx, "b12", b11c.Hash(), address)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = n.SendBlockheader(ctx, b12[0].MsgBlock().Header)
-	if err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(500 * time.Millisecond)
+	_ = b12
+	time.Sleep(50 * time.Millisecond)
 
 	t.Logf("did we fork?")
 
@@ -830,7 +839,7 @@ func TestIndexFork(t *testing.T) {
 	startHash := n.Best()
 	count := 9
 	expectedHeight := uint64(count)
-	_, err = n.Mine(count, startHash[0], address)
+	_, err = n.MineN(count, startHash[0], address)
 	if err != nil {
 		t.Fatal(err)
 	}
