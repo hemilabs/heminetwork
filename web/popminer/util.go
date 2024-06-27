@@ -21,6 +21,10 @@ var (
 	arrayConstructor   = js.Global().Get("Array")
 )
 
+type JSValuer interface {
+	JSValue() js.Value
+}
+
 // jsValueOf returns x as a JavaScript value.
 //
 //	| Go                     | JavaScript             |
@@ -43,7 +47,7 @@ func jsValueOf(x any) js.Value {
 		return t
 	case js.Func:
 		return t.Value
-	case interface{ JSValue() js.Value }:
+	case JSValuer:
 		return t.JSValue()
 	case bool,
 		int, int8, int16, int32, int64,
@@ -189,7 +193,7 @@ func jsValueSafe(v any) (jsv js.Value) {
 
 	// Special handling
 	switch x := v.(type) {
-	case interface{ JSValue() js.Value }:
+	case JSValuer:
 		return x.JSValue()
 	}
 
