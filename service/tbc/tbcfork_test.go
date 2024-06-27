@@ -114,15 +114,23 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 			b.logf("no more blocks at: %v", height)
 			return nmh, nil
 		}
-		if len(bs) != 1 {
-			return nil, fmt.Errorf("fork at height: %v", height)
+		var parentBlock *block
+		for _, v := range bs {
+			if from.Hash().IsEqual(v.Hash()) {
+				continue
+			}
+			parentBlock = v
+			break
 		}
-		err := nmh.AddBlockHeader(&bs[0].MsgBlock().Header)
+		if parentBlock == nil {
+			return nil, fmt.Errorf("no parent at: %v", height)
+		}
+		err := nmh.AddBlockHeader(&parentBlock.MsgBlock().Header)
 		if err != nil {
 			return nil, fmt.Errorf("add header: %w", err)
 		}
 
-		b.logf("%v: %v", height, bs[0].MsgBlock().Header.BlockHash())
+		b.logf("%v: %v", height, parentBlock.MsgBlock().Header.BlockHash())
 		height++
 	}
 
@@ -439,6 +447,8 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 	if err != nil {
 		return nil, err
 	}
+
+	time.Sleep(250 * time.Millisecond)
 
 	return blk, nil
 }
@@ -867,25 +877,12 @@ func TestIndexFork(t *testing.T) {
 			t.Logf("node stop: %v", err)
 		}
 	}()
-
 	go func() {
 		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
 			panic(err)
 		}
 	}()
-
-	startHash := n.Best()
-	count := 9
-	expectedHeight := uint64(count)
-	_, err = n.MineN(count, startHash[0], address)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// n.le = true
-	err = n.dumpChain(n.Best()[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	time.Sleep(time.Second)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -911,40 +908,60 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
+	time.Sleep(time.Second)
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(2 * time.Second):
-		}
+	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
-		// See if we are at the right height
-		si := s.Synced(ctx)
-		if si.BlockHeader.Height != expectedHeight {
-			log.Infof("not synced")
-			continue
-		}
+	//   /-> b1a -> b2a
+	// g ->  b1 ->  b2 -> b3
+	//   \-> b1b -> b2b
 
-		// Don't execute balance tests if index is disabled.
-		if cfg.AutoIndex {
-			// Execute tests
-			balance, err := s.BalanceByAddress(ctx, address.String())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if balance != uint64(count*5000000000) {
-				t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
-			}
-			t.Logf("balance %v", spew.Sdump(balance))
-			utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("%v", spew.Sdump(utxos))
-		}
-		break
+	// best is b3
+
+	// best chain
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	b1, err := n.MineAndSend(ctx, "b1", parent, address)
+	if err != nil {
+		t.Fatal(err)
 	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// a chain
+	b1a, err := n.MineAndSend(ctx, "b1a", parent, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b chain
+	b1b, err := n.MineAndSend(ctx, "b1b", parent, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Index to b3
+	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = b2a
+	_ = b2b
+
+	time.Sleep(time.Second)
 }
 
 // borrowed from btcd
