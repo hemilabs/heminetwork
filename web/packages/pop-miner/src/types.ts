@@ -155,7 +155,9 @@ export type GenerateKeyResult = {
  *
  * @param args Key generation parameters.
  */
-export declare function generateKey(args: GenerateKeyArgs): Promise<GenerateKeyResult>;
+export declare function generateKey(
+  args: GenerateKeyArgs,
+): Promise<GenerateKeyResult>;
 
 /**
  * @see startPoPMiner
@@ -296,7 +298,9 @@ export type L2Keystone = {
  *
  * @param args Retrieval options.
  */
-export declare function l2Keystones(args: L2KeystonesArgs): Promise<L2KeystonesResult>;
+export declare function l2Keystones(
+  args: L2KeystonesArgs,
+): Promise<L2KeystonesResult>;
 
 /**
  * @see bitcoinBalance
@@ -330,7 +334,9 @@ export type BitcoinBalanceResult = {
  *
  * @param args Retrieval options.
  */
-export declare function bitcoinBalance(args: BitcoinBalanceArgs): Promise<BitcoinBalanceResult>;
+export declare function bitcoinBalance(
+  args: BitcoinBalanceArgs,
+): Promise<BitcoinBalanceResult>;
 
 /**
  * @see bitcoinInfo
@@ -364,7 +370,7 @@ export type BitcoinUTXOsResult = {
    * The UTXOs for the script hash.
    */
   readonly utxos: BitcoinUTXO[];
-}
+};
 
 /**
  * Represents a Bitcoin UTXO.
@@ -393,4 +399,6 @@ export type BitcoinUTXO = {
  *
  * @param args Retrieval options.
  */
-export declare function bitcoinUTXOs(args: BitcoinUTXOsArgs): Promise<BitcoinUTXOsResult>;
+export declare function bitcoinUTXOs(
+  args: BitcoinUTXOsArgs,
+): Promise<BitcoinUTXOsResult>;

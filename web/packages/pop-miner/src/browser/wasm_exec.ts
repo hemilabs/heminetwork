@@ -17,7 +17,8 @@ const enosys = () => {
 
 let outputBuf = '';
 const fs = {
-  constants: { // unused
+  constants: {
+    // unused
     O_WRONLY: -1,
     O_RDWR: -1,
     O_CREAT: -1,
@@ -160,7 +161,7 @@ export class Go {
   public importObject;
 
   constructor() {
-    this.argv = [ 'js' ];
+    this.argv = ['js'];
     this.env = {};
     this.exit = (code) => {
       if (code !== 0) {
@@ -566,12 +567,12 @@ export class Go {
     this._goRefCounts = new Array(this._values.length).fill(Infinity); // number of references that Go has to a JS value, indexed by reference id
     this._ids = new Map([
       // mapping from JS values to reference ids
-      [ 0, 1 ],
-      [ null, 2 ],
-      [ true, 3 ],
-      [ false, 4 ],
-      [ globalThis, 5 ],
-      [ this, 6 ],
+      [0, 1],
+      [null, 2],
+      [true, 3],
+      [false, 4],
+      [globalThis, 5],
+      [this, 6],
     ]);
     this._idPool = []; // unused ids that have been garbage collected
     this.exited = false; // whether the Go program has exited

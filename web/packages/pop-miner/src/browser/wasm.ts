@@ -11,7 +11,8 @@ import * as types from '../types';
 import { Go } from './wasm_exec';
 
 // Keep in sync with Method in web/popminer/api.go
-export type Method = 'version'
+export type Method =
+  | 'version'
   | 'wasmPing'
   | 'generateKey'
   | 'startPoPMiner'
@@ -85,7 +86,10 @@ const getWASM = (): WASM => {
   return globalWASM;
 };
 
-const instantiateWASM = async ({ wasmURL,  importObject }: {
+const instantiateWASM = async ({
+  wasmURL,
+  importObject,
+}: {
   wasmURL: string | URL;
   importObject: Record<string, any>;
 }): Promise<WebAssembly.WebAssemblyInstantiatedSource> => {
@@ -102,7 +106,9 @@ const instantiateWASM = async ({ wasmURL,  importObject }: {
   return await instantiateStreaming();
 };
 
-const loadWASM = async ({ wasmURL }: {
+const loadWASM = async ({
+  wasmURL,
+}: {
   wasmURL: string | URL;
 }): Promise<WASM> => {
   const go = new Go();
