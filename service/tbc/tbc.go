@@ -371,11 +371,15 @@ func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer,
 	}
 }
 
-func (s *Server) peerAdd(p *peer) {
+func (s *Server) peerAdd(p *peer) error {
 	log.Tracef("peerAdd: %v", p.address)
 	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if _, ok := s.peers[p.address]; ok {
+		return fmt.Errorf("peer exists: %v", p)
+	}
 	s.peers[p.address] = p
-	s.mtx.Unlock()
+	return nil
 }
 
 func (s *Server) peerDelete(address string) {
@@ -432,7 +436,10 @@ func (s *Server) peerManager(ctx context.Context) error {
 					log.Errorf("new peer: %v", err)
 					continue
 				}
-				s.peerAdd(peer)
+				if err := s.peerAdd(peer); err != nil {
+					log.Tracef("add peer: %v", err)
+					continue
+				}
 
 				go s.peerConnect(ctx, peerC, peer)
 
@@ -497,7 +504,9 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 	log.Infof("Local peer manager connecting to %v peers", peersWanted)
 
 	for {
-		s.peerAdd(peer)
+		if err := s.peerAdd(peer); err != nil {
+			return err
+		}
 		go s.peerConnect(ctx, peerC, peer)
 
 		select {
@@ -623,35 +632,41 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}()
 
-	_ = p.write(defaultCmdTimeout, wire.NewMsgSendHeaders()) // Ask peer to send headers
-	_ = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())     // Try to get network information
+	// Ask peer to send headers
+	err = p.write(defaultCmdTimeout, wire.NewMsgSendHeaders())
+	if err != nil {
+		log.Errorf("peer write send headers: %v %v", p, err)
+		return
+	}
+	// Try to get network information
+	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
+	if err != nil {
+		log.Errorf("peer write get addr: %v %v", p, err)
+		return
+	}
 
-	log.Debugf("Peer connected: %v", p)
-
-	// Pretend we are always in IBD.
-	//
-	// This obviously will put a pressure on the internet connection and
-	// database because each and every peer is racing at start of day.  As
-	// multiple answers come in the insert of the headers fails or
-	// succeeds. If it fails no more headers will be requested from that
-	// peer.
+	// Ask peer for block headers and special handle the first message.
+	// XXX explain
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		log.Errorf("block headers best: %v", err)
+		log.Errorf("block headers best: %v %v", p, err)
 		// database is closed, nothing we can do, return here to avoid below
 		// panic
 		if errors.Is(err, leveldb.ErrClosed) {
 			return
 		}
 	}
-	log.Debugf("block header best hash: %s", bhb.Hash)
-
+	log.Debugf("block header best hash: %v %s", p, bhb)
 	if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
 		// This should not happen
-		log.Errorf("get headers: %v", err)
+		log.Errorf("get headers: %v %v", p, err)
 		return
 	}
 
+	// Only now ca we consider the peer connected
+	log.Debugf("Peer connected: %v", p)
+
+	headersSeen := false
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -670,8 +685,40 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			return
 		}
 
+		// We must check the initial get headers response. If we asked
+		// for an unknown tip we'll get genesis back. This indicates
+		// that our tip is forked,
+		// XXX this needs to be cleaned up; maybe moved into handshake
+		if !headersSeen {
+			switch m := msg.(type) {
+			case *wire.MsgHeaders:
+				if len(m.Headers) != 0 {
+					h0 := m.Headers[0].PrevBlock
+					if !bhb.BlockHash().IsEqual(&h0) &&
+						s.chainParams.GenesisHash.IsEqual(&h0) {
+						log.Infof("%v", bhb.BlockHash())
+						log.Infof("%v", h0)
+
+						nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash()[:])
+						if err != nil {
+							panic(err)
+						}
+						bhb = nbh
+						log.Infof("WALKING BACK TO: %v", bhb)
+						if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
+							panic(err)
+							return
+						}
+						continue
+					}
+					_ = m
+					headersSeen = true
+				}
+			}
+		}
+
 		if verbose {
-			spew.Sdump(msg)
+			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
 
 		// Commands that are always accepted.
@@ -1616,8 +1663,8 @@ func (s *Server) Run(pctx context.Context) error {
 			return err
 		}
 	}
-	log.Infof("Starting block headers sync at height: %v time %v",
-		bhb.Height, bhb.Timestamp())
+	log.Infof("Starting block headers sync at %v height: %v time %v",
+		bhb, bhb.Height, bhb.Timestamp())
 
 	// HTTP server
 	mux := http.NewServeMux()
