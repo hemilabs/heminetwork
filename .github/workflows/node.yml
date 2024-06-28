@@ -68,3 +68,7 @@ jobs:
       - name: "Build @hemilabs/pop-miner package"
         working-directory: "web/"
         run: pnpm build:pop-miner
+
+      - name: "Lint"
+        working-directory: "web/"
+        run: pnpm lint

@@ -249,6 +249,10 @@ jobs:
         working-directory: "web/"
         run: make wasm
 
+      - name: "Build @hemilabs/pop-miner package"
+        working-directory: "web/"
+        run: pnpm build:pop-miner
+
       - name: "Publish @hemilabs/pop-miner package"
         working-directory: "web/"
         run: pnpm publish packages/pop-miner --access public --no-git-checks
