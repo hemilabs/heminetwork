@@ -1,0 +1,70 @@
+# Copyright (c) 2024 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+# GitHub Actions workflow to lint, build and test NPM packages.
+name: "Node"
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: "npm-${{ github.workflow }}-${{ github.event.number || github.ref }}"
+  cancel-in-progress: "${{ github.event_name == 'pull_request' }}"
+
+env:
+  GO_VERSION: "1.22.x"
+  PNPM_VERSION: "9.4.x"
+  NODE_VERSION: ">=20.0.0"
+  BINARYEN_VERSION: "117"
+
+jobs:
+  build:
+    name: "Build"
+    runs-on: "ubuntu-latest"
+    permissions:
+      contents: read
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Setup Go ${{ env.GO_VERSION }}"
+        uses: actions/setup-go@v5
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          cache: true
+          check-latest: true
+
+      - name: "Setup pnpm ${{ env.PNPM_VERSION }}"
+        uses: pnpm/action-setup@v4
+        with:
+          version: "${{ env.PNPM_VERSION }}"
+
+      - name: "Setup Node ${{ env.NODE_VERSION }}"
+        uses: actions/setup-node@v4
+        with:
+          node-version: "${{ env.NODE_VERSION }}"
+          check-latest: true
+          cache: "pnpm"
+          cache-dependency-path: "web/**/pnpm-lock.yaml"
+
+      - name: "Install dependencies"
+        working-directory: "web/"
+        run: pnpm install --frozen-lockfile
+
+      - name: "Install Go dependencies"
+        working-directory: "web/"
+        run: make deps
+
+        # TODO(joshuasing): Install and use binaryen
+      - name: "Build @hemilabs/pop-miner WebAssembly binary"
+        working-directory: "web/"
+        run: make wasm
+
+      - name: "Build @hemilabs/pop-miner package"
+        working-directory: "web/"
+        run: pnpm build:pop-miner

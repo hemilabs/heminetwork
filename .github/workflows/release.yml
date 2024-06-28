@@ -19,6 +19,11 @@ on:
         type: boolean
         required: true
         default: false
+      npm:
+        description: "Publish NPM packages"
+        type: boolean
+        required: true
+        default: false
       release:
         description: "Create GitHub release and publish Docker images"
         type: boolean
@@ -31,9 +36,13 @@ concurrency:
 
 env:
   GO_VERSION: "1.22.x"
+  PNPM_VERSION: "9.4.x"
+  NODE_VERSION: ">=20.0.0"
+  BINARYEN_VERSION: "117"
 
 jobs:
   # Run tests
+  # TODO(joshuasing): run PoP Miner / NPM package tests once added
   test:
     name: "Test"
     uses: ./.github/workflows/go.yml
@@ -181,11 +190,76 @@ jobs:
             ghcr.io/hemilabs/${{ matrix.service }}:latest
             ghcr.io/hemilabs/${{ matrix.service }}:${{ needs.prepare.outputs.tag }}
 
+  # Publish NPM packages
+  npm:
+    name: "npm"
+    runs-on: "ubuntu-latest"
+    if: github.event_name == 'push' || inputs.npm
+    needs: [ "prepare" ]
+    permissions:
+      contents: read
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "Setup Go ${{ env.GO_VERSION }}"
+        uses: actions/setup-go@v5
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          cache: true
+          check-latest: true
+
+      - name: "Setup pnpm ${{ env.PNPM_VERSION }}"
+        uses: pnpm/action-setup@v4
+        with:
+          version: "${{ env.PNPM_VERSION }}"
+
+      - name: "Setup Node ${{ env.NODE_VERSION }}"
+        uses: actions/setup-node@v4
+        with:
+          node-version: "${{ env.NODE_VERSION }}"
+          check-latest: true
+          cache: "pnpm"
+          cache-dependency-path: "web/**/pnpm-lock.yaml"
+
+      - name: "Install dependencies"
+        working-directory: "web/"
+        run: pnpm install --frozen-lockfile
+
+      - name: "Install Go dependencies"
+        working-directory: "web/"
+        run: make deps
+
+      - name: "Set package.json versions"
+        working-directory: "web/"
+        env:
+          VERSION: "${{ needs.prepare.outputs.version }}"
+        run: |
+          # Prints all package.json files
+          PACKAGE_FILES=$(find . -path '**/node_modules' -prune -o -name 'package.json' -print)
+          for file in $PACKAGE_FILES; do
+            # Set "version" in package.json file to $VERSION.
+            TMP_FILE="$(mktemp)"
+            jq --arg v "$VERSION" '.version = $v' "$file" > "$TMP_FILE"
+            mv "$TMP_FILE" "$file"
+          done
+
+        # TODO(joshuasing): Install and use binaryen
+      - name: "Build @hemilabs/pop-miner WebAssembly binary"
+        working-directory: "web/"
+        run: make wasm
+
+      - name: "Publish @hemilabs/pop-miner package"
+        working-directory: "web/"
+        run: pnpm publish packages/pop-miner --access public --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: "${{ secrets.NPM_REGISTRY_TOKEN }}"
+
   # Create GitHub Release
   release:
     name: "Release"
     runs-on: "ubuntu-latest"
-    needs: [ "prepare", "build", "docker" ]
+    needs: [ "prepare", "build", "docker", "npm" ]
     permissions:
       # Permission to write contents is required to create GitHub releases.
       # Builds are performed in a separate job with more restrictive permissions
