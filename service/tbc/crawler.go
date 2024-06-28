@@ -73,16 +73,34 @@ func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
 func (s *Server) findCanonicalHash(ctx context.Context, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
 	switch len(bhs) {
 	case 1:
-		return 1, nil // most common fast path
+		return 0, nil // most common fast path
 	case 0:
 		return -1, fmt.Errorf("no blockheaders provided")
 	}
 
+	// XXX make sure endHash has higher cumulative difficulty
+
 	// When this happens we have to walk back from endHash to find the
 	// connecting block. There is no shortcut possible without hitting edge
 	// conditions.
+	for k, v := range bhs {
+		h := endHash
+		for {
+			bh, err := s.db.BlockHeaderByHash(ctx, h[:])
+			if err != nil {
+				return -1, fmt.Errorf("block header by hash: %w", err)
+			}
+			h = bh.ParentHash()
+			if h.IsEqual(v.BlockHash()) {
+				return k, nil
+			}
+			if h.IsEqual(s.chainParams.GenesisHash) {
+				break
+			}
+		}
+	}
 
-	return -1, fmt.Errorf("findCanonicalHash FIXME")
+	return -1, fmt.Errorf("path not found")
 }
 
 func logMemStats() {
@@ -295,7 +313,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	if endHash == nil {
 		return errors.New("must provide an end hash")
 	}
-	_, endHeight, err := s.BlockHeaderByHash(ctx, endHash)
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -311,17 +329,22 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 			Height: 0,
 		}
 	}
-	// XXX we need training wheels here. We can't blind accept the end
-	// without asserting if it is either ihigher in the chain or is a
-	// forced for.
-	// XXX check cumulative? check fork?
+	startBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash[:])
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+	direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
+	if direction >= 1 {
+		// start > end
+		return fmt.Errorf("unsuported start > end condition")
+	}
 
 	// Allocate here so that we don't waste space when not indexing.
 	utxos := make(map[tbcd.Outpoint]tbcd.CacheOutput, s.cfg.MaxCachedTxs)
 	defer clear(utxos)
 
-	log.Infof("Start indexing UTxos at hash %v height %v", utxoHH.Hash, utxoHH.Height)
-	log.Infof("End indexing UTxos at hash %v height %v", endHash, endHeight)
+	log.Infof("Start indexing UTxos at hash %v height %v", startBH, startBH.Height)
+	log.Infof("End indexing UTxos at hash %v height %v", endBH, endBH.Height)
 	for {
 		start := time.Now()
 		blocksProcessed, last, err := s.indexUtxosInBlocks(ctx, endHash, utxos)
@@ -489,7 +512,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	if endHash == nil {
 		return errors.New("must provide an end hash")
 	}
-	_, endHeight, err := s.BlockHeaderByHash(ctx, endHash)
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -505,18 +528,22 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 			Height: 0,
 		}
 	}
-
-	// XXX we need training wheels here. We can't blind accept the end
-	// without asserting if it is either ihigher in the chain or is a
-	// forced for.
-	// XXX check cumulative? check fork?
+	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+	direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
+	if direction >= 1 {
+		// start > end
+		return fmt.Errorf("unsuported start > end condition")
+	}
 
 	// Allocate here so that we don't waste space when not indexing.
 	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
 	defer clear(txs)
 
-	log.Infof("Start indexing Txs at hash %v height %v", txHH.Hash, txHH.Height)
-	log.Infof("End indexing Txs at hash %v height %v", endHash, endHeight)
+	log.Infof("Start indexing Txs at hash %v height %v", startBH, startBH.Height)
+	log.Infof("End indexing Txs at hash %v height %v", endBH, endBH.Height)
 	for {
 		start := time.Now()
 		blocksProcessed, last, err := s.indexTxsInBlocks(ctx, endHash, txs)

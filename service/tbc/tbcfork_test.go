@@ -958,8 +958,20 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = b2a
-	_ = b2b
+	// XXX verify indexes
+
+	// Should fail
+	t.Logf("=== index b2a ===")
+	err = s.SyncIndexersToHash(ctx, b2a.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("=== index b2b ===")
+	err = s.SyncIndexersToHash(ctx, b2b.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	time.Sleep(time.Second)
 }
