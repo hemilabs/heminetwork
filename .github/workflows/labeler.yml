@@ -1,0 +1,14 @@
+# GitHub Actions workflow to automatically label pull requests.
+name: "Label"
+on: [ "pull_request_target" ]
+
+jobs:
+  labeler:
+    name: "Pull Request"
+    runs-on: "ubuntu-latest"
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: "Label pull requests"
+        uses: actions/labeler@v5
