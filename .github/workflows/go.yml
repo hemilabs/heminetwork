@@ -51,10 +51,10 @@ jobs:
 
       - name: "Download and verify dependencies"
         id: deps
-        run: make deps
+        run: make GOCACHE="$(go env GOCACHE)" deps
 
       - name: "make race"
-        run: make race
+        run: make GOCACHE="$(go env GOCACHE)" race
 
       - name: "make"
         if: (success() || failure()) && steps.deps.outcome == 'success'
@@ -62,7 +62,7 @@ jobs:
           PGTESTURI: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
           HEMI_DOCKER_TESTS: "1"
         run: |
-          make
+          make GOCACHE="$(go env GOCACHE)"
           git diff --exit-code
 
       - name: "make web popm"

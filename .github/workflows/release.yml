@@ -97,7 +97,7 @@ jobs:
           check-latest: true
 
       - name: "Download and verify dependencies"
-        run: make deps
+        run: make GOCACHE="$(go env GOCACHE)" deps
 
       - name: "Create binary archive for ${{ matrix.goos }}/${{ matrix.goarch }}"
         env:
@@ -105,7 +105,7 @@ jobs:
           GOARCH: "${{ matrix.goarch }}"
           CGO_ENABLED: 0 # Disable CGO.
           GOGC: off # Disable GC during build, faster but uses more RAM.
-        run: make archive
+        run: make GOCACHE="$(go env GOCACHE)" archive
 
       - name: "Upload artifacts"
         uses: actions/upload-artifact@v4
