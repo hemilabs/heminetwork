@@ -305,39 +305,16 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error {
-	log.Tracef("UtxoIndexer")
-	defer log.Tracef("UtxoIndexer exit")
+func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("UtxoIndexerUnwind")
+	defer log.Tracef("UtxoIndexerUnwind exit")
 
-	// Verify exit condition hash
-	if endHash == nil {
-		return errors.New("must provide an end hash")
-	}
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
-	if err != nil {
-		return fmt.Errorf("blockheader hash: %w", err)
-	}
+	return fmt.Errorf("UtxoIndexerUnwind not yet")
+}
 
-	// Verify start point is not after the end point
-	utxoHH, err := s.UtxoIndexHash(ctx)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("utxo indexer : %w", err)
-		}
-		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
-	}
-	startBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash[:])
-	if err != nil {
-		return fmt.Errorf("blockheader hash: %w", err)
-	}
-	direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
-	if direction >= 1 {
-		// start > end
-		return fmt.Errorf("unsuported start > end condition")
-	}
+func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("UtxoIndexerWind")
+	defer log.Tracef("UtxoIndexerWind exit")
 
 	// Allocate here so that we don't waste space when not indexing.
 	utxos := make(map[tbcd.Outpoint]tbcd.CacheOutput, s.cfg.MaxCachedTxs)
@@ -345,6 +322,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 
 	log.Infof("Start indexing UTxos at hash %v height %v", startBH, startBH.Height)
 	log.Infof("End indexing UTxos at hash %v height %v", endBH, endBH.Height)
+	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
 		blocksProcessed, last, err := s.indexUtxosInBlocks(ctx, endHash, utxos)
@@ -381,6 +359,46 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
+	}
+
+	return nil
+}
+
+func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error {
+	log.Tracef("UtxoIndexer")
+	defer log.Tracef("UtxoIndexer exit")
+
+	// Verify exit condition hash
+	if endHash == nil {
+		return errors.New("must provide an end hash")
+	}
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+
+	// Verify start point is not after the end point
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("utxo indexer : %w", err)
+		}
+		utxoHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+	startBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash[:])
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+	direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
+	switch {
+	case direction <= 0:
+		return s.UtxoIndexerWind(ctx, startBH, endBH)
+	default:
+		// start > end thus we must unwind
+		return s.UtxoIndexerUnwind(ctx, endBH, startBH)
 	}
 
 	return nil
@@ -504,39 +522,16 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
-	log.Tracef("TxIndexer")
-	defer log.Tracef("TxIndexer exit")
+func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, toBH *tbcd.BlockHeader) error {
+	log.Tracef("TxIndexerUnwind")
+	defer log.Tracef("TxIndexerUnwind exit")
 
-	// Verify exit condition hash
-	if endHash == nil {
-		return errors.New("must provide an end hash")
-	}
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
-	if err != nil {
-		return fmt.Errorf("blockheader hash: %w", err)
-	}
+	return fmt.Errorf("TxIndexerUnwind not yet")
+}
 
-	// Verify start point is not after the end point
-	txHH, err := s.TxIndexHash(ctx)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("tx indexer : %w", err)
-		}
-		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
-	}
-	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
-	if err != nil {
-		return fmt.Errorf("blockheader hash: %w", err)
-	}
-	direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
-	if direction >= 1 {
-		// start > end
-		return fmt.Errorf("unsuported start > end condition")
-	}
+func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("TxIndexerWind")
+	defer log.Tracef("TxIndexerWind exit")
 
 	// Allocate here so that we don't waste space when not indexing.
 	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
@@ -544,6 +539,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 
 	log.Infof("Start indexing Txs at hash %v height %v", startBH, startBH.Height)
 	log.Infof("End indexing Txs at hash %v height %v", endBH, endBH.Height)
+	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
 		blocksProcessed, last, err := s.indexTxsInBlocks(ctx, endHash, txs)
@@ -581,6 +577,46 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 			break
 		}
 
+	}
+
+	return nil
+}
+
+func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
+	log.Tracef("TxIndexer")
+	defer log.Tracef("TxIndexer exit")
+
+	// Verify exit condition hash
+	if endHash == nil {
+		return errors.New("must provide an end hash")
+	}
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+
+	// Verify start point is not after the end point
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("tx indexer : %w", err)
+		}
+		txHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+	direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
+	switch {
+	case direction <= 0:
+		return s.TxIndexerWind(ctx, startBH, endBH)
+	default:
+		// start > end thus we must unwind
+		return s.TxIndexerUnwind(ctx, endBH, startBH)
 	}
 
 	return nil
