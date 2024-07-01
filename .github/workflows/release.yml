@@ -97,7 +97,7 @@ jobs:
           check-latest: true
 
       - name: "Download and verify dependencies"
-        run: make GOCACHE="$(go env GOCACHE)" deps
+        run: make GOCACHE="$(go env GOCACHE)" go-deps
 
       - name: "Create binary archive for ${{ matrix.goos }}/${{ matrix.goarch }}"
         env:
