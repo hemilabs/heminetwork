@@ -5,9 +5,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
+	"math"
+	"math/big"
+	"math/rand"
+	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
@@ -15,12 +22,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	client "github.com/btcsuite/btcd/rpcclient"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/gosuri/uilive"
 	"github.com/jedib0t/go-pretty/v6/table"
 
+	"github.com/hemilabs/heminetwork/hemi/electrumx"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+
+	"github.com/slack-go/slack"
 )
 
 const (
@@ -54,6 +70,10 @@ func main() {
 	fmt.Println(output)
 }
 
+func weiToEth(wei *big.Int) *big.Float {
+	return new(big.Float).Quo(new(big.Float).SetInt(wei), big.NewFloat(params.Ether))
+}
+
 // monitor will wait the specified ms, then dump localnet's state as a json
 // string.  the reason we "wait" is so that localnet can progress.  the caller
 // chooses how long they want to wait in ms (i.e. how long they want to let
@@ -69,6 +89,74 @@ func monitor(dumpJsonAfterMs uint) string {
 	writer := uilive.New()
 	writer.Start()
 	t.SetOutputMirror(writer)
+
+	_, err := l2Version(l2())
+	if err != nil {
+		panic(err)
+	}
+
+	electrumxClient, err := electrumx.NewClient("electrumx.heminetwork:50001")
+	if err != nil {
+		panic(err)
+	}
+
+	for {
+
+		addr, err := btcutil.DecodeAddress("msMgk6qaS5sso4CTao22VaUY8rbFPp3ThT", &chaincfg.TestNet3Params)
+		if err != nil {
+			panic(err)
+		}
+
+		script, err := txscript.PayToAddrScript(addr)
+		if err != nil {
+			panic(err)
+		}
+
+		scriptHash := sha256.Sum256(script)
+
+		bitcoinBalance, err := electrumxClient.Balance(ctx, scriptHash[:])
+		if err != nil {
+			panic(err)
+		}
+
+		blockTime, err := latestL2BlockTime(ctx, l2())
+		if err != nil {
+			panic(err)
+		}
+
+		batcherBalance, err := l1batcherBalance(ctx, l1())
+		if err != nil {
+			panic(err)
+		}
+
+		proposerBalance, err := l1ProposerBalance(ctx, l1())
+		if err != nil {
+			panic(err)
+		}
+		d := time.Now().Sub(*blockTime)
+		m := math.Round(d.Minutes())
+		friendlyTime := fmt.Sprintf("last l2 block created %d minutes ago", int(m))
+		friendlyBatcherBalance := fmt.Sprintf("batcher balance %f sep eth", weiToEth(batcherBalance))
+		friendlyProposerBalance := fmt.Sprintf("proposer balance %f sep eth", weiToEth(proposerBalance))
+		bitcoinBalanceFriendly := fmt.Sprintf("pop miner balance %f tbtc", float64(bitcoinBalance.Confirmed)/100000000.0)
+		fmt.Println(friendlyBatcherBalance)
+		fmt.Println(friendlyProposerBalance)
+		fmt.Println(bitcoinBalanceFriendly)
+		fmt.Println(friendlyTime)
+
+		status := fmt.Sprintf("%s\n%s\n%s\n%s", friendlyTime, friendlyBatcherBalance, friendlyProposerBalance, bitcoinBalanceFriendly)
+
+		api := slack.New(os.Getenv("HEMI_E2E_SLACK_TOKEN"))
+		_, _, err = api.PostMessage("incentivized-testnet-monitoring", slack.MsgOptionText(status, false))
+		if err != nil {
+			panic(err)
+		}
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-time.After(10 * time.Minute):
+		}
+	}
 
 	go monitorBitcoinBlocksCreated(ctx, &s, &mtx)
 	go monitorPopTxs(ctx, &s, &mtx)
@@ -355,6 +443,24 @@ func dumpJsonAfterMsFromEnv() uint {
 	return uint(num)
 }
 
+func l2() string {
+	val := os.Getenv("HEMI_E2E_L2")
+	if val == "" {
+		val = "http://op-geth-l2:8546"
+	}
+
+	return val
+}
+
+func l1() string {
+	val := os.Getenv("HEMI_E2E_L1")
+	if val == "" {
+		val = "http://op-geth-l1:8545"
+	}
+
+	return val
+}
+
 func dumpJson(mtx *sync.Mutex, s *state) string {
 	mtx.Lock()
 	output := jsonOutput{
@@ -373,4 +479,114 @@ func dumpJson(mtx *sync.Mutex, s *state) string {
 	}
 
 	return string(b)
+}
+
+type EthereumRPCRequest struct {
+	Jsonrpc string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  []any  `json:"params"`
+	Id      int    `json:"id"`
+}
+
+type EthereumRPCResponse struct {
+	Result string `json:"result"`
+}
+
+func l2Version(l2 string) (string, error) {
+	body := EthereumRPCRequest{
+		Jsonrpc: "2.0",
+		Method:  "web3_clientVersion",
+		Params:  []any{},
+		Id:      rand.Int(),
+	}
+
+	return makeEthereumRPCRequest(l2, &body)
+}
+
+func latestL2BlockTime(ctx context.Context, l2 string) (*time.Time, error) {
+	client, err := ethclient.DialContext(ctx, l2)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	t := time.Unix(int64(header.Time), 0)
+
+	return &t, nil
+}
+
+const batcherAddress string = "0x2A9DC73B4Ac558f424087146672241F7Fc8199E9"
+const sequencerAddress string = "0x485F17600E8b651b79997B304197844758e02AEf"
+const proposerAddress string = "0x63643f30e892A3826B1F70932C11f2B8a740A104"
+
+func l1BalanceForAddress(ctx context.Context, l1 string, address common.Address) (*big.Int, error) {
+	client, err := ethclient.DialContext(ctx, l1)
+	if err != nil {
+		return nil, err
+	}
+
+	header, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	balance, err := client.BalanceAt(ctx, address, header.Number)
+	if err != nil {
+		return nil, err
+	}
+
+	return balance, nil
+}
+
+func l1batcherBalance(ctx context.Context, l1 string) (*big.Int, error) {
+	return l1BalanceForAddress(ctx, l1, common.HexToAddress(batcherAddress))
+}
+
+func l1SequencerBalance(ctx context.Context, l1 string) (*big.Int, error) {
+	return l1BalanceForAddress(ctx, l1, common.HexToAddress(sequencerAddress))
+}
+
+func l1ProposerBalance(ctx context.Context, l1 string) (*big.Int, error) {
+	return l1BalanceForAddress(ctx, l1, common.HexToAddress(proposerAddress))
+}
+
+func makeEthereumRPCRequest(l2 string, body *EthereumRPCRequest) (string, error) {
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+
+	client := http.Client{}
+	req, err := http.NewRequest(http.MethodPost, l2, bytes.NewBuffer(bodyBytes))
+	if err != nil {
+		return "", err
+	}
+
+	req.Header.Add("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	if err := resp.Body.Close(); err != nil {
+		return "", err
+	}
+
+	var response EthereumRPCResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return "", err
+	}
+
+	fmt.Println(string(respBody))
+
+	return response.Result, nil
 }
