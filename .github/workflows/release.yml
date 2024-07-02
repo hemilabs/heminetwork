@@ -255,7 +255,7 @@ jobs:
         working-directory: "web/"
         run: pnpm publish packages/pop-miner --access public --no-git-checks
         env:
-          NODE_AUTH_TOKEN: "${{ secrets.NPM_REGISTRY_TOKEN }}"
+          NODE_AUTH_TOKEN: "${{ secrets.NPM_TOKEN }}"
 
   # Create GitHub Release
   release:
