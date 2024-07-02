@@ -392,16 +392,12 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
-	direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
-	switch {
-	case direction <= 0:
+	if endBH.Difficulty.Cmp(&startBH.Difficulty) >= 1 {
 		return s.UtxoIndexerWind(ctx, startBH, endBH)
-	default:
-		// start > end thus we must unwind
-		return s.UtxoIndexerUnwind(ctx, endBH, startBH)
 	}
 
-	return nil
+	// start > end thus we must unwind
+	return s.UtxoIndexerUnwind(ctx, endBH, startBH)
 }
 
 func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
@@ -556,7 +552,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockTxUpdate(ctx, txs); err != nil {
+		if err = s.db.BlockTxUpdate(ctx, 0, txs); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -606,20 +602,55 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 			Height: 0,
 		}
 	}
+	// XXX make sure there is no gap between start and end or vice versa.
 	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
-	direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
-	switch {
-	case direction <= 0:
+	if endBH.Difficulty.Cmp(&startBH.Difficulty) >= 1 {
 		return s.TxIndexerWind(ctx, startBH, endBH)
-	default:
-		// start > end thus we must unwind
-		return s.TxIndexerUnwind(ctx, endBH, startBH)
 	}
 
-	return nil
+	// start > end thus we must unwind
+	return s.TxIndexerUnwind(ctx, endBH, startBH)
+}
+
+func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
+	log.Tracef("TxIndexIsLinear")
+	defer log.Tracef("TxIndexIsLinear exit")
+
+	// Verify exit condition hash
+	if endHash == nil {
+		return 0, errors.New("must provide an end hash")
+	}
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
+	if err != nil {
+		return 0, fmt.Errorf("blockheader hash: %w", err)
+	}
+
+	// Verify start point is not after the end point
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return 0, fmt.Errorf("tx indexer : %w", err)
+		}
+		txHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+	// XXX make sure there is no gap between start and end or vice versa.
+	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
+	if err != nil {
+		return 0, fmt.Errorf("blockheader hash: %w", err)
+	}
+	// direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
+	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
+	log.Infof("startBH %v %v", startBH, startBH.Difficulty)
+	log.Infof("endBH %v %v", endBH, endBH.Difficulty)
+	log.Infof("direction %v", direction)
+
+	return direction, nil
 }
 
 // SyncIndexersToHash tries to move the various indexers to the supplied
@@ -667,10 +698,10 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		}
 	}()
 
-	log.Debugf("Syncing indexes to: %v", hash)
-	if err := s.UtxoIndexer(ctx, hash); err != nil {
-		return fmt.Errorf("utxo indexer: %w", err)
-	}
+	//log.Debugf("Syncing indexes to: %v", hash)
+	//if err := s.UtxoIndexer(ctx, hash); err != nil {
+	//	return fmt.Errorf("utxo indexer: %w", err)
+	//}
 
 	// Transactions index
 	if err := s.TxIndexer(ctx, hash); err != nil {

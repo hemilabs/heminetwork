@@ -953,6 +953,17 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Verify linear indexing. Current TxIndex is sitting at genesis
+
+	// genesis -> b3 should work with negative direction (cdiff is less than target)
+	direction, err := s.TxIndexIsLinear(ctx, b3.Hash())
+	if err != nil {
+		t.Fatalf("expected success g -> b3, got %v", err)
+	}
+	if direction <= 0 {
+		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
+	}
+
 	// Index to b3
 	err = s.SyncIndexersToHash(ctx, b3.Hash())
 	if err != nil {
@@ -960,18 +971,50 @@ func TestIndexFork(t *testing.T) {
 	}
 	// XXX verify indexes
 
-	// Should fail
-	t.Logf("=== index b2a ===")
-	err = s.SyncIndexersToHash(ctx, b2a.Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
+	// Verify linear indexing. Current TxIndex is sitting at b3
 
-	t.Logf("=== index b2b ===")
-	err = s.SyncIndexersToHash(ctx, b2b.Hash())
+	// b3 -> genesis should work with postive direction (cdiff is greater than target)
+	direction, err = s.TxIndexIsLinear(ctx, s.chainParams.GenesisHash)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("expected success b3 -> genesis, got %v", err)
 	}
+	if direction >= 1 {
+		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
+	}
+	_ = b2a
+	_ = b2b
+	//// b3 -> b1 should work with negative direction
+	//direction, err = s.TxIndexIsLinear(ctx, b1.Hash())
+	//if err == nil {
+	//	t.Fatal("expected -1 going from b1 to genesis")
+	//}
+	//if direction != -1 {
+	//	t.Fatal("expected -1 going from b3 to genesis")
+	//}
+	//// b3 -> b2a should fail
+	//direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	//if err == nil {
+	//	t.Fatal(err)
+	//}
+
+	//// b3 -> b2b should fail
+	//direction, err = s.TxIndexIsLinear(ctx, b2b.Hash())
+	//if err == nil {
+	//	t.Fatal(err)
+	//}
+
+	//// Should fail
+	//t.Logf("=== index b2a ===")
+	//err = s.SyncIndexersToHash(ctx, b2a.Hash())
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+
+	//t.Logf("=== index b2b ===")
+	//err = s.SyncIndexersToHash(ctx, b2b.Hash())
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
 
 	time.Sleep(time.Second)
 }

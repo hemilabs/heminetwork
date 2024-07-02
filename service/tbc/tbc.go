@@ -701,13 +701,13 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 						nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash()[:])
 						if err != nil {
-							panic(err)
+							panic(err) // XXX
 						}
 						bhb = nbh
 						log.Infof("WALKING BACK TO: %v", bhb)
 						if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
-							panic(err)
-							return
+							panic(err) // XXX
+							// return
 						}
 						continue
 					}
