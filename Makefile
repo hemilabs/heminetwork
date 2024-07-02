@@ -58,7 +58,8 @@ lint:
 	$(shell go env GOPATH)/bin/goimports -local github.com/hemilabs/heminetwork -w -l .
 	$(shell go env GOPATH)/bin/gofumpt -w -l .
 	$(shell go env GOPATH)/bin/addlicense -c "Hemi Labs, Inc." -f $(PROJECTPATH)/license_header.txt \
-		-ignore "{.idea,.vscode}/**" -ignore ".github/release.yml" -ignore ".github/ISSUE_TEMPLATE/**" .
+		-ignore "{.idea,.vscode}/**" -ignore ".github/release.yml" -ignore ".github/ISSUE_TEMPLATE/**" \
+		-ignore "**/pnpm-{lock,workspace}.yaml" -ignore "**/node_modules/**" .
 	go vet ./...
 
 lint-deps:
