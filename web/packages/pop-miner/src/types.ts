@@ -184,7 +184,7 @@ export type MinerStartArgs = {
    * logging levels for individual components. For more information, please
    * see https://github.com/juju/loggo#func-configureloggers
    */
-  logLevel?: string | undefined;
+  logLevel?: string;
 
   /**
    * The number of stats/vB the PoP Miner will pay for fees.
