@@ -27,6 +27,8 @@ import (
 var (
 	UtxoIndexHashKey = []byte("utxoindexhash") // last indexed utxo hash
 	TxIndexHashKey   = []byte("txindexhash")   // last indexed tx hash
+
+	ErrNotLinear = errors.New("not linear") // not a valid chain
 )
 
 type HashHeight struct {
@@ -392,12 +394,13 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
-	if endBH.Difficulty.Cmp(&startBH.Difficulty) >= 1 {
-		return s.UtxoIndexerWind(ctx, startBH, endBH)
+	switch endBH.Difficulty.Cmp(&startBH.Difficulty) {
+	case 1:
+		return s.TxIndexerWind(ctx, startBH, endBH)
+	case -1:
+		return s.TxIndexerUnwind(ctx, endBH, startBH)
 	}
-
-	// start > end thus we must unwind
-	return s.UtxoIndexerUnwind(ctx, endBH, startBH)
+	return ErrNotLinear
 }
 
 func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
@@ -602,17 +605,19 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 			Height: 0,
 		}
 	}
+
 	// XXX make sure there is no gap between start and end or vice versa.
 	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
-	if endBH.Difficulty.Cmp(&startBH.Difficulty) >= 1 {
+	switch endBH.Difficulty.Cmp(&startBH.Difficulty) {
+	case 1:
 		return s.TxIndexerWind(ctx, startBH, endBH)
+	case -1:
+		return s.TxIndexerUnwind(ctx, endBH, startBH)
 	}
-
-	// start > end thus we must unwind
-	return s.TxIndexerUnwind(ctx, endBH, startBH)
+	return ErrNotLinear
 }
 
 func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
@@ -656,12 +661,18 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 	// Always walk backwards because it's only a single lookup.
 	// XXX is direction = 0 even meaningful?
 	var h, e *chainhash.Hash
-	if direction > 0 {
+	switch direction {
+	case 1:
 		h = endBH.BlockHash()
 		e = startBH.BlockHash()
-	} else {
+	case -1:
 		h = startBH.BlockHash()
 		e = endBH.BlockHash()
+	default:
+		return 0, ErrNotLinear
+	}
+	if direction > 0 {
+	} else {
 	}
 	for {
 		bh, err := s.db.BlockHeaderByHash(ctx, h[:])
@@ -673,7 +684,7 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 			return direction, nil
 		}
 		if h.IsEqual(s.chainParams.GenesisHash) {
-			return direction, fmt.Errorf("not linear")
+			return direction, ErrNotLinear
 		}
 	}
 }
