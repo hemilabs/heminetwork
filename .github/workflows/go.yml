@@ -64,8 +64,3 @@ jobs:
         run: |
           make
           git diff --exit-code
-
-      - name: "make web popm"
-        if: (success() || failure()) && steps.deps.outcome == 'success'
-        run: |
-          cd web && make
