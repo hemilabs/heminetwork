@@ -981,27 +981,26 @@ func TestIndexFork(t *testing.T) {
 	if direction >= 1 {
 		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
 	}
-	_ = b2a
-	_ = b2b
-	//// b3 -> b1 should work with negative direction
-	//direction, err = s.TxIndexIsLinear(ctx, b1.Hash())
-	//if err == nil {
-	//	t.Fatal("expected -1 going from b1 to genesis")
-	//}
-	//if direction != -1 {
-	//	t.Fatal("expected -1 going from b3 to genesis")
-	//}
-	//// b3 -> b2a should fail
-	//direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
-	//if err == nil {
-	//	t.Fatal(err)
-	//}
 
-	//// b3 -> b2b should fail
-	//direction, err = s.TxIndexIsLinear(ctx, b2b.Hash())
-	//if err == nil {
-	//	t.Fatal(err)
-	//}
+	// b3 -> b1 should work with positive direction
+	direction, err = s.TxIndexIsLinear(ctx, b1.Hash())
+	if err != nil {
+		t.Fatalf("expected success b3 -> b1, got %v", err)
+	}
+	if direction >= 1 {
+		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
+	}
+	// b3 -> b2a should fail
+	direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	if err == nil {
+		t.Fatal("b2a is not linear to b3")
+	}
+
+	// b3 -> b2b should fail
+	direction, err = s.TxIndexIsLinear(ctx, b2b.Hash())
+	if err == nil {
+		t.Fatal("b2b is not linear to b3")
+	}
 
 	//// Should fail
 	//t.Logf("=== index b2a ===")

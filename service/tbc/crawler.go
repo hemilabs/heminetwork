@@ -644,13 +644,38 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 	if err != nil {
 		return 0, fmt.Errorf("blockheader hash: %w", err)
 	}
-	// direction := startBH.Difficulty.Cmp(&endBH.Difficulty)
 	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
-	log.Infof("startBH %v %v", startBH, startBH.Difficulty)
-	log.Infof("endBH %v %v", endBH, endBH.Difficulty)
-	log.Infof("direction %v", direction)
+	log.Debugf("startBH %v %v", startBH, startBH.Difficulty)
+	log.Debugf("endBH %v %v", endBH, endBH.Difficulty)
+	log.Debugf("direction %v", direction)
 
-	return direction, nil
+	// Expensive linear test, this needs some performance love. We can
+	// memoize it keep snapshot heights whereto we know the chain is
+	// synced. For now just do the entire thing.
+
+	// Always walk backwards because it's only a single lookup.
+	// XXX is direction = 0 even meaningful?
+	var h, e *chainhash.Hash
+	if direction > 0 {
+		h = endBH.BlockHash()
+		e = startBH.BlockHash()
+	} else {
+		h = startBH.BlockHash()
+		e = endBH.BlockHash()
+	}
+	for {
+		bh, err := s.db.BlockHeaderByHash(ctx, h[:])
+		if err != nil {
+			return -1, fmt.Errorf("block header by hash: %w", err)
+		}
+		h = bh.ParentHash()
+		if h.IsEqual(e) {
+			return direction, nil
+		}
+		if h.IsEqual(s.chainParams.GenesisHash) {
+			return direction, fmt.Errorf("not linear")
+		}
+	}
 }
 
 // SyncIndexersToHash tries to move the various indexers to the supplied
