@@ -42,7 +42,7 @@ jobs:
         with:
           version: "${{ env.PNPM_VERSION }}"
 
-      - name: "Setup Node ${{ env.NODE_VERSION }}"
+      - name: "Setup Node"
         uses: actions/setup-node@v4
         with:
           node-version-file: "web/.nvmrc"
