@@ -1,0 +1,18 @@
+# Copyright (c) 2024 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+# GitHub Actions workflow to automatically label pull requests.
+name: "Label"
+on: [ "pull_request_target" ]
+
+jobs:
+  labeler:
+    name: "Pull Request"
+    runs-on: "ubuntu-latest"
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: "Label pull requests"
+        uses: actions/labeler@v5

@@ -1,0 +1,80 @@
+# Copyright (c) 2024 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+# Bitcoin Finality Governor (BFG)
+'area: bfg':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "api/bfgapi/**"
+          - "cmd/bfgd/**"
+          - "database/bfgd/**"
+          - "docker/bfgd/**"
+          - "service/bfg/**"
+
+# Bitcoin Secure Sequencer (BSS)
+'area: bss':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "api/bssapi/**"
+          - "cmd/bssd/**"
+          - "docker/bssd/**"
+          - "service/bss/**"
+
+# GitHub Actions workflows (CI)
+'area: ci':
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+
+# Deucalion (Prometheus service)
+'area: deucalion':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "service/deucalion/**"
+
+# Docker images
+'area: docker':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docker/**"
+
+# hemictl
+'area: hemictl':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cmd/hemictl/**"
+
+# @hemilabs/pop-miner NPM package
+'area: @hemilabs/pop-miner':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "web/packages/pop-miner/**"
+
+# Makefiles
+'area: make':
+  - changed-files:
+      - any-glob-to-any-file: "**/Makefile"
+
+# WebAssembly PoP Miner
+'area: popm/wasm':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "web/popminer/**"
+
+# PoP Miner
+'area: popm':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cmd/popmd/**"
+          - "docker/popmd/**"
+          - "service/popm/**"
+
+# Tiny Bitcoin Daemon (TBC)
+'area: tbc':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "api/tbcapi/**"
+          - "cmd/tbcd/**"
+          - "database/tbcd/**"
+          - "service/tbc/**"
