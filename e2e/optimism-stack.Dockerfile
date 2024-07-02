@@ -23,7 +23,7 @@ RUN foundryup
 ARG OP_GETH_CACHE_BREAK=4
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout 3dc8ee1910f971a965b158c6b7419620af6f87e2
+RUN git checkout 7ea31cb11ddefde02e25c80131e6189efc822b34
 
 WORKDIR /git
 
