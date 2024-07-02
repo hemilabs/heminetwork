@@ -26,13 +26,13 @@ set -e
 # in an attempt to prevent accidental tag creation or pushes.
 #
 # Usage:
-# 	release.sh <version>
+#   release.sh <version>
 #
 # Requirements:
-#	- git (configured correctly)
+#   - git (configured correctly)
 #   - gpg (and git configured to use signing key)
 #   - ssh (and key with access to repository)
-#	- grep
+#   - grep
 #   - sed
 #
 
