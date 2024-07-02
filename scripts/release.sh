@@ -28,6 +28,9 @@ set -e
 # Usage:
 #   release.sh <version>
 #
+# Environment variables:
+#   DRY_RUN - If set to `true`, the script will not create or push any tags.
+#
 # Requirements:
 #   - git (configured correctly)
 #   - gpg (and git configured to use signing key)
