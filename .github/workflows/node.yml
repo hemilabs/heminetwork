@@ -19,7 +19,6 @@ concurrency:
 env:
   GO_VERSION: "1.22.x"
   PNPM_VERSION: "9.4.x"
-  NODE_VERSION: ">=20.0.0"
   BINARYEN_VERSION: "117"
 
 jobs:
@@ -47,7 +46,7 @@ jobs:
       - name: "Setup Node ${{ env.NODE_VERSION }}"
         uses: actions/setup-node@v4
         with:
-          node-version: "${{ env.NODE_VERSION }}"
+          node-version-file: "web/.nvmrc"
           check-latest: true
           cache: "pnpm"
           cache-dependency-path: "web/**/pnpm-lock.yaml"
