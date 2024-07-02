@@ -13,7 +13,7 @@ on:
   workflow_call:
 
 concurrency:
-  group: "npm-${{ github.workflow }}-${{ github.event.number || github.ref }}"
+  group: "node-${{ github.workflow }}-${{ github.event.number || github.ref }}"
   cancel-in-progress: "${{ github.event_name == 'pull_request' }}"
 
 env:
