@@ -32,3 +32,6 @@
 
 # WASM PoP Miner (popmd/wasm)
 /web/ @hemilabs/dev @joshuasing
+
+# Release script
+/scripts/release.sh @hemilabs/dev @joshuasing
