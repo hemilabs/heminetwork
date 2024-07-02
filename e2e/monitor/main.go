@@ -133,12 +133,26 @@ func monitor(dumpJsonAfterMs uint) string {
 		if err != nil {
 			panic(err)
 		}
+
+		notify := false
 		d := time.Now().Sub(*blockTime)
 		m := math.Round(d.Minutes())
 		friendlyTime := fmt.Sprintf("last l2 block created %d minutes ago", int(m))
 		friendlyBatcherBalance := fmt.Sprintf("batcher balance %f sep eth", weiToEth(batcherBalance))
+		if weiToEth(batcherBalance).Cmp(big.NewFloat(5)) == -1 {
+			fmt.Println("batcherBalancer is less than 5, notifying")
+			notify = true
+		}
 		friendlyProposerBalance := fmt.Sprintf("proposer balance %f sep eth", weiToEth(proposerBalance))
+		if weiToEth(proposerBalance).Cmp(big.NewFloat(1)) == -1 {
+			fmt.Println("batcherBalancer is less than 1, notifying")
+			notify = true
+		}
 		bitcoinBalanceFriendly := fmt.Sprintf("pop miner balance %f tbtc", float64(bitcoinBalance.Confirmed)/100000000.0)
+		if float64(bitcoinBalance.Confirmed)/100000000.0 < 1.0 {
+			fmt.Println("pop miner is less than 1, notifying")
+			notify = true
+		}
 		fmt.Println(friendlyBatcherBalance)
 		fmt.Println(friendlyProposerBalance)
 		fmt.Println(bitcoinBalanceFriendly)
@@ -146,15 +160,18 @@ func monitor(dumpJsonAfterMs uint) string {
 
 		status := fmt.Sprintf("%s\n%s\n%s\n%s", friendlyTime, friendlyBatcherBalance, friendlyProposerBalance, bitcoinBalanceFriendly)
 
-		api := slack.New(os.Getenv("HEMI_E2E_SLACK_TOKEN"))
-		_, _, err = api.PostMessage("incentivized-testnet-monitoring", slack.MsgOptionText(status, false))
-		if err != nil {
-			panic(err)
+		if notify {
+			api := slack.New(os.Getenv("HEMI_E2E_SLACK_TOKEN"))
+			_, _, err = api.PostMessage("incentivized-testnet-monitoring", slack.MsgOptionText(status, false))
+			if err != nil {
+				panic(err)
+			}
 		}
+
 		select {
 		case <-ctx.Done():
 			return ""
-		case <-time.After(10 * time.Minute):
+		case <-time.After(30 * time.Second):
 		}
 	}
 
