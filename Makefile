@@ -28,7 +28,7 @@ cmds = \
 	popmd	\
 	tbcd
 
-.PHONY: all clean clean-dist deps $(cmds) build install lint lint-deps tidy race test vulncheck \
+.PHONY: all clean clean-dist deps go-deps $(cmds) build install lint lint-deps tidy race test vulncheck \
 	vulncheck-deps dist archive sources checksums
 
 all: lint tidy test build install
@@ -42,7 +42,9 @@ clean-dist:
 clean-test:
 	rm -rf $(PROJECTPATH)/service/tbc/.testleveldb/
 
-deps: lint-deps vulncheck-deps
+deps: lint-deps vulncheck-deps go-deps
+
+go-deps:
 	go mod download
 	go mod verify
 
