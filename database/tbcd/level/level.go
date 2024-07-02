@@ -312,7 +312,9 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 
 	hhKey := heightHashToKey(0, bhash[:])
 	hhBatch.Put(hhKey, []byte{})
-	ebh := encodeBlockHeader(0, bh, new(big.Int))
+	cdiff := big.NewInt(0)
+	cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
+	ebh := encodeBlockHeader(0, bh, cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
@@ -905,7 +907,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 	return nil
 }
 
-func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxKey]*tbcd.TxValue) error {
+func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxKey]*tbcd.TxValue) error {
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
 
@@ -931,8 +933,11 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxKey]*tbcd.TxValu
 		default:
 			return fmt.Errorf("invalid cache entry: %v", spew.Sdump(k))
 		}
-
-		txsBatch.Put(key, value)
+		if direction <= 0 {
+			txsBatch.Put(key, value)
+		} else {
+			txsBatch.Delete(key)
+		}
 		// log.Infof("%v:%v", spew.Sdump(key), spew.Sdump(value))
 		// // XXX this probably should be done by the caller but we do it
 		// // here to lower memory pressure as large gobs of data are
