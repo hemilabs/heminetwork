@@ -219,6 +219,7 @@ jobs:
           check-latest: true
           cache: "pnpm"
           cache-dependency-path: "web/**/pnpm-lock.yaml"
+          registry-url: "https://registry.npmjs.org"
 
       - name: "Install dependencies"
         working-directory: "web/"
