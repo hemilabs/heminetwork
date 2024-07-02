@@ -73,6 +73,12 @@ services:
     build:
       dockerfile: "./e2e/postgres.Dockerfile"
       context: "./.."
+    command:
+      - "postgres"
+      # lower random_page_cost (opposed to default 4.0) to cause planner
+      # to choose index scans vs sequential scans when at fewer rows in a table
+      - "-c"
+      - "random_page_cost=1.0"
     ports:
       - "5432:5432"
     environment:
@@ -127,11 +133,9 @@ services:
       POPM_REMINE_THRESHOLD: "1"
 
   op-geth-l1:
-    image: "ethereum/client-go@sha256:25ad59cc51af1cc232e2a770bbbffb52aec9499f128ff3eeb9159a677f4f7c11"
+    image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
     ports:
       - "8545:8545"
-    environment:
-      CHAIN_ID: "900"
     working_dir: "/tmp/geth"
     command:
       - "--dev"
@@ -160,7 +164,6 @@ services:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
       - "./e2e/jwt.txt:/tmp/jwt.txt:ro"
-      - "geth:/tmp/geth"
       - { type: "tmpfs", target: "/tmp" }
 
   op-geth-l2:
@@ -171,9 +174,6 @@ services:
       - "op-geth-l1"
     healthcheck:
       test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
-    ports:
-      - "8551:8551"
-      - "8546:8546"
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://op-geth-l1:8545"
@@ -222,7 +222,7 @@ services:
       - "--l1=http://op-geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--l1.trustrpc"
-      - "--log.level=trace"
+      - "--log.level=info"
       - "--l1.trustrpc=true"
       - "--l1.http-poll-interval=1s"
     volumes:
@@ -252,9 +252,13 @@ services:
       - "--max-pending-tx=1"
       - "--l1-eth-rpc=http://op-geth-l1:8545"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "op-geth-l1"
-      - "op-geth-l2"
-      - "op-node"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2:
+        condition: "service_healthy"
+      op-node:
+        condition: "service_started"
 
   op-proposer:
     build:
@@ -280,5 +284,4 @@ services:
       - "--l1-eth-rpc=http://op-geth-l1:8545"
 
 volumes:
-  geth:
   l2configs:

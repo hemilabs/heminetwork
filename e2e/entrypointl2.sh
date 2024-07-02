@@ -36,7 +36,10 @@ sh /tmp/genesisl2.sh
  /tmp/datadir \
  --authrpc.vhosts="*" \
  --authrpc.addr=0.0.0.0 \
- --authrpc.port=8551 \
+--authrpc.port=8551 \
  --authrpc.jwtsecret=/tmp/jwt.txt \
  --verbosity=5 \
- --gpo.maxprice=1
+ --gpo.maxprice=1 \
+ --tbc.network=localnet \
+ --tbc.initheight=1 \
+ --tbc.seeds='bitcoind:18444'
