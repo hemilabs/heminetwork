@@ -19,7 +19,6 @@ concurrency:
 env:
   GO_VERSION: "1.22.x"
   PNPM_VERSION: "9.4.x"
-  BINARYEN_VERSION: "117"
 
 jobs:
   build:
