@@ -15,6 +15,7 @@ export type Method =
   | 'version'
   | 'wasmPing'
   | 'generateKey'
+  | 'parseKey'
   | 'startPoPMiner'
   | 'stopPoPMiner'
   | 'ping'

@@ -9,7 +9,7 @@ import type {
   BitcoinBalanceResult,
   BitcoinInfoResult,
   BitcoinUTXOsResult,
-  GenerateKeyResult,
+  KeyResult,
   L2KeystonesResult,
   PingResult,
   VersionResult,
@@ -31,7 +31,15 @@ export const generateKey: typeof types.generateKey = ({ network }) => {
   return dispatch({
     method: 'generateKey',
     network: network,
-  }) as Promise<GenerateKeyResult>;
+  }) as Promise<KeyResult>;
+};
+
+export const parseKey: typeof types.parseKey = ({ network, privateKey }) => {
+  return dispatch({
+    method: 'parseKey',
+    network: network,
+    privateKey: privateKey,
+  }) as Promise<KeyResult>;
 };
 
 export const startPoPMiner: typeof types.startPoPMiner = (args) => {

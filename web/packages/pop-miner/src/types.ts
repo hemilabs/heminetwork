@@ -98,12 +98,12 @@ export type VersionResult = {
   /**
    * The version of the WASM PoP Miner.
    */
-  version: string;
+  readonly version: string;
 
   /**
    * The SHA-1 hash of the Git commit the WASM binary was built from.
    */
-  gitCommit: string;
+  readonly gitCommit: string;
 };
 
 /**
@@ -121,30 +121,37 @@ export type GenerateKeyArgs = {
   network: 'testnet3' | 'mainnet';
 };
 
-export type GenerateKeyResult = {
+/**
+ * Contains a secp256k1 key pair and its corresponding Bitcoin address and
+ * public key hash, and Ethereum address.
+ *
+ * @see generateKey
+ * @see parseKey
+ */
+export type KeyResult = {
   /**
-   * The Ethereum address for the generated key.
+   * The Ethereum address for the key.
    */
   readonly ethereumAddress: string;
 
   /**
-   * The network for which the key was generated.
+   * The network the addresses were created for.
    */
   readonly network: 'testnet3' | 'mainnet';
 
   /**
-   * The generated secpk256k1 private key, encoded as a hexadecimal string.
+   * The secp256k1 private key, encoded as a hexadecimal string.
    */
   readonly privateKey: string;
 
   /**
-   * The secpk256k1 public key for the generated key, in the 33-byte compressed
-   * format, encoded as a hexadecimal string.
+   * The secp256k1 public key, in the 33-byte compressed format, encoded as a
+   * hexadecimal string.
    */
   readonly publicKey: string;
 
   /**
-   * The Bitcoin pay-to-pubkey-hash address for the generated key.
+   * The Bitcoin pay-to-pubkey-hash address for the key.
    */
   readonly publicKeyHash: string;
 };
@@ -155,9 +162,31 @@ export type GenerateKeyResult = {
  *
  * @param args Key generation parameters.
  */
-export declare function generateKey(
-  args: GenerateKeyArgs,
-): Promise<GenerateKeyResult>;
+export declare function generateKey(args: GenerateKeyArgs): Promise<KeyResult>;
+
+/**
+ * @see parseKey
+ */
+export type ParseKeyArgs = {
+  /**
+   * Determines which network the public key will be created for.
+   */
+  network: 'testnet3' | 'mainnet';
+
+  /**
+   * The private key to parse and return the corresponding public key and
+   * addresses for, encoded as a hexadecimal string.
+   */
+  privateKey: string;
+};
+
+/**
+ * Parses the given private key and returns its corresponding public key and
+ * addresses.
+ *
+ * @param args Key parse parameters.
+ */
+export declare function parseKey(args: ParseKeyArgs): Promise<KeyResult>;
 
 /**
  * @see startPoPMiner
@@ -169,7 +198,7 @@ export type MinerStartArgs = {
   network: 'testnet' | 'devnet' | 'mainnet';
 
   /**
-   * The secpk256k1 private key for the PoP Miner.
+   * The secp256k1 private key for the PoP Miner.
    */
   privateKey: string;
 

@@ -15,6 +15,7 @@ const (
 	// The following can be dispatched at any time.
 	MethodVersion       Method = "version"       // Retrieve WASM version information
 	MethodGenerateKey   Method = "generateKey"   // Generate secp256k1 key pair
+	MethodParseKey      Method = "parseKey"      // Parses a secp256k1 private and returns key information
 	MethodStartPoPMiner Method = "startPoPMiner" // Start PoP Miner
 	MethodStopPoPMiner  Method = "stopPoPMiner"  // Stop PoP Miner
 
@@ -90,25 +91,25 @@ type VersionResult struct {
 	GitCommit string `json:"gitCommit"`
 }
 
-// GenerateKeyResult contains the generated key information.
-// Returned by MethodGenerateKey.
-type GenerateKeyResult struct {
-	// EthereumAddress is the Ethereum address for the generated key.
+// KeyResult contains a secp256k1 key pair and its corresponding Bitcoin
+// address and public key hash, and Ethereum address.
+//
+// Returned by MethodGenerateKey and MethodParseKey.
+type KeyResult struct {
+	// EthereumAddress is the Ethereum address for the key.
 	EthereumAddress string `json:"ethereumAddress"`
 
-	// Network is the network for which the key was generated.
+	// Network is the network the addresses were created for.
 	Network string `json:"network"`
 
-	// PrivateKey is the generated secpk256k1 private key, encoded as a
-	// hexadecimal string.
+	// PrivateKey is the secp256k1 private key, encoded as a hexadecimal string.
 	PrivateKey string `json:"privateKey"`
 
-	// PublicKey is the generated secp256k1 public key, in the 33-byte
-	// compressed format, encoded as a hexadecimal string.
+	// PublicKey is the secp256k1 public key, in the 33-byte compressed format,
+	// encoded as a hexadecimal string.
 	PublicKey string `json:"publicKey"`
 
-	// PublicKeyHash is the Bitcoin pay-to-pubkey-hash address for the generated
-	// key.
+	// PublicKeyHash is the Bitcoin pay-to-pubkey-hash address for the key.
 	PublicKeyHash string `json:"publicKeyHash"`
 }
 
