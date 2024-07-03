@@ -911,6 +911,10 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
 
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
 	// transactions
 	txsTx, txsCommit, txsDiscard, err := l.startTransaction(level.TransactionsDB)
 	if err != nil {
@@ -933,10 +937,11 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 		default:
 			return fmt.Errorf("invalid cache entry: %v", spew.Sdump(k))
 		}
-		if direction <= 0 {
-			txsBatch.Put(key, value)
-		} else {
+		switch direction {
+		case -1:
 			txsBatch.Delete(key)
+		case 1:
+			txsBatch.Put(key, value)
 		}
 		// log.Infof("%v:%v", spew.Sdump(key), spew.Sdump(value))
 		// // XXX this probably should be done by the caller but we do it

@@ -972,6 +972,7 @@ func TestIndexFork(t *testing.T) {
 	// XXX verify indexes
 
 	// Verify linear indexing. Current TxIndex is sitting at b3
+	t.Logf("b3: %v", b3)
 
 	// b3 -> genesis should work with postive direction (cdiff is greater than target)
 	direction, err = s.TxIndexIsLinear(ctx, s.chainParams.GenesisHash)
@@ -1002,10 +1003,37 @@ func TestIndexFork(t *testing.T) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
 
-	// unwind back to genesis
+	// make sure syncing to iself is non linear
 	err = s.SyncIndexersToHash(ctx, b3.Hash())
-	if !errors.Is(err, ErrNotLinear) {
-		t.Fatalf("at b3, should have returned not linear, got %v", err)
+	if err != nil {
+		t.Fatalf("at b3, should have returned nil, got %v", err)
+	}
+
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+
+	// XXX verify indexes
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	}
+	if txHH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	}
+
+	// see if we can move to b2z
+	direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	if err != nil {
+		t.Fatalf("expected success genesis -> b2a, got %v", err)
+	}
+	if direction != 1 {
+		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
 	}
 
 	//// Should fail
