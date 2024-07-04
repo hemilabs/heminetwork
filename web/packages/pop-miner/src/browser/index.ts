@@ -6,6 +6,7 @@
 
 import * as types from '../types';
 import type {
+  BitcoinAddressToScriptHashResult,
   BitcoinBalanceResult,
   BitcoinInfoResult,
   BitcoinUTXOsResult,

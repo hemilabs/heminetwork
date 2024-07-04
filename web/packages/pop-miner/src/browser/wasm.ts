@@ -16,6 +16,7 @@ export type Method =
   | 'wasmPing'
   | 'generateKey'
   | 'parseKey'
+  | 'bitcoinAddressToScriptHash'
   | 'startPoPMiner'
   | 'stopPoPMiner'
   | 'ping'
