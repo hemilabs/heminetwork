@@ -27,6 +27,18 @@
     </div>
 
     <div>
+      <input id="ParseKeyNetworkInput" value="testnet3">
+      <label for="ParseKeyNetworkInput">bitcoin network</label>
+      <br>
+      <input id="ParseKeyPrivateKeyInput" type="password">
+      <label for="ParseKeyPrivateKeyInput">secp256k1 private key (hexadecimal string, 32 bytes)</label>
+      <br>
+
+      <button id="ParseKeyButton">parse key</button>
+      <pre class="ParseKeyShow"></pre>
+    </div>
+
+    <div>
       <input id="StartPopMinerLogLevelInput" value="hemiwasm=INFO:popm=INFO:protocol=INFO">
       <label for="StartPopMinerLogLevelInput">log level</label>
       <br>

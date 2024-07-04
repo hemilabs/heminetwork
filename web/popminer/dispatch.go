@@ -17,7 +17,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
-	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/ethereum"
@@ -33,6 +33,13 @@ var handlers = map[Method]*Dispatch{
 		Handler: generateKey,
 		Required: []DispatchArgs{
 			{Name: "network", Type: js.TypeString},
+		},
+	},
+	MethodParseKey: {
+		Handler: parseKey,
+		Required: []DispatchArgs{
+			{Name: "network", Type: js.TypeString},
+			{Name: "privateKey", Type: js.TypeString},
 		},
 	},
 	MethodStartPoPMiner: {
@@ -182,48 +189,81 @@ func generateKey(_ js.Value, args []js.Value) (any, error) {
 	log.Tracef("generatekey")
 	defer log.Tracef("generatekey exit")
 
-	var (
-		btcChainParams *btcchaincfg.Params
-		netNormalized  string
-	)
-	net := args[0].Get("network").String()
-	switch net {
-	case "devnet", "testnet3", "testnet":
-		btcChainParams = &btcchaincfg.TestNet3Params
-		netNormalized = "testnet3"
-	case "mainnet":
-		btcChainParams = &btcchaincfg.MainNetParams
-		netNormalized = "mainnet"
-	default:
-		return nil, errorWithCode(ErrorCodeInvalidValue,
-			fmt.Errorf("invalid network: %s", net))
+	net, btcChainParams, err := bitcoinNetwork(args[0].Get("network").String())
+	if err != nil {
+		return nil, err
 	}
 
-	// TODO(joshuasing): consider alternative as dcrsecpk256k1 package is large.
-	privKey, err := dcrsecpk256k1.GeneratePrivateKey()
+	privKey, err := dcrsecp256k1.GeneratePrivateKey()
 	if err != nil {
 		log.Errorf("failed to generate private key: %v", err)
 		return nil, fmt.Errorf("generate secp256k1 private key: %w", err)
 	}
-	btcAddress, err := btcutil.NewAddressPubKey(
-		privKey.PubKey().SerializeCompressed(),
-		btcChainParams,
-	)
-	if err != nil {
-		log.Errorf("failed to generate btc address: %v", err)
-		return nil, fmt.Errorf("create BTC address from public key: %w", err)
-	}
 
 	compressedPubKey := privKey.PubKey().SerializeCompressed()
-	ethereumAddress := ethereum.PublicKeyToAddress(compressedPubKey).String()
+	btcAddress, err := btcutil.NewAddressPubKey(compressedPubKey, btcChainParams)
+	if err != nil {
+		log.Errorf("failed to create bitcoin address: %v", err)
+		return nil, fmt.Errorf("create bitcoin address from public key: %w", err)
+	}
 
-	return GenerateKeyResult{
-		EthereumAddress: ethereumAddress,
-		Network:         netNormalized,
+	return KeyResult{
+		EthereumAddress: ethereum.PublicKeyToAddress(compressedPubKey).String(),
+		Network:         net,
 		PrivateKey:      hex.EncodeToString(privKey.Serialize()),
 		PublicKey:       hex.EncodeToString(compressedPubKey),
 		PublicKeyHash:   btcAddress.AddressPubKeyHash().String(),
 	}, nil
+}
+
+func parseKey(_ js.Value, args []js.Value) (any, error) {
+	log.Tracef("parseKey")
+	defer log.Tracef("parseKey exit")
+
+	net, btcChainParams, err := bitcoinNetwork(args[0].Get("network").String())
+	if err != nil {
+		return nil, err
+	}
+
+	privateKey := args[0].Get("privateKey").String()
+	b, err := hex.DecodeString(privateKey)
+	if err != nil {
+		return nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("invalid private key: %w", err))
+	}
+
+	if len(b) != dcrsecp256k1.PrivKeyBytesLen {
+		return nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("invalid private key length: %d", len(b)))
+	}
+
+	privKey := dcrsecp256k1.PrivKeyFromBytes(b)
+	compressedPubKey := privKey.PubKey().SerializeCompressed()
+	btcAddress, err := btcutil.NewAddressPubKey(compressedPubKey, btcChainParams)
+	if err != nil {
+		log.Errorf("failed to create bitcoin address: %v", err)
+		return nil, fmt.Errorf("create bitcoin address from public key: %w", err)
+	}
+
+	return KeyResult{
+		EthereumAddress: ethereum.PublicKeyToAddress(compressedPubKey).String(),
+		Network:         net,
+		PrivateKey:      hex.EncodeToString(privKey.Serialize()),
+		PublicKey:       hex.EncodeToString(compressedPubKey),
+		PublicKeyHash:   btcAddress.AddressPubKeyHash().String(),
+	}, nil
+}
+
+func bitcoinNetwork(network string) (string, *btcchaincfg.Params, error) {
+	switch network {
+	case "devnet", "testnet3", "testnet":
+		return "testnet3", &btcchaincfg.TestNet3Params, nil
+	case "mainnet":
+		return "mainnet", &btcchaincfg.MainNetParams, nil
+	default:
+		return "", nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("invalid network: %s", network))
+	}
 }
 
 func startPoPMiner(_ js.Value, args []js.Value) (any, error) {

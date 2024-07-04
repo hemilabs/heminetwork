@@ -57,6 +57,26 @@ GenerateKeyButton.addEventListener('click', () => {
   GenerateKey();
 });
 
+const ParseKeyShow = document.querySelector('.ParseKeyShow');
+
+async function ParseKey() {
+  try {
+    const result = await dispatch({
+      method: 'parseKey',
+      network: ParseKeyNetworkInput.value,
+      privateKey: ParseKeyPrivateKeyInput.value,
+    });
+    ParseKeyShow.innerText = JSON.stringify(result, null, 2);
+  } catch (err) {
+    ParseKeyShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
+    console.error('Caught exception', err);
+  }
+}
+
+ParseKeyButton.addEventListener('click', () => {
+  ParseKey();
+});
+
 // start pop miner
 const StartPopMinerShow = document.querySelector('.StartPopMinerShow');
 
