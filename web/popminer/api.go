@@ -13,11 +13,12 @@ type Method string
 
 const (
 	// The following can be dispatched at any time.
-	MethodVersion       Method = "version"       // Retrieve WASM version information
-	MethodGenerateKey   Method = "generateKey"   // Generate secp256k1 key pair
-	MethodParseKey      Method = "parseKey"      // Parses a secp256k1 private and returns key information
-	MethodStartPoPMiner Method = "startPoPMiner" // Start PoP Miner
-	MethodStopPoPMiner  Method = "stopPoPMiner"  // Stop PoP Miner
+	MethodVersion                    Method = "version"                    // Retrieve WASM version information
+	MethodGenerateKey                Method = "generateKey"                // Generate secp256k1 key pair
+	MethodParseKey                   Method = "parseKey"                   // Parses a secp256k1 private and returns key information
+	MethodBitcoinAddressToScriptHash Method = "bitcoinAddressToScriptHash" // Bitcoin address to script hash
+	MethodStartPoPMiner              Method = "startPoPMiner"              // Start PoP Miner
+	MethodStopPoPMiner               Method = "stopPoPMiner"               // Stop PoP Miner
 
 	// The following can only be dispatched after the PoP Miner is running.
 	MethodPing           Method = "ping"           // Ping BFG
@@ -111,6 +112,19 @@ type KeyResult struct {
 
 	// PublicKeyHash is the Bitcoin pay-to-pubkey-hash address for the key.
 	PublicKeyHash string `json:"publicKeyHash"`
+}
+
+// BitcoinAddressToScriptHashResult contains the script hash requested for an
+// address.
+type BitcoinAddressToScriptHashResult struct {
+	// Network is the network the address is for.
+	Network string `json:"network"`
+
+	// Address is the address the script hash is for.
+	Address string `json:"address"`
+
+	// ScriptHash is the script hash for the given address.
+	ScriptHash string `json:"scriptHash"`
 }
 
 // PingResult contains information when pinging the BFG server.

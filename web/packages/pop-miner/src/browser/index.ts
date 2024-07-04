@@ -42,6 +42,15 @@ export const parseKey: typeof types.parseKey = ({ network, privateKey }) => {
   }) as Promise<KeyResult>;
 };
 
+export const bitcoinAddressToScriptHash: typeof types.bitcoinAddressToScriptHash =
+  ({ network, address }) => {
+    return dispatch({
+      method: 'bitcoinAddressToScriptHash',
+      network: network,
+      address: address,
+    }) as Promise<BitcoinAddressToScriptHashResult>;
+  };
+
 export const startPoPMiner: typeof types.startPoPMiner = (args) => {
   return dispatchVoid({
     method: 'startPoPMiner',
