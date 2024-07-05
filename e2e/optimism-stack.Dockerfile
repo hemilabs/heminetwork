@@ -20,14 +20,14 @@ ENV PATH="${PATH}:/root/.foundry/bin"
 
 RUN foundryup
 
-ARG OP_GETH_CACHE_BREAK=4
+ARG OP_GETH_CACHE_BREAK=1
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
 RUN git checkout 83dd8a6e0459dd0f96182bb16065411f9318ac00
 
 WORKDIR /git
 
-ARG OPTIMISM_CACHE_BREAK=2
+ARG OPTIMISM_CACHE_BREAK=1
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
 RUN git checkout adf68923d2b278641e405dd5bfc4f53196d58bbe
