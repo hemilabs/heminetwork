@@ -49,12 +49,26 @@ jobs:
           cache: true
           check-latest: true
 
+      - name: "Retrieve GOPATH"
+        id: retrieve
+        run: echo "GOPATH=$(go env GOPATH)" >> "$GITHUB_OUTPUT"
+
+      - name: "Setup GOPATH/bin cache"
+        uses: actions/cache@v4
+        with:
+          path: "${{ steps.retrieve.outputs.GOPATH }}/bin/"
+          key: "${{ runner.os }}-${{ runner.arch }}-gobin-go${{ env.GO_VERSION }}-${{ hashFiles('**/Makefile') }}"
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-gobin-go${{ env.GO_VERSION }}-${{ hashFiles('**/Makefile') }}
+            ${{ runner.os }}-${{ runner.arch }}-gobin-go${{ env.GO_VERSION }}-
+            ${{ runner.os }}-${{ runner.arch }}-gobin-
+
       - name: "Download and verify dependencies"
         id: deps
-        run: make deps
+        run: make GOCACHE="$(go env GOCACHE)" deps
 
       - name: "make race"
-        run: make race
+        run: make GOCACHE="$(go env GOCACHE)" race
 
       - name: "make"
         if: (success() || failure()) && steps.deps.outcome == 'success'
@@ -62,5 +76,5 @@ jobs:
           PGTESTURI: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
           HEMI_DOCKER_TESTS: "1"
         run: |
-          make
+          make GOCACHE="$(go env GOCACHE)"
           git diff --exit-code
