@@ -23,14 +23,14 @@ RUN foundryup
 ARG OP_GETH_CACHE_BREAK=4
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout 7ea31cb11ddefde02e25c80131e6189efc822b34
+RUN git checkout 83dd8a6e0459dd0f96182bb16065411f9318ac00
 
 WORKDIR /git
 
 ARG OPTIMISM_CACHE_BREAK=2
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout f7441a529441c3a206d7708f1186223050ef521b
+RUN git checkout adf68923d2b278641e405dd5bfc4f53196d58bbe
 
 WORKDIR /git/op-geth
 
