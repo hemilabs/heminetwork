@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
 
@@ -40,6 +42,13 @@ var handlers = map[Method]*Dispatch{
 		Required: []DispatchArgs{
 			{Name: "network", Type: js.TypeString},
 			{Name: "privateKey", Type: js.TypeString},
+		},
+	},
+	MethodBitcoinAddressToScriptHash: {
+		Handler: bitcoinAddressToScriptHash,
+		Required: []DispatchArgs{
+			{Name: "network", Type: js.TypeString},
+			{Name: "address", Type: js.TypeString},
 		},
 	},
 	MethodStartPoPMiner: {
@@ -251,6 +260,35 @@ func parseKey(_ js.Value, args []js.Value) (any, error) {
 		PrivateKey:      hex.EncodeToString(privKey.Serialize()),
 		PublicKey:       hex.EncodeToString(compressedPubKey),
 		PublicKeyHash:   btcAddress.AddressPubKeyHash().String(),
+	}, nil
+}
+
+func bitcoinAddressToScriptHash(_ js.Value, args []js.Value) (any, error) {
+	log.Tracef("bitcoinAddressToScriptHash")
+	defer log.Tracef("bitcoinAddressToScriptHash exit")
+
+	net, btcChainParams, err := bitcoinNetwork(args[0].Get("network").String())
+	if err != nil {
+		return nil, err
+	}
+
+	address := args[0].Get("address").String()
+	addr, err := btcutil.DecodeAddress(address, btcChainParams)
+	if err != nil {
+		return nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("invalid bitcoin address: %w", err))
+	}
+
+	script, err := txscript.PayToAddrScript(addr)
+	if err != nil {
+		return nil, fmt.Errorf("convert address to script: %w", err)
+	}
+
+	scriptHash := sha256.Sum256(script)
+	return BitcoinAddressToScriptHashResult{
+		Network:    net,
+		Address:    address,
+		ScriptHash: hex.EncodeToString(scriptHash[:]),
 	}, nil
 }
 

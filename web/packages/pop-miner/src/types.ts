@@ -189,6 +189,50 @@ export type ParseKeyArgs = {
 export declare function parseKey(args: ParseKeyArgs): Promise<KeyResult>;
 
 /**
+ * @see bitcoinAddressToScriptHash
+ */
+export type BitcoinAddressToScriptHashArgs = {
+  /**
+   * Determines the network the key will be parsed for.
+   */
+  network: 'testnet3' | 'mainnet';
+
+  /**
+   * The Bitcoin address to return the script hash of.
+   */
+  address: string;
+};
+
+/**
+ * @see bitcoinAddressToScriptHash
+ */
+export type BitcoinAddressToScriptHashResult = {
+  /**
+   * The network the address is for.
+   */
+  network: 'testnet3' | 'mainnet';
+
+  /**
+   * The address the script hash is for.
+   */
+  address: string;
+
+  /**
+   * The script hash for the address.
+   */
+  scriptHash: string;
+};
+
+/**
+ * Returns the script hash of the given Bitcoin address.
+ *
+ * @param args Bitcoin to script hash arguments.
+ */
+export declare function bitcoinAddressToScriptHash(
+  args: BitcoinAddressToScriptHashArgs,
+): Promise<BitcoinAddressToScriptHashResult>;
+
+/**
  * @see startPoPMiner
  */
 export type MinerStartArgs = {

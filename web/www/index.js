@@ -77,6 +77,26 @@ ParseKeyButton.addEventListener('click', () => {
   ParseKey();
 });
 
+const BitcoinAddressToScriptHashAddressShow = document.querySelector('.BitcoinAddressToScriptHashAddressShow');
+
+async function BitcoinAddressToScriptHashAddress() {
+  try {
+    const result = await dispatch({
+      method: 'bitcoinAddressToScriptHash',
+      network: BitcoinAddressToScriptHashNetworkInput.value,
+      address: BitcoinAddressToScriptHashAddressInput.value,
+    });
+    BitcoinAddressToScriptHashAddressShow.innerText = JSON.stringify(result, null, 2);
+  } catch (err) {
+    BitcoinAddressToScriptHashAddressShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
+    console.error('Caught exception', err);
+  }
+}
+
+BitcoinAddressToScriptHashAddressButton.addEventListener('click', () => {
+  BitcoinAddressToScriptHashAddress();
+});
+
 // start pop miner
 const StartPopMinerShow = document.querySelector('.StartPopMinerShow');
 
