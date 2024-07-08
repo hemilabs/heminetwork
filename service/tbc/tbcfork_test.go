@@ -27,11 +27,27 @@ import (
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 type block struct {
 	name string
 	b    *btcutil.Block
+
+	txs map[tbcd.TxKey]*tbcd.TxValue // Parsed Txs in cache format
+}
+
+func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
+	blk := &block{
+		name: name,
+		b:    b,
+		txs:  make(map[tbcd.TxKey]*tbcd.TxValue, 10),
+	}
+	err := processTxs(params, b.Hash(), b.Transactions(), blk.txs)
+	if err != nil {
+		panic(fmt.Errorf("processTxs: %v", err))
+	}
+	return blk
 }
 
 func (b block) Hash() *chainhash.Hash {
@@ -77,7 +93,7 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 	genesis := btcutil.NewBlock(chaincfg.RegressionNetParams.GenesisBlock)
 	genesis.SetHeight(0)
 	// node.chain[chaincfg.RegressionNetParams.GenesisHash.String()] = genesis
-	_, err := node.insertBlock(&block{name: "genesis", b: genesis})
+	_, err := node.insertBlock(newBlock(node.params, "genesis", genesis))
 	if err != nil {
 		return nil, err
 	}
@@ -359,43 +375,6 @@ func random(count int) []byte {
 	return b
 }
 
-func (b *btcNode) mineN(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
-	parent, ok := b.chain[from.String()]
-	if !ok {
-		return nil, errors.New("parent hash not found")
-	}
-
-	blocks := make([]*block, 0, count)
-	for range count {
-		// extra nonce is needed to prevent block collisions
-		en := random(8)
-		extraNonce := binary.BigEndian.Uint64(en)
-
-		nextBlockHeight := parent.Height() + 1
-		bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
-			parent.Hash(), extraNonce)
-		if err != nil {
-			return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
-		}
-		blk := &block{name: fmt.Sprintf("b%v", nextBlockHeight), b: bt}
-		blocks = append(blocks, blk)
-		b.logf("mined %v: %v", nextBlockHeight, blk.Hash())
-
-		n, err := b.insertBlock(blk)
-		if err != nil {
-			return nil, fmt.Errorf("insert block at height %v: %v",
-				nextBlockHeight, err)
-		}
-		if n != 1 {
-			b.logf("fork at: %v blocks %v", nextBlockHeight, n)
-		}
-		parent = blk
-		b.height = nextBlockHeight
-	}
-
-	return blocks, nil
-}
-
 func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
@@ -411,7 +390,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	if err != nil {
 		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
 	}
-	blk := &block{name: name, b: bt}
+	blk := newBlock(b.params, name, bt)
 	_, err = b.insertBlock(blk)
 	if err != nil {
 		return nil, fmt.Errorf("insert block at height %v: %v",
@@ -423,6 +402,26 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	}
 
 	return blk, nil
+}
+
+func (b *btcNode) mineN(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
+	parent, ok := b.chain[from.String()]
+	if !ok {
+		return nil, errors.New("parent hash not found")
+	}
+
+	blocks := make([]*block, 0, count)
+	for range count {
+		nextBlockHeight := parent.Height() + 1
+		blk, err := b.mine(fmt.Sprintf("b%v", nextBlockHeight), parent.Hash(), payToAddress)
+		if err != nil {
+			return nil, err
+		}
+		blocks = append(blocks, blk)
+		parent = blk
+	}
+
+	return blocks, nil
 }
 
 func (b *btcNode) Mine(name string, parent *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
@@ -932,6 +931,7 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Verify txs
 
 	// a chain
 	b1a, err := n.MineAndSend(ctx, "b1a", parent, address)
