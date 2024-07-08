@@ -77,9 +77,12 @@ type btcNode struct {
 	blocksAtHeight map[int32][]*block
 	height         int32
 	params         *chaincfg.Params
+	genesis        *block
 }
 
 func newFakeNode(t *testing.T, port string) (*btcNode, error) {
+	genesis := btcutil.NewBlock(chaincfg.RegressionNetParams.GenesisBlock)
+	genesis.SetHeight(0)
 	node := &btcNode{
 		t:              t,
 		le:             false,
@@ -89,11 +92,8 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 		height:         0,
 		params:         &chaincfg.RegressionNetParams,
 	}
-
-	genesis := btcutil.NewBlock(chaincfg.RegressionNetParams.GenesisBlock)
-	genesis.SetHeight(0)
-	// node.chain[chaincfg.RegressionNetParams.GenesisHash.String()] = genesis
-	_, err := node.insertBlock(newBlock(node.params, "genesis", genesis))
+	node.genesis = newBlock(node.params, "genesis", genesis)
+	_, err := node.insertBlock(node.genesis)
 	if err != nil {
 		return nil, err
 	}
@@ -490,6 +490,45 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressP
 		return nil, nil, err
 	}
 	return key, address, nil
+}
+
+func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
+	for _, b := range blocks {
+		bh, height, err := s.BlockHeaderByHash(ctx, b.Hash())
+		if err != nil {
+			return err
+		}
+		_ = bh
+		if height != uint64(b.Height()) {
+			return fmt.Errorf("%v != %v", height, uint64(b.Height()))
+		}
+
+		// Verify Txs
+		for ktx, vtx := range b.txs {
+			switch ktx[0] {
+			case 's':
+			case 't':
+				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
+				if err != nil {
+					return fmt.Errorf("invalid tx key: %w", err)
+				}
+				tx, err := s.TxById(ctx, tbcd.TxId(*txId))
+				if err != nil {
+					return fmt.Errorf("tx by id: %w", err)
+				}
+				_ = tx
+				// db block retrieval tested by TxById
+				if !blockHash.IsEqual(b.Hash()) {
+					return errors.New("t cache block hash invalid")
+				}
+			default:
+				return fmt.Errorf("invalid tx type %v", ktx[0])
+			}
+			_ = vtx
+		}
+	}
+
+	return nil
 }
 
 // XXX: Fix and re-enable test.
@@ -931,7 +970,6 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Verify txs
 
 	// a chain
 	b1a, err := n.MineAndSend(ctx, "b1a", parent, address)
@@ -970,6 +1008,10 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// XXX verify indexes
+	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Verify linear indexing. Current TxIndex is sitting at b3
 	t.Logf("b3: %v", b3)

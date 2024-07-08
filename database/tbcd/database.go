@@ -414,6 +414,21 @@ func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 	return txKey
 }
 
+func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, error) {
+	if txKey[0] != 't' {
+		return nil, nil, fmt.Errorf("invalid magic 0x%02x", txKey[0])
+	}
+	txId, err := chainhash.NewHash(txKey[1:33])
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid tx id: %w", err)
+	}
+	blockHash, err := chainhash.NewHash(txKey[33:65])
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid block hash: %w", err)
+	}
+	return txId, blockHash, nil
+}
+
 // Helper functions
 
 // B2H converts a raw block header to a wire block header structure.
