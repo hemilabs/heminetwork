@@ -410,6 +410,11 @@ func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.T
 
 		// cache spent transactions
 		for txInIdx, txIn := range tx.MsgTx().TxIn {
+			if txInIdx == 0 {
+				// Skip coinbase inputs
+				continue
+			}
+
 			txk, txv := tbcd.NewTxSpent(
 				blockHash,
 				tx.Hash(),
