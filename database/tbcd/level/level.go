@@ -738,7 +738,9 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 	it := txDB.NewIterator(util.BytesPrefix(txid[:]), nil)
 	defer it.Release()
 	for it.Next() {
-		if !bytes.Equal(it.Key()[:], txid[:]) {
+		if !bytes.Equal(it.Key()[:33], txid[:]) {
+			// XXX should not happen, remove later
+			panic(spew.Sdump(txid) + spew.Sdump(it.Key()))
 			break
 		}
 		block, err := tbcd.NewBlockHashFromBytes(it.Key()[33:])
@@ -751,8 +753,7 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	if len(blocks) == 0 {
-		ch, _ := chainhash.NewHash(txId[:])
-		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", ch))
+		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", txId))
 	}
 
 	return blocks, nil
@@ -783,8 +784,7 @@ func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	if len(si) == 0 {
-		ch, _ := chainhash.NewHash(txId[:])
-		return nil, database.NotFoundError(fmt.Sprintf("not found %v", ch))
+		return nil, database.NotFoundError(fmt.Sprintf("not found %v", txId))
 	}
 
 	return si, nil

@@ -314,6 +314,11 @@ func (t TxId) String() string {
 	return hex.EncodeToString(rev[:])
 }
 
+func (t TxId) Hash() *chainhash.Hash {
+	h, _ := chainhash.NewHash(t[:])
+	return h
+}
+
 func NewTxId(x [32]byte) (txId TxId) {
 	copy(txId[:], x[:])
 	return
@@ -338,6 +343,11 @@ func (bh BlockHash) String() string {
 		rev[32-k-1] = bh[k]
 	}
 	return hex.EncodeToString(rev[:])
+}
+
+func (bh BlockHash) Hash() *chainhash.Hash {
+	h, _ := chainhash.NewHash(bh[:])
+	return h
 }
 
 func NewBlockHash(x [32]byte) (blockHash BlockHash) {
@@ -378,7 +388,7 @@ func NewScriptHashFromBytes(x []byte) (scriptHash ScriptHash, err error) {
 
 // Spent Transaction:
 //
-//	s + txin.PrevOutPoint.Hash + txin.PrevOutPoint.Index + blockhash = txid + txin_index + blockhash | [1 + 32 + 4 + 32] = [32 + 4]
+//	s + txin.PrevOutPoint.Hash + txin.PrevOutPoint.Index + blockhash = txid + txin_index | [1 + 32 + 4 + 32] = [32 + 4]
 //
 // Transaction ID to Block mapping:
 //
@@ -404,6 +414,27 @@ func NewTxSpent(blockHash, txId, inPrevHash *chainhash.Hash, inPrevIndex, txInIn
 	return txKey, txValue
 }
 
+func SpendInfoFromTxSpentKeyValue(txKey TxKey, txValue TxValue) (*SpendInfo, error) {
+	if txKey[0] != 's' {
+		return nil, fmt.Errorf("invalid magic 0x%02x", txKey[0])
+	}
+	var (
+		err error
+		si  *SpendInfo = new(SpendInfo)
+	)
+	si.BlockHash, err = NewBlockHashFromBytes(txKey[37:69])
+	if err != nil {
+		return nil, fmt.Errorf("invalid block hash: %w", err)
+	}
+	si.TxId, err = NewTxIdFromBytes(txValue[0:32])
+	if err != nil {
+		return nil, fmt.Errorf("invalid tx id: %w", err)
+	}
+	si.InputIndex = binary.BigEndian.Uint32(txValue[32:36])
+
+	return si, nil
+}
+
 // NewTxMapping returns a TxKey and TxValue that maps a tx id to a block hash.
 func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 	// Construct key
@@ -414,19 +445,19 @@ func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 	return txKey
 }
 
-func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, error) {
+func TxIdBlockHashFromTxKey(txKey TxKey) (*TxId, *BlockHash, error) {
 	if txKey[0] != 't' {
 		return nil, nil, fmt.Errorf("invalid magic 0x%02x", txKey[0])
 	}
-	txId, err := chainhash.NewHash(txKey[1:33])
+	txId, err := NewTxIdFromBytes(txKey[1:33])
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid tx id: %w", err)
 	}
-	blockHash, err := chainhash.NewHash(txKey[33:65])
+	blockHash, err := NewBlockHashFromBytes(txKey[33:65])
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid block hash: %w", err)
 	}
-	return txId, blockHash, nil
+	return &txId, &blockHash, nil
 }
 
 // Helper functions

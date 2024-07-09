@@ -298,6 +298,7 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 	if err != nil {
 		return nil, err
 	}
+	log.Infof("coinbase tx %v", spew.Sdump(coinbaseTx.Hash()))
 
 	reqDifficulty := uint32(0x1d00ffff) // XXX
 
@@ -505,26 +506,41 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 
 		// Verify Txs
 		for ktx, vtx := range b.txs {
+			_ = vtx
 			switch ktx[0] {
 			case 's':
+				// XXX FIX
+				//log.Infof(spew.Sdump(ktx))
+				//log.Infof(spew.Sdump(vtx))
+				//si, err := tbcd.SpendInfoFromTxSpentKeyValue(ktx, *vtx)
+				//if err != nil {
+				//	return fmt.Errorf("invalid spend info: %w", err)
+				//}
+				//log.Infof(spew.Sdump(si))
+				//sis, err := s.SpendOutputsByTxId(ctx, si.TxId.Hash())
+				//if err != nil {
+				//	return fmt.Errorf("invalid spend infos: %w", err)
+				//}
+				//_ = sis
+				log.Infof("xx")
+
 			case 't':
 				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
 				if err != nil {
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
-				tx, err := s.TxById(ctx, tbcd.TxId(*txId))
+				tx, err := s.TxById(ctx, txId.Hash())
 				if err != nil {
 					return fmt.Errorf("tx by id: %w", err)
 				}
 				_ = tx
 				// db block retrieval tested by TxById
-				if !blockHash.IsEqual(b.Hash()) {
+				if !b.Hash().IsEqual(blockHash.Hash()) {
 					return errors.New("t cache block hash invalid")
 				}
 			default:
 				return fmt.Errorf("invalid tx type %v", ktx[0])
 			}
-			_ = vtx
 		}
 	}
 
@@ -1055,6 +1071,10 @@ func TestIndexFork(t *testing.T) {
 	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
 	}
 
 	// XXX verify indexes

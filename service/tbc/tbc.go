@@ -269,6 +269,7 @@ func NewServer(cfg *Config) (*Server, error) {
 }
 
 // DB exports the underlying database. This should only be used in tests.
+// XXX remove this and deal with the fallout.
 func (s *Server) DB() tbcd.Database {
 	return s.db
 }
@@ -1386,6 +1387,9 @@ func (s *Server) BlockHeaderBest(ctx context.Context) (uint64, *wire.BlockHeader
 }
 
 func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (uint64, error) {
+	log.Tracef("BalanceByAddress")
+	defer log.Tracef("BalanceByAddress exit")
+
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
 	if err != nil {
 		return 0, err
@@ -1405,6 +1409,9 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 }
 
 func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
+	log.Tracef("UtxosByAddress")
+	defer log.Tracef("UtxosByAddress exit")
+
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
 	if err != nil {
 		return nil, err
@@ -1424,11 +1431,38 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 	return utxos, nil
 }
 
-func (s *Server) TxById(ctx context.Context, txId tbcd.TxId) (*wire.MsgTx, error) {
-	blockHashes, err := s.db.BlocksByTxId(ctx, txId)
+func (s *Server) SpendOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpendInfo, error) {
+	log.Tracef("SpendOutputsByTxId")
+	defer log.Tracef("SpendOutputsByTxId exit")
+
+	// XXX investigate if this is indeed correct. As it is written now it
+	// returns all spent outputs. The db should always be canonical but
+	// assert that.
+
+	si, err := s.db.SpendOutputsByTxId(ctx, tbcd.TxId(*txId))
 	if err != nil {
 		return nil, err
 	}
+
+	return si, nil
+}
+
+func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
+	log.Tracef("TxById")
+	defer log.Tracef("TxById exit")
+
+	blockHashes, err := s.db.BlocksByTxId(ctx, tbcd.TxId(*txId))
+	if err != nil {
+		return nil, err
+	}
+
+	if len(blockHashes) > 1 {
+		panic("fix me blockhashes len")
+	}
+
+	// XXX investigate if this is indeed correct. As it is written now it
+	// returns the first block the tx exists in. This however must be the
+	// canonical block. This function must also return the blockhash.
 
 	// chain hash stores the bytes in reverse order
 	revTxId := bytes.Clone(txId[:])
@@ -1582,6 +1616,7 @@ func (s *Server) Synced(ctx context.Context) SyncInfo {
 // DBOpen opens the underlying server database. It has been put in its own
 // function to make it available during tests and hemictl.
 // It would be good if it can be deleted.
+// XXX remove and find a different way to do this.
 func (s *Server) DBOpen(ctx context.Context) error {
 	log.Tracef("DBOpen")
 	defer log.Tracef("DBOpen exit")
@@ -1605,6 +1640,7 @@ func (s *Server) DBOpen(ctx context.Context) error {
 	return nil
 }
 
+// XXX remove and find a different way to do this.
 func (s *Server) DBClose() error {
 	log.Tracef("DBClose")
 	defer log.Tracef("DBClose")
