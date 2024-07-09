@@ -448,7 +448,7 @@ func tbcdb() error {
 			return fmt.Errorf("indexer: %w", err)
 		}
 
-	case "txbyid":
+	case "blocksbytxid":
 		txid := args["txid"]
 		if txid == "" {
 			return errors.New("txid: must be set")

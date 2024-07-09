@@ -1447,9 +1447,9 @@ func (s *Server) SpendOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	return si, nil
 }
 
-func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
-	log.Tracef("TxById")
-	defer log.Tracef("TxById exit")
+func (s *Server) TxByTxId(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
+	log.Tracef("TxByTxId")
+	defer log.Tracef("TxByTxId exit")
 
 	blockHashes, err := s.db.BlocksByTxId(ctx, tbcd.TxId(*txId))
 	if err != nil {

@@ -771,8 +771,8 @@ func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 	it := txDB.NewIterator(&util.Range{Start: key[:]}, nil)
 	defer it.Release()
 	for it.Next() {
-		if !bytes.Equal(it.Key()[:], key[:]) {
-			break
+		if !bytes.Equal(it.Key()[:33], key[:]) {
+			continue
 		}
 		var s tbcd.SpendInfo
 		copy(s.TxId[:], it.Value()[0:32])
