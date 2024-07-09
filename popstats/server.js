@@ -1,6 +1,6 @@
 import { createClient } from "redis";
 import { createPublicClient, erc20Abi, http, zeroAddress } from "viem";
-import { hemiSepolia } from "hemi-viem";
+import { hemi, hemiSepolia } from "hemi-viem";
 import beforeExit from "before-exit";
 
 // Constants
@@ -16,13 +16,12 @@ const delayBlocks = BigInt((2 * 60 * 60) / 12); // 2 hours worth of Hemi blocks.
 const blocksChunkSize = 1000n;
 const delayOnEndMs = 15 * 60 * 1000; // Wait 15 minutes
 const delayOnErrorMs = 60 * 1000; // Wait 1 minute
+const isTestnet = true;
 
 // EVM helpers
 
-const evmClient = createPublicClient({
-  chain: hemiSepolia,
-  transport: http(),
-});
+const chain = isTestnet ? hemiSepolia : hemi;
+const evmClient = createPublicClient({ chain, transport: http() });
 
 function getLastBlockNumber() {
   return evmClient.getBlockNumber();
@@ -48,6 +47,10 @@ function getTxFromEvent(event) {
 
 // Database helpers
 
+const keyPrefix = isTestnet ? "ht" : "hn";
+const bestBlockKey = `${keyPrefix}:bestBlock`;
+const lastPayoutsKey = `${keyPrefix}:lastPayouts`;
+
 const redisClientPromise = createClient()
   .on("error", function (err) {
     console.error("Redis error:", err.message);
@@ -61,7 +64,7 @@ function disconnectFromRedis() {
 
 function getBestBlockNumber() {
   return redisClientPromise.then(function (redisClient) {
-    return redisClient.get("bestBlock").then(function (bestBlock) {
+    return redisClient.get(bestBlockKey).then(function (bestBlock) {
       return BigInt(bestBlock || startBlock);
     });
   });
@@ -69,7 +72,7 @@ function getBestBlockNumber() {
 
 function updateBestBlock(bestBlock) {
   return redisClientPromise.then(function (redisClient) {
-    return redisClient.set("bestBlock", bestBlock.toString());
+    return redisClient.set(bestBlockKey, bestBlock.toString());
   });
 }
 
@@ -79,7 +82,7 @@ function updateLastPayouts(events) {
   }
   return redisClientPromise.then(function (redisClient) {
     return redisClient.hSet(
-      "lastPayouts",
+      lastPayoutsKey,
       events.map(function (event) {
         return [event.args.to, event.blockNumber.toString()];
       })
@@ -89,7 +92,7 @@ function updateLastPayouts(events) {
 
 function getLastPayouts() {
   return redisClientPromise.then(function (redisClient) {
-    return redisClient.hGetAll("lastPayouts");
+    return redisClient.hGetAll(lastPayoutsKey);
   });
 }
 
