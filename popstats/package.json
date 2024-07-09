@@ -1,0 +1,48 @@
+{
+  "name": "hemi-pop-stats",
+  "version": "1.0.0",
+  "description": "Report PoP payouts to Absinthe",
+  "license": "MIT",
+  "author": {
+    "name": "Gabriel Montes"
+  },
+  "scripts": {
+    "docker:build": "docker build -t hemilabs/pop-stats:$npm_package_version -t hemilabs/pop-stats:latest .",
+    "docker:run": "docker run -it --env-file .env --name pop-stats --rm hemilabs/pop-stats:latest",
+    "redis:start": "docker run -d -p 6379:6379 -v ./redis-data:/data --name pop-stats-redis --rm redis:7-alpine redis-server --save 60 1 --loglevel warning",
+    "redis:stop": "docker stop $(docker ps -aqf \"name=pop-stats-redis\")"
+  },
+  "dependencies": {
+    "before-exit": "1.0.0",
+    "hemi-viem": "1.1.0",
+    "lodash": "^4.17.21",
+    "p-filter": "^4.1.0",
+    "p-limit": "^6.1.0",
+    "p-throttle": "^6.2.0",
+    "promise-mem": "^1.0.2",
+    "redis": "4.6.15",
+    "viem": "2.17.3"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-bloq": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "packageManager": "pnpm@9.5.0+sha512.140036830124618d624a2187b50d04289d5a087f326c9edfc0ccd733d76c4f52c3a313d4fc148794a2a9d81553016004e6742e8cf850670268a7387fc220c903",
+  "type": "module",
+  "eslintConfig": {
+    "extends": [
+      "bloq",
+      "bloq/node"
+    ],
+    "root": true,
+    "rules": {
+      "no-console": "off",
+      "no-process-exit": "off",
+      "quotes": "off"
+    }
+  },
+  "prettier": {}
+}
