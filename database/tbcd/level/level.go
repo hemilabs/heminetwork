@@ -738,6 +738,9 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 	it := txDB.NewIterator(util.BytesPrefix(txid[:]), nil)
 	defer it.Release()
 	for it.Next() {
+		if !bytes.Equal(it.Key()[:], txid[:]) {
+			break
+		}
 		block, err := tbcd.NewBlockHashFromBytes(it.Key()[33:])
 		if err != nil {
 			return nil, err
@@ -767,7 +770,7 @@ func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 	it := txDB.NewIterator(&util.Range{Start: key[:]}, nil)
 	defer it.Release()
 	for it.Next() {
-		if !bytes.Equal(it.Key()[1:33], key[1:33]) {
+		if !bytes.Equal(it.Key()[:], key[:]) {
 			break
 		}
 		var s tbcd.SpendInfo
