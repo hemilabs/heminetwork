@@ -509,19 +509,18 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 			_ = vtx
 			switch ktx[0] {
 			case 's':
-				//log.Infof(spew.Sdump(ktx))
-				//log.Infof(spew.Sdump(vtx))
-				//si, err := tbcd.SpendInfoFromTxSpentKeyValue(ktx, *vtx)
-				//if err != nil {
-				//	return fmt.Errorf("invalid spend info: %w", err)
-				//}
-				//log.Infof(spew.Sdump(si))
-				//sis, err := s.SpendOutputsByTxId(ctx, si.TxId.Hash())
-				//if err != nil {
-				//	return fmt.Errorf("invalid spend infos: %w", err)
-				//}
-				//_ = sis
-				//log.Infof("xx")
+				// log.Infof(spew.Sdump(ktx))
+				// log.Infof(spew.Sdump(vtx))
+				si, err := tbcd.SpendInfoFromTxSpentKeyValue(ktx, *vtx)
+				if err != nil {
+					return fmt.Errorf("invalid spend info: %w", err)
+				}
+				sis, err := s.SpendOutputsByTxId(ctx, si.TxId.Hash())
+				if err != nil {
+					return fmt.Errorf("invalid spend infos: %w", err)
+				}
+				log.Infof(spew.Sdump(sis))
+				// XXX verify sis
 
 			case 't':
 				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
