@@ -741,7 +741,7 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 		if !bytes.Equal(it.Key()[:33], txid[:]) {
 			// XXX should not happen, remove later
 			panic(spew.Sdump(txid) + spew.Sdump(it.Key()))
-			break
+			// break
 		}
 		block, err := tbcd.NewBlockHashFromBytes(it.Key()[33:])
 		if err != nil {
