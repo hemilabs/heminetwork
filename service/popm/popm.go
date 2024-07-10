@@ -8,10 +8,12 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"slices"
 	"strings"
 	"sync"
@@ -242,23 +244,42 @@ func (m *Miner) bitcoinUTXOs(ctx context.Context, scriptHash []byte) ([]*bfgapi.
 	return buResp.UTXOs, nil
 }
 
-func pickUTXOs(utxos []*bfgapi.BitcoinUTXO, amount int64) ([]*bfgapi.BitcoinUTXO, error) {
-	um := make(map[int]*bfgapi.BitcoinUTXO)
-	for i := range utxos {
-		um[i] = utxos[i]
-	}
+func pickUTXO(utxos []*bfgapi.BitcoinUTXO, amount int64) (*bfgapi.BitcoinUTXO, error) {
+	log.Tracef("pickUTXO")
+	defer log.Debugf("pickUTXO exit")
 
-	// First try to find a single UTXO that equal or exceed the given value.
-	// XXX not random enough
-	for _, utxo := range um {
+	// Filter available UTXOs with value >= amount.
+	var ux []*bfgapi.BitcoinUTXO
+	for i, utxo := range utxos {
 		if utxo.Value >= amount {
-			return []*bfgapi.BitcoinUTXO{utxo}, nil
+			ux = append(ux, utxos[i])
 		}
 	}
 
-	return nil, fmt.Errorf(
-		"address does not have sufficient balance to PoP mine, please send additional funds to continue",
-	)
+	num := len(ux)
+	log.Debugf("Found %d UTXOs (in %d) with value >= %d",
+		num, len(utxos), amount)
+
+	if num == 0 {
+		// There are no available UTXOs with a value >= amount.
+		return nil, errors.New("insufficient funds to PoP mine, " +
+			"please send additional funds to continue mining")
+	}
+
+	utxo := ux[0]
+	if num > 1 {
+		// There are more than one UTXOs with values >= amount.
+		// Select one randomly.
+		r, err := rand.Int(rand.Reader, big.NewInt(int64(len(ux))))
+		if err != nil {
+			return nil, fmt.Errorf("generate random: %w", err)
+		}
+		utxo = ux[int(r.Int64())]
+	}
+
+	log.Debugf("Selected UTXO to spend: %s (%d) with value %d",
+		utxo.Hash, utxo.Index, utxo.Value)
+	return utxo, nil
 }
 
 func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.BitcoinUTXO, payToScript []byte, feeAmount int64) (*btcwire.MsgTx, error) {
@@ -312,49 +333,45 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	scriptHash := btcchainhash.Hash(sha256.Sum256(payToScript))
 
 	// Estimate BTC fees.
-	txLen := 285 // XXX for now all transactions are the same size
+	txLen := 285 // XXX: for now all transactions are the same size
 	feePerKB := 1024 * m.cfg.StaticFee
 	feeAmount := (int64(txLen) * int64(feePerKB)) / 1024
 
-	// Check balance.
+	// Retrieve the current balance for the miner.
 	confirmed, unconfirmed, err := m.bitcoinBalance(ctx, scriptHash[:])
 	if err != nil {
 		return fmt.Errorf("get Bitcoin balance: %w", err)
 	}
-	log.Tracef("Bitcoin balance for miner is: %v confirmed, %v unconfirmed", confirmed, unconfirmed)
 
-	// Find UTXOs for inputs.
+	log.Tracef("Miner has Bitcoin balance: %v confirmed, %v unconfirmed",
+		confirmed, unconfirmed)
+
+	// Retrieve available UTXOs for the miner.
 	log.Tracef("Looking for UTXOs for script hash %v", scriptHash)
 	utxos, err := m.bitcoinUTXOs(ctx, scriptHash[:])
 	if err != nil {
-		return fmt.Errorf("get Bitcoin UTXOs: %w", err)
+		return fmt.Errorf("retrieve available Bitcoin UTXOs: %w", err)
 	}
 
-	log.Tracef("Found %d UTXOs at Bitcoin height %d", len(utxos), btcHeight)
+	log.Debugf("Miner has %d available UTXOs for script hash %v at Bitcoin height %d",
+		len(utxos), scriptHash, btcHeight)
 
-	if len(utxos) == 0 {
-		return errors.New("could not find any utxos")
-	}
-
-	utxos, err = pickUTXOs(utxos, feeAmount)
+	// Select UTXO to spend.
+	utxo, err := pickUTXO(utxos, feeAmount)
 	if err != nil {
-		return fmt.Errorf("pick UTXOs: %w", err)
-	}
-
-	if len(utxos) != 1 {
-		return errors.New("unable to create PoP transaction with a single UTXO")
+		return fmt.Errorf("pick UTXO to spend: %w", err)
 	}
 
 	// Build transaction.
-	btx, err := createTx(ks, btcHeight, utxos[0], payToScript, feeAmount)
+	btx, err := createTx(ks, btcHeight, utxo, payToScript, feeAmount)
 	if err != nil {
-		return err
+		return fmt.Errorf("create Bitcoin transaction: %w", err)
 	}
 
 	// Sign input.
 	err = bitcoin.SignTx(btx, payToScript, m.btcPrivateKey, m.btcPublicKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("sign Bitcoin transaction: %w", err)
 	}
 
 	// broadcast tx
