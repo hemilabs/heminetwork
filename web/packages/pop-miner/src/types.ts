@@ -310,7 +310,10 @@ export interface EventListener {
  * @param eventType The event type to listen for. If '' then all events.
  * @param listener The event listener that will be called when the event is dispatched.
  */
-export declare function addEventListener(eventType: EventType | '', listener: EventListener): Promise<void>;
+export declare function addEventListener(
+  eventType: EventType | '',
+  listener: EventListener,
+): Promise<void>;
 
 /**
  * Unregisters an event listener.
@@ -318,7 +321,10 @@ export declare function addEventListener(eventType: EventType | '', listener: Ev
  * @param eventType The event type to stop listening for.
  * @param listener The event listener to unregister.
  */
-export declare function removeEventListener(eventType: EventType | '', listener: EventListener): Promise<void>;
+export declare function removeEventListener(
+  eventType: EventType | '',
+  listener: EventListener,
+): Promise<void>;
 
 /**
  * @see startPoPMiner

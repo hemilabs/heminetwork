@@ -101,7 +101,10 @@ export const bitcoinUTXOs: typeof types.bitcoinUTXOs = ({ scriptHash }) => {
   }) as Promise<BitcoinUTXOsResult>;
 };
 
-export const addEventListener: typeof types.addEventListener = (eventType, listener) => {
+export const addEventListener: typeof types.addEventListener = (
+  eventType,
+  listener,
+) => {
   return dispatchVoid({
     method: 'addEventListener',
     eventType: eventType,
@@ -109,7 +112,10 @@ export const addEventListener: typeof types.addEventListener = (eventType, liste
   });
 };
 
-export const removeEventListener: typeof types.addEventListener = (eventType, listener) => {
+export const removeEventListener: typeof types.addEventListener = (
+  eventType,
+  listener,
+) => {
   return dispatchVoid({
     method: 'removeEventListener',
     eventType: eventType,
