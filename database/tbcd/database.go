@@ -65,7 +65,7 @@ type Database interface {
 	BlockByHash(ctx context.Context, hash []byte) (*Block, error)
 
 	// Transactions
-	BlockUtxoUpdate(ctx context.Context, utxos map[Outpoint]CacheOutput) error
+	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
 	BlocksByTxId(ctx context.Context, txId TxId) ([]BlockHash, error)
 	SpendOutputsByTxId(ctx context.Context, txId TxId) ([]SpendInfo, error)

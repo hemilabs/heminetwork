@@ -307,11 +307,148 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 	return blocksProcessed, last, nil
 }
 
+// unindexUtxosInBlocks unindexes utxos from the last processed block until the
+// provided end hash, inclusive. It returns the number of blocks processed and
+// the last hash it has processedd.
+func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
+	log.Tracef("unindexUtxoBlocks")
+	defer log.Tracef("unindexUtxoBlocks exit")
+
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	// Find start hash
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return 0, last, fmt.Errorf("utxo index hash: %w", err)
+		}
+		utxoHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+
+	utxosPercentage := 95 // flush cache at >95% capacity
+	blocksProcessed := 0
+	hh := utxoHH
+	for {
+		log.Debugf("unindexing utxos: %v", hh)
+		log.Infof("unindexing utxos: %v", hh)
+
+		hash := hh.Hash
+		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
+		if err != nil {
+			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
+		}
+
+		// Index block
+		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		if err != nil {
+			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
+		}
+		b, err := btcutil.NewBlockFromBytes(eb.Block)
+		if err != nil {
+			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
+		}
+
+		err = processUtxos(s.chainParams, b.Transactions(), utxos)
+		if err != nil {
+			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
+		}
+
+		blocksProcessed++
+
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := len(utxos) * 100 / s.cfg.MaxCachedTxs
+		if bh.Height%10000 == 0 || cp > utxosPercentage || blocksProcessed == 1 {
+			log.Infof("UTxo unindexer: %v utxo cache %v%%", hh, cp)
+		}
+		if cp > utxosPercentage {
+			// Set txsMax to the largest tx capacity seen
+			s.cfg.MaxCachedTxs = max(len(utxos), s.cfg.MaxCachedTxs)
+			last = hh
+			// Flush
+			break
+		}
+
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
+		// Move to previous block
+		height := bh.Height - 1
+		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash()[:])
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				log.Infof("No more blocks at: %v", height)
+				break
+			}
+			return 0, last, fmt.Errorf("block headers by height %v: %w",
+				height, err)
+		}
+		hh.Hash = *pbh.BlockHash()
+		hh.Height = pbh.Height
+	}
+
+	return blocksProcessed, last, nil
+}
+
 func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
 	log.Tracef("UtxoIndexerUnwind")
 	defer log.Tracef("UtxoIndexerUnwind exit")
 
-	return fmt.Errorf("UtxoIndexerUnwind not yet")
+	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
+
+	// Allocate here so that we don't waste space when not indexing.
+	utxos := make(map[tbcd.Outpoint]tbcd.CacheOutput, s.cfg.MaxCachedTxs)
+	defer clear(utxos)
+
+	log.Infof("Start unwinding UTxos at hash %v height %v", startBH, startBH.Height)
+	log.Infof("End unwinding UTxos at hash %v height %v", endBH, endBH.Height)
+	endHash := endBH.BlockHash()
+	for {
+		start := time.Now()
+		blocksProcessed, last, err := s.unindexUtxosInBlocks(ctx, endHash, utxos)
+		if err != nil {
+			return fmt.Errorf("unindex utxos in blocks: %w", err)
+		}
+		if blocksProcessed == 0 {
+			return nil
+		}
+		utxosCached := len(utxos)
+		log.Infof("UTxo unwinder blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
+			blocksProcessed, time.Since(start), utxosCached,
+			s.cfg.MaxCachedTxs-utxosCached, utxosCached/blocksProcessed)
+
+		// Flush to disk
+		start = time.Now()
+		if err = s.db.BlockUtxoUpdate(ctx, -1, utxos); err != nil {
+			return fmt.Errorf("block utxo update: %w", err)
+		}
+		// leveldb does all kinds of allocations, force GC to lower
+		// memory preassure.
+		logMemStats()
+		runtime.GC()
+
+		log.Infof("Flushing unwind utxos complete %v took %v",
+			utxosCached, time.Since(start))
+
+		// Record height in metadata
+		err = s.db.MetadataPut(ctx, UtxoIndexHashKey, last.Hash[:])
+		if err != nil {
+			return fmt.Errorf("metadata utxo hash: %w", err)
+		}
+
+		if endHash.IsEqual(&last.Hash) {
+			break
+		}
+
+	}
+	return nil
 }
 
 func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
@@ -341,7 +478,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockUtxoUpdate(ctx, utxos); err != nil {
+		if err = s.db.BlockUtxoUpdate(ctx, 1, utxos); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -644,7 +781,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 		start := time.Now()
 		blocksProcessed, last, err := s.unindexTxsInBlocks(ctx, endHash, txs)
 		if err != nil {
-			return fmt.Errorf("index tx in blocks: %w", err)
+			return fmt.Errorf("unindex txs in blocks: %w", err)
 		}
 		if blocksProcessed == 0 {
 			return nil

@@ -861,9 +861,13 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start u
 	return utxos, nil
 }
 
-func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	log.Tracef("BlockUtxoUpdate")
 	defer log.Tracef("BlockUtxoUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
 
 	// outputs
 	outsTx, outsCommit, outsDiscard, err := l.startTransaction(level.OutputsDB)
@@ -882,14 +886,19 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 		copy(hop[33:65], op.TxId())
 		copy(hop[65:], utxo.OutputIndexBytes())
 
-		if utxo.IsDelete() {
-			// Delete balance and utxos
-			outsBatch.Delete(op[:][:])
-			outsBatch.Delete(hop[:])
-		} else {
-			// Add utxo to balance and utxos
-			outsBatch.Put(op[:], utxo.ScriptHashSlice())
-			outsBatch.Put(hop[:], utxo.ValueBytes())
+		switch direction {
+		case 1:
+			if utxo.IsDelete() {
+				// Delete balance and utxos
+				outsBatch.Delete(op[:][:])
+				outsBatch.Delete(hop[:])
+			} else {
+				// Add utxo to balance and utxos
+				outsBatch.Put(op[:], utxo.ScriptHashSlice())
+				outsBatch.Put(hop[:], utxo.ValueBytes())
+			}
+		case -1:
+			return fmt.Errorf("can we just reverse the ops or do we need more magic?")
 		}
 		// XXX this probably should be done by the caller but we do it
 		// here to lower memory pressure as large gobs of data are
