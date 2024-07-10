@@ -209,20 +209,11 @@ func generateKey(_ js.Value, args []js.Value) (any, error) {
 		return nil, fmt.Errorf("generate secp256k1 private key: %w", err)
 	}
 
-	compressedPubKey := privKey.PubKey().SerializeCompressed()
-	btcAddress, err := btcutil.NewAddressPubKey(compressedPubKey, btcChainParams)
+	result, err := createKeyResult(privKey, net, btcChainParams)
 	if err != nil {
-		log.Errorf("failed to create bitcoin address: %v", err)
-		return nil, fmt.Errorf("create bitcoin address from public key: %w", err)
+		return nil, err
 	}
-
-	return KeyResult{
-		EthereumAddress: ethereum.PublicKeyToAddress(compressedPubKey).String(),
-		Network:         net,
-		PrivateKey:      hex.EncodeToString(privKey.Serialize()),
-		PublicKey:       hex.EncodeToString(compressedPubKey),
-		PublicKeyHash:   btcAddress.AddressPubKeyHash().String(),
-	}, nil
+	return result, nil
 }
 
 func parseKey(_ js.Value, args []js.Value) (any, error) {
@@ -247,15 +238,25 @@ func parseKey(_ js.Value, args []js.Value) (any, error) {
 	}
 
 	privKey := dcrsecp256k1.PrivKeyFromBytes(b)
+	result, err := createKeyResult(privKey, net, btcChainParams)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func createKeyResult(privKey *dcrsecp256k1.PrivateKey, net string, btcChainParams *btcchaincfg.Params) (KeyResult, error) {
 	compressedPubKey := privKey.PubKey().SerializeCompressed()
+	uncompressedPubKey := privKey.PubKey().SerializeUncompressed()
+
 	btcAddress, err := btcutil.NewAddressPubKey(compressedPubKey, btcChainParams)
 	if err != nil {
 		log.Errorf("failed to create bitcoin address: %v", err)
-		return nil, fmt.Errorf("create bitcoin address from public key: %w", err)
+		return KeyResult{}, fmt.Errorf("create bitcoin address from public key: %w", err)
 	}
 
 	return KeyResult{
-		EthereumAddress: ethereum.PublicKeyToAddress(compressedPubKey).String(),
+		EthereumAddress: ethereum.PublicKeyToAddress(uncompressedPubKey).String(),
 		Network:         net,
 		PrivateKey:      hex.EncodeToString(privKey.Serialize()),
 		PublicKey:       hex.EncodeToString(compressedPubKey),
