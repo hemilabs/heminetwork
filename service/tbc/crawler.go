@@ -370,6 +370,8 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	log.Tracef("UtxoIndexer")
 	defer log.Tracef("UtxoIndexer exit")
 
+	// XXX this is basically duplicate from UtxoIndexIsLinear
+
 	// Verify exit condition hash
 	if endHash == nil {
 		return errors.New("must provide an end hash")
@@ -390,17 +392,26 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 			Height: 0,
 		}
 	}
+
+	// XXX make sure there is no gap between start and end or vice versa.
 	startBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash[:])
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
-	switch endBH.Difficulty.Cmp(&startBH.Difficulty) {
-	case 1:
-		return s.TxIndexerWind(ctx, startBH, endBH)
-	case -1:
-		return s.TxIndexerUnwind(ctx, startBH, endBH)
+	direction, err := s.UtxoIndexIsLinear(ctx, endHash)
+	if err != nil {
+		return fmt.Errorf("TxIndexIsLinear: %w", err)
 	}
-	return ErrNotLinear
+	switch direction {
+	case 1:
+		return s.UtxoIndexerWind(ctx, startBH, endBH)
+	case -1:
+		return s.UtxoIndexerUnwind(ctx, startBH, endBH)
+	case 0:
+		// XXX dedup UtxoIndexIsLinear with the above code so that it isn't so awkward.
+		return nil // because we call TxIndexIsLinear we know it's the same block
+	}
+	return fmt.Errorf("wtf") // XXX fix code so thatw e can't get here
 }
 
 func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
@@ -759,7 +770,6 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	if err != nil {
 		return fmt.Errorf("TxIndexIsLinear: %w", err)
 	}
-	// switch endBH.Difficulty.Cmp(&startBH.Difficulty) {
 	switch direction {
 	case 1:
 		return s.TxIndexerWind(ctx, startBH, endBH)
@@ -772,18 +782,28 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	return fmt.Errorf("wtf") // XXX fix code so thatw e can't get here
 }
 
+func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
+	log.Tracef("UtxoIndexIsLinear")
+	defer log.Tracef("UtxoIndexIsLinear exit")
+
+	// Verify start point is not after the end point
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return 0, fmt.Errorf("tx indexer : %w", err)
+		}
+		utxoHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+
+	return s.IndexIsLinear(ctx, &utxoHH.Hash, endHash)
+}
+
 func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
 	log.Tracef("TxIndexIsLinear")
 	defer log.Tracef("TxIndexIsLinear exit")
-
-	// Verify exit condition hash
-	if endHash == nil {
-		return 0, errors.New("must provide an end hash")
-	}
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
-	if err != nil {
-		return 0, fmt.Errorf("blockheader hash: %w", err)
-	}
 
 	// Verify start point is not after the end point
 	txHH, err := s.TxIndexHash(ctx)
@@ -796,8 +816,25 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 			Height: 0,
 		}
 	}
-	// XXX make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
+
+	return s.IndexIsLinear(ctx, &txHH.Hash, endHash)
+}
+
+func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhash.Hash) (int, error) {
+	log.Tracef("IndexIsLinear")
+	defer log.Tracef("IndexIsLinear exit")
+
+	// Verify exit condition hash
+	if endHash == nil {
+		return 0, errors.New("must provide an end hash")
+	}
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
+	if err != nil {
+		return 0, fmt.Errorf("blockheader hash: %w", err)
+	}
+
+	// Make sure there is no gap between start and end or vice versa.
+	startBH, err := s.db.BlockHeaderByHash(ctx, startHash[:])
 	if err != nil {
 		return 0, fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -879,6 +916,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		// XXX explain why we need to get more headers here
 		// continue getting headers, XXX this does not belong here either
 		// XXX if bh download fails we will get jammed. We need a queued "must execute this command" added to peer/service.
+		// XXX we may not want to do this when in special "driver mode"
 		log.Infof("resuming block header download at: %v", actualHeight)
 		if err = s.getHeaders(ctx, p, bhb); err != nil {
 			log.Errorf("sync indexers: %v", err)
@@ -886,10 +924,12 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		}
 	}()
 
-	//log.Debugf("Syncing indexes to: %v", hash)
-	//if err := s.UtxoIndexer(ctx, hash); err != nil {
-	//	return fmt.Errorf("utxo indexer: %w", err)
-	//}
+	log.Debugf("Syncing indexes to: %v", hash)
+
+	// Utxos
+	if err := s.UtxoIndexer(ctx, hash); err != nil {
+		return fmt.Errorf("utxo indexer: %w", err)
+	}
 
 	// Transactions index
 	if err := s.TxIndexer(ctx, hash); err != nil {
