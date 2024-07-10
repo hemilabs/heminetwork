@@ -9,6 +9,7 @@ let wasm; // This stores the global object created by the WASM binary.
 // Called after the WASM binary has been loaded.
 async function init() {
   wasm = globalThis['@hemilabs/pop-miner'];
+  void registerEventListener();
 }
 
 async function dispatch(args) {
@@ -236,3 +237,23 @@ async function BitcoinUTXOs() {
 BitcoinUTXOsButton.addEventListener('click', () => {
   BitcoinUTXOs();
 });
+
+// Events
+const eventsDisplay = document.querySelector('.eventsDisplay');
+
+async function registerEventListener() {
+  try {
+    const result = await dispatch({
+      method: 'addEventListener',
+      eventType: '',
+      handler: handleEvent,
+    });
+    console.debug('addEventListener: ', JSON.stringify(result, null, 2));
+  } catch (err) {
+    console.error('Caught exception', err);
+  }
+}
+
+function handleEvent(event) {
+  eventsDisplay.innerText += `\n${JSON.stringify(event, null, 2)}\n`;
+}

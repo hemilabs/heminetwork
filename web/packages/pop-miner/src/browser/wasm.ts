@@ -23,14 +23,16 @@ export type Method =
   | 'l2Keystones'
   | 'bitcoinBalance'
   | 'bitcoinInfo'
-  | 'bitcoinUTXOs';
+  | 'bitcoinUTXOs'
+  | 'addEventListener'
+  | 'removeEventListener';
 
 /**
  * Dispatch args.
  *
  * @see dispatch
  */
-export type DispatchArgs = Record<string, unknown> & {
+export type DispatchArgs = Record<string, any> & {
   /**
    * The method to be dispatched.
    *
@@ -66,7 +68,7 @@ export const init: typeof types.init = async ({ wasmURL }) => {
     loadPromise = loadWASM({ wasmURL }).catch((err) => {
       loadPromise = undefined;
       throw err;
-    });
+    }) as Promise<WASM>;
   }
 
   globalWASM = globalWASM || (await loadPromise);

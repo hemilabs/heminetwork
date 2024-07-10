@@ -233,6 +233,94 @@ export declare function bitcoinAddressToScriptHash(
 ): Promise<BitcoinAddressToScriptHashResult>;
 
 /**
+ * Represents a type of event.
+ */
+export type EventType =
+  | 'minerStart'
+  | 'minerStop'
+  | 'mineKeystone'
+  | 'transactionBroadcast';
+
+/**
+ * An event that has been dispatched.
+ */
+export type Event = {
+  type: EventType;
+};
+
+/**
+ * Dispatched when the PoP miner has stopped.
+ */
+export type EventMinerStart = Event & {
+  type: 'minerStart';
+};
+
+/**
+ * Dispatched when the PoP miner has exited.
+ */
+export type EventMinerStop = Event & {
+  type: 'minerStop';
+
+  /**
+   * The error that caused the PoP miner to exit, or null.
+   */
+  error?: Error;
+};
+
+/**
+ * Dispatched when the PoP miner begins mining a keystone.
+ */
+export type EventMineKeystone = Event & {
+  type: 'mineKeystone';
+
+  /**
+   * The keystone to be mined.
+   */
+  keystone: L2Keystone;
+};
+
+/**
+ * Dispatched when the PoP miner broadcasts a PoP transaction to the Bitcoin
+ * network.
+ */
+export type EventTransactionBroadcast = Event & {
+  type: 'transactionBroadcast';
+
+  /**
+   * The keystone that was mined.
+   */
+  keystone: L2Keystone;
+
+  /**
+   * The hash of the Bitcoin transaction.
+   */
+  txHash: string;
+};
+
+/**
+ * An event listener that can receive events.
+ */
+export interface EventListener {
+  (event: Event): void;
+}
+
+/**
+ * Registers an event listener.
+ *
+ * @param eventType The event type to listen for. If '' then all events.
+ * @param listener The event listener that will be called when the event is dispatched.
+ */
+export declare function addEventListener(eventType: EventType | '', listener: EventListener): Promise<void>;
+
+/**
+ * Unregisters an event listener.
+ *
+ * @param eventType The event type to stop listening for.
+ * @param listener The event listener to unregister.
+ */
+export declare function removeEventListener(eventType: EventType | '', listener: EventListener): Promise<void>;
+
+/**
  * @see startPoPMiner
  */
 export type MinerStartArgs = {
