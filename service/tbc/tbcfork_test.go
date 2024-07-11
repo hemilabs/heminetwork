@@ -314,6 +314,9 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 			Bits:       reqDifficulty,
 		},
 	}
+
+	// XXX Add some spent transaxtion here
+
 	for _, tx := range blockTxs {
 		if err = msgBlock.AddTransaction(tx.MsgTx()); err != nil {
 			return nil, fmt.Errorf("add transaction to block: %w", err)
