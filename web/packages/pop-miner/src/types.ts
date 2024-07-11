@@ -130,9 +130,9 @@ export type GenerateKeyArgs = {
  */
 export type KeyResult = {
   /**
-   * The Ethereum address for the key.
+   * The Hemi Ethereum address for the key.
    */
-  readonly ethereumAddress: string;
+  readonly hemiAddress: string;
 
   /**
    * The network the addresses were created for.
@@ -153,7 +153,12 @@ export type KeyResult = {
   /**
    * The Bitcoin pay-to-pubkey-hash address for the key.
    */
-  readonly publicKeyHash: string;
+  readonly bitcoinPubKeyHash: string;
+
+  /**
+   * The Bitcoin pay-to-pubkey-hash script hash for the key.
+   */
+  readonly bitcoinScriptHash: string;
 };
 
 /**

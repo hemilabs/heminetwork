@@ -97,8 +97,8 @@ type VersionResult struct {
 //
 // Returned by MethodGenerateKey and MethodParseKey.
 type KeyResult struct {
-	// EthereumAddress is the Ethereum address for the key.
-	EthereumAddress string `json:"ethereumAddress"`
+	// HemiAddress is the Hemi Ethereum address for the key.
+	HemiAddress string `json:"hemiAddress"`
 
 	// Network is the network the addresses were created for.
 	Network string `json:"network"`
@@ -110,8 +110,12 @@ type KeyResult struct {
 	// encoded as a hexadecimal string.
 	PublicKey string `json:"publicKey"`
 
-	// PublicKeyHash is the Bitcoin pay-to-pubkey-hash address for the key.
-	PublicKeyHash string `json:"publicKeyHash"`
+	// BitcoinPubKeyHash is the Bitcoin pay-to-pubkey-hash address for the key.
+	BitcoinPubKeyHash string `json:"bitcoinPubKeyHash"`
+
+	// BitcoinScriptHash is the Bitcoin pay-to-pubkey-hash script hash for the
+	// key.
+	BitcoinScriptHash string `json:"bitcoinScriptHash"`
 }
 
 // BitcoinAddressToScriptHashResult contains the script hash requested for an
