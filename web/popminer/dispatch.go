@@ -261,22 +261,30 @@ func parseKey(_ js.Value, args []js.Value) (any, error) {
 	return result, nil
 }
 
-func createKeyResult(privKey *dcrsecp256k1.PrivateKey, net string, btcChainParams *btcchaincfg.Params) (KeyResult, error) {
+func createKeyResult(privKey *dcrsecp256k1.PrivateKey, net string, btcChainParams *btcchaincfg.Params) (*KeyResult, error) {
 	compressedPubKey := privKey.PubKey().SerializeCompressed()
 	uncompressedPubKey := privKey.PubKey().SerializeUncompressed()
 
 	btcAddress, err := btcutil.NewAddressPubKey(compressedPubKey, btcChainParams)
 	if err != nil {
 		log.Errorf("failed to create bitcoin address: %v", err)
-		return KeyResult{}, fmt.Errorf("create bitcoin address from public key: %w", err)
+		return nil, fmt.Errorf("create bitcoin address from public key: %w", err)
 	}
+	btcPubKeyHash := btcAddress.AddressPubKeyHash()
 
-	return KeyResult{
-		EthereumAddress: ethereum.PublicKeyToAddress(uncompressedPubKey).String(),
-		Network:         net,
-		PrivateKey:      hex.EncodeToString(privKey.Serialize()),
-		PublicKey:       hex.EncodeToString(compressedPubKey),
-		PublicKeyHash:   btcAddress.AddressPubKeyHash().String(),
+	btcScript, err := txscript.PayToAddrScript(btcPubKeyHash)
+	if err != nil {
+		return nil, fmt.Errorf("convert address to script: %w", err)
+	}
+	btcScriptHash := sha256.Sum256(btcScript)
+
+	return &KeyResult{
+		HemiAddress:       ethereum.PublicKeyToAddress(uncompressedPubKey).String(),
+		Network:           net,
+		PrivateKey:        hex.EncodeToString(privKey.Serialize()),
+		PublicKey:         hex.EncodeToString(compressedPubKey),
+		BitcoinPubKeyHash: btcPubKeyHash.String(),
+		BitcoinScriptHash: hex.EncodeToString(btcScriptHash[:]),
 	}, nil
 }
 
