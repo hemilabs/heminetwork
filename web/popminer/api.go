@@ -244,7 +244,7 @@ var popmEvents = map[popm.EventType]EventType{
 
 // eventTypes is a map used to parse string event types.
 var eventTypes = map[string]EventType{
-	"":                                     "", // Listen for all events.
+	"*":                                    "*", // Listen for all events.
 	EventTypeMinerStart.String():           EventTypeMinerStart,
 	EventTypeMinerStop.String():            EventTypeMinerStop,
 	EventTypeMineKeystone.String():         EventTypeMineKeystone,

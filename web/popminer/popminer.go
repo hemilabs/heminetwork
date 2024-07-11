@@ -56,7 +56,7 @@ func (s *Service) handleMinerEvent(popmEventType popm.EventType, data any) {
 func (s *Service) dispatchEvent(eventType EventType, data any) {
 	s.listenersMtx.RLock()
 	defer s.listenersMtx.RUnlock()
-	allHs, aok := s.listeners[""] // Special handlers that receive all events.
+	allHs, aok := s.listeners["*"] // Special handlers that receive all events.
 	hs, ok := s.listeners[eventType]
 	if !ok && !aok {
 		// There are no listeners for this event type.

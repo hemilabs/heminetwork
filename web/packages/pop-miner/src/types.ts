@@ -311,7 +311,7 @@ export interface EventListener {
  * @param listener The event listener that will be called when the event is dispatched.
  */
 export declare function addEventListener(
-  eventType: EventType | '',
+  eventType: EventType | '*',
   listener: EventListener,
 ): Promise<void>;
 
@@ -322,7 +322,7 @@ export declare function addEventListener(
  * @param listener The event listener to unregister.
  */
 export declare function removeEventListener(
-  eventType: EventType | '',
+  eventType: EventType | '*',
   listener: EventListener,
 ): Promise<void>;
 

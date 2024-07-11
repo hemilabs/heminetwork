@@ -245,7 +245,7 @@ async function registerEventListener() {
   try {
     const result = await dispatch({
       method: 'addEventListener',
-      eventType: '',
+      eventType: '*',
       handler: handleEvent,
     });
     console.debug('addEventListener: ', JSON.stringify(result, null, 2));
