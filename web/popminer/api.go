@@ -6,7 +6,11 @@
 
 package main
 
-import "syscall/js"
+import (
+	"syscall/js"
+
+	"github.com/hemilabs/heminetwork/service/popm"
+)
 
 // Method represents a method that can be dispatched.
 type Method string
@@ -26,6 +30,10 @@ const (
 	MethodBitcoinBalance Method = "bitcoinBalance" // Retrieve bitcoin balance
 	MethodBitcoinInfo    Method = "bitcoinInfo"    // Retrieve bitcoin information
 	MethodBitcoinUTXOs   Method = "bitcoinUTXOs"   // Retrieve bitcoin UTXOs
+
+	// Events
+	MethodEventListenerAdd    Method = "addEventListener"    // Register event listener
+	MethodEventListenerRemove Method = "removeEventListener" // Unregister event listener
 )
 
 // ErrorCode is used to differentiate between error types.
@@ -205,4 +213,66 @@ type BitcoinUTXO struct {
 
 	// Value is the value of the output in satoshis.
 	Value int64 `json:"value"`
+}
+
+// EventType represents a type of event.
+type EventType string
+
+const (
+	// EventTypeMinerStart is dispatched when the PoP miner has started.
+	EventTypeMinerStart EventType = "minerStart"
+
+	// EventTypeMinerStop is dispatched when the PoP miner has exited.
+	EventTypeMinerStop EventType = "minerStop"
+
+	// EventTypeMineKeystone is dispatched when the PoP miner is mining an L2
+	// keystone.
+	EventTypeMineKeystone EventType = "mineKeystone"
+
+	// EventTypeTransactionBroadcast is dispatched when the PoP miner has
+	// broadcast a Bitcoin transaction to the network.
+	EventTypeTransactionBroadcast EventType = "transactionBroadcast"
+)
+
+// popmEvents contains events dispatched by the native PoP Miner.
+// These events will be forwarded to JavaScript, however we also dispatch events
+// that are specific to the WebAssembly PoP Miner.
+var popmEvents = map[popm.EventType]EventType{
+	popm.EventTypeMineKeystone:         EventTypeMineKeystone,
+	popm.EventTypeTransactionBroadcast: EventTypeTransactionBroadcast,
+}
+
+// eventTypes is a map used to parse string event types.
+var eventTypes = map[string]EventType{
+	"*":                                    "*", // Listen for all events.
+	EventTypeMinerStart.String():           EventTypeMinerStart,
+	EventTypeMinerStop.String():            EventTypeMinerStop,
+	EventTypeMineKeystone.String():         EventTypeMineKeystone,
+	EventTypeTransactionBroadcast.String(): EventTypeTransactionBroadcast,
+}
+
+// String returns the string representation of the event type.
+func (e EventType) String() string {
+	return string(e)
+}
+
+// MarshalJS returns the JavaScript representation of the event type.
+func (e EventType) MarshalJS() (js.Value, error) {
+	return jsValueOf(e.String()), nil
+}
+
+// EventMinerStop is the data for EventTypeMinerStop.
+type EventMinerStop struct {
+	Error *Error `json:"error"`
+}
+
+// EventMineKeystone is the data for EventTypeMineKeystone.
+type EventMineKeystone struct {
+	Keystone L2Keystone `json:"keystone"`
+}
+
+// EventTransactionBroadcast is the data for EventTypeTransactionBroadcast.
+type EventTransactionBroadcast struct {
+	Keystone L2Keystone `json:"keystone"`
+	TxHash   string     `json:"txHash"`
 }

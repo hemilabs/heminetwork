@@ -88,6 +88,22 @@ var handlers = map[Method]*Dispatch{
 			{Name: "scriptHash", Type: js.TypeString},
 		},
 	},
+
+	// Events
+	MethodEventListenerAdd: {
+		Handler: addEventListener,
+		Required: []DispatchArgs{
+			{Name: "eventType", Type: js.TypeString},
+			{Name: "handler", Type: js.TypeFunction},
+		},
+	},
+	MethodEventListenerRemove: {
+		Handler: removeEventListener,
+		Required: []DispatchArgs{
+			{Name: "eventType", Type: js.TypeString},
+			{Name: "handler", Type: js.TypeFunction},
+		},
+	},
 }
 
 type DispatchArgs struct {
@@ -309,77 +325,109 @@ func startPoPMiner(_ js.Value, args []js.Value) (any, error) {
 	log.Tracef("startPoPMiner")
 	defer log.Tracef("startPoPMiner exit")
 
-	pmMtx.Lock()
-	defer pmMtx.Unlock()
-	if pm != nil {
-		return nil, errors.New("pop miner already started")
+	svc.minerMtx.Lock()
+	defer svc.minerMtx.Unlock()
+	if svc.miner != nil {
+		return nil, errors.New("miner already started")
 	}
 
-	pm = new(Miner)
-	pm.ctx, pm.cancel = context.WithCancel(context.Background())
+	cfg, err := createMinerConfig(args[0])
+	if err != nil {
+		return nil, err
+	}
 
+	miner, err := popm.NewMiner(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create miner: %w", err)
+	}
+
+	// Add WebAssembly miner event handler
+	miner.RegisterEventHandler(svc.handleMinerEvent)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	m := &Miner{
+		ctx:    ctx,
+		cancel: cancel,
+		Miner:  miner,
+		errCh:  make(chan error, 1),
+	}
+	svc.miner = m
+
+	// run in background
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		svc.dispatchEvent(EventTypeMinerStart, nil)
+		if err := m.Run(m.ctx); !errors.Is(err, context.Canceled) {
+			svc.dispatchEvent(EventTypeMinerStop, EventMinerStop{
+				Error: &Error{
+					Code:      ErrorCodeInternal,
+					Message:   err.Error(),
+					Stack:     string(debug.Stack()),
+					Timestamp: time.Now().Unix(),
+				},
+			})
+
+			// TODO: Fix, this doesn't work very well.
+			//  We should remove the miner from svc here, and make stopPoPMiner
+			//  no longer return the start error.
+			m.errCh <- err
+			return
+		}
+
+		// Exited without error.
+		svc.dispatchEvent(EventTypeMinerStop, EventMinerStop{})
+	}()
+
+	return js.Null(), nil
+}
+
+// createMinerConfig creates a [popm.Config] from the given JavaScript object.
+func createMinerConfig(config js.Value) (*popm.Config, error) {
 	cfg := popm.NewDefaultConfig()
-	cfg.BTCPrivateKey = args[0].Get("privateKey").String()
-	cfg.StaticFee = uint(args[0].Get("staticFee").Int())
+	cfg.BTCPrivateKey = config.Get("privateKey").String()
+	cfg.StaticFee = uint(config.Get("staticFee").Int())
 
-	cfg.LogLevel = args[0].Get("logLevel").String()
+	// Log level
+	cfg.LogLevel = config.Get("logLevel").String()
 	if cfg.LogLevel == "" {
 		cfg.LogLevel = "popm=ERROR"
 	}
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
-		pm = nil
-		return nil, fmt.Errorf("configure logger: %w", err)
+		return nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("configure logger: %w", err))
 	}
 
-	network := args[0].Get("network").String()
+	// Network
+	network := config.Get("network").String()
 	netOpts, ok := networks[network]
 	if !ok {
-		pm = nil
-		return nil, fmt.Errorf("unknown network: %s", network)
+		return nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("unknown network: %s", network))
 	}
 	cfg.BFGWSURL = netOpts.bfgURL
 	cfg.BTCChainName = netOpts.btcChainName
 
-	var err error
-	pm.miner, err = popm.NewMiner(cfg)
-	if err != nil {
-		pm = nil
-		return nil, fmt.Errorf("create PoP miner: %w", err)
-	}
-
-	// launch in background
-	pm.wg.Add(1)
-	go func() {
-		defer pm.wg.Done()
-		if err := pm.miner.Run(pm.ctx); !errors.Is(err, context.Canceled) {
-			// TODO(joshuasing): dispatch event on failure
-			pmMtx.Lock()
-			defer pmMtx.Unlock()
-			pm.err = err // Theoretically this can logic race unless we unset pm
-		}
-	}()
-
-	return js.Null(), nil
+	return cfg, nil
 }
 
 func stopPopMiner(_ js.Value, _ []js.Value) (any, error) {
 	log.Tracef("stopPopMiner")
 	defer log.Tracef("stopPopMiner exit")
 
-	pmMtx.Lock()
-	if pm == nil {
-		pmMtx.Unlock()
-		return nil, errors.New("pop miner not running")
+	svc.minerMtx.Lock()
+	if svc.miner == nil {
+		svc.minerMtx.Unlock()
+		return nil, errors.New("miner not running")
 	}
 
-	oldPM := pm
-	pm = nil
-	pmMtx.Unlock()
-	oldPM.cancel()
-	oldPM.wg.Wait()
+	// Copy the m and release the lock
+	m := svc.miner
+	svc.miner = nil
+	svc.minerMtx.Unlock()
 
-	if oldPM.err != nil {
-		return nil, oldPM.err
+	if err := m.shutdown(); err != nil {
+		return nil, err
 	}
 
 	return js.Null(), nil
@@ -389,11 +437,11 @@ func ping(_ js.Value, _ []js.Value) (any, error) {
 	log.Tracef("ping")
 	defer log.Tracef("ping exit")
 
-	activePM, err := activeMiner()
+	miner, err := runningMiner()
 	if err != nil {
 		return nil, err
 	}
-	pr, err := activePM.miner.Ping(activePM.ctx, time.Now().Unix())
+	pr, err := miner.Ping(miner.ctx, time.Now().Unix())
 	if err != nil {
 		return nil, err
 	}
@@ -416,26 +464,18 @@ func l2Keystones(_ js.Value, args []js.Value) (any, error) {
 	}
 	count := uint64(c)
 
-	activePM, err := activeMiner()
+	miner, err := runningMiner()
 	if err != nil {
 		return nil, err
 	}
-	pr, err := activePM.miner.L2Keystones(activePM.ctx, count)
+	pr, err := miner.L2Keystones(miner.ctx, count)
 	if err != nil {
 		return nil, err
 	}
 
 	keystones := make([]L2Keystone, len(pr.L2Keystones))
 	for i, ks := range pr.L2Keystones {
-		keystones[i] = L2Keystone{
-			Version:            ks.Version,
-			L1BlockNumber:      ks.L1BlockNumber,
-			L2BlockNumber:      ks.L2BlockNumber,
-			ParentEPHash:       ks.ParentEPHash.String(),
-			PrevKeystoneEPHash: ks.PrevKeystoneEPHash.String(),
-			StateRoot:          ks.StateRoot.String(),
-			EPHash:             ks.EPHash.String(),
-		}
+		keystones[i] = convertL2Keystone(&ks)
 	}
 
 	return L2KeystoneResult{
@@ -449,11 +489,11 @@ func bitcoinBalance(_ js.Value, args []js.Value) (any, error) {
 
 	scriptHash := args[0].Get("scriptHash").String()
 
-	activePM, err := activeMiner()
+	miner, err := runningMiner()
 	if err != nil {
 		return nil, err
 	}
-	pr, err := activePM.miner.BitcoinBalance(activePM.ctx, scriptHash)
+	pr, err := miner.BitcoinBalance(miner.ctx, scriptHash)
 	if err != nil {
 		return nil, err
 	}
@@ -468,11 +508,11 @@ func bitcoinInfo(_ js.Value, _ []js.Value) (any, error) {
 	log.Tracef("bitcoinInfo")
 	defer log.Tracef("bitcoinInfo exit")
 
-	activePM, err := activeMiner()
+	miner, err := runningMiner()
 	if err != nil {
 		return nil, err
 	}
-	pr, err := activePM.miner.BitcoinInfo(activePM.ctx)
+	pr, err := miner.BitcoinInfo(miner.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -488,11 +528,11 @@ func bitcoinUTXOs(_ js.Value, args []js.Value) (any, error) {
 
 	scriptHash := args[0].Get("scriptHash").String()
 
-	activePM, err := activeMiner()
+	miner, err := runningMiner()
 	if err != nil {
 		return nil, err
 	}
-	pr, err := activePM.miner.BitcoinUTXOs(activePM.ctx, scriptHash)
+	pr, err := miner.BitcoinUTXOs(miner.ctx, scriptHash)
 	if err != nil {
 		return nil, err
 	}
@@ -509,4 +549,55 @@ func bitcoinUTXOs(_ js.Value, args []js.Value) (any, error) {
 	return BitcoinUTXOsResult{
 		UTXOs: utxos,
 	}, nil
+}
+
+func addEventListener(_ js.Value, args []js.Value) (any, error) {
+	log.Tracef("addEventListener")
+	defer log.Tracef("addEventListener exit")
+
+	eventType := args[0].Get("eventType").String()
+	handler := args[0].Get("handler")
+
+	event, ok := eventTypes[eventType]
+	if !ok {
+		return nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("invalid event type: %s", eventType))
+	}
+
+	svc.listenersMtx.Lock()
+	svc.listeners[event] = append(svc.listeners[event], handler)
+	svc.listenersMtx.Unlock()
+
+	return js.Null(), nil
+}
+
+func removeEventListener(_ js.Value, args []js.Value) (any, error) {
+	log.Tracef("removeEventListener")
+	defer log.Tracef("removeEventListener exit")
+
+	eventType := args[0].Get("eventType").String()
+	handler := args[0].Get("handler")
+
+	event, ok := eventTypes[eventType]
+	if !ok {
+		return nil, errorWithCode(ErrorCodeInvalidValue,
+			fmt.Errorf("invalid event type: %s", eventType))
+	}
+
+	svc.listenersMtx.Lock()
+	eventHandlers := svc.listeners[event]
+	for i, h := range eventHandlers {
+		if handler.Equal(h) {
+			// Remove handler from the slice.
+			// We don't care about the order, so set the current index to the
+			// value of the last index, then delete the last index.
+			handlersLen := len(eventHandlers)
+			eventHandlers[i] = eventHandlers[handlersLen-1]
+			eventHandlers = eventHandlers[:handlersLen-1]
+		}
+	}
+	svc.listeners[event] = eventHandlers
+	svc.listenersMtx.Unlock()
+
+	return js.Null(), nil
 }

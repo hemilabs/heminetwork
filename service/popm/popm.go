@@ -123,6 +123,9 @@ type Miner struct {
 	mineNowCh chan struct{}
 
 	l2Keystones map[string]L2KeystoneProcessingContainer
+
+	eventHandlersMtx sync.RWMutex
+	eventHandlers    []EventHandler
 }
 
 func NewMiner(cfg *Config) (*Miner, error) {
@@ -318,6 +321,8 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	log.Infof("Broadcasting PoP transaction to Bitcoin...")
 
+	go m.dispatchEvent(EventTypeMineKeystone, EventMineKeystone{Keystone: ks})
+
 	btcHeight, err := m.bitcoinHeight(ctx)
 	if err != nil {
 		return fmt.Errorf("get Bitcoin height: %w", err)
@@ -393,6 +398,9 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	}
 
 	log.Infof("Successfully broadcast PoP transaction to Bitcoin with TX hash %v", txHash)
+
+	go m.dispatchEvent(EventTypeTransactionBroadcast,
+		EventTransactionBroadcast{Keystone: ks, TxHash: txHash.String()})
 
 	return nil
 }

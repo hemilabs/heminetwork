@@ -15,6 +15,9 @@ import (
 	"syscall/js"
 	"time"
 	"unsafe"
+
+	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/service/popm"
 )
 
 var (
@@ -282,4 +285,39 @@ func newJSError(code ErrorCode, message string) js.Value {
 		Stack:     string(debug.Stack()),
 		Timestamp: time.Now().Unix(),
 	})
+}
+
+// convertL2Keystone converts a [hemi.L2Keystone] to an L2Keystone.
+func convertL2Keystone(ks *hemi.L2Keystone) L2Keystone {
+	if ks == nil {
+		panic("convertL2Keystone: cannot handle nil *hemi.L2Keystone")
+	}
+
+	return L2Keystone{
+		Version:            ks.Version,
+		L1BlockNumber:      ks.L1BlockNumber,
+		L2BlockNumber:      ks.L2BlockNumber,
+		ParentEPHash:       ks.ParentEPHash.String(),
+		PrevKeystoneEPHash: ks.PrevKeystoneEPHash.String(),
+		StateRoot:          ks.StateRoot.String(),
+		EPHash:             ks.EPHash.String(),
+	}
+}
+
+// convertEvent converts a popm event struct to a WASM popm event struct.
+func convertEvent(data any) any {
+	switch d := data.(type) {
+	case popm.EventMineKeystone:
+		return EventMineKeystone{
+			Keystone: convertL2Keystone(d.Keystone),
+		}
+	case popm.EventTransactionBroadcast:
+		return EventTransactionBroadcast{
+			Keystone: convertL2Keystone(d.Keystone),
+			TxHash:   d.TxHash,
+		}
+	default:
+		log.Errorf("unknown popm event: %T", data)
+		return nil
+	}
 }
