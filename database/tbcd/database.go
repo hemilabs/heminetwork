@@ -67,7 +67,7 @@ type Database interface {
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
-	BlocksByTxId(ctx context.Context, txId TxId) ([]BlockHash, error)
+	BlocksByTxId(ctx context.Context, txId []byte) ([]BlockHash, error)
 	SpendOutputsByTxId(ctx context.Context, txId TxId) ([]SpendInfo, error)
 
 	// Peer manager

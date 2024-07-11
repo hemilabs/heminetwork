@@ -154,6 +154,48 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 	return nil
 }
 
+func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int64, error) {
+	txId := op.TxId()
+	txIndex := op.TxIndex()
+	opHash, err := chainhash.NewHash(txId)
+	if err != nil {
+		return nil, 0, fmt.Errorf("new hash: %w", err)
+	}
+
+	// Find block haehes
+	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
+	if err != nil {
+		return nil, 0, fmt.Errorf("blocks by txid: %w", err)
+	}
+	// Note that we may have more than one block hashe however since the
+	// TxID is generated from the actual Tx the script hash and value
+	// should be identical and thus we can return the values from the first
+	// block found.
+	if len(blockHashes) == 0 {
+		return nil, 0, fmt.Errorf("script value: no block hashes")
+	}
+	blk, err := s.db.BlockByHash(ctx, blockHashes[0][:])
+	if err != nil {
+		return nil, 0, fmt.Errorf("block by hash: %w", err)
+	}
+	b, err := btcutil.NewBlockFromBytes(blk.Block)
+	if err != nil {
+		return nil, 0, fmt.Errorf("new block: %w", err)
+	}
+	for _, tx := range b.Transactions() {
+		if !tx.Hash().IsEqual(opHash) {
+			continue
+		}
+		txOuts := tx.MsgTx().TxOut
+		if len(txOuts) < int(txIndex) {
+			return nil, 0, fmt.Errorf("tx index invalid: %v", op)
+		}
+		tx := txOuts[txIndex]
+		return tx.PkScript, tx.Value, nil
+	}
+	return nil, 0, fmt.Errorf("tx id not found: %v", op)
+}
+
 func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	// Walk backwards through the txs
 	for idx := len(txs) - 1; idx >= 0; idx-- {
@@ -166,15 +208,12 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 			}
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
-			pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
+			pkScript, value, err := s.scriptValue(ctx, op)
 			if err != nil {
 				panic(err)
 			}
-			value, err := s.db.BalanceByScriptHash(ctx, *pkScript)
-			if err != nil {
-				panic(err)
-			}
-			utxos[op] = tbcd.NewCacheOutput(*pkScript, value, op.TxIndex())
+			utxos[op] = tbcd.NewCacheOutput(sha256.Sum256(pkScript),
+				uint64(value), txIn.PreviousOutPoint.Index)
 		}
 
 		// TxOut if those are in the cache delete from cache; if they are not in the cache insert delete from disk command into cache
@@ -183,12 +222,12 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 				continue
 			}
 			op := tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))
-			if opc, ok := utxos[op]; ok {
+			if _, ok := utxos[op]; ok {
 				delete(utxos, op)
 			} else {
-				utxos[op] = tbcd.NewDeleteCacheOutput(opc.ScriptHash(), op.TxIndex())
+				utxos[op] = tbcd.NewDeleteCacheOutput(sha256.Sum256(txOut.PkScript),
+					op.TxIndex())
 			}
-
 		}
 	}
 

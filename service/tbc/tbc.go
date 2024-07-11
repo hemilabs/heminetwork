@@ -1451,7 +1451,7 @@ func (s *Server) TxByTxId(ctx context.Context, txId *chainhash.Hash) (*wire.MsgT
 	log.Tracef("TxByTxId")
 	defer log.Tracef("TxByTxId exit")
 
-	blockHashes, err := s.db.BlocksByTxId(ctx, tbcd.TxId(*txId))
+	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
 	if err != nil {
 		return nil, err
 	}

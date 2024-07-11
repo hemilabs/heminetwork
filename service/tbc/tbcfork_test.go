@@ -26,6 +26,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
+	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
@@ -288,7 +289,7 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 	}
 }
 
-func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64) (*btcutil.Block, error) {
+func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64, mempool []*btcutil.Tx) (*btcutil.Block, error) {
 	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
 	if err != nil {
 		return nil, err
@@ -304,7 +305,9 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 
 	var blockTxs []*btcutil.Tx
 	blockTxs = append(blockTxs, coinbaseTx)
-
+	if mempool != nil {
+		blockTxs = append(blockTxs, mempool...)
+	}
 	msgBlock := &wire.MsgBlock{
 		Header: wire.BlockHeader{
 			Version:    int32(vbTopBits),
@@ -314,9 +317,6 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 			Bits:       reqDifficulty,
 		},
 	}
-
-	// XXX Add some spent transaxtion here
-
 	for _, tx := range blockTxs {
 		if err = msgBlock.AddTransaction(tx.MsgTx()); err != nil {
 			return nil, fmt.Errorf("add transaction to block: %w", err)
@@ -389,8 +389,13 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	extraNonce := binary.BigEndian.Uint64(en)
 
 	nextBlockHeight := parent.Height() + 1
+	switch nextBlockHeight {
+	case 1:
+		// spend genesis coinbase
+	}
+
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
-		parent.Hash(), extraNonce)
+		parent.Hash(), extraNonce, nil)
 	if err != nil {
 		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
 	}
@@ -1113,6 +1118,35 @@ func TestIndexFork(t *testing.T) {
 	//}
 
 	time.Sleep(time.Second)
+}
+
+func createTx(btcHeight uint64, utxo *bfgapi.BitcoinUTXO, payToScript []byte, feeAmount int64) (*wire.MsgTx, error) {
+	btx := wire.MsgTx{
+		Version:  2,
+		LockTime: uint32(btcHeight),
+	}
+
+	// Add UTXO as input.
+	outPoint := wire.OutPoint{
+		Hash:  chainhash.Hash(utxo.Hash),
+		Index: utxo.Index,
+	}
+	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
+
+	// Add output for change as P2PKH.
+	changeAmount := utxo.Value - feeAmount
+	btx.TxOut = []*wire.TxOut{wire.NewTxOut(changeAmount, payToScript)}
+
+	// Add PoP TX using OP_RETURN output.
+	//aks := hemi.L2KeystoneAbbreviate(*l2Keystone)
+	//popTx := pop.TransactionL2{L2Keystone: aks}
+	//popTxOpReturn, err := popTx.EncodeToOpReturn()
+	//if err != nil {
+	//	return nil, fmt.Errorf("encode PoP transaction: %w", err)
+	//}
+	//btx.TxOut = append(btx.TxOut, wire.NewTxOut(0, popTxOpReturn))
+
+	return &btx, nil
 }
 
 // borrowed from btcd
