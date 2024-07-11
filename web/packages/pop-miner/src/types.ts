@@ -307,7 +307,7 @@ export interface EventListener {
 /**
  * Registers an event listener.
  *
- * @param eventType The event type to listen for. If '' then all events.
+ * @param eventType The event type to listen for. If '*' then listen for all events.
  * @param listener The event listener that will be called when the event is dispatched.
  */
 export declare function addEventListener(
