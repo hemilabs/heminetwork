@@ -154,6 +154,47 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 	return nil
 }
 
+func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+	// Walk backwards through the txs
+	for idx := len(txs) - 1; idx >= 0; idx-- {
+		tx := txs[idx]
+		// TxIn get data from disk and insert into the cache as insert
+		for _, txIn := range tx.MsgTx().TxIn {
+			if idx == 0 {
+				// Skip coinbase inputs
+				continue
+			}
+			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index)
+			pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
+			if err != nil {
+				panic(err)
+			}
+			value, err := s.db.BalanceByScriptHash(ctx, *pkScript)
+			if err != nil {
+				panic(err)
+			}
+			utxos[op] = tbcd.NewCacheOutput(*pkScript, value, op.TxIndex())
+		}
+
+		// TxOut if those are in the cache delete from cache; if they are not in the cache insert delete from disk command into cache
+		for outIndex, txOut := range tx.MsgTx().TxOut {
+			if txscript.IsUnspendable(txOut.PkScript) {
+				continue
+			}
+			op := tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))
+			if opc, ok := utxos[op]; ok {
+				delete(utxos, op)
+			} else {
+				utxos[op] = tbcd.NewDeleteCacheOutput(opc.ScriptHash(), op.TxIndex())
+			}
+
+		}
+	}
+
+	return nil
+}
+
 func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
 	defer w.Done()
 
@@ -353,7 +394,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
-		err = processUtxos(s.chainParams, b.Transactions(), utxos)
+		err = s.unprocessUtxos(ctx, s.chainParams, b.Transactions(), utxos)
 		if err != nil {
 			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
 		}

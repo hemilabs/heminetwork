@@ -898,7 +898,16 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 				outsBatch.Put(hop[:], utxo.ValueBytes())
 			}
 		case -1:
-			return fmt.Errorf("can we just reverse the ops or do we need more magic?")
+			// XXX does direction matter?
+			if utxo.IsDelete() {
+				// Delete balance and utxos
+				outsBatch.Delete(op[:][:])
+				outsBatch.Delete(hop[:])
+			} else {
+				// Add utxo to balance and utxos
+				outsBatch.Put(op[:], utxo.ScriptHashSlice())
+				outsBatch.Put(hop[:], utxo.ValueBytes())
+			}
 		}
 		// XXX this probably should be done by the caller but we do it
 		// here to lower memory pressure as large gobs of data are
