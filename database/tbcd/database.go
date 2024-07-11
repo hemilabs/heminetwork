@@ -418,10 +418,9 @@ func SpendInfoFromTxSpentKeyValue(txKey TxKey, txValue TxValue) (*SpendInfo, err
 	if txKey[0] != 's' {
 		return nil, fmt.Errorf("invalid magic 0x%02x", txKey[0])
 	}
-	var (
-		err error
-		si  *SpendInfo = new(SpendInfo)
-	)
+
+	var err error
+	si := new(SpendInfo)
 	si.BlockHash, err = NewBlockHashFromBytes(txKey[37:69])
 	if err != nil {
 		return nil, fmt.Errorf("invalid block hash: %w", err)

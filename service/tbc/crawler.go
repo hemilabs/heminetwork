@@ -77,7 +77,7 @@ func (s *Server) findCanonicalHash(ctx context.Context, endHash *chainhash.Hash,
 	case 1:
 		return 0, nil // most common fast path
 	case 0:
-		return -1, fmt.Errorf("no blockheaders provided")
+		return -1, errors.New("no blockheaders provided")
 	}
 
 	// XXX make sure endHash has higher cumulative difficulty
@@ -102,7 +102,7 @@ func (s *Server) findCanonicalHash(ctx context.Context, endHash *chainhash.Hash,
 		}
 	}
 
-	return -1, fmt.Errorf("path not found")
+	return -1, errors.New("path not found")
 }
 
 func logMemStats() {
@@ -589,7 +589,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 		// XXX dedup UtxoIndexIsLinear with the above code so that it isn't so awkward.
 		return nil // because we call TxIndexIsLinear we know it's the same block
 	}
-	return fmt.Errorf("wtf") // XXX fix code so thatw e can't get here
+	return errors.New("wtf") // XXX fix code so thatw e can't get here
 }
 
 func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
@@ -957,7 +957,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 		// XXX dedup TxIndexIsLinear with the above code so that it isn't so awkward.
 		return nil // because we call TxIndexIsLinear we know it's the same block
 	}
-	return fmt.Errorf("wtf") // XXX fix code so thatw e can't get here
+	return errors.New("wtf") // XXX fix code so thatw e can't get here
 }
 
 func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
