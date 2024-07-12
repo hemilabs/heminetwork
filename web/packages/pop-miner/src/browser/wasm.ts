@@ -19,6 +19,7 @@ export type Method =
   | 'bitcoinAddressToScriptHash'
   | 'startPoPMiner'
   | 'stopPoPMiner'
+  | 'minerStatus'
   | 'ping'
   | 'l2Keystones'
   | 'bitcoinBalance'

@@ -140,6 +140,25 @@ StopPopMinerButton.addEventListener('click', () => {
   StopPopMiner();
 });
 
+// miner status
+const minerStatusDisplay = document.querySelector('.minerStatusDisplay');
+
+async function minerStatus() {
+  try {
+    const result = await dispatch({
+      method: 'minerStatus',
+    });
+    minerStatusDisplay.innerText = JSON.stringify(result, null, 2);
+  } catch (err) {
+    minerStatusDisplay.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
+    console.error('Caught exception', err);
+  }
+}
+
+minerStatusButton.addEventListener('click', () => {
+  minerStatus();
+});
+
 // ping
 const PingShow = document.querySelector('.PingShow');
 

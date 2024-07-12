@@ -250,38 +250,38 @@ export type EventType =
  * An event that has been dispatched.
  */
 export type Event = {
-  type: EventType;
+  readonly type: EventType;
 };
 
 /**
  * Dispatched when the PoP miner has stopped.
  */
 export type EventMinerStart = Event & {
-  type: 'minerStart';
+  readonly type: 'minerStart';
 };
 
 /**
  * Dispatched when the PoP miner has exited.
  */
 export type EventMinerStop = Event & {
-  type: 'minerStop';
+  readonly type: 'minerStop';
 
   /**
    * The error that caused the PoP miner to exit, or null.
    */
-  error?: Error;
+  readonly error?: Error;
 };
 
 /**
  * Dispatched when the PoP miner begins mining a keystone.
  */
 export type EventMineKeystone = Event & {
-  type: 'mineKeystone';
+  readonly type: 'mineKeystone';
 
   /**
    * The keystone to be mined.
    */
-  keystone: L2Keystone;
+  readonly keystone: L2Keystone;
 };
 
 /**
@@ -289,17 +289,17 @@ export type EventMineKeystone = Event & {
  * network.
  */
 export type EventTransactionBroadcast = Event & {
-  type: 'transactionBroadcast';
+  readonly type: 'transactionBroadcast';
 
   /**
    * The keystone that was mined.
    */
-  keystone: L2Keystone;
+  readonly keystone: L2Keystone;
 
   /**
    * The hash of the Bitcoin transaction.
    */
-  txHash: string;
+  readonly txHash: string;
 };
 
 /**
@@ -378,6 +378,26 @@ export declare function startPoPMiner(args: MinerStartArgs): Promise<void>;
  * Miner exited with an error.
  */
 export declare function stopPoPMiner(): Promise<void>;
+
+/**
+ * @see minerStatus
+ */
+export type MinerStatusResult = {
+  /**
+   * Whether the PoP miner is currently running.
+   */
+  readonly running: boolean;
+
+  /**
+   * Whether the PoP miner is currently connected to a BFG server.
+   */
+  readonly connected: boolean;
+};
+
+/**
+ * Returns information about the status of the PoP miner.
+ */
+export declare function minerStatus(): Promise<MinerStatusResult>;
 
 /**
  * @see ping

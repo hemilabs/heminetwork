@@ -62,6 +62,9 @@ var handlers = map[Method]*Dispatch{
 	MethodStopPoPMiner: {
 		Handler: stopPopMiner,
 	},
+	MethodMinerStatus: {
+		Handler: minerStatus,
+	},
 
 	// The following can only be dispatched after the PoP Miner is running.
 	MethodPing: {
@@ -439,6 +442,20 @@ func stopPopMiner(_ js.Value, _ []js.Value) (any, error) {
 	}
 
 	return js.Null(), nil
+}
+
+func minerStatus(_ js.Value, _ []js.Value) (any, error) {
+	log.Tracef("minerStatus")
+	defer log.Tracef("minerStatus exit")
+
+	var status MinerStatusResult
+	miner, err := runningMiner()
+	if err == nil {
+		status.Running = true
+		status.Connected = miner.Connected()
+	}
+
+	return status, nil
 }
 
 func ping(_ js.Value, _ []js.Value) (any, error) {
