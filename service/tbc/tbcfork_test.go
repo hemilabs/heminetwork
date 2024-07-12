@@ -26,7 +26,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
@@ -79,6 +78,9 @@ type btcNode struct {
 	height         int32
 	params         *chaincfg.Params
 	genesis        *block
+	private        *btcec.PrivateKey
+	public         *btcec.PublicKey
+	address        *btcutil.AddressPubKey
 }
 
 func newFakeNode(t *testing.T, port string) (*btcNode, error) {
@@ -93,8 +95,18 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 		height:         0,
 		params:         &chaincfg.RegressionNetParams,
 	}
+	var err error
+	node.private, node.public, node.address, err = newPKAddress(&chaincfg.RegressionNetParams)
+	if err != nil {
+		return nil, err
+	}
+	t.Logf("miner keys:")
+	t.Logf("  private    : %v", node.private)
+	t.Logf("  public     : %v", node.public)
+	t.Logf("  address    : %v", node.address)
+
 	node.genesis = newBlock(node.params, "genesis", genesis)
-	_, err := node.insertBlock(node.genesis)
+	_, err = node.insertBlock(node.genesis)
 	if err != nil {
 		return nil, err
 	}
@@ -379,6 +391,45 @@ func random(count int) []byte {
 	return b
 }
 
+type addressToKey struct {
+	key        *btcec.PrivateKey
+	compressed bool
+}
+
+func mkGetKey(keys map[string]addressToKey) txscript.KeyDB {
+	if keys == nil {
+		return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
+			bool, error,
+		) {
+			return nil, false, errors.New("nope")
+		})
+	}
+	return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
+		bool, error,
+	) {
+		a2k, ok := keys[addr.EncodeAddress()]
+		if !ok {
+			return nil, false, errors.New("nope")
+		}
+		return a2k.key, a2k.compressed, nil
+	})
+}
+
+func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
+	if scripts == nil {
+		return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
+			return nil, errors.New("nope")
+		})
+	}
+	return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
+		script, ok := scripts[addr.EncodeAddress()]
+		if !ok {
+			return nil, errors.New("nope")
+		}
+		return script, nil
+	})
+}
+
 func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
@@ -390,8 +441,69 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 
 	nextBlockHeight := parent.Height() + 1
 	switch nextBlockHeight {
-	case 1:
-		// spend genesis coinbase
+	case 2:
+		// spend block 1 coinbase
+		key, err := btcec.NewPrivateKey()
+		if err != nil {
+			panic(err)
+		}
+		pk := key.PubKey().SerializeCompressed()
+		address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), b.params)
+		if err != nil {
+			panic(err)
+		}
+		pkScript, err := txscript.PayToAddrScript(address)
+		if err != nil {
+			panic(err)
+		}
+
+		cbtx, _ := parent.b.Tx(0)
+		tx := &wire.MsgTx{
+			Version:  1,
+			LockTime: 0,
+			TxIn: []*wire.TxIn{
+				{
+					PreviousOutPoint: wire.OutPoint{
+						Hash:  *cbtx.Hash(),
+						Index: uint32(cbtx.Index()),
+					},
+					Sequence: 4294967295,
+				},
+			},
+			TxOut: []*wire.TxOut{
+				{
+					Value:    10000,
+					PkScript: pkScript,
+				},
+			},
+		}
+
+		sigScript, err := txscript.SignTxOutput(b.params,
+			tx,
+			0,
+			pkScript,
+			txscript.SigHashAll,
+			mkGetKey(map[string]addressToKey{
+				address.EncodeAddress(): {key, true},
+			}),
+			mkGetScript(nil),
+			nil)
+		if err != nil {
+			panic(err)
+		}
+		tx.TxIn[0].SignatureScript = sigScript
+		b.t.Logf("block 2 tx: %v", spew.Sdump(tx))
+		// make sure tx is nominally ok
+		vm, err := txscript.NewEngine(pkScript, tx, 0,
+			txscript.ScriptBip16|txscript.ScriptVerifyDERSignatures,
+			nil, nil, 5000000000, nil)
+		if err != nil {
+			panic(err)
+		}
+		err = vm.Execute()
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
@@ -487,18 +599,18 @@ func (b *btcNode) Stop() error {
 	return p.conn.Close()
 }
 
-func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcutil.AddressPubKey, error) {
+func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKey, error) {
 	key, err := btcec.NewPrivateKey()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	pk := key.PubKey().SerializeUncompressed()
 	address, err := btcutil.NewAddressPubKey(pk, params)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return key, address, nil
+	return key, key.PubKey(), address, nil
 }
 
 func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
@@ -658,13 +770,6 @@ func TestFork(t *testing.T) {
 		wg.Wait()
 	}()
 
-	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("key    : %v", key)
-	t.Logf("address: %v", address)
-
 	n, err := newFakeNode(t, "18444") // TODO: should use random free port
 	if err != nil {
 		t.Fatal(err)
@@ -688,6 +793,7 @@ func TestFork(t *testing.T) {
 	startHash := n.Best()
 	count := 9
 	expectedHeight := uint64(count)
+	address := n.address
 	_, err = n.MineN(count, startHash[0], address)
 	if err != nil {
 		t.Fatal(err)
@@ -920,13 +1026,6 @@ func TestIndexFork(t *testing.T) {
 		wg.Wait()
 	}()
 
-	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("key    : %v", key)
-	t.Logf("address: %v", address)
-
 	n, err := newFakeNode(t, "18444")
 	if err != nil {
 		t.Fatal(err)
@@ -980,6 +1079,7 @@ func TestIndexFork(t *testing.T) {
 
 	// best chain
 	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
 	b1, err := n.MineAndSend(ctx, "b1", parent, address)
 	if err != nil {
 		t.Fatal(err)
@@ -1118,35 +1218,6 @@ func TestIndexFork(t *testing.T) {
 	//}
 
 	time.Sleep(time.Second)
-}
-
-func createTx(btcHeight uint64, utxo *bfgapi.BitcoinUTXO, payToScript []byte, feeAmount int64) (*wire.MsgTx, error) {
-	btx := wire.MsgTx{
-		Version:  2,
-		LockTime: uint32(btcHeight),
-	}
-
-	// Add UTXO as input.
-	outPoint := wire.OutPoint{
-		Hash:  chainhash.Hash(utxo.Hash),
-		Index: utxo.Index,
-	}
-	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
-
-	// Add output for change as P2PKH.
-	changeAmount := utxo.Value - feeAmount
-	btx.TxOut = []*wire.TxOut{wire.NewTxOut(changeAmount, payToScript)}
-
-	// Add PoP TX using OP_RETURN output.
-	//aks := hemi.L2KeystoneAbbreviate(*l2Keystone)
-	//popTx := pop.TransactionL2{L2Keystone: aks}
-	//popTxOpReturn, err := popTx.EncodeToOpReturn()
-	//if err != nil {
-	//	return nil, fmt.Errorf("encode PoP transaction: %w", err)
-	//}
-	//btx.TxOut = append(btx.TxOut, wire.NewTxOut(0, popTxOpReturn))
-
-	return &btx, nil
 }
 
 // borrowed from btcd

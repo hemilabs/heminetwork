@@ -167,7 +167,7 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 	if err != nil {
 		return nil, 0, fmt.Errorf("blocks by txid: %w", err)
 	}
-	// Note that we may have more than one block hashe however since the
+	// Note that we may have more than one block hash however since the
 	// TxID is generated from the actual Tx the script hash and value
 	// should be identical and thus we can return the values from the first
 	// block found.
@@ -210,13 +210,15 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 				txIn.PreviousOutPoint.Index)
 			pkScript, value, err := s.scriptValue(ctx, op)
 			if err != nil {
-				panic(err)
+				return fmt.Errorf("script value: %v", err)
 			}
 			utxos[op] = tbcd.NewCacheOutput(sha256.Sum256(pkScript),
 				uint64(value), txIn.PreviousOutPoint.Index)
 		}
 
-		// TxOut if those are in the cache delete from cache; if they are not in the cache insert delete from disk command into cache
+		// TxOut if those are in the cache delete from cache; if they
+		// are not in the cache insert "delete from disk command" into
+		// cache.
 		for outIndex, txOut := range tx.MsgTx().TxOut {
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
