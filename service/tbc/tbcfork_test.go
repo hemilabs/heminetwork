@@ -438,6 +438,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	// extra nonce is needed to prevent block collisions
 	en := random(8)
 	extraNonce := binary.BigEndian.Uint64(en)
+	var mempool []*btcutil.Tx
 
 	nextBlockHeight := parent.Height() + 1
 	switch nextBlockHeight {
@@ -504,10 +505,11 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		if err != nil {
 			panic(err)
 		}
+		mempool = []*btcutil.Tx{btcutil.NewTx(tx)}
 	}
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
-		parent.Hash(), extraNonce, nil)
+		parent.Hash(), extraNonce, mempool)
 	if err != nil {
 		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
 	}
