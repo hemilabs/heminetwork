@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"io"
 	"math/big"
 	"sort"
@@ -22,15 +21,6 @@ import (
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
-
-func bytes2Header(header []byte) (*wire.BlockHeader, error) {
-	var bh wire.BlockHeader
-	err := bh.Deserialize(bytes.NewReader(header))
-	if err != nil {
-		return nil, fmt.Errorf("deserialize block header: %w", err)
-	}
-	return &bh, nil
-}
 
 func h2b(wbh *wire.BlockHeader) []byte {
 	hb, err := header2Bytes(wbh)
