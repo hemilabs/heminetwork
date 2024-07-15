@@ -80,6 +80,9 @@ func TestBlockHeaderEncodeDecode(t *testing.T) {
 		t.Error(err)
 	}
 	awbh, err := bytes2Header(ash[:])
+	if err != nil {
+		t.Errorf("bytes2Header failed: %v", err)
+	}
 	if diff := deep.Equal(&gwbh, awbh); len(diff) > 0 {
 		t.Errorf("unexpected diff: %s", diff)
 	}
