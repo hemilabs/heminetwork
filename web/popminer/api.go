@@ -23,6 +23,7 @@ const (
 	MethodBitcoinAddressToScriptHash Method = "bitcoinAddressToScriptHash" // Bitcoin address to script hash
 	MethodStartPoPMiner              Method = "startPoPMiner"              // Start PoP Miner
 	MethodStopPoPMiner               Method = "stopPoPMiner"               // Stop PoP Miner
+	MethodMinerStatus                Method = "minerStatus"                // PoP Miner status
 
 	// The following can only be dispatched after the PoP Miner is running.
 	MethodPing           Method = "ping"           // Ping BFG
@@ -137,6 +138,17 @@ type BitcoinAddressToScriptHashResult struct {
 
 	// ScriptHash is the script hash for the given address.
 	ScriptHash string `json:"scriptHash"`
+}
+
+// MinerStatusResult contains information about the status of the PoP miner.
+// Returned by MethodMinerStatus.
+type MinerStatusResult struct {
+	// Running is whether the PoP miner is running.
+	Running bool `json:"running"`
+
+	// Connecting is whether the PoP miner is currently connected to a BFG
+	// server.
+	Connected bool `json:"connected"`
 }
 
 // PingResult contains information when pinging the BFG server.

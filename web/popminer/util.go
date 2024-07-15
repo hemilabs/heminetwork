@@ -52,7 +52,6 @@ type JSMarshaler interface {
 func jsValueOf(x any) js.Value {
 	v, err := jsValueSafe(x)
 	if err != nil {
-		log.Debugf("jsValueOf: attempting reflection for %T: %v", x, err)
 		return jsReflectValueOf(reflect.ValueOf(x))
 	}
 	return v

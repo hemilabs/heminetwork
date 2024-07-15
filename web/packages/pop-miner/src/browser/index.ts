@@ -12,6 +12,7 @@ import type {
   BitcoinUTXOsResult,
   KeyResult,
   L2KeystonesResult,
+  MinerStatusResult,
   PingResult,
   VersionResult,
 } from '../types';
@@ -66,6 +67,12 @@ export const stopPoPMiner: typeof types.stopPoPMiner = () => {
   return dispatchVoid({
     method: 'stopPoPMiner',
   });
+};
+
+export const minerStatus: typeof types.minerStatus = () => {
+  return dispatch({
+    method: 'minerStatus',
+  }) as Promise<MinerStatusResult>;
 };
 
 export const ping: typeof types.ping = () => {

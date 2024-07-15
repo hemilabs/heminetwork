@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -117,8 +118,9 @@ type Miner struct {
 	// Prometheus
 	isRunning bool
 
-	bfgWg    sync.WaitGroup
-	bfgCmdCh chan bfgCmd // commands to send to bfg
+	bfgWg        sync.WaitGroup
+	bfgCmdCh     chan bfgCmd // commands to send to bfg
+	bfgConnected atomic.Bool
 
 	mineNowCh chan struct{}
 
@@ -665,6 +667,10 @@ func (m *Miner) checkForKeystones(ctx context.Context) error {
 	return nil
 }
 
+func (m *Miner) Connected() bool {
+	return m.bfgConnected.Load()
+}
+
 func (m *Miner) running() bool {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
@@ -813,6 +819,9 @@ func (m *Miner) connectBFG(pctx context.Context) error {
 		rWSCh <- m.handleBFGWebsocketRead(ctx, conn)
 	}()
 
+	log.Debugf("Connected to BFG: %s", m.cfg.BFGWSURL)
+	m.bfgConnected.Store(true)
+
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()
@@ -821,8 +830,8 @@ func (m *Miner) connectBFG(pctx context.Context) error {
 	cancel()
 
 	// Wait for exit
-	log.Debugf("Connected to BFG: %s", m.cfg.BFGWSURL)
 	m.bfgWg.Wait()
+	m.bfgConnected.Store(false)
 
 	return err
 }
