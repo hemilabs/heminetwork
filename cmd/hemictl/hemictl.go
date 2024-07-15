@@ -206,7 +206,7 @@ func tbcdb() error {
 		return fmt.Errorf("new server: %w", err)
 	}
 	// Open db.
-	err = s.DBOpen(ctx)
+	err = s.DBOpen(ctx) // XXX kill this and verify all reversed hashes as parameters
 	if err != nil {
 		return fmt.Errorf("db open: %w", err)
 	}
@@ -460,7 +460,7 @@ func tbcdb() error {
 		var revTxId [32]byte
 		copy(revTxId[:], chtxid[:])
 
-		bh, err := s.DB().BlocksByTxId(ctx, revTxId)
+		bh, err := s.DB().BlocksByTxId(ctx, revTxId[:])
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
