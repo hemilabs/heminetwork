@@ -1188,14 +1188,15 @@ func TestIndexFork(t *testing.T) {
 	if direction != -1 {
 		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
 	}
+
 	// b3 -> b2a should fail
-	direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	_, err = s.TxIndexIsLinear(ctx, b2a.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2a is not linear to b3: %v", err)
 	}
 
 	// b3 -> b2b should fail
-	direction, err = s.TxIndexIsLinear(ctx, b2b.Hash())
+	_, err = s.TxIndexIsLinear(ctx, b2b.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
@@ -1237,18 +1238,18 @@ func TestIndexFork(t *testing.T) {
 		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
 	}
 
-	//// Should fail
-	//t.Logf("=== index b2a ===")
-	//err = s.SyncIndexersToHash(ctx, b2a.Hash())
-	//if err != nil {
+	// // Should fail
+	// t.Logf("=== index b2a ===")
+	// err = s.SyncIndexersToHash(ctx, b2a.Hash())
+	// if err != nil {
 	//	t.Fatal(err)
-	//}
+	// }
 
-	//t.Logf("=== index b2b ===")
-	//err = s.SyncIndexersToHash(ctx, b2b.Hash())
-	//if err != nil {
+	// t.Logf("=== index b2b ===")
+	// err = s.SyncIndexersToHash(ctx, b2b.Hash())
+	// if err != nil {
 	//	t.Fatal(err)
-	//}
+	// }
 
 	time.Sleep(time.Second)
 }
