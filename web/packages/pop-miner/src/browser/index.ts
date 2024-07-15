@@ -115,7 +115,7 @@ export const addEventListener: typeof types.addEventListener = (
   return dispatchVoid({
     method: 'addEventListener',
     eventType: eventType,
-    listener: listener,
+    handler: listener,
   });
 };
 
@@ -126,6 +126,6 @@ export const removeEventListener: typeof types.addEventListener = (
   return dispatchVoid({
     method: 'removeEventListener',
     eventType: eventType,
-    listener: listener,
+    handler: listener,
   });
 };
