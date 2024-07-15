@@ -801,15 +801,6 @@ func (s *Server) blksMissing(ctx context.Context) bool {
 	return len(bm) > 0
 }
 
-// blocksMissing checks the block cache and the database and returns true if all
-// blocks have not been downloaded.
-func (s *Server) blocksMissing(ctx context.Context) bool {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	return s.blksMissing(ctx)
-}
-
 func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
 	log.Tracef("handleAddr (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddr exit (%v)", p)
