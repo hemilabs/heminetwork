@@ -44,18 +44,17 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-type (
-	Pool     map[string]*leveldb.DB
-	Database struct {
-		mtx sync.RWMutex
-		wg  sync.WaitGroup // Wait group for notification handler exit
+type Pool map[string]*leveldb.DB
 
-		pool Pool // database pool
+type Database struct {
+	mtx sync.RWMutex
+	wg  sync.WaitGroup // Wait group for notification handler exit
 
-		ntfn map[database.NotificationName]int // Notification handlers
-		home string                            // leveld toplevel database directory
-	}
-)
+	pool Pool // database pool
+
+	ntfn map[database.NotificationName]int // Notification handlers
+	home string                            // leveld toplevel database directory
+}
 
 var _ database.Database = (*Database)(nil)
 
