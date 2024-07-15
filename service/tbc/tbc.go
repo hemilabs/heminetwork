@@ -336,9 +336,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	}
 
 	// insert into peers table
-	for _, ms := range moreSeeds {
-		peers = append(peers, ms)
-	}
+	peers = append(peers, moreSeeds...)
 
 	// return fake peers but don't save them to the database
 	return peers, nil
