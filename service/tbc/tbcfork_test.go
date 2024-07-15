@@ -80,7 +80,7 @@ type btcNode struct {
 	genesis        *block
 	private        *btcec.PrivateKey
 	public         *btcec.PublicKey
-	address        *btcutil.AddressPubKey
+	address        *btcutil.AddressPubKeyHash
 }
 
 func newFakeNode(t *testing.T, port string) (*btcNode, error) {
@@ -318,6 +318,7 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 	var blockTxs []*btcutil.Tx
 	blockTxs = append(blockTxs, coinbaseTx)
 	if mempool != nil {
+		log.Infof("mempool txs %v", spew.Sdump(mempool))
 		blockTxs = append(blockTxs, mempool...)
 	}
 	msgBlock := &wire.MsgBlock{
@@ -449,11 +450,20 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			panic(err)
 		}
 		pk := key.PubKey().SerializeCompressed()
+		upk := key.PubKey().SerializeUncompressed()
 		address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), b.params)
+		b.t.Logf("pk 0x%x", pk)
+		b.t.Logf("pk 0x%x", upk)
+		b.t.Logf("hash160 0x%x", btcutil.Hash160(pk))
 		if err != nil {
 			panic(err)
 		}
 		pkScript, err := txscript.PayToAddrScript(address)
+		if err != nil {
+			panic(err)
+		}
+		// change
+		changeScript, err := txscript.PayToAddrScript(payToAddress)
 		if err != nil {
 			panic(err)
 		}
@@ -466,26 +476,36 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 				{
 					PreviousOutPoint: wire.OutPoint{
 						Hash:  *cbtx.Hash(),
-						Index: uint32(cbtx.Index()),
+						Index: 0, // coinbase
 					},
 					Sequence: 4294967295,
 				},
 			},
 			TxOut: []*wire.TxOut{
 				{
-					Value:    10000,
+					Value:    3000000000,
+					PkScript: changeScript,
+				},
+				{
+					Value:    2000000000,
 					PkScript: pkScript,
 				},
 			},
 		}
 
+		prevTxOut, _ := parent.b.Tx(0)
+		if err != nil {
+			panic(err)
+		}
+		previousTxOutPkScript := prevTxOut.MsgTx().TxOut[0].PkScript
+
 		sigScript, err := txscript.SignTxOutput(b.params,
 			tx,
 			0,
-			pkScript,
+			previousTxOutPkScript,
 			txscript.SigHashAll,
 			mkGetKey(map[string]addressToKey{
-				address.EncodeAddress(): {key, true},
+				b.address.String(): {b.private, true},
 			}),
 			mkGetScript(nil),
 			nil)
@@ -495,12 +515,22 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		tx.TxIn[0].SignatureScript = sigScript
 		b.t.Logf("block 2 tx: %v", spew.Sdump(tx))
 		// make sure tx is nominally ok
-		vm, err := txscript.NewEngine(pkScript, tx, 0,
+		vm, err := txscript.NewEngine(previousTxOutPkScript, tx, 0,
 			txscript.ScriptBip16|txscript.ScriptVerifyDERSignatures,
 			nil, nil, 5000000000, nil)
 		if err != nil {
 			panic(err)
 		}
+		d, err := vm.DisasmScript(0)
+		if err != nil {
+			panic(err)
+		}
+		b.t.Logf("block 2 tx 0: %v", d)
+		d, err = vm.DisasmScript(1)
+		if err != nil {
+			panic(err)
+		}
+		b.t.Logf("block 2 tx 1: %v", d)
 		err = vm.Execute()
 		if err != nil {
 			panic(err)
@@ -601,14 +631,15 @@ func (b *btcNode) Stop() error {
 	return p.conn.Close()
 }
 
-func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKey, error) {
+func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
 	key, err := btcec.NewPrivateKey()
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	pk := key.PubKey().SerializeUncompressed()
-	address, err := btcutil.NewAddressPubKey(pk, params)
+	// address, err := btcutil.NewAddressPubKey(pk, params)
+	address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), params)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1220,6 +1251,230 @@ func TestIndexFork(t *testing.T) {
 	//}
 
 	time.Sleep(time.Second)
+}
+
+func TestTransactions(t *testing.T) {
+	params := &chaincfg.TestNet3Params
+	nextBlockHeight := int32(2)
+	extraNonce := uint64(nextBlockHeight)
+	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payToKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payToKeyPublic := payToKey.PubKey()
+	payToAddress, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(payToKeyPublic.SerializeCompressed()), params)
+
+	coinbaseTx, err := createCoinbaseTx(params, coinbaseScript,
+		nextBlockHeight, payToAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("coinbase: %v", spew.Sdump(coinbaseTx))
+	wireCoinbaseTx := coinbaseTx.MsgTx()
+	disasm, err := txscript.DisasmString(wireCoinbaseTx.TxOut[0].PkScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("coinbase: %v", disasm)
+
+	// now create a tx that spends  the above TxIn
+	redeemKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	redeemKeyPublic := redeemKey.PubKey()
+	redeemAddress, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(redeemKeyPublic.SerializeCompressed()), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	redeemTx := wire.NewMsgTx(wire.TxVersion)
+	prevOut := wire.NewOutPoint(coinbaseTx.Hash(), 0)
+	txIn := wire.NewTxIn(prevOut, nil, nil)
+	redeemTx.AddTxIn(txIn)
+	pkScript, err := txscript.PayToAddrScript(redeemAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txOut := wire.NewTxOut(3000000000, pkScript)
+	redeemTx.AddTxOut(txOut)
+	lookupKey := func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+		return payToKey, true, nil
+	}
+	sigScript, err := txscript.SignTxOutput(&chaincfg.MainNetParams,
+		redeemTx, 0, wireCoinbaseTx.TxOut[0].PkScript, txscript.SigHashAll,
+		txscript.KeyClosure(lookupKey), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	redeemTx.TxIn[0].SignatureScript = sigScript
+
+	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
+		txscript.ScriptStrictMultiSig |
+		txscript.ScriptDiscourageUpgradableNops
+	vm, err := txscript.NewEngine(wireCoinbaseTx.TxOut[0].PkScript, redeemTx, 0,
+		flags, nil, nil, -1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := vm.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	disasm, err = vm.DisasmScript(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("coinbase signed tx in 0: %v", disasm)
+	disasm, err = vm.DisasmScript(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("coinbase signed tx out 0: %v", disasm)
+
+	//flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
+	//	txscript.ScriptStrictMultiSig |
+	//	txscript.ScriptDiscourageUpgradableNops
+	//// tx.TxIn[0].SignatureScript = sigScript
+	//previousTxOutPkScript := coinbaseTx.MsgTx().TxOut[0].PkScript
+	//vm, err := txscript.NewEngine(previousTxOutPkScript, tx, 0,
+	//	flags, nil, nil, 5000000000, nil)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//d, err := vm.DisasmScript(0)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//t.Logf("coinbase: %v", d)
+	// key, err := btcec.NewPrivateKey()
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// tx := wire.NewMsgTx(wire.TxVersion)
+	// // blk1 := wire.NewMsgBlock()
+	// // prevBlock := btcutil.NewBlock(&wire.MsgBlock{})
+	// // prevBlock.SetHeight(1)
+	//
+	// // spend block 1 coinbase
+	// key, err := btcec.NewPrivateKey()
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// pk := key.PubKey().SerializeCompressed()
+	// upk := key.PubKey().SerializeUncompressed()
+	// address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), b.params)
+	// b.t.Logf("pk 0x%x", pk)
+	// b.t.Logf("pk 0x%x", upk)
+	// b.t.Logf("hash160 0x%x", btcutil.Hash160(pk))
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// pkScript, err := txscript.PayToAddrScript(address)
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// // change
+	// changeScript, err := txscript.PayToAddrScript(payToAddress)
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// cbtx, _ := parent.b.Tx(0)
+	//
+	//	tx := &wire.MsgTx{
+	//		Version:  1,
+	//		LockTime: 0,
+	//		TxIn: []*wire.TxIn{
+	//			{
+	//				PreviousOutPoint: wire.OutPoint{
+	//					Hash:  *cbtx.Hash(),
+	//					Index: 0, // coinbase
+	//				},
+	//				Sequence: 4294967295,
+	//			},
+	//		},
+	//		TxOut: []*wire.TxOut{
+	//			{
+	//				Value:    3000000000,
+	//				PkScript: changeScript,
+	//			},
+	//			{
+	//				Value:    2000000000,
+	//				PkScript: pkScript,
+	//			},
+	//		},
+	//	}
+	//
+	// prevTxOut, _ := parent.b.Tx(0)
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// previousTxOutPkScript := prevTxOut.MsgTx().TxOut[0].PkScript
+	//
+	// sigScript, err := txscript.SignTxOutput(b.params,
+	//
+	//	tx,
+	//	0,
+	//	previousTxOutPkScript,
+	//	txscript.SigHashAll,
+	//	mkGetKey(map[string]addressToKey{
+	//		b.address.String(): {b.private, true},
+	//	}),
+	//	mkGetScript(nil),
+	//	nil)
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// tx.TxIn[0].SignatureScript = sigScript
+	// b.t.Logf("block 2 tx: %v", spew.Sdump(tx))
+	// // make sure tx is nominally ok
+	// vm, err := txscript.NewEngine(previousTxOutPkScript, tx, 0,
+	//
+	//	txscript.ScriptBip16|txscript.ScriptVerifyDERSignatures,
+	//	nil, nil, 5000000000, nil)
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// d, err := vm.DisasmScript(0)
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// b.t.Logf("block 2 tx 0: %v", d)
+	// d, err = vm.DisasmScript(1)
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// b.t.Logf("block 2 tx 1: %v", d)
+	// err = vm.Execute()
+	//
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//
+	// mempool = []*btcutil.Tx{btcutil.NewTx(tx)}
 }
 
 // borrowed from btcd
