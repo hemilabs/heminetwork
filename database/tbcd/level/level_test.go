@@ -23,15 +23,6 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
-func bytes2Block(block []byte) (*wire.MsgBlock, error) {
-	var b wire.MsgBlock
-	err := b.Deserialize(bytes.NewReader(block))
-	if err != nil {
-		return nil, fmt.Errorf("deserialize msg block: %w", err)
-	}
-	return &b, nil
-}
-
 func bytes2Header(header []byte) (*wire.BlockHeader, error) {
 	var bh wire.BlockHeader
 	err := bh.Deserialize(bytes.NewReader(header))
@@ -147,7 +138,7 @@ func TestKeyOrder(t *testing.T) {
 	}
 }
 
-//func TestLevelDB(t *testing.T) {
+// func TestLevelDB(t *testing.T) {
 //	// Missing blocks
 //	// 1 000 000 000
 //
@@ -284,7 +275,7 @@ func TestKeyOrder(t *testing.T) {
 //		t.Fatalf("expected missing blocks cache to be empty: %v",
 //			spew.Sdump(ldb.blocksMissingCache))
 //	}
-//}
+// }
 
 // func TestBitcoinBits(t *testing.T) {
 //	// Decode block
