@@ -402,6 +402,30 @@ export type PingResult = {
 export declare function ping(): Promise<PingResult>;
 
 /**
+ * @see estimateCostReward
+ */
+export type EstimateCostRewardResult = {
+  /**
+   * Estimated cost of Bitcoin transaction fees in satoshis, per hour spent
+   * continuously PoP mining.
+   */
+  readonly estimatedHourlyCost: number;
+
+  /**
+   * Estimated PoP mining reward in number of HEMI, per hour spent continuously
+   * PoP mining.
+   */
+  readonly estimatedHourlyReward: number;
+};
+
+/**
+ * Estimates the current costs and rewards for PoP mining.
+ *
+ * **The PoP Miner must be running before calling this function.**
+ */
+export declare function estimateCostReward(): Promise<EstimateCostRewardResult>;
+
+/**
  * @see l2Keystones
  */
 export type L2KeystonesArgs = {

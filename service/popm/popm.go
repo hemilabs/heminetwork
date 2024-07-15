@@ -338,9 +338,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	scriptHash := btcchainhash.Hash(sha256.Sum256(payToScript))
 
 	// Estimate BTC fees.
-	txLen := 285 // XXX: for now all transactions are the same size
-	feePerKB := 1024 * m.cfg.StaticFee
-	feeAmount := (int64(txLen) * int64(feePerKB)) / 1024
+	feeAmount := m.EstimateFee()
 
 	// Retrieve the current balance for the miner.
 	confirmed, unconfirmed, err := m.bitcoinBalance(ctx, scriptHash[:])
@@ -403,6 +401,14 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 		EventTransactionBroadcast{Keystone: ks, TxHash: txHash.String()})
 
 	return nil
+}
+
+// EstimateFee estimates the fee amount for a PoP transaction.
+func (m *Miner) EstimateFee() int64 {
+	// TODO: Improve fee estimation.
+	const txLen int64 = 285 // XXX: for now all transactions are the same size
+	feePerKB := 1024 * int64(m.cfg.StaticFee)
+	return (txLen * feePerKB) / 1024
 }
 
 func (m *Miner) Ping(ctx context.Context, timestamp int64) (*bfgapi.PingResponse, error) {

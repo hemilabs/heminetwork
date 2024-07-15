@@ -20,6 +20,7 @@ export type Method =
   | 'startPoPMiner'
   | 'stopPoPMiner'
   | 'ping'
+  | 'estimateCostReward'
   | 'l2Keystones'
   | 'bitcoinBalance'
   | 'bitcoinInfo'

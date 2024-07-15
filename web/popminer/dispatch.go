@@ -67,6 +67,9 @@ var handlers = map[Method]*Dispatch{
 	MethodPing: {
 		Handler: ping,
 	},
+	MethodEstimateCostReward: {
+		Handler: estimateCostReward,
+	},
 	MethodL2Keystones: {
 		Handler: l2Keystones,
 		Required: []DispatchArgs{
@@ -327,6 +330,31 @@ func bitcoinNetwork(network string) (string, *btcchaincfg.Params, error) {
 		return "", nil, errorWithCode(ErrorCodeInvalidValue,
 			fmt.Errorf("invalid network: %s", network))
 	}
+}
+
+func estimateCostReward(_ js.Value, _ []js.Value) (any, error) {
+	log.Tracef("estimateCostReward")
+	defer log.Tracef("estimateCostReward exit")
+
+	m, err := runningMiner()
+	if err != nil {
+		return nil, err
+	}
+
+	// TODO: Update in accordance with reward changes.
+	//  This is currently for testnet only.
+
+	// A keystone currently occurs around every 5 minutes.
+	const keystonesPerHour = 60 / 5
+	// Every mined keystone currently rewards exactly 1 HEMI.
+	const rewardPerKeystone = 1
+	// Fee amount in satoshis per PoP transaction.
+	feePerKeystone := m.EstimateFee()
+
+	return EstimateCostRewardResult{
+		EstimatedHourlyCost:   feePerKeystone * keystonesPerHour,
+		EstimatedHourlyReward: rewardPerKeystone * keystonesPerHour,
+	}, nil
 }
 
 func startPoPMiner(_ js.Value, args []js.Value) (any, error) {

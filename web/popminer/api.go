@@ -25,11 +25,12 @@ const (
 	MethodStopPoPMiner               Method = "stopPoPMiner"               // Stop PoP Miner
 
 	// The following can only be dispatched after the PoP Miner is running.
-	MethodPing           Method = "ping"           // Ping BFG
-	MethodL2Keystones    Method = "l2Keystones"    // Retrieve L2 keystones
-	MethodBitcoinBalance Method = "bitcoinBalance" // Retrieve bitcoin balance
-	MethodBitcoinInfo    Method = "bitcoinInfo"    // Retrieve bitcoin information
-	MethodBitcoinUTXOs   Method = "bitcoinUTXOs"   // Retrieve bitcoin UTXOs
+	MethodPing               Method = "ping"               // Ping BFG
+	MethodEstimateCostReward Method = "estimateCostReward" // Estimate costs and rewards
+	MethodL2Keystones        Method = "l2Keystones"        // Retrieve L2 keystones
+	MethodBitcoinBalance     Method = "bitcoinBalance"     // Retrieve bitcoin balance
+	MethodBitcoinInfo        Method = "bitcoinInfo"        // Retrieve bitcoin information
+	MethodBitcoinUTXOs       Method = "bitcoinUTXOs"       // Retrieve bitcoin UTXOs
 
 	// Events
 	MethodEventListenerAdd    Method = "addEventListener"    // Register event listener
@@ -149,6 +150,18 @@ type PingResult struct {
 	// Timestamp is the time the BFG server sent the ping response, in unix
 	// nanoseconds.
 	Timestamp int64 `json:"timestamp"`
+}
+
+// EstimateCostRewardResult contains estimations for the cost and rewards of
+// running the PoP miner consistently. Returned by MethodEstimateCostReward.
+type EstimateCostRewardResult struct {
+	// EstimatedHourlyCost is the estimated cost of Bitcoin transaction fees in
+	// satoshis, per hour spent continuously PoP mining.
+	EstimatedHourlyCost int64 `json:"estimatedHourlyCost"`
+
+	// EstimatedHourlyReward is the estimated PoP mining reward in number of
+	// HEMI per hour spent continuously mining.
+	EstimatedHourlyReward int64 `json:"estimatedHourlyReward"`
 }
 
 // L2KeystoneResult contains the requested l2 keystones.

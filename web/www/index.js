@@ -159,6 +159,24 @@ PingButton.addEventListener('click', () => {
   Ping();
 });
 
+const estimateCostRewardDisplay = document.querySelector('.estimateCostRewardDisplay');
+
+async function estimateCostReward() {
+  try {
+    const result = await dispatch({
+      method: 'estimateCostReward',
+    });
+    estimateCostRewardDisplay.innerText = JSON.stringify(result, null, 2);
+  } catch (err) {
+    estimateCostRewardDisplay.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
+    console.error('Caught exception', err);
+  }
+}
+
+estimateCostRewardButton.addEventListener('click', () => {
+  estimateCostReward();
+});
+
 // l2 keystones
 const L2KeystonesShow = document.querySelector('.L2KeystonesShow');
 

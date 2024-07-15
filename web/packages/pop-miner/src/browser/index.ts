@@ -10,6 +10,7 @@ import type {
   BitcoinBalanceResult,
   BitcoinInfoResult,
   BitcoinUTXOsResult,
+  EstimateCostRewardResult,
   KeyResult,
   L2KeystonesResult,
   PingResult,
@@ -72,6 +73,12 @@ export const ping: typeof types.ping = () => {
   return dispatch({
     method: 'ping',
   }) as Promise<PingResult>;
+};
+
+export const estimateCostReward: typeof types.estimateCostReward = () => {
+  return dispatch({
+    method: 'estimateCostReward',
+  }) as Promise<EstimateCostRewardResult>;
 };
 
 export const l2Keystones: typeof types.l2Keystones = ({ numL2Keystones }) => {
