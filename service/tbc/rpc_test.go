@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -56,7 +55,6 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.BlockHeadersByHeightRawResponse
 	for {
 		select {
@@ -64,20 +62,17 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		lastErr = nil
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRawRequest{
 			Height: 55,
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightRawResponse {
@@ -86,12 +81,8 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 			}
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 
 	bh, err := bytes2Header(response.BlockHeaders[0])
@@ -139,7 +130,6 @@ func TestBlockHeadersByHeight(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.BlockHeadersByHeightResponse
 	for {
 		select {
@@ -147,20 +137,17 @@ func TestBlockHeadersByHeight(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		lastErr = nil
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
 			Height: 55,
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightResponse {
@@ -169,13 +156,9 @@ func TestBlockHeadersByHeight(t *testing.T) {
 			}
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 
 	if response.Error != nil {
@@ -216,7 +199,6 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.BlockHeadersByHeightResponse
 	for {
 		select {
@@ -224,20 +206,17 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		lastErr = nil
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
 			Height: 550,
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdBlockHeadersByHeightResponse {
@@ -246,13 +225,9 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 			}
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 
 	if response.Error.Message != "block headers not found at height 550" {
@@ -287,7 +262,6 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.BlockHeaderBestRawResponse
 	for {
 		select {
@@ -295,18 +269,15 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		lastErr = nil
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeaderBestRawRequest{})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdBlockHeaderBestRawResponse {
@@ -315,12 +286,8 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 			}
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 
 	bh, err := bytes2Header(response.BlockHeader)
@@ -368,7 +335,6 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.BlockHeaderBestResponse
 	for {
 		select {
@@ -376,18 +342,16 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		lastErr = nil
+
 		err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeaderBestRequest{})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdBlockHeaderBestResponse {
@@ -396,13 +360,9 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 			}
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 
 	if response.Error != nil {
@@ -549,7 +509,6 @@ func TestBalanceByAddress(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var lastErr error
 			var response tbcapi.BalanceByAddressResponse
 			for {
 				select {
@@ -558,20 +517,18 @@ func TestBalanceByAddress(t *testing.T) {
 					t.Fatal(ctx.Err())
 				}
 				indexAll(ctx, t, tbcServer)
-				lastErr = nil
+
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BalanceByAddressRequest{
 					Address: tti.address(),
 				})
 				if err != nil {
-					lastErr = err
-					continue
+					t.Fatal(err)
 				}
 
 				var v protocol.Message
 				err = wsjson.Read(ctx, c, &v)
 				if err != nil {
-					lastErr = err
-					continue
+					t.Fatal(err)
 				}
 
 				if v.Header.Command == tbcapi.CmdBalanceByAddressResponse {
@@ -602,13 +559,9 @@ func TestBalanceByAddress(t *testing.T) {
 					}
 					break
 				} else {
-					lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+					t.Fatalf("received unexpected command: %s", v.Header.Command)
 				}
 
-			}
-
-			if lastErr != nil {
-				t.Fatal(lastErr)
 			}
 		})
 	}
@@ -781,7 +734,6 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var lastErr error
 			var response tbcapi.UtxosByAddressRawResponse
 			for {
 				select {
@@ -790,22 +742,20 @@ func TestUtxosByAddressRaw(t *testing.T) {
 					t.Fatal(ctx.Err())
 				}
 				indexAll(ctx, t, tbcServer)
-				lastErr = nil
+
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRawRequest{
 					Address: tti.address(),
 					Start:   uint(tti.start),
 					Count:   uint(tti.limit),
 				})
 				if err != nil {
-					lastErr = err
-					continue
+					t.Fatal(err)
 				}
 
 				var v protocol.Message
 				err = wsjson.Read(ctx, c, &v)
 				if err != nil {
-					lastErr = err
-					continue
+					t.Fatal(err)
 				}
 
 				if v.Header.Command == tbcapi.CmdUtxosByAddressRawResponse {
@@ -827,13 +777,9 @@ func TestUtxosByAddressRaw(t *testing.T) {
 					}
 					break
 				} else {
-					lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+					t.Fatalf("received unexpected command: %s", v.Header.Command)
 				}
 
-			}
-
-			if lastErr != nil {
-				t.Fatal(lastErr)
 			}
 		})
 	}
@@ -1006,7 +952,6 @@ func TestUtxosByAddress(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var lastErr error
 			var response tbcapi.UtxosByAddressResponse
 			for {
 				select {
@@ -1015,22 +960,20 @@ func TestUtxosByAddress(t *testing.T) {
 					t.Fatal(ctx.Err())
 				}
 				indexAll(ctx, t, tbcServer)
-				lastErr = nil
+
 				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRequest{
 					Address: tti.address(),
 					Start:   uint(tti.start),
 					Count:   uint(tti.limit),
 				})
 				if err != nil {
-					lastErr = err
-					continue
+					t.Fatal(err)
 				}
 
 				var v protocol.Message
 				err = wsjson.Read(ctx, c, &v)
 				if err != nil {
-					lastErr = err
-					continue
+					t.Fatal(err)
 				}
 
 				if v.Header.Command == tbcapi.CmdUtxosByAddressResponse {
@@ -1052,13 +995,9 @@ func TestUtxosByAddress(t *testing.T) {
 					}
 					break
 				} else {
-					lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+					t.Fatalf("received unexpected command: %s", v.Header.Command)
 				}
 
-			}
-
-			if lastErr != nil {
-				t.Fatal(lastErr)
 			}
 		})
 	}
@@ -1098,7 +1037,6 @@ func TestTxByIdRaw(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.TxByIdRawResponse
 	for {
 		select {
@@ -1107,7 +1045,7 @@ func TestTxByIdRaw(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		indexAll(ctx, t, tbcServer)
-		lastErr = nil
+
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
 		if err != nil {
@@ -1120,15 +1058,13 @@ func TestTxByIdRaw(t *testing.T) {
 			TxId: txIdBytes,
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdTxByIdRawResponse {
@@ -1156,13 +1092,9 @@ func TestTxByIdRaw(t *testing.T) {
 
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 }
 
@@ -1199,7 +1131,6 @@ func TestTxByIdRawInvalid(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.TxByIdRawResponse
 	for {
 		select {
@@ -1208,7 +1139,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		indexAll(ctx, t, tbcServer)
-		lastErr = nil
+
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
 		if err != nil {
@@ -1223,15 +1154,13 @@ func TestTxByIdRawInvalid(t *testing.T) {
 			TxId: txIdBytes,
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdTxByIdRawResponse {
@@ -1251,13 +1180,9 @@ func TestTxByIdRawInvalid(t *testing.T) {
 
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 }
 
@@ -1309,7 +1234,6 @@ func TestTxByIdRawNotFound(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.TxByIdRawResponse
 	for {
 		select {
@@ -1318,7 +1242,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		indexAll(ctx, t, tbcServer)
-		lastErr = nil
+
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
 		if err != nil {
@@ -1333,15 +1257,13 @@ func TestTxByIdRawNotFound(t *testing.T) {
 			TxId: txIdBytes,
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdTxByIdRawResponse {
@@ -1361,13 +1283,9 @@ func TestTxByIdRawNotFound(t *testing.T) {
 
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 }
 
@@ -1405,7 +1323,6 @@ func TestTxById(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.TxByIdResponse
 	for {
 		select {
@@ -1416,7 +1333,6 @@ func TestTxById(t *testing.T) {
 
 		indexAll(ctx, t, tbcServer)
 
-		lastErr = nil
 		txId, err := chainhash.NewHashFromStr(getRandomTxId(ctx, t, bitcoindContainer))
 		if err != nil {
 			t.Fatal(err)
@@ -1426,15 +1342,13 @@ func TestTxById(t *testing.T) {
 			TxId: txId[:],
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdTxByIdResponse {
@@ -1459,13 +1373,9 @@ func TestTxById(t *testing.T) {
 
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 }
 
@@ -1502,7 +1412,6 @@ func TestTxByIdInvalid(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.TxByIdResponse
 	for {
 		select {
@@ -1511,7 +1420,7 @@ func TestTxByIdInvalid(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 		indexAll(ctx, t, tbcServer)
-		lastErr = nil
+
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
 		if err != nil {
@@ -1524,15 +1433,13 @@ func TestTxByIdInvalid(t *testing.T) {
 			TxId: txIdBytes,
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdTxByIdResponse {
@@ -1552,13 +1459,9 @@ func TestTxByIdInvalid(t *testing.T) {
 
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 }
 
@@ -1610,7 +1513,6 @@ func TestTxByIdNotFound(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var lastErr error
 	var response tbcapi.TxByIdResponse
 	for {
 		select {
@@ -1621,7 +1523,6 @@ func TestTxByIdNotFound(t *testing.T) {
 
 		indexAll(ctx, t, tbcServer)
 
-		lastErr = nil
 		txId := getRandomTxId(ctx, t, bitcoindContainer)
 		txIdBytes, err := hex.DecodeString(txId)
 		if err != nil {
@@ -1634,15 +1535,13 @@ func TestTxByIdNotFound(t *testing.T) {
 			TxId: txIdBytes,
 		})
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		var v protocol.Message
 		err = wsjson.Read(ctx, c, &v)
 		if err != nil {
-			lastErr = err
-			continue
+			t.Fatal(err)
 		}
 
 		if v.Header.Command == tbcapi.CmdTxByIdResponse {
@@ -1662,13 +1561,9 @@ func TestTxByIdNotFound(t *testing.T) {
 
 			break
 		} else {
-			lastErr = fmt.Errorf("received unexpected command: %s", v.Header.Command)
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
 		}
 
-	}
-
-	if lastErr != nil {
-		t.Fatal(lastErr)
 	}
 }
 
