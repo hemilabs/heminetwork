@@ -1673,7 +1673,11 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	payToKeyPublic := payToKey.PubKey()
-	payToAddress, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(payToKeyPublic.SerializeCompressed()), params)
+	payToAddress, err := btcutil.NewAddressPubKeyHash(
+		btcutil.Hash160(payToKeyPublic.SerializeCompressed()), params)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	coinbaseTx, err := createCoinbaseTx(params, coinbaseScript,
 		nextBlockHeight, payToAddress)
