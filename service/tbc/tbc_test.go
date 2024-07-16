@@ -1523,9 +1523,9 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 // various segments of blocks below the tip and ensures that TBC correctly
 // fails to perform the removal and does not make state changes.
 // Then, this test removes blocks [3-9] correctly and ensures block 2
-// is correctly set as the header.
+// is correctly set as the canonical tip.
 // Finally, this test adds blocks [3-8] again and ensures block 8
-// is correctly set as the header.
+// is correctly set as the canonical tip.
 func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
