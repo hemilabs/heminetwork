@@ -62,6 +62,14 @@ func (b block) MsgBlock() *wire.MsgBlock {
 	return b.b.MsgBlock()
 }
 
+func (b block) CoinbaseTx() *btcutil.Tx {
+	tx, err := b.b.Tx(0)
+	if err != nil {
+		panic(err)
+	}
+	return tx
+}
+
 func (b block) String() string {
 	return fmt.Sprintf("%v: %v %v", b.name, b.Height(), b.Hash())
 }
@@ -81,6 +89,8 @@ type btcNode struct {
 	private        *btcec.PrivateKey
 	public         *btcec.PublicKey
 	address        *btcutil.AddressPubKeyHash
+
+	keys map[string]*btcec.PrivateKey // keys used to sign various tx'
 }
 
 func newFakeNode(t *testing.T, port string) (*btcNode, error) {
@@ -94,15 +104,18 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 		blocksAtHeight: make(map[int32][]*block, 10),
 		height:         0,
 		params:         &chaincfg.RegressionNetParams,
+		keys:           make(map[string]*btcec.PrivateKey, 10),
 	}
+
+	// Add miner key to key pool
 	var err error
-	node.private, node.public, node.address, err = newPKAddress(&chaincfg.RegressionNetParams)
+	node.private, node.public, node.address, err = node.newKey()
 	if err != nil {
 		return nil, err
 	}
 	t.Logf("miner keys:")
-	t.Logf("  private    : %v", node.private)
-	t.Logf("  public     : %v", node.public)
+	t.Logf("  private    : %x", node.private.Serialize())
+	t.Logf("  public     : %x", node.public.SerializeCompressed())
 	t.Logf("  address    : %v", node.address)
 
 	node.genesis = newBlock(node.params, "genesis", genesis)
@@ -111,6 +124,137 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 		return nil, err
 	}
 	return node, nil
+}
+
+// lookupKey is used by the sign function.
+// Must be called locked.
+func (b *btcNode) lookupKey(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
+	b.t.Logf("lookup: %v", a)
+	key, ok := b.keys[a.String()]
+	if !ok {
+		return nil, false, fmt.Errorf("key not found: %v", a.String())
+	}
+	b.t.Logf("FOUND lookup: %v", a)
+	return key, true, nil
+}
+
+// newKey creates and inserts a new key into thw lookup table.
+// Must be called locked
+func (b *btcNode) newKey() (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
+	payToKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	payToKeyPublic := payToKey.PubKey()
+	payToAddress, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(payToKeyPublic.SerializeCompressed()), b.params)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// Add to lookup
+	b.keys[payToAddress.String()] = payToKey
+
+	return payToKey, payToKeyPublic, payToAddress, nil
+}
+
+func (b *btcNode) newSignedTxFromTx(inTx *btcutil.Tx, amount btcutil.Amount) (*btcutil.Tx, error) {
+	utxos := inTx.MsgTx().TxOut
+	redeemTx := wire.NewMsgTx(wire.TxVersion)
+	inHash := inTx.Hash()
+
+	total, err := btcutil.NewAmount(0)
+	if err != nil {
+		return nil, err
+	}
+	for _, txOut := range utxos {
+		total += btcutil.Amount(txOut.Value)
+	}
+	if amount > total {
+		return nil, fmt.Errorf("can't fund %v, got %v", amount, total)
+	}
+
+	// create new key to redeem
+	redeemPrivate, redeemPublic, redeemAddress, err := b.newKey()
+	if err != nil {
+		return nil, err
+	}
+	pkScript, err := txscript.PayToAddrScript(redeemAddress)
+	if err != nil {
+		return nil, err
+	}
+	b.t.Logf("rdeeem pkScript: %x", pkScript)
+	b.t.Logf("redeem keys:")
+	b.t.Logf("  private    : %x", redeemPrivate.Serialize())
+	b.t.Logf("  public     : %x", redeemPublic.SerializeCompressed())
+	b.t.Logf("  address    : %v", redeemAddress)
+
+	// find enough utxos to cover amount
+	left := amount
+	prevOuts := make(map[string][]byte, len(utxos))
+	for i, txOut := range utxos {
+		prevOut := wire.NewOutPoint(inHash, uint32(i))
+		txIn := wire.NewTxIn(prevOut, nil, nil)
+		redeemTx.AddTxIn(txIn)
+		prevOuts[prevOut.String()] = txOut.PkScript
+
+		value := btcutil.Amount(txOut.Value)
+		b.t.Logf("left %v value %v", left, value)
+		if left > value {
+			redeemTx.AddTxOut(wire.NewTxOut(txOut.Value, pkScript))
+			left -= value
+			continue
+		}
+
+		// Remaining bits
+		redeemTx.AddTxOut(wire.NewTxOut(int64(left), pkScript))
+
+		change := value - left
+		if change != 0 {
+			sc, as, sigs, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, b.params)
+			if err != nil {
+				return nil, err
+			}
+			_ = sc
+			_ = sigs
+			// only support one address for noe
+			if len(as) != 1 {
+				return nil, fmt.Errorf("only 1 address suported in change got %v", len(as))
+			}
+			payToAddress := as[0]
+			changeScript, err := txscript.PayToAddrScript(payToAddress)
+			if err != nil {
+				return nil, err
+			}
+			txOutChange := wire.NewTxOut(int64(change), changeScript)
+			redeemTx.AddTxOut(txOutChange)
+		}
+		break
+	}
+	for i, txIn := range redeemTx.TxIn {
+		prevPkScript, ok := prevOuts[txIn.PreviousOutPoint.String()]
+		if !ok {
+			panic("xx")
+		}
+		sigScript, err := txscript.SignTxOutput(b.params, redeemTx, i,
+			prevPkScript, txscript.SigHashAll,
+			txscript.KeyClosure(b.lookupKey), nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		redeemTx.TxIn[i].SignatureScript = sigScript
+	}
+
+	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
+		txscript.ScriptStrictMultiSig | txscript.ScriptDiscourageUpgradableNops
+	vm, err := txscript.NewEngine(utxos[0].PkScript, redeemTx, 0, flags, nil, nil, -1, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := vm.Execute(); err != nil {
+		return nil, err
+	}
+
+	return btcutil.NewTx(redeemTx), nil
 }
 
 func (b *btcNode) logf(format string, args ...any) {
@@ -445,97 +589,13 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	switch nextBlockHeight {
 	case 2:
 		// spend block 1 coinbase
-		key, err := btcec.NewPrivateKey()
+		tx, err := b.newSignedTxFromTx(parent.CoinbaseTx(), 3000000000)
 		if err != nil {
-			panic(err)
+			return nil, fmt.Errorf("new tx from tx: %w", err)
 		}
-		pk := key.PubKey().SerializeCompressed()
-		upk := key.PubKey().SerializeUncompressed()
-		address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), b.params)
-		b.t.Logf("pk 0x%x", pk)
-		b.t.Logf("pk 0x%x", upk)
-		b.t.Logf("hash160 0x%x", btcutil.Hash160(pk))
-		if err != nil {
-			panic(err)
-		}
-		pkScript, err := txscript.PayToAddrScript(address)
-		if err != nil {
-			panic(err)
-		}
-		// change
-		changeScript, err := txscript.PayToAddrScript(payToAddress)
-		if err != nil {
-			panic(err)
-		}
-
-		cbtx, _ := parent.b.Tx(0)
-		tx := &wire.MsgTx{
-			Version:  1,
-			LockTime: 0,
-			TxIn: []*wire.TxIn{
-				{
-					PreviousOutPoint: wire.OutPoint{
-						Hash:  *cbtx.Hash(),
-						Index: 0, // coinbase
-					},
-					Sequence: 4294967295,
-				},
-			},
-			TxOut: []*wire.TxOut{
-				{
-					Value:    3000000000,
-					PkScript: changeScript,
-				},
-				{
-					Value:    2000000000,
-					PkScript: pkScript,
-				},
-			},
-		}
-
-		prevTxOut, _ := parent.b.Tx(0)
-		if err != nil {
-			panic(err)
-		}
-		previousTxOutPkScript := prevTxOut.MsgTx().TxOut[0].PkScript
-
-		sigScript, err := txscript.SignTxOutput(b.params,
-			tx,
-			0,
-			previousTxOutPkScript,
-			txscript.SigHashAll,
-			mkGetKey(map[string]addressToKey{
-				b.address.String(): {b.private, true},
-			}),
-			mkGetScript(nil),
-			nil)
-		if err != nil {
-			panic(err)
-		}
-		tx.TxIn[0].SignatureScript = sigScript
-		b.t.Logf("block 2 tx: %v", spew.Sdump(tx))
-		// make sure tx is nominally ok
-		vm, err := txscript.NewEngine(previousTxOutPkScript, tx, 0,
-			txscript.ScriptBip16|txscript.ScriptVerifyDERSignatures,
-			nil, nil, 5000000000, nil)
-		if err != nil {
-			panic(err)
-		}
-		d, err := vm.DisasmScript(0)
-		if err != nil {
-			panic(err)
-		}
-		b.t.Logf("block 2 tx 0: %v", d)
-		d, err = vm.DisasmScript(1)
-		if err != nil {
-			panic(err)
-		}
-		b.t.Logf("block 2 tx 1: %v", d)
-		err = vm.Execute()
-		if err != nil {
-			panic(err)
-		}
-		mempool = []*btcutil.Tx{btcutil.NewTx(tx)}
+		b.t.Logf("%v", spew.Sdump(tx))
+		b.t.Logf("%v", parent.Hash())
+		mempool = []*btcutil.Tx{tx}
 	}
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
@@ -1255,7 +1315,7 @@ func TestIndexFork(t *testing.T) {
 }
 
 func TestTransactions(t *testing.T) {
-	params := &chaincfg.TestNet3Params
+	params := &chaincfg.RegressionNetParams
 	nextBlockHeight := int32(2)
 	extraNonce := uint64(nextBlockHeight)
 	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
@@ -1303,6 +1363,20 @@ func TestTransactions(t *testing.T) {
 	}
 	txOut := wire.NewTxOut(3000000000, pkScript)
 	redeemTx.AddTxOut(txOut)
+	sc, as, sigs, err := txscript.ExtractPkScriptAddrs(pkScript, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%v %v: %v", sc, sigs, spew.Sdump(as))
+
+	// add cgange
+	changeScript, err := txscript.PayToAddrScript(payToAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txOutChange := wire.NewTxOut(2000000000, changeScript)
+	redeemTx.AddTxOut(txOutChange)
+	// sign
 	lookupKey := func(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
 		return payToKey, true, nil
 	}
@@ -1313,6 +1387,7 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	redeemTx.TxIn[0].SignatureScript = sigScript
+	log.Infof("redeem tx: %v", spew.Sdump(redeemTx))
 
 	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
 		txscript.ScriptStrictMultiSig |
@@ -1330,7 +1405,7 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("coinbase signed tx in 0: %v", disasm)
-	disasm, err = vm.DisasmScript(0)
+	disasm, err = vm.DisasmScript(1)
 	if err != nil {
 		t.Fatal(err)
 	}
