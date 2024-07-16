@@ -542,8 +542,9 @@ func TestBalanceByAddress(t *testing.T) {
 						// there is a chance we just haven't finished indexing
 						// the blocks and txs, retry until timeout
 						continue
+					} else {
+						break
 					}
-					break
 				} else {
 					t.Fatalf("received unexpected command: %s", v.Header.Command)
 				}
