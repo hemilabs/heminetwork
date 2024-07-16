@@ -69,8 +69,7 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err = wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
