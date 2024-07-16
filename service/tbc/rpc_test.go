@@ -543,6 +543,7 @@ func TestBalanceByAddress(t *testing.T) {
 						// the blocks and txs, retry until timeout
 						continue
 					}
+					break
 				} else {
 					t.Fatalf("received unexpected command: %s", v.Header.Command)
 				}
