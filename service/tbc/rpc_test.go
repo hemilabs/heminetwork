@@ -150,7 +150,6 @@ func TestBlockHeadersByHeight(t *testing.T) {
 		if err := json.Unmarshal(v.Payload, &response); err != nil {
 			t.Fatal(err)
 		}
-
 	} else {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
@@ -216,7 +215,6 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 		if err := json.Unmarshal(v.Payload, &response); err != nil {
 			t.Fatal(err)
 		}
-
 	} else {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
@@ -274,7 +272,6 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 		if err := json.Unmarshal(v.Payload, &response); err != nil {
 			t.Fatal(err)
 		}
-
 	} else {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
@@ -346,7 +343,6 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 		if err := json.Unmarshal(v.Payload, &response); err != nil {
 			t.Fatal(err)
 		}
-
 	} else {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
@@ -549,7 +545,6 @@ func TestBalanceByAddress(t *testing.T) {
 					t.Fatalf("received unexpected command: %s", v.Header.Command)
 				}
 			}
-
 		})
 	}
 }
