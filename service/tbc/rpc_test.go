@@ -73,12 +73,12 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command == tbcapi.CmdBlockHeadersByHeightRawResponse {
-		if err := json.Unmarshal(v.Payload, &response); err != nil {
-			t.Fatal(err)
-		}
-	} else {
+	if v.Header.Command != tbcapi.CmdBlockHeadersByHeightRawResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
+	}
+
+	if err := json.Unmarshal(v.Payload, &response); err != nil {
+		t.Fatal(err)
 	}
 
 	bh, err := bytes2Header(response.BlockHeaders[0])
