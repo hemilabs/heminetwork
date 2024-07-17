@@ -140,8 +140,7 @@ func TestBlockHeadersByHeight(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -205,8 +204,7 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,8 +260,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -333,8 +330,7 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1034,8 +1030,7 @@ func TestTxByIdRaw(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1125,8 +1120,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1223,8 +1217,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1304,8 +1297,7 @@ func TestTxById(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1390,13 +1382,11 @@ func TestTxByIdInvalid(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
 	if v.Header.Command != tbcapi.CmdTxByIdResponse {
-
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1488,8 +1478,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
