@@ -153,6 +153,12 @@ func monitor(dumpJsonAfterMs uint) string {
 			fmt.Println("pop miner is less than 1, notifying")
 			notify = true
 		}
+
+		// if 1 minute ago is after blockTime
+		if time.Now().Add(-1*time.Minute).Compare(*blockTime) == 1 {
+			notify = true
+		}
+
 		fmt.Println(friendlyBatcherBalance)
 		fmt.Println(friendlyProposerBalance)
 		fmt.Println(bitcoinBalanceFriendly)
