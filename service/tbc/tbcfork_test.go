@@ -123,6 +123,11 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	g, err := node.genesis.b.Tx(0)
+	if err != nil {
+		return nil, err
+	}
+	t.Logf("  genesis    : %v", spew.Sdump(g.Hash()))
 	return node, nil
 }
 
@@ -602,6 +607,15 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
+
+		// spend block 1 coinbase
+		tx2, err := b.newSignedTxFromTx(tx, 3000000000)
+		if err != nil {
+			return nil, fmt.Errorf("new tx from tx: %w", err)
+		}
+		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
+			tx2.MsgTx().TxIn[0].PreviousOutPoint)
+		mempool = []*btcutil.Tx{tx, tx2}
 	}
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
@@ -1205,7 +1219,17 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	g, err := n.genesis.b.Tx(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	genesisTx, err := s.TxByTxId(ctx, g.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%v", spew.Sdump(genesisTx))
 
+	// XXX verify the balances
 	for address := range n.keys {
 		balance, err := s.BalanceByAddress(ctx, address)
 		if err != nil {
@@ -1237,6 +1261,44 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("%v: %v", b2.b.Transactions()[1].Hash(), spew.Sdump(si))
+
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, b1.Hash()) // s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	//err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	//if err == nil {
+	//	t.Fatalf("expected an error from mustHave")
+	//}
+	genesisTx, err = s.TxByTxId(ctx, g.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("=======================%v", spew.Sdump(genesisTx))
+
+	// XXX verify the balances
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	genesisTx, err = s.TxByTxId(ctx, g.Hash())
+	if err == nil {
+		t.Fatal("expected genesis tx gone")
+	}
 }
 
 func TestIndexFork(t *testing.T) {

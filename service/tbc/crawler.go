@@ -123,11 +123,11 @@ func logMemStats() {
 }
 
 func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
-	for idx, tx := range txs {
+	for _, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
-			if idx == 0 {
+			if blockchain.IsCoinBase(tx) {
 				// Skip coinbase inputs
-				continue
+				break
 			}
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
@@ -203,9 +203,9 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 		tx := txs[idx]
 		// TxIn get data from disk and insert into the cache as insert
 		for _, txIn := range tx.MsgTx().TxIn {
-			if idx == 0 {
+			if blockchain.IsCoinBase(tx) {
 				// Skip coinbase inputs
-				continue
+				break
 			}
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
@@ -257,11 +257,11 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	w := new(sync.WaitGroup)
 	txs := b.Transactions()
-	for idx, tx := range txs {
+	for _, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
-			if idx == 0 {
+			if blockchain.IsCoinBase(tx) {
 				// Skip coinbase inputs
-				continue
+				break
 			}
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
