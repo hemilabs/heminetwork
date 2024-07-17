@@ -62,8 +62,8 @@ func (b block) MsgBlock() *wire.MsgBlock {
 	return b.b.MsgBlock()
 }
 
-func (b block) CoinbaseTx() *btcutil.Tx {
-	tx, err := b.b.Tx(0)
+func (b block) TxByIndex(index int) *btcutil.Tx {
+	tx, err := b.b.Tx(index)
 	if err != nil {
 		panic(err)
 	}
@@ -129,12 +129,10 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 // lookupKey is used by the sign function.
 // Must be called locked.
 func (b *btcNode) lookupKey(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
-	b.t.Logf("lookup: %v", a)
 	key, ok := b.keys[a.String()]
 	if !ok {
 		return nil, false, fmt.Errorf("key not found: %v", a.String())
 	}
-	b.t.Logf("FOUND lookup: %v", a)
 	return key, true, nil
 }
 
@@ -198,7 +196,7 @@ func (b *btcNode) newSignedTxFromTx(inTx *btcutil.Tx, amount btcutil.Amount) (*b
 		prevOuts[prevOut.String()] = txOut.PkScript
 
 		value := btcutil.Amount(txOut.Value)
-		b.t.Logf("left %v value %v", left, value)
+		// b.t.Logf("left %v value %v", left, value)
 		if left > value {
 			redeemTx.AddTxOut(wire.NewTxOut(txOut.Value, pkScript))
 			left -= value
@@ -455,14 +453,13 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("coinbase tx %v", spew.Sdump(coinbaseTx.Hash()))
+	log.Infof("coinbase tx %v: %v", nextBlockHeight, coinbaseTx.Hash())
 
 	reqDifficulty := uint32(0x1d00ffff) // XXX
 
 	var blockTxs []*btcutil.Tx
 	blockTxs = append(blockTxs, coinbaseTx)
 	if mempool != nil {
-		log.Infof("mempool txs %v", spew.Sdump(mempool))
 		blockTxs = append(blockTxs, mempool...)
 	}
 	msgBlock := &wire.MsgBlock{
@@ -589,12 +586,21 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	switch nextBlockHeight {
 	case 2:
 		// spend block 1 coinbase
-		tx, err := b.newSignedTxFromTx(parent.CoinbaseTx(), 3000000000)
+		tx, err := b.newSignedTxFromTx(parent.TxByIndex(0), 3000000000)
 		if err != nil {
 			return nil, fmt.Errorf("new tx from tx: %w", err)
 		}
-		b.t.Logf("%v", spew.Sdump(tx))
-		b.t.Logf("%v", parent.Hash())
+		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
+			tx.MsgTx().TxIn[0].PreviousOutPoint)
+		mempool = []*btcutil.Tx{tx}
+	case 3:
+		// spend block 1 coinbase
+		tx, err := b.newSignedTxFromTx(parent.TxByIndex(1), 1100000000)
+		if err != nil {
+			return nil, fmt.Errorf("new tx from tx: %w", err)
+		}
+		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
+			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
 	}
 
@@ -717,21 +723,20 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 			return fmt.Errorf("%v != %v", height, uint64(b.Height()))
 		}
 
-		// Verify Txs
+		// Verify Txs cache
 		for ktx, vtx := range b.txs {
 			_ = vtx
 			switch ktx[0] {
 			case 's':
-				// log.Infof(spew.Sdump(ktx))
-				// log.Infof(spew.Sdump(vtx))
-				si, err := tbcd.SpendInfoFromTxSpentKeyValue(ktx, *vtx)
-				if err != nil {
-					return fmt.Errorf("invalid spend info: %w", err)
-				}
-				sis, err := s.SpendOutputsByTxId(ctx, si.TxId.Hash())
+				// grab previous outpoint from the key
+				tx, err := chainhash.NewHash(ktx[1:33])
+				sis, err := s.SpendOutputsByTxId(ctx, tx)
 				if err != nil {
 					return fmt.Errorf("invalid spend infos: %w", err)
 				}
+				log.Infof("tx hash: %v", tx)
+				log.Infof("ktx: %v", spew.Sdump(ktx))
+				log.Infof("vtx: %v", spew.Sdump(vtx))
 				log.Infof(spew.Sdump(sis))
 				// XXX verify sis
 
@@ -1111,6 +1116,129 @@ func TestWork(t *testing.T) {
 	t.Logf("compact to big: 0x%x", blockchain.CompactToBig(0x170331db))
 }
 
+func TestIndexNoFork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
+	n, err := newFakeNode(t, "18444")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+	go func() {
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
+			panic(err)
+		}
+	}()
+	time.Sleep(time.Second)
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:     false,
+		BlockSanity:   false,
+		LevelDBHome:   t.TempDir(),
+		ListenAddress: tbcapi.DefaultListen,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ignoreUlimit = true
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+	time.Sleep(time.Second)
+
+	// creat a linear chain with some tx's
+	// g ->  b1 ->  b2 -> b3
+
+	// best chain
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
+	b1, err := n.MineAndSend(ctx, "b1", parent, address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// genesis -> b3 should work with negative direction (cdiff is less than target)
+	direction, err := s.TxIndexIsLinear(ctx, b3.Hash())
+	if err != nil {
+		t.Fatalf("expected success g -> b3, got %v", err)
+	}
+	if direction <= 0 {
+		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
+	}
+
+	// Index to b3
+	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// XXX verify indexes
+	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	tx := b2.b.Transactions()[1]
+	txb2, err := s.TxByTxId(ctx, tx.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
+		t.Fatal("hash not equal")
+	}
+	si, err := s.SpendOutputsByTxId(ctx, b1.b.Transactions()[0].Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
+	si, err = s.SpendOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%v: %v", b2.b.Transactions()[1].Hash(), spew.Sdump(si))
+}
+
 func TestIndexFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -1227,6 +1355,8 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// XXX add mustNotHave
+	// verify tx
 
 	// Verify linear indexing. Current TxIndex is sitting at b3
 	t.Logf("b3: %v", b3)

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -638,13 +639,13 @@ func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.T
 		// cache txid <-> block
 		txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
 
-		// cache spent transactions
-		for txInIdx, txIn := range tx.MsgTx().TxIn {
-			if txInIdx == 0 {
-				// Skip coinbase inputs
-				continue
-			}
+		// Don't keep track of spent coinbase inputs
+		if blockchain.IsCoinBase(tx) {
+			// Skip coinbase inputs
+			continue
+		}
 
+		for txInIdx, txIn := range tx.MsgTx().TxIn {
 			txk, txv := tbcd.NewTxSpent(
 				blockHash,
 				tx.Hash(),

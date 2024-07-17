@@ -414,26 +414,6 @@ func NewTxSpent(blockHash, txId, inPrevHash *chainhash.Hash, inPrevIndex, txInIn
 	return txKey, txValue
 }
 
-func SpendInfoFromTxSpentKeyValue(txKey TxKey, txValue TxValue) (*SpendInfo, error) {
-	if txKey[0] != 's' {
-		return nil, fmt.Errorf("invalid magic 0x%02x", txKey[0])
-	}
-
-	var err error
-	si := new(SpendInfo)
-	si.BlockHash, err = NewBlockHashFromBytes(txKey[37:69])
-	if err != nil {
-		return nil, fmt.Errorf("invalid block hash: %w", err)
-	}
-	si.TxId, err = NewTxIdFromBytes(txValue[0:32])
-	if err != nil {
-		return nil, fmt.Errorf("invalid tx id: %w", err)
-	}
-	si.InputIndex = binary.BigEndian.Uint32(txValue[32:36])
-
-	return si, nil
-}
-
 // NewTxMapping returns a TxKey and TxValue that maps a tx id to a block hash.
 func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 	// Construct key

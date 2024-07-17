@@ -768,6 +768,21 @@ func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 	var key [1 + 32]byte
 	key[0] = 's'
 	copy(key[1:], txId[:])
+	debug := false
+	if debug {
+		it := txDB.NewIterator(nil, nil)
+		defer it.Release()
+		for it.Next() {
+			if it.Key()[0] == 't' {
+				continue
+			}
+			log.Infof("%v", spew.Sdump(it.Key()))
+		}
+		if err := it.Error(); err != nil {
+			return nil, fmt.Errorf("blocks by id iterator: %w", err)
+		}
+		return nil, fmt.Errorf("xxx")
+	}
 	it := txDB.NewIterator(&util.Range{Start: key[:]}, nil)
 	defer it.Release()
 	for it.Next() {
