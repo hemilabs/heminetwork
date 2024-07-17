@@ -199,7 +199,7 @@ type CacheOutput [32 + 8 + 4]byte // script_hash + value + out_idx
 // String reutrns pretty printable CacheOutput. Hash is not reversed since it is an
 // opaque pointer. It prints satoshis@script_hash:output_index
 func (c CacheOutput) String() string {
-	return fmt.Sprintf("%d @ %v:%d", binary.BigEndian.Uint64(c[32:40]),
+	return fmt.Sprintf("%d @ %x:%d", binary.BigEndian.Uint64(c[32:40]),
 		c[0:32], binary.BigEndian.Uint32(c[40:]))
 }
 
