@@ -23,6 +23,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
+	btcmempool "github.com/btcsuite/btcd/mempool"
 	btctxscript "github.com/btcsuite/btcd/txscript"
 	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
@@ -287,6 +288,8 @@ func pickUTXO(utxos []*bfgapi.BitcoinUTXO, amount int64) (*bfgapi.BitcoinUTXO, e
 	return utxo, nil
 }
 
+const minRelayTxFee = 10000
+
 func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.BitcoinUTXO, payToScript []byte, feeAmount int64) (*btcwire.MsgTx, error) {
 	btx := btcwire.MsgTx{
 		Version:  2,
@@ -298,11 +301,22 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 		Hash:  btcchainhash.Hash(utxo.Hash),
 		Index: utxo.Index,
 	}
-	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
+	btx.TxIn = []*btcwire.TxIn{
+		btcwire.NewTxIn(&outPoint, payToScript, nil),
+	}
 
 	// Add output for change as P2PKH.
 	changeAmount := utxo.Value - feeAmount
-	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
+	changeTxOut := btcwire.NewTxOut(changeAmount, payToScript)
+
+	// If the change output would be considered dust, then don't include the
+	// output and instead leave the remaining to be included as a fee.
+	//
+	// TODO: When we rewrite the fee estimation and BFG has access to a mempool,
+	//  improve the minRelayTxFee to be calculated from the mempool data.
+	if !btcmempool.IsDust(changeTxOut, minRelayTxFee) {
+		btx.TxOut = []*btcwire.TxOut{changeTxOut}
+	}
 
 	// Add PoP TX using OP_RETURN output.
 	aks := hemi.L2KeystoneAbbreviate(*l2Keystone)
