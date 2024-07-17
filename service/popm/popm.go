@@ -288,9 +288,7 @@ func pickUTXO(utxos []*bfgapi.BitcoinUTXO, amount int64) (*bfgapi.BitcoinUTXO, e
 	return utxo, nil
 }
 
-const minRelayTxFee = 10000
-
-func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.BitcoinUTXO, payToScript []byte, feeAmount int64) (*btcwire.MsgTx, error) {
+func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.BitcoinUTXO, payToScript []byte, feeAmount int64, minRelayTxFee int64) (*btcwire.MsgTx, error) {
 	btx := btcwire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
@@ -314,7 +312,7 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 	//
 	// TODO: When we rewrite the fee estimation and BFG has access to a mempool,
 	//  improve the minRelayTxFee to be calculated from the mempool data.
-	if !btcmempool.IsDust(changeTxOut, minRelayTxFee) {
+	if minRelayTxFee < 1 || !btcmempool.IsDust(changeTxOut, btcutil.Amount(minRelayTxFee)) {
 		btx.TxOut = []*btcwire.TxOut{changeTxOut}
 	}
 
@@ -384,7 +382,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	}
 
 	// Build transaction.
-	btx, err := createTx(ks, btcHeight, utxo, payToScript, feeAmount)
+	btx, err := createTx(ks, btcHeight, utxo, payToScript, feeAmount, 10000)
 	if err != nil {
 		return fmt.Errorf("create Bitcoin transaction: %w", err)
 	}
