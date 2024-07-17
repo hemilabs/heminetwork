@@ -500,41 +500,40 @@ func TestBalanceByAddress(t *testing.T) {
 				}
 
 				var v protocol.Message
-				err = wsjson.Read(ctx, c, &v)
-				if err != nil {
+				if err = wsjson.Read(ctx, c, &v); err != nil {
 					t.Fatal(err)
 				}
 
 				if v.Header.Command != tbcapi.CmdBalanceByAddressResponse {
 					t.Fatalf("received unexpected command: %s", v.Header.Command)
+				}
+
+				if err = json.Unmarshal(v.Payload, &response); err != nil {
+					t.Fatal(err)
+				}
+
+				var pricePerBlock uint64 = 50 * 100000000
+				var blocks uint64 = 4
+				var expectedBalance uint64 = 0
+				if !tti.doNotGenerate {
+					expectedBalance = pricePerBlock * blocks
+				}
+
+				expected := tbcapi.BalanceByAddressResponse{
+					Balance: expectedBalance,
+					Error:   nil,
+				}
+				if diff := deep.Equal(expected, response); len(diff) > 0 {
+					if response.Error != nil {
+						t.Error(response.Error.Message)
+					}
+					t.Logf("unexpected diff: %s", diff)
+
+					// there is a chance we just haven't finished indexing
+					// the blocks and txs, retry until timeout
+					continue
 				} else {
-					if err = json.Unmarshal(v.Payload, &response); err != nil {
-						t.Fatal(err)
-					}
-
-					var pricePerBlock uint64 = 50 * 100000000
-					var blocks uint64 = 4
-					var expectedBalance uint64 = 0
-					if !tti.doNotGenerate {
-						expectedBalance = pricePerBlock * blocks
-					}
-
-					expected := tbcapi.BalanceByAddressResponse{
-						Balance: expectedBalance,
-						Error:   nil,
-					}
-					if diff := deep.Equal(expected, response); len(diff) > 0 {
-						if response.Error != nil {
-							t.Error(response.Error.Message)
-						}
-						t.Logf("unexpected diff: %s", diff)
-
-						// there is a chance we just haven't finished indexing
-						// the blocks and txs, retry until timeout
-						continue
-					} else {
-						break
-					}
+					break
 				}
 			}
 		})
@@ -725,8 +724,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			}
 
 			var v protocol.Message
-			err = wsjson.Read(ctx, c, &v)
-			if err != nil {
+			if err = wsjson.Read(ctx, c, &v); err != nil {
 				t.Fatal(err)
 			}
 
@@ -938,8 +936,7 @@ func TestUtxosByAddress(t *testing.T) {
 			}
 
 			var v protocol.Message
-			err = wsjson.Read(ctx, c, &v)
-			if err != nil {
+			if err = wsjson.Read(ctx, c, &v); err != nil {
 				t.Fatal(err)
 			}
 
