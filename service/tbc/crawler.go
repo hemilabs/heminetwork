@@ -1100,6 +1100,9 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 
 // SyncIndexersToHash tries to move the various indexers to the supplied
 // height (inclusive).
+// Note: on unwind it means that it WILL unwind the the various indexers
+// including the hash that was passed in. E.g. if this unwinds from 1001 to
+// 1000 the indexes for block 1000 WILL be updated as well.
 func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) error {
 	log.Tracef("SyncIndexersToHash")
 	defer log.Tracef("SyncIndexersToHash exit")

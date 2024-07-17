@@ -1223,11 +1223,17 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// grab genesis tx and make sure it exists in the db
 	genesisTx, err := s.TxByTxId(ctx, g.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("%v", spew.Sdump(genesisTx))
+	_, err = s.SpendOutputsByTxId(ctx, g.Hash())
+	if err == nil {
+		t.Fatal("genesis coinbase tx should not be spent")
+	}
 
 	// XXX verify the balances
 	for address := range n.keys {
