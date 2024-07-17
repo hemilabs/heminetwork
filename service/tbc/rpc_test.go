@@ -61,10 +61,10 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRawRequest{
+
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRawRequest{
 		Height: 55,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -132,10 +132,10 @@ func TestBlockHeadersByHeight(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
+
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
 		Height: 55,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -196,10 +196,10 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
+
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeadersByHeightRequest{
 		Height: 550,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -254,8 +254,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeaderBestRawRequest{})
-	if err != nil {
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeaderBestRawRequest{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -324,8 +323,7 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeaderBestRequest{})
-	if err != nil {
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockHeaderBestRequest{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -495,10 +493,9 @@ func TestBalanceByAddress(t *testing.T) {
 				}
 				indexAll(ctx, t, tbcServer)
 
-				err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BalanceByAddressRequest{
+				if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BalanceByAddressRequest{
 					Address: tti.address(),
-				})
-				if err != nil {
+				}); err != nil {
 					t.Fatal(err)
 				}
 
@@ -719,12 +716,11 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			}
 			indexAll(ctx, t, tbcServer)
 
-			err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRawRequest{
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRawRequest{
 				Address: tti.address(),
 				Start:   uint(tti.start),
 				Count:   uint(tti.limit),
-			})
-			if err != nil {
+			}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -933,12 +929,11 @@ func TestUtxosByAddress(t *testing.T) {
 			}
 			indexAll(ctx, t, tbcServer)
 
-			err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRequest{
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRequest{
 				Address: tti.address(),
 				Start:   uint(tti.start),
 				Count:   uint(tti.limit),
-			})
-			if err != nil {
+			}); err != nil {
 				t.Fatal(err)
 			}
 
@@ -1022,10 +1017,9 @@ func TestTxByIdRaw(t *testing.T) {
 
 	slices.Reverse(txIdBytes) // convert to natural order
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 		TxId: txIdBytes,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1112,10 +1106,9 @@ func TestTxByIdRawInvalid(t *testing.T) {
 
 	slices.Reverse(txIdBytes) // convert to natural order
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 		TxId: txIdBytes,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1209,10 +1202,9 @@ func TestTxByIdRawNotFound(t *testing.T) {
 
 	slices.Reverse(txIdBytes) // convert to natural order
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
 		TxId: txIdBytes,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1289,10 +1281,9 @@ func TestTxById(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 		TxId: txIdBytes,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1374,10 +1365,9 @@ func TestTxByIdInvalid(t *testing.T) {
 
 	txIdBytes[0]++
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 		TxId: txIdBytes,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1470,10 +1460,9 @@ func TestTxByIdNotFound(t *testing.T) {
 
 	txIdBytes = append(txIdBytes, 8)
 
-	err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
 		TxId: txIdBytes,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
