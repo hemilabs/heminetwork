@@ -93,13 +93,13 @@ func (s *Server) findCanonicalHash(ctx context.Context, endHash *chainhash.Hash,
 			if err != nil {
 				return -1, fmt.Errorf("block header by hash: %w", err)
 			}
-			h = bh.ParentHash()
 			if h.IsEqual(v.BlockHash()) {
 				return k, nil
 			}
 			if h.IsEqual(s.chainParams.GenesisHash) {
 				break
 			}
+			h = bh.ParentHash()
 		}
 	}
 

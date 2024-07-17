@@ -1425,6 +1425,18 @@ func TestIndexFork(t *testing.T) {
 	}
 	// XXX add mustNotHave
 	// verify tx
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
 
 	// Verify linear indexing. Current TxIndex is sitting at b3
 	t.Logf("b3: %v", b3)
@@ -1475,6 +1487,19 @@ func TestIndexFork(t *testing.T) {
 		t.Fatalf("expected an error from mustHave")
 	}
 
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
 	// XXX verify indexes
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
@@ -1494,6 +1519,108 @@ func TestIndexFork(t *testing.T) {
 	}
 	if direction != 1 {
 		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
+	}
+
+	t.Logf("---------------------------------------- going to b2a")
+	err = s.SyncIndexersToHash(ctx, b2a.Hash())
+	if err != nil {
+		t.Fatalf("wind to b2a: %v", err)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+	txHH, err = s.TxIndexHash(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	}
+	if txHH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	}
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	t.Logf("---------------------------------------- going to b2b")
+	err = s.SyncIndexersToHash(ctx, b2b.Hash())
+	if err != nil {
+		t.Fatalf("wind to b2a: %v", err)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	t.Logf("---------------------------------------- going to b3")
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+	txHH, err = s.TxIndexHash(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	}
+	if txHH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	}
+
+	// Index to b3
+	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// XXX verify indexes
+	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// // Should fail
