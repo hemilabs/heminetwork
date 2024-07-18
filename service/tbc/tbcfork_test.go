@@ -74,6 +74,12 @@ func (b block) String() string {
 	return fmt.Sprintf("%v: %v %v", b.name, b.Height(), b.Hash())
 }
 
+type namedKey struct {
+	name            string
+	key             *btcec.PrivateKey
+	expectedBalance btcutil.Amount
+}
+
 type btcNode struct {
 	t    *testing.T // for logging
 	le   bool       // log enable
@@ -86,11 +92,12 @@ type btcNode struct {
 	height         int32
 	params         *chaincfg.Params
 	genesis        *block
+	gtx            *btcutil.Tx // for printing and diagnostics
 	private        *btcec.PrivateKey
 	public         *btcec.PublicKey
 	address        *btcutil.AddressPubKeyHash
 
-	keys map[string]*btcec.PrivateKey // keys used to sign various tx'
+	keys map[string]*namedKey // keys used to sign various tx'
 }
 
 func newFakeNode(t *testing.T, port string) (*btcNode, error) {
@@ -104,63 +111,84 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 		blocksAtHeight: make(map[int32][]*block, 10),
 		height:         0,
 		params:         &chaincfg.RegressionNetParams,
-		keys:           make(map[string]*btcec.PrivateKey, 10),
+		keys:           make(map[string]*namedKey, 10),
 	}
 
 	// Add miner key to key pool
 	var err error
-	node.private, node.public, node.address, err = node.newKey()
+	node.private, node.public, node.address, err = node.newKey("miner")
 	if err != nil {
 		return nil, err
 	}
-	t.Logf("miner keys:")
-	t.Logf("  private    : %x", node.private.Serialize())
-	t.Logf("  public     : %x", node.public.SerializeCompressed())
-	t.Logf("  address    : %v", node.address)
-
 	node.genesis = newBlock(node.params, "genesis", genesis)
 	_, err = node.insertBlock(node.genesis)
 	if err != nil {
 		return nil, err
 	}
-	g, err := node.genesis.b.Tx(0)
+	node.gtx, err = node.genesis.b.Tx(0)
 	if err != nil {
 		return nil, err
 	}
-	t.Logf("  genesis    : %v", spew.Sdump(g.Hash()))
+	t.Logf("genesis")
+	t.Logf("  block: %v", node.genesis.Hash())
+	t.Logf("  tx   : %v", node.gtx.Hash())
+	t.Logf("")
+	t.Logf("miner keys")
+	t.Logf("  private: %x", node.private.Serialize())
+	t.Logf("  public : %x", node.public.SerializeCompressed())
+	t.Logf("  address: %v", node.address)
+
 	return node, nil
 }
 
 // lookupKey is used by the sign function.
 // Must be called locked.
 func (b *btcNode) lookupKey(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
-	key, ok := b.keys[a.String()]
+	nk, ok := b.keys[a.String()]
 	if !ok {
 		return nil, false, fmt.Errorf("key not found: %v", a.String())
 	}
-	return key, true, nil
+	return nk.key, true, nil
 }
 
 // newKey creates and inserts a new key into thw lookup table.
 // Must be called locked
-func (b *btcNode) newKey() (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
-	payToKey, err := btcec.NewPrivateKey()
+func (b *btcNode) newKey(name string) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
+	privateKey, err := btcec.NewPrivateKey()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	payToKeyPublic := payToKey.PubKey()
-	payToAddress, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(payToKeyPublic.SerializeCompressed()), b.params)
+	publicKey := privateKey.PubKey()
+	address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(publicKey.SerializeCompressed()), b.params)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
 	// Add to lookup
-	b.keys[payToAddress.String()] = payToKey
+	b.keys[address.String()] = &namedKey{name: name, key: privateKey}
 
-	return payToKey, payToKeyPublic, payToAddress, nil
+	return privateKey, publicKey, address, nil
 }
 
-func (b *btcNode) newSignedTxFromTx(inTx *btcutil.Tx, amount btcutil.Amount) (*btcutil.Tx, error) {
+func (b *btcNode) keySet(name string, amount btcutil.Amount) {
+	if nk, ok := b.keys[name]; !ok {
+		panic(fmt.Sprintf("address not found: %v", name))
+	} else {
+		log.Infof("set address %v %v", name, amount)
+		nk.expectedBalance = amount
+	}
+}
+
+func (b *btcNode) keyAdd(name string, amount btcutil.Amount) {
+	if nk, ok := b.keys[name]; !ok {
+		panic(fmt.Sprintf("address not found: %v", name))
+	} else {
+		log.Infof("add address %v %v", name, amount)
+		nk.expectedBalance += amount
+	}
+}
+
+func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcutil.Amount) (*btcutil.Tx, error) {
 	utxos := inTx.MsgTx().TxOut
 	redeemTx := wire.NewMsgTx(wire.TxVersion)
 	inHash := inTx.Hash()
@@ -177,7 +205,7 @@ func (b *btcNode) newSignedTxFromTx(inTx *btcutil.Tx, amount btcutil.Amount) (*b
 	}
 
 	// create new key to redeem
-	redeemPrivate, redeemPublic, redeemAddress, err := b.newKey()
+	redeemPrivate, redeemPublic, redeemAddress, err := b.newKey(name)
 	if err != nil {
 		return nil, err
 	}
@@ -199,30 +227,35 @@ func (b *btcNode) newSignedTxFromTx(inTx *btcutil.Tx, amount btcutil.Amount) (*b
 		txIn := wire.NewTxIn(prevOut, nil, nil)
 		redeemTx.AddTxIn(txIn)
 		prevOuts[prevOut.String()] = txOut.PkScript
+		value := btcutil.Amount(txOut.Value) // amount to send
 
-		value := btcutil.Amount(txOut.Value)
-		// b.t.Logf("left %v value %v", left, value)
-		if left > value {
-			redeemTx.AddTxOut(wire.NewTxOut(txOut.Value, pkScript))
-			left -= value
-			continue
+		// extract txout script address to subtract value
+		sc, as, sigs, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, b.params)
+		if err != nil {
+			return nil, err
+		}
+		_ = sc
+		_ = sigs
+		b.keySet(as[0].String(), 0) // spend previous output
+
+		// only support one address for now
+		if len(as) != 1 {
+			return nil, fmt.Errorf("only 1 address suported in pkSctipt got %v", len(as))
 		}
 
+		// b.t.Logf("left %v value %v", left, value)
+		if left > value {
+			redeemTx.AddTxOut(wire.NewTxOut(int64(value), pkScript))
+			left -= value
+			b.keyAdd(redeemAddress.String(), value)
+			continue
+		}
 		// Remaining bits
 		redeemTx.AddTxOut(wire.NewTxOut(int64(left), pkScript))
+		b.keyAdd(redeemAddress.String(), left)
 
 		change := value - left
 		if change != 0 {
-			sc, as, sigs, err := txscript.ExtractPkScriptAddrs(txOut.PkScript, b.params)
-			if err != nil {
-				return nil, err
-			}
-			_ = sc
-			_ = sigs
-			// only support one address for noe
-			if len(as) != 1 {
-				return nil, fmt.Errorf("only 1 address suported in change got %v", len(as))
-			}
 			payToAddress := as[0]
 			changeScript, err := txscript.PayToAddrScript(payToAddress)
 			if err != nil {
@@ -230,6 +263,7 @@ func (b *btcNode) newSignedTxFromTx(inTx *btcutil.Tx, amount btcutil.Amount) (*b
 			}
 			txOutChange := wire.NewTxOut(int64(change), changeScript)
 			redeemTx.AddTxOut(txOutChange)
+			b.keyAdd(as[0].String(), change)
 		}
 		break
 	}
@@ -591,7 +625,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	switch nextBlockHeight {
 	case 2:
 		// spend block 1 coinbase
-		tx, err := b.newSignedTxFromTx(parent.TxByIndex(0), 3000000000)
+		tx, err := b.newSignedTxFromTx(name, parent.TxByIndex(0), 3000000000)
 		if err != nil {
 			return nil, fmt.Errorf("new tx from tx: %w", err)
 		}
@@ -599,8 +633,8 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
 	case 3:
-		// spend block 1 coinbase
-		tx, err := b.newSignedTxFromTx(parent.TxByIndex(1), 1100000000)
+		// spend block 2 coinbase
+		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(1), 1100000000)
 		if err != nil {
 			return nil, fmt.Errorf("new tx from tx: %w", err)
 		}
@@ -608,8 +642,8 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
 
-		// spend block 1 coinbase
-		tx2, err := b.newSignedTxFromTx(tx, 3000000000)
+		// spend above tx in same block
+		tx2, err := b.newSignedTxFromTx(name+":1", tx, 3000000000)
 		if err != nil {
 			return nil, fmt.Errorf("new tx from tx: %w", err)
 		}
@@ -629,6 +663,11 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		return nil, fmt.Errorf("insert block at height %v: %v",
 			nextBlockHeight, err)
 	}
+	coinbaseTx, err := blk.b.Tx(0)
+	if err != nil {
+		return nil, fmt.Errorf("coinbase tx height %v: %v", nextBlockHeight, err)
+	}
+	b.keyAdd(payToAddress.String(), btcutil.Amount(coinbaseTx.MsgTx().TxOut[0].Value)) // credit miner coinbase
 	// XXX this really sucks, we should get rid of height as a best indicator
 	if blk.Height() > b.height {
 		b.height = blk.Height()
@@ -776,103 +815,6 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 
 	return nil
 }
-
-// XXX: Fix and re-enable test.
-// func TestBasic(t *testing.T) {
-//	t.Skip()
-//
-//	ctx, cancel := context.WithCancel(context.Background())
-//	defer cancel()
-//
-//	key, address, err := newPKAddress(&chaincfg.RegressionNetParams)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	t.Logf("key    : %v", key)
-//	t.Logf("address: %v", address)
-//
-//	n, err := newFakeNode(t, "18444") // TODO: should use random free port
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//
-//	go func() {
-//		if err := n.Run(ctx); err != nil {
-//			panic(fmt.Errorf("node exited with error: %w", err))
-//		}
-//	}()
-//
-//	startHash := n.Best()
-//	count := 9
-//	expectedHeight := uint64(count)
-//
-//	if _, err = n.Mine(count, startHash[0], address); err != nil {
-//		t.Fatal(fmt.Errorf("mine: %w", err))
-//	}
-//
-//	if err = n.dumpChain(n.Best()[0]); err != nil {
-//		t.Fatal(fmt.Errorf("dump chain: %w", err))
-//	}
-//	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-//	time.Sleep(1 * time.Second) // XXX
-//
-//	// Connect tbc service
-//	cfg := &Config{
-//		AutoIndex:     true, // XXX for now
-//		BlockSanity:   false,
-//		LevelDBHome:   t.TempDir(),
-//		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
-//		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
-//		MaxCachedTxs:            1000, // XXX
-//		Network:                 networkLocalnet,
-//		PrometheusListenAddress: "",
-//	}
-//	_ = loggo.ConfigureLoggers(cfg.LogLevel)
-//	s, err := NewServer(cfg)
-//	if err != nil {
-//		t.Fatal(err)
-//	}
-//	s.ignoreUlimit = true
-//	go func() {
-//		err := s.Run(ctx)
-//		if err != nil && !errors.Is(err, context.Canceled) {
-//			panic(err)
-//		}
-//	}()
-//
-//	for {
-//		select {
-//		case <-ctx.Done():
-//			return
-//		case <-time.After(time.Second):
-//		}
-//
-//		// See if we are synced
-//		si := s.Synced(ctx)
-//		if !(si.Synced && si.BlockHeaderHeight == expectedHeight) {
-//			log.Infof("not synced")
-//			continue
-//		}
-//
-//		// Execute tests
-//		balance, err := s.BalanceByAddress(ctx, address.String())
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		// TODO: magic numbers should be extract into constants
-//		if balance != uint64(count*5000000000) {
-//			t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
-//		}
-//		t.Logf("balance %v", spew.Sdump(balance))
-//
-//		utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
-//		if err != nil {
-//			t.Fatal(err)
-//		}
-//		t.Logf("%v", spew.Sdump(utxos))
-//		return
-//	}
-// }
 
 func TestFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1214,40 +1156,36 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// XXX verify indexes
 	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := n.genesis.b.Tx(0)
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	// grab genesis tx and make sure it exists in the db
-	genesisTx, err := s.TxByTxId(ctx, g.Hash())
+	// make sure genesis tx is in db
+	_, err = s.TxByTxId(ctx, n.gtx.Hash())
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("genesis not found: %v", err)
 	}
-	t.Logf("%v", spew.Sdump(genesisTx))
-	_, err = s.SpendOutputsByTxId(ctx, g.Hash())
+	// make sure gensis was not spent
+	_, err = s.SpendOutputsByTxId(ctx, n.gtx.Hash())
 	if err == nil {
 		t.Fatal("genesis coinbase tx should not be spent")
 	}
 
 	// XXX verify the balances
-	for address := range n.keys {
+	for address, v := range n.keys {
 		balance, err := s.BalanceByAddress(ctx, address)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("%v: %v", address, balance)
+		t.Logf("%v (%v): %v", address, v.name, balance)
 		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("%v: %v", address, utxos)
+		t.Logf("%v (%v): %v", address, v.name, utxos)
 	}
+	t.Logf("%v", spew.Sdump(n.keys))
 
 	tx := b2.b.Transactions()[1]
 	txb2, err := s.TxByTxId(ctx, tx.Hash())
@@ -1277,11 +1215,11 @@ func TestIndexNoFork(t *testing.T) {
 	//if err == nil {
 	//	t.Fatalf("expected an error from mustHave")
 	//}
-	genesisTx, err = s.TxByTxId(ctx, g.Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("=======================%v", spew.Sdump(genesisTx))
+	//genesisTx, err = s.TxByTxId(ctx, g.Hash())
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//t.Logf("=======================%v", spew.Sdump(genesisTx))
 
 	// XXX verify the balances
 	for address := range n.keys {
@@ -1301,7 +1239,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	genesisTx, err = s.TxByTxId(ctx, g.Hash())
+	_, err = s.TxByTxId(ctx, n.gtx.Hash())
 	if err == nil {
 		t.Fatal("expected genesis tx gone")
 	}
@@ -1575,7 +1513,7 @@ func TestIndexFork(t *testing.T) {
 	t.Logf("---------------------------------------- going to b2b")
 	err = s.SyncIndexersToHash(ctx, b2b.Hash())
 	if err != nil {
-		t.Fatalf("wind to b2a: %v", err)
+		t.Fatalf("wind to b2b: %v", err)
 	}
 
 	for address := range n.keys {
