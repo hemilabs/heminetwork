@@ -888,7 +888,7 @@ func TestFork(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
@@ -1145,7 +1145,7 @@ func TestIndexNoFork(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
@@ -1345,7 +1345,7 @@ func TestIndexFork(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
