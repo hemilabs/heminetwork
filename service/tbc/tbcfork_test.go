@@ -1226,10 +1226,23 @@ func TestIndexNoFork(t *testing.T) {
 	// t.Logf("%v: %v", b2.b.Transactions()[1].Hash(), spew.Sdump(si))
 	_ = si
 
-	// unwind back to b3 (removes b3)
-	skipBug := true
+	// unwind back to b3 (removes b3 and b2)
+	skipBug := true // XXX
+	// skipBug = false
 	if !skipBug {
 		// XXX BUG unwiding first to b2 and then to genesis fails to unindex something
+		// This only happens when ending on b2, when ending on b3 and b1 it works.
+
+		// going from b3 and then to b1 and then back to b2 does work
+		//err = s.SyncIndexersToHash(ctx, b3.Hash())
+		//if err != nil {
+		//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+		//}
+		//err = s.SyncIndexersToHash(ctx, b1.Hash())
+		//if err != nil {
+		//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+		//}
+		log.Infof("BUGBUGBUGBUG")
 		err = s.SyncIndexersToHash(ctx, b2.Hash())
 		if err != nil {
 			t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
