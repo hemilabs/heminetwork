@@ -734,6 +734,9 @@ func waitForPort(ctx context.Context, port string) error {
 	for {
 		select {
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil
+			}
 			return ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 			conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", port), 100*time.Millisecond)
