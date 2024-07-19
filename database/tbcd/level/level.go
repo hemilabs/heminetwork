@@ -782,7 +782,7 @@ func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 		if err := it.Error(); err != nil {
 			return nil, fmt.Errorf("blocks by id iterator: %w", err)
 		}
-		return nil, fmt.Errorf("xxx")
+		return nil, errors.New("xxx")
 	}
 	it := txDB.NewIterator(&util.Range{Start: key[:]}, nil)
 	defer it.Release()

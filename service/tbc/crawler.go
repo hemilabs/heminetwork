@@ -170,10 +170,10 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 	}
 	// Note that we may have more than one block hash however since the
 	// TxID is generated from the actual Tx the script hash and value
-	// should be identical and thus we can return the values from the first
+	// should be identical, and thus we can return the values from the first
 	// block found.
 	if len(blockHashes) == 0 {
-		return nil, 0, fmt.Errorf("script value: no block hashes")
+		return nil, 0, errors.New("script value: no block hashes")
 	}
 	blk, err := s.db.BlockByHash(ctx, blockHashes[0][:])
 	if err != nil {
@@ -215,7 +215,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 			}
 			log.Infof("------ %v  %v", op, btcutil.Amount(value))
 			if _, ok := utxos[op]; ok {
-				return fmt.Errorf("collision")
+				return errors.New("collision")
 			}
 			utxos[op] = tbcd.NewCacheOutput(sha256.Sum256(pkScript),
 				uint64(value), txIn.PreviousOutPoint.Index)

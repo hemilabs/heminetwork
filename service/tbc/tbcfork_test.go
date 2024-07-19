@@ -172,7 +172,7 @@ func (b *btcNode) newKey(name string) (*btcec.PrivateKey, *btcec.PublicKey, *btc
 	return privateKey, publicKey, address, nil
 }
 
-//func (b *btcNode) verifyAllKeyBalances(ctx context.Context, s *Server) error {
+// func (b *btcNode) verifyAllKeyBalances(ctx context.Context, s *Server) error {
 //	// Verify the balances
 //	for address, key := range b.keys {
 //		balance, err := s.BalanceByAddress(ctx, address)
@@ -201,7 +201,7 @@ func (b *btcNode) newKey(name string) (*btcec.PrivateKey, *btcec.PublicKey, *btc
 //		}
 //	}
 //	return nil
-//}
+// }
 
 func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcutil.Amount) (*btcutil.Tx, error) {
 	utxos := inTx.MsgTx().TxOut
@@ -837,7 +837,7 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 					log.Infof("ktx: %v", spew.Sdump(ktx))
 					log.Infof("vtx: %v", spew.Sdump(vtx))
 					log.Infof(spew.Sdump(sis))
-					return fmt.Errorf("block mismatch")
+					return errors.New("block mismatch")
 				}
 
 			case 't':
@@ -1272,14 +1272,14 @@ func TestIndexNoFork(t *testing.T) {
 		// This only happens when ending on b2, when ending on b3 and b1 it works.
 
 		// going from b3 and then to b1 and then back to b2 does work
-		//err = s.SyncIndexersToHash(ctx, b3.Hash())
-		//if err != nil {
+		// err = s.SyncIndexersToHash(ctx, b3.Hash())
+		// if err != nil {
 		//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
-		//}
-		//err = s.SyncIndexersToHash(ctx, b1.Hash())
-		//if err != nil {
+		// }
+		// err = s.SyncIndexersToHash(ctx, b1.Hash())
+		// if err != nil {
 		//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
-		//}
+		// }
 		log.Infof("BUGBUGBUGBUG")
 		err = s.SyncIndexersToHash(ctx, b2.Hash())
 		if err != nil {
@@ -1292,10 +1292,10 @@ func TestIndexNoFork(t *testing.T) {
 	} else {
 		log.Infof("XXX max we need to debug this")
 	}
-	//err = mustNotHave(ctx, s, b2, b3)
-	//if err == nil {
+	// err = mustNotHave(ctx, s, b2, b3)
+	// if err == nil {
 	//	t.Fatalf("expected an error from mustHave")
-	//}
+	// }
 
 	// XXX Verify balances at b1
 
@@ -1612,37 +1612,37 @@ func TestIndexFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
-	//t.Logf("---------------------------------------- going to b3")
-	//// unwind back to genesis
-	//err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
-	//if err != nil {
+	// t.Logf("---------------------------------------- going to b3")
+	// // unwind back to genesis
+	// err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	// if err != nil {
 	//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
-	//}
-	//err = mustHave(ctx, s, n.genesis, b1, b2, b3)
-	//if err == nil {
+	// }
+	// err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	// if err == nil {
 	//	t.Fatalf("expected an error from mustHave")
-	//}
-	//txHH, err = s.TxIndexHash(ctx)
-	//if err != nil {
+	// }
+	// txHH, err = s.TxIndexHash(ctx)
+	// if err != nil {
 	//	t.Fatalf("expected success getting tx index hash, got: %v", err)
-	//}
-	//if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+	// }
+	// if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
 	//	t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
-	//}
-	//if txHH.Height != 0 {
+	// }
+	// if txHH.Height != 0 {
 	//	t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
-	//}
+	// }
 
-	//// Index to b3
-	//err = s.SyncIndexersToHash(ctx, b3.Hash())
-	//if err != nil {
+	// // Index to b3
+	// err = s.SyncIndexersToHash(ctx, b3.Hash())
+	// if err != nil {
 	//	t.Fatal(err)
-	//}
-	//// XXX verify indexes
-	//err = mustHave(ctx, s, n.genesis, b1, b2, b3)
-	//if err != nil {
+	// }
+	// // XXX verify indexes
+	// err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	// if err != nil {
 	//	t.Fatal(err)
-	//}
+	// }
 
 	// // Should fail
 	// t.Logf("=== index b2a ===")
