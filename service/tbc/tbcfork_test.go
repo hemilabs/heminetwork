@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -729,7 +730,31 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 	return blk, nil
 }
 
+func waitForPort(ctx context.Context, port string) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", port), 100*time.Millisecond)
+			if err != nil && !errors.Is(err, syscall.ECONNREFUSED) {
+				return err
+			}
+
+			if conn != nil {
+				conn.Close()
+				continue
+			}
+
+			return nil
+		}
+	}
+}
+
 func (b *btcNode) Run(ctx context.Context) error {
+	if err := waitForPort(ctx, b.port); err != nil {
+		return err
+	}
 	lc := &net.ListenConfig{}
 	l, err := lc.Listen(ctx, "tcp", "localhost:"+b.port)
 	if err != nil {
@@ -848,7 +873,9 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// n.le = true
+	wg.Add(1)
 	defer func() {
+		wg.Done()
 		err := n.Stop()
 		if err != nil {
 			t.Logf("node stop: %v", err)
@@ -1103,7 +1130,10 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wg.Add(1)
 	defer func() {
+		defer wg.Done()
 		err := n.Stop()
 		if err != nil {
 			t.Logf("node stop: %v", err)
@@ -1301,7 +1331,9 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	wg.Add(1)
 	defer func() {
+		defer wg.Done()
 		err := n.Stop()
 		if err != nil {
 			t.Logf("node stop: %v", err)
