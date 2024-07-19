@@ -637,7 +637,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	}
 	direction, err := s.UtxoIndexIsLinear(ctx, endHash)
 	if err != nil {
-		return fmt.Errorf("TxIndexIsLinear: %w", err)
+		return fmt.Errorf("UtxoIndexIsLinear: %w", err)
 	}
 	switch direction {
 	case 1:
@@ -647,8 +647,10 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	case 0:
 		// XXX dedup UtxoIndexIsLinear with the above code so that it isn't so awkward.
 		return nil // because we call TxIndexIsLinear we know it's the same block
+	default:
+		// XXX: clean up code so this isn't needed.
+		panic("bug: invalid direction")
 	}
-	return errors.New("wtf") // XXX fix code so thatw e can't get here
 }
 
 func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
