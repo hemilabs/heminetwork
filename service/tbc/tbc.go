@@ -1535,6 +1535,13 @@ func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 	return s.db.UpstreamStateId(ctx)
 }
 
+func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]byte) error {
+	log.Tracef("SetUpstreamStateId")
+	defer log.Tracef("SetUpstreamStateId exit")
+
+	return s.db.SetUpstreamStateId(ctx, upstreamStateId)
+}
+
 // BlockHeaderBest returns the headers for the best known blocks.
 func (s *Server) BlockHeaderBest(ctx context.Context) (uint64, *wire.BlockHeader, error) {
 	log.Tracef("BlockHeadersBest")

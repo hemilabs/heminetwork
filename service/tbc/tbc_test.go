@@ -1721,6 +1721,24 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 			"%x is correct (set to default)", stateIdRet[:])
 	}
 
+	updateStateWithoutModificationsId := [32]byte{0x4C, 0xA1, 0x62, 0xB6}
+	err = tbc.SetUpstreamStateId(ctx, &updateStateWithoutModificationsId)
+	if err != nil {
+		t.Errorf("unable to set upstream state id, err: %v", err)
+	}
+	stateIdRet, err = tbc.UpstreamStateId(ctx)
+	if err != nil {
+		t.Errorf("unable to get upstream state id, err: %v", err)
+	}
+	if !bytes.Equal(stateIdRet[:], updateStateWithoutModificationsId[:]) {
+		t.Errorf("after performing an explicit state id update without modifying header data state id should "+
+			"have been %x but got %x instead",
+			updateStateWithoutModificationsId[:], stateIdRet[:])
+	} else {
+		t.Logf("after performing an explicit state id update without modifying header data state, state id of "+
+			"%x is correct (set to default)", stateIdRet[:])
+	}
+
 	canonicalHeightAfter, canonicalAfter, err := tbc.BlockHeaderBest(ctx)
 	if err != nil {
 		t.Error(err)

@@ -238,6 +238,38 @@ func (l *ldb) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 	return &ret, nil
 }
 
+func (l *ldb) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]byte) error {
+	log.Tracef("SetUpstreamStateId")
+	defer log.Tracef("SetUpstreamStateId exit")
+
+	if upstreamStateId == nil {
+		return fmt.Errorf("cannot explicitly set upstream state id with a nil upstreamStateId")
+	}
+
+	// block headers
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
+	if err != nil {
+		return fmt.Errorf("block header open transaction: %w", err)
+	}
+	defer bhsDiscard()
+
+	bhBatch := new(leveldb.Batch)
+
+	bhBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
+
+	// Write block headers batch
+	if err = bhsTx.Write(bhBatch, nil); err != nil {
+		return fmt.Errorf("block header insert: %w", err)
+	}
+
+	// block headers commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("block header commit: %w", err)
+	}
+
+	return nil
+}
+
 // heightHashToKey generates a sortable key from height and hash. With this key
 // we can iterate over the block headers table and see what block records are
 // missing.
