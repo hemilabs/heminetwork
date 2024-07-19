@@ -1109,7 +1109,9 @@ func TestIndexNoFork(t *testing.T) {
 			t.Logf("node stop: %v", err)
 		}
 	}()
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
 			panic(err)
 		}
@@ -1134,7 +1136,10 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.ignoreUlimit = true
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
@@ -1302,7 +1307,9 @@ func TestIndexFork(t *testing.T) {
 			t.Logf("node stop: %v", err)
 		}
 	}()
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) {
 			panic(err)
 		}
@@ -1327,7 +1334,9 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.ignoreUlimit = true
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
