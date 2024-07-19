@@ -476,6 +476,10 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		// Exit if we processed the provided end hash
 		if endHash.IsEqual(&hash) {
 			last = hh
+			//last = &HashHeight{
+			//	Hash:   *bh.ParentHash(),
+			//	Height: bh.Height - 1,
+			//}
 			break
 		}
 
@@ -493,7 +497,9 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
 	}
-
+	if last == nil {
+		panic("qqq")
+	}
 	return blocksProcessed, last, nil
 }
 
@@ -538,6 +544,9 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 			utxosCached, time.Since(start))
 
 		// Record height in metadata
+		if last == nil {
+			panic("aaa")
+		}
 		err = s.db.MetadataPut(ctx, UtxoIndexHashKey, last.Hash[:])
 		if err != nil {
 			return fmt.Errorf("metadata utxo hash: %w", err)
