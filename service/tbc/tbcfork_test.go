@@ -1144,7 +1144,8 @@ func TestIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second)
+
+	time.Sleep(2 * time.Second)
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -1310,7 +1311,7 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
