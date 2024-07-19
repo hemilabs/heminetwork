@@ -622,7 +622,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("utxo indexer : %w", err)
+			return fmt.Errorf("utxo indexer: %w", err)
 		}
 		utxoHH = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,
@@ -994,7 +994,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("tx indexer : %w", err)
+			return fmt.Errorf("tx indexer: %w", err)
 		}
 		txHH = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,
@@ -1034,7 +1034,7 @@ func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("tx indexer : %w", err)
+			return 0, fmt.Errorf("tx indexer: %w", err)
 		}
 		utxoHH = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,
@@ -1053,7 +1053,7 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("tx indexer : %w", err)
+			return 0, fmt.Errorf("tx indexer: %w", err)
 		}
 		txHH = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,
