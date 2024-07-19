@@ -46,6 +46,7 @@ const (
 	verbose  = false
 
 	bhsCanonicalTipKey = "canonicaltip"
+	upstreamStateIdKey = "upstreamstateid"
 
 	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
@@ -217,6 +218,26 @@ func (l *ldb) BlockHeaderBest(ctx context.Context) (*tbcd.BlockHeader, error) {
 	return decodeBlockHeader(ebh), nil
 }
 
+func (l *ldb) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
+	log.Tracef("UpstreamStateId")
+	defer log.Tracef("UpstreamStateId exit")
+
+	bhsDB := l.pool[level.BlockHeadersDB]
+	// Get last record
+	upstreamStateId, err := bhsDB.Get([]byte(upstreamStateIdKey), nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError("upstream state id not found")
+		}
+		return nil, fmt.Errorf("upstream state id: %w", err)
+	}
+
+	var ret [32]byte
+	copy(ret[0:32], upstreamStateId[0:32])
+
+	return &ret, nil
+}
+
 // heightHashToKey generates a sortable key from height and hash. With this key
 // we can iterate over the block headers table and see what block records are
 // missing.
@@ -320,6 +341,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
+	bhBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
 
 	// Write height hash batch
 	if err = hhTx.Write(hhBatch, nil); err != nil {
@@ -461,7 +483,10 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 // an error. If this function returns an error, no changes have been made to
 // the underlying database state as all validity checks are done before db
 // modifications are applied.
-func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs [][80]byte, tipAfterRemoval [80]byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
+//
+// If an upstreamCursor is provided, it is updated atomically in the database
+// along with the state transition of removing the block headers.
+func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs [][80]byte, tipAfterRemoval [80]byte, upstreamStateId *[32]byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeadersRemove")
 	defer log.Tracef("BlockHeadersRemove exit")
 
@@ -663,6 +688,12 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs [][80]byte, tipAfterRe
 	tipEbh := encodeBlockHeader(tipAfterRemovalFromDb.Height, tipAfterRemoval, &tipAfterRemovalFromDb.Difficulty)
 	bhsBatch.Put([]byte(bhsCanonicalTipKey), tipEbh[:])
 
+	if upstreamStateId != nil {
+		bhsBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
+	} else {
+		bhsBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
+	}
+
 	// Get parent block from database
 	parentToRemovalSet, err := l.BlockHeaderByHash(ctx, headersParsed[0].PrevBlock[:])
 	if err != nil {
@@ -724,7 +755,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs [][80]byte, tipAfterRe
 // and always returns the canonical and last inserted blockheader, which may be
 // the same.
 // This call uses the database to prevent reentrancy.
-func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte, upstreamStateId *[32]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
@@ -899,6 +930,12 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		// Extend current best tip
 		bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 		it = tbcd.ITChainExtend
+	}
+
+	if upstreamStateId != nil {
+		bhsBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
+	} else {
+		bhsBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
 	}
 
 	// Write height hash batch

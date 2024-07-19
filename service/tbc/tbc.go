@@ -297,11 +297,10 @@ func NewServer(cfg *Config) (*Server, error) {
 	if len(cfg.Seeds) > 0 {
 		s.seeds = cfg.Seeds
 	}
-	
+
 	if !cfg.ExternalHeaderMode {
 		s.seeds = seeds
 	}
-
 
 	return s, nil
 }
@@ -1023,13 +1022,29 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	}
 }
 
-func (s *Server) RemoveExternalHeaders(ctx context.Context, headers [][80]byte, tipAfterRemoval [80]byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
+// RemoveExternalHeaders removes the provided headers from TBC's state knowledge,
+// setting the canonical tip to the provided tip. This method can only be
+// used when TBC is running in external header mode.
+//
+// The upstream state id is an optional identifier that the caller can use to track
+// some upstream state which represents TBC's own state once this removal is
+// performed. For example, op-geth uses this to track the hash of the EVM block
+// which cumulatively represents TBC's entire header knowledge after the removal
+// is processed, such that re-applying all Bitcoin Attributes Deposited transactions
+// in the EVM from genesis to that hash would result in TBC having this state.
+//
+// This upstream state id is tracked in TBC rather than upstream in the caller so
+// that updates to the upstreamCursor are always made atomically with the
+// corresponding TBC database state transition. Otherwise, an unexpected termination
+// between updating TBC state and recording the updated upstreamCursor could cause
+// state corruption.
+func (s *Server) RemoveExternalHeaders(ctx context.Context, headers [][80]byte, tipAfterRemoval [80]byte, upstreamStateId *[32]byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
 	if !s.cfg.ExternalHeaderMode {
 		return tbcd.RTInvalid, nil,
 			errors.New("RemoveExternalHeaders called on TBC instance that is not in external header mode")
 	}
 
-	it, por, err := s.db.BlockHeadersRemove(ctx, headers, tipAfterRemoval)
+	it, por, err := s.db.BlockHeadersRemove(ctx, headers, tipAfterRemoval, upstreamStateId)
 
 	// We aren't checking error because we want to pass everything from db upstream
 	if por != nil {
@@ -1042,7 +1057,7 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers [][80]byte, 
 	return it, por, err
 }
 
-func (s *Server) AddExternalHeaders(ctx context.Context, headers [][80]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
+func (s *Server) AddExternalHeaders(ctx context.Context, headers [][80]byte, upstreamStateId *[32]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
 	if !s.cfg.ExternalHeaderMode {
 		return tbcd.ITInvalid, nil, nil,
 			errors.New("AddExternalHeaders called on TBC instance that is not in external header mode")
@@ -1082,7 +1097,7 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers [][80]byte) (tb
 		}
 	}
 
-	it, cbh, lbh, err := s.db.BlockHeadersInsert(ctx, headers)
+	it, cbh, lbh, err := s.db.BlockHeadersInsert(ctx, headers, upstreamStateId)
 
 	// Adjust heights and difficulties of headers based off of our offset
 	// We aren't checking error because we want to pass everything from db upstream
@@ -1153,7 +1168,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	}
 
 	if len(headers) > 0 {
-		it, cbh, lbh, err := s.db.BlockHeadersInsert(ctx, headers)
+		it, cbh, lbh, err := s.db.BlockHeadersInsert(ctx, headers, nil)
 		if err != nil {
 			// This ends the race between peers during IBD.
 			if !errors.Is(database.ErrDuplicate, err) {
@@ -1508,6 +1523,16 @@ func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*b
 	}
 
 	return diff, nil
+}
+
+// UpstreamStateId fetches the last-stored upstream state id.
+// If the last header insertion/removal did not specify an upstream
+// state ID, this will return the default upstream state id.
+func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
+	log.Tracef("UpstreamStateId")
+	defer log.Tracef("UpstreamStateId exit")
+
+	return s.db.UpstreamStateId(ctx)
 }
 
 // BlockHeaderBest returns the headers for the best known blocks.
