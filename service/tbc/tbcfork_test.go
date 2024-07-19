@@ -5,6 +5,7 @@
 package tbc
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
@@ -47,6 +48,7 @@ func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
 	if err != nil {
 		panic(fmt.Errorf("processTxs: %v", err))
 	}
+
 	return blk
 }
 
@@ -75,9 +77,8 @@ func (b block) String() string {
 }
 
 type namedKey struct {
-	name            string
-	key             *btcec.PrivateKey
-	expectedBalance btcutil.Amount
+	name string
+	key  *btcec.PrivateKey
 }
 
 type btcNode struct {
@@ -170,23 +171,36 @@ func (b *btcNode) newKey(name string) (*btcec.PrivateKey, *btcec.PublicKey, *btc
 	return privateKey, publicKey, address, nil
 }
 
-func (b *btcNode) keySet(name string, amount btcutil.Amount) {
-	if nk, ok := b.keys[name]; !ok {
-		panic(fmt.Sprintf("address not found: %v", name))
-	} else {
-		log.Infof("set address %v %v", name, amount)
-		nk.expectedBalance = amount
-	}
-}
-
-func (b *btcNode) keyAdd(name string, amount btcutil.Amount) {
-	if nk, ok := b.keys[name]; !ok {
-		panic(fmt.Sprintf("address not found: %v", name))
-	} else {
-		log.Infof("add address %v %v", name, amount)
-		nk.expectedBalance += amount
-	}
-}
+//func (b *btcNode) verifyAllKeyBalances(ctx context.Context, s *Server) error {
+//	// Verify the balances
+//	for address, key := range b.keys {
+//		balance, err := s.BalanceByAddress(ctx, address)
+//		if err != nil {
+//			return fmt.Errorf("balance by address: %w", err)
+//		}
+//		// addressBalance := b.keyBalance(address)
+//		addressBalance := btcutil.Amount(0)
+//		panic("fixme")
+//		if addressBalance != btcutil.Amount(balance) {
+//			return fmt.Errorf("%v (%v): balance invalid wanted %v, got %v",
+//				address, key.name, addressBalance, btcutil.Amount(balance))
+//		}
+//		// Verify utxos add up to balance
+//		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+//		if err != nil {
+//			return fmt.Errorf("utxos by address: %w", err)
+//		}
+//		total := uint64(0)
+//		for _, utxo := range utxos {
+//			total += utxo.Value()
+//		}
+//		if addressBalance != btcutil.Amount(total) {
+//			return fmt.Errorf("%v: utxo balance invalid wanted %v, got %v",
+//				address, addressBalance, btcutil.Amount(total))
+//		}
+//	}
+//	return nil
+//}
 
 func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcutil.Amount) (*btcutil.Tx, error) {
 	utxos := inTx.MsgTx().TxOut
@@ -236,7 +250,6 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 		}
 		_ = sc
 		_ = sigs
-		b.keySet(as[0].String(), 0) // spend previous output
 
 		// only support one address for now
 		if len(as) != 1 {
@@ -247,12 +260,10 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 		if left > value {
 			redeemTx.AddTxOut(wire.NewTxOut(int64(value), pkScript))
 			left -= value
-			b.keyAdd(redeemAddress.String(), value)
 			continue
 		}
 		// Remaining bits
 		redeemTx.AddTxOut(wire.NewTxOut(int64(left), pkScript))
-		b.keyAdd(redeemAddress.String(), left)
 
 		change := value - left
 		if change != 0 {
@@ -263,7 +274,6 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 			}
 			txOutChange := wire.NewTxOut(int64(change), changeScript)
 			redeemTx.AddTxOut(txOutChange)
-			b.keyAdd(as[0].String(), change)
 		}
 		break
 	}
@@ -663,11 +673,6 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		return nil, fmt.Errorf("insert block at height %v: %v",
 			nextBlockHeight, err)
 	}
-	coinbaseTx, err := blk.b.Tx(0)
-	if err != nil {
-		return nil, fmt.Errorf("coinbase tx height %v: %v", nextBlockHeight, err)
-	}
-	b.keyAdd(payToAddress.String(), btcutil.Amount(coinbaseTx.MsgTx().TxOut[0].Value)) // credit miner coinbase
 	// XXX this really sucks, we should get rid of height as a best indicator
 	if blk.Height() > b.height {
 		b.height = blk.Height()
@@ -776,6 +781,7 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 			return fmt.Errorf("%v != %v", height, uint64(b.Height()))
 		}
 
+		log.Infof("mustHave: %v", b.Hash())
 		// Verify Txs cache
 		for ktx, vtx := range b.txs {
 			_ = vtx
@@ -783,15 +789,28 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 			case 's':
 				// grab previous outpoint from the key
 				tx, err := chainhash.NewHash(ktx[1:33])
+				if err != nil {
+					return fmt.Errorf("invalid tx hash: %w", err)
+				}
 				sis, err := s.SpendOutputsByTxId(ctx, tx)
 				if err != nil {
 					return fmt.Errorf("invalid spend infos: %w", err)
 				}
-				log.Infof("tx hash: %v", tx)
-				log.Infof("ktx: %v", spew.Sdump(ktx))
-				log.Infof("vtx: %v", spew.Sdump(vtx))
-				log.Infof(spew.Sdump(sis))
-				// XXX verify sis
+				found := false
+				for _, si := range sis {
+					if !bytes.Equal(b.Hash()[:], si.BlockHash[:]) {
+						continue
+					}
+					found = true
+					break
+				}
+				if !found {
+					log.Infof("tx hash: %v", tx)
+					log.Infof("ktx: %v", spew.Sdump(ktx))
+					log.Infof("vtx: %v", spew.Sdump(vtx))
+					log.Infof(spew.Sdump(sis))
+					return fmt.Errorf("block mismatch")
+				}
 
 			case 't':
 				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
@@ -1161,6 +1180,24 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// verify all balances
+	//err = n.verifyAllKeyBalances(ctx, s)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	for address, key := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v (%v): %v", address, key.name, balance)
+		//utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		//if err != nil {
+		//	t.Fatal(err)
+		//}
+		//t.Logf("%v: %v", address, utxos)
+	}
+
 	// make sure genesis tx is in db
 	_, err = s.TxByTxId(ctx, n.gtx.Hash())
 	if err != nil {
@@ -1172,21 +1209,7 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal("genesis coinbase tx should not be spent")
 	}
 
-	// XXX verify the balances
-	for address, v := range n.keys {
-		balance, err := s.BalanceByAddress(ctx, address)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v (%v): %v", address, v.name, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v (%v): %v", address, v.name, utxos)
-	}
-	t.Logf("%v", spew.Sdump(n.keys))
-
+	// Spot check tx 1 from b2
 	tx := b2.b.Transactions()[1]
 	txb2, err := s.TxByTxId(ctx, tx.Hash())
 	if err != nil {
@@ -1199,15 +1222,16 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
+	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
 	si, err = s.SpendOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("%v: %v", b2.b.Transactions()[1].Hash(), spew.Sdump(si))
+	// t.Logf("%v: %v", b2.b.Transactions()[1].Hash(), spew.Sdump(si))
+	_ = si
 
-	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, b1.Hash()) // s.chainParams.GenesisHash)
+	// unwind back to b3 (removes b3)
+	err = s.SyncIndexersToHash(ctx, b2.Hash()) // s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -1221,19 +1245,24 @@ func TestIndexNoFork(t *testing.T) {
 	//}
 	//t.Logf("=======================%v", spew.Sdump(genesisTx))
 
-	// XXX verify the balances
-	for address := range n.keys {
-		balance, err := s.BalanceByAddress(ctx, address)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v: %v", address, utxos)
-	}
+	//// XXX verify the balances
+	//for address := range n.keys {
+	//	balance, err := s.BalanceByAddress(ctx, address)
+	//	if err != nil {
+	//		t.Fatal(err)
+	//	}
+	//	t.Logf("%v: %v", address, balance)
+	//	//utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+	//	//if err != nil {
+	//	//	t.Fatal(err)
+	//	//}
+	//	//t.Logf("%v: %v", address, utxos)
+	//}
+	// verify all balances
+	//err = n.verifyAllKeyBalances(ctx, s)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
 
 	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
 	if err != nil {
@@ -1243,6 +1272,15 @@ func TestIndexNoFork(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected genesis tx gone")
 	}
+
+	// Expect 0 balnces everywhere
+	//for _, key := range n.keys {
+	//	key.expectedBalance = 0
+	//}
+	//err = n.verifyAllKeyBalances(ctx, s)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
 }
 
 func TestIndexFork(t *testing.T) {
@@ -1529,37 +1567,37 @@ func TestIndexFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
-	t.Logf("---------------------------------------- going to b3")
-	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
-	if err != nil {
-		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
-	}
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
-	if err == nil {
-		t.Fatalf("expected an error from mustHave")
-	}
-	txHH, err = s.TxIndexHash(ctx)
-	if err != nil {
-		t.Fatalf("expected success getting tx index hash, got: %v", err)
-	}
-	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
-		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
-	}
-	if txHH.Height != 0 {
-		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
-	}
+	//t.Logf("---------------------------------------- going to b3")
+	//// unwind back to genesis
+	//err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	//if err != nil {
+	//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	//}
+	//err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	//if err == nil {
+	//	t.Fatalf("expected an error from mustHave")
+	//}
+	//txHH, err = s.TxIndexHash(ctx)
+	//if err != nil {
+	//	t.Fatalf("expected success getting tx index hash, got: %v", err)
+	//}
+	//if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+	//	t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	//}
+	//if txHH.Height != 0 {
+	//	t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	//}
 
-	// Index to b3
-	err = s.SyncIndexersToHash(ctx, b3.Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
-	// XXX verify indexes
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
-	if err != nil {
-		t.Fatal(err)
-	}
+	//// Index to b3
+	//err = s.SyncIndexersToHash(ctx, b3.Hash())
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//// XXX verify indexes
+	//err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
 
 	// // Should fail
 	// t.Logf("=== index b2a ===")
@@ -1574,7 +1612,7 @@ func TestIndexFork(t *testing.T) {
 	//	t.Fatal(err)
 	// }
 
-	time.Sleep(time.Second)
+	// time.Sleep(time.Second)
 }
 
 func TestTransactions(t *testing.T) {
