@@ -89,6 +89,7 @@ type Database interface {
 
 	// Upstream state id
 	UpstreamStateId(ctx context.Context) (*[32]byte, error)
+	SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]byte) error
 
 	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
