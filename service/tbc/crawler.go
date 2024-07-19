@@ -163,43 +163,37 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 		return nil, 0, fmt.Errorf("new hash: %w", err)
 	}
 
-	// Find block hashes
+	// Find block haehes
 	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
 	if err != nil {
 		return nil, 0, fmt.Errorf("blocks by txid: %w", err)
 	}
-
 	// Note that we may have more than one block hash however since the
 	// TxID is generated from the actual Tx the script hash and value
-	// should be identical, and thus we can return the values from the first
+	// should be identical and thus we can return the values from the first
 	// block found.
 	if len(blockHashes) == 0 {
-		return nil, 0, errors.New("script value: no block hashes")
+		return nil, 0, fmt.Errorf("script value: no block hashes")
 	}
-
 	blk, err := s.db.BlockByHash(ctx, blockHashes[0][:])
 	if err != nil {
 		return nil, 0, fmt.Errorf("block by hash: %w", err)
 	}
-
 	b, err := btcutil.NewBlockFromBytes(blk.Block)
 	if err != nil {
 		return nil, 0, fmt.Errorf("new block: %w", err)
 	}
-
 	for _, tx := range b.Transactions() {
 		if !tx.Hash().IsEqual(opHash) {
 			continue
 		}
-
 		txOuts := tx.MsgTx().TxOut
 		if len(txOuts) < int(txIndex) {
 			return nil, 0, fmt.Errorf("tx index invalid: %v", op)
 		}
-		txOut := txOuts[txIndex]
-		return txOut.PkScript, txOut.Value, nil
+		tx := txOuts[txIndex]
+		return tx.PkScript, tx.Value, nil
 	}
-
 	return nil, 0, fmt.Errorf("tx id not found: %v", op)
 }
 
@@ -213,17 +207,14 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 				// Skip coinbase inputs
 				break
 			}
-
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			pkScript, value, err := s.scriptValue(ctx, op)
 			if err != nil {
 				return fmt.Errorf("script value: %v", err)
 			}
-
-			log.Infof("------ %v  %v", op, btcutil.Amount(value))
 			if _, ok := utxos[op]; ok {
-				return errors.New("collision")
+				return fmt.Errorf("impossible collisioni: %v", op)
 			}
 			utxos[op] = tbcd.NewCacheOutput(sha256.Sum256(pkScript),
 				uint64(value), txIn.PreviousOutPoint.Index)
@@ -236,17 +227,13 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
-
 			op := tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))
 			if _, ok := utxos[op]; ok {
 				delete(utxos, op)
-				log.Infof("------delete %v  %v", op, btcutil.Amount(txOut.Value))
-				continue
+			} else {
+				utxos[op] = tbcd.NewDeleteCacheOutput(sha256.Sum256(txOut.PkScript),
+					op.TxIndex())
 			}
-
-			log.Infof("------DELETE %v  %v", op, btcutil.Amount(txOut.Value))
-			utxos[op] = tbcd.NewDeleteCacheOutput(sha256.Sum256(txOut.PkScript),
-				op.TxIndex())
 		}
 	}
 
@@ -265,22 +252,20 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 		log.Debugf("db missing pkscript: %v", op)
 		return
 	}
-
 	s.mtx.Lock()
 	utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
 	s.mtx.Unlock()
 }
 
 func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
-	var w sync.WaitGroup
-
-	for _, tx := range b.Transactions() {
+	w := new(sync.WaitGroup)
+	txs := b.Transactions()
+	for _, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if blockchain.IsCoinBase(tx) {
 				// Skip coinbase inputs
 				break
 			}
-
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			s.mtx.Lock()
@@ -292,17 +277,18 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbc
 
 			// utxo not found, retrieve pkscript from database.
 			w.Add(1)
-			go s.fetchOP(ctx, &w, op, utxos)
+			go s.fetchOP(ctx, w, op, utxos)
 		}
 	}
 
 	w.Wait()
+
 	return nil
 }
 
 // indexUtxosInBlocks indexes utxos from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processed.
+// the last hash it has processedd.
 func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
 	log.Tracef("indexUtxoBlocks")
 	defer log.Tracef("indexUtxoBlocks exit")
@@ -408,8 +394,9 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 }
 
 // unindexUtxosInBlocks unindexes utxos from the last processed block until the
-// provided end hash, inclusive. It returns the number of blocks processed and
+// provided end hash, exclusive. It returns the number of blocks processed and
 // the last hash it has processedd.
+// Note that by walking backwards the terminal condition MUST BE EXCLUSIVE!!
 func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
 	log.Tracef("unindexUtxoBlocks")
 	defer log.Tracef("unindexUtxoBlocks exit")
@@ -443,6 +430,12 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
 		// Index block
 		eb, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
@@ -473,16 +466,6 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			break
 		}
 
-		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
-			last = hh
-			//last = &HashHeight{
-			//	Hash:   *bh.ParentHash(),
-			//	Height: bh.Height - 1,
-			//}
-			break
-		}
-
 		// Move to previous block
 		height := bh.Height - 1
 		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash()[:])
@@ -497,9 +480,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
 	}
-	if last == nil {
-		panic("qqq")
-	}
+
 	return blocksProcessed, last, nil
 }
 
@@ -536,7 +517,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 			return fmt.Errorf("block utxo update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory usage.
+		// memory preassure.
 		logMemStats()
 		runtime.GC()
 
@@ -544,9 +525,6 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 			utxosCached, time.Since(start))
 
 		// Record height in metadata
-		if last == nil {
-			panic("aaa")
-		}
 		err = s.db.MetadataPut(ctx, UtxoIndexHashKey, last.Hash[:])
 		if err != nil {
 			return fmt.Errorf("metadata utxo hash: %w", err)
@@ -591,7 +569,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory usage.
+		// memory preassure.
 		logMemStats()
 		runtime.GC()
 
@@ -631,7 +609,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("utxo indexer: %w", err)
+			return fmt.Errorf("utxo indexer : %w", err)
 		}
 		utxoHH = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,
@@ -646,7 +624,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	}
 	direction, err := s.UtxoIndexIsLinear(ctx, endHash)
 	if err != nil {
-		return fmt.Errorf("UtxoIndexIsLinear: %w", err)
+		return fmt.Errorf("TxIndexIsLinear: %w", err)
 	}
 	switch direction {
 	case 1:
@@ -656,10 +634,8 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	case 0:
 		// XXX dedup UtxoIndexIsLinear with the above code so that it isn't so awkward.
 		return nil // because we call TxIndexIsLinear we know it's the same block
-	default:
-		// XXX: clean up code so this isn't needed.
-		panic("bug: invalid direction")
 	}
+	return errors.New("wtf") // XXX fix code so thatw e can't get here
 }
 
 func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
@@ -768,19 +744,16 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-
 		index, err := s.findCanonicalHash(ctx, endHash, bhs)
 		if err != nil {
 			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
 				height, err)
 		}
-
 		// Verify it connects to parent
 		if !hash.IsEqual(bhs[index].ParentHash()) {
 			return 0, last, fmt.Errorf("%v does not connect to: %v",
 				bhs[index], hash)
 		}
-
 		hh.Hash = *bhs[index].BlockHash()
 		hh.Height = bhs[index].Height
 	}
@@ -819,6 +792,13 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		log.Infof("unindexing txs: %v", hh)
 
 		hash := hh.Hash
+
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
 		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
@@ -851,12 +831,6 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
 			last = hh
 			// Flush
-			break
-		}
-
-		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
-			last = hh
 			break
 		}
 
@@ -910,9 +884,8 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 		if err = s.db.BlockTxUpdate(ctx, -1, txs); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
-
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory usage.
+		// memory preassure.
 		logMemStats()
 		runtime.GC()
 
@@ -963,9 +936,8 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 		if err = s.db.BlockTxUpdate(ctx, 1, txs); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
-
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory usage.
+		// memory preassure.
 		logMemStats()
 		runtime.GC()
 
@@ -981,6 +953,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
+
 	}
 
 	return nil
@@ -1005,7 +978,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("tx indexer: %w", err)
+			return fmt.Errorf("tx indexer : %w", err)
 		}
 		txHH = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,
@@ -1018,7 +991,6 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
-
 	direction, err := s.TxIndexIsLinear(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("TxIndexIsLinear: %w", err)
@@ -1031,10 +1003,8 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	case 0:
 		// XXX dedup TxIndexIsLinear with the above code so that it isn't so awkward.
 		return nil // because we call TxIndexIsLinear we know it's the same block
-	default:
-		// XXX: clean up code so this isn't needed.
-		panic("bug: invalid direction")
 	}
+	return errors.New("wtf") // XXX fix code so thatw e can't get here
 }
 
 func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
@@ -1045,7 +1015,7 @@ func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("tx indexer: %w", err)
+			return 0, fmt.Errorf("tx indexer : %w", err)
 		}
 		utxoHH = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,
@@ -1064,7 +1034,7 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("tx indexer: %w", err)
+			return 0, fmt.Errorf("tx indexer : %w", err)
 		}
 		txHH = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,

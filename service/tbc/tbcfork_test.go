@@ -1243,69 +1243,44 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal("genesis coinbase tx should not be spent")
 	}
 
-	//// Spot check tx 1 from b2
-	//tx := b2.b.Transactions()[1]
-	//txb2, err := s.TxByTxId(ctx, tx.Hash())
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
-	//	t.Fatal("hash not equal")
-	//}
-	//si, err := s.SpendOutputsByTxId(ctx, b1.b.Transactions()[0].Hash())
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
-	//si, err = s.SpendOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//// t.Logf("%v: %v", b2.b.Transactions()[1].Hash(), spew.Sdump(si))
-	//_ = si
+	// Spot check tx 1 from b2
+	tx := b2.b.Transactions()[1]
+	txb2, err := s.TxByTxId(ctx, tx.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
+		t.Fatal("hash not equal")
+	}
+	si, err := s.SpendOutputsByTxId(ctx, b1.b.Transactions()[0].Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
+	si, err = s.SpendOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t.Logf("%v: %v", b2.b.Transactions()[1].Hash(), spew.Sdump(si))
+	_ = si
 
 	// unwind back to b3 (removes b3 and b2)
-	skipBug := true // XXX
-	skipBug = false
-	if !skipBug {
-		// XXX BUG unwiding first to b2 and then to genesis fails to unindex something
-		// This only happens when ending on b2, when ending on b3 and b1 it works.
-
-		// going from b3 and then to b1 and then back to b2 does work
-		// err = s.SyncIndexersToHash(ctx, b3.Hash())
-		// if err != nil {
-		//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
-		// }
-		// err = s.SyncIndexersToHash(ctx, b1.Hash())
-		// if err != nil {
-		//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
-		// }
-		log.Infof("BUGBUGBUGBUG")
-		err = s.SyncIndexersToHash(ctx, b2.Hash())
-		if err != nil {
-			t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
-		}
-		//err = mustHave(ctx, s, n.genesis, b1)
-		//if err != nil {
-		//	t.Fatalf("expected an error from mustHave: %v", err)
-		//}
-	} else {
-		log.Infof("XXX max we need to debug this")
+	err = s.SyncIndexersToHash(ctx, b2.Hash())
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
-	// err = mustNotHave(ctx, s, b2, b3)
-	// if err == nil {
-	//	t.Fatalf("expected an error from mustHave")
-	// }
-
-	// XXX Verify balances at b1
+	err = mustHave(ctx, s, n.genesis, b1)
+	if err != nil {
+		t.Fatalf("expected an error from mustHave: %v", err)
+	}
 
 	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = s.TxByTxId(ctx, n.gtx.Hash())
-	if err == nil {
-		t.Fatal("expected genesis tx gone")
+	if err != nil {
+		t.Fatal("expected genesis")
 	}
 
 	// Expect 0 balances everywhere
@@ -1613,11 +1588,23 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// t.Logf("---------------------------------------- going to b3")
-	// // unwind back to genesis
-	// err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
-	// if err != nil {
-	//	t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
-	// }
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("xxxx %v", err)
+	}
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
 	// err = mustHave(ctx, s, n.genesis, b1, b2, b3)
 	// if err == nil {
 	//	t.Fatalf("expected an error from mustHave")
