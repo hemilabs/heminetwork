@@ -292,7 +292,7 @@ func TestCreateTxVersion2(t *testing.T) {
 
 	mockPayToScript := []byte{}
 
-	btx, err := createTx(&l2Keystone, 1, &utxo, mockPayToScript, 1)
+	btx, err := createTx(&l2Keystone, 1, &utxo, mockPayToScript, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestCreateTxLockTime(t *testing.T) {
 
 	var height uint64 = 99
 
-	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, 1)
+	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestCreateTxTxIn(t *testing.T) {
 
 	var feeAmount int64 = 10
 
-	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, feeAmount)
+	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, feeAmount, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,22 +366,19 @@ func TestCreateTxTxOutPayTo(t *testing.T) {
 		Index: 5,
 		Value: 10,
 	}
-
 	copy(utxo.Hash, []byte{1, 2, 3})
 
 	mockPayToScript := []byte{4, 5, 6}
+	height := uint64(99)
+	feeAmount := int64(10)
 
-	var height uint64 = 99
-
-	var feeAmount int64 = 10
-
-	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, feeAmount)
+	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, feeAmount, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	expectexTxOut := btcwire.NewTxOut(utxo.Value-feeAmount, mockPayToScript)
-	diff := deep.Equal(expectexTxOut, btx.TxOut[0])
+	wantTxOut := btcwire.NewTxOut(utxo.Value-feeAmount, mockPayToScript)
+	diff := deep.Equal(btx.TxOut[0], wantTxOut)
 	if len(diff) != 0 {
 		t.Fatalf("got unexpected diff %s", diff)
 	}
@@ -404,7 +401,7 @@ func TestCreateTxTxOutPopTx(t *testing.T) {
 
 	var feeAmount int64 = 10
 
-	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, feeAmount)
+	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, feeAmount, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,6 +497,7 @@ func TestSignTx(t *testing.T) {
 				&testTableItem.utxo,
 				testTableItem.payToScript,
 				testTableItem.feeAmount,
+				0,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -566,7 +564,7 @@ func TestSignTxDifferingPubPrivKeys(t *testing.T) {
 
 	var feeAmount int64 = 10
 
-	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, feeAmount)
+	btx, err := createTx(&l2Keystone, height, &utxo, mockPayToScript, feeAmount, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
