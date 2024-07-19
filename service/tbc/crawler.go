@@ -163,11 +163,12 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 		return nil, 0, fmt.Errorf("new hash: %w", err)
 	}
 
-	// Find block haehes
+	// Find block hashes
 	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
 	if err != nil {
 		return nil, 0, fmt.Errorf("blocks by txid: %w", err)
 	}
+
 	// Note that we may have more than one block hash however since the
 	// TxID is generated from the actual Tx the script hash and value
 	// should be identical, and thus we can return the values from the first
@@ -175,25 +176,30 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 	if len(blockHashes) == 0 {
 		return nil, 0, errors.New("script value: no block hashes")
 	}
+
 	blk, err := s.db.BlockByHash(ctx, blockHashes[0][:])
 	if err != nil {
 		return nil, 0, fmt.Errorf("block by hash: %w", err)
 	}
+
 	b, err := btcutil.NewBlockFromBytes(blk.Block)
 	if err != nil {
 		return nil, 0, fmt.Errorf("new block: %w", err)
 	}
+
 	for _, tx := range b.Transactions() {
 		if !tx.Hash().IsEqual(opHash) {
 			continue
 		}
+
 		txOuts := tx.MsgTx().TxOut
 		if len(txOuts) < int(txIndex) {
 			return nil, 0, fmt.Errorf("tx index invalid: %v", op)
 		}
-		tx := txOuts[txIndex]
-		return tx.PkScript, tx.Value, nil
+		txOut := txOuts[txIndex]
+		return txOut.PkScript, txOut.Value, nil
 	}
+
 	return nil, 0, fmt.Errorf("tx id not found: %v", op)
 }
 
@@ -207,12 +213,14 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 				// Skip coinbase inputs
 				break
 			}
+
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			pkScript, value, err := s.scriptValue(ctx, op)
 			if err != nil {
 				return fmt.Errorf("script value: %v", err)
 			}
+
 			log.Infof("------ %v  %v", op, btcutil.Amount(value))
 			if _, ok := utxos[op]; ok {
 				return errors.New("collision")
@@ -228,15 +236,17 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
+
 			op := tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))
 			if _, ok := utxos[op]; ok {
 				delete(utxos, op)
 				log.Infof("------delete %v  %v", op, btcutil.Amount(txOut.Value))
-			} else {
-				log.Infof("------DELETE %v  %v", op, btcutil.Amount(txOut.Value))
-				utxos[op] = tbcd.NewDeleteCacheOutput(sha256.Sum256(txOut.PkScript),
-					op.TxIndex())
+				continue
 			}
+
+			log.Infof("------DELETE %v  %v", op, btcutil.Amount(txOut.Value))
+			utxos[op] = tbcd.NewDeleteCacheOutput(sha256.Sum256(txOut.PkScript),
+				op.TxIndex())
 		}
 	}
 
@@ -255,20 +265,22 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 		log.Debugf("db missing pkscript: %v", op)
 		return
 	}
+
 	s.mtx.Lock()
 	utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
 	s.mtx.Unlock()
 }
 
 func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
-	w := new(sync.WaitGroup)
-	txs := b.Transactions()
-	for _, tx := range txs {
+	var w sync.WaitGroup
+
+	for _, tx := range b.Transactions() {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if blockchain.IsCoinBase(tx) {
 				// Skip coinbase inputs
 				break
 			}
+
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			s.mtx.Lock()
@@ -280,18 +292,17 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbc
 
 			// utxo not found, retrieve pkscript from database.
 			w.Add(1)
-			go s.fetchOP(ctx, w, op, utxos)
+			go s.fetchOP(ctx, &w, op, utxos)
 		}
 	}
 
 	w.Wait()
-
 	return nil
 }
 
 // indexUtxosInBlocks indexes utxos from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processedd.
+// the last hash it has processed.
 func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
 	log.Tracef("indexUtxoBlocks")
 	defer log.Tracef("indexUtxoBlocks exit")
@@ -519,7 +530,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 			return fmt.Errorf("block utxo update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory usage.
 		logMemStats()
 		runtime.GC()
 
@@ -571,7 +582,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory usage.
 		logMemStats()
 		runtime.GC()
 
@@ -746,16 +757,19 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
+
 		index, err := s.findCanonicalHash(ctx, endHash, bhs)
 		if err != nil {
 			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
 				height, err)
 		}
+
 		// Verify it connects to parent
 		if !hash.IsEqual(bhs[index].ParentHash()) {
 			return 0, last, fmt.Errorf("%v does not connect to: %v",
 				bhs[index], hash)
 		}
+
 		hh.Hash = *bhs[index].BlockHash()
 		hh.Height = bhs[index].Height
 	}
@@ -885,8 +899,9 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 		if err = s.db.BlockTxUpdate(ctx, -1, txs); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
+
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory usage.
 		logMemStats()
 		runtime.GC()
 
@@ -937,8 +952,9 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 		if err = s.db.BlockTxUpdate(ctx, 1, txs); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
+
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory usage.
 		logMemStats()
 		runtime.GC()
 
@@ -954,7 +970,6 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
-
 	}
 
 	return nil
