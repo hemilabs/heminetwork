@@ -1007,6 +1007,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
+
 	direction, err := s.TxIndexIsLinear(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("TxIndexIsLinear: %w", err)
@@ -1019,8 +1020,10 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	case 0:
 		// XXX dedup TxIndexIsLinear with the above code so that it isn't so awkward.
 		return nil // because we call TxIndexIsLinear we know it's the same block
+	default:
+		// XXX: clean up code so this isn't needed.
+		panic("bug: invalid direction")
 	}
-	return errors.New("wtf") // XXX fix code so thatw e can't get here
 }
 
 func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
