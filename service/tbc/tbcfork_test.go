@@ -14,7 +14,6 @@ import (
 	"math/big"
 	"net"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -100,6 +99,8 @@ type btcNode struct {
 	address        *btcutil.AddressPubKeyHash
 
 	keys map[string]*namedKey // keys used to sign various tx'
+
+	listener net.Listener
 }
 
 func newFakeNode(t *testing.T, port string) (*btcNode, error) {
@@ -725,39 +726,12 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 		return nil, err
 	}
 
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	return blk, nil
 }
 
-func waitForPort(ctx context.Context, port string) error {
-	for {
-		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.Canceled) {
-				return nil
-			}
-			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-			conn, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", port), 100*time.Millisecond)
-			if err != nil && !errors.Is(err, syscall.ECONNREFUSED) {
-				return err
-			}
-
-			if conn != nil {
-				conn.Close()
-				continue
-			}
-
-			return nil
-		}
-	}
-}
-
 func (b *btcNode) Run(ctx context.Context) error {
-	if err := waitForPort(ctx, b.port); err != nil {
-		return err
-	}
 	lc := &net.ListenConfig{}
 	l, err := lc.Listen(ctx, "tcp", "localhost:"+b.port)
 	if err != nil {
@@ -769,6 +743,9 @@ func (b *btcNode) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+
+	b.listener = l
+
 	return b.handleRPC(ctx, conn)
 }
 
@@ -780,7 +757,12 @@ func (b *btcNode) Stop() error {
 	if p == nil {
 		return nil
 	}
-	return p.conn.Close()
+
+	if err := p.conn.Close(); err != nil {
+		return err
+	}
+
+	return b.listener.Close()
 }
 
 func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
@@ -865,10 +847,8 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 
 func TestFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
 	defer func() {
 		cancel()
-		wg.Wait()
 	}()
 
 	n, err := newFakeNode(t, "18444") // TODO: should use random free port
@@ -876,18 +856,14 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// n.le = true
-	wg.Add(1)
 	defer func() {
-		wg.Done()
 		err := n.Stop()
 		if err != nil {
 			t.Logf("node stop: %v", err)
 		}
 	}()
 
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
@@ -926,10 +902,7 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.ignoreUlimit = true
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
-
 		log.Infof("s run")
 		defer log.Infof("s run done")
 		err := s.Run(ctx)
@@ -1123,10 +1096,8 @@ func TestWork(t *testing.T) {
 
 func TestIndexNoFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
 	defer func() {
 		cancel()
-		wg.Wait()
 	}()
 
 	n, err := newFakeNode(t, "18444")
@@ -1134,17 +1105,14 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wg.Add(1)
 	defer func() {
-		defer wg.Done()
 		err := n.Stop()
 		if err != nil {
 			t.Logf("node stop: %v", err)
 		}
 	}()
-	wg.Add(1)
+
 	go func() {
-		defer wg.Done()
 		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
@@ -1170,9 +1138,7 @@ func TestIndexNoFork(t *testing.T) {
 	}
 	s.ignoreUlimit = true
 
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
@@ -1299,27 +1265,21 @@ func TestIndexNoFork(t *testing.T) {
 
 func TestIndexFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
 	defer func() {
 		cancel()
-		wg.Wait()
 	}()
 
 	n, err := newFakeNode(t, "18444")
 	if err != nil {
 		t.Fatal(err)
 	}
-	wg.Add(1)
 	defer func() {
-		defer wg.Done()
 		err := n.Stop()
 		if err != nil {
 			t.Logf("node stop: %v", err)
 		}
 	}()
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
@@ -1344,9 +1304,7 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.ignoreUlimit = true
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
