@@ -213,6 +213,10 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 			if err != nil {
 				return fmt.Errorf("script value: %v", err)
 			}
+			log.Infof("------ %v  %v", op, btcutil.Amount(value))
+			if _, ok := utxos[op]; ok {
+				return fmt.Errorf("collision")
+			}
 			utxos[op] = tbcd.NewCacheOutput(sha256.Sum256(pkScript),
 				uint64(value), txIn.PreviousOutPoint.Index)
 		}
@@ -227,7 +231,9 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 			op := tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))
 			if _, ok := utxos[op]; ok {
 				delete(utxos, op)
+				log.Infof("------delete %v  %v", op, btcutil.Amount(txOut.Value))
 			} else {
+				log.Infof("------DELETE %v  %v", op, btcutil.Amount(txOut.Value))
 				utxos[op] = tbcd.NewDeleteCacheOutput(sha256.Sum256(txOut.PkScript),
 					op.TxIndex())
 			}
