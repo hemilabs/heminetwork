@@ -15,7 +15,6 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/davecgh/go-spew/spew"
@@ -69,7 +68,7 @@ func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
 	return s.mdHashHeight(ctx, TxIndexHashKey)
 }
 
-// findCanonicalHash determines which hash is on the canonical chain.by walking
+// findCanonicalHash determines which hash is on the canonical chain by walking
 // back the chain from the provided end point. It returns the index in bhs of
 // the correct hash. On failure it returns -1 DELIBERATELY to crash the caller
 // if error is not checked.
@@ -122,7 +121,7 @@ func logMemStats() {
 		mem.NumGC)
 }
 
-func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	for _, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if blockchain.IsCoinBase(tx) {
@@ -132,7 +131,6 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			if utxo, ok := utxos[op]; ok && !utxo.IsDelete() {
-				// log.Infof("deleting utxo %s value %d", hex.EncodeToString(utxo.ScriptHashSlice()), utxo.Value())
 				delete(utxos, op)
 				continue
 			}
@@ -141,17 +139,12 @@ func processUtxos(cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoin
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
-
-			// scriptHash := sha256.Sum256(txOut.PkScript)
-			// log.Infof("adding utxo to script hash %s value %d", hex.EncodeToString(scriptHash[:]), uint64(txOut.Value))
-
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
 				sha256.Sum256(txOut.PkScript),
 				uint64(txOut.Value),
 				uint32(outIndex))
 		}
 	}
-	// log.Infof("%v", spew.Sdump(utxos))
 	return nil
 }
 
@@ -163,7 +156,7 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 		return nil, 0, fmt.Errorf("new hash: %w", err)
 	}
 
-	// Find block haehes
+	// Find block hashes
 	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
 	if err != nil {
 		return nil, 0, fmt.Errorf("blocks by txid: %w", err)
@@ -173,7 +166,7 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 	// should be identical and thus we can return the values from the first
 	// block found.
 	if len(blockHashes) == 0 {
-		return nil, 0, fmt.Errorf("script value: no block hashes")
+		return nil, 0, errors.New("script value: no block hashes")
 	}
 	blk, err := s.db.BlockByHash(ctx, blockHashes[0][:])
 	if err != nil {
@@ -194,10 +187,11 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 		tx := txOuts[txIndex]
 		return tx.PkScript, tx.Value, nil
 	}
+
 	return nil, 0, fmt.Errorf("tx id not found: %v", op)
 }
 
-func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	// Walk backwards through the txs
 	for idx := len(txs) - 1; idx >= 0; idx-- {
 		tx := txs[idx]
@@ -207,14 +201,18 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 				// Skip coinbase inputs
 				break
 			}
+
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			pkScript, value, err := s.scriptValue(ctx, op)
 			if err != nil {
 				return fmt.Errorf("script value: %v", err)
 			}
+			// XXX this should not happen. We are keeping it for
+			// now to ensure it indeed does not happen. Remove in a
+			// couple of years.
 			if _, ok := utxos[op]; ok {
-				return fmt.Errorf("impossible collisioni: %v", op)
+				return fmt.Errorf("impossible collision: %v", op)
 			}
 			utxos[op] = tbcd.NewCacheOutput(sha256.Sum256(pkScript),
 				uint64(value), txIn.PreviousOutPoint.Index)
@@ -227,6 +225,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, cp *chaincfg.Params, txs []
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
+
 			op := tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))
 			if _, ok := utxos[op]; ok {
 				delete(utxos, op)
@@ -259,13 +258,13 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 
 func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	w := new(sync.WaitGroup)
-	txs := b.Transactions()
-	for _, tx := range txs {
+	for _, tx := range b.Transactions() {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if blockchain.IsCoinBase(tx) {
 				// Skip coinbase inputs
 				break
 			}
+
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
 			s.mtx.Lock()
@@ -339,7 +338,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		// At this point we can lockless since it is all single
 		// threaded again.
 		// log.Infof("processing utxo at height %d", height)
-		err = processUtxos(s.chainParams, b.Transactions(), utxos)
+		err = processUtxos(b.Transactions(), utxos)
 		if err != nil {
 			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
 		}
@@ -446,7 +445,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
-		err = s.unprocessUtxos(ctx, s.chainParams, b.Transactions(), utxos)
+		err = s.unprocessUtxos(ctx, b.Transactions(), utxos)
 		if err != nil {
 			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
 		}
@@ -638,7 +637,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	return errors.New("wtf") // XXX fix code so thatw e can't get here
 }
 
-func processTxs(cp *chaincfg.Params, blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
+func processTxs(blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
 	for _, tx := range txs {
 		// cache txid <-> block
 		txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
@@ -707,7 +706,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
-		err = processTxs(s.chainParams, b.Hash(), b.Transactions(), txs)
+		err = processTxs(b.Hash(), b.Transactions(), txs)
 		if err != nil {
 			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
 		}
@@ -814,7 +813,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
-		err = processTxs(s.chainParams, b.Hash(), b.Transactions(), txs)
+		err = processTxs(b.Hash(), b.Transactions(), txs)
 		if err != nil {
 			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
 		}
