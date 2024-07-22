@@ -468,45 +468,7 @@ func tbcdb() error {
 			fmt.Printf("%v\n", bh[k])
 		}
 
-	// case "_txbyid":
-	//	txid := args["txid"]
-	//	if txid == "" {
-	//		return errors.New("txid: must be set")
-	//	}
-	//	chtxid, err := chainhash.NewHashFromStr(txid)
-	//	if err != nil {
-	//		return fmt.Errorf("chainhash: %w", err)
-	//	}
-
-	//	bh, err := s.TxById(ctx, chtxid)
-	//	if err != nil {
-	//		return fmt.Errorf("block by txid: %w", err)
-	//	}
-	//	for k := range bh {
-	//		fmt.Printf("%v\n", bh[k])
-	//	}
-
-	case "spendoutputsbytxid":
-		txid := args["txid"]
-		if txid == "" {
-			return errors.New("txid: must be set")
-		}
-		chtxid, err := chainhash.NewHashFromStr(txid)
-		if err != nil {
-			return fmt.Errorf("chainhash: %w", err)
-		}
-		var revTxId [32]byte
-		copy(revTxId[:], chtxid[:])
-
-		si, err := s.DB().SpendOutputsByTxId(ctx, revTxId)
-		if err != nil {
-			return fmt.Errorf("spend outputs by txid: %w", err)
-		}
-		for k := range si {
-			fmt.Printf("%v\n", si[k])
-		}
-
-	case "_spendoutputsbytxid":
+	case "txbyid":
 		txid := args["txid"]
 		if txid == "" {
 			return errors.New("txid: must be set")
@@ -516,7 +478,23 @@ func tbcdb() error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		si, err := s.SpendOutputsByTxId(ctx, chtxid)
+		tx, err := s.TxById(ctx, chtxid)
+		if err != nil {
+			return fmt.Errorf("block by txid: %w", err)
+		}
+		fmt.Printf("%v\n", spew.Sdump(tx))
+
+	case "spentoutputsbytxid":
+		txid := args["txid"]
+		if txid == "" {
+			return errors.New("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		si, err := s.SpentOutputsByTxId(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("spend outputs by txid: %w", err)
 		}

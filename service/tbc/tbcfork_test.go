@@ -802,7 +802,7 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 				if err != nil {
 					return fmt.Errorf("invalid tx hash: %w", err)
 				}
-				sis, err := s.SpendOutputsByTxId(ctx, tx)
+				sis, err := s.SpentOutputsByTxId(ctx, tx)
 				if err != nil {
 					return fmt.Errorf("invalid spend infos: %w", err)
 				}
@@ -827,7 +827,7 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 				if err != nil {
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
-				tx, err := s.TxByTxId(ctx, txId.Hash())
+				tx, err := s.TxById(ctx, txId.Hash())
 				if err != nil {
 					return fmt.Errorf("tx by id: %w", err)
 				}
@@ -1200,31 +1200,31 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// make sure genesis tx is in db
-	_, err = s.TxByTxId(ctx, n.gtx.Hash())
+	_, err = s.TxById(ctx, n.gtx.Hash())
 	if err != nil {
 		t.Fatalf("genesis not found: %v", err)
 	}
 	// make sure gensis was not spent
-	_, err = s.SpendOutputsByTxId(ctx, n.gtx.Hash())
+	_, err = s.SpentOutputsByTxId(ctx, n.gtx.Hash())
 	if err == nil {
 		t.Fatal("genesis coinbase tx should not be spent")
 	}
 
 	// Spot check tx 1 from b2
 	tx := b2.b.Transactions()[1]
-	txb2, err := s.TxByTxId(ctx, tx.Hash())
+	txb2, err := s.TxById(ctx, tx.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
 		t.Fatal("hash not equal")
 	}
-	si, err := s.SpendOutputsByTxId(ctx, b1.b.Transactions()[0].Hash())
+	si, err := s.SpentOutputsByTxId(ctx, b1.b.Transactions()[0].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
-	si, err = s.SpendOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
+	si, err = s.SpentOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1245,7 +1245,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.TxByTxId(ctx, n.gtx.Hash())
+	_, err = s.TxById(ctx, n.gtx.Hash())
 	if err != nil {
 		t.Fatal("expected genesis")
 	}

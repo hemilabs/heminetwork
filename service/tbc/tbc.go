@@ -1420,15 +1420,15 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 	return utxos, nil
 }
 
-func (s *Server) SpendOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpendInfo, error) {
-	log.Tracef("SpendOutputsByTxId")
-	defer log.Tracef("SpendOutputsByTxId exit")
+func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
+	log.Tracef("SpentOutputsByTxId")
+	defer log.Tracef("SpentOutputsByTxId exit")
 
 	// XXX investigate if this is indeed correct. As it is written now it
 	// returns all spent outputs. The db should always be canonical but
 	// assert that.
 
-	si, err := s.db.SpendOutputsByTxId(ctx, tbcd.TxId(*txId))
+	si, err := s.db.SpentOutputsByTxId(ctx, tbcd.TxId(*txId))
 	if err != nil {
 		return nil, err
 	}
@@ -1436,9 +1436,9 @@ func (s *Server) SpendOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	return si, nil
 }
 
-func (s *Server) TxByTxId(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
-	log.Tracef("TxByTxId")
-	defer log.Tracef("TxByTxId exit")
+func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
+	log.Tracef("TxById")
+	defer log.Tracef("TxById exit")
 
 	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
 	if err != nil {

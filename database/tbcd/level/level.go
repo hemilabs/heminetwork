@@ -760,11 +760,11 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, 
 	return blocks, nil
 }
 
-func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.SpendInfo, error) {
-	log.Tracef("SpendOutputByOutpoint")
-	defer log.Tracef("SpendOutputByOutpoint exit")
+func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.SpentInfo, error) {
+	log.Tracef("SpentOutputByOutpoint")
+	defer log.Tracef("SpentOutputByOutpoint exit")
 
-	si := make([]tbcd.SpendInfo, 0, 2)
+	si := make([]tbcd.SpentInfo, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
 	var key [1 + 32]byte
 	key[0] = 's'
@@ -790,7 +790,7 @@ func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 		if !bytes.Equal(it.Key()[:33], key[:]) {
 			continue
 		}
-		var s tbcd.SpendInfo
+		var s tbcd.SpentInfo
 		copy(s.TxId[:], it.Value()[0:32])
 		copy(s.BlockHash[:], it.Key()[37:])
 		s.InputIndex = binary.BigEndian.Uint32(it.Value()[32:36])

@@ -68,7 +68,7 @@ type Database interface {
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
 	BlocksByTxId(ctx context.Context, txId []byte) ([]BlockHash, error)
-	SpendOutputsByTxId(ctx context.Context, txId TxId) ([]SpendInfo, error)
+	SpentOutputsByTxId(ctx context.Context, txId TxId) ([]SpentInfo, error)
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -142,7 +142,7 @@ type BlockIdentifier struct {
 	Hash   database.ByteArray
 }
 
-type SpendInfo struct {
+type SpentInfo struct {
 	BlockHash  BlockHash
 	TxId       TxId
 	InputIndex uint32
