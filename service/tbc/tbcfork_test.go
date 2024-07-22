@@ -827,7 +827,7 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 				if err != nil {
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
-				tx, err := s.TxByTxId(ctx, txId.Hash())
+				tx, _, err := s.TxByTxId(ctx, txId.Hash())
 				if err != nil {
 					return fmt.Errorf("tx by id: %w", err)
 				}
@@ -1200,7 +1200,7 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// make sure genesis tx is in db
-	_, err = s.TxByTxId(ctx, n.gtx.Hash())
+	_, _, err = s.TxByTxId(ctx, n.gtx.Hash())
 	if err != nil {
 		t.Fatalf("genesis not found: %v", err)
 	}
@@ -1212,7 +1212,7 @@ func TestIndexNoFork(t *testing.T) {
 
 	// Spot check tx 1 from b2
 	tx := b2.b.Transactions()[1]
-	txb2, err := s.TxByTxId(ctx, tx.Hash())
+	txb2, _, err := s.TxByTxId(ctx, tx.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1245,7 +1245,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.TxByTxId(ctx, n.gtx.Hash())
+	_, _, err = s.TxByTxId(ctx, n.gtx.Hash())
 	if err != nil {
 		t.Fatal("expected genesis")
 	}
