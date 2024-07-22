@@ -366,7 +366,7 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 		}, nil
 	}
 
-	tx, err := s.TxByTxId(ctx, txId)
+	tx, hash, err := s.TxByTxId(ctx, txId)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxId)
@@ -390,7 +390,8 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	}
 
 	return &tbcapi.TxByIdRawResponse{
-		Tx: b,
+		Tx:   b,
+		Hash: reverseBytes(hash[:]),
 	}, nil
 }
 
@@ -406,7 +407,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 		}, nil
 	}
 
-	tx, err := s.TxByTxId(ctx, txId)
+	tx, hash, err := s.TxByTxId(ctx, txId)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxId)
@@ -422,7 +423,8 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	}
 
 	return &tbcapi.TxByIdResponse{
-		Tx: wireTxToTBC(tx),
+		Tx:   wireTxToTBC(tx),
+		Hash: reverseBytes(hash[:]),
 	}, nil
 }
 
