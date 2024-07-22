@@ -782,11 +782,10 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey,
 
 func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 	for _, b := range blocks {
-		bh, height, err := s.BlockHeaderByHash(ctx, b.Hash())
+		_, height, err := s.BlockHeaderByHash(ctx, b.Hash())
 		if err != nil {
 			return err
 		}
-		_ = bh
 		if height != uint64(b.Height()) {
 			return fmt.Errorf("%v != %v", height, uint64(b.Height()))
 		}
@@ -794,7 +793,6 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 		log.Infof("mustHave: %v", b.Hash())
 		// Verify Txs cache
 		for ktx, vtx := range b.txs {
-			_ = vtx
 			switch ktx[0] {
 			case 's':
 				// grab previous outpoint from the key
@@ -827,11 +825,10 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 				if err != nil {
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
-				tx, err := s.TxById(ctx, txId.Hash())
+				_, err = s.TxById(ctx, txId.Hash())
 				if err != nil {
 					return fmt.Errorf("tx by id: %w", err)
 				}
-				_ = tx
 				// db block retrieval tested by TxById
 				if !b.Hash().IsEqual(blockHash.Hash()) {
 					return errors.New("t cache block hash invalid")

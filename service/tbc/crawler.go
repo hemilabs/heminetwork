@@ -421,7 +421,6 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 	hh := utxoHH
 	for {
 		log.Debugf("unindexing utxos: %v", hh)
-		log.Infof("unindexing utxos: %v", hh)
 
 		hash := hh.Hash
 		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
@@ -532,8 +531,8 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
-
 	}
+
 	return nil
 }
 
@@ -631,10 +630,10 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	case -1:
 		return s.UtxoIndexerUnwind(ctx, startBH, endBH)
 	case 0:
-		// XXX dedup UtxoIndexIsLinear with the above code so that it isn't so awkward.
-		return nil // because we call TxIndexIsLinear we know it's the same block
+		// Because we call TxIndexIsLinear we know it's the same block.
+		return nil
 	}
-	return errors.New("wtf") // XXX fix code so thatw e can't get here
+	return fmt.Errorf("invalid direction: %v", direction)
 }
 
 func processTxs(blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
@@ -788,7 +787,6 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 	hh := txHH
 	for {
 		log.Debugf("unindexing txs: %v", hh)
-		log.Infof("unindexing txs: %v", hh)
 
 		hash := hh.Hash
 
@@ -985,7 +983,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 		}
 	}
 
-	// XXX make sure there is no gap between start and end or vice versa.
+	// Make sure there is no gap between start and end or vice versa.
 	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
@@ -1000,10 +998,11 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	case -1:
 		return s.TxIndexerUnwind(ctx, startBH, endBH)
 	case 0:
-		// XXX dedup TxIndexIsLinear with the above code so that it isn't so awkward.
-		return nil // because we call TxIndexIsLinear we know it's the same block
+		// Because we call TxIndexIsLinear we know it's the same block.
+		return nil
 	}
-	return errors.New("wtf") // XXX fix code so thatw e can't get here
+
+	return fmt.Errorf("invalid direction: %v", direction)
 }
 
 func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
@@ -1062,20 +1061,21 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 	if err != nil {
 		return 0, fmt.Errorf("blockheader hash: %w", err)
 	}
-	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
-	log.Infof("startBH %v %v", startBH, startBH.Difficulty)
-	log.Infof("endBH %v %v", endBH, endBH.Difficulty)
-	log.Infof("direction %v", direction)
+	// Short circuit if the block hash is the same.
 	if startBH.BlockHash().IsEqual(endBH.BlockHash()) {
 		return 0, nil
 	}
+
+	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
+	log.Debugf("startBH %v %v", startBH, startBH.Difficulty)
+	log.Debugf("endBH %v %v", endBH, endBH.Difficulty)
+	log.Debugf("direction %v", direction)
 
 	// Expensive linear test, this needs some performance love. We can
 	// memoize it keep snapshot heights whereto we know the chain is
 	// synced. For now just do the entire thing.
 
 	// Always walk backwards because it's only a single lookup.
-	// XXX is direction = 0 even meaningful?
 	var h, e *chainhash.Hash
 	switch direction {
 	case 1:
@@ -1085,6 +1085,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		h = startBH.BlockHash()
 		e = endBH.BlockHash()
 	default:
+		// This is a fork and thus not linear.
 		return 0, ErrNotLinear
 	}
 	for {
@@ -1124,7 +1125,6 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		s.mtx.Lock()
 		s.quiesced = false
 		s.indexing = false
-		// s.clipped = false
 		actualHeight, bhb, err := s.RawBlockHeaderBest(ctx)
 		if err != nil {
 			log.Errorf("sync indexers best: %v", err)

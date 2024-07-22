@@ -662,7 +662,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		return
 	}
 
-	// Only now ca we consider the peer connected
+	// Only now can we consider the peer connected
 	log.Debugf("Peer connected: %v", p)
 
 	headersSeen := false
@@ -695,17 +695,17 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 					h0 := m.Headers[0].PrevBlock
 					if !bhb.BlockHash().IsEqual(&h0) &&
 						s.chainParams.GenesisHash.IsEqual(&h0) {
-						log.Infof("%v", bhb.BlockHash())
-						log.Infof("%v", h0)
+						log.Debugf("%v", bhb.BlockHash())
+						log.Debugf("%v", h0)
 
 						nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash()[:])
 						if err != nil {
 							panic(err) // XXX
 						}
 						bhb = nbh
-						log.Infof("WALKING BACK TO: %v", bhb)
+						log.Infof("Fork detected, walking chain back to: %v", bhb)
 						if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
-							panic(err) // XXX
+							panic(err) // XXX this needs to be a log and exit
 							// return
 						}
 						continue
