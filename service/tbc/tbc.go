@@ -1587,6 +1587,27 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 	return balance, nil
 }
 
+// ScriptHashAvailableToSpend returns a boolean which indicates whether
+// a specific output (uniquely identified by TxId output index) is
+// available for spending in the UTXO table.
+// This function can return false for two reasons:
+//  1. The outpoint was already spent
+//  2. The outpoint never existed
+func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId *chainhash.Hash, index uint32) (bool, error) {
+	txIdBytes := [32]byte(txId.CloneBytes())
+	op := tbcd.NewOutpoint(txIdBytes, index)
+	sh, err := s.db.ScriptHashByOutpoint(ctx, op)
+	if err != nil {
+		return false, err
+	}
+	if sh != nil {
+		// Found it, therefore is unspent
+		return true, nil
+	}
+	// Did not find it, therefore either spent or never existed
+	return false, nil
+}
+
 func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	log.Tracef("UtxosByAddress")
 	defer log.Tracef("UtxosByAddress exit")
@@ -1634,54 +1655,53 @@ func (s *Server) SpendOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	return si, nil
 }
 
-func (s *Server) TxByTxId(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
+func (s *Server) TxByTxId(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, *chainhash.Hash, error) {
 	log.Tracef("TxByTxId")
 	defer log.Tracef("TxByTxId exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call tx by txid on TBC running in External Header mode")
+		return nil, nil, errors.New("cannot call tx by txid on TBC running in External Header mode")
 	}
 
 	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if len(blockHashes) > 1 {
-		panic("fix me blockhashes len")
-	}
-
-	// XXX investigate if this is indeed correct. As it is written now it
-	// returns the first block the tx exists in. This however must be the
-	// canonical block. This function must also return the blockhash.
+	// Assume that multiple transactions with the same TxId are the same underlying transaction.
+	// XXX: Canonical check to guarantee we get the correct one from canonical chain anyway,
+	// and so that we can return the correct containing block.
+	// if len(blockHashes) > 1 {
+	// 	panic("fix me blockhashes len")
+	// }
 
 	// chain hash stores the bytes in reverse order
 	revTxId := bytes.Clone(txId[:])
 	slices.Reverse(revTxId)
 	ch, err := chainhash.NewHashFromStr(hex.EncodeToString(revTxId[:]))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for _, blockHash := range blockHashes {
 		block, err := s.db.BlockByHash(ctx, blockHash[:])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		parsedBlock, err := btcutil.NewBlockFromBytes(block.Block)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		for _, tx := range parsedBlock.Transactions() {
 			if tx.Hash().IsEqual(ch) {
-				return tx.MsgTx(), nil
+				return tx.MsgTx(), blockHash.Hash(), nil
 			}
 		}
 	}
 
-	return nil, database.ErrNotFound
+	return nil, nil, database.ErrNotFound
 }
 
 func feesFromTransactions(txs []*btcutil.Tx) error {
@@ -1745,6 +1765,29 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 	}
 
 	return fees, errors.New("not yet")
+}
+
+// FullBlockAvailable returns whether TBC has the full block
+// corresponding to the specified hash available in its database.
+// XXX: Optimize this to not actually read the full block from disk
+func (s *Server) FullBlockAvailable(ctx context.Context, hash *chainhash.Hash) (bool, error) {
+	if s.cfg.ExternalHeaderMode {
+		return false, errors.New("cannot call full block available on TBC running in External Header mode")
+	}
+
+	block, err := s.db.BlockByHash(ctx, hash[:])
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return false, nil // Not found
+		} else {
+			return false, err
+		}
+	}
+	if block != nil {
+		return true, nil
+	} else {
+		return false, errors.New("fetching block did not return error but block is nil")
+	}
 }
 
 type SyncInfo struct {
