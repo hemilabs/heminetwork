@@ -68,7 +68,7 @@ type Database interface {
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
 	BlocksByTxId(ctx context.Context, txId []byte) ([]BlockHash, error)
-	SpentOutputsByTxId(ctx context.Context, txId TxId) ([]SpentInfo, error)
+	SpentOutputsByTxId(ctx context.Context, txId []byte) ([]SpentInfo, error)
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -81,6 +81,12 @@ type Database interface {
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)
 }
+
+// XXX there exist various types in this file that need to be reevaluated.
+// Such ass BlockHash, ScriptHash etc. They exist for convenience reasons but
+// it may be worth to switch to chainhash and btcd.OutPoint etc. This does need
+// thought because we have composites that are needed for the code to function
+// properly.
 
 // BlockHeader contains the first 80 raw bytes of a bitcoin block plus its
 // location information (hash+height) and the cumulative difficulty.

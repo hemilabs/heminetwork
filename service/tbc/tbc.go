@@ -1428,7 +1428,7 @@ func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	// returns all spent outputs. The db should always be canonical but
 	// assert that.
 
-	si, err := s.db.SpentOutputsByTxId(ctx, tbcd.TxId(*txId))
+	si, err := s.db.SpentOutputsByTxId(ctx, txId[:])
 	if err != nil {
 		return nil, err
 	}

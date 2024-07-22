@@ -398,7 +398,7 @@ func tbcdb() error {
 		fmt.Println("\tdumpoutputs <prefix>")
 		fmt.Println("\thelp")
 		fmt.Println("\tscripthashbyoutpoint [txid] [index]")
-		fmt.Println("\tspentoutputsbytxid [txid] [index]")
+		fmt.Println("\tspentoutputsbytxid <txid>")
 		fmt.Println("\ttxbyid <hash>")
 		fmt.Println("\ttxindex <height> <count> <maxcache>")
 		fmt.Println("\tutxoindex <height> <count> <maxcache>")

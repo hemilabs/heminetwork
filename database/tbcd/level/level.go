@@ -738,11 +738,6 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, 
 	it := txDB.NewIterator(util.BytesPrefix(txid[:]), nil)
 	defer it.Release()
 	for it.Next() {
-		if !bytes.Equal(it.Key()[:33], txid[:]) {
-			// XXX should not happen, remove later
-			panic(spew.Sdump(txid) + spew.Sdump(it.Key()))
-			// break
-		}
 		block, err := tbcd.NewBlockHashFromBytes(it.Key()[33:])
 		if err != nil {
 			return nil, err
@@ -760,7 +755,7 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, 
 	return blocks, nil
 }
 
-func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.SpentInfo, error) {
+func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId []byte) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputByOutpoint")
 	defer log.Tracef("SpentOutputByOutpoint exit")
 
@@ -769,21 +764,6 @@ func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 	var key [1 + 32]byte
 	key[0] = 's'
 	copy(key[1:], txId[:])
-	debug := false
-	if debug {
-		it := txDB.NewIterator(nil, nil)
-		defer it.Release()
-		for it.Next() {
-			if it.Key()[0] == 't' {
-				continue
-			}
-			log.Infof("%v", spew.Sdump(it.Key()))
-		}
-		if err := it.Error(); err != nil {
-			return nil, fmt.Errorf("blocks by id iterator: %w", err)
-		}
-		return nil, errors.New("xxx")
-	}
 	it := txDB.NewIterator(&util.Range{Start: key[:]}, nil)
 	defer it.Release()
 	for it.Next() {
@@ -902,29 +882,18 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 		copy(hop[33:65], op.TxId())
 		copy(hop[65:], utxo.OutputIndexBytes())
 
-		switch direction {
-		case 1:
-			if utxo.IsDelete() {
-				// Delete balance and utxos
-				outsBatch.Delete(op[:][:])
-				outsBatch.Delete(hop[:])
-			} else {
-				// Add utxo to balance and utxos
-				outsBatch.Put(op[:], utxo.ScriptHashSlice())
-				outsBatch.Put(hop[:], utxo.ValueBytes())
-			}
-		case -1:
-			// XXX does direction matter?
-			if utxo.IsDelete() {
-				// Delete balance and utxos
-				outsBatch.Delete(op[:][:])
-				outsBatch.Delete(hop[:])
-			} else {
-				// Add utxo to balance and utxos
-				outsBatch.Put(op[:], utxo.ScriptHashSlice())
-				outsBatch.Put(hop[:], utxo.ValueBytes())
-			}
+		// The cache is updated in a way that makes the direction
+		// irrelevant.
+		if utxo.IsDelete() {
+			// Delete balance and utxos
+			outsBatch.Delete(op[:][:])
+			outsBatch.Delete(hop[:])
+		} else {
+			// Add utxo to balance and utxos
+			outsBatch.Put(op[:], utxo.ScriptHashSlice())
+			outsBatch.Put(hop[:], utxo.ValueBytes())
 		}
+
 		// XXX this probably should be done by the caller but we do it
 		// here to lower memory pressure as large gobs of data are
 		// written to disk.
@@ -980,10 +949,10 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 		case 1:
 			txsBatch.Put(key, value)
 		}
-		// log.Infof("%v:%v", spew.Sdump(key), spew.Sdump(value))
-		// // XXX this probably should be done by the caller but we do it
-		// // here to lower memory pressure as large gobs of data are
-		// // written to disk.
+
+		// XXX this probably should be done by the caller but we do it
+		// here to lower memory pressure as large gobs of data are
+		// written to disk.
 		delete(txs, k)
 	}
 
