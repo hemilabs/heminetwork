@@ -83,7 +83,7 @@ type Database interface {
 }
 
 // XXX there exist various types in this file that need to be reevaluated.
-// Such ass BlockHash, ScriptHash etc. They exist for convenience reasons but
+// Such as BlockHash, ScriptHash etc. They exist for convenience reasons but
 // it may be worth to switch to chainhash and btcd.OutPoint etc. This does need
 // thought because we have composites that are needed for the code to function
 // properly.
