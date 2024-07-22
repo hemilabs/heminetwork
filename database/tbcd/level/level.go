@@ -312,7 +312,9 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 
 	hhKey := heightHashToKey(0, bhash[:])
 	hhBatch.Put(hhKey, []byte{})
-	ebh := encodeBlockHeader(0, bh, new(big.Int))
+	cdiff := big.NewInt(0)
+	cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
+	ebh := encodeBlockHeader(0, bh, cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
@@ -724,7 +726,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	}, nil
 }
 
-func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHash, error) {
+func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, error) {
 	log.Tracef("BlocksByTxId")
 	defer log.Tracef("BlocksByTxId exit")
 
@@ -746,18 +748,18 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.BlockHas
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	if len(blocks) == 0 {
-		ch, _ := chainhash.NewHash(txId[:])
-		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", ch))
+		ctxid, _ := chainhash.NewHash(txId)
+		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", ctxid))
 	}
 
 	return blocks, nil
 }
 
-func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.SpendInfo, error) {
-	log.Tracef("SpendOutputByOutpoint")
-	defer log.Tracef("SpendOutputByOutpoint exit")
+func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId []byte) ([]tbcd.SpentInfo, error) {
+	log.Tracef("SpentOutputByOutpoint")
+	defer log.Tracef("SpentOutputByOutpoint exit")
 
-	si := make([]tbcd.SpendInfo, 0, 2)
+	si := make([]tbcd.SpentInfo, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
 	var key [1 + 32]byte
 	key[0] = 's'
@@ -765,10 +767,10 @@ func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 	it := txDB.NewIterator(&util.Range{Start: key[:]}, nil)
 	defer it.Release()
 	for it.Next() {
-		if !bytes.Equal(it.Key()[1:33], key[1:33]) {
-			break
+		if !bytes.Equal(it.Key()[:33], key[:]) {
+			continue
 		}
-		var s tbcd.SpendInfo
+		var s tbcd.SpentInfo
 		copy(s.TxId[:], it.Value()[0:32])
 		copy(s.BlockHash[:], it.Key()[37:])
 		s.InputIndex = binary.BigEndian.Uint32(it.Value()[32:36])
@@ -778,8 +780,7 @@ func (l *ldb) SpendOutputsByTxId(ctx context.Context, txId tbcd.TxId) ([]tbcd.Sp
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	if len(si) == 0 {
-		ch, _ := chainhash.NewHash(txId[:])
-		return nil, database.NotFoundError(fmt.Sprintf("not found %v", ch))
+		return nil, database.NotFoundError(fmt.Sprintf("not found %v", txId))
 	}
 
 	return si, nil
@@ -856,9 +857,13 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start u
 	return utxos, nil
 }
 
-func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	log.Tracef("BlockUtxoUpdate")
 	defer log.Tracef("BlockUtxoUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
 
 	// outputs
 	outsTx, outsCommit, outsDiscard, err := l.startTransaction(level.OutputsDB)
@@ -877,6 +882,8 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 		copy(hop[33:65], op.TxId())
 		copy(hop[65:], utxo.OutputIndexBytes())
 
+		// The cache is updated in a way that makes the direction
+		// irrelevant.
 		if utxo.IsDelete() {
 			// Delete balance and utxos
 			outsBatch.Delete(op[:][:])
@@ -886,6 +893,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 			outsBatch.Put(op[:], utxo.ScriptHashSlice())
 			outsBatch.Put(hop[:], utxo.ValueBytes())
 		}
+
 		// XXX this probably should be done by the caller but we do it
 		// here to lower memory pressure as large gobs of data are
 		// written to disk.
@@ -905,9 +913,13 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, utxos map[tbcd.Outpoint]tbcd.
 	return nil
 }
 
-func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxKey]*tbcd.TxValue) error {
+func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxKey]*tbcd.TxValue) error {
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
 
 	// transactions
 	txsTx, txsCommit, txsDiscard, err := l.startTransaction(level.TransactionsDB)
@@ -931,12 +943,16 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, txs map[tbcd.TxKey]*tbcd.TxValu
 		default:
 			return fmt.Errorf("invalid cache entry: %v", spew.Sdump(k))
 		}
+		switch direction {
+		case -1:
+			txsBatch.Delete(key)
+		case 1:
+			txsBatch.Put(key, value)
+		}
 
-		txsBatch.Put(key, value)
-		// log.Infof("%v:%v", spew.Sdump(key), spew.Sdump(value))
-		// // XXX this probably should be done by the caller but we do it
-		// // here to lower memory pressure as large gobs of data are
-		// // written to disk.
+		// XXX this probably should be done by the caller but we do it
+		// here to lower memory pressure as large gobs of data are
+		// written to disk.
 		delete(txs, k)
 	}
 

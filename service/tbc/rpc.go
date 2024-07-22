@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"nhooyr.io/websocket"
@@ -357,14 +358,15 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	log.Tracef("handleTxByIdRawRequest")
 	defer log.Tracef("handleTxByIdRawRequest exit")
 
-	if len(req.TxId) != 32 {
+	txId, err := chainhash.NewHash(req.TxId)
+	if err != nil {
 		responseErr := protocol.RequestErrorf("invalid tx id")
 		return &tbcapi.TxByIdRawResponse{
 			Error: responseErr,
 		}, nil
 	}
 
-	tx, err := s.TxById(ctx, [32]byte(req.TxId))
+	tx, err := s.TxById(ctx, txId)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxId)
@@ -396,14 +398,15 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	log.Tracef("handleTxByIdRequest")
 	defer log.Tracef("handleTxByIdRequest exit")
 
-	if len(req.TxId) != 32 {
+	txId, err := chainhash.NewHash(req.TxId)
+	if err != nil {
 		responseErr := protocol.RequestErrorf("invalid tx id")
 		return &tbcapi.TxByIdResponse{
 			Error: responseErr,
 		}, nil
 	}
 
-	tx, err := s.TxById(ctx, [32]byte(reverseBytes(req.TxId)))
+	tx, err := s.TxById(ctx, txId)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxId)
@@ -563,6 +566,7 @@ func wireTxToTBC(w *wire.MsgTx) *tbcapi.Tx {
 	return tx
 }
 
+// XXX this probably should not exist, it means the code is busted instead
 func reverseBytes(b []byte) []byte {
 	slices.Reverse(b)
 	return b

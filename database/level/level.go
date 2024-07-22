@@ -44,18 +44,14 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-type (
-	Pool     map[string]*leveldb.DB
-	Database struct {
-		mtx sync.RWMutex
-		wg  sync.WaitGroup // Wait group for notification handler exit
+type Pool map[string]*leveldb.DB
 
-		pool Pool // database pool
+type Database struct {
+	mtx  sync.RWMutex
+	pool Pool // database pool
 
-		ntfn map[database.NotificationName]int // Notification handlers
-		home string                            // leveld toplevel database directory
-	}
-)
+	home string // leveld toplevel database directory
+}
 
 var _ database.Database = (*Database)(nil)
 
@@ -68,8 +64,7 @@ func (l *Database) Close() error {
 
 	var errSeen error // XXX return last error for now
 	for k, v := range l.pool {
-		err := v.Close()
-		if err != nil {
+		if err := v.Close(); err != nil {
 			// do continue, leveldb does not like unfresh shutdowns
 			log.Errorf("close %v: %v", k, err)
 			errSeen = err

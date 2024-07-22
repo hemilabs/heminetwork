@@ -206,7 +206,7 @@ func tbcdb() error {
 		return fmt.Errorf("new server: %w", err)
 	}
 	// Open db.
-	err = s.DBOpen(ctx)
+	err = s.DBOpen(ctx) // XXX kill this and verify all reversed hashes as parameters
 	if err != nil {
 		return fmt.Errorf("db open: %w", err)
 	}
@@ -398,7 +398,8 @@ func tbcdb() error {
 		fmt.Println("\tdumpoutputs <prefix>")
 		fmt.Println("\thelp")
 		fmt.Println("\tscripthashbyoutpoint [txid] [index]")
-		fmt.Println("\tspendoutputsbytxid [txid] [index]")
+		fmt.Println("\tspentoutputsbytxid <txid>")
+		fmt.Println("\ttxbyid <hash>")
 		fmt.Println("\ttxindex <height> <count> <maxcache>")
 		fmt.Println("\tutxoindex <height> <count> <maxcache>")
 		fmt.Println("\tutxosbyscripthash [hash]")
@@ -460,7 +461,7 @@ func tbcdb() error {
 		var revTxId [32]byte
 		copy(revTxId[:], chtxid[:])
 
-		bh, err := s.DB().BlocksByTxId(ctx, revTxId)
+		bh, err := s.DB().BlocksByTxId(ctx, revTxId[:])
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
@@ -468,7 +469,7 @@ func tbcdb() error {
 			fmt.Printf("%v\n", bh[k])
 		}
 
-	case "spendoutputsbytxid":
+	case "txbyid":
 		txid := args["txid"]
 		if txid == "" {
 			return errors.New("txid: must be set")
@@ -477,10 +478,24 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		var revTxId [32]byte
-		copy(revTxId[:], chtxid[:])
 
-		si, err := s.DB().SpendOutputsByTxId(ctx, revTxId)
+		tx, err := s.TxById(ctx, chtxid)
+		if err != nil {
+			return fmt.Errorf("block by txid: %w", err)
+		}
+		fmt.Printf("%v\n", spew.Sdump(tx))
+
+	case "spentoutputsbytxid":
+		txid := args["txid"]
+		if txid == "" {
+			return errors.New("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		si, err := s.SpentOutputsByTxId(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("spend outputs by txid: %w", err)
 		}

@@ -269,6 +269,7 @@ func NewServer(cfg *Config) (*Server, error) {
 }
 
 // DB exports the underlying database. This should only be used in tests.
+// XXX remove this and deal with the fallout.
 func (s *Server) DB() tbcd.Database {
 	return s.db
 }
@@ -335,9 +336,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	}
 
 	// insert into peers table
-	for _, ms := range moreSeeds {
-		peers = append(peers, ms)
-	}
+	peers = append(peers, moreSeeds...)
 
 	// return fake peers but don't save them to the database
 	return peers, nil
@@ -371,11 +370,15 @@ func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer,
 	}
 }
 
-func (s *Server) peerAdd(p *peer) {
+func (s *Server) peerAdd(p *peer) error {
 	log.Tracef("peerAdd: %v", p.address)
 	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if _, ok := s.peers[p.address]; ok {
+		return fmt.Errorf("peer exists: %v", p)
+	}
 	s.peers[p.address] = p
-	s.mtx.Unlock()
+	return nil
 }
 
 func (s *Server) peerDelete(address string) {
@@ -432,7 +435,10 @@ func (s *Server) peerManager(ctx context.Context) error {
 					log.Errorf("new peer: %v", err)
 					continue
 				}
-				s.peerAdd(peer)
+				if err := s.peerAdd(peer); err != nil {
+					log.Tracef("add peer: %v", err)
+					continue
+				}
 
 				go s.peerConnect(ctx, peerC, peer)
 
@@ -497,7 +503,9 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 	log.Infof("Local peer manager connecting to %v peers", peersWanted)
 
 	for {
-		s.peerAdd(peer)
+		if err := s.peerAdd(peer); err != nil {
+			return err
+		}
 		go s.peerConnect(ctx, peerC, peer)
 
 		select {
@@ -623,35 +631,41 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}()
 
-	_ = p.write(defaultCmdTimeout, wire.NewMsgSendHeaders()) // Ask peer to send headers
-	_ = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())     // Try to get network information
+	// Ask peer to send headers
+	err = p.write(defaultCmdTimeout, wire.NewMsgSendHeaders())
+	if err != nil {
+		log.Errorf("peer write send headers: %v %v", p, err)
+		return
+	}
+	// Try to get network information
+	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
+	if err != nil {
+		log.Errorf("peer write get addr: %v %v", p, err)
+		return
+	}
 
-	log.Debugf("Peer connected: %v", p)
-
-	// Pretend we are always in IBD.
-	//
-	// This obviously will put a pressure on the internet connection and
-	// database because each and every peer is racing at start of day.  As
-	// multiple answers come in the insert of the headers fails or
-	// succeeds. If it fails no more headers will be requested from that
-	// peer.
+	// Ask peer for block headers and special handle the first message.
+	// XXX explain
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		log.Errorf("block headers best: %v", err)
+		log.Errorf("block headers best: %v %v", p, err)
 		// database is closed, nothing we can do, return here to avoid below
 		// panic
 		if errors.Is(err, leveldb.ErrClosed) {
 			return
 		}
 	}
-	log.Debugf("block header best hash: %s", bhb.Hash)
-
+	log.Debugf("block header best hash: %v %s", p, bhb)
 	if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
 		// This should not happen
-		log.Errorf("get headers: %v", err)
+		log.Errorf("get headers: %v %v", p, err)
 		return
 	}
 
+	// Only now can we consider the peer connected
+	log.Debugf("Peer connected: %v", p)
+
+	headersSeen := false
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -670,8 +684,40 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			return
 		}
 
+		// We must check the initial get headers response. If we asked
+		// for an unknown tip we'll get genesis back. This indicates
+		// that our tip is forked,
+		// XXX this needs to be cleaned up; maybe moved into handshake
+		if !headersSeen {
+			switch m := msg.(type) {
+			case *wire.MsgHeaders:
+				if len(m.Headers) != 0 {
+					h0 := m.Headers[0].PrevBlock
+					if !bhb.BlockHash().IsEqual(&h0) &&
+						s.chainParams.GenesisHash.IsEqual(&h0) {
+						log.Debugf("%v", bhb.BlockHash())
+						log.Debugf("%v", h0)
+
+						nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash()[:])
+						if err != nil {
+							panic(err) // XXX
+						}
+						bhb = nbh
+						log.Infof("Fork detected, walking chain back to: %v", bhb)
+						if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
+							panic(err) // XXX this needs to be a log and exit
+							// return
+						}
+						continue
+					}
+					_ = m
+					headersSeen = true
+				}
+			}
+		}
+
 		if verbose {
-			spew.Sdump(msg)
+			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
 
 		// Commands that are always accepted.
@@ -753,15 +799,6 @@ func (s *Server) blksMissing(ctx context.Context) bool {
 		return true // this is really kind of terminal
 	}
 	return len(bm) > 0
-}
-
-// blocksMissing checks the block cache and the database and returns true if all
-// blocks have not been downloaded.
-func (s *Server) blocksMissing(ctx context.Context) bool {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	return s.blksMissing(ctx)
 }
 
 func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
@@ -1339,6 +1376,9 @@ func (s *Server) BlockHeaderBest(ctx context.Context) (uint64, *wire.BlockHeader
 }
 
 func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (uint64, error) {
+	log.Tracef("BalanceByAddress")
+	defer log.Tracef("BalanceByAddress exit")
+
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
 	if err != nil {
 		return 0, err
@@ -1358,6 +1398,9 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 }
 
 func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
+	log.Tracef("UtxosByAddress")
+	defer log.Tracef("UtxosByAddress exit")
+
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
 	if err != nil {
 		return nil, err
@@ -1377,11 +1420,38 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 	return utxos, nil
 }
 
-func (s *Server) TxById(ctx context.Context, txId tbcd.TxId) (*wire.MsgTx, error) {
-	blockHashes, err := s.db.BlocksByTxId(ctx, txId)
+func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
+	log.Tracef("SpentOutputsByTxId")
+	defer log.Tracef("SpentOutputsByTxId exit")
+
+	// XXX investigate if this is indeed correct. As it is written now it
+	// returns all spent outputs. The db should always be canonical but
+	// assert that.
+
+	si, err := s.db.SpentOutputsByTxId(ctx, txId[:])
 	if err != nil {
 		return nil, err
 	}
+
+	return si, nil
+}
+
+func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
+	log.Tracef("TxById")
+	defer log.Tracef("TxById exit")
+
+	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
+	if err != nil {
+		return nil, err
+	}
+
+	if len(blockHashes) > 1 {
+		panic("fix me blockhashes len")
+	}
+
+	// XXX investigate if this is indeed correct. As it is written now it
+	// returns the first block the tx exists in. This however must be the
+	// canonical block. This function must also return the blockhash.
 
 	// chain hash stores the bytes in reverse order
 	revTxId := bytes.Clone(txId[:])
@@ -1535,6 +1605,7 @@ func (s *Server) Synced(ctx context.Context) SyncInfo {
 // DBOpen opens the underlying server database. It has been put in its own
 // function to make it available during tests and hemictl.
 // It would be good if it can be deleted.
+// XXX remove and find a different way to do this.
 func (s *Server) DBOpen(ctx context.Context) error {
 	log.Tracef("DBOpen")
 	defer log.Tracef("DBOpen exit")
@@ -1558,6 +1629,7 @@ func (s *Server) DBOpen(ctx context.Context) error {
 	return nil
 }
 
+// XXX remove and find a different way to do this.
 func (s *Server) DBClose() error {
 	log.Tracef("DBClose")
 	defer log.Tracef("DBClose")
@@ -1616,8 +1688,8 @@ func (s *Server) Run(pctx context.Context) error {
 			return err
 		}
 	}
-	log.Infof("Starting block headers sync at height: %v time %v",
-		bhb.Height, bhb.Timestamp())
+	log.Infof("Starting block headers sync at %v height: %v time %v",
+		bhb, bhb.Height, bhb.Timestamp())
 
 	// HTTP server
 	mux := http.NewServeMux()

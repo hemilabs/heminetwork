@@ -65,10 +65,10 @@ type Database interface {
 	BlockByHash(ctx context.Context, hash []byte) (*Block, error)
 
 	// Transactions
-	BlockUtxoUpdate(ctx context.Context, utxos map[Outpoint]CacheOutput) error
-	BlockTxUpdate(ctx context.Context, txs map[TxKey]*TxValue) error
-	BlocksByTxId(ctx context.Context, txId TxId) ([]BlockHash, error)
-	SpendOutputsByTxId(ctx context.Context, txId TxId) ([]SpendInfo, error)
+	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
+	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
+	BlocksByTxId(ctx context.Context, txId []byte) ([]BlockHash, error)
+	SpentOutputsByTxId(ctx context.Context, txId []byte) ([]SpentInfo, error)
 
 	// Peer manager
 	PeersStats(ctx context.Context) (int, int)               // good, bad count
@@ -81,6 +81,12 @@ type Database interface {
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)
 }
+
+// XXX there exist various types in this file that need to be reevaluated.
+// Such as BlockHash, ScriptHash etc. They exist for convenience reasons but
+// it may be worth to switch to chainhash and btcd.OutPoint etc. This does need
+// thought because we have composites that are needed for the code to function
+// properly.
 
 // BlockHeader contains the first 80 raw bytes of a bitcoin block plus its
 // location information (hash+height) and the cumulative difficulty.
@@ -142,7 +148,7 @@ type BlockIdentifier struct {
 	Hash   database.ByteArray
 }
 
-type SpendInfo struct {
+type SpentInfo struct {
 	BlockHash  BlockHash
 	TxId       TxId
 	InputIndex uint32
@@ -199,7 +205,7 @@ type CacheOutput [32 + 8 + 4]byte // script_hash + value + out_idx
 // String reutrns pretty printable CacheOutput. Hash is not reversed since it is an
 // opaque pointer. It prints satoshis@script_hash:output_index
 func (c CacheOutput) String() string {
-	return fmt.Sprintf("%d @ %v:%d", binary.BigEndian.Uint64(c[32:40]),
+	return fmt.Sprintf("%d @ %x:%d", binary.BigEndian.Uint64(c[32:40]),
 		c[0:32], binary.BigEndian.Uint32(c[40:]))
 }
 
@@ -314,6 +320,11 @@ func (t TxId) String() string {
 	return hex.EncodeToString(rev[:])
 }
 
+func (t TxId) Hash() *chainhash.Hash {
+	h, _ := chainhash.NewHash(t[:])
+	return h
+}
+
 func NewTxId(x [32]byte) (txId TxId) {
 	copy(txId[:], x[:])
 	return
@@ -338,6 +349,11 @@ func (bh BlockHash) String() string {
 		rev[32-k-1] = bh[k]
 	}
 	return hex.EncodeToString(rev[:])
+}
+
+func (bh BlockHash) Hash() *chainhash.Hash {
+	h, _ := chainhash.NewHash(bh[:])
+	return h
 }
 
 func NewBlockHash(x [32]byte) (blockHash BlockHash) {
@@ -378,7 +394,7 @@ func NewScriptHashFromBytes(x []byte) (scriptHash ScriptHash, err error) {
 
 // Spent Transaction:
 //
-//	s + txin.PrevOutPoint.Hash + txin.PrevOutPoint.Index + blockhash = txid + txin_index + blockhash | [1 + 32 + 4 + 32] = [32 + 4]
+//	s + txin.PrevOutPoint.Hash + txin.PrevOutPoint.Index + blockhash = txid + txin_index | [1 + 32 + 4 + 32] = [32 + 4]
 //
 // Transaction ID to Block mapping:
 //
@@ -412,6 +428,21 @@ func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 	copy(txKey[33:], blockHash[:])
 
 	return txKey
+}
+
+func TxIdBlockHashFromTxKey(txKey TxKey) (*TxId, *BlockHash, error) {
+	if txKey[0] != 't' {
+		return nil, nil, fmt.Errorf("invalid magic 0x%02x", txKey[0])
+	}
+	txId, err := NewTxIdFromBytes(txKey[1:33])
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid tx id: %w", err)
+	}
+	blockHash, err := NewBlockHashFromBytes(txKey[33:65])
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid block hash: %w", err)
+	}
+	return &txId, &blockHash, nil
 }
 
 // Helper functions
