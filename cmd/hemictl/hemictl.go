@@ -479,7 +479,7 @@ func tbcdb() error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		tx, err := s.TxById(ctx, chtxid)
+		tx, _, err := s.TxById(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}

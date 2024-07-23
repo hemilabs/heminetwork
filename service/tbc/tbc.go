@@ -1709,7 +1709,6 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 }
 
 func feesFromTransactions(txs []*btcutil.Tx) error {
-
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if idx == 0 {
