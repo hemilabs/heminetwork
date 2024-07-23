@@ -730,8 +730,10 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			case *wire.MsgHeaders:
 				if len(m.Headers) != 0 {
 					h0 := m.Headers[0].PrevBlock
+					th, _ := s.db.BlockHeaderByHash(ctx, h0[:])
 					if !bhb.BlockHash().IsEqual(&h0) &&
-						s.chainParams.GenesisHash.IsEqual(&h0) {
+						s.chainParams.GenesisHash.IsEqual(&h0) &&
+						th == nil {
 						log.Debugf("%v", bhb.BlockHash())
 						log.Debugf("%v", h0)
 
