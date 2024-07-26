@@ -81,18 +81,22 @@ func New(ctx context.Context, home string) (*ldb, error) {
 		return nil, err
 	}
 
+	// Make MaxCost and Metrics configurable.
 	blockCache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,     // number of keys to track frequency of (10M).
 		MaxCost:     1 << 30, // maximum cost of cache (1GB).
 		BufferItems: 64,      // number of keys per Get buffer.
+		Metrics:     false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 	}
+	// Make Metrics configurable.
 	headerCache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,     // number of keys to track frequency of (10M).
 		MaxCost:     1 << 29, // maximum cost of cache (100MB).
 		BufferItems: 64,      // number of keys per Get buffer.
+		Metrics:     false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't setup header cache: %w", err)
