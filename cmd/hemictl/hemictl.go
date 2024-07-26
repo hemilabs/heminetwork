@@ -229,7 +229,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		bh, err := s.DB().BlockHeaderByHash(ctx, ch[:])
+		bh, err := s.DB().BlockHeaderByHash(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("block header by hash: %w", err)
 		}
@@ -241,11 +241,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("block headers best: %w", err)
 		}
-		hash, err := chainhash.NewHash(bhb.Hash)
-		if err != nil {
-			return fmt.Errorf("block headers best chainhash: %w", err)
-		}
-		fmt.Printf("hash  : %v\n", hash)
+		fmt.Printf("hash  : %v\n", bhb.Hash)
 		fmt.Printf("height: %v\n", bhb.Height)
 
 	case "blockheadersbyheight":
@@ -291,7 +287,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		b, err := s.DB().BlockByHash(ctx, ch[:])
+		b, err := s.DB().BlockByHash(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
@@ -458,10 +454,8 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		var revTxId [32]byte
-		copy(revTxId[:], chtxid[:])
 
-		bh, err := s.DB().BlocksByTxId(ctx, revTxId[:])
+		bh, err := s.DB().BlocksByTxId(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
