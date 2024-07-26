@@ -1140,7 +1140,9 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		// XXX if bh download fails we will get jammed. We need a queued "must execute this command" added to peer/service.
 		// XXX we may not want to do this when in special "driver mode"
 		log.Infof("resuming block header download at: %v", actualHeight)
-		if err = s.getHeaders(ctx, p, bhb); err != nil {
+		var bh [80]byte
+		copy(bh[:], bhb)
+		if err = s.getHeaders(ctx, p, bh); err != nil {
 			log.Errorf("sync indexers: %v", err)
 			return
 		}
