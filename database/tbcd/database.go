@@ -15,6 +15,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 
@@ -60,10 +61,10 @@ type Database interface {
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
-	BlockInsert(ctx context.Context, b *Block) (int64, error)
+	BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error)
 	// XXX replace BlockInsert with plural version
 	// BlocksInsert(ctx context.Context, bs []*Block) (int64, error)
-	BlockByHash(ctx context.Context, hash *chainhash.Hash) (*Block, error)
+	BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error)
 
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
@@ -124,12 +125,6 @@ func (bh BlockHeader) ParentHash() *chainhash.Hash {
 		panic(err)
 	}
 	return &wh.PrevBlock
-}
-
-// Block contains a raw bitcoin block and its corresponding hash.
-type Block struct {
-	Hash  *chainhash.Hash
-	Block database.ByteArray // this needs to be converted to either wire or btcutil
 }
 
 // BlockIdentifier uniquely identifies a block using it's hash and height.

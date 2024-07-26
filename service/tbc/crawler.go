@@ -163,13 +163,9 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 	if len(blockHashes) == 0 {
 		return nil, 0, errors.New("script value: no block hashes")
 	}
-	blk, err := s.db.BlockByHash(ctx, blockHashes[0])
+	b, err := s.db.BlockByHash(ctx, blockHashes[0])
 	if err != nil {
 		return nil, 0, fmt.Errorf("block by hash: %w", err)
-	}
-	b, err := btcutil.NewBlockFromBytes(blk.Block)
-	if err != nil {
-		return nil, 0, fmt.Errorf("new block: %w", err)
 	}
 	for _, tx := range b.Transactions() {
 		if !tx.Hash().IsEqual(txId) {
@@ -316,13 +312,9 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Index block
-		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-		b, err := btcutil.NewBlockFromBytes(eb.Block)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		// fixupCache is executed in parallel meaning that the utxos
@@ -430,13 +422,9 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		}
 
 		// Index block
-		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-		b, err := btcutil.NewBlockFromBytes(eb.Block)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		err = s.unprocessUtxos(ctx, b.Transactions(), utxos)
@@ -691,13 +679,9 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		}
 
 		// Index block
-		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-		b, err := btcutil.NewBlockFromBytes(eb.Block)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		err = processTxs(b.Hash(), b.Transactions(), txs)
@@ -797,13 +781,9 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Index block
-		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-		b, err := btcutil.NewBlockFromBytes(eb.Block)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		err = processTxs(b.Hash(), b.Transactions(), txs)
