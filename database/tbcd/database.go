@@ -7,6 +7,7 @@ package tbcd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -195,7 +196,7 @@ func (c CacheOutput) String() string {
 		c[0:32], binary.BigEndian.Uint32(c[40:]))
 }
 
-func (c CacheOutput) ScriptHash() (hash [32]byte) {
+func (c CacheOutput) ScriptHash() (hash ScriptHash) {
 	copy(hash[:], c[0:32])
 	return
 }
@@ -258,7 +259,7 @@ func (u Utxo) String() string {
 		ch, binary.BigEndian.Uint32(u[40:]))
 }
 
-func (u Utxo) ScriptHash() (hash [32]byte) {
+func (u Utxo) ScriptHash() (hash ScriptHash) {
 	copy(hash[:], u[0:32])
 	return
 }
@@ -294,26 +295,32 @@ func NewUtxo(hash [32]byte, value uint64, outIndex uint32) (u Utxo) {
 	return
 }
 
-// ScriptHash is a bitcoin transaction id. The underlying slice is reversed, only
-// when using the stringer does it apear in human readable format.
-type ScriptHash [32]byte
+// ScriptHash is a sha256 that has a stringer.
+type ScriptHash [sha256.Size]byte
 
-func (bh ScriptHash) String() string {
-	return hex.EncodeToString(bh[:])
+func (sh ScriptHash) String() string {
+	return hex.EncodeToString(sh[:])
 }
 
-func NewScriptHash(x [32]byte) (scriptHash ScriptHash) {
-	copy(scriptHash[:], x[:])
-	return
+func NewScriptHashFromScript(script []byte) (scriptHash ScriptHash) {
+	return sha256.Sum256(script)
 }
 
-func NewScriptHashFromBytes(x []byte) (scriptHash ScriptHash, err error) {
-	if len(x) != 32 {
+func NewScriptHashFromBytes(hash []byte) (scriptHash ScriptHash, err error) {
+	if len(hash) != 32 {
 		err = errors.New("invalid script hash length")
 		return
 	}
-	copy(scriptHash[:], x[:])
+	copy(scriptHash[:], hash[:])
 	return
+}
+
+func NewScriptHashFromString(hash string) (ScriptHash, error) {
+	shs, err := hex.DecodeString(hash)
+	if err != nil {
+		return ScriptHash{}, err
+	}
+	return NewScriptHashFromBytes(shs)
 }
 
 // Spent Transaction:

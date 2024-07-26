@@ -6,7 +6,6 @@ package tbc
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"runtime"
@@ -140,7 +139,7 @@ func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) e
 				continue
 			}
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
-				sha256.Sum256(txOut.PkScript),
+				tbcd.NewScriptHashFromScript(txOut.PkScript),
 				uint64(txOut.Value),
 				uint32(outIndex))
 		}
@@ -210,7 +209,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 			if _, ok := utxos[op]; ok {
 				return fmt.Errorf("impossible collision: %v", op)
 			}
-			utxos[op] = tbcd.NewCacheOutput(sha256.Sum256(pkScript),
+			utxos[op] = tbcd.NewCacheOutput(tbcd.NewScriptHashFromScript(pkScript),
 				uint64(value), txIn.PreviousOutPoint.Index)
 		}
 
@@ -226,7 +225,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 			if _, ok := utxos[op]; ok {
 				delete(utxos, op)
 			} else {
-				utxos[op] = tbcd.NewDeleteCacheOutput(sha256.Sum256(txOut.PkScript),
+				utxos[op] = tbcd.NewDeleteCacheOutput(tbcd.NewScriptHashFromScript(txOut.PkScript),
 					op.TxIndex())
 			}
 		}

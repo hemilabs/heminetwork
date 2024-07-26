@@ -7,7 +7,6 @@ package tbc
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -1398,7 +1397,8 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 		return 0, err
 	}
 
-	balance, err := s.db.BalanceByScriptHash(ctx, sha256.Sum256(script))
+	balance, err := s.db.BalanceByScriptHash(ctx,
+		tbcd.NewScriptHashFromScript(script))
 	if err != nil {
 		return 0, err
 	}
@@ -1419,10 +1419,8 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 	if err != nil {
 		return nil, err
 	}
-
-	scriptHash := sha256.Sum256(script)
-
-	utxos, err := s.db.UtxosByScriptHash(ctx, scriptHash, start, count)
+	utxos, err := s.db.UtxosByScriptHash(ctx, tbcd.NewScriptHashFromScript(script),
+		start, count)
 	if err != nil {
 		return nil, err
 	}

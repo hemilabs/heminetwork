@@ -7,8 +7,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -533,13 +531,12 @@ func tbcdb() error {
 			return errors.New("hash or address: both set")
 		}
 
-		var hh [32]byte
+		var sh tbcd.ScriptHash
 		if hash != "" {
-			h, err := hex.DecodeString(hash)
+			sh, err = tbcd.NewScriptHashFromString(hash)
 			if err != nil {
-				return fmt.Errorf("decode hex: %w", err)
+				return fmt.Errorf("new scripthash from string: %w", err)
 			}
-			copy(hh[:], h)
 		}
 		if address != "" {
 			// XXX set params
@@ -551,11 +548,10 @@ func tbcdb() error {
 			if err != nil {
 				return err
 			}
-			sh := sha256.Sum256(h)
-			copy(hh[:], sh[:])
+			sh = tbcd.NewScriptHashFromScript(h)
 		}
 
-		balance, err := s.DB().BalanceByScriptHash(ctx, hh)
+		balance, err := s.DB().BalanceByScriptHash(ctx, sh)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
@@ -591,13 +587,12 @@ func tbcdb() error {
 			return err
 		}
 
-		var hh [32]byte
+		var sh tbcd.ScriptHash
 		if hash != "" {
-			h, err := hex.DecodeString(hash)
+			sh, err = tbcd.NewScriptHashFromString(hash)
 			if err != nil {
-				return fmt.Errorf("decode hex: %w", err)
+				return err
 			}
-			copy(hh[:], h)
 		}
 		if address != "" {
 			// XXX set params
@@ -609,11 +604,10 @@ func tbcdb() error {
 			if err != nil {
 				return err
 			}
-			sh := sha256.Sum256(h)
-			copy(hh[:], sh[:])
+			sh = tbcd.NewScriptHashFromScript(h)
 		}
 
-		utxos, err := s.DB().UtxosByScriptHash(ctx, hh, startNum, countNum)
+		utxos, err := s.DB().UtxosByScriptHash(ctx, sh, startNum, countNum)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
