@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"sync"
 	"time"
 
@@ -45,8 +44,6 @@ const (
 	verbose  = false
 
 	bhsCanonicalTipKey = "canonicaltip"
-
-	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
 
 type IteratorError error
@@ -61,10 +58,6 @@ func init() {
 
 type ldb struct {
 	mtx sync.Mutex
-
-	// maybe remove this because it eats a bit of memory
-	peersGood map[string]struct{}
-	peersBad  map[string]struct{}
 
 	*level.Database
 	pool level.Pool
@@ -108,8 +101,6 @@ func New(ctx context.Context, home string) (*ldb, error) {
 	l := &ldb{
 		Database:    ld,
 		pool:        ld.DB(),
-		peersGood:   make(map[string]struct{}, 1000),
-		peersBad:    make(map[string]struct{}, 1000),
 		blockCache:  blockCache,
 		headerCache: headerCache,
 	}
@@ -948,111 +939,4 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 
 	return nil
-}
-
-func (l *ldb) PeersStats(ctx context.Context) (int, int) {
-	log.Tracef("PeersInsert")
-	defer log.Tracef("PeersInsert exit")
-
-	l.mtx.Lock()
-	defer l.mtx.Unlock()
-	return len(l.peersGood), len(l.peersBad)
-}
-
-func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
-	log.Tracef("PeersInsert")
-	defer log.Tracef("PeersInsert exit")
-
-	l.mtx.Lock()
-	for k := range peers {
-		p := peers[k]
-		a := net.JoinHostPort(p.Host, p.Port)
-		if len(a) < 7 {
-			// 0.0.0.0
-			continue
-		}
-		if _, ok := l.peersBad[a]; ok {
-			// Skip bad peers
-			continue
-		}
-		if _, ok := l.peersGood[a]; ok {
-			// Not strictly needed to skip but this os working pseudode code
-			continue
-		}
-
-		l.peersGood[a] = struct{}{}
-	}
-	allGoodPeers := len(l.peersGood)
-	allBadPeers := len(l.peersBad)
-	l.mtx.Unlock()
-
-	log.Debugf("PeersInsert exit %v good %v bad %v",
-		len(peers), allGoodPeers, allBadPeers)
-
-	return nil
-}
-
-func (l *ldb) PeerDelete(ctx context.Context, host, port string) error {
-	log.Tracef("PeerDelete")
-	defer log.Tracef("PeerDelete exit")
-
-	a := net.JoinHostPort(host, port)
-	if len(a) < 7 {
-		// 0.0.0.0
-		return nil
-	}
-
-	l.mtx.Lock()
-	if _, ok := l.peersGood[a]; ok {
-		delete(l.peersGood, a)
-		l.peersBad[a] = struct{}{}
-	}
-
-	// Crude hammer to reset good/bad state of peers
-	if len(l.peersGood) < minPeersRequired {
-		// Kill all peers to force caller to reseed. This happens when
-		// network is down for a while and all peers are moved into
-		// bad map.
-		l.peersGood = make(map[string]struct{}, 1000)
-		l.peersBad = make(map[string]struct{}, 1000)
-		log.Tracef("peer cache purged")
-	}
-
-	allGoodPeers := len(l.peersGood)
-	allBadPeers := len(l.peersBad)
-
-	l.mtx.Unlock()
-
-	log.Debugf("PeerDelete exit good %v bad %v", allGoodPeers, allBadPeers)
-
-	return nil
-}
-
-func (l *ldb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
-	log.Tracef("PeersRandom")
-
-	x := 0
-	peers := make([]tbcd.Peer, 0, count)
-
-	l.mtx.Lock()
-	allGoodPeers := len(l.peersGood)
-	allBadPeers := len(l.peersBad)
-	for k := range l.peersGood {
-		h, p, err := net.SplitHostPort(k)
-		if err != nil {
-			continue
-		}
-		peers = append(peers, tbcd.Peer{Host: h, Port: p})
-		x++
-		if x >= count {
-			break
-		}
-	}
-	l.mtx.Unlock()
-
-	log.Debugf("PeersRandom exit %v (good %v bad %v)", len(peers),
-		allGoodPeers, allBadPeers)
-
-	// XXX For now return peers in order and let the stack above deal with it.
-	return peers, nil
 }

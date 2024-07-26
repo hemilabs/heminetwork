@@ -70,12 +70,6 @@ type Database interface {
 	BlocksByTxId(ctx context.Context, txId []byte) ([]BlockHash, error)
 	SpentOutputsByTxId(ctx context.Context, txId []byte) ([]SpentInfo, error)
 
-	// Peer manager
-	PeersStats(ctx context.Context) (int, int)               // good, bad count
-	PeersInsert(ctx context.Context, peers []Peer) error     // insert or update
-	PeerDelete(ctx context.Context, host, port string) error // remove peer
-	PeersRandom(ctx context.Context, count int) ([]Peer, error)
-
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)

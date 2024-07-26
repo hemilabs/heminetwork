@@ -58,6 +58,8 @@ const (
 	defaultCmdTimeout          = 4 * time.Second
 	defaultPingTimeout         = 3 * time.Second
 	defaultBlockPendingTimeout = 17 * time.Second
+
+	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
 
 var (
@@ -172,6 +174,9 @@ type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
+	// Note that peers is protected by mtx NOT peersMtx
+	peers map[string]*peer // active but not necessarily connected
+
 	cfg *Config
 
 	// stats
@@ -186,9 +191,13 @@ type Server struct {
 	timeSource  blockchain.MedianTimeSource
 	seeds       []string
 
-	peers  map[string]*peer // active but not necessarily connected
-	blocks *ttl.TTL         // outstanding block downloads [hash]when/where
-	pings  *ttl.TTL         // outstanding pings
+	// maybe remove this because it eats a bit of memory
+	peerMtx   sync.RWMutex
+	peersGood map[string]struct{}
+	peersBad  map[string]struct{}
+
+	blocks *ttl.TTL // outstanding block downloads [hash]when/where
+	pings  *ttl.TTL // outstanding pings
 
 	// reentrancy flags for the indexers
 	// utxoIndexerRunning bool
@@ -230,6 +239,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		printTime:      time.Now().Add(10 * time.Second),
 		blocks:         blocks,
 		peers:          make(map[string]*peer, cfg.PeersWanted),
+		peersBad:       make(map[string]struct{}, 8192),
+		peersGood:      make(map[string]struct{}, 8192),
 		pings:          pings,
 		blocksInserted: make(map[string]struct{}, 8192), // stats XXX rmeove?
 		timeSource:     blockchain.NewMedianTime(),
@@ -289,11 +300,119 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte)
 	return nil
 }
 
+func (s *Server) PeersStats() (int, int) {
+	log.Tracef("PeersStats")
+	defer log.Tracef("PeersStats exit")
+
+	s.peerMtx.Lock()
+	defer s.peerMtx.Unlock()
+	return len(s.peersGood), len(s.peersBad)
+}
+
+func (s *Server) PeersInsert(peers []tbcd.Peer) error {
+	log.Tracef("PeersInsert")
+	defer log.Tracef("PeersInsert exit")
+
+	s.peerMtx.Lock()
+	for k := range peers {
+		p := peers[k]
+		a := net.JoinHostPort(p.Host, p.Port)
+		if len(a) < 7 {
+			// 0.0.0.0
+			continue
+		}
+		if _, ok := s.peersBad[a]; ok {
+			// Skip bad peers
+			continue
+		}
+		if _, ok := s.peersGood[a]; ok {
+			// Not strictly needed to skip but this os working pseudode code
+			continue
+		}
+
+		s.peersGood[a] = struct{}{}
+	}
+	allGoodPeers := len(s.peersGood)
+	allBadPeers := len(s.peersBad)
+	s.peerMtx.Unlock()
+
+	log.Debugf("PeersInsert exit %v good %v bad %v",
+		len(peers), allGoodPeers, allBadPeers)
+
+	return nil
+}
+
+func (s *Server) PeerDelete(host, port string) error {
+	log.Tracef("PeerDelete")
+	defer log.Tracef("PeerDelete exit")
+
+	a := net.JoinHostPort(host, port)
+	if len(a) < 7 {
+		// 0.0.0.0
+		return nil
+	}
+
+	s.peerMtx.Lock()
+	if _, ok := s.peersGood[a]; ok {
+		delete(s.peersGood, a)
+		s.peersBad[a] = struct{}{}
+	}
+
+	// Crude hammer to reset good/bad state of peers
+	if len(s.peersGood) < minPeersRequired {
+		// Kill all peers to force caller to reseed. This happens when
+		// network is down for a while and all peers are moved into
+		// bad map.
+		clear(s.peersGood)
+		clear(s.peersBad)
+		s.peersGood = make(map[string]struct{}, 8192)
+		s.peersBad = make(map[string]struct{}, 8192)
+		log.Tracef("peer cache purged")
+	}
+
+	allGoodPeers := len(s.peersGood)
+	allBadPeers := len(s.peersBad)
+
+	s.peerMtx.Unlock()
+
+	log.Debugf("PeerDelete exit good %v bad %v", allGoodPeers, allBadPeers)
+
+	return nil
+}
+
+func (s *Server) PeersRandom(count int) ([]tbcd.Peer, error) {
+	log.Tracef("PeersRandom")
+
+	x := 0
+	peers := make([]tbcd.Peer, 0, count)
+
+	s.peerMtx.Lock()
+	allGoodPeers := len(s.peersGood)
+	allBadPeers := len(s.peersBad)
+	for k := range s.peersGood {
+		h, p, err := net.SplitHostPort(k)
+		if err != nil {
+			continue
+		}
+		peers = append(peers, tbcd.Peer{Host: h, Port: p})
+		x++
+		if x >= count {
+			break
+		}
+	}
+	s.peerMtx.Unlock()
+
+	log.Debugf("PeersRandom exit %v (good %v bad %v)", len(peers),
+		allGoodPeers, allBadPeers)
+
+	return peers, nil
+}
+
 func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error) {
 	log.Tracef("seed")
 	defer log.Tracef("seed exit")
 
-	peers, err := s.db.PeersRandom(pctx, peersWanted)
+	peers, err := s.PeersRandom(peersWanted)
 	if err != nil {
 		return nil, fmt.Errorf("peers random: %w", err)
 	}
@@ -616,7 +735,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 				log.Errorf("split host port: %v", err)
 				return
 			}
-			if err = s.db.PeerDelete(ctx, host, port); err != nil {
+			if err = s.PeerDelete(host, port); err != nil {
 				log.Errorf("peer delete (%v): %v", pp, err)
 			} else {
 				log.Debugf("Peer delete: %v", pp)
@@ -812,7 +931,7 @@ func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
 			Port: strconv.Itoa(int(msg.AddrList[k].Port)),
 		})
 	}
-	err := s.db.PeersInsert(ctx, peers)
+	err := s.PeersInsert(peers)
 	// Don't log insert 0, its a dup.
 	if err != nil && !errors.Is(err, database.ErrZeroRows) {
 		log.Errorf("%v", err)
@@ -830,7 +949,7 @@ func (s *Server) handleAddrV2(ctx context.Context, p *peer, msg *wire.MsgAddrV2)
 			Port: strconv.Itoa(int(msg.AddrList[k].Port)),
 		})
 	}
-	err := s.db.PeersInsert(ctx, peers)
+	err := s.PeersInsert(peers)
 	// Don't log insert 0, its a dup.
 	if err != nil && !errors.Is(err, database.ErrZeroRows) {
 		log.Errorf("%v", err)
@@ -1215,7 +1334,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 		// Grab some peer stats as well
 		activePeers = len(s.peers)
-		goodPeers, badPeers = s.db.PeersStats(ctx)
+		goodPeers, badPeers = s.PeersStats()
 		// Gonna take it right into the Danger Zone! (double mutex)
 		for _, peer := range s.peers {
 			if peer.isConnected() {
