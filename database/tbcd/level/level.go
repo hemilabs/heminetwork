@@ -63,7 +63,7 @@ type ldb struct {
 	*level.Database
 	pool level.Pool
 
-	blockCache *lru.Cache[string, *tbcd.Block] // block cache
+	blockCache *lru.Cache[string, *btcutil.Block] // block cache
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
@@ -104,7 +104,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	}
 
 	if cfg.BlockCache > 0 {
-		l.blockCache, err = lru.New[string, *tbcd.Block](cfg.BlockCache)
+		l.blockCache, err = lru.New[string, *btcutil.Block](cfg.BlockCache)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 		}
@@ -675,7 +675,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 		if l.cfg.BlockCache > 0 {
-			l.blockCache.Add(string(b.Hash[:]), b)
+			l.blockCache.Add(string(b.Hash()[:]), b)
 		}
 	}
 
