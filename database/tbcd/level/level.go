@@ -18,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/dgraph-io/ristretto"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -69,6 +70,9 @@ type ldb struct {
 
 	*level.Database
 	pool level.Pool
+
+	blockCache  *ristretto.Cache // block cache
+	headerCache *ristretto.Cache // header cache
 }
 
 var _ tbcd.Database = (*ldb)(nil)
@@ -81,6 +85,24 @@ func New(ctx context.Context, home string) (*ldb, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	blockCache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,     // number of keys to track frequency of (10M).
+		MaxCost:     1 << 30, // maximum cost of cache (1GB).
+		BufferItems: 64,      // number of keys per Get buffer.
+	})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't setup block cache: %w", err)
+	}
+	headerCache, err := ristretto.NewCache(&ristretto.Config{
+		NumCounters: 1e7,     // number of keys to track frequency of (10M).
+		MaxCost:     1 << 30, // maximum cost of cache (1GB).
+		BufferItems: 64,      // number of keys per Get buffer.
+	})
+	if err != nil {
+		return nil, fmt.Errorf("couldn't setup header cache: %w", err)
+	}
+
 	log.Debugf("tbcdb database version: %v", ldbVersion)
 	l := &ldb{
 		Database:                  ld,
@@ -89,6 +111,8 @@ func New(ctx context.Context, home string) (*ldb, error) {
 		blocksMissingCache:        make(map[string]*cacheEntry, 1024),
 		peersGood:                 make(map[string]struct{}, 1000),
 		peersBad:                  make(map[string]struct{}, 1000),
+		blockCache:                blockCache,
+		headerCache:               headerCache,
 	}
 
 	return l, nil
