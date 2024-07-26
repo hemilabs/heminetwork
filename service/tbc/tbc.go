@@ -175,6 +175,7 @@ type Server struct {
 	wg  sync.WaitGroup
 
 	// Note that peers is protected by mtx NOT peersMtx
+	// TODO: move to PeerManager?
 	peers map[string]*peer // active but not necessarily connected
 
 	cfg *Config
@@ -191,10 +192,7 @@ type Server struct {
 	timeSource  blockchain.MedianTimeSource
 	seeds       []string
 
-	// maybe remove this because it eats a bit of memory
-	peerMtx   sync.RWMutex
-	peersGood map[string]struct{}
-	peersBad  map[string]struct{}
+	pm *PeerManager
 
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL // outstanding pings
@@ -239,8 +237,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		printTime:      time.Now().Add(10 * time.Second),
 		blocks:         blocks,
 		peers:          make(map[string]*peer, cfg.PeersWanted),
-		peersBad:       make(map[string]struct{}, 8192),
-		peersGood:      make(map[string]struct{}, 8192),
+		pm:             newPeerManager(),
 		pings:          pings,
 		blocksInserted: make(map[string]struct{}, 8192), // stats XXX rmeove?
 		timeSource:     blockchain.NewMedianTime(),
@@ -300,119 +297,12 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte)
 	return nil
 }
 
-func (s *Server) PeersStats() (int, int) {
-	log.Tracef("PeersStats")
-	defer log.Tracef("PeersStats exit")
-
-	s.peerMtx.Lock()
-	defer s.peerMtx.Unlock()
-	return len(s.peersGood), len(s.peersBad)
-}
-
-func (s *Server) PeersInsert(peers []tbcd.Peer) error {
-	log.Tracef("PeersInsert")
-	defer log.Tracef("PeersInsert exit")
-
-	s.peerMtx.Lock()
-	for k := range peers {
-		p := peers[k]
-		a := net.JoinHostPort(p.Host, p.Port)
-		if len(a) < 7 {
-			// 0.0.0.0
-			continue
-		}
-		if _, ok := s.peersBad[a]; ok {
-			// Skip bad peers
-			continue
-		}
-		if _, ok := s.peersGood[a]; ok {
-			// Not strictly needed to skip but this os working pseudode code
-			continue
-		}
-
-		s.peersGood[a] = struct{}{}
-	}
-	allGoodPeers := len(s.peersGood)
-	allBadPeers := len(s.peersBad)
-	s.peerMtx.Unlock()
-
-	log.Debugf("PeersInsert exit %v good %v bad %v",
-		len(peers), allGoodPeers, allBadPeers)
-
-	return nil
-}
-
-func (s *Server) PeerDelete(host, port string) error {
-	log.Tracef("PeerDelete")
-	defer log.Tracef("PeerDelete exit")
-
-	a := net.JoinHostPort(host, port)
-	if len(a) < 7 {
-		// 0.0.0.0
-		return nil
-	}
-
-	s.peerMtx.Lock()
-	if _, ok := s.peersGood[a]; ok {
-		delete(s.peersGood, a)
-		s.peersBad[a] = struct{}{}
-	}
-
-	// Crude hammer to reset good/bad state of peers
-	if len(s.peersGood) < minPeersRequired {
-		// Kill all peers to force caller to reseed. This happens when
-		// network is down for a while and all peers are moved into
-		// bad map.
-		clear(s.peersGood)
-		clear(s.peersBad)
-		s.peersGood = make(map[string]struct{}, 8192)
-		s.peersBad = make(map[string]struct{}, 8192)
-		log.Tracef("peer cache purged")
-	}
-
-	allGoodPeers := len(s.peersGood)
-	allBadPeers := len(s.peersBad)
-
-	s.peerMtx.Unlock()
-
-	log.Debugf("PeerDelete exit good %v bad %v", allGoodPeers, allBadPeers)
-
-	return nil
-}
-
-func (s *Server) PeersRandom(count int) ([]tbcd.Peer, error) {
-	log.Tracef("PeersRandom")
-
-	x := 0
-	peers := make([]tbcd.Peer, 0, count)
-
-	s.peerMtx.Lock()
-	allGoodPeers := len(s.peersGood)
-	allBadPeers := len(s.peersBad)
-	for k := range s.peersGood {
-		h, p, err := net.SplitHostPort(k)
-		if err != nil {
-			continue
-		}
-		peers = append(peers, tbcd.Peer{Host: h, Port: p})
-		x++
-		if x >= count {
-			break
-		}
-	}
-	s.peerMtx.Unlock()
-
-	log.Debugf("PeersRandom exit %v (good %v bad %v)", len(peers),
-		allGoodPeers, allBadPeers)
-
-	return peers, nil
-}
-
-func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error) {
+// TODO: move to PeerManager?
+func (s *Server) seed(pctx context.Context, peersWanted int) ([]string, error) {
 	log.Tracef("seed")
 	defer log.Tracef("seed exit")
 
-	peers, err := s.PeersRandom(peersWanted)
+	peers, err := s.pm.PeersRandom(peersWanted)
 	if err != nil {
 		return nil, fmt.Errorf("peers random: %w", err)
 	}
@@ -427,7 +317,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	defer cancel()
 
 	errorsSeen := 0
-	var moreSeeds []tbcd.Peer
+	var moreSeeds []string
 	for _, v := range s.seeds {
 		host, port, err := net.SplitHostPort(v)
 		if err != nil {
@@ -443,10 +333,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 		}
 
 		for _, ip := range ips {
-			moreSeeds = append(moreSeeds, tbcd.Peer{
-				Host: ip.String(),
-				Port: port,
-			})
+			moreSeeds = append(moreSeeds, net.JoinHostPort(ip.String(), port))
 		}
 	}
 
@@ -454,14 +341,15 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 		return nil, errors.New("could not seed")
 	}
 
-	// insert into peers table
+	// insert into peers table // TODO: ?
 	peers = append(peers, moreSeeds...)
 
-	// return fake peers but don't save them to the database
+	// return fake peers but don't save them to the database // TODO: ?
 	return peers, nil
 }
 
-func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer, error) {
+// TODO: move to PeerManager?
+func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]string, error) {
 	log.Tracef("seedForever")
 	defer log.Tracef("seedForever")
 
@@ -489,6 +377,7 @@ func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer,
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peerAdd(p *peer) error {
 	log.Tracef("peerAdd: %v", p.address)
 	s.mtx.Lock()
@@ -500,6 +389,7 @@ func (s *Server) peerAdd(p *peer) error {
 	return nil
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peerDelete(address string) {
 	log.Tracef("peerDelete: %v", address)
 	s.mtx.Lock()
@@ -507,15 +397,17 @@ func (s *Server) peerDelete(address string) {
 	s.mtx.Unlock()
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peersLen() int {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	return len(s.peers)
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peerManager(ctx context.Context) error {
-	log.Tracef("peerManager")
-	defer log.Tracef("peerManager exit")
+	log.Tracef("PeerManager")
+	defer log.Tracef("PeerManager exit")
 
 	// Channel for peering signals
 	peersWanted := s.cfg.PeersWanted
@@ -547,8 +439,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 
 			// Connect peer
 			for range peersWanted - peersActive {
-				address := net.JoinHostPort(seeds[x].Host, seeds[x].Port)
-				peer, err := NewPeer(s.wireNet, address)
+				peer, err := NewPeer(s.wireNet, seeds[x])
 				if err != nil {
 					// This really should not happen
 					log.Errorf("new peer: %v", err)
@@ -603,6 +494,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) localPeerManager(ctx context.Context) error {
 	log.Tracef("localPeerManager")
 	defer log.Tracef("localPeerManager exit")
@@ -645,6 +537,7 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) startPeerManager(ctx context.Context) error {
 	log.Tracef("startPeerManager")
 	defer log.Tracef("startPeerManager exit")
@@ -656,6 +549,7 @@ func (s *Server) startPeerManager(ctx context.Context) error {
 	return s.peerManager(ctx)
 }
 
+// TODO: move to PeerManager?
 func (s *Server) pingExpired(key any, value any) {
 	log.Tracef("pingExpired")
 	defer log.Tracef("pingExpired exit")
@@ -671,6 +565,7 @@ func (s *Server) pingExpired(key any, value any) {
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) pingAllPeers(ctx context.Context) {
 	log.Tracef("pingAllPeers")
 	defer log.Tracef("pingAllPeers exit")
@@ -707,6 +602,7 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	log.Tracef("peerConnect %v", p)
 	defer func() {
@@ -735,7 +631,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 				log.Errorf("split host port: %v", err)
 				return
 			}
-			if err = s.PeerDelete(host, port); err != nil {
+			if err = s.pm.PeerDelete(host, port); err != nil {
 				log.Errorf("peer delete (%v): %v", pp, err)
 			} else {
 				log.Debugf("Peer delete: %v", pp)
@@ -920,39 +816,36 @@ func (s *Server) blksMissing(ctx context.Context) bool {
 	return len(bm) > 0
 }
 
-func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
+func (s *Server) handleAddr(_ context.Context, p *peer, msg *wire.MsgAddr) {
 	log.Tracef("handleAddr (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddr exit (%v)", p)
 
-	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
-	for k := range msg.AddrList {
-		peers = append(peers, tbcd.Peer{
-			Host: msg.AddrList[k].IP.String(),
-			Port: strconv.Itoa(int(msg.AddrList[k].Port)),
-		})
+	peers := make([]string, 0, len(msg.AddrList))
+	for i, a := range msg.AddrList {
+		peers[i] = net.JoinHostPort(a.IP.String(), strconv.Itoa(int(a.Port)))
 	}
-	err := s.PeersInsert(peers)
-	// Don't log insert 0, its a dup.
-	if err != nil && !errors.Is(err, database.ErrZeroRows) {
-		log.Errorf("%v", err)
+
+	if err := s.pm.PeersInsert(peers); err != nil {
+		log.Errorf("Insert peers: %v", err)
 	}
 }
 
-func (s *Server) handleAddrV2(ctx context.Context, p *peer, msg *wire.MsgAddrV2) {
+func (s *Server) handleAddrV2(_ context.Context, p *peer, msg *wire.MsgAddrV2) {
 	log.Tracef("handleAddrV2 (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddrV2 exit (%v)", p)
 
-	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
-	for k := range msg.AddrList {
-		peers = append(peers, tbcd.Peer{
-			Host: msg.AddrList[k].Addr.String(),
-			Port: strconv.Itoa(int(msg.AddrList[k].Port)),
-		})
+	peers := make([]string, 0, len(msg.AddrList))
+	for i, a := range msg.AddrList {
+		addr := net.JoinHostPort(a.Addr.String(), strconv.Itoa(int(a.Port)))
+		if len(addr) < 7 {
+			// 0.0.0.0
+			continue
+		}
+		peers[i] = addr
 	}
-	err := s.PeersInsert(peers)
-	// Don't log insert 0, its a dup.
-	if err != nil && !errors.Is(err, database.ErrZeroRows) {
-		log.Errorf("%v", err)
+
+	if err := s.pm.PeersInsert(peers); err != nil {
+		log.Errorf("Insert peers: %v", err)
 	}
 }
 
@@ -1334,7 +1227,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 		// Grab some peer stats as well
 		activePeers = len(s.peers)
-		goodPeers, badPeers = s.PeersStats()
+		goodPeers, badPeers = s.pm.Stats()
 		// Gonna take it right into the Danger Zone! (double mutex)
 		for _, peer := range s.peers {
 			if peer.isConnected() {

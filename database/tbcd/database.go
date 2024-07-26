@@ -148,14 +148,6 @@ type SpentInfo struct {
 	InputIndex uint32
 }
 
-// Peer
-type Peer struct {
-	Host      string
-	Port      string
-	LastAt    database.Timestamp `deep:"-"` // Last time connected
-	CreatedAt database.Timestamp `deep:"-"`
-}
-
 // XXX we can probably save a bunch of bcopy if we construct the key directly
 // for the db. Peek at the s + t cache which does this.
 
