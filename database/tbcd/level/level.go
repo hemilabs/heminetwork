@@ -296,16 +296,12 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 // decodeBlockHeader reverse the process of encodeBlockHeader.
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
-	// copy the values to prevent slicing reentrancy problems.
-	var (
-		header [80]byte
-	)
-	copy(header[:], ebh[8:88])
 	bh := &tbcd.BlockHeader{
-		Hash:   tbcd.HeaderHash(header[:]),
+		Hash:   tbcd.HeaderHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
-		Header: header[:],
 	}
+	// copy the values to prevent slicing reentrancy problems.
+	copy(bh.Header[:], ebh[8:88])
 	(&bh.Difficulty).SetBytes(ebh[88:])
 	return bh
 }
@@ -537,14 +533,12 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		lastRecord = ebh[:]
 	}
 
-	var header [80]byte
-	copy(header[:], bhs[len(bhs)-1][:])
 	cbh := &tbcd.BlockHeader{
 		Hash:       &bhash,
 		Height:     height,
-		Header:     header[:],
 		Difficulty: *cdiff,
 	}
+	copy(cbh.Header[:], bhs[len(bhs)-1][:])
 	lbh := cbh
 
 	// XXX: Reason about needing to check fork flag. For now keep it here to

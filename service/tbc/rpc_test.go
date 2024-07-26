@@ -81,7 +81,7 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bh, err := bytes2Header(response.BlockHeaders[0])
+	bh, err := slice2Header(response.BlockHeaders[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bh, err := bytes2Header(response.BlockHeader)
+	bh, err := slice2Header(response.BlockHeader)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -88,7 +88,7 @@ type Database interface {
 type BlockHeader struct {
 	Hash       *chainhash.Hash
 	Height     uint64
-	Header     database.ByteArray
+	Header     [80]byte
 	Difficulty big.Int
 }
 
@@ -98,7 +98,7 @@ func (bh BlockHeader) String() string {
 
 func (bh BlockHeader) Timestamp() time.Time {
 	var wbh wire.BlockHeader
-	err := wbh.Deserialize(bytes.NewReader(bh.Header))
+	err := wbh.Deserialize(bytes.NewReader(bh.Header[:]))
 	if err != nil {
 		return time.Time{}
 	}
@@ -107,7 +107,7 @@ func (bh BlockHeader) Timestamp() time.Time {
 
 func (bh BlockHeader) Wire() (*wire.BlockHeader, error) {
 	var wbh wire.BlockHeader
-	err := wbh.Deserialize(bytes.NewReader(bh.Header))
+	err := wbh.Deserialize(bytes.NewReader(bh.Header[:]))
 	if err != nil {
 		return nil, fmt.Errorf("deserialize: %w", err)
 	}

@@ -130,9 +130,18 @@ func h2b(wbh *wire.BlockHeader) []byte {
 	return hb
 }
 
-func bytes2Header(header []byte) (*wire.BlockHeader, error) {
+func bytes2Header(header [80]byte) (*wire.BlockHeader, error) {
 	var bh wire.BlockHeader
-	err := bh.Deserialize(bytes.NewReader(header))
+	err := bh.Deserialize(bytes.NewReader(header[:]))
+	if err != nil {
+		return nil, fmt.Errorf("deserialize block header: %w", err)
+	}
+	return &bh, nil
+}
+
+func slice2Header(header []byte) (*wire.BlockHeader, error) {
+	var bh wire.BlockHeader
+	err := bh.Deserialize(bytes.NewReader(header[:]))
 	if err != nil {
 		return nil, fmt.Errorf("deserialize block header: %w", err)
 	}
@@ -278,7 +287,7 @@ func (s *Server) DB() tbcd.Database {
 	return s.db
 }
 
-func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte) error {
+func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash [80]byte) error {
 	bh, err := bytes2Header(lastHeaderHash)
 	if err != nil {
 		return fmt.Errorf("invalid header: %w", err)
@@ -1319,7 +1328,7 @@ func (s *Server) RawBlockHeadersByHeight(ctx context.Context, height uint64) ([]
 
 	var headers []api.ByteSlice
 	for _, bh := range bhs {
-		headers = append(headers, []byte(bh.Header))
+		headers = append(headers, []byte(bh.Header[:]))
 	}
 
 	return headers, nil
