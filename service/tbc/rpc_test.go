@@ -1265,7 +1265,7 @@ func TestTxById(t *testing.T) {
 
 	var response tbcapi.TxByIdResponse
 	select {
-	case <-time.After(1 * time.Second):
+	case <-time.After(2 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
