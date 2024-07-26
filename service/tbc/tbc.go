@@ -1644,7 +1644,8 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	// by one from the last block height seen.
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		panic(err)
+		log.Errorf("synced: block headers best: %v", err)
+		return
 	}
 	// Ensure we have genesis or the Synced flag will be true if metadata
 	// does not exist.
