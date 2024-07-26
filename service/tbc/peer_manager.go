@@ -34,8 +34,8 @@ func (pm *PeerManager) Stats() (int, int) {
 	log.Tracef("PeersStats")
 	defer log.Tracef("PeersStats exit")
 
-	pm.peersMtx.Lock()
-	defer pm.peersMtx.Unlock()
+	pm.peersMtx.RLock()
+	defer pm.peersMtx.RUnlock()
 	return len(pm.peersGood), len(pm.peersBad)
 }
 
@@ -113,7 +113,7 @@ func (pm *PeerManager) PeersRandom(count int) ([]string, error) {
 	i := 0
 	peers := make([]string, count)
 
-	pm.peersMtx.Lock()
+	pm.peersMtx.RLock()
 	allGoodPeers := len(pm.peersGood)
 	allBadPeers := len(pm.peersBad)
 	for k := range pm.peersGood {
@@ -123,7 +123,7 @@ func (pm *PeerManager) PeersRandom(count int) ([]string, error) {
 			break
 		}
 	}
-	pm.peersMtx.Unlock()
+	pm.peersMtx.RUnlock()
 
 	log.Debugf("PeersRandom exit %v (good %v bad %v)", len(peers),
 		allGoodPeers, allBadPeers)
