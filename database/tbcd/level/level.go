@@ -71,8 +71,11 @@ type ldb struct {
 	*level.Database
 	pool level.Pool
 
-	blockCache  *ristretto.Cache // block cache
-	headerCache *ristretto.Cache // header cache
+	blockCache *ristretto.Cache // block cache
+
+	// Block Header cache. Note that it is only primed during reads. Doing
+	// this during writes would be relatively expensive at nearly no gain.
+	headerCache *ristretto.Cache // header cache (maybe make a simple map?)
 }
 
 var _ tbcd.Database = (*ldb)(nil)
@@ -96,7 +99,7 @@ func New(ctx context.Context, home string) (*ldb, error) {
 	}
 	headerCache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,     // number of keys to track frequency of (10M).
-		MaxCost:     1 << 30, // maximum cost of cache (1GB).
+		MaxCost:     1 << 29, // maximum cost of cache (100MB).
 		BufferItems: 64,      // number of keys per Get buffer.
 	})
 	if err != nil {
@@ -173,6 +176,12 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
+	// Try cache first
+	b, _ := l.headerCache.Get(string(hash))
+	if b != nil {
+		return b.(*tbcd.BlockHeader), nil
+	}
+
 	// It stands to reason that this code does not need a trasaction. The
 	// caller code will either receive or not receice an answer. It does
 	// not seem likely to be racing higher up in the stack.
@@ -185,7 +194,12 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 		}
 		return nil, fmt.Errorf("block header get: %w", err)
 	}
-	return decodeBlockHeader(ebh), nil
+	bh := decodeBlockHeader(ebh)
+
+	// Insert into cache, roughlt 150 byte cost.
+	l.headerCache.Set(string(bh.Hash), bh, 150)
+
+	return bh, nil
 }
 
 func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.BlockHeader, error) {
@@ -710,6 +724,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		if err = bDB.Put(b.Hash, b.Block, nil); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
+		l.blockCache.Set(string(b.Hash), b, int64(len(b.Hash)+len(b.Block)))
 	}
 
 	// It's possible to remove the transaction for bm without a transaction
@@ -735,6 +750,12 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
+	// Try cache first
+	cb, _ := l.blockCache.Get(string(hash))
+	if cb != nil {
+		return cb.(*tbcd.Block), nil
+	}
+
 	bDB := l.pool[level.BlocksDB]
 	eb, err := bDB.Get(hash, nil)
 	if err != nil {
@@ -744,10 +765,12 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 		}
 		return nil, fmt.Errorf("block get: %w", err)
 	}
-	return &tbcd.Block{
+	b := &tbcd.Block{
 		Hash:  hash,
 		Block: eb,
-	}, nil
+	}
+	l.blockCache.Set(string(hash), b, int64(len(b.Hash)+len(b.Block)))
+	return b, nil
 }
 
 func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, error) {

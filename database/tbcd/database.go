@@ -139,7 +139,7 @@ func (bh BlockHeader) ParentHash() *chainhash.Hash {
 // Block contains a raw bitcoin block and its corresponding hash.
 type Block struct {
 	Hash  database.ByteArray
-	Block database.ByteArray
+	Block database.ByteArray // this needs to be converted to either wire or btcutil
 }
 
 // BlockIdentifier uniquely identifies a block using it's hash and height.
