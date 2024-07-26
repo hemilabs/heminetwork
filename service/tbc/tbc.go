@@ -1241,18 +1241,14 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 	block := btcutil.NewBlock(msg)
 	bhs := block.Hash().String()
-	bb, err := block.Bytes() // XXX we should not being doing this twice but requires a modification to the wire package
+	rawBlock, err := block.Bytes()
 	if err != nil {
-		log.Errorf("block bytes %v: %v", block.Hash(), err)
+		log.Errorf("Unable to get raw block %v: %v", bhs, err)
 		return
-	}
-	b := &tbcd.Block{
-		Hash:  block.Hash(),
-		Block: bb,
 	}
 
 	if s.cfg.BlockSanity {
-		err = blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
+		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
 			s.timeSource)
 		if err != nil {
 			log.Errorf("Unable to validate block hash %v: %v", bhs, err)
@@ -1274,7 +1270,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		// }
 	}
 
-	height, err := s.db.BlockInsert(ctx, b)
+	height, err := s.db.BlockInsert(ctx, block)
 	if err != nil {
 		log.Errorf("block insert %v: %v", bhs, err)
 	} else {
@@ -1307,7 +1303,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 	// Stats
 	if err == nil {
-		s.blocksSize += uint64(len(b.Block) + len(b.Hash))
+		s.blocksSize += uint64(len(rawBlock) + 32)
 		if _, ok := s.blocksInserted[bhs]; ok {
 			s.blocksDuplicate++
 		} else {
@@ -1376,14 +1372,7 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	}
 
 	log.Debugf("Inserting genesis block")
-	gb, err := btcutil.NewBlock(s.chainParams.GenesisBlock).Bytes()
-	if err != nil {
-		return fmt.Errorf("genesis block encode: %w", err)
-	}
-	_, err = s.db.BlockInsert(ctx, &tbcd.Block{
-		Hash:  s.chainParams.GenesisHash,
-		Block: gb,
-	})
+	_, err = s.db.BlockInsert(ctx, btcutil.NewBlock(s.chainParams.GenesisBlock))
 	if err != nil {
 		return fmt.Errorf("genesis block insert: %w", err)
 	}
@@ -1577,13 +1566,7 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 		if err != nil {
 			return nil, err
 		}
-
-		parsedBlock, err := btcutil.NewBlockFromBytes(block.Block)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, tx := range parsedBlock.Transactions() {
+		for _, tx := range block.Transactions() {
 			if tx.Hash().IsEqual(txId) {
 				return tx.MsgTx(), nil
 			}
@@ -1631,14 +1614,9 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 			panic("fees at height: unsupported fork")
 			// return 0, fmt.Errorf("too many block headers: %v", len(bhs))
 		}
-		be, err := s.db.BlockByHash(ctx, bhs[0].Hash)
+		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
 			return 0, fmt.Errorf("block by hash: %w", err)
-		}
-		b, err := btcutil.NewBlockFromBytes(be.Block)
-		if err != nil {
-			return 0, fmt.Errorf("could not decode block %v %v: %v",
-				height, bhs[0].Hash, err)
 		}
 
 		// walk block tx'
@@ -1656,9 +1634,6 @@ type SyncInfo struct {
 	BlockHeader HashHeight
 	Utxo        HashHeight
 	Tx          HashHeight
-	// BlockHeaderHeight uint64 // last block header height
-	// UtxoHeight        uint64 // last indexed utxo block height
-	// TxHeight          uint64 // last indexed tx block height
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/ristretto"
@@ -627,11 +628,11 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 	return bis, nil
 }
 
-func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
+func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) {
 	log.Tracef("BlockInsert")
 	defer log.Tracef("BlockInsert exit")
 
-	bh, err := l.BlockHeaderByHash(ctx, b.Hash)
+	bh, err := l.BlockHeaderByHash(ctx, b.Hash())
 	if err != nil {
 		return -1, fmt.Errorf("block header by hash: %w", err)
 	}
@@ -639,16 +640,20 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	// Insert block without transaction, if it succeeds and the missing
 	// does not it will be simply redone.
 	bDB := l.pool[level.BlocksDB]
-	has, err := bDB.Has(b.Hash[:], nil)
+	has, err := bDB.Has(b.Hash()[:], nil)
 	if err != nil {
 		return -1, fmt.Errorf("block insert has: %w", err)
 	}
 	if !has {
 		// Insert block since we do not have it yet
-		if err = bDB.Put(b.Hash[:], b.Block, nil); err != nil {
+		rawBlock, err := b.Bytes()
+		if err != nil {
+			return -1, fmt.Errorf("encoding block: %w", err)
+		}
+		if err = bDB.Put(b.Hash()[:], rawBlock, nil); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
-		l.blockCache.Set(string(b.Hash[:]), b, int64(len(b.Hash)+len(b.Block)))
+		l.blockCache.Set(string(b.Hash()[:]), b, int64(32+len(rawBlock)))
 	}
 
 	// Remove block identifier from blocks missing
@@ -664,14 +669,20 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	return int64(bh.Height), nil
 }
 
-func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*tbcd.Block, error) {
+func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
+
+	// Get height
+	bh, err := l.BlockHeaderByHash(ctx, hash)
+	if err != nil {
+		return nil, fmt.Errorf("could not obtain block height: %w", err)
+	}
 
 	// Try cache first
 	cb, _ := l.blockCache.Get(string(hash[:]))
 	if cb != nil {
-		return cb.(*tbcd.Block), nil
+		return cb.(*btcutil.Block), nil
 	}
 
 	bDB := l.pool[level.BlocksDB]
@@ -682,11 +693,13 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*tbcd.Bloc
 		}
 		return nil, fmt.Errorf("block get: %w", err)
 	}
-	b := &tbcd.Block{
-		Hash:  hash,
-		Block: eb,
+	b, err := btcutil.NewBlockFromBytes(eb)
+	if err != nil {
+		return nil, fmt.Errorf("block decode: %w", err)
 	}
-	l.blockCache.Set(string(hash[:]), b, int64(len(b.Hash)+len(b.Block)))
+	b.SetHeight(int32(bh.Height))
+	l.blockCache.Set(string(hash[:]), b, int64(32+len(eb)))
+
 	return b, nil
 }
 
