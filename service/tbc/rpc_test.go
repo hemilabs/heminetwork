@@ -1263,12 +1263,13 @@ func TestTxById(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdResponse
 	select {
-	case <-time.After(2 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
+
+	var response tbcapi.TxByIdResponse
 
 	indexAll(ctx, t, tbcServer)
 
@@ -1278,8 +1279,10 @@ func TestTxById(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	revTxId := tbcd.TxId(reverseBytes(txIdBytes))
+
 	if err = tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxId: txIdBytes,
+		TxId: revTxId[:],
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1300,8 +1303,6 @@ func TestTxById(t *testing.T) {
 	if response.Error != nil {
 		t.Fatal(response.Error.Message)
 	}
-
-	revTxId := tbcd.TxId(reverseBytes(txIdBytes))
 
 	tx, err := tbcServer.TxById(ctx, revTxId.Hash())
 	if err != nil {
