@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/ristretto"
@@ -80,18 +81,22 @@ func New(ctx context.Context, home string) (*ldb, error) {
 		return nil, err
 	}
 
+	// Make MaxCost and Metrics configurable.
 	blockCache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,     // number of keys to track frequency of (10M).
 		MaxCost:     1 << 30, // maximum cost of cache (1GB).
 		BufferItems: 64,      // number of keys per Get buffer.
+		Metrics:     false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 	}
+	// Make Metrics configurable.
 	headerCache, err := ristretto.NewCache(&ristretto.Config{
 		NumCounters: 1e7,     // number of keys to track frequency of (10M).
 		MaxCost:     1 << 29, // maximum cost of cache (100MB).
 		BufferItems: 64,      // number of keys per Get buffer.
+		Metrics:     false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("couldn't setup header cache: %w", err)
@@ -159,12 +164,12 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	return mdDB.Put(key, value, nil)
 }
 
-func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
 	// Try cache first
-	b, _ := l.headerCache.Get(string(hash))
+	b, _ := l.headerCache.Get(string(hash[:]))
 	if b != nil {
 		return b.(*tbcd.BlockHeader), nil
 	}
@@ -174,7 +179,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	// not seem likely to be racing higher up in the stack.
 
 	bhsDB := l.pool[level.BlockHeadersDB]
-	ebh, err := bhsDB.Get(hash, nil)
+	ebh, err := bhsDB.Get(hash[:], nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("block header not found: %x", hash))
@@ -184,7 +189,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	bh := decodeBlockHeader(ebh)
 
 	// Insert into cache, roughlt 150 byte cost.
-	l.headerCache.Set(string(bh.Hash), bh, 150)
+	l.headerCache.Set(string(bh.Hash[:]), bh, 150)
 
 	return bh, nil
 }
@@ -254,12 +259,11 @@ func heightHashToKey(height uint64, hash []byte) []byte {
 }
 
 // keyToHeightHash reverses the process of heightHashToKey.
-func keyToHeightHash(key []byte) (uint64, []byte) {
-	if len(key) != 8+1+chainhash.HashSize {
-		panic(fmt.Sprintf("invalid key size: %v", len(key)))
+func keyToHeightHash(key []byte) (uint64, *chainhash.Hash) {
+	hash, err := chainhash.NewHash(key[9:])
+	if err != nil {
+		panic(fmt.Sprintf("chain hash new: %v", len(key)))
 	}
-	hash := make([]byte, chainhash.HashSize) // must make copy!
-	copy(hash, key[9:])
 	return binary.BigEndian.Uint64(key[0:8]), hash
 }
 
@@ -276,16 +280,12 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 // decodeBlockHeader reverse the process of encodeBlockHeader.
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
-	// copy the values to prevent slicing reentrancy problems.
-	var (
-		header [80]byte
-	)
-	copy(header[:], ebh[8:88])
 	bh := &tbcd.BlockHeader{
-		Hash:   tbcd.HeaderHash(header[:])[:],
+		Hash:   tbcd.HeaderHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
-		Header: header[:],
 	}
+	// copy the values to prevent slicing reentrancy problems.
+	copy(bh.Header[:], ebh[8:88])
 	(&bh.Difficulty).SetBytes(ebh[88:])
 	return bh
 }
@@ -405,7 +405,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		return tbcd.ITInvalid, nil, nil,
 			fmt.Errorf("block headers insert b2h: %w", err)
 	}
-	pbh, err := l.BlockHeaderByHash(ctx, wbh.PrevBlock[:])
+	pbh, err := l.BlockHeaderByHash(ctx, &wbh.PrevBlock)
 	if err != nil {
 		return tbcd.ITInvalid, nil, nil,
 			fmt.Errorf("block headers insert: %w", err)
@@ -517,14 +517,12 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		lastRecord = ebh[:]
 	}
 
-	var header [80]byte
-	copy(header[:], bhs[len(bhs)-1][:])
 	cbh := &tbcd.BlockHeader{
-		Hash:       bhash[:],
+		Hash:       &bhash,
 		Height:     height,
-		Header:     header[:],
 		Difficulty: *cdiff,
 	}
+	copy(cbh.Header[:], bhs[len(bhs)-1][:])
 	lbh := cbh
 
 	// XXX: Reason about needing to check fork flag. For now keep it here to
@@ -634,11 +632,11 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 	return bis, nil
 }
 
-func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
+func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) {
 	log.Tracef("BlockInsert")
 	defer log.Tracef("BlockInsert exit")
 
-	bh, err := l.BlockHeaderByHash(ctx, b.Hash)
+	bh, err := l.BlockHeaderByHash(ctx, b.Hash())
 	if err != nil {
 		return -1, fmt.Errorf("block header by hash: %w", err)
 	}
@@ -646,20 +644,25 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	// Insert block without transaction, if it succeeds and the missing
 	// does not it will be simply redone.
 	bDB := l.pool[level.BlocksDB]
-	has, err := bDB.Has(b.Hash, nil)
+	has, err := bDB.Has(b.Hash()[:], nil)
 	if err != nil {
 		return -1, fmt.Errorf("block insert has: %w", err)
 	}
 	if !has {
 		// Insert block since we do not have it yet
-		if err = bDB.Put(b.Hash, b.Block, nil); err != nil {
+		rawBlock, err := b.Bytes()
+		if err != nil {
+			return -1, fmt.Errorf("encoding block: %w", err)
+		}
+		if err = bDB.Put(b.Hash()[:], rawBlock, nil); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
-		l.blockCache.Set(string(b.Hash), b, int64(len(b.Hash)+len(b.Block)))
+		size := int64(((32 + len(rawBlock)) * 12) / 10)
+		l.blockCache.Set(string(b.Hash()[:]), b, size)
 	}
 
 	// Remove block identifier from blocks missing
-	key := heightHashToKey(bh.Height, bh.Hash)
+	key := heightHashToKey(bh.Height, bh.Hash[:])
 	bmDB := l.pool[level.BlocksMissingDB]
 	if err = bmDB.Delete(key, nil); err != nil {
 		// Ignore not found, it was deleted prior to this call.
@@ -671,38 +674,46 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	return int64(bh.Height), nil
 }
 
-func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error) {
+func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
+	// Get height
+	bh, err := l.BlockHeaderByHash(ctx, hash)
+	if err != nil {
+		return nil, fmt.Errorf("could not obtain block height: %w", err)
+	}
+
 	// Try cache first
-	cb, _ := l.blockCache.Get(string(hash))
+	cb, _ := l.blockCache.Get(string(hash[:]))
 	if cb != nil {
-		return cb.(*tbcd.Block), nil
+		return cb.(*btcutil.Block), nil
 	}
 
 	bDB := l.pool[level.BlocksDB]
-	eb, err := bDB.Get(hash, nil)
+	eb, err := bDB.Get(hash[:], nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			ch, _ := chainhash.NewHash(hash)
-			return nil, database.NotFoundError(fmt.Sprintf("block not found: %v", ch))
+			return nil, database.NotFoundError(fmt.Sprintf("block not found: %v", hash))
 		}
 		return nil, fmt.Errorf("block get: %w", err)
 	}
-	b := &tbcd.Block{
-		Hash:  hash,
-		Block: eb,
+	b, err := btcutil.NewBlockFromBytes(eb)
+	if err != nil {
+		return nil, fmt.Errorf("block decode: %w", err)
 	}
-	l.blockCache.Set(string(hash), b, int64(len(b.Hash)+len(b.Block)))
+	b.SetHeight(int32(bh.Height))
+	size := int64(((32 + len(eb)) * 12) / 10)
+	l.blockCache.Set(string(hash[:]), b, size)
+
 	return b, nil
 }
 
-func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, error) {
+func (l *ldb) BlocksByTxId(ctx context.Context, txId *chainhash.Hash) ([]*chainhash.Hash, error) {
 	log.Tracef("BlocksByTxId")
 	defer log.Tracef("BlocksByTxId exit")
 
-	blocks := make([]tbcd.BlockHash, 0, 2)
+	blocks := make([]*chainhash.Hash, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
 	var txid [33]byte
 	txid[0] = 't'
@@ -710,7 +721,7 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, 
 	it := txDB.NewIterator(util.BytesPrefix(txid[:]), nil)
 	defer it.Release()
 	for it.Next() {
-		block, err := tbcd.NewBlockHashFromBytes(it.Key()[33:])
+		block, err := chainhash.NewHash(it.Key()[33:])
 		if err != nil {
 			return nil, err
 		}
@@ -720,14 +731,13 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, 
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	if len(blocks) == 0 {
-		ctxid, _ := chainhash.NewHash(txId)
-		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", ctxid))
+		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", txid))
 	}
 
 	return blocks, nil
 }
 
-func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId []byte) ([]tbcd.SpentInfo, error) {
+func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputByOutpoint")
 	defer log.Tracef("SpentOutputByOutpoint exit")
 
@@ -742,9 +752,18 @@ func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId []byte) ([]tbcd.Spent
 		if !bytes.Equal(it.Key()[:33], key[:]) {
 			continue
 		}
-		var s tbcd.SpentInfo
-		copy(s.TxId[:], it.Value()[0:32])
-		copy(s.BlockHash[:], it.Key()[37:])
+		var (
+			s   tbcd.SpentInfo
+			err error
+		)
+		s.TxId, err = chainhash.NewHash(it.Value()[0:32])
+		if err != nil {
+			return nil, fmt.Errorf("new tx id: %w", err)
+		}
+		s.BlockHash, err = chainhash.NewHash(it.Key()[37:])
+		if err != nil {
+			return nil, fmt.Errorf("new block hash: %w", err)
+		}
 		s.InputIndex = binary.BigEndian.Uint32(it.Value()[32:36])
 		si = append(si, s)
 	}
@@ -814,7 +833,7 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start u
 		}
 		index := binary.BigEndian.Uint32(it.Key()[65:])
 		value := binary.BigEndian.Uint64(it.Value())
-		var txId tbcd.TxId
+		var txId chainhash.Hash
 		copy(txId[:], it.Key()[33:65])
 		utxos = append(utxos, tbcd.NewUtxo(txId, value, index))
 

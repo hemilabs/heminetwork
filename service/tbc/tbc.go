@@ -7,8 +7,6 @@ package tbc
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -16,7 +14,6 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -133,18 +130,22 @@ func h2b(wbh *wire.BlockHeader) []byte {
 	return hb
 }
 
-func bytes2Header(header []byte) (*wire.BlockHeader, error) {
+func bytes2Header(header [80]byte) (*wire.BlockHeader, error) {
 	var bh wire.BlockHeader
-	err := bh.Deserialize(bytes.NewReader(header))
+	err := bh.Deserialize(bytes.NewReader(header[:]))
 	if err != nil {
 		return nil, fmt.Errorf("deserialize block header: %w", err)
 	}
 	return &bh, nil
 }
 
-func sliceChainHash(ch chainhash.Hash) []byte {
-	// Fuck you chainhash package
-	return ch[:]
+func slice2Header(header []byte) (*wire.BlockHeader, error) {
+	var bh wire.BlockHeader
+	err := bh.Deserialize(bytes.NewReader(header[:]))
+	if err != nil {
+		return nil, fmt.Errorf("deserialize block header: %w", err)
+	}
+	return &bh, nil
 }
 
 type Config struct {
@@ -282,7 +283,7 @@ func (s *Server) DB() tbcd.Database {
 	return s.db
 }
 
-func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte) error {
+func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash [80]byte) error {
 	bh, err := bytes2Header(lastHeaderHash)
 	if err != nil {
 		return fmt.Errorf("invalid header: %w", err)
@@ -713,7 +714,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 						log.Debugf("%v", bhb.BlockHash())
 						log.Debugf("%v", h0)
 
-						nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash()[:])
+						nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
 						if err != nil {
 							panic(err) // XXX
 						}
@@ -1133,18 +1134,14 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 	block := btcutil.NewBlock(msg)
 	bhs := block.Hash().String()
-	bb, err := block.Bytes() // XXX we should not being doing this twice but requires a modification to the wire package
+	rawBlock, err := block.Bytes()
 	if err != nil {
-		log.Errorf("block bytes %v: %v", block.Hash(), err)
+		log.Errorf("Unable to get raw block %v: %v", bhs, err)
 		return
-	}
-	b := &tbcd.Block{
-		Hash:  sliceChainHash(*block.Hash()),
-		Block: bb,
 	}
 
 	if s.cfg.BlockSanity {
-		err = blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
+		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
 			s.timeSource)
 		if err != nil {
 			log.Errorf("Unable to validate block hash %v: %v", bhs, err)
@@ -1166,7 +1163,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 		// }
 	}
 
-	height, err := s.db.BlockInsert(ctx, b)
+	height, err := s.db.BlockInsert(ctx, block)
 	if err != nil {
 		log.Errorf("block insert %v: %v", bhs, err)
 	} else {
@@ -1199,7 +1196,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 	// Stats
 	if err == nil {
-		s.blocksSize += uint64(len(b.Block) + len(b.Hash))
+		s.blocksSize += uint64(len(rawBlock) + 32)
 		if _, ok := s.blocksInserted[bhs]; ok {
 			s.blocksDuplicate++
 		} else {
@@ -1268,14 +1265,7 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	}
 
 	log.Debugf("Inserting genesis block")
-	gb, err := btcutil.NewBlock(s.chainParams.GenesisBlock).Bytes()
-	if err != nil {
-		return fmt.Errorf("genesis block encode: %w", err)
-	}
-	_, err = s.db.BlockInsert(ctx, &tbcd.Block{
-		Hash:  s.chainParams.GenesisHash[:],
-		Block: gb,
-	})
+	_, err = s.db.BlockInsert(ctx, btcutil.NewBlock(s.chainParams.GenesisBlock))
 	if err != nil {
 		return fmt.Errorf("genesis block insert: %w", err)
 	}
@@ -1289,7 +1279,7 @@ func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
-	bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
+	bh, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
 		return nil, 0, fmt.Errorf("db block header by hash: %w", err)
 	}
@@ -1323,7 +1313,7 @@ func (s *Server) RawBlockHeadersByHeight(ctx context.Context, height uint64) ([]
 
 	var headers []api.ByteSlice
 	for _, bh := range bhs {
-		headers = append(headers, []byte(bh.Header))
+		headers = append(headers, []byte(bh.Header[:]))
 	}
 
 	return headers, nil
@@ -1366,7 +1356,7 @@ func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*b
 	log.Tracef("DifficultyAtHash")
 	defer log.Tracef("DifficultyAtHash exit")
 
-	blockHeader, err := s.db.BlockHeaderByHash(ctx, hash[:])
+	blockHeader, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -1401,7 +1391,8 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 		return 0, err
 	}
 
-	balance, err := s.db.BalanceByScriptHash(ctx, sha256.Sum256(script))
+	balance, err := s.db.BalanceByScriptHash(ctx,
+		tbcd.NewScriptHashFromScript(script))
 	if err != nil {
 		return 0, err
 	}
@@ -1422,10 +1413,8 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 	if err != nil {
 		return nil, err
 	}
-
-	scriptHash := sha256.Sum256(script)
-
-	utxos, err := s.db.UtxosByScriptHash(ctx, scriptHash, start, count)
+	utxos, err := s.db.UtxosByScriptHash(ctx, tbcd.NewScriptHashFromScript(script),
+		start, count)
 	if err != nil {
 		return nil, err
 	}
@@ -1440,7 +1429,7 @@ func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	// returns all spent outputs. The db should always be canonical but
 	// assert that.
 
-	si, err := s.db.SpentOutputsByTxId(ctx, txId[:])
+	si, err := s.db.SpentOutputsByTxId(ctx, txId)
 	if err != nil {
 		return nil, err
 	}
@@ -1452,7 +1441,7 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	log.Tracef("TxById")
 	defer log.Tracef("TxById exit")
 
-	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
+	blockHashes, err := s.db.BlocksByTxId(ctx, txId)
 	if err != nil {
 		return nil, err
 	}
@@ -1465,27 +1454,13 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	// returns the first block the tx exists in. This however must be the
 	// canonical block. This function must also return the blockhash.
 
-	// chain hash stores the bytes in reverse order
-	revTxId := bytes.Clone(txId[:])
-	slices.Reverse(revTxId)
-	ch, err := chainhash.NewHashFromStr(hex.EncodeToString(revTxId[:]))
-	if err != nil {
-		return nil, err
-	}
-
 	for _, blockHash := range blockHashes {
-		block, err := s.db.BlockByHash(ctx, blockHash[:])
+		block, err := s.db.BlockByHash(ctx, blockHash)
 		if err != nil {
 			return nil, err
 		}
-
-		parsedBlock, err := btcutil.NewBlockFromBytes(block.Block)
-		if err != nil {
-			return nil, err
-		}
-
-		for _, tx := range parsedBlock.Transactions() {
-			if tx.Hash().IsEqual(ch) {
+		for _, tx := range block.Transactions() {
+			if tx.Hash().IsEqual(txId) {
 				return tx.MsgTx(), nil
 			}
 		}
@@ -1532,15 +1507,9 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 			panic("fees at height: unsupported fork")
 			// return 0, fmt.Errorf("too many block headers: %v", len(bhs))
 		}
-		be, err := s.db.BlockByHash(ctx, bhs[0].Hash)
+		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
 			return 0, fmt.Errorf("block by hash: %w", err)
-		}
-		b, err := btcutil.NewBlockFromBytes(be.Block)
-		if err != nil {
-			ch, _ := chainhash.NewHash(bhs[0].Hash)
-			return 0, fmt.Errorf("could not decode block %v %v: %v",
-				height, ch, err)
 		}
 
 		// walk block tx'
@@ -1558,9 +1527,6 @@ type SyncInfo struct {
 	BlockHeader HashHeight
 	Utxo        HashHeight
 	Tx          HashHeight
-	// BlockHeaderHeight uint64 // last block header height
-	// UtxoHeight        uint64 // last indexed utxo block height
-	// TxHeight          uint64 // last indexed tx block height
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -1571,18 +1537,15 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	// by one from the last block height seen.
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		panic(err)
-	}
-	bhHash, err := chainhash.NewHash(bhb.Hash)
-	if err != nil {
-		panic(err)
+		log.Errorf("synced: block headers best: %v", err)
+		return
 	}
 	// Ensure we have genesis or the Synced flag will be true if metadata
 	// does not exist.
-	if zeroHash.IsEqual(bhHash) {
+	if zeroHash.IsEqual(bhb.Hash) {
 		panic("no genesis")
 	}
-	si.BlockHeader.Hash = *bhHash
+	si.BlockHeader.Hash = bhb.Hash
 	si.BlockHeader.Height = bhb.Height
 
 	// utxo index
@@ -1599,7 +1562,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	}
 	si.Tx = *txHH
 
-	if utxoHH.Hash.IsEqual(bhHash) && txHH.Hash.IsEqual(bhHash) &&
+	if utxoHH.Hash.IsEqual(bhb.Hash) && txHH.Hash.IsEqual(bhb.Hash) &&
 		!s.blksMissing(ctx) {
 		si.Synced = true
 	}
@@ -1660,6 +1623,7 @@ func (s *Server) Run(pctx context.Context) error {
 
 	// We need a lot of open files and memory for the indexes. Best effort
 	// to echo to the user what the ulimits are.
+	s.ignoreUlimit = true
 	if s.ignoreUlimit || s.cfg.Network == networkLocalnet {
 		log.Warningf("ignoring ulimit requirements")
 	} else if ulimitSupported {

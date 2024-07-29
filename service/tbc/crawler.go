@@ -6,7 +6,6 @@ package tbc
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"runtime"
@@ -32,7 +31,7 @@ var (
 )
 
 type HashHeight struct {
-	Hash   chainhash.Hash
+	Hash   *chainhash.Hash
 	Height uint64
 }
 
@@ -51,11 +50,11 @@ func (s *Server) mdHashHeight(ctx context.Context, key []byte) (*HashHeight, err
 	if err != nil {
 		return nil, fmt.Errorf("metadata hash: %w", err)
 	}
-	bh, err := s.db.BlockHeaderByHash(ctx, ch[:])
+	bh, err := s.db.BlockHeaderByHash(ctx, ch)
 	if err != nil {
 		return nil, fmt.Errorf("metadata block header: %w", err)
 	}
-	return &HashHeight{Hash: *ch, Height: bh.Height}, nil
+	return &HashHeight{Hash: ch, Height: bh.Height}, nil
 }
 
 // UtxoIndexHash returns the last hash that has been been UTxO indexed.
@@ -88,7 +87,7 @@ func (s *Server) findCanonicalHash(ctx context.Context, endHash *chainhash.Hash,
 	for k, v := range bhs {
 		h := endHash
 		for {
-			bh, err := s.db.BlockHeaderByHash(ctx, h[:])
+			bh, err := s.db.BlockHeaderByHash(ctx, h)
 			if err != nil {
 				return -1, fmt.Errorf("block header by hash: %w", err)
 			}
@@ -140,7 +139,7 @@ func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) e
 				continue
 			}
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
-				sha256.Sum256(txOut.PkScript),
+				tbcd.NewScriptHashFromScript(txOut.PkScript),
 				uint64(txOut.Value),
 				uint32(outIndex))
 		}
@@ -149,15 +148,11 @@ func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) e
 }
 
 func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int64, error) {
-	txId := op.TxId()
+	txId := op.TxIdHash()
 	txIndex := op.TxIndex()
-	opHash, err := chainhash.NewHash(txId)
-	if err != nil {
-		return nil, 0, fmt.Errorf("new hash: %w", err)
-	}
 
 	// Find block hashes
-	blockHashes, err := s.db.BlocksByTxId(ctx, txId[:])
+	blockHashes, err := s.db.BlocksByTxId(ctx, txId)
 	if err != nil {
 		return nil, 0, fmt.Errorf("blocks by txid: %w", err)
 	}
@@ -168,16 +163,12 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 	if len(blockHashes) == 0 {
 		return nil, 0, errors.New("script value: no block hashes")
 	}
-	blk, err := s.db.BlockByHash(ctx, blockHashes[0][:])
+	b, err := s.db.BlockByHash(ctx, blockHashes[0])
 	if err != nil {
 		return nil, 0, fmt.Errorf("block by hash: %w", err)
 	}
-	b, err := btcutil.NewBlockFromBytes(blk.Block)
-	if err != nil {
-		return nil, 0, fmt.Errorf("new block: %w", err)
-	}
 	for _, tx := range b.Transactions() {
-		if !tx.Hash().IsEqual(opHash) {
+		if !tx.Hash().IsEqual(txId) {
 			continue
 		}
 		txOuts := tx.MsgTx().TxOut
@@ -214,7 +205,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 			if _, ok := utxos[op]; ok {
 				return fmt.Errorf("impossible collision: %v", op)
 			}
-			utxos[op] = tbcd.NewCacheOutput(sha256.Sum256(pkScript),
+			utxos[op] = tbcd.NewCacheOutput(tbcd.NewScriptHashFromScript(pkScript),
 				uint64(value), txIn.PreviousOutPoint.Index)
 		}
 
@@ -230,7 +221,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 			if _, ok := utxos[op]; ok {
 				delete(utxos, op)
 			} else {
-				utxos[op] = tbcd.NewDeleteCacheOutput(sha256.Sum256(txOut.PkScript),
+				utxos[op] = tbcd.NewDeleteCacheOutput(tbcd.NewScriptHashFromScript(txOut.PkScript),
 					op.TxIndex())
 			}
 		}
@@ -303,7 +294,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("utxo index hash: %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
@@ -315,19 +306,15 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		log.Debugf("indexing utxos: %v", hh)
 
 		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
+		bh, err := s.db.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
 		// Index block
-		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-		b, err := btcutil.NewBlockFromBytes(eb.Block)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		// fixupCache is executed in parallel meaning that the utxos
@@ -359,7 +346,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
+		if endHash.IsEqual(hash) {
 			last = hh
 			break
 		}
@@ -385,7 +372,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("%v does not connect to: %v",
 				bhs[index], hash)
 		}
-		hh.Hash = *bhs[index].BlockHash()
+		hh.Hash = bhs[index].BlockHash()
 		hh.Height = bhs[index].Height
 	}
 
@@ -411,7 +398,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("utxo index hash: %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
@@ -423,25 +410,21 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		log.Debugf("unindexing utxos: %v", hh)
 
 		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
+		bh, err := s.db.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
+		if endHash.IsEqual(hash) {
 			last = hh
 			break
 		}
 
 		// Index block
-		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-		b, err := btcutil.NewBlockFromBytes(eb.Block)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		err = s.unprocessUtxos(ctx, b.Transactions(), utxos)
@@ -466,7 +449,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 
 		// Move to previous block
 		height := bh.Height - 1
-		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash()[:])
+		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
 		if err != nil {
 			if errors.Is(err, database.ErrNotFound) {
 				log.Infof("No more blocks at: %v", height)
@@ -475,7 +458,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		hh.Hash = *pbh.BlockHash()
+		hh.Hash = pbh.BlockHash()
 		hh.Height = pbh.Height
 	}
 
@@ -528,7 +511,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 			return fmt.Errorf("metadata utxo hash: %w", err)
 		}
 
-		if endHash.IsEqual(&last.Hash) {
+		if endHash.IsEqual(last.Hash) {
 			break
 		}
 	}
@@ -580,7 +563,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 			return fmt.Errorf("metadata utxo hash: %w", err)
 		}
 
-		if endHash.IsEqual(&last.Hash) {
+		if endHash.IsEqual(last.Hash) {
 			break
 		}
 	}
@@ -598,7 +581,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	if endHash == nil {
 		return errors.New("must provide an end hash")
 	}
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -610,13 +593,13 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 			return fmt.Errorf("utxo indexer : %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
 
 	// XXX make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash[:])
+	startBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -678,7 +661,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("tx index hash: %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
@@ -690,19 +673,15 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		log.Debugf("indexing txs: %v", hh)
 
 		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
+		bh, err := s.db.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
 		// Index block
-		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-		b, err := btcutil.NewBlockFromBytes(eb.Block)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		err = processTxs(b.Hash(), b.Transactions(), txs)
@@ -726,7 +705,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
+		if endHash.IsEqual(hash) {
 			last = hh
 			break
 		}
@@ -752,7 +731,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("%v does not connect to: %v",
 				bhs[index], hash)
 		}
-		hh.Hash = *bhs[index].BlockHash()
+		hh.Hash = bhs[index].BlockHash()
 		hh.Height = bhs[index].Height
 	}
 
@@ -777,7 +756,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("tx index hash: %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
@@ -791,24 +770,20 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		hash := hh.Hash
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
+		if endHash.IsEqual(hash) {
 			last = hh
 			break
 		}
 
-		bh, err := s.db.BlockHeaderByHash(ctx, hash[:])
+		bh, err := s.db.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
 		// Index block
-		eb, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-		b, err := btcutil.NewBlockFromBytes(eb.Block)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not decode block %v: %w", hh, err)
 		}
 
 		err = processTxs(b.Hash(), b.Transactions(), txs)
@@ -833,7 +808,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 
 		// Move to previous block
 		height := bh.Height - 1
-		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash()[:])
+		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
 		if err != nil {
 			if errors.Is(err, database.ErrNotFound) {
 				log.Infof("No more blocks at: %v", height)
@@ -842,7 +817,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		hh.Hash = *pbh.BlockHash()
+		hh.Hash = pbh.BlockHash()
 		hh.Height = pbh.Height
 	}
 
@@ -895,7 +870,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 			return fmt.Errorf("metadata tx hash: %w", err)
 		}
 
-		if endHash.IsEqual(&last.Hash) {
+		if endHash.IsEqual(last.Hash) {
 			break
 		}
 
@@ -947,7 +922,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 			return fmt.Errorf("metadata tx hash: %w", err)
 		}
 
-		if endHash.IsEqual(&last.Hash) {
+		if endHash.IsEqual(last.Hash) {
 			break
 		}
 
@@ -966,7 +941,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	if endHash == nil {
 		return errors.New("must provide an end hash")
 	}
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -978,13 +953,13 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 			return fmt.Errorf("tx indexer : %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
 
 	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash[:])
+	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -1016,12 +991,12 @@ func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 			return 0, fmt.Errorf("tx indexer : %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
 
-	return s.IndexIsLinear(ctx, &utxoHH.Hash, endHash)
+	return s.IndexIsLinear(ctx, utxoHH.Hash, endHash)
 }
 
 func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
@@ -1035,12 +1010,12 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 			return 0, fmt.Errorf("tx indexer : %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
 
-	return s.IndexIsLinear(ctx, &txHH.Hash, endHash)
+	return s.IndexIsLinear(ctx, txHH.Hash, endHash)
 }
 
 func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhash.Hash) (int, error) {
@@ -1051,13 +1026,13 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 	if endHash == nil {
 		return 0, errors.New("must provide an end hash")
 	}
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash[:])
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return 0, fmt.Errorf("blockheader hash: %w", err)
 	}
 
 	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, startHash[:])
+	startBH, err := s.db.BlockHeaderByHash(ctx, startHash)
 	if err != nil {
 		return 0, fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -1089,7 +1064,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		return 0, ErrNotLinear
 	}
 	for {
-		bh, err := s.db.BlockHeaderByHash(ctx, h[:])
+		bh, err := s.db.BlockHeaderByHash(ctx, h)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
 		}
@@ -1145,7 +1120,9 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		// XXX if bh download fails we will get jammed. We need a queued "must execute this command" added to peer/service.
 		// XXX we may not want to do this when in special "driver mode"
 		log.Infof("resuming block header download at: %v", actualHeight)
-		if err = s.getHeaders(ctx, p, bhb); err != nil {
+		var bh [80]byte
+		copy(bh[:], bhb)
+		if err = s.getHeaders(ctx, p, bh); err != nil {
 			log.Errorf("sync indexers: %v", err)
 			return
 		}

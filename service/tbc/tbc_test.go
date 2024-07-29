@@ -67,7 +67,7 @@ func TestBlockHeaderEncodeDecode(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	wbh, err := bytes2Header(sh)
+	wbh, err := slice2Header(sh)
 	if err != nil {
 		t.Error(err)
 	}
@@ -79,7 +79,7 @@ func TestBlockHeaderEncodeDecode(t *testing.T) {
 	if err != nil {
 		t.Error(err)
 	}
-	awbh, err := bytes2Header(ash[:])
+	awbh, err := slice2Header(ash[:])
 	if err != nil {
 		t.Errorf("bytes2Header failed: %v", err)
 	}
