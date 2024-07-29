@@ -111,13 +111,13 @@ func (pm *PeerManager) PeersRandom(count int) ([]string, error) {
 	log.Tracef("PeersRandom")
 
 	i := 0
-	peers := make([]string, count)
+	peers := make([]string, 0, count)
 
 	pm.peersMtx.RLock()
 	allGoodPeers := len(pm.peersGood)
 	allBadPeers := len(pm.peersBad)
 	for k := range pm.peersGood {
-		peers[i] = k
+		peers = append(peers, k)
 		i++
 		if i >= count {
 			break

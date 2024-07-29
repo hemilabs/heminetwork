@@ -820,7 +820,7 @@ func (s *Server) handleAddr(_ context.Context, p *peer, msg *wire.MsgAddr) {
 	log.Tracef("handleAddr (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddr exit (%v)", p)
 
-	peers := make([]string, 0, len(msg.AddrList))
+	peers := make([]string, len(msg.AddrList))
 	for i, a := range msg.AddrList {
 		peers[i] = net.JoinHostPort(a.IP.String(), strconv.Itoa(int(a.Port)))
 	}
@@ -835,13 +835,13 @@ func (s *Server) handleAddrV2(_ context.Context, p *peer, msg *wire.MsgAddrV2) {
 	defer log.Tracef("handleAddrV2 exit (%v)", p)
 
 	peers := make([]string, 0, len(msg.AddrList))
-	for i, a := range msg.AddrList {
+	for _, a := range msg.AddrList {
 		addr := net.JoinHostPort(a.Addr.String(), strconv.Itoa(int(a.Port)))
 		if len(addr) < 7 {
 			// 0.0.0.0
 			continue
 		}
-		peers[i] = addr
+		peers = append(peers, addr)
 	}
 
 	if err := s.pm.PeersInsert(peers); err != nil {
