@@ -149,6 +149,8 @@ func sliceChainHash(ch chainhash.Hash) []byte {
 
 type Config struct {
 	AutoIndex               bool
+	BlockCache              int
+	BlockheaderCache        int
 	BlockSanity             bool
 	LevelDBHome             string
 	ListenAddress           string
@@ -1633,7 +1635,10 @@ func (s *Server) DBOpen(ctx context.Context) error {
 
 	// Open db.
 	var err error
-	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
+	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
+	cfg.BlockCache = s.cfg.BlockCache
+	cfg.BlockheaderCache = s.cfg.BlockheaderCache
+	s.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
 	}

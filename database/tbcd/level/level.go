@@ -66,25 +66,41 @@ type ldb struct {
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
-	headerCache *lru.Cache[string, *tbcd.BlockHeader] // header cache (maybe make a simple map?)
+	headerCache *lru.Cache[string, *tbcd.BlockHeader] // header cache
+
+	cfg *Config
 }
 
 var _ tbcd.Database = (*ldb)(nil)
 
-func New(ctx context.Context, home string) (*ldb, error) {
+type Config struct {
+	Home             string // home directory
+	BlockCache       int    // number of blocks to cache
+	BlockheaderCache int    // number of blocks headers to cache
+}
+
+func NewConfig(home string) *Config {
+	return &Config{
+		Home:             home, // require user to set home.
+		BlockCache:       250,  // max 4GB on mainnet
+		BlockheaderCache: 1e6,  // Cache all blockheaders on mainnet
+	}
+}
+
+func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 
-	ld, err := level.New(ctx, home, ldbVersion)
+	ld, err := level.New(ctx, cfg.Home, ldbVersion)
 	if err != nil {
 		return nil, err
 	}
 
-	blockCache, err := lru.New[string, *tbcd.Block](250)
+	blockCache, err := lru.New[string, *tbcd.Block](cfg.BlockCache)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 	}
-	headerCache, err := lru.New[string, *tbcd.BlockHeader](1e6)
+	headerCache, err := lru.New[string, *tbcd.BlockHeader](cfg.BlockheaderCache)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't setup header cache: %w", err)
 	}
