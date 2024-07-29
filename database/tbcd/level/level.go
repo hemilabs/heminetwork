@@ -657,7 +657,8 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 		if err = bDB.Put(b.Hash()[:], rawBlock, nil); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
-		l.blockCache.Set(string(b.Hash()[:]), b, int64(32+len(rawBlock)))
+		size := int64(((32 + len(rawBlock)) * 12) / 10)
+		l.blockCache.Set(string(b.Hash()[:]), b, size)
 	}
 
 	// Remove block identifier from blocks missing
@@ -702,7 +703,8 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 		return nil, fmt.Errorf("block decode: %w", err)
 	}
 	b.SetHeight(int32(bh.Height))
-	l.blockCache.Set(string(hash[:]), b, int64(32+len(eb)))
+	size := int64(((32 + len(eb)) * 12) / 10)
+	l.blockCache.Set(string(hash[:]), b, size)
 
 	return b, nil
 }
