@@ -17,7 +17,7 @@ import (
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/dgraph-io/ristretto"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -62,11 +62,11 @@ type ldb struct {
 	*level.Database
 	pool level.Pool
 
-	blockCache *ristretto.Cache // block cache
+	blockCache *lru.Cache[string, *tbcd.Block] // block cache
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
-	headerCache *ristretto.Cache // header cache (maybe make a simple map?)
+	headerCache *lru.Cache[string, *tbcd.BlockHeader] // header cache (maybe make a simple map?)
 }
 
 var _ tbcd.Database = (*ldb)(nil)
@@ -80,19 +80,11 @@ func New(ctx context.Context, home string) (*ldb, error) {
 		return nil, err
 	}
 
-	blockCache, err := ristretto.NewCache(&ristretto.Config{
-		NumCounters: 1e7,     // number of keys to track frequency of (10M).
-		MaxCost:     1 << 30, // maximum cost of cache (1GB).
-		BufferItems: 64,      // number of keys per Get buffer.
-	})
+	blockCache, err := lru.New[string, *tbcd.Block](250)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 	}
-	headerCache, err := ristretto.NewCache(&ristretto.Config{
-		NumCounters: 1e7,     // number of keys to track frequency of (10M).
-		MaxCost:     1 << 29, // maximum cost of cache (100MB).
-		BufferItems: 64,      // number of keys per Get buffer.
-	})
+	headerCache, err := lru.New[string, *tbcd.BlockHeader](1e6)
 	if err != nil {
 		return nil, fmt.Errorf("couldn't setup header cache: %w", err)
 	}
@@ -164,9 +156,8 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	defer log.Tracef("BlockHeaderByHash exit")
 
 	// Try cache first
-	b, _ := l.headerCache.Get(string(hash))
-	if b != nil {
-		return b.(*tbcd.BlockHeader), nil
+	if b, ok := l.headerCache.Get(string(hash)); ok {
+		return b, nil
 	}
 
 	// It stands to reason that this code does not need a trasaction. The
@@ -184,7 +175,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	bh := decodeBlockHeader(ebh)
 
 	// Insert into cache, roughlt 150 byte cost.
-	l.headerCache.Set(string(bh.Hash), bh, 150)
+	l.headerCache.Add(string(bh.Hash), bh)
 
 	return bh, nil
 }
@@ -655,7 +646,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		if err = bDB.Put(b.Hash, b.Block, nil); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
-		l.blockCache.Set(string(b.Hash), b, int64(len(b.Hash)+len(b.Block)))
+		l.blockCache.Add(string(b.Hash), b)
 	}
 
 	// Remove block identifier from blocks missing
@@ -676,9 +667,8 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	defer log.Tracef("BlockByHash exit")
 
 	// Try cache first
-	cb, _ := l.blockCache.Get(string(hash))
-	if cb != nil {
-		return cb.(*tbcd.Block), nil
+	if cb, ok := l.blockCache.Get(string(hash)); ok {
+		return cb, nil
 	}
 
 	bDB := l.pool[level.BlocksDB]
@@ -694,7 +684,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 		Hash:  hash,
 		Block: eb,
 	}
-	l.blockCache.Set(string(hash), b, int64(len(b.Hash)+len(b.Block)))
+	l.blockCache.Add(string(hash), b)
 	return b, nil
 }
 

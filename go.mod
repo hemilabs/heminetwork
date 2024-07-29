@@ -13,12 +13,12 @@ require (
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.2.0
-	github.com/dgraph-io/ristretto v0.1.1
 	github.com/docker/docker v25.0.5+incompatible
 	github.com/docker/go-connections v0.5.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.13.5
 	github.com/go-test/deep v1.1.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/juju/loggo v1.0.0
 	github.com/lib/pq v1.10.9
 	github.com/mitchellh/go-homedir v1.1.0
@@ -52,7 +52,6 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/glog v1.2.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/google/uuid v1.6.0 // indirect
