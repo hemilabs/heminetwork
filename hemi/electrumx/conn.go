@@ -186,13 +186,14 @@ func (c *clientConn) Close() error {
 	if c.onClose != nil {
 		c.onClose(c)
 	}
-	if c.closeCh != nil {
-		close(c.closeCh)
-		c.closeCh = nil
-	}
 
 	if err := c.conn.Close(); err != nil {
 		return err
+	}
+
+	if c.closeCh != nil {
+		close(c.closeCh)
+		c.closeCh = nil
 	}
 
 	// Wait for pinger to exit.
