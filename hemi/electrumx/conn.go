@@ -181,6 +181,9 @@ func (c *clientConn) Close() error {
 	if c.onClose != nil {
 		c.onClose(c)
 	}
-	close(c.closeCh)
+	if c.closeCh != nil {
+		close(c.closeCh)
+		c.closeCh = nil
+	}
 	return c.conn.Close()
 }
