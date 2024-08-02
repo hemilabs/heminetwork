@@ -1201,7 +1201,10 @@ func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxs
 	hash := hemi.HashSerializedL2KeystoneAbrev(ptl2.L2Block)
 	var h [32]byte
 	copy(h[:], hash)
-	popTxs, err := s.db.PopBasisByL2KeystoneAbrevHash(ctx, h, true)
+
+	response := &bfgapi.PopTxsForL2BlockResponse{}
+
+	popTxs, err := s.db.PopBasisByL2KeystoneAbrevHash(ctx, h, true, ptl2.Page)
 	if err != nil {
 		e := protocol.NewInternalErrorf("error getting pop basis: %w", err)
 		return &bfgapi.PopTxsForL2BlockResponse{
@@ -1209,8 +1212,6 @@ func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxs
 		}, e
 	}
 
-	response := &bfgapi.PopTxsForL2BlockResponse{}
-	response.PopTxs = make([]bfgapi.PopTx, 0, len(popTxs))
 	for k := range popTxs {
 		response.PopTxs = append(response.PopTxs, bfgapi.PopTx{
 			BtcTxId:             api.ByteSlice(popTxs[k].BtcTxId),

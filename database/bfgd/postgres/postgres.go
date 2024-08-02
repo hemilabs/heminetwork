@@ -472,7 +472,13 @@ func (p *pgdb) PopBasisInsertFull(ctx context.Context, pb *bfgd.PopBasis) error 
 	return nil
 }
 
-func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool) ([]bfgd.PopBasis, error) {
+func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool, page uint32) ([]bfgd.PopBasis, error) {
+	// can change later as needed
+	var limit uint32 = 100
+
+	// start at page 0
+	offset := limit * page
+
 	q := `
 		SELECT
 			id,
@@ -495,9 +501,13 @@ func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte
 		q += " AND btc_block_hash IS NOT NULL"
 	}
 
+	// use ORDER BY so pagination maintains an order of some sort (so we don't
+	// respond multiple times with the same record on different pages)
+	q += " ORDER BY id OFFSET $2 LIMIT $3"
+
 	pbs := []bfgd.PopBasis{}
 	log.Infof("querying for hash: %v", database.ByteArray(aHash[:]))
-	rows, err := p.db.QueryContext(ctx, q, aHash[:])
+	rows, err := p.db.QueryContext(ctx, q, aHash[:], offset, limit)
 	if err != nil {
 		return nil, err
 	}

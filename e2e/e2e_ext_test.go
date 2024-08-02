@@ -1634,7 +1634,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	publicKeyUncompressed := publicKey.SerializeUncompressed()
 
 	// 3
-	popBases, err := db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false)
+	popBases, err := db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1845,7 +1845,7 @@ loop:
 		case <-lctx.Done():
 			break loop
 		case <-time.After(1 * time.Second):
-			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false)
+			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false, 0)
 			if len(popBases) > 0 {
 				break loop
 			}
@@ -2015,7 +2015,7 @@ loop:
 		case <-lctx.Done():
 			break loop
 		case <-time.After(1 * time.Second):
-			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), true)
+			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), true, 0)
 			if len(popBases) > 0 {
 				break loop
 			}
@@ -2285,6 +2285,167 @@ func TestPopPayouts(t *testing.T) {
 
 	if len(diff) != 0 {
 		t.Fatalf("unexpected diff %s", diff)
+	}
+}
+
+func TestPopPayoutsMultiplePages(t *testing.T) {
+	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	includedL2Keystone := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      11,
+		L2BlockNumber:      22,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+	}
+
+	btcHeaderHash := fillOutBytes("btcheaderhash", 32)
+
+	btcBlock := bfgd.BtcBlock{
+		Hash:   btcHeaderHash,
+		Header: fillOutBytes("btcheader", 80),
+		Height: 99,
+	}
+
+	err := db.BtcBlockInsert(ctx, &btcBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// insert 151 pop payouts to different miners, get the first 3 pages,
+	// we expect result counts like so : 100, 51, 0
+	var txIndex uint64 = 1
+
+	for i := 0; i < 151; i++ {
+
+		privateKey, err := dcrsecp256k1.GeneratePrivateKeyFromRand(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		publicKey := privateKey.PubKey()
+		publicKeyUncompressed := publicKey.SerializeUncompressed()
+
+		txIndex++
+		popBasis := bfgd.PopBasis{
+			BtcTxId:             fillOutBytes("btctxid1", 32),
+			BtcRawTx:            []byte("btcrawtx1"),
+			PopTxId:             fillOutBytes("poptxid1", 32),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+			PopMinerPublicKey:   publicKeyUncompressed,
+			BtcHeaderHash:       btcHeaderHash,
+			BtcTxIndex:          &txIndex,
+		}
+
+		err = db.PopBasisInsertFull(ctx, &popBasis)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
+
+	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
+
+	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+
+	bws := &bssWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	serializedL2Keystone := hemi.L2KeystoneAbbreviate(includedL2Keystone).Serialize()
+
+	// 2
+	popPayoutsRequest := bssapi.PopPayoutsRequest{
+		L2BlockForPayout: serializedL2Keystone[:],
+	}
+
+	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var v protocol.Message
+	err = wsjson.Read(ctx, c, &v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if v.Header.Command != bssapi.CmdPopPayoutResponse {
+		t.Fatalf("received unexpected command: %s", v.Header.Command)
+	}
+
+	popPayoutsResponse := bssapi.PopPayoutsResponse{}
+	err = json.Unmarshal(v.Payload, &popPayoutsResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(popPayoutsResponse.PopPayouts) != 100 {
+		t.Fatalf("expected first page to have 100 results, received %d", len(popPayoutsResponse.PopPayouts))
+	}
+
+	popPayoutsRequest.Page = 1
+	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = wsjson.Read(ctx, c, &v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if v.Header.Command != bssapi.CmdPopPayoutResponse {
+		t.Fatalf("received unexpected command: %s", v.Header.Command)
+	}
+
+	err = json.Unmarshal(v.Payload, &popPayoutsResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(popPayoutsResponse.PopPayouts) != 51 {
+		t.Fatalf("expected first page to have 51 results, received %d", len(popPayoutsResponse.PopPayouts))
+	}
+
+	popPayoutsRequest.Page = 2
+	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = wsjson.Read(ctx, c, &v)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if v.Header.Command != bssapi.CmdPopPayoutResponse {
+		t.Fatalf("received unexpected command: %s", v.Header.Command)
+	}
+
+	err = json.Unmarshal(v.Payload, &popPayoutsResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(popPayoutsResponse.PopPayouts) != 0 {
+		t.Fatalf("expected first page to have 0 results, received %d", len(popPayoutsResponse.PopPayouts))
 	}
 }
 

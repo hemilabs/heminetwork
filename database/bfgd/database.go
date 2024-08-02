@@ -28,7 +28,7 @@ type Database interface {
 	BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, error)
 
 	// Pop data
-	PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool) ([]PopBasis, error)
+	PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool, page uint32) ([]PopBasis, error)
 	PopBasisInsertFull(ctx context.Context, pb *PopBasis) error
 	PopBasisInsertPopMFields(ctx context.Context, pb *PopBasis) error
 	PopBasisUpdateBTCFields(ctx context.Context, pb *PopBasis) (int64, error)

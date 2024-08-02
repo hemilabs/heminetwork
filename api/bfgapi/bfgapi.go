@@ -131,6 +131,7 @@ type BitcoinUTXOsResponse struct {
 
 type PopTxsForL2BlockRequest struct {
 	L2Block api.ByteSlice `json:"l2_block"`
+	Page    uint32        `json:"page,omitempty"`
 }
 
 type PopTxsForL2BlockResponse struct {

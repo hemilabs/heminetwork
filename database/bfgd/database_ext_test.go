@@ -274,7 +274,7 @@ func TestDatabasePostgres(t *testing.T) {
 	}
 
 	// Pop basis get half
-	pbHalfOut, err := db.PopBasisByL2KeystoneAbrevHash(ctx, l2KAH, true)
+	pbHalfOut, err := db.PopBasisByL2KeystoneAbrevHash(ctx, l2KAH, true, 0)
 	if err != nil {
 		t.Fatalf("Failed to get pop basis: %v", err)
 	}
@@ -981,6 +981,7 @@ func TestPopBasisInsertNilMerklePath(t *testing.T) {
 		ctx,
 		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
 		false,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1026,6 +1027,7 @@ func TestPopBasisInsertNotNilMerklePath(t *testing.T) {
 		ctx,
 		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
 		false,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1070,6 +1072,7 @@ func TestPopBasisInsertNilMerklePathFromPopM(t *testing.T) {
 		ctx,
 		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
 		false,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1195,6 +1198,7 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 		ctx,
 		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
 		false,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1217,6 +1221,7 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 		ctx,
 		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
 		false,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1305,6 +1310,7 @@ func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
 		ctx,
 		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
 		false,
+		0,
 	)
 	if err != nil {
 		t.Fatal(err)
