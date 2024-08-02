@@ -151,7 +151,9 @@ func TestProtocolHandshake(t *testing.T) {
 	}
 
 	clientURI := testServer.URL
-	conn, err := protocol.NewConn(clientURI, clientAuth)
+	conn, err := protocol.NewConn(clientURI, &protocol.ConnOptions{
+		Authenticator: clientAuth,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

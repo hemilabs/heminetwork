@@ -808,7 +808,9 @@ func (m *Miner) connectBFG(pctx context.Context) error {
 		return err
 	}
 
-	conn, err = protocol.NewConn(m.cfg.BFGWSURL, authenticator)
+	conn, err = protocol.NewConn(m.cfg.BFGWSURL, &protocol.ConnOptions{
+		Authenticator: authenticator,
+	})
 	if err != nil {
 		return err
 	}
