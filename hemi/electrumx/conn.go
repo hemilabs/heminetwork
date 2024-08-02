@@ -25,6 +25,7 @@ const (
 // clientConn is a connection with an ElectrumX server.
 type clientConn struct {
 	mx sync.Mutex
+	wg sync.WaitGroup
 
 	conn      net.Conn
 	requestID uint64
@@ -40,6 +41,8 @@ func newClientConn(conn net.Conn, onClose func(c *clientConn)) *clientConn {
 		closeCh: make(chan struct{}),
 		onClose: onClose,
 	}
+
+	c.wg.Add(1)
 	go c.pinger()
 	return c
 }
@@ -152,6 +155,8 @@ func (c *clientConn) ping() error {
 
 // pinger pings each connection on a ticker.
 func (c *clientConn) pinger() {
+	defer c.wg.Done()
+
 	ticker := time.NewTicker(connPingInterval)
 	for {
 		select {
@@ -181,6 +186,17 @@ func (c *clientConn) Close() error {
 	if c.onClose != nil {
 		c.onClose(c)
 	}
-	close(c.closeCh)
-	return c.conn.Close()
+
+	if err := c.conn.Close(); err != nil {
+		return err
+	}
+
+	if c.closeCh != nil {
+		close(c.closeCh)
+	}
+
+	// Wait for pinger to exit.
+	c.wg.Wait()
+	c.closeCh = nil
+	return nil
 }

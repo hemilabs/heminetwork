@@ -33,9 +33,9 @@ func TestClientConn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to dial server: %v", err)
 	}
-	defer conn.Close()
 
 	c := newClientConn(conn, nil)
+	defer c.Close()
 
 	tests := []struct {
 		name   string
@@ -162,6 +162,33 @@ func TestReadResponse(t *testing.T) {
 					string(p), string(want))
 			}
 		})
+	}
+}
+
+func TestClose(t *testing.T) {
+	server := createMockServer(t)
+	defer server.Close()
+
+	conn, err := net.Dial("tcp", server.address)
+	if err != nil {
+		t.Fatalf("failed to dial server: %v", err)
+	}
+
+	c := newClientConn(conn, nil)
+
+	// Ping the server.
+	if err := c.ping(); err != nil {
+		t.Errorf("failed to ping server: %v", err)
+	}
+
+	// Close the client.
+	if err := c.Close(); err != nil {
+		t.Errorf("failed to close client: %v", err)
+	}
+
+	// Close the client again. This should do nothing and return net.ErrClosed.
+	if err := c.Close(); err == nil || !errors.Is(err, net.ErrClosed) {
+		t.Errorf("failed to close client (second): %v", err)
 	}
 }
 
