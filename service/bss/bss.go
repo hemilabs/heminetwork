@@ -629,7 +629,9 @@ func (s *Server) connectBFG(ctx context.Context) error {
 	log.Tracef("connectBFG")
 	defer log.Tracef("connectBFG exit")
 
-	conn, err := protocol.NewConn(s.cfg.BFGURL, nil)
+	conn, err := protocol.NewConn(s.cfg.BFGURL, &protocol.ConnOptions{
+		ReadLimit: 2 * (1 << 20), // 2 MiB
+	})
 	if err != nil {
 		return err
 	}
