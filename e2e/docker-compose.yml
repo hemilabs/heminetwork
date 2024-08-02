@@ -218,6 +218,8 @@ services:
     command:
       - "sh"
       - "/tmp/entrypointl2.sh"
+    ports:
+      - 8546:8546
     volumes:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
@@ -461,15 +463,16 @@ services:
     deploy:
       restart_policy:
         condition: "any"
+    environment:
+      LOG_LEVEL: TRACE
     command:
       - "op-batcher/bin/op-batcher"
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
       - "--l2-eth-rpc=http://op-geth-l2:8546"
       - "--rollup-rpc=http://op-node:8547"
       - "--poll-interval=1s"
-      - "--sub-safety-margin=1"
       - "--num-confirmations=1"
-      - "--safe-abort-nonce-too-low-count=3"
-      - "--resubmission-timeout=30s"
+      - "--resubmission-timeout=15s"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
@@ -477,6 +480,10 @@ services:
       - "--max-pending-tx=1"
       - "--l1-eth-rpc=http://geth-l1:8545"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
+      - "--max-channel-duration=5"
+      - "--log.level=DEBUG"
+      - "--log.format=terminal"
+      - "--safe-abort-nonce-too-low-count=1"
     depends_on:
       geth-l1:
         condition: "service_started"
@@ -575,6 +582,11 @@ services:
       - "--l2oo-address=${L2OO_ADDRESS}"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
       - "--l1-eth-rpc=http://geth-l1:8545"
+      - "--log.level=DEBUG"
+      - "--log.format=terminal"
+      - "--allow-non-finalized"
+      - "--resubmission-timeout=15s"
+      - "--safe-abort-nonce-too-low-count=1"
 
   op-proposer-2:
     build:
