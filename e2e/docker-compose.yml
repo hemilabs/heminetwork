@@ -181,6 +181,8 @@ services:
     command:
       - "sh"
       - "/tmp/entrypointl2.sh"
+    ports:
+      - 8546:8546
     volumes:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
