@@ -232,6 +232,7 @@ func (s *Server) handlePopPayoutsRequest(ctx context.Context, msg *bssapi.PopPay
 
 	popTxsForL2BlockRes, err := s.callBFG(ctx, bfgapi.PopTxsForL2BlockRequest{
 		L2Block: msg.L2BlockForPayout,
+		Page:    msg.Page,
 	})
 	if err != nil {
 		e := protocol.NewInternalErrorf("pop tx for l2: block %w", err)
