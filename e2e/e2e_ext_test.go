@@ -2370,7 +2370,6 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 
 	serializedL2Keystone := hemi.L2KeystoneAbbreviate(includedL2Keystone).Serialize()
 
-	// 2
 	popPayoutsRequest := bssapi.PopPayoutsRequest{
 		L2BlockForPayout: serializedL2Keystone[:],
 	}

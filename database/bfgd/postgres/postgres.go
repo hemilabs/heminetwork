@@ -474,7 +474,7 @@ func (p *pgdb) PopBasisInsertFull(ctx context.Context, pb *bfgd.PopBasis) error 
 
 func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool, page uint32) ([]bfgd.PopBasis, error) {
 	// can change later as needed
-	var limit uint32 = 100
+	limit := uint32(100)
 
 	// start at page 0
 	offset := limit * page
