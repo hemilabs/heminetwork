@@ -8,7 +8,7 @@ replace nhooyr.io/websocket v1.8.11 => github.com/hemilabs/websocket v0.0.0-2024
 
 require (
 	github.com/btcsuite/btcd v0.24.2
-	github.com/btcsuite/btcd/btcec/v2 v2.3.4
+	github.com/btcsuite/btcd/btcec/v2 v2.3.3
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
 	github.com/davecgh/go-spew v1.1.1
