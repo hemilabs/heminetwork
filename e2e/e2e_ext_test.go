@@ -2301,8 +2301,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		Height: 99,
 	}
 
-	err := db.BtcBlockInsert(ctx, &btcBlock)
-	if err != nil {
+	if err := db.BtcBlockInsert(ctx, &btcBlock); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2310,12 +2309,13 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	// we expect result counts like so : 100, 51, 0
 	var txIndex uint64 = 1
 
-	for i := 0; i < 151; i++ {
+	for range 151 {
 
 		privateKey, err := dcrsecp256k1.GeneratePrivateKeyFromRand(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
 		}
+
 		publicKey := privateKey.PubKey()
 		publicKeyUncompressed := publicKey.SerializeUncompressed()
 
@@ -2330,8 +2330,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 			BtcTxIndex:          &txIndex,
 		}
 
-		err = db.PopBasisInsertFull(ctx, &popBasis)
-		if err != nil {
+		if err := db.PopBasisInsertFull(ctx, &popBasis); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2358,14 +2357,14 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		L2BlockForPayout: serializedL2Keystone[:],
 	}
 
-	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
-	if err != nil {
+	if err := bssapi.Write(
+		ctx, bws.conn, "someid", popPayoutsRequest,
+	); err != nil {
 		t.Fatal(err)
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2374,23 +2373,25 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	}
 
 	popPayoutsResponse := bssapi.PopPayoutsResponse{}
-	err = json.Unmarshal(v.Payload, &popPayoutsResponse)
-	if err != nil {
+	if err := json.Unmarshal(v.Payload, &popPayoutsResponse); err != nil {
 		t.Fatal(err)
 	}
 
 	if len(popPayoutsResponse.PopPayouts) != 100 {
-		t.Fatalf("expected first page to have 100 results, received %d", len(popPayoutsResponse.PopPayouts))
+		t.Fatalf(
+			"expected first page to have 100 results, received %d",
+			len(popPayoutsResponse.PopPayouts),
+		)
 	}
 
 	popPayoutsRequest.Page = 1
-	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
-	if err != nil {
+	if err := bssapi.Write(
+		ctx, bws.conn, "someid", popPayoutsRequest,
+	); err != nil {
 		t.Fatal(err)
 	}
 
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2404,17 +2405,20 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	}
 
 	if len(popPayoutsResponse.PopPayouts) != 51 {
-		t.Fatalf("expected first page to have 51 results, received %d", len(popPayoutsResponse.PopPayouts))
+		t.Fatalf(
+			"expected first page to have 51 results, received %d",
+			len(popPayoutsResponse.PopPayouts),
+		)
 	}
 
 	popPayoutsRequest.Page = 2
-	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
-	if err != nil {
+	if err := bssapi.Write(
+		ctx, bws.conn, "someid", popPayoutsRequest,
+	); err != nil {
 		t.Fatal(err)
 	}
 
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
+	if err := wsjson.Read(ctx, c, &v); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2422,13 +2426,14 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
-	err = json.Unmarshal(v.Payload, &popPayoutsResponse)
-	if err != nil {
+	if err := json.Unmarshal(v.Payload, &popPayoutsResponse); err != nil {
 		t.Fatal(err)
 	}
 
 	if len(popPayoutsResponse.PopPayouts) != 0 {
-		t.Fatalf("expected first page to have 0 results, received %d", len(popPayoutsResponse.PopPayouts))
+		t.Fatalf(
+			"expected first page to have 0 results, received %d",
+			len(popPayoutsResponse.PopPayouts))
 	}
 }
 
