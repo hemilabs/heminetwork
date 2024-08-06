@@ -750,10 +750,11 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 				return ctx.Err()
 			case <-time.After(m.holdoffTimeout):
 			}
-			// XXX this is too noisy
-			log.Errorf("Retrying connecting to BFG")
+
+			log.Infof("Reconnecting to BFG server")
 			continue
 		}
+
 		switch cmd {
 		case bfgapi.CmdPingRequest:
 			p := payload.(*bfgapi.PingRequest)
