@@ -2310,7 +2310,6 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	var txIndex uint64 = 1
 
 	for range 151 {
-
 		privateKey, err := dcrsecp256k1.GeneratePrivateKeyFromRand(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -2357,9 +2356,8 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		L2BlockForPayout: serializedL2Keystone[:],
 	}
 
-	if err := bssapi.Write(
-		ctx, bws.conn, "someid", popPayoutsRequest,
-	); err != nil {
+	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -2385,9 +2383,8 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	}
 
 	popPayoutsRequest.Page = 1
-	if err := bssapi.Write(
-		ctx, bws.conn, "someid", popPayoutsRequest,
-	); err != nil {
+	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -2412,9 +2409,8 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	}
 
 	popPayoutsRequest.Page = 2
-	if err := bssapi.Write(
-		ctx, bws.conn, "someid", popPayoutsRequest,
-	); err != nil {
+	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
+	if err != nil {
 		t.Fatal(err)
 	}
 
