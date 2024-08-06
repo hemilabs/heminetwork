@@ -307,7 +307,7 @@ func tbcdb() error {
 
 		levelDBHome := "~/.tbcd" // XXX
 		network := "testnet3"
-		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network)))
 		if err != nil {
 			return err
 		}
@@ -324,7 +324,7 @@ func tbcdb() error {
 
 		levelDBHome := "~/.tbcd" // XXX
 		network := "testnet3"
-		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network)))
 		if err != nil {
 			return err
 		}
@@ -342,7 +342,7 @@ func tbcdb() error {
 
 		levelDBHome := "~/.tbcd" // XXX
 		network := "testnet3"
-		db, err := level.New(ctx, filepath.Join(levelDBHome, network))
+		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network)))
 		if err != nil {
 			return err
 		}

@@ -70,12 +70,6 @@ type Database interface {
 	BlocksByTxId(ctx context.Context, txId []byte) ([]BlockHash, error)
 	SpentOutputsByTxId(ctx context.Context, txId []byte) ([]SpentInfo, error)
 
-	// Peer manager
-	PeersStats(ctx context.Context) (int, int)               // good, bad count
-	PeersInsert(ctx context.Context, peers []Peer) error     // insert or update
-	PeerDelete(ctx context.Context, host, port string) error // remove peer
-	PeersRandom(ctx context.Context, count int) ([]Peer, error)
-
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
@@ -139,7 +133,7 @@ func (bh BlockHeader) ParentHash() *chainhash.Hash {
 // Block contains a raw bitcoin block and its corresponding hash.
 type Block struct {
 	Hash  database.ByteArray
-	Block database.ByteArray
+	Block database.ByteArray // this needs to be converted to either wire or btcutil
 }
 
 // BlockIdentifier uniquely identifies a block using it's hash and height.
@@ -152,14 +146,6 @@ type SpentInfo struct {
 	BlockHash  BlockHash
 	TxId       TxId
 	InputIndex uint32
-}
-
-// Peer
-type Peer struct {
-	Host      string
-	Port      string
-	LastAt    database.Timestamp `deep:"-"` // Last time connected
-	CreatedAt database.Timestamp `deep:"-"`
 }
 
 // XXX we can probably save a bunch of bcopy if we construct the key directly
