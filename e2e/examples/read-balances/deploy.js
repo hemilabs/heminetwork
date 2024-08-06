@@ -3,13 +3,13 @@ const solc = require('solc')
 const fs = require('fs')
 
 const deployContract = async (l, devAccount, filename, contractname) => {
-    const ReadBalancesFileContents = fs.readFileSync(filename).toString();
+    const fc = fs.readFileSync(filename).toString();
 
     const input = {
       language: "Solidity",
       sources: {
         [filename]: {
-          content: ReadBalancesFileContents,
+          content: fc,
         },
       },
       settings: {
@@ -92,6 +92,8 @@ const main = async () => {
       );
 
       const deployedContract = await deployContract(l2, devAccount, 'ReadBalances.sol', 'ReadBalances');
+
+    //   const otherDeployedContract = await deployContract(l1, devAccount, 'L1ReadBalances.sol', 'L1ReadBalances');
 
     const bitcoinBalance = await deployedContract.methods.getBitcoinAddressBalance('mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG').call()
 
