@@ -2,6 +2,54 @@ const web3 = require('web3');
 const solc = require('solc')
 const fs = require('fs')
 
+const deployContract = async (l, devAccount, filename, contractname) => {
+    const ReadBalancesFileContents = fs.readFileSync(filename).toString();
+
+    const input = {
+      language: "Solidity",
+      sources: {
+        [filename]: {
+          content: ReadBalancesFileContents,
+        },
+      },
+      settings: {
+        outputSelection: {
+          "*": {
+            "*": ["*"],
+          },
+        },
+      },
+    };
+
+    const output = (await new Promise((resolve, reject) => {
+      solc.loadRemoteVersion("v0.8.23+commit.f704f362", (err, snapshot) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        resolve(JSON.parse(snapshot.compile(JSON.stringify(input))));
+      });
+    }));
+
+
+    const bytecode = output.contracts[filename][contractname].evm.bytecode.object;
+    const abi = output.contracts[filename][contractname].abi;
+
+    const contract = new l.eth.Contract(abi);
+
+    const deployedContract = await contract
+      .deploy({
+        data: bytecode,
+      })
+      .send({
+        from: devAccount,
+        gas: "18530800",
+      });
+
+    return deployedContract;
+} 
+
 const main = async () => {
     const l1RpcUrl = `http://localhost:8545`;
     const l2RpcUrl = `http://localhost:8546`;
@@ -33,62 +81,25 @@ const main = async () => {
             resolve();
         })
         promiseEvent.on("error", (e) => reject(e));
-      });
-
-      console.log(`balances after -- l1: ${await l1.eth.getBalance(devAccount)}, l2: ${await l2.eth.getBalance(devAccount)}`)
-
-      const ReadBalancesFileContents = fs.readFileSync("./ReadBalances.sol").toString();
-
-    const input = {
-      language: "Solidity",
-      sources: {
-        "ReadBalances.sol": {
-          content: ReadBalancesFileContents,
-        },
-      },
-      settings: {
-        outputSelection: {
-          "*": {
-            "*": ["*"],
-          },
-        },
-      },
-    };
-
-    const output = (await new Promise((resolve, reject) => {
-      solc.loadRemoteVersion("v0.8.23+commit.f704f362", (err, snapshot) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-
-        resolve(JSON.parse(snapshot.compile(JSON.stringify(input))));
-      });
-    }));
-
+    });
+    
+    console.log(`balances after -- l1: ${await l1.eth.getBalance(devAccount)}, l2: ${await l2.eth.getBalance(devAccount)}`)
+    
     await l2.eth.personal.unlockAccount(
         devAccount,
         "blahblahblah",
         30 * 1000
       );
 
-    const bytecode = output.contracts["ReadBalances.sol"]["ReadBalances"].evm.bytecode.object;
-    const abi = output.contracts["ReadBalances.sol"]["ReadBalances"].abi;
-
-    const contract = new l2.eth.Contract(abi);
-
-    const deployedContract = await contract
-      .deploy({
-        data: bytecode,
-      })
-      .send({
-        from: devAccount,
-        gas: "18530800",
-      });
+      const deployedContract = await deployContract(l2, devAccount, 'ReadBalances.sol', 'ReadBalances');
 
     const bitcoinBalance = await deployedContract.methods.getBitcoinAddressBalance('mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG').call()
 
+      console.log(`deployed contract to ${deployedContract.options.address}`)
+
     console.log(`bitcoin balance according to the l2 precompile is ${bitcoinBalance}`)
+
+
 } 
 
 main()
