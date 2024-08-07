@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork
 
 go 1.22
 
-toolchain go1.22.5
+toolchain go1.22.6
 
 replace nhooyr.io/websocket v1.8.11 => github.com/hemilabs/websocket v0.0.0-20240620132401-b5109a38f904
 
