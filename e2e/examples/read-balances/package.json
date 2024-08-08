@@ -9,6 +9,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@eth-optimism/sdk": "3.3.2",
+    "ethers": "5.7.2",
     "solc": "0.8.26",
     "web3": "4.11.1"
   }
