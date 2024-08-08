@@ -5,6 +5,7 @@ contract L1ReadBalances {
   mapping(string => uint256) balances;
 
   function setBitcoinAddressBalance(string calldata btcAddress, uint256 balance) public {
+    // protect, ensure coming from CrossDomainMessenger
     balances[btcAddress] = balance;
     return;
   }
