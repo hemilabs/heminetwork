@@ -1551,9 +1551,9 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 		cs := append(s.metrics.collectors(),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promNamespace,
+				Namespace: promNamespace,
 				Name:      "running",
-				Help:      "Is bfg service running.",
+				Help:      "Whether the BFG service is running",
 			}, s.promRunning),
 		)
 		s.wg.Add(1)
