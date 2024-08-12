@@ -883,10 +883,12 @@ func TestFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:     false,
-		BlockSanity:   false,
-		LevelDBHome:   t.TempDir(),
-		ListenAddress: tbcapi.DefaultListen, // TODO: should use random free port
+		AutoIndex:        false,
+		BlockCache:       1000,
+		BlockheaderCache: 1000,
+		BlockSanity:      false,
+		LevelDBHome:      t.TempDir(),
+		ListenAddress:    tbcapi.DefaultListen, // TODO: should use random free port
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -1118,10 +1120,12 @@ func TestIndexNoFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:     false,
-		BlockSanity:   false,
-		LevelDBHome:   t.TempDir(),
-		ListenAddress: tbcapi.DefaultListen,
+		AutoIndex:        false,
+		BlockCache:       1000,
+		BlockheaderCache: 1000,
+		BlockSanity:      false,
+		LevelDBHome:      t.TempDir(),
+		ListenAddress:    tbcapi.DefaultListen,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -1286,10 +1290,12 @@ func TestIndexFork(t *testing.T) {
 
 	// Connect tbc service
 	cfg := &Config{
-		AutoIndex:     false,
-		BlockSanity:   false,
-		LevelDBHome:   t.TempDir(),
-		ListenAddress: tbcapi.DefaultListen,
+		AutoIndex:        false,
+		BlockCache:       1000,
+		BlockheaderCache: 1000,
+		BlockSanity:      false,
+		LevelDBHome:      t.TempDir(),
+		ListenAddress:    tbcapi.DefaultListen,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
