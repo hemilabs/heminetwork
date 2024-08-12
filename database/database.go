@@ -72,7 +72,6 @@ var (
 	ErrDuplicate  = DuplicateError("duplicate")
 	ErrNotFound   = NotFoundError("not found")
 	ErrValidation = ValidationError("validation")
-	ErrZeroRows   = ZeroRowsError("zero rows affected")
 )
 
 // ByteArray is a type that corresponds to BYTEA in a database. It supports
