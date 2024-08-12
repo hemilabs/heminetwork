@@ -47,7 +47,7 @@ type notificationId string
 const (
 	logLevel = "INFO"
 
-	promSubsystem = "bfg_service" // Prometheus
+	promNamespace = "bfg" // Prometheus
 
 	notifyBtcBlocks     notificationId = "btc_blocks"
 	notifyBtcFinalities notificationId = "btc_finalities"
@@ -114,8 +114,8 @@ type Server struct {
 	db bfgd.Database
 
 	// Prometheus
-	cmdsProcessed prometheus.Counter
-	isRunning     bool
+	metrics   *metrics
+	isRunning bool
 
 	// sessions is a record of websocket connections and their
 	// respective request contexts
@@ -128,6 +128,61 @@ type Server struct {
 	checkForInvalidBlocks chan struct{}
 }
 
+// metrics stores prometheus metrics.
+type metrics struct {
+	popBroadcasts    prometheus.Counter       // Total number of PoP transaction broadcasts
+	rpcCallsTotal    *prometheus.CounterVec   // Total number of successful RPC commands
+	rpcCallsDuration *prometheus.HistogramVec // RPC calls duration in seconds
+	rpcConnections   *prometheus.GaugeVec     // Number of active RPC WebSocket connections
+}
+
+// newMetrics returns a new metrics struct containing prometheus collectors.
+func newMetrics() *metrics {
+	// When adding a metric here, remember to add it to metrics.collectors().
+	return &metrics{
+		popBroadcasts: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: promNamespace,
+			Name:      "pop_broadcasts_total",
+			Help:      "Total number of PoP transaction broadcasts",
+		}),
+		rpcCallsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: promNamespace,
+				Name:      "rpc_calls_total",
+				Help:      "Total number of successful RPC commands",
+			},
+			[]string{"listener", "command"},
+		),
+		rpcCallsDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: promNamespace,
+				Name:      "rpc_calls_duration_seconds",
+				Help:      "RPC call durations in seconds",
+				Buckets:   prometheus.DefBuckets,
+			},
+			[]string{"listener", "command"},
+		),
+		rpcConnections: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: promNamespace,
+				Name:      "rpc_connections",
+				Help:      "Number of active RPC WebSocket connections",
+			},
+			[]string{"listener"},
+		),
+	}
+}
+
+// collectors returns all prometheus collectors.
+func (m *metrics) collectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		m.popBroadcasts,
+		m.rpcCallsTotal,
+		m.rpcCallsDuration,
+		m.rpcConnections,
+	}
+}
+
 func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
@@ -135,18 +190,14 @@ func NewServer(cfg *Config) (*Server, error) {
 	defaultRequestTimeout := 9 * time.Second // XXX
 	requestLimit := 1000                     // XXX
 	s := &Server{
-		cfg:            cfg,
-		requestLimiter: make(chan bool, requestLimit),
-		requestLimit:   requestLimit,
-		requestTimeout: defaultRequestTimeout,
-		btcHeight:      cfg.BTCStartHeight,
-		server:         http.NewServeMux(),
-		publicServer:   http.NewServeMux(),
-		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
-			Subsystem: promSubsystem,
-			Name:      "rpc_calls_total",
-			Help:      "The total number of succesful RPC commands",
-		}),
+		cfg:                   cfg,
+		requestLimiter:        make(chan bool, requestLimit),
+		requestLimit:          requestLimit,
+		requestTimeout:        defaultRequestTimeout,
+		btcHeight:             cfg.BTCStartHeight,
+		server:                http.NewServeMux(),
+		publicServer:          http.NewServeMux(),
+		metrics:               newMetrics(),
 		sessions:              make(map[string]*bfgWs),
 		checkForInvalidBlocks: make(chan struct{}),
 	}
@@ -196,7 +247,7 @@ func (s *Server) invalidBlockChecker(ctx context.Context) {
 }
 
 // handleRequest is called as a go routine to handle a long-lived command.
-func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid string, requestType string, handler func(ctx context.Context) (any, error)) {
+func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid string, cmd protocol.Command, handler func(ctx context.Context) (any, error)) {
 	log.Tracef("handleRequest: %v", bws.addr)
 	defer log.Tracef("handleRequest exit: %v", bws.addr)
 
@@ -206,27 +257,33 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 	select {
 	case <-s.requestLimiter:
 	default:
-		log.Infof("Request limiter hit %v: %v", bws.addr, requestType)
+		log.Infof("Request limiter hit %v: %v", bws.addr, cmd)
 		<-s.requestLimiter
 	}
 	defer func() { s.requestLimiter <- true }()
 
-	log.Tracef("Handling request %v: %v", bws.addr, requestType)
+	start := time.Now()
+	defer func() {
+		s.metrics.rpcCallsDuration.With(prometheus.Labels{
+			"listener": bws.listenerName,
+			"command":  string(cmd),
+		}).Observe(time.Since(start).Seconds())
+	}()
+
+	log.Tracef("Handling request %v: %v", bws.addr, cmd)
 
 	response, err := handler(ctx)
 	if err != nil {
-		log.Errorf("Failed to handle %v request %v: %v",
-			requestType, bws.addr, err)
+		log.Errorf("Failed to handle %v request %v: %v", cmd, bws.addr, err)
 	}
 	if response == nil {
 		return
 	}
 
-	log.Debugf("Responding to %v request with %v", requestType, spew.Sdump(response))
-
+	log.Debugf("Responding to %v request with %v", cmd, spew.Sdump(response))
 	if err := bfgapi.Write(ctx, bws.conn, wsid, response); err != nil {
 		log.Errorf("Failed to handle %v request: protocol write failed: %v",
-			requestType, err)
+			cmd, err)
 	}
 }
 
@@ -292,6 +349,8 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 			Error: e.ProtocolError(),
 		}, e
 	}
+
+	s.metrics.popBroadcasts.Inc()
 
 	if err := s.db.PopBasisInsertPopMFields(ctx, &bfgd.PopBasis{
 		BtcTxId:             txHash,
@@ -634,6 +693,7 @@ type bfgWs struct {
 	addr           string
 	conn           *protocol.WSConn
 	sessionId      string
+	listenerName   string // "public" or "private"
 	requestContext context.Context
 	notify         map[notificationId]struct{}
 	publicKey      []byte
@@ -664,61 +724,65 @@ func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
 
 		switch cmd {
 		case bfgapi.CmdPingRequest:
-			err = s.handlePingRequest(ctx, bws, payload, id)
+			if err := s.handlePingRequest(ctx, bws, payload, id); err != nil {
+				// Terminal error, exit.
+				log.Errorf("handleWebsocketRead %v %v %v: %v",
+					bws.addr, cmd, id, err)
+				return
+			}
 		case bfgapi.CmdPopTxForL2BlockRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.PopTxsForL2BlockRequest)
 				return s.handlePopTxsForL2Block(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle pop for l2 block request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdNewL2KeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.NewL2KeystonesRequest)
 				return s.handleNewL2Keystones(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle new l2 keystones request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBTCFinalityByRecentKeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BTCFinalityByRecentKeystonesRequest)
 				return s.handleBtcFinalityByRecentKeystonesRequest(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle finality recent keystones request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBTCFinalityByKeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BTCFinalityByKeystonesRequest)
 				return s.handleBtcFinalityByKeystonesRequest(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle finality keystones request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdAccessPublicKeyCreateRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.AccessPublicKeyCreateRequest)
 				return s.handleAccessPublicKeyCreateRequest(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle access key create request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdAccessPublicKeyDeleteRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.AccessPublicKeyDeleteRequest)
 				return s.handleAccessPublicKeyDelete(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle access key delete request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		default:
-			err = errors.New("unknown command")
-		}
-
-		// If set, it is a terminal error.
-		if err != nil {
-			log.Errorf("handleWebsocketRead %v %v %v: %v",
-				bws.addr, cmd, id, err)
+			// Terminal error, exit.
+			log.Errorf("handleWebsocketRead %v %v %v: unknown command",
+				bws.addr, cmd, id)
 			return
 		}
 
-		s.cmdsProcessed.Inc()
+		s.metrics.rpcCallsTotal.With(prometheus.Labels{
+			"listener": "private",
+			"command":  string(cmd),
+		}).Inc()
 	}
 }
 
@@ -743,56 +807,58 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 
 		switch cmd {
 		case bfgapi.CmdPingRequest:
-			// quick call
-			err = s.handlePingRequest(ctx, bws, payload, id)
+			if err := s.handlePingRequest(ctx, bws, payload, id); err != nil {
+				// Terminal error, exit.
+				log.Errorf("handleWebsocketRead %v %v %v: %v",
+					bws.addr, cmd, id, err)
+				return
+			}
 		case bfgapi.CmdL2KeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.L2KeystonesRequest)
 				return s.handleL2KeystonesRequest(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle l2 keystones request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBitcoinBalanceRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BitcoinBalanceRequest)
 				return s.handleBitcoinBalance(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle bitcoin balance request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBitcoinBroadcastRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BitcoinBroadcastRequest)
 				return s.handleBitcoinBroadcast(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle bitcoin broadcast request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBitcoinInfoRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BitcoinInfoRequest)
 				return s.handleBitcoinInfo(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle bitcoin broadcast request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBitcoinUTXOsRequest:
-
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BitcoinUTXOsRequest)
 				return s.handleBitcoinUTXOs(c, msg)
 			}
 
-			go s.handleRequest(ctx, bws, id, "handle bitcoin utxos request", handler)
+			go s.handleRequest(ctx, bws, id, cmd, handler)
 		default:
-			err = errors.New("unknown command")
-		}
-
-		// If set, it is a terminal error.
-		if err != nil {
-			log.Errorf("handleWebsocketRead %v %v %v: %v",
-				bws.addr, cmd, id, err)
+			// Terminal error, exit.
+			log.Errorf("handleWebsocketRead %v %v %v: unknown command",
+				bws.addr, cmd, id)
 			return
 		}
 
-		s.cmdsProcessed.Inc()
+		s.metrics.rpcCallsTotal.With(prometheus.Labels{
+			"listener": "public",
+			"command":  string(cmd),
+		}).Inc()
 	}
 }
 
@@ -860,6 +926,7 @@ func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) 
 			notifyBtcBlocks:     {},
 			notifyBtcFinalities: {},
 		},
+		listenerName:   "private",
 		requestContext: r.Context(),
 	}
 
@@ -867,9 +934,11 @@ func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) 
 		log.Errorf("error occurred creating key: %s", err)
 		return
 	}
+	s.metrics.rpcConnections.WithLabelValues("private").Inc()
 
 	defer func() {
 		s.deleteSession(bws.sessionId)
+		s.metrics.rpcConnections.WithLabelValues("private").Dec()
 	}()
 
 	bws.wg.Add(1)
@@ -911,6 +980,7 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	bws := &bfgWs{
 		addr:           r.RemoteAddr,
 		conn:           protocol.NewWSConn(conn),
+		listenerName:   "public",
 		requestContext: r.Context(),
 		notify: map[notificationId]struct{}{
 			notifyL2Keystones: {},
@@ -959,8 +1029,11 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("error occurred creating key: %s", err)
 		return
 	}
+	s.metrics.rpcConnections.WithLabelValues("public").Inc()
+
 	defer func() {
 		s.deleteSession(bws.sessionId)
+		s.metrics.rpcConnections.WithLabelValues("public").Dec()
 	}()
 
 	// Always ping, required by protocol.
@@ -1476,14 +1549,13 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create prometheus server: %w", err)
 		}
-		cs := []prometheus.Collector{
-			s.cmdsProcessed, // XXX should we make two counters? priv/pub
+		cs := append(s.metrics.collectors(),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Namespace: promNamespace,
 				Name:      "running",
-				Help:      "Is bfg service running.",
+				Help:      "Whether the BFG service is running",
 			}, s.promRunning),
-		}
+		)
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
