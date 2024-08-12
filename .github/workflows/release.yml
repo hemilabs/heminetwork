@@ -8,27 +8,6 @@ name: "Release"
 on:
   push:
     tags: [ "v*.*.*" ]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version"
-        type: string
-        required: true
-      docker:
-        description: "Build Docker images"
-        type: boolean
-        required: true
-        default: false
-      npm:
-        description: "Publish NPM packages"
-        type: boolean
-        required: true
-        default: false
-      release:
-        description: "Create GitHub release and publish Docker images"
-        type: boolean
-        required: true
-        default: false
 
 concurrency:
   group: "release-${{ github.ref }}"
@@ -42,10 +21,9 @@ env:
     -X github.com/hemilabs/heminetwork/version.PreRelease=
 
 jobs:
-  # Run tests
-  # TODO(joshuasing): run PoP Miner / NPM package tests once added
-  test:
-    name: "Test"
+  # Build and test
+  test-go:
+    name: "Test (Go)"
     uses: ./.github/workflows/go.yml
 
   # Prepare to release
@@ -62,7 +40,7 @@ jobs:
       - name: "Determine version type"
         id: version
         env:
-          RAW_VERSION: "${{ inputs.version || github.ref_name }}"
+          RAW_VERSION: "${{ github.ref_name }}"
         # This script determines the version type (stability), e.g.
         #  1.0.0 = stable, 1.1.0-rc.1 = unstable, 0.1.0 = unstable
         run: |
@@ -78,126 +56,10 @@ jobs:
           echo "Detected that $TAG is $TYPE"
           echo "type=$TYPE" >> "$GITHUB_OUTPUT"
 
-  # Build binaries
-  build:
-    name: "Build (${{ matrix.goos }}/${{ matrix.goarch }})"
-    runs-on: "ubuntu-latest"
-    needs: [ "test", "prepare" ]
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: true
-      matrix:
-        goos: [ "linux", "darwin" ]
-        goarch: [ "amd64", "arm64" ]
-        include:
-          - goos: "windows"
-            goarch: "amd64"
-          - goos: "openbsd"
-            goarch: "amd64"
-    steps:
-      - name: "Checkout repository"
-        uses: actions/checkout@v4
-
-      - name: "Setup Go ${{ env.GO_VERSION }}"
-        uses: actions/setup-go@v5
-        with:
-          go-version: "${{ env.GO_VERSION }}"
-          cache: true
-          check-latest: true
-
-      - name: "Download and verify dependencies"
-        run: make GOCACHE="$(go env GOCACHE)" go-deps
-
-      - name: "Create binary archive for ${{ matrix.goos }}/${{ matrix.goarch }}"
-        env:
-          GOOS: "${{ matrix.goos }}"
-          GOARCH: "${{ matrix.goarch }}"
-          CGO_ENABLED: 0 # Disable CGO.
-          GOGC: off # Disable GC during build, faster but uses more RAM.
-          GO_LDFLAGS: "${{ env.GO_LDFLAGS }}"
-        run: make GOCACHE="$(go env GOCACHE)" GO_LDFLAGS="$GO_LDFLAGS" archive
-
-      - name: "Upload artifacts"
-        uses: actions/upload-artifact@v4
-        with:
-          name: "${{ matrix.goos }}_${{ matrix.goarch }}"
-          retention-days: 1
-          path: |
-            dist/*
-
-  # Build and publish Docker images
-  docker:
-    name: "Docker (${{ matrix.service }})"
-    runs-on: "ubuntu-latest"
-    if: github.event_name == 'push' || inputs.docker
-    needs: [ "test", "prepare" ]
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - service: "bfgd"
-            platforms: "linux/amd64,linux/arm64"
-          - service: "bssd"
-            platforms: "linux/amd64,linux/arm64"
-          - service: "popmd"
-            platforms: "linux/amd64,linux/arm64"
-    steps:
-      - name: "Checkout repository"
-        uses: actions/checkout@v4
-
-      - name: "Setup QEMU"
-        uses: docker/setup-qemu-action@v3
-
-      - name: "Setup Docker Buildx"
-        uses: docker/setup-buildx-action@v3
-
-      - name: "Login to DockerHub"
-        if: github.event_name == 'push' || inputs.release
-        uses: docker/login-action@v3
-        with:
-          username: "${{ secrets.DOCKERHUB_USERNAME }}"
-          password: "${{ secrets.DOCKERHUB_TOKEN }}"
-
-      - name: "Login to GitHub Container Registry"
-        if: github.event_name == 'push' || inputs.release
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: "${{ github.repository_owner }}"
-          password: "${{ secrets.GITHUB_TOKEN }}"
-
-      - name: "Prepare"
-        id: "prepare"
-        run: |
-          echo "build_date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
-
-      - name: "Build and push"
-        uses: docker/build-push-action@v5
-        with:
-          context: "${{ github.workspace }}"
-          platforms: "${{ matrix.platforms }}"
-          file: "${{ github.workspace }}/docker/${{ matrix.service }}/Dockerfile"
-          push: "${{ github.event_name == 'push' || inputs.release }}"
-          build-args: |
-            VERSION=${{ needs.prepare.outputs.version }}
-            VCS_REF=${{ github.sha }}
-            BUILD_DATE=${{ steps.prepare.outputs.build_date }}
-            GO_LDFLAGS=${{ env.GO_LDFLAGS }}
-          tags: |
-            hemilabs/${{ matrix.service }}:latest
-            hemilabs/${{ matrix.service }}:${{ needs.prepare.outputs.tag }}
-            ghcr.io/hemilabs/${{ matrix.service }}:latest
-            ghcr.io/hemilabs/${{ matrix.service }}:${{ needs.prepare.outputs.tag }}
-
   # Publish NPM packages
   npm:
     name: "npm"
     runs-on: "ubuntu-latest"
-    if: github.event_name == 'push' || inputs.npm
     needs: [ "prepare" ]
     permissions:
       contents: read
@@ -267,36 +129,57 @@ jobs:
   release:
     name: "Release"
     runs-on: "ubuntu-latest"
-    needs: [ "prepare", "build", "docker", "npm" ]
+    needs: [ "test-go", "npm" ]
     permissions:
-      # Permission to write contents is required to create GitHub releases.
-      # Builds are performed in a separate job with more restrictive permissions
-      # because this permission allows any action to write to the repository.
+      # Required to create GitHub releases.
       contents: write
+      # Required for Sigstore cosign authentication.
+      id-token: write
+      # Required to publish to GitHub Container Registry.
+      packages: write
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@v4
-
-      - name: "Create sources archive"
-        run: make sources
-
-      - name: "Download build artifacts"
-        uses: actions/download-artifact@v4
         with:
-          pattern: "*_*"
-          path: "${{ github.workspace }}/dist/"
-          merge-multiple: true
+          fetch-depth: 0
 
-      - name: "Create checksums"
-        run: make checksums
+      - name: "Setup Go ${{ env.GO_VERSION }}"
+        uses: actions/setup-go@v5
+        with:
+          go-version: "${{ env.GO_VERSION }}"
+          cache: true
+          check-latest: true
 
-      - name: "Create GitHub release"
-        if: github.event_name == 'push' || inputs.release
+      - name: "Install cosign"
+        uses: sigstore/cosign-installer@v3.6.0
+
+      - name: "Install Syft"
+        uses: anchore/sbom-action/download-syft@v0.17.0
+
+      - name: "Setup QEMU"
+        uses: docker/setup-qemu-action@v3
+
+      - name: "Setup Docker Buildx"
+        uses: docker/setup-buildx-action@v3
+
+      - name: "Login to DockerHub"
+        uses: docker/login-action@v3
+        with:
+          username: "${{ secrets.DOCKERHUB_USERNAME }}"
+          password: "${{ secrets.DOCKERHUB_TOKEN }}"
+
+      - name: "Login to GitHub Container Registry"
+        uses: docker/login-action@v3
+        with:
+          registry: "ghcr.io"
+          username: "${{ github.repository_owner }}"
+          password: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: "Release"
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: "goreleaser"
+          version: "~> v2"
+          args: "release --clean"
         env:
-          TAG: "${{ github.ref_name || needs.prepare.outputs.tag }}"
-          PRERELEASE: "${{ needs.prepare.outputs.version_type == 'unstable' }}"
-          GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        # Creates a GitHub release using the 'gh' CLI (https://github.com/cli/cli).
-        # Release notes will be generated by GitHub using the config at .github/release.yml.
-        run: |
-          gh release create "$TAG" ./dist/* --generate-notes --prerelease=$PRERELEASE
+          GITHUB_TOKEN: "${{ secrets.GITHUB_RELEASE_TOKEN }}"

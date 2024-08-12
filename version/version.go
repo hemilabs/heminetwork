@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"strings"
 )
 
@@ -17,21 +18,19 @@ import (
 // or build metadata identifiers, and the `.` separator.
 const semverAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-."
 
-// Constants defining the application version number.
-const (
-	Major = 0
-	Minor = 3
-	Patch = 0
+// Defines the application version number. These are set at link-time by
+// GoReleaser for releases.
+var (
+	Major = "0"
+	Minor = "3"
+	Patch = "0"
 )
-
-// Integer is an integer encoding of the major.minor.patch version.
-const Integer = 1000000*Major + 10000*Minor + 100*Patch
 
 // PreRelease contains the prerelease name of the application. It is a variable,
 // so it can be modified at link time (e.g.
 // `-ldflags "-X github.com/hemilabs/heminetwork/version.PreRelease=rc1"`).
 // It must only contain characters from the semantic version alphabet.
-var PreRelease = "pre"
+var PreRelease = "dev"
 
 // BuildMetadata defines additional build metadata. It is modified at link time
 // for official releases. It must only contain characters from the semantic
@@ -48,7 +47,7 @@ func init() {
 // semantic versioning 2.0.0 spec (https://semver.org/).
 func String() string {
 	// Start with the major, minor, and path versions.
-	version := fmt.Sprintf("%d.%d.%d", Major, Minor, Patch)
+	version := fmt.Sprintf("%s.%s.%s", Major, Minor, Patch)
 
 	// Append pre-release version if there is one. The hyphen called for
 	// by the semantic versioning spec is automatically appended and should
@@ -105,4 +104,27 @@ func BuildInfo() string {
 	out.WriteString(fmt.Sprintf("%s %s/%s)",
 		runtime.Version(), runtime.GOOS, runtime.GOARCH))
 	return out.String()
+}
+
+func vcsCommitID() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	var vcs, revision string
+	for _, bs := range bi.Settings {
+		switch bs.Key {
+		case "vcs":
+			vcs = bs.Value
+		case "vcs.revision":
+			revision = bs.Value
+		}
+	}
+	if vcs == "" {
+		return ""
+	}
+	if vcs == "git" && len(revision) > 9 {
+		revision = revision[:9]
+	}
+	return revision
 }

@@ -1,0 +1,508 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+version: 2
+
+project_name: "heminetwork"
+report_sizes: true
+
+before:
+  hooks:
+    - "go mod tidy"
+    - "go mod download"
+    - "go mod verify"
+
+# Re-enable once we no longer need the 'replace' directive in go.mod.
+# gomod:
+#   # Proxy the module from proxy.golang.org, making the builds verifiable.
+#   proxy: true
+
+builds:
+  # Bitcoin Finality Governor Daemon
+  - id: "bfgd"
+    binary: "bfgd"
+    main: "./cmd/bfgd/"
+    env: ["CGO_ENABLED=0", "GOGC=off"]
+    ldflags:
+      - "-s -w"
+      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+    flags: ["-trimpath"]
+    goos:
+      - "linux"
+      - "windows"
+      - "darwin"
+      - "openbsd"
+    goarch: ["amd64", "arm64", "arm"]
+    goarm: ["7"]
+    ignore:
+      - goos: "windows"
+        goarch: arm
+
+  # Bitcoin Secure Sequencer Daemon
+  - id: "bssd"
+    binary: "bssd"
+    main: "./cmd/bssd/"
+    env: ["CGO_ENABLED=0", "GOGC=off"]
+    ldflags:
+      - "-s -w"
+      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+    flags: ["-trimpath"]
+    goos:
+      - "linux"
+      - "windows"
+      - "darwin"
+      - "openbsd"
+    goarch: ["amd64", "arm64", "arm"]
+    goarm: ["7"]
+    ignore:
+      - goos: "windows"
+        goarch: arm
+
+  # btctool util
+  - id: "btctool"
+    binary: "btctool"
+    main: "./cmd/btctool/"
+    env: ["CGO_ENABLED=0", "GOGC=off"]
+    ldflags:
+      - "-s -w"
+      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+    flags: ["-trimpath"]
+    goos:
+      - "linux"
+      - "windows"
+      - "darwin"
+      - "openbsd"
+    goarch: ["amd64", "arm64", "arm"]
+    goarm: ["7"]
+    ignore:
+      - goos: "windows"
+        goarch: arm
+
+  # extool util
+  - id: "extool"
+    binary: "extool"
+    main: "./cmd/extool/"
+    env: ["CGO_ENABLED=0", "GOGC=off"]
+    ldflags:
+      - "-s -w"
+      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+    flags: ["-trimpath"]
+    goos:
+      - "linux"
+      - "windows"
+      - "darwin"
+      - "openbsd"
+    goarch: ["amd64", "arm64", "arm"]
+    goarm: ["7"]
+    ignore:
+      - goos: "windows"
+        goarch: arm
+
+  # hemictl util
+  - id: "hemictl"
+    binary: "hemictl"
+    main: "./cmd/hemictl/"
+    env: ["CGO_ENABLED=0", "GOGC=off"]
+    ldflags:
+      - "-s -w"
+      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+    flags: ["-trimpath"]
+    goos:
+      - "linux"
+      - "windows"
+      - "darwin"
+      - "openbsd"
+    goarch: ["amd64", "arm64", "arm"]
+    goarm: ["7"]
+    ignore:
+      - goos: "windows"
+        goarch: arm
+
+  # Key Generator util
+  - id: "keygen"
+    binary: "keygen"
+    main: "./cmd/keygen/"
+    env: ["CGO_ENABLED=0", "GOGC=off"]
+    ldflags:
+      - "-s -w"
+      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+    flags: ["-trimpath"]
+    goos:
+      - "linux"
+      - "windows"
+      - "darwin"
+      - "openbsd"
+    goarch: ["amd64", "arm64", "arm"]
+    goarm: ["7"]
+    ignore:
+      - goos: "windows"
+        goarch: arm
+
+  # PoP Miner Daemon
+  - id: "popmd"
+    binary: "popmd"
+    main: "./cmd/popmd/"
+    env: ["CGO_ENABLED=0", "GOGC=off"]
+    ldflags:
+      - "-s -w"
+      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+    flags: ["-trimpath"]
+    goos:
+      - "linux"
+      - "windows"
+      - "darwin"
+      - "openbsd"
+    goarch: ["amd64", "arm64", "arm"]
+    goarm: ["7"]
+    ignore:
+      - goos: "windows"
+        goarch: arm
+
+  # Tiny Bitcoin Daemon
+  - id: "tbcd"
+    binary: "tbcd"
+    main: "./cmd/tbcd/"
+    env: [ "CGO_ENABLED=0", "GOGC=off" ]
+    ldflags: [ "-s -w" ]
+    flags: [ "-trimpath" ]
+    goos:
+      - "linux"
+      - "windows"
+      - "darwin"
+    goarch: [ "amd64", "arm64", "arm" ]
+    goarm: [ "7" ]
+    ignore:
+      - goos: "windows"
+        goarch: arm
+
+archives:
+  - format: "tar.gz"
+    name_template: "{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    wrap_in_directory: true
+    allow_different_binary_count: true
+    format_overrides:
+      - goos: "windows"
+        format: "zip"
+    files:
+      - "README*"
+      - "LICENSE*"
+
+# Creates checksum file.
+checksum:
+  name_template: "{{ .ProjectName }}_v{{ .Version }}_checksums.txt"
+  algorithm: "sha256"
+
+# Creates source tarball.
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_v{{ .Version }}_sources"
+  format: "tar.gz"
+
+# Creates SBOMs for all archives and the source tarball.
+sboms:
+  - id: "archive"
+    artifacts: "archive"
+  - id: "source"
+    artifacts: "source"
+
+# Signs the checksum file, which includes checksums for all files (including sboms).
+signs:
+  - cmd: "cosign"
+    certificate: "${artifact}.pem"
+    args:
+      - "sign-blob"
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: "checksum"
+    output: true
+
+# Creates Docker images:
+#  - bfgd: linux/amd64, linux/arm64
+#  - bssd: linux/amd64, linux/arm64
+#  - popmd: linux/amd64, linux/arm64/v8, linux/arm/v7
+dockers:
+  # bfgd amd64
+  - id: "bfgd-amd64"
+    goos: "linux"
+    goarch: "amd64"
+    dockerfile: "docker/bfgd/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/bfgd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+  # bfgd arm64
+  - id: "bfgd-arm64"
+    goos: "linux"
+    goarch: "arm64"
+    dockerfile: "docker/bfgd/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/bfgd:{{ .Version }}-arm64"
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64/v8"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+  # bssd amd64
+  - id: "bssd-amd64"
+    goos: "linux"
+    goarch: "amd64"
+    dockerfile: "docker/bssd/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/bssd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+  # bssd arm64
+  - id: "bssd-arm64"
+    goos: "linux"
+    goarch: "arm64"
+    dockerfile: "docker/bssd/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/bssd:{{ .Version }}-arm64"
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64/v8"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+  # popmd amd64
+  - id: "popmd-amd64"
+    goos: "linux"
+    goarch: "amd64"
+    dockerfile: "docker/popmd/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/popmd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+  # popmd arm64
+  - id: "popmd-arm64"
+    goos: "linux"
+    goarch: "arm64"
+    dockerfile: "docker/popmd/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/popmd:{{ .Version }}-arm64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64/v8"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+  # popmd armv7
+  - id: "popmd-armv7"
+    goos: "linux"
+    goarch: "arm"
+    goarm: "7"
+    dockerfile: "docker/popmd/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/popmd:{{ .Version }}-armv7"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
+    build_flag_templates:
+      - "--platform=linux/arm/v7"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+# Creates Docker manifests for each image containing the images for each
+# architecture.
+docker_manifests:
+  # bfgd - Docker Hub
+  - name_template: "hemilabs/bfgd:latest"
+    image_templates:
+      - "hemilabs/bfgd:{{ .Version }}-amd64"
+      - "hemilabs/bfgd:{{ .Version }}-arm64"
+  - name_template: "hemilabs/bfgd:{{ .Major }}"
+    image_templates:
+      - "hemilabs/bfgd:{{ .Version }}-amd64"
+      - "hemilabs/bfgd:{{ .Version }}-arm64"
+  - name_template: "hemilabs/bfgd:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "hemilabs/bfgd:{{ .Version }}-amd64"
+      - "hemilabs/bfgd:{{ .Version }}-arm64"
+  - name_template: "hemilabs/bfgd:{{ .Version }}"
+    image_templates:
+      - "hemilabs/bfgd:{{ .Version }}-amd64"
+      - "hemilabs/bfgd:{{ .Version }}-arm64"
+
+  # bfgd - GitHub Container Registry
+  - name_template: "ghcr.io/hemilabs/bfgd:latest"
+    image_templates:
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/hemilabs/bfgd:{{ .Major }}"
+    image_templates:
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/hemilabs/bfgd:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/hemilabs/bfgd:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
+
+  # bssd - Docker Hub
+  - name_template: "hemilabs/bssd:latest"
+    image_templates:
+      - "hemilabs/bssd:{{ .Version }}-amd64"
+      - "hemilabs/bssd:{{ .Version }}-arm64"
+  - name_template: "hemilabs/bssd:{{ .Major }}"
+    image_templates:
+      - "hemilabs/bssd:{{ .Version }}-amd64"
+      - "hemilabs/bssd:{{ .Version }}-arm64"
+  - name_template: "hemilabs/bssd:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "hemilabs/bssd:{{ .Version }}-amd64"
+      - "hemilabs/bssd:{{ .Version }}-arm64"
+  - name_template: "hemilabs/bssd:{{ .Version }}"
+    image_templates:
+      - "hemilabs/bssd:{{ .Version }}-amd64"
+      - "hemilabs/bssd:{{ .Version }}-arm64"
+
+  # bssd - GitHub Container Registry
+  - name_template: "ghcr.io/hemilabs/bssd:latest"
+    image_templates:
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/hemilabs/bssd:{{ .Major }}"
+    image_templates:
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/hemilabs/bssd:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/hemilabs/bssd:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
+
+  # popmd - Docker Hub
+  - name_template: "hemilabs/popmd:latest"
+    image_templates:
+      - "hemilabs/popmd:{{ .Version }}-amd64"
+      - "hemilabs/popmd:{{ .Version }}-arm64"
+      - "hemilabs/popmd:{{ .Version }}-armv7"
+  - name_template: "hemilabs/popmd:{{ .Major }}"
+    image_templates:
+      - "hemilabs/popmd:{{ .Version }}-amd64"
+      - "hemilabs/popmd:{{ .Version }}-arm64"
+      - "hemilabs/popmd:{{ .Version }}-armv7"
+  - name_template: "hemilabs/popmd:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "hemilabs/popmd:{{ .Version }}-amd64"
+      - "hemilabs/popmd:{{ .Version }}-arm64"
+      - "hemilabs/popmd:{{ .Version }}-armv7"
+  - name_template: "hemilabs/popmd:{{ .Version }}"
+    image_templates:
+      - "hemilabs/popmd:{{ .Version }}-amd64"
+      - "hemilabs/popmd:{{ .Version }}-arm64"
+      - "hemilabs/popmd:{{ .Version }}-armv7"
+
+  # popmd - GitHub Container Registry
+  - name_template: "ghcr.io/hemilabs/popmd:latest"
+    image_templates:
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
+  - name_template: "ghcr.io/hemilabs/popmd:{{ .Major }}"
+    image_templates:
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
+  - name_template: "ghcr.io/hemilabs/popmd:{{ .Major }}.{{ .Minor }}"
+    image_templates:
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
+  - name_template: "ghcr.io/hemilabs/popmd:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
+      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
+
+# Signs Docker images and manifests.
+docker_signs:
+  - cmd: "cosign"
+    args: ["sign", "${artifact}", "--yes"]
+    artifacts: "all"
+
+# Snapshot version settings.
+snapshot:
+  version_template: "{{ incpatch .Version }}-dev-{{ .ShortCommit }}"
+
+# Generates the changelog.
+changelog:
+  use: "github-native"
+
+# Creates a GitHub release.
+release:
+  github:
+    owner: "hemilabs"
+    name: "network"
+  replace_existing_draft: true
+  prerelease: "auto"
+  make_latest: true
+  mode: "keep-existing"
+
+# Closes milestones for the released tag.
+milestones:
+  - repo:
+      owner: "hemilabs"
+      name: "heminetwork"
+    close: true
+    name_template: "{{ .Tag }}"
