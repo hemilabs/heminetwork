@@ -47,7 +47,7 @@ var (
 		},
 		"TBC_BLOCK_CACHE": config.Config{
 			Value:        &cfg.BlockCache,
-			DefaultValue: int(250),
+			DefaultValue: 250,
 			Help:         "number of cached blocks",
 			Print:        config.PrintAll,
 		},
@@ -77,7 +77,7 @@ var (
 		},
 		"TBC_MAX_CACHED_TXS": config.Config{
 			Value:        &cfg.MaxCachedTxs,
-			DefaultValue: 1000000,
+			DefaultValue: int(1e6),
 			Help:         "maximum cached utxos and/or txs during indexing",
 			Print:        config.PrintAll,
 		},

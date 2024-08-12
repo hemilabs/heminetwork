@@ -165,10 +165,12 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress: tbcapi.DefaultListen,
-		LogLevel:      logLevel,
-		MaxCachedTxs:  defaultMaxCachedTxs,
-		PeersWanted:   defaultPeersWanted,
+		ListenAddress:    tbcapi.DefaultListen,
+		BlockCache:       250,
+		BlockheaderCache: 1e6,
+		LogLevel:         logLevel,
+		MaxCachedTxs:     defaultMaxCachedTxs,
+		PeersWanted:      defaultPeersWanted,
 	}
 }
 
