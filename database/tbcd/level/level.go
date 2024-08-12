@@ -96,22 +96,32 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		return nil, err
 	}
 
-	blockCache, err := lru.New[string, *tbcd.Block](cfg.BlockCache)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't setup block cache: %w", err)
-	}
-	headerCache, err := lru.New[string, *tbcd.BlockHeader](cfg.BlockheaderCache)
-	if err != nil {
-		return nil, fmt.Errorf("couldn't setup header cache: %w", err)
+	l := &ldb{
+		Database: ld,
+		pool:     ld.DB(),
+		cfg:      cfg,
 	}
 
-	log.Debugf("tbcdb database version: %v", ldbVersion)
-	l := &ldb{
-		Database:    ld,
-		pool:        ld.DB(),
-		blockCache:  blockCache,
-		headerCache: headerCache,
+	if cfg.BlockCache > 0 {
+		l.blockCache, err = lru.New[string, *tbcd.Block](cfg.BlockCache)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
+		}
+		log.Infof("block cache: %v", cfg.BlockCache)
+	} else {
+		log.Infof("block cache: DISABLED")
 	}
+	if cfg.BlockheaderCache > 0 {
+		l.headerCache, err = lru.New[string, *tbcd.BlockHeader](cfg.BlockheaderCache)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't setup header cache: %w", err)
+		}
+		log.Infof("blockheader cache: %v", cfg.BlockheaderCache)
+	} else {
+		log.Infof("blockheader cache: DISABLED")
+	}
+
+	log.Infof("tbcdb database version: %v", ldbVersion)
 
 	return l, nil
 }
@@ -172,8 +182,10 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	defer log.Tracef("BlockHeaderByHash exit")
 
 	// Try cache first
-	if b, ok := l.headerCache.Get(string(hash)); ok {
-		return b, nil
+	if l.cfg.BlockheaderCache > 0 {
+		if b, ok := l.headerCache.Get(string(hash)); ok {
+			return b, nil
+		}
 	}
 
 	// It stands to reason that this code does not need a trasaction. The
@@ -191,7 +203,9 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	bh := decodeBlockHeader(ebh)
 
 	// Insert into cache, roughlt 150 byte cost.
-	l.headerCache.Add(string(bh.Hash), bh)
+	if l.cfg.BlockheaderCache > 0 {
+		l.headerCache.Add(string(bh.Hash), bh)
+	}
 
 	return bh, nil
 }
@@ -662,7 +676,9 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		if err = bDB.Put(b.Hash, b.Block, nil); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
-		l.blockCache.Add(string(b.Hash), b)
+		if l.cfg.BlockCache > 0 {
+			l.blockCache.Add(string(b.Hash), b)
+		}
 	}
 
 	// Remove block identifier from blocks missing
@@ -682,9 +698,11 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
-	// Try cache first
-	if cb, ok := l.blockCache.Get(string(hash)); ok {
-		return cb, nil
+	if l.cfg.BlockCache > 0 {
+		// Try cache first
+		if cb, ok := l.blockCache.Get(string(hash)); ok {
+			return cb, nil
+		}
 	}
 
 	bDB := l.pool[level.BlocksDB]
@@ -700,7 +718,9 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 		Hash:  hash,
 		Block: eb,
 	}
-	l.blockCache.Add(string(hash), b)
+	if l.cfg.BlockCache > 0 {
+		l.blockCache.Add(string(hash), b)
+	}
 	return b, nil
 }
 

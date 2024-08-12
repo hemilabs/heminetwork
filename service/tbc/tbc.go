@@ -202,7 +202,7 @@ type Server struct {
 	// reentrancy flags for the indexers
 	// utxoIndexerRunning bool
 	// txIndexerRunning   bool
-	quiesced bool // when set do not accept blockheaders and ot blocks.
+	quiesced bool // when set do not accept blockheaders and/or blocks.
 	// clipped  bool // XXX kill including all surrounding code, this is for test only
 	indexing bool // prevent re-entrant indexing
 
@@ -1579,6 +1579,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		// here but the real fix is return an error or add ctx to wire.
 		// This is a workaround. Code prints a bunch of crap during IBD
 		// when shutdown because of this.
+		// XXX make this a function?
 		select {
 		case <-ctx.Done():
 			return
