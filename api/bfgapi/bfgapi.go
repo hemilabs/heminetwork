@@ -56,6 +56,8 @@ var (
 	DefaultPrometheusListen = "localhost:2112"
 	DefaultPrivateURL       = "ws://" + DefaultPrivateListen + "/" + RouteWebsocketPrivate
 	DefaultPublicURL        = "ws://" + DefaultPublicListen + "/" + RouteWebsocketPublic
+	DefaultRequestLimit     = 10000 // XXX this is a bandaid
+	DefaultRequestTimeout   = 9     // XXX PNOOMA
 )
 
 type AccessPublicKey struct {
