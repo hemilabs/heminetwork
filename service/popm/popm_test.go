@@ -18,10 +18,10 @@ import (
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 	btctxscript "github.com/btcsuite/btcd/txscript"
 	btcwire "github.com/btcsuite/btcd/wire"
+	"github.com/coder/websocket"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/go-test/deep"
-	"nhooyr.io/websocket"
 
 	"github.com/hemilabs/heminetwork/api/auth"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
