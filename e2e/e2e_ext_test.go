@@ -292,6 +292,8 @@ func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, el
 		EXBTCAddress:         electrumxAddr,
 		BTCStartHeight:       btcStartHeight,
 		PublicKeyAuth:        auth,
+		RequestLimit:         bfgapi.DefaultRequestLimit,
+		RequestTimeout:       bfgapi.DefaultRequestTimeout,
 	})
 	if err != nil {
 		t.Fatal(err)
