@@ -65,6 +65,8 @@ func NewDefaultConfig() *Config {
 		EXBTCAddress:         "localhost:18001",
 		PrivateListenAddress: ":8080",
 		PublicListenAddress:  ":8383",
+		RequestLimit:         bfgapi.DefaultRequestLimit,
+		RequestTimeout:       bfgapi.DefaultRequestTimeout,
 	}
 }
 
@@ -91,6 +93,8 @@ type Config struct {
 	PrometheusListenAddress string
 	PprofListenAddress      string
 	PublicKeyAuth           bool
+	RequestLimit            int
+	RequestTimeout          int // in seconds
 }
 
 type Server struct {
@@ -100,9 +104,8 @@ type Server struct {
 	cfg *Config
 
 	// requests
-	requestLimit   int       // Request limiter queue depth
 	requestLimiter chan bool // Maximum in progress websocket commands
-	requestTimeout time.Duration
+	// requestTimeout time.Duration
 
 	btcHeight uint64
 
@@ -187,13 +190,17 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
-	defaultRequestTimeout := 9 * time.Second // XXX
-	requestLimit := 1000                     // XXX
+	if cfg.RequestLimit <= 0 {
+		return nil, fmt.Errorf("invalid request limit: %v", cfg.RequestLimit)
+	}
+	minRequestTimeout := 3
+	if cfg.RequestTimeout <= minRequestTimeout {
+		return nil, fmt.Errorf("invalid request timeout (minimum %v): %v",
+			minRequestTimeout, cfg.RequestTimeout)
+	}
 	s := &Server{
 		cfg:                   cfg,
-		requestLimiter:        make(chan bool, requestLimit),
-		requestLimit:          requestLimit,
-		requestTimeout:        defaultRequestTimeout,
+		requestLimiter:        make(chan bool, cfg.RequestLimit),
 		btcHeight:             cfg.BTCStartHeight,
 		server:                http.NewServeMux(),
 		publicServer:          http.NewServeMux(),
@@ -201,7 +208,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		sessions:              make(map[string]*bfgWs),
 		checkForInvalidBlocks: make(chan struct{}),
 	}
-	for range requestLimit {
+	for range cfg.RequestLimit {
 		s.requestLimiter <- true
 	}
 
@@ -251,7 +258,8 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 	log.Tracef("handleRequest: %v", bws.addr)
 	defer log.Tracef("handleRequest exit: %v", bws.addr)
 
-	ctx, cancel := context.WithTimeout(parentCtx, s.requestTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx,
+		time.Duration(s.cfg.RequestTimeout)*time.Second)
 	defer cancel()
 
 	select {

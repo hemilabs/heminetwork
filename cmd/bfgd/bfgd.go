@@ -87,6 +87,18 @@ var (
 			Help:         "address and port bfgd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
+		"BFG_REQUEST_LIMIT": config.Config{
+			Value:        &cfg.RequestLimit,
+			DefaultValue: bfgapi.DefaultRequestLimit,
+			Help:         "maximum request queue depth",
+			Print:        config.PrintAll,
+		},
+		"BFG_REQUEST_TIMEOUT": config.Config{
+			Value:        &cfg.RequestTimeout,
+			DefaultValue: bfgapi.DefaultRequestTimeout,
+			Help:         "request timeout in seconds",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
