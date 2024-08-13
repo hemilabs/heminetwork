@@ -45,6 +45,18 @@ var (
 			Help:         "enable auto utxo and tx indexes",
 			Print:        config.PrintAll,
 		},
+		"TBC_BLOCK_CACHE": config.Config{
+			Value:        &cfg.BlockCache,
+			DefaultValue: 250,
+			Help:         "number of cached blocks",
+			Print:        config.PrintAll,
+		},
+		"TBC_BLOCKHEADER_CACHE": config.Config{
+			Value:        &cfg.BlockheaderCache,
+			DefaultValue: int(1e6),
+			Help:         "number of cached blockheaders",
+			Print:        config.PrintAll,
+		},
 		"TBC_BLOCK_SANITY": config.Config{
 			Value:        &cfg.BlockSanity,
 			DefaultValue: false,
@@ -65,7 +77,7 @@ var (
 		},
 		"TBC_MAX_CACHED_TXS": config.Config{
 			Value:        &cfg.MaxCachedTxs,
-			DefaultValue: 1000000,
+			DefaultValue: int(1e6),
 			Help:         "maximum cached utxos and/or txs during indexing",
 			Print:        config.PrintAll,
 		},

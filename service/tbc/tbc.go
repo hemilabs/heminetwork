@@ -58,6 +58,8 @@ const (
 	defaultCmdTimeout          = 4 * time.Second
 	defaultPingTimeout         = 3 * time.Second
 	defaultBlockPendingTimeout = 17 * time.Second
+
+	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
 
 var (
@@ -147,6 +149,8 @@ func sliceChainHash(ch chainhash.Hash) []byte {
 
 type Config struct {
 	AutoIndex               bool
+	BlockCache              int
+	BlockheaderCache        int
 	BlockSanity             bool
 	LevelDBHome             string
 	ListenAddress           string
@@ -161,16 +165,22 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress: tbcapi.DefaultListen,
-		LogLevel:      logLevel,
-		MaxCachedTxs:  defaultMaxCachedTxs,
-		PeersWanted:   defaultPeersWanted,
+		ListenAddress:    tbcapi.DefaultListen,
+		BlockCache:       250,
+		BlockheaderCache: 1e6,
+		LogLevel:         logLevel,
+		MaxCachedTxs:     defaultMaxCachedTxs,
+		PeersWanted:      defaultPeersWanted,
 	}
 }
 
 type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
+
+	// Note that peers is protected by mtx NOT peersMtx
+	// TODO: move to PeerManager?
+	peers map[string]*peer // active but not necessarily connected
 
 	cfg *Config
 
@@ -186,14 +196,15 @@ type Server struct {
 	timeSource  blockchain.MedianTimeSource
 	seeds       []string
 
-	peers  map[string]*peer // active but not necessarily connected
-	blocks *ttl.TTL         // outstanding block downloads [hash]when/where
-	pings  *ttl.TTL         // outstanding pings
+	pm *PeerManager
+
+	blocks *ttl.TTL // outstanding block downloads [hash]when/where
+	pings  *ttl.TTL // outstanding pings
 
 	// reentrancy flags for the indexers
 	// utxoIndexerRunning bool
 	// txIndexerRunning   bool
-	quiesced bool // when set do not accept blockheaders and ot blocks.
+	quiesced bool // when set do not accept blockheaders and/or blocks.
 	// clipped  bool // XXX kill including all surrounding code, this is for test only
 	indexing bool // prevent re-entrant indexing
 
@@ -230,6 +241,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		printTime:      time.Now().Add(10 * time.Second),
 		blocks:         blocks,
 		peers:          make(map[string]*peer, cfg.PeersWanted),
+		pm:             newPeerManager(),
 		pings:          pings,
 		blocksInserted: make(map[string]struct{}, 8192), // stats XXX rmeove?
 		timeSource:     blockchain.NewMedianTime(),
@@ -289,11 +301,12 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash []byte)
 	return nil
 }
 
-func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error) {
+// TODO: move to PeerManager?
+func (s *Server) seed(pctx context.Context, peersWanted int) ([]string, error) {
 	log.Tracef("seed")
 	defer log.Tracef("seed exit")
 
-	peers, err := s.db.PeersRandom(pctx, peersWanted)
+	peers, err := s.pm.PeersRandom(peersWanted)
 	if err != nil {
 		return nil, fmt.Errorf("peers random: %w", err)
 	}
@@ -308,7 +321,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 	defer cancel()
 
 	errorsSeen := 0
-	var moreSeeds []tbcd.Peer
+	var moreSeeds []string
 	for _, v := range s.seeds {
 		host, port, err := net.SplitHostPort(v)
 		if err != nil {
@@ -324,10 +337,7 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 		}
 
 		for _, ip := range ips {
-			moreSeeds = append(moreSeeds, tbcd.Peer{
-				Host: ip.String(),
-				Port: port,
-			})
+			moreSeeds = append(moreSeeds, net.JoinHostPort(ip.String(), port))
 		}
 	}
 
@@ -335,14 +345,15 @@ func (s *Server) seed(pctx context.Context, peersWanted int) ([]tbcd.Peer, error
 		return nil, errors.New("could not seed")
 	}
 
-	// insert into peers table
+	// insert into peers table // TODO: ?
 	peers = append(peers, moreSeeds...)
 
-	// return fake peers but don't save them to the database
+	// return fake peers but don't save them to the database // TODO: ?
 	return peers, nil
 }
 
-func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer, error) {
+// TODO: move to PeerManager?
+func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]string, error) {
 	log.Tracef("seedForever")
 	defer log.Tracef("seedForever")
 
@@ -370,6 +381,7 @@ func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]tbcd.Peer,
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peerAdd(p *peer) error {
 	log.Tracef("peerAdd: %v", p.address)
 	s.mtx.Lock()
@@ -381,6 +393,7 @@ func (s *Server) peerAdd(p *peer) error {
 	return nil
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peerDelete(address string) {
 	log.Tracef("peerDelete: %v", address)
 	s.mtx.Lock()
@@ -388,15 +401,17 @@ func (s *Server) peerDelete(address string) {
 	s.mtx.Unlock()
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peersLen() int {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	return len(s.peers)
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peerManager(ctx context.Context) error {
-	log.Tracef("peerManager")
-	defer log.Tracef("peerManager exit")
+	log.Tracef("PeerManager")
+	defer log.Tracef("PeerManager exit")
 
 	// Channel for peering signals
 	peersWanted := s.cfg.PeersWanted
@@ -428,8 +443,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 
 			// Connect peer
 			for range peersWanted - peersActive {
-				address := net.JoinHostPort(seeds[x].Host, seeds[x].Port)
-				peer, err := NewPeer(s.wireNet, address)
+				peer, err := NewPeer(s.wireNet, seeds[x])
 				if err != nil {
 					// This really should not happen
 					log.Errorf("new peer: %v", err)
@@ -484,6 +498,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) localPeerManager(ctx context.Context) error {
 	log.Tracef("localPeerManager")
 	defer log.Tracef("localPeerManager exit")
@@ -526,6 +541,7 @@ func (s *Server) localPeerManager(ctx context.Context) error {
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) startPeerManager(ctx context.Context) error {
 	log.Tracef("startPeerManager")
 	defer log.Tracef("startPeerManager exit")
@@ -537,6 +553,7 @@ func (s *Server) startPeerManager(ctx context.Context) error {
 	return s.peerManager(ctx)
 }
 
+// TODO: move to PeerManager?
 func (s *Server) pingExpired(key any, value any) {
 	log.Tracef("pingExpired")
 	defer log.Tracef("pingExpired exit")
@@ -552,6 +569,7 @@ func (s *Server) pingExpired(key any, value any) {
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) pingAllPeers(ctx context.Context) {
 	log.Tracef("pingAllPeers")
 	defer log.Tracef("pingAllPeers exit")
@@ -588,6 +606,7 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 	}
 }
 
+// TODO: move to PeerManager?
 func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	log.Tracef("peerConnect %v", p)
 	defer func() {
@@ -616,7 +635,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 				log.Errorf("split host port: %v", err)
 				return
 			}
-			if err = s.db.PeerDelete(ctx, host, port); err != nil {
+			if err = s.pm.PeerDelete(host, port); err != nil {
 				log.Errorf("peer delete (%v): %v", pp, err)
 			} else {
 				log.Debugf("Peer delete: %v", pp)
@@ -801,39 +820,36 @@ func (s *Server) blksMissing(ctx context.Context) bool {
 	return len(bm) > 0
 }
 
-func (s *Server) handleAddr(ctx context.Context, p *peer, msg *wire.MsgAddr) {
+func (s *Server) handleAddr(_ context.Context, p *peer, msg *wire.MsgAddr) {
 	log.Tracef("handleAddr (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddr exit (%v)", p)
 
-	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
-	for k := range msg.AddrList {
-		peers = append(peers, tbcd.Peer{
-			Host: msg.AddrList[k].IP.String(),
-			Port: strconv.Itoa(int(msg.AddrList[k].Port)),
-		})
+	peers := make([]string, len(msg.AddrList))
+	for i, a := range msg.AddrList {
+		peers[i] = net.JoinHostPort(a.IP.String(), strconv.Itoa(int(a.Port)))
 	}
-	err := s.db.PeersInsert(ctx, peers)
-	// Don't log insert 0, its a dup.
-	if err != nil && !errors.Is(err, database.ErrZeroRows) {
-		log.Errorf("%v", err)
+
+	if err := s.pm.PeersInsert(peers); err != nil {
+		log.Errorf("Insert peers: %v", err)
 	}
 }
 
-func (s *Server) handleAddrV2(ctx context.Context, p *peer, msg *wire.MsgAddrV2) {
+func (s *Server) handleAddrV2(_ context.Context, p *peer, msg *wire.MsgAddrV2) {
 	log.Tracef("handleAddrV2 (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddrV2 exit (%v)", p)
 
-	peers := make([]tbcd.Peer, 0, len(msg.AddrList))
-	for k := range msg.AddrList {
-		peers = append(peers, tbcd.Peer{
-			Host: msg.AddrList[k].Addr.String(),
-			Port: strconv.Itoa(int(msg.AddrList[k].Port)),
-		})
+	peers := make([]string, 0, len(msg.AddrList))
+	for _, a := range msg.AddrList {
+		addr := net.JoinHostPort(a.Addr.String(), strconv.Itoa(int(a.Port)))
+		if len(addr) < 7 {
+			// 0.0.0.0
+			continue
+		}
+		peers = append(peers, addr)
 	}
-	err := s.db.PeersInsert(ctx, peers)
-	// Don't log insert 0, its a dup.
-	if err != nil && !errors.Is(err, database.ErrZeroRows) {
-		log.Errorf("%v", err)
+
+	if err := s.pm.PeersInsert(peers); err != nil {
+		log.Errorf("Insert peers: %v", err)
 	}
 }
 
@@ -1215,7 +1231,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 		// Grab some peer stats as well
 		activePeers = len(s.peers)
-		goodPeers, badPeers = s.db.PeersStats(ctx)
+		goodPeers, badPeers = s.pm.Stats()
 		// Gonna take it right into the Danger Zone! (double mutex)
 		for _, peer := range s.peers {
 			if peer.isConnected() {
@@ -1559,6 +1575,18 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	// by one from the last block height seen.
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
+		// XXX this happens because we shut down and blocks come in.
+		// The context is canceled but wire isn't smart enought so we
+		// make it here. We should not be testing for leveldb errors
+		// here but the real fix is return an error or add ctx to wire.
+		// This is a workaround. Code prints a bunch of crap during IBD
+		// when shutdown because of this.
+		// XXX make this a function?
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		panic(err)
 	}
 	bhHash, err := chainhash.NewHash(bhb.Hash)
@@ -1621,7 +1649,10 @@ func (s *Server) DBOpen(ctx context.Context) error {
 
 	// Open db.
 	var err error
-	s.db, err = level.New(ctx, filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
+	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
+	cfg.BlockCache = s.cfg.BlockCache
+	cfg.BlockheaderCache = s.cfg.BlockheaderCache
+	s.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
 	}

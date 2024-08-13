@@ -11,13 +11,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -44,8 +44,6 @@ const (
 	verbose  = false
 
 	bhsCanonicalTipKey = "canonicaltip"
-
-	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
 
 type IteratorError error
@@ -59,37 +57,71 @@ func init() {
 }
 
 type ldb struct {
-	mtx                       sync.Mutex
-	blocksMissingCacheEnabled bool                   // XXX verify this code in tests
-	blocksMissingCache        map[string]*cacheEntry // XXX purge and manages cache size
-
-	// maybe remove this because it eats a bit of memory
-	peersGood map[string]struct{}
-	peersBad  map[string]struct{}
+	mtx sync.Mutex
 
 	*level.Database
 	pool level.Pool
+
+	blockCache *lru.Cache[string, *tbcd.Block] // block cache
+
+	// Block Header cache. Note that it is only primed during reads. Doing
+	// this during writes would be relatively expensive at nearly no gain.
+	headerCache *lru.Cache[string, *tbcd.BlockHeader] // header cache
+
+	cfg *Config
 }
 
 var _ tbcd.Database = (*ldb)(nil)
 
-func New(ctx context.Context, home string) (*ldb, error) {
+type Config struct {
+	Home             string // home directory
+	BlockCache       int    // number of blocks to cache
+	BlockheaderCache int    // number of blocks headers to cache
+}
+
+func NewConfig(home string) *Config {
+	return &Config{
+		Home:             home, // require user to set home.
+		BlockCache:       250,  // max 4GB on mainnet
+		BlockheaderCache: 1e6,  // Cache all blockheaders on mainnet
+	}
+}
+
+func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 
-	ld, err := level.New(ctx, home, ldbVersion)
+	ld, err := level.New(ctx, cfg.Home, ldbVersion)
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("tbcdb database version: %v", ldbVersion)
+
 	l := &ldb{
-		Database:                  ld,
-		pool:                      ld.DB(),
-		blocksMissingCacheEnabled: true, // XXX make setting
-		blocksMissingCache:        make(map[string]*cacheEntry, 1024),
-		peersGood:                 make(map[string]struct{}, 1000),
-		peersBad:                  make(map[string]struct{}, 1000),
+		Database: ld,
+		pool:     ld.DB(),
+		cfg:      cfg,
 	}
+
+	if cfg.BlockCache > 0 {
+		l.blockCache, err = lru.New[string, *tbcd.Block](cfg.BlockCache)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
+		}
+		log.Infof("block cache: %v", cfg.BlockCache)
+	} else {
+		log.Infof("block cache: DISABLED")
+	}
+	if cfg.BlockheaderCache > 0 {
+		l.headerCache, err = lru.New[string, *tbcd.BlockHeader](cfg.BlockheaderCache)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't setup header cache: %w", err)
+		}
+		log.Infof("blockheader cache: %v", cfg.BlockheaderCache)
+	} else {
+		log.Infof("blockheader cache: DISABLED")
+	}
+
+	log.Infof("tbcdb database version: %v", ldbVersion)
 
 	return l, nil
 }
@@ -149,6 +181,13 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
+	// Try cache first
+	if l.cfg.BlockheaderCache > 0 {
+		if b, ok := l.headerCache.Get(string(hash)); ok {
+			return b, nil
+		}
+	}
+
 	// It stands to reason that this code does not need a trasaction. The
 	// caller code will either receive or not receice an answer. It does
 	// not seem likely to be racing higher up in the stack.
@@ -161,7 +200,14 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash []byte) (*tbcd.BlockHe
 		}
 		return nil, fmt.Errorf("block header get: %w", err)
 	}
-	return decodeBlockHeader(ebh), nil
+	bh := decodeBlockHeader(ebh)
+
+	// Insert into cache, roughlt 150 byte cost.
+	if l.cfg.BlockheaderCache > 0 {
+		l.headerCache.Add(string(bh.Hash), bh)
+	}
+
+	return bh, nil
 }
 
 func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.BlockHeader, error) {
@@ -598,24 +644,6 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 		bh.Height, bh.Hash = keyToHeightHash(it.Key())
 		bis = append(bis, bh)
 
-		// cache the reply
-		if l.blocksMissingCacheEnabled {
-			l.mtx.Lock()
-			// XXX we MUST bind this map but for now let it be piggy
-			if _, ok := l.blocksMissingCache[string(bh.Hash)]; !ok {
-				l.blocksMissingCache[string(bh.Hash)] = &cacheEntry{
-					height:    bh.Height,
-					timestamp: time.Now(),
-				}
-			}
-			blockCacheLen = len(l.blocksMissingCache)
-			l.mtx.Unlock()
-		}
-		// if blockCacheLen >= 128 {
-		//	log.Tracef("max cache %v", blockCacheLen)
-		//	break
-		// }
-
 		x++
 		if x >= count {
 			break
@@ -631,47 +659,9 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 	log.Tracef("BlockInsert")
 	defer log.Tracef("BlockInsert exit")
 
-	// Try cache first
-	var ce *cacheEntry
-	if l.blocksMissingCacheEnabled {
-		// XXX explain here why using string(b.Hash) is acceptable
-		l.mtx.Lock()
-		ce = l.blocksMissingCache[string(b.Hash)]
-		l.mtx.Unlock()
-
-		defer func() {
-			// purge cache as well
-			l.mtx.Lock()
-			delete(l.blocksMissingCache, string(b.Hash))
-			bmcl := len(l.blocksMissingCache)
-			l.mtx.Unlock()
-			// XXX string b.Hash is shit
-			log.Debugf("BlockInsert cached %v", bmcl)
-		}()
-	}
-
-	// Determine block height either from cache or the database.
-	var bh *tbcd.BlockHeader
-
-	// If cache entry is not found grab it from the database.
-	if ce == nil {
-		// Open the block headers database transaction
-		bhsDB := l.pool[level.BlockHeadersDB]
-		ebh, err := bhsDB.Get(b.Hash, nil)
-		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
-				return -1, database.NotFoundError(fmt.Sprintf(
-					"block insert block header not found: %v",
-					b.Hash))
-			}
-			return -1, fmt.Errorf("block insert block header: %w", err)
-		}
-		bh = decodeBlockHeader(ebh)
-	} else {
-		bh = &tbcd.BlockHeader{
-			Height: ce.height,
-			Hash:   b.Hash,
-		}
+	bh, err := l.BlockHeaderByHash(ctx, b.Hash)
+	if err != nil {
+		return -1, fmt.Errorf("block header by hash: %w", err)
 	}
 
 	// Insert block without transaction, if it succeeds and the missing
@@ -686,30 +676,34 @@ func (l *ldb) BlockInsert(ctx context.Context, b *tbcd.Block) (int64, error) {
 		if err = bDB.Put(b.Hash, b.Block, nil); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
+		if l.cfg.BlockCache > 0 {
+			l.blockCache.Add(string(b.Hash), b)
+		}
 	}
-
-	// It's possible to remove the transaction for bm without a transaction
-	// as well since the only risk would be duplicate work. Reason about
-	// this some more.
 
 	// Remove block identifier from blocks missing
 	key := heightHashToKey(bh.Height, bh.Hash)
 	bmDB := l.pool[level.BlocksMissingDB]
 	if err = bmDB.Delete(key, nil); err != nil {
-		// Ignore not found
-		if errors.Is(err, leveldb.ErrNotFound) {
-			log.Errorf("block insert delete from missing: %v", err)
-		} else {
+		// Ignore not found, it was deleted prior to this call.
+		if !errors.Is(err, leveldb.ErrNotFound) {
 			return -1, fmt.Errorf("block insert delete from missing: %w", err)
 		}
 	}
-	// XXX think about Height type; why are we forced to mix types?
+
 	return int64(bh.Height), nil
 }
 
 func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
+
+	if l.cfg.BlockCache > 0 {
+		// Try cache first
+		if cb, ok := l.blockCache.Get(string(hash)); ok {
+			return cb, nil
+		}
+	}
 
 	bDB := l.pool[level.BlocksDB]
 	eb, err := bDB.Get(hash, nil)
@@ -720,10 +714,14 @@ func (l *ldb) BlockByHash(ctx context.Context, hash []byte) (*tbcd.Block, error)
 		}
 		return nil, fmt.Errorf("block get: %w", err)
 	}
-	return &tbcd.Block{
+	b := &tbcd.Block{
 		Hash:  hash,
 		Block: eb,
-	}, nil
+	}
+	if l.cfg.BlockCache > 0 {
+		l.blockCache.Add(string(hash), b)
+	}
+	return b, nil
 }
 
 func (l *ldb) BlocksByTxId(ctx context.Context, txId []byte) ([]tbcd.BlockHash, error) {
@@ -967,111 +965,4 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 
 	return nil
-}
-
-func (l *ldb) PeersStats(ctx context.Context) (int, int) {
-	log.Tracef("PeersInsert")
-	defer log.Tracef("PeersInsert exit")
-
-	l.mtx.Lock()
-	defer l.mtx.Unlock()
-	return len(l.peersGood), len(l.peersBad)
-}
-
-func (l *ldb) PeersInsert(ctx context.Context, peers []tbcd.Peer) error {
-	log.Tracef("PeersInsert")
-	defer log.Tracef("PeersInsert exit")
-
-	l.mtx.Lock()
-	for k := range peers {
-		p := peers[k]
-		a := net.JoinHostPort(p.Host, p.Port)
-		if len(a) < 7 {
-			// 0.0.0.0
-			continue
-		}
-		if _, ok := l.peersBad[a]; ok {
-			// Skip bad peers
-			continue
-		}
-		if _, ok := l.peersGood[a]; ok {
-			// Not strictly needed to skip but this os working pseudode code
-			continue
-		}
-
-		l.peersGood[a] = struct{}{}
-	}
-	allGoodPeers := len(l.peersGood)
-	allBadPeers := len(l.peersBad)
-	l.mtx.Unlock()
-
-	log.Debugf("PeersInsert exit %v good %v bad %v",
-		len(peers), allGoodPeers, allBadPeers)
-
-	return nil
-}
-
-func (l *ldb) PeerDelete(ctx context.Context, host, port string) error {
-	log.Tracef("PeerDelete")
-	defer log.Tracef("PeerDelete exit")
-
-	a := net.JoinHostPort(host, port)
-	if len(a) < 7 {
-		// 0.0.0.0
-		return nil
-	}
-
-	l.mtx.Lock()
-	if _, ok := l.peersGood[a]; ok {
-		delete(l.peersGood, a)
-		l.peersBad[a] = struct{}{}
-	}
-
-	// Crude hammer to reset good/bad state of peers
-	if len(l.peersGood) < minPeersRequired {
-		// Kill all peers to force caller to reseed. This happens when
-		// network is down for a while and all peers are moved into
-		// bad map.
-		l.peersGood = make(map[string]struct{}, 1000)
-		l.peersBad = make(map[string]struct{}, 1000)
-		log.Tracef("peer cache purged")
-	}
-
-	allGoodPeers := len(l.peersGood)
-	allBadPeers := len(l.peersBad)
-
-	l.mtx.Unlock()
-
-	log.Debugf("PeerDelete exit good %v bad %v", allGoodPeers, allBadPeers)
-
-	return nil
-}
-
-func (l *ldb) PeersRandom(ctx context.Context, count int) ([]tbcd.Peer, error) {
-	log.Tracef("PeersRandom")
-
-	x := 0
-	peers := make([]tbcd.Peer, 0, count)
-
-	l.mtx.Lock()
-	allGoodPeers := len(l.peersGood)
-	allBadPeers := len(l.peersBad)
-	for k := range l.peersGood {
-		h, p, err := net.SplitHostPort(k)
-		if err != nil {
-			continue
-		}
-		peers = append(peers, tbcd.Peer{Host: h, Port: p})
-		x++
-		if x >= count {
-			break
-		}
-	}
-	l.mtx.Unlock()
-
-	log.Debugf("PeersRandom exit %v (good %v bad %v)", len(peers),
-		allGoodPeers, allBadPeers)
-
-	// XXX For now return peers in order and let the stack above deal with it.
-	return peers, nil
 }
