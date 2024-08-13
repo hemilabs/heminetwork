@@ -16,10 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
-	"nhooyr.io/websocket"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"

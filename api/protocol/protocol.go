@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/juju/loggo"
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 )
 
 var log = loggo.GetLogger("protocol")

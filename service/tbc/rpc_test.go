@@ -15,12 +15,12 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/testcontainers/testcontainers-go"
-	"nhooyr.io/websocket"
-	"nhooyr.io/websocket/wsjson"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"

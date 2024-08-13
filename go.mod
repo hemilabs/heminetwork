@@ -4,13 +4,15 @@ go 1.22
 
 toolchain go1.22.6
 
-replace nhooyr.io/websocket v1.8.11 => github.com/hemilabs/websocket v0.0.0-20240620132401-b5109a38f904
+// Temporary replace until we upstream our ws_js patch.
+replace github.com/coder/websocket v1.8.12 => github.com/hemilabs/websocket v0.0.0-20240813101919-bf33653e9aa5
 
 require (
 	github.com/btcsuite/btcd v0.24.2
 	github.com/btcsuite/btcd/btcec/v2 v2.3.4
 	github.com/btcsuite/btcd/btcutil v1.1.5
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
+	github.com/coder/websocket v1.8.12
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0
 	github.com/docker/docker v27.1.1+incompatible
@@ -28,7 +30,6 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.32.0
 	golang.org/x/sys v0.23.0
-	nhooyr.io/websocket v1.8.11
 )
 
 require (
