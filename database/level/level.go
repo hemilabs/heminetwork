@@ -20,6 +20,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/opt"
 
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/rawdb"
 )
 
 const (
@@ -27,12 +28,13 @@ const (
 
 	BlockHeadersDB  = "blockheaders"
 	BlocksMissingDB = "blocksmissing"
-	BlocksDB        = "blocks"
 	MetadataDB      = "metadata"
 	HeightHashDB    = "heighthash"
 	PeersDB         = "peers"
 	OutputsDB       = "outputs"
 	TransactionsDB  = "transactions"
+
+	BlocksDB = "blocks" // raw database
 
 	versionKey      = "version"
 	databaseVersion = 1
@@ -44,13 +46,17 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-type Pool map[string]*leveldb.DB
+type (
+	Pool    map[string]*leveldb.DB
+	RawPool map[string]*rawdb.RawDB
+)
 
 type Database struct {
-	mtx  sync.RWMutex
-	pool Pool // database pool
+	mtx     sync.RWMutex
+	pool    Pool    // database pool
+	rawPool RawPool // raw database pool
 
-	home string // leveld toplevel database directory
+	home string // leveldb toplevel database directory
 }
 
 var _ database.Database = (*Database)(nil)
@@ -63,6 +69,15 @@ func (l *Database) Close() error {
 	defer l.mtx.Unlock()
 
 	var errSeen error // XXX return last error for now
+
+	for k, v := range l.rawPool {
+		if err := v.Close(); err != nil {
+			// do continue, leveldb does not like unfresh shutdowns
+			log.Errorf("close %v: %v", k, err)
+			errSeen = err
+		}
+	}
+
 	for k, v := range l.pool {
 		if err := v.Close(); err != nil {
 			// do continue, leveldb does not like unfresh shutdowns
@@ -79,6 +94,13 @@ func (l *Database) DB() Pool {
 	defer log.Tracef("DB exit")
 
 	return l.pool
+}
+
+func (l *Database) RawDB() RawPool {
+	log.Tracef("RawDB")
+	defer log.Tracef("RawDB exit")
+
+	return l.rawPool
 }
 
 func (l *Database) RegisterNotification(ctx context.Context, n database.NotificationName, f database.NotificationCallback, payload any) error {
@@ -109,6 +131,24 @@ func (l *Database) openDB(name string, options *opt.Options) error {
 	return nil
 }
 
+func (l *Database) openRawDB(name string, blockSize int64) error {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+
+	dir := filepath.Join(l.home, name)
+	rdb, err := rawdb.New(dir, blockSize)
+	if err != nil {
+		return fmt.Errorf("rawdb new %v: %w", name, err)
+	}
+	err = rdb.Open()
+	if err != nil {
+		return fmt.Errorf("rawdb open %v: %w", name, err)
+	}
+	l.rawPool[name] = rdb
+
+	return nil
+}
+
 func (l *Database) Version(ctx context.Context) (int, error) {
 	mdDB := l.pool[MetadataDB]
 	value, err := mdDB.Get([]byte(versionKey), nil)
@@ -135,8 +175,9 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	}
 
 	l := &Database{
-		home: h,
-		pool: make(Pool),
+		home:    h,
+		pool:    make(Pool),
+		rawPool: make(RawPool),
 	}
 
 	unwind := true
@@ -146,14 +187,9 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 		}
 	}()
 
-	// Peers table
 	err = l.openDB(BlockHeadersDB, nil)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", BlockHeadersDB, err)
-	}
-	err = l.openDB(BlocksDB, nil)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", BlocksDB, err)
 	}
 	err = l.openDB(BlocksMissingDB, nil)
 	if err != nil {
@@ -174,6 +210,12 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	err = l.openDB(TransactionsDB, nil)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", TransactionsDB, err)
+	}
+
+	// Blocks database is special
+	err = l.openRawDB(BlocksDB, 256*1024*1024)
+	if err != nil {
+		return nil, fmt.Errorf("rawdb %v: %w", BlocksDB, err)
 	}
 
 	// Treat metadata special so that we can insert some stuff.

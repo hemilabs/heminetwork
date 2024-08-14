@@ -61,7 +61,8 @@ type ldb struct {
 	mtx sync.Mutex
 
 	*level.Database
-	pool level.Pool
+	pool    level.Pool
+	rawPool level.RawPool
 
 	blockCache *lru.Cache[string, *btcutil.Block] // block cache
 
@@ -100,6 +101,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	l := &ldb{
 		Database: ld,
 		pool:     ld.DB(),
+		rawPool:  ld.RawDB(),
 		cfg:      cfg,
 	}
 
@@ -658,20 +660,18 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 		return -1, fmt.Errorf("block header by hash: %w", err)
 	}
 
-	// Insert block without transaction, if it succeeds and the missing
-	// does not it will be simply redone.
-	bDB := l.pool[level.BlocksDB]
-	has, err := bDB.Has(b.Hash()[:], nil)
+	bDB := l.rawPool[level.BlocksDB]
+	has, err := bDB.Has(b.Hash()[:])
 	if err != nil {
 		return -1, fmt.Errorf("block insert has: %w", err)
 	}
 	if !has {
-		// Insert block since we do not have it yet
-		rawBlock, err := b.Bytes()
+		raw, err := b.Bytes()
 		if err != nil {
-			return -1, fmt.Errorf("encoding block: %w", err)
+			return -1, fmt.Errorf("blocks encode: %w", err)
 		}
-		if err = bDB.Put(b.Hash()[:], rawBlock, nil); err != nil {
+		// Insert block since we do not have it yet
+		if err = bDB.Insert(b.Hash()[:], raw); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 		if l.cfg.BlockCache > 0 {
@@ -703,8 +703,8 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 		}
 	}
 
-	bDB := l.pool[level.BlocksDB]
-	eb, err := bDB.Get(hash[:], nil)
+	bDB := l.rawPool[level.BlocksDB]
+	eb, err := bDB.Get(hash[:])
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("block not found: %v", hash))
