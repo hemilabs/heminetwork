@@ -52,7 +52,7 @@ const (
 
 var (
 	log     = loggo.GetLogger(daemonName)
-	welcome = fmt.Sprintf("Hemi Network Controller: v%v", version.String())
+	welcome string
 
 	bssURL   string
 	logLevel string
@@ -785,6 +785,9 @@ var (
 )
 
 func init() {
+	version.Component = "hemictl"
+	welcome = "Hemi Network Controller " + version.BuildInfo()
+
 	// merge all command maps
 	for k, v := range bssapi.APICommands() {
 		allCommands[string(k)] = v

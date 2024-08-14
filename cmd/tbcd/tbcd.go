@@ -29,7 +29,7 @@ const (
 
 var (
 	log     = loggo.GetLogger(daemonName)
-	welcome = fmt.Sprintf("Hemi Tiny Bitcoin Daemon: v%v", version.String())
+	welcome string
 
 	cfg = tbc.NewDefaultConfig()
 	cm  = config.CfgMap{
@@ -132,6 +132,11 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 	}
 	<-signalChan // Second signal, hard exit.
 	os.Exit(2)
+}
+
+func init() {
+	version.Component = "tbcd"
+	welcome = "Hemi Tiny Bitcoin Daemon " + version.BuildInfo()
 }
 
 func _main() error {

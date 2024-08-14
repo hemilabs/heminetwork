@@ -32,6 +32,7 @@ import (
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
 	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/version"
 )
 
 var log = loggo.GetLogger("bdf")
@@ -488,6 +489,7 @@ func addressToScript(addr string) (btcutil.Address, error) {
 }
 
 func init() {
+	version.Component = "btctool"
 }
 
 func _main() error {

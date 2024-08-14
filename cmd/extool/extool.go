@@ -20,6 +20,10 @@ import (
 	"github.com/hemilabs/heminetwork/version"
 )
 
+func init() {
+	version.Component = "extool"
+}
+
 func main() {
 	ver := flag.Bool("v", false, "version")
 	flag.Parse()

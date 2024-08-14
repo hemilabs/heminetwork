@@ -16,6 +16,7 @@ import (
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/version"
 )
 
 const (
@@ -25,19 +26,24 @@ const (
 	CmdSecp256k1HelloChallengeAccepted                  = "secp256k1-hello-challenge-accepted"
 )
 
-// Hello is a client->server command that sends the client ECDSA public key.
+// Secp256k1Hello is a client->server command that sends the client Secp256k1
+// public key.
 type Secp256k1Hello struct {
-	PublicKey string `json:"publickey"` // Client compressed public key
+	// UserAgent is the client user agent.
+	UserAgent string `json:"userAgent,omitempty"`
+
+	// PublicKey is the client compressed public key.
+	PublicKey string `json:"publickey"`
 }
 
-// HelloChallenge is a server->client command that challenges the the client to
-// sign the hash of the provided message.
+// Secp256k1HelloChallenge is a server->client command that challenges the
+// client to sign the hash of the provided message.
 type Secp256k1HelloChallenge struct {
 	Message string `json:"message"`
 }
 
-// Secp256k1HelloChallengeAccepted returns the signature of the HelloChallenge.Message
-// hash.
+// Secp256k1HelloChallengeAccepted is a client->server command containing the
+// signature of the Secp256k1HelloChallenge.Message hash.
 type Secp256k1HelloChallengeAccepted struct {
 	Signature string `json:"signature"`
 }
@@ -106,7 +112,8 @@ type Secp256k1Auth struct {
 	privKey *dcrsecpk256k1.PrivateKey // client private key
 	pubKey  *dcrsecpk256k1.PublicKey  // client public key
 
-	remotePubKey *dcrsecpk256k1.PublicKey // server side remote key (client)
+	remoteUserAgent string                   // client user agent
+	remotePubKey    *dcrsecpk256k1.PublicKey // server side remote key (client)
 }
 
 func NewSecp256k1AuthClient(privKey *dcrsecpk256k1.PrivateKey) (*Secp256k1Auth, error) {
@@ -117,7 +124,11 @@ func NewSecp256k1AuthServer() (*Secp256k1Auth, error) {
 	return &Secp256k1Auth{}, nil
 }
 
-func (s Secp256k1Auth) RemotePublicKey() *dcrsecpk256k1.PublicKey {
+func (s *Secp256k1Auth) RemoteUserAgent() string {
+	return s.remoteUserAgent
+}
+
+func (s *Secp256k1Auth) RemotePublicKey() *dcrsecpk256k1.PublicKey {
 	pub := *s.remotePubKey
 	return &pub
 }
@@ -136,8 +147,11 @@ func (s *Secp256k1Auth) HandshakeClient(ctx context.Context, conn protocol.APICo
 	defer log.Tracef("HandshakeClient exit")
 
 	pubKey := hex.EncodeToString(s.pubKey.SerializeCompressed())
-	id := "Hello: " + pubKey
-	err := protocol.Write(ctx, conn, s, id, Secp256k1Hello{PublicKey: pubKey})
+	id := "Hello:" + pubKey
+	err := protocol.Write(ctx, conn, s, id, Secp256k1Hello{
+		UserAgent: version.UserAgent(),
+		PublicKey: pubKey,
+	})
 	if err != nil {
 		return err
 	}

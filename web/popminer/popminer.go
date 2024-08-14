@@ -11,13 +11,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync"
 	"syscall/js"
 
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/service/popm"
+	versionPkg "github.com/hemilabs/heminetwork/version"
 )
 
 var (
@@ -112,6 +112,7 @@ func (m *Miner) shutdown() error {
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
+	versionPkg.Component = "popm-web"
 }
 
 func main() {
@@ -121,11 +122,7 @@ func main() {
 	// Create event listeners map
 	svc.listeners = make(map[EventType][]js.Value)
 
-	// Enable function dispatcher
-	log.Infof("=== Start of Day ===")
-	log.Infof("%v version %v compiled with go version %v %v/%v revision %v",
-		filepath.Base(os.Args[0]), version, runtime.Version(),
-		runtime.GOOS, runtime.GOARCH, gitCommit)
+	log.Infof("%s %s", filepath.Base(os.Args[0]), versionPkg.BuildInfo())
 	log.Infof("Logging level: %v", logLevel)
 
 	// Set global variable

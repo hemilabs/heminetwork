@@ -27,7 +27,7 @@ const (
 
 var (
 	log     = loggo.GetLogger(daemonName)
-	welcome = fmt.Sprintf("Hemi Bitcoin Finality Governor: v%v", version.String())
+	welcome string
 
 	cfg = bfg.NewDefaultConfig()
 	cm  = config.CfgMap{
@@ -129,7 +129,7 @@ func _main() error {
 	}
 
 	loggo.ConfigureLoggers(cfg.LogLevel)
-	log.Infof("%v", welcome)
+	log.Infof(welcome)
 
 	pc := config.PrintableConfig(cm)
 	for k := range pc {
@@ -150,6 +150,11 @@ func _main() error {
 	}
 
 	return nil
+}
+
+func init() {
+	version.Component = "bfgd"
+	welcome = "Hemi Bitcoin Finality Governor " + version.BuildInfo()
 }
 
 func main() {

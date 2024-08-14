@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"reflect"
 	"sync"
@@ -380,6 +381,9 @@ type ConnOptions struct {
 
 	// Authenticator is the connection authenticator.
 	Authenticator Authenticator
+
+	// Headers are the HTTP headers included in the WebSocket handshake request.
+	Headers http.Header
 }
 
 // defaultConnReadLimit is the default connection read limit.
@@ -430,7 +434,7 @@ func (ac *Conn) Connect(ctx context.Context) error {
 	// package.
 	// Note that we cannot have DialOptions on a WASM websocket
 	log.Tracef("Connect: dialing %v", ac.serverURL)
-	conn, _, err := websocket.Dial(connectCtx, ac.serverURL, nil)
+	conn, _, err := websocket.Dial(connectCtx, ac.serverURL, newDialOptions(ac.opts))
 	if err != nil {
 		return fmt.Errorf("dial server: %w", err)
 	}

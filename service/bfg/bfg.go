@@ -1009,9 +1009,15 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("Handshake Server failed for %v: %s", bws.addr, err)
 		return
 	}
+
 	publicKey := authenticator.RemotePublicKey().SerializeCompressed()
 	publicKeyEncoded := hex.EncodeToString(publicKey)
 	log.Tracef("successful handshake with public key: %s", publicKeyEncoded)
+
+	userAgent := r.UserAgent()
+	if ua := authenticator.RemoteUserAgent(); ua != "" {
+		userAgent = ua
+	}
 
 	if s.cfg.PublicKeyAuth {
 		log.Tracef("will enforce auth")
@@ -1056,8 +1062,8 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	bws.wg.Add(1)
 	go s.handleWebsocketPublicRead(r.Context(), bws)
 
-	log.Infof("Authenticated session %s from %s public key %x",
-		bws.sessionId, r.RemoteAddr, bws.publicKey)
+	log.Infof("Authenticated session %s from %s public key %x (%s)",
+		bws.sessionId, r.RemoteAddr, bws.publicKey, userAgent)
 	bws.wg.Wait()
 	log.Infof("Terminated session %s from %s public key %x",
 		bws.sessionId, r.RemoteAddr, bws.publicKey)

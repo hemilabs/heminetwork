@@ -26,7 +26,7 @@ const (
 
 var (
 	log     = loggo.GetLogger(daemonName)
-	welcome = fmt.Sprintf("Hemi Proof of Proof miner: v%v", version.String())
+	welcome string
 
 	cfg = popm.NewDefaultConfig()
 	cm  = config.CfgMap{
@@ -129,6 +129,11 @@ func _main() error {
 	}
 
 	return nil
+}
+
+func init() {
+	version.Component = "popmd"
+	welcome = "Hemi Proof-of-Proof Miner " + version.BuildInfo()
 }
 
 func main() {
