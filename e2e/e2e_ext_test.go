@@ -2368,6 +2368,8 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 
 	serializedL2Keystone := hemi.L2KeystoneAbbreviate(includedL2Keystone).Serialize()
 
+	uniquePopPayouts := map[string]bool{}
+
 	popPayoutsRequest := bssapi.PopPayoutsRequest{
 		L2BlockForPayout: serializedL2Keystone[:],
 	}
@@ -2398,6 +2400,10 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		)
 	}
 
+	for _, p := range popPayoutsResponse.PopPayouts {
+		uniquePopPayouts[p.MinerAddress.String()] = true
+	}
+
 	popPayoutsRequest.Page = 1
 	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
 	if err != nil {
@@ -2424,6 +2430,10 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		)
 	}
 
+	for _, p := range popPayoutsResponse.PopPayouts {
+		uniquePopPayouts[p.MinerAddress.String()] = true
+	}
+
 	popPayoutsRequest.Page = 2
 	err = bssapi.Write(ctx, bws.conn, "someid", popPayoutsRequest)
 	if err != nil {
@@ -2446,6 +2456,11 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		t.Fatalf(
 			"expected first page to have 0 results, received %d",
 			len(popPayoutsResponse.PopPayouts))
+	}
+
+	// ensure there were 151 unique pop payouts using miner address
+	if len(uniquePopPayouts) != 151 {
+		t.Fatalf("unexpected number of pop payouts %d", len(uniquePopPayouts))
 	}
 }
 
