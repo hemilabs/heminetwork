@@ -68,13 +68,13 @@ func (l *Database) Close() error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	var errSeen error // XXX return last error for now
+	var errSeen error
 
 	for k, v := range l.rawPool {
 		if err := v.Close(); err != nil {
 			// do continue, leveldb does not like unfresh shutdowns
 			log.Errorf("close %v: %v", k, err)
-			errSeen = err
+			errSeen = errors.Join(errSeen, err)
 		}
 	}
 
@@ -82,7 +82,7 @@ func (l *Database) Close() error {
 		if err := v.Close(); err != nil {
 			// do continue, leveldb does not like unfresh shutdowns
 			log.Errorf("close %v: %v", k, err)
-			errSeen = err
+			errSeen = errors.Join(errSeen, err)
 		}
 	}
 
