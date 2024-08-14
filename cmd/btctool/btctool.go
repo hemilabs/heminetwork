@@ -6,7 +6,6 @@ package main // XXX wrap in structure
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -32,6 +31,7 @@ import (
 	"github.com/hemilabs/heminetwork/cmd/btctool/bdf"
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
 	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 var log = loggo.GetLogger("bdf")
@@ -532,14 +532,15 @@ func _main() error {
 		if address == "" {
 			return errors.New("address: must be set")
 		}
-		var (
-			a  btcutil.Address
-			h  []byte
-			sh [32]byte
-		)
-		a, err = addressToScript(address)
-		h, err = txscript.PayToAddrScript(a)
-		sh = sha256.Sum256(h)
+		a, err := addressToScript(address)
+		if err != nil {
+			return err
+		}
+		h, err := txscript.PayToAddrScript(a)
+		if err != nil {
+			return err
+		}
+		sh := tbcd.NewScriptHashFromScript(h)
 		spew.Dump(a)
 		spew.Dump(h)
 		spew.Dump(sh)

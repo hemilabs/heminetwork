@@ -825,12 +825,12 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 				if err != nil {
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
-				_, err = s.TxById(ctx, txId.Hash())
+				_, err = s.TxById(ctx, txId)
 				if err != nil {
 					return fmt.Errorf("tx by id: %w", err)
 				}
 				// db block retrieval tested by TxById
-				if !b.Hash().IsEqual(blockHash.Hash()) {
+				if !b.Hash().IsEqual(blockHash) {
 					return errors.New("t cache block hash invalid")
 				}
 			default:

@@ -7,6 +7,7 @@ package tbcd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 
@@ -50,7 +52,7 @@ type Database interface {
 
 	// Block header
 	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
-	BlockHeaderByHash(ctx context.Context, hash []byte) (*BlockHeader, error)
+	BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*BlockHeader, error)
 	BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error
 
 	// Block headers
@@ -59,16 +61,16 @@ type Database interface {
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
-	BlockInsert(ctx context.Context, b *Block) (int64, error)
+	BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error)
 	// XXX replace BlockInsert with plural version
 	// BlocksInsert(ctx context.Context, bs []*Block) (int64, error)
-	BlockByHash(ctx context.Context, hash []byte) (*Block, error)
+	BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error)
 
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
-	BlocksByTxId(ctx context.Context, txId []byte) ([]BlockHash, error)
-	SpentOutputsByTxId(ctx context.Context, txId []byte) ([]SpentInfo, error)
+	BlocksByTxId(ctx context.Context, txId *chainhash.Hash) ([]*chainhash.Hash, error)
+	SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]SpentInfo, error)
 
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
@@ -85,20 +87,19 @@ type Database interface {
 // BlockHeader contains the first 80 raw bytes of a bitcoin block plus its
 // location information (hash+height) and the cumulative difficulty.
 type BlockHeader struct {
-	Hash       database.ByteArray
+	Hash       *chainhash.Hash
 	Height     uint64
-	Header     database.ByteArray
+	Header     [80]byte
 	Difficulty big.Int
 }
 
 func (bh BlockHeader) String() string {
-	ch, _ := chainhash.NewHash(bh.Hash)
-	return ch.String()
+	return bh.Hash.String()
 }
 
 func (bh BlockHeader) Timestamp() time.Time {
 	var wbh wire.BlockHeader
-	err := wbh.Deserialize(bytes.NewReader(bh.Header))
+	err := wbh.Deserialize(bytes.NewReader(bh.Header[:]))
 	if err != nil {
 		return time.Time{}
 	}
@@ -107,7 +108,7 @@ func (bh BlockHeader) Timestamp() time.Time {
 
 func (bh BlockHeader) Wire() (*wire.BlockHeader, error) {
 	var wbh wire.BlockHeader
-	err := wbh.Deserialize(bytes.NewReader(bh.Header))
+	err := wbh.Deserialize(bytes.NewReader(bh.Header[:]))
 	if err != nil {
 		return nil, fmt.Errorf("deserialize: %w", err)
 	}
@@ -115,11 +116,7 @@ func (bh BlockHeader) Wire() (*wire.BlockHeader, error) {
 }
 
 func (bh BlockHeader) BlockHash() *chainhash.Hash {
-	ch, err := chainhash.NewHash(bh.Hash)
-	if err != nil {
-		panic(err)
-	}
-	return ch
+	return bh.Hash
 }
 
 func (bh BlockHeader) ParentHash() *chainhash.Hash {
@@ -130,21 +127,15 @@ func (bh BlockHeader) ParentHash() *chainhash.Hash {
 	return &wh.PrevBlock
 }
 
-// Block contains a raw bitcoin block and its corresponding hash.
-type Block struct {
-	Hash  database.ByteArray
-	Block database.ByteArray // this needs to be converted to either wire or btcutil
-}
-
 // BlockIdentifier uniquely identifies a block using it's hash and height.
 type BlockIdentifier struct {
 	Height uint64
-	Hash   database.ByteArray
+	Hash   *chainhash.Hash
 }
 
 type SpentInfo struct {
-	BlockHash  BlockHash
-	TxId       TxId
+	BlockHash  *chainhash.Hash
+	TxId       *chainhash.Hash
 	InputIndex uint32
 }
 
@@ -166,6 +157,11 @@ func (o Outpoint) String() string {
 
 func (o Outpoint) TxId() []byte {
 	return o[1:33]
+}
+
+func (o Outpoint) TxIdHash() *chainhash.Hash {
+	h, _ := chainhash.NewHash(o[1:33])
+	return h
 }
 
 func (o Outpoint) TxIndex() uint32 {
@@ -195,7 +191,7 @@ func (c CacheOutput) String() string {
 		c[0:32], binary.BigEndian.Uint32(c[40:]))
 }
 
-func (c CacheOutput) ScriptHash() (hash [32]byte) {
+func (c CacheOutput) ScriptHash() (hash ScriptHash) {
 	copy(hash[:], c[0:32])
 	return
 }
@@ -258,7 +254,7 @@ func (u Utxo) String() string {
 		ch, binary.BigEndian.Uint32(u[40:]))
 }
 
-func (u Utxo) ScriptHash() (hash [32]byte) {
+func (u Utxo) ScriptHash() (hash ScriptHash) {
 	copy(hash[:], u[0:32])
 	return
 }
@@ -294,88 +290,32 @@ func NewUtxo(hash [32]byte, value uint64, outIndex uint32) (u Utxo) {
 	return
 }
 
-// TxId is a bitcoin transaction id. The underlying slice is reversed, only
-// when using the stringer does it apear in human readable format.
-type TxId [32]byte
+// ScriptHash is a SHA256 hash that implements fmt.Stringer.
+type ScriptHash [sha256.Size]byte
 
-func (t TxId) String() string {
-	var rev [32]byte
-	for k := range t {
-		rev[32-k-1] = t[k]
-	}
-	return hex.EncodeToString(rev[:])
+func (sh ScriptHash) String() string {
+	return hex.EncodeToString(sh[:])
 }
 
-func (t TxId) Hash() *chainhash.Hash {
-	h, _ := chainhash.NewHash(t[:])
-	return h
+func NewScriptHashFromScript(script []byte) (scriptHash ScriptHash) {
+	return sha256.Sum256(script)
 }
 
-func NewTxId(x [32]byte) (txId TxId) {
-	copy(txId[:], x[:])
-	return
-}
-
-func NewTxIdFromBytes(x []byte) (txId TxId, err error) {
-	if len(x) != 32 {
-		err = errors.New("invalid transaction hash length")
-		return
-	}
-	copy(txId[:], x[:])
-	return
-}
-
-// BlockHash is a bitcoin transaction id. The underlying slice is reversed, only
-// when using the stringer does it apear in human readable format.
-type BlockHash [32]byte
-
-func (bh BlockHash) String() string {
-	var rev [32]byte
-	for k := range bh {
-		rev[32-k-1] = bh[k]
-	}
-	return hex.EncodeToString(rev[:])
-}
-
-func (bh BlockHash) Hash() *chainhash.Hash {
-	h, _ := chainhash.NewHash(bh[:])
-	return h
-}
-
-func NewBlockHash(x [32]byte) (blockHash BlockHash) {
-	copy(blockHash[:], x[:])
-	return
-}
-
-func NewBlockHashFromBytes(x []byte) (blockHash BlockHash, err error) {
-	if len(x) != 32 {
-		err = errors.New("invalid block hash length")
-		return
-	}
-	copy(blockHash[:], x[:])
-	return
-}
-
-// ScriptHash is a bitcoin transaction id. The underlying slice is reversed, only
-// when using the stringer does it apear in human readable format.
-type ScriptHash [32]byte
-
-func (bh ScriptHash) String() string {
-	return hex.EncodeToString(bh[:])
-}
-
-func NewScriptHash(x [32]byte) (scriptHash ScriptHash) {
-	copy(scriptHash[:], x[:])
-	return
-}
-
-func NewScriptHashFromBytes(x []byte) (scriptHash ScriptHash, err error) {
-	if len(x) != 32 {
+func NewScriptHashFromBytes(hash []byte) (scriptHash ScriptHash, err error) {
+	if len(hash) != 32 {
 		err = errors.New("invalid script hash length")
 		return
 	}
-	copy(scriptHash[:], x[:])
+	copy(scriptHash[:], hash[:])
 	return
+}
+
+func NewScriptHashFromString(hash string) (ScriptHash, error) {
+	shs, err := hex.DecodeString(hash)
+	if err != nil {
+		return ScriptHash{}, err
+	}
+	return NewScriptHashFromBytes(shs)
 }
 
 // Spent Transaction:
@@ -416,19 +356,19 @@ func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
 	return txKey
 }
 
-func TxIdBlockHashFromTxKey(txKey TxKey) (*TxId, *BlockHash, error) {
+func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, error) {
 	if txKey[0] != 't' {
 		return nil, nil, fmt.Errorf("invalid magic 0x%02x", txKey[0])
 	}
-	txId, err := NewTxIdFromBytes(txKey[1:33])
+	txId, err := chainhash.NewHash(txKey[1:33])
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid tx id: %w", err)
 	}
-	blockHash, err := NewBlockHashFromBytes(txKey[33:65])
+	blockHash, err := chainhash.NewHash(txKey[33:65])
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid block hash: %w", err)
 	}
-	return &txId, &blockHash, nil
+	return txId, blockHash, nil
 }
 
 // Helper functions

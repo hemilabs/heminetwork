@@ -15,6 +15,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
@@ -26,7 +27,6 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
-	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 func TestBlockHeadersByHeightRaw(t *testing.T) {
@@ -81,7 +81,7 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bh, err := bytes2Header(response.BlockHeaders[0])
+	bh, err := slice2Header(response.BlockHeaders[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bh, err := bytes2Header(response.BlockHeader)
+	bh, err := slice2Header(response.BlockHeader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1279,10 +1279,14 @@ func TestTxById(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	revTxId := tbcd.TxId(reverseBytes(txIdBytes))
+	slices.Reverse(txIdBytes)
 
+	ctxid, err := chainhash.NewHash(txIdBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxId: revTxId[:],
+		TxId: ctxid[:],
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1304,7 +1308,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(response.Error.Message)
 	}
 
-	tx, err := tbcServer.TxById(ctx, revTxId.Hash())
+	tx, err := tbcServer.TxById(ctx, ctxid)
 	if err != nil {
 		t.Fatal(err)
 	}

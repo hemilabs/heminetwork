@@ -7,8 +7,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -229,7 +227,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		bh, err := s.DB().BlockHeaderByHash(ctx, ch[:])
+		bh, err := s.DB().BlockHeaderByHash(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("block header by hash: %w", err)
 		}
@@ -241,11 +239,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("block headers best: %w", err)
 		}
-		hash, err := chainhash.NewHash(bhb.Hash)
-		if err != nil {
-			return fmt.Errorf("block headers best chainhash: %w", err)
-		}
-		fmt.Printf("hash  : %v\n", hash)
+		fmt.Printf("hash  : %v\n", bhb.Hash)
 		fmt.Printf("height: %v\n", bhb.Height)
 
 	case "blockheadersbyheight":
@@ -291,7 +285,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		b, err := s.DB().BlockByHash(ctx, ch[:])
+		b, err := s.DB().BlockByHash(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
@@ -458,10 +452,8 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		var revTxId [32]byte
-		copy(revTxId[:], chtxid[:])
 
-		bh, err := s.DB().BlocksByTxId(ctx, revTxId[:])
+		bh, err := s.DB().BlocksByTxId(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
@@ -539,13 +531,12 @@ func tbcdb() error {
 			return errors.New("hash or address: both set")
 		}
 
-		var hh [32]byte
+		var sh tbcd.ScriptHash
 		if hash != "" {
-			h, err := hex.DecodeString(hash)
+			sh, err = tbcd.NewScriptHashFromString(hash)
 			if err != nil {
-				return fmt.Errorf("decode hex: %w", err)
+				return fmt.Errorf("new scripthash from string: %w", err)
 			}
-			copy(hh[:], h)
 		}
 		if address != "" {
 			// XXX set params
@@ -557,11 +548,10 @@ func tbcdb() error {
 			if err != nil {
 				return err
 			}
-			sh := sha256.Sum256(h)
-			copy(hh[:], sh[:])
+			sh = tbcd.NewScriptHashFromScript(h)
 		}
 
-		balance, err := s.DB().BalanceByScriptHash(ctx, hh)
+		balance, err := s.DB().BalanceByScriptHash(ctx, sh)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
@@ -597,13 +587,12 @@ func tbcdb() error {
 			return err
 		}
 
-		var hh [32]byte
+		var sh tbcd.ScriptHash
 		if hash != "" {
-			h, err := hex.DecodeString(hash)
+			sh, err = tbcd.NewScriptHashFromString(hash)
 			if err != nil {
-				return fmt.Errorf("decode hex: %w", err)
+				return err
 			}
-			copy(hh[:], h)
 		}
 		if address != "" {
 			// XXX set params
@@ -615,11 +604,10 @@ func tbcdb() error {
 			if err != nil {
 				return err
 			}
-			sh := sha256.Sum256(h)
-			copy(hh[:], sh[:])
+			sh = tbcd.NewScriptHashFromScript(h)
 		}
 
-		utxos, err := s.DB().UtxosByScriptHash(ctx, hh, startNum, countNum)
+		utxos, err := s.DB().UtxosByScriptHash(ctx, sh, startNum, countNum)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
