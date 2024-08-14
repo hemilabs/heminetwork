@@ -56,13 +56,6 @@ func New(home string, maxSize int64) (*RawDB, error) {
 	}, nil
 }
 
-func (r *RawDB) lastFilename() (string, error) {
-	log.Tracef("lastFilename")
-	defer log.Tracef("lastFilename exit")
-
-	return "", errors.New("not yet")
-}
-
 func (r *RawDB) Open() error {
 	log.Tracef("Open")
 	defer log.Tracef("Open exit")
