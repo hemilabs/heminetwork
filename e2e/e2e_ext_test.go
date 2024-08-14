@@ -52,6 +52,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/database/bfgd"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
+	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/electrumx"
 	"github.com/hemilabs/heminetwork/hemi/pop"
@@ -2325,11 +2326,16 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	// we expect result counts like so : 100, 51, 0
 	var txIndex uint64 = 1
 
+	addresses := []string{}
+
 	for range 151 {
 		privateKey, err := dcrsecp256k1.GeneratePrivateKeyFromRand(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		address := ethereum.AddressFromPrivateKey(privateKey)
+		addresses = append(addresses, address.String())
 
 		publicKey := privateKey.PubKey()
 		publicKeyUncompressed := publicKey.SerializeUncompressed()
@@ -2368,7 +2374,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 
 	serializedL2Keystone := hemi.L2KeystoneAbbreviate(includedL2Keystone).Serialize()
 
-	uniquePopPayouts := map[string]bool{}
+	receivedAddresses := []string{}
 
 	popPayoutsRequest := bssapi.PopPayoutsRequest{
 		L2BlockForPayout: serializedL2Keystone[:],
@@ -2401,7 +2407,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	}
 
 	for _, p := range popPayoutsResponse.PopPayouts {
-		uniquePopPayouts[p.MinerAddress.String()] = true
+		receivedAddresses = append(receivedAddresses, p.MinerAddress.String())
 	}
 
 	popPayoutsRequest.Page = 1
@@ -2431,7 +2437,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	}
 
 	for _, p := range popPayoutsResponse.PopPayouts {
-		uniquePopPayouts[p.MinerAddress.String()] = true
+		receivedAddresses = append(receivedAddresses, p.MinerAddress.String())
 	}
 
 	popPayoutsRequest.Page = 2
@@ -2458,9 +2464,11 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 			len(popPayoutsResponse.PopPayouts))
 	}
 
-	// ensure there were 151 unique pop payouts using miner address
-	if len(uniquePopPayouts) != 151 {
-		t.Fatalf("unexpected number of pop payouts %d", len(uniquePopPayouts))
+	slices.Sort(addresses)
+	slices.Sort(receivedAddresses)
+
+	if diff := deep.Equal(addresses, receivedAddresses); len(diff) != 0 {
+		t.Fatalf("unexpected diff %v", diff)
 	}
 }
 
