@@ -121,7 +121,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 	for {
 		// This should not happen but we must ensure we aren't spinning.
 		if tries > 1 {
-			return fmt.Errorf("could not determinet last filename")
+			return fmt.Errorf("could not determine last filename")
 		}
 
 		lfe, err := r.index.Get(lastFilenameKey, nil)
