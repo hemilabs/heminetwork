@@ -290,7 +290,7 @@ func NewUtxo(hash [32]byte, value uint64, outIndex uint32) (u Utxo) {
 	return
 }
 
-// ScriptHash is a sha256 that has a stringer.
+// ScriptHash is a SHA256 hash that implements fmt.Stringer.
 type ScriptHash [sha256.Size]byte
 
 func (sh ScriptHash) String() string {
