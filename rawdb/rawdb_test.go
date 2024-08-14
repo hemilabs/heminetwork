@@ -17,13 +17,13 @@ func TestRawDB(t *testing.T) {
 	}
 	remove := true
 	defer func() {
-		if remove {
-			err := os.RemoveAll(home)
-			if err != nil {
-				panic(err)
-			}
-		} else {
+		if !remove {
 			t.Logf("did not remove home: %v", home)
+			return
+		}
+
+		if err := os.RemoveAll(home); err != nil {
+			panic(err)
 		}
 	}()
 	blockSize := int64(4096)
