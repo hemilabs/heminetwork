@@ -1279,6 +1279,8 @@ func TestTxById(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	slices.Reverse(txIdBytes)
+
 	ctxid, err := chainhash.NewHash(txIdBytes)
 	if err != nil {
 		t.Fatal(err)
