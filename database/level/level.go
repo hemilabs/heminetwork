@@ -46,10 +46,9 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-type (
-	Pool    map[string]*leveldb.DB
-	RawPool map[string]*rawdb.RawDB
-)
+type Pool map[string]*leveldb.DB
+
+type RawPool map[string]*rawdb.RawDB
 
 type Database struct {
 	mtx     sync.RWMutex
