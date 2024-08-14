@@ -212,7 +212,7 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	}
 
 	// Blocks database is special
-	err = l.openRawDB(BlocksDB, 256*1024*1024)
+	err = l.openRawDB(BlocksDB, rawdb.DefaultMaxFileSize)
 	if err != nil {
 		return nil, fmt.Errorf("rawdb %v: %w", BlocksDB, err)
 	}

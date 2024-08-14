@@ -21,6 +21,8 @@ const (
 
 	indexDir = "index"
 	dataDir  = "data"
+
+	DefaultMaxFileSize = 256 * 1024 * 1024 // 256MB file max; will never be bigger.
 )
 
 var (
