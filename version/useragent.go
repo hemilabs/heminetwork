@@ -53,7 +53,7 @@ func UserAgent() string {
 	return userAgent
 }
 
-// createUserAgent creates a RFC9110 compliant User-Agent header value.
+// createUserAgent creates a RFC9110-compliant User-Agent header value.
 // https://www.rfc-editor.org/rfc/rfc9110#name-user-agent
 func createUserAgent(product, version string, comments ...string) string {
 	if product == "" {
