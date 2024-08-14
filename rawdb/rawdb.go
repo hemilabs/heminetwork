@@ -207,6 +207,7 @@ func (r *RawDB) Get(key []byte) ([]byte, error) {
 			log.Errorf("close: %v", err)
 		}
 	}()
+
 	data := make([]byte, size)
 	n, err := f.ReadAt(data, int64(offset))
 	if err != nil {
