@@ -37,6 +37,18 @@ var (
 			Help:         "electrumx endpoint",
 			Print:        config.PrintAll,
 		},
+		"BFG_EXBTC_INITIAL_CONNECTIONS": config.Config{
+			Value:        &cfg.EXBTCInitialConns,
+			DefaultValue: 5,
+			Help:         "electrumx initial connections",
+			Print:        config.PrintAll,
+		},
+		"BFG_EXBTC_MAX_CONNECTIONS": config.Config{
+			Value:        &cfg.EXBTCMaxConns,
+			DefaultValue: 100,
+			Help:         "electrumx max connections",
+			Print:        config.PrintAll,
+		},
 		"BFG_PUBLIC_KEY_AUTH": config.Config{
 			Value:        &cfg.PublicKeyAuth,
 			DefaultValue: false,
