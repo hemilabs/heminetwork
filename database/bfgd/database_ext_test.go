@@ -397,7 +397,7 @@ func TestL2KeystoneInsertSuccess(t *testing.T) {
 		t.Fatalf("unexpected diff %s", diff)
 	}
 
-	count, err := db.L2KeystonesCount(ctx)
+	count, err := l2KeystonesCount(ctx, sdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func TestL2KeystoneInsertMultipleSuccess(t *testing.T) {
 		t.Fatalf("unexpected diff %s", diff)
 	}
 
-	count, err := db.L2KeystonesCount(ctx)
+	count, err := l2KeystonesCount(ctx, sdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,7 +502,7 @@ func TestL2KeystoneInsertInvalidHashLength(t *testing.T) {
 		t.Fatalf("unexpected error %s", err)
 	}
 
-	count, err := db.L2KeystonesCount(ctx)
+	count, err := l2KeystonesCount(ctx, sdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -539,7 +539,7 @@ func TestL2KeystoneInsertInvalidEPHashLength(t *testing.T) {
 		t.Fatalf("unexpected error %s", err)
 	}
 
-	count, err := db.L2KeystonesCount(ctx)
+	count, err := l2KeystonesCount(ctx, sdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +576,7 @@ func TestL2KeystoneInsertInvalidStateRootLength(t *testing.T) {
 		t.Fatalf("unexpected error %s", err)
 	}
 
-	count, err := db.L2KeystonesCount(ctx)
+	count, err := l2KeystonesCount(ctx, sdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -613,7 +613,7 @@ func TestL2KeystoneInsertInvalidPrevKeystoneEPHashLength(t *testing.T) {
 		t.Fatalf("unexpected error %s", err)
 	}
 
-	count, err := db.L2KeystonesCount(ctx)
+	count, err := l2KeystonesCount(ctx, sdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -650,7 +650,7 @@ func TestL2KeystoneInsertInvalidParentEPHashLength(t *testing.T) {
 		t.Fatalf("unexpected error %s", err)
 	}
 
-	count, err := db.L2KeystonesCount(ctx)
+	count, err := l2KeystonesCount(ctx, sdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -905,7 +905,7 @@ func TestL2KeystoneInsertMultipleAtomicFailure(t *testing.T) {
 		t.Fatalf("insert should have failed but it did not: %s", err)
 	}
 
-	count, err := db.L2KeystonesCount(ctx)
+	count, err := l2KeystonesCount(ctx, sdb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1960,4 +1960,22 @@ func createBtcBlocksAtStartingHeight(ctx context.Context, t *testing.T, db bfgd.
 	}
 
 	return blocks
+}
+
+func l2KeystonesCount(ctx context.Context, db *sql.DB) (int, error) {
+	const selectCount = `SELECT COUNT(*) FROM l2_keystones;`
+
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	defer conn.Close()
+
+	var count int
+	if err := conn.QueryRowContext(ctx, selectCount).Scan(&count); err != nil {
+		return 0, err
+	}
+
+	return count, nil
 }

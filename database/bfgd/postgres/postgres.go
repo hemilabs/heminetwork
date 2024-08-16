@@ -95,19 +95,6 @@ func (p *pgdb) Version(ctx context.Context) (int, error) {
 	return dbVersion, nil
 }
 
-func (p *pgdb) L2KeystonesCount(ctx context.Context) (int, error) {
-	log.Tracef("L2KeystonesCount")
-	defer log.Tracef("L2KeystonesCount exit")
-
-	const selectCount = `SELECT COUNT(*) FROM l2_keystones;`
-	var count int
-	if err := p.db.QueryRowContext(ctx, selectCount).Scan(&count); err != nil {
-		return 0, err
-	}
-
-	return count, nil
-}
-
 func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) error {
 	log.Tracef("L2KeystonesInsert")
 	defer log.Tracef("L2KeystonesInsert exit")

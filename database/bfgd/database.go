@@ -18,7 +18,6 @@ type Database interface {
 
 	// L2 keystone table
 	L2KeystonesInsert(ctx context.Context, l2ks []L2Keystone) error
-	L2KeystonesCount(ctx context.Context) (int, error)
 	L2KeystoneByAbrevHash(ctx context.Context, aHash [32]byte) (*L2Keystone, error)
 	L2KeystonesMostRecentN(ctx context.Context, n uint32) ([]L2Keystone, error)
 
