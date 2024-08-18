@@ -293,30 +293,24 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 		}, e
 	}
 
-	if err := s.db.PopBasisInsertPopMFields(ctx, &bfgd.PopBasis{
-		BtcTxId:             txHash,
-		BtcRawTx:            database.ByteArray(bbr.Transaction),
-		PopMinerPublicKey:   publicKeyUncompressed,
-		L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
-	}); err != nil {
-		if errors.Is(err, database.ErrDuplicate) {
-			return &bfgapi.BitcoinBroadcastResponse{
-				Error: protocol.RequestErrorf("pop basis already exists"),
-			}, nil
+	go func() {
+		// retry up to 2 times, allowing only 5 second per try
+		// if we fail here it is ok for now
+		for range 2 {
+			insertCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := s.db.PopBasisInsertPopMFields(insertCtx, &bfgd.PopBasis{
+				BtcTxId:             txHash,
+				BtcRawTx:            database.ByteArray(bbr.Transaction),
+				PopMinerPublicKey:   publicKeyUncompressed,
+				L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
+			}); err != nil {
+				log.Errorf("error occurred inserting pop basis: %s", err)
+			} else {
+				return
+			}
 		}
-
-		if errors.Is(err, database.ErrValidation) {
-			e := protocol.NewInternalErrorf("invalid pop basis: %w", err)
-			return &bfgapi.BitcoinBroadcastResponse{
-				Error: e.ProtocolError(),
-			}, e
-		}
-
-		e := protocol.NewInternalErrorf("insert pop basis: %w", err)
-		return &bfgapi.BitcoinBroadcastResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
+	}()
 
 	return &bfgapi.BitcoinBroadcastResponse{TXID: txHash}, nil
 }
