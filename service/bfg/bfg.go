@@ -1196,6 +1196,7 @@ func (s *Server) handleL2KeystonesNotification() error {
 	defer log.Tracef("handleL2KeystonesNotification exit")
 
 	s.mtx.Lock()
+	log.Infof("will notify %d sessions of l2 keystones", len(s.sessions))
 	for _, bws := range s.sessions {
 		if _, ok := bws.notify[notifyL2Keystones]; !ok {
 			continue
