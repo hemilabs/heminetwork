@@ -344,6 +344,23 @@ func (p *pgdb) BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64,
 	return height, nil
 }
 
+func (p *pgdb) PopBasisExistsByBtcTxIdUnconfirmed(ctx context.Context, btcTxId [32]byte) (bool, error) {
+	log.Tracef("PopBasisInsertPopMFields")
+	defer log.Tracef("PopBasisInsertPopMFields exit")
+	const q = `
+		SELECT EXISTS(SELECT * FROM pop_basis WHERE btc_txid = $1 AND btc_block_hash IS NULL)
+	`
+	row := p.db.QueryRowContext(ctx, q, database.ByteArray(btcTxId[:]))
+
+	var exists bool
+
+	if err := row.Scan(&exists); err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
 func (p *pgdb) PopBasisInsertPopMFields(ctx context.Context, pb *bfgd.PopBasis) error {
 	log.Tracef("PopBasisInsertPopMFields")
 	defer log.Tracef("PopBasisInsertPopMFields exit")

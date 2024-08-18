@@ -294,21 +294,37 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	}
 
 	go func() {
-		// retry up to 2 times, allowing only 5 second per try
-		// if we fail here it is ok for now
-		for range 2 {
-			insertCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := s.db.PopBasisInsertPopMFields(insertCtx, &bfgd.PopBasis{
-				BtcTxId:             txHash,
-				BtcRawTx:            database.ByteArray(bbr.Transaction),
-				PopMinerPublicKey:   publicKeyUncompressed,
-				L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
-			}); err != nil {
-				log.Errorf("error occurred inserting pop basis: %s", err)
-			} else {
+		insertCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+
+		if len(txHash) != 32 {
+			log.Errorf("tx hash %v invalid length of %d", len(txHash))
+			return
+		}
+
+		exists, err := s.db.PopBasisExistsByBtcTxIdUnconfirmed(insertCtx, [32]byte(txHash))
+		if err != nil {
+			log.Errorf("error checking if pop_basis exists: %v", err)
+		}
+
+		log.Infof("does unconfirmed txid exist? %s : %v", hex.EncodeToString(txHash), exists)
+
+		if exists {
+			return
+		}
+
+		if err := s.db.PopBasisInsertPopMFields(insertCtx, &bfgd.PopBasis{
+			BtcTxId:             txHash,
+			BtcRawTx:            database.ByteArray(bbr.Transaction),
+			PopMinerPublicKey:   publicKeyUncompressed,
+			L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
+		}); err != nil {
+			log.Errorf("error occurred inserting pop basis: %s", err)
+			if errors.Is(err, database.ErrDuplicate) {
 				return
 			}
+		} else {
+			return
 		}
 	}()
 

@@ -33,6 +33,7 @@ type Database interface {
 	PopBasisInsertFull(ctx context.Context, pb *PopBasis) error
 	PopBasisInsertPopMFields(ctx context.Context, pb *PopBasis) error
 	PopBasisUpdateBTCFields(ctx context.Context, pb *PopBasis) (int64, error)
+	PopBasisExistsByBtcTxIdUnconfirmed(ctx context.Context, btcTxId [32]byte) (bool, error)
 
 	L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]L2BTCFinality, error)
 	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray) ([]L2BTCFinality, error)
