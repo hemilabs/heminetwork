@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"syscall"
 	"time"
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -160,7 +161,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 		}
 
 		if err = conn.call(ctx, method, params, result); err != nil {
-			if errors.Is(err, net.ErrClosed) {
+			if errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.EPIPE) {
 				return retry.RetryableError(err)
 			}
 			c.connPool.freeConn(conn)
