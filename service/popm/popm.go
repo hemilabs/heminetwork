@@ -769,8 +769,12 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			}
 		case bfgapi.CmdL2KeystonesNotification:
 			go func() {
-				if err := m.checkForKeystones(ctx); err != nil {
-					log.Errorf("error checking for keystones: %s", err)
+				for range 5 {
+					if err := m.checkForKeystones(ctx); err != nil {
+						log.Errorf("error checking for keystones: %s", err)
+					} else {
+						return
+					}
 				}
 			}()
 		default:
