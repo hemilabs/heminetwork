@@ -35,7 +35,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.22.x"
+  GO_VERSION: "1.23.x"
   PNPM_VERSION: "9.4.x"
   GO_LDFLAGS: >-
     -X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'
