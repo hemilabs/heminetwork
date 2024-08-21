@@ -26,12 +26,12 @@ func TestMonitor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// each keystone is 25 seconds, so there are 4 keystones per 100 seconds,
-	// we expect the number of pop txs to be at least once every 25 seconds
+	// each keystone is 50 seconds, so there are 2 keystones per 100 seconds,
+	// we expect the number of pop txs to be at least once every 50 seconds
 	// for the time we waited
-	// add 25 seconds for cushion
-	seconds := ms / 1000
-	popTxsPer100Seconds := 4
+	// add 50 seconds (1 keystone) of cushion
+	seconds := (ms + (50 * 1000)) / 1000
+	popTxsPer100Seconds := 2
 	expectedPopTxs := popTxsPer100Seconds * (seconds / 100)
 
 	t.Logf("expecting at least %d pop txs mined", expectedPopTxs)
