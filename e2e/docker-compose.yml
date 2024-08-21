@@ -20,7 +20,9 @@ services:
       - "18443:18443"
       - "18444:18444"
     volumes:
-      - bitcoindata:/bitcoin/.bitcoin
+      - { type: "tmpfs", target: "/bitcoin/.bitcoin" }
+    networks:
+      e2e:
 
   bitcoind-initialblocks:
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
@@ -37,6 +39,8 @@ services:
       - "1000" # need to generate a lot for greater chance to not spend coinbase
       - "$BTC_ADDRESS"
     restart: on-failure
+    networks:
+      e2e:
 
   bitcoind-moreblocks:
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
@@ -55,6 +59,8 @@ services:
       - "generatetoaddress"
       - "1"
       - "$BTC_ADDRESS"
+    networks:
+      e2e:
 
   electrs:
     image: blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8
@@ -76,17 +82,17 @@ services:
       - "50000"
       - --electrum-txs-limit
       - "50000"
-      - --blocks-dir
-      - "/bitcoindata/regtest/blocks"
+      - --jsonrpc-import
     environment:
       RUST_LOG: debug
       RUST_BACKTRACE: "full"
     volumes:
       - ./cookie:/tmp/.cookie
-      - bitcoindata:/bitcoindata:ro
     deploy:
       restart_policy:
         condition: "on-failure"
+    networks:
+      e2e:
 
   bfgd-postgres:
     build:
@@ -105,6 +111,8 @@ services:
       POSTGRES_HOST_AUTH_METHOD: "trust"
     volumes:
       - { type: "tmpfs", target: "/var" }
+    networks:
+      e2e:
 
   bfgd:
     build:
@@ -126,6 +134,8 @@ services:
       BFG_LOG_LEVEL: "INFO"
       BFG_PUBLIC_ADDRESS: ":8383"
       BFG_PRIVATE_ADDRESS: ":8080"
+    networks:
+      e2e:
 
   bssd:
     build:
@@ -139,6 +149,8 @@ services:
       BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
       BSS_LOG_LEVEL: "INFO"
       BSS_ADDRESS: ":8081"
+    networks:
+      e2e:
 
   popmd:
     build:
@@ -151,6 +163,8 @@ services:
       POPM_BFG_URL: "http://bfgd:8383/v1/ws/public"
       POPM_LOG_LEVEL: "INFO"
       POPM_REMINE_THRESHOLD: "1"
+    networks:
+      e2e:
 
   geth-l1:
     image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
@@ -185,6 +199,8 @@ services:
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
       - "./e2e/jwt.txt:/tmp/jwt.txt:ro"
       - { type: "tmpfs", target: "/tmp" }
+    networks:
+      e2e:
 
   op-geth-l2:
     build:
@@ -194,6 +210,7 @@ services:
       - "geth-l1"
     healthcheck:
       test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
+      timeout: 60s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
@@ -212,6 +229,74 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - { type: "tmpfs", target: "/tmp" }
+    networks:
+      e2e:
+  
+  op-geth-l2-2:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    depends_on:
+      op-geth-l2:
+        condition: "service_healthy"
+    healthcheck:
+      test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
+      timeout: 60s
+    environment:
+      ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
+      OP_GETH_L1_RPC: "http://op-geth-l1:8545"
+      ENTRYPOINT_SKIP_GENESIS: "true"
+    working_dir: "/tmp"
+    command:
+      - "sh"
+      - "/tmp/entrypointl2.sh"
+    volumes:
+      - "./e2e/keystore:/tmp/keystore:ro"
+      - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
+      - "./jwt.txt:/tmp/jwt.txt:ro"
+      - "./entrypointl2.sh:/tmp/entrypointl2.sh"
+      - "./genesisl2.sh:/tmp/genesisl2.sh"
+      - "./output:/tmp/output"
+      - "l2configs:/l2configs"
+      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
+      - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
+      - { type: "tmpfs", target: "/tmp" }
+    restart: on-failure
+    networks:
+      e2e:
+
+  op-geth-l2-3:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    depends_on:
+      op-geth-l2:
+        condition: "service_healthy"
+    healthcheck:
+      test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
+      timeout: 60s
+    environment:
+      ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
+      OP_GETH_L1_RPC: "http://op-geth-l1:8545"
+      ENTRYPOINT_SKIP_GENESIS: "true"
+    working_dir: "/tmp"
+    command:
+      - "sh"
+      - "/tmp/entrypointl2.sh"
+    volumes:
+      - "./e2e/keystore:/tmp/keystore:ro"
+      - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
+      - "./jwt.txt:/tmp/jwt.txt:ro"
+      - "./entrypointl2.sh:/tmp/entrypointl2.sh"
+      - "./genesisl2.sh:/tmp/genesisl2.sh"
+      - "./output:/tmp/output"
+      - "l2configs:/l2configs"
+      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
+      - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
+      - { type: "tmpfs", target: "/tmp" }
+    restart: on-failure
+    networks:
+      e2e:
 
   op-node:
     build:
@@ -231,23 +316,143 @@ services:
       - "op-node/bin/op-node"
       - "--l2=ws://op-geth-l2:8551"
       - "--l2.jwt-secret=/tmp/jwt.txt"
-      - "--sequencer.enabled"
+      - "--sequencer.enabled=true"
       - "--sequencer.l1-confs=0"
+      - "--sequencer.stopped=true"
       - "--verifier.l1-confs=0"
       - "--rollup.config=/l2configs/rollup.json"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
-      - "--p2p.disable"
       - "--rpc.enable-admin"
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--l1.trustrpc"
       - "--log.level=info"
       - "--l1.trustrpc=true"
-      - "--l1.http-poll-interval=1s"
+      - "--l1.http-poll-interval=6s"
+      - "--p2p.no-discovery"
+      - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
+      - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
+      - "--p2p.static=/ip4/192.169.198.7/tcp/9222/p2p/16Uiu2HAkx8gegEci9Jk2GDJ92S7HuF7odZCgg9mbos18qiqNEpFz"
+      - "--p2p.static=/ip4/192.169.197.7/tcp/9222/p2p/16Uiu2HAmVqqZGwbuWDffuQo2jCLBSULod13CZuoACZQS8WTKEL2X"
+      - "--conductor.enabled=true"
+      - "--conductor.rpc=http://op-conductor:8547"
+      - "--log.level=debug"
+      - "--log.format=terminal"
+      - "--override.ecotone=1725868497"
+      - "--override.canyon=1725868497"
+      - "--override.delta=1725868497"
+      - "--l1.beacon.ignore=true"
     volumes:
       - "l2configs:/l2configs"
       - "./jwt.txt:/tmp/jwt.txt"
+      - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
+    networks:
+      e2e:
+        ipv4_address: 192.169.199.7
+
+
+  op-node-2:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2-2:
+        condition: "service_healthy"
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+    command:
+      - "op-node/bin/op-node"
+      - "--l2=ws://op-geth-l2-2:8551"
+      - "--l2.jwt-secret=/tmp/jwt.txt"
+      - "--sequencer.enabled=true"
+      - "--sequencer.l1-confs=0"
+      - "--sequencer.stopped=true"
+      - "--verifier.l1-confs=0"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--rpc.enable-admin"
+      - "--l1=http://op-geth-l1:8545"
+      - "--l1.rpckind=standard"
+      - "--l1.trustrpc"
+      - "--log.level=trace"
+      - "--l1.trustrpc=true"
+      - "--l1.http-poll-interval=1s"
+      - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
+      - "--p2p.static=/ip4/192.169.197.7/tcp/9222/p2p/16Uiu2HAmVqqZGwbuWDffuQo2jCLBSULod13CZuoACZQS8WTKEL2X"
+      - "--p2p.no-discovery"
+      - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
+      - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
+      - "--conductor.enabled=true"
+      - "--conductor.rpc=http://op-conductor-2:8547"
+      - "--override.ecotone=1725868497"
+      - "--override.canyon=1725868497"
+      - "--override.delta=1725868497"
+      - "--l1.beacon.ignore=true"
+    volumes:
+      - "l2configs:/l2configs"
+      - "./jwt.txt:/tmp/jwt.txt"
+      - "./op-node-priv-key-2.txt:/tmp/op-node-priv-key.txt"
+    networks:
+      e2e:
+        ipv4_address: 192.169.198.7
+
+  op-node-3:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2-3:
+        condition: "service_healthy"
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+    command:
+      - "op-node/bin/op-node"
+      - "--l2=ws://op-geth-l2-3:8551"
+      - "--l2.jwt-secret=/tmp/jwt.txt"
+      - "--sequencer.enabled=true"
+      - "--sequencer.l1-confs=0"
+      - "--sequencer.stopped=true"
+      - "--verifier.l1-confs=0"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--rpc.enable-admin"
+      - "--l1=http://op-geth-l1:8545"
+      - "--l1.rpckind=standard"
+      - "--l1.trustrpc"
+      - "--log.level=trace"
+      - "--l1.trustrpc=true"
+      - "--l1.http-poll-interval=1s"
+      - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
+      - "--p2p.static=/ip4/192.169.198.7/tcp/9222/p2p/16Uiu2HAkx8gegEci9Jk2GDJ92S7HuF7odZCgg9mbos18qiqNEpFz"
+      - "--p2p.no-discovery"
+      - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
+      - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
+      - "--conductor.enabled=true"
+      - "--conductor.rpc=http://op-conductor-3:8547"
+      - "--override.ecotone=1725868497"
+      - "--override.canyon=1725868497"
+      - "--override.delta=1725868497"
+      - "--l1.beacon.ignore=true"
+    volumes:
+      - "l2configs:/l2configs"
+      - "./jwt.txt:/tmp/jwt.txt"
+      - "./op-node-priv-key-3.txt:/tmp/op-node-priv-key.txt"
+    networks:
+      e2e:
+        ipv4_address: 192.169.197.7
 
   op-batcher:
     build:
@@ -279,6 +484,74 @@ services:
         condition: "service_healthy"
       op-node:
         condition: "service_started"
+    networks:
+      e2e:
+
+  op-batcher-2:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    command:
+      - "op-batcher/bin/op-batcher"
+      - "--l2-eth-rpc=http://op-geth-l2-2:8546"
+      - "--rollup-rpc=http://op-node-2:8547"
+      - "--poll-interval=1s"
+      - "--sub-safety-margin=1"
+      - "--num-confirmations=1"
+      - "--safe-abort-nonce-too-low-count=3"
+      - "--resubmission-timeout=30s"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8548"
+      - "--rpc.enable-admin"
+      - "--max-channel-duration=1"
+      - "--max-pending-tx=1"
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--private-key=${ADMIN_PRIVATE_KEY}"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2-2:
+        condition: "service_healthy"
+      op-node-2:
+        condition: "service_started"
+    networks:
+      e2e:
+
+  op-batcher-3:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    command:
+      - "op-batcher/bin/op-batcher"
+      - "--l2-eth-rpc=http://op-geth-l2-3:8546"
+      - "--rollup-rpc=http://op-node-3:8547"
+      - "--poll-interval=1s"
+      - "--sub-safety-margin=1"
+      - "--num-confirmations=1"
+      - "--safe-abort-nonce-too-low-count=3"
+      - "--resubmission-timeout=30s"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8548"
+      - "--rpc.enable-admin"
+      - "--max-channel-duration=1"
+      - "--max-pending-tx=1"
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--private-key=${ADMIN_PRIVATE_KEY}"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2-3:
+        condition: "service_healthy"
+      op-node-3:
+        condition: "service_started"
+    networks:
+      e2e:
 
   op-proposer:
     build:
@@ -303,6 +576,181 @@ services:
       - "--private-key=${ADMIN_PRIVATE_KEY}"
       - "--l1-eth-rpc=http://geth-l1:8545"
 
+  op-proposer-2:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2-2:
+        condition: "service_healthy"
+      op-node-2:
+        condition: "service_started"
+    command:
+      - "op-proposer/bin/op-proposer"
+      - "--poll-interval=1s"
+      - "--rpc.port=8560"
+      - "--rollup-rpc=http://op-node-2:8547"
+      - "--l2oo-address=${L2OO_ADDRESS}"
+      - "--private-key=${ADMIN_PRIVATE_KEY}"
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
+    networks:
+      e2e:
+
+  op-proposer-3:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      op-geth-l1:
+        condition: "service_started"
+      op-geth-l2-3:
+        condition: "service_healthy"
+      op-node-3:
+        condition: "service_started"
+    command:
+      - "op-proposer/bin/op-proposer"
+      - "--poll-interval=1s"
+      - "--rpc.port=8560"
+      - "--rollup-rpc=http://op-node-3:8547"
+      - "--l2oo-address=${L2OO_ADDRESS}"
+      - "--private-key=${ADMIN_PRIVATE_KEY}"
+      - "--l1-eth-rpc=http://op-geth-l1:8545"
+    networks:
+      e2e:
+
+  op-conductor:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    command:
+      - "op-conductor/bin/op-conductor"
+      - "--consensus.addr=op-conductor"
+      - "--consensus.port=50050"
+      - "--raft.server.id=op-conductor-1"
+      - "--raft.storage.dir=/tmp/raft"
+      - "--raft.bootstrap"
+      - "--node.rpc=http://op-node:8547"
+      - "--execution.rpc=http://op-geth-l2:8546"
+      - "--healthcheck.unsafe-interval=10" 
+      - "--healthcheck.safe-interval=200"
+      - "--healthcheck.min-peer-count=1"
+      - "--healthcheck.interval=60"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--log.format=terminal"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+    volumes:
+      - "l2configs:/l2configs"
+      - "./jwt.txt:/tmp/jwt.txt"
+    restart: always
+    networks:
+      e2e:
+    depends_on:
+      op-node:
+        condition: "service_started"
+      op-geth-l2:
+        condition: "service_healthy"
+    ports:
+      - "127.0.0.1:50050:50050"
+
+  op-conductor-2:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    command:
+      - "op-conductor/bin/op-conductor"
+      - "--consensus.addr=op-conductor-2"
+      - "--consensus.port=50051"
+      - "--raft.server.id=op-conductor-2"
+      - "--raft.storage.dir=/tmp/raft"
+      - "--node.rpc=http://op-node-2:8547"
+      - "--execution.rpc=http://op-geth-l2-2:8546"
+      - "--healthcheck.unsafe-interval=10" 
+      - "--healthcheck.safe-interval=200"
+      - "--healthcheck.min-peer-count=1"
+      - "--healthcheck.interval=60"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--log.format=terminal"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+    volumes:
+      - "l2configs:/l2configs"
+      - "./jwt.txt:/tmp/jwt.txt"
+    restart: always
+    networks:
+      e2e:
+    depends_on:
+      op-node-2:
+        condition: "service_started"
+      op-geth-l2-2:
+        condition: "service_healthy"
+    ports:
+      - "127.0.0.1:50051:50051"
+  
+  op-conductor-3:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    command:
+      - "op-conductor/bin/op-conductor"
+      - "--consensus.addr=op-conductor-3"
+      - "--consensus.port=50052"
+      - "--raft.server.id=op-conductor-3"
+      - "--raft.storage.dir=/tmp/raft"
+      - "--node.rpc=http://op-node-3:8547"
+      - "--execution.rpc=http://op-geth-l2-3:8546"
+      - "--healthcheck.unsafe-interval=10" 
+      - "--healthcheck.safe-interval=200"
+      - "--healthcheck.min-peer-count=1"
+      - "--healthcheck.interval=60"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--log.format=terminal"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+    volumes:
+      - "l2configs:/l2configs"
+      - "./jwt.txt:/tmp/jwt.txt"
+    restart: always
+    networks:
+      e2e:
+    depends_on:
+      op-node-3:
+        condition: "service_started"
+      op-geth-l2-3:
+        condition: "service_healthy"
+    ports:
+      - "127.0.0.1:50052:50052"
+
+  raft:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    entrypoint:
+      - "bash"
+    command:
+      - "/tmp/setup-raft.bash"
+    depends_on:
+      - "op-conductor"
+      - "op-conductor-2"
+      - "op-conductor-3"
+    volumes:
+      - "./setup-raft.bash:/tmp/setup-raft.bash"
+    restart: on-failure
+    networks:
+      e2e:
 volumes:
   l2configs:
-  bitcoindata:
+
+networks:
+  e2e:
+    ipam:
+      config:
+        - subnet: 192.169.0.0/16
