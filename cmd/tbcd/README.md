@@ -110,4 +110,3 @@ The `tbcd` daemon runs an RPC server that listens on the address provided by the
 The RPC protocol is **WebSocket-based** and **uses a standard request/response model.**
 
 [Read more about the RPC protocol and available commands](../../api/tbcapi/README.md).
-
