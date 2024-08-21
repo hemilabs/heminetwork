@@ -37,7 +37,7 @@ func main() {
 		log.Fatal("No address specified")
 	}
 
-	c, err := electrumx.NewClient(address)
+	c, err := electrumx.NewClient(address, 1, 1)
 	if err != nil {
 		log.Fatalf("Failed to create electrumx client: %v", err)
 	}

@@ -63,6 +63,8 @@ func init() {
 func NewDefaultConfig() *Config {
 	return &Config{
 		EXBTCAddress:         "localhost:18001",
+		EXBTCInitialConns:    5,
+		EXBTCMaxConns:        100,
 		PrivateListenAddress: ":8080",
 		PublicListenAddress:  ":8383",
 		RequestLimit:         bfgapi.DefaultRequestLimit,
@@ -86,6 +88,8 @@ type btcClient interface {
 type Config struct {
 	BTCStartHeight          uint64
 	EXBTCAddress            string
+	EXBTCInitialConns       int
+	EXBTCMaxConns           int
 	PrivateListenAddress    string
 	PublicListenAddress     string
 	LogLevel                string
@@ -213,7 +217,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	var err error
-	s.btcClient, err = electrumx.NewClient(cfg.EXBTCAddress)
+	s.btcClient, err = electrumx.NewClient(cfg.EXBTCAddress, cfg.EXBTCInitialConns, cfg.EXBTCMaxConns)
 	if err != nil {
 		return nil, fmt.Errorf("create electrumx client: %w", err)
 	}

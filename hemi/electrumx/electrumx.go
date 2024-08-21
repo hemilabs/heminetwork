@@ -124,19 +124,13 @@ type Client struct {
 
 var log = loggo.GetLogger("electrumx")
 
-const (
-	clientInitialConnections = 2
-	clientMaximumConnections = 5
-)
-
 // NewClient returns an initialised electrumx client.
-func NewClient(address string) (*Client, error) {
+func NewClient(address string, initialConns, maxConns int) (*Client, error) {
 	c := &Client{}
 
 	// The address may be empty during tests, ignore empty addresses.
 	if address != "" {
-		pool, err := newConnPool("tcp", address,
-			clientInitialConnections, clientMaximumConnections)
+		pool, err := newConnPool("tcp", address, initialConns, maxConns)
 		if err != nil {
 			return nil, fmt.Errorf("new connection pool: %w", err)
 		}
