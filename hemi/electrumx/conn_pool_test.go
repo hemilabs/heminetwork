@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+const (
+	clientInitialConnections = 2
+	clientMaximumConnections = 5
+)
+
 func TestConnPool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

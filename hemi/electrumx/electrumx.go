@@ -123,11 +123,6 @@ type Client struct {
 
 var log = loggo.GetLogger("electrumx")
 
-const (
-	clientInitialConnections = 2
-	clientMaximumConnections = 5
-)
-
 // NewClient returns an initialised electrumx client.
 func NewClient(address string, initialConns, maxConns int) (*Client, error) {
 	c := &Client{}
