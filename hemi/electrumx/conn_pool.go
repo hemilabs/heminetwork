@@ -74,7 +74,7 @@ func (p *connPool) onClose(conn *clientConn) {
 
 	p.poolMx.Lock()
 	// Remove the connection from the pool.
-	slices.DeleteFunc(p.pool, func(c *clientConn) bool {
+	p.pool = slices.DeleteFunc(p.pool, func(c *clientConn) bool {
 		return c == conn
 	})
 	p.poolMx.Unlock()
