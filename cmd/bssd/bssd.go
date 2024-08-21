@@ -28,7 +28,7 @@ const (
 
 var (
 	log     = loggo.GetLogger(daemonName)
-	welcome = fmt.Sprintf("Hemi Bitcoin Secure Sequencer: v%s", version.String())
+	welcome string
 
 	cfg = bss.NewDefaultConfig()
 	cm  = config.CfgMap{
@@ -113,6 +113,11 @@ func _main() error {
 	}
 
 	return nil
+}
+
+func init() {
+	version.Component = "bssd"
+	welcome = "Hemi Bitcoin Secure Sequencer " + version.BuildInfo()
 }
 
 func main() {

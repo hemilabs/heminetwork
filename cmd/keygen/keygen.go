@@ -25,13 +25,18 @@ var (
 	secp256k1KeyPair = flag.Bool("secp256k1", false, "Generate a secp256k1 key pair")
 	jsonFormat       = flag.Bool("json", false, "print output as JSON")
 
-	welcome = fmt.Sprintf("key generator: v%v", version.String())
+	welcome string
 )
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "%v\n", welcome)
 	fmt.Fprintf(os.Stderr, "\t%v [-net mainnet|testnet3] [-json] <-secp256k1>\n", os.Args[0])
 	flag.PrintDefaults()
+}
+
+func init() {
+	version.Component = "keygen"
+	welcome = "Key Generator " + version.BuildInfo()
 }
 
 func _main() error {

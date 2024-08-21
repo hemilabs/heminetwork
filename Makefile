@@ -10,6 +10,7 @@ PROJECTPATH = $(abspath $(dir $(realpath $(firstword $(MAKEFILE_LIST)))))
 export GOBIN=$(PROJECTPATH)/bin
 export GOCACHE=$(PROJECTPATH)/.gocache
 export GOPKG=$(PROJECTPATH)/pkg
+GO_LDFLAGS=""
 DIST=$(PROJECTPATH)/dist
 
 ifeq ($(GOOS),windows)
@@ -49,7 +50,7 @@ go-deps:
 	go mod verify
 
 $(cmds):
-	go build -trimpath -o $(GOBIN)/$@$(BIN_EXT) ./cmd/$@
+	go build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(GOBIN)/$@$(BIN_EXT) ./cmd/$@
 
 build:
 	go build ./...
@@ -105,4 +106,3 @@ sources: dist
 
 checksums: dist
 	cd $(DIST) && shasum -a 256 * > $(project)_$(version)_checksums.txt
-

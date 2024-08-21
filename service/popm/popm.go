@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -37,6 +38,7 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/pprof"
+	"github.com/hemilabs/heminetwork/version"
 )
 
 // XXX we should debate if we can make pop miner fully transient. It feels like
@@ -809,8 +811,12 @@ func (m *Miner) connectBFG(pctx context.Context) error {
 		return err
 	}
 
+	headers := http.Header{}
+	headers.Add("User-Agent", version.UserAgent())
+
 	conn, err = protocol.NewConn(m.cfg.BFGWSURL, &protocol.ConnOptions{
 		Authenticator: authenticator,
+		Headers:       headers,
 	})
 	if err != nil {
 		return err

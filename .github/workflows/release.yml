@@ -37,6 +37,9 @@ concurrency:
 env:
   GO_VERSION: "1.22.x"
   PNPM_VERSION: "9.4.x"
+  GO_LDFLAGS: >-
+    -X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'
+    -X github.com/hemilabs/heminetwork/version.PreRelease=
 
 jobs:
   # Run tests
@@ -112,7 +115,8 @@ jobs:
           GOARCH: "${{ matrix.goarch }}"
           CGO_ENABLED: 0 # Disable CGO.
           GOGC: off # Disable GC during build, faster but uses more RAM.
-        run: make GOCACHE="$(go env GOCACHE)" archive
+          GO_LDFLAGS: "${{ env.GO_LDFLAGS }}"
+        run: make GOCACHE="$(go env GOCACHE)" GO_LDFLAGS="$GO_LDFLAGS" archive
 
       - name: "Upload artifacts"
         uses: actions/upload-artifact@v4
@@ -182,6 +186,7 @@ jobs:
             VERSION=${{ needs.prepare.outputs.version }}
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ steps.prepare.outputs.build_date }}
+            GO_LDFLAGS=${{ env.GO_LDFLAGS }}
           tags: |
             hemilabs/${{ matrix.service }}:latest
             hemilabs/${{ matrix.service }}:${{ needs.prepare.outputs.tag }}
