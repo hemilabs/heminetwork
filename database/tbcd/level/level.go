@@ -36,7 +36,7 @@ import (
 //	Blocks
 //
 //	Balances
-//	Utxos
+//	UTXOs
 
 const (
 	ldbVersion = 1

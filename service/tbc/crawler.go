@@ -1134,7 +1134,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 
 	log.Debugf("Syncing indexes to: %v", hash)
 
-	// Utxos
+	// UTXOs
 	if err := s.UtxoIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}

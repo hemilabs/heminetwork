@@ -1333,7 +1333,12 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	return nil
 }
 
-//
+// BlockByHash returns a block with the given hash.
+func (s *Server) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
+	log.Tracef("BlockByHash")
+	defer log.Tracef("BlockByHash exit")
+	return s.db.BlockByHash(ctx, hash)
+}
 
 func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*wire.BlockHeader, uint64, error) {
 	log.Tracef("BlockHeaderByHash")
@@ -1350,32 +1355,19 @@ func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*
 	return bhw, bh.Height, nil
 }
 
-func (s *Server) blockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.BlockHeader, error) {
-	log.Tracef("blockHeadersByHeight")
-	defer log.Tracef("blockHeadersByHeight exit")
-
-	bhs, err := s.db.BlockHeadersByHeight(ctx, height)
-	if err != nil {
-		return nil, fmt.Errorf("db block header by height: %w", err)
-	}
-
-	return bhs, nil
-}
-
 func (s *Server) RawBlockHeadersByHeight(ctx context.Context, height uint64) ([]api.ByteSlice, error) {
 	log.Tracef("RawBlockHeadersByHeight")
 	defer log.Tracef("RawBlockHeadersByHeight exit")
 
-	bhs, err := s.blockHeadersByHeight(ctx, height)
+	bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 	if err != nil {
 		return nil, err
 	}
 
 	var headers []api.ByteSlice
 	for _, bh := range bhs {
-		headers = append(headers, []byte(bh.Header[:]))
+		headers = append(headers, bh.Header[:])
 	}
-
 	return headers, nil
 }
 
@@ -1383,7 +1375,7 @@ func (s *Server) BlockHeadersByHeight(ctx context.Context, height uint64) ([]*wi
 	log.Tracef("BlockHeadersByHeight")
 	defer log.Tracef("BlockHeadersByHeight exit")
 
-	blockHeaders, err := s.blockHeadersByHeight(ctx, height)
+	blockHeaders, err := s.db.BlockHeadersByHeight(ctx, height)
 	if err != nil {
 		return nil, err
 	}
@@ -1409,7 +1401,7 @@ func (s *Server) RawBlockHeaderBest(ctx context.Context) (uint64, api.ByteSlice,
 	if err != nil {
 		return 0, nil, err
 	}
-	return bhb.Height, api.ByteSlice(bhb.Header[:]), nil
+	return bhb.Height, bhb.Header[:], nil
 }
 
 func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*big.Int, error) {

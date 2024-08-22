@@ -10,6 +10,8 @@ import (
 	"maps"
 	"reflect"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 )
@@ -19,6 +21,12 @@ const (
 
 	CmdPingRequest  = "tbcapi-ping-request"
 	CmdPingResponse = "tbcapi-ping-response"
+
+	CmdBlockByHashRawRequest  = "tbcapi-block-by-hash-raw-request"
+	CmdBlockByHashRawResponse = "tbcapi-block-by-hash-raw-response"
+
+	CmdBlockByHashRequest  = "tbcapi-block-by-hash-request"
+	CmdBlockByHashResponse = "tbcapi-block-by-hash-response"
 
 	CmdBlockHeadersByHeightRawRequest  = "tbcapi-block-headers-by-height-raw-request"
 	CmdBlockHeadersByHeightRawResponse = "tbcapi-block-headers-by-height-raw-response"
@@ -35,11 +43,11 @@ const (
 	CmdBalanceByAddressRequest  = "tbcapi-balance-by-address-request"
 	CmdBalanceByAddressResponse = "tbcapi-balance-by-address-response"
 
-	CmdUtxosByAddressRawRequest  = "tbcapi-utxos-by-address-raw-request"
-	CmdUtxosByAddressRawResponse = "tbcapi-utxos-by-address-raw-response"
+	CmdUTXOsByAddressRawRequest  = "tbcapi-utxos-by-address-raw-request"
+	CmdUTXOsByAddressRawResponse = "tbcapi-utxos-by-address-raw-response"
 
-	CmdUtxosByAddressRequest  = "tbcapi-utxos-by-address-request"
-	CmdUtxosByAddressResponse = "tbcapi-utxos-by-address-response"
+	CmdUTXOsByAddressRequest  = "tbcapi-utxos-by-address-request"
+	CmdUTXOsByAddressResponse = "tbcapi-utxos-by-address-response"
 
 	CmdTxByIdRawRequest  = "tbcapi-tx-by-id-raw-request"
 	CmdTxByIdRawResponse = "tbcapi-tx-by-id-raw-response"
@@ -61,13 +69,81 @@ type (
 	PingResponse protocol.PingResponse
 )
 
+// TxWitness represents a Bitcoin transaction witness.
+type TxWitness []api.ByteSlice
+
+// TxIn represents a Bitcoin transaction input.
+type TxIn struct {
+	PreviousOutPoint OutPoint      `json:"outpoint"`
+	SignatureScript  api.ByteSlice `json:"signature_script"`
+	Witness          TxWitness     `json:"tx_witness"`
+	Sequence         uint32        `json:"sequence"`
+}
+
+// OutPoint is a transaction out point.
+type OutPoint struct {
+	Hash  chainhash.Hash `json:"hash"`
+	Index uint32         `json:"index"`
+}
+
+// TxOut represents a Bitcoin transaction output.
+type TxOut struct {
+	Value    int64         `json:"value"`
+	PkScript api.ByteSlice `json:"pk_script"`
+}
+
+// Tx represents a Bitcoin transaction.
+type Tx struct {
+	Version  int32    `json:"version"`
+	LockTime uint32   `json:"lock_time"`
+	TxIn     []*TxIn  `json:"tx_in"`
+	TxOut    []*TxOut `json:"tx_out"`
+}
+
+// UTXO represents a Bitcoin unspent transaction output.
+type UTXO struct {
+	TxId     chainhash.Hash `json:"tx_id"`
+	Value    uint64         `json:"value"`
+	OutIndex uint32         `json:"out_index"`
+}
+
+// BlockHeader represents a Bitcoin block header.
 type BlockHeader struct {
-	Version    int32         `json:"version"`
-	PrevHash   api.ByteSlice `json:"prev_hash"`   // reverse order
-	MerkleRoot api.ByteSlice `json:"merkle_root"` // reverse order
-	Timestamp  int64         `json:"timestamp"`
-	Bits       string        `json:"bits"`
-	Nonce      uint32        `json:"nonce"`
+	Version    int32          `json:"version"`
+	PrevHash   chainhash.Hash `json:"prev_hash"`
+	MerkleRoot chainhash.Hash `json:"merkle_root"`
+	Timestamp  int64          `json:"timestamp"`
+	Bits       string         `json:"bits"`
+	Nonce      uint32         `json:"nonce"`
+}
+
+// Block represents a Bitcoin block.
+type Block struct {
+	Hash   chainhash.Hash `json:"hash"`
+	Header BlockHeader    `json:"header"`
+	Txs    []Tx           `json:"txs"`
+}
+
+// BlockByHashRequest requests a [Block] by its hash.
+type BlockByHashRequest struct {
+	Hash *chainhash.Hash `json:"hash"`
+}
+
+// BlockByHashResponse is the response for [BlockByHashRequest].
+type BlockByHashResponse struct {
+	Block *Block          `json:"block"`
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
+// BlockByHashRawRequest requests a raw block by its hash.
+type BlockByHashRawRequest struct {
+	Hash *chainhash.Hash `json:"hash"`
+}
+
+// BlockByHashRawResponse is the response for [BlockByHashRawRequest].
+type BlockByHashRawResponse struct {
+	Block api.ByteSlice   `json:"block"`
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type BlockHeadersByHeightRawRequest struct {
@@ -113,36 +189,30 @@ type BalanceByAddressResponse struct {
 	Error   *protocol.Error `json:"error,omitempty"`
 }
 
-type UtxosByAddressRawRequest struct {
+type UTXOsByAddressRawRequest struct {
 	Address string `json:"address"`
 	Start   uint   `json:"start"`
 	Count   uint   `json:"count"`
 }
 
-type UtxosByAddressRawResponse struct {
-	Utxos []api.ByteSlice `json:"utxos"`
+type UTXOsByAddressRawResponse struct {
+	UTXOs []api.ByteSlice `json:"utxos"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type UtxosByAddressRequest struct {
+type UTXOsByAddressRequest struct {
 	Address string `json:"address"`
 	Start   uint   `json:"start"`
 	Count   uint   `json:"count"`
 }
 
-type Utxo struct {
-	TxId     api.ByteSlice `json:"tx_id"` // reverse order
-	Value    uint64        `json:"value"`
-	OutIndex uint32        `json:"out_index"`
-}
-
-type UtxosByAddressResponse struct {
-	Utxos []*Utxo         `json:"utxos"`
+type UTXOsByAddressResponse struct {
+	UTXOs []*UTXO         `json:"utxos"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
 type TxByIdRawRequest struct {
-	TxId api.ByteSlice `json:"tx_id"` // natural order
+	TxID *chainhash.Hash `json:"tx_id"`
 }
 
 type TxByIdRawResponse struct {
@@ -151,7 +221,7 @@ type TxByIdRawResponse struct {
 }
 
 type TxByIdRequest struct {
-	TxId api.ByteSlice `json:"tx_id"` // reverse order
+	TxID *chainhash.Hash `json:"tx_id"`
 }
 
 type TxByIdResponse struct {
@@ -159,35 +229,13 @@ type TxByIdResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type OutPoint struct {
-	Hash  api.ByteSlice `json:"hash"` // reverse order
-	Index uint32        `json:"index"`
-}
-
-type TxWitness []api.ByteSlice
-
-type TxIn struct {
-	PreviousOutPoint OutPoint      `json:"outpoint"`
-	SignatureScript  api.ByteSlice `json:"signature_script"`
-	Witness          TxWitness     `json:"tx_witness"`
-	Sequence         uint32        `json:"sequence"`
-}
-
-type TxOut struct {
-	Value    int64         `json:"value"`
-	PkScript api.ByteSlice `json:"pk_script"`
-}
-
-type Tx struct {
-	Version  int32    `json:"version"`
-	LockTime uint32   `json:"lock_time"`
-	TxIn     []*TxIn  `json:"tx_in"`
-	TxOut    []*TxOut `json:"tx_out"`
-}
-
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                     reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                    reflect.TypeOf(PingResponse{}),
+	CmdBlockByHashRequest:              reflect.TypeOf(BlockByHashRequest{}),
+	CmdBlockByHashResponse:             reflect.TypeOf(BlockByHashResponse{}),
+	CmdBlockByHashRawRequest:           reflect.TypeOf(BlockByHashRawRequest{}),
+	CmdBlockByHashRawResponse:          reflect.TypeOf(BlockByHashRawResponse{}),
 	CmdBlockHeadersByHeightRawRequest:  reflect.TypeOf(BlockHeadersByHeightRawRequest{}),
 	CmdBlockHeadersByHeightRawResponse: reflect.TypeOf(BlockHeadersByHeightRawResponse{}),
 	CmdBlockHeadersByHeightRequest:     reflect.TypeOf(BlockHeadersByHeightRequest{}),
@@ -198,10 +246,10 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockHeaderBestResponse:         reflect.TypeOf(BlockHeaderBestResponse{}),
 	CmdBalanceByAddressRequest:         reflect.TypeOf(BalanceByAddressRequest{}),
 	CmdBalanceByAddressResponse:        reflect.TypeOf(BalanceByAddressResponse{}),
-	CmdUtxosByAddressRawRequest:        reflect.TypeOf(UtxosByAddressRawRequest{}),
-	CmdUtxosByAddressRawResponse:       reflect.TypeOf(UtxosByAddressRawResponse{}),
-	CmdUtxosByAddressRequest:           reflect.TypeOf(UtxosByAddressRequest{}),
-	CmdUtxosByAddressResponse:          reflect.TypeOf(UtxosByAddressResponse{}),
+	CmdUTXOsByAddressRawRequest:        reflect.TypeOf(UTXOsByAddressRawRequest{}),
+	CmdUTXOsByAddressRawResponse:       reflect.TypeOf(UTXOsByAddressRawResponse{}),
+	CmdUTXOsByAddressRequest:           reflect.TypeOf(UTXOsByAddressRequest{}),
+	CmdUTXOsByAddressResponse:          reflect.TypeOf(UTXOsByAddressResponse{}),
 	CmdTxByIdRawRequest:                reflect.TypeOf(TxByIdRawRequest{}),
 	CmdTxByIdRawResponse:               reflect.TypeOf(TxByIdRawResponse{}),
 	CmdTxByIdRequest:                   reflect.TypeOf(TxByIdRequest{}),

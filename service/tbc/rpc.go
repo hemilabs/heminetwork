@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 
@@ -62,6 +61,20 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 		switch cmd {
 		case tbcapi.CmdPingRequest:
 			err = s.handlePingRequest(ctx, ws, payload, id)
+		case tbcapi.CmdBlockByHashRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockByHashRequest)
+				return s.handleBlockByHashRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBlockByHashRawRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockByHashRawRequest)
+				return s.handleBlockByHashRawRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		case tbcapi.CmdBlockHeadersByHeightRequest:
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.BlockHeadersByHeightRequest)
@@ -97,16 +110,16 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdUtxosByAddressRawRequest:
+		case tbcapi.CmdUTXOsByAddressRawRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.UtxosByAddressRawRequest)
+				req := payload.(*tbcapi.UTXOsByAddressRawRequest)
 				return s.handleUtxosByAddressRawRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdUtxosByAddressRequest:
+		case tbcapi.CmdUTXOsByAddressRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.UtxosByAddressRequest)
+				req := payload.(*tbcapi.UTXOsByAddressRequest)
 				return s.handleUtxosByAddressRequest(ctx, req)
 			}
 
@@ -193,6 +206,60 @@ func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, 
 	// Ping request processed successfully
 	s.cmdsProcessed.Inc()
 	return nil
+}
+
+func (s *Server) handleBlockByHashRequest(ctx context.Context, req *tbcapi.BlockByHashRequest) (any, error) {
+	log.Tracef("handleBlockByHashRequest")
+	defer log.Tracef("handleBlockByHashRequest exit")
+
+	block, err := s.BlockByHash(ctx, req.Hash)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.BlockByHashResponse{
+				Error: protocol.RequestErrorf("block not found with hash %s", req.Hash),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockByHashResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.BlockByHashResponse{
+		Block: wireBlockToTBC(block.MsgBlock()),
+	}, nil
+}
+
+func (s *Server) handleBlockByHashRawRequest(ctx context.Context, req *tbcapi.BlockByHashRawRequest) (any, error) {
+	log.Tracef("handleBlockByHashRawRequest")
+	defer log.Tracef("handleBlockByHashRawRequest exit")
+
+	block, err := s.BlockByHash(ctx, req.Hash)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.BlockByHashRawResponse{
+				Error: protocol.RequestErrorf("block not found with hash: %s", req.Hash),
+			}, nil
+		}
+
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockByHashRawResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	b, err := block.Bytes()
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockByHashRawResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.BlockByHashRawResponse{
+		Block: b,
+	}, nil
 }
 
 func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbcapi.BlockHeadersByHeightRequest) (any, error) {
@@ -294,7 +361,7 @@ func (s *Server) handleBalanceByAddressRequest(ctx context.Context, req *tbcapi.
 	}, nil
 }
 
-func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi.UtxosByAddressRawRequest) (any, error) {
+func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi.UTXOsByAddressRawRequest) (any, error) {
 	log.Tracef("handleUtxosByAddressRawRequest")
 	defer log.Tracef("handleUtxosByAddressRawRequest exit")
 
@@ -302,12 +369,12 @@ func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi
 	if err != nil {
 		if errors.Is(err, level.ErrIterator) {
 			e := protocol.NewInternalError(err)
-			return &tbcapi.UtxosByAddressRawResponse{
+			return &tbcapi.UTXOsByAddressRawResponse{
 				Error: e.ProtocolError(),
 			}, err
 		}
 
-		return &tbcapi.UtxosByAddressRawResponse{
+		return &tbcapi.UTXOsByAddressRawResponse{
 			Error: protocol.RequestErrorf("error getting utxos for address: %s", req.Address),
 		}, nil
 	}
@@ -317,12 +384,12 @@ func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi
 		responseUtxos = append(responseUtxos, utxo[:])
 	}
 
-	return &tbcapi.UtxosByAddressRawResponse{
-		Utxos: responseUtxos,
+	return &tbcapi.UTXOsByAddressRawResponse{
+		UTXOs: responseUtxos,
 	}, nil
 }
 
-func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UtxosByAddressRequest) (any, error) {
+func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UTXOsByAddressRequest) (any, error) {
 	log.Tracef("handleUtxosByAddressRequest")
 	defer log.Tracef("handleUtxosByAddressRequest exit")
 
@@ -330,27 +397,35 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.Ut
 	if err != nil {
 		if errors.Is(err, level.ErrIterator) {
 			e := protocol.NewInternalError(err)
-			return &tbcapi.UtxosByAddressResponse{
+			return &tbcapi.UTXOsByAddressResponse{
 				Error: e.ProtocolError(),
 			}, e
 		}
 
-		return &tbcapi.UtxosByAddressResponse{
+		return &tbcapi.UTXOsByAddressResponse{
 			Error: protocol.RequestErrorf("error getting utxos for address: %s", req.Address),
 		}, nil
 	}
 
-	var responseUtxos []*tbcapi.Utxo
+	var responseUtxos []*tbcapi.UTXO
 	for _, utxo := range utxos {
-		responseUtxos = append(responseUtxos, &tbcapi.Utxo{
-			TxId:     reverseBytes(utxo.ScriptHashSlice()),
+		txId, err := chainhash.NewHash(utxo.ScriptHashSlice())
+		if err != nil {
+			e := protocol.NewInternalError(err)
+			return &tbcapi.UTXOsByAddressResponse{
+				Error: e.ProtocolError(),
+			}, e
+		}
+
+		responseUtxos = append(responseUtxos, &tbcapi.UTXO{
+			TxId:     *txId,
 			Value:    utxo.Value(),
 			OutIndex: utxo.OutputIndex(),
 		})
 	}
 
-	return &tbcapi.UtxosByAddressResponse{
-		Utxos: responseUtxos,
+	return &tbcapi.UTXOsByAddressResponse{
+		UTXOs: responseUtxos,
 	}, nil
 }
 
@@ -358,18 +433,10 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	log.Tracef("handleTxByIdRawRequest")
 	defer log.Tracef("handleTxByIdRawRequest exit")
 
-	txId, err := chainhash.NewHash(req.TxId)
-	if err != nil {
-		responseErr := protocol.RequestErrorf("invalid tx id")
-		return &tbcapi.TxByIdRawResponse{
-			Error: responseErr,
-		}, nil
-	}
-
-	tx, err := s.TxById(ctx, txId)
+	tx, err := s.TxById(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxId)
+			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
 			return &tbcapi.TxByIdRawResponse{
 				Error: responseErr,
 			}, nil
@@ -398,18 +465,10 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	log.Tracef("handleTxByIdRequest")
 	defer log.Tracef("handleTxByIdRequest exit")
 
-	txId, err := chainhash.NewHash(req.TxId)
-	if err != nil {
-		responseErr := protocol.RequestErrorf("invalid tx id")
-		return &tbcapi.TxByIdResponse{
-			Error: responseErr,
-		}, nil
-	}
-
-	tx, err := s.TxById(ctx, txId)
+	tx, err := s.TxById(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxId)
+			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
 			return &tbcapi.TxByIdResponse{
 				Error: responseErr,
 			}, nil
@@ -513,6 +572,20 @@ func randHexId(length int) (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+// wireBlockToTBC converts a wire.MsgBlock to a tbcapi.Block.
+func wireBlockToTBC(block *wire.MsgBlock) *tbcapi.Block {
+	txs := make([]tbcapi.Tx, len(block.Transactions))
+	for i, tx := range block.Transactions {
+		txs[i] = *wireTxToTBC(tx)
+	}
+	return &tbcapi.Block{
+		Hash:   block.BlockHash(),
+		Header: *wireBlockHeaderToTBC(&block.Header),
+		Txs:    txs,
+	}
+}
+
+// wireBlockHeadersToBTC converts []*wire.BlockHeader to []*tbcapi.BlockHeader.
 func wireBlockHeadersToTBC(bhs []*wire.BlockHeader) []*tbcapi.BlockHeader {
 	blockHeaders := make([]*tbcapi.BlockHeader, len(bhs))
 	for i, bh := range bhs {
@@ -521,17 +594,19 @@ func wireBlockHeadersToTBC(bhs []*wire.BlockHeader) []*tbcapi.BlockHeader {
 	return blockHeaders
 }
 
+// wireBlockHeaderToTBC converts a wire.BlockHeader to a tbcapi.BlockHeader.
 func wireBlockHeaderToTBC(bh *wire.BlockHeader) *tbcapi.BlockHeader {
 	return &tbcapi.BlockHeader{
 		Version:    bh.Version,
-		PrevHash:   reverseBytes(bh.PrevBlock[:]),
-		MerkleRoot: reverseBytes(bh.MerkleRoot[:]),
+		PrevHash:   bh.PrevBlock,
+		MerkleRoot: bh.MerkleRoot,
 		Timestamp:  bh.Timestamp.Unix(),
 		Bits:       fmt.Sprintf("%x", bh.Bits),
 		Nonce:      bh.Nonce,
 	}
 }
 
+// wireTxToTBC converts a wire.MsgTx to tbcapi.Tx.
 func wireTxToTBC(w *wire.MsgTx) *tbcapi.Tx {
 	tx := &tbcapi.Tx{
 		Version:  w.Version,
@@ -545,7 +620,7 @@ func wireTxToTBC(w *wire.MsgTx) *tbcapi.Tx {
 			Sequence:        txIn.Sequence,
 			SignatureScript: txIn.SignatureScript,
 			PreviousOutPoint: tbcapi.OutPoint{
-				Hash:  reverseBytes(txIn.PreviousOutPoint.Hash[:]),
+				Hash:  txIn.PreviousOutPoint.Hash,
 				Index: txIn.PreviousOutPoint.Index,
 			},
 			Witness: make(tbcapi.TxWitness, len(txIn.Witness)),
@@ -564,10 +639,4 @@ func wireTxToTBC(w *wire.MsgTx) *tbcapi.Tx {
 	}
 
 	return tx
-}
-
-// XXX this probably should not exist, it means the code is busted instead
-func reverseBytes(b []byte) []byte {
-	slices.Reverse(b)
-	return b
 }

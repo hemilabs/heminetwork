@@ -707,7 +707,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var response tbcapi.UtxosByAddressRawResponse
+			var response tbcapi.UTXOsByAddressRawResponse
 			select {
 			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
@@ -715,7 +715,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			}
 			indexAll(ctx, t, tbcServer)
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRawRequest{
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UTXOsByAddressRawRequest{
 				Address: tti.address(),
 				Start:   uint(tti.start),
 				Count:   uint(tti.limit),
@@ -728,7 +728,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if v.Header.Command != tbcapi.CmdUtxosByAddressRawResponse {
+			if v.Header.Command != tbcapi.CmdUTXOsByAddressRawResponse {
 				t.Fatalf("received unexpected command: %s", v.Header.Command)
 			}
 
@@ -743,9 +743,9 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				expectedCount = tti.limit
 			}
 
-			if !tti.doNotGenerate && len(response.Utxos) != int(expectedCount) {
-				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.Utxos))
-			} else if tti.doNotGenerate && len(response.Utxos) != 0 {
+			if !tti.doNotGenerate && len(response.UTXOs) != int(expectedCount) {
+				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.UTXOs))
+			} else if tti.doNotGenerate && len(response.UTXOs) != 0 {
 				t.Fatalf("did not generate any blocks for address, should not have utxos")
 			}
 		})
@@ -919,7 +919,7 @@ func TestUtxosByAddress(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var response tbcapi.UtxosByAddressResponse
+			var response tbcapi.UTXOsByAddressResponse
 			select {
 			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
@@ -927,7 +927,7 @@ func TestUtxosByAddress(t *testing.T) {
 			}
 			indexAll(ctx, t, tbcServer)
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRequest{
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UTXOsByAddressRequest{
 				Address: tti.address(),
 				Start:   uint(tti.start),
 				Count:   uint(tti.limit),
@@ -940,7 +940,7 @@ func TestUtxosByAddress(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if v.Header.Command != tbcapi.CmdUtxosByAddressResponse {
+			if v.Header.Command != tbcapi.CmdUTXOsByAddressResponse {
 				t.Fatalf("received unexpected command: %s", v.Header.Command)
 			}
 
@@ -955,9 +955,9 @@ func TestUtxosByAddress(t *testing.T) {
 				expectedCount = tti.limit
 			}
 
-			if !tti.doNotGenerate && len(response.Utxos) != int(expectedCount) {
-				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.Utxos))
-			} else if tti.doNotGenerate && len(response.Utxos) != 0 {
+			if !tti.doNotGenerate && len(response.UTXOs) != int(expectedCount) {
+				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.UTXOs))
+			} else if tti.doNotGenerate && len(response.UTXOs) != 0 {
 				t.Fatalf("did not generate any blocks for address, should not have utxos")
 			}
 		})
@@ -1015,7 +1015,7 @@ func TestTxByIdRaw(t *testing.T) {
 	slices.Reverse(txIdBytes) // convert to natural order
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxId: txIdBytes,
+		TxID: txIdBytes,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1104,7 +1104,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	slices.Reverse(txIdBytes) // convert to natural order
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxId: txIdBytes,
+		TxID: txIdBytes,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1200,7 +1200,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	slices.Reverse(txIdBytes) // convert to natural order
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxId: txIdBytes,
+		TxID: txIdBytes,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1286,7 +1286,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxId: ctxid[:],
+		TxID: ctxid[:],
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1370,7 +1370,7 @@ func TestTxByIdInvalid(t *testing.T) {
 	txIdBytes[0]++
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxId: txIdBytes,
+		TxID: txIdBytes,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1465,7 +1465,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	txIdBytes = append(txIdBytes, 8)
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxId: txIdBytes,
+		TxID: txIdBytes,
 	}); err != nil {
 		t.Fatal(err)
 	}
