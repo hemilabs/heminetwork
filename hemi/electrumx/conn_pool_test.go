@@ -15,6 +15,11 @@ const (
 	clientMaximumConnections = 5
 )
 
+var testClientOpts = &ClientOptions{
+	InitialConnections: clientInitialConnections,
+	MaxConnections:     clientMaximumConnections,
+}
+
 func TestConnPool(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -22,8 +27,7 @@ func TestConnPool(t *testing.T) {
 	server := createMockServer(t)
 	defer server.Close()
 
-	pool, err := newConnPool("tcp", server.address,
-		clientInitialConnections, clientMaximumConnections)
+	pool, err := newConnPool("tcp", server.address, testClientOpts, nil)
 	if err != nil {
 		t.Fatalf("failed to create connPool: %v", err)
 	}

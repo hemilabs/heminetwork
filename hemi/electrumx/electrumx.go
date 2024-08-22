@@ -17,10 +17,16 @@ import (
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/juju/loggo"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sethvargo/go-retry"
 
 	"github.com/hemilabs/heminetwork/bitcoin"
 )
+
+var log = loggo.GetLogger("electrumx")
+
+// Prometheus subsystem name.
+const promSubsystem = "electrumx"
 
 // https://electrumx.readthedocs.io/en/latest/protocol-basics.html
 
@@ -120,17 +126,118 @@ var (
 // Client implements an electrumx JSON RPC client.
 type Client struct {
 	connPool *connPool
+	metrics  *metrics
 }
 
-var log = loggo.GetLogger("electrumx")
+var (
+	defaultInitialConnections = 2
+	defaultMaxConnections     = 10
+)
+
+type ClientOptions struct {
+	// InitialConnections is the number of initial ElectrumX connections to open
+	// and keep in the pool.
+	InitialConnections int
+
+	// MaxConnections is the maximum number of ElectrumX connections to keep in
+	// the pool.
+	//
+	// If adding a connection back to the pool would result in the pool having
+	// more connections than this value, the connection will be closed instead
+	// of being added to the pool.
+	MaxConnections int
+
+	// PromNamespace is the application Prometheus namespace.
+	PromNamespace string
+}
+
+type metrics struct {
+	connsOpen        prometheus.Gauge         // Number of open connections
+	connsIdle        prometheus.Gauge         // Number of idle connections
+	connsOpened      prometheus.Counter       // Total number of connections opened
+	connsClosed      prometheus.Counter       // Total number of connections closed
+	rpcCallsTotal    *prometheus.CounterVec   // Total number of RPC calls
+	rpcCallsDuration *prometheus.HistogramVec // RPC call durations in seconds
+}
+
+func newMetrics(namespace string) *metrics {
+	return &metrics{
+		connsOpen: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: promSubsystem,
+			Name:      "connections_open",
+			Help:      "Number of open ElectrumX connections",
+		}),
+		connsIdle: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: promSubsystem,
+			Name:      "connections_idle",
+			Help:      "Number of idle ElectrumX connections",
+		}),
+		connsOpened: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: promSubsystem,
+			Name:      "connections_opened_total",
+			Help:      "Total number of ElectrumX connections opened",
+		}),
+		connsClosed: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: namespace,
+			Subsystem: promSubsystem,
+			Name:      "connections_closed_total",
+			Help:      "Total number of ElectrumX connections closed",
+		}),
+		rpcCallsTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: namespace,
+				Subsystem: promSubsystem,
+				Name:      "rpc_calls_total",
+				Help:      "Total number of ElectrumX RPC calls",
+			},
+			[]string{"method"},
+		),
+		rpcCallsDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Namespace: namespace,
+				Subsystem: promSubsystem,
+				Name:      "rpc_calls_duration_seconds",
+				Help:      "ElectrumX RPC call durations in seconds",
+				Buckets:   prometheus.DefBuckets,
+			},
+			[]string{"method"},
+		),
+	}
+}
+
+func (m *metrics) collectors() []prometheus.Collector {
+	return []prometheus.Collector{
+		m.connsOpen,
+		m.connsIdle,
+		m.connsOpened,
+		m.connsClosed,
+		m.rpcCallsTotal,
+		m.rpcCallsDuration,
+	}
+}
 
 // NewClient returns an initialised electrumx client.
-func NewClient(address string, initialConns, maxConns int) (*Client, error) {
-	c := &Client{}
+func NewClient(address string, opts *ClientOptions) (*Client, error) {
+	if opts == nil {
+		opts = new(ClientOptions)
+	}
+	if opts.InitialConnections == 0 {
+		opts.InitialConnections = defaultInitialConnections
+	}
+	if opts.MaxConnections == 0 {
+		opts.MaxConnections = defaultMaxConnections
+	}
+
+	c := &Client{
+		metrics: newMetrics(opts.PromNamespace),
+	}
 
 	// The address may be empty during tests, ignore empty addresses.
 	if address != "" {
-		pool, err := newConnPool("tcp", address, initialConns, maxConns)
+		pool, err := newConnPool("tcp", address, opts, c.metrics)
 		if err != nil {
 			return nil, fmt.Errorf("new connection pool: %w", err)
 		}
@@ -138,6 +245,11 @@ func NewClient(address string, initialConns, maxConns int) (*Client, error) {
 	}
 
 	return c, nil
+}
+
+// Metrics returns Prometheus metric collectors for the client.
+func (c *Client) Metrics() []prometheus.Collector {
+	return c.metrics.collectors()
 }
 
 func (c *Client) call(ctx context.Context, method string, params, result any) error {

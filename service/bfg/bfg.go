@@ -74,6 +74,7 @@ func NewDefaultConfig() *Config {
 
 // XXX figure out if this needs to be moved out into the electrumx package.
 type btcClient interface {
+	Metrics() []prometheus.Collector
 	Balance(ctx context.Context, scriptHash []byte) (*electrumx.Balance, error)
 	Broadcast(ctx context.Context, rtx []byte) ([]byte, error)
 	Height(ctx context.Context) (uint64, error)
@@ -217,7 +218,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	var err error
-	s.btcClient, err = electrumx.NewClient(cfg.EXBTCAddress, cfg.EXBTCInitialConns, cfg.EXBTCMaxConns)
+	s.btcClient, err = electrumx.NewClient(cfg.EXBTCAddress, &electrumx.ClientOptions{
+		InitialConnections: cfg.EXBTCInitialConns,
+		MaxConnections:     cfg.EXBTCMaxConns,
+		PromNamespace:      promNamespace,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create electrumx client: %w", err)
 	}
@@ -1561,7 +1566,8 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create prometheus server: %w", err)
 		}
-		cs := append(s.metrics.collectors(),
+		cs := append(
+			append(s.metrics.collectors(), s.btcClient.Metrics()...),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: promNamespace,
 				Name:      "running",

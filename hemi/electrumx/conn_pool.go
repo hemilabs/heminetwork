@@ -28,22 +28,28 @@ type connPool struct {
 	// TODO(joshuasing): This is used as a basic queue, however there are much
 	//  more performant queue implementations that could be used.
 	pool []*clientConn
+
+	// metrics contains prometheus collectors used for collecting metrics.
+	metrics *metrics
 }
 
 // newConnPool creates a new connection pool.
-func newConnPool(network, address string, initial, max int) (*connPool, error) {
-	if initial > max {
-		return nil, errors.New("initial connections must be less than max connections")
+func newConnPool(network, address string, opts *ClientOptions, metrics *metrics) (*connPool, error) {
+	if opts.InitialConnections > opts.MaxConnections {
+		return nil, errors.New(
+			"initial connections must be less than or equal to max connections",
+		)
 	}
 
 	p := &connPool{
 		network: network,
 		address: address,
-		max:     max,
+		max:     opts.MaxConnections,
+		metrics: metrics,
 	}
 
 	// Add initial connections to the pool.
-	for range initial {
+	for range opts.InitialConnections {
 		conn, err := p.newConn()
 		if err != nil {
 			return nil, fmt.Errorf("new initial connection: %w", err)
@@ -63,7 +69,11 @@ func (p *connPool) newConn() (*clientConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newClientConn(c, p.onClose), nil
+	if p.metrics != nil {
+		p.metrics.connsOpened.Inc()
+		p.metrics.connsOpen.Inc()
+	}
+	return newClientConn(c, p.metrics, p.onClose), nil
 }
 
 // onClose removes a connection from the pool if found.
@@ -74,10 +84,17 @@ func (p *connPool) onClose(conn *clientConn) {
 
 	p.poolMx.Lock()
 	// Remove the connection from the pool.
+	l := len(p.pool)
 	p.pool = slices.DeleteFunc(p.pool, func(c *clientConn) bool {
 		return c == conn
 	})
+	removed := len(p.pool) != l
 	p.poolMx.Unlock()
+
+	if p.metrics != nil && removed {
+		p.metrics.connsClosed.Inc()
+		p.metrics.connsOpen.Dec()
+	}
 }
 
 // acquireConn returns a connection from the pool.
@@ -93,14 +110,17 @@ func (p *connPool) acquireConn() (*clientConn, error) {
 	}
 	p.poolMx.Unlock()
 
-	if c == nil {
-		// The connection pool is empty, create a new connection.
-		var err error
-		if c, err = p.newConn(); err != nil {
-			return nil, fmt.Errorf("new connection: %w", err)
-		}
+	if c != nil {
+		// Successfully acquired a connection from the pool.
+		c.metrics.connsIdle.Dec()
+		return c, nil
 	}
 
+	// The connection pool is empty, create a new connection.
+	var err error
+	if c, err = p.newConn(); err != nil {
+		return nil, fmt.Errorf("new connection: %w", err)
+	}
 	return c, nil
 }
 
@@ -124,6 +144,7 @@ func (p *connPool) freeConn(conn *clientConn) {
 
 	p.pool = append(p.pool, conn)
 	p.poolMx.Unlock()
+	p.metrics.connsIdle.Inc()
 }
 
 // size returns the number of connections in the pool.
