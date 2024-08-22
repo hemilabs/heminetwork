@@ -107,10 +107,6 @@ type Server struct {
 
 	cfg *Config
 
-	// requests
-	requestLimiter chan bool // Maximum in progress websocket commands
-	// requestTimeout time.Duration
-
 	btcHeight uint64
 
 	server       *http.ServeMux
@@ -204,16 +200,12 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 	s := &Server{
 		cfg:                   cfg,
-		requestLimiter:        make(chan bool, cfg.RequestLimit),
 		btcHeight:             cfg.BTCStartHeight,
 		server:                http.NewServeMux(),
 		publicServer:          http.NewServeMux(),
 		metrics:               newMetrics(),
 		sessions:              make(map[string]*bfgWs),
 		checkForInvalidBlocks: make(chan struct{}),
-	}
-	for range cfg.RequestLimit {
-		s.requestLimiter <- true
 	}
 
 	var err error
@@ -267,12 +259,16 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 	defer cancel()
 
 	select {
-	case <-s.requestLimiter:
+	case <-bws.requestLimiter:
+	case <-parentCtx.Done():
+		log.Debugf("handleRequest context done: %v", parentCtx.Err())
+		return
 	default:
-		log.Infof("Request limiter hit %v: %v", bws.addr, cmd)
-		<-s.requestLimiter
+		log.Infof("Request limiter hit %v (%v): %v", bws.addr, bws.sessionId, cmd)
+		bws.conn.CloseStatus(websocket.StatusNormalClosure, "request limit hit")
+		return
 	}
-	defer func() { s.requestLimiter <- true }()
+	defer func() { bws.requestLimiter <- true }()
 
 	start := time.Now()
 	defer func() {
@@ -283,6 +279,10 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 	}()
 
 	log.Tracef("Handling request %v: %v", bws.addr, cmd)
+
+	// ensure that only one handler is called per-time-per-connection
+	bws.mtx.Lock()
+	defer bws.mtx.Unlock()
 
 	response, err := handler(ctx)
 	if err != nil {
@@ -703,6 +703,10 @@ type bfgWs struct {
 	requestContext context.Context
 	notify         map[notificationId]struct{}
 	publicKey      []byte
+	requestLimiter chan bool
+
+	// used to only allow one request to be processed at a time from a given connection
+	mtx sync.Mutex
 }
 
 func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
@@ -934,6 +938,10 @@ func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) 
 		},
 		listenerName:   "private",
 		requestContext: r.Context(),
+		requestLimiter: make(chan bool, s.cfg.RequestLimit),
+	}
+	for range s.cfg.RequestLimit {
+		bws.requestLimiter <- true
 	}
 
 	if bws.sessionId, err = s.newSession(bws); err != nil {
@@ -991,6 +999,10 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 		notify: map[notificationId]struct{}{
 			notifyL2Keystones: {},
 		},
+		requestLimiter: make(chan bool, s.cfg.RequestLimit),
+	}
+	for range s.cfg.RequestLimit {
+		bws.requestLimiter <- true
 	}
 
 	// Must complete handshake in WSHandshakeTimeout.
