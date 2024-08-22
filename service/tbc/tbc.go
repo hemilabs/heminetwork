@@ -765,6 +765,14 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		quiesced := s.quiesced
 		s.mtx.Unlock()
 		if quiesced {
+			// XXX we must record if we got wire.MsgHeaders:and wire.MsgBlock
+			// when we unquiesce we should do a getheaders because
+			// we may have missed several; what will happen now is
+			// that we missed, say, 2 headers so when the thirs
+			// comes in it has no parent and thus everything fails.
+			//
+			// This seems to resolve itself when we restart because
+			// then we resume where we were at.
 			continue
 		}
 
