@@ -708,6 +708,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		// for an unknown tip we'll get genesis back. This indicates
 		// that our tip is forked,
 		// XXX this needs to be cleaned up; maybe moved into handshake
+		// XXX this can happen reentrantly. Not sure if that is ok at this time.
 		if !headersSeen {
 			switch m := msg.(type) {
 			case *wire.MsgHeaders:
