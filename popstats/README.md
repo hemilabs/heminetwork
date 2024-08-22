@@ -25,17 +25,23 @@ Set the following environment variables in a `.env` file:
 - ABSINTHE_API_URL and ABSINTHE_API_KEY: URL of the Absinthe GraphQL API and authentication JWT
 - REDIS_URL: Full URI of the Redis database
 
-Optionally, start a Redis instance:
+Optionally, start a Redis instance and use `redis://host.docker.internal:6379` as the Redis URL:
 
 ```sh
-npm run redis:start
+docker run -d -p 6379:6379 -v ./redis-data:/data --name pop-stats-redis --rm redis:7-alpine redis-server --save 60 1 --loglevel warning
 ```
 
 Finally, build the Docker image and start a container:
 
 ```sh
-npm run docker:build
-npm run docker:run
+docker build -t hemilabs/pop-stats:latest .
+docker run -it --env-file .env --name pop-stats --rm hemilabs/pop-stats:latest
 ```
 
 The process will then start identifying and reporting all PoP payouts, then will exit.
+
+Redis can be easily stopped by running:
+
+```sh
+docker stop $(docker ps -aqf \"name=pop-stats-redis\")
+```

@@ -6,12 +6,6 @@
   "author": {
     "name": "Gabriel Montes"
   },
-  "scripts": {
-    "docker:build": "docker build -t hemilabs/pop-stats:$npm_package_version -t hemilabs/pop-stats:latest .",
-    "docker:run": "docker run -it --env-file .env --name pop-stats --rm hemilabs/pop-stats:latest",
-    "redis:start": "docker run -d -p 6379:6379 -v ./redis-data:/data --name pop-stats-redis --rm redis:7-alpine redis-server --save 60 1 --loglevel warning",
-    "redis:stop": "docker stop $(docker ps -aqf \"name=pop-stats-redis\")"
-  },
   "dependencies": {
     "before-exit": "1.0.0",
     "hemi-viem": "1.1.0",
