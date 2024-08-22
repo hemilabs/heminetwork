@@ -1,13 +1,13 @@
 # PoP stats
 
-This PR adds a service that will identify all the PoP payout transactions, summarize, calculate the incentive program points and report those to Absinthe.
+This is a service that identifies all the PoP payout transactions, summarizes, calculates the incentive program points, and reports those to Absinthe.
 
 ## How it works
 
 This service is prepared to be run once a day as a cron job.
-On each run, it gets all the HEMI token mint operations (transfers coming from the null address), filters those originated by the depositor address (0x8888...8888), summarize the events by recipient address, do some data formatting and send it to Absinthe.
+On each run, it gets all the HEMI token mint operations (transfers coming from the null address), filters those originated by the depositor address (0x8888...8888), summarizes the events by recipient address, does some data formatting and sends it to Absinthe.
 
-In order to walk through the history more efficiently, the service processes the blocks in chunks of 7200, which is roughly 1 day worth of Hemi Network blocks.
+In order to walk through the history more efficiently, the service processes the blocks in chunks of 7200, which is roughly 1 day's worth of Hemi Network blocks.
 Then it reports the results before taking care of the next chunk.
 The intended side-effect is to report points once per day, even during the initial run where many days need to be reported.
 
