@@ -17,4 +17,6 @@ CREATE TABLE btc_transaction_broadcast_request (
     created_at                  TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+CREATE INDEX ON btc_transaction_broadcast_request (last_broadcast_attempt_at) WHERE  broadcast_at IS NULL;
+
 COMMIT;
