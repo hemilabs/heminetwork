@@ -1065,7 +1065,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, seriali
 }
 
 // BtcTransactionBroadcastRequestGetNext returns all broadcast requests that
-//  1. was last attempted over 30 seconds ago
+//  1. was last attempted over 10 minutes ago
 //  2. AND have never been broadcasted
 func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context) ([]byte, error) {
 	log.Tracef("BtcTransactionBroadcastRequestGetNext")
