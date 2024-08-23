@@ -1067,6 +1067,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, seriali
 // BtcTransactionBroadcastRequestGetNext returns all broadcast requests that
 //  1. was last attempted over 10 minutes ago
 //  2. AND have never been broadcasted
+//  3. if it's two hours or more old, ignore
 func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context) ([]byte, error) {
 	log.Tracef("BtcTransactionBroadcastRequestGetNext")
 	defer log.Tracef("BtcTransactionBroadcastRequestGetNext exit")
@@ -1083,7 +1084,8 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context) ([]byt
 				last_broadcast_attempt_at < NOW() - INTERVAL '10 minutes'
 			)
 			AND broadcast_at IS NULL
-			ORDER BY created_at ASC
+			AND last_broadcast_attempt IS NULL OR last_broadcast_attempt > NOW() - INTERVAL '2 hours'
+			ORDER BY created_at DESC
 			LIMIT 1
 		)
 		RETURNING serialized_tx

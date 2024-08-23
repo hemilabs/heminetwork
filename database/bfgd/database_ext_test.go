@@ -2036,6 +2036,40 @@ func TestBtcTransactionBroadcastRequestGetNextAfter10Minutes(t *testing.T) {
 	}
 }
 
+func TestBtcTransactionBroadcastRequestGetNextAfter2Hours(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET last_broadcast_attempt_at = NOW() - INTERVAL '3 hours'")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if savedSerializedTx != nil {
+		t.Fatal("expected nil value")
+	}
+}
+
 func TestBtcTransactionBroadcastRequestGetNextAlreadyBroadcast(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
