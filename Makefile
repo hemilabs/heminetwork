@@ -43,7 +43,7 @@ go-deps:
 	go mod verify
 
 $(cmds):
-	go build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(GOBIN)/$@$(BIN_EXT) ./cmd/$@
+	go build -trimpath -ldflags "$(GO_LDFLAGS)" -o $(GOBIN)/$@ ./cmd/$@
 
 build:
 	go build ./...
