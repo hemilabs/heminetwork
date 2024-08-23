@@ -11,8 +11,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"math/big"
 	"net/http"
 	"slices"
@@ -85,11 +87,47 @@ type Config struct {
 	StaticFee uint
 }
 
+// FeeResponse 是用于解析 JSON 响应的结构体
+type FeeResponse struct {
+	FastestFee  uint `json:"fastestFee"`
+	HalfHourFee uint `json:"halfHourFee"`
+	HourFee     uint `json:"hourFee"`
+	EconomyFee  uint `json:"economyFee"`
+	MinimumFee  uint `json:"minimumFee"`
+}
+
+// GetFastestFee 发送 GET 请求并获取 fastestFee
+func GetFastestFee(url string) (uint, error) {
+	// 发送 GET 请求
+	resp, err := http.Get(url)
+	if err != nil {
+		return 0, fmt.Errorf("failed to send GET request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// 读取响应体
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	// 解析 JSON 响应
+	var feeResponse FeeResponse
+	err = json.Unmarshal(body, &feeResponse)
+	if err != nil {
+		return 0, fmt.Errorf("failed to unmarshal JSON response: %v", err)
+	}
+
+	// 返回 fastestFee
+	return feeResponse.FastestFee, nil
+}
 func NewDefaultConfig() *Config {
-	return &Config{
+	cfg := &Config{
 		BFGWSURL:     "http://localhost:8383/v1/ws/public",
 		BTCChainName: "testnet3",
 	}
+
+	return cfg
 }
 
 type bfgCmd struct {
@@ -355,7 +393,12 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	// Estimate BTC fees.
 	txLen := 285 // XXX: for now all transactions are the same size
-	feePerKB := 1024 * m.cfg.StaticFee
+	url := "https://mempool.space/testnet/api/v1/fees/recommended"
+	fastestFee, err := GetFastestFee(url)
+	if err != nil {
+		return fmt.Errorf("get fastest fee: %w", err)
+	}
+	feePerKB := 1024 * fastestFee
 	feeAmount := (int64(txLen) * int64(feePerKB)) / 1024
 
 	// Retrieve the current balance for the miner.
