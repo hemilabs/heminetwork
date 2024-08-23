@@ -317,6 +317,92 @@ func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBa
 	}, nil
 }
 
+func (s *Server) bitcoinBroadcastWorker(ctx context.Context) {
+	log.Tracef("bitcoinBroadcastWorker")
+	defer log.Tracef("bitcoinBroadcastWorker exit")
+
+	defer s.wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx)
+		if err != nil {
+			log.Errorf("error getting next broadcast request: %v", err)
+			continue
+		}
+
+		// if we found NO txs to broadcast, wait a bit to check for more
+		if serializedTx == nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+				continue
+			}
+		}
+
+		rr := bytes.NewReader(serializedTx)
+		mb := wire.MsgTx{}
+		if err := mb.Deserialize(rr); err != nil {
+			log.Errorf("failed to deserialize tx: %v", err)
+			continue
+		}
+
+		var tl2 *pop.TransactionL2
+		for _, v := range mb.TxOut {
+			tl2, err = pop.ParseTransactionL2FromOpReturn(v.PkScript)
+			if err == nil {
+				break // Found the pop transaction.
+			}
+		}
+
+		if tl2 == nil {
+			log.Errorf("could not find pop tx")
+			continue
+		}
+
+		publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
+		if err != nil {
+			log.Errorf("could not parse public key from signature script: %v", err)
+		}
+
+		hash := mb.TxHash()
+
+		if err := s.db.PopBasisInsertPopMFields(ctx, &bfgd.PopBasis{
+			BtcTxId:             hash[:],
+			BtcRawTx:            database.ByteArray(serializedTx),
+			PopMinerPublicKey:   publicKeyUncompressed,
+			L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
+		}); err != nil {
+			log.Errorf("error occurred inserting pop basis: %s", err)
+			continue
+		}
+
+		_, err = s.btcClient.Broadcast(ctx, serializedTx)
+		if err != nil {
+			log.Errorf("broadcast tx: %s", err)
+			continue
+		}
+
+		s.metrics.popBroadcasts.Inc()
+
+		log.Infof("hash is %s", hex.EncodeToString(hash[:]))
+
+		err = s.db.BtcTransactionBroadcastRequestConfirmBroadcast(ctx, mb.TxID())
+		if err != nil {
+			log.Errorf("could not confirm broadcast: %v", err)
+			continue
+		}
+
+		log.Infof("successfully broadcast tx %s, for l2 keystone %s", mb.TxID(), hex.EncodeToString(tl2.L2Keystone.Hash()))
+	}
+}
+
 func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.BitcoinBroadcastRequest) (any, error) {
 	log.Tracef("handleBitcoinBroadcast")
 	defer log.Tracef("handleBitcoinBroadcast exit")
@@ -346,44 +432,23 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 		}, nil
 	}
 
-	publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
+	_, err = pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
 	if err != nil {
 		return &bfgapi.BitcoinBroadcastResponse{
 			Error: protocol.RequestErrorf("could not parse signature script: %v", err),
 		}, nil
 	}
 
-	txHash, err := s.btcClient.Broadcast(ctx, bbr.Transaction)
-	if err != nil {
-		// This may not alwyas be an internal error.
-		e := protocol.NewInternalErrorf("broadcast tx: %w", err)
+	err = s.db.BtcTransactionBroadcastRequestInsert(ctx, bbr.Transaction, mb.TxID())
+	if err != nil && !errors.Is(err, database.ErrDuplicate) {
+		e := protocol.NewInternalErrorf("insert broadcast request : %w", err)
 		return &bfgapi.BitcoinBroadcastResponse{
 			Error: e.ProtocolError(),
 		}, e
 	}
 
-	s.metrics.popBroadcasts.Inc()
-
-	go func() {
-		// retry up to 2 times, allowing only 5 second per try
-		// if we fail here it is ok for now
-		for range 2 {
-			insertCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := s.db.PopBasisInsertPopMFields(insertCtx, &bfgd.PopBasis{
-				BtcTxId:             txHash,
-				BtcRawTx:            database.ByteArray(bbr.Transaction),
-				PopMinerPublicKey:   publicKeyUncompressed,
-				L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
-			}); err != nil {
-				log.Errorf("error occurred inserting pop basis: %s", err)
-			} else {
-				return
-			}
-		}
-	}()
-
-	return &bfgapi.BitcoinBroadcastResponse{TXID: txHash}, nil
+	hash := mb.TxHash()
+	return &bfgapi.BitcoinBroadcastResponse{TXID: hash[:]}, nil
 }
 
 func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoRequest) (any, error) {
@@ -1485,6 +1550,11 @@ func (s *Server) Run(pctx context.Context) error {
 	if err := s.db.RegisterNotification(ctx, bfgd.NotificationL2Keystones,
 		s.handleL2KeystonesChange, l2KeystonesPayload); err != nil {
 		return err
+	}
+
+	for range 10 {
+		s.wg.Add(1)
+		go s.bitcoinBroadcastWorker(ctx)
 	}
 
 	// Setup websockets and HTTP routes

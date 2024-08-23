@@ -1042,3 +1042,86 @@ func (p *pgdb) refreshBTCBlocksCanonical(ctx context.Context) error {
 
 	return nil
 }
+
+func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txId string) error {
+	log.Tracef("BtcTransactionBroadcastRequestInsert")
+	defer log.Tracef("BtcTransactionBroadcastRequestInsert exit")
+
+	const insertSql = `
+		INSERT INTO btc_transaction_broadcast_request 
+		(tx_id, serialized_tx)
+		VALUES ($1, $2)
+	`
+	_, err := p.db.ExecContext(ctx, insertSql, txId, serializedTx)
+	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code.Class().Name() == "integrity_constraint_violation" {
+			return database.DuplicateError(fmt.Sprintf("duplicate entry: %s", pgErr))
+		}
+		return fmt.Errorf("failed to insert btc_transaction_broadcast_request: %w", err)
+	}
+
+	return nil
+}
+
+// BtcTransactionBroadcastRequestGetNext returns all broadcast requests that
+//  1. was last attempted over 30 seconds ago
+//  2. AND have never been broadcasted
+func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context) ([]byte, error) {
+	log.Tracef("BtcTransactionBroadcastRequestGetNext")
+	defer log.Tracef("BtcTransactionBroadcastRequestGetNext exit")
+
+	const querySql = `
+		UPDATE btc_transaction_broadcast_request 
+		SET last_broadcast_attempt_at = NOW()
+		WHERE tx_id = (
+			SELECT tx_id FROM btc_transaction_broadcast_request
+			WHERE 
+			(
+				last_broadcast_attempt_at IS NULL
+				OR
+				last_broadcast_attempt_at < NOW() - INTERVAL '10 minutes'
+			)
+			AND broadcast_at IS NULL
+			ORDER BY created_at ASC
+			LIMIT 1
+		)
+		RETURNING serialized_tx
+	`
+	rows, err := p.db.QueryContext(ctx, querySql)
+	if err != nil {
+		return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %v", err)
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var serializedTx []byte
+		if err := rows.Scan(&serializedTx); err != nil {
+			return nil, err
+		}
+
+		return serializedTx, nil
+	}
+
+	return nil, nil
+}
+
+// BtcTransactionBroadcastRequestConfirmBroadcast sets a broadcast request to
+// "broadcasted" so it doesn't get attempted again
+func (p *pgdb) BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error {
+	log.Tracef("BtcTransactionBroadcastRequestConfirmBroadcast")
+	defer log.Tracef("BtcTransactionBroadcastRequestConfirmBroadcast exit")
+
+	const querySql = `
+		UPDATE btc_transaction_broadcast_request 
+		SET broadcast_at = NOW()
+		WHERE tx_id = $1
+	`
+	_, err := p.db.ExecContext(ctx, querySql, txId)
+	if err != nil {
+		return fmt.Errorf("could not confirm broadcast: %v", err)
+	}
+
+	return nil
+}
