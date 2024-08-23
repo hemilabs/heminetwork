@@ -1437,7 +1437,6 @@ func TestBitcoinUTXOs(t *testing.T) {
 // 2. call BitcoinBroadcast RPC on BFG
 // 3. ensure that a pop_basis was inserted with the expected values
 func TestBitcoinBroadcast(t *testing.T) {
-	t.Skip()
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {
 		db.Close()
@@ -1539,21 +1538,24 @@ func TestBitcoinBroadcast(t *testing.T) {
 
 	t.Logf("test hash is %s", hex.EncodeToString(btcTxId[:]))
 
-	diff := deep.Equal(popBases, []bfgd.PopBasis{
-		{
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
-			PopMinerPublicKey:   publicKeyUncompressed,
-			BtcRawTx:            btx,
-			BtcTxId:             btcTxId[:],
-			BtcMerklePath:       nil,
-			BtcHeaderHash:       nil,
-			PopTxId:             nil,
-			BtcTxIndex:          nil,
-		},
-	})
+	if len(popBases) != 1 {
+		t.Fatalf("unexpected length %d", len(popBases))
+	}
 
-	if len(diff) > 0 {
-		t.Fatalf("unexpected diff: %s", diff)
+	if !slices.Equal(popBases[0].L2KeystoneAbrevHash, hemi.L2KeystoneAbbreviate(l2Keystone).Hash()) {
+		t.Fatalf("%v != %v", popBases[0].L2KeystoneAbrevHash, hemi.L2KeystoneAbbreviate(l2Keystone).Hash())
+	}
+
+	if !slices.Equal(popBases[0].PopMinerPublicKey, publicKeyUncompressed) {
+		t.Fatalf("%v != %v", popBases[0].PopMinerPublicKey, publicKeyUncompressed)
+	}
+
+	if !slices.Equal(popBases[0].BtcRawTx, btx) {
+		t.Fatalf("%v != %v", popBases[0].BtcRawTx, btx)
+	}
+
+	if !slices.Equal(popBases[0].BtcTxId, btcTxId[:]) {
+		t.Fatalf("%v != %v", popBases[0].BtcTxId, btcTxId[:])
 	}
 }
 

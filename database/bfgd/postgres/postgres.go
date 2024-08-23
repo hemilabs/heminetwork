@@ -1085,7 +1085,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context) ([]byt
 			)
 			AND broadcast_at IS NULL
 			AND created_at > NOW() - INTERVAL '2 hours'
-			ORDER BY created_at DESC
+			ORDER BY created_at ASC
 			LIMIT 1
 		)
 		RETURNING serialized_tx
