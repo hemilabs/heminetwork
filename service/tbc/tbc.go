@@ -451,8 +451,8 @@ func (s *Server) peerManager(ctx context.Context) error {
 					continue
 				}
 
-				// Increment x before add since we want to move
-				// on to the next element in case the peer is
+				// Increment x before peer add since we want to
+				// move on to the next seed in case the peer is
 				// already in connected.
 				x++
 				if x >= len(seeds) {
