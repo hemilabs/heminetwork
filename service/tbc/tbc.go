@@ -52,9 +52,10 @@ const (
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
-	defaultCmdTimeout          = 4 * time.Second
-	defaultPingTimeout         = 3 * time.Second
-	defaultBlockPendingTimeout = 17 * time.Second
+	defaultCmdTimeout                 = 4 * time.Second
+	defaultPingTimeout                = 3 * time.Second
+	defaultBlockPendingTimeout        = 17 * time.Second
+	defaultBlockHeadersPendingTimeout = 7 * time.Second
 
 	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
 )
@@ -200,7 +201,8 @@ type Server struct {
 	pm *PeerManager
 
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
-	pings  *ttl.TTL // outstanding pings
+	// blockHeaders *ttl.TTL // outstanding block header downloads
+	pings *ttl.TTL // outstanding pings
 
 	// reentrancy flags for the indexers
 	// utxoIndexerRunning bool
@@ -236,11 +238,16 @@ func NewServer(cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	//blockHeaders, err := ttl.New(cfg.PeersWanted, true)
+	//if err != nil {
+	//	return nil, err
+	//}
 	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
-		cfg:            cfg,
-		printTime:      time.Now().Add(10 * time.Second),
-		blocks:         blocks,
+		cfg:       cfg,
+		printTime: time.Now().Add(10 * time.Second),
+		blocks:    blocks,
+		// blockHeaders:   blockHeaders,
 		peers:          make(map[string]*peer, cfg.PeersWanted),
 		pm:             newPeerManager(),
 		pings:          pings,
@@ -298,6 +305,9 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash [80]byt
 	if err = p.write(defaultCmdTimeout, ghs); err != nil {
 		return fmt.Errorf("write get headers: %w", err)
 	}
+
+	// s.blockHeaders.Put(ctx, defaultBlockHeadersPendingTimeout, hash.String(), p,
+	//	s.blockHeadersExpired, nil)
 
 	return nil
 }
@@ -450,13 +460,10 @@ func (s *Server) peerManager(ctx context.Context) error {
 					log.Errorf("new peer: %v", err)
 					continue
 				}
-				if err := s.peerAdd(peer); err != nil {
-					log.Tracef("add peer: %v", err)
-					continue
-				}
 
-				go s.peerConnect(ctx, peerC, peer)
-
+				// Increment x before add since we want to move
+				// on to the next element in case the peer is
+				// already in connected.
 				x++
 				if x >= len(seeds) {
 					// XXX duplicate code from above
@@ -471,6 +478,12 @@ func (s *Server) peerManager(ctx context.Context) error {
 					}
 					x = 0
 				}
+
+				if err := s.peerAdd(peer); err != nil {
+					log.Debugf("add peer: %v", err)
+					continue
+				}
+				go s.peerConnect(ctx, peerC, peer)
 			}
 		}
 
@@ -484,13 +497,19 @@ func (s *Server) peerManager(ctx context.Context) error {
 			return ctx.Err()
 		case address := <-peerC:
 			// peer exited, connect to new one
+			log.Debugf("peerDelete %v", address)
 			s.peerDelete(address)
 
+			// Expire all blocks headersfor peer
+			//bhn := s.blockHeaders.DeleteByValue(func(p any) bool {
+			//	return p.(*peer).address == address
+			//})
 			// Expire all blocks for peer
 			n := s.blocks.DeleteByValue(func(p any) bool {
 				return p.(*peer).address == address
 			})
-			log.Debugf("peer exited: %v blocks canceled: %v", address, n)
+			log.Debugf("peer exited: %v blocks canceled: %v",
+				address, n)
 		case <-loopTicker.C:
 			log.Debugf("pinging active peers: %v", s.peersLen())
 			go s.pingAllPeers(ctx)
@@ -729,35 +748,38 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// We must check the initial get headers response. If
 			// we asked for an unknown tip we'll get genesis back.
 			// This indicates that our tip is forked,
-			if len(m.Headers) == 0 {
-				// XXX deal with this
-				panic(fmt.Sprintf("%v: no headers", p))
-				continue
-			}
+			log.Infof("headers %v", len(m.Headers))
+			if len(m.Headers) > 0 {
+				// Check if best block header links and is not genesis
+				h0 := m.Headers[0].PrevBlock
+				if !bhb.BlockHash().IsEqual(&h0) &&
+					s.chainParams.GenesisHash.IsEqual(&h0) {
+					log.Infof("%v: bhb %v", p, bhb.BlockHash())
+					log.Infof("%v: h0 %v", p, h0)
 
-			// Check if best block header links and is not genesis
-			h0 := m.Headers[0].PrevBlock
-			if !bhb.BlockHash().IsEqual(&h0) &&
-				s.chainParams.GenesisHash.IsEqual(&h0) {
-				log.Infof("%v: bhb %v", p, bhb.BlockHash())
-				log.Infof("%v: h0 %v", p, h0)
-
-				nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
-				if err != nil {
-					panic(err) // XXX
+					nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
+					if err != nil {
+						panic(err) // XXX
+					}
+					bhb = nbh
+					log.Infof("Fork detected %v: walking chain back to: %v",
+						p, bhb)
+					if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
+						panic(err) // XXX this needs to be a log and exit
+						// return
+					}
+					continue
 				}
-				bhb = nbh
-				log.Infof("Fork detected %v: walking chain back to: %v",
-					p, bhb)
-				if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
-					panic(err) // XXX this needs to be a log and exit
-					// return
-				}
-				continue
-			}
 
-			// Kick off headers download in main loop
-			go s.handleHeaders(ctx, p, m)
+				// Kick off headers download in main loop
+				panic("x")
+				go s.handleHeaders(ctx, p, m)
+			} else {
+				// We are caught up so kick of handleHeaders
+				// with 0 headers so that block download
+				// starts.
+				go s.handleHeaders(ctx, p, m)
+			}
 
 			// All done bringing up peer.
 			headersSeen = true
@@ -954,6 +976,21 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 	}
 }
 
+func (s *Server) blockHeadersExpired(key any, value any) {
+	log.Infof("blockHeadersExpired")
+	defer log.Infof("blockHeadersExpired exit")
+
+	p, ok := value.(*peer)
+	if !ok {
+		// this really should not happen
+		log.Errorf("block headers expired no peer: %v", key)
+		return
+	}
+	log.Infof("block headers expired %v: %v", p, key)
+
+	p.close() // this will tear down peer and kick of new headers download
+}
+
 // blockExpired expires a block download and kills the peer.
 func (s *Server) blockExpired(key any, value any) {
 	log.Tracef("blockExpired")
@@ -1060,6 +1097,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 }
 
 func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeaders) {
+	log.Infof("handleHeaders (%v): %v", p, len(msg.Headers))
 	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
@@ -1075,6 +1113,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 		return
 	}
+
+	// s.blockHeaders.Delete(msg.Headers[0].BlockHash().String()) // remove block headers from TTL
 
 	// This code works because duplicate blockheaders are rejected later on
 	// but only after a somewhat expensive parameter setup and database
@@ -1103,6 +1143,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			// We already have these headers. Ask for best headers
 			// despite racing with other peers. We do that to
 			// preven stalling the download.
+			return
+			log.Infof("%p: dup", p)
 			bhb, err := s.db.BlockHeaderBest(ctx)
 			if err != nil {
 				log.Errorf("block headers best %v: %v", p, err)
