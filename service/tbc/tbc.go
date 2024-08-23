@@ -748,7 +748,6 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// We must check the initial get headers response. If
 			// we asked for an unknown tip we'll get genesis back.
 			// This indicates that our tip is forked,
-			log.Infof("headers %v", len(m.Headers))
 			if len(m.Headers) > 0 {
 				// Check if best block header links and is not genesis
 				h0 := m.Headers[0].PrevBlock
@@ -768,11 +767,11 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 						panic(err) // XXX this needs to be a log and exit
 						// return
 					}
+					// Wait for next headers message.
 					continue
 				}
 
 				// Kick off headers download in main loop
-				panic("x")
 				go s.handleHeaders(ctx, p, m)
 			} else {
 				// We are caught up so kick of handleHeaders
@@ -787,7 +786,6 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	}
 
 	// Only now can we consider the peer connected
-	log.Infof("Peer connected: %v", p)
 	log.Debugf("Peer connected: %v", p)
 
 	for {
@@ -1097,7 +1095,6 @@ func (s *Server) syncBlocks(ctx context.Context) {
 }
 
 func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeaders) {
-	log.Infof("handleHeaders (%v): %v", p, len(msg.Headers))
 	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
