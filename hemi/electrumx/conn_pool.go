@@ -112,7 +112,9 @@ func (p *connPool) acquireConn() (*clientConn, error) {
 
 	if c != nil {
 		// Successfully acquired a connection from the pool.
-		c.metrics.connsIdle.Dec()
+		if c.metrics != nil {
+			c.metrics.connsIdle.Dec()
+		}
 		return c, nil
 	}
 
@@ -144,7 +146,9 @@ func (p *connPool) freeConn(conn *clientConn) {
 
 	p.pool = append(p.pool, conn)
 	p.poolMx.Unlock()
-	p.metrics.connsIdle.Inc()
+	if p.metrics != nil {
+		p.metrics.connsIdle.Inc()
+	}
 }
 
 // size returns the number of connections in the pool.
