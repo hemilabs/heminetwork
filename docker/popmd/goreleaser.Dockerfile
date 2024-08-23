@@ -3,24 +3,16 @@
 # which can be found in the LICENSE file.
 
 # Build stage
-FROM golang:1.22.6-alpine3.20@sha256:1a478681b671001b7f029f94b5016aed984a23ad99c707f6a0ab6563860ae2f3 AS builder
+FROM alpine:3.20.2@sha256:0a4eaa0eecf5f8c050e5bba433f58c052be7587ee8af3e8b3910ef9ab5fbe9f5 AS builder
 
-ARG GO_LDFLAGS
-
-# Add ca-certificates, timezone data, make and git
-RUN apk --no-cache add --update ca-certificates tzdata make git
+# Add ca-certificates, timezone data
+RUN apk --no-cache add --update ca-certificates tzdata
 
 # Create non-root user
 RUN addgroup --gid 65532 popmd && \
     adduser --disabled-password --gecos "" \
         --home "/etc/popmd/" --shell "/sbin/nologin" \
         -G popmd --uid 65532 popmd
-
-WORKDIR /build/
-COPY . .
-
-RUN make deps
-RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" popmd
 
 # Run stage
 FROM scratch
@@ -52,7 +44,7 @@ COPY --from=builder /etc/group /etc/group
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=builder /build/bin/popmd /usr/local/bin/popmd
+COPY popmd /usr/local/bin/popmd
 
 # Environment variables
 ENV POPM_LOG_LEVEL=""

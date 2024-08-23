@@ -3,24 +3,16 @@
 # which can be found in the LICENSE file.
 
 # Build stage
-FROM golang:1.22.6-alpine3.20@sha256:1a478681b671001b7f029f94b5016aed984a23ad99c707f6a0ab6563860ae2f3 AS builder
+FROM alpine:3.20.2@sha256:0a4eaa0eecf5f8c050e5bba433f58c052be7587ee8af3e8b3910ef9ab5fbe9f5 AS builder
 
-ARG GO_LDFLAGS
-
-# Add ca-certificates, timezone data, make and git
-RUN apk --no-cache add --update ca-certificates tzdata make git
+# Add ca-certificates, timezone data
+RUN apk --no-cache add --update ca-certificates tzdata
 
 # Create non-root user
-RUN addgroup --gid 65532 popmd && \
+RUN addgroup --gid 65532 bfgd && \
     adduser --disabled-password --gecos "" \
-        --home "/etc/popmd/" --shell "/sbin/nologin" \
-        -G popmd --uid 65532 popmd
-
-WORKDIR /build/
-COPY . .
-
-RUN make deps
-RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" popmd
+        --home "/etc/bfgd/" --shell "/sbin/nologin" \
+        -G bfgd --uid 65532 bfgd
 
 # Run stage
 FROM scratch
@@ -37,9 +29,9 @@ LABEL org.opencontainers.image.created=$BUILD_DATE \
       org.opencontainers.image.revision=$VCS_REF \
       org.opencontainers.image.vendor="Hemi Labs" \
       org.opencontainers.image.licenses="MIT" \
-      org.opencontainers.image.title="PoP Miner" \
+      org.opencontainers.image.title="Bitcoin Finality Govener" \
       org.label-schema.build-date=$BUILD_DATE \
-      org.label-schema.name="PoP Miner" \
+      org.label-schema.name="Bitcoin Finality Govener" \
       org.label-schema.url="https://github.com/hemilabs/heminetwork" \
       org.label-schema.vcs-url="https://github.com/hemilabs/heminetwork" \
       org.label-schema.vcs-ref=$VCS_REF \
@@ -52,18 +44,19 @@ COPY --from=builder /etc/group /etc/group
 COPY --from=builder /etc/passwd /etc/passwd
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-COPY --from=builder /build/bin/popmd /usr/local/bin/popmd
+COPY bfgd /usr/local/bin/bfgd
 
 # Environment variables
-ENV POPM_LOG_LEVEL=""
-ENV POPM_BTC_PRIVKEY=""
-ENV POPM_BFG_URL=""
-ENV POPM_BTC_CHAIN_NAME=""
-ENV POPM_PROMETHEUS_ADDRESS=""
-ENV POPM_PPROF_ADDRESS=""
-ENV POPM_REMINE_THRESHOLD=""
-ENV POPM_STATIC_FEE=""
+ENV BFG_EXBTC_ADDRESS=""
+ENV BFG_PUBLIC_KEY_AUTH=""
+ENV BFG_BTC_START_HEIGHT=""
+ENV BFG_LOG_LEVEL=""
+ENV BFG_POSTGRES_URI=""
+ENV BFG_PUBLIC_ADDRESS=""
+ENV BFG_PRIVATE_ADDRESS=""
+ENV BFG_PROMETHEUS_ADDRESS=""
+ENV BFG_PPROF_ADDRESS=""
 
-USER popmd:popmd
-WORKDIR /etc/popmd/
-ENTRYPOINT ["/usr/local/bin/popmd"]
+USER bfgd:bfgd
+WORKDIR /etc/bfgd/
+ENTRYPOINT ["/usr/local/bin/bfgd"]

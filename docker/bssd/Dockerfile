@@ -55,11 +55,11 @@ COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /build/bin/bssd /usr/local/bin/bssd
 
 # Environment variables
-ENV BSS_BFG_URL=
-ENV BSS_ADDRESS=
-ENV BSS_LOG_LEVEL=
-ENV BSS_PROMETHEUS_ADDRESS=
-ENV BSS_PPROF_ADDRESS=
+ENV BSS_BFG_URL=""
+ENV BSS_ADDRESS=""
+ENV BSS_LOG_LEVEL=""
+ENV BSS_PROMETHEUS_ADDRESS=""
+ENV BSS_PPROF_ADDRESS=""
 
 USER bssd:bssd
 WORKDIR /etc/bssd/

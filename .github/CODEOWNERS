@@ -35,3 +35,6 @@
 
 # Release script
 /scripts/release.sh @hemilabs/dev @joshuasing
+
+# GoReleaser config
+.goreleaser.yaml @hemilabs/dev @joshuasing
