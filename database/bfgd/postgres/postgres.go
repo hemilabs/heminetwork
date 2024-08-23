@@ -1084,7 +1084,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context) ([]byt
 				last_broadcast_attempt_at < NOW() - INTERVAL '10 minutes'
 			)
 			AND broadcast_at IS NULL
-			AND last_broadcast_attempt IS NULL OR last_broadcast_attempt > NOW() - INTERVAL '2 hours'
+			AND created_at > NOW() - INTERVAL '2 hours'
 			ORDER BY created_at DESC
 			LIMIT 1
 		)

@@ -2055,7 +2055,7 @@ func TestBtcTransactionBroadcastRequestGetNextAfter2Hours(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET last_broadcast_attempt_at = NOW() - INTERVAL '3 hours'")
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '3 hours'")
 	if err != nil {
 		t.Fatal(err)
 	}
