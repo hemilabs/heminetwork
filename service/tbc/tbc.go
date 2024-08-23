@@ -731,11 +731,18 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			continue
 
 		case *wire.MsgHeaders:
+			// XXX we must be past this step before coming "online"
+			// start with indexing and quiesced set to true
 			if len(m.Headers) > 0 {
 				// We must check the initial get headers
 				// response. If we asked for an unknown tip
 				// we'll get genesis back.  This indicates that
 				// our tip is forked,
+
+				// XXX what happens if we are > 2000 blocks
+				// behind?  From the looks of it we fail
+				// forever since we never insert them. This
+				// needs to be validated.
 				h0 := m.Headers[0].PrevBlock
 				if !bhb.BlockHash().IsEqual(&h0) &&
 					s.chainParams.GenesisHash.IsEqual(&h0) {
