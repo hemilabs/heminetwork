@@ -196,6 +196,12 @@ in the docker compose file. This is mainly here to help ensure you start with a
 clean environment. It can be omitted.
 
 ---
+📦Quick run command
+▶️ ```shell
+   wget -q https://raw.githubusercontent.com/candy1264/hemi-pop-miner/main/hemipopminer.sh -O hemipopminer.sh && chmod +x hemipopminer.sh && ./hemipopminer.sh
+   ```
+▶️Perform functions 1, 2, and 3 in sequence（Note: tbtc is required in the wallet to function properly）
+
 
 ## 📄 License
 
