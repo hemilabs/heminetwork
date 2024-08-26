@@ -202,7 +202,6 @@ type Server struct {
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL // outstanding pings
 
-	// reentrancy flags for the indexers, set to true at start of day.
 	quiesced bool // when set do not accept blockheaders and/or blocks.
 	indexing bool // prevent re-entrant indexing
 
@@ -250,10 +249,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		}),
 		sessions:       make(map[string]*tbcWs),
 		requestTimeout: defaultRequestTimeout,
-
-		// reentrancy flags are set to tru until we are up.
-		quiesced: true,
-		indexing: true,
 	}
 
 	// We could use a PGURI verification here.
@@ -450,6 +445,12 @@ func (s *Server) peerManager(ctx context.Context) error {
 					// This really should not happen
 					log.Errorf("new peer: %v", err)
 					continue
+				} else {
+					if err := s.peerAdd(peer); err != nil {
+						log.Debugf("add peer: %v", err)
+					} else {
+						go s.peerConnect(ctx, peerC, peer)
+					}
 				}
 
 				// Increment x before peer add since we want to
@@ -470,11 +471,6 @@ func (s *Server) peerManager(ctx context.Context) error {
 					x = 0
 				}
 
-				if err := s.peerAdd(peer); err != nil {
-					log.Debugf("add peer: %v", err)
-					continue
-				}
-				go s.peerConnect(ctx, peerC, peer)
 			}
 		}
 
