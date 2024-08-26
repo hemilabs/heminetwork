@@ -484,7 +484,6 @@ func (s *Server) peerManager(ctx context.Context) error {
 			return ctx.Err()
 		case address := <-peerC:
 			// peer exited, connect to new one
-			log.Debugf("peerDelete %v", address)
 			s.peerDelete(address)
 
 			// Expire all blocks for peer

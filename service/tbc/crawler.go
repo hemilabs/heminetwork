@@ -981,7 +981,6 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 }
 
 func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
-	log.Infof("UtxoIndexIsLinear")
 	log.Tracef("UtxoIndexIsLinear")
 	defer log.Tracef("UtxoIndexIsLinear exit")
 
@@ -1001,7 +1000,6 @@ func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 }
 
 func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
-	log.Infof("TxIndexIsLinear")
 	log.Tracef("TxIndexIsLinear")
 	defer log.Tracef("TxIndexIsLinear exit")
 
@@ -1044,9 +1042,9 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 	}
 
 	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
-	log.Infof("startBH %v %v", startBH, startBH.Difficulty)
-	log.Infof("endBH %v %v", endBH, endBH.Difficulty)
-	log.Infof("direction %v", direction)
+	log.Debugf("startBH %v %v", startBH, startBH.Difficulty)
+	log.Debugf("endBH %v %v", endBH, endBH.Difficulty)
+	log.Debugf("direction %v", direction)
 
 	// Expensive linear test, this needs some performance love. We can
 	// memoize it keep snapshot heights whereto we know the chain is
@@ -1063,6 +1061,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		e = endBH.BlockHash()
 	default:
 		// This is a fork and thus not linear.
+		// XXX remove this once we determine if ErrNotLinear can happen here.
 		log.Infof("startBH %v %v", startBH, startBH.Difficulty)
 		log.Infof("endBH %v %v", endBH, endBH.Difficulty)
 		log.Infof("direction %v", direction)
