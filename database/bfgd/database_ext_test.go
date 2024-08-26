@@ -1993,7 +1993,7 @@ func TestBtcTransactionBroadcastRequestGetNextBefore10Minutes(t *testing.T) {
 	}
 }
 
-func TestBtcTransactionBroadcastRequestGetNextAfter10Minutes(t *testing.T) {
+func TestBtcTransactionBroadcastRequestGetNextRetry(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
@@ -2021,12 +2021,12 @@ func TestBtcTransactionBroadcastRequestGetNextAfter10Minutes(t *testing.T) {
 		t.Fatalf("slices to do match: %v != %v", serializedTx, savedSerializedTx)
 	}
 
-	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET last_broadcast_attempt_at = NOW() - INTERVAL '11 minutes'")
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET next_broadcast_attempt_at = NOW()")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err = db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	savedSerializedTx, err = db.BtcTransactionBroadcastRequestGetNext(ctx, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2055,7 +2055,7 @@ func TestBtcTransactionBroadcastRequestGetNextAfter2Hours(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '3 hours'")
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '31 minutes'")
 	if err != nil {
 		t.Fatal(err)
 	}
