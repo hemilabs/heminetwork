@@ -20,14 +20,14 @@ import (
 )
 
 const (
-	bfgdVersion = 8
+	bfgdVersion = 9
 
 	logLevel = "INFO"
 	verbose  = false
 )
 
 const effectiveHeightSql = `
-	COALESCE((SELECT MIN(height)
+	COALESCE((SELECT height
 
 	FROM 
 	(
@@ -38,6 +38,7 @@ const effectiveHeightSql = `
 				= pop_basis.l2_keystone_abrev_hash
 
 		WHERE ll.l2_block_number >= l2_keystones.l2_block_number
+		ORDER BY height ASC LIMIT 1
 	)), 0)
 `
 
@@ -808,7 +809,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.ep_hash,
 			l2_keystones.version,
 			%s,
-			COALESCE((SELECT MAX(height) FROM btc_blocks_can),0)
+			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
 
 		FROM l2_keystones
 		LEFT JOIN pop_basis ON l2_keystones.l2_keystone_abrev_hash 
