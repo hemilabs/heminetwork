@@ -740,7 +740,7 @@ func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer test
 	return buf.String()[8 : len(buf.String())-1], nil
 }
 
-func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container) string {
+func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container) *chainhash.Hash {
 	blockHash, err := runBitcoinCommand(
 		ctx,
 		t,
@@ -780,7 +780,11 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 		t.Fatal("was expecting at least 1 transaction")
 	}
 
-	return parsed.Tx[0]
+	hash, err := chainhash.NewHashFromStr(parsed.Tx[0])
+	if err != nil {
+		t.Fatalf("failed to parse tx hash: %v", err)
+	}
+	return hash
 }
 
 func nextPort(ctx context.Context, t *testing.T) int {

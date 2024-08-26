@@ -6,16 +6,13 @@ package tbc
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
@@ -1007,15 +1004,9 @@ func TestTxByIdRaw(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	slices.Reverse(txIdBytes) // convert to natural order
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1047,8 +1038,9 @@ func TestTxByIdRaw(t *testing.T) {
 	}
 
 	// is the hash equal to what we queried for?
-	if tx.TxHash().String() != txId {
-		t.Fatalf("id mismatch: %s != %s", tx.TxHash().String(), txId)
+	txHash := tx.TxHash()
+	if !txId.IsEqual(&txHash) {
+		t.Fatalf("id mismatch: %s != %s", txHash, txId)
 	}
 }
 
@@ -1094,17 +1086,10 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txIdBytes[0]++
-
-	slices.Reverse(txIdBytes) // convert to natural order
+	txId[0]++
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1190,17 +1175,10 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txIdBytes = append(txIdBytes, 8)
-
-	slices.Reverse(txIdBytes) // convert to natural order
+	txId[len(txId)-1] = 8
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1274,19 +1252,8 @@ func TestTxById(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	slices.Reverse(txIdBytes)
-
-	ctxid, err := chainhash.NewHash(txIdBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: ctxid[:],
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1308,7 +1275,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(response.Error.Message)
 	}
 
-	tx, err := tbcServer.TxById(ctx, ctxid)
+	tx, err := tbcServer.TxById(ctx, txId)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1362,15 +1329,10 @@ func TestTxByIdInvalid(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txIdBytes[0]++
+	txId[0]++
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1457,15 +1419,10 @@ func TestTxByIdNotFound(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txIdBytes = append(txIdBytes, 8)
+	txId[len(txId)-1] = 8
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
