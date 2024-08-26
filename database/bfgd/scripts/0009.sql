@@ -14,6 +14,7 @@ CREATE TABLE btc_transaction_broadcast_request (
     serialized_tx               BYTEA NOT NULL,
     broadcast_at                TIMESTAMP,
     last_broadcast_attempt_at   TIMESTAMP,
+    next_broadcast_attempt_at   TIMESTAMP,
     created_at                  TIMESTAMP NOT NULL DEFAULT NOW()
 );
 

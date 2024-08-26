@@ -43,7 +43,7 @@ type Database interface {
 	AccessPublicKeyDelete(ctx context.Context, publicKey *AccessPublicKey) error
 
 	BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txId string) error
-	BtcTransactionBroadcastRequestGetNext(ctx context.Context) ([]byte, error)
+	BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error)
 	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
 }
 

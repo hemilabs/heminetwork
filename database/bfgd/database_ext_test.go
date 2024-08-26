@@ -1888,7 +1888,7 @@ func TestBtcTransactionBroadcastRequestGetNext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1925,7 +1925,7 @@ func TestBtcTransactionBroadcastRequestGetNextMultiple(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1934,7 +1934,7 @@ func TestBtcTransactionBroadcastRequestGetNextMultiple(t *testing.T) {
 		t.Fatalf("slices to do match: %v != %v", serializedTx, savedSerializedTx)
 	}
 
-	savedSerializedTx2, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx2, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1943,7 +1943,7 @@ func TestBtcTransactionBroadcastRequestGetNextMultiple(t *testing.T) {
 		t.Fatalf("slices to do match: %v != %v", serializedTx2, savedSerializedTx2)
 	}
 
-	savedSerializedTx3, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx3, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1972,7 +1972,7 @@ func TestBtcTransactionBroadcastRequestGetNextBefore10Minutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1983,7 +1983,7 @@ func TestBtcTransactionBroadcastRequestGetNextBefore10Minutes(t *testing.T) {
 
 	// we should have set the fields on the last get, should not be able to
 	// get and process twice
-	savedSerializedTx, err = db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err = db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2012,7 +2012,7 @@ func TestBtcTransactionBroadcastRequestGetNextAfter10Minutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2026,7 +2026,7 @@ func TestBtcTransactionBroadcastRequestGetNextAfter10Minutes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err = db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err = db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2060,7 +2060,7 @@ func TestBtcTransactionBroadcastRequestGetNextAfter2Hours(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2094,7 +2094,7 @@ func TestBtcTransactionBroadcastRequestGetNextAlreadyBroadcast(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2128,7 +2128,7 @@ func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx)
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 	if err != nil {
 		t.Fatal(err)
 	}

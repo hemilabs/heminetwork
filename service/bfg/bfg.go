@@ -317,7 +317,7 @@ func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBa
 	}, nil
 }
 
-func (s *Server) bitcoinBroadcastWorker(ctx context.Context) {
+func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) {
 	log.Tracef("bitcoinBroadcastWorker")
 	defer log.Tracef("bitcoinBroadcastWorker exit")
 
@@ -330,7 +330,11 @@ func (s *Server) bitcoinBroadcastWorker(ctx context.Context) {
 		default:
 		}
 
-		serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx)
+		// being "not high priority" means that we're "retrying" a transaction
+		if !highPriority {
+		}
+
+		serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, true)
 		if err != nil {
 			log.Errorf("error getting next broadcast request: %v", err)
 			continue
@@ -1552,9 +1556,9 @@ func (s *Server) Run(pctx context.Context) error {
 		return err
 	}
 
-	for range 10 {
+	for _, p := range []bool{true, false} {
 		s.wg.Add(1)
-		go s.bitcoinBroadcastWorker(ctx)
+		go s.bitcoinBroadcastWorker(ctx, p)
 	}
 
 	// Setup websockets and HTTP routes

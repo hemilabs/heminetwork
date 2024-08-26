@@ -1064,32 +1064,34 @@ func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, seriali
 	return nil
 }
 
-// BtcTransactionBroadcastRequestGetNext returns all broadcast requests that
-//  1. was last attempted over 10 minutes ago
-//  2. AND have never been broadcasted
-//  3. if it's two hours or more old, ignore
-func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context) ([]byte, error) {
+// BtcTransactionBroadcastRequestGetNext
+func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error) {
 	log.Tracef("BtcTransactionBroadcastRequestGetNext")
 	defer log.Tracef("BtcTransactionBroadcastRequestGetNext exit")
 
-	const querySql = `
+	onlyNewClause := " next_broadcast_attempt IS NOT NULL AND next_broadcast_attempt < NOW() "
+	if onlyNew {
+		onlyNewClause = " next_broadcast_attempt IS NULL "
+	}
+
+	querySql := fmt.Sprintf(`
 		UPDATE btc_transaction_broadcast_request 
-		SET last_broadcast_attempt_at = NOW()
+		SET last_broadcast_attempt_at = NOW(), 
+		
+		next_broadcast_attempt = NOW() + INTERVAL '1 minute' + RANDOM() * INTERVAL '60 seconds' 
+		
 		WHERE tx_id = (
 			SELECT tx_id FROM btc_transaction_broadcast_request
 			WHERE 
-			(
-				last_broadcast_attempt_at IS NULL
-				OR
-				last_broadcast_attempt_at < NOW() - INTERVAL '10 minutes'
-			)
+			%s
 			AND broadcast_at IS NULL
-			AND created_at > NOW() - INTERVAL '2 hours'
+			AND created_at > NOW() - INTERVAL '30 minutes'
 			ORDER BY created_at ASC
 			LIMIT 1
 		)
 		RETURNING serialized_tx
-	`
+	`, onlyNewClause)
+
 	rows, err := p.db.QueryContext(ctx, querySql)
 	if err != nil {
 		return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %v", err)
