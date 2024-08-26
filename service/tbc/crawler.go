@@ -605,7 +605,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	}
 	direction, err := s.UtxoIndexIsLinear(ctx, endHash)
 	if err != nil {
-		return fmt.Errorf("TxIndexIsLinear: %w", err)
+		return fmt.Errorf("UtxoIndexIsLinear: %w", err)
 	}
 	switch direction {
 	case 1:
@@ -1061,6 +1061,10 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		e = endBH.BlockHash()
 	default:
 		// This is a fork and thus not linear.
+		// XXX remove this once we determine if ErrNotLinear can happen here.
+		log.Infof("startBH %v %v", startBH, startBH.Difficulty)
+		log.Infof("endBH %v %v", endBH, endBH.Difficulty)
+		log.Infof("direction %v", direction)
 		return 0, ErrNotLinear
 	}
 	for {
