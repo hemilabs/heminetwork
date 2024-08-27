@@ -347,8 +347,6 @@ func (s *Server) bitcoinBroadcastWorker(ctxI context.Context, highPriority bool)
 			select {
 			case <-time.After(5 * time.Second):
 				continue
-			case <-ctxI.Done():
-				return
 			}
 		}
 

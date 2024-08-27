@@ -262,7 +262,7 @@ func New(ctx context.Context, puri string, version int) (*Database, error) {
 	}
 	pool.SetConnMaxLifetime(0)
 	pool.SetMaxIdleConns(5)
-	pool.SetMaxOpenConns(100)
+	pool.SetMaxOpenConns(5)
 	if err := pool.PingContext(ctx); err != nil {
 		return nil, fmt.Errorf("unable to connect to database: %w", err)
 	}
