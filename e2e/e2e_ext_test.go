@@ -750,6 +750,8 @@ func TestNewL2Keystone(t *testing.T) {
 
 	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(l2KeystoneRequest.L2Keystone).Hash()
 
+	time.Sleep(2 * time.Second)
+
 	// 3
 	l2KeystoneSavedDB, err := db.L2KeystoneByAbrevHash(ctx, [32]byte(l2KeystoneAbrevHash))
 	if err != nil {
@@ -817,6 +819,8 @@ func TestL2Keystone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	time.Sleep(2 * time.Second)
 
 	l2KeystonesRequest := bfgapi.L2KeystonesRequest{
 		NumL2Keystones: 5,
@@ -2513,6 +2517,8 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
+	time.Sleep(2 * time.Second)
+
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
 	if err != nil {
@@ -2603,6 +2609,8 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
 	}
+
+	time.Sleep(2 * time.Second)
 
 	finalityRequest := bfgapi.BTCFinalityByRecentKeystonesRequest{
 		NumRecentKeystones: 100,

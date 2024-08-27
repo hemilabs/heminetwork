@@ -341,6 +341,17 @@ func (s *Server) bitcoinBroadcastWorker(ctxI context.Context, highPriority bool)
 			continue
 		}
 
+		// if there are no new serialized txs, backoff a bit
+		if serializedTx == nil {
+			cancel()
+			select {
+			case <-time.After(5 * time.Second):
+				continue
+			case <-ctxI.Done():
+				return
+			}
+		}
+
 		rr := bytes.NewReader(serializedTx)
 		mb := wire.MsgTx{}
 		if err := mb.Deserialize(rr); err != nil {
