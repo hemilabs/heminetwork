@@ -687,6 +687,11 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 	// Before we can consider a peer connected we must ensure we receive
 	// headers and ensure we are not sitting on a fork.
+
+	// XXX I truly hate having two main loops. We need to create a
+	// start-of-day function where we connect to 3 or so peers and then we
+	// reconcile potential forks at startup. Once that phase is complete we
+	// go into the main loop.
 	for headersSeen := false; !headersSeen; {
 		// See if we were interrupted, for the love of pete add ctx to wire
 		select {
