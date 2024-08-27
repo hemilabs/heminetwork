@@ -330,11 +330,7 @@ func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) 
 		default:
 		}
 
-		// being "not high priority" means that we're "retrying" a transaction
-		if !highPriority {
-		}
-
-		serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+		serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, highPriority)
 		if err != nil {
 			log.Errorf("error getting next broadcast request: %v", err)
 			continue
