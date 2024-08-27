@@ -15,7 +15,8 @@ CREATE TABLE btc_transaction_broadcast_request (
     broadcast_at                TIMESTAMP,
     last_broadcast_attempt_at   TIMESTAMP,
     next_broadcast_attempt_at   TIMESTAMP,
-    created_at                  TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at                  TIMESTAMP NOT NULL DEFAULT NOW(),
+    last_error TEXT
 );
 
 CREATE INDEX ON btc_transaction_broadcast_request (last_broadcast_attempt_at) WHERE  broadcast_at IS NULL;

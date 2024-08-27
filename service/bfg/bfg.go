@@ -382,7 +382,7 @@ func (s *Server) bitcoinBroadcastWorker(ctxI context.Context, highPriority bool)
 		if err != nil {
 			log.Errorf("broadcast tx: %s", err)
 			if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
-				err = s.db.BtcTransactionBroadcastRequestDelete(ctx, mb.TxID())
+				err = s.db.BtcTransactionBroadcastRequestSetLastError(ctx, mb.TxID(), err.Error())
 				if err != nil {
 					log.Errorf("could not delete %v", err)
 				}

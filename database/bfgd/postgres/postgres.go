@@ -1135,15 +1135,15 @@ func (p *pgdb) BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Contex
 	return nil
 }
 
-func (p *pgdb) BtcTransactionBroadcastRequestDelete(ctx context.Context, txId string) error {
-	log.Tracef("BtcTransactionBroadcastRequestDelete")
-	defer log.Tracef("BtcTransactionBroadcastRequestDelete exit")
+func (p *pgdb) BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error {
+	log.Tracef("BtcTransactionBroadcastRequestSetLastError")
+	defer log.Tracef("BtcTransactionBroadcastRequestSetLastError exit")
 
 	const querySql = `
-		DELETE FROM btc_transaction_broadcast_request 
-		WHERE tx_id = $1
+		UPDATE btc_transaction_broadcast_request 
+		SET last_error = $2, tx_id = $1
 	`
-	_, err := p.db.ExecContext(ctx, querySql, txId)
+	_, err := p.db.ExecContext(ctx, querySql, txId, lastErr)
 	if err != nil {
 		return fmt.Errorf("could not confirm broadcast: %v", err)
 	}
