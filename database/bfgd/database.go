@@ -45,6 +45,7 @@ type Database interface {
 	BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txId string) error
 	BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error)
 	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
+	BtcTransactionBroadcastRequestDelete(ctx context.Context, txId string) error
 }
 
 // NotificationName identifies a database notification type.

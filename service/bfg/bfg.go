@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -380,6 +381,12 @@ func (s *Server) bitcoinBroadcastWorker(ctxI context.Context, highPriority bool)
 		_, err = s.btcClient.Broadcast(ctx, serializedTx)
 		if err != nil {
 			log.Errorf("broadcast tx: %s", err)
+			if strings.Contains(err.Error(), "bad-txns-inputs-missingorspent") {
+				err = s.db.BtcTransactionBroadcastRequestDelete(ctx, mb.TxID())
+				if err != nil {
+					log.Errorf("could not delete %v", err)
+				}
+			}
 			cancel()
 			continue
 		}
