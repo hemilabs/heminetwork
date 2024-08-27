@@ -2345,6 +2345,8 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 		NumRecentKeystones: 100,
 	}
 
+	time.Sleep(5 * time.Second)
+
 	err = bssapi.Write(ctx, bws.conn, "someid", finalityRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -2359,6 +2361,8 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 	if v.Header.Command != bssapi.CmdBTCFinalityByRecentKeystonesResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
+
+	time.Sleep(5 * time.Second)
 
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
 	if err != nil {
@@ -2694,6 +2698,8 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
 	}
+
+	time.Sleep(5 * time.Second)
 
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
