@@ -149,7 +149,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			Help:      "The total number of succesful RPC commands",
 		}),
 		requestTimeout: defaultRequestTimeout,
-		bfgCallTimeout: defaultRequestTimeout / 2,
+		bfgCallTimeout: 20 * time.Second,
 		holdoffTimeout: 6 * time.Second,
 		requestLimit:   requestLimit,
 		sessions:       make(map[string]*bssWs),
