@@ -1277,7 +1277,12 @@ func (s *Server) getL2KeystonesCache() []hemi.L2Keystone {
 		return []hemi.L2Keystone{}
 	}
 
-	return s.l2keystonesCache
+	results := []hemi.L2Keystone{}
+	for _, v := range s.l2keystonesCache {
+		results = append(results, v)
+	}
+
+	return results
 }
 
 func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
@@ -1312,8 +1317,17 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2Ke
 	log.Tracef("handleL2KeystonesRequest")
 	defer log.Tracef("handleL2KeystonesRequest exit")
 
+	results := []hemi.L2Keystone{}
+	for i, v := range s.getL2KeystonesCache() {
+		if uint64(i) < l2kr.NumL2Keystones {
+			results = append(results, v)
+		} else {
+			break
+		}
+	}
+
 	return &bfgapi.L2KeystonesResponse{
-		L2Keystones: s.getL2KeystonesCache()[:l2kr.NumL2Keystones],
+		L2Keystones: results,
 	}, nil
 }
 
