@@ -317,7 +317,7 @@ func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBa
 	}, nil
 }
 
-func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) {
+func (s *Server) bitcoinBroadcastWorker(ctxI context.Context, highPriority bool) {
 	log.Tracef("bitcoinBroadcastWorker")
 	defer log.Tracef("bitcoinBroadcastWorker exit")
 
@@ -325,31 +325,25 @@ func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) 
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-ctxI.Done():
 			return
 		default:
 		}
 
+		ctx, cancel := context.WithTimeout(ctxI, 5*time.Second)
+
 		serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, highPriority)
 		if err != nil {
 			log.Errorf("error getting next broadcast request: %v", err)
+			cancel()
 			continue
-		}
-
-		// if we found NO txs to broadcast, wait a bit to check for more
-		if serializedTx == nil {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(5 * time.Second):
-				continue
-			}
 		}
 
 		rr := bytes.NewReader(serializedTx)
 		mb := wire.MsgTx{}
 		if err := mb.Deserialize(rr); err != nil {
 			log.Errorf("failed to deserialize tx: %v", err)
+			cancel()
 			continue
 		}
 
@@ -363,6 +357,7 @@ func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) 
 
 		if tl2 == nil {
 			log.Errorf("could not find pop tx")
+			cancel()
 			continue
 		}
 
@@ -379,13 +374,13 @@ func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) 
 			PopMinerPublicKey:   publicKeyUncompressed,
 			L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
 		}); err != nil {
-			log.Errorf("error occurred inserting pop basis: %s", err)
-			continue
+			log.Infof("inserting pop basis: %s", err)
 		}
 
 		_, err = s.btcClient.Broadcast(ctx, serializedTx)
 		if err != nil {
 			log.Errorf("broadcast tx: %s", err)
+			cancel()
 			continue
 		}
 
@@ -396,10 +391,12 @@ func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) 
 		err = s.db.BtcTransactionBroadcastRequestConfirmBroadcast(ctx, mb.TxID())
 		if err != nil {
 			log.Errorf("could not confirm broadcast: %v", err)
+			cancel()
 			continue
 		}
 
 		log.Infof("successfully broadcast tx %s, for l2 keystone %s", mb.TxID(), hex.EncodeToString(tl2.L2Keystone.Hash()))
+		cancel()
 	}
 }
 
@@ -1557,8 +1554,8 @@ func (s *Server) Run(pctx context.Context) error {
 		defer s.wg.Done()
 		for {
 			select {
-			case <-time.After(1 * time.minute):
-				log.Info("sending notifications of l2 keystones")
+			case <-time.After(1 * time.Minute):
+				log.Infof("sending notifications of l2 keystones")
 				go s.handleL2KeystonesNotification()
 			case <-ctx.Done():
 				return
@@ -1567,8 +1564,10 @@ func (s *Server) Run(pctx context.Context) error {
 	}()
 
 	for _, p := range []bool{true, false} {
-		s.wg.Add(1)
-		go s.bitcoinBroadcastWorker(ctx, p)
+		for range 4 {
+			s.wg.Add(1)
+			go s.bitcoinBroadcastWorker(ctx, p)
+		}
 	}
 
 	// Setup websockets and HTTP routes
