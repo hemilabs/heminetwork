@@ -12,7 +12,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	mathRand "math/rand"
 	"net"
 	"net/http"
 	"sync"
@@ -1319,8 +1318,6 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2Ke
 }
 
 func writeNotificationResponse(bws *bfgWs, response any) {
-	r := (mathRand.Int() % (10 * 1000))
-	<-time.After(time.Duration(r) * time.Millisecond)
 	if err := bfgapi.Write(bws.requestContext, bws.conn, "", response); err != nil {
 		log.Errorf("handleBtcFinalityNotification write: %v %v", bws.addr, err)
 	}
