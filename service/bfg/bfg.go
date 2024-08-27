@@ -332,7 +332,7 @@ func (s *Server) handleOneBroadcastRequest(ctx context.Context, highPriority boo
 	// if there are no new serialized txs, backoff a bit
 	if serializedTx == nil {
 		select {
-		case <-time.After(5 * time.Second):
+		case <-time.After(1 * time.Second):
 			return
 		case <-ctx.Done():
 			return
