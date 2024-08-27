@@ -1516,7 +1516,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 	}
 
 	// async now, in a rush, sleep should work
-	time.Sleep(2 * time.second)
+	time.Sleep(2 * time.Second)
 
 	command, _, _, err := bfgapi.Read(ctx, bws.conn)
 	if err != nil {
@@ -2428,7 +2428,7 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(2 * time.second)
+	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
@@ -2523,7 +2523,7 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(2 * time.second)
+	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
@@ -2616,7 +2616,7 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(2 * time.second)
+	time.Sleep(2 * time.Second)
 
 	finalityRequest := bfgapi.BTCFinalityByRecentKeystonesRequest{
 		NumRecentKeystones: 100,
