@@ -46,6 +46,7 @@ type Database interface {
 	BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error)
 	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
 	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
+	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
 }
 
 // NotificationName identifies a database notification type.

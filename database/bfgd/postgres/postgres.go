@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 9
+	bfgdVersion = 10
 
 	logLevel = "INFO"
 	verbose  = false
@@ -1146,6 +1146,22 @@ func (p *pgdb) BtcTransactionBroadcastRequestSetLastError(ctx context.Context, t
 	_, err := p.db.ExecContext(ctx, querySql, txId, lastErr)
 	if err != nil {
 		return fmt.Errorf("could not confirm broadcast: %v", err)
+	}
+
+	return nil
+}
+
+func (p *pgdb) BtcTransactionBroadcastRequestTrim(ctx context.Context) error {
+	log.Tracef("BtcTransactionBroadcastRequestSetLastError")
+	defer log.Tracef("BtcTransactionBroadcastRequestSetLastError exit")
+
+	const querySql = `
+		DELETE FROM btc_transaction_broadcast_request 
+		WHERE created_at < NOW() - INTERVAL '1 hour'
+	`
+	_, err := p.db.ExecContext(ctx, querySql)
+	if err != nil {
+		return fmt.Errorf("could not trim broadcast: %v", err)
 	}
 
 	return nil
