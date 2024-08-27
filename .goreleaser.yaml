@@ -497,7 +497,7 @@ changelog:
 release:
   github:
     owner: "hemilabs"
-    name: "network"
+    name: "heminetwork"
   replace_existing_draft: true
   prerelease: "auto"
   make_latest: true
