@@ -2517,7 +2517,7 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
@@ -2610,7 +2610,7 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	finalityRequest := bfgapi.BTCFinalityByRecentKeystonesRequest{
 		NumRecentKeystones: 100,
