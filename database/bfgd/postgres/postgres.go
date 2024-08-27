@@ -1074,6 +1074,11 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		onlyNewClause = " next_broadcast_attempt_at IS NULL "
 	}
 
+	orderClause := " ORDER BY last_broadcast_attempt_at ASC "
+	if onlyNew {
+		orderClause = " ORDER BY created_at ASC "
+	}
+
 	querySql := fmt.Sprintf(`
 		UPDATE btc_transaction_broadcast_request 
 		SET last_broadcast_attempt_at = NOW(), 
@@ -1086,11 +1091,11 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 			%s
 			AND broadcast_at IS NULL
 			AND created_at > NOW() - INTERVAL '30 minutes'
-			ORDER BY created_at ASC
+			%s
 			LIMIT 1
 		)
 		RETURNING serialized_tx
-	`, onlyNewClause)
+	`, onlyNewClause, orderClause)
 
 	rows, err := p.db.QueryContext(ctx, querySql)
 	if err != nil {
