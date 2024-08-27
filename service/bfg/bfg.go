@@ -1552,6 +1552,20 @@ func (s *Server) Run(pctx context.Context) error {
 		return err
 	}
 
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-time.After(1 * time.minute):
+				log.Info("sending notifications of l2 keystones")
+				go s.handleL2KeystonesNotification()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	for _, p := range []bool{true, false} {
 		s.wg.Add(1)
 		go s.bitcoinBroadcastWorker(ctx, p)
