@@ -1088,10 +1088,10 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		WHERE tx_id = (
 			SELECT tx_id FROM btc_transaction_broadcast_request
 			WHERE 
-			next_broadcast_attempt_at IS NULL
+			%s
 			AND broadcast_at IS NULL
 			AND created_at > NOW() - INTERVAL '30 minutes'
-			ORDER BY created_at ASC
+			%s
 			LIMIT 1
 		)
 		RETURNING serialized_tx
