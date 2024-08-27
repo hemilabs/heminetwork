@@ -41,6 +41,11 @@ type Database interface {
 	AccessPublicKeyInsert(ctx context.Context, publicKey *AccessPublicKey) error
 	AccessPublicKeyExists(ctx context.Context, publicKey *AccessPublicKey) (bool, error)
 	AccessPublicKeyDelete(ctx context.Context, publicKey *AccessPublicKey) error
+
+	BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txId string) error
+	BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error)
+	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
+	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
 }
 
 // NotificationName identifies a database notification type.

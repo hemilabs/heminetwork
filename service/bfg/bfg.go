@@ -134,6 +134,8 @@ type Server struct {
 	canonicalChainHeight uint64
 
 	checkForInvalidBlocks chan struct{}
+
+	l2keystonesCache []hemi.L2Keystone
 }
 
 // metrics stores prometheus metrics.
@@ -322,6 +324,102 @@ func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBa
 	}, nil
 }
 
+func (s *Server) handleOneBroadcastRequest(ctx context.Context, highPriority bool) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, highPriority)
+	if err != nil {
+		log.Errorf("error getting next broadcast request: %v", err)
+		return
+	}
+
+	// if there are no new serialized txs, backoff a bit
+	if serializedTx == nil {
+		select {
+		case <-time.After(1 * time.Second):
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
+
+	rr := bytes.NewReader(serializedTx)
+	mb := wire.MsgTx{}
+	if err := mb.Deserialize(rr); err != nil {
+		log.Errorf("failed to deserialize tx: %v", err)
+		return
+	}
+
+	var tl2 *pop.TransactionL2
+	for _, v := range mb.TxOut {
+		tl2, err = pop.ParseTransactionL2FromOpReturn(v.PkScript)
+		if err == nil {
+			break // Found the pop transaction.
+		}
+	}
+
+	if tl2 == nil {
+		log.Errorf("could not find pop tx")
+		return
+	}
+
+	publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
+	if err != nil {
+		log.Errorf("could not parse public key from signature script: %v", err)
+		return
+	}
+
+	hash := mb.TxHash()
+
+	if err := s.db.PopBasisInsertPopMFields(ctx, &bfgd.PopBasis{
+		BtcTxId:             hash[:],
+		BtcRawTx:            database.ByteArray(serializedTx),
+		PopMinerPublicKey:   publicKeyUncompressed,
+		L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
+	}); err != nil {
+		log.Infof("inserting pop basis: %s", err)
+	}
+
+	_, err = s.btcClient.Broadcast(ctx, serializedTx)
+	if err != nil {
+		log.Errorf("broadcast tx: %s", err)
+		err = s.db.BtcTransactionBroadcastRequestSetLastError(ctx, mb.TxID(), err.Error())
+		if err != nil {
+			log.Errorf("could not delete %v", err)
+		}
+		return
+	}
+
+	s.metrics.popBroadcasts.Inc()
+
+	log.Tracef("hash is %s", hex.EncodeToString(hash[:]))
+
+	err = s.db.BtcTransactionBroadcastRequestConfirmBroadcast(ctx, mb.TxID())
+	if err != nil {
+		log.Errorf("could not confirm broadcast: %v", err)
+		return
+	}
+
+	log.Infof("successfully broadcast tx %s, for l2 keystone %s", mb.TxID(), hex.EncodeToString(tl2.L2Keystone.Hash()))
+}
+
+func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) {
+	log.Tracef("bitcoinBroadcastWorker")
+	defer log.Tracef("bitcoinBroadcastWorker exit")
+
+	defer s.wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			s.handleOneBroadcastRequest(ctx, highPriority)
+		}
+	}
+}
+
 func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.BitcoinBroadcastRequest) (any, error) {
 	log.Tracef("handleBitcoinBroadcast")
 	defer log.Tracef("handleBitcoinBroadcast exit")
@@ -351,44 +449,23 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 		}, nil
 	}
 
-	publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
+	_, err = pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
 	if err != nil {
 		return &bfgapi.BitcoinBroadcastResponse{
 			Error: protocol.RequestErrorf("could not parse signature script: %v", err),
 		}, nil
 	}
 
-	txHash, err := s.btcClient.Broadcast(ctx, bbr.Transaction)
-	if err != nil {
-		// This may not alwyas be an internal error.
-		e := protocol.NewInternalErrorf("broadcast tx: %w", err)
+	err = s.db.BtcTransactionBroadcastRequestInsert(ctx, bbr.Transaction, mb.TxID())
+	if err != nil && !errors.Is(err, database.ErrDuplicate) {
+		e := protocol.NewInternalErrorf("insert broadcast request : %w", err)
 		return &bfgapi.BitcoinBroadcastResponse{
 			Error: e.ProtocolError(),
 		}, e
 	}
 
-	s.metrics.popBroadcasts.Inc()
-
-	go func() {
-		// retry up to 2 times, allowing only 5 second per try
-		// if we fail here it is ok for now
-		for range 2 {
-			insertCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if err := s.db.PopBasisInsertPopMFields(insertCtx, &bfgd.PopBasis{
-				BtcTxId:             txHash,
-				BtcRawTx:            database.ByteArray(bbr.Transaction),
-				PopMinerPublicKey:   publicKeyUncompressed,
-				L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
-			}); err != nil {
-				log.Errorf("error occurred inserting pop basis: %s", err)
-			} else {
-				return
-			}
-		}
-	}()
-
-	return &bfgapi.BitcoinBroadcastResponse{TXID: txHash}, nil
+	hash := mb.TxHash()
+	return &bfgapi.BitcoinBroadcastResponse{TXID: hash[:]}, nil
 }
 
 func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoRequest) (any, error) {
@@ -1203,16 +1280,30 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	}, nil
 }
 
-func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
-	log.Tracef("handleL2KeystonesRequest")
-	defer log.Tracef("handleL2KeystonesRequest exit")
+func (s *Server) getL2KeystonesCache() []hemi.L2Keystone {
+	log.Tracef("getL2KeystonesCache")
+	defer log.Tracef("getL2KeystonesCache exit")
 
-	results, err := s.db.L2KeystonesMostRecentN(ctx, uint32(l2kr.NumL2Keystones))
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	results := make([]hemi.L2Keystone, len(s.l2keystonesCache))
+	copy(results, s.l2keystonesCache)
+
+	return results
+}
+
+func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
+	log.Tracef("refreshL2KeystoneCache")
+	defer log.Tracef("refreshL2KeystoneCache exit")
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	results, err := s.db.L2KeystonesMostRecentN(ctx, 100)
 	if err != nil {
-		e := protocol.NewInternalErrorf("error getting l2 keystones: %w", err)
-		return &bfgapi.L2KeystonesResponse{
-			Error: e.ProtocolError(),
-		}, e
+		log.Errorf("error getting keystones %v", err)
+		return
 	}
 
 	l2Keystones := make([]hemi.L2Keystone, 0, len(results))
@@ -1228,8 +1319,24 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2Ke
 		})
 	}
 
+	s.l2keystonesCache = l2Keystones
+}
+
+func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
+	log.Tracef("handleL2KeystonesRequest")
+	defer log.Tracef("handleL2KeystonesRequest exit")
+
+	results := []hemi.L2Keystone{}
+	for i, v := range s.getL2KeystonesCache() {
+		if uint64(i) < l2kr.NumL2Keystones {
+			results = append(results, v)
+		} else {
+			break
+		}
+	}
+
 	return &bfgapi.L2KeystonesResponse{
-		L2Keystones: l2Keystones,
+		L2Keystones: results,
 	}, nil
 }
 
@@ -1312,22 +1419,21 @@ func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2Key
 	log.Tracef("handleNewL2Keystones")
 	defer log.Tracef("handleNewL2Keystones exit")
 
-	ks := hemiL2KeystonesToDb(nlkr.L2Keystones)
-	err := s.db.L2KeystonesInsert(ctx, ks)
 	response := bfgapi.NewL2KeystonesResponse{}
-	if err != nil {
-		if errors.Is(err, database.ErrDuplicate) {
-			response.Error = protocol.Errorf("l2 keystone already exists")
-			return response, nil
-		}
-		if errors.Is(err, database.ErrValidation) {
-			log.Errorf("error inserting l2 keystone: %s", err)
-			response.Error = protocol.Errorf("invalid l2 keystone")
-			return response, nil
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		ks := hemiL2KeystonesToDb(nlkr.L2Keystones)
+		err := s.db.L2KeystonesInsert(ctx, ks)
+		if err != nil {
+			log.Errorf("error saving keystone %v", err)
+			return
 		}
 
-		return nil, err
-	}
+		s.refreshL2KeystoneCache(ctx)
+	}()
 
 	return response, nil
 }
@@ -1491,6 +1597,40 @@ func (s *Server) Run(pctx context.Context) error {
 		s.handleL2KeystonesChange, l2KeystonesPayload); err != nil {
 		return err
 	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-time.After(1 * time.Minute):
+				log.Infof("sending notifications of l2 keystones")
+				go s.handleL2KeystonesNotification()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	for _, p := range []bool{true, false} {
+		for range 4 {
+			s.wg.Add(1)
+			go s.bitcoinBroadcastWorker(ctx, p)
+		}
+	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(1 * time.Second):
+				s.refreshL2KeystoneCache(ctx)
+			}
+		}
+	}()
 
 	// Setup websockets and HTTP routes
 	privateMux := s.server

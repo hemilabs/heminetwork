@@ -1815,6 +1815,329 @@ func TestBtcHeightsNoChildren(t *testing.T) {
 	}
 }
 
+type BtcTransactionBroadcastRequest struct {
+	TxId         string
+	SerializedTx []byte
+}
+
+func TestBtcTransactionBroadcastRequestInsert(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := sdb.QueryContext(ctx, "SELECT tx_id, serialized_tx FROM btc_transaction_broadcast_request")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result := BtcTransactionBroadcastRequest{}
+	count := 0
+
+	for rows.Next() {
+		err = rows.Scan(&result.TxId, &result.SerializedTx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count++
+	}
+
+	if count != 1 {
+		t.Fatalf("unexpected number of rows %d", count)
+	}
+
+	diff := deep.Equal(result, BtcTransactionBroadcastRequest{
+		TxId:         txId,
+		SerializedTx: serializedTx,
+	})
+
+	if len(diff) > 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+}
+
+func TestBtcTransactionBroadcastRequestGetNext(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(serializedTx, savedSerializedTx) {
+		t.Fatalf("slices to do match: %v != %v", serializedTx, savedSerializedTx)
+	}
+}
+
+func TestBtcTransactionBroadcastRequestGetNextMultiple(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	serializedTx2 := []byte("blahblahblah2")
+	txId2 := "myid2"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx2, txId2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(serializedTx, savedSerializedTx) {
+		t.Fatalf("slices to do match: %v != %v", serializedTx, savedSerializedTx)
+	}
+
+	savedSerializedTx2, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(serializedTx2, savedSerializedTx2) {
+		t.Fatalf("slices to do match: %v != %v", serializedTx2, savedSerializedTx2)
+	}
+
+	savedSerializedTx3, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if savedSerializedTx3 != nil {
+		t.Fatal("expected nil value")
+	}
+}
+
+func TestBtcTransactionBroadcastRequestGetNextBefore10Minutes(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(serializedTx, savedSerializedTx) {
+		t.Fatalf("slices to do match: %v != %v", serializedTx, savedSerializedTx)
+	}
+
+	// we should have set the fields on the last get, should not be able to
+	// get and process twice
+	savedSerializedTx, err = db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if savedSerializedTx != nil {
+		t.Fatal("expected a nil response")
+	}
+}
+
+func TestBtcTransactionBroadcastRequestGetNextRetry(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(serializedTx, savedSerializedTx) {
+		t.Fatalf("slices to do match: %v != %v", serializedTx, savedSerializedTx)
+	}
+
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET next_broadcast_attempt_at = NOW()")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err = db.BtcTransactionBroadcastRequestGetNext(ctx, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !slices.Equal(serializedTx, savedSerializedTx) {
+		t.Fatalf("slices to do match: %v != %v", serializedTx, savedSerializedTx)
+	}
+}
+
+func TestBtcTransactionBroadcastRequestGetNextAfter2Hours(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '31 minutes'")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if savedSerializedTx != nil {
+		t.Fatal("expected nil value")
+	}
+}
+
+func TestBtcTransactionBroadcastRequestGetNextAlreadyBroadcast(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET broadcast_at = NOW()")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if savedSerializedTx != nil {
+		t.Fatal("expected nil response")
+	}
+}
+
+func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.BtcTransactionBroadcastRequestConfirmBroadcast(ctx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if savedSerializedTx != nil {
+		t.Fatal("expected nil response")
+	}
+}
+
 func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count int, chain bool, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {
 	header := make([]byte, 80)
 	hash := make([]byte, 32)
