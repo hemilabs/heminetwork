@@ -1083,7 +1083,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		UPDATE btc_transaction_broadcast_request 
 		SET last_broadcast_attempt_at = NOW(), 
 		
-		next_broadcast_attempt_at = NOW() + INTERVAL '1 minute' + RANDOM() * INTERVAL '60 seconds' 
+		next_broadcast_attempt_at = NOW() + INTERVAL '1 minute' + RANDOM() * INTERVAL '240 seconds' 
 		
 		WHERE tx_id = (
 			SELECT tx_id FROM btc_transaction_broadcast_request
