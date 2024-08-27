@@ -134,6 +134,8 @@ type Server struct {
 	canonicalChainHeight uint64
 
 	checkForInvalidBlocks chan struct{}
+
+	l2keystonesCache []hemi.L2Keystone
 }
 
 // metrics stores prometheus metrics.
@@ -1265,16 +1267,30 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	}, nil
 }
 
-func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
-	log.Tracef("handleL2KeystonesRequest")
-	defer log.Tracef("handleL2KeystonesRequest exit")
+func (s *Server) getL2KeystonesCache() []hemi.L2Keystone {
+	log.Tracef("getL2KeystonesCache")
+	defer log.Tracef("getL2KeystonesCache exit")
 
-	results, err := s.db.L2KeystonesMostRecentN(ctx, uint32(l2kr.NumL2Keystones))
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if s.l2keystonesCache == nil {
+		return []hemi.L2Keystone{}
+	}
+
+	return s.l2keystonesCache
+}
+
+func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
+	log.Tracef("refreshL2KeystoneCache")
+	defer log.Tracef("refreshL2KeystoneCache exit")
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	results, err := s.db.L2KeystonesMostRecentN(ctx, 100)
 	if err != nil {
-		e := protocol.NewInternalErrorf("error getting l2 keystones: %w", err)
-		return &bfgapi.L2KeystonesResponse{
-			Error: e.ProtocolError(),
-		}, e
+		log.Errorf("error getting keystones %v", err)
 	}
 
 	l2Keystones := make([]hemi.L2Keystone, 0, len(results))
@@ -1290,8 +1306,15 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2Ke
 		})
 	}
 
+	s.l2keystonesCache = l2Keystones
+}
+
+func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
+	log.Tracef("handleL2KeystonesRequest")
+	defer log.Tracef("handleL2KeystonesRequest exit")
+
 	return &bfgapi.L2KeystonesResponse{
-		L2Keystones: l2Keystones,
+		L2Keystones: s.getL2KeystonesCache()[:l2kr.NumL2Keystones],
 	}, nil
 }
 
@@ -1576,6 +1599,17 @@ func (s *Server) Run(pctx context.Context) error {
 			go s.bitcoinBroadcastWorker(ctx, p)
 		}
 	}
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(1 * time.Second):
+				s.refreshL2KeystoneCache(ctx)
+			}
+		}
+	}()
 
 	// Setup websockets and HTTP routes
 	privateMux := s.server
