@@ -1088,10 +1088,10 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		WHERE tx_id = (
 			SELECT tx_id FROM btc_transaction_broadcast_request
 			WHERE 
-			%s
+			next_broadcast_attempt_at IS NULL
 			AND broadcast_at IS NULL
 			AND created_at > NOW() - INTERVAL '30 minutes'
-			%s
+			ORDER BY created_at ASC
 			LIMIT 1
 		)
 		RETURNING serialized_tx
@@ -1141,7 +1141,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestSetLastError(ctx context.Context, t
 
 	const querySql = `
 		UPDATE btc_transaction_broadcast_request 
-		SET last_error = $2, tx_id = $1
+		SET last_error = $2 WHERE tx_id = $1
 	`
 	_, err := p.db.ExecContext(ctx, querySql, txId, lastErr)
 	if err != nil {

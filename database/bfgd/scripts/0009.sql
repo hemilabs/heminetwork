@@ -20,5 +20,8 @@ CREATE TABLE btc_transaction_broadcast_request (
 );
 
 CREATE INDEX ON btc_transaction_broadcast_request (last_broadcast_attempt_at) WHERE  broadcast_at IS NULL;
+CREATE INDEX btc_transaction_broadcast_request_created_at_new ON btc_transaction_broadcast_request (created_at) WHERE broadcast_at IS NULL AND next_broadcast_attempt_at IS NULL; 
+CREATE INDEX btc_transaction_broadcast_request_created_at_retry ON btc_transaction_broadcast_request (created_at) WHERE broadcast_at IS NULL; 
+
 
 COMMIT;

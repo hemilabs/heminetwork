@@ -1611,7 +1611,7 @@ func (s *Server) Run(pctx context.Context) error {
 
 	s.wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer s.wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
