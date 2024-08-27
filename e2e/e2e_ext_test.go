@@ -2424,6 +2424,8 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
+	time.Sleep(5 * time.Second)
+
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
 	if err != nil {
