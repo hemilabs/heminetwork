@@ -1516,7 +1516,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 	}
 
 	// async now, in a rush, sleep should work
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	command, _, _, err := bfgapi.Read(ctx, bws.conn)
 	if err != nil {
@@ -2345,6 +2345,8 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 		NumRecentKeystones: 100,
 	}
 
+	time.Sleep(5 * time.Second)
+
 	err = bssapi.Write(ctx, bws.conn, "someid", finalityRequest)
 	if err != nil {
 		t.Fatal(err)
@@ -2359,6 +2361,8 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 	if v.Header.Command != bssapi.CmdBTCFinalityByRecentKeystonesResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
+
+	time.Sleep(5 * time.Second)
 
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
 	if err != nil {
@@ -2424,7 +2428,7 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
@@ -2519,7 +2523,7 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
@@ -2612,7 +2616,7 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	finalityRequest := bfgapi.BTCFinalityByRecentKeystonesRequest{
 		NumRecentKeystones: 100,
@@ -2695,6 +2699,8 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
+	time.Sleep(5 * time.Second)
+
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
 	if err != nil {
@@ -2723,6 +2729,15 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	err = wsjson.Read(ctx, c, &v)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// there is a chance we get notifications from the L2KeystonesInsert
+	// call above, if they haven't been broadcast yet.  ignore those.
+	if v.Header.Command == bfgapi.CmdL2KeystonesNotification {
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if v.Header.Command != bfgapi.CmdBTCFinalityByKeystonesResponse {
