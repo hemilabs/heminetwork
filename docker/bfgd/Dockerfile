@@ -17,9 +17,13 @@ RUN addgroup --gid 65532 bfgd && \
         -G bfgd --uid 65532 bfgd
 
 WORKDIR /build/
-COPY . .
 
+COPY Makefile .
+COPY go.mod .
+COPY go.sum .
 RUN make deps
+
+COPY . .
 RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" bfgd
 
 # Run stage

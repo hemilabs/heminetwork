@@ -34,7 +34,7 @@ func TestClientConn(t *testing.T) {
 		t.Fatalf("failed to dial server: %v", err)
 	}
 
-	c := newClientConn(conn, nil)
+	c := newClientConn(conn, nil, nil)
 	defer c.Close()
 
 	tests := []struct {
@@ -174,7 +174,7 @@ func TestClose(t *testing.T) {
 		t.Fatalf("failed to dial server: %v", err)
 	}
 
-	c := newClientConn(conn, nil)
+	c := newClientConn(conn, nil, nil)
 
 	// Ping the server.
 	if err := c.ping(); err != nil {

@@ -15,6 +15,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -30,14 +32,17 @@ type clientConn struct {
 	conn      net.Conn
 	requestID uint64
 
+	metrics *metrics
+
 	closeCh chan struct{}
 	onClose func(c *clientConn)
 }
 
 // newClientConn returns a new clientConn.
-func newClientConn(conn net.Conn, onClose func(c *clientConn)) *clientConn {
+func newClientConn(conn net.Conn, metrics *metrics, onClose func(c *clientConn)) *clientConn {
 	c := &clientConn{
 		conn:    conn,
+		metrics: metrics,
 		closeCh: make(chan struct{}),
 		onClose: onClose,
 	}
@@ -55,6 +60,18 @@ func (c *clientConn) call(ctx context.Context, method string, params, result any
 	c.mx.Lock()
 	defer c.mx.Unlock()
 	c.requestID++
+
+	if c.metrics != nil {
+		start := time.Now()
+		defer func() {
+			c.metrics.rpcCallsDuration.With(prometheus.Labels{
+				"method": method,
+			}).Observe(time.Since(start).Seconds())
+		}()
+		c.metrics.rpcCallsTotal.With(prometheus.Labels{
+			"method": method,
+		}).Inc()
+	}
 
 	req, err := NewJSONRPCRequest(c.requestID, method, params)
 	if err != nil {
