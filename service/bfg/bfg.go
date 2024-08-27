@@ -1410,24 +1410,20 @@ func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2Key
 	log.Tracef("handleNewL2Keystones")
 	defer log.Tracef("handleNewL2Keystones exit")
 
-	ks := hemiL2KeystonesToDb(nlkr.L2Keystones)
-	err := s.db.L2KeystonesInsert(ctx, ks)
 	response := bfgapi.NewL2KeystonesResponse{}
-	if err != nil {
-		if errors.Is(err, database.ErrDuplicate) {
-			response.Error = protocol.Errorf("l2 keystone already exists")
-			return response, nil
-		}
-		if errors.Is(err, database.ErrValidation) {
-			log.Errorf("error inserting l2 keystone: %s", err)
-			response.Error = protocol.Errorf("invalid l2 keystone")
-			return response, nil
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		ks := hemiL2KeystonesToDb(nlkr.L2Keystones)
+		err := s.db.L2KeystonesInsert(ctx, ks)
+		if err != nil {
+			log.Errorf("error saving keystone %v", err)
 		}
 
-		return nil, err
-	}
-
-	go s.refreshL2KeystoneCache(ctx)
+		s.refreshL2KeystoneCache(ctx)
+	}()
 
 	return response, nil
 }
@@ -1613,7 +1609,9 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	}
 
+	s.wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for {
 			select {
 			case <-ctx.Done():
