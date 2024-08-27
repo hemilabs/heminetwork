@@ -1416,6 +1416,8 @@ func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2Key
 		return nil, err
 	}
 
+	go s.refreshL2KeystoneCache(ctx)
+
 	return response, nil
 }
 
