@@ -1092,18 +1092,16 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	defer log.Tracef("SyncIndexersToHash exit")
 
 	s.mtx.Lock()
-	if s.indexing {
+	if s.quiesced {
 		s.mtx.Unlock()
 		return errors.New("already indexing")
 	}
-	s.indexing = true
 	s.mtx.Unlock()
 
 	defer func() {
 		// unquiesce
 		s.mtx.Lock()
 		s.quiesced = false
-		s.indexing = false
 		actualHeight, bhb, err := s.RawBlockHeaderBest(ctx)
 		if err != nil {
 			log.Errorf("sync indexers best: %v", err)

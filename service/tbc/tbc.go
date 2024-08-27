@@ -202,8 +202,7 @@ type Server struct {
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL // outstanding pings
 
-	quiesced bool // when set do not accept blockheaders and/or blocks.
-	indexing bool // prevent re-entrant indexing
+	quiesced bool // when set do not accept blockheaders and/or blocks and prevent indexing.
 
 	db tbcd.Database
 
@@ -732,8 +731,6 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			continue
 
 		case *wire.MsgHeaders:
-			// XXX we must be past this step before coming "online"
-			// start with indexing and quiesced set to true
 			if len(m.Headers) > 0 {
 				// We must check the initial get headers
 				// response. If we asked for an unknown tip
@@ -1111,7 +1108,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	if err != nil {
 		// This ends the race between peers during IBD.
 		if errors.Is(database.ErrDuplicate, err) {
-			// XXX for now don't do paralle blockheader downloads.
+			// XXX for now don't do parallel blockheader downloads.
 			// Seems to really slow the process down.
 			//
 			// We already have these headers. Ask for best headers
