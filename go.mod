@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork
 
 go 1.22
 
-toolchain go1.22.6
+toolchain go1.23.0
 
 // Temporary replace until we upstream our ws_js patch.
 replace github.com/coder/websocket v1.8.12 => github.com/hemilabs/websocket v0.0.0-20240813101919-bf33653e9aa5

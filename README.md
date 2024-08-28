@@ -71,7 +71,7 @@ Pre-built binaries are available on the [Releases Page](https://github.com/hemil
 
 - `git`
 - `make`
-- [Go v1.22.2+](https://go.dev/dl/)
+- [Go v1.23+](https://go.dev/dl/)
 
 ### Building with Makefile
 
