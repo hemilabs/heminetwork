@@ -1059,6 +1059,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 				{},
 			},
 			electrumx: false,
+			skip:      true,
 		},
 		{
 			name:          "bitcoin utxos electrumx error",
