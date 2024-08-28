@@ -470,8 +470,9 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 
 	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
 	s.mtx.Lock()
-	if !s.quiesced {
+	if s.quiesced {
 		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
 		panic("UtxoIndexerUnwind not quiesced")
 	}
 	s.mtx.Unlock()
@@ -529,8 +530,9 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 	defer log.Tracef("UtxoIndexerWind exit")
 
 	s.mtx.Lock()
-	if !s.quiesced {
+	if s.quiesced {
 		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
 		panic("UtxoIndexerWind not quiesced")
 	}
 	s.mtx.Unlock()
@@ -588,8 +590,9 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	defer log.Tracef("UtxoIndexer exit")
 
 	s.mtx.Lock()
-	if !s.quiesced {
+	if s.quiesced {
 		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
 		panic("UtxoIndexer not quiesced")
 	}
 	s.mtx.Unlock()
@@ -849,8 +852,9 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
 
 	s.mtx.Lock()
-	if !s.quiesced {
+	if s.quiesced {
 		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
 		panic("TxIndexerUnwind not quiesced")
 	}
 	s.mtx.Unlock()
@@ -907,8 +911,9 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 	defer log.Tracef("TxIndexerWind exit")
 
 	s.mtx.Lock()
-	if !s.quiesced {
+	if s.quiesced {
 		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
 		panic("TxIndexerWind not quiesced")
 	}
 	s.mtx.Unlock()
@@ -969,8 +974,9 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	// XXX this is basically duplicate from TxIndexIsLinear
 
 	s.mtx.Lock()
-	if !s.quiesced {
+	if s.quiesced {
 		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
 		panic("TxIndexer not quiesced")
 	}
 	s.mtx.Unlock()
@@ -1143,15 +1149,15 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		s.quiesced = false
 		actualHeight, bhb, err := s.RawBlockHeaderBest(ctx)
 		if err != nil {
-			log.Errorf("sync indexers best: %v", err)
 			s.mtx.Unlock()
+			log.Errorf("sync indexers best: %v", err)
 			return
 		}
 		// get a random peer
 		p, err := s.randomPeer(ctx)
 		if err != nil {
-			log.Errorf("sync indexers random peer: %v", err)
 			s.mtx.Unlock()
+			log.Errorf("sync indexers random peer: %v", err)
 			return
 		}
 		s.mtx.Unlock()
