@@ -47,6 +47,11 @@ func (m *Miner) automaticFees(fee RecommendedFeeType, refresh time.Duration) {
 	defer log.Tracef("automaticFees exit")
 	defer m.wg.Done()
 
+	if m.mempoolSpaceURL == "" {
+		// Not supported for this network.
+		return
+	}
+
 	for {
 		m.updateFee(m.ctx, fee)
 
