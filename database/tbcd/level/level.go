@@ -17,6 +17,7 @@ import (
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/juju/loggo"
@@ -402,7 +403,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 // and always returns the canonical and last inserted blockheader, which may be
 // the same.
 // This call uses the database to prevent reentrancy.
-func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
@@ -412,48 +413,64 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// that right now but leaving a note.
 
 	if len(bhs) == 0 {
-		return tbcd.ITInvalid, nil, nil,
-			errors.New("block headers insert: no block headers to insert")
+		return tbcd.ITInvalid, nil, nil, 0,
+			errors.New("block headers insert: invalid")
+	}
+
+	// Iterate over the block headers and skip block headers we already
+	// have in the database. Rely on caching to make this not suck terribly.
+	bhDB := l.pool[level.BlockHeadersDB]
+	var (
+		x     int
+		wbh   *wire.BlockHeader
+		bhash chainhash.Hash
+		err   error
+	)
+	for _, rbh := range bhs {
+		wbh, err = tbcd.B2H(rbh[:])
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("block headers insert b2h: %w", err)
+		}
+		bhash = wbh.BlockHash()
+		has, err := bhDB.Has(bhash[:], nil)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("block headers insert has: %w", err)
+		}
+		if has {
+			x++
+		} else {
+			break
+		}
+	}
+	bhs = bhs[x:]
+	if len(bhs) == 0 {
+		return tbcd.ITInvalid, nil, nil, 0,
+			database.DuplicateError("block headers insert duplicate")
 	}
 
 	// Ensure we can connect these blockheaders prior to starting database
 	// transaction. This also obtains the starting cumulative difficulty
 	// and  height.
-	wbh, err := tbcd.B2H(bhs[0][:])
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
-			fmt.Errorf("block headers insert b2h: %w", err)
-	}
 	pbh, err := l.BlockHeaderByHash(ctx, &wbh.PrevBlock)
 	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// block headers
 	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
 	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers open transaction: %w", err)
 	}
 	defer bhsDiscard()
 
-	// Make sure we are not inserting the same blocks
-	bhash := wbh.BlockHash()
-	has, err := bhsTx.Has(bhash[:], nil)
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
-			fmt.Errorf("block headers insert has: %w", err)
-	}
-	if has {
-		return tbcd.ITInvalid, nil, nil,
-			database.DuplicateError("block headers insert duplicate")
-	}
-
 	// blocks missing
 	bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
 	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing open transaction: %w", err)
 	}
 	defer bmDiscard()
@@ -461,7 +478,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// height hash
 	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
 	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash open transaction: %w", err)
 	}
 	defer hhDiscard()
@@ -471,10 +488,10 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	bbh, err := bhsTx.Get([]byte(bhsCanonicalTipKey), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			return tbcd.ITInvalid, nil, nil,
+			return tbcd.ITInvalid, nil, nil, 0,
 				database.NotFoundError("best block header not found")
 		}
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("best block header: %w", err)
 	}
 	bestBH := decodeBlockHeader(bbh)
@@ -505,7 +522,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		if k != 0 {
 			wbh, err = tbcd.B2H(bh[:])
 			if err != nil {
-				return tbcd.ITInvalid, nil, nil,
+				return tbcd.ITInvalid, nil, nil, 0,
 					fmt.Errorf("block headers insert b2h: %w", err)
 			}
 			bhash = wbh.BlockHash()
@@ -579,40 +596,41 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 	// Write height hash batch
 	if err = hhTx.Write(hhBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash batch: %w", err)
 	}
 
 	// Write missing blocks batch
 	if err = bmTx.Write(bmBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing batch: %w", err)
 	}
 
 	// Write block headers batch
 	if err = bhsTx.Write(bhsBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// height hash commit
 	if err = hhCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash commit: %w", err)
 	}
 
 	// blocks missing commit
 	if err = bmCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
 
 	// block headers commit
 	if err = bhsCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil, fmt.Errorf("block headers commit: %w", err)
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("block headers commit: %w", err)
 	}
 
-	return it, cbh, lbh, nil
+	return it, cbh, lbh, len(bhs), nil
 }
 
 type cacheEntry struct {

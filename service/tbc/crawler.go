@@ -379,10 +379,9 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 	return blocksProcessed, last, nil
 }
 
-// unindexUtxosInBlocks unindexes utxos from the last processed block until the
-// provided end hash, exclusive. It returns the number of blocks processed and
+// unindexUTxosInBlocks unindexes txs from the last processed block until the
+// provided end hash, inclusive. It returns the number of blocks processed and
 // the last hash it has processedd.
-// Note that by walking backwards the terminal condition MUST BE EXCLUSIVE!!
 func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
 	log.Tracef("unindexUtxoBlocks")
 	defer log.Tracef("unindexUtxoBlocks exit")
@@ -470,6 +469,12 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 	defer log.Tracef("UtxoIndexerUnwind exit")
 
 	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
+	s.mtx.Lock()
+	if !s.quiesced {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic("UtxoIndexerUnwind not quiesced")
+	}
+	s.mtx.Unlock()
 
 	// Allocate here so that we don't waste space when not indexing.
 	utxos := make(map[tbcd.Outpoint]tbcd.CacheOutput, s.cfg.MaxCachedTxs)
@@ -523,6 +528,13 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 	log.Tracef("UtxoIndexerWind")
 	defer log.Tracef("UtxoIndexerWind exit")
 
+	s.mtx.Lock()
+	if !s.quiesced {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic("UtxoIndexerWind not quiesced")
+	}
+	s.mtx.Unlock()
+
 	// Allocate here so that we don't waste space when not indexing.
 	utxos := make(map[tbcd.Outpoint]tbcd.CacheOutput, s.cfg.MaxCachedTxs)
 	defer clear(utxos)
@@ -575,6 +587,12 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	log.Tracef("UtxoIndexer")
 	defer log.Tracef("UtxoIndexer exit")
 
+	s.mtx.Lock()
+	if !s.quiesced {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic("UtxoIndexer not quiesced")
+	}
+	s.mtx.Unlock()
 	// XXX this is basically duplicate from UtxoIndexIsLinear
 
 	// Verify exit condition hash
@@ -590,7 +608,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("utxo indexer : %w", err)
+			return fmt.Errorf("utxo indexer: %w", err)
 		}
 		utxoHH = &HashHeight{
 			Hash:   s.chainParams.GenesisHash,
@@ -613,7 +631,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	case -1:
 		return s.UtxoIndexerUnwind(ctx, startBH, endBH)
 	case 0:
-		// Because we call TxIndexIsLinear we know it's the same block.
+		// Because we call UtxoIndexIsLinear we know it's the same block.
 		return nil
 	}
 	return fmt.Errorf("invalid direction: %v", direction)
@@ -830,6 +848,12 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 
 	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
 
+	s.mtx.Lock()
+	if !s.quiesced {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic("TxIndexerUnwind not quiesced")
+	}
+	s.mtx.Unlock()
 	// Allocate here so that we don't waste space when not indexing.
 	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
 	defer clear(txs)
@@ -881,6 +905,13 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
 	log.Tracef("TxIndexerWind")
 	defer log.Tracef("TxIndexerWind exit")
+
+	s.mtx.Lock()
+	if !s.quiesced {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic("TxIndexerWind not quiesced")
+	}
+	s.mtx.Unlock()
 
 	// Allocate here so that we don't waste space when not indexing.
 	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
@@ -937,6 +968,13 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 
 	// XXX this is basically duplicate from TxIndexIsLinear
 
+	s.mtx.Lock()
+	if !s.quiesced {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic("TxIndexer not quiesced")
+	}
+	s.mtx.Unlock()
+
 	// Verify exit condition hash
 	if endHash == nil {
 		return errors.New("must provide an end hash")
@@ -950,7 +988,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("tx indexer : %w", err)
+			return fmt.Errorf("tx indexer: %w", err)
 		}
 		txHH = &HashHeight{
 			Hash:   s.chainParams.GenesisHash,
@@ -988,7 +1026,7 @@ func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("tx indexer : %w", err)
+			return 0, fmt.Errorf("tx indexer: %w", err)
 		}
 		utxoHH = &HashHeight{
 			Hash:   s.chainParams.GenesisHash,
@@ -1007,7 +1045,7 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("tx indexer : %w", err)
+			return 0, fmt.Errorf("tx indexer: %w", err)
 		}
 		txHH = &HashHeight{
 			Hash:   s.chainParams.GenesisHash,
@@ -1068,6 +1106,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		return 0, ErrNotLinear
 	}
 	for {
+		log.Infof("sod %v", h)
 		bh, err := s.db.BlockHeaderByHash(ctx, h)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
