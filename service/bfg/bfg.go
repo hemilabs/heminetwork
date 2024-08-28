@@ -136,6 +136,8 @@ type Server struct {
 	checkForInvalidBlocks chan struct{}
 
 	l2keystonesCache []hemi.L2Keystone
+
+	btcHeightCache uint64
 }
 
 // metrics stores prometheus metrics.
@@ -468,17 +470,31 @@ func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.Bitcoin
 	return &bfgapi.BitcoinBroadcastResponse{TXID: hash[:]}, nil
 }
 
+func (s *Server) updateBtcHeightCache(height uint64) {
+	log.Tracef("updateBtcHeightCache")
+	defer log.Tracef("updateBtcHeightCache exit")
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	s.btcHeightCache = height
+}
+
+func (s *Server) getBtcHeightCache() uint64 {
+	log.Tracef("getBtcHeightCache")
+	defer log.Tracef("getBtcHeightCache exit")
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	return s.btcHeightCache
+}
+
 func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoRequest) (any, error) {
 	log.Tracef("handleBitcoinInfo")
 	defer log.Tracef("handleBitcoinInfo exit")
 
-	height, err := s.btcClient.Height(ctx)
-	if err != nil {
-		e := protocol.NewInternalErrorf("bitcoin height: %w", err)
-		return &bfgapi.BitcoinInfoResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
+	height := s.getBtcHeightCache()
 
 	return &bfgapi.BitcoinInfoResponse{
 		Height: height,
@@ -755,6 +771,9 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 				}
 				continue
 			}
+
+			s.updateBtcHeightCache(btcHeight)
+
 			printMsg = true
 			if s.btcHeight > btcHeight {
 				// XXX do we need this check?
