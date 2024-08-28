@@ -109,7 +109,8 @@ type Miner struct {
 	holdoffTimeout time.Duration
 	requestTimeout time.Duration
 
-	cfg *Config
+	cfg   *Config
+	txFee atomic.Uint32
 
 	btcChainParams *btcchaincfg.Params
 	btcPrivateKey  *dcrsecp256k1.PrivateKey
@@ -146,6 +147,7 @@ func NewMiner(cfg *Config) (*Miner, error) {
 		mineNowCh:      make(chan struct{}, 1),
 		l2Keystones:    make(map[string]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
 	}
+	m.SetFee(cfg.StaticFee)
 
 	switch strings.ToLower(cfg.BTCChainName) {
 	case "mainnet":
@@ -165,6 +167,24 @@ func NewMiner(cfg *Config) (*Miner, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+// Fee returns the current fee in sats/vB used by the PoP Miner when
+// creating PoP transactions.
+func (m *Miner) Fee() uint {
+	return uint(m.txFee.Load())
+}
+
+// SetFee sets the fee in sats/vB used by the PoP Miner when creating
+// PoP transactions.
+func (m *Miner) SetFee(fee uint) {
+	switch {
+	case fee < 0:
+		fee = 1
+	case fee > 1<<32-1:
+		fee = 1<<32 - 1
+	}
+	m.txFee.Store(uint32(fee))
 }
 
 func (m *Miner) bitcoinBalance(ctx context.Context, scriptHash []byte) (uint64, int64, error) {
@@ -355,7 +375,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 
 	// Estimate BTC fees.
 	txLen := 285 // XXX: for now all transactions are the same size
-	feePerKB := 1024 * m.cfg.StaticFee
+	feePerKB := 1024 * m.Fee()
 	feeAmount := (int64(txLen) * int64(feePerKB)) / 1024
 
 	// Retrieve the current balance for the miner.

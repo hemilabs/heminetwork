@@ -332,6 +332,17 @@ export declare function removeEventListener(
 ): Promise<void>;
 
 /**
+ * The type of recommended fee to use when doing automatic fees using
+ * the mempool.space REST API.
+ */
+export type RecommendedFeeType =
+  | 'fastest'
+  | 'halfHour'
+  | 'hour'
+  | 'economy'
+  | 'minimum';
+
+/**
  * @see startPoPMiner
  */
 export type MinerStartArgs = {
@@ -359,7 +370,22 @@ export type MinerStartArgs = {
   logLevel?: string;
 
   /**
-   * The number of stats/vB the PoP Miner will pay for fees.
+   * Whether to do automatic fee estimation using the mempool.space API.
+   * Defaults to true. If disabled, then only the staticFee will be used.
+   *
+   * When the value is true, the 'economy' recommended fee type will be used.
+   */
+  automaticFees?: boolean | RecommendedFeeType;
+
+  /**
+   * The duration between refreshing recommended fee data from the
+   * mempool.space API, in seconds. Defaults to 300 seconds (5 minutes).
+   */
+  automaticFeeRefreshSeconds?: number;
+
+  /**
+   * The number of sats/vB the PoP Miner will pay for fees. If automaticFees
+   * is enabled, then this will be used as a fallback fee value.
    */
   staticFee: number;
 };
@@ -392,6 +418,11 @@ export type MinerStatusResult = {
    * Whether the PoP miner is currently connected to a BFG server.
    */
   readonly connected: boolean;
+
+  /**
+   * The current fee used by the PoP miner for PoP transactions, in sats/vB.
+   */
+  readonly fee: number;
 };
 
 /**
