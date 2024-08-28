@@ -1204,7 +1204,6 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	// There really is no good way of determining if we can escape the
 	// expensive calls so we just eat it.
 	var pbhHash *chainhash.Hash
-	headers := make([][80]byte, len(msg.Headers))
 	for k := range msg.Headers {
 		if pbhHash != nil && pbhHash.IsEqual(&msg.Headers[k].PrevBlock) {
 			log.Errorf("cannot connect %v index %v",
@@ -1212,11 +1211,9 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			p.close() // get rid of this misbehaving peer
 			return
 		}
-
-		copy(headers[k][0:80], h2b(msg.Headers[k])) // XXX don't double copy
 		pbhHash = &msg.Headers[k].PrevBlock
 	}
-	it, cbh, lbh, n, err := s.db.BlockHeadersInsert(ctx, headers)
+	it, cbh, lbh, n, err := s.db.BlockHeadersInsert(ctx, msg)
 	if err != nil {
 		// This ends the race between peers during IBD.
 		if errors.Is(database.ErrDuplicate, err) {

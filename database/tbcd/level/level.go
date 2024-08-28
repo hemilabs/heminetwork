@@ -403,7 +403,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 // and always returns the canonical and last inserted blockheader, which may be
 // the same.
 // This call uses the database to prevent reentrancy.
-func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
@@ -412,7 +412,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// headers on what the network may be doing. Not sure how to handle
 	// that right now but leaving a note.
 
-	if len(bhs) == 0 {
+	if len(bhs.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("block headers insert: invalid")
 	}
@@ -420,19 +420,9 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// Iterate over the block headers and skip block headers we already
 	// have in the database. Rely on caching to make this not suck terribly.
 	bhDB := l.pool[level.BlockHeadersDB]
-	var (
-		x     int
-		wbh   *wire.BlockHeader
-		bhash chainhash.Hash
-		err   error
-	)
-	for _, rbh := range bhs {
-		wbh, err = tbcd.B2H(rbh[:])
-		if err != nil {
-			return tbcd.ITInvalid, nil, nil, 0,
-				fmt.Errorf("block headers insert b2h: %w", err)
-		}
-		bhash = wbh.BlockHash()
+	var x int
+	for _, rbh := range bhs.Headers {
+		bhash := rbh.BlockHash()
 		has, err := bhDB.Has(bhash[:], nil)
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
@@ -444,8 +434,8 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 			break
 		}
 	}
-	bhs = bhs[x:]
-	if len(bhs) == 0 {
+	bhs.Headers = bhs.Headers[x:]
+	if len(bhs.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
 			database.DuplicateError("block headers insert duplicate")
 	}
@@ -453,6 +443,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// Ensure we can connect these blockheaders prior to starting database
 	// transaction. This also obtains the starting cumulative difficulty
 	// and  height.
+	wbh := bhs.Headers[0]
 	pbh, err := l.BlockHeaderByHash(ctx, &wbh.PrevBlock)
 	if err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
@@ -484,7 +475,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	defer hhDiscard()
 
 	// retrieve best/canonical block header
-	var lastRecord []byte
 	bbh, err := bhsTx.Get([]byte(bhsCanonicalTipKey), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -517,16 +507,15 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 	cdiff := &pbh.Difficulty
 	height := pbh.Height
-	for k, bh := range bhs {
+	var (
+		bhash           chainhash.Hash
+		lastBlockHeader [80]byte
+		lastRecord      []byte
+	)
+	for _, bh := range bhs.Headers {
 		// The first element is skipped, as it is pre-decoded.
-		if k != 0 {
-			wbh, err = tbcd.B2H(bh[:])
-			if err != nil {
-				return tbcd.ITInvalid, nil, nil, 0,
-					fmt.Errorf("block headers insert b2h: %w", err)
-			}
-			bhash = wbh.BlockHash()
-		}
+		wbh = bh
+		bhash = wbh.BlockHash()
 
 		// pre set values because we start with previous value
 		height++
@@ -548,7 +537,8 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 		// Encode block header as [hash][height,header,cdiff] or,
 		// [32][8+80+32] bytes
-		ebh := encodeBlockHeader(height, bh, cdiff)
+		lastBlockHeader = tbcd.H2B(bh)
+		ebh := encodeBlockHeader(height, lastBlockHeader, cdiff)
 		bhsBatch.Put(bhash[:], ebh[:])
 		lastRecord = ebh[:]
 	}
@@ -557,8 +547,8 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		Hash:       &bhash,
 		Height:     height,
 		Difficulty: *cdiff,
+		Header:     lastBlockHeader,
 	}
-	copy(cbh.Header[:], bhs[len(bhs)-1][:])
 	lbh := cbh
 
 	// XXX: Reason about needing to check fork flag. For now keep it here to
@@ -630,7 +620,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 			fmt.Errorf("block headers commit: %w", err)
 	}
 
-	return it, cbh, lbh, len(bhs), nil
+	return it, cbh, lbh, len(bhs.Headers), nil
 }
 
 type cacheEntry struct {

@@ -57,7 +57,7 @@ type Database interface {
 
 	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
-	BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (InsertType, *BlockHeader, *BlockHeader, int, error)
+	BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (InsertType, *BlockHeader, *BlockHeader, int, error)
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
@@ -380,6 +380,17 @@ func B2H(header []byte) (*wire.BlockHeader, error) {
 		return nil, fmt.Errorf("deserialize block header: %w", err)
 	}
 	return &bh, nil
+}
+
+func H2B(wbh *wire.BlockHeader) [80]byte {
+	var b bytes.Buffer
+	err := wbh.Serialize(&b)
+	if err != nil {
+		panic(err)
+	}
+	var bh [80]byte
+	copy(bh[:], b.Bytes())
+	return bh
 }
 
 // HeaderHash return the block hash from a raw block header.
