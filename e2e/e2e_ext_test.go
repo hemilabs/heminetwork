@@ -1330,7 +1330,7 @@ func TestBitcoinInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(6 * time.Second)
 
 	if err := bfgapi.Write(
 		ctx, bws.conn, "someid", &bfgapi.BitcoinInfoRequest{},
