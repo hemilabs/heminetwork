@@ -2567,6 +2567,15 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// there is a chance we get notifications from the L2KeystonesInsert
+	// call above, if they haven't been broadcast yet.  ignore those.
+	if v.Header.Command == bfgapi.CmdL2KeystonesNotification {
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	if v.Header.Command != bssapi.CmdBTCFinalityByKeystonesResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
@@ -2643,6 +2652,15 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 	err = wsjson.Read(ctx, c, &v)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// there is a chance we get notifications from the L2KeystonesInsert
+	// call above, if they haven't been broadcast yet.  ignore those.
+	if v.Header.Command == bfgapi.CmdL2KeystonesNotification {
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if v.Header.Command != bfgapi.CmdBTCFinalityByRecentKeystonesResponse {
