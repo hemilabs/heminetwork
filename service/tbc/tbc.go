@@ -5,7 +5,6 @@
 package tbc
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -85,67 +84,6 @@ var log = loggo.GetLogger("tbc")
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
-}
-
-func tx2Bytes(tx *wire.MsgTx) ([]byte, error) {
-	var b bytes.Buffer
-	if err := tx.Serialize(&b); err != nil {
-		return nil, err
-	}
-
-	return b.Bytes(), nil
-}
-
-func bytes2Tx(b []byte) (*wire.MsgTx, error) {
-	var w wire.MsgTx
-	if err := w.Deserialize(bytes.NewReader(b)); err != nil {
-		return nil, err
-	}
-
-	return &w, nil
-}
-
-func header2Slice(wbh *wire.BlockHeader) ([]byte, error) {
-	var b bytes.Buffer
-	err := wbh.Serialize(&b)
-	if err != nil {
-		return nil, err
-	}
-	return b.Bytes(), nil
-}
-
-func header2Array(wbh *wire.BlockHeader) ([80]byte, error) {
-	sb, err := header2Slice(wbh)
-	if err != nil {
-		return [80]byte{}, err
-	}
-	return [80]byte(sb), nil
-}
-
-func h2b(wbh *wire.BlockHeader) []byte {
-	hb, err := header2Slice(wbh)
-	if err != nil {
-		panic(err)
-	}
-	return hb
-}
-
-func bytes2Header(header [80]byte) (*wire.BlockHeader, error) {
-	var bh wire.BlockHeader
-	err := bh.Deserialize(bytes.NewReader(header[:]))
-	if err != nil {
-		return nil, fmt.Errorf("deserialize block header: %w", err)
-	}
-	return &bh, nil
-}
-
-func slice2Header(header []byte) (*wire.BlockHeader, error) {
-	var bh wire.BlockHeader
-	err := bh.Deserialize(bytes.NewReader(header[:]))
-	if err != nil {
-		return nil, fmt.Errorf("deserialize block header: %w", err)
-	}
-	return &bh, nil
 }
 
 type Config struct {
@@ -281,15 +219,10 @@ func (s *Server) DB() tbcd.Database {
 	return s.db
 }
 
-func (s *Server) getHeaders(ctx context.Context, p *peer, lastHeaderHash [80]byte) error {
-	bh, err := bytes2Header(lastHeaderHash)
-	if err != nil {
-		return fmt.Errorf("invalid header: %w", err)
-	}
-	hash := bh.BlockHash()
+func (s *Server) getHeaders(ctx context.Context, p *peer, hash *chainhash.Hash) error {
 	ghs := wire.NewMsgGetHeaders()
-	ghs.AddBlockLocatorHash(&hash)
-	if err = p.write(defaultCmdTimeout, ghs); err != nil {
+	ghs.AddBlockLocatorHash(hash)
+	if err := p.write(defaultCmdTimeout, ghs); err != nil {
 		return fmt.Errorf("write get headers: %w", err)
 	}
 
@@ -630,7 +563,7 @@ func (s *Server) sod(ctx context.Context, p *peer) (bool, *wire.MsgHeaders, erro
 	}
 	// Ask peer for block headers and special handle the first message.
 	log.Debugf("block header best hash: %v %s", p, bhb)
-	if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
+	if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
 		// This should not happen
 		return false, nil, fmt.Errorf("sod get headers: %v %v", p, err)
 	}
@@ -715,7 +648,7 @@ func (s *Server) sod(ctx context.Context, p *peer) (bool, *wire.MsgHeaders, erro
 				bhb = nbh
 				log.Debugf("Fork detected %v: walking chain back to: %v",
 					p, bhb)
-				if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
+				if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
 					return false, nil, fmt.Errorf("sod get headers: %v %w",
 						p, err)
 				}
@@ -1247,7 +1180,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		height = cbh.Height
 
 		// Ask for next batch of headers at canonical tip.
-		if err = s.getHeaders(ctx, p, cbh.Header); err != nil {
+		if err = s.getHeaders(ctx, p, cbh.BlockHash()); err != nil {
 			log.Errorf("get headers: %v", err)
 			return
 		}
@@ -1256,13 +1189,13 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		height = lbh.Height
 
 		// Ask for more block headers at the fork tip.
-		if err = s.getHeaders(ctx, p, lbh.Header); err != nil {
+		if err = s.getHeaders(ctx, p, lbh.BlockHash()); err != nil {
 			log.Errorf("get headers fork: %v", err)
 			return
 		}
 
 		// Also ask for more block headers at canonical tip
-		if err = s.getHeaders(ctx, p, cbh.Header); err != nil {
+		if err = s.getHeaders(ctx, p, cbh.BlockHash()); err != nil {
 			log.Errorf("get headers canonical: %v", err)
 			return
 		}
@@ -1277,13 +1210,13 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 		}
 
 		// Ask for more block headers at the fork tip.
-		if err = s.getHeaders(ctx, p, lbh.Header); err != nil {
+		if err = s.getHeaders(ctx, p, lbh.BlockHash()); err != nil {
 			log.Errorf("get headers fork: %v", err)
 			return
 		}
 
 		// Also ask for more block headers at canonical tip
-		if err = s.getHeaders(ctx, p, cbh.Header); err != nil {
+		if err = s.getHeaders(ctx, p, cbh.BlockHash()); err != nil {
 			log.Errorf("get headers canonical: %v", err)
 			return
 		}
@@ -1426,11 +1359,8 @@ func (s *Server) insertGenesis(ctx context.Context) error {
 	// We really should be inserting the block first but block insert
 	// verifies that a block header exists.
 	log.Infof("Inserting genesis block and header: %v", s.chainParams.GenesisHash)
-	gbh, err := header2Array(&s.chainParams.GenesisBlock.Header)
+	err := s.db.BlockHeaderGenesisInsert(ctx, &s.chainParams.GenesisBlock.Header)
 	if err != nil {
-		return fmt.Errorf("serialize genesis block header: %w", err)
-	}
-	if err = s.db.BlockHeaderGenesisInsert(ctx, gbh); err != nil {
 		return fmt.Errorf("genesis block header insert: %w", err)
 	}
 
@@ -1458,7 +1388,7 @@ func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*
 	if err != nil {
 		return nil, 0, fmt.Errorf("db block header by hash: %w", err)
 	}
-	bhw, err := bytes2Header(bh.Header)
+	bhw, err := bh.Wire()
 	if err != nil {
 		return nil, 0, fmt.Errorf("bytes to header: %w", err)
 	}
@@ -1535,7 +1465,7 @@ func (s *Server) BlockHeaderBest(ctx context.Context) (uint64, *wire.BlockHeader
 	if err != nil {
 		return 0, nil, err
 	}
-	wbh, err := bytes2Header(blockHeader.Header)
+	wbh, err := blockHeader.Wire()
 	return blockHeader.Height, wbh, err
 }
 

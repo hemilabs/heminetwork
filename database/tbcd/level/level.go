@@ -310,15 +310,9 @@ func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	return bh
 }
 
-func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
+func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader) error {
 	log.Tracef("BlockHeaderGenesisInsert")
 	defer log.Tracef("BlockHeaderGenesisInsert exit")
-
-	wbh, err := tbcd.B2H(bh[:])
-	if err != nil {
-		return fmt.Errorf("block header insert b2h: %w", err)
-	}
-	bhash := wbh.BlockHash()
 
 	// block headers
 	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
@@ -328,6 +322,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 	defer bhsDiscard()
 
 	// Make sure we are not inserting the same blocks
+	bhash := wbh.BlockHash()
 	has, err := bhsTx.Has(bhash[:], nil)
 	if err != nil {
 		return fmt.Errorf("block header insert has: %w", err)
@@ -359,7 +354,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 	hhBatch.Put(hhKey, []byte{})
 	cdiff := big.NewInt(0)
 	cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
-	ebh := encodeBlockHeader(0, bh, cdiff)
+	ebh := encodeBlockHeader(0, tbcd.H2B(wbh), cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
