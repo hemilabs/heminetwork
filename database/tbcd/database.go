@@ -62,8 +62,7 @@ type Database interface {
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
 	BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error)
-	// XXX replace BlockInsert with plural version
-	// BlocksInsert(ctx context.Context, bs []*Block) (int64, error)
+	// BlocksInsert(ctx context.Context, bs []*btcutil.Block) (int64, error)
 	BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error)
 
 	// Transactions
@@ -369,45 +368,4 @@ func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, erro
 		return nil, nil, fmt.Errorf("invalid block hash: %w", err)
 	}
 	return txId, blockHash, nil
-}
-
-// Helper functions
-
-// B2H converts a raw block header to a wire block header structure.
-func B2H(header []byte) (*wire.BlockHeader, error) {
-	var bh wire.BlockHeader
-	if err := bh.Deserialize(bytes.NewReader(header)); err != nil {
-		return nil, fmt.Errorf("deserialize block header: %w", err)
-	}
-	return &bh, nil
-}
-
-func H2B(wbh *wire.BlockHeader) [80]byte {
-	var b bytes.Buffer
-	err := wbh.Serialize(&b)
-	if err != nil {
-		panic(err)
-	}
-	var bh [80]byte
-	copy(bh[:], b.Bytes())
-	return bh
-}
-
-// HeaderHash return the block hash from a raw block header.
-func HeaderHash(header []byte) *chainhash.Hash {
-	h, err := B2H(header)
-	if err != nil {
-		panic(err)
-	}
-	hash := h.BlockHash()
-	return &hash
-}
-
-// HeaderHash return the parent block hash from a raw block header.
-func HeaderParentHash(header []byte) *chainhash.Hash {
-	h, err := B2H(header)
-	if err != nil {
-		panic(err)
-	}
-	return &h.PrevBlock
 }

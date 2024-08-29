@@ -76,6 +76,35 @@ type ldb struct {
 
 var _ tbcd.Database = (*ldb)(nil)
 
+func h2b(wbh *wire.BlockHeader) [80]byte {
+	var b bytes.Buffer
+	err := wbh.Serialize(&b)
+	if err != nil {
+		panic(err)
+	}
+	var bh [80]byte
+	copy(bh[:], b.Bytes())
+	return bh
+}
+
+func b2h(header []byte) (*wire.BlockHeader, error) {
+	var bh wire.BlockHeader
+	if err := bh.Deserialize(bytes.NewReader(header)); err != nil {
+		return nil, fmt.Errorf("deserialize block header: %w", err)
+	}
+	return &bh, nil
+}
+
+// HeaderHash return the block hash from a raw block header.
+func HeaderHash(header []byte) *chainhash.Hash {
+	h, err := b2h(header)
+	if err != nil {
+		panic(err)
+	}
+	hash := h.BlockHash()
+	return &hash
+}
+
 type Config struct {
 	Home             string // home directory
 	BlockCache       int    // number of blocks to cache
@@ -301,7 +330,7 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	bh := &tbcd.BlockHeader{
-		Hash:   tbcd.HeaderHash(ebh[8:88]),
+		Hash:   HeaderHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 	}
 	// copy the values to prevent slicing reentrancy problems.
@@ -354,7 +383,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 	hhBatch.Put(hhKey, []byte{})
 	cdiff := big.NewInt(0)
 	cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
-	ebh := encodeBlockHeader(0, tbcd.H2B(wbh), cdiff)
+	ebh := encodeBlockHeader(0, h2b(wbh), cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
@@ -532,7 +561,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 
 		// Encode block header as [hash][height,header,cdiff] or,
 		// [32][8+80+32] bytes
-		lastBlockHeader = tbcd.H2B(bh)
+		lastBlockHeader = h2b(bh)
 		ebh := encodeBlockHeader(height, lastBlockHeader, cdiff)
 		bhsBatch.Put(bhash[:], ebh[:])
 		lastRecord = ebh[:]
