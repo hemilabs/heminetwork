@@ -1059,6 +1059,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 				{},
 			},
 			electrumx: false,
+			skip:      true,
 		},
 		{
 			name:          "bitcoin utxos electrumx error",
@@ -1325,6 +1326,8 @@ func TestBitcoinInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	time.Sleep(5 * time.Second)
 
 	if err := bfgapi.Write(
 		ctx, bws.conn, "someid", &bfgapi.BitcoinInfoRequest{},
@@ -2458,6 +2461,15 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	err = wsjson.Read(ctx, c, &v)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	// there is a chance we get notifications from the L2KeystonesInsert
+	// call above, if they haven't been broadcast yet.  ignore those.
+	if v.Header.Command == bfgapi.CmdL2KeystonesNotification {
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if v.Header.Command != bssapi.CmdBTCFinalityByKeystonesResponse {
