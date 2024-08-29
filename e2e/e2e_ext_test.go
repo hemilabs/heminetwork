@@ -739,10 +739,6 @@ func TestNewL2Keystone(t *testing.T) {
 	}
 
 	var v protocol.Message
-	err = wsjson.Read(ctx, c, &v)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	for {
 		err = wsjson.Read(ctx, c, &v)
@@ -1334,7 +1330,7 @@ func TestBitcoinInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	if err := bfgapi.Write(
 		ctx, bws.conn, "someid", &bfgapi.BitcoinInfoRequest{},
@@ -2726,7 +2722,7 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
