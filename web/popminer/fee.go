@@ -13,8 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"time"
-
-	versionPkg "github.com/hemilabs/heminetwork/version"
 )
 
 const mempoolRecommendedFees = "/api/v1/fees/recommended"
@@ -103,7 +101,6 @@ func (m *Miner) getRecommendedFees(ctx context.Context) (*recommendedFees, error
 		return nil, fmt.Errorf("create recommended fees request: %w", err)
 	}
 	req.Header.Add("Accept", "application/json")
-	req.Header.Add("User-Agent", versionPkg.UserAgent())
 
 	// Make HTTP request.
 	res, err := m.httpClient.Do(req)
