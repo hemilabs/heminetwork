@@ -95,8 +95,8 @@ func b2h(header []byte) (*wire.BlockHeader, error) {
 	return &bh, nil
 }
 
-// HeaderHash return the block hash from a raw block header.
-func HeaderHash(header []byte) *chainhash.Hash {
+// headerHash return the block hash from a raw block header.
+func headerHash(header []byte) *chainhash.Hash {
 	h, err := b2h(header)
 	if err != nil {
 		panic(err)
@@ -330,7 +330,7 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	bh := &tbcd.BlockHeader{
-		Hash:   HeaderHash(ebh[8:88]),
+		Hash:   headerHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 	}
 	// copy the values to prevent slicing reentrancy problems.
