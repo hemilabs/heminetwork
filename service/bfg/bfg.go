@@ -366,22 +366,13 @@ func (s *Server) handleOneBroadcastRequest(ctx context.Context, highPriority boo
 		return
 	}
 
-	publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
+	_, err = pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
 	if err != nil {
 		log.Errorf("could not parse public key from signature script: %v", err)
 		return
 	}
 
 	hash := mb.TxHash()
-
-	if err := s.db.PopBasisInsertPopMFields(ctx, &bfgd.PopBasis{
-		BtcTxId:             hash[:],
-		BtcRawTx:            database.ByteArray(serializedTx),
-		PopMinerPublicKey:   publicKeyUncompressed,
-		L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
-	}); err != nil {
-		log.Infof("inserting pop basis: %s", err)
-	}
 
 	_, err = s.btcClient.Broadcast(ctx, serializedTx)
 	if err != nil {
