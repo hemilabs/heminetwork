@@ -1033,13 +1033,12 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	}
 
 	// First one here sets sodComplete
-	once := sync.OnceFunc(func() {
+	s.mtx.Lock()
+	if !s.soddingComplete {
 		log.Infof("SOD complete")
-		s.mtx.Lock()
-		s.soddingComplete = true
-		s.mtx.Unlock()
-	})
-	once()
+	}
+	s.soddingComplete = true
+	s.mtx.Unlock()
 
 	// Only now can we consider the peer connected
 	log.Debugf("Peer connected: %v", p)
