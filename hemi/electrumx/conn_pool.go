@@ -91,7 +91,10 @@ func (p *connPool) onClose(conn *clientConn) {
 	removed := len(p.pool) != l
 	p.poolMx.Unlock()
 
-	if p.metrics != nil && removed {
+	if p.metrics != nil {
+		if removed {
+			p.metrics.connsIdle.Dec()
+		}
 		p.metrics.connsClosed.Inc()
 		p.metrics.connsOpen.Dec()
 	}
