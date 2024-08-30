@@ -1445,7 +1445,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 
 	if response.Error != nil {
-		if !strings.Contains(response.Error.Message, "invalid tx id") {
+		if !strings.Contains(response.Error.Message, "tx not found") {
 			t.Fatalf("incorrect error found: %s", response.Error.Message)
 		}
 	}
