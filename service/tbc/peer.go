@@ -62,14 +62,19 @@ func (p *peer) String() string {
 
 func (p *peer) write(timeout time.Duration, msg wire.Message) error {
 	p.conn.SetWriteDeadline(time.Now().Add(timeout))
+	// XXX contexts would be nice
 	_, err := wire.WriteMessageWithEncodingN(p.conn, msg, p.protocolVersion,
 		p.network, wire.LatestEncoding)
 	return err
 }
 
-func (p *peer) read() (wire.Message, error) {
+func (p *peer) read(timeout time.Duration) (wire.Message, error) {
+	if timeout == 0 {
+		p.conn.SetReadDeadline(time.Time{}) // never timeout on reads
+	} else {
+		p.conn.SetReadDeadline(time.Now().Add(timeout))
+	}
 	// XXX contexts would be nice
-	p.conn.SetReadDeadline(time.Time{}) // never timeout on reads
 	_, msg, _, err := wire.ReadMessageWithEncodingN(p.conn, p.protocolVersion,
 		p.network, wire.LatestEncoding)
 	return msg, err

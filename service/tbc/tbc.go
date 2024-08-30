@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"sync"
 	"time"
@@ -140,8 +141,12 @@ type Server struct {
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL // outstanding pings
 
-	quiesced bool // when set do not accept blockheaders and/or blocks and prevent indexing.
-	db       tbcd.Database
+	quiesced        bool // when set do not accept blockheaders and/or blocks and prevent indexing.
+	sodding         bool //when set we are in sod
+	soddingComplete bool //when set when sod completes
+	indexing        bool // when set we are indexing
+
+	db tbcd.Database
 
 	// Prometheus
 	isRunning     bool
@@ -498,7 +503,7 @@ func (s *Server) pingExpired(key any, value any) {
 	}
 	log.Debugf("pingExpired %v", key)
 	if err := p.close(); err != nil {
-		log.Errorf("ping %v: %v", key, err)
+		log.Debugf("ping %v: %v", key, err)
 	}
 }
 
@@ -531,12 +536,243 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 		log.Debugf("Pinging: %v", p)
 		err := p.write(defaultCmdTimeout, wire.NewMsgPing(uint64(time.Now().Unix())))
 		if err != nil {
-			log.Errorf("ping %v: %v", p, err)
+			log.Debugf("ping %v: %v", p, err)
+			return
 		}
 
 		// Record outstanding ping
 		s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
 	}
+}
+
+func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message) bool {
+	// Do accept addr and ping commands before we consider the peer up.
+	switch m := msg.(type) {
+	case *wire.MsgAddr:
+		if err := s.handleAddr(ctx, p, m); err != nil {
+			log.Debugf("handle generic addr: %v", err)
+		}
+	case *wire.MsgAddrV2:
+		if err := s.handleAddrV2(ctx, p, m); err != nil {
+			log.Debugf("handle generic addr: %v", err)
+		}
+
+	case *wire.MsgPing:
+		if err := s.handlePing(ctx, p, m); err != nil {
+			log.Debugf("handle generic addr: %v", err)
+		}
+
+	case *wire.MsgPong:
+		if err := s.handlePong(ctx, p, m); err != nil {
+			log.Debugf("handle generic addr: %v", err)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire.Message, expect any) (any, error) {
+
+	start := time.Now()
+	if err := p.write(defaultCmdTimeout, cmd); err != nil {
+		return nil, fmt.Errorf("write: %w", err)
+	}
+
+	verbose := false
+	for {
+		// See if we were interrupted, for the love of pete add ctx to wire
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		delta := d - time.Now().Sub(start)
+		if delta <= 0 {
+			return nil, fmt.Errorf("poll p2p: timeout")
+		}
+		msg, err := p.read(delta)
+		if errors.Is(err, wire.ErrUnknownMessage) {
+			// skip unknown
+			continue
+		} else if err != nil {
+			return nil, fmt.Errorf("poll p2p read: %v %v", p, err)
+		}
+
+		if verbose {
+			log.Infof("%v: %v", p, spew.Sdump(msg))
+		}
+		if reflect.TypeOf(msg) == reflect.TypeOf(expect) {
+			return msg, nil
+		}
+
+		s.handleGeneric(ctx, p, msg)
+	}
+}
+
+func (s *Server) inCanonicalChainP2P(ctx context.Context, p *peer, hash *chainhash.Hash) (bool, error) {
+	log.Tracef("inCanonicalChainP2P %v", hash)
+	defer log.Tracef("inCanonicalChainP2P exit %v", hash)
+
+	if s.chainParams.GenesisHash.IsEqual(hash) {
+		return true, nil
+	}
+
+	ghs := wire.NewMsgGetHeaders()
+	ghs.AddBlockLocatorHash(hash)
+	ghs.HashStop = *s.chainParams.GenesisHash
+	var x *wire.MsgHeaders
+	msg, err := s.pollP2P(ctx, 5*time.Second, p, ghs, x)
+	if err != nil {
+		return false, fmt.Errorf("inCanonicalChainP2P: %w", err)
+	}
+	if m, ok := msg.(*wire.MsgHeaders); ok {
+		if len(m.Headers) == 0 {
+			return false, fmt.Errorf("poll p2p: invalid headers response")
+		}
+		prevBlockHash := &m.Headers[0].PrevBlock
+		if s.chainParams.GenesisHash.IsEqual(prevBlockHash) {
+			return false, nil
+		}
+		zeroHash := chainhash.Hash{}
+		if prevBlockHash.IsEqual(&zeroHash) {
+			return false, fmt.Errorf("poll p2p: invalid header hash")
+		}
+		return true, nil
+	}
+
+	return false, fmt.Errorf("invalid headers type: %T", msg)
+}
+
+func (s *Server) findCanonicalP2P(ctx context.Context, p *peer, hash *chainhash.Hash) (*chainhash.Hash, error) {
+	// XXX memoize results
+	for {
+		x, err := s.inCanonicalChainP2P(ctx, p, hash)
+		if err != nil {
+			return nil, fmt.Errorf("find canonical: %v %v", p, err)
+		}
+		if x {
+			return hash, nil
+		}
+
+		bh, err := s.db.BlockHeaderByHash(ctx, hash)
+		if err != nil {
+			return nil, fmt.Errorf("find canonical header: %v %v", p, err)
+		}
+		wbh, err := bh.Wire()
+		if err != nil {
+			return nil, fmt.Errorf("find canonical header wire: %v %v", p, err)
+		}
+		hash = &wbh.PrevBlock
+		if s.chainParams.GenesisHash.IsEqual(hash) {
+			return nil, fmt.Errorf("reached genesis")
+		}
+	}
+}
+
+func (s *Server) fixupUtxoIndex(ctx context.Context, p *peer) error {
+	log.Tracef("fixupUtxoIndex")
+	defer log.Tracef("fixupUtxoIndex exit")
+
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		return fmt.Errorf("fixup utxo index hash: %v %v", p, err)
+	}
+	hash, err := s.findCanonicalP2P(ctx, p, utxoHH.Hash)
+	if err != nil {
+		return fmt.Errorf("fixup utxo index find: %v %v", p, err)
+	}
+	if hash.IsEqual(utxoHH.Hash) {
+		// Found self, utxo index is on canonical chain.
+		return nil
+	}
+
+	endBH, err := s.db.BlockHeaderByHash(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("fixup utxo index block header: %v %v", p, err)
+	}
+	if utxoHH.Height < endBH.Height {
+		panic("impossible condition")
+	}
+
+	log.Infof("Fixing up utxo index from %v to %v @ %v", utxoHH, endBH, endBH.Height)
+	err = s.UtxoIndexer(ctx, endBH.Hash)
+	if err != nil {
+		// this probably is terminal
+		panic(fmt.Errorf("fixup utxo index: %v %v", p, err))
+	}
+	return nil
+}
+func (s *Server) fixupTxIndex(ctx context.Context, p *peer) error {
+	log.Tracef("fixupTxIndex")
+	defer log.Tracef("fixupTxIndex exit")
+
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		return fmt.Errorf("fixup tx index hash: %v %v", p, err)
+	}
+	hash, err := s.findCanonicalP2P(ctx, p, txHH.Hash)
+	if err != nil {
+		return fmt.Errorf("fixup tx index find: %v %v", p, err)
+	}
+	if hash.IsEqual(txHH.Hash) {
+		// Found self, tx index is on canonical chain.
+		return nil
+	}
+
+	endBH, err := s.db.BlockHeaderByHash(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("fixup tx index block header: %v %v", p, err)
+	}
+	if txHH.Height < endBH.Height {
+		panic("impossible condition")
+	}
+
+	// fixup tx index
+	log.Infof("Fixing up tx index from %v to %v @ %v", txHH, endBH, endBH.Height)
+	err = s.TxIndexer(ctx, endBH.Hash)
+	if err != nil {
+		// this probably is terminal
+		panic(fmt.Errorf("fixup tx index: %v %v", p, err))
+	}
+	return nil
+}
+
+func (s *Server) fixupIndexes(ctx context.Context, p *peer) error {
+	log.Tracef("fixupIndexes")
+	defer log.Tracef("fixupIndexes exit")
+
+	s.mtx.Lock()
+	if s.soddingComplete {
+		log.Debugf("sodding complete")
+		s.mtx.Unlock()
+		return nil
+	}
+	if s.sodding {
+		log.Debugf("already sodding")
+		s.mtx.Unlock()
+		return nil
+	}
+	s.sodding = true
+	s.mtx.Unlock()
+
+	defer func() {
+		s.mtx.Lock()
+		s.sodding = false
+		s.mtx.Unlock()
+	}()
+
+	err := s.fixupUtxoIndex(ctx, p)
+	if err != nil {
+		return fmt.Errorf("fixupUtxoIndex %w", err)
+	}
+	err = s.fixupTxIndex(ctx, p)
+	if err != nil {
+		return fmt.Errorf("fixupTxIndex %w", err)
+	}
+
+	return nil
 }
 
 // sod is Start Of Day. Code runs through bringup of a peer.
@@ -561,6 +797,7 @@ func (s *Server) sod(ctx context.Context, p *peer) (bool, *wire.MsgHeaders, erro
 	if err != nil {
 		return false, nil, fmt.Errorf("sod block headers best: %v %v", p, err)
 	}
+
 	// Ask peer for block headers and special handle the first message.
 	log.Debugf("block header best hash: %v %s", p, bhb)
 	if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
@@ -589,7 +826,7 @@ func (s *Server) sod(ctx context.Context, p *peer) (bool, *wire.MsgHeaders, erro
 		default:
 		}
 
-		msg, err := p.read()
+		msg, err := p.read(5 * time.Second)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown
 			continue
@@ -601,28 +838,12 @@ func (s *Server) sod(ctx context.Context, p *peer) (bool, *wire.MsgHeaders, erro
 		if verbose {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
+		if s.handleGeneric(ctx, p, msg) {
+			continue
+		}
 
 		// Do accept addr and ping commands before we consider the peer up.
 		switch m := msg.(type) {
-		case *wire.MsgAddr:
-			if err := s.handleAddr(ctx, p, m); err != nil {
-				return false, nil, fmt.Errorf("sod handle addr: %v %w", p, err)
-			}
-		case *wire.MsgAddrV2:
-			if err := s.handleAddrV2(ctx, p, m); err != nil {
-				return false, nil, fmt.Errorf("sod handle addrv2: %v %w", p, err)
-			}
-
-		case *wire.MsgPing:
-			if err := s.handlePing(ctx, p, m); err != nil {
-				return false, nil, fmt.Errorf("sod handle ping: %v %w", p, err)
-			}
-
-		case *wire.MsgPong:
-			if err := s.handlePong(ctx, p, m); err != nil {
-				return false, nil, fmt.Errorf("sod handle pong: %v %w", p, err)
-			}
-
 		case *wire.MsgHeaders:
 			if len(m.Headers) == 0 {
 				log.Debugf("sod peer caught up: %v", p)
@@ -672,7 +893,7 @@ func (s *Server) sod(ctx context.Context, p *peer) (bool, *wire.MsgHeaders, erro
 	}
 }
 
-func (s *Server) sodFork(ctx context.Context, hash *chainhash.Hash) (bool, error) {
+func (s *Server) sodFork(ctx context.Context, hash *chainhash.Hash, p *peer) (bool, error) {
 	log.Tracef("sodFork")
 	defer log.Tracef("sodFork exit")
 
@@ -680,29 +901,6 @@ func (s *Server) sodFork(ctx context.Context, hash *chainhash.Hash) (bool, error
 	//
 	// Walk back chain and unwind the various indexes if needed.
 	// Also pause other sodForks/indexing/etc until tip is healthy again.
-
-	s.mtx.Lock()
-	if s.quiesced {
-		// We are quiesced so just return no error for now.
-		//
-		// XXX this will likely logic race between a legit index and
-		// sodFork. Determine if we need an additional flag to prevent
-		// interaction between those two scenarios.
-		s.mtx.Unlock()
-		return false, nil
-	}
-	s.quiesced = true
-	s.mtx.Unlock()
-
-	// Unquiesce when done.
-	defer func() {
-		s.mtx.Lock()
-		s.quiesced = false
-		s.mtx.Unlock()
-	}()
-
-	log.Infof("Start of day forked canonical tip at: %v", hash)
-
 	endBH, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
 		return false, fmt.Errorf("blockheader hash: %w", err)
@@ -715,8 +913,9 @@ func (s *Server) sodFork(ctx context.Context, hash *chainhash.Hash) (bool, error
 			return false, fmt.Errorf("utxo index hash: %w", err)
 		}
 		// Utxo index hash does not exist yet
-	} else if endBH.Height > utxoHH.Height {
-		log.Infof("fork index %v utxo index %v", endBH.Height, utxoHH.Height)
+	} else if utxoHH.Height > endBH.Height {
+		log.Infof("Start of day forked tip at %v utxo index %v",
+			endBH.Height, utxoHH.Height)
 		if err := s.UtxoIndexer(ctx, hash); err != nil {
 			if !errors.Is(err, database.ErrNotFound) {
 				return false, fmt.Errorf("utxo indexer: %w", err)
@@ -731,8 +930,9 @@ func (s *Server) sodFork(ctx context.Context, hash *chainhash.Hash) (bool, error
 			return false, fmt.Errorf("tx index hash: %w", err)
 		}
 		// Tx index hash does not exist yet
-	} else if endBH.Height > txHH.Height {
-		log.Infof("fork index %v tx index %v", endBH.Height, utxoHH.Height)
+	} else if txHH.Height > endBH.Height {
+		log.Infof("Start of day forked tip at %v tx index %v",
+			endBH.Height, utxoHH.Height)
 		if err := s.TxIndexer(ctx, hash); err != nil {
 			if !errors.Is(err, database.ErrNotFound) {
 				return false, fmt.Errorf("tx indexer: %w", err)
@@ -787,6 +987,14 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}()
 
+	// This deals with indexes that are NOT on the canonical chain.
+	err = s.fixupIndexes(ctx, p)
+	if err != nil {
+		log.Debugf("%v", err)
+		return
+	}
+
+	// See if our tip is indeed canonical.
 	forked, msgHeaders, err := s.sod(ctx, p)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrClosed) {
@@ -799,17 +1007,39 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	}
 	// XXX wave hands here for now but we should get 3 peers to agree that
 	// this is a fork indeed.
-	if forked {
-		complete, err := s.sodFork(ctx, &msgHeaders.Headers[0].PrevBlock)
-		if err != nil {
-			panic(fmt.Sprintf("sod fork: %v", err))
+
+	s.mtx.Lock()
+	if !s.sodding {
+		s.sodding = true
+		s.mtx.Unlock()
+		if forked {
+			complete, err := s.sodFork(ctx, &msgHeaders.Headers[0].PrevBlock, p)
+			if err != nil {
+				panic(fmt.Sprintf("sod fork: %v", err))
+			}
+			if complete {
+				s.handleHeaders(ctx, p, msgHeaders)
+			}
+		} else {
+			if msgHeaders != nil {
+				s.handleHeaders(ctx, p, msgHeaders)
+			}
 		}
-		if complete {
-			s.handleHeaders(ctx, p, msgHeaders)
-		}
+		s.mtx.Lock()
+		s.sodding = false
+		s.mtx.Unlock()
 	} else {
-		s.handleHeaders(ctx, p, msgHeaders)
+		s.mtx.Unlock()
 	}
+
+	// First one here sets sodComplete
+	once := sync.OnceFunc(func() {
+		log.Infof("SOD complete")
+		s.mtx.Lock()
+		s.soddingComplete = true
+		s.mtx.Unlock()
+	})
+	once()
 
 	// Only now can we consider the peer connected
 	log.Debugf("Peer connected: %v", p)
@@ -822,7 +1052,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		default:
 		}
 
-		msg, err := p.read()
+		msg, err := p.read(5 * time.Second)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown
 			continue
@@ -834,29 +1064,13 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		if verbose {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
-
-		// Commands that are always accepted.
-		switch m := msg.(type) {
-		case *wire.MsgAddr:
-			go s.handleAddr(ctx, p, m)
-			continue
-
-		case *wire.MsgAddrV2:
-			go s.handleAddrV2(ctx, p, m)
-			continue
-
-		case *wire.MsgPing:
-			go s.handlePing(ctx, p, m)
-			continue
-
-		case *wire.MsgPong:
-			go s.handlePong(ctx, p, m)
+		if s.handleGeneric(ctx, p, msg) {
 			continue
 		}
 
 		// When quiesced do not handle other p2p commands.
 		s.mtx.Lock()
-		if s.quiesced {
+		if s.indexing || s.quiesced || s.sodding || !s.soddingComplete {
 			// XXX we must record if we got wire.MsgHeaders:and wire.MsgBlock
 			// when we unquiesce we should do a getheaders because
 			// we may have missed several; what will happen now is
@@ -866,6 +1080,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// This seems to resolve itself when we restart because
 			// then we resume where we were at.
 			s.mtx.Unlock()
+			log.Infof("indexing %v quiesced %v sodding %v %v",
+				s.indexing, s.quiesced, s.sodding, s.soddingComplete)
 			continue
 		}
 		s.mtx.Unlock()
@@ -1078,7 +1294,6 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			log.Errorf("sync blocks best block header: %v", err)
 			return
 		}
-		s.quiesced = true // XXX if it's set and we exit with an error, what should we do??
 		go func() {
 			// we really want to push the indexing reentrancy into this call
 			log.Infof("quiescing p2p and indexing to: %v @ %v",
@@ -1729,6 +1944,7 @@ func (s *Server) Run(pctx context.Context) error {
 
 	// We need a lot of open files and memory for the indexes. Best effort
 	// to echo to the user what the ulimits are.
+	s.ignoreUlimit = true
 	if s.ignoreUlimit || s.cfg.Network == networkLocalnet {
 		log.Warningf("ignoring ulimit requirements")
 	} else if ulimitSupported {

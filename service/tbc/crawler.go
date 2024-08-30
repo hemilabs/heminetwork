@@ -470,10 +470,10 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 
 	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
 	s.mtx.Lock()
-	if s.quiesced {
+	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("UtxoIndexerUnwind not quiesced")
+		panic("UtxoIndexerUnwind not true")
 	}
 	s.mtx.Unlock()
 
@@ -530,10 +530,10 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 	defer log.Tracef("UtxoIndexerWind exit")
 
 	s.mtx.Lock()
-	if s.quiesced {
+	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("UtxoIndexerWind not quiesced")
+		panic("UtxoIndexerWind not true")
 	}
 	s.mtx.Unlock()
 
@@ -590,10 +590,10 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	defer log.Tracef("UtxoIndexer exit")
 
 	s.mtx.Lock()
-	if s.quiesced {
+	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("UtxoIndexer not quiesced")
+		panic("UtxoIndexer indexing not true")
 	}
 	s.mtx.Unlock()
 	// XXX this is basically duplicate from UtxoIndexIsLinear
@@ -852,10 +852,10 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
 
 	s.mtx.Lock()
-	if s.quiesced {
+	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("TxIndexerUnwind not quiesced")
+		panic("TxIndexerUnwind indexing not true")
 	}
 	s.mtx.Unlock()
 	// Allocate here so that we don't waste space when not indexing.
@@ -911,10 +911,10 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 	defer log.Tracef("TxIndexerWind exit")
 
 	s.mtx.Lock()
-	if s.quiesced {
+	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("TxIndexerWind not quiesced")
+		panic("TxIndexerWind not true")
 	}
 	s.mtx.Unlock()
 
@@ -974,10 +974,10 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	// XXX this is basically duplicate from TxIndexIsLinear
 
 	s.mtx.Lock()
-	if s.quiesced {
+	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("TxIndexer not quiesced")
+		panic("TxIndexer not true")
 	}
 	s.mtx.Unlock()
 
@@ -1086,10 +1086,9 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 	}
 
 	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
-	log.Debugf("startBH %v %v", startBH, startBH.Difficulty)
-	log.Debugf("endBH %v %v", endBH, endBH.Difficulty)
+	log.Debugf("startBH %v %v", startBH.Height, startBH)
+	log.Debugf("endBH %v %v", endBH.Height, endBH)
 	log.Debugf("direction %v", direction)
-
 	// Expensive linear test, this needs some performance love. We can
 	// memoize it keep snapshot heights whereto we know the chain is
 	// synced. For now just do the entire thing.
@@ -1112,11 +1111,18 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		return 0, ErrNotLinear
 	}
 	for {
-		log.Debugf("sod %v", h)
+		//log.Infof("sod %v %v", x, h)
 		bh, err := s.db.BlockHeaderByHash(ctx, h)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
 		}
+		//bhs, err := s.db.BlockHeadersByHeight(ctx, bh.Height)
+		//if err != nil {
+		//	return -1, fmt.Errorf("block header by height: %w", err)
+		//}
+		//if len(bhs) != 1 {
+		//	panic(fmt.Sprintf("%v", spew.Sdump(bhs)))
+		//}
 		h = bh.ParentHash()
 		if h.IsEqual(e) {
 			return direction, nil
@@ -1137,16 +1143,17 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	defer log.Tracef("SyncIndexersToHash exit")
 
 	s.mtx.Lock()
-	if s.quiesced {
+	if s.indexing {
 		s.mtx.Unlock()
 		return errors.New("already indexing")
 	}
+	s.indexing = true
 	s.mtx.Unlock()
 
 	defer func() {
 		// unquiesce
 		s.mtx.Lock()
-		s.quiesced = false
+		s.indexing = false
 		bhb, err := s.db.BlockHeaderBest(ctx)
 		if err != nil {
 			s.mtx.Unlock()
@@ -1173,6 +1180,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		}
 	}()
 
+	log.Infof("Syncing indexes to: %v", hash)
 	log.Debugf("Syncing indexes to: %v", hash)
 
 	// UTXOs

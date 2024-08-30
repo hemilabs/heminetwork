@@ -441,29 +441,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 			errors.New("block headers insert: invalid")
 	}
 
-	// Iterate over the block headers and skip block headers we already
-	// have in the database. Rely on caching to make this not suck terribly.
-	bhDB := l.pool[level.BlockHeadersDB]
-	var x int
-	for _, rbh := range bhs.Headers {
-		bhash := rbh.BlockHash()
-		has, err := bhDB.Has(bhash[:], nil)
-		if err != nil {
-			return tbcd.ITInvalid, nil, nil, 0,
-				fmt.Errorf("block headers insert has: %w", err)
-		}
-		if has {
-			x++
-		} else {
-			break
-		}
-	}
-	bhs.Headers = bhs.Headers[x:]
-	if len(bhs.Headers) == 0 {
-		return tbcd.ITInvalid, nil, nil, 0,
-			database.DuplicateError("block headers insert duplicate")
-	}
-
 	// Ensure we can connect these blockheaders prior to starting database
 	// transaction. This also obtains the starting cumulative difficulty
 	// and  height.
@@ -481,6 +458,28 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 			fmt.Errorf("block headers open transaction: %w", err)
 	}
 	defer bhsDiscard()
+
+	// Iterate over the block headers and skip block headers we already
+	// have in the database. Rely on caching to make this not suck terribly.
+	var x int
+	for _, rbh := range bhs.Headers {
+		bhash := rbh.BlockHash()
+		has, err := bhsTx.Has(bhash[:], nil)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("block headers insert has: %w", err)
+		}
+		if has {
+			x++
+		} else {
+			break
+		}
+	}
+	bhs.Headers = bhs.Headers[x:]
+	if len(bhs.Headers) == 0 {
+		return tbcd.ITInvalid, nil, nil, 0,
+			database.DuplicateError("block headers insert duplicate")
+	}
 
 	// blocks missing
 	bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
