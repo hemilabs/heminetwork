@@ -105,6 +105,29 @@ func TestNewMiner(t *testing.T) {
 	}
 }
 
+func TestFees(t *testing.T) {
+	cfg := NewDefaultConfig()
+	cfg.StaticFee = 5
+	cfg.BTCPrivateKey = "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641"
+
+	m, err := NewMiner(cfg)
+	if err != nil {
+		t.Fatalf("Failed to create new miner: %v", err)
+	}
+
+	// Make sure that the static fee is used.
+	if m.Fee() != cfg.StaticFee {
+		t.Errorf("got fee %d, want %d", m.Fee(), cfg.StaticFee)
+	}
+
+	// Make sure the fee can be changed with SetFee.
+	const newFee = 8
+	m.SetFee(newFee)
+	if m.Fee() != newFee {
+		t.Errorf("got fee %d, want %d", m.Fee(), newFee)
+	}
+}
+
 // TestProcessReceivedKeystones ensures that we store the latest keystone
 // correctly as well as data stored in slices within the struct
 func TestProcessReceivedKeystones(t *testing.T) {
