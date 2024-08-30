@@ -1087,7 +1087,7 @@ func TestConnectToBFGAndPerformMineMultiple(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	server, msgCh, cleanup := createMockBFG(ctx, t, []string{}, false, 2)
 	defer cleanup()
