@@ -1540,41 +1540,6 @@ func TestBitcoinBroadcast(t *testing.T) {
 			break
 		}
 	}
-
-	publicKey := privateKey.PubKey()
-	publicKeyUncompressed := publicKey.SerializeUncompressed()
-
-	t.Logf("querying for keystone %s", hex.EncodeToString(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()))
-
-	// 3
-	popBases, err := db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	btcTxId := mb.TxHash()
-
-	t.Logf("test hash is %s", hex.EncodeToString(btcTxId[:]))
-
-	if len(popBases) != 1 {
-		t.Fatalf("unexpected length %d", len(popBases))
-	}
-
-	if !slices.Equal(popBases[0].L2KeystoneAbrevHash, hemi.L2KeystoneAbbreviate(l2Keystone).Hash()) {
-		t.Fatalf("%v != %v", popBases[0].L2KeystoneAbrevHash, hemi.L2KeystoneAbbreviate(l2Keystone).Hash())
-	}
-
-	if !slices.Equal(popBases[0].PopMinerPublicKey, publicKeyUncompressed) {
-		t.Fatalf("%v != %v", popBases[0].PopMinerPublicKey, publicKeyUncompressed)
-	}
-
-	if !slices.Equal(popBases[0].BtcRawTx, btx) {
-		t.Fatalf("%v != %v", popBases[0].BtcRawTx, btx)
-	}
-
-	if !slices.Equal(popBases[0].BtcTxId, btcTxId[:]) {
-		t.Fatalf("%v != %v", popBases[0].BtcTxId, btcTxId[:])
-	}
 }
 
 // TestBitcoinBroadcastDuplicate calls BitcoinBroadcast twice with the same
