@@ -38,3 +38,6 @@
 
 # GoReleaser config
 .goreleaser.yaml @hemilabs/dev @joshuasing
+
+# PoP payouts reporting service
+/popstats/ @hemilabs/dev @gabmontes
