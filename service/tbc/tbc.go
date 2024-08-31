@@ -141,9 +141,9 @@ type Server struct {
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL // outstanding pings
 
-	quiesced        bool // when set do not accept blockheaders and/or blocks and prevent indexing.
-	sodding         bool //when set we are in sod
-	soddingComplete bool //when set when sod completes
+	// quiesced        bool // when set do not accept blockheaders and/or blocks and prevent indexing.
+	sodding         bool // when set we are in sod
+	soddingComplete bool // when set when sod completes
 	indexing        bool // when set we are indexing
 
 	db tbcd.Database
@@ -573,7 +573,6 @@ func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message) b
 }
 
 func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire.Message, expect any) (any, error) {
-
 	start := time.Now()
 	if err := p.write(defaultCmdTimeout, cmd); err != nil {
 		return nil, fmt.Errorf("write: %w", err)
@@ -603,6 +602,7 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 		if verbose {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
+
 		if reflect.TypeOf(msg) == reflect.TypeOf(expect) {
 			return msg, nil
 		}
@@ -704,6 +704,7 @@ func (s *Server) fixupUtxoIndex(ctx context.Context, p *peer) error {
 	}
 	return nil
 }
+
 func (s *Server) fixupTxIndex(ctx context.Context, p *peer) error {
 	log.Tracef("fixupTxIndex")
 	defer log.Tracef("fixupTxIndex exit")
@@ -754,12 +755,19 @@ func (s *Server) fixupIndexes(ctx context.Context, p *peer) error {
 		s.mtx.Unlock()
 		return nil
 	}
+	if s.indexing {
+		log.Debugf("already indexing")
+		s.mtx.Unlock()
+		return nil
+	}
 	s.sodding = true
+	s.indexing = true
 	s.mtx.Unlock()
 
 	defer func() {
 		s.mtx.Lock()
 		s.sodding = false
+		s.indexing = false
 		s.mtx.Unlock()
 	}()
 
@@ -773,6 +781,29 @@ func (s *Server) fixupIndexes(ctx context.Context, p *peer) error {
 	}
 
 	return nil
+}
+
+func (s *Server) getBlockP2P(ctx context.Context, p *peer, hash *chainhash.Hash) (*btcutil.Block, error) {
+	log.Tracef("getBlockP2P %v", hash)
+	defer log.Tracef("getBlockP2P exit %v", hash)
+
+	getData := wire.NewMsgGetData()
+	getData.InvList = append(getData.InvList,
+		&wire.InvVect{
+			Type: wire.InvTypeBlock,
+			Hash: *hash,
+		})
+
+	var x *wire.MsgBlock
+	msg, err := s.pollP2P(ctx, 15*time.Second, p, getData, x)
+	if err != nil {
+		return nil, fmt.Errorf("getBlockP2P: %w", err)
+	}
+	if m, ok := msg.(*wire.MsgBlock); ok {
+		return btcutil.NewBlock(m), nil
+	}
+
+	return nil, fmt.Errorf("invalid blocks type: %T", msg)
 }
 
 // sod is Start Of Day. Code runs through bringup of a peer.
@@ -987,6 +1018,23 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}()
 
+	//hh := "00000000000016a503ee2d27d92092fbea8249154c9bcd7eb0460713f920fd08"
+	//h, err := chainhash.NewHashFromStr(hh)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//s.cfg.BlockSanity = true
+	//b, err := s.getBlockP2P(ctx, p, h)
+	//if err != nil {
+	//	log.Errorf("%v", err)
+	//}
+	//_ = b
+
+	//_, err = s.db.BlockByHash(ctx, h)
+	//if err != nil {
+	//	panic(err)
+	//}
+
 	// This deals with indexes that are NOT on the canonical chain.
 	err = s.fixupIndexes(ctx, p)
 	if err != nil {
@@ -1069,7 +1117,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 		// When quiesced do not handle other p2p commands.
 		s.mtx.Lock()
-		if s.indexing || s.quiesced || s.sodding || !s.soddingComplete {
+		if s.indexing || s.sodding || !s.soddingComplete {
 			// XXX we must record if we got wire.MsgHeaders:and wire.MsgBlock
 			// when we unquiesce we should do a getheaders because
 			// we may have missed several; what will happen now is
@@ -1079,8 +1127,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// This seems to resolve itself when we restart because
 			// then we resume where we were at.
 			s.mtx.Unlock()
-			log.Infof("indexing %v quiesced %v sodding %v %v",
-				s.indexing, s.quiesced, s.sodding, s.soddingComplete)
+			// log.Infof("indexing %v sodding %v soddingComplete %v",
+			//	s.indexing, s.sodding, s.soddingComplete)
 			continue
 		}
 		s.mtx.Unlock()
@@ -1294,9 +1342,6 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			return
 		}
 		go func() {
-			// we really want to push the indexing reentrancy into this call
-			log.Infof("quiescing p2p and indexing to: %v @ %v",
-				bhb, bhb.Height)
 			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != nil {
 				log.Errorf("sync blocks: %v", err)
 				return
@@ -1445,7 +1490,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	log.Infof("Inserted (%v) %v block headers height %v", it, n, height)
 }
 
-func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
+func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) error {
 	log.Tracef("handleBlock (%v)", p)
 	defer log.Tracef("handleBlock exit (%v)", p)
 
@@ -1453,16 +1498,15 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 	bhs := block.Hash().String()
 	rawBlock, err := block.Bytes()
 	if err != nil {
-		log.Errorf("Unable to get raw block %v: %v", bhs, err)
-		return
+		return fmt.Errorf("handle block unable to get raw block %v: %w", bhs, err)
 	}
 
 	if s.cfg.BlockSanity {
 		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
 			s.timeSource)
 		if err != nil {
-			log.Errorf("Unable to validate block hash %v: %v", bhs, err)
-			return
+			return fmt.Errorf("handle block unable to validate block hash %v: %v",
+				bhs, err)
 		}
 
 		// Contextual check of block
@@ -1482,7 +1526,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 	height, err := s.db.BlockInsert(ctx, block)
 	if err != nil {
-		log.Errorf("block insert %v: %v", bhs, err)
+		return fmt.Errorf("block insert %v: %w", bhs, err)
 	} else {
 		log.Infof("Insert block %v at %v txs %v %v", bhs, height,
 			len(msg.Transactions), msg.Header.Timestamp)
@@ -1564,6 +1608,8 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) {
 
 	// kick cache
 	go s.syncBlocks(ctx)
+
+	return nil
 }
 
 func (s *Server) insertGenesis(ctx context.Context) error {

@@ -563,6 +563,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 		if err = s.db.BlockUtxoUpdate(ctx, 1, utxos); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
+
 		// leveldb does all kinds of allocations, force GC to lower
 		// memory preassure.
 		logMemStats()
@@ -1111,7 +1112,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		return 0, ErrNotLinear
 	}
 	for {
-		//log.Infof("sod %v %v", x, h)
+		// log.Infof("sod %v %v", x, h)
 		bh, err := s.db.BlockHeaderByHash(ctx, h)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
@@ -1180,7 +1181,6 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		}
 	}()
 
-	log.Infof("Syncing indexes to: %v", hash)
 	log.Debugf("Syncing indexes to: %v", hash)
 
 	// UTXOs

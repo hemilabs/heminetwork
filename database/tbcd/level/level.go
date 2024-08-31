@@ -744,7 +744,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	}
 	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
-		return nil, fmt.Errorf("block decode: %w", err)
+		panic(fmt.Errorf("block decode data corruption: %w", err))
 	}
 	if l.cfg.BlockCache > 0 {
 		l.blockCache.Add(string(hash[:]), b)

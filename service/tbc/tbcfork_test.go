@@ -416,7 +416,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 		default:
 		}
 
-		msg, err := p.read()
+		msg, err := p.read(5 * time.Second)
 		if err != nil {
 			if errors.Is(err, wire.ErrUnknownMessage) {
 				// ignore unknown
