@@ -10,7 +10,8 @@ PROJECTPATH = $(abspath $(dir $(realpath $(firstword $(MAKEFILE_LIST)))))
 export GOBIN=$(PROJECTPATH)/bin
 export GOCACHE=$(PROJECTPATH)/.gocache
 export GOPKG=$(PROJECTPATH)/pkg
-GO_LDFLAGS=""
+
+GO_LDFLAGS=
 DIST=$(PROJECTPATH)/dist
 
 project = heminetwork

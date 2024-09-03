@@ -6,16 +6,13 @@ package tbc
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
@@ -707,7 +704,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var response tbcapi.UtxosByAddressRawResponse
+			var response tbcapi.UTXOsByAddressRawResponse
 			select {
 			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
@@ -715,7 +712,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			}
 			indexAll(ctx, t, tbcServer)
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRawRequest{
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UTXOsByAddressRawRequest{
 				Address: tti.address(),
 				Start:   uint(tti.start),
 				Count:   uint(tti.limit),
@@ -728,7 +725,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if v.Header.Command != tbcapi.CmdUtxosByAddressRawResponse {
+			if v.Header.Command != tbcapi.CmdUTXOsByAddressRawResponse {
 				t.Fatalf("received unexpected command: %s", v.Header.Command)
 			}
 
@@ -743,9 +740,9 @@ func TestUtxosByAddressRaw(t *testing.T) {
 				expectedCount = tti.limit
 			}
 
-			if !tti.doNotGenerate && len(response.Utxos) != int(expectedCount) {
-				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.Utxos))
-			} else if tti.doNotGenerate && len(response.Utxos) != 0 {
+			if !tti.doNotGenerate && len(response.UTXOs) != int(expectedCount) {
+				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.UTXOs))
+			} else if tti.doNotGenerate && len(response.UTXOs) != 0 {
 				t.Fatalf("did not generate any blocks for address, should not have utxos")
 			}
 		})
@@ -919,7 +916,7 @@ func TestUtxosByAddress(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var response tbcapi.UtxosByAddressResponse
+			var response tbcapi.UTXOsByAddressResponse
 			select {
 			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
@@ -927,7 +924,7 @@ func TestUtxosByAddress(t *testing.T) {
 			}
 			indexAll(ctx, t, tbcServer)
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UtxosByAddressRequest{
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.UTXOsByAddressRequest{
 				Address: tti.address(),
 				Start:   uint(tti.start),
 				Count:   uint(tti.limit),
@@ -940,7 +937,7 @@ func TestUtxosByAddress(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if v.Header.Command != tbcapi.CmdUtxosByAddressResponse {
+			if v.Header.Command != tbcapi.CmdUTXOsByAddressResponse {
 				t.Fatalf("received unexpected command: %s", v.Header.Command)
 			}
 
@@ -955,9 +952,9 @@ func TestUtxosByAddress(t *testing.T) {
 				expectedCount = tti.limit
 			}
 
-			if !tti.doNotGenerate && len(response.Utxos) != int(expectedCount) {
-				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.Utxos))
-			} else if tti.doNotGenerate && len(response.Utxos) != 0 {
+			if !tti.doNotGenerate && len(response.UTXOs) != int(expectedCount) {
+				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.UTXOs))
+			} else if tti.doNotGenerate && len(response.UTXOs) != 0 {
 				t.Fatalf("did not generate any blocks for address, should not have utxos")
 			}
 		})
@@ -1007,15 +1004,9 @@ func TestTxByIdRaw(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	slices.Reverse(txIdBytes) // convert to natural order
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxId: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1047,8 +1038,9 @@ func TestTxByIdRaw(t *testing.T) {
 	}
 
 	// is the hash equal to what we queried for?
-	if tx.TxHash().String() != txId {
-		t.Fatalf("id mismatch: %s != %s", tx.TxHash().String(), txId)
+	txHash := tx.TxHash()
+	if !txId.IsEqual(&txHash) {
+		t.Fatalf("id mismatch: %s != %s", txHash, txId)
 	}
 }
 
@@ -1094,17 +1086,10 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txIdBytes[0]++
-
-	slices.Reverse(txIdBytes) // convert to natural order
+	txId[0]++
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxId: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1190,17 +1175,10 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txIdBytes = append(txIdBytes, 8)
-
-	slices.Reverse(txIdBytes) // convert to natural order
+	txId[len(txId)-1] = 8
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxId: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1223,7 +1201,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	}
 
 	if response.Error != nil {
-		if !strings.Contains(response.Error.Message, "invalid tx id") {
+		if !strings.Contains(response.Error.Message, "tx not found") {
 			t.Fatalf("incorrect error found: %s", response.Error.Message)
 		}
 	}
@@ -1274,19 +1252,8 @@ func TestTxById(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	slices.Reverse(txIdBytes)
-
-	ctxid, err := chainhash.NewHash(txIdBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxId: ctxid[:],
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1308,7 +1275,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(response.Error.Message)
 	}
 
-	tx, err := tbcServer.TxById(ctx, ctxid)
+	tx, err := tbcServer.TxById(ctx, txId)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1362,15 +1329,10 @@ func TestTxByIdInvalid(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txIdBytes[0]++
+	txId[0]++
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxId: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1457,15 +1419,10 @@ func TestTxByIdNotFound(t *testing.T) {
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	txIdBytes, err := hex.DecodeString(txId)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	txIdBytes = append(txIdBytes, 8)
+	txId[len(txId)-1] = 8
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxId: txIdBytes,
+		TxID: txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1488,7 +1445,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 
 	if response.Error != nil {
-		if !strings.Contains(response.Error.Message, "invalid tx id") {
+		if !strings.Contains(response.Error.Message, "tx not found") {
 			t.Fatalf("incorrect error found: %s", response.Error.Message)
 		}
 	}
