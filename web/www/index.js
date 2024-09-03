@@ -103,11 +103,17 @@ const StartPopMinerShow = document.querySelector('.StartPopMinerShow');
 
 async function StartPopMiner() {
   try {
+    let automaticFees = StartPopMinerAutomaticFeesInput.value;
+    if (automaticFees === 'false' || automaticFees === 'true') {
+      automaticFees = automaticFees === 'true';
+    }
     const result = await dispatch({
       method: 'startPoPMiner',
       network: StartPopMinerNetworkInput.value,
       logLevel: StartPopMinerLogLevelInput.value,
       privateKey: StartPopMinerPrivateKeyInput.value,
+      automaticFees: automaticFees,
+      automaticFeeRefreshSeconds: Number(StartPopMinerAutomaticFeeRefreshInput.value),
       staticFee: Number(StartPopMinerStaticFeeInput.value),
     });
     StartPopMinerShow.innerText = JSON.stringify(result, null, 2);

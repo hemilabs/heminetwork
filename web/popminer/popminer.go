@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -91,6 +92,14 @@ type Miner struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	*popm.Miner
+
+	// httpClient is the HTTP client used for accessing the mempool.space API
+	// if automaticFees is enabled.
+	httpClient *http.Client
+
+	// mempoolSpaceURL is the base URL for mempool.space, for the current
+	// network.
+	mempoolSpaceURL string
 
 	errCh chan error
 	wg    sync.WaitGroup

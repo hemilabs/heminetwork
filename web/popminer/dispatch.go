@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"runtime/debug"
 	"syscall/js"
 	"time"
@@ -342,26 +343,13 @@ func startPoPMiner(_ js.Value, args []js.Value) (any, error) {
 		return nil, errors.New("miner already started")
 	}
 
-	cfg, err := createMinerConfig(args[0])
+	m, autoFees, err := newMiner(args[0])
 	if err != nil {
 		return nil, err
 	}
 
-	miner, err := popm.NewMiner(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("create miner: %w", err)
-	}
-
 	// Add WebAssembly miner event handler
-	miner.RegisterEventHandler(svc.handleMinerEvent)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	m := &Miner{
-		ctx:    ctx,
-		cancel: cancel,
-		Miner:  miner,
-		errCh:  make(chan error, 1),
-	}
+	m.RegisterEventHandler(svc.handleMinerEvent)
 	svc.miner = m
 
 	// run in background
@@ -390,11 +378,25 @@ func startPoPMiner(_ js.Value, args []js.Value) (any, error) {
 		svc.dispatchEvent(EventTypeMinerStop, EventMinerStop{})
 	}()
 
+	if autoFees.enabled {
+		// Automatic fees are enabled, run the goroutine to retrieve the fees
+		// at the refresh interval.
+		m.wg.Add(1)
+		go m.automaticFees(autoFees.feeType, autoFees.refreshInterval)
+	}
+
 	return js.Null(), nil
 }
 
-// createMinerConfig creates a [popm.Config] from the given JavaScript object.
-func createMinerConfig(config js.Value) (*popm.Config, error) {
+type automaticFeeOptions struct {
+	enabled         bool
+	feeType         RecommendedFeeType
+	refreshInterval time.Duration
+}
+
+// newMiner creates a [popm.Miner] using config options from the given
+// JavaScript object.
+func newMiner(config js.Value) (*Miner, *automaticFeeOptions, error) {
 	cfg := popm.NewDefaultConfig()
 	cfg.BTCPrivateKey = config.Get("privateKey").String()
 	cfg.StaticFee = uint(config.Get("staticFee").Int())
@@ -405,7 +407,7 @@ func createMinerConfig(config js.Value) (*popm.Config, error) {
 		cfg.LogLevel = "popm=ERROR"
 	}
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
-		return nil, errorWithCode(ErrorCodeInvalidValue,
+		return nil, nil, errorWithCode(ErrorCodeInvalidValue,
 			fmt.Errorf("configure logger: %w", err))
 	}
 
@@ -413,13 +415,47 @@ func createMinerConfig(config js.Value) (*popm.Config, error) {
 	network := config.Get("network").String()
 	netOpts, ok := networks[network]
 	if !ok {
-		return nil, errorWithCode(ErrorCodeInvalidValue,
+		return nil, nil, errorWithCode(ErrorCodeInvalidValue,
 			fmt.Errorf("unknown network: %s", network))
 	}
 	cfg.BFGWSURL = netOpts.bfgURL
 	cfg.BTCChainName = netOpts.btcChainName
 
-	return cfg, nil
+	// Automatic fee options
+	autoFeeConfig := config.Get("automaticFees")
+	autoFees := &automaticFeeOptions{
+		enabled:         autoFeeConfig.Truthy(),
+		feeType:         RecommendedFeeTypeEconomy,
+		refreshInterval: 5 * time.Minute,
+	}
+	if autoFeeConfig.Type() == js.TypeString {
+		// automaticFees is a string, parse the selected recommended fee type.
+		feeType, err := ParseRecommendedFeeType(autoFeeConfig.String())
+		if err != nil {
+			return nil, nil, errorWithCode(ErrorCodeInvalidValue, err)
+		}
+		autoFees.feeType = feeType
+	}
+	if rf := config.Get("automaticFeeRefreshSeconds"); rf.Truthy() {
+		autoFees.refreshInterval = time.Duration(rf.Int()) * time.Second
+	}
+
+	// Create new miner
+	miner, err := popm.NewMiner(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("create miner: %w", err)
+	}
+
+	m := &Miner{
+		Miner: miner,
+		errCh: make(chan error, 1),
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
+		},
+		mempoolSpaceURL: netOpts.mempoolSpaceURL,
+	}
+	m.ctx, m.cancel = context.WithCancel(context.Background())
+	return m, autoFees, nil
 }
 
 func stopPopMiner(_ js.Value, _ []js.Value) (any, error) {
@@ -453,6 +489,7 @@ func minerStatus(_ js.Value, _ []js.Value) (any, error) {
 	if err == nil {
 		status.Running = true
 		status.Connected = miner.Connected()
+		status.Fee = miner.Fee()
 	}
 
 	return status, nil

@@ -15,24 +15,32 @@ const (
 	rpcHemiMainnet = "wss://rpc.hemi.network"
 
 	bfgRoute = "/v1/ws/public"
+
+	mempoolSpaceURL = "https://mempool.space"
 )
 
 type networkOptions struct {
 	bfgURL       string
 	btcChainName string
+
+	// mempoolSpaceURL is the base URL for mempool.space for this network.
+	mempoolSpaceURL string
 }
 
 var networks = map[string]networkOptions{
 	"testnet": {
-		bfgURL:       rpcHemiTestnet + bfgRoute,
-		btcChainName: btcChainTestnet3,
+		bfgURL:          rpcHemiTestnet + bfgRoute,
+		btcChainName:    btcChainTestnet3,
+		mempoolSpaceURL: mempoolSpaceURL + "/testnet",
 	},
 	"devnet": {
-		bfgURL:       rpcHemiDevnet + bfgRoute,
-		btcChainName: btcChainTestnet3,
+		bfgURL:          rpcHemiDevnet + bfgRoute,
+		btcChainName:    btcChainTestnet3,
+		mempoolSpaceURL: "",
 	},
 	"mainnet": {
-		bfgURL:       rpcHemiMainnet + bfgRoute,
-		btcChainName: btcChainMainnet,
+		bfgURL:          rpcHemiMainnet + bfgRoute,
+		btcChainName:    btcChainMainnet,
+		mempoolSpaceURL: mempoolSpaceURL,
 	},
 }

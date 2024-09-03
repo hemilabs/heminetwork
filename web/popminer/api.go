@@ -7,6 +7,8 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"syscall/js"
 
 	"github.com/hemilabs/heminetwork/service/popm"
@@ -140,6 +142,36 @@ type BitcoinAddressToScriptHashResult struct {
 	ScriptHash string `json:"scriptHash"`
 }
 
+// RecommendedFeeType is the type of recommended fee to use when doing automatic
+// fees using the mempool.space REST API.
+type RecommendedFeeType string
+
+const (
+	RecommendedFeeTypeFastest  RecommendedFeeType = "fastest"
+	RecommendedFeeTypeHalfHour RecommendedFeeType = "halfHour"
+	RecommendedFeeTypeHour     RecommendedFeeType = "hour"
+	RecommendedFeeTypeEconomy  RecommendedFeeType = "economy"
+	RecommendedFeeTypeMinimum  RecommendedFeeType = "minimum"
+)
+
+// ParseRecommendedFeeType parses the given string as a RecommendedFeeType.
+func ParseRecommendedFeeType(s string) (RecommendedFeeType, error) {
+	switch strings.ToLower(s) {
+	case "fastest":
+		return RecommendedFeeTypeFastest, nil
+	case "halfHour":
+		return RecommendedFeeTypeHalfHour, nil
+	case "hour":
+		return RecommendedFeeTypeHour, nil
+	case "economy":
+		return RecommendedFeeTypeEconomy, nil
+	case "minimum":
+		return RecommendedFeeTypeMinimum, nil
+	default:
+		return "", fmt.Errorf("unknown recommended fee type: %q", s)
+	}
+}
+
 // MinerStatusResult contains information about the status of the PoP miner.
 // Returned by MethodMinerStatus.
 type MinerStatusResult struct {
@@ -149,6 +181,10 @@ type MinerStatusResult struct {
 	// Connecting is whether the PoP miner is currently connected to a BFG
 	// server.
 	Connected bool `json:"connected"`
+
+	// Fee is the current fee used by the PoP miner for PoP transactions,
+	// in sats/vB.
+	Fee uint `json:"fee"`
 }
 
 // PingResult contains information when pinging the BFG server.
