@@ -520,7 +520,7 @@ func (s *Server) startPeerManager(ctx context.Context) error {
 }
 
 // TODO: move to PeerManager?
-func (s *Server) pingExpired(key any, value any) {
+func (s *Server) pingExpired(ctx context.Context, key any, value any) {
 	log.Tracef("pingExpired")
 	defer log.Tracef("pingExpired exit")
 
@@ -1191,10 +1191,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			log.Criticalf("sod: %v database closed", p)
 			return
 		}
-		log.Errorf("sod: %v", err)
-		return
-	}
-	if ch != nil {
+	} else if ch != nil {
 		err := s.getHeaders(ctx, p, ch)
 		if err != nil {
 			// Database is closed, This is terminal.
@@ -1278,6 +1275,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// This seems to resolve itself when we restart because
 			// then we resume where we were at.
 			s.mtx.Unlock()
+			log.Infof("indexing %v", s.indexing)
 			// log.Infof("indexing %v sodding %v soddingComplete %v",
 			//	s.indexing, s.sodding, s.soddingComplete)
 			continue
@@ -1423,7 +1421,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 }
 
 // blockExpired expires a block download and kills the peer.
-func (s *Server) blockExpired(key any, value any) {
+func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	log.Tracef("blockExpired")
 	defer log.Tracef("blockExpired exit")
 
@@ -1449,8 +1447,6 @@ func (s *Server) blockExpired(key any, value any) {
 	}
 
 	// XXX get ctx sent in instead
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
 	bhX, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
 		panic(err)
@@ -2230,6 +2226,16 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Infof("Genesis: %v", s.chainParams.GenesisHash) // XXX make debug
 	log.Infof("Starting block headers sync at %v height: %v time %v",
 		bhb, bhb.Height, bhb.Timestamp())
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		panic(err)
+	}
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		panic(err)
+	}
+	log.Infof("Utxo index %v", utxoHH)
+	log.Infof("Tx index %v", txHH)
 
 	// HTTP server
 	mux := http.NewServeMux()
