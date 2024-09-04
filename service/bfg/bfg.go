@@ -271,7 +271,7 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 	log.Tracef("handleRequest: %v", bws.addr)
 	defer log.Tracef("handleRequest exit: %v", bws.addr)
 
-	ctx, cancel := context.WithTimeout(parentCtx,
+	ctx, cancel := context.WithTimeout(bws.requestContext,
 		time.Duration(s.cfg.RequestTimeout)*time.Second)
 	defer cancel()
 
@@ -279,7 +279,12 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 	case <-s.requestLimiter:
 	default:
 		log.Infof("Request limiter hit %v: %v", bws.addr, cmd)
-		<-s.requestLimiter
+		select {
+		case <-s.requestLimiter:
+		case <-ctx.Done():
+			log.Infof("request context done %v: %v", bws.addr, cmd)
+			return
+		}
 	}
 	defer func() { s.requestLimiter <- true }()
 
