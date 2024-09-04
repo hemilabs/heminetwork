@@ -1398,7 +1398,6 @@ func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) er
 }
 
 func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash) error {
-	log.Infof("downloadBlock %v %v", p, ch)
 	log.Tracef("downloadBlock")
 	defer log.Tracef("downloadBlock exit")
 
