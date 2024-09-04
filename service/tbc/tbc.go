@@ -901,14 +901,18 @@ func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 		return nil, fmt.Errorf("find canonical: %v %v", p, err)
 	}
 	if hash.IsEqual(bhb.Hash) {
-		// Found self, utxo index is on canonical chain.
+		// Found self, on canonical chain.
 		return bhb.Hash, nil
 	}
-
-	log.Infof("sod: %v", p.remoteVersion.LastBlock)
+	if bhb.Height > uint64(p.remoteVersion.LastBlock) {
+		// XXX debug
+		// XXX should we look at cumulative difficulty?
+		// XXX unwind indexes?
+		log.Infof("sod: %v our tip is greater %v > %v",
+			p, bhb.Height, p.remoteVersion.LastBlock)
+		return bhb.Hash, nil
+	}
 	log.Infof("tip not canonical: %v %v common: %v", bhb.Height, bhb, hash)
-
-	// XXX we probably should delete all orphaned block headers from missing db.
 
 	return hash, nil
 
