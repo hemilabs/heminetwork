@@ -1275,7 +1275,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			// This seems to resolve itself when we restart because
 			// then we resume where we were at.
 			s.mtx.Unlock()
-			log.Infof("indexing %v", s.indexing)
+			//log.Infof("indexing %v", s.indexing)
 			// log.Infof("indexing %v sodding %v soddingComplete %v",
 			//	s.indexing, s.sodding, s.soddingComplete)
 			continue
