@@ -9,9 +9,20 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/juju/loggo"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	logLevel = "INFO"
+	log      = loggo.GetLogger("ttl")
+
+	ErrNotFound = errors.New("not found")
+)
+
+func init() {
+	loggo.ConfigureLoggers(logLevel)
+}
 
 // value wraps a value stored in the TTL map and includes additional metadata.
 type value struct {
@@ -66,8 +77,8 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		// expired
+		v.timeoutExpired = true
 		if v.expired != nil {
-			v.timeoutExpired = true
 			go v.expired(key, v.value)
 		}
 

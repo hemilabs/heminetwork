@@ -61,6 +61,7 @@ type Database interface {
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
+	BlockMissingDelete(ctx context.Context, height int64, hash *chainhash.Hash) error
 	BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error)
 	// BlocksInsert(ctx context.Context, bs []*btcutil.Block) (int64, error)
 	BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error)

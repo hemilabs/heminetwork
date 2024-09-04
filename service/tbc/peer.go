@@ -135,6 +135,8 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 
 		switch msg.(type) {
 		case *wire.MsgVerAck:
+			log.Debugf("handshake: %v %v %v %v",
+				p, v.UserAgent, v.ProtocolVersion, v.LastBlock)
 			return nil
 		case *wire.MsgSendAddrV2:
 			p.addrV2 = true

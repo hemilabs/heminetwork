@@ -723,6 +723,21 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	return int64(bh.Height), nil
 }
 
+func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash *chainhash.Hash) error {
+	log.Tracef("BlockMissingDelete")
+	defer log.Tracef("BlockMissingDelete exit")
+
+	key := heightHashToKey(uint64(height), hash[:])
+	bmDB := l.pool[level.BlocksMissingDB]
+	if err := bmDB.Delete(key, nil); err != nil {
+		// Ignore not found, it was deleted prior to this call.
+		if !errors.Is(err, leveldb.ErrNotFound) {
+			return fmt.Errorf("block missing delete: %w", err)
+		}
+	}
+	return nil
+}
+
 func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
