@@ -1527,7 +1527,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		go func() {
 			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != nil {
-				log.Errorf("sync blocks: %v", err)
+				panic(fmt.Errorf("sync blocks: %v", err))
 				return
 			}
 		}()
