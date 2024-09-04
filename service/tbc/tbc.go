@@ -40,12 +40,15 @@ import (
 	"github.com/hemilabs/heminetwork/ttl"
 )
 
+type phase int
+
 const (
 	logLevel = "INFO"
 
 	promSubsystem = "tbc_service" // Prometheus
 
 	defaultPeersWanted   = 64
+	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
@@ -56,7 +59,13 @@ const (
 	defaultPingTimeout         = 3 * time.Second
 	defaultBlockPendingTimeout = 17 * time.Second
 
-	minPeersRequired = 64 // minimum number of peers in good map before cache is purged
+	// Phase transitions 0 -> 1 -> 2 -> 3
+	// Once we reach phase 3 we go back and forth between 3 and 4
+	phaseStartOfDay      phase = 0 // tbc launched, no peers
+	phaseFixingUpIndexes phase = 1 // verify indexes are canonical
+	phaseFixingUpTip     phase = 2 // verify canonical tip
+	phaseRunning         phase = 3 // fully running
+	phaseIndexing        phase = 4 // fully running + indexing
 )
 
 var (
@@ -85,6 +94,22 @@ var log = loggo.GetLogger("tbc")
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
+}
+
+func (p phase) String() string {
+	switch p {
+	case phaseStartOfDay:
+		return "start of day"
+	case phaseFixingUpIndexes:
+		return "fixing up indexes"
+	case phaseFixingUpTip:
+		return "fixing up canonical tip"
+	case phaseRunning:
+		return "running"
+	case phaseIndexing:
+		return "indexing"
+	}
+	return "invalid"
 }
 
 type Config struct {
@@ -142,9 +167,9 @@ type Server struct {
 	pings  *ttl.TTL // outstanding pings
 
 	// quiesced        bool // when set do not accept blockheaders and/or blocks and prevent indexing.
-	sodding         bool // when set we are in sod
-	soddingComplete bool // when set when sod completes
-	indexing        bool // when set we are indexing
+	//sodding         bool // when set we are in sod
+	//soddingComplete bool // when set when sod completes
+	indexing bool // when set we are indexing
 
 	db tbcd.Database
 
@@ -225,6 +250,9 @@ func (s *Server) DB() tbcd.Database {
 }
 
 func (s *Server) getHeaders(ctx context.Context, p *peer, hash *chainhash.Hash) error {
+	log.Tracef("getheaders %v %v", p, hash)
+	defer log.Tracef("seed exit %v %v", p, hash)
+
 	ghs := wire.NewMsgGetHeaders()
 	ghs.AddBlockLocatorHash(hash)
 	if err := p.write(defaultCmdTimeout, ghs); err != nil {
@@ -545,7 +573,7 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 	}
 }
 
-func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message) bool {
+func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, raw []byte) bool {
 	// Do accept addr and ping commands before we consider the peer up.
 	switch m := msg.(type) {
 	case *wire.MsgAddr:
@@ -554,18 +582,29 @@ func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message) b
 		}
 	case *wire.MsgAddrV2:
 		if err := s.handleAddrV2(ctx, p, m); err != nil {
-			log.Debugf("handle generic addr: %v", err)
+			log.Debugf("handle generic addr v2: %v", err)
 		}
 
 	case *wire.MsgPing:
 		if err := s.handlePing(ctx, p, m); err != nil {
-			log.Debugf("handle generic addr: %v", err)
+			log.Debugf("handle generic ping: %v", err)
 		}
 
 	case *wire.MsgPong:
 		if err := s.handlePong(ctx, p, m); err != nil {
-			log.Debugf("handle generic addr: %v", err)
+			log.Debugf("handle generic pong: %v", err)
 		}
+
+	case *wire.MsgBlock:
+		if err := s.handleBlock(ctx, p, m, raw); err != nil {
+			log.Errorf("handle generic block: %v", err)
+		}
+
+	case *wire.MsgNotFound:
+		if err := s.handleNotFound(ctx, p, m, raw); err != nil {
+			log.Errorf("handle generic not found: %v", err)
+		}
+
 	default:
 		return false
 	}
@@ -591,7 +630,7 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 		if delta <= 0 {
 			return nil, fmt.Errorf("poll p2p: timeout")
 		}
-		msg, err := p.read(delta)
+		msg, raw, err := p.read(delta)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown
 			continue
@@ -602,12 +641,17 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 		if verbose {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
-
-		if reflect.TypeOf(msg) == reflect.TypeOf(expect) {
+		switch m := msg.(type) {
+		case *wire.MsgNotFound:
+			log.Infof("%v: %v", p, spew.Sdump(m))
+		}
+		var nf *wire.MsgNotFound
+		if reflect.TypeOf(msg) == reflect.TypeOf(expect) ||
+			reflect.TypeOf(msg) == reflect.TypeOf(nf) {
 			return msg, nil
 		}
 
-		s.handleGeneric(ctx, p, msg)
+		s.handleGeneric(ctx, p, msg, raw)
 	}
 }
 
@@ -629,7 +673,8 @@ func (s *Server) inCanonicalChainP2P(ctx context.Context, p *peer, hash *chainha
 	}
 	if m, ok := msg.(*wire.MsgHeaders); ok {
 		if len(m.Headers) == 0 {
-			return false, fmt.Errorf("poll p2p: invalid headers response")
+			// Happens when tip is canonical
+			return true, nil
 		}
 		prevBlockHash := &m.Headers[0].PrevBlock
 		if s.chainParams.GenesisHash.IsEqual(prevBlockHash) {
@@ -745,29 +790,29 @@ func (s *Server) fixupIndexes(ctx context.Context, p *peer) error {
 	defer log.Tracef("fixupIndexes exit")
 
 	s.mtx.Lock()
-	if s.soddingComplete {
-		log.Debugf("sodding complete")
-		s.mtx.Unlock()
-		return nil
-	}
-	if s.sodding {
-		log.Debugf("already sodding")
-		s.mtx.Unlock()
-		return nil
-	}
+	//if s.soddingComplete {
+	//	log.Debugf("sodding complete")
+	//	s.mtx.Unlock()
+	//	return nil
+	//}
+	//if s.sodding {
+	//	log.Debugf("already sodding")
+	//	s.mtx.Unlock()
+	//	return nil
+	//}
 	if s.indexing {
 		log.Debugf("already indexing")
 		s.mtx.Unlock()
 		return nil
 	}
-	s.sodding = true
-	s.indexing = true
+	//s.sodding = true
+	//s.indexing = true
 	s.mtx.Unlock()
 
 	defer func() {
 		s.mtx.Lock()
-		s.sodding = false
-		s.indexing = false
+		//s.sodding = false
+		//s.indexing = false
 		s.mtx.Unlock()
 	}()
 
@@ -800,128 +845,172 @@ func (s *Server) getBlockP2P(ctx context.Context, p *peer, hash *chainhash.Hash)
 		return nil, fmt.Errorf("getBlockP2P: %w", err)
 	}
 	if m, ok := msg.(*wire.MsgBlock); ok {
-		return btcutil.NewBlock(m), nil
+		h := m.BlockHash()
+		if hash.IsEqual(&h) {
+			return btcutil.NewBlock(m), nil
+		}
+	}
+	// XXX this should be a callback into pollP2P that succeeds and return
+	// an error or continues to poll because it didn't receive the
+	// proper/expected response.
+	if m, ok := msg.(*wire.MsgNotFound); ok {
+		if len(m.InvList) == 1 &&
+			m.InvList[0].Type == wire.InvTypeBlock &&
+			hash.IsEqual(&m.InvList[0].Hash) {
+			return nil, fmt.Errorf("not found: %v", spew.Sdump(m))
+		}
 	}
 
 	return nil, fmt.Errorf("invalid blocks type: %T", msg)
 }
 
 // sod is Start Of Day. Code runs through bringup of a peer.
-func (s *Server) sod(ctx context.Context, p *peer) (bool, *wire.MsgHeaders, error) {
+func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 	log.Tracef("sod")
 	defer log.Tracef("sod exit")
 
-	// Ask peer to send headers instead of inventory.
-	err := p.write(defaultCmdTimeout, wire.NewMsgSendHeaders())
-	if err != nil {
-		return false, nil, fmt.Errorf("sod peer write send headers: %v %v",
-			p, err)
-	}
-	// Ask peer for network information
-	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
-	if err != nil {
-		return false, nil, fmt.Errorf("sod peer write get addr: %v %v", p, err)
-	}
-
-	// Get canonical tip from database to commence block headers sync.
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		return false, nil, fmt.Errorf("sod block headers best: %v %v", p, err)
+		return nil, fmt.Errorf("block header best: %v %v", p, err)
+	}
+	hash, err := s.findCanonicalP2P(ctx, p, bhb.Hash)
+	if err != nil {
+		return nil, fmt.Errorf("find canonical: %v %v", p, err)
+	}
+	if hash.IsEqual(bhb.Hash) {
+		// Found self, utxo index is on canonical chain.
+		return bhb.Hash, nil
 	}
 
-	// Ask peer for block headers and special handle the first message.
-	log.Debugf("block header best hash: %v %s", p, bhb)
-	if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
-		// This should not happen
-		return false, nil, fmt.Errorf("sod get headers: %v %v", p, err)
-	}
+	log.Infof("tip not canonical: %v %v common: %v", bhb.Height, bhb, hash)
 
-	verbose := false
+	// XXX we probably should delete all orphaned block headers from missing db.
 
-	// Before we can consider a peer connected we must ensure we receive
-	// headers and ensure we are not sitting on a fork.
-	// Note that this code will race between peers but that is ok.
-	//
-	// There are three cases to deal with here:
-	// 1. Everything is fine, fallthrough and start participating in p2p
-	// 2. Blockheaders are not caught up, catch up on block headers.
-	// 3. Blockheaders are on a fork
-	// 3.1	Indexes aren't caught up, walk chain back, index to canonical tip.
-	// 3.2	Indexes are caught up. Walk chain back and unindex indexes.
-	forked := false
-	for {
-		// See if we were interrupted, for the love of pete add ctx to wire
-		select {
-		case <-ctx.Done():
-			return false, nil, ctx.Err()
-		default:
-		}
+	return hash, nil
 
-		msg, err := p.read(5 * time.Second)
-		if errors.Is(err, wire.ErrUnknownMessage) {
-			// skip unknown
-			continue
-		} else if err != nil {
-			// XXX this is guaranteed too loud.
-			return false, nil, fmt.Errorf("sod peer read: %v %v", p, err)
-		}
+	//// Ask peer to send headers instead of inventory.
+	//err := p.write(defaultCmdTimeout, wire.NewMsgSendHeaders())
+	//if err != nil {
+	//	return false, nil, fmt.Errorf("sod peer write send headers: %v %v",
+	//		p, err)
+	//}
+	//// Ask peer for network information
+	//err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
+	//if err != nil {
+	//	return false, nil, fmt.Errorf("sod peer write get addr: %v %v", p, err)
+	//}
 
-		if verbose {
-			log.Infof("%v: %v", p, spew.Sdump(msg))
-		}
-		if s.handleGeneric(ctx, p, msg) {
-			continue
-		}
+	//// Get canonical tip from database to commence block headers sync.
+	//bhb, err := s.db.BlockHeaderBest(ctx)
+	//if err != nil {
+	//	return false, nil, fmt.Errorf("sod block header best: %v %v", p, err)
+	//}
 
-		// Do accept addr and ping commands before we consider the peer up.
-		switch m := msg.(type) {
-		case *wire.MsgHeaders:
-			if len(m.Headers) == 0 {
-				log.Debugf("sod peer caught up: %v", p)
-				return forked, m, nil
-			}
+	//// Ask peer for block headers and special handle the first message.
+	//log.Infof("block header best hash: %v %s", p, bhb)
+	//log.Debugf("block header best hash: %v %s", p, bhb)
+	//if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
+	//	// This should not happen
+	//	return false, nil, fmt.Errorf("sod get headers: %v %v", p, err)
+	//}
 
-			// We must check the initial get headers response. If
-			// we asked for an unknown tip we'll get genesis back.
-			// This indicates that our tip is forked,
-			h0 := m.Headers[0].PrevBlock
-			if !bhb.BlockHash().IsEqual(&h0) &&
-				s.chainParams.GenesisHash.IsEqual(&h0) {
-				forked = true
+	//verbose := false
 
-				log.Debugf("%v: bhb %v", p, bhb.BlockHash())
-				log.Debugf("%v: h0 %v", p, h0)
+	//// Before we can consider a peer connected we must ensure we receive
+	//// headers and ensure we are not sitting on a fork.
+	//// Note that this code will race between peers but that is ok.
+	////
+	//// There are three cases to deal with here:
+	//// 1. Everything is fine, fallthrough and start participating in p2p
+	//// 2. Blockheaders are not caught up, catch up on block headers.
+	//// 3. Blockheaders are on a fork
+	//// 3.1	Indexes aren't caught up, walk chain back, index to canonical tip.
+	//// 3.2	Indexes are caught up. Walk chain back and unindex indexes.
+	//forked := false
+	//for {
+	//	// See if we were interrupted, for the love of pete add ctx to wire
+	//	select {
+	//	case <-ctx.Done():
+	//		return false, nil, ctx.Err()
+	//	default:
+	//	}
 
-				nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
-				if err != nil {
-					return false, nil, fmt.Errorf("sod block header by hash: %v %w",
-						p, err)
-				}
-				bhb = nbh
-				log.Debugf("Fork detected %v: walking chain back to: %v",
-					p, bhb)
-				if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
-					return false, nil, fmt.Errorf("sod get headers: %v %w",
-						p, err)
-				}
-				// Wait for next headers message.
-				continue
-			}
+	//	msg, raw, err := p.read(5 * time.Second)
+	//	if errors.Is(err, wire.ErrUnknownMessage) {
+	//		// skip unknown
+	//		continue
+	//	} else if err != nil {
+	//		// XXX this is guaranteed too loud.
+	//		return false, nil, fmt.Errorf("sod peer read: %v %v", p, err)
+	//	}
 
-			// XXX mvoe comment
-			// When there are no headers it means we are caught up
-			// and thus we call handleHeaders with 0 headers to
-			// start the block download process.
-			//
-			// When we did get headers we have to process them and
-			// that will kick of the rest of the satemachine in
-			// handleHeaders.
-			//go s.handleHeaders(ctx, p, m)
+	//	if verbose {
+	//		log.Infof("%v: %v", p, spew.Sdump(msg))
+	//	}
+	//	if s.handleGeneric(ctx, p, msg, raw) {
+	//		continue
+	//	}
 
-			// All done bringing up peer.
-			return forked, m, nil
-		}
-	}
+	//	// Do accept addr and ping commands before we consider the peer up.
+	//	switch m := msg.(type) {
+	//	case *wire.MsgHeaders:
+	//		if len(m.Headers) == 0 {
+	//			log.Debugf("sod peer caught up: %v", p)
+	//			// XXX for now return false; true can happen
+	//			// when len headers > 0 however that should
+	//			// resolve itself as a recent fork instead of
+	//			// SOD.
+	//			//
+	//			// This happens when indexing and a peer return
+	//			// genesis; thus a fork.
+	//			log.Infof("sod handle headers")
+	//			s.handleHeaders(ctx, p, m)
+	//			return false, nil, nil
+	//		}
+
+	//		// We must check the initial get headers response. If
+	//		// we asked for an unknown tip we'll get genesis back.
+	//		// This indicates that our tip is forked,
+	//		h0 := m.Headers[0].PrevBlock
+	//		if !bhb.BlockHash().IsEqual(&h0) &&
+	//			s.chainParams.GenesisHash.IsEqual(&h0) {
+	//			forked = true
+
+	//			log.Debugf("%v: bhb %v", p, bhb.BlockHash())
+	//			log.Debugf("%v: h0 %v", p, h0)
+
+	//			nbh, err := s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
+	//			if err != nil {
+	//				return false, nil, fmt.Errorf("sod block header by hash: %v %w",
+	//					p, err)
+	//			}
+	//			bhb = nbh
+	//			log.Infof("Fork detected %v: walking chain back to: %v",
+	//				p, bhb)
+	//			log.Debugf("Fork detected %v: walking chain back to: %v",
+	//				p, bhb)
+	//			if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
+	//				return false, nil, fmt.Errorf("sod get headers: %v %w",
+	//					p, err)
+	//			}
+	//			// Wait for next headers message.
+	//			continue
+	//		}
+
+	//		// XXX mvoe comment
+	//		// When there are no headers it means we are caught up
+	//		// and thus we call handleHeaders with 0 headers to
+	//		// start the block download process.
+	//		//
+	//		// When we did get headers we have to process them and
+	//		// that will kick of the rest of the satemachine in
+	//		// handleHeaders.
+	//		//go s.handleHeaders(ctx, p, m)
+
+	//		// All done bringing up peer.
+	//		return forked, m, nil
+	//	}
+	//}
 }
 
 func (s *Server) sodFork(ctx context.Context, hash *chainhash.Hash, p *peer) (bool, error) {
@@ -1018,11 +1107,16 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}()
 
-	//hh := "00000000000016a503ee2d27d92092fbea8249154c9bcd7eb0460713f920fd08"
+	//hh := "0000000059a01b1afeb8bdeb8ef0797fa2f2b5b9ac4e80115fbbeef99c71ed67"
 	//h, err := chainhash.NewHashFromStr(hh)
 	//if err != nil {
 	//	panic(err)
 	//}
+	//bh, err := s.db.BlockHeaderByHash(ctx, h)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//log.Infof("%v", bh.Height)
 	//s.cfg.BlockSanity = true
 	//b, err := s.getBlockP2P(ctx, p, h)
 	//if err != nil {
@@ -1036,57 +1130,61 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	//}
 
 	// This deals with indexes that are NOT on the canonical chain.
-	err = s.fixupIndexes(ctx, p)
-	if err != nil {
-		log.Debugf("%v", err)
-		return
-	}
+	//err = s.fixupIndexes(ctx, p)
+	//if err != nil {
+	//	log.Debugf("%v", err)
+	//	return
+	//}
 
-	// See if our tip is indeed canonical.
-	forked, msgHeaders, err := s.sod(ctx, p)
+	//// See if our tip is indeed canonical.
+	ch, err := s.sod(ctx, p)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrClosed) {
 			// Database is closed, This is terminal.
 			log.Criticalf("sod: %v database closed", p)
 			return
 		}
-		// log.Errorf("sod: %v", err)
+		log.Errorf("sod: %v", err)
 		return
+	}
+	if ch != nil {
+		err := s.getHeaders(ctx, p, ch)
+		if err != nil {
+			// Database is closed, This is terminal.
+			log.Errorf("sod get headers: %v %v %v", p, ch, err)
+			return
+		}
 	}
 	// XXX wave hands here for now but we should get 3 peers to agree that
 	// this is a fork indeed.
 
-	s.mtx.Lock()
-	if !s.sodding {
-		s.sodding = true
-		s.mtx.Unlock()
-		if forked {
-			complete, err := s.sodFork(ctx, &msgHeaders.Headers[0].PrevBlock, p)
-			if err != nil {
-				panic(fmt.Sprintf("sod fork: %v", err))
-			}
-			if complete {
-				s.handleHeaders(ctx, p, msgHeaders)
-			}
-		} else {
-			if msgHeaders != nil {
-				s.handleHeaders(ctx, p, msgHeaders)
-			}
-		}
-		s.mtx.Lock()
-		s.sodding = false
-		s.mtx.Unlock()
-	} else {
-		s.mtx.Unlock()
-	}
-
-	// First one here sets sodComplete
-	s.mtx.Lock()
-	if !s.soddingComplete {
-		log.Infof("SOD complete")
-	}
-	s.soddingComplete = true
-	s.mtx.Unlock()
+	//s.mtx.Lock()
+	//if !s.sodding {
+	//	s.sodding = true
+	//	s.mtx.Unlock()
+	//	if forked {
+	//		complete, err := s.sodFork(ctx, &msgHeaders.Headers[0].PrevBlock, p)
+	//		if err != nil {
+	//			panic(fmt.Sprintf("sod fork: %v", err))
+	//		}
+	//		if complete {
+	//			s.handleHeaders(ctx, p, msgHeaders)
+	//		}
+	//	} else {
+	//		if msgHeaders != nil {
+	//			s.handleHeaders(ctx, p, msgHeaders)
+	//		}
+	//	}
+	//	s.mtx.Lock()
+	//	s.sodding = false
+	//	if s.soddingComplete {
+	//		log.Infof("SOD complete")
+	//		s.soddingComplete = true
+	//	}
+	//	s.mtx.Unlock()
+	//} else {
+	//	s.mtx.Unlock()
+	//}
 
 	// Only now can we consider the peer connected
 	log.Debugf("Peer connected: %v", p)
@@ -1099,7 +1197,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		default:
 		}
 
-		msg, err := p.read(5 * time.Second)
+		msg, raw, err := p.read(5 * time.Second)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown
 			continue
@@ -1111,13 +1209,20 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		if verbose {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
-		if s.handleGeneric(ctx, p, msg) {
+		switch m := msg.(type) {
+		case *wire.MsgNotFound:
+			panic(spew.Sdump(m))
+			log.Infof("%v: %v", p, spew.Sdump(m))
+		}
+		//log.Infof("%v: %T", p, msg)
+		if s.handleGeneric(ctx, p, msg, raw) {
 			continue
 		}
 
 		// When quiesced do not handle other p2p commands.
 		s.mtx.Lock()
-		if s.indexing || s.sodding || !s.soddingComplete {
+		//if s.indexing || s.sodding || !s.soddingComplete {
+		if s.indexing { //|| s.sodding || !s.soddingComplete {
 			// XXX we must record if we got wire.MsgHeaders:and wire.MsgBlock
 			// when we unquiesce we should do a getheaders because
 			// we may have missed several; what will happen now is
@@ -1132,13 +1237,11 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			continue
 		}
 		s.mtx.Unlock()
-
 		switch m := msg.(type) {
+		case *wire.MsgNotFound:
+			log.Infof("%v: %v", p, spew.Sdump(m))
 		case *wire.MsgHeaders:
 			go s.handleHeaders(ctx, p, m)
-
-		case *wire.MsgBlock:
-			go s.handleBlock(ctx, p, m)
 
 		default:
 			log.Tracef("unhandled message type %v: %T\n", p, msg)
@@ -1251,6 +1354,7 @@ func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) er
 }
 
 func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash) {
+	log.Infof("downloadBlock %v %v", p, ch)
 	log.Tracef("downloadBlock")
 	defer log.Tracef("downloadBlock exit")
 
@@ -1417,7 +1521,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			// prevent stalling the download.
 			//bhb, err := s.db.BlockHeaderBest(ctx)
 			//if err != nil {
-			//	log.Errorf("block headers best %v: %v", p, err)
+			//	log.Errorf("block header best %v: %v", p, err)
 			//	return
 			//}
 			//if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
@@ -1490,8 +1594,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	log.Infof("Inserted (%v) %v block headers height %v", it, n, height)
 }
 
-func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) error {
-	log.Tracef("handleBlock (%v)", p)
+func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, raw []byte) error {
+	log.Infof("handleBlock (%v)", p)
 	defer log.Tracef("handleBlock exit (%v)", p)
 
 	block := btcutil.NewBlock(msg)
@@ -1524,13 +1628,14 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) e
 		// }
 	}
 
-	height, err := s.db.BlockInsert(ctx, block)
+	height, err := s.db.BlockInsert(ctx, block) // XXX see if we can use raw here
 	if err != nil {
 		return fmt.Errorf("block insert %v: %w", bhs, err)
 	} else {
 		log.Infof("Insert block %v at %v txs %v %v", bhs, height,
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
+	s.blocks.Delete(bhs) // remove block from cache regardless of insert result
 
 	// Whatever happens, delete from cache and potentially try again
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
@@ -1553,8 +1658,6 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) e
 	// XXX do we need these? s.mtx.Lock()
 	// XXX rethink lock here
 	s.mtx.Lock()
-	s.blocks.Delete(bhs) // remove block from cache regardless of insert result
-
 	// Stats
 	if err == nil {
 		s.blocksSize += uint64(len(rawBlock) + 32)
@@ -1608,6 +1711,15 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock) e
 
 	// kick cache
 	go s.syncBlocks(ctx)
+
+	return nil
+}
+
+func (s *Server) handleNotFound(ctx context.Context, p *peer, msg *wire.MsgNotFound, raw []byte) error {
+	log.Infof("handleNotFound %v", spew.Sdump(msg))
+	defer log.Infof("handleNotFound exit")
+	log.Tracef("insertGenesis")
+	defer log.Tracef("insertGenesis exit")
 
 	return nil
 }
@@ -2019,7 +2131,7 @@ func (s *Server) Run(pctx context.Context) error {
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("block headers best: %w", err)
+			return fmt.Errorf("block header best: %w", err)
 		}
 
 		if err = s.insertGenesis(ctx); err != nil {

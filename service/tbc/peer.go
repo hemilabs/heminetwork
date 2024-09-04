@@ -68,16 +68,16 @@ func (p *peer) write(timeout time.Duration, msg wire.Message) error {
 	return err
 }
 
-func (p *peer) read(timeout time.Duration) (wire.Message, error) {
+func (p *peer) read(timeout time.Duration) (wire.Message, []byte, error) {
 	if timeout == 0 {
 		p.conn.SetReadDeadline(time.Time{}) // never timeout on reads
 	} else {
 		p.conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	// XXX contexts would be nice
-	_, msg, _, err := wire.ReadMessageWithEncodingN(p.conn, p.protocolVersion,
+	_, msg, buf, err := wire.ReadMessageWithEncodingN(p.conn, p.protocolVersion,
 		p.network, wire.LatestEncoding)
-	return msg, err
+	return msg, buf, err
 }
 
 func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
