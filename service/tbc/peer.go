@@ -164,7 +164,7 @@ func (p *peer) connect(ctx context.Context) error {
 	}
 
 	log.Debugf("dialing %s", p.address)
-	conn, err := d.DialContext(ctx, "tcp", p.address)
+	conn, err := d.DialContext(ctx, "tcp", "95.179.156.170:28333")
 	if err != nil {
 		return fmt.Errorf("dial %v: %w", p.address, err)
 	}
