@@ -2138,6 +2138,82 @@ func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
 	}
 }
 
+func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '59 minutes'")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.BtcTransactionBroadcastRequestTrim(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if savedSerializedTx == nil {
+		t.Fatal("expected a saved tx")
+	}
+}
+
+func BtcTransactionBroadcastRequestTrim(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	serializedTx := []byte("blahblahblah")
+	txId := "myid"
+
+	err := db.BtcTransactionBroadcastRequestInsert(ctx, serializedTx, txId)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '61 minutes'")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.BtcTransactionBroadcastRequestTrim(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	savedSerializedTx, err := db.BtcTransactionBroadcastRequestGetNext(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if savedSerializedTx != nil {
+		t.Fatal("tx should have been trimmed")
+	}
+}
+
 func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count int, chain bool, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {
 	header := make([]byte, 80)
 	hash := make([]byte, 32)

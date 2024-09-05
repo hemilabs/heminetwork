@@ -1647,6 +1647,22 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	}()
 
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Minute):
+				if err := s.db.BtcTransactionBroadcastRequestTrim(ctx); err != nil {
+					log.Errorf("error trimming old requests: %v", err)
+				}
+
+			}
+		}
+	}()
+
 	// Setup websockets and HTTP routes
 	privateMux := s.server
 	publicMux := s.publicServer
