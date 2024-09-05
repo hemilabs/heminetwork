@@ -26,28 +26,28 @@ const (
 
 // clientConn is a connection with an ElectrumX server.
 type clientConn struct {
-	mx sync.Mutex
-	wg sync.WaitGroup
-
+	mx        sync.Mutex
 	conn      net.Conn
 	requestID uint64
 
-	metrics *metrics
-
-	closeCh chan struct{}
+	ctx     context.Context
+	cancel  context.CancelFunc
 	onClose func(c *clientConn)
+
+	metrics *metrics
 }
 
 // newClientConn returns a new clientConn.
 func newClientConn(conn net.Conn, metrics *metrics, onClose func(c *clientConn)) *clientConn {
+	ctx, cancel := context.WithCancel(context.Background())
 	c := &clientConn{
 		conn:    conn,
-		metrics: metrics,
-		closeCh: make(chan struct{}),
+		ctx:     ctx,
+		cancel:  cancel,
 		onClose: onClose,
+		metrics: metrics,
 	}
 
-	c.wg.Add(1)
 	go c.pinger()
 	return c
 }
@@ -156,11 +156,11 @@ func readResponse(ctx context.Context, r io.Reader, reqID uint64) (*JSONRPCRespo
 }
 
 // ping writes a ping request to the connection.
-func (c *clientConn) ping() error {
+func (c *clientConn) ping(ctx context.Context) error {
 	log.Tracef("ping")
 	defer log.Tracef("ping exit")
 
-	ctx, cancel := context.WithTimeout(context.Background(), connPingTimeout)
+	ctx, cancel := context.WithTimeout(ctx, connPingTimeout)
 	defer cancel()
 
 	if err := c.call(ctx, "server.ping", nil, nil); err != nil {
@@ -172,16 +172,17 @@ func (c *clientConn) ping() error {
 
 // pinger pings each connection on a ticker.
 func (c *clientConn) pinger() {
-	defer c.wg.Done()
-
 	ticker := time.NewTicker(connPingInterval)
+	defer ticker.Stop()
+
 	for {
 		select {
-		case <-c.closeCh:
+		case <-c.ctx.Done():
+			// Connection closed.
 			return
 		case <-ticker.C:
 			log.Debugf("Pinging")
-			if err := c.ping(); err != nil {
+			if err := c.ping(c.ctx); err != nil {
 				if !errors.Is(err, net.ErrClosed) {
 					log.Errorf("An error occurred while pinging connection: %v", err)
 				}
@@ -204,16 +205,10 @@ func (c *clientConn) Close() error {
 		c.onClose(c)
 	}
 
+	defer c.cancel()
 	if err := c.conn.Close(); err != nil {
 		return err
 	}
 
-	if c.closeCh != nil {
-		close(c.closeCh)
-	}
-
-	// Wait for pinger to exit.
-	c.wg.Wait()
-	c.closeCh = nil
 	return nil
 }

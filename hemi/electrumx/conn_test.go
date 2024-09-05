@@ -177,7 +177,7 @@ func TestClose(t *testing.T) {
 	c := newClientConn(conn, nil, nil)
 
 	// Ping the server.
-	if err := c.ping(); err != nil {
+	if err := c.ping(context.Background()); err != nil {
 		t.Errorf("failed to ping server: %v", err)
 	}
 
