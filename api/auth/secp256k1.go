@@ -162,7 +162,9 @@ func (s *Secp256k1Auth) HandshakeClient(ctx context.Context, conn protocol.APICo
 		if err != nil {
 			return fmt.Errorf("read: %w", err)
 		}
-		log.Tracef(spew.Sdump(payload))
+		if log.IsTraceEnabled() {
+			log.Tracef(spew.Sdump(payload))
+		}
 
 		switch c := payload.(type) {
 		case *Secp256k1HelloChallenge:
@@ -203,7 +205,9 @@ func (s *Secp256k1Auth) HandshakeServer(ctx context.Context, conn protocol.APICo
 		if err != nil {
 			return fmt.Errorf("read: %w", err)
 		}
-		log.Tracef(spew.Sdump(payload))
+		if log.IsTraceEnabled() {
+			log.Tracef(spew.Sdump(payload))
+		}
 
 		switch c := payload.(type) {
 		case *Secp256k1Hello:

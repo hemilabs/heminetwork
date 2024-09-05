@@ -306,7 +306,10 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 		return
 	}
 
-	log.Debugf("Responding to %v request with %v", cmd, spew.Sdump(response))
+	if log.IsDebugEnabled() {
+		// spew.Sdump is expensive.
+		log.Debugf("Responding to %v request with %v", cmd, spew.Sdump(response))
+	}
 	if err := bfgapi.Write(ctx, bws.conn, wsid, response); err != nil {
 		log.Errorf("Failed to handle %v request: protocol write failed: %v",
 			cmd, err)
@@ -822,8 +825,11 @@ func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
 		}
 
 		// May be too loud.
-		log.Tracef("handleWebsocketRead read %v: %v %v %v",
-			bws.addr, cmd, id, spew.Sdump(payload))
+		if log.IsTraceEnabled() {
+			// spew.Sdump is expensive.
+			log.Tracef("handleWebsocketRead read %v: %v %v %v",
+				bws.addr, cmd, id, spew.Sdump(payload))
+		}
 
 		switch cmd {
 		case bfgapi.CmdPingRequest:
@@ -1052,7 +1058,10 @@ func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) 
 		Timestamp: time.Now().Unix(),
 	}
 
-	log.Tracef("responding with %s", spew.Sdump(ping))
+	if log.IsTraceEnabled() {
+		// spew.Sdump is expensive.
+		log.Tracef("responding with %s", spew.Sdump(ping))
+	}
 	if err := bfgapi.Write(r.Context(), bws.conn, "0", ping); err != nil {
 		log.Errorf("Write: %v", err)
 	}
@@ -1177,7 +1186,10 @@ func (s *Server) handlePingRequest(ctx context.Context, bws *bfgWs, payload any,
 		Timestamp:       time.Now().Unix(),
 	}
 
-	log.Tracef("responding with %v", spew.Sdump(response))
+	if log.IsTraceEnabled() {
+		// spew.Sdump is expensive.
+		log.Tracef("responding with %v", spew.Sdump(response))
+	}
 
 	if err := bfgapi.Write(ctx, bws.conn, id, response); err != nil {
 		return fmt.Errorf("handlePingRequest write: %v %v",
