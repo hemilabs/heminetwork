@@ -1527,7 +1527,7 @@ func (s *Server) handleAccessPublicKeys(table string, action string, payload, pa
 	for _, v := range s.sessions {
 		// if public key does not exist on session, it's not an authenticated
 		// session so we don't close it because it didn't use a public key
-		if v.publicKey == nil || len(v.publicKey) == 0 {
+		if len(v.publicKey) == 0 {
 			continue
 		}
 
