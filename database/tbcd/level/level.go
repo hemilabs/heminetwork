@@ -469,11 +469,10 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("block headers insert has: %w", err)
 		}
-		if has {
-			x++
-		} else {
+		if !has {
 			break
 		}
+		x++
 	}
 	bhs.Headers = bhs.Headers[x:]
 	if len(bhs.Headers) == 0 {
