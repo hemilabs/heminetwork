@@ -1669,7 +1669,7 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 
 	// Parse trusted proxies.
-	s.trustedProxies, err = s.parseTrustedProxies(s.cfg.TrustedProxies)
+	s.trustedProxies, err = parseTrustedProxies(s.cfg.TrustedProxies)
 	if err != nil {
 		return fmt.Errorf("parse trusted proxies: %w", err)
 	}
@@ -1860,7 +1860,7 @@ func (s *Server) isTrustedProxy(ip net.IP) bool {
 
 // parseTrustedProxies parses a list of trusted proxy IP addresses or CIDR
 // ranges.
-func (s *Server) parseTrustedProxies(trustedProxies []string) ([]*net.IPNet, error) {
+func parseTrustedProxies(trustedProxies []string) ([]*net.IPNet, error) {
 	if len(trustedProxies) < 1 {
 		return nil, nil
 	}

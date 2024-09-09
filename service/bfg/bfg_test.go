@@ -7,10 +7,13 @@ package bfg
 import (
 	"bytes"
 	"fmt"
+	"net"
+	"net/http"
 	"testing"
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 	btcwire "github.com/btcsuite/btcd/wire"
+	"github.com/go-test/deep"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/bitcoin"
@@ -168,5 +171,516 @@ func TestCheckBitcoinFinality(t *testing.T) {
 	bf.BTCTransactionIndex = 20
 	if err := checkBitcoinFinality(bf); err == nil {
 		t.Error("Bitcoin finality succeeded, should have failed")
+	}
+}
+
+func TestServerRemoteIP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		remoteIPHeaders []string
+		trustedProxies  []*net.IPNet
+		req             *http.Request
+		want            string
+	}{
+		{
+			name: "localhost-no-headers",
+			req: &http.Request{
+				RemoteAddr: "127.0.0.1:54864",
+			},
+			want: "127.0.0.1",
+		},
+		{
+			name: "localhost-spoofed-xforwardedfor",
+			req: &http.Request{
+				Header: http.Header{
+					"X-Forwarded-For": []string{"1.2.3.4"},
+				},
+				RemoteAddr: "127.0.0.1:49488",
+			},
+			want: "127.0.0.1",
+		},
+		{
+			name: "more-realistic",
+			remoteIPHeaders: []string{
+				"X-Forwarded-For",
+			},
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			req: &http.Request{
+				Header: http.Header{
+					"X-Forwarded-For": []string{"1.2.3.4"},
+				},
+				RemoteAddr: "10.4.0.1:41587",
+			},
+			want: "1.2.3.4", // Value of X-Forwarded-For header.
+		},
+		{
+			name: "multiple-trusted",
+			remoteIPHeaders: []string{
+				"X-Forwarded-For",
+			},
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			req: &http.Request{
+				Header: http.Header{
+					"X-Forwarded-For": []string{"1.2.3.4, 10.1.0.1, 10.1.1.2"},
+				},
+				RemoteAddr: "10.1.2.3:44792",
+			},
+			want: "1.2.3.4",
+		},
+		{
+			name: "multiple-untrusted",
+			remoteIPHeaders: []string{
+				"X-Forwarded-For",
+			},
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			req: &http.Request{
+				Header: http.Header{
+					"X-Forwarded-For": []string{"1.2.3.4, 2.3.4.5"},
+				},
+				RemoteAddr: "10.1.2.3:43111",
+			},
+			want: "2.3.4.5", // First untrusted IP address must be used.
+		},
+		{
+			name: "header-untrusted-remoteaddr",
+			remoteIPHeaders: []string{
+				"X-Forwarded-For",
+			},
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			req: &http.Request{
+				Header: http.Header{
+					"X-Forwarded-For": []string{"1.2.3.4, 2.3.4.5, 10.0.1.2"},
+				},
+				RemoteAddr: "4.3.2.1:43111",
+			},
+			want: "4.3.2.1",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				remoteIPHeaders: tt.remoteIPHeaders,
+				trustedProxies:  tt.trustedProxies,
+			}
+
+			if got := s.remoteIP(tt.req); got != tt.want {
+				t.Errorf("remoteIP() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestServerParseForwardedHeader(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		trustedProxies []*net.IPNet
+		input          []string
+		want           string
+		ok             bool
+	}{
+		{
+			name: "empty",
+			ok:   false,
+		},
+		{
+			name: "localhost",
+			input: []string{
+				"127.0.0.1",
+			},
+			want: "127.0.0.1",
+			ok:   true,
+		},
+		{
+			name: "localhost-ipv6",
+			input: []string{
+				"::1",
+			},
+			want: "::1",
+			ok:   true,
+		},
+		{
+			name: "client-ip",
+			input: []string{
+				"1.2.3.4",
+			},
+			want: "1.2.3.4",
+			ok:   true,
+		},
+		{
+			name: "one-trusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: []string{
+				"1.2.3.4, 10.1.4.1",
+			},
+			want: "1.2.3.4",
+			ok:   true,
+		},
+		{
+			name: "multiple-trusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: []string{
+				"1.2.3.4, 10.1.4.1, 10.2.2.1",
+			},
+			want: "1.2.3.4",
+			ok:   true,
+		},
+		{
+			name: "multiple-untrusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: []string{
+				"1.2.3.4, 2.3.4.5, 10.1.1.1, 10.2.2.2",
+			},
+			want: "2.3.4.5", // The first untrusted IP must be returned.
+			ok:   true,
+		},
+		{
+			name: "all-trusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: []string{
+				"10.1.1.1, 10.1.2.1, 10.1.3.1, 10.1.4.1",
+			},
+			want: "10.1.1.1", // If they are all trusted, return the first IP.
+			ok:   true,
+		},
+		{
+			name: "all-untrusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: []string{
+				"1.0.0.1, 1.0.0.2, 1.0.0.3, 1.0.0.4",
+			},
+			want: "1.0.0.4", // The first untrusted IP must be returned.
+			ok:   true,
+		},
+		{
+			name: "multiple-header-values",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: []string{
+				"1.2.3.4, 10.1.1.1, 10.2.2.1",
+				"10.3.3.1, 10.4.4.4",
+			},
+			want: "1.2.3.4",
+			ok:   true,
+		},
+		{
+			name: "multiple-header-values-two-untrusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: []string{
+				"1.2.4.5, 10.1.1.1, 10.2.2.1",
+				"10.3.3.1, 1.2.3.4, 10.4.4.4",
+			},
+			want: "1.2.3.4", // The first untrusted IP must be returned.
+			ok:   true,
+		},
+		{
+			name: "ipv6",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("2001:db8:a1:b2::/64"),
+			},
+			input: []string{
+				"2001:ffff::1, 2001:db8:a1:b2::1",
+			},
+			want: "2001:ffff::1",
+			ok:   true,
+		},
+		{
+			name: "ipv6-ipv4",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: []string{
+				"2001:ffff::1, 10.1.1.1",
+			},
+			want: "2001:ffff::1",
+			ok:   true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				trustedProxies: tt.trustedProxies,
+			}
+
+			got, ok := s.parseForwardedHeader(tt.input)
+			if got != tt.want {
+				t.Errorf("parseForwardedHeader(%q) value = %v, want %v",
+					tt.input, got, tt.want)
+			}
+			if ok != tt.ok {
+				t.Errorf("parseForwardedHeader(%q) ok = %v, want %v",
+					tt.input, ok, tt.ok)
+			}
+		})
+	}
+}
+
+func TestServerIsTrustedProxy(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		trustedProxies []*net.IPNet
+		input          string
+		want           bool
+	}{
+		{
+			name: "empty",
+			want: false,
+		},
+		{
+			name:  "localhost",
+			input: "127.0.0.1",
+			want:  false,
+		},
+		{
+			name:  "localhost-ipv6",
+			input: "::1",
+			want:  false,
+		},
+		{
+			name: "localhost-trusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("127.0.0.0/8"),
+			},
+			input: "127.0.0.1",
+			want:  true,
+		},
+		{
+			name: "localhost-ipv6-trusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("::1/128"),
+			},
+			input: "::1",
+			want:  true,
+		},
+		{
+			name: "trusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: "10.1.2.3",
+			want:  true,
+		},
+		{
+			name: "untrusted",
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			input: "1.2.3.4",
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &Server{
+				trustedProxies: tt.trustedProxies,
+			}
+
+			if ok := s.isTrustedProxy(net.ParseIP(tt.input)); ok != tt.want {
+				t.Errorf("isTrustedProxy(%q) = %v, want %v",
+					tt.input, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseTrustedProxies(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		input   []string
+		want    []*net.IPNet
+		wantErr bool
+	}{
+		{
+			name:  "nil",
+			input: nil,
+			want:  nil,
+		},
+		{
+			name:  "empty",
+			input: []string{},
+			want:  nil,
+		},
+		{
+			name: "ipv4",
+			input: []string{
+				"127.0.0.1",
+			},
+			want: []*net.IPNet{
+				mustParseCIDR("127.0.0.1/32"),
+			},
+		},
+		{
+			name: "ipv6",
+			input: []string{
+				"2001:db8::1",
+			},
+			want: []*net.IPNet{
+				mustParseCIDR("2001:db8::1/128"),
+			},
+		},
+		{
+			name: "cidr",
+			input: []string{
+				"192.0.2.0/24",
+			},
+			want: []*net.IPNet{
+				mustParseCIDR("192.0.2.0/24"),
+			},
+		},
+		{
+			name: "ipv4-ipv6",
+			input: []string{
+				"10.0.0.0/8",
+				"2001:db8::/32",
+			},
+			want: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+				mustParseCIDR("2001:db8::/32"),
+			},
+		},
+		{
+			name: "invalid",
+			input: []string{
+				"hello world",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid-ipv4-cidr",
+			input: []string{
+				"10.0.0.0/256",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid-ipv6-cidr",
+			input: []string{
+				"2001:db8::/256",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseTrustedProxies(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseTrustedProxies(%q) error = %v, wantErr %v",
+					tt.input, err, tt.wantErr)
+				return
+			}
+
+			if diff := deep.Equal(got, tt.want); len(diff) > 0 {
+				t.Errorf("parseTrustedProxies(%q):\n%s", tt.input, diff)
+			}
+		})
+	}
+}
+
+func mustParseCIDR(s string) *net.IPNet {
+	_, ipNet, err := net.ParseCIDR(s)
+	if err != nil {
+		panic(fmt.Errorf("parse CIDR %s: %w", s, err))
+	}
+	return ipNet
+}
+
+func TestSingleCIDR(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			input: "127.0.0.1",
+			want:  "127.0.0.1/32",
+		},
+		{
+			input: "1.2.3.4",
+			want:  "1.2.3.4/32",
+		},
+		{
+			input: "192.168.0.1",
+			want:  "192.168.0.1/32",
+		},
+		{
+			input: "2001:db8:3333:4444:5555:6666:7777:8888",
+			want:  "2001:db8:3333:4444:5555:6666:7777:8888/128",
+		},
+		{
+			input: "2001:db8::1234:5678",
+			want:  "2001:db8::1234:5678/128",
+		},
+		{
+			input: "2001:db8:1::ab9:C0A8:102",
+			want:  "2001:db8:1::ab9:C0A8:102/128",
+		},
+		{
+			input: "2001:0db8:0001:0000:0000:0ab9:C0A8:0102",
+			want:  "2001:0db8:0001:0000:0000:0ab9:C0A8:0102/128",
+		},
+		{
+			input:   "",
+			wantErr: true,
+		},
+		{
+			input:   "::1/128",
+			wantErr: true,
+		},
+		{
+			input:   "127.0.0.1/32",
+			wantErr: true,
+		},
+		{
+			input:   "1.2",
+			wantErr: true,
+		},
+		{
+			input:   "hello world",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := singleCIDR(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("singleCIDR(%q) error = %v, wantErr %v",
+					tt.input, err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("singleCIDR(%q) got = %v, want %v",
+					tt.input, got, tt.want)
+			}
+		})
 	}
 }
