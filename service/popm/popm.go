@@ -355,7 +355,7 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 // seperately. Also utxo picker needs to be fixed. Don't return a fake utxo
 // etc. Fix fee estimation.
 func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
-	log.Infof("Broadcasting PoP transaction to Bitcoin...")
+	log.Infof("Mining an L2 keystone...")
 
 	go m.dispatchEvent(EventTypeMineKeystone, EventMineKeystone{Keystone: ks})
 
@@ -423,6 +423,8 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	txb := buf.Bytes()
 
 	log.Tracef("Broadcasting Bitcoin transaction %x", txb)
+	log.Infof("Broadcasting PoP transaction to Bitcoin %s...",
+		m.btcChainParams.Name)
 
 	txh, err := m.bitcoinBroadcast(ctx, txb)
 	if err != nil {
@@ -433,7 +435,10 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 		return fmt.Errorf("create BTC hash from transaction hash: %w", err)
 	}
 
-	log.Infof("Successfully broadcast PoP transaction to Bitcoin with TX hash %v", txHash)
+	log.Infof(
+		"Successfully broadcast PoP transaction to Bitcoin %s with TX hash %v",
+		m.btcChainParams.Name, txHash,
+	)
 
 	go m.dispatchEvent(EventTypeTransactionBroadcast,
 		EventTransactionBroadcast{Keystone: ks, TxHash: txHash.String()})
