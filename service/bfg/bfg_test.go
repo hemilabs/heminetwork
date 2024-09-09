@@ -265,6 +265,25 @@ func TestServerRemoteIP(t *testing.T) {
 			},
 			want: "4.3.2.1",
 		},
+		{
+			name: "multiple-header-values",
+			remoteIPHeaders: []string{
+				"X-Forwarded-For",
+			},
+			trustedProxies: []*net.IPNet{
+				mustParseCIDR("10.0.0.0/8"),
+			},
+			req: &http.Request{
+				Header: http.Header{
+					"X-Forwarded-For": []string{
+						"1.2.3.4, 2.3.4.5, 10.1.1.1",
+						"10.2.2.2, 10.3.3.3",
+					},
+				},
+				RemoteAddr: "10.3.4.1:43111",
+			},
+			want: "2.3.4.5",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
