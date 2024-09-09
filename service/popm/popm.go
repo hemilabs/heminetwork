@@ -355,7 +355,7 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 // seperately. Also utxo picker needs to be fixed. Don't return a fake utxo
 // etc. Fix fee estimation.
 func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
-	log.Infof("Mining an L2 keystone...")
+	log.Infof("Mining an L2 keystone at height %d...", ks.L2BlockNumber)
 
 	go m.dispatchEvent(EventTypeMineKeystone, EventMineKeystone{Keystone: ks})
 
