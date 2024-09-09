@@ -1791,11 +1791,11 @@ func (s *Server) Run(pctx context.Context) error {
 func (s *Server) remoteIP(req *http.Request) string {
 	remoteAddr, _, err := net.SplitHostPort(req.RemoteAddr)
 	if err != nil {
-		return ""
+		return req.RemoteAddr
 	}
 	remoteIP := net.ParseIP(remoteAddr)
 	if remoteIP == nil {
-		return ""
+		return req.RemoteAddr
 	}
 
 	// If the remote IP is a trusted proxy, attempt parsing remote IP headers.
