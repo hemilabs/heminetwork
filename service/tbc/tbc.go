@@ -40,8 +40,6 @@ import (
 	"github.com/hemilabs/heminetwork/ttl"
 )
 
-type phase int
-
 const (
 	logLevel = "INFO"
 
@@ -58,14 +56,6 @@ const (
 	defaultCmdTimeout          = 4 * time.Second
 	defaultPingTimeout         = 3 * time.Second
 	defaultBlockPendingTimeout = 13 * time.Second
-
-	// Phase transitions 0 -> 1 -> 2 -> 3
-	// Once we reach phase 3 we go back and forth between 3 and 4
-	phaseStartOfDay      phase = 0 // tbc launched, no peers
-	phaseFixingUpIndexes phase = 1 // verify indexes are canonical
-	phaseFixingUpTip     phase = 2 // verify canonical tip
-	phaseRunning         phase = 3 // fully running
-	phaseIndexing        phase = 4 // fully running + indexing
 )
 
 var (
@@ -94,22 +84,6 @@ var log = loggo.GetLogger("tbc")
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
-}
-
-func (p phase) String() string {
-	switch p {
-	case phaseStartOfDay:
-		return "start of day"
-	case phaseFixingUpIndexes:
-		return "fixing up indexes"
-	case phaseFixingUpTip:
-		return "fixing up canonical tip"
-	case phaseRunning:
-		return "running"
-	case phaseIndexing:
-		return "indexing"
-	}
-	return "invalid"
 }
 
 type Config struct {
