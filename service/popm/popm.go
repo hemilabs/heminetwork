@@ -628,23 +628,22 @@ func (m *Miner) processReceivedKeystones(ctx context.Context, l2Keystones []hemi
 			continue
 		}
 
-		if m.cfg.RetryMineThreshold < 1 {
-			log.Debugf(
-				"Refusing to mine keystone with block height %d, highest received: %d",
-				kh.L2BlockNumber, lastL2BlockNumber,
-			)
-			continue
+		if m.cfg.RetryMineThreshold > 0 {
+			retryThreshold := uint32(m.cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod
+			if (lastL2BlockNumber - kh.L2BlockNumber) <= retryThreshold {
+				log.Debugf(
+					"Received keystone old keystone with block height %d, within threshold %d",
+					kh.L2BlockNumber, retryThreshold,
+				)
+				m.queueKeystoneForMining(&kh)
+				continue
+			}
 		}
 
-		retryThreshold := uint32(m.cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod
-		if (lastL2BlockNumber - kh.L2BlockNumber) <= retryThreshold {
-			log.Debugf(
-				"Received keystone old keystone with block height %d, within threshold %d",
-				kh.L2BlockNumber, retryThreshold,
-			)
-			m.queueKeystoneForMining(&kh)
-			continue
-		}
+		log.Debugf(
+			"Refusing to mine keystone with block height %d, highest received: %d",
+			kh.L2BlockNumber, lastL2BlockNumber,
+		)
 	}
 }
 
