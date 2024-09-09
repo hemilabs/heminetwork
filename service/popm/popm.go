@@ -179,7 +179,7 @@ func (m *Miner) Fee() uint {
 // PoP transactions.
 func (m *Miner) SetFee(fee uint) {
 	switch {
-	case fee < 0:
+	case fee < 1:
 		fee = 1
 	case fee > 1<<32-1:
 		fee = 1<<32 - 1
@@ -556,11 +556,12 @@ func (m *Miner) mineKnownKeystones(ctx context.Context) {
 		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
 		key := hex.EncodeToString(serialized[:])
 
-		log.Infof("Received keystone for mining with height %v...", e.L2BlockNumber)
+		log.Debugf("Received keystone for mining with height %v...", e.L2BlockNumber)
 
 		err := m.mineKeystone(ctx, &e)
 		if err != nil {
-			log.Errorf("Failed to mine keystone: %v", err)
+			log.Errorf("Failed to mine keystone with height %d: %v",
+				e.L2BlockNumber, err)
 		}
 
 		m.mtx.Lock()
@@ -607,33 +608,42 @@ func (m *Miner) processReceivedKeystones(ctx context.Context, l2Keystones []hemi
 	slices.SortFunc(l2Keystones, sortL2KeystonesByL2BlockNumberAsc)
 
 	for _, kh := range l2Keystones {
-		log.Infof(
-			"checking keystone received with height %d against last keystone %s",
-			kh.L2BlockNumber,
-			func() string {
-				if m.lastKeystone == nil {
-					return "nil"
-				}
+		if ctx.Err() != nil {
+			return
+		}
 
-				return fmt.Sprintf("%d", m.lastKeystone.L2BlockNumber)
-			}(),
-		)
+		var lastL2BlockNumber uint32
+		if m.lastKeystone != nil {
+			lastL2BlockNumber = m.lastKeystone.L2BlockNumber
+			log.Debugf(
+				"Checking keystone received with height %d against last keystone %d",
+				kh.L2BlockNumber, lastL2BlockNumber,
+			)
+		}
+
 		if m.lastKeystone == nil || kh.L2BlockNumber > m.lastKeystone.L2BlockNumber {
-			log.Infof("Got new last keystone header with height %v", kh.L2BlockNumber)
+			log.Debugf("Received new keystone with block height %d", kh.L2BlockNumber)
+			m.lastKeystone = &kh
+			m.queueKeystoneForMining(&kh)
+			continue
+		}
 
-			// copy L2Keystone to a tmp variable so the value doesn't get
-			// ovewritten on next iteration. otherwise lastKeystone always
-			// points to the latest kh
-			tmp := kh
-			m.lastKeystone = &tmp
+		if m.cfg.RetryMineThreshold < 1 {
+			log.Debugf(
+				"Refusing to mine keystone with block height %d, highest received: %d",
+				kh.L2BlockNumber, lastL2BlockNumber,
+			)
+			continue
+		}
 
-			m.queueKeystoneForMining(&tmp)
-		} else if m.cfg.RetryMineThreshold > 0 && (m.lastKeystone.L2BlockNumber-kh.L2BlockNumber) <= uint32(m.cfg.RetryMineThreshold)*hemi.KeystoneHeaderPeriod {
-			log.Tracef("received keystone older than latest, but within threshold, will remine l2 block number = %d", kh.L2BlockNumber)
-			tmp := kh
-			m.queueKeystoneForMining(&tmp)
-		} else {
-			log.Warningf("refusing to mine keystone with height %d, highest received: %d", kh.L2BlockNumber, m.lastKeystone.L2BlockNumber)
+		retryThreshold := uint32(m.cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod
+		if (lastL2BlockNumber - kh.L2BlockNumber) <= retryThreshold {
+			log.Debugf(
+				"Received keystone old keystone with block height %d, within threshold %d",
+				kh.L2BlockNumber, retryThreshold,
+			)
+			m.queueKeystoneForMining(&kh)
+			continue
 		}
 	}
 }
@@ -773,7 +783,7 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			case <-time.After(m.holdoffTimeout):
 			}
 
-			log.Infof("Reconnecting to BFG server")
+			log.Infof("Connection with BFG server was lost, reconnecting...")
 			continue
 		}
 
@@ -786,13 +796,12 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			}
 			// XXX WriteConn ??
 			if err := bfgapi.Write(ctx, conn, rid, response); err != nil {
-				log.Errorf("handleBFGWebsocketRead write: %v",
-					err)
+				log.Errorf("Failed to write ping response to BFG server: %v", err)
 			}
 		case bfgapi.CmdL2KeystonesNotification:
 			go func() {
 				if err := m.checkForKeystones(ctx); err != nil {
-					log.Errorf("error checking for keystones: %s", err)
+					log.Errorf("An error occurred while checking for keystones: %v", err)
 				}
 			}()
 		default:
@@ -958,10 +967,10 @@ func (m *Miner) Run(pctx context.Context) error {
 	}
 	cancel()
 
-	log.Infof("pop miner service shutting down")
+	log.Infof("PoP miner shutting down...")
 
 	m.wg.Wait()
-	log.Infof("pop miner service clean shutdown")
+	log.Infof("PoP miner has shutdown cleanly")
 
 	return err
 }
