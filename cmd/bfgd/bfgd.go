@@ -111,6 +111,18 @@ var (
 			Help:         "request timeout in seconds",
 			Print:        config.PrintAll,
 		},
+		"BFG_TRUSTED_PROXIES": config.Config{
+			Value:        &cfg.TrustedProxies,
+			DefaultValue: []string{},
+			Help:         "trusted proxies IP addresses or CIDRs",
+			Print:        config.PrintAll,
+		},
+		"BFG_REMOTE_IP_HEADERS": config.Config{
+			Value:        &cfg.RemoteIPHeaders,
+			DefaultValue: []string{},
+			Help:         "list of headers used to obtain the client IP address (requires trusted proxies)",
+			Print:        config.PrintAll,
+		},
 	}
 )
 

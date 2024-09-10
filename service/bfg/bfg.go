@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,6 +101,8 @@ type Config struct {
 	PublicKeyAuth           bool
 	RequestLimit            int
 	RequestTimeout          int // in seconds
+	RemoteIPHeaders         []string
+	TrustedProxies          []string
 }
 
 type Server struct {
@@ -111,6 +114,9 @@ type Server struct {
 	// requests
 	requestLimiter chan bool // Maximum in progress websocket commands
 	// requestTimeout time.Duration
+
+	remoteIPHeaders []string
+	trustedProxies  []*net.IPNet
 
 	btcHeight uint64
 
@@ -1006,8 +1012,9 @@ func (s *Server) deleteSession(id string) {
 }
 
 func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) {
-	log.Tracef("handleWebsocketPrivate: %v", r.RemoteAddr)
-	defer log.Tracef("handleWebsocketPrivate exit: %v", r.RemoteAddr)
+	remoteAddr := s.remoteIP(r)
+	log.Tracef("handleWebsocketPrivate: %v", remoteAddr)
+	defer log.Tracef("handleWebsocketPrivate exit: %v", remoteAddr)
 
 	wao := &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionContextTakeover,
@@ -1017,13 +1024,13 @@ func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) 
 	conn, err := websocket.Accept(w, r, wao)
 	if err != nil {
 		log.Errorf("Failed to accept websocket connection for %v: %v",
-			r.RemoteAddr, err)
+			remoteAddr, err)
 		return
 	}
 	defer conn.Close(websocket.StatusProtocolError, "")
 
 	bws := &bfgWs{
-		addr: r.RemoteAddr,
+		addr: remoteAddr,
 		conn: protocol.NewWSConn(conn),
 		notify: map[notificationId]struct{}{
 			notifyBtcBlocks:     {},
@@ -1057,14 +1064,15 @@ func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) 
 		log.Errorf("Write: %v", err)
 	}
 
-	log.Infof("Unauthenticated connection from %v", r.RemoteAddr)
+	log.Infof("Unauthenticated connection from %v", remoteAddr)
 	bws.wg.Wait()
-	log.Infof("Unauthenticated connection terminated from %v", r.RemoteAddr)
+	log.Infof("Unauthenticated connection terminated from %v", remoteAddr)
 }
 
 func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
-	log.Tracef("handleWebsocketPublic: %v", r.RemoteAddr)
-	defer log.Tracef("handleWebsocketPublic exit: %v", r.RemoteAddr)
+	remoteAddr := s.remoteIP(r)
+	log.Tracef("handleWebsocketPublic: %v", remoteAddr)
+	defer log.Tracef("handleWebsocketPublic exit: %v", remoteAddr)
 
 	wao := &websocket.AcceptOptions{
 		CompressionMode:    websocket.CompressionContextTakeover,
@@ -1075,13 +1083,13 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, wao)
 	if err != nil {
 		log.Errorf("Failed to accept websocket connection for %v: %v",
-			r.RemoteAddr, err)
+			remoteAddr, err)
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	bws := &bfgWs{
-		addr:           r.RemoteAddr,
+		addr:           remoteAddr,
 		conn:           protocol.NewWSConn(conn),
 		listenerName:   "public",
 		requestContext: r.Context(),
@@ -1158,10 +1166,10 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	go s.handleWebsocketPublicRead(r.Context(), bws)
 
 	log.Infof("Authenticated session %s from %s public key %x (%s)",
-		bws.sessionId, r.RemoteAddr, bws.publicKey, userAgent)
+		bws.sessionId, remoteAddr, bws.publicKey, userAgent)
 	bws.wg.Wait()
-	log.Infof("Terminated session %s from %s public key %x",
-		bws.sessionId, r.RemoteAddr, bws.publicKey)
+	log.Infof("Terminated session %s from %s public key %x (%s)",
+		bws.sessionId, remoteAddr, bws.publicKey, userAgent)
 }
 
 func (s *Server) handlePingRequest(ctx context.Context, bws *bfgWs, payload any, id string) error {
@@ -1670,6 +1678,18 @@ func (s *Server) Run(pctx context.Context) error {
 	handle("bfgpriv", privateMux, bfgapi.RouteWebsocketPrivate, s.handleWebsocketPrivate)
 	handle("bfgpub", publicMux, bfgapi.RouteWebsocketPublic, s.handleWebsocketPublic)
 
+	// Parse remote IP headers.
+	s.remoteIPHeaders = make([]string, len(s.cfg.RemoteIPHeaders))
+	for i, h := range s.cfg.RemoteIPHeaders {
+		s.remoteIPHeaders[i] = http.CanonicalHeaderKey(h)
+	}
+
+	// Parse trusted proxies.
+	s.trustedProxies, err = parseTrustedProxies(s.cfg.TrustedProxies)
+	if err != nil {
+		return fmt.Errorf("parse trusted proxies: %w", err)
+	}
+
 	publicHttpServer := &http.Server{
 		Addr:        s.cfg.PublicListenAddress,
 		Handler:     publicMux,
@@ -1781,4 +1801,123 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Infof("bfg service clean shutdown")
 
 	return err
+}
+
+// remoteIP returns the remote client IP address for the http request.
+func (s *Server) remoteIP(req *http.Request) string {
+	remoteAddr, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteAddr)
+	if remoteIP == nil {
+		return req.RemoteAddr
+	}
+
+	// If the remote IP is a trusted proxy, attempt parsing remote IP headers.
+	if s.isTrustedProxy(remoteIP) {
+		for _, headerName := range s.remoteIPHeaders {
+			values := req.Header.Values(headerName)
+			if ip, valid := s.parseForwardedHeader(values); valid {
+				return ip
+			}
+		}
+	}
+
+	return remoteIP.String()
+}
+
+// parseForwardedHeader parses the given value of an X-Forwarded-For header and
+// returns the client IP address.
+//
+// The header value is searched in reverse order, skipping all addresses that
+// are trusted proxies. The first untrusted address is returned.
+func (s *Server) parseForwardedHeader(values []string) (string, bool) {
+	if len(values) < 1 {
+		return "", false
+	}
+
+	// There can be multiple headers present in the request, and the IP
+	// addresses in the headers must be treated as a single list of IP
+	// addresses, starting with the first IP of the first header, and
+	// ending with the last IP of the last header.
+	var addrs []string
+	for _, v := range values {
+		addrs = append(addrs, strings.Split(v, ",")...)
+	}
+
+	for i := len(addrs) - 1; i >= 0; i-- {
+		ipStr := strings.TrimSpace(addrs[i])
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			// Invalid header value.
+			return "", false
+		}
+
+		if i == 0 || !s.isTrustedProxy(ip) {
+			// Return last value or untrusted address.
+			return ipStr, true
+		}
+	}
+
+	return "", false
+}
+
+// isTrustedProxy returns whether the IP address is included in the list of
+// trusted proxies.
+func (s *Server) isTrustedProxy(ip net.IP) bool {
+	for _, cidr := range s.trustedProxies {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+// parseTrustedProxies parses a list of trusted proxy IP addresses or CIDR
+// ranges.
+func parseTrustedProxies(trustedProxies []string) ([]*net.IPNet, error) {
+	if len(trustedProxies) < 1 {
+		return nil, nil
+	}
+
+	cidr := make([]*net.IPNet, len(trustedProxies))
+	for i, trustedProxy := range trustedProxies {
+		var err error
+		if !strings.Contains(trustedProxy, "/") {
+			// Not a CIDR, create a CIDR representing the single address.
+			trustedProxy, err = singleCIDR(trustedProxy)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// Parse CIDR.
+		_, cidr[i], err = net.ParseCIDR(trustedProxy)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return cidr, nil
+}
+
+// singleCIDR returns a CIDR representing a single IP address.
+func singleCIDR(ip string) (string, error) {
+	parsedIP := net.ParseIP(ip)
+	if ipv4 := parsedIP.To4(); ipv4 != nil {
+		// Use 4-byte representation of IP address if using IPv4.
+		parsedIP = ipv4
+	}
+	if parsedIP == nil {
+		return "", &net.ParseError{Type: "IP address", Text: ip}
+	}
+
+	switch len(parsedIP) {
+	case net.IPv4len:
+		ip += "/32"
+	case net.IPv6len:
+		ip += "/128"
+	}
+	return ip, nil
 }
