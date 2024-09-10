@@ -379,7 +379,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 	return blocksProcessed, last, nil
 }
 
-// unindexUtxosInBlocks unindexes iutxos from the last processed block until the
+// unindexUtxosInBlocks unindexes utxos from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
 // the last hash it has processedd.
 func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
