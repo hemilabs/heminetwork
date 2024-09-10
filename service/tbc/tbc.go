@@ -1399,56 +1399,66 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 	return err
 }
 
-// blockExpired expires a block download and kills the peer.
-func (s *Server) blockExpired(ctx context.Context, key any, value any) {
-	log.Tracef("blockExpired")
-	defer log.Tracef("blockExpired exit")
+func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) error {
+	log.Tracef("handleBlockExpired")
+	defer log.Tracef("handleBlockExpired exit")
 
 	p, ok := value.(*peer)
 	if !ok {
 		// this really should not happen
-		log.Errorf("block expired no peer: %v", key)
-		return
+		return fmt.Errorf("invalid peer type: %T", value)
 	}
-	log.Infof("block expired %v: %v", p, key)
-	// panic(fmt.Sprintf("block expired %v: %v", p, key))
-
-	// XXX don't close peer, blocks can expire
-	log.Infof("DELETE BLOCK OR NOT %v", key)
-
 	if _, ok := key.(string); !ok {
-		p.close() // this will tear down peer
+		// this really should not happen
+		return fmt.Errorf("invalid key type: %T", key)
 	}
+
+	// Ensure block is on main chain, if it is not it is deleted from
+	// blocks missing database.
 	hash, err := chainhash.NewHashFromStr(key.(string))
 	if err != nil {
-		log.Errorf("block expired hash: %v", err)
-		return
+		return fmt.Errorf("new hash: %v", err)
 	}
-
-	// XXX get ctx sent in instead
 	bhX, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("block header by hash: %v", err)
 	}
 	best, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		panic(err)
+		return fmt.Errorf("block header best: %v", err)
 	}
-	log.Infof("linear: %v %v %v -> %v %v", p, best.Height, best, bhX.Height, bhX)
-	direction, err := s.IndexIsLinear(ctx, best.Hash, bhX.Hash)
+	log.Debugf("linear: %v %v %v -> %v %v", p, best.Height, best, bhX.Height, bhX)
+	_, err = s.IndexIsLinear(ctx, best.Hash, bhX.Hash)
 	if err != nil {
 		log.Infof("deleting from blocks missing: %v %v %v",
 			p, bhX.Height, bhX)
 		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
 		if err != nil {
-			log.Errorf("block expired delete missing: %v", err)
-			return
+			return fmt.Errorf("block expired delete missing: %v", err)
+		}
+
+		// Block exists on a fork, stop downloading it.
+		return nil
+	}
+
+	// Legit timeout, return error so that it can be retried.
+	return fmt.Errorf("timeout %v", hash)
+}
+
+func (s *Server) blockExpired(ctx context.Context, key any, value any) {
+	log.Tracef("blockExpired")
+	defer log.Tracef("blockExpired exit")
+
+	err := s.handleBlockExpired(ctx, key, value)
+	if err != nil {
+		// Close peer.
+		if p, ok := value.(*peer); ok {
+			if err := p.close(); err != nil {
+				log.Errorf("block expired: %v %v", p, err)
+			}
+			log.Errorf("block expired: %v %w", p, err)
 		}
 	}
-	_ = direction
-	// XXX should we redo this with findCanonicalHash?
-
-	// Legit timeout
 }
 
 // randomPeer returns a random peer from the map. Must be called with lock
