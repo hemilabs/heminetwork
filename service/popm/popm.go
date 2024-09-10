@@ -179,7 +179,7 @@ func (m *Miner) Fee() uint {
 // PoP transactions.
 func (m *Miner) SetFee(fee uint) {
 	switch {
-	case fee < 0:
+	case fee < 1:
 		fee = 1
 	case fee > 1<<32-1:
 		fee = 1<<32 - 1
@@ -355,7 +355,7 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 // seperately. Also utxo picker needs to be fixed. Don't return a fake utxo
 // etc. Fix fee estimation.
 func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
-	log.Infof("Broadcasting PoP transaction to Bitcoin...")
+	log.Infof("Mining an L2 keystone at height %d...", ks.L2BlockNumber)
 
 	go m.dispatchEvent(EventTypeMineKeystone, EventMineKeystone{Keystone: ks})
 
@@ -423,6 +423,8 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	txb := buf.Bytes()
 
 	log.Tracef("Broadcasting Bitcoin transaction %x", txb)
+	log.Infof("Broadcasting PoP transaction to Bitcoin %s...",
+		m.btcChainParams.Name)
 
 	txh, err := m.bitcoinBroadcast(ctx, txb)
 	if err != nil {
@@ -433,7 +435,10 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 		return fmt.Errorf("create BTC hash from transaction hash: %w", err)
 	}
 
-	log.Infof("Successfully broadcast PoP transaction to Bitcoin with TX hash %v", txHash)
+	log.Infof(
+		"Successfully broadcast PoP transaction to Bitcoin %s with TX hash %v",
+		m.btcChainParams.Name, txHash,
+	)
 
 	go m.dispatchEvent(EventTypeTransactionBroadcast,
 		EventTransactionBroadcast{Keystone: ks, TxHash: txHash.String()})
@@ -556,11 +561,12 @@ func (m *Miner) mineKnownKeystones(ctx context.Context) {
 		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
 		key := hex.EncodeToString(serialized[:])
 
-		log.Infof("Received keystone for mining with height %v...", e.L2BlockNumber)
+		log.Debugf("Received keystone for mining with height %v...", e.L2BlockNumber)
 
 		err := m.mineKeystone(ctx, &e)
 		if err != nil {
-			log.Errorf("Failed to mine keystone: %v", err)
+			log.Errorf("Failed to mine keystone with height %d: %v",
+				e.L2BlockNumber, err)
 		}
 
 		m.mtx.Lock()
@@ -607,34 +613,42 @@ func (m *Miner) processReceivedKeystones(ctx context.Context, l2Keystones []hemi
 	slices.SortFunc(l2Keystones, sortL2KeystonesByL2BlockNumberAsc)
 
 	for _, kh := range l2Keystones {
-		log.Infof(
-			"checking keystone received with height %d against last keystone %s",
-			kh.L2BlockNumber,
-			func() string {
-				if m.lastKeystone == nil {
-					return "nil"
-				}
-
-				return fmt.Sprintf("%d", m.lastKeystone.L2BlockNumber)
-			}(),
-		)
-		if m.lastKeystone == nil || kh.L2BlockNumber > m.lastKeystone.L2BlockNumber {
-			log.Infof("Got new last keystone header with height %v", kh.L2BlockNumber)
-
-			// copy L2Keystone to a tmp variable so the value doesn't get
-			// ovewritten on next iteration. otherwise lastKeystone always
-			// points to the latest kh
-			tmp := kh
-			m.lastKeystone = &tmp
-
-			m.queueKeystoneForMining(&tmp)
-		} else if m.cfg.RetryMineThreshold > 0 && (m.lastKeystone.L2BlockNumber-kh.L2BlockNumber) <= uint32(m.cfg.RetryMineThreshold)*hemi.KeystoneHeaderPeriod {
-			log.Tracef("received keystone older than latest, but within threshold, will remine l2 block number = %d", kh.L2BlockNumber)
-			tmp := kh
-			m.queueKeystoneForMining(&tmp)
-		} else {
-			log.Warningf("refusing to mine keystone with height %d, highest received: %d", kh.L2BlockNumber, m.lastKeystone.L2BlockNumber)
+		if ctx.Err() != nil {
+			return
 		}
+
+		var lastL2BlockNumber uint32
+		if m.lastKeystone != nil {
+			lastL2BlockNumber = m.lastKeystone.L2BlockNumber
+			log.Debugf(
+				"Checking keystone received with height %d against last keystone %d",
+				kh.L2BlockNumber, lastL2BlockNumber,
+			)
+		}
+
+		if m.lastKeystone == nil || kh.L2BlockNumber > m.lastKeystone.L2BlockNumber {
+			log.Debugf("Received new keystone with block height %d", kh.L2BlockNumber)
+			m.lastKeystone = &kh
+			m.queueKeystoneForMining(&kh)
+			continue
+		}
+
+		if m.cfg.RetryMineThreshold > 0 {
+			retryThreshold := uint32(m.cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod
+			if (lastL2BlockNumber - kh.L2BlockNumber) <= retryThreshold {
+				log.Debugf(
+					"Received keystone old keystone with block height %d, within threshold %d",
+					kh.L2BlockNumber, retryThreshold,
+				)
+				m.queueKeystoneForMining(&kh)
+				continue
+			}
+		}
+
+		log.Debugf(
+			"Refusing to mine keystone with block height %d, highest received: %d",
+			kh.L2BlockNumber, lastL2BlockNumber,
+		)
 	}
 }
 
@@ -773,7 +787,7 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			case <-time.After(m.holdoffTimeout):
 			}
 
-			log.Infof("Reconnecting to BFG server")
+			log.Infof("Connection with BFG server was lost, reconnecting...")
 			continue
 		}
 
@@ -786,13 +800,12 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			}
 			// XXX WriteConn ??
 			if err := bfgapi.Write(ctx, conn, rid, response); err != nil {
-				log.Errorf("handleBFGWebsocketRead write: %v",
-					err)
+				log.Errorf("Failed to write ping response to BFG server: %v", err)
 			}
 		case bfgapi.CmdL2KeystonesNotification:
 			go func() {
 				if err := m.checkForKeystones(ctx); err != nil {
-					log.Errorf("error checking for keystones: %s", err)
+					log.Errorf("An error occurred while checking for keystones: %v", err)
 				}
 			}()
 		default:
@@ -958,10 +971,10 @@ func (m *Miner) Run(pctx context.Context) error {
 	}
 	cancel()
 
-	log.Infof("pop miner service shutting down")
+	log.Infof("PoP miner shutting down...")
 
 	m.wg.Wait()
-	log.Infof("pop miner service clean shutdown")
+	log.Infof("PoP miner has shutdown cleanly")
 
 	return err
 }
