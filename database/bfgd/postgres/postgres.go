@@ -35,7 +35,7 @@ const effectiveHeightSql = `
 			INNER JOIN pop_basis ON pop_basis.btc_block_hash 
 				= btc_blocks_can.hash
 			INNER JOIN l2_keystones ll ON ll.l2_keystone_abrev_hash 
-				= pop_basis.l2_keystone_abrev_hash
+				= l2_keystones.l2_keystone_abrev_hash
 
 		WHERE ll.l2_block_number >= l2_keystones.l2_block_number
 		ORDER BY height ASC LIMIT 1
