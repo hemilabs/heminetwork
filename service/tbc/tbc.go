@@ -943,8 +943,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		// When quiesced do not handle other p2p commands.
 		s.mtx.Lock()
 		if s.indexing {
-			s.mtx.Unlock()
 			log.Debugf("indexing %v", s.indexing)
+			s.mtx.Unlock()
 			continue
 		}
 		s.mtx.Unlock()
