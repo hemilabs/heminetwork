@@ -424,7 +424,7 @@ func newMiner(config js.Value) (*Miner, *automaticFeeOptions, error) {
 	// Automatic fee options
 	autoFeeConfig := config.Get("automaticFees")
 	autoFees := &automaticFeeOptions{
-		enabled:         autoFeeConfig.Truthy(),
+		enabled:         autoFeeConfig.IsUndefined() || autoFeeConfig.Truthy(),
 		feeType:         RecommendedFeeTypeEconomy,
 		refreshInterval: 5 * time.Minute,
 	}
