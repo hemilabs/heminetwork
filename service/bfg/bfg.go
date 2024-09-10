@@ -729,7 +729,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			// that something else has inserted the row before us
 			// (i.e. a race condition), this is ok, as it should
 			// have the same values, so we no-op
-			if err != nil && !errors.Is(database.ErrDuplicate, err) {
+			if err != nil && !errors.Is(err, database.ErrDuplicate) {
 				return err
 			}
 		}
@@ -1535,7 +1535,7 @@ func (s *Server) handleAccessPublicKeys(table string, action string, payload, pa
 	for _, v := range s.sessions {
 		// if public key does not exist on session, it's not an authenticated
 		// session so we don't close it because it didn't use a public key
-		if v.publicKey == nil || len(v.publicKey) == 0 {
+		if len(v.publicKey) == 0 {
 			continue
 		}
 
