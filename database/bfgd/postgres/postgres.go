@@ -38,6 +38,7 @@ const effectiveHeightSql = `
 				= pop_basis.l2_keystone_abrev_hash
 
 		WHERE ll.l2_block_number >= l2_keystones.l2_block_number
+		AND height > (SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1) - 100
 		ORDER BY height ASC LIMIT 1
 	)), 0)
 `
