@@ -1287,7 +1287,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			return nil
 		}
 		// Real error, abort header fetch
-		return fmt.Errorf("block headers insert: %v", err)
+		return fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// Note that BlockHeadersInsert always returns the canonical
