@@ -1206,7 +1206,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		go func() {
 			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != nil {
 				// XXX this a panic?
-				panic(fmt.Errorf("sync blocks: %v", err))
+				panic(fmt.Errorf("sync blocks: %w", err))
 			}
 		}()
 		return
