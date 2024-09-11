@@ -1012,7 +1012,7 @@ func (s *Server) handleAddr(_ context.Context, p *peer, msg *wire.MsgAddr) error
 	}
 
 	if err := s.pm.PeersInsert(peers); err != nil {
-		return fmt.Errorf("Insert peers: %w", err)
+		return fmt.Errorf("insert peers: %w", err)
 	}
 
 	return nil
