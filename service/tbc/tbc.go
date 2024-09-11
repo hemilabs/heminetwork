@@ -1359,7 +1359,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
 			s.timeSource)
 		if err != nil {
-			return fmt.Errorf("handle block unable to validate block hash %v: %v",
+			return fmt.Errorf("handle block unable to validate block hash %v: %w",
 				bhs, err)
 		}
 
