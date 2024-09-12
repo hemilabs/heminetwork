@@ -113,6 +113,7 @@ async function StartPopMiner() {
       logLevel: StartPopMinerLogLevelInput.value,
       privateKey: StartPopMinerPrivateKeyInput.value,
       automaticFees: automaticFees,
+      automaticFeeMultiplier: Number(StartPopMinerAutomaticFeeMultiplierInput.value),
       automaticFeeRefreshSeconds: Number(StartPopMinerAutomaticFeeRefreshInput.value),
       staticFee: Number(StartPopMinerStaticFeeInput.value),
     });

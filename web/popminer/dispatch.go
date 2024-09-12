@@ -382,7 +382,11 @@ func startPoPMiner(_ js.Value, args []js.Value) (any, error) {
 		// Automatic fees are enabled, run the goroutine to retrieve the fees
 		// at the refresh interval.
 		m.wg.Add(1)
-		go m.automaticFees(autoFees.feeType, autoFees.refreshInterval)
+		go m.automaticFees(
+			autoFees.feeType,
+			autoFees.multiplier,
+			autoFees.refreshInterval,
+		)
 	}
 
 	return js.Null(), nil
@@ -391,6 +395,7 @@ func startPoPMiner(_ js.Value, args []js.Value) (any, error) {
 type automaticFeeOptions struct {
 	enabled         bool
 	feeType         RecommendedFeeType
+	multiplier      float64
 	refreshInterval time.Duration
 }
 
@@ -425,7 +430,8 @@ func newMiner(config js.Value) (*Miner, *automaticFeeOptions, error) {
 	autoFeeConfig := config.Get("automaticFees")
 	autoFees := &automaticFeeOptions{
 		enabled:         autoFeeConfig.IsUndefined() || autoFeeConfig.Truthy(),
-		feeType:         RecommendedFeeTypeEconomy,
+		feeType:         RecommendedFeeTypeFastest,
+		multiplier:      1.1,
 		refreshInterval: 5 * time.Minute,
 	}
 	if autoFeeConfig.Type() == js.TypeString {
@@ -436,7 +442,18 @@ func newMiner(config js.Value) (*Miner, *automaticFeeOptions, error) {
 		}
 		autoFees.feeType = feeType
 	}
+	if fm := config.Get("automaticFeeMultiplier"); fm.Truthy() {
+		if fm.Float() <= 0 {
+			return nil, nil, errorWithCode(ErrorCodeInvalidValue,
+				errors.New("automaticFeeMultiplier must be greater than zero"))
+		}
+		autoFees.multiplier = fm.Float()
+	}
 	if rf := config.Get("automaticFeeRefreshSeconds"); rf.Truthy() {
+		if rf.Int() < 1 {
+			return nil, nil, errorWithCode(ErrorCodeInvalidValue,
+				errors.New("automaticFeeRefreshSeconds must be greater than zero"))
+		}
 		autoFees.refreshInterval = time.Duration(rf.Int()) * time.Second
 	}
 
