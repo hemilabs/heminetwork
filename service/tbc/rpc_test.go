@@ -121,7 +121,7 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf(spew.Sdump(bh))
+	t.Log(spew.Sdump(bh))
 
 	if response.Error != nil {
 		t.Errorf("got unwanted error: %v", response.Error)
@@ -311,7 +311,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf(spew.Sdump(bh))
+	t.Log(spew.Sdump(bh))
 
 	if response.Error != nil {
 		t.Errorf("got unwanted error: %v", response.Error)

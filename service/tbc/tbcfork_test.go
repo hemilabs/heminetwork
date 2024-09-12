@@ -1224,6 +1224,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = si
 	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
 	si, err = s.SpentOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
 	if err != nil {
