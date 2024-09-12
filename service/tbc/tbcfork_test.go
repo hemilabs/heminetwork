@@ -46,7 +46,7 @@ func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
 	}
 	err := processTxs(b.Hash(), b.Transactions(), blk.txs)
 	if err != nil {
-		panic(fmt.Errorf("processTxs: %v", err))
+		panic(fmt.Errorf("processTxs: %w", err))
 	}
 
 	return blk

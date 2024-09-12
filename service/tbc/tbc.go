@@ -604,7 +604,7 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 
 		delta := d - time.Now().Sub(start)
 		if delta <= 0 {
-			return nil, fmt.Errorf("poll p2p: timeout")
+			return nil, errors.New("poll p2p: timeout")
 		}
 		msg, raw, err := p.read(delta)
 		if errors.Is(err, wire.ErrUnknownMessage) {
@@ -679,7 +679,7 @@ func (s *Server) inCanonicalChainP2P(ctx context.Context, p *peer, hash *chainha
 		}
 		zeroHash := chainhash.Hash{}
 		if prevBlockHash.IsEqual(&zeroHash) {
-			return false, fmt.Errorf("poll p2p: invalid header hash")
+			return false, errors.New("poll p2p: invalid header hash")
 		}
 		return true, nil
 	}
@@ -712,7 +712,7 @@ func (s *Server) findCanonicalP2P(ctx context.Context, p *peer, hash *chainhash.
 		}
 		hash = &wbh.PrevBlock
 		if s.chainParams.GenesisHash.IsEqual(hash) {
-			return nil, fmt.Errorf("reached genesis")
+			return nil, errors.New("reached genesis")
 		}
 	}
 }
@@ -1105,15 +1105,15 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	// blocks missing database.
 	hash, err := chainhash.NewHashFromStr(key.(string))
 	if err != nil {
-		return fmt.Errorf("new hash: %v", err)
+		return fmt.Errorf("new hash: %w", err)
 	}
 	bhX, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
-		return fmt.Errorf("block header by hash: %v", err)
+		return fmt.Errorf("block header by hash: %w", err)
 	}
 	best, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		return fmt.Errorf("block header best: %v", err)
+		return fmt.Errorf("block header best: %w", err)
 	}
 	log.Debugf("linear: %v %v %v -> %v %v", p, best.Height, best, bhX.Height, bhX)
 	_, err = s.IndexIsLinear(ctx, best.Hash, bhX.Hash)
@@ -1122,7 +1122,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 			p, bhX.Height, bhX)
 		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
 		if err != nil {
-			return fmt.Errorf("block expired delete missing: %v", err)
+			return fmt.Errorf("block expired delete missing: %w", err)
 		}
 
 		// Block exists on a fork, stop downloading it.
@@ -1275,15 +1275,15 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			// We already have these headers. Ask for best headers
 			// despite racing with other peers. We do that to
 			// prevent stalling the download.
-			//bhb, err := s.db.BlockHeaderBest(ctx)
-			//if err != nil {
+			// bhb, err := s.db.BlockHeaderBest(ctx)
+			// if err != nil {
 			//	log.Errorf("block header best %v: %v", p, err)
 			//	return
-			//}
-			//if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
+			// }
+			// if err = s.getHeaders(ctx, p, bhb.Header); err != nil {
 			//	log.Errorf("get headers %v: %v", p, err)
 			//	return
-			//}
+			// }
 			return nil
 		}
 		// Real error, abort header fetch
@@ -1299,7 +1299,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 		// Ask for next batch of headers at canonical tip.
 		if err = s.getHeaders(ctx, p, cbh.BlockHash()); err != nil {
-			return fmt.Errorf("get headers: %v", err)
+			return fmt.Errorf("get headers: %w", err)
 		}
 
 	case tbcd.ITForkExtend:
@@ -1307,12 +1307,12 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 		// Ask for more block headers at the fork tip.
 		if err = s.getHeaders(ctx, p, lbh.BlockHash()); err != nil {
-			return fmt.Errorf("get headers fork: %v", err)
+			return fmt.Errorf("get headers fork: %w", err)
 		}
 
 		// Also ask for more block headers at canonical tip
 		if err = s.getHeaders(ctx, p, cbh.BlockHash()); err != nil {
-			return fmt.Errorf("get headers canonical: %v", err)
+			return fmt.Errorf("get headers canonical: %w", err)
 		}
 
 	case tbcd.ITChainFork:
@@ -1326,12 +1326,12 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 		// Ask for more block headers at the fork tip.
 		if err = s.getHeaders(ctx, p, lbh.BlockHash()); err != nil {
-			return fmt.Errorf("get headers fork: %v", err)
+			return fmt.Errorf("get headers fork: %w", err)
 		}
 
 		// Also ask for more block headers at canonical tip
 		if err = s.getHeaders(ctx, p, cbh.BlockHash()); err != nil {
-			return fmt.Errorf("get headers canonical: %v", err)
+			return fmt.Errorf("get headers canonical: %w", err)
 		}
 
 	default:

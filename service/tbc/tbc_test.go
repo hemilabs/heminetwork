@@ -726,7 +726,7 @@ func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer test
 	if err != nil {
 		return "", err
 	}
-	t.Logf(buf.String())
+	t.Log(buf.String())
 
 	if exitCode != 0 {
 		return "", fmt.Errorf("error code received: %d", exitCode)
@@ -938,7 +938,7 @@ func cliBlockHeaderToWire(t *testing.T, header *BtcCliBlockHeader) *wire.BlockHe
 // the raw byte representation of the block header.
 func cliBlockHeaderToRaw(t *testing.T, cliBlockHeader *BtcCliBlockHeader) []api.ByteSlice {
 	blockHeader := cliBlockHeaderToWire(t, cliBlockHeader)
-	t.Logf(spew.Sdump(blockHeader))
+	t.Log(spew.Sdump(blockHeader))
 
 	bytes, err := header2Slice(blockHeader)
 	if err != nil {
@@ -952,7 +952,7 @@ func cliBlockHeaderToRaw(t *testing.T, cliBlockHeader *BtcCliBlockHeader) []api.
 // the [tbcapi.BlockHeader] representation of the block header.
 func cliBlockHeaderToTBC(t *testing.T, btcCliBlockHeader *BtcCliBlockHeader) []*tbcapi.BlockHeader {
 	blockHeader := cliBlockHeaderToWire(t, btcCliBlockHeader)
-	t.Logf(spew.Sdump(blockHeader))
+	t.Log(spew.Sdump(blockHeader))
 	return wireBlockHeadersToTBC([]*wire.BlockHeader{blockHeader})
 }
 

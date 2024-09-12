@@ -197,7 +197,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 				txIn.PreviousOutPoint.Index)
 			pkScript, value, err := s.scriptValue(ctx, op)
 			if err != nil {
-				return fmt.Errorf("script value: %v", err)
+				return fmt.Errorf("script value: %w", err)
 			}
 			// XXX this should not happen. We are keeping it for
 			// now to ensure it indeed does not happen. Remove in a
@@ -627,7 +627,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	}
 	direction, err := s.UtxoIndexIsLinear(ctx, endHash)
 	if err != nil {
-		return fmt.Errorf("UtxoIndexIsLinear: %w", err)
+		return fmt.Errorf("utxo index is linear: %w", err)
 	}
 	switch direction {
 	case 1:
@@ -1010,7 +1010,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	}
 	direction, err := s.TxIndexIsLinear(ctx, endHash)
 	if err != nil {
-		return fmt.Errorf("TxIndexIsLinear: %w", err)
+		return fmt.Errorf("tx index is linear: %w", err)
 	}
 	switch direction {
 	case 1:
@@ -1117,13 +1117,13 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
 		}
-		//bhs, err := s.db.BlockHeadersByHeight(ctx, bh.Height)
-		//if err != nil {
+		// bhs, err := s.db.BlockHeadersByHeight(ctx, bh.Height)
+		// if err != nil {
 		//	return -1, fmt.Errorf("block header by height: %w", err)
-		//}
-		//if len(bhs) != 1 {
+		// }
+		// if len(bhs) != 1 {
 		//	panic(fmt.Sprintf("%v", spew.Sdump(bhs)))
-		//}
+		// }
 		h = bh.ParentHash()
 		if h.IsEqual(e) {
 			return direction, nil
