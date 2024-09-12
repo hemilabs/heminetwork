@@ -83,7 +83,7 @@ func (m *Miner) updateFee(ctx context.Context, fee RecommendedFeeType, multiplie
 
 	// Apply multiplier.
 	recommendedFee := fees.pick(fee)
-	multipliedFee := uint64(math.Ceil(float64(recommendedFee) * multiplier))
+	multipliedFee := math.Ceil(float64(recommendedFee) * multiplier)
 
 	// Bounds check before converting to uint32.
 	switch {
@@ -94,7 +94,7 @@ func (m *Miner) updateFee(ctx context.Context, fee RecommendedFeeType, multiplie
 	}
 
 	log.Debugf("Updating PoP miner fee (%d * %f): %d sats/vB",
-		recommendedFee, multiplier, multipliedFee)
+		recommendedFee, multiplier, uint64(multipliedFee))
 
 	// Update fee used by the miner.
 	m.SetFee(uint(multipliedFee))
