@@ -59,6 +59,9 @@ export const startPoPMiner: typeof types.startPoPMiner = (args) => {
     network: args.network,
     privateKey: args.privateKey,
     logLevel: args.logLevel ?? '',
+    automaticFees: args.automaticFees,
+    automaticFeeMultiplier: args.automaticFeeMultiplier,
+    automaticFeeRefreshSeconds: args.automaticFeeRefreshSeconds,
     staticFee: args.staticFee,
   });
 };
