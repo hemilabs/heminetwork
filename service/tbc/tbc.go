@@ -1268,7 +1268,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	it, cbh, lbh, n, err := s.db.BlockHeadersInsert(ctx, msg)
 	if err != nil {
 		// This ends the race between peers during IBD.
-		if errors.Is(database.ErrDuplicate, err) {
+		if errors.Is(err, database.ErrDuplicate) {
 			// XXX for now don't do parallel blockheader downloads.
 			// Seems to really slow the process down.
 			//
