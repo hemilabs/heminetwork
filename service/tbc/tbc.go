@@ -1144,7 +1144,7 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 			if err := p.close(); err != nil {
 				log.Errorf("block expired: %v %v", p, err)
 			}
-			log.Errorf("block expired: %v %w", p, err)
+			log.Errorf("block expired: %v %v", p, err)
 		}
 	}
 }
