@@ -46,7 +46,7 @@ func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
 	}
 	err := processTxs(b.Hash(), b.Transactions(), blk.txs)
 	if err != nil {
-		panic(fmt.Errorf("processTxs: %v", err))
+		panic(fmt.Errorf("processTxs: %w", err))
 	}
 
 	return blk
@@ -416,7 +416,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 		default:
 		}
 
-		msg, err := p.read()
+		msg, _, err := p.read(5 * time.Second)
 		if err != nil {
 			if errors.Is(err, wire.ErrUnknownMessage) {
 				// ignore unknown
@@ -1224,6 +1224,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_ = si
 	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
 	si, err = s.SpentOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
 	if err != nil {

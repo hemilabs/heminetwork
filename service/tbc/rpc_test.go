@@ -5,14 +5,17 @@
 package tbc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
@@ -25,6 +28,41 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
 )
+
+func bytes2Tx(b []byte) (*wire.MsgTx, error) {
+	var w wire.MsgTx
+	if err := w.Deserialize(bytes.NewReader(b)); err != nil {
+		return nil, err
+	}
+
+	return &w, nil
+}
+
+func header2Slice(wbh *wire.BlockHeader) ([]byte, error) {
+	var b bytes.Buffer
+	err := wbh.Serialize(&b)
+	if err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+func header2Array(wbh *wire.BlockHeader) ([80]byte, error) {
+	sb, err := header2Slice(wbh)
+	if err != nil {
+		return [80]byte{}, err
+	}
+	return [80]byte(sb), nil
+}
+
+func slice2Header(header []byte) (*wire.BlockHeader, error) {
+	var bh wire.BlockHeader
+	err := bh.Deserialize(bytes.NewReader(header[:]))
+	if err != nil {
+		return nil, fmt.Errorf("deserialize block header: %w", err)
+	}
+	return &bh, nil
+}
 
 func TestBlockHeadersByHeightRaw(t *testing.T) {
 	skipIfNoDocker(t)
@@ -83,7 +121,7 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf(spew.Sdump(bh))
+	t.Log(spew.Sdump(bh))
 
 	if response.Error != nil {
 		t.Errorf("got unwanted error: %v", response.Error)
@@ -273,7 +311,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf(spew.Sdump(bh))
+	t.Log(spew.Sdump(bh))
 
 	if response.Error != nil {
 		t.Errorf("got unwanted error: %v", response.Error)
@@ -1471,11 +1509,7 @@ func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
 
 	hash := bh.BlockHash()
 
-	if err := tbcServer.TxIndexer(ctx, &hash); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := tbcServer.UtxoIndexer(ctx, &hash); err != nil {
+	if err := tbcServer.SyncIndexersToHash(ctx, &hash); err != nil {
 		t.Fatal(err)
 	}
 }

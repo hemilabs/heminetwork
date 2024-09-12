@@ -9,22 +9,36 @@ import (
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/juju/loggo"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	logLevel = "INFO"
+	log      = loggo.GetLogger("ttl")
+
+	ErrNotFound = errors.New("not found")
+)
+
+func init() {
+	loggo.ConfigureLoggers(logLevel)
+}
 
 // value wraps a value stored in the TTL map and includes additional metadata.
 type value struct {
 	value any
 
-	expired func(any, any) // called when TTL expires
-	remove  func(any, any) // called when removed from map
+	expired func(context.Context, any, any) // called when TTL expires
+	remove  func(context.Context, any, any) // called when removed from map
 
 	timeoutExpired bool // set when this value has expired
 
 	// Value context
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// Context used during callbacks.
+	callbackContext context.Context
 }
 
 // TTL is an opaque structure that stores key/values in an internal map. These
@@ -66,15 +80,15 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		// expired
+		v.timeoutExpired = true
 		if v.expired != nil {
-			v.timeoutExpired = true
-			go v.expired(key, v.value)
+			go v.expired(v.callbackContext, key, v.value)
 		}
 
 	case errors.Is(err, context.Canceled):
 		// This is the caller calling cancel
 		if v.remove != nil {
-			go v.remove(key, v.value)
+			go v.remove(v.callbackContext, key, v.value)
 		}
 	}
 
@@ -87,14 +101,15 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 // designates the duration of the validity of this key value pair. The expired
 // function is called when the duration expires and the remove callback is
 // called when the key is Canceled.
-func (tm *TTL) Put(pctx context.Context, ttl time.Duration, key any, val any, expired func(any, any), remove func(any, any)) {
+func (tm *TTL) Put(pctx context.Context, ttl time.Duration, key any, val any, expired func(context.Context, any, any), remove func(context.Context, any, any)) {
 	tm.mtx.Lock()
 	defer tm.mtx.Unlock()
 
 	v := &value{
-		value:   val,
-		expired: expired,
-		remove:  remove,
+		value:           val,
+		expired:         expired,
+		remove:          remove,
+		callbackContext: pctx,
 	}
 	v.ctx, v.cancel = context.WithTimeout(pctx, ttl)
 	tm.m[key] = v

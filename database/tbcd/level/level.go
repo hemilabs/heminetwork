@@ -17,6 +17,7 @@ import (
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/juju/loggo"
@@ -74,6 +75,35 @@ type ldb struct {
 }
 
 var _ tbcd.Database = (*ldb)(nil)
+
+func h2b(wbh *wire.BlockHeader) [80]byte {
+	var b bytes.Buffer
+	err := wbh.Serialize(&b)
+	if err != nil {
+		panic(err)
+	}
+	var bh [80]byte
+	copy(bh[:], b.Bytes())
+	return bh
+}
+
+func b2h(header []byte) (*wire.BlockHeader, error) {
+	var bh wire.BlockHeader
+	if err := bh.Deserialize(bytes.NewReader(header)); err != nil {
+		return nil, fmt.Errorf("deserialize block header: %w", err)
+	}
+	return &bh, nil
+}
+
+// headerHash return the block hash from a raw block header.
+func headerHash(header []byte) *chainhash.Hash {
+	h, err := b2h(header)
+	if err != nil {
+		panic(err)
+	}
+	hash := h.BlockHash()
+	return &hash
+}
 
 type Config struct {
 	Home             string // home directory
@@ -300,7 +330,7 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	bh := &tbcd.BlockHeader{
-		Hash:   tbcd.HeaderHash(ebh[8:88]),
+		Hash:   headerHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 	}
 	// copy the values to prevent slicing reentrancy problems.
@@ -309,15 +339,9 @@ func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	return bh
 }
 
-func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
+func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader) error {
 	log.Tracef("BlockHeaderGenesisInsert")
 	defer log.Tracef("BlockHeaderGenesisInsert exit")
-
-	wbh, err := tbcd.B2H(bh[:])
-	if err != nil {
-		return fmt.Errorf("block header insert b2h: %w", err)
-	}
-	bhash := wbh.BlockHash()
 
 	// block headers
 	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
@@ -327,6 +351,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 	defer bhsDiscard()
 
 	// Make sure we are not inserting the same blocks
+	bhash := wbh.BlockHash()
 	has, err := bhsTx.Has(bhash[:], nil)
 	if err != nil {
 		return fmt.Errorf("block header insert has: %w", err)
@@ -358,7 +383,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 	hhBatch.Put(hhKey, []byte{})
 	cdiff := big.NewInt(0)
 	cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
-	ebh := encodeBlockHeader(0, bh, cdiff)
+	ebh := encodeBlockHeader(0, h2b(wbh), cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
@@ -402,7 +427,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, bh [80]byte) error {
 // and always returns the canonical and last inserted blockheader, which may be
 // the same.
 // This call uses the database to prevent reentrancy.
-func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
@@ -411,49 +436,54 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// headers on what the network may be doing. Not sure how to handle
 	// that right now but leaving a note.
 
-	if len(bhs) == 0 {
-		return tbcd.ITInvalid, nil, nil,
-			errors.New("block headers insert: no block headers to insert")
+	if len(bhs.Headers) == 0 {
+		return tbcd.ITInvalid, nil, nil, 0,
+			errors.New("block headers insert: invalid")
 	}
 
 	// Ensure we can connect these blockheaders prior to starting database
 	// transaction. This also obtains the starting cumulative difficulty
 	// and  height.
-	wbh, err := tbcd.B2H(bhs[0][:])
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
-			fmt.Errorf("block headers insert b2h: %w", err)
-	}
+	wbh := bhs.Headers[0]
 	pbh, err := l.BlockHeaderByHash(ctx, &wbh.PrevBlock)
 	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// block headers
 	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
 	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers open transaction: %w", err)
 	}
 	defer bhsDiscard()
 
-	// Make sure we are not inserting the same blocks
-	bhash := wbh.BlockHash()
-	has, err := bhsTx.Has(bhash[:], nil)
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
-			fmt.Errorf("block headers insert has: %w", err)
+	// Iterate over the block headers and skip block headers we already
+	// have in the database. Rely on caching to make this not suck terribly.
+	var x int
+	for _, rbh := range bhs.Headers {
+		bhash := rbh.BlockHash()
+		has, err := bhsTx.Has(bhash[:], nil)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("block headers insert has: %w", err)
+		}
+		if !has {
+			break
+		}
+		x++
 	}
-	if has {
-		return tbcd.ITInvalid, nil, nil,
+	bhs.Headers = bhs.Headers[x:]
+	if len(bhs.Headers) == 0 {
+		return tbcd.ITInvalid, nil, nil, 0,
 			database.DuplicateError("block headers insert duplicate")
 	}
 
 	// blocks missing
 	bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
 	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing open transaction: %w", err)
 	}
 	defer bmDiscard()
@@ -461,20 +491,19 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 	// height hash
 	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
 	if err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash open transaction: %w", err)
 	}
 	defer hhDiscard()
 
 	// retrieve best/canonical block header
-	var lastRecord []byte
 	bbh, err := bhsTx.Get([]byte(bhsCanonicalTipKey), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			return tbcd.ITInvalid, nil, nil,
+			return tbcd.ITInvalid, nil, nil, 0,
 				database.NotFoundError("best block header not found")
 		}
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("best block header: %w", err)
 	}
 	bestBH := decodeBlockHeader(bbh)
@@ -500,16 +529,15 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 	cdiff := &pbh.Difficulty
 	height := pbh.Height
-	for k, bh := range bhs {
+	var (
+		bhash           chainhash.Hash
+		lastBlockHeader [80]byte
+		lastRecord      []byte
+	)
+	for _, bh := range bhs.Headers {
 		// The first element is skipped, as it is pre-decoded.
-		if k != 0 {
-			wbh, err = tbcd.B2H(bh[:])
-			if err != nil {
-				return tbcd.ITInvalid, nil, nil,
-					fmt.Errorf("block headers insert b2h: %w", err)
-			}
-			bhash = wbh.BlockHash()
-		}
+		wbh = bh
+		bhash = wbh.BlockHash()
 
 		// pre set values because we start with previous value
 		height++
@@ -531,7 +559,8 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 		// Encode block header as [hash][height,header,cdiff] or,
 		// [32][8+80+32] bytes
-		ebh := encodeBlockHeader(height, bh, cdiff)
+		lastBlockHeader = h2b(bh)
+		ebh := encodeBlockHeader(height, lastBlockHeader, cdiff)
 		bhsBatch.Put(bhash[:], ebh[:])
 		lastRecord = ebh[:]
 	}
@@ -540,8 +569,8 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 		Hash:       &bhash,
 		Height:     height,
 		Difficulty: *cdiff,
+		Header:     lastBlockHeader,
 	}
-	copy(cbh.Header[:], bhs[len(bhs)-1][:])
 	lbh := cbh
 
 	// XXX: Reason about needing to check fork flag. For now keep it here to
@@ -579,40 +608,41 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs [][80]byte) (tbcd.Inse
 
 	// Write height hash batch
 	if err = hhTx.Write(hhBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash batch: %w", err)
 	}
 
 	// Write missing blocks batch
 	if err = bmTx.Write(bmBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing batch: %w", err)
 	}
 
 	// Write block headers batch
 	if err = bhsTx.Write(bhsBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// height hash commit
 	if err = hhCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash commit: %w", err)
 	}
 
 	// blocks missing commit
 	if err = bmCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil,
+		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing commit: %w", err)
 	}
 
 	// block headers commit
 	if err = bhsCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil, fmt.Errorf("block headers commit: %w", err)
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("block headers commit: %w", err)
 	}
 
-	return it, cbh, lbh, nil
+	return it, cbh, lbh, len(bhs.Headers), nil
 }
 
 type cacheEntry struct {
@@ -692,6 +722,21 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	return int64(bh.Height), nil
 }
 
+func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash *chainhash.Hash) error {
+	log.Tracef("BlockMissingDelete")
+	defer log.Tracef("BlockMissingDelete exit")
+
+	key := heightHashToKey(uint64(height), hash[:])
+	bmDB := l.pool[level.BlocksMissingDB]
+	if err := bmDB.Delete(key, nil); err != nil {
+		// Ignore not found, it was deleted prior to this call.
+		if !errors.Is(err, leveldb.ErrNotFound) {
+			return fmt.Errorf("block missing delete: %w", err)
+		}
+	}
+	return nil
+}
+
 func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
@@ -713,7 +758,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	}
 	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
-		return nil, fmt.Errorf("block decode: %w", err)
+		panic(fmt.Errorf("block decode data corruption: %w", err))
 	}
 	if l.cfg.BlockCache > 0 {
 		l.blockCache.Add(string(hash[:]), b)

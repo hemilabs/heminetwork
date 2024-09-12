@@ -5,6 +5,7 @@
 package tbc
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -26,6 +27,15 @@ import (
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 )
+
+func tx2Bytes(tx *wire.MsgTx) ([]byte, error) {
+	var b bytes.Buffer
+	if err := tx.Serialize(&b); err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
+}
 
 type tbcWs struct {
 	wg             sync.WaitGroup

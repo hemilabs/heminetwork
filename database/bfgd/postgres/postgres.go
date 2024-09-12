@@ -1101,7 +1101,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 
 	rows, err := p.db.QueryContext(ctx, querySql)
 	if err != nil {
-		return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %v", err)
+		return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %w", err)
 	}
 
 	defer rows.Close()
@@ -1131,7 +1131,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Contex
 	`
 	_, err := p.db.ExecContext(ctx, querySql, txId)
 	if err != nil {
-		return fmt.Errorf("could not confirm broadcast: %v", err)
+		return fmt.Errorf("could not confirm broadcast: %w", err)
 	}
 
 	return nil
@@ -1147,7 +1147,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestSetLastError(ctx context.Context, t
 	`
 	_, err := p.db.ExecContext(ctx, querySql, txId, lastErr)
 	if err != nil {
-		return fmt.Errorf("could not confirm broadcast: %v", err)
+		return fmt.Errorf("could not confirm broadcast: %w", err)
 	}
 
 	return nil
@@ -1163,7 +1163,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestTrim(ctx context.Context) error {
 	`
 	_, err := p.db.ExecContext(ctx, querySql)
 	if err != nil {
-		return fmt.Errorf("could not trim broadcast: %v", err)
+		return fmt.Errorf("could not trim broadcast: %w", err)
 	}
 
 	return nil
