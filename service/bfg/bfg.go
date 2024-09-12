@@ -387,7 +387,7 @@ func (s *Server) handleOneBroadcastRequest(ctx context.Context, highPriority boo
 
 	_, err = s.btcClient.Broadcast(ctx, serializedTx)
 	if err != nil {
-		log.Errorf("broadcast tx: %s", err)
+		log.Errorf("broadcast tx %s: %s", mb.TxID(), err)
 		err = s.db.BtcTransactionBroadcastRequestSetLastError(ctx, mb.TxID(), err.Error())
 		if err != nil {
 			log.Errorf("could not delete %v", err)
