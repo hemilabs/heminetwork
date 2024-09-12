@@ -62,10 +62,13 @@
       <input id="StartPopMinerPrivateKeyInput" type="password">
       <label for="StartPopMinerPrivateKeyInput">bitcoin private key (must be funded)</label>
       <br>
-      <input id="StartPopMinerAutomaticFeesInput" value="economy">
+      <input id="StartPopMinerAutomaticFeesInput" value="fastest">
       <label for="StartPopMinerAutomaticFeesInput">
           Whether to do automatic fees (set to 'false' to disable), and which type of recommended fee to use.
       </label>
+      <br>
+      <input id="StartPopMinerAutomaticFeeMultiplierInput" value="1.1">
+      <label for="StartPopMinerAutomaticFeeMultiplierInput">Fee multiplier</label>
       <br>
       <input id="StartPopMinerAutomaticFeeRefreshInput" value="300">
       <label for="StartPopMinerAutomaticFeeRefreshInput">Interval to refresh recommended fees from mempool.space API</label>

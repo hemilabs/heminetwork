@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"time"
@@ -46,7 +47,7 @@ func (r recommendedFees) pick(f RecommendedFeeType) uint {
 
 // automaticFees runs a loop to refresh the fee used by the PoP Miner using
 // the recommended fee of the specified type from the mempool.space REST API.
-func (m *Miner) automaticFees(fee RecommendedFeeType, refresh time.Duration) {
+func (m *Miner) automaticFees(fee RecommendedFeeType, multiplier float64, refresh time.Duration) {
 	log.Tracef("automaticFees")
 	defer log.Tracef("automaticFees exit")
 	defer m.wg.Done()
@@ -57,7 +58,7 @@ func (m *Miner) automaticFees(fee RecommendedFeeType, refresh time.Duration) {
 	}
 
 	for {
-		m.updateFee(m.ctx, fee)
+		m.updateFee(m.ctx, fee, multiplier)
 
 		select {
 		case <-m.ctx.Done():
@@ -69,7 +70,7 @@ func (m *Miner) automaticFees(fee RecommendedFeeType, refresh time.Duration) {
 
 // updateFee requests the recommended fees from mempool.space and updates the
 // fee being used by the PoP Miner.
-func (m *Miner) updateFee(ctx context.Context, fee RecommendedFeeType) {
+func (m *Miner) updateFee(ctx context.Context, fee RecommendedFeeType, multiplier float64) {
 	ctx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
 	defer cancel()
 
@@ -80,8 +81,23 @@ func (m *Miner) updateFee(ctx context.Context, fee RecommendedFeeType) {
 		return
 	}
 
+	// Apply multiplier.
+	recommendedFee := fees.pick(fee)
+	multipliedFee := math.Ceil(float64(recommendedFee) * multiplier)
+
+	// Bounds check before converting to uint32.
+	switch {
+	case multipliedFee < 1:
+		multipliedFee = 1
+	case multipliedFee > 1<<32-1:
+		multipliedFee = 1<<32 - 1
+	}
+
+	log.Debugf("Updating PoP miner fee (%d * %f): %d sats/vB",
+		recommendedFee, multiplier, uint64(multipliedFee))
+
 	// Update fee used by the miner.
-	m.SetFee(fees.pick(fee))
+	m.SetFee(uint(multipliedFee))
 }
 
 // getRecommendedFees requests the recommended fees from the mempool.space

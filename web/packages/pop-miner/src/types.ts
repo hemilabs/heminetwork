@@ -373,9 +373,17 @@ export type MinerStartArgs = {
    * Whether to do automatic fee estimation using the mempool.space API.
    * Defaults to true. If disabled, then only the staticFee will be used.
    *
-   * When the value is true, the 'economy' recommended fee type will be used.
+   * When the value is true, the 'fastest' recommended fee type will be used.
    */
   automaticFees?: boolean | RecommendedFeeType;
+
+  /**
+   * Controls the fee used when automaticFees is enabled. This allows the output
+   * fee to be increased or decreased by a percentage. For example, if the
+   * recommended fee is 500 and the multiplier is 1.1, the output will be 550.
+   * Defaults to 1.1 (+10%).
+   */
+  automaticFeeMultiplier?: number;
 
   /**
    * The duration between refreshing recommended fee data from the
