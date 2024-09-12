@@ -602,7 +602,7 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 		default:
 		}
 
-		delta := d - time.Now().Sub(start)
+		delta := d - time.Since(start)
 		if delta <= 0 {
 			return nil, errors.New("poll p2p: timeout")
 		}
