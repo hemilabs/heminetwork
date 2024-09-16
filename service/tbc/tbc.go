@@ -593,6 +593,10 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
+	// This function is pretty flawed. We should debate killing it
+	// altogether and see if we can replace this with other functionality
+	// elsewhere.
+
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -631,11 +635,20 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 		case *wire.MsgPong:
 			continue
 		case *wire.MsgNotFound:
-			log.Infof("why am i seeing this %v: %v", p, spew.Sdump(m))
+			// XXX sometimes, with emphasis on sometimes when we
+			// request a block we go through this code. This does
+			// not seem reliable at all and we probably should
+			// simply continue to ignore it and detect missing
+			// blocks using block headers.
+			log.Debugf("not found %v: %v", p, spew.Sdump(m))
 		case *wire.MsgInv:
 			if len(m.InvList) > 0 {
 				if m.InvList[0].Type != wire.InvTypeTx {
-					log.Infof(spew.Sdump(msg))
+					// XXX block notifications go through
+					// here. We may not need to react to
+					// that and rely solely on block
+					// headers.
+					log.Debugf(spew.Sdump(msg))
 				}
 				continue
 			}
@@ -1205,7 +1218,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		go func() {
 			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != nil {
-				// XXX this a panic?
+				// XXX this is probably not a panic.
 				panic(fmt.Errorf("sync blocks: %w", err))
 			}
 		}()
@@ -1477,17 +1490,17 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 			// XXX add to mempool
 			// log.Infof("inventory tx: %v", v.Hash)
 		case wire.InvTypeBlock:
-			log.Infof("inventory block: %v", v.Hash)
+			log.Debugf("inventory block: %v", v.Hash)
 		case wire.InvTypeFilteredBlock:
-			log.Infof("inventory filtered block: %v", v.Hash)
+			log.Debugf("inventory filtered block: %v", v.Hash)
 		case wire.InvTypeWitnessBlock:
-			log.Infof("inventory witness block: %v", v.Hash)
+			log.Debugf("inventory witness block: %v", v.Hash)
 		case wire.InvTypeWitnessTx:
-			log.Infof("inventory witness tx: %v", v.Hash)
+			log.Debugf("inventory witness tx: %v", v.Hash)
 		case wire.InvTypeFilteredWitnessBlock:
-			log.Infof("inventory filtered witness block: %v", v.Hash)
+			log.Debugf("inventory filtered witness block: %v", v.Hash)
 		default:
-			log.Infof("inventory unknown: %v", spew.Sdump(v.Hash))
+			log.Errorf("inventory unknown: %v", spew.Sdump(v.Hash))
 		}
 	}
 
@@ -1818,7 +1831,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	si.Tx = *txHH
 
 	if utxoHH.Hash.IsEqual(bhb.Hash) && txHH.Hash.IsEqual(bhb.Hash) &&
-		!s.blksMissing(ctx) {
+		!s.indexing && !s.blksMissing(ctx) {
 		si.Synced = true
 	}
 	return
