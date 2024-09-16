@@ -48,6 +48,11 @@ func newClientConn(conn net.Conn, metrics *metrics, onClose func(c *clientConn))
 		metrics: metrics,
 	}
 
+	if metrics != nil {
+		metrics.connsOpened.Inc()
+		metrics.connsOpen.Inc()
+	}
+
 	go c.pinger()
 	return c
 }
@@ -59,7 +64,10 @@ func (c *clientConn) call(ctx context.Context, method string, params, result any
 
 	c.mx.Lock()
 	defer c.mx.Unlock()
-	c.requestID++
+
+	if c.conn == nil {
+		return net.ErrClosed
+	}
 
 	if c.metrics != nil {
 		start := time.Now()
@@ -73,6 +81,7 @@ func (c *clientConn) call(ctx context.Context, method string, params, result any
 		}).Inc()
 	}
 
+	c.requestID++
 	req, err := NewJSONRPCRequest(c.requestID, method, params)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
@@ -201,6 +210,11 @@ func (c *clientConn) Close() error {
 	c.mx.Lock()
 	defer c.mx.Unlock()
 
+	if c.conn == nil {
+		// Already closed.
+		return nil
+	}
+
 	if c.onClose != nil {
 		c.onClose(c)
 	}
@@ -208,6 +222,12 @@ func (c *clientConn) Close() error {
 	defer c.cancel()
 	if err := c.conn.Close(); err != nil {
 		return err
+	}
+	c.conn = nil
+
+	if c.metrics != nil {
+		c.metrics.connsClosed.Inc()
+		c.metrics.connsOpen.Dec()
 	}
 
 	return nil
