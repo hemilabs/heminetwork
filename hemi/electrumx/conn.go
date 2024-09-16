@@ -212,7 +212,7 @@ func (c *clientConn) Close() error {
 
 	if c.conn == nil {
 		// Already closed.
-		return nil
+		return net.ErrClosed
 	}
 
 	if c.onClose != nil {
