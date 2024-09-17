@@ -130,7 +130,8 @@ type Server struct {
 	blocksDuplicate int
 
 	// mempool
-	mempool map[chainhash.Hash][]byte // when nil, tx has not been downloaded
+	mempool        map[chainhash.Hash][]byte // when nil, tx has not been downloaded
+	mempoolEnabled bool                      // true mean mempool is enabled
 
 	// bitcoin network
 	wireNet     wire.BitcoinNet
@@ -177,6 +178,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
 		mempool:        make(map[chainhash.Hash][]byte, 10000),
+		mempoolEnabled: false, // disable for now
 		blocks:         blocks,
 		peers:          make(map[string]*peer, cfg.PeersWanted),
 		pm:             newPeerManager(),
@@ -1552,6 +1554,9 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 		case wire.InvTypeTx:
 			// add to mempool
 			log.Tracef("inventory tx: %v", v.Hash)
+			if !s.mempoolEnabled {
+				return nil
+			}
 			s.mtx.Lock()
 			if _, ok := s.mempool[v.Hash]; !ok {
 				s.mempool[v.Hash] = nil
