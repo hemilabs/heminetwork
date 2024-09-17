@@ -129,6 +129,9 @@ type Server struct {
 	blocksInserted  map[string]struct{}
 	blocksDuplicate int
 
+	// mempool
+	mempool map[chainhash.Hash][]byte // when nil, tx has not been downloaded
+
 	// bitcoin network
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
@@ -173,6 +176,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
+		mempool:        make(map[chainhash.Hash][]byte, 10000),
 		blocks:         blocks,
 		peers:          make(map[string]*peer, cfg.PeersWanted),
 		pm:             newPeerManager(),
@@ -561,6 +565,11 @@ func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, r
 			log.Errorf("handle generic block: %v", err)
 		}
 
+	case *wire.MsgTx:
+		if err := s.handleTx(ctx, p, m, raw); err != nil {
+			log.Errorf("handle generic transaction: %v", err)
+		}
+
 	case *wire.MsgInv:
 		if err := s.handleInv(ctx, p, m, raw); err != nil {
 			log.Errorf("handle generic inv: %v", err)
@@ -919,6 +928,13 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}
 
+	// Start building the mempool.
+	err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
+	if err != nil {
+		log.Errorf("peer mempool: %v", err)
+		return
+	}
+
 	// XXX wave hands here for now but we should get 3 peers to agree that
 	// this is a fork indeed.
 
@@ -1095,7 +1111,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 	if err != nil {
 		// peer dead, make sure it is reaped
 		log.Errorf("download block write: %v %v", p, err)
-		p.close()
+		p.close() // XXX this should not happen here
 	}
 	return err
 }
@@ -1160,6 +1176,51 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 			log.Errorf("block expired: %v %v", p, err)
 		}
 	}
+}
+
+func (s *Server) downloadMissingTx(ctx context.Context, p *peer) error {
+	log.Tracef("downloadMissingTx")
+	defer log.Tracef("downloadMissingTx exit")
+
+	// XXX rub some vroom vroom on this
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	getData := wire.NewMsgGetData()
+	for k, v := range s.mempool {
+		if v != nil {
+			continue
+		}
+		if err := getData.AddInvVect(&wire.InvVect{
+			Type: wire.InvTypeTx,
+			Hash: k,
+		}); err != nil {
+			// only happens when asking max inventory
+			break
+		}
+	}
+
+	err := p.write(defaultCmdTimeout, getData)
+	if err != nil {
+		// peer dead, make sure it is reaped
+		log.Errorf("download missing tx write: %v %v", p, err)
+		p.close() // XXX this should not happen here
+	}
+	return err
+}
+
+func (s *Server) handleTx(ctx context.Context, p *peer, msg *wire.MsgTx, raw []byte) error {
+	log.Tracef("handleTx")
+	defer log.Tracef("handleTx exit")
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if tx := s.mempool[msg.TxHash()]; tx == nil {
+		s.mempool[msg.TxHash()] = raw
+	}
+
+	return nil
 }
 
 // randomPeer returns a random peer from the map. Must be called with lock
@@ -1404,6 +1465,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
 	var (
 		printStats      bool
+		mempool         int
 		blocksSize      uint64
 		blocksInserted  int
 		blocksDuplicate int // keep track of this until have less of them
@@ -1434,6 +1496,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 	if now.After(s.printTime) {
 		printStats = true
 
+		mempool = len(s.mempool)
 		blocksSize = s.blocksSize
 		blocksInserted = len(s.blocksInserted)
 		blocksDuplicate = s.blocksDuplicate
@@ -1467,9 +1530,9 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 		log.Infof("Inserted %v blocks (%v, %v duplicates) in the last %v",
 			blocksInserted, humanize.Bytes(blocksSize), blocksDuplicate, delta)
 		log.Infof("Pending blocks %v/%v active peers %v connected peers %v "+
-			"good peers %v bad peers %v",
+			"good peers %v bad peers %v mempool %v",
 			blocksPending, defaultPendingBlocks, activePeers, connectedPeers,
-			goodPeers, badPeers)
+			goodPeers, badPeers, mempool)
 	}
 
 	// kick cache
@@ -1487,16 +1550,23 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 		case wire.InvTypeError:
 			log.Errorf("inventory error: %v", v.Hash)
 		case wire.InvTypeTx:
-			// XXX add to mempool
-			// log.Infof("inventory tx: %v", v.Hash)
+			// add to mempool
+			log.Tracef("inventory tx: %v", v.Hash)
+			s.mtx.Lock()
+			if _, ok := s.mempool[v.Hash]; !ok {
+				s.mempool[v.Hash] = nil
+			}
+			s.mtx.Unlock()
+			go s.downloadMissingTx(ctx, p)
+
 		case wire.InvTypeBlock:
 			log.Debugf("inventory block: %v", v.Hash)
 		case wire.InvTypeFilteredBlock:
 			log.Debugf("inventory filtered block: %v", v.Hash)
 		case wire.InvTypeWitnessBlock:
-			log.Debugf("inventory witness block: %v", v.Hash)
+			log.Infof("inventory witness block: %v", v.Hash)
 		case wire.InvTypeWitnessTx:
-			log.Debugf("inventory witness tx: %v", v.Hash)
+			log.Infof("inventory witness tx: %v", v.Hash)
 		case wire.InvTypeFilteredWitnessBlock:
 			log.Debugf("inventory filtered witness block: %v", v.Hash)
 		default:
