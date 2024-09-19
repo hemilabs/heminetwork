@@ -69,10 +69,6 @@ func (p *connPool) newConn() (*clientConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.metrics != nil {
-		p.metrics.connsOpened.Inc()
-		p.metrics.connsOpen.Inc()
-	}
 	return newClientConn(c, p.metrics, p.onClose), nil
 }
 
@@ -91,12 +87,8 @@ func (p *connPool) onClose(conn *clientConn) {
 	removed := len(p.pool) != l
 	p.poolMx.Unlock()
 
-	if p.metrics != nil {
-		if removed {
-			p.metrics.connsIdle.Dec()
-		}
-		p.metrics.connsClosed.Inc()
-		p.metrics.connsOpen.Dec()
+	if p.metrics != nil && removed {
+		p.metrics.connsIdle.Dec()
 	}
 }
 
