@@ -54,8 +54,8 @@ var (
 	DefaultPrivateListen    = "localhost:8080"
 	DefaultPublicListen     = "localhost:8383"
 	DefaultPrometheusListen = "localhost:2112"
-	DefaultPrivateURL       = "ws://" + DefaultPrivateListen + "/" + RouteWebsocketPrivate
-	DefaultPublicURL        = "ws://" + DefaultPublicListen + "/" + RouteWebsocketPublic
+	DefaultPrivateURL       = "ws://" + DefaultPrivateListen + RouteWebsocketPrivate
+	DefaultPublicURL        = "ws://" + DefaultPublicListen + RouteWebsocketPublic
 	DefaultRequestLimit     = 10000 // XXX this is a bandaid
 	DefaultRequestTimeout   = 9     // XXX PNOOMA
 )
