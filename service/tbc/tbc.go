@@ -1245,25 +1245,18 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	}
 
 	if len(bm) == 0 {
-		// We can avoid quiescing by verifying if we are already done
-		// indexing.
-		if si := s.synced(ctx); si.Synced {
-			log.Tracef("already synced at %v", si.BlockHeader)
-			return
-		}
-
 		// Exit if AutoIndex isn't enabled.
 		if !s.cfg.AutoIndex {
 			return
 		}
 
-		bhb, err := s.db.BlockHeaderBest(ctx)
-		if err != nil {
-			log.Errorf("sync blocks best block header: %v", err)
-			return
-		}
 		go func() {
-			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != nil {
+			bhb, err := s.db.BlockHeaderBest(ctx)
+			if err != nil {
+				log.Errorf("sync blocks best block header: %v", err)
+				return
+			}
+			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != ErrAlreadyIndexing {
 				// XXX this is probably not a panic.
 				panic(fmt.Errorf("sync blocks: %w", err))
 			}
@@ -1351,7 +1344,6 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 	// Note that BlockHeadersInsert always returns the canonical
 	// tip blockheader.
-	// XXX deal with mempool here too!!!
 	var height uint64
 	switch it {
 	case tbcd.ITChainExtend:

@@ -27,7 +27,8 @@ var (
 	UtxoIndexHashKey = []byte("utxoindexhash") // last indexed utxo hash
 	TxIndexHashKey   = []byte("txindexhash")   // last indexed tx hash
 
-	ErrNotLinear = errors.New("not linear") // not a valid chain
+	ErrNotLinear       = errors.New("not linear") // not a valid chain
+	ErrAlreadyIndexing = errors.New("already indexing")
 )
 
 type HashHeight struct {
@@ -431,6 +432,13 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
 		}
 
+		// Add tx's back to the mempool.
+		if s.mempoolEnabled {
+			// XXX this may not be the right spot.
+			txHashes, _ := b.MsgBlock().TxHashes()
+			_ = s.mempool.txsRemove(ctx, txHashes)
+		}
+
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
@@ -813,6 +821,15 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
 		}
 
+		// This is probably not needed here since we alreayd dealt with
+		// it via the utxo unindexer but since it will be mostly a
+		// no-op just go ahead.
+		if s.mempoolEnabled {
+			// XXX this may not be the right spot.
+			txHashes, _ := b.MsgBlock().TxHashes()
+			_ = s.mempool.txsRemove(ctx, txHashes)
+		}
+
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
@@ -1087,6 +1104,9 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 	}
 
 	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
+	log.Infof("startBH %v %v", startBH.Height, startBH)
+	log.Infof("endBH %v %v", endBH.Height, endBH)
+	log.Infof("direction %v", direction)
 	log.Debugf("startBH %v %v", startBH.Height, startBH)
 	log.Debugf("endBH %v %v", endBH.Height, endBH)
 	log.Debugf("direction %v", direction)
@@ -1146,7 +1166,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	s.mtx.Lock()
 	if s.indexing {
 		s.mtx.Unlock()
-		return errors.New("already indexing")
+		return ErrAlreadyIndexing
 	}
 	s.indexing = true
 	s.mtx.Unlock()
