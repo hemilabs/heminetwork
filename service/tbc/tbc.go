@@ -130,8 +130,8 @@ type Server struct {
 	blocksDuplicate int
 
 	// mempool
-	mempool        map[chainhash.Hash][]byte // when nil, tx has not been downloaded
-	mempoolEnabled bool                      // true mean mempool is enabled
+	mempool        *mempool
+	mempoolEnabled bool // true mean mempool is enabled
 
 	// bitcoin network
 	wireNet     wire.BitcoinNet
@@ -173,12 +173,16 @@ func NewServer(cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	mp, err := mempoolNew()
+	if err != nil {
+		return nil, err
+	}
 	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
-		mempool:        make(map[chainhash.Hash][]byte, 10000),
-		mempoolEnabled: false, // disable for now
+		mempool:        mp,
+		mempoolEnabled: true, // XXX make config option
 		blocks:         blocks,
 		peers:          make(map[string]*peer, cfg.PeersWanted),
 		pm:             newPeerManager(),
@@ -963,10 +967,10 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		if verbose {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
-		switch m := msg.(type) {
-		case *wire.MsgNotFound:
-			log.Infof("%v: %v", p, spew.Sdump(m))
-		}
+		//switch m := msg.(type) {
+		//case *wire.MsgNotFound:
+		//	log.Infof("%v: %v", p, spew.Sdump(m))
+		//}
 		if s.handleGeneric(ctx, p, msg, raw) {
 			continue
 		}
@@ -1184,25 +1188,11 @@ func (s *Server) downloadMissingTx(ctx context.Context, p *peer) error {
 	log.Tracef("downloadMissingTx")
 	defer log.Tracef("downloadMissingTx exit")
 
-	// XXX rub some vroom vroom on this
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	getData := wire.NewMsgGetData()
-	for k, v := range s.mempool {
-		if v != nil {
-			continue
-		}
-		if err := getData.AddInvVect(&wire.InvVect{
-			Type: wire.InvTypeTx,
-			Hash: k,
-		}); err != nil {
-			// only happens when asking max inventory
-			break
-		}
+	getData, err := s.mempool.getDataConstruct(ctx)
+	if err != nil {
+		return fmt.Errorf("download missing tx: %w", err)
 	}
-
-	err := p.write(defaultCmdTimeout, getData)
+	err = p.write(defaultCmdTimeout, getData)
 	if err != nil {
 		// peer dead, make sure it is reaped
 		log.Errorf("download missing tx write: %v %v", p, err)
@@ -1215,14 +1205,7 @@ func (s *Server) handleTx(ctx context.Context, p *peer, msg *wire.MsgTx, raw []b
 	log.Tracef("handleTx")
 	defer log.Tracef("handleTx exit")
 
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	if tx := s.mempool[msg.TxHash()]; tx == nil {
-		s.mempool[msg.TxHash()] = raw
-	}
-
-	return nil
+	return s.mempool.txsInsert(ctx, msg, raw)
 }
 
 // randomPeer returns a random peer from the map. Must be called with lock
@@ -1467,7 +1450,8 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
 	var (
 		printStats      bool
-		mempool         int
+		mempoolCount    int
+		mempoolSize     int
 		blocksSize      uint64
 		blocksInserted  int
 		blocksDuplicate int // keep track of this until have less of them
@@ -1498,7 +1482,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 	if now.After(s.printTime) {
 		printStats = true
 
-		mempool = len(s.mempool)
+		mempoolCount, mempoolSize = s.mempool.stats(ctx)
 		blocksSize = s.blocksSize
 		blocksInserted = len(s.blocksInserted)
 		blocksDuplicate = s.blocksDuplicate
@@ -1532,9 +1516,10 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 		log.Infof("Inserted %v blocks (%v, %v duplicates) in the last %v",
 			blocksInserted, humanize.Bytes(blocksSize), blocksDuplicate, delta)
 		log.Infof("Pending blocks %v/%v active peers %v connected peers %v "+
-			"good peers %v bad peers %v mempool %v",
+			"good peers %v bad peers %v mempool %v %v",
 			blocksPending, defaultPendingBlocks, activePeers, connectedPeers,
-			goodPeers, badPeers, mempool)
+			goodPeers, badPeers, mempoolCount,
+			humanize.Bytes(uint64(mempoolSize)))
 	}
 
 	// kick cache
@@ -1547,23 +1532,16 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 	log.Tracef("handleInv (%v)", p)
 	defer log.Tracef("handleInv exit (%v)", p)
 
+	var txsFound bool
+
 	for _, v := range msg.InvList {
 		switch v.Type {
 		case wire.InvTypeError:
 			log.Errorf("inventory error: %v", v.Hash)
 		case wire.InvTypeTx:
-			// add to mempool
-			log.Tracef("inventory tx: %v", v.Hash)
-			if !s.mempoolEnabled {
-				return nil
-			}
-			s.mtx.Lock()
-			if _, ok := s.mempool[v.Hash]; !ok {
-				s.mempool[v.Hash] = nil
-			}
-			s.mtx.Unlock()
-			go s.downloadMissingTx(ctx, p)
-
+			// handle these later or else we have to insert txs one
+			// at a time while taking a mutex.
+			txsFound = true
 		case wire.InvTypeBlock:
 			log.Debugf("inventory block: %v", v.Hash)
 		case wire.InvTypeFilteredBlock:
@@ -1579,15 +1557,21 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 		}
 	}
 
+	if s.mempoolEnabled && txsFound {
+		if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
+			go s.downloadMissingTx(ctx, p)
+		}
+	}
+
 	return nil
 }
 
 func (s *Server) handleNotFound(ctx context.Context, p *peer, msg *wire.MsgNotFound, raw []byte) error {
-	log.Infof("handleNotFound %v", spew.Sdump(msg))
-	defer log.Infof("handleNotFound exit")
+	// log.Infof("handleNotFound %v", spew.Sdump(msg))
+	// defer log.Infof("handleNotFound exit")
 
-	// XXX keep here to see if it spams logs
-	log.Infof("NotFound: %v %v", p, spew.Sdump(msg))
+	//// XXX keep here to see if it spams logs
+	//log.Infof("NotFound: %v %v", p, spew.Sdump(msg))
 
 	return nil
 }
