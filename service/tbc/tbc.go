@@ -1250,6 +1250,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			return
 		}
 
+		// Use closure because of mutext being held.
 		go func() {
 			bhb, err := s.db.BlockHeaderBest(ctx)
 			if err != nil {
