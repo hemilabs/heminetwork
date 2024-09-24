@@ -95,6 +95,7 @@ type Config struct {
 	ListenAddress           string
 	LogLevel                string
 	MaxCachedTxs            int
+	MempoolEnabled          bool
 	Network                 string
 	PeersWanted             int
 	PrometheusListenAddress string
@@ -109,6 +110,7 @@ func NewDefaultConfig() *Config {
 		BlockheaderCache: 1e6,
 		LogLevel:         logLevel,
 		MaxCachedTxs:     defaultMaxCachedTxs,
+		MempoolEnabled:   true,
 		PeersWanted:      defaultPeersWanted,
 	}
 }
@@ -130,8 +132,7 @@ type Server struct {
 	blocksDuplicate int
 
 	// mempool
-	mempool        *mempool
-	mempoolEnabled bool // true mean mempool is enabled
+	mempool *mempool
 
 	// bitcoin network
 	wireNet     wire.BitcoinNet
@@ -173,16 +174,10 @@ func NewServer(cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	mp, err := mempoolNew()
-	if err != nil {
-		return nil, err
-	}
 	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
 		cfg:            cfg,
 		printTime:      time.Now().Add(10 * time.Second),
-		mempool:        mp,
-		mempoolEnabled: true, // XXX make config option
 		blocks:         blocks,
 		peers:          make(map[string]*peer, cfg.PeersWanted),
 		pm:             newPeerManager(),
@@ -196,6 +191,12 @@ func NewServer(cfg *Config) (*Server, error) {
 		}),
 		sessions:       make(map[string]*tbcWs),
 		requestTimeout: defaultRequestTimeout,
+	}
+	if s.cfg.MempoolEnabled {
+		s.mempool, err = mempoolNew()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// We could use a PGURI verification here.
@@ -1441,8 +1442,10 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 	s.blocks.Delete(bhs) // remove block from cache regardless of insert result
 
 	// Reap txs from mempool, no need to log error.
-	txHashes, _ := block.MsgBlock().TxHashes()
-	_ = s.mempool.txsRemove(ctx, txHashes)
+	if s.cfg.MempoolEnabled {
+		txHashes, _ := block.MsgBlock().TxHashes()
+		_ = s.mempool.txsRemove(ctx, txHashes)
+	}
 
 	// Whatever happens, delete from cache and potentially try again
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
@@ -1480,8 +1483,10 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 	if now.After(s.printTime) {
 		printStats = true
 
-		mempoolCount, mempoolSize = s.mempool.stats(ctx)
-		blocksSize = s.blocksSize
+		if s.cfg.MempoolEnabled {
+			mempoolCount, mempoolSize = s.mempool.stats(ctx)
+			blocksSize = s.blocksSize
+		}
 		blocksInserted = len(s.blocksInserted)
 		blocksDuplicate = s.blocksDuplicate
 		// This is super awkward but prevents calculating N inserts *
@@ -1555,7 +1560,7 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 		}
 	}
 
-	if s.mempoolEnabled && txsFound {
+	if s.cfg.MempoolEnabled && txsFound {
 		if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
 			go s.downloadMissingTx(ctx, p)
 		}

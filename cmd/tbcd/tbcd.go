@@ -81,6 +81,12 @@ var (
 			Help:         "maximum cached utxos and/or txs during indexing",
 			Print:        config.PrintAll,
 		},
+		"TBC_MEMPOOL_ENABLED": config.Config{
+			Value:        &cfg.MempoolEnabled,
+			DefaultValue: true,
+			Help:         "bitcoin network mempool enable/disable switch",
+			Print:        config.PrintAll,
+		},
 		"TBC_NETWORK": config.Config{
 			Value:        &cfg.Network,
 			DefaultValue: defaultNetwork,
