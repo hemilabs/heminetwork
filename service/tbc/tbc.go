@@ -1351,6 +1351,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 
 	// Note that BlockHeadersInsert always returns the canonical
 	// tip blockheader.
+	// XXX deal with mempool here too!!!
 	var height uint64
 	switch it {
 	case tbcd.ITChainExtend:
@@ -1445,6 +1446,10 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
 	s.blocks.Delete(bhs) // remove block from cache regardless of insert result
+
+	// Reap txs from mempool, no need to log error.
+	txHashes, _ := block.MsgBlock().TxHashes()
+	_ = s.mempool.txsRemove(ctx, txHashes)
 
 	// Whatever happens, delete from cache and potentially try again
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
