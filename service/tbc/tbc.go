@@ -110,7 +110,7 @@ func NewDefaultConfig() *Config {
 		BlockheaderCache: 1e6,
 		LogLevel:         logLevel,
 		MaxCachedTxs:     defaultMaxCachedTxs,
-		MempoolEnabled:   true,
+		MempoolEnabled:   false, // XXX temporary to test CI
 		PeersWanted:      defaultPeersWanted,
 	}
 }
