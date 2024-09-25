@@ -937,7 +937,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 	// Start building the mempool.
 	err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
-	if err != nil {
+	if err != nil && !errors.Is(err, net.ErrClosed) {
 		log.Errorf("peer mempool: %v", err)
 		return
 	}
@@ -1194,10 +1194,10 @@ func (s *Server) downloadMissingTx(ctx context.Context, p *peer) error {
 		return fmt.Errorf("download missing tx: %w", err)
 	}
 	err = p.write(defaultCmdTimeout, getData)
-	if err != nil {
+	if err != nil && !errors.Is(err, net.ErrClosed) {
 		// peer dead, make sure it is reaped
 		log.Errorf("download missing tx write: %v %v", p, err)
-		p.close() // XXX this should not happen here
+		p.close() // XXX this probably should not happen here
 	}
 	return err
 }
