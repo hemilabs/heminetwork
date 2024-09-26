@@ -693,7 +693,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	bDB := l.rawPool[level.BlocksDB]
 	has, err := bDB.Has(b.Hash()[:])
 	if err != nil {
-		return -1, fmt.Errorf("block insert has: %w", err)
+		return -1, database.DuplicateError("block insert: exists")
 	}
 	if !has {
 		raw, err := b.Bytes()
