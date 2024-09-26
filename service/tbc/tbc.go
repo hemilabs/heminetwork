@@ -12,6 +12,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -1115,8 +1116,11 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 	err := p.write(defaultCmdTimeout, getData)
 	if err != nil {
 		// peer dead, make sure it is reaped
-		log.Errorf("download block write: %v %v", p, err)
 		p.close() // XXX this should not happen here
+		if !errors.Is(err, net.ErrClosed) &&
+			!errors.Is(err, os.ErrDeadlineExceeded) {
+			log.Errorf("download block write: %v %v", p, err)
+		}
 	}
 	return err
 }
@@ -1175,9 +1179,7 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	if err != nil {
 		// Close peer.
 		if p, ok := value.(*peer); ok {
-			if err := p.close(); err != nil {
-				log.Errorf("block expired: %v %v", p, err)
-			}
+			p.close() // XXX kill peer
 			log.Errorf("block expired: %v %v", p, err)
 		}
 	}
@@ -1192,10 +1194,13 @@ func (s *Server) downloadMissingTx(ctx context.Context, p *peer) error {
 		return fmt.Errorf("download missing tx: %w", err)
 	}
 	err = p.write(defaultCmdTimeout, getData)
-	if err != nil && !errors.Is(err, net.ErrClosed) {
+	if err != nil {
 		// peer dead, make sure it is reaped
-		log.Errorf("download missing tx write: %v %v", p, err)
-		p.close() // XXX this probably should not happen here
+		p.close() // XXX this should not happen here
+		if !errors.Is(err, net.ErrClosed) &&
+			!errors.Is(err, os.ErrDeadlineExceeded) {
+			log.Errorf("download missing tx write: %v %v", p, err)
+		}
 	}
 	return err
 }
