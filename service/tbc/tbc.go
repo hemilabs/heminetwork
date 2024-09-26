@@ -531,7 +531,7 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 			return
 		default:
 		}
-		if p.conn == nil {
+		if !p.isConnected() {
 			continue
 		}
 
@@ -1122,8 +1122,6 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 	defer s.mtx.Unlock()
 	err := p.write(defaultCmdTimeout, getData)
 	if err != nil {
-		// peer dead, make sure it is reaped
-		p.close() // XXX this should not happen here
 		if !errors.Is(err, net.ErrClosed) &&
 			!errors.Is(err, os.ErrDeadlineExceeded) {
 			log.Errorf("download block write: %v %v", p, err)
@@ -1225,13 +1223,14 @@ func (s *Server) handleTx(ctx context.Context, p *peer, msg *wire.MsgTx, raw []b
 
 // randomPeer returns a random peer from the map. Must be called with lock
 // held.
+// XXX move to PeerManager
 func (s *Server) randomPeer(ctx context.Context) (*peer, error) {
 	log.Tracef("randomPeer")
 	defer log.Tracef("randomPeer exit")
 
 	// unassigned slot, download block
 	for _, p := range s.peers {
-		if p.conn == nil {
+		if !p.isConnected() {
 			// Not connected yet
 			continue
 		}

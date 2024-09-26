@@ -61,22 +61,42 @@ func (p *peer) String() string {
 }
 
 func (p *peer) write(timeout time.Duration, msg wire.Message) error {
-	p.conn.SetWriteDeadline(time.Now().Add(timeout))
+	p.mtx.Lock()
+	conn := p.conn
+	p.mtx.Unlock()
+	if conn == nil {
+		return fmt.Errorf("write: no conn")
+	}
+
+	conn.SetWriteDeadline(time.Now().Add(timeout))
 	// XXX contexts would be nice
-	_, err := wire.WriteMessageWithEncodingN(p.conn, msg, p.protocolVersion,
+	_, err := wire.WriteMessageWithEncodingN(conn, msg, p.protocolVersion,
 		p.network, wire.LatestEncoding)
+	if err != nil {
+		conn.Close()
+	}
 	return err
 }
 
 func (p *peer) read(timeout time.Duration) (wire.Message, []byte, error) {
+	p.mtx.Lock()
+	conn := p.conn
+	p.mtx.Unlock()
+	if conn == nil {
+		return nil, nil, fmt.Errorf("read: no conn")
+	}
+
 	if timeout == 0 {
-		p.conn.SetReadDeadline(time.Time{}) // never timeout on reads
+		conn.SetReadDeadline(time.Time{}) // never timeout on reads
 	} else {
-		p.conn.SetReadDeadline(time.Now().Add(timeout))
+		conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	// XXX contexts would be nice
-	_, msg, buf, err := wire.ReadMessageWithEncodingN(p.conn, p.protocolVersion,
+	_, msg, buf, err := wire.ReadMessageWithEncodingN(conn, p.protocolVersion,
 		p.network, wire.LatestEncoding)
+	if err != nil {
+		conn.Close()
+	}
 	return msg, buf, err
 }
 
