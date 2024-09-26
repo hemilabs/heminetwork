@@ -126,10 +126,9 @@ type Server struct {
 	cfg *Config
 
 	// stats
-	printTime       time.Time
-	blocksSize      uint64 // cumulative block size written
-	blocksInserted  map[string]struct{}
-	blocksDuplicate int
+	printTime      time.Time
+	blocksSize     uint64 // cumulative block size written
+	blocksInserted int    // blocks inserted since last print
 
 	// mempool
 	mempool *mempool
@@ -176,14 +175,13 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
-		cfg:            cfg,
-		printTime:      time.Now().Add(10 * time.Second),
-		blocks:         blocks,
-		peers:          make(map[string]*peer, cfg.PeersWanted),
-		pm:             newPeerManager(),
-		pings:          pings,
-		blocksInserted: make(map[string]struct{}, 8192), // stats XXX rmeove?
-		timeSource:     blockchain.NewMedianTime(),
+		cfg:        cfg,
+		printTime:  time.Now().Add(10 * time.Second),
+		blocks:     blocks,
+		peers:      make(map[string]*peer, cfg.PeersWanted),
+		pm:         newPeerManager(),
+		pings:      pings,
+		timeSource: blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Subsystem: promSubsystem,
 			Name:      "rpc_calls_total",
@@ -1404,10 +1402,13 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 
 	block := btcutil.NewBlock(msg)
 	bhs := block.Hash().String()
-	rawBlock, err := block.Bytes()
-	if err != nil {
-		return fmt.Errorf("handle block unable to get raw block %v: %w", bhs, err)
-	}
+	s.blocks.Delete(bhs) // remove block from ttl regardless of insert result
+
+	// Whatever happens, kick cache in the nuts on the way out.
+	defer func() {
+		// kick cache
+		go s.syncBlocks(ctx)
+	}()
 
 	if s.cfg.BlockSanity {
 		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
@@ -1434,12 +1435,11 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 
 	height, err := s.db.BlockInsert(ctx, block) // XXX see if we can use raw here
 	if err != nil {
-		return fmt.Errorf("block insert %v: %w", bhs, err)
+		return fmt.Errorf("database block insert %v: %w", bhs, err)
 	} else {
 		log.Infof("Insert block %v at %v txs %v %v", bhs, height,
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
-	s.blocks.Delete(bhs) // remove block from cache regardless of insert result
 
 	// Reap txs from mempool, no need to log error.
 	if s.cfg.MempoolEnabled {
@@ -1447,86 +1447,51 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 		_ = s.mempool.txsRemove(ctx, txHashes)
 	}
 
-	// Whatever happens, delete from cache and potentially try again
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
-	var (
-		printStats      bool
-		mempoolCount    int
-		mempoolSize     int
-		blocksSize      uint64
-		blocksInserted  int
-		blocksDuplicate int // keep track of this until have less of them
-		delta           time.Duration
 
-		// blocks pending
-		blocksPending int
-
-		// peers
-		goodPeers      int
-		badPeers       int
-		activePeers    int
-		connectedPeers int
-	)
-	// XXX do we need these? s.mtx.Lock()
-	// XXX rethink lock here
 	s.mtx.Lock()
 	// Stats
-	if err == nil {
-		s.blocksSize += uint64(len(rawBlock) + 32)
-		if _, ok := s.blocksInserted[bhs]; ok {
-			s.blocksDuplicate++
-		} else {
-			s.blocksInserted[bhs] = struct{}{}
-		}
-	}
+	s.blocksSize += uint64(len(raw))
+	s.blocksInserted++
+
 	now := time.Now()
 	if now.After(s.printTime) {
-		printStats = true
-
+		var (
+			mempoolCount   int
+			mempoolSize    int
+			connectedPeers int
+		)
 		if s.cfg.MempoolEnabled {
 			mempoolCount, mempoolSize = s.mempool.stats(ctx)
-			blocksSize = s.blocksSize
 		}
-		blocksInserted = len(s.blocksInserted)
-		blocksDuplicate = s.blocksDuplicate
-		// This is super awkward but prevents calculating N inserts *
-		// time.Before(10*time.Second).
-		delta = now.Sub(s.printTime.Add(-10 * time.Second))
-
-		s.blocksSize = 0
-		s.blocksInserted = make(map[string]struct{}, 8192)
-		s.blocksDuplicate = 0
-		s.printTime = now.Add(10 * time.Second)
-
-		// Grab pending block cache stats
-		blocksPending = s.blocks.Len()
 
 		// Grab some peer stats as well
-		activePeers = len(s.peers)
-		goodPeers, badPeers = s.pm.Stats()
+		goodPeers, badPeers := s.pm.Stats()
 		// Gonna take it right into the Danger Zone! (double mutex)
 		for _, peer := range s.peers {
 			if peer.isConnected() {
 				connectedPeers++
 			}
 		}
-	}
-	s.mtx.Unlock()
 
-	if printStats {
-		// XXX this counts errors somehow after ibd, probably because
-		// duplicate blocks are downloaded when an inv comes in.
-		log.Infof("Inserted %v blocks (%v, %v duplicates) in the last %v",
-			blocksInserted, humanize.Bytes(blocksSize), blocksDuplicate, delta)
+		// This is super awkward but prevents calculating N inserts *
+		// time.Before(10*time.Second).
+		delta := now.Sub(s.printTime.Add(-10 * time.Second))
+
+		log.Infof("Inserted %v blocks (%v) in the last %v",
+			s.blocksInserted, humanize.Bytes(s.blocksSize), delta)
 		log.Infof("Pending blocks %v/%v active peers %v connected peers %v "+
 			"good peers %v bad peers %v mempool %v %v",
-			blocksPending, defaultPendingBlocks, activePeers, connectedPeers,
-			goodPeers, badPeers, mempoolCount,
+			s.blocks.Len(), defaultPendingBlocks, len(s.peers),
+			connectedPeers, goodPeers, badPeers, mempoolCount,
 			humanize.Bytes(uint64(mempoolSize)))
-	}
 
-	// kick cache
-	go s.syncBlocks(ctx)
+		// Reset stats
+		s.blocksSize = 0
+		s.blocksInserted = 0
+		s.printTime = now.Add(10 * time.Second)
+	}
+	s.mtx.Unlock()
 
 	return nil
 }
