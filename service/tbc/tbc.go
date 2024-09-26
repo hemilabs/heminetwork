@@ -934,6 +934,13 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}
 
+	// Get p2p information.
+	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
+	if err != nil && !errors.Is(err, net.ErrClosed) {
+		log.Errorf("peer get addr: %v", err)
+		return
+	}
+
 	// Start building the mempool.
 	err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
 	if err != nil && !errors.Is(err, net.ErrClosed) {
