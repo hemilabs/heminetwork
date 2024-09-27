@@ -438,7 +438,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 			log.Debugf("peer exited: %v blocks canceled: %v",
 				address, n)
 		case <-loopTicker.C:
-			log.Debugf("pinging active peers: %v", s.peersLen())
+			log.Tracef("pinging active peers: %v", s.peersLen())
 			go s.pingAllPeers(ctx)
 			loopTicker.Reset(loopTimeout)
 		}
@@ -878,9 +878,10 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	log.Tracef("peerConnect %v", p)
 	defer func() {
 		select {
-		case peerC <- p.String():
+		case peerC <- p.String(): // remove from peer manager
 		default:
 			log.Tracef("could not signal peer channel: %v", p)
+			panic("xx")
 		}
 		log.Tracef("peerConnect exit %v", p)
 	}()
@@ -888,34 +889,29 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	err := p.connect(tctx)
-	if err != nil {
-		go func(pp *peer) {
-			// Remove from database; it's ok to be aggressive if it
-			// failed with no route to host or failed with i/o
-			// timeout or invalid network (ipv4/ipv6).
-			//
-			// This does have the side-effect of draining the peer
-			// table during network outages but that is ok. The
-			// peers table will be rebuild based on DNS seeds.
-			host, port, err := net.SplitHostPort(pp.String())
-			if err != nil {
-				log.Errorf("split host port: %v", err)
-				return
-			}
-			if err = s.pm.PeerDelete(host, port); err != nil {
-				log.Errorf("peer delete (%v): %v", pp, err)
-			} else {
-				log.Debugf("Peer delete: %v", pp)
-			}
-		}(p)
-		log.Debugf("connect: %v", err)
-		return
-	}
 	defer func() {
+		// Remove from database; it's ok to be aggressive if it
+		// failed with no route to host or failed with i/o
+		// timeout or invalid network (ipv4/ipv6).
+		//
+		// This does have the side-effect of draining the peer
+		// table during network outages but that is ok. The
+		// peers table will be rebuild based on DNS seeds.
+		//
+		// XXX This really belongs in peer manager.
+		if err := s.pm.PeerDelete(p.String()); err != nil {
+			log.Errorf("peer manager delete (%v): %v", p, err)
+		}
 		if err := p.close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			if errors.Is(err, net.ErrClosed) {
+				panic(err)
+			}
 			log.Errorf("peer disconnect: %v %v", p, err)
 		}
 	}()
+	if err != nil {
+		return
+	}
 
 	// See if our tip is indeed canonical.
 	ch, err := s.sod(ctx, p)
@@ -1103,6 +1099,9 @@ func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) er
 		return fmt.Errorf("cancel: %w", err)
 	}
 
+	// XXX might as well ask for missing blocks
+	go s.syncBlocks(ctx)
+
 	log.Tracef("handlePong %v: pong %v", p.address, pong.Nonce)
 	return nil
 }
@@ -1131,6 +1130,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 }
 
 func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) error {
+	log.Infof("handleBlockExpired %v", key)
 	log.Tracef("handleBlockExpired")
 	defer log.Tracef("handleBlockExpired exit")
 
@@ -1263,15 +1263,9 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		if !s.cfg.AutoIndex {
 			return
 		}
-
-		// Use closure because of mutext being held.
+		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
-			bhb, err := s.db.BlockHeaderBest(ctx)
-			if err != nil {
-				log.Errorf("sync blocks best block header: %v", err)
-				return
-			}
-			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != ErrAlreadyIndexing {
+			if err = s.SyncIndexersToBest(ctx); err != nil && err != ErrAlreadyIndexing {
 				// XXX this is probably not a panic.
 				panic(fmt.Errorf("sync blocks: %w", err))
 			}

@@ -220,7 +220,7 @@ func (p *peer) close() error {
 	if p.conn != nil {
 		return p.conn.Close()
 	}
-	return errors.New("already closed")
+	return net.ErrClosed
 }
 
 func (p *peer) isConnected() bool {
