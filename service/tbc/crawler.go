@@ -69,8 +69,11 @@ func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
 }
 
 func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
-	// This function assumes that the highest block height connects to the
-	// lowest block height.
+	// This function has one odd corner case. If bhX and bhY are both on a
+	// "long" chain without multiple blockheaders it will terminate on the
+	// first height that has a single blockheader. This is to be expected!
+	// This function "should" be called between forking blocks and then
+	// it'll find the first common parent.
 
 	// 0. If bhX and bhY are the same return bhX.
 	if bhX.Hash.IsEqual(bhY.Hash) {
