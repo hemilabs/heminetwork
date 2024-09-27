@@ -937,11 +937,13 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		return
 	}
 
-	// Start building the mempool.
-	err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
-	if err != nil && !errors.Is(err, net.ErrClosed) {
-		log.Errorf("peer mempool: %v", err)
-		return
+	if s.cfg.MempoolEnabled {
+		// Start building the mempool.
+		err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			log.Errorf("peer mempool: %v", err)
+			return
+		}
 	}
 
 	// XXX wave hands here for now but we should get 3 peers to agree that
