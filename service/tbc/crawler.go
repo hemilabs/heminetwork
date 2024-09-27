@@ -68,6 +68,53 @@ func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
 	return s.mdHashHeight(ctx, TxIndexHashKey)
 }
 
+func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+	// This function assumes that the highest block height connects to the
+	// lowest block height.
+
+	// 0. If bhX and bhY are the same return bhX.
+	if bhX.Hash.IsEqual(bhY.Hash) {
+		return bhX, nil
+	}
+
+	// 1. Find lowest height between X and Y.
+	h := min(bhX.Height, bhY.Height)
+
+	// 2. Walk chain back until X and Y point to the same parent.
+	for {
+		bhs, err := s.db.BlockHeadersByHeight(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("block headers by height: %w", err)
+		}
+		if bhs[0].Hash.IsEqual(s.chainParams.GenesisHash) {
+			if h != 0 {
+				panic("height 0 not genesis")
+			}
+			return nil, fmt.Errorf("genesis")
+		}
+
+		// See if all blockheaders share a common parent.
+		equals := 0
+		var ph *chainhash.Hash
+		for k := range bhs {
+			if k == 0 {
+				ph = bhs[k].ParentHash()
+			}
+			if !ph.IsEqual(bhs[k].ParentHash()) {
+				break
+			}
+			equals++
+		}
+		if equals == len(bhs) {
+			// All blockheaders point to the same parent.
+			return s.db.BlockHeaderByHash(ctx, ph)
+		}
+
+		// Decrease height
+		h--
+	}
+}
+
 // findCanonicalHash determines which hash is on the canonical chain by walking
 // back the chain from the provided end point. It returns the index in bhs of
 // the correct hash. On failure it returns -1 DELIBERATELY to crash the caller
