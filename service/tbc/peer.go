@@ -94,7 +94,7 @@ func (p *peer) read(timeout time.Duration) (wire.Message, []byte, error) {
 	// XXX contexts would be nice
 	_, msg, buf, err := wire.ReadMessageWithEncodingN(conn, p.protocolVersion,
 		p.network, wire.LatestEncoding)
-	if err != nil {
+	if err != nil && !errors.Is(err, wire.ErrUnknownMessage) {
 		conn.Close()
 	}
 	return msg, buf, err

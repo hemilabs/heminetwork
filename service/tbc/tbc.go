@@ -965,6 +965,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		msg, raw, err := p.read(5 * time.Second)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown
+			log.Debugf("unknown message received")
 			continue
 		} else if err != nil {
 			log.Debugf("peer read %v: %v", p, err)
