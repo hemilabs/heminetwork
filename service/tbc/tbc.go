@@ -1136,46 +1136,41 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	log.Tracef("handleBlockExpired")
 	defer log.Tracef("handleBlockExpired exit")
 
-	log.Infof("Skipping handleBlockExpired, FIXME!")
+	p, ok := value.(*peer)
+	if !ok {
+		// this really should not happen
+		return fmt.Errorf("invalid peer type: %T", value)
+	}
+	if _, ok := key.(string); !ok {
+		// this really should not happen
+		return fmt.Errorf("invalid key type: %T", key)
+	}
 
-	if false {
-		p, ok := value.(*peer)
-		if !ok {
-			// this really should not happen
-			return fmt.Errorf("invalid peer type: %T", value)
-		}
-		if _, ok := key.(string); !ok {
-			// this really should not happen
-			return fmt.Errorf("invalid key type: %T", key)
+	// Ensure block is on main chain, if it is not it is deleted from
+	// blocks missing database.
+	hash, err := chainhash.NewHashFromStr(key.(string))
+	if err != nil {
+		return fmt.Errorf("new hash: %w", err)
+	}
+	bhX, err := s.db.BlockHeaderByHash(ctx, hash)
+	if err != nil {
+		return fmt.Errorf("block header by hash: %w", err)
+	}
+	canonical, err := s.isCanonical(ctx, bhX)
+	if err != nil {
+		return fmt.Errorf("is canonical: %w", err)
+	}
+
+	if !canonical {
+		log.Infof("deleting from blocks missing: %v %v %v",
+			p, bhX.Height, bhX)
+		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
+		if err != nil {
+			return fmt.Errorf("block expired delete missing: %w", err)
 		}
 
-		// Ensure block is on main chain, if it is not it is deleted from
-		// blocks missing database.
-		hash, err := chainhash.NewHashFromStr(key.(string))
-		if err != nil {
-			return fmt.Errorf("new hash: %w", err)
-		}
-		bhX, err := s.db.BlockHeaderByHash(ctx, hash)
-		if err != nil {
-			return fmt.Errorf("block header by hash: %w", err)
-		}
-		best, err := s.db.BlockHeaderBest(ctx)
-		if err != nil {
-			return fmt.Errorf("block header best: %w", err)
-		}
-		log.Debugf("linear: %v %v %v -> %v %v", p, best.Height, best, bhX.Height, bhX)
-		_, err = s.IndexIsLinear(ctx, best.Hash, bhX.Hash)
-		if err != nil {
-			log.Infof("deleting from blocks missing: %v %v %v",
-				p, bhX.Height, bhX)
-			err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
-			if err != nil {
-				return fmt.Errorf("block expired delete missing: %w", err)
-			}
-
-			// Block exists on a fork, stop downloading it.
-			return nil
-		}
+		// Block exists on a fork, stop downloading it.
+		return nil
 	}
 
 	// Legit timeout, return error so that it can be retried.
