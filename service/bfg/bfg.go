@@ -1320,9 +1320,6 @@ func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
 	log.Tracef("refreshL2KeystoneCache")
 	defer log.Tracef("refreshL2KeystoneCache exit")
 
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
 	results, err := s.db.L2KeystonesMostRecentN(ctx, 100)
 	if err != nil {
 		log.Errorf("error getting keystones %v", err)
@@ -1341,6 +1338,9 @@ func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
 			EPHash:             api.ByteSlice(v.EPHash),
 		})
 	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 
 	s.l2keystonesCache = l2Keystones
 }
