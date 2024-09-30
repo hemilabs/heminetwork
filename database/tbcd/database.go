@@ -97,6 +97,10 @@ func (bh BlockHeader) String() string {
 	return bh.Hash.String()
 }
 
+func (bh BlockHeader) HH() string {
+	return fmt.Sprintf("%v @ %v", bh.Height, bh.Hash.String())
+}
+
 func (bh BlockHeader) Timestamp() time.Time {
 	var wbh wire.BlockHeader
 	err := wbh.Deserialize(bytes.NewReader(bh.Header[:]))

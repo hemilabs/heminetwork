@@ -12,6 +12,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -95,6 +96,7 @@ type Config struct {
 	ListenAddress           string
 	LogLevel                string
 	MaxCachedTxs            int
+	MempoolEnabled          bool
 	Network                 string
 	PeersWanted             int
 	PrometheusListenAddress string
@@ -109,6 +111,7 @@ func NewDefaultConfig() *Config {
 		BlockheaderCache: 1e6,
 		LogLevel:         logLevel,
 		MaxCachedTxs:     defaultMaxCachedTxs,
+		MempoolEnabled:   true,
 		PeersWanted:      defaultPeersWanted,
 	}
 }
@@ -124,10 +127,12 @@ type Server struct {
 	cfg *Config
 
 	// stats
-	printTime       time.Time
-	blocksSize      uint64 // cumulative block size written
-	blocksInserted  map[string]struct{}
-	blocksDuplicate int
+	printTime      time.Time
+	blocksSize     uint64 // cumulative block size written
+	blocksInserted int    // blocks inserted since last print
+
+	// mempool
+	mempool *mempool
 
 	// bitcoin network
 	wireNet     wire.BitcoinNet
@@ -171,14 +176,13 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 	defaultRequestTimeout := 10 * time.Second // XXX: make config option?
 	s := &Server{
-		cfg:            cfg,
-		printTime:      time.Now().Add(10 * time.Second),
-		blocks:         blocks,
-		peers:          make(map[string]*peer, cfg.PeersWanted),
-		pm:             newPeerManager(),
-		pings:          pings,
-		blocksInserted: make(map[string]struct{}, 8192), // stats XXX rmeove?
-		timeSource:     blockchain.NewMedianTime(),
+		cfg:        cfg,
+		printTime:  time.Now().Add(10 * time.Second),
+		blocks:     blocks,
+		peers:      make(map[string]*peer, cfg.PeersWanted),
+		pm:         newPeerManager(),
+		pings:      pings,
+		timeSource: blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Subsystem: promSubsystem,
 			Name:      "rpc_calls_total",
@@ -186,6 +190,12 @@ func NewServer(cfg *Config) (*Server, error) {
 		}),
 		sessions:       make(map[string]*tbcWs),
 		requestTimeout: defaultRequestTimeout,
+	}
+	if s.cfg.MempoolEnabled {
+		s.mempool, err = mempoolNew()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// We could use a PGURI verification here.
@@ -222,7 +232,7 @@ func (s *Server) DB() tbcd.Database {
 
 func (s *Server) getHeaders(ctx context.Context, p *peer, hash *chainhash.Hash) error {
 	log.Tracef("getheaders %v %v", p, hash)
-	defer log.Tracef("seed exit %v %v", p, hash)
+	defer log.Tracef("getHeaders exit %v %v", p, hash)
 
 	ghs := wire.NewMsgGetHeaders()
 	ghs.AddBlockLocatorHash(hash)
@@ -379,10 +389,9 @@ func (s *Server) peerManager(ctx context.Context) error {
 				if err != nil {
 					// This really should not happen
 					log.Errorf("new peer: %v", err)
-					continue
 				} else {
 					if err := s.peerAdd(peer); err != nil {
-						log.Debugf("add peer: %v", err)
+						log.Infof("add peer: %v", err)
 					} else {
 						go s.peerConnect(ctx, peerC, peer)
 					}
@@ -428,7 +437,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 			log.Debugf("peer exited: %v blocks canceled: %v",
 				address, n)
 		case <-loopTicker.C:
-			log.Debugf("pinging active peers: %v", s.peersLen())
+			log.Tracef("pinging active peers: %v", s.peersLen())
 			go s.pingAllPeers(ctx)
 			loopTicker.Reset(loopTimeout)
 		}
@@ -521,7 +530,7 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 			return
 		default:
 		}
-		if p.conn == nil {
+		if !p.isConnected() {
 			continue
 		}
 
@@ -561,6 +570,11 @@ func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, r
 			log.Errorf("handle generic block: %v", err)
 		}
 
+	case *wire.MsgTx:
+		if err := s.handleTx(ctx, p, m, raw); err != nil {
+			log.Errorf("handle generic transaction: %v", err)
+		}
+
 	case *wire.MsgInv:
 		if err := s.handleInv(ctx, p, m, raw); err != nil {
 			log.Errorf("handle generic inv: %v", err)
@@ -592,6 +606,10 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 	if err := p.write(defaultCmdTimeout, cmd); err != nil {
 		return nil, fmt.Errorf("write: %w", err)
 	}
+
+	// This function is pretty flawed. We should debate killing it
+	// altogether and see if we can replace this with other functionality
+	// elsewhere.
 
 	verbose := false
 	for {
@@ -631,11 +649,20 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 		case *wire.MsgPong:
 			continue
 		case *wire.MsgNotFound:
-			log.Infof("why am i seeing this %v: %v", p, spew.Sdump(m))
+			// XXX sometimes, with emphasis on sometimes when we
+			// request a block we go through this code. This does
+			// not seem reliable at all and we probably should
+			// simply continue to ignore it and detect missing
+			// blocks using block headers.
+			log.Debugf("not found %v: %v", p, spew.Sdump(m))
 		case *wire.MsgInv:
 			if len(m.InvList) > 0 {
 				if m.InvList[0].Type != wire.InvTypeTx {
-					log.Infof(spew.Sdump(msg))
+					// XXX block notifications go through
+					// here. We may not need to react to
+					// that and rely solely on block
+					// headers.
+					log.Debugf(spew.Sdump(msg))
 				}
 				continue
 			}
@@ -850,7 +877,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	log.Tracef("peerConnect %v", p)
 	defer func() {
 		select {
-		case peerC <- p.String():
+		case peerC <- p.String(): // remove from peer manager
 		default:
 			log.Tracef("could not signal peer channel: %v", p)
 		}
@@ -860,34 +887,29 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	err := p.connect(tctx)
-	if err != nil {
-		go func(pp *peer) {
-			// Remove from database; it's ok to be aggressive if it
-			// failed with no route to host or failed with i/o
-			// timeout or invalid network (ipv4/ipv6).
-			//
-			// This does have the side-effect of draining the peer
-			// table during network outages but that is ok. The
-			// peers table will be rebuild based on DNS seeds.
-			host, port, err := net.SplitHostPort(pp.String())
-			if err != nil {
-				log.Errorf("split host port: %v", err)
-				return
-			}
-			if err = s.pm.PeerDelete(host, port); err != nil {
-				log.Errorf("peer delete (%v): %v", pp, err)
-			} else {
-				log.Debugf("Peer delete: %v", pp)
-			}
-		}(p)
-		log.Debugf("connect: %v", err)
-		return
-	}
 	defer func() {
+		// Remove from database; it's ok to be aggressive if it
+		// failed with no route to host or failed with i/o
+		// timeout or invalid network (ipv4/ipv6).
+		//
+		// This does have the side-effect of draining the peer
+		// table during network outages but that is ok. The
+		// peers table will be rebuild based on DNS seeds.
+		//
+		// XXX This really belongs in peer manager.
+		if err := s.pm.PeerDelete(p.String()); err != nil {
+			log.Errorf("peer manager delete (%v): %v", p, err)
+		}
 		if err := p.close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			if errors.Is(err, net.ErrClosed) {
+				panic(err)
+			}
 			log.Errorf("peer disconnect: %v %v", p, err)
 		}
 	}()
+	if err != nil {
+		return
+	}
 
 	// See if our tip is indeed canonical.
 	ch, err := s.sod(ctx, p)
@@ -902,6 +924,22 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		if err != nil {
 			// Database is closed, This is terminal.
 			log.Errorf("sod get headers: %v %v %v", p, ch, err)
+			return
+		}
+	}
+
+	// Get p2p information.
+	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
+	if err != nil && !errors.Is(err, net.ErrClosed) {
+		log.Errorf("peer get addr: %v", err)
+		return
+	}
+
+	if s.cfg.MempoolEnabled {
+		// Start building the mempool.
+		err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			log.Errorf("peer mempool: %v", err)
 			return
 		}
 	}
@@ -932,10 +970,10 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		if verbose {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
-		switch m := msg.(type) {
-		case *wire.MsgNotFound:
-			log.Infof("%v: %v", p, spew.Sdump(m))
-		}
+		//switch m := msg.(type) {
+		//case *wire.MsgNotFound:
+		//	log.Infof("%v: %v", p, spew.Sdump(m))
+		//}
 		if s.handleGeneric(ctx, p, msg, raw) {
 			continue
 		}
@@ -1061,6 +1099,9 @@ func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) er
 		return fmt.Errorf("cancel: %w", err)
 	}
 
+	// XXX might as well ask for missing blocks
+	go s.syncBlocks(ctx)
+
 	log.Tracef("handlePong %v: pong %v", p.address, pong.Nonce)
 	return nil
 }
@@ -1080,14 +1121,16 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 	defer s.mtx.Unlock()
 	err := p.write(defaultCmdTimeout, getData)
 	if err != nil {
-		// peer dead, make sure it is reaped
-		log.Errorf("download block write: %v %v", p, err)
-		p.close()
+		if !errors.Is(err, net.ErrClosed) &&
+			!errors.Is(err, os.ErrDeadlineExceeded) {
+			log.Errorf("download block write: %v %v", p, err)
+		}
 	}
 	return err
 }
 
 func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) error {
+	log.Infof("handleBlockExpired %v", key)
 	log.Tracef("handleBlockExpired")
 	defer log.Tracef("handleBlockExpired exit")
 
@@ -1111,13 +1154,12 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("block header by hash: %w", err)
 	}
-	best, err := s.db.BlockHeaderBest(ctx)
+	canonical, err := s.isCanonical(ctx, bhX)
 	if err != nil {
-		return fmt.Errorf("block header best: %w", err)
+		return fmt.Errorf("is canonical: %w", err)
 	}
-	log.Debugf("linear: %v %v %v -> %v %v", p, best.Height, best, bhX.Height, bhX)
-	_, err = s.IndexIsLinear(ctx, best.Hash, bhX.Hash)
-	if err != nil {
+
+	if !canonical {
 		log.Infof("deleting from blocks missing: %v %v %v",
 			p, bhX.Height, bhX)
 		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
@@ -1130,7 +1172,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	}
 
 	// Legit timeout, return error so that it can be retried.
-	return fmt.Errorf("timeout %v", hash)
+	return fmt.Errorf("timeout %v", key)
 }
 
 func (s *Server) blockExpired(ctx context.Context, key any, value any) {
@@ -1141,23 +1183,49 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	if err != nil {
 		// Close peer.
 		if p, ok := value.(*peer); ok {
-			if err := p.close(); err != nil {
-				log.Errorf("block expired: %v %v", p, err)
-			}
+			p.close() // XXX kill peer
 			log.Errorf("block expired: %v %v", p, err)
 		}
 	}
 }
 
+func (s *Server) downloadMissingTx(ctx context.Context, p *peer) error {
+	log.Tracef("downloadMissingTx")
+	defer log.Tracef("downloadMissingTx exit")
+
+	getData, err := s.mempool.getDataConstruct(ctx)
+	if err != nil {
+		return fmt.Errorf("download missing tx: %w", err)
+	}
+	err = p.write(defaultCmdTimeout, getData)
+	if err != nil {
+		// peer dead, make sure it is reaped
+		p.close() // XXX this should not happen here
+		if !errors.Is(err, net.ErrClosed) &&
+			!errors.Is(err, os.ErrDeadlineExceeded) {
+			log.Errorf("download missing tx write: %v %v", p, err)
+		}
+	}
+	return err
+}
+
+func (s *Server) handleTx(ctx context.Context, p *peer, msg *wire.MsgTx, raw []byte) error {
+	log.Tracef("handleTx")
+	defer log.Tracef("handleTx exit")
+
+	return s.mempool.txsInsert(ctx, msg, raw)
+}
+
 // randomPeer returns a random peer from the map. Must be called with lock
 // held.
+// XXX move to PeerManager
 func (s *Server) randomPeer(ctx context.Context) (*peer, error) {
 	log.Tracef("randomPeer")
 	defer log.Tracef("randomPeer exit")
 
 	// unassigned slot, download block
 	for _, p := range s.peers {
-		if p.conn == nil {
+		if !p.isConnected() {
 			// Not connected yet
 			continue
 		}
@@ -1186,26 +1254,14 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	}
 
 	if len(bm) == 0 {
-		// We can avoid quiescing by verifying if we are already done
-		// indexing.
-		if si := s.synced(ctx); si.Synced {
-			log.Tracef("already synced at %v", si.BlockHeader)
-			return
-		}
-
 		// Exit if AutoIndex isn't enabled.
 		if !s.cfg.AutoIndex {
 			return
 		}
-
-		bhb, err := s.db.BlockHeaderBest(ctx)
-		if err != nil {
-			log.Errorf("sync blocks best block header: %v", err)
-			return
-		}
+		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
-			if err = s.SyncIndexersToHash(ctx, bhb.BlockHash()); err != nil {
-				// XXX this a panic?
+			if err = s.SyncIndexersToBest(ctx); err != nil && err != ErrAlreadyIndexing {
+				// XXX this is probably not a panic.
 				panic(fmt.Errorf("sync blocks: %w", err))
 			}
 		}()
@@ -1350,10 +1406,13 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 
 	block := btcutil.NewBlock(msg)
 	bhs := block.Hash().String()
-	rawBlock, err := block.Bytes()
-	if err != nil {
-		return fmt.Errorf("handle block unable to get raw block %v: %w", bhs, err)
-	}
+	s.blocks.Delete(bhs) // remove block from ttl regardless of insert result
+
+	// Whatever happens, kick cache in the nuts on the way out.
+	defer func() {
+		// kick cache
+		go s.syncBlocks(ctx)
+	}()
 
 	if s.cfg.BlockSanity {
 		err := blockchain.CheckBlockSanity(block, s.chainParams.PowLimit,
@@ -1380,87 +1439,63 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 
 	height, err := s.db.BlockInsert(ctx, block) // XXX see if we can use raw here
 	if err != nil {
-		return fmt.Errorf("block insert %v: %w", bhs, err)
+		return fmt.Errorf("database block insert %v: %w", bhs, err)
 	} else {
 		log.Infof("Insert block %v at %v txs %v %v", bhs, height,
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
-	s.blocks.Delete(bhs) // remove block from cache regardless of insert result
 
-	// Whatever happens, delete from cache and potentially try again
+	// Reap txs from mempool, no need to log error.
+	if s.cfg.MempoolEnabled {
+		txHashes, _ := block.MsgBlock().TxHashes()
+		_ = s.mempool.txsRemove(ctx, txHashes)
+	}
+
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
-	var (
-		printStats      bool
-		blocksSize      uint64
-		blocksInserted  int
-		blocksDuplicate int // keep track of this until have less of them
-		delta           time.Duration
 
-		// blocks pending
-		blocksPending int
-
-		// peers
-		goodPeers      int
-		badPeers       int
-		activePeers    int
-		connectedPeers int
-	)
-	// XXX do we need these? s.mtx.Lock()
-	// XXX rethink lock here
 	s.mtx.Lock()
 	// Stats
-	if err == nil {
-		s.blocksSize += uint64(len(rawBlock) + 32)
-		if _, ok := s.blocksInserted[bhs]; ok {
-			s.blocksDuplicate++
-		} else {
-			s.blocksInserted[bhs] = struct{}{}
-		}
-	}
+	s.blocksSize += uint64(len(raw))
+	s.blocksInserted++
+
 	now := time.Now()
 	if now.After(s.printTime) {
-		printStats = true
-
-		blocksSize = s.blocksSize
-		blocksInserted = len(s.blocksInserted)
-		blocksDuplicate = s.blocksDuplicate
-		// This is super awkward but prevents calculating N inserts *
-		// time.Before(10*time.Second).
-		delta = now.Sub(s.printTime.Add(-10 * time.Second))
-
-		s.blocksSize = 0
-		s.blocksInserted = make(map[string]struct{}, 8192)
-		s.blocksDuplicate = 0
-		s.printTime = now.Add(10 * time.Second)
-
-		// Grab pending block cache stats
-		blocksPending = s.blocks.Len()
+		var (
+			mempoolCount   int
+			mempoolSize    int
+			connectedPeers int
+		)
+		if s.cfg.MempoolEnabled {
+			mempoolCount, mempoolSize = s.mempool.stats(ctx)
+		}
 
 		// Grab some peer stats as well
-		activePeers = len(s.peers)
-		goodPeers, badPeers = s.pm.Stats()
+		goodPeers, badPeers := s.pm.Stats()
 		// Gonna take it right into the Danger Zone! (double mutex)
 		for _, peer := range s.peers {
 			if peer.isConnected() {
 				connectedPeers++
 			}
 		}
+
+		// This is super awkward but prevents calculating N inserts *
+		// time.Before(10*time.Second).
+		delta := now.Sub(s.printTime.Add(-10 * time.Second))
+
+		log.Infof("Inserted %v blocks (%v) in the last %v",
+			s.blocksInserted, humanize.Bytes(s.blocksSize), delta)
+		log.Infof("Pending blocks %v/%v active peers %v connected peers %v "+
+			"good peers %v bad peers %v mempool %v %v",
+			s.blocks.Len(), defaultPendingBlocks, len(s.peers),
+			connectedPeers, goodPeers, badPeers, mempoolCount,
+			humanize.Bytes(uint64(mempoolSize)))
+
+		// Reset stats
+		s.blocksSize = 0
+		s.blocksInserted = 0
+		s.printTime = now.Add(10 * time.Second)
 	}
 	s.mtx.Unlock()
-
-	if printStats {
-		// XXX this counts errors somehow after ibd, probably because
-		// duplicate blocks are downloaded when an inv comes in.
-		log.Infof("Inserted %v blocks (%v, %v duplicates) in the last %v",
-			blocksInserted, humanize.Bytes(blocksSize), blocksDuplicate, delta)
-		log.Infof("Pending blocks %v/%v active peers %v connected peers %v "+
-			"good peers %v bad peers %v",
-			blocksPending, defaultPendingBlocks, activePeers, connectedPeers,
-			goodPeers, badPeers)
-	}
-
-	// kick cache
-	go s.syncBlocks(ctx)
 
 	return nil
 }
@@ -1469,25 +1504,34 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 	log.Tracef("handleInv (%v)", p)
 	defer log.Tracef("handleInv exit (%v)", p)
 
+	var txsFound bool
+
 	for _, v := range msg.InvList {
 		switch v.Type {
 		case wire.InvTypeError:
 			log.Errorf("inventory error: %v", v.Hash)
 		case wire.InvTypeTx:
-			// XXX add to mempool
-			// log.Infof("inventory tx: %v", v.Hash)
+			// handle these later or else we have to insert txs one
+			// at a time while taking a mutex.
+			txsFound = true
 		case wire.InvTypeBlock:
-			log.Infof("inventory block: %v", v.Hash)
+			log.Debugf("inventory block: %v", v.Hash)
 		case wire.InvTypeFilteredBlock:
-			log.Infof("inventory filtered block: %v", v.Hash)
+			log.Debugf("inventory filtered block: %v", v.Hash)
 		case wire.InvTypeWitnessBlock:
 			log.Infof("inventory witness block: %v", v.Hash)
 		case wire.InvTypeWitnessTx:
 			log.Infof("inventory witness tx: %v", v.Hash)
 		case wire.InvTypeFilteredWitnessBlock:
-			log.Infof("inventory filtered witness block: %v", v.Hash)
+			log.Debugf("inventory filtered witness block: %v", v.Hash)
 		default:
-			log.Infof("inventory unknown: %v", spew.Sdump(v.Hash))
+			log.Errorf("inventory unknown: %v", spew.Sdump(v.Hash))
+		}
+	}
+
+	if s.cfg.MempoolEnabled && txsFound {
+		if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
+			go s.downloadMissingTx(ctx, p)
 		}
 	}
 
@@ -1495,11 +1539,11 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 }
 
 func (s *Server) handleNotFound(ctx context.Context, p *peer, msg *wire.MsgNotFound, raw []byte) error {
-	log.Infof("handleNotFound %v", spew.Sdump(msg))
-	defer log.Infof("handleNotFound exit")
+	// log.Infof("handleNotFound %v", spew.Sdump(msg))
+	// defer log.Infof("handleNotFound exit")
 
-	// XXX keep here to see if it spams logs
-	log.Infof("NotFound: %v %v", p, spew.Sdump(msg))
+	//// XXX keep here to see if it spams logs
+	//log.Infof("NotFound: %v %v", p, spew.Sdump(msg))
 
 	return nil
 }
@@ -1818,7 +1862,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	si.Tx = *txHH
 
 	if utxoHH.Hash.IsEqual(bhb.Hash) && txHH.Hash.IsEqual(bhb.Hash) &&
-		!s.blksMissing(ctx) {
+		!s.indexing && !s.blksMissing(ctx) {
 		si.Synced = true
 	}
 	return

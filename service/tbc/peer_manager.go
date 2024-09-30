@@ -50,11 +50,6 @@ func (pm *PeerManager) PeersInsert(peers []string) error {
 			// Skip bad peers.
 			continue
 		}
-		if _, ok := pm.peersGood[addr]; ok {
-			// Already inserted.
-			continue
-		}
-
 		pm.peersGood[addr] = struct{}{}
 	}
 	allGoodPeers := len(pm.peersGood)
@@ -68,22 +63,22 @@ func (pm *PeerManager) PeersInsert(peers []string) error {
 }
 
 // PeerDelete marks the peer as bad.
-func (pm *PeerManager) PeerDelete(host, port string) error {
+// XXX this function only returns nil!?
+func (pm *PeerManager) PeerDelete(address string) error {
 	log.Tracef("PeerDelete")
 	defer log.Tracef("PeerDelete exit")
 
-	a := net.JoinHostPort(host, port)
-	if len(a) < 7 {
-		// 0.0.0.0
-		return nil
+	_, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
 	}
 
 	pm.peersMtx.Lock()
-	if _, ok := pm.peersGood[a]; ok {
-		// Mark peer as bad.
-		delete(pm.peersGood, a)
-		pm.peersBad[a] = struct{}{}
-	}
+
+	// Remove peer from good.
+	delete(pm.peersGood, address)
+	// Mark peer as bad.
+	pm.peersBad[address] = struct{}{}
 
 	// Crude hammer to reset good/bad state of peers
 	if len(pm.peersGood) < minPeersRequired {

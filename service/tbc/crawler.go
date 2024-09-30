@@ -23,11 +23,28 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
+func s2h(s string) chainhash.Hash {
+	h, err := chainhash.NewHashFromStr(s)
+	if err != nil {
+		panic(err)
+	}
+	return *h
+}
+
 var (
 	UtxoIndexHashKey = []byte("utxoindexhash") // last indexed utxo hash
 	TxIndexHashKey   = []byte("txindexhash")   // last indexed tx hash
 
-	ErrNotLinear = errors.New("not linear") // not a valid chain
+	ErrNotLinear       = errors.New("not linear") // not a valid chain
+	ErrAlreadyIndexing = errors.New("already indexing")
+
+	testnet3Checkpoints = map[chainhash.Hash]uint64{
+		s2h("0000000000003c46fc60e56b9c2ae202b1efec83fcc7899d21de16757dea40a4"): 3000000,
+		s2h("000000000000001669469c0354b3f341a36b10ab099d1962f7ec4fae528b1f1d"): 2900000,
+		s2h("000000000000010dd0863ec3d7a0bae17c1957ae1de9cbcdae8e77aad33e3b8c"): 2000000,
+		s2h("0000000000478e259a3eda2fafbeeb0106626f946347955e99278fe6cc848414"): 1000000,
+		s2h("000000000001a7c0aaa2630fbb2c0e476aafffc60f82177375b2aaa22209f606"): 500000,
+	}
 )
 
 type HashHeight struct {
@@ -67,19 +84,129 @@ func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
 	return s.mdHashHeight(ctx, TxIndexHashKey)
 }
 
-// findCanonicalHash determines which hash is on the canonical chain by walking
-// back the chain from the provided end point. It returns the index in bhs of
-// the correct hash. On failure it returns -1 DELIBERATELY to crash the caller
-// if error is not checked.
-func (s *Server) findCanonicalHash(ctx context.Context, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
+func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+	// This function has one odd corner case. If bhX and bhY are both on a
+	// "long" chain without multiple blockheaders it will terminate on the
+	// first height that has a single blockheader. This is to be expected!
+	// This function "should" be called between forking blocks and then
+	// it'll find the first common parent.
+
+	// This function assumes that the highest block height connects to the
+	// lowest block height.
+
+	// 0. If bhX and bhY are the same return bhX.
+	if bhX.Hash.IsEqual(bhY.Hash) {
+		return bhX, nil
+	}
+
+	// 1. Find lowest height between X and Y.
+	h := min(bhX.Height, bhY.Height)
+
+	// 2. Walk chain back until X and Y point to the same parent.
+	for {
+		log.Infof("height: %v", h)
+		bhs, err := s.db.BlockHeadersByHeight(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("block headers by height: %w", err)
+		}
+		if bhs[0].Hash.IsEqual(s.chainParams.GenesisHash) {
+			if h != 0 {
+				panic("height 0 not genesis")
+			}
+			return nil, fmt.Errorf("genesis")
+		}
+
+		// See if all blockheaders share a common parent.
+		equals := 0
+		var ph *chainhash.Hash
+		for k := range bhs {
+			if k == 0 {
+				ph = bhs[k].ParentHash()
+			}
+			if !ph.IsEqual(bhs[k].ParentHash()) {
+				break
+			}
+			equals++
+		}
+		if equals == len(bhs) {
+			// All blockheaders point to the same parent.
+			return s.db.BlockHeaderByHash(ctx, ph)
+		}
+
+		// Decrease height
+		h--
+	}
+}
+
+func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, error) {
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return false, err
+	}
+	if bhb.Height < bh.Height {
+		return false, fmt.Errorf("best height less than provided height: %v < %v",
+			bhb.Height, bh.Height)
+	}
+	if bhb.Hash.IsEqual(bh.Hash) {
+		// Self == best
+		return true, nil
+	}
+	// Move best block header backwards until we find bh.
+	for {
+		// log.Debugf("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
+		// XXX add mainnet checkpoints
+		if height, ok := testnet3Checkpoints[*bhb.Hash]; ok && height <= bh.Height {
+			return false, nil
+		}
+		bhb, err = s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
+		if err != nil {
+			return false, err
+		}
+		if bhb.Hash.IsEqual(s.chainParams.GenesisHash) {
+			return false, nil
+		}
+		if bhb.Hash.IsEqual(bh.Hash) {
+			return true, nil
+		}
+	}
+}
+
+func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+	log.Tracef("findCanonicalParent %v", bh)
+
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for {
+		// XXX make discernable error here
+		canonical, err := s.isCanonical(ctx, bh)
+		if err != nil {
+			return nil, err
+		}
+		if canonical {
+			log.Tracef("findCanonicalParent exit %v", bh)
+			return bh, nil
+		}
+		bh, err = s.findCommonParent(ctx, bhb, bh)
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+// findPathFromHash determines which hash is in the path by walking back the
+// chain from the provided end point. It returns the index in bhs of the
+// correct hash. On failure it returns -1 DELIBERATELY to crash the caller if
+// error is not checked.
+func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
+	log.Tracef("findPathFromHash %v", len(bhs))
 	switch len(bhs) {
 	case 1:
 		return 0, nil // most common fast path
 	case 0:
 		return -1, errors.New("no blockheaders provided")
 	}
-
-	// XXX make sure endHash has higher cumulative difficulty
 
 	// When this happens we have to walk back from endHash to find the
 	// connecting block. There is no shortcut possible without hitting edge
@@ -100,7 +227,6 @@ func (s *Server) findCanonicalHash(ctx context.Context, endHash *chainhash.Hash,
 			h = bh.ParentHash()
 		}
 	}
-
 	return -1, errors.New("path not found")
 }
 
@@ -355,14 +481,10 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		height := bh.Height + 1
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		index, err := s.findCanonicalHash(ctx, endHash, bhs)
+		index, err := s.findPathFromHash(ctx, endHash, bhs)
 		if err != nil {
 			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
 				height, err)
@@ -431,6 +553,13 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
 		}
 
+		// Add tx's back to the mempool.
+		if s.cfg.MempoolEnabled {
+			// XXX this may not be the right spot.
+			txHashes, _ := b.MsgBlock().TxHashes()
+			_ = s.mempool.txsRemove(ctx, txHashes)
+		}
+
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
@@ -450,10 +579,6 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		height := bh.Height - 1
 		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
@@ -504,7 +629,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 			return fmt.Errorf("block utxo update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory pressure.
 		logMemStats()
 		runtime.GC()
 
@@ -565,7 +690,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 		}
 
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory pressure.
 		logMemStats()
 		runtime.GC()
 
@@ -577,7 +702,6 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 		if err != nil {
 			return fmt.Errorf("metadata utxo hash: %w", err)
 		}
-
 		if endHash.IsEqual(last.Hash) {
 			break
 		}
@@ -629,6 +753,9 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	if err != nil {
 		return fmt.Errorf("utxo index is linear: %w", err)
 	}
+	log.Debugf("startbh %v", startBH.HH())
+	log.Debugf("endHash %v", endHash)
+	log.Debugf("direction %v", direction)
 	switch direction {
 	case 1:
 		return s.UtxoIndexerWind(ctx, startBH, endBH)
@@ -736,14 +863,10 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		height := bh.Height + 1
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		index, err := s.findCanonicalHash(ctx, endHash, bhs)
+		index, err := s.findPathFromHash(ctx, endHash, bhs)
 		if err != nil {
 			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
 				height, err)
@@ -813,6 +936,15 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
 		}
 
+		// This is probably not needed here since we alreayd dealt with
+		// it via the utxo unindexer but since it will be mostly a
+		// no-op just go ahead.
+		if s.cfg.MempoolEnabled {
+			// XXX this may not be the right spot.
+			txHashes, _ := b.MsgBlock().TxHashes()
+			_ = s.mempool.txsRemove(ctx, txHashes)
+		}
+
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
@@ -832,10 +964,6 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		height := bh.Height - 1
 		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
@@ -886,7 +1014,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory pressure.
 		logMemStats()
 		runtime.GC()
 
@@ -946,7 +1074,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory pressure.
 		logMemStats()
 		runtime.GC()
 
@@ -1135,7 +1263,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 }
 
 // SyncIndexersToHash tries to move the various indexers to the supplied
-// height (inclusive).
+// hash (inclusive).
 // Note: on unwind it means that it WILL unwind the the various indexers
 // including the hash that was passed in. E.g. if this unwinds from 1001 to
 // 1000 the indexes for block 1000 WILL be updated as well.
@@ -1146,13 +1274,13 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	s.mtx.Lock()
 	if s.indexing {
 		s.mtx.Unlock()
-		return errors.New("already indexing")
+		return ErrAlreadyIndexing
 	}
 	s.indexing = true
 	s.mtx.Unlock()
 
 	defer func() {
-		// unquiesce
+		// Mark indexing done.
 		s.mtx.Lock()
 		s.indexing = false
 		bhb, err := s.db.BlockHeaderBest(ctx)
@@ -1195,4 +1323,89 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	log.Debugf("Done syncing to: %v", hash)
 
 	return nil
+}
+
+func (s *Server) syncIndexersToBest(ctx context.Context) error {
+	log.Tracef("syncIndexersToBest")
+	defer log.Tracef("syncIndexersToBest exit")
+
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Index Utxo
+	utxoHH, err := s.UtxoIndexHash(ctx)
+	if err != nil {
+		return err
+	}
+	utxoBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash)
+	if err != nil {
+		return err
+	}
+	cp, err := s.findCanonicalParent(ctx, utxoBH)
+	if err != nil {
+		return err
+	}
+	if !cp.Hash.IsEqual(utxoBH.Hash) {
+		log.Infof("Syncing utxo index to: %v from: %v via: %v",
+			bhb.HH(), utxoBH.HH(), cp.HH())
+		// utxoBH is NOT on canonical chain, unwind first
+		if err := s.UtxoIndexer(ctx, cp.Hash); err != nil {
+			return fmt.Errorf("utxo indexer unwind: %w", err)
+		}
+	}
+	// Index utxo to best block
+	if err := s.UtxoIndexer(ctx, bhb.Hash); err != nil {
+		return fmt.Errorf("utxo indexer: %w", err)
+	}
+
+	// Index Tx
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		return err
+	}
+	txBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
+	if err != nil {
+		return err
+	}
+	cp, err = s.findCanonicalParent(ctx, txBH)
+	if err != nil {
+		return err
+	}
+	if !cp.Hash.IsEqual(txBH.Hash) {
+		log.Infof("Syncing tx index to: %v from: %v via: %v",
+			bhb.HH(), txBH.HH(), cp.HH())
+		// txBH is NOT on canonical chain, unwind first
+		if err := s.TxIndexer(ctx, cp.Hash); err != nil {
+			return fmt.Errorf("tx indexer unwind: %w", err)
+		}
+	}
+	// Transactions index
+	if err := s.TxIndexer(ctx, bhb.Hash); err != nil {
+		return fmt.Errorf("tx indexer: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Server) SyncIndexersToBest(ctx context.Context) error {
+	log.Tracef("SyncIndexersToBest")
+	defer log.Tracef("SyncIndexersToBest exit")
+
+	s.mtx.Lock()
+	if s.indexing {
+		s.mtx.Unlock()
+		return ErrAlreadyIndexing
+	}
+	s.indexing = true
+	s.mtx.Unlock()
+
+	defer func() {
+		s.mtx.Lock()
+		s.indexing = false
+		s.mtx.Unlock()
+	}()
+
+	return s.syncIndexersToBest(ctx)
 }
