@@ -1470,7 +1470,7 @@ func TestIndexFork(t *testing.T) {
 		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
 	}
 
-	// see if we can move to b2z
+	// see if we can move to b2a
 	direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
 	if err != nil {
 		t.Fatalf("expected success genesis -> b2a, got %v", err)
