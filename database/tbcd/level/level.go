@@ -788,7 +788,7 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId *chainhash.Hash) ([]*chainh
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	if len(blocks) == 0 {
-		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", txid))
+		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", txId))
 	}
 
 	return blocks, nil
