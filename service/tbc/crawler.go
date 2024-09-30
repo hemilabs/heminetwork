@@ -195,26 +195,38 @@ func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) 
 	}
 }
 
-// findCanonicalHash determines which hash is on the canonical chain by walking
-// back the chain from the provided end point. It returns the index in bhs of
-// the correct hash. On failure it returns -1 DELIBERATELY to crash the caller
-// if error is not checked.
-func (s *Server) findCanonicalHash(ctx context.Context, bhs []tbcd.BlockHeader) (int, error) {
-	// XXX this is broken
-	log.Tracef("findCanonicalHash %v", len(bhs))
-	for k := range bhs {
-		bh, err := s.db.BlockHeaderByHash(ctx, bhs[k].Hash)
-		if err != nil {
-			return -1, fmt.Errorf("block header by hash: %w", err)
-		}
-
-		canonical, err := s.isCanonical(ctx, bh)
-		if canonical {
-			log.Infof("findCanonicalHash: %v %v", k, bh)
-			return k, nil
-		}
+// findPathFromHash determines which hash is in the path by walking back the
+// chain from the provided end point. It returns the index in bhs of the
+// correct hash. On failure it returns -1 DELIBERATELY to crash the caller if
+// error is not checked.
+func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
+	log.Tracef("findPathFromHash %v", len(bhs))
+	switch len(bhs) {
+	case 1:
+		return 0, nil // most common fast path
+	case 0:
+		return -1, errors.New("no blockheaders provided")
 	}
 
+	// When this happens we have to walk back from endHash to find the
+	// connecting block. There is no shortcut possible without hitting edge
+	// conditions.
+	for k, v := range bhs {
+		h := endHash
+		for {
+			bh, err := s.db.BlockHeaderByHash(ctx, h)
+			if err != nil {
+				return -1, fmt.Errorf("block header by hash: %w", err)
+			}
+			if h.IsEqual(v.BlockHash()) {
+				return k, nil
+			}
+			if h.IsEqual(s.chainParams.GenesisHash) {
+				break
+			}
+			h = bh.ParentHash()
+		}
+	}
 	return -1, errors.New("path not found")
 }
 
@@ -472,7 +484,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		index, err := s.findCanonicalHash(ctx, bhs)
+		index, err := s.findPathFromHash(ctx, endHash, bhs)
 		if err != nil {
 			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
 				height, err)
@@ -854,7 +866,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		index, err := s.findCanonicalHash(ctx, bhs)
+		index, err := s.findPathFromHash(ctx, endHash, bhs)
 		if err != nil {
 			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
 				height, err)
@@ -1268,11 +1280,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	s.mtx.Unlock()
 
 	defer func() {
-		s.mtx.Lock()
-		s.indexing = false
-		s.mtx.Unlock()
-		return
-		// unquiesce
+		// Mark indexing done.
 		s.mtx.Lock()
 		s.indexing = false
 		bhb, err := s.db.BlockHeaderBest(ctx)
