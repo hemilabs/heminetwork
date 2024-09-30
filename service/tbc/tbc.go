@@ -232,11 +232,12 @@ func (s *Server) DB() tbcd.Database {
 
 func (s *Server) getHeaders(ctx context.Context, p *peer, hash *chainhash.Hash) error {
 	log.Tracef("getheaders %v %v", p, hash)
-	defer log.Tracef("seed exit %v %v", p, hash)
+	defer log.Tracef("getHeaders exit %v %v", p, hash)
 
 	ghs := wire.NewMsgGetHeaders()
 	ghs.AddBlockLocatorHash(hash)
 	if err := p.write(defaultCmdTimeout, ghs); err != nil {
+		panic("xx")
 		return fmt.Errorf("write get headers: %w", err)
 	}
 
@@ -389,10 +390,9 @@ func (s *Server) peerManager(ctx context.Context) error {
 				if err != nil {
 					// This really should not happen
 					log.Errorf("new peer: %v", err)
-					continue
 				} else {
 					if err := s.peerAdd(peer); err != nil {
-						log.Debugf("add peer: %v", err)
+						log.Infof("add peer: %v", err)
 					} else {
 						go s.peerConnect(ctx, peerC, peer)
 					}
@@ -881,7 +881,6 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		case peerC <- p.String(): // remove from peer manager
 		default:
 			log.Tracef("could not signal peer channel: %v", p)
-			panic("xx")
 		}
 		log.Tracef("peerConnect exit %v", p)
 	}()

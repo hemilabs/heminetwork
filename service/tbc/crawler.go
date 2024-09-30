@@ -153,7 +153,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 	}
 	// Move best block header backwards until we find bh.
 	for {
-		//log.Debugf("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
+		// log.Debugf("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
 		// XXX add mainnet checkpoints
 		if height, ok := testnet3Checkpoints[*bhb.Hash]; ok && height <= bh.Height {
 			return false, nil
@@ -621,7 +621,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 			return fmt.Errorf("block utxo update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory pressure.
 		logMemStats()
 		runtime.GC()
 
@@ -682,7 +682,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 		}
 
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory pressure.
 		logMemStats()
 		runtime.GC()
 
@@ -694,7 +694,6 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 		if err != nil {
 			return fmt.Errorf("metadata utxo hash: %w", err)
 		}
-
 		if endHash.IsEqual(last.Hash) {
 			break
 		}
@@ -1015,7 +1014,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory pressure.
 		logMemStats()
 		runtime.GC()
 
@@ -1075,7 +1074,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
-		// memory preassure.
+		// memory pressure.
 		logMemStats()
 		runtime.GC()
 
@@ -1264,7 +1263,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 }
 
 // SyncIndexersToHash tries to move the various indexers to the supplied
-// height (inclusive).
+// hash (inclusive).
 // Note: on unwind it means that it WILL unwind the the various indexers
 // including the hash that was passed in. E.g. if this unwinds from 1001 to
 // 1000 the indexes for block 1000 WILL be updated as well.
@@ -1281,6 +1280,10 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	s.mtx.Unlock()
 
 	defer func() {
+		s.mtx.Lock()
+		s.indexing = false
+		s.mtx.Unlock()
+		return
 		// unquiesce
 		s.mtx.Lock()
 		s.indexing = false

@@ -385,9 +385,6 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 	b.t.Logf("handleRPC %v", conn.RemoteAddr())
 	defer b.t.Logf("handleRPC exit %v", conn.RemoteAddr())
 
-	b.logf("handleRPC %v", conn.RemoteAddr())
-	defer b.logf("handleRPC exit %v", conn.RemoteAddr())
-
 	p := &peer{
 		conn:            conn,
 		connected:       time.Now(),
@@ -433,6 +430,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 }
 
 func (b *btcNode) handleMsg(ctx context.Context, p *peer, msg wire.Message) error {
+	b.t.Logf("%v", spew.Sdump(msg))
 	switch m := msg.(type) {
 	case *wire.MsgVersion:
 		mva := &wire.MsgVerAck{}
@@ -1302,6 +1300,7 @@ func TestIndexFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
+		MempoolEnabled:          false,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1480,7 +1479,6 @@ func TestIndexFork(t *testing.T) {
 		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
 	}
 
-	t.Logf("---------------------------------------- going to b2a")
 	err = s.SyncIndexersToHash(ctx, b2a.Hash())
 	if err != nil {
 		t.Fatalf("wind to b2a: %v", err)
