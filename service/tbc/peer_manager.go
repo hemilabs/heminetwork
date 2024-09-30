@@ -85,7 +85,9 @@ func (pm *PeerManager) PeerDelete(address string) error {
 		// Kill all peers to force caller to reseed. This happens when
 		// network is down for a while and all peers are moved into
 		// bad map.
+		clear(pm.peersGood)
 		clear(pm.peersBad)
+		pm.peersGood = make(map[string]struct{}, 8192)
 		pm.peersBad = make(map[string]struct{}, 8192)
 		log.Debugf("peer cache purged")
 	}
