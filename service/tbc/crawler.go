@@ -173,7 +173,6 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 
 func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
 	log.Tracef("findCanonicalParent %v", bh)
-	defer log.Tracef("findCanonicalParent exit %v", bh)
 
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
@@ -186,6 +185,7 @@ func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) 
 			return nil, err
 		}
 		if canonical {
+			log.Tracef("findCanonicalParent exit %v", bh)
 			return bh, nil
 		}
 		bh, err = s.findCommonParent(ctx, bhb, bh)
@@ -200,13 +200,17 @@ func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) 
 // the correct hash. On failure it returns -1 DELIBERATELY to crash the caller
 // if error is not checked.
 func (s *Server) findCanonicalHash(ctx context.Context, bhs []tbcd.BlockHeader) (int, error) {
+	// XXX this is broken
+	log.Tracef("findCanonicalHash %v", len(bhs))
 	for k := range bhs {
 		bh, err := s.db.BlockHeaderByHash(ctx, bhs[k].Hash)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
 		}
+
 		canonical, err := s.isCanonical(ctx, bh)
 		if canonical {
+			log.Infof("findCanonicalHash: %v %v", k, bh)
 			return k, nil
 		}
 	}
@@ -465,10 +469,6 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		height := bh.Height + 1
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
@@ -567,10 +567,6 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		height := bh.Height - 1
 		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
@@ -855,10 +851,6 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		height := bh.Height + 1
 		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
@@ -960,10 +952,6 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		height := bh.Height - 1
 		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
 		if err != nil {
-			if errors.Is(err, database.ErrNotFound) {
-				log.Infof("No more blocks at: %v", height)
-				break
-			}
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
