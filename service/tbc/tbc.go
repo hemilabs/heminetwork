@@ -237,7 +237,6 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, hash *chainhash.Hash) 
 	ghs := wire.NewMsgGetHeaders()
 	ghs.AddBlockLocatorHash(hash)
 	if err := p.write(defaultCmdTimeout, ghs); err != nil {
-		panic("xx")
 		return fmt.Errorf("write get headers: %w", err)
 	}
 
