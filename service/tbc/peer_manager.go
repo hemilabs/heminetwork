@@ -16,9 +16,10 @@ const (
 
 // PeerManager keeps track of the available peers and their quality.
 type PeerManager struct {
-	peersMtx  sync.RWMutex
-	peersGood map[string]struct{}
-	peersBad  map[string]struct{}
+	peersMtx    sync.RWMutex
+	peersGood   map[string]struct{}
+	peersBad    map[string]struct{}
+	goodSeenMax int // keep track of max good peers seen to prevent early purge
 }
 
 // newPeerManager returns a new peer manager.
@@ -81,7 +82,11 @@ func (pm *PeerManager) PeerDelete(address string) error {
 	pm.peersBad[address] = struct{}{}
 
 	// Crude hammer to reset good/bad state of peers
-	if len(pm.peersGood) < minPeersRequired {
+
+	// XXX goodSeenMax should be a connection test; not a threshold.
+	// Another reason to move all peer stuff into the manager.
+	pm.goodSeenMax = max(pm.goodSeenMax, len(pm.peersGood))
+	if pm.goodSeenMax > minPeersRequired && len(pm.peersGood) < minPeersRequired {
 		// Kill all peers to force caller to reseed. This happens when
 		// network is down for a while and all peers are moved into
 		// bad map.
@@ -89,6 +94,7 @@ func (pm *PeerManager) PeerDelete(address string) error {
 		clear(pm.peersBad)
 		pm.peersGood = make(map[string]struct{}, 8192)
 		pm.peersBad = make(map[string]struct{}, 8192)
+		pm.goodSeenMax = 0
 		log.Debugf("peer cache purged")
 	}
 

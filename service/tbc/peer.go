@@ -105,12 +105,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	defer log.Tracef("handshake exit %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 
 	// 1. send our version
-	// 2. receive version
-	// 3. send sendaddrv2
-	// 4. send verack
-	// 5. receive sendaddrv2, verack or ignore
-
-	defaultHandshakeTimeout := 5 * time.Second
+	defaultHandshakeTimeout := 2 * time.Second // This is cumulative.
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
 	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
@@ -124,18 +119,18 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	if err != nil {
 		return fmt.Errorf("could not read version message: %w", err)
 	}
-
 	v, ok := rmsg.(*wire.MsgVersion)
 	if !ok {
 		return errors.New("expected version message")
 	}
 	p.remoteVersion = v
 
-	// 3. send sendaddrv2
+	// 3. ask for v2 addresses, this has to be done before verack despite
+	// what the spec says.
 	if v.ProtocolVersion >= 70016 {
 		err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgSendAddrV2(), p.protocolVersion, p.network)
 		if err != nil {
-			return fmt.Errorf("could not send sendaddrv2: %w", err)
+			return fmt.Errorf("could not send addrv2: %w", err)
 		}
 	}
 
@@ -145,7 +140,11 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 		return fmt.Errorf("could not send verack: %w", err)
 	}
 
-	for range 3 {
+	expire := time.Now().Add(defaultHandshakeTimeout)
+	for {
+		if time.Now().After(expire) {
+			return fmt.Errorf("timeout")
+		}
 		msg, err := readTimeout(defaultHandshakeTimeout, conn, p.protocolVersion, p.network)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue
@@ -160,13 +159,10 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 			return nil
 		case *wire.MsgSendAddrV2:
 			p.addrV2 = true
-			continue
 		default:
 			return fmt.Errorf("unexpected message type: %T", msg)
 		}
 	}
-
-	return errors.New("handshake failed")
 }
 
 func (p *peer) connect(ctx context.Context) error {
