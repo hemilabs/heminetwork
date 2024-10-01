@@ -1129,9 +1129,6 @@ func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) er
 		return fmt.Errorf("cancel: %w", err)
 	}
 
-	// XXX might as well ask for missing blocks
-	go s.syncBlocks(ctx)
-
 	log.Tracef("handlePong %v: pong %v", p.address, pong.Nonce)
 	return nil
 }
