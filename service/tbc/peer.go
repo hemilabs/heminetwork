@@ -105,7 +105,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	defer log.Tracef("handshake exit %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 
 	// 1. send our version
-	defaultHandshakeTimeout := 2 * time.Second
+	defaultHandshakeTimeout := 2 * time.Second // This is cumulative.
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
 	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
@@ -128,7 +128,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	// 3. ask for v2 addresses, this has to be done before verack despite
 	// what the spec says.
 	if v.ProtocolVersion >= 70016 {
-		err = writeTimeout(defaultCmdTimeout, conn, wire.NewMsgSendAddrV2(), p.protocolVersion, p.network)
+		err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgSendAddrV2(), p.protocolVersion, p.network)
 		if err != nil {
 			return fmt.Errorf("could not send addrv2: %w", err)
 		}
@@ -140,7 +140,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 		return fmt.Errorf("could not send verack: %w", err)
 	}
 
-	expire := time.Now().Add(2 * time.Second)
+	expire := time.Now().Add(defaultHandshakeTimeout)
 	for {
 		if time.Now().After(expire) {
 			return fmt.Errorf("timeout")
