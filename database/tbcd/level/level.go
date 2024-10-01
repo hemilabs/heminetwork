@@ -980,6 +980,10 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 	defer txsDiscard()
 
+	block := make([]byte, 33)
+	block[0] = 'b'
+	var blk []byte
+
 	txsBatch := new(leveldb.Batch)
 	for k, v := range txs {
 		// cache is being emptied so we can slice it here.
@@ -989,17 +993,30 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 			key = k[0:65]
 			value = nil
 
+			// insert block hash to determine if it was indexed later
+			// XXX guard this operation behind a map lookup to no insert dups
+			copy(block[1:], k[33:65])
+			blk = block
 		case 's':
 			key = k[:]
 			value = v[:]
+
+			// don't insert block
+			blk = nil
 		default:
 			return fmt.Errorf("invalid cache entry: %v", spew.Sdump(k))
 		}
 		switch direction {
 		case -1:
 			txsBatch.Delete(key)
+			if blk != nil {
+				txsBatch.Delete(blk)
+			}
 		case 1:
 			txsBatch.Put(key, value)
+			if blk != nil {
+				txsBatch.Put(blk, nil)
+			}
 		}
 
 		// XXX this probably should be done by the caller but we do it
