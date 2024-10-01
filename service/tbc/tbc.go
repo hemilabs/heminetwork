@@ -139,6 +139,7 @@ type Server struct {
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
 	seeds       []string
+	checkpoints map[chainhash.Hash]uint64
 
 	pm *PeerManager
 
@@ -205,14 +206,17 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
 		s.seeds = mainnetSeeds
+		s.checkpoints = mainnetCheckpoints
 	case "testnet3":
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
 		s.seeds = testnetSeeds
+		s.checkpoints = testnet3Checkpoints
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
 		s.seeds = localnetSeeds
+		s.checkpoints = make(map[chainhash.Hash]uint64)
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
 	}
@@ -391,7 +395,7 @@ func (s *Server) peerManager(ctx context.Context) error {
 					log.Errorf("new peer: %v", err)
 				} else {
 					if err := s.peerAdd(peer); err != nil {
-						log.Infof("add peer: %v", err)
+						log.Debugf("add peer: %v", err)
 					} else {
 						go s.peerConnect(ctx, peerC, peer)
 					}
