@@ -558,52 +558,52 @@ func (s *Server) pingAllPeers(ctx context.Context) {
 	}
 }
 
-func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, raw []byte) bool {
+func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, raw []byte) (bool, error) {
 	// Do accept addr and ping commands before we consider the peer up.
 	switch m := msg.(type) {
 	case *wire.MsgAddr:
 		if err := s.handleAddr(ctx, p, m); err != nil {
-			log.Debugf("handle generic addr: %v", err)
+			return false, fmt.Errorf("handle generic addr: %w", err)
 		}
 	case *wire.MsgAddrV2:
 		if err := s.handleAddrV2(ctx, p, m); err != nil {
-			log.Debugf("handle generic addr v2: %v", err)
+			return false, fmt.Errorf("handle generic addr v2: %w", err)
 		}
 
 	case *wire.MsgBlock:
 		if err := s.handleBlock(ctx, p, m, raw); err != nil {
-			log.Errorf("handle generic block: %v", err)
+			return false, fmt.Errorf("handle generic block: %w", err)
 		}
 
 	case *wire.MsgTx:
 		if err := s.handleTx(ctx, p, m, raw); err != nil {
-			log.Errorf("handle generic transaction: %v", err)
+			return false, fmt.Errorf("handle generic transaction: %w", err)
 		}
 
 	case *wire.MsgInv:
 		if err := s.handleInv(ctx, p, m, raw); err != nil {
-			log.Errorf("handle generic inv: %v", err)
+			return false, fmt.Errorf("handle generic inv: %w", err)
 		}
 
 	case *wire.MsgPing:
 		if err := s.handlePing(ctx, p, m); err != nil {
-			log.Debugf("handle generic ping: %v", err)
+			return false, fmt.Errorf("handle generic ping: %w", err)
 		}
 
 	case *wire.MsgPong:
 		if err := s.handlePong(ctx, p, m); err != nil {
-			log.Debugf("handle generic pong: %v", err)
+			return false, fmt.Errorf("handle generic pong: %w", err)
 		}
 
 	case *wire.MsgNotFound:
 		if err := s.handleNotFound(ctx, p, m, raw); err != nil {
-			log.Errorf("handle generic not found: %v", err)
+			return false, fmt.Errorf("handle generic not found: %w", err)
 		}
 
 	default:
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
 // XXX can be removed if we decide to kill findCanonicalP2P.
@@ -972,6 +972,8 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 	// Only now can we consider the peer connected
 	verbose := false
+	log.Debugf("connected: %v", p)
+	defer log.Debugf("disconnect: %v", p)
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
 		select {
@@ -1004,7 +1006,12 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
 
-		if s.handleGeneric(ctx, p, msg, raw) {
+		handled, err := s.handleGeneric(ctx, p, msg, raw)
+		if err != nil {
+			log.Errorf("%T: %v", msg, err)
+			return
+		}
+		if handled {
 			continue
 		}
 
@@ -1021,6 +1028,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		case *wire.MsgHeaders:
 			if err := s.handleHeaders(ctx, p, m); err != nil {
 				log.Errorf("handle headers: %v", err)
+				return
 			}
 
 		default:
