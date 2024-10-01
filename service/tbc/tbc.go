@@ -930,6 +930,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}()
 	if err != nil {
+		log.Debugf("connect failed %v: %v", p, err)
 		return
 	}
 
@@ -946,6 +947,15 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		if err != nil {
 			// Database is closed, This is terminal.
 			log.Errorf("sod get headers: %v %v %v", p, ch, err)
+			return
+		}
+	}
+
+	// Ask for v2 addresses
+	if p.protocolVersion >= 70016 {
+		err = p.write(defaultCmdTimeout, wire.NewMsgSendAddrV2())
+		if err != nil {
+			log.Errorf("could not send sendaddrv2: %w", err)
 			return
 		}
 	}
@@ -970,7 +980,6 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 	// this is a fork indeed.
 
 	// Only now can we consider the peer connected
-	log.Debugf("Peer connected: %v", p)
 	verbose := false
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -980,11 +989,22 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		default:
 		}
 
-		msg, raw, err := p.read(5 * time.Second)
+		msg, raw, err := p.read(defaultCmdTimeout)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown
 			continue
 		} else if err != nil {
+			// Check if context was canceled when read timeout occurs
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+
+				// Regular timeout, proceed with reading.
+				continue
+			}
 			log.Debugf("peer read %v: %v", p, err)
 			return
 		}
@@ -1149,7 +1169,6 @@ func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash)
 }
 
 func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) error {
-	log.Infof("handleBlockExpired %v", key)
 	log.Tracef("handleBlockExpired")
 	defer log.Tracef("handleBlockExpired exit")
 
@@ -1177,7 +1196,6 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("is canonical: %w", err)
 	}
-
 	if !canonical {
 		log.Infof("deleting from blocks missing: %v %v %v",
 			p, bhX.Height, bhX)
@@ -1189,6 +1207,8 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 		// Block exists on a fork, stop downloading it.
 		return nil
 	}
+
+	log.Infof("block expired %v %v", p, hash)
 
 	// Legit timeout, return error so that it can be retried.
 	return fmt.Errorf("timeout %v", key)
@@ -1256,6 +1276,20 @@ func (s *Server) randomPeer(ctx context.Context) (*peer, error) {
 func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
 	defer log.Tracef("syncBlocks exit")
+
+	// Set to true to disallow blocks to be downloaded in parallel with
+	// blockheaders.
+	if false {
+		// See where best block is at
+		bhb, err := s.db.BlockHeaderBest(ctx)
+		if err != nil {
+			log.Errorf("sync blocks: %v", err)
+			return
+		}
+		if time.Now().Sub(bhb.Timestamp()) > 4*time.Hour {
+			return
+		}
+	}
 
 	// Prevent race condition with 'want', which may cause the cache
 	// capacity to be exceeded.
