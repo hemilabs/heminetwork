@@ -453,13 +453,11 @@ func tbcdb() error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		bh, err := s.DB().BlocksByTxId(ctx, chtxid)
+		bh, err := s.DB().BlockByTxId(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
-		for k := range bh {
-			fmt.Printf("%v\n", bh[k])
-		}
+		fmt.Printf("%v\n", bh)
 
 	case "txbyid":
 		txid := args["txid"]

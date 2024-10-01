@@ -766,9 +766,9 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	return b, nil
 }
 
-func (l *ldb) BlocksByTxId(ctx context.Context, txId *chainhash.Hash) ([]*chainhash.Hash, error) {
-	log.Tracef("BlocksByTxId")
-	defer log.Tracef("BlocksByTxId exit")
+func (l *ldb) BlockByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+	log.Tracef("BlockByTxId")
+	defer log.Tracef("BlockByTxId exit")
 
 	blocks := make([]*chainhash.Hash, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
@@ -787,11 +787,15 @@ func (l *ldb) BlocksByTxId(ctx context.Context, txId *chainhash.Hash) ([]*chainh
 	if err := it.Error(); err != nil {
 		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
-	if len(blocks) == 0 {
+	switch len(blocks) {
+	case 0:
 		return nil, database.NotFoundError(fmt.Sprintf("tx not found: %v", txId))
+	case 1:
+		return blocks[0], nil
+	default:
+		panic(fmt.Sprintf("invalid blocks count %v: %v",
+			len(blocks), spew.Sdump(blocks)))
 	}
-
-	return blocks, nil
 }
 
 func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {

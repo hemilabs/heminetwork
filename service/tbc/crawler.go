@@ -301,18 +301,11 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 	txIndex := op.TxIndex()
 
 	// Find block hashes
-	blockHashes, err := s.db.BlocksByTxId(ctx, txId)
+	blockHash, err := s.db.BlockByTxId(ctx, txId)
 	if err != nil {
-		return nil, 0, fmt.Errorf("blocks by txid: %w", err)
+		return nil, 0, fmt.Errorf("block by txid: %w", err)
 	}
-	// Note that we may have more than one block hash however since the
-	// TxID is generated from the actual Tx the script hash and value
-	// should be identical and thus we can return the values from the first
-	// block found.
-	if len(blockHashes) == 0 {
-		return nil, 0, errors.New("script value: no block hashes")
-	}
-	b, err := s.db.BlockByHash(ctx, blockHashes[0])
+	b, err := s.db.BlockByHash(ctx, blockHash)
 	if err != nil {
 		return nil, 0, fmt.Errorf("block by hash: %w", err)
 	}

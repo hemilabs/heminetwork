@@ -1778,28 +1778,17 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	log.Tracef("TxById")
 	defer log.Tracef("TxById exit")
 
-	blockHashes, err := s.db.BlocksByTxId(ctx, txId)
+	blockHash, err := s.db.BlockByTxId(ctx, txId)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(blockHashes) > 1 {
-		panic("fix me blockhashes len")
+	block, err := s.db.BlockByHash(ctx, blockHash)
+	if err != nil {
+		return nil, err
 	}
-
-	// XXX investigate if this is indeed correct. As it is written now it
-	// returns the first block the tx exists in. This however must be the
-	// canonical block. This function must also return the blockhash.
-
-	for _, blockHash := range blockHashes {
-		block, err := s.db.BlockByHash(ctx, blockHash)
-		if err != nil {
-			return nil, err
-		}
-		for _, tx := range block.Transactions() {
-			if tx.Hash().IsEqual(txId) {
-				return tx.MsgTx(), nil
-			}
+	for _, tx := range block.Transactions() {
+		if tx.Hash().IsEqual(txId) {
+			return tx.MsgTx(), nil
 		}
 	}
 
