@@ -125,7 +125,16 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	}
 	p.remoteVersion = v
 
-	// 3. send verack
+	// 3. ask for v2 addresses, this has to be done before verack despite
+	// what the spec says.
+	if v.ProtocolVersion >= 70016 {
+		err = writeTimeout(defaultCmdTimeout, conn, wire.NewMsgSendAddrV2(), p.protocolVersion, p.network)
+		if err != nil {
+			return fmt.Errorf("could not send addrv2: %w", err)
+		}
+	}
+
+	// 4. send verack
 	err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgVerAck(), p.protocolVersion, p.network)
 	if err != nil {
 		return fmt.Errorf("could not send verack: %w", err)
@@ -149,7 +158,6 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 				p, v.UserAgent, v.ProtocolVersion, v.LastBlock)
 			return nil
 		case *wire.MsgSendAddrV2:
-			// This happens *often* here because we send verack early.
 			p.addrV2 = true
 		default:
 			return fmt.Errorf("unexpected message type: %T", msg)

@@ -951,15 +951,6 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		}
 	}
 
-	// Ask for v2 addresses
-	if p.protocolVersion >= 70016 {
-		err = p.write(defaultCmdTimeout, wire.NewMsgSendAddrV2())
-		if err != nil {
-			log.Errorf("could not send sendaddrv2: %w", err)
-			return
-		}
-	}
-
 	// Get p2p information.
 	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
 	if err != nil && !errors.Is(err, net.ErrClosed) {
