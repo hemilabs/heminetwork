@@ -147,6 +147,7 @@ type Server struct {
 	pings  *ttl.TTL // outstanding pings
 
 	indexing bool // when set we are indexing
+	sodding  bool // when set p2p is considered "up enough"
 
 	db tbcd.Database
 
@@ -605,6 +606,7 @@ func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, r
 	return true
 }
 
+// XXX can be removed if we decide to kill findCanonicalP2P.
 func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire.Message, expect any) (any, error) {
 	start := time.Now()
 	if err := p.write(defaultCmdTimeout, cmd); err != nil {
@@ -683,6 +685,7 @@ func (s *Server) pollP2P(ctx context.Context, d time.Duration, p *peer, cmd wire
 	}
 }
 
+// XXX can be removed if we decide to kill findCanonicalP2P.
 func (s *Server) inCanonicalChainP2P(ctx context.Context, p *peer, hash *chainhash.Hash) (bool, error) {
 	log.Tracef("inCanonicalChainP2P %v", hash)
 	defer log.Tracef("inCanonicalChainP2P exit %v", hash)
@@ -721,6 +724,7 @@ func (s *Server) inCanonicalChainP2P(ctx context.Context, p *peer, hash *chainha
 // findCanonicalP2P asks the p2p network if a block hash is canonical.  Think
 // about if this should be removed since it is a bit awkward and prone to
 // attack.
+// XXX can be removed if we decide to kill findCanonicalP2P.
 func (s *Server) findCanonicalP2P(ctx context.Context, p *peer, hash *chainhash.Hash) (*chainhash.Hash, error) {
 	// XXX this function is flawed and needs to be rewritten.
 	// XXX memoize results
@@ -748,105 +752,111 @@ func (s *Server) findCanonicalP2P(ctx context.Context, p *peer, hash *chainhash.
 	}
 }
 
-func (s *Server) fixupUtxoIndex(ctx context.Context, p *peer) error {
-	log.Tracef("fixupUtxoIndex")
-	defer log.Tracef("fixupUtxoIndex exit")
+//func (s *Server) fixupUtxoIndex(ctx context.Context, p *peer) error {
+//	log.Tracef("fixupUtxoIndex")
+//	defer log.Tracef("fixupUtxoIndex exit")
+//
+//	utxoHH, err := s.UtxoIndexHash(ctx)
+//	if err != nil {
+//		return fmt.Errorf("fixup utxo index hash: %v %v", p, err)
+//	}
+//	hash, err := s.findCanonicalP2P(ctx, p, utxoHH.Hash)
+//	if err != nil {
+//		return fmt.Errorf("fixup utxo index find: %v %v", p, err)
+//	}
+//	if hash.IsEqual(utxoHH.Hash) {
+//		// Found self, utxo index is on canonical chain.
+//		return nil
+//	}
+//
+//	endBH, err := s.db.BlockHeaderByHash(ctx, hash)
+//	if err != nil {
+//		return fmt.Errorf("fixup utxo index block header: %v %v", p, err)
+//	}
+//	if utxoHH.Height < endBH.Height {
+//		panic("impossible condition")
+//	}
+//
+//	log.Infof("Fixing up utxo index from %v to %v @ %v", utxoHH, endBH, endBH.Height)
+//	err = s.UtxoIndexer(ctx, endBH.Hash)
+//	if err != nil {
+//		// this probably is terminal
+//		panic(fmt.Errorf("fixup utxo index: %v %v", p, err))
+//	}
+//	return nil
+//}
+//
+//func (s *Server) fixupTxIndex(ctx context.Context, p *peer) error {
+//	log.Tracef("fixupTxIndex")
+//	defer log.Tracef("fixupTxIndex exit")
+//
+//	txHH, err := s.TxIndexHash(ctx)
+//	if err != nil {
+//		return fmt.Errorf("fixup tx index hash: %v %v", p, err)
+//	}
+//	hash, err := s.findCanonicalP2P(ctx, p, txHH.Hash)
+//	if err != nil {
+//		return fmt.Errorf("fixup tx index find: %v %v", p, err)
+//	}
+//	if hash.IsEqual(txHH.Hash) {
+//		// Found self, tx index is on canonical chain.
+//		return nil
+//	}
+//
+//	endBH, err := s.db.BlockHeaderByHash(ctx, hash)
+//	if err != nil {
+//		return fmt.Errorf("fixup tx index block header: %v %v", p, err)
+//	}
+//	if txHH.Height < endBH.Height {
+//		panic("impossible condition")
+//	}
+//
+//	// fixup tx index
+//	log.Infof("Fixing up tx index from %v to %v @ %v", txHH, endBH, endBH.Height)
+//	err = s.TxIndexer(ctx, endBH.Hash)
+//	if err != nil {
+//		// this probably is terminal
+//		panic(fmt.Errorf("fixup tx index: %v %v", p, err))
+//	}
+//	return nil
+//}
+//
+//// fixupIndexes fixes up the index when at start of day the index tip is not on
+//// the canonical chain. This code remains disabled for now because it uses an
+//// awkward p2p method to determine if the index tip is canonical. Fix this by
+//// downloading all blockheaders and then determine using said blockheaders if
+//// tip needs to be fixed up or not.
+//func (s *Server) fixupIndexes(ctx context.Context, p *peer) error {
+//	log.Tracef("fixupIndexes")
+//	defer log.Tracef("fixupIndexes exit")
+//
+//	s.mtx.Lock()
+//	if s.indexing {
+//		log.Debugf("fixup indexes already indexing")
+//		s.mtx.Unlock()
+//		return nil
+//	}
+//	s.mtx.Unlock()
+//
+//	err := s.fixupUtxoIndex(ctx, p)
+//	if err != nil {
+//		return fmt.Errorf("fixupUtxoIndex %w", err)
+//	}
+//	err = s.fixupTxIndex(ctx, p)
+//	if err != nil {
+//		return fmt.Errorf("fixupTxIndex %w", err)
+//	}
+//
+//	return nil
+//}
 
-	utxoHH, err := s.UtxoIndexHash(ctx)
-	if err != nil {
-		return fmt.Errorf("fixup utxo index hash: %v %v", p, err)
-	}
-	hash, err := s.findCanonicalP2P(ctx, p, utxoHH.Hash)
-	if err != nil {
-		return fmt.Errorf("fixup utxo index find: %v %v", p, err)
-	}
-	if hash.IsEqual(utxoHH.Hash) {
-		// Found self, utxo index is on canonical chain.
-		return nil
-	}
-
-	endBH, err := s.db.BlockHeaderByHash(ctx, hash)
-	if err != nil {
-		return fmt.Errorf("fixup utxo index block header: %v %v", p, err)
-	}
-	if utxoHH.Height < endBH.Height {
-		panic("impossible condition")
-	}
-
-	log.Infof("Fixing up utxo index from %v to %v @ %v", utxoHH, endBH, endBH.Height)
-	err = s.UtxoIndexer(ctx, endBH.Hash)
-	if err != nil {
-		// this probably is terminal
-		panic(fmt.Errorf("fixup utxo index: %v %v", p, err))
-	}
-	return nil
-}
-
-func (s *Server) fixupTxIndex(ctx context.Context, p *peer) error {
-	log.Tracef("fixupTxIndex")
-	defer log.Tracef("fixupTxIndex exit")
-
-	txHH, err := s.TxIndexHash(ctx)
-	if err != nil {
-		return fmt.Errorf("fixup tx index hash: %v %v", p, err)
-	}
-	hash, err := s.findCanonicalP2P(ctx, p, txHH.Hash)
-	if err != nil {
-		return fmt.Errorf("fixup tx index find: %v %v", p, err)
-	}
-	if hash.IsEqual(txHH.Hash) {
-		// Found self, tx index is on canonical chain.
-		return nil
-	}
-
-	endBH, err := s.db.BlockHeaderByHash(ctx, hash)
-	if err != nil {
-		return fmt.Errorf("fixup tx index block header: %v %v", p, err)
-	}
-	if txHH.Height < endBH.Height {
-		panic("impossible condition")
-	}
-
-	// fixup tx index
-	log.Infof("Fixing up tx index from %v to %v @ %v", txHH, endBH, endBH.Height)
-	err = s.TxIndexer(ctx, endBH.Hash)
-	if err != nil {
-		// this probably is terminal
-		panic(fmt.Errorf("fixup tx index: %v %v", p, err))
-	}
-	return nil
-}
-
-// fixupIndexes fixes up the index when at start of day the index tip is not on
-// the canonical chain. This code remains disabled for now because it uses an
-// awkward p2p method to determine if the index tip is canonical. Fix this by
-// downloading all blockheaders and then determine using said blockheaders if
-// tip needs to be fixed up or not.
-func (s *Server) fixupIndexes(ctx context.Context, p *peer) error {
-	log.Tracef("fixupIndexes")
-	defer log.Tracef("fixupIndexes exit")
-
-	s.mtx.Lock()
-	if s.indexing {
-		log.Debugf("fixup indexes already indexing")
-		s.mtx.Unlock()
-		return nil
-	}
-	s.mtx.Unlock()
-
-	err := s.fixupUtxoIndex(ctx, p)
-	if err != nil {
-		return fmt.Errorf("fixupUtxoIndex %w", err)
-	}
-	err = s.fixupTxIndex(ctx, p)
-	if err != nil {
-		return fmt.Errorf("fixupTxIndex %w", err)
-	}
-
-	return nil
-}
-
-// sod is Start Of Day. Code runs through bringup of a peer.
+// sod is Start Of Day. Code runs through bringup of a SINGLE peer. This really
+// should be three peers.
+//
+// XXX this code may be dissapeared since tbc should recover once it receives
+// an inv when a block is mined. This is a pretty ugly bandaid for a relatively
+// short startup cost. We are leaving this here to simply log that we are not
+// at the right tip.
 func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 	log.Tracef("sod")
 	defer log.Tracef("sod exit")
@@ -855,6 +865,16 @@ func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 	if err != nil {
 		return nil, fmt.Errorf("block header best: %v %v", p, err)
 	}
+
+	// Only sod once
+	s.mtx.Lock()
+	if s.sodding {
+		s.mtx.Unlock()
+		return bhb.Hash, nil
+	}
+	s.sodding = true
+	s.mtx.Unlock()
+
 	hash, err := s.findCanonicalP2P(ctx, p, bhb.Hash)
 	if err != nil {
 		return nil, fmt.Errorf("find canonical: %v %v", p, err)
@@ -864,14 +884,12 @@ func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 		return bhb.Hash, nil
 	}
 	if bhb.Height > uint64(p.remoteVersion.LastBlock) {
-		// XXX debug
-		// XXX should we look at cumulative difficulty?
-		// XXX unwind indexes?
-		log.Infof("sod: %v our tip is greater %v > %v",
+		log.Debugf("sod: %v our tip is greater %v > %v",
 			p, bhb.Height, p.remoteVersion.LastBlock)
 		return bhb.Hash, nil
 	}
-	log.Infof("tip not canonical: %v %v common: %v", bhb.Height, bhb, hash)
+	log.Infof("Our tip seems not canonical: %v %v common: %v",
+		bhb.Height, bhb, hash)
 
 	return hash, nil
 }
@@ -974,10 +992,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		if verbose {
 			log.Infof("%v: %v", p, spew.Sdump(msg))
 		}
-		//switch m := msg.(type) {
-		//case *wire.MsgNotFound:
-		//	log.Infof("%v: %v", p, spew.Sdump(m))
-		//}
+
 		if s.handleGeneric(ctx, p, msg, raw) {
 			continue
 		}
