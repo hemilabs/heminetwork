@@ -999,6 +999,8 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 			if _, ok := bm[string(k[33:65])]; !ok {
 				copy(block[1:], k[33:65])
 				blk = block
+			} else {
+				blk = nil
 			}
 		case 's':
 			key = k[:]
