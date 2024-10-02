@@ -983,6 +983,8 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	block := make([]byte, 33)
 	block[0] = 'b'
 	var blk []byte
+	bm := make(map[string]struct{}, len(txs))
+	defer clear(bm)
 
 	txsBatch := new(leveldb.Batch)
 	for k, v := range txs {
@@ -994,9 +996,10 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 			value = nil
 
 			// insert block hash to determine if it was indexed later
-			// XXX guard this operation behind a map lookup to no insert dups
-			copy(block[1:], k[33:65])
-			blk = block
+			if _, ok := bm[string(k[33:65])]; !ok {
+				copy(block[1:], k[33:65])
+				blk = block
+			}
 		case 's':
 			key = k[:]
 			value = v[:]
