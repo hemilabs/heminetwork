@@ -284,7 +284,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		b, err := s.DB().BlockByHash(ctx, ch)
+		b, err := s.BlockByHash(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
@@ -554,7 +554,7 @@ func tbcdb() error {
 			sh = tbcd.NewScriptHashFromScript(h)
 		}
 
-		balance, err := s.DB().BalanceByScriptHash(ctx, sh)
+		balance, err := s.BalanceByScriptHash(ctx, sh)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}

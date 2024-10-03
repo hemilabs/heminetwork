@@ -1745,6 +1745,18 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 	return balance, nil
 }
 
+func (s *Server) BalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash) (uint64, error) {
+	log.Tracef("BalanceByScriptHash")
+	defer log.Tracef("BalanceByScriptHash exit")
+
+	balance, err := s.db.BalanceByScriptHash(ctx, hash)
+	if err != nil {
+		return 0, err
+	}
+
+	return balance, nil
+}
+
 func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	log.Tracef("UtxosByAddress")
 	defer log.Tracef("UtxosByAddress exit")
