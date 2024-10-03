@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -29,7 +28,6 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -106,10 +104,6 @@ type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
-	// Note that peers is protected by mtx NOT peersMtx
-	// TODO: move to PeerManager?
-	peers map[string]*peer // active but not necessarily connected
-
 	cfg *Config
 
 	// stats
@@ -166,7 +160,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg:        cfg,
 		printTime:  time.Now().Add(10 * time.Second),
 		blocks:     blocks,
-		peers:      make(map[string]*peer, cfg.PeersWanted),
 		pings:      pings,
 		timeSource: blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
@@ -177,13 +170,19 @@ func NewServer(cfg *Config) (*Server, error) {
 		sessions:       make(map[string]*tbcWs),
 		requestTimeout: defaultRequestTimeout,
 	}
-	if s.cfg.MempoolEnabled {
-		s.mempool, err = mempoolNew()
-		if err != nil {
-			return nil, err
+
+	log.Infof("MEMPOOL IS CURRENTLY BROKEN AND HAS BEEN DISABLED")
+	s.cfg.MempoolEnabled = false
+	if false {
+		if s.cfg.MempoolEnabled {
+			s.mempool, err = mempoolNew()
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
+	wanted := defaultPeersWanted
 	switch cfg.Network {
 	case "mainnet":
 		s.wireNet = wire.MainNet
@@ -199,6 +198,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
 		s.checkpoints = make(map[chainhash.Hash]uint64)
+		wanted = 1
 
 		// XXX currently broken
 
@@ -206,7 +206,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
 	}
 
-	pm, err := NewPeerManager(s.wireNet, 64) // XXX 64 is a constant
+	pm, err := NewPeerManager(s.wireNet, wanted)
 	if err != nil {
 		return nil, err
 	}
@@ -228,263 +228,6 @@ func (s *Server) getHeaders(ctx context.Context, p *peer, hash *chainhash.Hash) 
 	return nil
 }
 
-// TODO: move to PeerManager?
-func (s *Server) seed(pctx context.Context, peersWanted int) ([]string, error) {
-	log.Tracef("seed")
-	defer log.Tracef("seed exit")
-
-	peers, err := s.pm.PeersRandom(peersWanted)
-	if err != nil {
-		return nil, fmt.Errorf("peers random: %w", err)
-	}
-	// return peers from db first
-	if len(peers) >= peersWanted {
-		return peers, nil
-	}
-
-	// Seed
-	resolver := &net.Resolver{}
-	ctx, cancel := context.WithTimeout(pctx, 15*time.Second)
-	defer cancel()
-
-	errorsSeen := 0
-	var moreSeeds []string
-	for _, v := range s.seeds {
-		host, port, err := net.SplitHostPort(v)
-		if err != nil {
-			log.Errorf("Failed to parse host/port: %v", err)
-			errorsSeen++
-			continue
-		}
-		ips, err := resolver.LookupIP(ctx, "ip", host)
-		if err != nil {
-			log.Errorf("lookup: %v", err)
-			errorsSeen++
-			continue
-		}
-
-		for _, ip := range ips {
-			moreSeeds = append(moreSeeds, net.JoinHostPort(ip.String(), port))
-		}
-	}
-
-	if errorsSeen == len(s.seeds) {
-		return nil, errors.New("could not seed")
-	}
-
-	// insert into peers table // TODO: ?
-	peers = append(peers, moreSeeds...)
-
-	// return fake peers but don't save them to the database // TODO: ?
-	return peers, nil
-}
-
-// TODO: move to PeerManager?
-func (s *Server) seedForever(ctx context.Context, peersWanted int) ([]string, error) {
-	log.Tracef("seedForever")
-	defer log.Tracef("seedForever")
-
-	minW := 5
-	maxW := 59
-	for {
-		holdOff := time.Duration(minW+rand.IntN(maxW-minW)) * time.Second
-		var em string
-		peers, err := s.seed(ctx, peersWanted)
-		if err != nil {
-			em = fmt.Sprintf("seed error: %v, retrying in %v", err, holdOff)
-		} else if peers != nil && len(peers) == 0 {
-			em = fmt.Sprintf("no peers found, retrying in %v", holdOff)
-		} else {
-			// great success!
-			return peers, nil
-		}
-		log.Errorf("%v", em)
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(holdOff):
-		}
-	}
-}
-
-// TODO: move to PeerManager?
-func (s *Server) peerAdd(p *peer) error {
-	log.Tracef("peerAdd: %v", p.address)
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	if _, ok := s.peers[p.address]; ok {
-		return fmt.Errorf("peer exists: %v", p)
-	}
-	s.peers[p.address] = p
-	return nil
-}
-
-// TODO: move to PeerManager?
-func (s *Server) peerDelete(address string) {
-	log.Tracef("peerDelete: %v", address)
-	s.mtx.Lock()
-	delete(s.peers, address)
-	s.mtx.Unlock()
-}
-
-// TODO: move to PeerManager?
-func (s *Server) peersLen() int {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	return len(s.peers)
-}
-
-// TODO: move to PeerManager?
-func (s *Server) peerManager(ctx context.Context) error {
-	log.Tracef("PeerManager")
-	defer log.Tracef("PeerManager exit")
-
-	// Channel for peering signals
-	peersWanted := s.cfg.PeersWanted
-	peerC := make(chan string, peersWanted)
-
-	log.Infof("Peer manager connecting to %v peers", peersWanted)
-	seeds, err := s.seedForever(ctx, peersWanted)
-	if err != nil {
-		// context canceled
-		return fmt.Errorf("seed: %w", err)
-	}
-	if len(seeds) == 0 {
-		// should not happen
-		return errors.New("no seeds found")
-	}
-
-	// Add a ticker that times out every 13 seconds regardless of what is
-	// going on. This will be nice and jittery and detect bad beers
-	// peridiocally.
-	loopTimeout := 13 * time.Second
-	loopTicker := time.NewTicker(loopTimeout)
-
-	x := 0
-	for {
-		peersActive := s.peersLen()
-		log.Debugf("peerManager active %v wanted %v", peersActive, peersWanted)
-		if peersActive < peersWanted {
-			// XXX we may want to make peers play along with waitgroup
-
-			// Connect peer
-			for range peersWanted - peersActive {
-				peer, err := NewPeer(s.wireNet, seeds[x])
-				if err != nil {
-					// This really should not happen
-					log.Errorf("new peer: %v", err)
-				} else {
-					if err := s.peerAdd(peer); err != nil {
-						log.Debugf("add peer: %v", err)
-					} else {
-						go s.peerConnect(ctx, peerC, peer)
-					}
-				}
-
-				// Increment x before peer add since we want to
-				// move on to the next seed in case the peer is
-				// already in connected.
-				x++
-				if x >= len(seeds) {
-					// XXX duplicate code from above
-					seeds, err = s.seedForever(ctx, peersWanted)
-					if err != nil {
-						// Context canceled
-						return fmt.Errorf("seed: %w", err)
-					}
-					if len(seeds) == 0 {
-						// should not happen
-						return errors.New("no seeds found")
-					}
-					x = 0
-				}
-
-			}
-		}
-
-		// Unfortunately we need a timer here to restart the loop.  The
-		// error is a laptop goes to sleep, all peers disconnect, RSTs
-		// are not seen by sleeping laptop, laptop wakes up. Now the
-		// expiration timers are all expired but not noticed by the
-		// laptop.
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case address := <-peerC:
-			// peer exited, connect to new one
-			s.peerDelete(address)
-
-			// Expire all blocks for peer
-			n := s.blocks.DeleteByValue(func(p any) bool {
-				return p.(*peer).address == address
-			})
-			log.Debugf("peer exited: %v blocks canceled: %v",
-				address, n)
-		case <-loopTicker.C:
-			log.Tracef("pinging active peers: %v", s.peersLen())
-			go s.pingAllPeers(ctx)
-			loopTicker.Reset(loopTimeout)
-		}
-	}
-}
-
-// TODO: move to PeerManager?
-func (s *Server) localPeerManager(ctx context.Context) error {
-	log.Tracef("localPeerManager")
-	defer log.Tracef("localPeerManager exit")
-
-	if len(s.seeds) != 1 {
-		return fmt.Errorf("expecting 1 seed, received %d", len(s.seeds))
-	}
-
-	peersWanted := 1
-	peerC := make(chan string, peersWanted)
-
-	peer, err := NewPeer(s.wireNet, s.seeds[0])
-	if err != nil {
-		return fmt.Errorf("new peer: %w", err)
-	}
-
-	log.Infof("Local peer manager connecting to %v peers", peersWanted)
-
-	for {
-		if err := s.peerAdd(peer); err != nil {
-			return err
-		}
-		go s.peerConnect(ctx, peerC, peer)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case address := <-peerC:
-			s.peerDelete(address)
-			log.Infof("peer exited: %v", address)
-		}
-
-		// hold off on reconnect
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(10 * time.Second):
-			log.Infof("peer exited: %v", "hold of timeout")
-		}
-	}
-}
-
-// TODO: move to PeerManager?
-func (s *Server) startPeerManager(ctx context.Context) error {
-	log.Tracef("startPeerManager")
-	defer log.Tracef("startPeerManager exit")
-
-	switch s.cfg.Network {
-	case networkLocalnet:
-		return s.localPeerManager(ctx)
-	}
-	return s.peerManager(ctx)
-}
-
-// TODO: move to PeerManager?
 func (s *Server) pingExpired(ctx context.Context, key any, value any) {
 	log.Tracef("pingExpired")
 	defer log.Tracef("pingExpired exit")
@@ -500,43 +243,43 @@ func (s *Server) pingExpired(ctx context.Context, key any, value any) {
 	}
 }
 
-// TODO: move to PeerManager?
-func (s *Server) pingAllPeers(ctx context.Context) {
-	log.Tracef("pingAllPeers")
-	defer log.Tracef("pingAllPeers exit")
-
-	// XXX reason and explain why this cannot be reentrant
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	for _, p := range s.peers {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if !p.isConnected() {
-			continue
-		}
-
-		// Cancel outstanding ping, should not happen
-		peer := p.String()
-		s.pings.Cancel(peer)
-
-		// We don't really care about the response. We just want to
-		// write to the connection to make it fail if the other side
-		// went away.
-		log.Debugf("Pinging: %v", p)
-		err := p.write(defaultCmdTimeout, wire.NewMsgPing(uint64(time.Now().Unix())))
-		if err != nil {
-			log.Debugf("ping %v: %v", p, err)
-			return
-		}
-
-		// Record outstanding ping
-		s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
-	}
-}
+// XXX BRING THIS BACK
+//func (s *Server) pingAllPeers(ctx context.Context) {
+//	log.Tracef("pingAllPeers")
+//	defer log.Tracef("pingAllPeers exit")
+//
+//	// XXX reason and explain why this cannot be reentrant
+//	s.mtx.Lock()
+//	defer s.mtx.Unlock()
+//
+//	for _, p := range s.peers {
+//		select {
+//		case <-ctx.Done():
+//			return
+//		default:
+//		}
+//		if !p.isConnected() {
+//			continue
+//		}
+//
+//		// Cancel outstanding ping, should not happen
+//		peer := p.String()
+//		s.pings.Cancel(peer)
+//
+//		// We don't really care about the response. We just want to
+//		// write to the connection to make it fail if the other side
+//		// went away.
+//		log.Debugf("Pinging: %v", p)
+//		err := p.write(defaultCmdTimeout, wire.NewMsgPing(uint64(time.Now().Unix())))
+//		if err != nil {
+//			log.Debugf("ping %v: %v", p, err)
+//			return
+//		}
+//
+//		// Record outstanding ping
+//		s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
+//	}
+//}
 
 func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, raw []byte) (bool, error) {
 	// Do accept addr and ping commands before we consider the peer up.
@@ -874,76 +617,36 @@ func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 	return hash, nil
 }
 
-// TODO: move to PeerManager?
-func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
-	log.Tracef("peerConnect %v", p)
-	defer func() {
-		select {
-		case peerC <- p.String(): // remove from peer manager
-		default:
-			log.Tracef("could not signal peer channel: %v", p)
-		}
-		log.Tracef("peerConnect exit %v", p)
-	}()
+func (s *Server) handlePeer(ctx context.Context, p *peer) error {
+	log.Tracef("handlePeer %v", p)
 
-	tctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	err := p.connect(tctx)
 	defer func() {
-		// Remove from database; it's ok to be aggressive if it
-		// failed with no route to host or failed with i/o
-		// timeout or invalid network (ipv4/ipv6).
-		//
-		// This does have the side-effect of draining the peer
-		// table during network outages but that is ok. The
-		// peers table will be rebuild based on DNS seeds.
-		//
-		// XXX This really belongs in peer manager.
-		if err := s.pm.Bad(p.String()); err != nil {
-			log.Errorf("peer manager delete (%v): %v", p, err)
-		}
-		if err := p.close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			if errors.Is(err, net.ErrClosed) {
-				panic(err)
-			}
-			log.Errorf("peer disconnect: %v %v", p, err)
-		}
+		log.Tracef("handlePeer exit %v", p)
+		s.pm.Bad(p.String()) // always close peer
 	}()
-	if err != nil {
-		log.Debugf("connect failed %v: %v", p, err)
-		return
-	}
 
 	// See if our tip is indeed canonical.
 	ch, err := s.sod(ctx, p)
 	if err != nil {
-		if errors.Is(err, leveldb.ErrClosed) {
-			// Database is closed, This is terminal.
-			log.Criticalf("sod: %v database closed", p)
-			return
-		}
+		return err
 	} else if ch != nil {
 		err := s.getHeaders(ctx, p, ch)
 		if err != nil {
-			// Database is closed, This is terminal.
-			log.Errorf("sod get headers: %v %v %v", p, ch, err)
-			return
+			return err
 		}
 	}
 
 	// Get p2p information.
 	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
 	if err != nil && !errors.Is(err, net.ErrClosed) {
-		log.Errorf("peer get addr: %v", err)
-		return
+		return err
 	}
 
 	if s.cfg.MempoolEnabled {
 		// Start building the mempool.
 		err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
 		if err != nil && !errors.Is(err, net.ErrClosed) {
-			log.Errorf("peer mempool: %v", err)
-			return
+			return err
 		}
 	}
 
@@ -958,28 +661,27 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		// See if we were interrupted, for the love of pete add ctx to wire
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		default:
 		}
 
 		msg, raw, err := p.read(defaultCmdTimeout)
 		if errors.Is(err, wire.ErrUnknownMessage) {
-			// skip unknown
+			// skip unknown message
 			continue
 		} else if err != nil {
 			// Check if context was canceled when read timeout occurs
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				select {
 				case <-ctx.Done():
-					return
+					return ctx.Err()
 				default:
 				}
 
 				// Regular timeout, proceed with reading.
 				continue
 			}
-			log.Debugf("peer read %v: %v", p, err)
-			return
+			return err
 		}
 
 		if verbose {
@@ -988,8 +690,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 
 		handled, err := s.handleGeneric(ctx, p, msg, raw)
 		if err != nil {
-			log.Errorf("%T: %v", msg, err)
-			return
+			return err
 		}
 		if handled {
 			continue
@@ -1007,8 +708,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		switch m := msg.(type) {
 		case *wire.MsgHeaders:
 			if err := s.handleHeaders(ctx, p, m); err != nil {
-				log.Errorf("handle headers: %v", err)
-				return
+				return err
 			}
 
 		default:
@@ -1227,24 +927,6 @@ func (s *Server) handleTx(ctx context.Context, p *peer, msg *wire.MsgTx, raw []b
 	return s.mempool.txsInsert(ctx, msg, raw)
 }
 
-// randomPeer returns a random peer from the map. Must be called with lock
-// held.
-// XXX move to PeerManager
-func (s *Server) randomPeer(ctx context.Context) (*peer, error) {
-	log.Tracef("randomPeer")
-	defer log.Tracef("randomPeer exit")
-
-	// unassigned slot, download block
-	for _, p := range s.peers {
-		if !p.isConnected() {
-			// Not connected yet
-			continue
-		}
-		return p, nil
-	}
-	return nil, errors.New("no peers")
-}
-
 func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
 	defer log.Tracef("syncBlocks exit")
@@ -1301,7 +983,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			// Already being downloaded.
 			continue
 		}
-		rp, err := s.randomPeer(ctx)
+		rp, err := s.pm.Random()
 		if err != nil {
 			// This can happen during startup or when the network
 			// is starved.
@@ -1495,13 +1177,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 		}
 
 		// Grab some peer stats as well
-		goodPeers, badPeers := s.pm.Stats()
-		// Gonna take it right into the Danger Zone! (double mutex)
-		for _, peer := range s.peers {
-			if peer.isConnected() {
-				connectedPeers++
-			}
-		}
+		connectedPeers, goodPeers, badPeers := s.pm.Stats()
 
 		// This is super awkward but prevents calculating N inserts *
 		// time.Before(10*time.Second).
@@ -1509,11 +1185,10 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 
 		log.Infof("Inserted %v blocks (%v) in the last %v",
 			s.blocksInserted, humanize.Bytes(s.blocksSize), delta)
-		log.Infof("Pending blocks %v/%v active peers %v connected peers %v "+
-			"good peers %v bad peers %v mempool %v %v",
-			s.blocks.Len(), defaultPendingBlocks, len(s.peers),
-			connectedPeers, goodPeers, badPeers, mempoolCount,
-			humanize.Bytes(uint64(mempoolSize)))
+		log.Infof("Pending blocks %v/%v connected peers %v good peers %v "+
+			"bad peers %v mempool %v %v",
+			s.blocks.Len(), defaultPendingBlocks, connectedPeers, goodPeers,
+			badPeers, mempoolCount, humanize.Bytes(uint64(mempoolSize)))
 
 		// Reset stats
 		s.blocksSize = 0
@@ -2104,11 +1779,30 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if err := s.startPeerManager(ctx); err != nil {
+		if err := s.pm.Run(ctx); err != nil {
 			select {
 			case errC <- err:
 			default:
 			}
+		}
+	}()
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			p, err := s.pm.RandomConnect(ctx)
+			if err != nil {
+				// Should not be reached
+				log.Errorf("random connect: %v", err)
+				continue
+			}
+			go func(pp *peer) {
+				err := s.handlePeer(ctx, pp)
+				if err != nil {
+					log.Errorf("%v: %v", pp, err)
+				}
+			}(p)
 		}
 	}()
 

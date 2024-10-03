@@ -85,7 +85,7 @@ func (pm *PeerManager) String() string {
 	pm.mtx.RLock()
 	defer pm.mtx.RUnlock()
 
-	return fmt.Sprintf("Bad exit peers %v good %v bad %v",
+	return fmt.Sprintf("connected %v good %v bad %v",
 		len(pm.peers), len(pm.good), len(pm.bad))
 }
 
@@ -127,19 +127,23 @@ func (pm *PeerManager) seed(pctx context.Context) error {
 }
 
 // Stats returns peer statistics.
-func (pm *PeerManager) Stats() (int, int) {
+func (pm *PeerManager) Stats() (int, int, int) {
 	log.Tracef("PeersStats")
 	defer log.Tracef("PeersStats exit")
 
 	pm.mtx.RLock()
 	defer pm.mtx.RUnlock()
-	return len(pm.good), len(pm.bad)
+	return len(pm.peers), len(pm.good), len(pm.bad)
 }
 
 func (pm *PeerManager) handleAddr(peers []string) {
 	for _, addr := range peers {
 		_, _, err := net.SplitHostPort(addr)
 		if err != nil {
+			continue
+		}
+		if _, ok := pm.peers[addr]; ok {
+			// Skip connected peers.
 			continue
 		}
 		if _, ok := pm.bad[addr]; ok {
@@ -243,26 +247,19 @@ func (pm *PeerManager) Bad(address string) error {
 	return nil
 }
 
-// XXX remove
-func (pm *PeerManager) PeersRandom(count int) ([]string, error) {
-	log.Tracef("PeersRandom %v", count)
-
-	i := 0
-	peers := make([]string, 0, count)
+func (pm *PeerManager) Random() (*peer, error) {
+	log.Tracef("Random")
+	defer log.Tracef("Random exit")
 
 	pm.mtx.RLock()
-	for k := range pm.good {
-		peers = append(peers, k)
-		i++
-		if i >= count {
-			break
+	pm.mtx.RUnlock()
+	for _, p := range pm.peers {
+		if p.isConnected() {
+			return p, nil
 		}
 	}
-	log.Debugf("PeersRandom exit %v (good %v bad %v)",
-		len(peers), len(pm.good), len(pm.bad))
-	pm.mtx.RUnlock()
 
-	return peers, nil
+	return nil, errors.New("no peers")
 }
 
 func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
@@ -271,17 +268,27 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 
 	// Block until a connect slot opens up
 	for {
+		log.Debugf("peer manager: %v", pm)
 		address := ""
 		pm.mtx.Lock()
-		if len(pm.peers) < pm.want {
-			// Check to see if we are out of good peers
-			if len(pm.good) == 0 {
-				pm.handleAddr(pm.seeds)
-			}
-			for k := range pm.good {
-				address = k
-				delete(pm.good, k)
-			}
+
+		// XXX add reset caluse
+		//if len(pm.peers) < pm.want {
+		//	// Check to see if we are out of good peers
+		//	if len(pm.peers) == 0 && len(pm.good) == 0 && len(pm.bad) > 0 {
+		//		log.Infof("RESET, needs flag")
+		//		clear(pm.good)
+		//		clear(pm.bad)
+		//		pm.handleAddr(pm.seeds)
+		//	}
+		//	for k := range pm.good {
+		//		address = k
+		//		delete(pm.good, k)
+		//	}
+		//}
+		for k := range pm.good {
+			address = k
+			continue
 		}
 		pm.mtx.Unlock()
 
@@ -290,12 +297,12 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 			p, err := NewPeer(pm.net, address)
 			if err != nil {
 				// XXX can't happen, remove error case from NewPeer
-				log.Debugf("%v", err)
+				log.Errorf("%v", err)
 				continue
 			}
 			err = p.connect(ctx)
 			if err != nil {
-				log.Debugf("%v: %v", p, err)
+				pm.Bad(address)
 				continue
 			}
 			pm.Connected(p)
