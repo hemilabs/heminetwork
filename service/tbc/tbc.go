@@ -229,12 +229,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
-// DB exports the underlying database. This should only be used in tests.
-// XXX remove this and deal with the fallout.
-func (s *Server) DB() tbcd.Database {
-	return s.db
-}
-
 func (s *Server) getHeaders(ctx context.Context, p *peer, hash *chainhash.Hash) error {
 	log.Tracef("getheaders %v %v", p, hash)
 	defer log.Tracef("getHeaders exit %v %v", p, hash)
