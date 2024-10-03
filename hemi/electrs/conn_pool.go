@@ -12,7 +12,7 @@ import (
 	"sync"
 )
 
-// connPool represents an ElectrumX connection pool.
+// connPool represents an electrs connection pool.
 type connPool struct {
 	network string
 	address string

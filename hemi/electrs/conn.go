@@ -24,7 +24,7 @@ const (
 	connPingTimeout  = 5 * time.Second
 )
 
-// clientConn is a connection with an ElectrumX server.
+// clientConn is a connection with an Electrs server.
 type clientConn struct {
 	mx        sync.Mutex
 	conn      net.Conn
@@ -147,7 +147,7 @@ func readResponse(ctx context.Context, r io.Reader, reqID uint64) (*JSONRPCRespo
 
 	if res.ID != reqID {
 		if res.ID == 0 {
-			// ElectrumX may have sent a request, ignore it and try again.
+			// Electrs may have sent a request, ignore it and try again.
 			// TODO(joshuasing): We should probably handle incoming requests by
 			//  having a separate goroutine that handles reading.
 			select {
@@ -155,7 +155,7 @@ func readResponse(ctx context.Context, r io.Reader, reqID uint64) (*JSONRPCRespo
 				return nil, ctx.Err()
 			default:
 			}
-			log.Debugf("Received a response from ElectrumX with ID 0, retrying read response...")
+			log.Debugf("Received a response from Electrs with ID 0, retrying read response...")
 			return readResponse(ctx, r, reqID)
 		}
 		return nil, fmt.Errorf("response ID differs from request ID (%d != %d)", res.ID, reqID)

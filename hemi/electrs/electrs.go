@@ -135,11 +135,11 @@ var (
 )
 
 type ClientOptions struct {
-	// InitialConnections is the number of initial ElectrumX connections to open
+	// InitialConnections is the number of initial Electrs connections to open
 	// and keep in the pool.
 	InitialConnections int
 
-	// MaxConnections is the maximum number of ElectrumX connections to keep in
+	// MaxConnections is the maximum number of Electrs connections to keep in
 	// the pool.
 	//
 	// If adding a connection back to the pool would result in the pool having
@@ -166,32 +166,32 @@ func newMetrics(namespace string) *metrics {
 			Namespace: namespace,
 			Subsystem: promSubsystem,
 			Name:      "connections_open",
-			Help:      "Number of open ElectrumX connections",
+			Help:      "Number of open Electrs connections",
 		}),
 		connsIdle: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: promSubsystem,
 			Name:      "connections_idle",
-			Help:      "Number of idle ElectrumX connections",
+			Help:      "Number of idle Electrs connections",
 		}),
 		connsOpened: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: promSubsystem,
 			Name:      "connections_opened_total",
-			Help:      "Total number of ElectrumX connections opened",
+			Help:      "Total number of Electrs connections opened",
 		}),
 		connsClosed: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: promSubsystem,
 			Name:      "connections_closed_total",
-			Help:      "Total number of ElectrumX connections closed",
+			Help:      "Total number of Electrs connections closed",
 		}),
 		rpcCallsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Subsystem: promSubsystem,
 				Name:      "rpc_calls_total",
-				Help:      "Total number of ElectrumX RPC calls",
+				Help:      "Total number of Electrs RPC calls",
 			},
 			[]string{"method"},
 		),
@@ -200,7 +200,7 @@ func newMetrics(namespace string) *metrics {
 				Namespace: namespace,
 				Subsystem: promSubsystem,
 				Name:      "rpc_calls_duration_seconds",
-				Help:      "ElectrumX RPC call durations in seconds",
+				Help:      "Electrs RPC call durations in seconds",
 				Buckets:   prometheus.DefBuckets,
 			},
 			[]string{"method"},
@@ -341,9 +341,9 @@ func (c *Client) Broadcast(ctx context.Context, rtx []byte) ([]byte, error) {
 func (c *Client) Height(ctx context.Context) (uint64, error) {
 	// TODO: The way this function is used could be improved.
 	//  "blockchain.headers.subscribe" subscribes to receive notifications from
-	//  the ElectrumX server, however this function appears to be used for
+	//  the Electrs server, however this function appears to be used for
 	//  polling instead, which could be replaced by handling the requests sent
-	//  from the ElectrumX server.
+	//  from the Electrs server.
 	hn := &HeaderNotification{}
 	if err := c.call(ctx, "blockchain.headers.subscribe", nil, hn); err != nil {
 		return 0, err
