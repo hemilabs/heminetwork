@@ -182,7 +182,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		printTime:  time.Now().Add(10 * time.Second),
 		blocks:     blocks,
 		peers:      make(map[string]*peer, cfg.PeersWanted),
-		pm:         newPeerManager(),
+		pm:         NewPeerManager(nil),
 		pings:      pings,
 		timeSource: blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
@@ -913,7 +913,7 @@ func (s *Server) peerConnect(ctx context.Context, peerC chan string, p *peer) {
 		// peers table will be rebuild based on DNS seeds.
 		//
 		// XXX This really belongs in peer manager.
-		if err := s.pm.PeerDelete(p.String()); err != nil {
+		if err := s.pm.Bad(p.String()); err != nil {
 			log.Errorf("peer manager delete (%v): %v", p, err)
 		}
 		if err := p.close(); err != nil && !errors.Is(err, net.ErrClosed) {
@@ -1081,7 +1081,7 @@ func (s *Server) handleAddr(_ context.Context, p *peer, msg *wire.MsgAddr) error
 		peers[i] = net.JoinHostPort(a.IP.String(), strconv.Itoa(int(a.Port)))
 	}
 
-	if err := s.pm.PeersInsert(peers); err != nil {
+	if err := s.pm.HandleAddr(peers); err != nil {
 		return fmt.Errorf("insert peers: %w", err)
 	}
 
@@ -1102,7 +1102,7 @@ func (s *Server) handleAddrV2(_ context.Context, p *peer, msg *wire.MsgAddrV2) e
 		peers = append(peers, addr)
 	}
 
-	if err := s.pm.PeersInsert(peers); err != nil {
+	if err := s.pm.HandleAddr(peers); err != nil {
 		return fmt.Errorf("insert peers: %w", err)
 	}
 

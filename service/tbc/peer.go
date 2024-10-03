@@ -212,9 +212,12 @@ func (p *peer) close() error {
 	defer log.Tracef("close exit")
 
 	p.mtx.Lock()
-	defer p.mtx.Unlock()
-	if p.conn != nil {
-		return p.conn.Close()
+	conn := p.conn
+	p.conn = nil
+	p.isDialing = true // mark not connected
+	p.mtx.Unlock()
+	if conn != nil {
+		return conn.Close()
 	}
 	return net.ErrClosed
 }
