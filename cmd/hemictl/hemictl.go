@@ -442,7 +442,7 @@ func tbcdb() error {
 			return fmt.Errorf("indexer: %w", err)
 		}
 
-	case "blocksbytxid":
+	case "blockhashbytxid":
 		txid := args["txid"]
 		if txid == "" {
 			return errors.New("txid: must be set")
@@ -452,7 +452,7 @@ func tbcdb() error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		bh, err := s.DB().BlockByTxId(ctx, chtxid)
+		bh, err := s.BlockHashByTxId(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}

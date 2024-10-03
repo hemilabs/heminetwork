@@ -301,7 +301,7 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 	txIndex := op.TxIndex()
 
 	// Find block hashes
-	blockHash, err := s.db.BlockByTxId(ctx, txId)
+	blockHash, err := s.db.BlockHashByTxId(ctx, txId)
 	if err != nil {
 		return nil, 0, fmt.Errorf("block by txid: %w", err)
 	}

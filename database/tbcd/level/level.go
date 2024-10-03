@@ -766,9 +766,9 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	return b, nil
 }
 
-func (l *ldb) BlockByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
-	log.Tracef("BlockByTxId")
-	defer log.Tracef("BlockByTxId exit")
+func (l *ldb) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+	log.Tracef("BlockHashByTxId")
+	defer log.Tracef("BlockHashByTxId exit")
 
 	blocks := make([]*chainhash.Hash, 0, 2)
 	txDB := l.pool[level.TransactionsDB]

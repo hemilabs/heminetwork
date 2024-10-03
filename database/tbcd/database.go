@@ -69,7 +69,7 @@ type Database interface {
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
-	BlockByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error)
+	BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error)
 	SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]SpentInfo, error)
 
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.

@@ -1787,11 +1787,18 @@ func (s *Server) BlockInTxIndex(ctx context.Context, blkid *chainhash.Hash) (boo
 	return s.db.BlockInTxIndex(ctx, blkid)
 }
 
+func (s *Server) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+	log.Tracef("BlockHashByTxId")
+	defer log.Tracef("BlockHashByTxId exit")
+
+	return s.db.BlockHashByTxId(ctx, txId)
+}
+
 func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
 	log.Tracef("TxById")
 	defer log.Tracef("TxById exit")
 
-	blockHash, err := s.db.BlockByTxId(ctx, txId)
+	blockHash, err := s.db.BlockHashByTxId(ctx, txId)
 	if err != nil {
 		return nil, err
 	}
