@@ -34,7 +34,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/bfgd"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/electrumx"
+	"github.com/hemilabs/heminetwork/hemi/electrs"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
@@ -73,17 +73,17 @@ func NewDefaultConfig() *Config {
 	}
 }
 
-// XXX figure out if this needs to be moved out into the electrumx package.
+// XXX figure out if this needs to be moved out into the electrs package.
 type btcClient interface {
 	Metrics() []prometheus.Collector
-	Balance(ctx context.Context, scriptHash []byte) (*electrumx.Balance, error)
+	Balance(ctx context.Context, scriptHash []byte) (*electrs.Balance, error)
 	Broadcast(ctx context.Context, rtx []byte) ([]byte, error)
 	Height(ctx context.Context) (uint64, error)
 	RawBlockHeader(ctx context.Context, height uint64) (*bitcoin.BlockHeader, error)
 	RawTransaction(ctx context.Context, txHash []byte) ([]byte, error)
 	Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 	TransactionAtPosition(ctx context.Context, height, index uint64) ([]byte, []string, error)
-	UTXOs(ctx context.Context, scriptHash []byte) ([]*electrumx.UTXO, error)
+	UTXOs(ctx context.Context, scriptHash []byte) ([]*electrs.UTXO, error)
 	Close() error
 }
 
@@ -228,13 +228,13 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	var err error
-	s.btcClient, err = electrumx.NewClient(cfg.EXBTCAddress, &electrumx.ClientOptions{
+	s.btcClient, err = electrs.NewClient(cfg.EXBTCAddress, &electrs.ClientOptions{
 		InitialConnections: cfg.EXBTCInitialConns,
 		MaxConnections:     cfg.EXBTCMaxConns,
 		PromNamespace:      promNamespace,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create electrumx client: %w", err)
+		return nil, fmt.Errorf("create electrs client: %w", err)
 	}
 
 	// We could use a PGURI verification here.
@@ -634,7 +634,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		txHash, merkleHashes, err := s.btcClient.TransactionAtPosition(ctx,
 			height, index)
 		if err != nil {
-			if errors.Is(err, electrumx.ErrNoTxAtPosition) {
+			if errors.Is(err, electrs.ErrNoTxAtPosition) {
 				// There is no way to tell how many transactions are
 				// in a block, so hopefully we've got them all...
 				return nil

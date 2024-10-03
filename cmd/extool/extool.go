@@ -16,7 +16,7 @@ import (
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 
-	"github.com/hemilabs/heminetwork/hemi/electrumx"
+	"github.com/hemilabs/heminetwork/hemi/electrs"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -37,12 +37,12 @@ func main() {
 		log.Fatal("No address specified")
 	}
 
-	c, err := electrumx.NewClient(address, &electrumx.ClientOptions{
+	c, err := electrs.NewClient(address, &electrs.ClientOptions{
 		InitialConnections: 1,
 		MaxConnections:     1,
 	})
 	if err != nil {
-		log.Fatalf("Failed to create electrumx client: %v", err)
+		log.Fatalf("Failed to create electrs client: %v", err)
 	}
 
 	ctx, ctxCancel := context.WithTimeout(context.Background(), 10*time.Second)

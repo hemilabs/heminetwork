@@ -16,7 +16,7 @@ import (
 // after 5 minutes and check that it has progressed at least to a certain
 // point
 func TestMonitor(t *testing.T) {
-	ms := 1000 * 60 * 5 // dump after 5 minutes
+	ms := (1000 * 60 * 5) + 25*1000 // dump after 5 minutes + 25 seconds for cushion (1 keystone)
 	output := monitor(uint(ms))
 
 	t.Log(output)
@@ -29,6 +29,7 @@ func TestMonitor(t *testing.T) {
 	// each keystone is 25 seconds, so there are 4 keystones per 100 seconds,
 	// we expect the number of pop txs to be at least once every 25 seconds
 	// for the time we waited
+	// add 25 seconds for cushion
 	seconds := ms / 1000
 	popTxsPer100Seconds := 4
 	expectedPopTxs := popTxsPer100Seconds * (seconds / 100)
