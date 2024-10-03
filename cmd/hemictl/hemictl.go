@@ -261,7 +261,7 @@ func tbcdb() error {
 
 	case "blocksmissing":
 		count := args["count"]
-		c, err := strconv.ParseInt(count, 10, 64)
+		c, err := strconv.ParseInt(count, 10, 32)
 		if len(count) > 0 && err != nil {
 			return fmt.Errorf("parse uint: %w", err)
 		}
