@@ -1762,16 +1762,21 @@ func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	log.Tracef("SpentOutputsByTxId")
 	defer log.Tracef("SpentOutputsByTxId exit")
 
-	// XXX investigate if this is indeed correct. As it is written now it
-	// returns all spent outputs. The db should always be canonical but
-	// assert that.
-
+	// As it is written now it returns all spent outputs per the tx index view.
 	si, err := s.db.SpentOutputsByTxId(ctx, txId)
 	if err != nil {
 		return nil, err
 	}
 
 	return si, nil
+}
+
+func (s *Server) BlockInTxIndex(ctx context.Context, blkid *chainhash.Hash) (bool, error) {
+	log.Tracef("BlockInTxIndex")
+	defer log.Tracef("BlockInTxIndex exit")
+
+	// As it is written now it returns true/false per the tx index view.
+	return s.db.BlockInTxIndex(ctx, blkid)
 }
 
 func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {

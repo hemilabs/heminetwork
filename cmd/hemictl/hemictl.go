@@ -502,23 +502,29 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		var revTxId [32]byte
-		copy(revTxId[:], chtxid[:])
 
-		index := args["index"]
-		if index == "" {
-			return errors.New("index: must be set")
-		}
-		idx, err := strconv.ParseUint(index, 10, 32)
+		si, err := s.SpentOutputsByTxId(ctx, chtxid)
 		if err != nil {
-			return fmt.Errorf("index: %w", err)
+			return fmt.Errorf("spend outputs by txid: %w", err)
 		}
-		op := tbcd.NewOutpoint(revTxId, uint32(idx))
-		sh, err := s.DB().ScriptHashByOutpoint(ctx, op)
+		for k := range si {
+			fmt.Printf("%v\n", si[k])
+		}
+
+	case "blockintxindex":
+		blkid := args["blkid"]
+		if blkid == "" {
+			return errors.New("blkid: must be set")
+		}
+		blkhash, err := chainhash.NewHashFromStr(blkid)
 		if err != nil {
-			return fmt.Errorf("block by hash: %w", err)
+			return fmt.Errorf("chainhash: %w", err)
 		}
-		spew.Dump(sh)
+		ok, err := s.BlockInTxIndex(ctx, blkhash)
+		if err != nil {
+			return fmt.Errorf("block in transaction index: %w", err)
+		}
+		fmt.Printf("%v\n", ok)
 
 	case "balancebyscripthash":
 		address := args["address"]

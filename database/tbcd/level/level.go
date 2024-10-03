@@ -838,6 +838,38 @@ func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]t
 	return si, nil
 }
 
+func (l *ldb) BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error) {
+	log.Tracef("BlockInTxIndex")
+	defer log.Tracef("BlockInTxIndex exit")
+
+	blocks := make([]*chainhash.Hash, 0, 2)
+	txDB := l.pool[level.TransactionsDB]
+	var blkid [33]byte
+	blkid[0] = 'b'
+	copy(blkid[1:], hash[:])
+	it := txDB.NewIterator(util.BytesPrefix(blkid[:]), nil)
+	defer it.Release()
+	for it.Next() {
+		block, err := chainhash.NewHash(it.Key()[33:])
+		if err != nil {
+			return false, err
+		}
+		blocks = append(blocks, block)
+	}
+	if err := it.Error(); err != nil {
+		return false, fmt.Errorf("blocks by id iterator: %w", err)
+	}
+	switch len(blocks) {
+	case 0:
+		return false, nil
+	case 1:
+		return true, nil
+	default:
+		panic(fmt.Sprintf("invalid blocks count %v: %v",
+			len(blocks), spew.Sdump(blocks)))
+	}
+}
+
 func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
 	log.Tracef("ScriptHashByOutpoint")
 	defer log.Tracef("ScriptHashByOutpoint exit")
