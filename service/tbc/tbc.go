@@ -65,20 +65,6 @@ var (
 	localnetSeeds = []string{
 		"127.0.0.1:18444",
 	}
-	testnetSeeds = []string{
-		"testnet-seed.bitcoin.jonasschnelli.ch:18333",
-		"seed.tbtc.petertodd.org:18333",
-		"seed.testnet.bitcoin.sprovoost.nl:18333",
-		"testnet-seed.bluematt.me:18333",
-	}
-	mainnetSeeds = []string{
-		"seed.bitcoin.sipa.be:8333",
-		"dnsseed.bluematt.me:8333",
-		"dnsseed.bitcoin.dashjr.org:8333",
-		"seed.bitcoinstats.com:8333",
-		"seed.bitnodes.io:8333",
-		"seed.bitcoin.jonasschnelli.ch:8333",
-	}
 )
 
 var log = loggo.GetLogger("tbc")
@@ -135,13 +121,12 @@ type Server struct {
 	mempool *mempool
 
 	// bitcoin network
+	seeds       []string // XXX remove
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
-	seeds       []string
 	checkpoints map[chainhash.Hash]uint64
-
-	pm *PeerManager
+	pm          *PeerManager
 
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
 	pings  *ttl.TTL // outstanding pings
@@ -182,7 +167,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		printTime:  time.Now().Add(10 * time.Second),
 		blocks:     blocks,
 		peers:      make(map[string]*peer, cfg.PeersWanted),
-		pm:         NewPeerManager(nil),
 		pings:      pings,
 		timeSource: blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
@@ -200,31 +184,33 @@ func NewServer(cfg *Config) (*Server, error) {
 		}
 	}
 
-	// We could use a PGURI verification here.
-
 	switch cfg.Network {
 	case "mainnet":
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
-		s.seeds = mainnetSeeds
 		s.checkpoints = mainnetCheckpoints
+
 	case "testnet3":
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
-		s.seeds = testnetSeeds
 		s.checkpoints = testnet3Checkpoints
+
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
-		s.seeds = localnetSeeds
 		s.checkpoints = make(map[chainhash.Hash]uint64)
+
+		// XXX currently broken
+
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
 	}
 
-	if len(cfg.Seeds) > 0 {
-		s.seeds = cfg.Seeds
+	pm, err := NewPeerManager(s.wireNet, 64) // XXX 64 is a constant
+	if err != nil {
+		return nil, err
 	}
+	s.pm = pm
 
 	return s, nil
 }
@@ -1081,9 +1067,7 @@ func (s *Server) handleAddr(_ context.Context, p *peer, msg *wire.MsgAddr) error
 		peers[i] = net.JoinHostPort(a.IP.String(), strconv.Itoa(int(a.Port)))
 	}
 
-	if err := s.pm.HandleAddr(peers); err != nil {
-		return fmt.Errorf("insert peers: %w", err)
-	}
+	s.pm.HandleAddr(peers)
 
 	return nil
 }
@@ -1102,9 +1086,7 @@ func (s *Server) handleAddrV2(_ context.Context, p *peer, msg *wire.MsgAddrV2) e
 		peers = append(peers, addr)
 	}
 
-	if err := s.pm.HandleAddr(peers); err != nil {
-		return fmt.Errorf("insert peers: %w", err)
-	}
+	s.pm.HandleAddr(peers)
 
 	return nil
 }

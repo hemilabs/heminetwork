@@ -5,29 +5,125 @@
 package tbc
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"math/rand/v2"
 	"net"
 	"sync"
+	"time"
+
+	"github.com/btcsuite/btcd/wire"
 )
 
 const (
-	maxPeersGood = 1 << 13
-	maxPeersBad  = 1 << 13
+	maxPeersGood = 1024
+	maxPeersBad  = 1024
+)
+
+var (
+	testnet3Seeds = []string{
+		"testnet-seed.bitcoin.jonasschnelli.ch:18333",
+		"seed.tbtc.petertodd.org:18333",
+		"seed.testnet.bitcoin.sprovoost.nl:18333",
+		"testnet-seed.bluematt.me:18333",
+	}
+	mainnetSeeds = []string{
+		"seed.bitcoin.sipa.be:8333",
+		"dnsseed.bluematt.me:8333",
+		"dnsseed.bitcoin.dashjr.org:8333",
+		"seed.bitcoinstats.com:8333",
+		"seed.bitnodes.io:8333",
+		"seed.bitcoin.jonasschnelli.ch:8333",
+	}
 )
 
 // PeerManager keeps track of the available peers and their quality.
 type PeerManager struct {
-	peersMtx    sync.RWMutex
-	good        map[string]struct{}
-	bad         map[string]struct{}
-	goodSeenMax int // keep track of max good peers seen to prevent early purge
+	mtx sync.RWMutex
+
+	net wire.BitcoinNet // bitcoin network to connect to
+
+	want int // number of peers we want to be connected to
+
+	dnsSeeds []string // hard coded dns seeds
+	seeds    []string // seeds obtained from DNS
+
+	peers map[string]*peer // connected peers
+	good  map[string]struct{}
+	bad   map[string]struct{}
 }
 
 // NewPeerManager returns a new peer manager.
-func NewPeerManager(seeds []string) *PeerManager {
-	return &PeerManager{
-		good: make(map[string]struct{}, maxPeersGood),
-		bad:  make(map[string]struct{}, maxPeersBad),
+func NewPeerManager(net wire.BitcoinNet, want int) (*PeerManager, error) {
+	if want == 0 {
+		return nil, errors.New("peers wanted must not be 0")
 	}
+
+	var dnsSeeds []string
+	switch net {
+	case wire.MainNet:
+		dnsSeeds = mainnetSeeds
+	case wire.TestNet3:
+		dnsSeeds = testnet3Seeds
+	case wire.TestNet:
+	default:
+		return nil, fmt.Errorf("invalid network: %v", net)
+	}
+
+	return &PeerManager{
+		net:      net,
+		want:     want,
+		dnsSeeds: dnsSeeds,
+		good:     make(map[string]struct{}, maxPeersGood),
+		bad:      make(map[string]struct{}, maxPeersBad),
+		peers:    make(map[string]*peer, want),
+	}, nil
+}
+
+func (pm *PeerManager) String() string {
+	pm.mtx.RLock()
+	defer pm.mtx.RUnlock()
+
+	return fmt.Sprintf("Bad exit peers %v good %v bad %v",
+		len(pm.peers), len(pm.good), len(pm.bad))
+}
+
+func (pm *PeerManager) seed(pctx context.Context) error {
+	log.Tracef("seed")
+	defer log.Tracef("seed exit")
+
+	// Seed
+	resolver := &net.Resolver{}
+	ctx, cancel := context.WithTimeout(pctx, 15*time.Second)
+	defer cancel()
+
+	errorsSeen := 0
+	for _, v := range pm.dnsSeeds {
+		host, port, err := net.SplitHostPort(v)
+		if err != nil {
+			log.Errorf("Failed to parse host/port: %v", err)
+			errorsSeen++
+			continue
+		}
+		ips, err := resolver.LookupIP(ctx, "ip", host)
+		if err != nil {
+			log.Errorf("lookup: %v", err)
+			errorsSeen++
+			continue
+		}
+
+		for _, ip := range ips {
+			address := net.JoinHostPort(ip.String(), port)
+			pm.seeds = append(pm.seeds, address)
+		}
+	}
+
+	if len(pm.seeds) == 0 {
+		return errors.New("could not dns seed")
+	}
+
+	return nil
 }
 
 // Stats returns peer statistics.
@@ -35,28 +131,83 @@ func (pm *PeerManager) Stats() (int, int) {
 	log.Tracef("PeersStats")
 	defer log.Tracef("PeersStats exit")
 
-	pm.peersMtx.RLock()
-	defer pm.peersMtx.RUnlock()
+	pm.mtx.RLock()
+	defer pm.mtx.RUnlock()
 	return len(pm.good), len(pm.bad)
 }
 
-// PeersInsert adds known peers.
-func (pm *PeerManager) HandleAddr(peers []string) error {
-	log.Tracef("HandleAddr %v", len(peers))
-
-	pm.peersMtx.Lock()
+func (pm *PeerManager) handleAddr(peers []string) {
 	for _, addr := range peers {
+		_, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			continue
+		}
 		if _, ok := pm.bad[addr]; ok {
 			// Skip bad peers.
 			continue
 		}
 		pm.good[addr] = struct{}{}
 	}
-	log.Debugf("PeersInsert exit %v good %v bad %v",
+	log.Debugf("HandleAddr exit %v good %v bad %v",
 		len(peers), len(pm.good), len(pm.bad))
-	pm.peersMtx.Unlock()
+}
+
+// HandleAddr adds peers to good list.
+func (pm *PeerManager) HandleAddr(peers []string) {
+	log.Tracef("HandleAddr %v", len(peers))
+
+	pm.mtx.Lock()
+	defer pm.mtx.Unlock()
+	pm.handleAddr(peers)
+}
+
+// Good adds peer good list.
+func (pm *PeerManager) Good(address string) error {
+	log.Tracef("Good")
+	defer log.Tracef("Good exit")
+
+	_, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+
+	pm.mtx.Lock()
+	defer pm.mtx.Unlock()
+
+	// If peer is connected don't add it to good list
+	if _, ok := pm.peers[address]; ok {
+		return fmt.Errorf("peer active: %v", address)
+	}
+
+	// Remove peer from bad.
+	delete(pm.bad, address)
+	// Add peer to good.
+	pm.good[address] = struct{}{}
+
+	log.Debugf("Good exit peers %v good %v bad %v",
+		len(pm.peers), len(pm.good), len(pm.bad))
 
 	return nil
+}
+
+func (pm *PeerManager) Connected(p *peer) {
+	log.Tracef("Connected")
+	defer log.Tracef("Connected exit")
+
+	address := p.String()
+
+	pm.mtx.Lock()
+	defer pm.mtx.Unlock()
+
+	// If peer is connected, ignore it
+	if _, ok := pm.peers[address]; !ok {
+		pm.peers[address] = p
+	}
+	delete(pm.bad, address)
+	delete(pm.good, address)
+
+	log.Debugf("Connected exit peers %v good %v bad %v",
+		len(pm.peers), len(pm.good), len(pm.bad))
 }
 
 // Bad marks the peer as bad.
@@ -69,42 +220,37 @@ func (pm *PeerManager) Bad(address string) error {
 		return err
 	}
 
-	pm.peersMtx.Lock()
+	pm.mtx.Lock()
+
+	// If peer is connected, disconnect it and mark it bad
+	if p, ok := pm.peers[address]; ok {
+		if p != nil {
+			p.close()
+		}
+		delete(pm.peers, address)
+	}
 
 	// Remove peer from good.
 	delete(pm.good, address)
 	// Mark peer as bad.
 	pm.bad[address] = struct{}{}
 
-	// Crude hammer to reset good/bad state of peers
+	log.Debugf("Bad exit peers %v good %v bad %v",
+		len(pm.peers), len(pm.good), len(pm.bad))
 
-	// XXX goodSeenMax should be a connection test; not a threshold.
-	// Another reason to move all peer stuff into the manager.
-	pm.goodSeenMax = max(pm.goodSeenMax, len(pm.good))
-	if pm.goodSeenMax > minPeersRequired && len(pm.good) < minPeersRequired {
-		// Kill all peers to force caller to reseed. This happens when
-		// network is down for a while and all peers are moved into
-		// bad map.
-		clear(pm.good)
-		clear(pm.bad)
-		pm.good = make(map[string]struct{}, 8192)
-		pm.bad = make(map[string]struct{}, 8192)
-		pm.goodSeenMax = 0
-		log.Debugf("peer cache purged")
-	}
-	log.Debugf("Bad exit good %v bad %v", len(pm.good), len(pm.bad))
-	pm.peersMtx.Unlock()
+	pm.mtx.Unlock()
 
 	return nil
 }
 
+// XXX remove
 func (pm *PeerManager) PeersRandom(count int) ([]string, error) {
 	log.Tracef("PeersRandom %v", count)
 
 	i := 0
 	peers := make([]string, 0, count)
 
-	pm.peersMtx.RLock()
+	pm.mtx.RLock()
 	for k := range pm.good {
 		peers = append(peers, k)
 		i++
@@ -114,7 +260,91 @@ func (pm *PeerManager) PeersRandom(count int) ([]string, error) {
 	}
 	log.Debugf("PeersRandom exit %v (good %v bad %v)",
 		len(peers), len(pm.good), len(pm.bad))
-	pm.peersMtx.RUnlock()
+	pm.mtx.RUnlock()
 
 	return peers, nil
+}
+
+func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
+	log.Tracef("RandomConnect")
+	defer log.Tracef("RandomConnect")
+
+	// Block until a connect slot opens up
+	for {
+		address := ""
+		pm.mtx.Lock()
+		if len(pm.peers) < pm.want {
+			// Check to see if we are out of good peers
+			if len(pm.good) == 0 {
+				pm.handleAddr(pm.seeds)
+			}
+			for k := range pm.good {
+				address = k
+				delete(pm.good, k)
+			}
+		}
+		pm.mtx.Unlock()
+
+		if len(address) > 0 {
+			// connect peer
+			p, err := NewPeer(pm.net, address)
+			if err != nil {
+				// XXX can't happen, remove error case from NewPeer
+				log.Debugf("%v", err)
+				continue
+			}
+			err = p.connect(ctx)
+			if err != nil {
+				log.Debugf("%v: %v", p, err)
+				continue
+			}
+			pm.Connected(p)
+			return p, nil
+		}
+
+		// Block but do timeout to see if something was reaped
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
+	// NewPeer(pm.net, address)
+	return nil, errors.New("nope")
+}
+
+func (pm *PeerManager) Run(ctx context.Context) error {
+	log.Tracef("Run")
+	defer log.Tracef("Run")
+
+	log.Infof("Starting DNS seeder")
+	minW := 5
+	maxW := 59
+	for {
+		err := pm.seed(ctx)
+		if err != nil {
+			log.Debugf("seed: %v", err)
+		} else {
+			break
+		}
+
+		holdOff := time.Duration(minW+rand.IntN(maxW-minW)) * time.Second
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(holdOff):
+		}
+	}
+	pm.HandleAddr(pm.seeds) // Add all seeds to good list
+	log.Infof("DNS seeding complete")
+
+	log.Infof("Starting peer manager")
+	defer log.Infof("Peer manager stopped")
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	return nil
 }
