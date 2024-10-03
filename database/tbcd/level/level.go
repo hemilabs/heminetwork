@@ -997,6 +997,7 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 
 			// insert block hash to determine if it was indexed later
 			if _, ok := bm[string(k[33:65])]; !ok {
+				bm[string(k[33:65])] = struct{}{}
 				copy(block[1:], k[33:65])
 				blk = block
 			} else {
