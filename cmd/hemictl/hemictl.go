@@ -610,7 +610,7 @@ func tbcdb() error {
 			sh = tbcd.NewScriptHashFromScript(h)
 		}
 
-		utxos, err := s.DB().UtxosByScriptHash(ctx, sh, startNum, countNum)
+		utxos, err := s.UtxosByScriptHash(ctx, sh, startNum, countNum)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}

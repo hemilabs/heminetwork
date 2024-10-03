@@ -1778,6 +1778,13 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 	return utxos, nil
 }
 
+func (s *Server) UtxosByScriptHash(ctx context.Context, hash tbcd.ScriptHash, start uint64, count uint64) ([]tbcd.Utxo, error) {
+	log.Tracef("UtxosByScriptHash")
+	defer log.Tracef("UtxosByScriptHash exit")
+
+	return s.db.UtxosByScriptHash(ctx, hash, start, count)
+}
+
 func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputsByTxId")
 	defer log.Tracef("SpentOutputsByTxId exit")
