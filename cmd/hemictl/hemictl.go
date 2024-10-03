@@ -227,20 +227,20 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		bh, err := s.DB().BlockHeaderByHash(ctx, ch)
+		bh, height, err := s.BlockHeaderByHash(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("block header by hash: %w", err)
 		}
 		fmt.Printf("hash  : %v\n", bh)
-		fmt.Printf("height: %v\n", bh.Height)
+		fmt.Printf("height: %v\n", height)
 
 	case "blockheaderbest":
-		bhb, err := s.DB().BlockHeaderBest(ctx)
+		height, bh, err := s.BlockHeaderBest(ctx)
 		if err != nil {
-			return fmt.Errorf("block headers best: %w", err)
+			return fmt.Errorf("block header best: %w", err)
 		}
-		fmt.Printf("hash  : %v\n", bhb.Hash)
-		fmt.Printf("height: %v\n", bhb.Height)
+		fmt.Printf("hash  : %v\n", bh.BlockHash())
+		fmt.Printf("height: %v\n", height)
 
 	case "blockheadersbyheight":
 		height := args["height"]
@@ -251,7 +251,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("parse uint: %w", err)
 		}
-		bh, err := s.DB().BlockHeadersByHeight(ctx, h)
+		bh, err := s.BlockHeadersByHeight(ctx, h)
 		if err != nil {
 			return fmt.Errorf("block header by height: %w", err)
 		}
@@ -261,18 +261,17 @@ func tbcdb() error {
 
 	case "blocksmissing":
 		count := args["count"]
-		c, err := strconv.ParseUint(count, 10, 64)
+		c, err := strconv.ParseInt(count, 10, 64)
 		if len(count) > 0 && err != nil {
 			return fmt.Errorf("parse uint: %w", err)
 		}
-		if c == 0 {
-			c = 1
-		}
-		bh, err := s.DB().BlocksMissing(ctx, int(c))
+		bi, err := s.BlocksMissing(ctx, int(c))
 		if err != nil {
-			return fmt.Errorf("block header by height: %w", err)
+			return fmt.Errorf("blocks missing: %w", err)
 		}
-		spew.Dump(bh)
+		for k := range bi {
+			fmt.Printf("%v: %v\n", bi[k].Height, bi[k].Hash)
+		}
 
 	// case "blockinsert":
 

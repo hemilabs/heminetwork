@@ -1625,6 +1625,8 @@ func (s *Server) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcuti
 	return s.db.BlockByHash(ctx, hash)
 }
 
+// XXX should we return a form of tbcd.BlockHeader which contains all info? and
+// note that the return parameters here are reversed from BlockHeaderBest call.
 func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*wire.BlockHeader, uint64, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
@@ -1638,6 +1640,12 @@ func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*
 		return nil, 0, fmt.Errorf("bytes to header: %w", err)
 	}
 	return bhw, bh.Height, nil
+}
+
+func (s *Server) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentifier, error) {
+	log.Tracef("BlocksMissing")
+	defer log.Tracef("BlocksMissing exit")
+	return s.db.BlocksMissing(ctx, count)
 }
 
 func (s *Server) RawBlockHeadersByHeight(ctx context.Context, height uint64) ([]api.ByteSlice, error) {
