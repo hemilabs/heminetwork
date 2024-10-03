@@ -1625,6 +1625,8 @@ func (s *Server) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcuti
 	return s.db.BlockByHash(ctx, hash)
 }
 
+// XXX should we return a form of tbcd.BlockHeader which contains all info? and
+// note that the return parameters here are reversed from BlockHeaderBest call.
 func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*wire.BlockHeader, uint64, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
@@ -1638,6 +1640,12 @@ func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*
 		return nil, 0, fmt.Errorf("bytes to header: %w", err)
 	}
 	return bhw, bh.Height, nil
+}
+
+func (s *Server) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentifier, error) {
+	log.Tracef("BlocksMissing")
+	defer log.Tracef("BlocksMissing exit")
+	return s.db.BlocksMissing(ctx, count)
 }
 
 func (s *Server) RawBlockHeadersByHeight(ctx context.Context, height uint64) ([]api.ByteSlice, error) {
@@ -1737,6 +1745,18 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 	return balance, nil
 }
 
+func (s *Server) BalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash) (uint64, error) {
+	log.Tracef("BalanceByScriptHash")
+	defer log.Tracef("BalanceByScriptHash exit")
+
+	balance, err := s.db.BalanceByScriptHash(ctx, hash)
+	if err != nil {
+		return 0, err
+	}
+
+	return balance, nil
+}
+
 func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	log.Tracef("UtxosByAddress")
 	defer log.Tracef("UtxosByAddress exit")
@@ -1758,14 +1778,18 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 	return utxos, nil
 }
 
+func (s *Server) UtxosByScriptHash(ctx context.Context, hash tbcd.ScriptHash, start uint64, count uint64) ([]tbcd.Utxo, error) {
+	log.Tracef("UtxosByScriptHash")
+	defer log.Tracef("UtxosByScriptHash exit")
+
+	return s.db.UtxosByScriptHash(ctx, hash, start, count)
+}
+
 func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputsByTxId")
 	defer log.Tracef("SpentOutputsByTxId exit")
 
-	// XXX investigate if this is indeed correct. As it is written now it
-	// returns all spent outputs. The db should always be canonical but
-	// assert that.
-
+	// As it is written now it returns all spent outputs per the tx index view.
 	si, err := s.db.SpentOutputsByTxId(ctx, txId)
 	if err != nil {
 		return nil, err
@@ -1774,11 +1798,26 @@ func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	return si, nil
 }
 
+func (s *Server) BlockInTxIndex(ctx context.Context, blkid *chainhash.Hash) (bool, error) {
+	log.Tracef("BlockInTxIndex")
+	defer log.Tracef("BlockInTxIndex exit")
+
+	// As it is written now it returns true/false per the tx index view.
+	return s.db.BlockInTxIndex(ctx, blkid)
+}
+
+func (s *Server) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+	log.Tracef("BlockHashByTxId")
+	defer log.Tracef("BlockHashByTxId exit")
+
+	return s.db.BlockHashByTxId(ctx, txId)
+}
+
 func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
 	log.Tracef("TxById")
 	defer log.Tracef("TxById exit")
 
-	blockHash, err := s.db.BlockByTxId(ctx, txId)
+	blockHash, err := s.db.BlockHashByTxId(ctx, txId)
 	if err != nil {
 		return nil, err
 	}

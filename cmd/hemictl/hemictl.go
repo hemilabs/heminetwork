@@ -227,20 +227,20 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		bh, err := s.DB().BlockHeaderByHash(ctx, ch)
+		bh, height, err := s.BlockHeaderByHash(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("block header by hash: %w", err)
 		}
 		fmt.Printf("hash  : %v\n", bh)
-		fmt.Printf("height: %v\n", bh.Height)
+		fmt.Printf("height: %v\n", height)
 
 	case "blockheaderbest":
-		bhb, err := s.DB().BlockHeaderBest(ctx)
+		height, bh, err := s.BlockHeaderBest(ctx)
 		if err != nil {
-			return fmt.Errorf("block headers best: %w", err)
+			return fmt.Errorf("block header best: %w", err)
 		}
-		fmt.Printf("hash  : %v\n", bhb.Hash)
-		fmt.Printf("height: %v\n", bhb.Height)
+		fmt.Printf("hash  : %v\n", bh.BlockHash())
+		fmt.Printf("height: %v\n", height)
 
 	case "blockheadersbyheight":
 		height := args["height"]
@@ -251,7 +251,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("parse uint: %w", err)
 		}
-		bh, err := s.DB().BlockHeadersByHeight(ctx, h)
+		bh, err := s.BlockHeadersByHeight(ctx, h)
 		if err != nil {
 			return fmt.Errorf("block header by height: %w", err)
 		}
@@ -261,18 +261,17 @@ func tbcdb() error {
 
 	case "blocksmissing":
 		count := args["count"]
-		c, err := strconv.ParseUint(count, 10, 64)
+		c, err := strconv.ParseInt(count, 10, 32)
 		if len(count) > 0 && err != nil {
 			return fmt.Errorf("parse uint: %w", err)
 		}
-		if c == 0 {
-			c = 1
-		}
-		bh, err := s.DB().BlocksMissing(ctx, int(c))
+		bi, err := s.BlocksMissing(ctx, int(c))
 		if err != nil {
-			return fmt.Errorf("block header by height: %w", err)
+			return fmt.Errorf("blocks missing: %w", err)
 		}
-		spew.Dump(bh)
+		for k := range bi {
+			fmt.Printf("%v: %v\n", bi[k].Height, bi[k].Hash)
+		}
 
 	// case "blockinsert":
 
@@ -285,7 +284,7 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		b, err := s.DB().BlockByHash(ctx, ch)
+		b, err := s.BlockByHash(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
@@ -443,7 +442,7 @@ func tbcdb() error {
 			return fmt.Errorf("indexer: %w", err)
 		}
 
-	case "blocksbytxid":
+	case "blockhashbytxid":
 		txid := args["txid"]
 		if txid == "" {
 			return errors.New("txid: must be set")
@@ -453,7 +452,7 @@ func tbcdb() error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		bh, err := s.DB().BlockByTxId(ctx, chtxid)
+		bh, err := s.BlockHashByTxId(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
@@ -502,23 +501,29 @@ func tbcdb() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		var revTxId [32]byte
-		copy(revTxId[:], chtxid[:])
 
-		index := args["index"]
-		if index == "" {
-			return errors.New("index: must be set")
-		}
-		idx, err := strconv.ParseUint(index, 10, 32)
+		si, err := s.SpentOutputsByTxId(ctx, chtxid)
 		if err != nil {
-			return fmt.Errorf("index: %w", err)
+			return fmt.Errorf("spend outputs by txid: %w", err)
 		}
-		op := tbcd.NewOutpoint(revTxId, uint32(idx))
-		sh, err := s.DB().ScriptHashByOutpoint(ctx, op)
+		for k := range si {
+			fmt.Printf("%v\n", si[k])
+		}
+
+	case "blockintxindex":
+		blkid := args["blkid"]
+		if blkid == "" {
+			return errors.New("blkid: must be set")
+		}
+		blkhash, err := chainhash.NewHashFromStr(blkid)
 		if err != nil {
-			return fmt.Errorf("block by hash: %w", err)
+			return fmt.Errorf("chainhash: %w", err)
 		}
-		spew.Dump(sh)
+		ok, err := s.BlockInTxIndex(ctx, blkhash)
+		if err != nil {
+			return fmt.Errorf("block in transaction index: %w", err)
+		}
+		fmt.Printf("%v\n", ok)
 
 	case "balancebyscripthash":
 		address := args["address"]
@@ -549,7 +554,7 @@ func tbcdb() error {
 			sh = tbcd.NewScriptHashFromScript(h)
 		}
 
-		balance, err := s.DB().BalanceByScriptHash(ctx, sh)
+		balance, err := s.BalanceByScriptHash(ctx, sh)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}
@@ -605,7 +610,7 @@ func tbcdb() error {
 			sh = tbcd.NewScriptHashFromScript(h)
 		}
 
-		utxos, err := s.DB().UtxosByScriptHash(ctx, sh, startNum, countNum)
+		utxos, err := s.UtxosByScriptHash(ctx, sh, startNum, countNum)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}

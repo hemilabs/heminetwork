@@ -766,9 +766,9 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	return b, nil
 }
 
-func (l *ldb) BlockByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
-	log.Tracef("BlockByTxId")
-	defer log.Tracef("BlockByTxId exit")
+func (l *ldb) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+	log.Tracef("BlockHashByTxId")
+	defer log.Tracef("BlockHashByTxId exit")
 
 	blocks := make([]*chainhash.Hash, 0, 2)
 	txDB := l.pool[level.TransactionsDB]
@@ -836,6 +836,38 @@ func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]t
 	}
 
 	return si, nil
+}
+
+func (l *ldb) BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error) {
+	log.Tracef("BlockInTxIndex")
+	defer log.Tracef("BlockInTxIndex exit")
+
+	blocks := make([]*chainhash.Hash, 0, 2)
+	txDB := l.pool[level.TransactionsDB]
+	var blkid [33]byte
+	blkid[0] = 'b'
+	copy(blkid[1:], hash[:])
+	it := txDB.NewIterator(util.BytesPrefix(blkid[:]), nil)
+	defer it.Release()
+	for it.Next() {
+		block, err := chainhash.NewHash(it.Key()[33:])
+		if err != nil {
+			return false, err
+		}
+		blocks = append(blocks, block)
+	}
+	if err := it.Error(); err != nil {
+		return false, fmt.Errorf("blocks by id iterator: %w", err)
+	}
+	switch len(blocks) {
+	case 0:
+		return false, nil
+	case 1:
+		return true, nil
+	default:
+		panic(fmt.Sprintf("invalid blocks count %v: %v",
+			len(blocks), spew.Sdump(blocks)))
+	}
 }
 
 func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
@@ -980,6 +1012,12 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 	defer txsDiscard()
 
+	block := make([]byte, 33)
+	block[0] = 'b'
+	var blk []byte
+	bm := make(map[string]struct{}, len(txs))
+	defer clear(bm)
+
 	txsBatch := new(leveldb.Batch)
 	for k, v := range txs {
 		// cache is being emptied so we can slice it here.
@@ -989,17 +1027,34 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 			key = k[0:65]
 			value = nil
 
+			// insert block hash to determine if it was indexed later
+			if _, ok := bm[string(k[33:65])]; !ok {
+				bm[string(k[33:65])] = struct{}{}
+				copy(block[1:], k[33:65])
+				blk = block
+			} else {
+				blk = nil
+			}
 		case 's':
 			key = k[:]
 			value = v[:]
+
+			// don't insert block
+			blk = nil
 		default:
 			return fmt.Errorf("invalid cache entry: %v", spew.Sdump(k))
 		}
 		switch direction {
 		case -1:
 			txsBatch.Delete(key)
+			if blk != nil {
+				txsBatch.Delete(blk)
+			}
 		case 1:
 			txsBatch.Put(key, value)
+			if blk != nil {
+				txsBatch.Put(blk, nil)
+			}
 		}
 
 		// XXX this probably should be done by the caller but we do it
