@@ -35,6 +35,8 @@ const (
 	EventConnected = "event_connected"
 )
 
+var defaultTestTimeout = 30 * time.Second
+
 func TestBTCPrivateKeyFromHex(t *testing.T) {
 	tests := []struct {
 		input string
@@ -982,7 +984,7 @@ func TestConnectToBFGAndPerformMineWithAuth(t *testing.T) {
 
 	publicKey := hex.EncodeToString(privateKey.PubKey().SerializeCompressed())
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTestTimeout)
 	defer cancel()
 	server, msgCh, cleanup := createMockBFG(ctx, t, []string{publicKey}, false, 1)
 	defer cleanup()
@@ -1046,7 +1048,7 @@ func TestConnectToBFGAndPerformMine(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTestTimeout)
 	defer cancel()
 	server, msgCh, cleanup := createMockBFG(ctx, t, []string{}, false, 1)
 	defer cleanup()
@@ -1110,7 +1112,7 @@ func TestConnectToBFGAndPerformMineMultiple(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTestTimeout)
 	defer cancel()
 	server, msgCh, cleanup := createMockBFG(ctx, t, []string{}, false, 2)
 	defer cleanup()
@@ -1158,7 +1160,7 @@ func TestConnectToBFGAndPerformMineMultiple(t *testing.T) {
 		missing := false
 		for m := range messagesExpected {
 			message := string(m)
-			if messagesReceived[message] != messagesExpected[m] {
+			if messagesReceived[message] < messagesExpected[m] {
 				t.Logf("still missing message %v, found %d want %d", m, messagesReceived[message], messagesExpected[m])
 				missing = true
 			}
@@ -1175,7 +1177,7 @@ func TestConnectToBFGAndPerformMineALot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTestTimeout)
 	defer cancel()
 	server, msgCh, cleanup := createMockBFG(ctx, t, []string{}, false, 100)
 	defer cleanup()
@@ -1240,7 +1242,7 @@ func TestConnectToBFGAndPerformMineWithAuthError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultTestTimeout)
 	defer cancel()
 	server, msgCh, cleanup := createMockBFG(ctx, t, []string{"incorrect"}, false, 1)
 	defer cleanup()

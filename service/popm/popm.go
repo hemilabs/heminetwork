@@ -590,9 +590,9 @@ func (m *Miner) mine(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-m.mineNowCh:
-			go m.mineKnownKeystones(ctx)
+			m.mineKnownKeystones(ctx)
 		case <-time.After(l2KeystoneRetryTimeout):
-			go m.mineKnownKeystones(ctx)
+			m.mineKnownKeystones(ctx)
 		}
 	}
 }
