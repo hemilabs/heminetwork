@@ -316,8 +316,6 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 		case <-time.After(3 * time.Second):
 		}
 	}
-	// NewPeer(pm.net, address)
-	return nil, errors.New("nope")
 }
 
 func (pm *PeerManager) Run(ctx context.Context) error {
@@ -352,6 +350,4 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-
-	return nil
 }
