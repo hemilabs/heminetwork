@@ -1353,7 +1353,13 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	// Index Utxo
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
-		return err
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("utxo index hash: %w", err)
+		}
+		utxoHH = &HashHeight{
+			Hash:   s.chainParams.GenesisHash,
+			Height: 0,
+		}
 	}
 	utxoBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash)
 	if err != nil {
@@ -1379,7 +1385,13 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	// Index Tx
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
-		return err
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("tx index hash: %w", err)
+		}
+		txHH = &HashHeight{
+			Hash:   s.chainParams.GenesisHash,
+			Height: 0,
+		}
 	}
 	txBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
 	if err != nil {
