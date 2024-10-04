@@ -131,6 +131,10 @@ type Server struct {
 	db tbcd.Database
 
 	// Prometheus
+	prom struct {
+		syncInfo             SyncInfo
+		connected, good, bad int
+	} // periodically updated by promPoll
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
 
@@ -737,6 +741,65 @@ func (s *Server) promRunning() float64 {
 		return 1
 	}
 	return 0
+}
+
+func (s *Server) promSynced() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if s.prom.syncInfo.Synced {
+		return 1
+	}
+	return 0
+}
+
+func (s *Server) promBlockHeader() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.syncInfo.BlockHeader.Height)
+}
+
+func (s *Server) promUtxo() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.syncInfo.Utxo.Height)
+}
+
+func (s *Server) promTx() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.syncInfo.Tx.Height)
+}
+
+func (s *Server) promConnectedPeers() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.connected)
+}
+
+func (s *Server) promGoodPeers() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.good)
+}
+
+func (s *Server) promBadPeers() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.bad)
+}
+
+func (s *Server) promPoll(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+
+		s.prom.syncInfo = s.Synced(ctx)
+		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
+
+	}
 }
 
 // blksMissing checks the block cache and the database and returns true if all
@@ -1763,6 +1826,41 @@ func (s *Server) Run(pctx context.Context) error {
 				Name:      "running",
 				Help:      "Is tbc service running.",
 			}, s.promRunning),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "synced",
+				Help:      "Is tbc synced.",
+			}, s.promSynced),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "blockheader_height",
+				Help:      "Blockheader height.",
+			}, s.promBlockHeader),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "utxo_sync_height",
+				Help:      "Height of utxo indexer.",
+			}, s.promUtxo),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "tx_sync_height",
+				Help:      "Height of tx indexer.",
+			}, s.promTx),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "peers_connected",
+				Help:      "Number of peers connected.",
+			}, s.promConnectedPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "peers_good",
+				Help:      "Number of good peers.",
+			}, s.promGoodPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "peers_bad",
+				Help:      "Number of bad peers.",
+			}, s.promBadPeers),
 		}
 		s.wg.Add(1)
 		go func() {
@@ -1772,6 +1870,15 @@ func (s *Server) Run(pctx context.Context) error {
 				return
 			}
 			log.Infof("prometheus clean shutdown")
+		}()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			err := s.promPoll(ctx)
+			if err != nil {
+				log.Errorf("prometheus poll terminated with error: %v", err)
+				return
+			}
 		}()
 	}
 
