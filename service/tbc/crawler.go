@@ -128,7 +128,6 @@ func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeade
 
 	// 2. Walk chain back until X and Y point to the same parent.
 	for {
-		log.Infof("height: %v", h)
 		bhs, err := s.db.BlockHeadersByHeight(ctx, h)
 		if err != nil {
 			return nil, fmt.Errorf("block headers by height: %w", err)
@@ -178,8 +177,8 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 	// Move best block header backwards until we find bh.
 	for {
 		// log.Debugf("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
-		if height, ok := s.checkpoints[*bhb.Hash]; ok && height <= bh.Height {
-			return false, nil
+		if height, ok := s.checkpoints[*bhb.Hash]; ok && bh.Height <= height {
+			return true, nil
 		}
 		bhb, err = s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
 		if err != nil {
@@ -197,12 +196,16 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
 	log.Tracef("findCanonicalParent %v", bh)
 
+	// Genesis is always canonical.
+	if bh.Hash.IsEqual(s.chainParams.GenesisHash) {
+		return bh, nil
+	}
+
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for {
-		// XXX make discernable error here
 		canonical, err := s.isCanonical(ctx, bh)
 		if err != nil {
 			return nil, err
@@ -1212,8 +1215,8 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 	defer log.Tracef("IndexIsLinear exit")
 
 	// Verify exit condition hash
-	if endHash == nil {
-		return 0, errors.New("must provide an end hash")
+	if startHash == nil || endHash == nil {
+		return 0, errors.New("must provide start and end hash")
 	}
 	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
@@ -1353,7 +1356,13 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	// Index Utxo
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
-		return err
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("utxo index hash: %w", err)
+		}
+		utxoHH = &HashHeight{
+			Hash:   s.chainParams.GenesisHash,
+			Height: 0,
+		}
 	}
 	utxoBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash)
 	if err != nil {
@@ -1379,7 +1388,13 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	// Index Tx
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
-		return err
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("tx index hash: %w", err)
+		}
+		txHH = &HashHeight{
+			Hash:   s.chainParams.GenesisHash,
+			Height: 0,
+		}
 	}
 	txBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
 	if err != nil {
