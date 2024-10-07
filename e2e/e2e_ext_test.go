@@ -53,19 +53,19 @@ import (
 	"github.com/hemilabs/heminetwork/database/bfgd"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/electrumx"
+	"github.com/hemilabs/heminetwork/hemi/electrs"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/bfg"
 	"github.com/hemilabs/heminetwork/service/bss"
 )
 
 const (
-	testDBPrefix                = "e2e_ext_test_db_"
-	mockEncodedBlockHeader      = "\"0000c02048cd664586152c3dcf356d010cbb9216fdeb3b1aeae256d59a0700000000000086182c855545356ec11d94972cf31b97ef01ae7c9887f4349ad3f0caf2d3c0b118e77665efdf2819367881fb\""
-	mockTxHash                  = "7fe9c3262f8fe26764b01955b4c996296f7c0c72945af1556038a084fcb37dbb"
-	mockTxPos                   = 3
-	mockTxheight                = 2
-	mockElectrumxConnectTimeout = 3 * time.Second
+	testDBPrefix              = "e2e_ext_test_db_"
+	mockEncodedBlockHeader    = "\"0000c02048cd664586152c3dcf356d010cbb9216fdeb3b1aeae256d59a0700000000000086182c855545356ec11d94972cf31b97ef01ae7c9887f4349ad3f0caf2d3c0b118e77665efdf2819367881fb\""
+	mockTxHash                = "7fe9c3262f8fe26764b01955b4c996296f7c0c72945af1556038a084fcb37dbb"
+	mockTxPos                 = 3
+	mockTxheight              = 2
+	mockElectrsConnectTimeout = 3 * time.Second
 )
 
 var mockMerkleHashes = []string{
@@ -282,7 +282,7 @@ func nextPort(ctx context.Context, t *testing.T) int {
 	}
 }
 
-func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrumxAddr string, btcStartHeight uint64, auth bool) (*bfg.Server, string, string, string) {
+func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, auth bool) (*bfg.Server, string, string, string) {
 	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
@@ -290,7 +290,7 @@ func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, el
 		PrivateListenAddress: bfgPrivateListenAddress,
 		PublicListenAddress:  bfgPublicListenAddress,
 		PgURI:                pgUri,
-		EXBTCAddress:         electrumxAddr,
+		EXBTCAddress:         electrsAddr,
 		BTCStartHeight:       btcStartHeight,
 		PublicKeyAuth:        auth,
 		RequestLimit:         bfgapi.DefaultRequestLimit,
@@ -321,8 +321,8 @@ func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, el
 	return bfgServer, bfgPrivateListenAddress, bfgWsPrivateUrl, bfgWsPublicUrl
 }
 
-func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrumxAddr string, btcStartHeight uint64) (*bfg.Server, string, string, string) {
-	return createBfgServerWithAuth(ctx, t, pgUri, electrumxAddr, btcStartHeight, false)
+func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64) (*bfg.Server, string, string, string) {
+	return createBfgServerWithAuth(ctx, t, pgUri, electrsAddr, btcStartHeight, false)
 }
 
 func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
@@ -361,7 +361,7 @@ func reverseAndEncodeEncodedHash(encodedHash string) string {
 	return hex.EncodeToString(rev)
 }
 
-func createMockElectrumxServer(ctx context.Context, t *testing.T, l2Keystone *hemi.L2Keystone, btx []byte) (string, func()) {
+func createMockElectrsServer(ctx context.Context, t *testing.T, l2Keystone *hemi.L2Keystone, btx []byte) (string, func()) {
 	addr := fmt.Sprintf("localhost:%d", nextPort(ctx, t))
 
 	listener, err := net.Listen("tcp", addr)
@@ -391,14 +391,14 @@ func createMockElectrumxServer(ctx context.Context, t *testing.T, l2Keystone *he
 				panic(err)
 			}
 
-			go handleMockElectrumxConnection(ctx, t, conn, btx)
+			go handleMockElectrsConnection(ctx, t, conn, btx)
 		}
 	}()
 
 	return addr, cleanup
 }
 
-func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.Conn, btx []byte) {
+func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Conn, btx []byte) {
 	mb := wire.MsgTx{}
 	if err := mb.Deserialize(bytes.NewBuffer(btx)); err != nil {
 		panic(fmt.Sprintf("failed to deserialize tx: %v", err))
@@ -426,13 +426,13 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 			return
 		}
 
-		req := electrumx.JSONRPCRequest{}
+		req := electrs.JSONRPCRequest{}
 		err = json.Unmarshal(buf[:n], &req)
 		if err != nil {
 			panic(err)
 		}
 
-		res := electrumx.JSONRPCResponse{}
+		res := electrs.JSONRPCResponse{}
 		if req.Method == "blockchain.transaction.broadcast" {
 			res.ID = req.ID
 			res.Error = nil
@@ -442,7 +442,7 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 		if req.Method == "blockchain.headers.subscribe" {
 			res.ID = req.ID
 			res.Error = nil
-			headerNotification := electrumx.HeaderNotification{
+			headerNotification := electrs.HeaderNotification{
 				Height:       mockTxheight,
 				BinaryHeader: "aaaa",
 			}
@@ -464,11 +464,8 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 		if req.Method == "blockchain.transaction.id_from_pos" {
 			res.ID = req.ID
 			res.Error = nil
-			params := struct {
-				Height uint64 `json:"height"`
-				TXPos  uint64 `json:"tx_pos"`
-				Merkle bool   `json:"merkle"`
-			}{}
+
+			params := []any{}
 
 			err := json.Unmarshal(req.Params, &params)
 			if err != nil {
@@ -476,21 +473,21 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 			}
 
 			result := struct {
-				TXHash string   `json:"tx_hash"`
+				TXHash string   `json:"tx_id"`
 				Merkle []string `json:"merkle"`
 			}{}
 
-			t.Logf("checking height %d, pos %d", params.Height, params.TXPos)
+			t.Logf("checking height %d, pos %d", params[0], params[1])
 
-			if params.TXPos == mockTxPos && params.Height == mockTxheight {
+			if params[0].(float64) == mockTxheight && params[1].(float64) == mockTxPos {
 				result.TXHash = reverseAndEncodeEncodedHash(mb.TxID())
 				result.Merkle = mockMerkleHashes
 			}
 
 			// pretend that there are no transactions past mockTxHeight
 			// and mockTxPos
-			if params.Height >= mockTxheight && params.TXPos > mockTxPos {
-				res.Error = electrumx.NewJSONRPCError(1, "no tx at pos")
+			if params[0].(float64) >= mockTxheight && params[1].(float64) > mockTxPos {
+				res.Error = electrs.NewJSONRPCError(1, "no tx at position")
 			}
 
 			b, err := json.Marshal(&result)
@@ -505,17 +502,14 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 			res.ID = req.ID
 			res.Error = nil
 
-			params := struct {
-				TXHash  string `json:"tx_hash"`
-				Verbose bool   `json:"verbose"`
-			}{}
+			params := []any{}
 
 			err := json.Unmarshal(req.Params, &params)
 			if err != nil {
 				panic(err)
 			}
 
-			if params.TXHash == reverseAndEncodeEncodedHash(mb.TxID()) {
+			if params[0] == reverseAndEncodeEncodedHash(mb.TxID()) {
 				j, err := json.Marshal(hex.EncodeToString(btx))
 				if err != nil {
 					panic(err)
@@ -527,7 +521,7 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 		if req.Method == "blockchain.scripthash.get_balance" {
 			res.ID = req.ID
 			res.Error = nil
-			j, err := json.Marshal(electrumx.Balance{
+			j, err := json.Marshal(electrs.Balance{
 				Confirmed:   1,
 				Unconfirmed: 2,
 			})
@@ -541,7 +535,7 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 		if req.Method == "blockchain.headers.subscribe" {
 			res.ID = req.ID
 			res.Error = nil
-			j, err := json.Marshal(electrumx.HeaderNotification{
+			j, err := json.Marshal(electrs.HeaderNotification{
 				Height: 10,
 			})
 			if err != nil {
@@ -568,6 +562,7 @@ func handleMockElectrumxConnection(ctx context.Context, t *testing.T, conn net.C
 				Index:  9999,
 				Value:  999999,
 			}}
+
 			b, err := json.Marshal(j)
 			if err != nil {
 				panic(err)
@@ -937,14 +932,14 @@ func TestBitcoinBalance(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -1009,7 +1004,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 		name          string
 		expectedError string
 		requests      any
-		electrumx     bool
+		electrs       bool
 		skip          bool
 	}
 
@@ -1018,7 +1013,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			name:          "bitcoin balance error",
 			expectedError: "internal error",
 			requests:      []bfgapi.BitcoinBalanceRequest{},
-			electrumx:     false,
+			electrs:       false,
 		},
 		{
 			name:          "bitcoin broadcast deserialize error",
@@ -1028,18 +1023,18 @@ func TestBFGPublicErrorCases(t *testing.T) {
 					Transaction: []byte("invalid..."),
 				},
 			},
-			electrumx: false,
+			electrs: false,
 		},
 		{
-			name:          "bitcoin broadcast electrumx error",
+			name:          "bitcoin broadcast electrs error",
 			expectedError: "internal error",
 			requests: []bfgapi.BitcoinBroadcastRequest{
 				{
 					Transaction: btx,
 				},
 			},
-			electrumx: false,
-			skip:      true,
+			electrs: false,
+			skip:    true,
 		},
 		{
 			name:          "bitcoin broadcast database error",
@@ -1052,25 +1047,25 @@ func TestBFGPublicErrorCases(t *testing.T) {
 					Transaction: btx,
 				},
 			},
-			skip:      true,
-			electrumx: true,
+			skip:    true,
+			electrs: true,
 		},
 		{
-			name:          "bitcoin info electrumx error",
+			name:          "bitcoin info electrs error",
 			expectedError: "internal error",
 			requests: []bfgapi.BitcoinInfoRequest{
 				{},
 			},
-			electrumx: false,
-			skip:      true,
+			electrs: false,
+			skip:    true,
 		},
 		{
-			name:          "bitcoin utxos electrumx error",
+			name:          "bitcoin utxos electrs error",
 			expectedError: "internal error",
 			requests: []bfgapi.BitcoinUTXOsRequest{
 				{},
 			},
-			electrumx: false,
+			electrs: false,
 		},
 	}
 
@@ -1089,10 +1084,10 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			ctx, cancel := defaultTestContext()
 			defer cancel()
 
-			electrumxAddr := ""
+			electrsAddr := ""
 			var cleanupE func()
 
-			if tti.electrumx {
+			if tti.electrs {
 				l2Keystone := hemi.L2Keystone{
 					Version:            1,
 					L1BlockNumber:      5,
@@ -1105,15 +1100,15 @@ func TestBFGPublicErrorCases(t *testing.T) {
 
 				btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-				electrumxAddr, cleanupE = createMockElectrumxServer(ctx, t, nil, btx)
+				electrsAddr, cleanupE = createMockElectrsServer(ctx, t, nil, btx)
 				defer cleanupE()
-				err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+				err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 				if err != nil {
 					t.Fatal(err)
 				}
 			}
 
-			_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+			_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 			c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 			if err != nil {
@@ -1299,14 +1294,14 @@ func TestBitcoinInfo(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -1383,14 +1378,14 @@ func TestBitcoinUTXOs(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -1475,14 +1470,14 @@ func TestBitcoinBroadcast(t *testing.T) {
 	// 1
 	btx := createBtcTx(t, 800, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	minerPrivateKeyBytes := []byte{1, 2, 3, 4, 5, 6, 7, 199}
 
@@ -1575,14 +1570,14 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	// 1
 	btx := createBtcTx(t, 800, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, nil, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	minerPrivateKeyBytes := []byte{1, 2, 3, 4, 5, 6, 7, 199}
 
@@ -1708,9 +1703,9 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	// }
 }
 
-// TestProcessBitcoinBlockNewBtcBlock mocks a btc block response from electrumx
+// TestProcessBitcoinBlockNewBtcBlock mocks a btc block response from electrs
 // server and ensures that the btc block was inserted correctly
-// 1 create mock electrumx server, by default it will send a mock btc block
+// 1 create mock electrs server, by default it will send a mock btc block
 // when blockchain.block.header is called
 // 2 ensure that btc_block is inserted with correct values.  this is checked on
 // an internal timer, so give this a timeout
@@ -1738,14 +1733,14 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 	btx := createBtcTx(t, 800, &l2Keystone, minerPrivateKeyBytes)
 
 	// 1
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	expectedBtcBlockHeader, err := hex.DecodeString(strings.Replace(mockEncodedBlockHeader, "\"", "", 2))
 	if err != nil {
@@ -1759,7 +1754,7 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 	// 2
 	// wait a max of 10 seconds (with a resolution of 1 second) for the
 	// btc_block to be inserted into the db.  this happens on a timer
-	// when checking electrumx
+	// when checking electrs
 	lctx, lcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer lcancel()
 	var btcBlockHeader *bfgd.BtcBlock
@@ -1792,10 +1787,10 @@ loop:
 }
 
 // TestProcessBitcoinBlockNewFullPopBasis takes a full btc tx from the mock
-// electrumx server and ensures that a new full pop_basis was inserted into the
+// electrs server and ensures that a new full pop_basis was inserted into the
 // db
 // 1 create btc tx
-// 2 run mock electrumx, instructing it to use the created btc tx
+// 2 run mock electrs, instructing it to use the created btc tx
 // 3 query database for newly created pop_basis, this happens on a timer
 // 4 ensure pop_basis was inserted and filled out with correct fields
 func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
@@ -1823,19 +1818,19 @@ func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
 	btx := createBtcTx(t, 199, &l2Keystone, []byte{1, 2, 3})
 
 	// 2
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	// 3
 	// wait a max of 10 seconds (with a resolution of 1 second) for the
 	// btc_block to be inserted into the db.  this happens on a timer
-	// when checking electrumx
+	// when checking electrs
 	lctx, lcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer lcancel()
 	var popBases []bfgd.PopBasis
@@ -1905,11 +1900,11 @@ loop:
 }
 
 // TestBitcoinBroadcastThenUpdate will insert a pop_basis record from
-// BitcoinBroadcast RPC call to BFG.  Then wait for electrumx to send full
+// BitcoinBroadcast RPC call to BFG.  Then wait for electrs to send full
 // information about that pop_basis from a pop tx.  then assert that the
 // pop_basis was filled out correctly
 // 1 create a btc tx
-// 2 create a mock electrumx server that will return that btc tx
+// 2 create a mock electrs server that will return that btc tx
 // 3 call BitcoinBroadcast RPC call
 // 4 wait for full pop_basis to be in database
 // 5 assert the pop_basis fields are correct
@@ -1942,14 +1937,14 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 	}
 
 	// 2
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrumxAddr, mockElectrumxConnectTimeout)
+	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -2005,7 +2000,7 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 	// 4
 	// wait a max of 10 seconds (with a resolution of 1 second) for the
 	// btc_block to be inserted into the db.  this happens on a timer
-	// when checking electrumx
+	// when checking electrs
 	lctx, lcancel := context.WithTimeout(ctx, 10*time.Second)
 	defer lcancel()
 	var popBases []bfgd.PopBasis
@@ -2754,7 +2749,7 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 }
 
 // TestNotifyOnNewBtcBlockBFGClients tests that upon getting a new btc block,
-// in this case from (mock) electrumx, that a new btc block
+// in this case from (mock) electrs, that a new btc block
 // notification will be sent to all clients connected to BFG
 // 1. connect client
 // 2. wait for notification
@@ -2781,17 +2776,17 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
 	if err := EnsureCanConnectTCP(
 		t,
-		electrumxAddr,
-		mockElectrumxConnectTimeout,
+		electrsAddr,
+		mockElectrsConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	// 1
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -2824,7 +2819,7 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 }
 
 // TestNotifyOnNewBtcFinalityBFGClients tests that upon getting a new btc block,
-// in this case from (mock) electrumx, that a finality notification will be sent
+// in this case from (mock) electrs, that a finality notification will be sent
 // to all clients connected to BFG
 // 1. connect client
 // 2. wait for notification
@@ -2851,17 +2846,17 @@ func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
 	if err := EnsureCanConnectTCP(
 		t,
-		electrumxAddr,
-		mockElectrumxConnectTimeout,
+		electrsAddr,
+		mockElectrsConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	// 1
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -2955,7 +2950,7 @@ func TestNotifyOnL2KeystonesBFGClients(t *testing.T) {
 }
 
 // TestNotifyOnNewBtcBlockBSSClients tests that upon getting a new btc block,
-// in this case from (mock) electrumx, that a new btc notification
+// in this case from (mock) electrs, that a new btc notification
 // will be sent to all clients connected to BSS
 // 1. connect client
 // 2. wait for notification
@@ -2982,17 +2977,17 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
 	if err := EnsureCanConnectTCP(
 		t,
-		electrumxAddr,
-		mockElectrumxConnectTimeout,
+		electrsAddr,
+		mockElectrsConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	// 1
@@ -3025,7 +3020,7 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 }
 
 // TestNotifyOnNewBtcFinalityBSSClients tests that upon getting a new btc block,
-// in this case from (mock) electrumx, that a new finality notification
+// in this case from (mock) electrs, that a new finality notification
 // will be sent to all clients connected to BSS
 // 1. connect client
 // 2. wait for notification
@@ -3052,17 +3047,17 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
 	if err := EnsureCanConnectTCP(
 		t,
-		electrumxAddr,
-		mockElectrumxConnectTimeout,
+		electrsAddr,
+		mockElectrsConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	// 1
@@ -3117,17 +3112,17 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
 	if err := EnsureCanConnectTCP(
 		t,
-		electrumxAddr,
-		mockElectrumxConnectTimeout,
+		electrsAddr,
+		mockElectrsConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 
 	wg := sync.WaitGroup{}
 
@@ -3188,17 +3183,17 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
-	electrumxAddr, cleanupE := createMockElectrumxServer(ctx, t, &l2Keystone, btx)
+	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
 	if err := EnsureCanConnectTCP(
 		t,
-		electrumxAddr,
-		mockElectrumxConnectTimeout,
+		electrsAddr,
+		mockElectrsConnectTimeout,
 	); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrumxAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	wg := sync.WaitGroup{}

@@ -2,7 +2,7 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-package electrumx
+package electrs
 
 import (
 	"context"
@@ -23,12 +23,12 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin"
 )
 
-var log = loggo.GetLogger("electrumx")
+var log = loggo.GetLogger("electrs")
 
 // Prometheus subsystem name.
-const promSubsystem = "electrumx"
+const promSubsystem = "electrs"
 
-// https://electrumx.readthedocs.io/en/latest/protocol-basics.html
+// https://github.com/romanz/electrs
 
 type JSONRPCError struct {
 	Code    int    `json:"code"`
@@ -123,7 +123,7 @@ var (
 	ErrNoTxAtPosition = NewNoTxAtPositionError(errors.New("no tx at position"))
 )
 
-// Client implements an electrumx JSON RPC client.
+// Client implements an electrs JSON RPC client.
 type Client struct {
 	connPool *connPool
 	metrics  *metrics
@@ -135,11 +135,11 @@ var (
 )
 
 type ClientOptions struct {
-	// InitialConnections is the number of initial ElectrumX connections to open
+	// InitialConnections is the number of initial Electrs connections to open
 	// and keep in the pool.
 	InitialConnections int
 
-	// MaxConnections is the maximum number of ElectrumX connections to keep in
+	// MaxConnections is the maximum number of Electrs connections to keep in
 	// the pool.
 	//
 	// If adding a connection back to the pool would result in the pool having
@@ -166,32 +166,32 @@ func newMetrics(namespace string) *metrics {
 			Namespace: namespace,
 			Subsystem: promSubsystem,
 			Name:      "connections_open",
-			Help:      "Number of open ElectrumX connections",
+			Help:      "Number of open Electrs connections",
 		}),
 		connsIdle: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: promSubsystem,
 			Name:      "connections_idle",
-			Help:      "Number of idle ElectrumX connections",
+			Help:      "Number of idle Electrs connections",
 		}),
 		connsOpened: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: promSubsystem,
 			Name:      "connections_opened_total",
-			Help:      "Total number of ElectrumX connections opened",
+			Help:      "Total number of Electrs connections opened",
 		}),
 		connsClosed: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: promSubsystem,
 			Name:      "connections_closed_total",
-			Help:      "Total number of ElectrumX connections closed",
+			Help:      "Total number of Electrs connections closed",
 		}),
 		rpcCallsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
 				Namespace: namespace,
 				Subsystem: promSubsystem,
 				Name:      "rpc_calls_total",
-				Help:      "Total number of ElectrumX RPC calls",
+				Help:      "Total number of Electrs RPC calls",
 			},
 			[]string{"method"},
 		),
@@ -200,7 +200,7 @@ func newMetrics(namespace string) *metrics {
 				Namespace: namespace,
 				Subsystem: promSubsystem,
 				Name:      "rpc_calls_duration_seconds",
-				Help:      "ElectrumX RPC call durations in seconds",
+				Help:      "Electrs RPC call durations in seconds",
 				Buckets:   prometheus.DefBuckets,
 			},
 			[]string{"method"},
@@ -219,7 +219,7 @@ func (m *metrics) collectors() []prometheus.Collector {
 	}
 }
 
-// NewClient returns an initialised electrumx client.
+// NewClient returns an initialised electrs client.
 func NewClient(address string, opts *ClientOptions) (*Client, error) {
 	if opts == nil {
 		opts = new(ClientOptions)
@@ -316,11 +316,8 @@ func (c *Client) Balance(ctx context.Context, scriptHash []byte) (*Balance, erro
 	if err != nil {
 		return nil, fmt.Errorf("invalid script hash: %w", err)
 	}
-	params := struct {
-		ScriptHash string `json:"scripthash"`
-	}{
-		ScriptHash: hash.String(),
-	}
+
+	params := []any{hash.String()}
 	var balance Balance
 	if err := c.call(ctx, "blockchain.scripthash.get_balance", &params, &balance); err != nil {
 		return nil, err
@@ -329,11 +326,7 @@ func (c *Client) Balance(ctx context.Context, scriptHash []byte) (*Balance, erro
 }
 
 func (c *Client) Broadcast(ctx context.Context, rtx []byte) ([]byte, error) {
-	params := struct {
-		RawTx string `json:"raw_tx"`
-	}{
-		RawTx: hex.EncodeToString(rtx),
-	}
+	params := []any{hex.EncodeToString(rtx)}
 	var txHashStr string
 	if err := c.call(ctx, "blockchain.transaction.broadcast", &params, &txHashStr); err != nil {
 		return nil, err
@@ -348,24 +341,21 @@ func (c *Client) Broadcast(ctx context.Context, rtx []byte) ([]byte, error) {
 func (c *Client) Height(ctx context.Context) (uint64, error) {
 	// TODO: The way this function is used could be improved.
 	//  "blockchain.headers.subscribe" subscribes to receive notifications from
-	//  the ElectrumX server, however this function appears to be used for
+	//  the Electrs server, however this function appears to be used for
 	//  polling instead, which could be replaced by handling the requests sent
-	//  from the ElectrumX server.
+	//  from the Electrs server.
 	hn := &HeaderNotification{}
 	if err := c.call(ctx, "blockchain.headers.subscribe", nil, hn); err != nil {
 		return 0, err
 	}
+
+	log.Infof("received height of %d", hn.Height)
+
 	return hn.Height, nil
 }
 
 func (c *Client) RawBlockHeader(ctx context.Context, height uint64) (*bitcoin.BlockHeader, error) {
-	params := struct {
-		Height   uint64 `json:"height"`
-		CPHeight uint64 `json:"cp_height"`
-	}{
-		Height:   height,
-		CPHeight: 0,
-	}
+	params := []any{height}
 	var rbhStr string
 	if err := c.call(ctx, "blockchain.block.header", &params, &rbhStr); err != nil {
 		return nil, fmt.Errorf("get block header: %w", err)
@@ -382,13 +372,8 @@ func (c *Client) RawTransaction(ctx context.Context, txHash []byte) ([]byte, err
 	if err != nil {
 		return nil, fmt.Errorf("invalid transaction hash: %w", err)
 	}
-	params := struct {
-		TXHash  string `json:"tx_hash"`
-		Verbose bool   `json:"verbose"`
-	}{
-		TXHash:  hash.String(),
-		Verbose: false,
-	}
+
+	params := []any{hash.String(), false}
 	var rtxStr string
 	if err := c.call(ctx, "blockchain.transaction.get", &params, &rtxStr); err != nil {
 		return nil, fmt.Errorf("get transaction: %w", err)
@@ -405,13 +390,7 @@ func (c *Client) Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 	if err != nil {
 		return nil, fmt.Errorf("invalid transaction hash: %w", err)
 	}
-	params := struct {
-		TXHash  string `json:"tx_hash"`
-		Verbose bool   `json:"verbose"`
-	}{
-		TXHash:  hash.String(),
-		Verbose: true,
-	}
+	params := []any{hash.String(), true}
 	var txJSON json.RawMessage
 	if err := c.call(ctx, "blockchain.transaction.get", &params, &txJSON); err != nil {
 		return nil, fmt.Errorf("get transaction: %w", err)
@@ -420,21 +399,14 @@ func (c *Client) Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 }
 
 func (c *Client) TransactionAtPosition(ctx context.Context, height, index uint64) ([]byte, []string, error) {
-	params := struct {
-		Height uint64 `json:"height"`
-		TXPos  uint64 `json:"tx_pos"`
-		Merkle bool   `json:"merkle"`
-	}{
-		Height: height,
-		TXPos:  index,
-		Merkle: true,
-	}
 	result := struct {
-		TXHash string   `json:"tx_hash"`
+		TXHash string   `json:"tx_id"`
 		Merkle []string `json:"merkle"`
 	}{}
+
+	params := []any{height, index, true}
 	if err := c.call(ctx, "blockchain.transaction.id_from_pos", &params, &result); err != nil {
-		if strings.HasPrefix(err.Error(), "no tx at position ") {
+		if strings.HasPrefix(err.Error(), "invalid tx_pos ") {
 			return nil, nil, NewNoTxAtPositionError(err)
 		} else if strings.HasPrefix(err.Error(), "db error: DBError('block ") && strings.Contains(err.Error(), " not on disk ") {
 			return nil, nil, NewBlockNotOnDiskError(err)
@@ -455,11 +427,8 @@ func (c *Client) UTXOs(ctx context.Context, scriptHash []byte) ([]*UTXO, error) 
 	if err != nil {
 		return nil, fmt.Errorf("invalid script hash: %w", err)
 	}
-	params := struct {
-		ScriptHash string `json:"scripthash"`
-	}{
-		ScriptHash: hash.String(),
-	}
+
+	params := []any{hash.String()}
 	var eutxos []*exUTXO
 	if err := c.call(ctx, "blockchain.scripthash.listunspent", &params, &eutxos); err != nil {
 		return nil, err

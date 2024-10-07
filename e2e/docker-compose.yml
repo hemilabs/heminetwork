@@ -33,7 +33,7 @@ services:
       - "-rpcport=18443"
       - "-rpcconnect=bitcoind"
       - "generatetoaddress"
-      - "3000" # need to generate a lot for greater chance to not spend coinbase
+      - "1000" # need to generate a lot for greater chance to not spend coinbase
       - "$BTC_ADDRESS"
     restart: on-failure
 
@@ -55,19 +55,28 @@ services:
       - "1"
       - "$BTC_ADDRESS"
 
-  electrumx:
-    image: "lukechilds/electrumx@sha256:2949784536f8f85af229004e12e5b5c3a1d7428918a492f77b4e958035c2ae2a"
+  electrs:
+    build:
+      context: https://github.com/romanz/electrs.git#1d02f10ec38edbc3b7df6b16bb8989d9bc0aaa0f
     depends_on:
       - "bitcoind"
-    ports:
-      - "50001:8000"
-    environment:
-      DAEMON_URL: "http://user:password@bitcoind:18443"
-      COIN: "Bitcoin"
-      COST_HARD_LIMIT: "0"
-      COST_SOFT_LIMIT: "0"
-      MAX_SEND: "8388608"
-      NET: "regtest"
+    command:
+      - electrs
+      - --electrum-rpc-addr
+      - '0.0.0.0:50001'
+      - --daemon-rpc-addr
+      - "bitcoind:18443"
+      - --daemon-p2p-addr
+      - "bitcoind:18444"
+      - --network
+      - regtest
+      - --cookie-file
+      - "/tmp/.cookie"
+    volumes:
+      - ./cookie:/tmp/.cookie
+    deploy:
+      restart_policy:
+        condition: "on-failure"
 
   bfgd-postgres:
     build:
@@ -96,13 +105,14 @@ services:
         condition: "any"
     depends_on:
       - "bfgd-postgres"
+      - "electrs"
     ports:
       - "8080:8080"
       - "8383:8383"
     environment:
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       BFG_BTC_START_HEIGHT: "1"
-      BFG_EXBTC_ADDRESS: "electrumx:50001"
+      BFG_EXBTC_ADDRESS: "electrs:50001"
       BFG_LOG_LEVEL: "INFO"
       BFG_PUBLIC_ADDRESS: ":8383"
       BFG_PRIVATE_ADDRESS: ":8080"

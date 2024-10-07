@@ -138,7 +138,7 @@ go run ./integrationtest
 ### 🏁 Prerequisites
 
 - A **PostgreSQL database**, bfgd expects the sql scripts in `./database/bfgd/scripts/` to be run to set up your schema.
-- A **connection to an ElectrumX node** on the proper Bitcoin network (testnet or mainnet).
+- A **connection to an Electrs node** on the proper Bitcoin network (testnet or mainnet).
 
 ## ▶️ Running bssd
 

@@ -34,19 +34,19 @@ var (
 		"BFG_EXBTC_ADDRESS": config.Config{
 			Value:        &cfg.EXBTCAddress,
 			DefaultValue: "localhost:18001",
-			Help:         "electrumx endpoint",
+			Help:         "electrs endpoint",
 			Print:        config.PrintAll,
 		},
 		"BFG_EXBTC_INITIAL_CONNECTIONS": config.Config{
 			Value:        &cfg.EXBTCInitialConns,
 			DefaultValue: 5,
-			Help:         "electrumx initial connections",
+			Help:         "electrs initial connections",
 			Print:        config.PrintAll,
 		},
 		"BFG_EXBTC_MAX_CONNECTIONS": config.Config{
 			Value:        &cfg.EXBTCMaxConns,
 			DefaultValue: 100,
-			Help:         "electrumx max connections",
+			Help:         "electrs max connections",
 			Print:        config.PrintAll,
 		},
 		"BFG_PUBLIC_KEY_AUTH": config.Config{

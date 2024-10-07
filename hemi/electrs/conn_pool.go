@@ -2,7 +2,7 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-package electrumx
+package electrs
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 	"sync"
 )
 
-// connPool represents an ElectrumX connection pool.
+// connPool represents an electrs connection pool.
 type connPool struct {
 	network string
 	address string
