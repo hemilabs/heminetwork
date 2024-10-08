@@ -431,24 +431,9 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
-	// XXX at start of day lastRecord contains the last canonical
-	// downloaded blockheader. Thus if it is on a fork it will not ask for
-	// headers on what the network may be doing. Not sure how to handle
-	// that right now but leaving a note.
-
 	if len(bhs.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("block headers insert: invalid")
-	}
-
-	// Ensure we can connect these blockheaders prior to starting database
-	// transaction. This also obtains the starting cumulative difficulty
-	// and  height.
-	wbh := bhs.Headers[0]
-	pbh, err := l.BlockHeaderByHash(ctx, &wbh.PrevBlock)
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// block headers
@@ -459,6 +444,9 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 	}
 	defer bhsDiscard()
 
+	// Ensure we can connect these blockheaders. This also obtains the
+	// starting cumulative difficulty and height.
+	//
 	// Iterate over the block headers and skip block headers we already
 	// have in the database. Rely on caching to make this not suck terribly.
 	var x int
@@ -478,6 +466,14 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 	if len(bhs.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
 			database.DuplicateError("block headers insert duplicate")
+	}
+
+	// Obtain current and previous blockheader.
+	wbh := bhs.Headers[0]
+	pbh, err := l.BlockHeaderByHash(ctx, &wbh.PrevBlock)
+	if err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// blocks missing
