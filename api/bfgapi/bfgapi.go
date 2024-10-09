@@ -57,7 +57,7 @@ var (
 	DefaultPrivateURL       = "ws://" + DefaultPrivateListen + RouteWebsocketPrivate
 	DefaultPublicURL        = "ws://" + DefaultPublicListen + RouteWebsocketPublic
 	DefaultRequestLimit     = 10000 // XXX this is a bandaid
-	DefaultRequestTimeout   = 9     // XXX PNOOMA
+	DefaultRequestTimeout   = 10    // XXX PNOOMA
 )
 
 type AccessPublicKey struct {
