@@ -141,8 +141,8 @@ func readResponse(ctx context.Context, r io.Reader, reqID uint64) (*JSONRPCRespo
 	if err = json.Unmarshal(b, &res); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
-	if res.Error != nil {
-		return nil, RPCError(res.Error.Message)
+	if res.Error != "" {
+		return nil, RPCError(res.Error)
 	}
 
 	if res.ID != reqID {

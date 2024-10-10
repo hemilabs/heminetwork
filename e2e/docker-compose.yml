@@ -19,7 +19,7 @@ services:
       - "18443:18443"
       - "18444:18444"
     volumes:
-      - { type: "tmpfs", target: "/bitcoin/.bitcoin" }
+      - bitcoindata:/bitcoin/.bitcoin
 
   bitcoind-initialblocks:
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
@@ -56,24 +56,33 @@ services:
       - "$BTC_ADDRESS"
 
   electrs:
-    build:
-      context: https://github.com/romanz/electrs.git#1d02f10ec38edbc3b7df6b16bb8989d9bc0aaa0f
+    image: blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8
     depends_on:
       - "bitcoind"
     command:
-      - electrs
+      - electrs_bitcoin/bin/electrs
       - --electrum-rpc-addr
       - '0.0.0.0:50001'
       - --daemon-rpc-addr
       - "bitcoind:18443"
-      - --daemon-p2p-addr
-      - "bitcoind:18444"
       - --network
       - regtest
-      - --cookie-file
-      - "/tmp/.cookie"
+      - --cookie
+      - "user:password"
+      - "-vvv"
+      - "--timestamp"
+      - --utxos-limit
+      - "50000"
+      - --electrum-txs-limit
+      - "50000"
+      - --blocks-dir
+      - "/bitcoindata/regtest/blocks"
+    environment:
+      RUST_LOG: debug
+      RUST_BACKTRACE: "full"
     volumes:
       - ./cookie:/tmp/.cookie
+      - bitcoindata:/bitcoindata:ro
     deploy:
       restart_policy:
         condition: "on-failure"
@@ -295,3 +304,4 @@ services:
 
 volumes:
   l2configs:
+  bitcoindata:
