@@ -245,43 +245,27 @@ func (s *Server) pingExpired(ctx context.Context, key any, value any) {
 	}
 }
 
-// XXX BRING THIS BACK
-//func (s *Server) pingAllPeers(ctx context.Context) {
-//	log.Tracef("pingAllPeers")
-//	defer log.Tracef("pingAllPeers exit")
-//
-//	// XXX reason and explain why this cannot be reentrant
-//	s.mtx.Lock()
-//	defer s.mtx.Unlock()
-//
-//	for _, p := range s.peers {
-//		select {
-//		case <-ctx.Done():
-//			return
-//		default:
-//		}
-//		if !p.isConnected() {
-//			continue
-//		}
-//
-//		// Cancel outstanding ping, should not happen
-//		peer := p.String()
-//		s.pings.Cancel(peer)
-//
-//		// We don't really care about the response. We just want to
-//		// write to the connection to make it fail if the other side
-//		// went away.
-//		log.Debugf("Pinging: %v", p)
-//		err := p.write(defaultCmdTimeout, wire.NewMsgPing(uint64(time.Now().Unix())))
-//		if err != nil {
-//			log.Debugf("ping %v: %v", p, err)
-//			return
-//		}
-//
-//		// Record outstanding ping
-//		s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
-//	}
-//}
+func (s *Server) pingPeer(ctx context.Context, p *peer) {
+	log.Tracef("pingPeer %v", p)
+	defer log.Tracef("pingPeer %v exit", p)
+
+	// Cancel outstanding ping, should not happen
+	peer := p.String()
+	s.pings.Cancel(peer)
+
+	// We don't really care about the response. We just want to
+	// write to the connection to make it fail if the other side
+	// went away.
+	log.Debugf("Pinging: %v", p)
+	err := p.write(defaultCmdTimeout, wire.NewMsgPing(uint64(time.Now().Unix())))
+	if err != nil {
+		log.Debugf("ping %v: %v", p, err)
+		return
+	}
+
+	// Record outstanding ping
+	s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
+}
 
 func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, raw []byte) (bool, error) {
 	// Do accept addr and ping commands before we consider the peer up.
@@ -1892,6 +1876,7 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	}()
 
+	// connected peers
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -1908,6 +1893,20 @@ func (s *Server) Run(pctx context.Context) error {
 					log.Debugf("%v: %v", pp, err)
 				}
 			}(p)
+		}
+	}()
+
+	// ping loop
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(13 * time.Second):
+			}
+			s.pm.All(ctx, s.pingPeer)
 		}
 	}()
 

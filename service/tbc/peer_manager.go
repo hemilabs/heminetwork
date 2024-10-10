@@ -261,6 +261,21 @@ func (pm *PeerManager) Random() (*peer, error) {
 	return nil, errors.New("no peers")
 }
 
+// All runs a call back on all connected peers.
+func (pm *PeerManager) All(ctx context.Context, f func(ctx context.Context, p *peer)) {
+	log.Tracef("All")
+	defer log.Tracef("All")
+
+	pm.mtx.RLock()
+	defer pm.mtx.RUnlock()
+	for _, p := range pm.peers {
+		if !p.isConnected() {
+			continue
+		}
+		go f(ctx, p)
+	}
+}
+
 // RandomConnect blocks until there is a peer ready to use.
 func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 	log.Tracef("RandomConnect")
