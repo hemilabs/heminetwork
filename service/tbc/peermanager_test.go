@@ -37,7 +37,7 @@ func ping(ctx context.Context, t *testing.T, p *peer) error {
 func TestPeerManager(t *testing.T) {
 	want := 2
 	wantLoop := want * 2
-	pm, err := NewPeerManager(wire.TestNet3, want)
+	pm, err := NewPeerManager(wire.TestNet3, []string{}, want)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestPeerManager(t *testing.T) {
 				t.Logf("ping returned error but that's fine: %v", err)
 			}
 			// Always close
-			err = pm.Bad(pp.String())
+			err = pm.Bad(ctx, pp.String())
 			if err != nil {
 				panic(err)
 			}
