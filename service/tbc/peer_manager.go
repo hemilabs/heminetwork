@@ -59,7 +59,7 @@ type PeerManager struct {
 
 // NewPeerManager returns a new peer manager.
 func NewPeerManager(net wire.BitcoinNet, seeds []string, want int) (*PeerManager, error) {
-	if want == 0 {
+	if want < 1 {
 		return nil, errors.New("peers wanted must not be 0")
 	}
 
@@ -244,6 +244,7 @@ func (pm *PeerManager) Bad(ctx context.Context, address string) error {
 	return nil
 }
 
+// Random returns a random connected peer.
 func (pm *PeerManager) Random() (*peer, error) {
 	log.Tracef("Random")
 	defer log.Tracef("Random exit")
@@ -260,6 +261,7 @@ func (pm *PeerManager) Random() (*peer, error) {
 	return nil, errors.New("no peers")
 }
 
+// RandomConnect blocks until there is a peer ready to use.
 func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 	log.Tracef("RandomConnect")
 	defer log.Tracef("RandomConnect")
