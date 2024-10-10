@@ -58,7 +58,7 @@ type PeerManager struct {
 }
 
 // NewPeerManager returns a new peer manager.
-func NewPeerManager(net wire.BitcoinNet, want int) (*PeerManager, error) {
+func NewPeerManager(net wire.BitcoinNet, seeds []string, want int) (*PeerManager, error) {
 	if want == 0 {
 		return nil, errors.New("peers wanted must not be 0")
 	}
@@ -78,6 +78,7 @@ func NewPeerManager(net wire.BitcoinNet, want int) (*PeerManager, error) {
 		net:      net,
 		want:     want,
 		dnsSeeds: dnsSeeds,
+		seeds:    seeds,
 		good:     make(map[string]struct{}, maxPeersGood),
 		bad:      make(map[string]struct{}, maxPeersBad),
 		peers:    make(map[string]*peer, want),
@@ -272,18 +273,23 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 	}
 }
 
-func (pm *PeerManager) randomAddress(ctx context.Context) (string, error) {
+func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*peer, error) {
 	pm.mtx.Lock()
 	defer pm.mtx.Unlock()
 
 	// Reset caluse
-	if len(pm.good) < len(pm.seeds) && len(pm.bad) > len(pm.seeds) {
+	// log.Infof("good %v bad %v seeds %v", len(pm.good), len(pm.bad), len(pm.seeds))
+	if len(pm.good) < len(pm.seeds) && len(pm.bad) >= len(pm.seeds) {
+		// Return an error to make the caller aware that we have reset
+		// back to seeds.
 		clear(pm.bad)
 		pm.handleAddr(pm.seeds)
+		return nil, errors.New("reset")
 	}
 	for k := range pm.good {
 		if _, ok := pm.peers[k]; ok {
 			// Address is in use
+			log.Errorf("address already on peers list: %v", k)
 			continue
 		}
 		if _, ok := pm.bad[k]; ok {
@@ -297,37 +303,30 @@ func (pm *PeerManager) randomAddress(ctx context.Context) (string, error) {
 		// are len(bad)-len(peers)
 		delete(pm.good, k)
 		pm.bad[k] = struct{}{}
-		return k, nil
+
+		return NewPeer(pm.net, slot, k)
 	}
-	return "", errors.New("no addresses")
+	return nil, errors.New("no addresses")
 }
 
-func (pm *PeerManager) connect(ctx context.Context, slot int) error {
-	log.Tracef("connect: %v", slot)
-	defer log.Tracef("connect exit: %v", slot)
+func (pm *PeerManager) connect(ctx context.Context, p *peer) error {
+	log.Tracef("connect: %v %v", p.Id(), p)
+	defer log.Tracef("connect exit: %v %v", p.Id(), p)
 
-	address, err := pm.randomAddress(ctx)
-	if err != nil {
-		return fmt.Errorf("random address: %v", err)
-	}
-	p, err := NewPeer(pm.net, address, slot)
-	if err != nil {
-		return fmt.Errorf("new peer: %v", err)
-	}
-	err = p.connect(ctx)
+	err := p.connect(ctx)
 	if err != nil {
 		return fmt.Errorf("new peer: %v", err)
 	}
 
 	pm.mtx.Lock()
-	if _, ok := pm.peers[address]; ok {
+	if _, ok := pm.peers[p.String()]; ok {
 		// This race does indeed happen because Good can add this.
 		p.close() // close new peer and don't add it
-		log.Errorf("peer already connected: %v", address)
+		log.Errorf("peer already connected: %v", p)
 		pm.mtx.Unlock()
-		return nil // XXX or else we free the slot UGH
+		return fmt.Errorf("connect %w", err)
 	}
-	pm.peers[address] = p
+	pm.peers[p.String()] = p
 	pm.mtx.Unlock()
 
 	pm.peersC <- p // block
@@ -335,10 +334,11 @@ func (pm *PeerManager) connect(ctx context.Context, slot int) error {
 	return nil
 }
 
-func (pm *PeerManager) connectSlot(ctx context.Context, slot int) {
-	err := pm.connect(ctx, slot)
+func (pm *PeerManager) connectSlot(ctx context.Context, p *peer) {
+	err := pm.connect(ctx, p)
 	if err != nil {
-		pm.slotsC <- slot // give slot back
+		// log.Errorf("%v", err)
+		pm.slotsC <- p.Id() // give slot back
 		return
 	}
 }
@@ -347,26 +347,28 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run")
 
-	log.Infof("Starting DNS seeder")
-	minW := 5
-	maxW := 59
-	for {
-		err := pm.seed(ctx)
-		if err != nil {
-			log.Debugf("seed: %v", err)
-		} else {
-			break
-		}
+	if len(pm.seeds) == 0 {
+		log.Infof("Starting DNS seeder")
+		minW := 5
+		maxW := 59
+		for {
+			err := pm.seed(ctx)
+			if err != nil {
+				log.Debugf("seed: %v", err)
+			} else {
+				break
+			}
 
-		holdOff := time.Duration(minW+rand.IntN(maxW-minW)) * time.Second
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(holdOff):
+			holdOff := time.Duration(minW+rand.IntN(maxW-minW)) * time.Second
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(holdOff):
+			}
 		}
+		log.Infof("DNS seeding complete")
 	}
 	pm.HandleAddr(pm.seeds) // Add all seeds to good list
-	log.Infof("DNS seeding complete")
 
 	log.Infof("Starting peer manager")
 	defer log.Infof("Peer manager stopped")
@@ -379,9 +381,17 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 	for {
 		select {
 		case slot := <-pm.slotsC:
-			go pm.connectSlot(ctx, slot)
+			p, err := pm.randomPeer(ctx, slot)
+			if err != nil {
+				// basically no addresses, hold-off
+				<-time.After(7 * time.Second)
+				pm.slotsC <- slot // give the slot back
+				continue
+			}
+			go pm.connectSlot(ctx, p)
 
 		case <-ctx.Done():
+			log.Infof("exit")
 			return ctx.Err()
 		}
 	}

@@ -204,13 +204,11 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.checkpoints = make(map[chainhash.Hash]uint64)
 		wanted = 1
 
-		// XXX currently broken
-
 	default:
 		return nil, fmt.Errorf("invalid network: %v", cfg.Network)
 	}
 
-	pm, err := NewPeerManager(s.wireNet, wanted)
+	pm, err := NewPeerManager(s.wireNet, s.cfg.Seeds, wanted)
 	if err != nil {
 		return nil, err
 	}

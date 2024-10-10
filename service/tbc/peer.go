@@ -48,10 +48,10 @@ type peer struct {
 	addrV2        bool
 }
 
-func NewPeer(network wire.BitcoinNet, address string, id int) (*peer, error) {
+func NewPeer(network wire.BitcoinNet, id int, address string) (*peer, error) {
 	_, _, err := net.SplitHostPort(address)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%v: %w", address, err)
 	}
 	return &peer{
 		protocolVersion: wire.ProtocolVersion,
