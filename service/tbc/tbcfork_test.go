@@ -27,7 +27,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
@@ -886,13 +885,13 @@ func TestFork(t *testing.T) {
 		BlockheaderCache: 1000,
 		BlockSanity:      false,
 		LevelDBHome:      t.TempDir(),
-		ListenAddress:    tbcapi.DefaultListen, // TODO: should use random free port
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{"127.0.0.1:18444"},
+		ListenAddress:           "localhost:8881",
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1124,7 +1123,7 @@ func TestIndexNoFork(t *testing.T) {
 		BlockheaderCache: 1000,
 		BlockSanity:      false,
 		LevelDBHome:      t.TempDir(),
-		ListenAddress:    tbcapi.DefaultListen,
+		ListenAddress:    "localhost:8882",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
@@ -1296,7 +1295,7 @@ func TestIndexFork(t *testing.T) {
 		BlockheaderCache: 1000,
 		BlockSanity:      false,
 		LevelDBHome:      t.TempDir(),
-		ListenAddress:    tbcapi.DefaultListen,
+		ListenAddress:    "localhost:8883",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
