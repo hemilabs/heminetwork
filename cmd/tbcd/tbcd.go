@@ -121,9 +121,6 @@ var (
 )
 
 func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
-	log.Tracef("HandleSignals")
-	defer log.Tracef("HandleSignals exit")
-
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	defer func() {
@@ -141,11 +138,6 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 	}
 	<-signalChan // Second signal, hard exit.
 	os.Exit(2)
-}
-
-func init() {
-	version.Component = "tbcd"
-	welcome = "Hemi Tiny Bitcoin Daemon " + version.BuildInfo()
 }
 
 func _main() error {
@@ -207,6 +199,11 @@ func _main() error {
 	return nil
 }
 
+func init() {
+	version.Component = "tbcd"
+	welcome = "Hemi Tiny Bitcoin Daemon " + version.BuildInfo()
+}
+
 func main() {
 	if len(os.Args) != 1 {
 		fmt.Fprintf(os.Stderr, "%v\n", welcome)
@@ -218,7 +215,7 @@ func main() {
 	}
 
 	if err := _main(); err != nil {
-		log.Errorf("%v", err)
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
 }
