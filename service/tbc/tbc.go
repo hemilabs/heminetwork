@@ -1012,7 +1012,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
-			if err = s.SyncIndexersToBest(ctx); err != nil && err != ErrAlreadyIndexing {
+			if err = s.SyncIndexersToBest(ctx); err != nil && !errors.Is(err, ErrAlreadyIndexing) && errors.Is(err, context.Canceled) {
 				// XXX this is probably not a panic.
 				panic(fmt.Errorf("sync blocks: %w", err))
 			}
@@ -1883,9 +1883,9 @@ func (s *Server) Run(pctx context.Context) error {
 		for {
 			p, err := s.pm.RandomConnect(ctx)
 			if err != nil {
-				// Should not be reached
+				// Only reached when context is closed.
 				log.Errorf("random connect: %v", err)
-				continue
+				return
 			}
 			go func(pp *peer) {
 				err := s.handlePeer(ctx, pp)
