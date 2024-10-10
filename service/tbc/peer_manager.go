@@ -250,11 +250,11 @@ func (pm *PeerManager) Random() (*peer, error) {
 
 	pm.mtx.RLock()
 	defer pm.mtx.RUnlock()
+
 	for _, p := range pm.peers {
 		if p.isConnected() {
 			return p, nil
 		}
-		log.Errorf("not connected: %v", p) // XXX
 	}
 
 	return nil, errors.New("no peers")
