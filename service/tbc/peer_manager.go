@@ -249,7 +249,7 @@ func (pm *PeerManager) Random() (*peer, error) {
 	defer log.Tracef("Random exit")
 
 	pm.mtx.RLock()
-	pm.mtx.RUnlock()
+	defer pm.mtx.RUnlock()
 	for _, p := range pm.peers {
 		if p.isConnected() {
 			return p, nil
