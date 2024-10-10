@@ -272,20 +272,11 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 		address := ""
 		pm.mtx.Lock()
 
-		// XXX add reset caluse
-		//if len(pm.peers) < pm.want {
-		//	// Check to see if we are out of good peers
-		//	if len(pm.peers) == 0 && len(pm.good) == 0 && len(pm.bad) > 0 {
-		//		log.Infof("RESET, needs flag")
-		//		clear(pm.good)
-		//		clear(pm.bad)
-		//		pm.handleAddr(pm.seeds)
-		//	}
-		//	for k := range pm.good {
-		//		address = k
-		//		delete(pm.good, k)
-		//	}
-		//}
+		// Reset caluse
+		if len(pm.peers) < len(pm.seeds) {
+			clear(pm.bad)
+			pm.handleAddr(pm.seeds)
+		}
 		for k := range pm.good {
 			address = k
 			continue
