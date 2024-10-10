@@ -121,6 +121,9 @@ var (
 )
 
 func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
+	log.Tracef("HandleSignals")
+	defer log.Tracef("HandleSignals exit")
+
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	defer func() {

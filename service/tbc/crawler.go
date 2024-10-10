@@ -1309,7 +1309,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 			return
 		}
 		// get a random peer
-		p, err := s.randomPeer(ctx)
+		p, err := s.pm.Random()
 		if err != nil {
 			s.mtx.Unlock()
 			log.Errorf("sync indexers random peer: %v", err)
