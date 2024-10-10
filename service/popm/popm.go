@@ -74,6 +74,8 @@ type Config struct {
 	// hexadecimal digits.
 	BTCPrivateKey string
 
+	BFGRequestTimeout time.Duration
+
 	LogLevel string
 
 	PrometheusListenAddress string
@@ -85,10 +87,13 @@ type Config struct {
 	StaticFee uint
 }
 
+const DefaultBFGRequestTimeout = 15 * time.Second
+
 func NewDefaultConfig() *Config {
 	return &Config{
-		BFGWSURL:     "http://localhost:8383/v1/ws/public",
-		BTCChainName: "testnet3",
+		BFGWSURL:          "http://localhost:8383/v1/ws/public",
+		BFGRequestTimeout: DefaultBFGRequestTimeout,
+		BTCChainName:      "testnet3",
 	}
 }
 
@@ -138,12 +143,15 @@ func NewMiner(cfg *Config) (*Miner, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
+	if cfg.BFGRequestTimeout <= 0 {
+		cfg.BFGRequestTimeout = DefaultBFGRequestTimeout
+	}
 
 	m := &Miner{
 		cfg:            cfg,
 		bfgCmdCh:       make(chan bfgCmd, 10),
 		holdoffTimeout: 5 * time.Second,
-		requestTimeout: 5 * time.Second,
+		requestTimeout: cfg.BFGRequestTimeout,
 		mineNowCh:      make(chan struct{}, 1),
 		l2Keystones:    make(map[string]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
 	}

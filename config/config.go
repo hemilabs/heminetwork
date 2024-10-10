@@ -31,6 +31,7 @@ type Config struct {
 	Help         string    // One line help
 	Print        PrintMode // Print mode
 	Required     bool      // If true, error out with error
+	Parse        func(envValue string) (any, error)
 }
 
 type CfgMap map[string]Config
@@ -58,6 +59,15 @@ func Parse(c CfgMap) error {
 			// Set v.Value to v.DefaultValue
 			reflect.ValueOf(v.Value).Elem().Set(reflect.ValueOf(v.DefaultValue))
 		} else {
+			if v.Parse != nil {
+				val, err := v.Parse(envValue)
+				if err != nil {
+					return fmt.Errorf("invalid value for %v: %v", k, err)
+				}
+				reflect.ValueOf(v.Value).Elem().Set(reflect.ValueOf(val))
+				return nil
+			}
+
 			switch reflect.TypeOf(v.Value).Elem().Kind() {
 			case reflect.Int, reflect.Int8, reflect.Int16,
 				reflect.Int32, reflect.Int64:

@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/juju/loggo"
 
@@ -45,9 +46,18 @@ var (
 		},
 		"POPM_BFG_URL": config.Config{
 			Value:        &cfg.BFGWSURL,
-			DefaultValue: popm.NewDefaultConfig().BFGWSURL,
+			DefaultValue: cfg.BFGWSURL,
 			Help:         "url for BFG (Bitcoin Finality Governor)",
 			Print:        config.PrintAll,
+		},
+		"POPM_BFG_REQUEST_TIMEOUT": config.Config{
+			Value:        &cfg.BFGRequestTimeout,
+			DefaultValue: cfg.BFGRequestTimeout,
+			Help:         "request timeout for BFG (Bitcoin Finality Governor)",
+			Print:        config.PrintAll,
+			Parse: func(envValue string) (any, error) {
+				return time.ParseDuration(envValue)
+			},
 		},
 		"POPM_BTC_CHAIN_NAME": config.Config{
 			Value:        &cfg.BTCChainName,
