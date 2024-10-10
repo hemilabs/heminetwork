@@ -18,8 +18,9 @@ sh /tmp/genesisl2.sh
  --http.port=8546 \
  --http.addr \
  '0.0.0.0' \
- --http.vhosts \
- '*' \
+ --http.vhosts='*' \
+ --http.api=debug,eth,txpool,net,engine,personal \
+ --allow-insecure-unlock \
  --ws  \
  --ws.addr=0.0.0.0  \
  --ws.port=28546  \

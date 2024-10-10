@@ -75,3 +75,5 @@ flycheck_*.el
 ### Other files
 ## macOS
 .DS_Store
+
+node_modules
