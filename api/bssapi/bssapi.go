@@ -37,6 +37,7 @@ type PopPayout struct {
 
 type PopPayoutsRequest struct {
 	L2BlockForPayout api.ByteSlice `json:"l2_block_for_payout"`
+	Page             uint32        `json:"page,omitempty"`
 
 	// these are unused at this point, they will be used in the future to determine the
 	// total payout to miners
