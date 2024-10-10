@@ -626,7 +626,7 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 
 	defer func() {
 		log.Tracef("handlePeer exit %v", p)
-		s.pm.Bad(p.String()) // always close peer
+		s.pm.Bad(ctx, p.String()) // always close peer
 	}()
 
 	// See if our tip is indeed canonical.
@@ -1907,7 +1907,7 @@ func (s *Server) Run(pctx context.Context) error {
 			go func(pp *peer) {
 				err := s.handlePeer(ctx, pp)
 				if err != nil {
-					log.Errorf("%v: %v", pp, err)
+					log.Debugf("%v: %v", pp, err)
 				}
 			}(p)
 		}

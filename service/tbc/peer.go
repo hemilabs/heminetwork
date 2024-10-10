@@ -39,6 +39,7 @@ type peer struct {
 	connected time.Time
 
 	address string
+	id      int
 
 	protocolVersion uint32
 	network         wire.BitcoinNet
@@ -47,17 +48,25 @@ type peer struct {
 	addrV2        bool
 }
 
-func NewPeer(network wire.BitcoinNet, address string) (*peer, error) {
-	// XXX parse address and return failure if it's wrong
+func NewPeer(network wire.BitcoinNet, address string, id int) (*peer, error) {
+	_, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return nil, err
+	}
 	return &peer{
 		protocolVersion: wire.ProtocolVersion,
 		network:         network,
 		address:         address,
+		id:              id,
 	}, nil
 }
 
 func (p *peer) String() string {
 	return p.address
+}
+
+func (p *peer) Id() int {
+	return p.id
 }
 
 func (p *peer) write(timeout time.Duration, msg wire.Message) error {
@@ -182,8 +191,13 @@ func (p *peer) connect(ctx context.Context) error {
 	p.mtx.Unlock()
 
 	d := net.Dialer{
-		Timeout:   5 * time.Second,
-		KeepAlive: 9 * time.Second,
+		Deadline: time.Now().Add(5 * time.Second),
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     7 * time.Second,
+			Interval: 7 * time.Second,
+			Count:    2,
+		},
 	}
 
 	log.Debugf("dialing %s", p.address)
@@ -191,7 +205,6 @@ func (p *peer) connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("dial %v: %w", p.address, err)
 	}
-	log.Debugf("done dialing %s", p.address)
 
 	err = p.handshake(ctx, conn)
 	if err != nil {

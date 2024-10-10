@@ -52,6 +52,9 @@ type PeerManager struct {
 	peers map[string]*peer // connected peers
 	good  map[string]struct{}
 	bad   map[string]struct{}
+
+	peersC chan *peer // blocking channel for RandomConnect
+	slotsC chan int
 }
 
 // NewPeerManager returns a new peer manager.
@@ -78,6 +81,7 @@ func NewPeerManager(net wire.BitcoinNet, want int) (*PeerManager, error) {
 		good:     make(map[string]struct{}, maxPeersGood),
 		bad:      make(map[string]struct{}, maxPeersBad),
 		peers:    make(map[string]*peer, want),
+		peersC:   make(chan *peer, 0),
 	}, nil
 }
 
@@ -182,6 +186,9 @@ func (pm *PeerManager) Good(address string) error {
 	if _, ok := pm.peers[address]; ok {
 		return fmt.Errorf("peer active: %v", address)
 	}
+	if _, ok := pm.good[address]; ok {
+		return fmt.Errorf("peer good: %v", address)
+	}
 
 	// Remove peer from bad.
 	delete(pm.bad, address)
@@ -194,29 +201,9 @@ func (pm *PeerManager) Good(address string) error {
 	return nil
 }
 
-func (pm *PeerManager) Connected(p *peer) {
-	log.Tracef("Connected")
-	defer log.Tracef("Connected exit")
-
-	address := p.String()
-
-	pm.mtx.Lock()
-	defer pm.mtx.Unlock()
-
-	// If peer is connected, ignore it
-	if _, ok := pm.peers[address]; !ok {
-		pm.peers[address] = p
-	}
-	delete(pm.bad, address)
-	delete(pm.good, address)
-
-	log.Debugf("Connected exit peers %v good %v bad %v",
-		len(pm.peers), len(pm.good), len(pm.bad))
-}
-
 // Bad marks the peer as bad.
-func (pm *PeerManager) Bad(address string) error {
-	log.Tracef("Bad")
+func (pm *PeerManager) Bad(ctx context.Context, address string) error {
+	log.Tracef("Bad %v", address)
 	defer log.Tracef("Bad exit")
 
 	_, _, err := net.SplitHostPort(address)
@@ -229,7 +216,16 @@ func (pm *PeerManager) Bad(address string) error {
 	// If peer is connected, disconnect it and mark it bad
 	if p, ok := pm.peers[address]; ok {
 		if p != nil {
+			// if we don't have a peer we are going to starve the slots
+			log.Debugf("got address without peer: %v", address)
 			p.close()
+			go func() {
+				// Run outside of mutex
+				select {
+				case <-ctx.Done():
+				case pm.slotsC <- p.Id():
+				}
+			}()
 		}
 		delete(pm.peers, address)
 	}
@@ -257,6 +253,7 @@ func (pm *PeerManager) Random() (*peer, error) {
 		if p.isConnected() {
 			return p, nil
 		}
+		log.Errorf("not connected: %v", p) // XXX
 	}
 
 	return nil, errors.New("no peers")
@@ -267,45 +264,82 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 	defer log.Tracef("RandomConnect")
 
 	// Block until a connect slot opens up
-	for {
-		log.Debugf("peer manager: %v", pm)
-		address := ""
-		pm.mtx.Lock()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case p := <-pm.peersC:
+		return p, nil
+	}
+}
 
-		// Reset caluse
-		if len(pm.peers) < len(pm.seeds) {
-			clear(pm.bad)
-			pm.handleAddr(pm.seeds)
-		}
-		for k := range pm.good {
-			address = k
+func (pm *PeerManager) randomAddress(ctx context.Context) (string, error) {
+	pm.mtx.Lock()
+	defer pm.mtx.Unlock()
+
+	// Reset caluse
+	if len(pm.good) < len(pm.seeds) && len(pm.bad) > len(pm.seeds) {
+		clear(pm.bad)
+		pm.handleAddr(pm.seeds)
+	}
+	for k := range pm.good {
+		if _, ok := pm.peers[k]; ok {
+			// Address is in use
 			continue
 		}
+		if _, ok := pm.bad[k]; ok {
+			// Should not happen but let's make sure we aren't
+			// reusing an address.
+			log.Errorf("found addres on bad list: %v", k)
+			continue
+		}
+
+		// Remove from good list and add to bad list. Thus active peers
+		// are len(bad)-len(peers)
+		delete(pm.good, k)
+		pm.bad[k] = struct{}{}
+		return k, nil
+	}
+	return "", errors.New("no addresses")
+}
+
+func (pm *PeerManager) connect(ctx context.Context, slot int) error {
+	log.Tracef("connect: %v", slot)
+	defer log.Tracef("connect exit: %v", slot)
+
+	address, err := pm.randomAddress(ctx)
+	if err != nil {
+		return fmt.Errorf("random address: %v", err)
+	}
+	p, err := NewPeer(pm.net, address, slot)
+	if err != nil {
+		return fmt.Errorf("new peer: %v", err)
+	}
+	err = p.connect(ctx)
+	if err != nil {
+		return fmt.Errorf("new peer: %v", err)
+	}
+
+	pm.mtx.Lock()
+	if _, ok := pm.peers[address]; ok {
+		// This race does indeed happen because Good can add this.
+		p.close() // close new peer and don't add it
+		log.Errorf("peer already connected: %v", address)
 		pm.mtx.Unlock()
+		return nil // XXX or else we free the slot UGH
+	}
+	pm.peers[address] = p
+	pm.mtx.Unlock()
 
-		if len(address) > 0 {
-			// connect peer
-			p, err := NewPeer(pm.net, address)
-			if err != nil {
-				// XXX can't happen, remove error case from NewPeer
-				log.Errorf("%v", err)
-				continue
-			}
-			err = p.connect(ctx)
-			if err != nil {
-				pm.Bad(address)
-				continue
-			}
-			pm.Connected(p)
-			return p, nil
-		}
+	pm.peersC <- p // block
 
-		// Block but do timeout to see if something was reaped
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(3 * time.Second):
-		}
+	return nil
+}
+
+func (pm *PeerManager) connectSlot(ctx context.Context, slot int) {
+	err := pm.connect(ctx, slot)
+	if err != nil {
+		pm.slotsC <- slot // give slot back
+		return
 	}
 }
 
@@ -337,8 +371,18 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 	log.Infof("Starting peer manager")
 	defer log.Infof("Peer manager stopped")
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
+	// Start connecting "want" number of peers.
+	pm.slotsC = make(chan int, pm.want)
+	for i := 0; i < pm.want; i++ {
+		pm.slotsC <- i
+	}
+	for {
+		select {
+		case slot := <-pm.slotsC:
+			go pm.connectSlot(ctx, slot)
+
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
