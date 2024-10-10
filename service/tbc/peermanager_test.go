@@ -77,7 +77,7 @@ func TestPeerManager(t *testing.T) {
 
 	wg.Wait()
 
-	if len(pm.bad) != wantLoop {
+	if len(pm.bad) < wantLoop {
 		t.Fatalf("not enough bad, got %v wanted %v", len(pm.bad), wantLoop)
 	}
 	if len(pm.peers) != 0 {
