@@ -35,6 +35,7 @@ func ping(ctx context.Context, t *testing.T, p *peer) error {
 }
 
 func TestPeerManager(t *testing.T) {
+	t.Skip("this test connects to testnet3")
 	want := 2
 	wantLoop := want * 2
 	pm, err := NewPeerManager(wire.TestNet3, []string{}, want)

@@ -877,7 +877,7 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-	time.Sleep(500 * time.Millisecond) // XXX
+	time.Sleep(2 * time.Second) // XXX
 
 	// Connect tbc service
 	cfg := &Config{
@@ -892,6 +892,7 @@ func TestFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
+		Seeds:                   []string{"127.0.0.1:18444"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1114,7 +1115,7 @@ func TestIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 2)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1129,6 +1130,7 @@ func TestIndexNoFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
+		Seeds:                   []string{"127.0.0.1:18444"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1285,7 +1287,7 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second)
+	time.Sleep(time.Second * 2)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1301,6 +1303,7 @@ func TestIndexFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          false,
+		Seeds:                   []string{"127.0.0.1:18444"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)

@@ -1883,7 +1883,10 @@ func (s *Server) Run(pctx context.Context) error {
 		for {
 			p, err := s.pm.RandomConnect(ctx)
 			if err != nil {
-				// Only reached when context is closed.
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				// Should not be reached
 				log.Errorf("random connect: %v", err)
 				return
 			}
