@@ -335,8 +335,7 @@ func (pm *PeerManager) connect(ctx context.Context, p *peer) error {
 	log.Tracef("connect: %v %v", p.Id(), p)
 	defer log.Tracef("connect exit: %v %v", p.Id(), p)
 
-	err := p.connect(ctx)
-	if err != nil {
+	if err := p.connect(ctx); err != nil {
 		return fmt.Errorf("new peer: %v", err)
 	}
 
@@ -346,7 +345,7 @@ func (pm *PeerManager) connect(ctx context.Context, p *peer) error {
 		p.close() // close new peer and don't add it
 		log.Errorf("peer already connected: %v", p)
 		pm.mtx.Unlock()
-		return fmt.Errorf("connect: %w", err)
+		return fmt.Errorf("peer already connected: %v", p)
 	}
 	pm.peers[p.String()] = p
 	pm.mtx.Unlock()
