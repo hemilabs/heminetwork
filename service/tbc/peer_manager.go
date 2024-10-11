@@ -258,7 +258,7 @@ func (pm *PeerManager) Random() (*peer, error) {
 		}
 	}
 
-	return nil, errors.New("no peers")
+	return nil, errors.New("no connected peers")
 }
 
 // All runs a call back on all connected peers.

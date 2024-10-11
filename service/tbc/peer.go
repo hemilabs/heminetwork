@@ -224,9 +224,6 @@ func (p *peer) close() error {
 	log.Tracef("close")
 	defer log.Tracef("close exit")
 
-	if p == nil {
-		panic("p")
-	}
 	p.mtx.Lock()
 	conn := p.conn
 	p.conn = nil
