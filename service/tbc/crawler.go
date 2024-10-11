@@ -119,7 +119,7 @@ func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeade
 	// lowest block height.
 
 	// 0. If bhX and bhY are the same return bhX.
-	if bhX.Hash.IsEqual(bhY.Hash) {
+	if bhX.Hash.IsEqual(&bhY.Hash) {
 		return bhX, nil
 	}
 
@@ -170,14 +170,14 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		return false, fmt.Errorf("best height less than provided height: %v < %v",
 			bhb.Height, bh.Height)
 	}
-	if bhb.Hash.IsEqual(bh.Hash) {
+	if bhb.Hash.IsEqual(&bh.Hash) {
 		// Self == best
 		return true, nil
 	}
 	// Move best block header backwards until we find bh.
 	for {
 		// log.Debugf("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
-		if height, ok := s.checkpoints[*bhb.Hash]; ok && bh.Height <= height {
+		if height, ok := s.checkpoints[bhb.Hash]; ok && bh.Height <= height {
 			return true, nil
 		}
 		bhb, err = s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
@@ -187,7 +187,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		if bhb.Hash.IsEqual(s.chainParams.GenesisHash) {
 			return false, nil
 		}
-		if bhb.Hash.IsEqual(bh.Hash) {
+		if bhb.Hash.IsEqual(&bh.Hash) {
 			return true, nil
 		}
 	}
@@ -457,7 +457,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -562,7 +562,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -847,7 +847,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -945,7 +945,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -1372,16 +1372,16 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !cp.Hash.IsEqual(utxoBH.Hash) {
+	if !cp.Hash.IsEqual(&utxoBH.Hash) {
 		log.Infof("Syncing utxo index to: %v from: %v via: %v",
 			bhb.HH(), utxoBH.HH(), cp.HH())
 		// utxoBH is NOT on canonical chain, unwind first
-		if err := s.UtxoIndexer(ctx, cp.Hash); err != nil {
+		if err := s.UtxoIndexer(ctx, &cp.Hash); err != nil {
 			return fmt.Errorf("utxo indexer unwind: %w", err)
 		}
 	}
 	// Index utxo to best block
-	if err := s.UtxoIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.UtxoIndexer(ctx, &bhb.Hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
@@ -1404,16 +1404,16 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !cp.Hash.IsEqual(txBH.Hash) {
+	if !cp.Hash.IsEqual(&txBH.Hash) {
 		log.Infof("Syncing tx index to: %v from: %v via: %v",
 			bhb.HH(), txBH.HH(), cp.HH())
 		// txBH is NOT on canonical chain, unwind first
-		if err := s.TxIndexer(ctx, cp.Hash); err != nil {
+		if err := s.TxIndexer(ctx, &cp.Hash); err != nil {
 			return fmt.Errorf("tx indexer unwind: %w", err)
 		}
 	}
 	// Transactions index
-	if err := s.TxIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.TxIndexer(ctx, &bhb.Hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 

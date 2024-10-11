@@ -113,9 +113,9 @@ type Config struct {
 
 func NewConfig(home string) *Config {
 	return &Config{
-		Home:             home,     // require user to set home.
-		BlockCache:       250,      // max 4GB on mainnet
-		BlockheaderCache: int(1e6), // Cache all blockheaders on mainnet
+		Home:             home, // require user to set home.
+		BlockCache:       250,  // max 4GB on mainnet
+		BlockheaderCache: 1e6,  // Cache all blockheaders on mainnet
 	}
 }
 
@@ -328,7 +328,7 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	bh := &tbcd.BlockHeader{
-		Hash:   headerHash(ebh[8:88]),
+		Hash:   *headerHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 	}
 	// copy the values to prevent slicing reentrancy problems.
@@ -560,7 +560,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 	}
 
 	cbh := &tbcd.BlockHeader{
-		Hash:       &bhash,
+		Hash:       bhash,
 		Height:     height,
 		Difficulty: *cdiff,
 		Header:     lastBlockHeader,

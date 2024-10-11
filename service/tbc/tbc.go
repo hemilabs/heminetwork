@@ -864,23 +864,23 @@ func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 	s.mtx.Lock()
 	if s.sodding {
 		s.mtx.Unlock()
-		return bhb.Hash, nil
+		return &bhb.Hash, nil
 	}
 	s.sodding = true
 	s.mtx.Unlock()
 
-	hash, err := s.findCanonicalP2P(ctx, p, bhb.Hash)
+	hash, err := s.findCanonicalP2P(ctx, p, &bhb.Hash)
 	if err != nil {
 		return nil, fmt.Errorf("find canonical: %v %v", p, err)
 	}
-	if hash.IsEqual(bhb.Hash) {
+	if hash.IsEqual(&bhb.Hash) {
 		// Found self, on canonical chain.
-		return bhb.Hash, nil
+		return &bhb.Hash, nil
 	}
 	if bhb.Height > uint64(p.remoteVersion.LastBlock) {
 		log.Debugf("sod: %v our tip is greater %v > %v",
 			p, bhb.Height, p.remoteVersion.LastBlock)
-		return bhb.Hash, nil
+		return &bhb.Hash, nil
 	}
 	log.Infof("Our tip seems not canonical: %v %v common: %v",
 		bhb.Height, bhb, hash)
@@ -1189,7 +1189,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if !canonical {
 		log.Infof("deleting from blocks missing: %v %v %v",
 			p, bhX.Height, bhX)
-		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
+		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), &bhX.Hash)
 		if err != nil {
 			return fmt.Errorf("block expired delete missing: %w", err)
 		}
@@ -1866,7 +1866,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 			panic("fees at height: unsupported fork")
 			// return 0, fmt.Errorf("too many block headers: %v", len(bhs))
 		}
-		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
+		b, err := s.db.BlockByHash(ctx, &bhs[0].Hash)
 		if err != nil {
 			return 0, fmt.Errorf("block by hash: %w", err)
 		}
@@ -1912,10 +1912,10 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	}
 	// Ensure we have genesis or the Synced flag will be true if metadata
 	// does not exist.
-	if zeroHash.IsEqual(bhb.Hash) {
+	if zeroHash.IsEqual(&bhb.Hash) {
 		panic("no genesis")
 	}
-	si.BlockHeader.Hash = bhb.Hash
+	si.BlockHeader.Hash = &bhb.Hash
 	si.BlockHeader.Height = bhb.Height
 
 	// utxo index
@@ -1932,7 +1932,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	}
 	si.Tx = *txHH
 
-	if utxoHH.Hash.IsEqual(bhb.Hash) && txHH.Hash.IsEqual(bhb.Hash) &&
+	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
 		!s.indexing && !s.blksMissing(ctx) {
 		si.Synced = true
 	}

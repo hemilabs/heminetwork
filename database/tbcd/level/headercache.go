@@ -1,3 +1,7 @@
+// Copyright (c) 2024 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package level
 
 import (
@@ -20,8 +24,7 @@ func (l *lowIQMap) Put(v *tbcd.BlockHeader) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	k := v.Hash
-	if _, ok := l.m[*k]; ok {
+	if _, ok := l.m[v.Hash]; ok {
 		return
 	}
 
@@ -33,7 +36,7 @@ func (l *lowIQMap) Put(v *tbcd.BlockHeader) {
 		}
 	}
 
-	l.m[*k] = v
+	l.m[v.Hash] = v
 }
 
 func (l *lowIQMap) Get(k *chainhash.Hash) (*tbcd.BlockHeader, bool) {
