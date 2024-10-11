@@ -25,6 +25,7 @@ const (
 	defaultLogLevel = daemonName + "=INFO;tbc=INFO;level=INFO"
 	defaultNetwork  = "testnet3" // XXX make this mainnet
 	defaultHome     = "~/." + daemonName
+	bhsDefault      = int(1e6) // enough for mainnet
 )
 
 var (
@@ -53,7 +54,7 @@ var (
 		},
 		"TBC_BLOCKHEADER_CACHE": config.Config{
 			Value:        &cfg.BlockheaderCache,
-			DefaultValue: int(1e6),
+			DefaultValue: bhsDefault,
 			Help:         "number of cached blockheaders",
 			Print:        config.PrintAll,
 		},

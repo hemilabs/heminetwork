@@ -65,11 +65,11 @@ type ldb struct {
 	pool    level.Pool
 	rawPool level.RawPool
 
-	blockCache *lru.Cache[string, *btcutil.Block] // block cache
+	blockCache *lru.Cache[chainhash.Hash, *btcutil.Block] // block cache
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
-	headerCache *lru.Cache[string, *tbcd.BlockHeader] // header cache
+	headerCache *lowIQMap
 
 	cfg *Config
 }
@@ -136,7 +136,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	}
 
 	if cfg.BlockCache > 0 {
-		l.blockCache, err = lru.New[string, *btcutil.Block](cfg.BlockCache)
+		l.blockCache, err = lru.New[chainhash.Hash, *btcutil.Block](cfg.BlockCache)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 		}
@@ -145,10 +145,8 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		log.Infof("block cache: DISABLED")
 	}
 	if cfg.BlockheaderCache > 0 {
-		l.headerCache, err = lru.New[string, *tbcd.BlockHeader](cfg.BlockheaderCache)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't setup header cache: %w", err)
-		}
+		l.headerCache = lowIQMapNew(cfg.BlockheaderCache)
+
 		log.Infof("blockheader cache: %v", cfg.BlockheaderCache)
 	} else {
 		log.Infof("blockheader cache: DISABLED")
@@ -216,7 +214,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 
 	if l.cfg.BlockheaderCache > 0 {
 		// Try cache first
-		if b, ok := l.headerCache.Get(string(hash[:])); ok {
+		if b, ok := l.headerCache.Get(hash); ok {
 			return b, nil
 		}
 	}
@@ -235,9 +233,9 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 	}
 	bh := decodeBlockHeader(ebh)
 
-	// Insert into cache, roughlt 150 byte cost.
+	// Insert into cache, roughly 150 byte cost.
 	if l.cfg.BlockheaderCache > 0 {
-		l.headerCache.Add(string(bh.Hash[:]), bh)
+		l.headerCache.Put(bh)
 	}
 
 	return bh, nil
@@ -330,7 +328,7 @@ func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebh
 // XXX should we have a function that does not call the expensive headerHash function?
 func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	bh := &tbcd.BlockHeader{
-		Hash:   headerHash(ebh[8:88]),
+		Hash:   *headerHash(ebh[8:88]),
 		Height: binary.BigEndian.Uint64(ebh[0:8]),
 	}
 	// copy the values to prevent slicing reentrancy problems.
@@ -562,7 +560,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 	}
 
 	cbh := &tbcd.BlockHeader{
-		Hash:       &bhash,
+		Hash:       bhash,
 		Height:     height,
 		Difficulty: *cdiff,
 		Header:     lastBlockHeader,
@@ -701,7 +699,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 		if l.cfg.BlockCache > 0 {
-			l.blockCache.Add(string(b.Hash()[:]), b)
+			l.blockCache.Add(*b.Hash(), b)
 		}
 	}
 
@@ -739,7 +737,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 
 	if l.cfg.BlockCache > 0 {
 		// Try cache first
-		if cb, ok := l.blockCache.Get(string(hash[:])); ok {
+		if cb, ok := l.blockCache.Get(*hash); ok {
 			return cb, nil
 		}
 	}
@@ -757,7 +755,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 		panic(fmt.Errorf("block decode data corruption: %w", err))
 	}
 	if l.cfg.BlockCache > 0 {
-		l.blockCache.Add(string(hash[:]), b)
+		l.blockCache.Add(*hash, b)
 	}
 	return b, nil
 }

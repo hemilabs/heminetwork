@@ -88,7 +88,7 @@ type Database interface {
 // BlockHeader contains the first 80 raw bytes of a bitcoin block plus its
 // location information (hash+height) and the cumulative difficulty.
 type BlockHeader struct {
-	Hash       *chainhash.Hash
+	Hash       chainhash.Hash
 	Height     uint64
 	Header     [80]byte
 	Difficulty big.Int
@@ -121,7 +121,7 @@ func (bh BlockHeader) Wire() (*wire.BlockHeader, error) {
 }
 
 func (bh BlockHeader) BlockHash() *chainhash.Hash {
-	return bh.Hash
+	return &bh.Hash
 }
 
 func (bh BlockHeader) ParentHash() *chainhash.Hash {

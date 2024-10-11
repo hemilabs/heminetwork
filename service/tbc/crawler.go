@@ -72,7 +72,7 @@ var (
 )
 
 type HashHeight struct {
-	Hash   *chainhash.Hash
+	Hash   chainhash.Hash
 	Height uint64
 }
 
@@ -95,7 +95,7 @@ func (s *Server) mdHashHeight(ctx context.Context, key []byte) (*HashHeight, err
 	if err != nil {
 		return nil, fmt.Errorf("metadata block header: %w", err)
 	}
-	return &HashHeight{Hash: ch, Height: bh.Height}, nil
+	return &HashHeight{Hash: *ch, Height: bh.Height}, nil
 }
 
 // UtxoIndexHash returns the last hash that has been been UTxO indexed.
@@ -119,7 +119,7 @@ func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeade
 	// lowest block height.
 
 	// 0. If bhX and bhY are the same return bhX.
-	if bhX.Hash.IsEqual(bhY.Hash) {
+	if bhX.Hash.IsEqual(&bhY.Hash) {
 		return bhX, nil
 	}
 
@@ -170,14 +170,14 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		return false, fmt.Errorf("best height less than provided height: %v < %v",
 			bhb.Height, bh.Height)
 	}
-	if bhb.Hash.IsEqual(bh.Hash) {
+	if bhb.Hash.IsEqual(&bh.Hash) {
 		// Self == best
 		return true, nil
 	}
 	// Move best block header backwards until we find bh.
 	for {
 		// log.Debugf("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
-		if height, ok := s.checkpoints[*bhb.Hash]; ok && bh.Height <= height {
+		if height, ok := s.checkpoints[bhb.Hash]; ok && bh.Height <= height {
 			return true, nil
 		}
 		bhb, err = s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
@@ -187,7 +187,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		if bhb.Hash.IsEqual(s.chainParams.GenesisHash) {
 			return false, nil
 		}
-		if bhb.Hash.IsEqual(bh.Hash) {
+		if bhb.Hash.IsEqual(&bh.Hash) {
 			return true, nil
 		}
 	}
@@ -439,7 +439,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("utxo index hash: %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
@@ -451,13 +451,13 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		log.Debugf("indexing utxos: %v", hh)
 
 		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, hash)
+		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -491,7 +491,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(hash) {
+		if endHash.IsEqual(&hash) {
 			last = hh
 			break
 		}
@@ -513,7 +513,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("%v does not connect to: %v",
 				bhs[index], hash)
 		}
-		hh.Hash = bhs[index].BlockHash()
+		hh.Hash = *bhs[index].BlockHash()
 		hh.Height = bhs[index].Height
 	}
 
@@ -538,7 +538,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("utxo index hash: %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
@@ -550,19 +550,19 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		log.Debugf("unindexing utxos: %v", hh)
 
 		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, hash)
+		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(hash) {
+		if endHash.IsEqual(&hash) {
 			last = hh
 			break
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -601,7 +601,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		hh.Hash = pbh.BlockHash()
+		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
 	}
 
@@ -661,7 +661,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 			return fmt.Errorf("metadata utxo hash: %w", err)
 		}
 
-		if endHash.IsEqual(last.Hash) {
+		if endHash.IsEqual(&last.Hash) {
 			break
 		}
 	}
@@ -721,7 +721,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 		if err != nil {
 			return fmt.Errorf("metadata utxo hash: %w", err)
 		}
-		if endHash.IsEqual(last.Hash) {
+		if endHash.IsEqual(&last.Hash) {
 			break
 		}
 	}
@@ -758,13 +758,13 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 			return fmt.Errorf("utxo indexer: %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
 
 	// XXX make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash)
+	startBH, err := s.db.BlockHeaderByHash(ctx, &utxoHH.Hash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -829,7 +829,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("tx index hash: %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
@@ -841,13 +841,13 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		log.Debugf("indexing txs: %v", hh)
 
 		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, hash)
+		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -873,7 +873,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(hash) {
+		if endHash.IsEqual(&hash) {
 			last = hh
 			break
 		}
@@ -895,7 +895,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("%v does not connect to: %v",
 				bhs[index], hash)
 		}
-		hh.Hash = bhs[index].BlockHash()
+		hh.Hash = *bhs[index].BlockHash()
 		hh.Height = bhs[index].Height
 	}
 
@@ -920,7 +920,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("tx index hash: %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
@@ -934,18 +934,18 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		hash := hh.Hash
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(hash) {
+		if endHash.IsEqual(&hash) {
 			last = hh
 			break
 		}
 
-		bh, err := s.db.BlockHeaderByHash(ctx, hash)
+		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -986,7 +986,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
 		}
-		hh.Hash = pbh.BlockHash()
+		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
 	}
 
@@ -1046,7 +1046,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 			return fmt.Errorf("metadata tx hash: %w", err)
 		}
 
-		if endHash.IsEqual(last.Hash) {
+		if endHash.IsEqual(&last.Hash) {
 			break
 		}
 
@@ -1106,7 +1106,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 			return fmt.Errorf("metadata tx hash: %w", err)
 		}
 
-		if endHash.IsEqual(last.Hash) {
+		if endHash.IsEqual(&last.Hash) {
 			break
 		}
 
@@ -1145,13 +1145,13 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 			return fmt.Errorf("tx indexer: %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
 
 	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
+	startBH, err := s.db.BlockHeaderByHash(ctx, &txHH.Hash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -1183,12 +1183,12 @@ func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 			return 0, fmt.Errorf("tx indexer: %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
 
-	return s.IndexIsLinear(ctx, utxoHH.Hash, endHash)
+	return s.IndexIsLinear(ctx, &utxoHH.Hash, endHash)
 }
 
 func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
@@ -1202,12 +1202,12 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 			return 0, fmt.Errorf("tx indexer: %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
 
-	return s.IndexIsLinear(ctx, txHH.Hash, endHash)
+	return s.IndexIsLinear(ctx, &txHH.Hash, endHash)
 }
 
 func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhash.Hash) (int, error) {
@@ -1360,11 +1360,11 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 			return fmt.Errorf("utxo index hash: %w", err)
 		}
 		utxoHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
-	utxoBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash)
+	utxoBH, err := s.db.BlockHeaderByHash(ctx, &utxoHH.Hash)
 	if err != nil {
 		return err
 	}
@@ -1372,16 +1372,16 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !cp.Hash.IsEqual(utxoBH.Hash) {
+	if !cp.Hash.IsEqual(&utxoBH.Hash) {
 		log.Infof("Syncing utxo index to: %v from: %v via: %v",
 			bhb.HH(), utxoBH.HH(), cp.HH())
 		// utxoBH is NOT on canonical chain, unwind first
-		if err := s.UtxoIndexer(ctx, cp.Hash); err != nil {
+		if err := s.UtxoIndexer(ctx, &cp.Hash); err != nil {
 			return fmt.Errorf("utxo indexer unwind: %w", err)
 		}
 	}
 	// Index utxo to best block
-	if err := s.UtxoIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.UtxoIndexer(ctx, &bhb.Hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
@@ -1392,11 +1392,11 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 			return fmt.Errorf("tx index hash: %w", err)
 		}
 		txHH = &HashHeight{
-			Hash:   s.chainParams.GenesisHash,
+			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
 		}
 	}
-	txBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
+	txBH, err := s.db.BlockHeaderByHash(ctx, &txHH.Hash)
 	if err != nil {
 		return err
 	}
@@ -1404,16 +1404,16 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !cp.Hash.IsEqual(txBH.Hash) {
+	if !cp.Hash.IsEqual(&txBH.Hash) {
 		log.Infof("Syncing tx index to: %v from: %v via: %v",
 			bhb.HH(), txBH.HH(), cp.HH())
 		// txBH is NOT on canonical chain, unwind first
-		if err := s.TxIndexer(ctx, cp.Hash); err != nil {
+		if err := s.TxIndexer(ctx, &cp.Hash); err != nil {
 			return fmt.Errorf("tx indexer unwind: %w", err)
 		}
 	}
 	// Transactions index
-	if err := s.TxIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.TxIndexer(ctx, &bhb.Hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
