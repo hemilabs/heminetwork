@@ -141,11 +141,6 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 	os.Exit(2)
 }
 
-func init() {
-	version.Component = "tbcd"
-	welcome = "Hemi Tiny Bitcoin Daemon " + version.BuildInfo()
-}
-
 func _main() error {
 	// Parse configuration from environment
 	if err := config.Parse(cm); err != nil {
@@ -205,6 +200,11 @@ func _main() error {
 	return nil
 }
 
+func init() {
+	version.Component = "tbcd"
+	welcome = "Hemi Tiny Bitcoin Daemon " + version.BuildInfo()
+}
+
 func main() {
 	if len(os.Args) != 1 {
 		fmt.Fprintf(os.Stderr, "%v\n", welcome)
@@ -216,7 +216,7 @@ func main() {
 	}
 
 	if err := _main(); err != nil {
-		log.Errorf("%v", err)
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
 }
