@@ -36,6 +36,11 @@ var (
 		"seed.bitnodes.io:8333",
 		"seed.bitcoin.jonasschnelli.ch:8333",
 	}
+
+	ErrReset            = errors.New("reset")
+	ErrNoAddresses      = errors.New("no addresses")
+	ErrDNSSeed          = errors.New("could not dns seed")
+	ErrNoConnectedPeers = errors.New("no connected peers")
 )
 
 // PeerManager keeps track of the available peers and their quality.
@@ -103,18 +108,15 @@ func (pm *PeerManager) seed(pctx context.Context) error {
 	ctx, cancel := context.WithTimeout(pctx, 15*time.Second)
 	defer cancel()
 
-	errorsSeen := 0
 	for _, v := range pm.dnsSeeds {
 		host, port, err := net.SplitHostPort(v)
 		if err != nil {
 			log.Errorf("Failed to parse host/port: %v", err)
-			errorsSeen++
 			continue
 		}
 		ips, err := resolver.LookupIP(ctx, "ip", host)
 		if err != nil {
 			log.Errorf("lookup: %v", err)
-			errorsSeen++
 			continue
 		}
 
@@ -125,7 +127,7 @@ func (pm *PeerManager) seed(pctx context.Context) error {
 	}
 
 	if len(pm.seeds) == 0 {
-		return errors.New("could not dns seed")
+		return ErrDNSSeed
 	}
 
 	return nil
@@ -133,14 +135,17 @@ func (pm *PeerManager) seed(pctx context.Context) error {
 
 // Stats returns peer statistics.
 func (pm *PeerManager) Stats() (int, int, int) {
-	log.Tracef("PeersStats")
-	defer log.Tracef("PeersStats exit")
+	log.Tracef("Stats")
+	defer log.Tracef("Stats exit")
 
 	pm.mtx.RLock()
 	defer pm.mtx.RUnlock()
 	return len(pm.peers), len(pm.good), len(pm.bad)
 }
 
+// handleAddr adds peers to the good list if they do not exist in the connected
+// and bad list.
+// Note that this function requires the mutex to be held.
 func (pm *PeerManager) handleAddr(peers []string) {
 	for _, addr := range peers {
 		_, _, err := net.SplitHostPort(addr)
@@ -170,7 +175,7 @@ func (pm *PeerManager) HandleAddr(peers []string) {
 	pm.handleAddr(peers)
 }
 
-// Good adds peer good list.
+// Good adds peer to good list if it does not exist in connected and good list already.
 func (pm *PeerManager) Good(address string) error {
 	log.Tracef("Good")
 	defer log.Tracef("Good exit")
@@ -258,7 +263,7 @@ func (pm *PeerManager) Random() (*peer, error) {
 		}
 	}
 
-	return nil, errors.New("no connected peers")
+	return nil, ErrNoConnectedPeers
 }
 
 // All runs a call back on all connected peers.
@@ -301,7 +306,7 @@ func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*peer, error) 
 		// back to seeds.
 		clear(pm.bad)
 		pm.handleAddr(pm.seeds)
-		return nil, errors.New("reset")
+		return nil, ErrReset
 	}
 	for k := range pm.good {
 		if _, ok := pm.peers[k]; ok {
@@ -323,7 +328,7 @@ func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*peer, error) 
 
 		return NewPeer(pm.net, slot, k)
 	}
-	return nil, errors.New("no addresses")
+	return nil, ErrNoAddresses
 }
 
 func (pm *PeerManager) connect(ctx context.Context, p *peer) error {
@@ -341,7 +346,7 @@ func (pm *PeerManager) connect(ctx context.Context, p *peer) error {
 		p.close() // close new peer and don't add it
 		log.Errorf("peer already connected: %v", p)
 		pm.mtx.Unlock()
-		return fmt.Errorf("connect %w", err)
+		return fmt.Errorf("connect: %w", err)
 	}
 	pm.peers[p.String()] = p
 	pm.mtx.Unlock()
@@ -352,8 +357,7 @@ func (pm *PeerManager) connect(ctx context.Context, p *peer) error {
 }
 
 func (pm *PeerManager) connectSlot(ctx context.Context, p *peer) {
-	err := pm.connect(ctx, p)
-	if err != nil {
+	if err := pm.connect(ctx, p); err != nil {
 		// log.Errorf("%v", err)
 		pm.slotsC <- p.Id() // give slot back
 		return
