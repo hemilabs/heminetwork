@@ -69,8 +69,7 @@ type ldb struct {
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
-	hcMtx       sync.RWMutex
-	headerCache map[chainhash.Hash]*tbcd.BlockHeader // header cache
+	headerCache *lowIQMap
 
 	cfg *Config
 }
@@ -114,9 +113,9 @@ type Config struct {
 
 func NewConfig(home string) *Config {
 	return &Config{
-		Home:             home, // require user to set home.
-		BlockCache:       250,  // max 4GB on mainnet
-		BlockheaderCache: 1e6,  // Cache all blockheaders on mainnet
+		Home:             home,     // require user to set home.
+		BlockCache:       250,      // max 4GB on mainnet
+		BlockheaderCache: int(1e6), // Cache all blockheaders on mainnet
 	}
 }
 
@@ -146,7 +145,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		log.Infof("block cache: DISABLED")
 	}
 	if cfg.BlockheaderCache > 0 {
-		l.headerCache = make(map[chainhash.Hash]*tbcd.BlockHeader, cfg.BlockheaderCache)
+		l.headerCache = lowIQMapNew(cfg.BlockheaderCache)
 
 		log.Infof("blockheader cache: %v", cfg.BlockheaderCache)
 	} else {
@@ -215,12 +214,9 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 
 	if l.cfg.BlockheaderCache > 0 {
 		// Try cache first
-		l.hcMtx.RLock()
-		if b, ok := l.headerCache[*hash]; ok {
-			l.hcMtx.RUnlock()
+		if b, ok := l.headerCache.Get(hash); ok {
 			return b, nil
 		}
-		l.hcMtx.RUnlock()
 	}
 
 	// It stands to reason that this code does not need a trasaction. The
@@ -239,11 +235,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 
 	// Insert into cache, roughly 150 byte cost.
 	if l.cfg.BlockheaderCache > 0 {
-		l.hcMtx.Lock()
-		if _, ok := l.headerCache[*bh.Hash]; !ok {
-			l.headerCache[*bh.Hash] = bh
-		}
-		l.hcMtx.Unlock()
+		l.headerCache.Put(bh)
 	}
 
 	return bh, nil
