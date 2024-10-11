@@ -158,7 +158,8 @@ func _main() error {
 	// Override blockheader cache based on network
 	switch cfg.Network {
 	case "testnet3":
-		if cfg.BlockheaderCache == bhsDefault {
+		bhs := os.Getenv("TBC_BLOCKHEADER_CACHE")
+		if bhs == "" {
 			cfg.BlockheaderCache = 35000000
 		}
 	}
