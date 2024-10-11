@@ -25,7 +25,7 @@ const (
 	defaultLogLevel = daemonName + "=INFO;tbc=INFO;level=INFO"
 	defaultNetwork  = "testnet3" // XXX make this mainnet
 	defaultHome     = "~/." + daemonName
-	bhsDefault      = int(1e6) // enough for mainnet; overridden for testnet3
+	bhsDefault      = int(1e6) // enough for mainnet
 )
 
 var (
@@ -154,15 +154,6 @@ func _main() error {
 
 	loggo.ConfigureLoggers(cfg.LogLevel)
 	log.Infof("%v", welcome)
-
-	// Override blockheader cache based on network
-	switch cfg.Network {
-	case "testnet3":
-		bhs := os.Getenv("TBC_BLOCKHEADER_CACHE")
-		if bhs == "" {
-			cfg.BlockheaderCache = 35000000
-		}
-	}
 
 	pc := config.PrintableConfig(cm)
 	for k := range pc {
