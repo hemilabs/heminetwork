@@ -1915,7 +1915,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	if zeroHash.IsEqual(&bhb.Hash) {
 		panic("no genesis")
 	}
-	si.BlockHeader.Hash = &bhb.Hash
+	si.BlockHeader.Hash = bhb.Hash
 	si.BlockHeader.Height = bhb.Height
 
 	// utxo index
