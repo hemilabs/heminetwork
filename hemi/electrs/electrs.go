@@ -61,7 +61,7 @@ func NewJSONRPCRequest(id uint64, method string, params any) (*JSONRPCRequest, e
 
 type JSONRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
-	Error   *JSONRPCError   `json:"error,omitempty"`
+	Error   string          `json:"error,omitempty"`
 	Result  json.RawMessage `json:"result"`
 	ID      uint64          `json:"id"`
 }
@@ -400,13 +400,13 @@ func (c *Client) Transaction(ctx context.Context, txHash []byte) ([]byte, error)
 
 func (c *Client) TransactionAtPosition(ctx context.Context, height, index uint64) ([]byte, []string, error) {
 	result := struct {
-		TXHash string   `json:"tx_id"`
+		TXHash string   `json:"tx_hash"`
 		Merkle []string `json:"merkle"`
 	}{}
 
 	params := []any{height, index, true}
 	if err := c.call(ctx, "blockchain.transaction.id_from_pos", &params, &result); err != nil {
-		if strings.HasPrefix(err.Error(), "invalid tx_pos ") {
+		if strings.HasPrefix(err.Error(), "No tx in position ") {
 			return nil, nil, NewNoTxAtPositionError(err)
 		} else if strings.HasPrefix(err.Error(), "db error: DBError('block ") && strings.Contains(err.Error(), " not on disk ") {
 			return nil, nil, NewBlockNotOnDiskError(err)

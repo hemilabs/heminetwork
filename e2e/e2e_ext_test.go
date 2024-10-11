@@ -436,13 +436,13 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 		res := electrs.JSONRPCResponse{}
 		if req.Method == "blockchain.transaction.broadcast" {
 			res.ID = req.ID
-			res.Error = nil
+			res.Error = ""
 			res.Result = json.RawMessage([]byte(fmt.Sprintf("\"%s\"", mb.TxID())))
 		}
 
 		if req.Method == "blockchain.headers.subscribe" {
 			res.ID = req.ID
-			res.Error = nil
+			res.Error = ""
 			headerNotification := electrs.HeaderNotification{
 				Height:       mockTxheight,
 				BinaryHeader: "aaaa",
@@ -458,13 +458,13 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 
 		if req.Method == "blockchain.block.header" {
 			res.ID = req.ID
-			res.Error = nil
+			res.Error = ""
 			res.Result = json.RawMessage([]byte(mockEncodedBlockHeader))
 		}
 
 		if req.Method == "blockchain.transaction.id_from_pos" {
 			res.ID = req.ID
-			res.Error = nil
+			res.Error = ""
 
 			params := []any{}
 
@@ -474,7 +474,7 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 			}
 
 			result := struct {
-				TXHash string   `json:"tx_id"`
+				TXHash string   `json:"tx_hash"`
 				Merkle []string `json:"merkle"`
 			}{}
 
@@ -488,7 +488,7 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 			// pretend that there are no transactions past mockTxHeight
 			// and mockTxPos
 			if params[0].(float64) >= mockTxheight && params[1].(float64) > mockTxPos {
-				res.Error = electrs.NewJSONRPCError(1, "no tx at position")
+				res.Error = "no tx at position"
 			}
 
 			b, err := json.Marshal(&result)
@@ -501,7 +501,7 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 
 		if req.Method == "blockchain.transaction.get" {
 			res.ID = req.ID
-			res.Error = nil
+			res.Error = ""
 
 			params := []any{}
 
@@ -521,7 +521,7 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 
 		if req.Method == "blockchain.scripthash.get_balance" {
 			res.ID = req.ID
-			res.Error = nil
+			res.Error = ""
 			j, err := json.Marshal(electrs.Balance{
 				Confirmed:   1,
 				Unconfirmed: 2,
@@ -535,7 +535,7 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 
 		if req.Method == "blockchain.headers.subscribe" {
 			res.ID = req.ID
-			res.Error = nil
+			res.Error = ""
 			j, err := json.Marshal(electrs.HeaderNotification{
 				Height: 10,
 			})
@@ -547,7 +547,7 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 
 		if req.Method == "blockchain.scripthash.listunspent" {
 			res.ID = req.ID
-			res.Error = nil
+			res.Error = ""
 			hash := []byte{
 				1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2, 3, 4, 5, 6,
 				7, 8, 9, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1, 2,
