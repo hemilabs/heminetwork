@@ -20,10 +20,10 @@ ENV PATH="${PATH}:/root/.foundry/bin"
 
 RUN foundryup
 
-ARG OP_GETH_CACHE_BREAK=1
+ARG OP_GETH_CACHE_BREAK=12F
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout 83dd8a6e0459dd0f96182bb16065411f9318ac00
+RUN git checkout 4c818bcfa33873c808cfb697ea1b713748338117
 
 WORKDIR /git
 
@@ -50,6 +50,8 @@ WORKDIR /git/optimism/op-bindings
 RUN go mod tidy
 WORKDIR /git/optimism
 RUN make op-bindings op-node op-batcher op-proposer
+RUN make -C ./op-conductor op-conductor
+
 RUN pnpm build
 
 WORKDIR /git/optimism/packages/contracts-bedrock

@@ -5,7 +5,10 @@
 
 set -xe
 
-sh /tmp/genesisl2.sh
+if [ -z "${ENTRYPOINT_SKIP_GENESIS}" ]; then
+    sh /tmp/genesisl2.sh
+fi
+
 
 /git/op-geth/build/bin/geth init --datadir /tmp/datadir /l2configs/genesis.json
 
@@ -42,4 +45,7 @@ sh /tmp/genesisl2.sh
  --gpo.maxprice=1 \
  --tbc.network=localnet \
  --tbc.initheight=1 \
- --tbc.seeds='bitcoind:18444'
+ --tbc.seeds='bitcoind:18444' \
+ --override.ecotone=1725868497 \
+ --override.canyon=1725868497 \
+ --override.cancun=1725868497

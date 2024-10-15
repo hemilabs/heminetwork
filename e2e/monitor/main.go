@@ -293,11 +293,11 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		console.log(Number.parseInt(hexValue, 16));
 	`
 
-	runJs := func(jsi string, layer string, ipcPath string) string {
+	runJs := func(jsi string, layer string, ipcPath string, replica string) string {
 		cmd := exec.Command(
 			"docker",
 			"exec",
-			fmt.Sprintf("e2e-op-geth-%s-1", layer),
+			fmt.Sprintf("e2e-op-geth-%s-%s", layer, replica),
 			"geth",
 			"attach",
 			"--exec",
@@ -313,10 +313,10 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 	}
 
 	for {
-		first := runJs(firstBatcherTxBlockJs, "l1", "geth.ipc")
-		last := runJs(lastBatcherTxBlockJs, "l1", "geth.ipc")
-		count := runJs(batcherPublicationCountJs, "l1", "geth.ipc")
-		popMinerBalance := runJs(popMinerBalanceJs, "l2", "datadir/geth.ipc")
+		first := runJs(firstBatcherTxBlockJs, "l1", "geth.ipc", "1")
+		last := runJs(lastBatcherTxBlockJs, "l1", "geth.ipc", "1")
+		count := runJs(batcherPublicationCountJs, "l1", "geth.ipc", "1")
+		popMinerBalance := runJs(popMinerBalanceJs, "l2", "datadir/geth.ipc", "2-1")
 
 		mtx.Lock()
 		s.firstBatcherPublicationHash = first
