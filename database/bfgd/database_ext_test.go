@@ -193,7 +193,7 @@ func TestDatabasePostgres(t *testing.T) {
 		EPHash:             b2Hash,
 	}
 	l2ksIn := []bfgd.L2Keystone{ks1, ks2}
-	err = db.L2KeystonesInsert(ctx, l2ksIn)
+	err = db.L2KeystonesInsert(ctx, l2ksIn, false)
 	if err != nil {
 		t.Fatalf("Failed to get L2 keystones: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestL2KeystoneInsertSuccess(t *testing.T) {
 		Hash:               fillOutBytes("mockhash", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,80 @@ func TestL2KeystoneInsertMultipleSuccess(t *testing.T) {
 		Hash:               fillOutBytes("mockhashz", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	saved, err := db.L2KeystoneByAbrevHash(ctx, [32]byte(l2Keystone.Hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := deep.Equal(saved, &l2Keystone)
+	if len(diff) != 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+
+	otherSaved, err := db.L2KeystoneByAbrevHash(ctx, [32]byte(otherL2Keystone.Hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff = deep.Equal(otherSaved, &otherL2Keystone)
+	if len(diff) != 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+
+	count, err := l2KeystonesCount(ctx, sdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 2 {
+		t.Fatalf("unexpected count %d", count)
+	}
+}
+
+func TestL2KeystoneInsertIgnoreDuplicates(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	l2Keystone := bfgd.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      11,
+		L2BlockNumber:      22,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+		Hash:               fillOutBytes("mockhash", 32),
+	}
+
+	otherL2Keystone := bfgd.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      11,
+		L2BlockNumber:      22,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+		Hash:               fillOutBytes("mockhashz", 32),
+	}
+
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +570,7 @@ func TestL2KeystoneInsertInvalidHashLength(t *testing.T) {
 		Hash:               fillOutBytes("mockhash", 31),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 	if err == nil || errors.Is(database.ValidationError(""), err) == false {
 		t.Fatalf("unexpected error %s", err)
 	}
@@ -534,7 +607,7 @@ func TestL2KeystoneInsertInvalidEPHashLength(t *testing.T) {
 		Hash:               fillOutBytes("mockhash", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 	if err == nil || errors.Is(database.ValidationError(""), err) == false {
 		t.Fatalf("unexpected error %s", err)
 	}
@@ -571,7 +644,7 @@ func TestL2KeystoneInsertInvalidStateRootLength(t *testing.T) {
 		Hash:               fillOutBytes("mockhash", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 	if err == nil || errors.Is(database.ValidationError(""), err) == false {
 		t.Fatalf("unexpected error %s", err)
 	}
@@ -608,7 +681,7 @@ func TestL2KeystoneInsertInvalidPrevKeystoneEPHashLength(t *testing.T) {
 		Hash:               fillOutBytes("mockhash", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 	if err == nil || errors.Is(database.ValidationError(""), err) == false {
 		t.Fatalf("unexpected error %s", err)
 	}
@@ -645,7 +718,7 @@ func TestL2KeystoneInsertInvalidParentEPHashLength(t *testing.T) {
 		Hash:               fillOutBytes("mockhash", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 	if err == nil || errors.Is(database.ValidationError(""), err) == false {
 		t.Fatalf("unexpected error %s", err)
 	}
@@ -699,7 +772,7 @@ func TestL2KeystoneByAbrevHashFound(t *testing.T) {
 		Hash:               fillOutBytes("mockhash", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 	if err != nil {
 		t.Fatalf("unexpected error %s", err)
 	}
@@ -748,7 +821,7 @@ func TestL2KeystoneInsertMostRecentNMoreThanSaved(t *testing.T) {
 		Hash:               fillOutBytes("mockhashz", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -801,7 +874,7 @@ func TestL2KeystoneInsertMostRecentNFewerThanSaved(t *testing.T) {
 		Hash:               fillOutBytes("mockhashz", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -852,7 +925,7 @@ func TestL2KeystoneInsertMostRecentNLimit100(t *testing.T) {
 		toInsert = append(toInsert, l2Keystone)
 	}
 
-	err := db.L2KeystonesInsert(ctx, toInsert)
+	err := db.L2KeystonesInsert(ctx, toInsert, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -900,7 +973,7 @@ func TestL2KeystoneInsertMultipleAtomicFailure(t *testing.T) {
 		Hash:               fillOutBytes("mockhashz", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone}, false)
 	if err == nil || errors.Is(err, database.ValidationError("")) == false {
 		t.Fatalf("insert should have failed but it did not: %s", err)
 	}
@@ -948,7 +1021,7 @@ func TestL2KeystoneInsertMultipleDuplicateError(t *testing.T) {
 		Hash:               fillOutBytes("mockhash", 32),
 	}
 
-	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone}, false)
 	if err == nil || errors.Is(err, database.DuplicateError("")) == false {
 		t.Fatalf("received unexpected error: %s", err)
 	}
@@ -2292,7 +2365,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 	}
 
 	if height == -1 {
-		err = db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+		err = db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2310,7 +2383,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 		t.Fatal(err)
 	}
 
-	err = db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
+	err = db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

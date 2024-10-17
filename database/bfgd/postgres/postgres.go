@@ -97,7 +97,7 @@ func (p *pgdb) Version(ctx context.Context) (int, error) {
 	return dbVersion, nil
 }
 
-func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) error {
+func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone, ignoreDuplicates bool) error {
 	log.Tracef("L2KeystonesInsert")
 	defer log.Tracef("L2KeystonesInsert exit")
 
@@ -120,7 +120,7 @@ func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) er
 		}
 	}()
 
-	const qInsertL2Keystone = `
+	qInsertL2Keystone := `
 		INSERT INTO l2_keystones (
 			l2_keystone_abrev_hash,
 			l1_block_number,
@@ -134,6 +134,13 @@ func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) er
 
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
+
+	// give caller the option to ignore duplicates (i.e. if this l2 keystone already
+	// exists in the db no-op).  we actually might always want to do this,
+	// as L2 Keystones has no concept of an upsert
+	if ignoreDuplicates {
+		qInsertL2Keystone += " ON CONFLICT DO NOTHING"
+	}
 
 	for _, v := range l2ks {
 		result, err := tx.ExecContext(ctx, qInsertL2Keystone, v.Hash,
@@ -160,7 +167,7 @@ func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) er
 		if err != nil {
 			return fmt.Errorf("insert l2 keystone rows affected: %w", err)
 		}
-		if rows < 1 {
+		if rows < 1 && !ignoreDuplicates {
 			return fmt.Errorf("insert l2 keystone rows: %v", rows)
 		}
 	}
