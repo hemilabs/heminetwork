@@ -6,6 +6,7 @@ package bfg
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -701,5 +702,21 @@ func TestSingleCIDR(t *testing.T) {
 					tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestErrorIfNotPrivKeyConnectingToBFG(t *testing.T) {
+	_, err := NewServer(&Config{
+		RequestLimit:   1,
+		RequestTimeout: 4,
+		BFGURL:         "something",
+	})
+
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+
+	if !errors.Is(err, ErrBTCPrivateKeyMissing) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
