@@ -70,6 +70,7 @@ func NewDefaultConfig() *Config {
 		PublicListenAddress:  ":8383",
 		RequestLimit:         bfgapi.DefaultRequestLimit,
 		RequestTimeout:       bfgapi.DefaultRequestTimeout,
+		BFGURL:               "",
 	}
 }
 
@@ -85,6 +86,12 @@ type btcClient interface {
 	TransactionAtPosition(ctx context.Context, height, index uint64) ([]byte, []string, error)
 	UTXOs(ctx context.Context, scriptHash []byte) ([]*electrs.UTXO, error)
 	Close() error
+}
+
+// Wrap for calling bfg commands
+type bfgCmd struct {
+	msg any
+	ch  chan any
 }
 
 type Config struct {
@@ -103,6 +110,7 @@ type Config struct {
 	RequestTimeout          int // in seconds
 	RemoteIPHeaders         []string
 	TrustedProxies          []string
+	BFGURL                  string
 }
 
 type Server struct {
@@ -144,6 +152,13 @@ type Server struct {
 	l2keystonesCache []hemi.L2Keystone
 
 	btcHeightCache uint64
+
+	bfgWG sync.WaitGroup // wait group for connecting to other bfgs
+
+	holdoffTimeout time.Duration // Time in between connections attempt to BFG
+	bfgCallTimeout time.Duration
+
+	bfgCmdCh chan bfgCmd // commands to send to bfg
 }
 
 // metrics stores prometheus metrics.
@@ -222,6 +237,9 @@ func NewServer(cfg *Config) (*Server, error) {
 		metrics:               newMetrics(),
 		sessions:              make(map[string]*bfgWs),
 		checkForInvalidBlocks: make(chan struct{}),
+		holdoffTimeout:        6 * time.Second,
+		bfgCallTimeout:        20 * time.Second,
+		bfgCmdCh:              make(chan bfgCmd),
 	}
 	for range cfg.RequestLimit {
 		s.requestLimiter <- true
@@ -1402,7 +1420,7 @@ func (s *Server) handleBtcBlockNotification() error {
 	return nil
 }
 
-func (s *Server) handleL2KeystonesNotification() error {
+func (s *Server) handleL2KeystonesNotification() {
 	log.Tracef("handleL2KeystonesNotification")
 	defer log.Tracef("handleL2KeystonesNotification exit")
 
@@ -1414,8 +1432,6 @@ func (s *Server) handleL2KeystonesNotification() error {
 		go writeNotificationResponse(bws, &bfgapi.L2KeystonesNotification{})
 	}
 	s.mtx.Unlock()
-
-	return nil
 }
 
 func hemiL2KeystoneToDb(l2ks hemi.L2Keystone) bfgd.L2Keystone {
@@ -1439,25 +1455,28 @@ func hemiL2KeystonesToDb(l2ks []hemi.L2Keystone) []bfgd.L2Keystone {
 	return dbks
 }
 
+func (s *Server) saveL2Keystones(ctx context.Context, l2k []hemi.L2Keystone) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	ks := hemiL2KeystonesToDb(l2k)
+	err := s.db.L2KeystonesInsert(ctx, ks)
+	if err != nil {
+		log.Errorf("error saving keystone %v", err)
+		return
+	}
+
+	s.refreshL2KeystoneCache(ctx)
+	s.handleL2KeystonesNotification()
+}
+
 func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
 	log.Tracef("handleNewL2Keystones")
 	defer log.Tracef("handleNewL2Keystones exit")
 
 	response := bfgapi.NewL2KeystonesResponse{}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		ks := hemiL2KeystonesToDb(nlkr.L2Keystones)
-		err := s.db.L2KeystonesInsert(ctx, ks)
-		if err != nil {
-			log.Errorf("error saving keystone %v", err)
-			return
-		}
-
-		s.refreshL2KeystoneCache(ctx)
-	}()
+	go s.saveL2Keystones(context.Background(), nlkr.L2Keystones)
 
 	return response, nil
 }
@@ -1552,6 +1571,170 @@ func (s *Server) handleAccessPublicKeys(table string, action string, payload, pa
 
 func (s *Server) handleL2KeystonesChange(table string, action string, payload, payloadOld any) {
 	go s.handleL2KeystonesNotification()
+}
+
+func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
+	defer s.bfgWG.Done()
+
+	log.Tracef("handleBFGWebsocketReadUnauth")
+	defer log.Tracef("handleBFGWebsocketReadUnauth exit")
+	for {
+		log.Infof("handleBFGWebsocketReadUnauth %v", "ReadConn")
+		cmd, _, _, err := bfgapi.ReadConn(ctx, conn)
+		if err != nil {
+			// See if we were terminated
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(s.holdoffTimeout):
+			}
+			continue
+		}
+		log.Infof("handleBFGWebsocketReadUnauth %v", cmd)
+
+		switch cmd {
+		case bfgapi.CmdL2KeystonesNotification:
+			resp, err := s.callBFG(ctx, &bfgapi.L2KeystonesRequest{})
+			if err != nil {
+				log.Errorf("callBFG error: %v", err)
+				continue
+			}
+
+			l2ksr := resp.(*bfgapi.L2KeystonesResponse)
+			go s.saveL2Keystones(ctx, l2ksr.L2Keystones)
+
+		default:
+			log.Errorf("unknown command: %v", cmd)
+			return
+		}
+	}
+}
+
+func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
+	log.Tracef("callBFG %T", msg)
+	defer log.Tracef("callBFG exit %T", msg)
+
+	bc := bfgCmd{
+		msg: msg,
+		ch:  make(chan any),
+	}
+
+	ctx, cancel := context.WithTimeout(parrentCtx, s.bfgCallTimeout)
+	defer cancel()
+
+	// attempt to send
+	select {
+	case <-ctx.Done():
+		return nil, protocol.NewInternalErrorf("callBFG send context error: %w",
+			ctx.Err())
+	case s.bfgCmdCh <- bc:
+	default:
+		return nil, protocol.NewInternalErrorf("bfg command queue full")
+	}
+
+	// Wait for response
+	select {
+	case <-ctx.Done():
+		return nil, protocol.NewInternalErrorf("callBFG received context error: %w",
+			ctx.Err())
+	case payload := <-bc.ch:
+		if err, ok := payload.(error); ok {
+			return nil, err // XXX is this an error or internal error
+		}
+		return payload, nil
+	}
+
+	// Won't get here
+}
+
+func (s *Server) handleBFGCallCompletion(parrentCtx context.Context, conn *protocol.Conn, bc bfgCmd) {
+	log.Tracef("handleBFGCallCompletion")
+	defer log.Tracef("handleBFGCallCompletion exit")
+
+	ctx, cancel := context.WithTimeout(parrentCtx, s.bfgCallTimeout)
+	defer cancel()
+
+	log.Tracef("handleBFGCallCompletion: %v", spew.Sdump(bc.msg))
+
+	_, _, payload, err := bfgapi.Call(ctx, conn, bc.msg)
+	if err != nil {
+		log.Errorf("handleBFGCallCompletion %T: %v", bc.msg, err)
+		select {
+		case bc.ch <- err:
+		default:
+		}
+	}
+	select {
+	case bc.ch <- payload:
+		log.Tracef("handleBFGCallCompletion returned: %v", spew.Sdump(payload))
+	default:
+	}
+}
+
+func (s *Server) handleBFGWebsocketCallUnauth(ctx context.Context, conn *protocol.Conn) {
+	defer s.bfgWG.Done()
+
+	log.Tracef("handleBFGWebsocketCallUnauth")
+	defer log.Tracef("handleBFGWebsocketCallUnauth exit")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case bc := <-s.bfgCmdCh:
+			go s.handleBFGCallCompletion(ctx, conn, bc)
+		}
+	}
+}
+
+func (s *Server) connectBFG(ctx context.Context) error {
+	log.Tracef("connectBFG")
+	defer log.Tracef("connectBFG exit")
+
+	conn, err := protocol.NewConn(s.cfg.BFGURL, &protocol.ConnOptions{
+		ReadLimit: 2 * (1 << 20), // 2 MiB
+	})
+	if err != nil {
+		return err
+	}
+	err = conn.Connect(ctx)
+	if err != nil {
+		return err
+	}
+
+	s.bfgWG.Add(1)
+	go s.handleBFGWebsocketCallUnauth(ctx, conn)
+
+	s.bfgWG.Add(1)
+	go s.handleBFGWebsocketReadUnauth(ctx, conn)
+
+	// Wait for exit
+	s.bfgWG.Wait()
+
+	return nil
+}
+
+func (s *Server) bfg(ctx context.Context) {
+	defer s.wg.Done()
+
+	log.Tracef("bfg")
+	defer log.Tracef("bfg exit")
+
+	for {
+		if err := s.connectBFG(ctx); err != nil {
+			// Do nothing
+			log.Tracef("connectBFG: %v", err)
+		} else {
+			log.Infof("Connected to BFG: %s", s.cfg.BFGURL)
+		}
+		// See if we were terminated
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.holdoffTimeout):
+		}
+
+		log.Debugf("Reconnecting to: %v", s.cfg.BFGURL)
+	}
 }
 
 func (s *Server) Run(pctx context.Context) error {
