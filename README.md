@@ -140,6 +140,17 @@ go run ./integrationtest
 - A **PostgreSQL database**, bfgd expects the sql scripts in `./database/bfgd/scripts/` to be run to set up your schema.
 - A **connection to an Electrs node** on the proper Bitcoin network (testnet or mainnet).
 
+### Running your own bfgd and PoP mining with it
+
+If you'd like to run your own `bfgd` and don't want to rely on Hemi Labs (or any third party) for _broadcasting transactions_, you may run `bfgd` and connect it to a _trusted_ `bfgd` run by a third party to _receive l2 keystones only_ (l2 keystones represent l2 state and are what are mined in PoP transactions).  In this case, the third party `bfgd` will only send you l2 keystones, your `bfgd` can notify your local pop miner and this will broadcast them to your Electrs+bitcoind setup so you don't rely on Hemi Labs--or any third party--which may be congested.
+
+If you'd like to do so, use the following environment variables when running bfgd:
+
+* `BFG_BFG_URL`: the _trusted_ `bfgd`'s websocket url that you will connect to
+* `BFG_BTC_PRIVKEY`: your btc private key.  note that this can be an unfunded private key and you'll still receive l2 keystones to mine
+
+then you may connect your local `popmd` to your aforementioned local `bfgd`
+
 ## ▶️ Running bssd
 
 ### 🏁 Prerequisites
