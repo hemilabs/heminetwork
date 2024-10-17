@@ -22,6 +22,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -38,6 +39,7 @@ import (
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
+	"github.com/hemilabs/heminetwork/version"
 )
 
 // XXX this code needs to be a bit smarter when syncing bitcoin. We should
@@ -1602,7 +1604,6 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 
 			l2ksr := resp.(*bfgapi.L2KeystonesResponse)
 			go s.saveL2Keystones(ctx, l2ksr.L2Keystones)
-
 		default:
 			log.Errorf("unknown command: %v", cmd)
 			return
@@ -1686,16 +1687,34 @@ func (s *Server) handleBFGWebsocketCallUnauth(ctx context.Context, conn *protoco
 	}
 }
 
-func (s *Server) connectBFG(ctx context.Context) error {
+func (s *Server) connectBFG(pctx context.Context) error {
 	log.Tracef("connectBFG")
 	defer log.Tracef("connectBFG exit")
 
+	headers := http.Header{}
+	headers.Add("User-Agent", version.UserAgent())
+
+	privKey, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		panic(err)
+	}
+
+	authenticator, err := auth.NewSecp256k1AuthClient(privKey)
+	if err != nil {
+		return err
+	}
+
 	conn, err := protocol.NewConn(s.cfg.BFGURL, &protocol.ConnOptions{
-		ReadLimit: 2 * (1 << 20), // 2 MiB
+		Authenticator: authenticator,
+		Headers:       headers,
 	})
 	if err != nil {
 		return err
 	}
+
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
 	err = conn.Connect(ctx)
 	if err != nil {
 		return err
@@ -1967,6 +1986,11 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 		log.Errorf("bitcoin client clean shutdown")
 	}()
+
+	if s.cfg.BFGURL != "" {
+		s.wg.Add(1)
+		go s.bfg(ctx)
+	}
 
 	s.wg.Add(1)
 	go s.trackBitcoin(ctx)

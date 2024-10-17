@@ -631,6 +631,7 @@ func (ac *Conn) Read(ctx context.Context, api API) (Command, string, interface{}
 			}
 			return cmd, id, payload, err
 		}
+
 		ac.RLock()
 		call, ok := ac.calls[id]
 		ac.RUnlock()

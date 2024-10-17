@@ -124,6 +124,7 @@ func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
 			}
 			c.CloseNow()
 			doneCh <- true
+			return
 		}
 	}()
 
@@ -283,7 +284,7 @@ func nextPort(ctx context.Context, t *testing.T) int {
 	}
 }
 
-func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, auth bool) (*bfg.Server, string, string, string) {
+func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, auth bool, otherBfgUrl string) (*bfg.Server, string, string, string) {
 	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
@@ -296,6 +297,7 @@ func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, el
 		PublicKeyAuth:        auth,
 		RequestLimit:         bfgapi.DefaultRequestLimit,
 		RequestTimeout:       bfgapi.DefaultRequestTimeout,
+		BFGURL:               otherBfgUrl,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -323,7 +325,11 @@ func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, el
 }
 
 func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64) (*bfg.Server, string, string, string) {
-	return createBfgServerWithAuth(ctx, t, pgUri, electrsAddr, btcStartHeight, false)
+	return createBfgServerWithAuth(ctx, t, pgUri, electrsAddr, btcStartHeight, false, "")
+}
+
+func createBfgServerConnectedToAnother(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string, string) {
+	return createBfgServerWithAuth(ctx, t, pgUri, electrsAddr, btcStartHeight, false, otherBfgUrl)
 }
 
 func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
@@ -3133,6 +3139,80 @@ func TestNotifyOnL2KeystonesBFGClients(t *testing.T) {
 	wg.Wait()
 }
 
+func TestNotifyOnL2KeystonesBFGClientsViaOtherBFG(t *testing.T) {
+	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	otherDb, otherPgUri, otherSdb, otherCleanup := createTestDB(context.Background(), t)
+	defer func() {
+		otherDb.Close()
+		otherSdb.Close()
+		otherCleanup()
+	}()
+
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, _, otherBfgPublicWsUrl := createBfgServerWithAuth(ctx, t, otherPgUri, "", 1, false, bfgPublicWsUrl)
+
+	c, _, err := websocket.Dial(ctx, otherBfgPublicWsUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	protocolConn := protocol.NewWSConn(c)
+
+	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
+		t.Fatal(err)
+	}
+	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+
+	l2Keystone := bfgd.L2Keystone{
+		Hash:               fillOutBytes("somehashone", 32),
+		Version:            1,
+		L1BlockNumber:      11,
+		L2BlockNumber:      22,
+		ParentEPHash:       fillOutBytes("parentephashone", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephashone", 32),
+		StateRoot:          fillOutBytes("staterootone", 32),
+		EPHash:             fillOutBytes("ephashone", 32),
+	}
+
+	// insert the l2 keystone into the first bfg server's postgres,
+	// this should send a notification to the "other" bfg which should
+	// broadcast the notification
+
+	if err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{
+		l2Keystone,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			var v protocol.Message
+			if err = wsjson.Read(ctx, c, &v); err != nil {
+				panic(fmt.Sprintf("error reading from ws: %s", err))
+			}
+
+			if v.Header.Command == bfgapi.CmdL2KeystonesNotification {
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+}
+
 // TestNotifyOnNewBtcBlockBSSClients tests that upon getting a new btc block,
 // in this case from (mock) electrs, that a new btc notification
 // will be sent to all clients connected to BSS
@@ -3433,7 +3513,7 @@ func TestBFGAuthNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true)
+	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -3465,7 +3545,7 @@ func TestBFGAuthPing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true)
+	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -3519,7 +3599,7 @@ func TestBFGAuthPingThenRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsPrivateUrl, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true)
+	_, _, bfgWsPrivateUrl, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -3576,7 +3656,7 @@ func TestBFGAuthWrongKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true)
+	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
