@@ -148,6 +148,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdTxBroadcastRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.TxBroadcastRequest)
+				return s.handleTxBroadcastRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -493,6 +500,21 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	return &tbcapi.TxByIdResponse{
 		Tx: wireTxToTBC(tx),
 	}, nil
+}
+
+func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBroadcastRequest) (any, error) {
+	log.Tracef("handleTxBroadcastRequest")
+	defer log.Tracef("handleTxBroadcastRequest exit")
+
+	txid, err := s.TxBroadcast(ctx, req.Tx)
+	if err != nil {
+		responseErr := protocol.NewInternalError(err)
+		return &tbcapi.TxBroadcastResponse{
+			Error: responseErr.ProtocolError(),
+		}, responseErr
+	}
+
+	return &tbcapi.TxBroadcastResponse{TxID: txid}, nil
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {

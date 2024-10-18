@@ -11,10 +11,14 @@ import (
 	"reflect"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 )
+
+// XXX we should kill the wrapping types that are basically identical to wire.
+// Wire is a full citizen so treat it as such.
 
 const (
 	APIVersion = 1
@@ -54,6 +58,9 @@ const (
 
 	CmdTxByIdRequest  = "tbcapi-tx-by-id-request"
 	CmdTxByIdResponse = "tbcapi-tx-by-id-response"
+
+	CmdTxBroadcastRequest  = "tbcapi-tx-broadcast-request"
+	CmdTxBroadcastResponse = "tbcapi-tx-broadcast-response"
 )
 
 var (
@@ -229,6 +236,15 @@ type TxByIdResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
+type TxBroadcastRequest struct {
+	Tx *wire.MsgTx `json:"tx"`
+}
+
+type TxBroadcastResponse struct {
+	TxID  *chainhash.Hash `json:"tx_id"`
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                     reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                    reflect.TypeOf(PingResponse{}),
@@ -254,6 +270,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdTxByIdRawResponse:               reflect.TypeOf(TxByIdRawResponse{}),
 	CmdTxByIdRequest:                   reflect.TypeOf(TxByIdRequest{}),
 	CmdTxByIdResponse:                  reflect.TypeOf(TxByIdResponse{}),
+	CmdTxBroadcastRequest:              reflect.TypeOf(TxBroadcastRequest{}),
+	CmdTxBroadcastResponse:             reflect.TypeOf(TxBroadcastResponse{}),
 }
 
 type tbcAPI struct{}
