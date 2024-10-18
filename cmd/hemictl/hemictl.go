@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -27,6 +28,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
@@ -471,6 +473,25 @@ func tbcdb() error {
 		tx, err := s.TxById(ctx, chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
+		}
+		fmt.Printf("%v\n", spew.Sdump(tx))
+
+	case "txbroadcast":
+		// XXX not a db command remove
+		txHex := args["tx"]
+		if txHex == "" {
+			return errors.New("tx: must be set")
+		}
+		var r io.Reader
+		if txHex == "-" {
+			r = os.Stdin
+		} else {
+			r = strings.NewReader(txHex)
+		}
+		tx := wire.NewMsgTx(0)
+		err = tx.Deserialize(hex.NewDecoder(r))
+		if err != nil {
+			return fmt.Errorf("tx broadcast deserialize: %w", err)
 		}
 		fmt.Printf("%v\n", spew.Sdump(tx))
 

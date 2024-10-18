@@ -1530,6 +1530,13 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	return nil, database.ErrNotFound
 }
 
+func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {
+	log.Tracef("TxBroadcast")
+	defer log.Tracef("TxBroadcast exit")
+
+	return nil, fmt.Errorf("GFY")
+}
+
 func feesFromTransactions(txs []*btcutil.Tx) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
