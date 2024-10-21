@@ -386,15 +386,6 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	feePerKB := 1024 * m.Fee()
 	feeAmount := (int64(txLen) * int64(feePerKB)) / 1024
 
-	// Retrieve the current balance for the miner.
-	confirmed, unconfirmed, err := m.bitcoinBalance(ctx, scriptHash[:])
-	if err != nil {
-		return fmt.Errorf("get Bitcoin balance: %w", err)
-	}
-
-	log.Tracef("Miner has Bitcoin balance: %v confirmed, %v unconfirmed",
-		confirmed, unconfirmed)
-
 	// Retrieve available UTXOs for the miner.
 	log.Tracef("Looking for UTXOs for script hash %v", scriptHash)
 	utxos, err := m.bitcoinUTXOs(ctx, scriptHash[:])
