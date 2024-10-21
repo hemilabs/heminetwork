@@ -164,25 +164,12 @@ func Write(ctx context.Context, c APIConn, api API, id string, payload interface
 		return fmt.Errorf("command unknown for payload %T", payload)
 	}
 
-	// Go's JSON encoder encodes a nil slice as "null" and an empty
-	// array as "[]" - react does not cope with this, so convert nil
-	// slices to empty slices. In order to do this we need to copy
-	// the payload so as not to modify the original. Yay.
-	b, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	clone := reflect.New(reflect.TypeOf(payload)).Interface()
-	if err := json.Unmarshal(b, clone); err != nil {
-		return err
-	}
-	fixupNilSlices(clone)
-
 	msg := &Message{
 		Header: Header{Command: cmd, ID: id},
 	}
-	msg.Payload, err = json.Marshal(clone)
-	if err != nil {
+
+	var err error
+	if msg.Payload, err = json.Marshal(payload); err != nil {
 		return err
 	}
 
