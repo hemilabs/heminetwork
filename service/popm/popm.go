@@ -195,28 +195,6 @@ func (m *Miner) SetFee(fee uint) {
 	m.txFee.Store(uint32(fee))
 }
 
-func (m *Miner) bitcoinBalance(ctx context.Context, scriptHash []byte) (uint64, int64, error) {
-	br := &bfgapi.BitcoinBalanceRequest{
-		ScriptHash: scriptHash,
-	}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, br)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	bResp, ok := res.(*bfgapi.BitcoinBalanceResponse)
-	if !ok {
-		return 0, 0, fmt.Errorf("not a BitcoinBalanceResponse %T", res)
-	}
-
-	if bResp.Error != nil {
-		return 0, 0, bResp.Error
-	}
-
-	return bResp.Confirmed, bResp.Unconfirmed, nil
-}
-
 func (m *Miner) bitcoinBroadcast(ctx context.Context, tx []byte) ([]byte, error) {
 	bbr := &bfgapi.BitcoinBroadcastRequest{
 		Transaction: tx,

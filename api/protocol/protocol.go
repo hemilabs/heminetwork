@@ -88,53 +88,6 @@ func commandFromPayload(payload any, api API) (Command, bool) {
 	return "", false
 }
 
-// fixupStruct iterates over a struct in order to fix up nil slices.
-func fixupStruct(v reflect.Value) {
-	if v.Type().Kind() != reflect.Struct {
-		return
-	}
-	for i := range v.NumField() {
-		fv := v.Field(i)
-		fk := fv.Type().Kind()
-		if fk == reflect.Ptr {
-			if fv.IsNil() {
-				continue
-			}
-			fv = reflect.Indirect(fv)
-			fk = fv.Type().Kind()
-		}
-		switch fk {
-		case reflect.Slice:
-			fixupNilSlice(fv)
-		case reflect.Struct:
-			fixupStruct(fv)
-		}
-	}
-}
-
-// fixupNilSlice changes a nil slice to an empty slice if it is setable.
-func fixupNilSlice(v reflect.Value) {
-	if v.Type().Kind() != reflect.Slice {
-		return
-	}
-	if !v.IsNil() || !v.CanSet() {
-		return
-	}
-	v.Set(reflect.MakeSlice(v.Type(), 0, 0))
-}
-
-// fixupNilSlices fixes up nil slices to empty slices in a struct and any
-// nested structs.
-func fixupNilSlices(i any) {
-	v := reflect.Indirect(reflect.ValueOf(i))
-	switch v.Type().Kind() {
-	case reflect.Slice:
-		fixupNilSlice(v)
-	case reflect.Struct:
-		fixupStruct(v)
-	}
-}
-
 type API interface {
 	Commands() map[Command]reflect.Type
 }
