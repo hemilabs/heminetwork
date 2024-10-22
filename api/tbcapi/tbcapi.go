@@ -61,6 +61,9 @@ const (
 
 	CmdTxBroadcastRequest  = "tbcapi-tx-broadcast-request"
 	CmdTxBroadcastResponse = "tbcapi-tx-broadcast-response"
+
+	CmdTxBroadcastRawRequest  = "tbcapi-tx-broadcast-raw-request"
+	CmdTxBroadcastRawResponse = "tbcapi-tx-broadcast-raw-response"
 )
 
 var (
@@ -237,10 +240,21 @@ type TxByIdResponse struct {
 }
 
 type TxBroadcastRequest struct {
-	Tx *wire.MsgTx `json:"tx"`
+	Tx    *wire.MsgTx `json:"tx"`
+	Force bool        `json:"force"`
 }
 
 type TxBroadcastResponse struct {
+	TxID  *chainhash.Hash `json:"tx_id"`
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
+type TxBroadcastRawRequest struct {
+	Tx    api.ByteSlice `json:"tx"`
+	Force bool          `json:"force"`
+}
+
+type TxBroadcastRawResponse struct {
 	TxID  *chainhash.Hash `json:"tx_id"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
@@ -272,6 +286,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdTxByIdResponse:                  reflect.TypeOf(TxByIdResponse{}),
 	CmdTxBroadcastRequest:              reflect.TypeOf(TxBroadcastRequest{}),
 	CmdTxBroadcastResponse:             reflect.TypeOf(TxBroadcastResponse{}),
+	CmdTxBroadcastRawRequest:           reflect.TypeOf(TxBroadcastRawRequest{}),
+	CmdTxBroadcastRawResponse:          reflect.TypeOf(TxBroadcastRawResponse{}),
 }
 
 type tbcAPI struct{}
