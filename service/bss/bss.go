@@ -290,6 +290,8 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, msg *b
 
 	response, err := s.callBFG(ctx, &bfgapi.BTCFinalityByKeystonesRequest{
 		L2Keystones: msg.L2Keystones,
+		Limit:       msg.Limit,
+		Page:        msg.Page,
 	})
 	if err != nil {
 		e := protocol.NewInternalErrorf("btc finality keystones: %w", err)

@@ -1598,6 +1598,8 @@ func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
+		0,
+		100,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1640,6 +1642,8 @@ func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
+		0,
+		100,
 	)
 	if err != nil {
 		t.Fatal(err)
