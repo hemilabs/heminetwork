@@ -311,7 +311,7 @@ func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*peer, error) 
 	for k := range pm.good {
 		if _, ok := pm.peers[k]; ok {
 			// Address is in use
-			log.Errorf("address already on peers list: %v", k)
+			log.Debugf("address already on peers list: %v", k)
 			continue
 		}
 		if _, ok := pm.bad[k]; ok {
