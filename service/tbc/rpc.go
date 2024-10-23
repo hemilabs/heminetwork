@@ -515,13 +515,11 @@ func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBro
 
 	txid, err := s.TxBroadcast(ctx, req.Tx, req.Force)
 	if err != nil {
-		var responseErr *protocol.Error
 		if errors.Is(err, ErrTxAlreadyBroadcast) || errors.Is(err, ErrTxBroadcastNoPeers) {
-			responseErr = protocol.RequestError(err)
-		} else {
-			responseErr = protocol.NewInternalError(err).ProtocolError()
+			return &tbcapi.TxBroadcastResponse{Error: protocol.RequestError(err)}, err
 		}
-		return &tbcapi.TxBroadcastResponse{Error: responseErr}, responseErr
+		e := protocol.NewInternalError(err)
+		return &tbcapi.TxBroadcastResponse{Error: e.ProtocolError()}, e
 	}
 
 	return &tbcapi.TxBroadcastResponse{TxID: txid}, nil
