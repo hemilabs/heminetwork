@@ -138,7 +138,8 @@ type Server struct {
 	db tbcd.Database
 
 	// Prometheus
-	prom struct {
+	promPollVerbose bool // set to true to print stats during poll
+	prom            struct {
 		syncInfo             SyncInfo
 		connected, good, bad int
 	} // periodically updated by promPoll
@@ -737,7 +738,7 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 		// When quiesced do not handle other p2p commands.
 		s.mtx.Lock()
 		if s.indexing {
-			log.Infof("indexing %v", s.indexing)
+			log.Debugf("indexing %v", s.indexing)
 			s.mtx.Unlock()
 			continue
 		}
@@ -841,10 +842,13 @@ func (s *Server) promPoll(ctx context.Context) error {
 		if s.cfg.MempoolEnabled {
 			mempoolCount, mempoolSize = s.mempool.stats(ctx)
 		}
-		log.Infof("Pending blocks %v/%v connected peers %v good peers %v "+
-			"bad peers %v mempool %v %v",
-			s.blocks.Len(), defaultPendingBlocks, s.prom.connected, s.prom.good,
-			s.prom.bad, mempoolCount, humanize.Bytes(uint64(mempoolSize)))
+		if s.promPollVerbose {
+			log.Infof("Pending blocks %v/%v connected peers %v "+
+				"good peers %v bad peers %v mempool %v %v",
+				s.blocks.Len(), defaultPendingBlocks, s.prom.connected,
+				s.prom.good, s.prom.bad, mempoolCount,
+				humanize.Bytes(uint64(mempoolSize)))
+		}
 		s.mtx.RUnlock()
 
 	}
@@ -2081,7 +2085,6 @@ func (s *Server) Run(pctx context.Context) error {
 				return
 			}
 			go func(pp *peer) {
-				log.Infof("calling handlePeer %v", pp)
 				err := s.handlePeer(ctx, pp)
 				if err != nil {
 					log.Debugf("%v: %v", pp, err)

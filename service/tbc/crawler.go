@@ -1340,7 +1340,6 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		return err
 	}
 
-	log.Infof("============ index utxo")
 	// Index Utxo
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
@@ -1373,7 +1372,6 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
-	log.Infof("============ index tx")
 	// Index Tx
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
@@ -1425,7 +1423,6 @@ func (s *Server) SyncIndexersToBest(ctx context.Context) error {
 		s.mtx.Unlock()
 		return ErrAlreadyIndexing
 	}
-	log.Infof("marking indexing true -----------------")
 	s.indexing = true
 	s.mtx.Unlock()
 
@@ -1433,7 +1430,6 @@ func (s *Server) SyncIndexersToBest(ctx context.Context) error {
 		s.mtx.Lock()
 		s.indexing = false
 		s.mtx.Unlock()
-		log.Infof("marking indexing false -----------------")
 	}()
 
 	return s.syncIndexersToBest(ctx)
