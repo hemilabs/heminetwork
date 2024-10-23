@@ -282,6 +282,11 @@ func (s *Server) mempoolPeer(ctx context.Context, p *peer) {
 		return
 	}
 
+	// XXX
+	if (p.remoteVersion.Services & wire.SFNodeBloom) == 0 {
+		return
+	}
+
 	err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
 	if err != nil {
 		log.Debugf("mempool %v: %v", p, err)
@@ -696,9 +701,11 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 
 	// If we are caught up and start collecting mempool data.
 	if s.cfg.MempoolEnabled && s.Synced(ctx).Synced {
-		err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
-		if err != nil {
-			return fmt.Errorf("mempool %v: %w", p, err)
+		if (p.remoteVersion.Services & wire.SFNodeBloom) == wire.SFNodeBloom {
+			err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
+			if err != nil {
+				return fmt.Errorf("mempool %v: %w", p, err)
+			}
 		}
 	}
 
@@ -707,7 +714,9 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 
 	// Only now can we consider the peer connected
 	verbose := false
-	log.Infof("connected: %v", p)
+	log.Infof("connected: %v version %v agent %v", p,
+		p.remoteVersion.ProtocolVersion,
+		p.remoteVersion.UserAgent)
 	defer log.Debugf("disconnect: %v", p)
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
