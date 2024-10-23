@@ -1611,9 +1611,9 @@ func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *peer) error {
 	log.Tracef("TxBroadcastAllToPeer %v", p)
 	defer log.Tracef("TxBroadcastAllToPeer %v exit", p)
 
-	s.mtx.Lock()
+	s.mtx.RLock()
 	if len(s.broadcast) == 0 {
-		s.mtx.Unlock()
+		s.mtx.RUnlock()
 		return nil
 	}
 
@@ -1621,11 +1621,11 @@ func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *peer) error {
 	for k := range s.broadcast {
 		err := invTx.AddInvVect(wire.NewInvVect(wire.InvTypeTx, &k))
 		if err != nil {
-			s.mtx.Unlock()
+			s.mtx.RUnlock()
 			return fmt.Errorf("invalid vector: %w", err)
 		}
 	}
-	s.mtx.Unlock()
+	s.mtx.RUnlock()
 
 	err := p.write(defaultCmdTimeout, invTx)
 	if err != nil {
@@ -1658,8 +1658,8 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 	}
 	var success atomic.Uint64
 	inv := func(ctx context.Context, p *peer) {
-		log.Infof("inv %v", p)
-		defer log.Infof("inv %v exit", p)
+		log.Tracef("inv %v", p)
+		defer log.Tracef("inv %v exit", p)
 
 		err := p.write(defaultCmdTimeout, invTx)
 		if err != nil {
