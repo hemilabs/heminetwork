@@ -52,8 +52,8 @@ const (
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
-	defaultCmdTimeout          = 4 * time.Second
-	defaultPingTimeout         = 3 * time.Second
+	defaultCmdTimeout          = 7 * time.Second
+	defaultPingTimeout         = 9 * time.Second
 	defaultBlockPendingTimeout = 13 * time.Second
 )
 
@@ -606,8 +606,23 @@ func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 	log.Tracef("handlePeer %v", p)
 
+	var readError error
 	defer func() {
-		log.Tracef("handlePeer exit %v", p)
+		re := ""
+		if readError != nil {
+			re = fmt.Sprintf(" error: %v", readError)
+		}
+		// kill pending blocks and pings
+		findPeer := func(value any) bool {
+			if pp, ok := value.(*peer); ok && pp.String() == p.String() {
+				return true
+			}
+			return false
+		}
+		blks := s.blocks.DeleteByValue(findPeer)
+		pings := s.pings.DeleteByValue(findPeer)
+		log.Infof("disconnected: %v blocks %v pings %v%v", p, blks, pings, re)
+
 		s.pm.Bad(ctx, p.String()) // always close peer
 	}()
 
@@ -641,7 +656,7 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 
 	// Only now can we consider the peer connected
 	verbose := false
-	log.Debugf("connected: %v", p)
+	log.Infof("connected: %v", p)
 	defer log.Debugf("disconnect: %v", p)
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -651,22 +666,15 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 		default:
 		}
 
-		msg, raw, err := p.read(defaultCmdTimeout)
+		// Don't set a deadline. There is plenty of write activity that
+		// will timeout on its own and cause a close resulting in the
+		// err path being taken.
+		msg, raw, err := p.read(0)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			// skip unknown message
 			continue
 		} else if err != nil {
-			// Check if context was canceled when read timeout occurs
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-
-				// Regular timeout, proceed with reading.
-				continue
-			}
+			readError = err
 			return err
 		}
 
