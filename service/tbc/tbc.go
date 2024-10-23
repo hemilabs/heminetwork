@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -63,6 +64,9 @@ var (
 	localnetSeeds = []string{
 		"127.0.0.1:18444",
 	}
+
+	ErrTxAlreadyBroadcast = errors.New("tx already broadcast")
+	ErrTxBroadcastNoPeers = errors.New("can't broadcast tx, no peers")
 )
 
 var log = loggo.GetLogger("tbc")
@@ -113,6 +117,9 @@ type Server struct {
 
 	// mempool
 	mempool *mempool
+
+	// broadcast
+	broadcast map[chainhash.Hash]*wire.MsgTx
 
 	// bitcoin network
 	seeds       []string // XXX remove
@@ -173,6 +180,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		}),
 		sessions:       make(map[string]*tbcWs),
 		requestTimeout: defaultRequestTimeout,
+		broadcast:      make(map[chainhash.Hash]*wire.MsgTx, 16),
 	}
 
 	log.Infof("MEMPOOL IS CURRENTLY BROKEN AND HAS BEEN DISABLED")
@@ -308,6 +316,14 @@ func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, r
 		if err := s.handleNotFound(ctx, p, m, raw); err != nil {
 			return false, fmt.Errorf("handle generic not found: %w", err)
 		}
+
+	case *wire.MsgGetData:
+		if err := s.handleGetData(ctx, p, m, raw); err != nil {
+			return false, fmt.Errorf("handle generic get data: %w", err)
+		}
+
+	case *wire.MsgMemPool:
+		log.Infof("mempool: %v", spew.Sdump(m))
 
 	default:
 		return false, nil
@@ -639,14 +655,20 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 
 	// Get p2p information.
 	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
-	if err != nil && !errors.Is(err, net.ErrClosed) {
+	if err != nil {
+		return err
+	}
+
+	// Broadcast all tx's to new node.
+	err = s.TxBroadcastAllToPeer(ctx, p)
+	if err != nil {
 		return err
 	}
 
 	if s.cfg.MempoolEnabled {
 		// Start building the mempool.
 		err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
-		if err != nil && !errors.Is(err, net.ErrClosed) {
+		if err != nil {
 			return err
 		}
 	}
@@ -1205,9 +1227,19 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
 
+	// Reap broadcast messages.
+	txHashes, _ := block.MsgBlock().TxHashes()
+	s.mtx.Lock()
+	for _, v := range txHashes {
+		if _, ok := s.broadcast[v]; ok {
+			delete(s.broadcast, v)
+			log.Infof("broadcast tx %v included in %v %v", v, bhs, height)
+		}
+	}
+	s.mtx.Unlock()
+
 	// Reap txs from mempool, no need to log error.
 	if s.cfg.MempoolEnabled {
-		txHashes, _ := block.MsgBlock().TxHashes()
 		_ = s.mempool.txsRemove(ctx, txHashes)
 	}
 
@@ -1297,6 +1329,43 @@ func (s *Server) handleNotFound(ctx context.Context, p *peer, msg *wire.MsgNotFo
 
 	//// XXX keep here to see if it spams logs
 	//log.Infof("NotFound: %v %v", p, spew.Sdump(msg))
+
+	return nil
+}
+
+func (s *Server) handleGetData(ctx context.Context, p *peer, msg *wire.MsgGetData, raw []byte) error {
+	log.Tracef("handleGetData %v", p)
+	defer log.Tracef("handleGetData %v exit", p)
+
+	for _, v := range msg.InvList {
+		switch v.Type {
+		case wire.InvTypeError:
+			log.Errorf("get data error: %v", v.Hash)
+		case wire.InvTypeTx:
+			s.mtx.RLock()
+			if tx, ok := s.broadcast[v.Hash]; ok {
+				log.Debugf("handleGetData %v", spew.Sdump(msg))
+				txc := tx.Copy()
+				err := p.write(defaultCmdTimeout, txc)
+				if err != nil {
+					log.Errorf("write tx: %v", err)
+				}
+			}
+			s.mtx.RUnlock()
+		case wire.InvTypeBlock:
+			log.Infof("get data block: %v", v.Hash)
+		case wire.InvTypeFilteredBlock:
+			log.Infof("get data filtered block: %v", v.Hash)
+		case wire.InvTypeWitnessBlock:
+			log.Infof("get data witness block: %v", v.Hash)
+		case wire.InvTypeWitnessTx:
+			log.Infof("get data witness tx: %v", v.Hash)
+		case wire.InvTypeFilteredWitnessBlock:
+			log.Infof("get data filtered witness block: %v", v.Hash)
+		default:
+			log.Errorf("get data unknown: %v", spew.Sdump(v.Hash))
+		}
+	}
 
 	return nil
 }
@@ -1536,6 +1605,76 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	}
 
 	return nil, database.ErrNotFound
+}
+
+func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *peer) error {
+	log.Tracef("TxBroadcastAllToPeer %v", p)
+	defer log.Tracef("TxBroadcastAllToPeer %v exit", p)
+
+	s.mtx.RLock()
+	if len(s.broadcast) == 0 {
+		s.mtx.RUnlock()
+		return nil
+	}
+
+	invTx := wire.NewMsgInv()
+	for k := range s.broadcast {
+		err := invTx.AddInvVect(wire.NewInvVect(wire.InvTypeTx, &k))
+		if err != nil {
+			s.mtx.RUnlock()
+			return fmt.Errorf("invalid vector: %w", err)
+		}
+	}
+	s.mtx.RUnlock()
+
+	err := p.write(defaultCmdTimeout, invTx)
+	if err != nil {
+		return fmt.Errorf("broadcast all %v: %w", p, err)
+	}
+
+	log.Debugf("broadcast all txs to peer %v: tx count %v", p, len(invTx.InvList))
+
+	return nil
+}
+
+func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*chainhash.Hash, error) {
+	log.Tracef("TxBroadcast")
+	defer log.Tracef("TxBroadcast exit")
+
+	s.mtx.Lock()
+	if _, ok := s.broadcast[tx.TxHash()]; ok && !force {
+		s.mtx.Unlock()
+		return nil, ErrTxAlreadyBroadcast
+	}
+	s.broadcast[tx.TxHash()] = tx
+	txb := tx.Copy()
+	s.mtx.Unlock()
+
+	txHash := txb.TxHash()
+	invTx := wire.NewMsgInv()
+	err := invTx.AddInvVect(wire.NewInvVect(wire.InvTypeTx, &txHash))
+	if err != nil {
+		return nil, fmt.Errorf("invalid vector: %w", err)
+	}
+	var success atomic.Uint64
+	inv := func(ctx context.Context, p *peer) {
+		log.Tracef("inv %v", p)
+		defer log.Tracef("inv %v exit", p)
+
+		err := p.write(defaultCmdTimeout, invTx)
+		if err != nil {
+			log.Debugf("inv %v: %v", p, err)
+			return
+		}
+		success.Add(1)
+	}
+	s.pm.AllBlock(ctx, inv)
+
+	if success.Load() == 0 {
+		return nil, ErrTxBroadcastNoPeers
+	}
+
+	return &txHash, nil
 }
 
 func feesFromTransactions(txs []*btcutil.Tx) error {

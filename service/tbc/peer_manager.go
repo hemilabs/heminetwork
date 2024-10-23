@@ -281,6 +281,29 @@ func (pm *PeerManager) All(ctx context.Context, f func(ctx context.Context, p *p
 	}
 }
 
+func (pm *PeerManager) AllBlock(ctx context.Context, f func(ctx context.Context, p *peer)) {
+	log.Tracef("AllBlock")
+	defer log.Tracef("AllBlock")
+
+	var wgAll sync.WaitGroup
+
+	pm.mtx.RLock()
+	for _, p := range pm.peers {
+		if !p.isConnected() {
+			continue
+		}
+		wgAll.Add(1)
+		go func() {
+			defer wgAll.Done()
+			f(ctx, p)
+		}()
+	}
+	pm.mtx.RUnlock()
+
+	log.Infof("AllBlock waiting")
+	wgAll.Wait()
+}
+
 // RandomConnect blocks until there is a peer ready to use.
 func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 	log.Tracef("RandomConnect")

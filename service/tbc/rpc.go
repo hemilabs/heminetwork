@@ -148,6 +148,20 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdTxBroadcastRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.TxBroadcastRequest)
+				return s.handleTxBroadcastRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdTxBroadcastRawRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.TxBroadcastRawRequest)
+				return s.handleTxBroadcastRawRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -493,6 +507,45 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	return &tbcapi.TxByIdResponse{
 		Tx: wireTxToTBC(tx),
 	}, nil
+}
+
+func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBroadcastRequest) (any, error) {
+	log.Tracef("handleTxBroadcastRequest")
+	defer log.Tracef("handleTxBroadcastRequest exit")
+
+	txid, err := s.TxBroadcast(ctx, req.Tx, req.Force)
+	if err != nil {
+		if errors.Is(err, ErrTxAlreadyBroadcast) || errors.Is(err, ErrTxBroadcastNoPeers) {
+			return &tbcapi.TxBroadcastResponse{Error: protocol.RequestError(err)}, err
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.TxBroadcastResponse{Error: e.ProtocolError()}, e
+	}
+
+	return &tbcapi.TxBroadcastResponse{TxID: txid}, nil
+}
+
+func (s *Server) handleTxBroadcastRawRequest(ctx context.Context, req *tbcapi.TxBroadcastRawRequest) (any, error) {
+	log.Tracef("handleTxBroadcastRawRequest")
+	defer log.Tracef("handleTxBroadcastRawRequest exit")
+
+	tx := wire.NewMsgTx(0)
+	err := tx.Deserialize(bytes.NewBuffer(req.Tx))
+	if err != nil {
+		return &tbcapi.TxBroadcastResponse{
+			Error: protocol.RequestError(err),
+		}, nil
+	}
+	txid, err := s.TxBroadcast(ctx, tx, req.Force)
+	if err != nil {
+		if errors.Is(err, ErrTxAlreadyBroadcast) || errors.Is(err, ErrTxBroadcastNoPeers) {
+			return &tbcapi.TxBroadcastResponse{Error: protocol.RequestError(err)}, err
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.TxBroadcastResponse{Error: e.ProtocolError()}, e
+	}
+
+	return &tbcapi.TxBroadcastResponse{TxID: txid}, nil
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
