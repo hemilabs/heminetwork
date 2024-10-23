@@ -2669,9 +2669,9 @@ func TestGetFinalitiesByL2KeystoneBSSWithPagination(t *testing.T) {
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1)
+	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)
+	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
@@ -2702,6 +2702,8 @@ func TestGetFinalitiesByL2KeystoneBSSWithPagination(t *testing.T) {
 	}
 
 	receivedFinalities := []hemi.L2BTCFinality{}
+
+	// use pagination to get records 1 by 1 (there are two)
 
 	for i := range 2 {
 		finalityRequest := bssapi.BTCFinalityByKeystonesRequest{
@@ -2770,9 +2772,9 @@ func TestGetFinalitiesByL2KeystoneBFGWithPagination(t *testing.T) {
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
 
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1)
+	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)
+	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -2803,6 +2805,8 @@ func TestGetFinalitiesByL2KeystoneBFGWithPagination(t *testing.T) {
 	}
 
 	receivedFinalities := []hemi.L2BTCFinality{}
+
+	// use pagination to get records 1 by 1 (there are two)
 
 	for i := range 2 {
 		finalityRequest := bfgapi.BTCFinalityByKeystonesRequest{
