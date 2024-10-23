@@ -655,14 +655,20 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 
 	// Get p2p information.
 	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
-	if err != nil && !errors.Is(err, net.ErrClosed) {
+	if err != nil {
+		return err
+	}
+
+	// Broadcast all tx's to new node.
+	err = s.TxBroadcastAllToPeer(ctx, p)
+	if err != nil {
 		return err
 	}
 
 	if s.cfg.MempoolEnabled {
 		// Start building the mempool.
 		err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
-		if err != nil && !errors.Is(err, net.ErrClosed) {
+		if err != nil {
 			return err
 		}
 	}
@@ -1328,8 +1334,8 @@ func (s *Server) handleNotFound(ctx context.Context, p *peer, msg *wire.MsgNotFo
 }
 
 func (s *Server) handleGetData(ctx context.Context, p *peer, msg *wire.MsgGetData, raw []byte) error {
-	log.Infof("handleGetData %v", p)
-	defer log.Infof("handleGetData %v exit", p)
+	log.Tracef("handleGetData %v", p)
+	defer log.Tracef("handleGetData %v exit", p)
 
 	for _, v := range msg.InvList {
 		switch v.Type {
@@ -1338,7 +1344,7 @@ func (s *Server) handleGetData(ctx context.Context, p *peer, msg *wire.MsgGetDat
 		case wire.InvTypeTx:
 			s.mtx.RLock()
 			if tx, ok := s.broadcast[v.Hash]; ok {
-				log.Infof("handleGetData %v", spew.Sdump(msg))
+				log.Debugf("handleGetData %v", spew.Sdump(msg))
 				txc := tx.Copy()
 				err := p.write(defaultCmdTimeout, txc)
 				if err != nil {
@@ -1599,6 +1605,36 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	}
 
 	return nil, database.ErrNotFound
+}
+
+func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *peer) error {
+	log.Tracef("TxBroadcastAllToPeer %v", p)
+	defer log.Tracef("TxBroadcastAllToPeer %v exit", p)
+
+	s.mtx.Lock()
+	if len(s.broadcast) == 0 {
+		s.mtx.Unlock()
+		return nil
+	}
+
+	invTx := wire.NewMsgInv()
+	for k := range s.broadcast {
+		err := invTx.AddInvVect(wire.NewInvVect(wire.InvTypeTx, &k))
+		if err != nil {
+			s.mtx.Unlock()
+			return fmt.Errorf("invalid vector: %w", err)
+		}
+	}
+	s.mtx.Unlock()
+
+	err := p.write(defaultCmdTimeout, invTx)
+	if err != nil {
+		return fmt.Errorf("broadcast all %v: %w", p, err)
+	}
+
+	log.Debugf("broadcast all txs to peer %v: tx count %v", p, len(invTx.InvList))
+
+	return nil
 }
 
 func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*chainhash.Hash, error) {
