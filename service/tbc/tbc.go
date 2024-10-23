@@ -291,10 +291,6 @@ func (s *Server) headersPeer(ctx context.Context, p *peer) {
 	log.Tracef("headersPeer %v", p)
 	defer log.Tracef("headersPeer %v exit", p)
 
-	s.mtx.Lock()
-	log.Infof("starting to collect block headers %v", p, s.indexing)
-	s.mtx.Unlock()
-
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		log.Errorf("headers peer block header best: %v %v", p, err)

@@ -998,7 +998,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 	log.Tracef("TxIndexerUnwind")
 	defer log.Tracef("TxIndexerUnwind exit")
 
-	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with TxIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
 
 	s.mtx.Lock()
 	if !s.indexing {
@@ -1404,7 +1404,6 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
-	// XXX remove?
 	bh, err := s.db.BlockHeaderByHash(ctx, &bhb.Hash)
 	if err == nil {
 		return err
