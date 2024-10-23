@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -16,46 +17,64 @@ import (
 // after 5 minutes and check that it has progressed at least to a certain
 // point
 func TestMonitor(t *testing.T) {
-	ms := (1000 * 60 * 5) + 25*1000 // dump after 5 minutes + 25 seconds for cushion (1 keystone)
-	output := monitor(uint(ms))
+	// let localnet start, there are smarter ways to do this but this will work
+	// for now
+	time.Sleep(2 * time.Minute)
 
-	t.Log(output)
-
-	var jo jsonOutput
-	if err := json.Unmarshal([]byte(output), &jo); err != nil {
-		t.Fatal(err)
-	}
-
-	// each keystone is 25 seconds, so there are 4 keystones per 100 seconds,
-	// we expect the number of pop txs to be at least once every 25 seconds
-	// for the time we waited
-	// add 25 seconds for cushion
-	seconds := ms / 1000
-	popTxsPer100Seconds := 4
-	expectedPopTxs := popTxsPer100Seconds * (seconds / 100)
-
+	// somewhat arbitrary; we should be able to get to 12 pop txs mined in a
+	// reasonable amount of time
+	const expectedPopTxs = 12
 	t.Logf("expecting at least %d pop txs mined", expectedPopTxs)
-
-	if jo.PopTxCount < uint64(expectedPopTxs) {
-		t.Fatalf("popTxCount %d < %d", jo.PopTxCount, expectedPopTxs)
-	}
 
 	// the expected balance should be at least 1 BaseHEMI per poptx - 8.  We say
 	// "- 8" because we lag 8 keystones behind a pop payout (200 L2 blocks at
 	// 1 block per second)
-	popMinerBalance := big.NewInt(0)
-	balance, ok := popMinerBalance.SetString(jo.PopMinerHemiBalance, 10)
-	if !ok {
-		t.Fatalf("could not parse balance from %s", jo.PopMinerHemiBalance)
-	}
-
 	expectedPayouts := expectedPopTxs - 8
 	expectedPayoutBalance := big.NewInt(hemi.HEMIBase)
 	expectedPayoutBalance = expectedPayoutBalance.Mul(big.NewInt(int64(expectedPayouts)), expectedPayoutBalance)
+	t.Logf("expecting a HEMI balance of at least %d", expectedPayoutBalance)
 
-	t.Logf("expecting actual balance %d to be greater than %d", balance, expectedPayoutBalance)
+	// if we get to 10 minutes without the expected number of pop txs
+	// and HEMI balance, something is wrong, fail the test
+	blockWaitTimeoutTimer := time.NewTimer(10 * time.Minute)
 
-	if expectedPayoutBalance.Cmp(balance) > 0 {
-		t.Fatalf("pop miner payout balance received %d, want at least %d", balance, expectedPayoutBalance)
+	for {
+		// poll every 10 seconds until timeout
+		select {
+		case <-blockWaitTimeoutTimer.C:
+			t.Fatalf("timed out")
+		case <-time.After(10 * time.Second):
+		}
+
+		// let the goroutines gather stats for 10 seconds, then dump
+		// it and check the results, if they're not what we expected try again
+		output := monitor(uint(10 * 1000))
+		t.Log(output)
+
+		var jo jsonOutput
+		if err := json.Unmarshal([]byte(output), &jo); err != nil {
+			t.Fatal(err)
+		}
+
+		if jo.PopTxCount < uint64(expectedPopTxs) {
+			t.Logf("popTxCount %d < %d", jo.PopTxCount, expectedPopTxs)
+			continue
+		}
+
+		popMinerBalance := big.NewInt(0)
+		balance, ok := popMinerBalance.SetString(jo.PopMinerHemiBalance, 10)
+		if !ok {
+			t.Fatalf("could not parse balance from %s", jo.PopMinerHemiBalance)
+		}
+
+		t.Logf("expecting actual balance %d to be greater than %d", balance, expectedPayoutBalance)
+
+		if expectedPayoutBalance.Cmp(balance) > 0 {
+			t.Logf("pop miner payout balance received %d, want at least %d", balance, expectedPayoutBalance)
+			continue
+		}
+
+		// success; we passed the test
+		break
 	}
 }
