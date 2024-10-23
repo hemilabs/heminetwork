@@ -1014,7 +1014,6 @@ func TestConnectToBFGAndPerformMineWithAuth(t *testing.T) {
 		EventConnected,
 		bfgapi.CmdL2KeystonesRequest,
 		bfgapi.CmdBitcoinInfoRequest,
-		bfgapi.CmdBitcoinBalanceRequest,
 		bfgapi.CmdBitcoinUTXOsRequest,
 		bfgapi.CmdBitcoinBroadcastRequest,
 	}
@@ -1078,7 +1077,6 @@ func TestConnectToBFGAndPerformMine(t *testing.T) {
 		EventConnected,
 		bfgapi.CmdL2KeystonesRequest,
 		bfgapi.CmdBitcoinInfoRequest,
-		bfgapi.CmdBitcoinBalanceRequest,
 		bfgapi.CmdBitcoinUTXOsRequest,
 		bfgapi.CmdBitcoinBroadcastRequest,
 	}
@@ -1142,7 +1140,6 @@ func TestConnectToBFGAndPerformMineMultiple(t *testing.T) {
 		EventConnected:                    1,
 		bfgapi.CmdL2KeystonesRequest:      1,
 		bfgapi.CmdBitcoinInfoRequest:      2,
-		bfgapi.CmdBitcoinBalanceRequest:   2,
 		bfgapi.CmdBitcoinUTXOsRequest:     2,
 		bfgapi.CmdBitcoinBroadcastRequest: 2,
 	}
@@ -1207,7 +1204,6 @@ func TestConnectToBFGAndPerformMineALot(t *testing.T) {
 		EventConnected:                    1,
 		bfgapi.CmdL2KeystonesRequest:      1,
 		bfgapi.CmdBitcoinInfoRequest:      l2KeystonesMaxSize,
-		bfgapi.CmdBitcoinBalanceRequest:   l2KeystonesMaxSize,
 		bfgapi.CmdBitcoinUTXOsRequest:     l2KeystonesMaxSize,
 		bfgapi.CmdBitcoinBroadcastRequest: l2KeystonesMaxSize,
 	}

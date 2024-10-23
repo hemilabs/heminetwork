@@ -195,28 +195,6 @@ func (m *Miner) SetFee(fee uint) {
 	m.txFee.Store(uint32(fee))
 }
 
-func (m *Miner) bitcoinBalance(ctx context.Context, scriptHash []byte) (uint64, int64, error) {
-	br := &bfgapi.BitcoinBalanceRequest{
-		ScriptHash: scriptHash,
-	}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, br)
-	if err != nil {
-		return 0, 0, err
-	}
-
-	bResp, ok := res.(*bfgapi.BitcoinBalanceResponse)
-	if !ok {
-		return 0, 0, fmt.Errorf("not a BitcoinBalanceResponse %T", res)
-	}
-
-	if bResp.Error != nil {
-		return 0, 0, bResp.Error
-	}
-
-	return bResp.Confirmed, bResp.Unconfirmed, nil
-}
-
 func (m *Miner) bitcoinBroadcast(ctx context.Context, tx []byte) ([]byte, error) {
 	bbr := &bfgapi.BitcoinBroadcastRequest{
 		Transaction: tx,
@@ -385,15 +363,6 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	txLen := 285 // XXX: for now all transactions are the same size
 	feePerKB := 1024 * m.Fee()
 	feeAmount := (int64(txLen) * int64(feePerKB)) / 1024
-
-	// Retrieve the current balance for the miner.
-	confirmed, unconfirmed, err := m.bitcoinBalance(ctx, scriptHash[:])
-	if err != nil {
-		return fmt.Errorf("get Bitcoin balance: %w", err)
-	}
-
-	log.Tracef("Miner has Bitcoin balance: %v confirmed, %v unconfirmed",
-		confirmed, unconfirmed)
 
 	// Retrieve available UTXOs for the miner.
 	log.Tracef("Looking for UTXOs for script hash %v", scriptHash)
