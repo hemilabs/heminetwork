@@ -39,6 +39,7 @@ var (
 	ErrAlreadyIndexing = errors.New("already indexing")
 
 	testnet3Checkpoints = map[chainhash.Hash]uint64{
+		s2h("0000000000001242d96bedebc9f45a2ecdd40d393ca0d725f500fb4977a50582"): 3100000,
 		s2h("0000000000003c46fc60e56b9c2ae202b1efec83fcc7899d21de16757dea40a4"): 3000000,
 		s2h("000000000000001669469c0354b3f341a36b10ab099d1962f7ec4fae528b1f1d"): 2900000,
 		s2h("0000000000000093bcb68c03a9a168ae252572d348a2eaeba2cdf9231d73206f"): 2500000,
@@ -997,7 +998,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 	log.Tracef("TxIndexerUnwind")
 	defer log.Tracef("TxIndexerUnwind exit")
 
-	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with TxIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
 
 	s.mtx.Lock()
 	if !s.indexing {
@@ -1302,30 +1303,10 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		// Mark indexing done.
 		s.mtx.Lock()
 		s.indexing = false
-		bhb, err := s.db.BlockHeaderBest(ctx)
-		if err != nil {
-			s.mtx.Unlock()
-			log.Errorf("sync indexers best: %v", err)
-			return
-		}
-		// get a random peer
-		p, err := s.pm.Random()
-		if err != nil {
-			s.mtx.Unlock()
-			log.Errorf("sync indexers random peer: %v", err)
-			return
-		}
 		s.mtx.Unlock()
 
-		// XXX explain why we need to get more headers here
-		// continue getting headers, XXX this does not belong here either
-		// XXX if bh download fails we will get jammed. We need a queued "must execute this command" added to peer/service.
-		// XXX we may not want to do this when in special "driver mode"
-		log.Infof("resuming block header download at: %v", bhb.Height)
-		if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
-			log.Errorf("sync indexers: %v", err)
-			return
-		}
+		// Get block headers
+		s.pm.All(ctx, s.headersPeer)
 	}()
 
 	log.Debugf("Syncing indexes to: %v", hash)
@@ -1340,6 +1321,12 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 	log.Debugf("Done syncing to: %v", hash)
+
+	bh, err := s.db.BlockHeaderByHash(ctx, hash)
+	if err == nil {
+		return err
+	}
+	log.Infof("Syncing complete at: %v", bh.HH())
 
 	return nil
 }
@@ -1416,6 +1403,12 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err := s.TxIndexer(ctx, &bhb.Hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
+
+	bh, err := s.db.BlockHeaderByHash(ctx, &bhb.Hash)
+	if err == nil {
+		return err
+	}
+	log.Infof("Syncing complete at: %v", bh.HH())
 
 	return nil
 }

@@ -138,9 +138,11 @@ type Server struct {
 	db tbcd.Database
 
 	// Prometheus
-	prom struct {
-		syncInfo             SyncInfo
-		connected, good, bad int
+	promPollVerbose bool // set to true to print stats during poll
+	prom            struct {
+		syncInfo                  SyncInfo
+		connected, good, bad      int
+		mempoolCount, mempoolSize int
 	} // periodically updated by promPoll
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
@@ -178,19 +180,16 @@ func NewServer(cfg *Config) (*Server, error) {
 			Name:      "rpc_calls_total",
 			Help:      "The total number of successful RPC commands",
 		}),
-		sessions:       make(map[string]*tbcWs),
-		requestTimeout: defaultRequestTimeout,
-		broadcast:      make(map[chainhash.Hash]*wire.MsgTx, 16),
+		sessions:        make(map[string]*tbcWs),
+		requestTimeout:  defaultRequestTimeout,
+		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
+		promPollVerbose: false,
 	}
 
-	log.Infof("MEMPOOL IS CURRENTLY BROKEN AND HAS BEEN DISABLED")
-	s.cfg.MempoolEnabled = false
-	if false {
-		if s.cfg.MempoolEnabled {
-			s.mempool, err = mempoolNew()
-			if err != nil {
-				return nil, err
-			}
+	if s.cfg.MempoolEnabled {
+		s.mempool, err = mempoolNew()
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -273,6 +272,36 @@ func (s *Server) pingPeer(ctx context.Context, p *peer) {
 
 	// Record outstanding ping
 	s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
+}
+
+func (s *Server) mempoolPeer(ctx context.Context, p *peer) {
+	log.Tracef("mempoolPeer %v", p)
+	defer log.Tracef("mempoolPeer %v exit", p)
+
+	if !s.cfg.MempoolEnabled {
+		return
+	}
+
+	err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
+	if err != nil {
+		log.Debugf("mempool %v: %v", p, err)
+		return
+	}
+}
+
+func (s *Server) headersPeer(ctx context.Context, p *peer) {
+	log.Tracef("headersPeer %v", p)
+	defer log.Tracef("headersPeer %v exit", p)
+
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		log.Errorf("headers peer block header best: %v %v", p, err)
+		return
+	}
+	if err = s.getHeaders(ctx, p, bhb.BlockHash()); err != nil {
+		log.Errorf("headers peer sync indexers: %v", err)
+		return
+	}
 }
 
 func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, raw []byte) (bool, error) {
@@ -609,7 +638,7 @@ func (s *Server) sod(ctx context.Context, p *peer) (*chainhash.Hash, error) {
 		return &bhb.Hash, nil
 	}
 	if bhb.Height > uint64(p.remoteVersion.LastBlock) {
-		log.Debugf("sod: %v our tip is greater %v > %v",
+		log.Infof("sod: %v our tip is greater %v > %v",
 			p, bhb.Height, p.remoteVersion.LastBlock)
 		return &bhb.Hash, nil
 	}
@@ -665,11 +694,11 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 		return err
 	}
 
-	if s.cfg.MempoolEnabled {
-		// Start building the mempool.
-		err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
+	// If we are caught up and start collecting mempool data.
+	if s.cfg.MempoolEnabled && s.Synced(ctx).Synced {
+		err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
 		if err != nil {
-			return err
+			return fmt.Errorf("mempool %v: %w", p, err)
 		}
 	}
 
@@ -800,6 +829,18 @@ func (s *Server) promBadPeers() float64 {
 	return float64(s.prom.bad)
 }
 
+func (s *Server) promMempoolCount() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.mempoolCount)
+}
+
+func (s *Server) promMempoolSize() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.mempoolSize)
+}
+
 func (s *Server) promPoll(ctx context.Context) error {
 	for {
 		select {
@@ -810,6 +851,19 @@ func (s *Server) promPoll(ctx context.Context) error {
 
 		s.prom.syncInfo = s.Synced(ctx)
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
+		if s.cfg.MempoolEnabled {
+			s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
+		}
+
+		if s.promPollVerbose {
+			s.mtx.RLock()
+			log.Infof("Pending blocks %v/%v connected peers %v "+
+				"good peers %v bad peers %v mempool %v %v",
+				s.blocks.Len(), defaultPendingBlocks, s.prom.connected,
+				s.prom.good, s.prom.bad, s.prom.mempoolCount,
+				humanize.Bytes(uint64(s.prom.mempoolSize)))
+			s.mtx.RUnlock()
+		}
 
 	}
 }
@@ -1046,6 +1100,9 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				// XXX this is probably not a panic.
 				panic(fmt.Errorf("sync blocks: %w", err))
 			}
+
+			// Get block headers
+			s.pm.All(ctx, s.headersPeer)
 		}()
 		return
 	}
@@ -1077,15 +1134,19 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
 	if len(msg.Headers) == 0 {
-		// This may signify the end of IBD but isn't 100%. We can fart
-		// around with mean block time to determine if this peer is
-		// just behind or if we are nominally where we should be. This
-		// test will never be 100% accurate.
-
-		// only do this if peer is synced, not sure how to detect that.
-
-		go s.syncBlocks(ctx)
-
+		// This may signify the end of IBD but isn't 100%.
+		if s.blksMissing(ctx) {
+			bhb, err := s.db.BlockHeaderBest(ctx)
+			if err == nil {
+				log.Infof("blockheaders caught up at: %v", bhb.HH())
+			}
+			go s.syncBlocks(ctx)
+		} else {
+			if s.cfg.MempoolEnabled {
+				// Start building the mempool.
+				s.pm.All(ctx, s.mempoolPeer)
+			}
+		}
 		return nil
 	}
 
@@ -1990,6 +2051,16 @@ func (s *Server) Run(pctx context.Context) error {
 				Name:      "peers_bad",
 				Help:      "Number of bad peers.",
 			}, s.promBadPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "mempool_count",
+				Help:      "Number of txs in mempool.",
+			}, s.promMempoolCount),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: promSubsystem,
+				Name:      "mempool_size",
+				Help:      "Size of mempool in bytes.",
+			}, s.promMempoolSize),
 		}
 		s.wg.Add(1)
 		go func() {
