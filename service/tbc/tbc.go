@@ -183,14 +183,10 @@ func NewServer(cfg *Config) (*Server, error) {
 		broadcast:      make(map[chainhash.Hash]*wire.MsgTx, 16),
 	}
 
-	log.Infof("MEMPOOL IS CURRENTLY BROKEN AND HAS BEEN DISABLED")
-	s.cfg.MempoolEnabled = false
-	if false {
-		if s.cfg.MempoolEnabled {
-			s.mempool, err = mempoolNew()
-			if err != nil {
-				return nil, err
-			}
+	if s.cfg.MempoolEnabled {
+		s.mempool, err = mempoolNew()
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -665,14 +661,6 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 		return err
 	}
 
-	if s.cfg.MempoolEnabled {
-		// Start building the mempool.
-		err = p.write(defaultCmdTimeout, wire.NewMsgMemPool())
-		if err != nil {
-			return err
-		}
-	}
-
 	// XXX wave hands here for now but we should get 3 peers to agree that
 	// this is a fork indeed.
 
@@ -1077,15 +1065,19 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
 	if len(msg.Headers) == 0 {
-		// This may signify the end of IBD but isn't 100%. We can fart
-		// around with mean block time to determine if this peer is
-		// just behind or if we are nominally where we should be. This
-		// test will never be 100% accurate.
-
-		// only do this if peer is synced, not sure how to detect that.
-
-		go s.syncBlocks(ctx)
-
+		// This may signify the end of IBD but isn't 100%.
+		if s.blksMissing(ctx) {
+			go s.syncBlocks(ctx)
+		} else {
+			if s.cfg.MempoolEnabled {
+				// Start building the mempool.
+				log.Infof("starting to collect mempool tx'")
+				err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
+				if err != nil {
+					return err
+				}
+			}
+		}
 		return nil
 	}
 
