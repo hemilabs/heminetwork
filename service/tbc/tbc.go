@@ -1221,9 +1221,19 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 			len(msg.Transactions), msg.Header.Timestamp)
 	}
 
+	// Reap broadcast messages.
+	txHashes, _ := block.MsgBlock().TxHashes()
+	s.mtx.Lock()
+	for _, v := range txHashes {
+		if _, ok := s.broadcast[v]; ok {
+			delete(s.broadcast, v)
+			log.Infof("broadcast tx %v included in %v %v", v, bhs, height)
+		}
+	}
+	s.mtx.Unlock()
+
 	// Reap txs from mempool, no need to log error.
 	if s.cfg.MempoolEnabled {
-		txHashes, _ := block.MsgBlock().TxHashes()
 		_ = s.mempool.txsRemove(ctx, txHashes)
 	}
 
