@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/wire"
+
 	"github.com/hemilabs/heminetwork/version"
 )
 
