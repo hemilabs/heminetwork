@@ -19,10 +19,12 @@ import (
 func TestMonitor(t *testing.T) {
 	time.Sleep(2 * time.Minute)
 
+	expectedPopTxs := 12
+
 	var jo jsonOutput
 
 	blockWaitTimeoutTimer := time.NewTimer(10 * time.Minute)
-	for jo.BitcoinBlockCount < 1020 {
+	for jo.BitcoinBlockCount < 1020 && len(jo.PopTxCount) < expectedPopTxs {
 
 		select {
 		case <-blockWaitTimeoutTimer.C:
@@ -43,8 +45,6 @@ func TestMonitor(t *testing.T) {
 	if err := json.Unmarshal([]byte(output), &jo); err != nil {
 		t.Fatal(err)
 	}
-
-	expectedPopTxs := 12
 
 	t.Logf("expecting at least %d pop txs mined", expectedPopTxs)
 
