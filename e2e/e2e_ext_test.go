@@ -2654,6 +2654,214 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	}
 }
 
+func TestGetFinalitiesByL2KeystoneBSSWithPagination(t *testing.T) {
+	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
+
+	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
+
+	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1)
+	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)
+	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)
+	expectedFinalitiesDesc := []int32{-8, -6}
+
+	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+
+	bws := &bssWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	// first and second btcBlocks
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l2Keystones := []hemi.L2Keystone{}
+	for _, r := range recentFinalities[1:] {
+		l, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l2Keystones = append(l2Keystones, l.L2Keystone)
+	}
+
+	receivedFinalities := []hemi.L2BTCFinality{}
+
+	// use pagination to get records 1 by 1 (there are two)
+
+	for i := range 2 {
+		finalityRequest := bssapi.BTCFinalityByKeystonesRequest{
+			L2Keystones: l2Keystones,
+			Page:        uint32(i),
+			Limit:       1,
+		}
+
+		err = bssapi.Write(ctx, bws.conn, "someid", finalityRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if v.Header.Command != bssapi.CmdBTCFinalityByKeystonesResponse {
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
+		}
+
+		finalityResponse := bssapi.BTCFinalityByRecentKeystonesResponse{}
+		err = json.Unmarshal(v.Payload, &finalityResponse)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("length is %d", len(finalityResponse.L2BTCFinalities))
+
+		if len(finalityResponse.L2BTCFinalities) != 1 {
+			t.Fatalf("unexpected length %v", len(finalityResponse.L2BTCFinalities))
+		}
+
+		receivedFinalities = append(receivedFinalities, finalityResponse.L2BTCFinalities[0])
+	}
+
+	expectedResponse := []hemi.L2BTCFinality{}
+	for i, r := range recentFinalities[1:] {
+		f, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		f.BTCFinality = expectedFinalitiesDesc[i]
+		expectedResponse = append(expectedResponse, *f)
+	}
+
+	diff := deep.Equal(expectedResponse, receivedFinalities)
+	if len(diff) > 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+}
+
+func TestGetFinalitiesByL2KeystoneBFGWithPagination(t *testing.T) {
+	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
+
+	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1)
+	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)
+	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)
+	expectedFinalitiesDesc := []int32{-8, -6}
+
+	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+
+	bws := &bssWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	// first and second btcBlocks
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l2Keystones := []hemi.L2Keystone{}
+	for _, r := range recentFinalities[1:] {
+		l, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l2Keystones = append(l2Keystones, l.L2Keystone)
+	}
+
+	receivedFinalities := []hemi.L2BTCFinality{}
+
+	// use pagination to get records 1 by 1 (there are two)
+
+	for i := range 2 {
+		finalityRequest := bfgapi.BTCFinalityByKeystonesRequest{
+			L2Keystones: l2Keystones,
+			Page:        uint32(i),
+			Limit:       1,
+		}
+
+		err = bfgapi.Write(ctx, bws.conn, "someid", finalityRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var v protocol.Message
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if v.Header.Command != bfgapi.CmdBTCFinalityByKeystonesResponse {
+			t.Fatalf("received unexpected command: %s", v.Header.Command)
+		}
+
+		finalityResponse := bfgapi.BTCFinalityByRecentKeystonesResponse{}
+		err = json.Unmarshal(v.Payload, &finalityResponse)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("length is %d", len(finalityResponse.L2BTCFinalities))
+
+		if len(finalityResponse.L2BTCFinalities) != 1 {
+			t.Fatalf("unexpected length %v", len(finalityResponse.L2BTCFinalities))
+		}
+
+		receivedFinalities = append(receivedFinalities, finalityResponse.L2BTCFinalities[0])
+	}
+
+	expectedResponse := []hemi.L2BTCFinality{}
+	for i, r := range recentFinalities[1:] {
+		f, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		f.BTCFinality = expectedFinalitiesDesc[i]
+		expectedResponse = append(expectedResponse, *f)
+	}
+
+	diff := deep.Equal(expectedResponse, receivedFinalities)
+	if len(diff) > 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+}
+
 func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {

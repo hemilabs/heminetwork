@@ -799,12 +799,19 @@ func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfg
 
 // L2BTCFinalityByL2KeystoneAbrevHash queries for finalities by L2KeystoneAbrevHash
 // and returns them descending by l2_block_number
-func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray) ([]bfgd.L2BTCFinality, error) {
+func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray, page uint32, limit uint32) ([]bfgd.L2BTCFinality, error) {
 	log.Tracef("L2BTCFinalityByL2KeystoneAbrevHash")
 	defer log.Tracef("L2BTCFinalityByL2KeystoneAbrevHash exit")
 
 	if len(l2KeystoneAbrevHashes) > 100 {
 		return nil, errors.New("l2KeystoneAbrevHashes cannot be longer than 100")
+	}
+
+	// don't let users query for more than 100 at a time, default 0 to 100 for
+	// backwards compatibility
+	if limit > 100 || limit == 0 {
+		log.Tracef("limit was set to %d, defaulting to 100", limit)
+		limit = 100
 	}
 
 	sql := fmt.Sprintf(`
@@ -831,6 +838,10 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		WHERE l2_keystones.l2_keystone_abrev_hash = ANY($1)
 
 		ORDER BY l2_keystones.l2_block_number DESC
+
+		OFFSET $2
+
+		LIMIT $3
 	`, effectiveHeightSql)
 
 	l2KeystoneAbrevHashesStr := [][]byte{}
@@ -841,7 +852,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 	// XXX this doesn't go here
 	log.Infof("the hashes are %v", l2KeystoneAbrevHashesStr)
 
-	rows, err := p.db.QueryContext(ctx, sql, pq.Array(l2KeystoneAbrevHashesStr))
+	rows, err := p.db.QueryContext(ctx, sql, pq.Array(l2KeystoneAbrevHashesStr), page*limit, limit)
 	if err != nil {
 		return nil, err
 	}

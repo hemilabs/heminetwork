@@ -149,6 +149,8 @@ type BTCFinalityByRecentKeystonesResponse struct {
 
 type BTCFinalityByKeystonesRequest struct {
 	L2Keystones []hemi.L2Keystone `json:"l2_keystones"`
+	Page        uint32            `json:"page,omitempty"`
+	Limit       uint32            `json:"limit,omitempty"`
 }
 
 type BTCFinalityByKeystonesResponse struct {
