@@ -33,7 +33,7 @@ services:
       - "-rpcport=18443"
       - "-rpcconnect=bitcoind"
       - "generatetoaddress"
-      - "3000" # need to generate a lot for greater chance to not spend coinbase
+      - "1000" # need to generate a lot for greater chance to not spend coinbase
       - "$BTC_ADDRESS"
     restart: on-failure
 

@@ -85,4 +85,8 @@ func TestMonitor(t *testing.T) {
 		break
 	}
 
+	if lastErr != nil {
+		t.Fatal(lastErr)
+	}
+
 }
