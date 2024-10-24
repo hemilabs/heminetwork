@@ -282,8 +282,8 @@ func (s *Server) mempoolPeer(ctx context.Context, p *peer) {
 		return
 	}
 
-	// XXX
-	if (p.remoteVersion.Services & wire.SFNodeBloom) == 0 {
+	// Don't ask for mempool if the other end does not advertise it.
+	if !p.remoteVersion.HasService(wire.SFNodeBloom) {
 		return
 	}
 
@@ -699,13 +699,12 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 		return err
 	}
 
-	// If we are caught up and start collecting mempool data.
-	if s.cfg.MempoolEnabled && s.Synced(ctx).Synced {
-		if (p.remoteVersion.Services & wire.SFNodeBloom) == wire.SFNodeBloom {
-			err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
-			if err != nil {
-				return fmt.Errorf("mempool %v: %w", p, err)
-			}
+	// If we are caught up start collecting mempool data.
+	if s.cfg.MempoolEnabled && p.remoteVersion.HasService(wire.SFNodeBloom) &&
+		s.Synced(ctx).Synced {
+		err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
+		if err != nil {
+			return fmt.Errorf("mempool %v: %w", p, err)
 		}
 	}
 
