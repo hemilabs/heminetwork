@@ -22,8 +22,8 @@ const semverAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 // GoReleaser for releases.
 var (
 	Major = "0"
-	Minor = "3"
-	Patch = "0"
+	Minor = "5"
+	Patch = "1"
 )
 
 // PreRelease contains the prerelease name of the application. It is a variable,
