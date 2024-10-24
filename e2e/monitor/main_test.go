@@ -40,7 +40,7 @@ func TestMonitor(t *testing.T) {
 		}
 	}
 
-	output := monitor(uint(60 * 1000))
+	output := monitor(uint(10 * 1000))
 	t.Log(output)
 	if err := json.Unmarshal([]byte(output), &jo); err != nil {
 		t.Fatal(err)
