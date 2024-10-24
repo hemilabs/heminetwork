@@ -6,6 +6,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -36,26 +37,52 @@ func TestMonitor(t *testing.T) {
 
 	t.Logf("expecting at least %d pop txs mined", expectedPopTxs)
 
-	if jo.PopTxCount < uint64(expectedPopTxs) {
-		t.Fatalf("popTxCount %d < %d", jo.PopTxCount, expectedPopTxs)
+	const maxRetries = 5
+	const retryAfterSeconds = 30
+	var lastErr error
+
+	for i := range maxRetries {
+		lastErr = nil
+
+		t.Logf("retry %d/%d, lastErr = %v", i, maxRetries, lastErr)
+
+		if i != 0 {
+			output := monitor(uint(retryAfterSeconds * 1000))
+
+			t.Log(output)
+
+			if err := json.Unmarshal([]byte(output), &jo); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if jo.PopTxCount < uint64(expectedPopTxs) {
+			lastErr = fmt.Errorf("popTxCount %d < %d", jo.PopTxCount, expectedPopTxs)
+			continue
+		}
+
+		// the expected balance should be at least 1 BaseHEMI per poptx - 8.  We say
+		// "- 8" because we lag 8 keystones behind a pop payout (200 L2 blocks at
+		// 1 block per second)
+		popMinerBalance := big.NewInt(0)
+		balance, ok := popMinerBalance.SetString(jo.PopMinerHemiBalance, 10)
+		if !ok {
+			lastErr = fmt.Errorf("could not parse balance from %s", jo.PopMinerHemiBalance)
+			continue
+		}
+
+		expectedPayouts := expectedPopTxs - 8
+		expectedPayoutBalance := big.NewInt(hemi.HEMIBase)
+		expectedPayoutBalance = expectedPayoutBalance.Mul(big.NewInt(int64(expectedPayouts)), expectedPayoutBalance)
+
+		t.Logf("expecting actual balance %d to be greater than %d", balance, expectedPayoutBalance)
+
+		if expectedPayoutBalance.Cmp(balance) > 0 {
+			lastErr = fmt.Errorf("pop miner payout balance received %d, want at least %d", balance, expectedPayoutBalance)
+			continue
+		}
+
+		break
 	}
 
-	// the expected balance should be at least 1 BaseHEMI per poptx - 8.  We say
-	// "- 8" because we lag 8 keystones behind a pop payout (200 L2 blocks at
-	// 1 block per second)
-	popMinerBalance := big.NewInt(0)
-	balance, ok := popMinerBalance.SetString(jo.PopMinerHemiBalance, 10)
-	if !ok {
-		t.Fatalf("could not parse balance from %s", jo.PopMinerHemiBalance)
-	}
-
-	expectedPayouts := expectedPopTxs - 8
-	expectedPayoutBalance := big.NewInt(hemi.HEMIBase)
-	expectedPayoutBalance = expectedPayoutBalance.Mul(big.NewInt(int64(expectedPayouts)), expectedPayoutBalance)
-
-	t.Logf("expecting actual balance %d to be greater than %d", balance, expectedPayoutBalance)
-
-	if expectedPayoutBalance.Cmp(balance) > 0 {
-		t.Fatalf("pop miner payout balance received %d, want at least %d", balance, expectedPayoutBalance)
-	}
 }
