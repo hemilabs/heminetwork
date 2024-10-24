@@ -15,6 +15,7 @@ services:
       - "-rpcallowip=0.0.0.0/0"
       - "-rpcbind=0.0.0.0:18443"
       - "-txindex=1"
+      - "-rpcworkqueue=400"
     ports:
       - "18443:18443"
       - "18444:18444"
