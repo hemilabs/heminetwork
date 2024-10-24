@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/wire"
+
+	"github.com/hemilabs/heminetwork/version"
 )
 
 // XXX wire could use some contexts,
@@ -118,6 +120,7 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
 	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
+	msg.UserAgent = fmt.Sprintf("/%v:%v/", version.Component, version.String())
 	err := writeTimeout(defaultHandshakeTimeout, conn, msg, p.protocolVersion, p.network)
 	if err != nil {
 		return fmt.Errorf("could not write version message: %w", err)
