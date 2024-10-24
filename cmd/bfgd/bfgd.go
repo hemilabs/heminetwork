@@ -123,6 +123,18 @@ var (
 			Help:         "list of headers used to obtain the client IP address (requires trusted proxies)",
 			Print:        config.PrintAll,
 		},
+		"BFG_BFG_URL": config.Config{
+			Value:        &cfg.BFGURL,
+			DefaultValue: "",
+			Help:         "public websocket address of another BFG you'd like to receive L2Keystones from",
+			Print:        config.PrintAll,
+		},
+		"BFG_BTC_PRIVKEY": config.Config{
+			Value:        &cfg.BTCPrivateKey,
+			DefaultValue: "",
+			Help:         "your btc private key, this is only needed when connecting to another BFG",
+			Print:        config.PrintSecret,
+		},
 	}
 )
 

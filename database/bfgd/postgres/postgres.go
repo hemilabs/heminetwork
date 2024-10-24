@@ -133,10 +133,12 @@ func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) er
 		)
 
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+
+		ON CONFLICT DO NOTHING
 	`
 
 	for _, v := range l2ks {
-		result, err := tx.ExecContext(ctx, qInsertL2Keystone, v.Hash,
+		_, err := tx.ExecContext(ctx, qInsertL2Keystone, v.Hash,
 			v.L1BlockNumber, v.L2BlockNumber, v.ParentEPHash,
 			v.PrevKeystoneEPHash, v.StateRoot, v.EPHash, v.Version)
 		if err != nil {
@@ -155,13 +157,6 @@ func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) er
 				return database.DuplicateError(fmt.Sprintf("constraint error: %s", pgErr))
 			}
 			return fmt.Errorf("insert l2 keystone: %w", err)
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("insert l2 keystone rows affected: %w", err)
-		}
-		if rows < 1 {
-			return fmt.Errorf("insert l2 keystone rows: %v", rows)
 		}
 	}
 

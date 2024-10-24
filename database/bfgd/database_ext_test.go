@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	mathrand "math/rand/v2"
 	"net/url"
 	"os"
@@ -441,6 +442,79 @@ func TestL2KeystoneInsertMultipleSuccess(t *testing.T) {
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	saved, err := db.L2KeystoneByAbrevHash(ctx, [32]byte(l2Keystone.Hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := deep.Equal(saved, &l2Keystone)
+	if len(diff) != 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+
+	otherSaved, err := db.L2KeystoneByAbrevHash(ctx, [32]byte(otherL2Keystone.Hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff = deep.Equal(otherSaved, &otherL2Keystone)
+	if len(diff) != 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+
+	count, err := l2KeystonesCount(ctx, sdb)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 2 {
+		t.Fatalf("unexpected count %d", count)
+	}
+}
+
+func TestL2KeystoneInsertIgnoreDuplicates(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	l2Keystone := bfgd.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      11,
+		L2BlockNumber:      22,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+		Hash:               fillOutBytes("mockhash", 32),
+	}
+
+	otherL2Keystone := bfgd.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      11,
+		L2BlockNumber:      22,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+		Hash:               fillOutBytes("mockhashz", 32),
+	}
+
+	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,7 +989,7 @@ func TestL2KeystoneInsertMultipleAtomicFailure(t *testing.T) {
 	}
 }
 
-func TestL2KeystoneInsertMultipleDuplicateError(t *testing.T) {
+func TestL2KeystoneInsertDuplicateOK(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
@@ -949,8 +1023,17 @@ func TestL2KeystoneInsertMultipleDuplicateError(t *testing.T) {
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
-	if err == nil || errors.Is(err, database.DuplicateError("")) == false {
+	if err != nil {
 		t.Fatalf("received unexpected error: %s", err)
+	}
+
+	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := deep.Equal([]bfgd.L2Keystone{l2Keystone}, l2Keystones); len(diff) != 0 {
+		log.Fatalf("unexpected diff %v", diff)
 	}
 }
 
