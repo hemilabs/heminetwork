@@ -64,7 +64,8 @@ func monitor(dumpJsonAfterMs uint) string {
 		bitcoinBlockCount: 0,
 	}
 	mtx := sync.Mutex{}
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	t := table.NewWriter()
 	writer := uilive.New()
 	writer.Start()
