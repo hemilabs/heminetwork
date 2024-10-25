@@ -294,13 +294,13 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		console.log(Number.parseInt(hexValue, 16));
 	`
 
-	runJs := func(jsi string, layer string, ipcPath string) string {
+	runJs := func(jsi string, layer string, ipcPath string, replica string) string {
 		prefix := "op-"
 		if layer == "l1" {
 			prefix = ""
 		}
 
-		container := fmt.Sprintf("e2e-%sgeth-%s-1", prefix, layer)
+		container := fmt.Sprintf("e2e-%sgeth-%s-%s", prefix, layer, replica)
 		cmd := exec.Command(
 			"docker",
 			"exec",
