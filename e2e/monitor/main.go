@@ -295,7 +295,6 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 	`
 
 	runJs := func(jsi string, layer string, ipcPath string) string {
-
 		prefix := "op-"
 		if layer == "l1" {
 			prefix = ""
