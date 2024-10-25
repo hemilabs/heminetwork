@@ -24,7 +24,7 @@ func TestMonitor(t *testing.T) {
 	var jo jsonOutput
 
 	blockWaitTimeoutTimer := time.NewTimer(10 * time.Minute)
-	for jo.BitcoinBlockCount < 1020 && len(jo.PopTxCount) < expectedPopTxs {
+	for jo.BitcoinBlockCount < 1020 && jo.PopTxCount < uint64(expectedPopTxs) {
 
 		select {
 		case <-blockWaitTimeoutTimer.C:
