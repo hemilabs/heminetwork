@@ -1275,6 +1275,8 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	finalities, err := s.db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		l2KeystoneAbrevHashes,
+		bfkr.Page,
+		bfkr.Limit,
 	)
 	if err != nil {
 		e := protocol.NewInternalErrorf("l2 keystones: %w", err)
