@@ -132,7 +132,7 @@ var (
 		"BFG_BTC_PRIVKEY": config.Config{
 			Value:        &cfg.BTCPrivateKey,
 			DefaultValue: "",
-			Help:         "your btc private key, this is only needed when connecting to another BFG",
+			Help:         "a btc private key, this is only needed when connecting to another BFG",
 			Print:        config.PrintSecret,
 		},
 	}
