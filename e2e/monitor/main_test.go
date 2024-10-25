@@ -27,8 +27,7 @@ func TestMonitor(t *testing.T) {
 	t.Logf("expecting at least %d pop txs mined", expectedPopTxs)
 
 	// the expected balance should be at least 1 BaseHEMI per poptx - 8.  We say
-	// "- 8" because we lag 8 keystones behind a pop payout (200 L2 blocks at
-	// 1 block per second)
+	// "- 8" because we lag 8 keystones behind a pop payout
 	expectedPayouts := expectedPopTxs - 8
 	expectedPayoutBalance := big.NewInt(hemi.HEMIBase)
 	expectedPayoutBalance = expectedPayoutBalance.Mul(big.NewInt(int64(expectedPayouts)), expectedPayoutBalance)
