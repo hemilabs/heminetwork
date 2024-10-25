@@ -244,7 +244,7 @@ services:
       timeout: 60s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
-      OP_GETH_L1_RPC: "http://op-geth-l1:8545"
+      OP_GETH_L1_RPC: "http://geth-l1:8545"
       ENTRYPOINT_SKIP_GENESIS: "true"
     working_dir: "/tmp"
     command:
@@ -277,7 +277,7 @@ services:
       timeout: 60s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
-      OP_GETH_L1_RPC: "http://op-geth-l1:8545"
+      OP_GETH_L1_RPC: "http://geth-l1:8545"
       ENTRYPOINT_SKIP_GENESIS: "true"
     working_dir: "/tmp"
     command:
@@ -360,7 +360,7 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2-2:
         condition: "service_healthy"
@@ -378,7 +378,7 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
       - "--rpc.enable-admin"
-      - "--l1=http://op-geth-l1:8545"
+      - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--l1.trustrpc"
       - "--log.level=trace"
@@ -411,7 +411,7 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2-3:
         condition: "service_healthy"
@@ -429,7 +429,7 @@ services:
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
       - "--rpc.enable-admin"
-      - "--l1=http://op-geth-l1:8545"
+      - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--l1.trustrpc"
       - "--log.level=trace"
@@ -508,10 +508,10 @@ services:
       - "--rpc.enable-admin"
       - "--max-channel-duration=1"
       - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--l1-eth-rpc=http://geth-l1:8545"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2-2:
         condition: "service_healthy"
@@ -541,10 +541,10 @@ services:
       - "--rpc.enable-admin"
       - "--max-channel-duration=1"
       - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--l1-eth-rpc=http://geth-l1:8545"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2-3:
         condition: "service_healthy"
@@ -584,7 +584,7 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2-2:
         condition: "service_healthy"
@@ -597,7 +597,7 @@ services:
       - "--rollup-rpc=http://op-node-2:8547"
       - "--l2oo-address=${L2OO_ADDRESS}"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--l1-eth-rpc=http://geth-l1:8545"
     networks:
       e2e:
 
@@ -609,7 +609,7 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2-3:
         condition: "service_healthy"
@@ -622,7 +622,7 @@ services:
       - "--rollup-rpc=http://op-node-3:8547"
       - "--l2oo-address=${L2OO_ADDRESS}"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--l1-eth-rpc=http://geth-l1:8545"
     networks:
       e2e:
 
