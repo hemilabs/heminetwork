@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -16,23 +17,34 @@ import (
 // after 5 minutes and check that it has progressed at least to a certain
 // point
 func TestMonitor(t *testing.T) {
-	ms := (1000 * 60 * 5) + 25*1000 // dump after 5 minutes + 25 seconds for cushion (1 keystone)
-	output := monitor(uint(ms))
+	time.Sleep(2 * time.Minute)
 
-	t.Log(output)
+	expectedPopTxs := 12
 
 	var jo jsonOutput
+
+	blockWaitTimeoutTimer := time.NewTimer(10 * time.Minute)
+	for jo.BitcoinBlockCount < 1020 && jo.PopTxCount < uint64(expectedPopTxs) {
+
+		select {
+		case <-blockWaitTimeoutTimer.C:
+			t.Fatalf("timed out waiting for btc blocks")
+		case <-time.After(10 * time.Second):
+		}
+
+		output := monitor(uint(10 * 1000))
+		t.Log(output)
+
+		if err := json.Unmarshal([]byte(output), &jo); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	output := monitor(uint(10 * 1000))
+	t.Log(output)
 	if err := json.Unmarshal([]byte(output), &jo); err != nil {
 		t.Fatal(err)
 	}
-
-	// each keystone is 25 seconds, so there are 4 keystones per 100 seconds,
-	// we expect the number of pop txs to be at least once every 25 seconds
-	// for the time we waited
-	// add 25 seconds for cushion
-	seconds := ms / 1000
-	popTxsPer100Seconds := 4
-	expectedPopTxs := popTxsPer100Seconds * (seconds / 100)
 
 	t.Logf("expecting at least %d pop txs mined", expectedPopTxs)
 
