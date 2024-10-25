@@ -160,7 +160,7 @@ When running BFG, you'll want the following env variables set:
 * `BFG_BTC_START_HEIGHT`: when your db is empty, bfgd will need a starting point to parse btc blocks at, set this to the tip of the bitcoin chain at first deploy
 * `BFG_EXBTC_ADDRESS`: your electrs rpc address
 
-then you may connect your local `popmd` to your aforementioned local `bfgd` via the `POPM_BFG_URL` env variable
+you may then connect your local `popmd` to your aforementioned local `bfgd` via the `POPM_BFG_URL` env variable
 
 ## ▶️ Running bssd
 
