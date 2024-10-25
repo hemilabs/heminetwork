@@ -152,7 +152,7 @@ services:
       POPM_LOG_LEVEL: "INFO"
       POPM_REMINE_THRESHOLD: "1"
 
-  op-geth-l1:
+  geth-l1:
     image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
     ports:
       - "8545:8545"
@@ -191,12 +191,12 @@ services:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
     depends_on:
-      - "op-geth-l1"
+      - "geth-l1"
     healthcheck:
       test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
-      OP_GETH_L1_RPC: "http://op-geth-l1:8545"
+      OP_GETH_L1_RPC: "http://geth-l1:8545"
     working_dir: "/tmp"
     command:
       - "sh"
@@ -221,7 +221,7 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
@@ -239,7 +239,7 @@ services:
       - "--rpc.port=8547"
       - "--p2p.disable"
       - "--rpc.enable-admin"
-      - "--l1=http://op-geth-l1:8545"
+      - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
       - "--l1.trustrpc"
       - "--log.level=info"
@@ -270,10 +270,10 @@ services:
       - "--rpc.enable-admin"
       - "--max-channel-duration=1"
       - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--l1-eth-rpc=http://geth-l1:8545"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
@@ -288,7 +288,7 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      op-geth-l1:
+      geth-l1:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
@@ -301,7 +301,7 @@ services:
       - "--rollup-rpc=http://op-node:8547"
       - "--l2oo-address=${L2OO_ADDRESS}"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://op-geth-l1:8545"
+      - "--l1-eth-rpc=http://geth-l1:8545"
 
 volumes:
   l2configs:

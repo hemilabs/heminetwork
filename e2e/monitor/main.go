@@ -295,10 +295,16 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 	`
 
 	runJs := func(jsi string, layer string, ipcPath string) string {
+		prefix := "op-"
+		if layer == "l1" {
+			prefix = ""
+		}
+
+		container := fmt.Sprintf("e2e-%sgeth-%s-1", prefix, layer)
 		cmd := exec.Command(
 			"docker",
 			"exec",
-			fmt.Sprintf("e2e-op-geth-%s-1", layer),
+			container,
 			"geth",
 			"attach",
 			"--exec",
