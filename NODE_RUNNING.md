@@ -66,6 +66,8 @@ mv beacon-chain-v5.1.2-linux-amd64 ~/bin/beacon-chain
 
 ### geth-L1
 
+### prysm
+
 ### op-geth-L2
 
 ### op-node
@@ -73,7 +75,7 @@ mv beacon-chain-v5.1.2-linux-amd64 ~/bin/beacon-chain
 ### bfgd
 ### electrs
 ### bfgd-postgres
-### prysm
+
 
 ## Docker
 
