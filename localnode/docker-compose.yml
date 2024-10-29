@@ -1,0 +1,252 @@
+# Copyright (c) 2024 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+version: "3"
+
+services:
+  bitcoind:
+    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
+    command:
+      - "bitcoind"
+      - "-testnet=1"
+      - "-rpcuser=user"
+      - "-rpcpassword=password"
+      - "-rpcallowip=0.0.0.0/0"
+      - "-rpcbind=0.0.0.0:18443"
+      - "-txindex=1"
+      - "-rpcworkqueue=400"
+    ports:
+      - "18443:18443"
+      - "18444:18444"
+    volumes:
+      - { type: "tmpfs", target: "/bitcoin/.bitcoin" }
+    networks:
+      localnode:
+
+  electrs:
+    image: blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8
+    depends_on:
+      - "bitcoind"
+    command:
+      - electrs_bitcoin/bin/electrs
+      - --electrum-rpc-addr
+      - '0.0.0.0:50001'
+      - --daemon-rpc-addr
+      - "bitcoind:18443"
+      - --network
+      - testnet
+      - --cookie
+      - "user:password"
+      - "-vvv"
+      - "--timestamp"
+      - --utxos-limit
+      - "50000"
+      - --electrum-txs-limit
+      - "50000"
+      - --jsonrpc-import
+    environment:
+      RUST_LOG: debug
+      RUST_BACKTRACE: "full"
+    volumes:
+      - ./cookie:/tmp/.cookie
+    deploy:
+      restart_policy:
+        condition: "on-failure"
+    networks:
+      localnode:
+
+  bfgd-postgres:
+    build:
+      dockerfile: "./localnode/postgres.Dockerfile"
+      context: "./.."
+    command:
+      - "postgres"
+      # lower random_page_cost (opposed to default 4.0) to cause planner
+      # to choose index scans vs sequential scans when at fewer rows in a table
+      - "-c"
+      - "random_page_cost=1.0"
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: "bfg"
+      POSTGRES_HOST_AUTH_METHOD: "trust"
+    volumes:
+      - { type: "tmpfs", target: "/var" }
+    networks:
+      localnode:
+
+  bfgd:
+    build:
+      dockerfile: "./docker/bfgd/Dockerfile"
+      context: "./.."
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      - "bfgd-postgres"
+      - "electrs"
+    ports:
+      - "8080:8080"
+      - "8383:8383"
+    environment:
+      BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
+      ### XXXX Make this variable and set to recent block
+      BFG_BTC_START_HEIGHT: "3195980"
+      BFG_EXBTC_ADDRESS: "electrs:50001"
+      BFG_LOG_LEVEL: "INFO"
+      BFG_PUBLIC_ADDRESS: ":8383"
+      BFG_PRIVATE_ADDRESS: ":8080"
+    networks:
+      localnode:
+
+  bssd:
+    build:
+      dockerfile: "./docker/bssd/Dockerfile"
+      context: "./.."
+    depends_on:
+      - "bfgd"
+    ports:
+      - "8081:8081"
+    environment:
+      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
+      BSS_LOG_LEVEL: "INFO"
+      BSS_ADDRESS: ":8081"
+    networks:
+      localnode:
+
+  prysm:
+    image: gcr.io/prysmaticlabs/prysm/beacon-chain:stable
+    command:
+      - "--execution-endpoint=http://geth-l1:8551"
+      - "--sepolia"
+      - "--jwt-secret=/tmp/jwt/jwt.hex"
+      - "--checkpoint-sync-url=https://sepolia.beaconstate.info"
+      - "--genesis-beacon-api-url=https://sepolia.beaconstate.info"
+      - "--accept-terms-of-use"
+      - "--datadir=/data/prysm"
+      - "--rpc-host=0.0.0.0"
+      - "--enable-debug-rpc-endpoints"
+      - "--grpc-gateway-host=0.0.0.0"
+      - "--enable-experimental-backfill"
+    volumes:
+    ports:
+    networks:
+      localnode:
+        
+  geth-l1:
+    image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
+    ports:
+      - "8545:8545"
+    working_dir: "/tmp/geth"
+    command:
+      - "--dev"
+      - "--dev.period"
+      - "3"
+      - "--keystore"
+      - "/tmp/keystore"
+      - "--password"
+      - "/tmp/passwords.txt"
+      - "--http"
+      - "--http.port=8545"
+      - "--http.addr"
+      - "0.0.0.0"
+      - "--http.vhosts"
+      - "*"
+      - "--syncmode=full"
+      - "--gcmode=archive"
+      - "--nodiscover"
+      - "--maxpeers=0"
+      - "--authrpc.vhosts=\"*\""
+      - "--rpc.allow-unprotected-txs"
+      - "--datadir"
+      - "/tmp/geth"
+      - "--gpo.percentile=0"
+    volumes:
+      - "./localnode/keystore:/tmp/keystore:ro"
+      - "./localnode/passwords.txt:/tmp/passwords.txt:ro"
+      - "./localnode/jwt.txt:/tmp/jwt.txt:ro"
+      - { type: "tmpfs", target: "/tmp" }
+    networks:
+      localnode:
+
+
+  op-geth-l2:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    depends_on:
+      - "geth-l1"
+    healthcheck:
+      test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
+      timeout: 60s
+    environment:
+      ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
+      OP_GETH_L1_RPC: "http://geth-l1:8545"
+    working_dir: "/tmp"
+    command:
+      - "sh"
+      - "/tmp/entrypointl2.sh"
+    volumes:
+      - "./e2e/keystore:/tmp/keystore:ro"
+      - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
+      - "./jwt.txt:/tmp/jwt.txt:ro"
+      - "./entrypointl2.sh:/tmp/entrypointl2.sh"
+      - "./genesisl2.sh:/tmp/genesisl2.sh"
+      - "./output:/tmp/output"
+      - "l2configs:/l2configs"
+      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
+      - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
+      - { type: "tmpfs", target: "/tmp" }
+    networks:
+      localnode:
+
+  op-node:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+      op-geth-l2:
+        condition: "service_healthy"
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+    command:
+      - "op-node/bin/op-node"
+      - "--l2=ws://op-geth-l2:8551"
+      - "--l2.jwt-secret=/tmp/jwt.txt"
+      - "--sequencer.enabled=true"
+      - "--sequencer.l1-confs=0"
+      - "--sequencer.stopped=true"
+      - "--verifier.l1-confs=0"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--rpc.enable-admin"
+      - "--l1=http://geth-l1:8545"
+      - "--l1.rpckind=standard"
+      - "--l1.trustrpc"
+      - "--log.level=info"
+      - "--l1.trustrpc=true"
+      - "--l1.http-poll-interval=6s"
+      - "--p2p.no-discovery"
+      - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
+      - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
+      - "--conductor.enabled=true"
+      - "--conductor.rpc=http://op-conductor:8547"
+      - "--log.level=debug"
+      - "--log.format=terminal"
+      - "--override.ecotone=1725868497"
+      - "--override.canyon=1725868497"
+      - "--override.delta=1725868497"
+      - "--l1.beacon.ignore=true"
+    volumes:
+      - "l2configs:/l2configs"
+      - "./jwt.txt:/tmp/jwt.txt"
+      - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
+    networks:
+      localnode:
