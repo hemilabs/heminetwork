@@ -5,47 +5,35 @@
 
 set -xe
 
-if [ -z "${ENTRYPOINT_SKIP_GENESIS}" ]; then
-    sh /tmp/genesisl2.sh
-fi
-
-
-/git/op-geth/build/bin/geth init --datadir /tmp/datadir /l2configs/genesis.json
+/git/op-geth/build/bin/geth init --datadir /tmp/datadir /tmp/testnet-genesis.json
 
 /git/op-geth/build/bin/geth \
- --keystore \
- /tmp/keystore \
- --password \
- /tmp/passwords.txt \
- --http \
- --http.port=8546 \
- --http.addr \
- '0.0.0.0' \
- --http.vhosts \
- '*' \
- --ws  \
- --ws.addr=0.0.0.0  \
- --ws.port=28546  \
- --ws.origins="*"  \
- --ws.api=debug,eth,txpool,net,engine  \
- --syncmode=full  \
- --gcmode=archive  \
- --nodiscover  \
- --maxpeers=0 \
- --networkid=901 \
- --authrpc.vhosts="*"  \
- --rpc.allow-unprotected-txs \
- --datadir \
- /tmp/datadir \
- --authrpc.vhosts="*" \
- --authrpc.addr=0.0.0.0 \
- --authrpc.port=8551 \
- --authrpc.jwtsecret=/tmp/jwt.txt \
- --verbosity=5 \
- --gpo.maxprice=1 \
- --tbc.network=localnet \
- --tbc.initheight=1 \
- --tbc.seeds='bitcoind:18444' \
- --override.ecotone=1725868497 \
- --override.canyon=1725868497 \
- --override.cancun=1725868497
+	--config=/tmp/op-geth-l2-config/config \
+        --http \
+        --http.corsdomain=* \
+        --http.vhosts=* \
+        --http.addr=0.0.0.0 \
+        --http.api=web3,eth,txpool,net \
+        --http.port=18546 \
+        --ws \
+        --ws.rpcprefix=/ \
+        --ws.addr=0.0.0.0 \
+        --ws.port=28546 \
+        --ws.origins=* \
+        --ws.api=eth,txpool,net \
+        --syncmode=snap \
+        --gcmode=archive \
+        --maxpeers=2 \
+        --networkid=743111 \
+        --authrpc.vhosts=* \
+        --authrpc.addr=0.0.0.0 \
+        --authrpc.port=8551 \
+        --authrpc.jwtsecret=/tmp/jwt/jwt.hex \
+        --rollup.disabletxpoolgossip=false \
+        --datadir=/tmp/datadir \
+        --nodiscover \
+        --override.ecotone=1715865630 \
+        --override.canyon=1715865630 \
+        --override.cancun=1715865630 \
+        --tbc.initheight=0 \
+        --tbc.leveldbhome=/data/geth/tbctmp/tbcdatadir10/tbcdatadir
