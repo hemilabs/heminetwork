@@ -128,7 +128,7 @@ services:
       - "--grpc-gateway-host=0.0.0.0"
       - "--enable-experimental-backfill"
     volumes:
-      - "./prysm-data"
+      - "./prysm-data:/data"
     ports:
       - 4000:4000
     networks:
