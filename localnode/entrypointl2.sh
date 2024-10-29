@@ -8,7 +8,7 @@ set -xe
 geth init --datadir /tmp/datadir/geth /tmp/testnet-genesis.json
 
 geth \
-	--config=/tmp/op-geth-l2-config/config \
+	--config=/tmp/l2-config.toml \
         --http \
         --http.corsdomain=* \
         --http.vhosts=* \
@@ -36,4 +36,4 @@ geth \
         --override.canyon=1715865630 \
         --override.cancun=1715865630 \
         --tbc.initheight=0 \
-        --tbc.leveldbhome=/data/geth/tbctmp/tbcdatadir10/tbcdatadir
+        --tbc.leveldbhome=/tbcdata

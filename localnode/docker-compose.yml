@@ -162,11 +162,34 @@ services:
     networks:
       localnode:
 
+  op-geth-l2-init:
+    image: alpine:latest
+    command:
+      - chown
+      - -R
+      - "65532" # geth user
+      - /tmp/datadir
+    volumes:
+      - op-geth_data:/tmp/datadir
+  op-geth-l2-init-tbc:
+    image: alpine:latest
+    command:
+      - chown
+      - -R
+      - "65532" # geth user
+      - /tbcdata
+    volumes:
+      - tbc_data:/tbcdata
 
   op-geth-l2:
     image: "ghcr.io/hemilabs/op-geth:337407d@sha256:43860fcb691c85e344bd17a660a19e254924953b2ccebe03f2d87d425eeaecbb"
     depends_on:
-      - "geth-l1"
+      geth-l1: 
+        condition: service_started
+      op-geth-l2-init: 
+        condition: "service_completed_successfully"
+      op-geth-l2-init-tbc: 
+        condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/rollup.json"]
       timeout: 60s
@@ -178,10 +201,12 @@ services:
       - "/tmp/entrypointl2.sh"
     volumes:
       - "./testnet-genesis.json:/tmp/testnet-genesis.json"
-      - "./jwt.txt:/tmp/jwt.txt:ro"
+      - "./jwt.txt:/tmp/jwt/jwt.hex:ro"
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - op-geth_data:/tmp/datadir
       - "./rollup.json:/tmp/rollup.json"
+      - "./l2-config.toml:/tmp/l2-config.toml"
+      - tbc_data:/tbcdata
     networks:
       localnode:
 
@@ -231,3 +256,4 @@ volumes:
   psql_data:
   op-geth_data:
   electrs_data:
+  tbc_data:
