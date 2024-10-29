@@ -23,6 +23,7 @@ Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin wi
     * [🏁 Prerequisites](#-prerequisites-2)
   * [▶️ Running bssd](#-running-bssd)
     * [🏁 Prerequisites](#-prerequisites-3)
+  * [▶️ Running a full node](#-running-a-full-node)
   * [▶️ Running the localnet network](#-running-the-localnet-network)
     * [🏁 Prerequisites](#-prerequisites-4)
     * [📚 Tutorial](#-tutorial)
@@ -145,6 +146,10 @@ go run ./integrationtest
 ### 🏁 Prerequisites
 
 - Connect to a live [bfgd](#-running-bfgd) instance.
+
+## ▶️ Running a full node
+
+To run a full (non-sequencing) node locally see [NODE_RUNNING](NODE_RUNNING.md).
 
 ## ▶️ Running the localnet network
 
