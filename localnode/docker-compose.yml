@@ -18,7 +18,7 @@ services:
       - "18443:18443"
       - "18444:18444"
     volumes:
-      - { type: "tmpfs", target: "/bitcoin/.bitcoin" }
+      - bitcoin_data:/bitcoin/.bitcoin
     networks:
       localnode:
 
@@ -43,11 +43,13 @@ services:
       - --electrum-txs-limit
       - "50000"
       - --jsonrpc-import
+      - --db-dir=/data/electrs/blockstream
     environment:
       RUST_LOG: debug
       RUST_BACKTRACE: "full"
     volumes:
       - ./cookie:/tmp/.cookie
+      - electrs_data:/data/electrs
     deploy:
       restart_policy:
         condition: "on-failure"
@@ -70,7 +72,7 @@ services:
       POSTGRES_DB: "bfg"
       POSTGRES_HOST_AUTH_METHOD: "trust"
     volumes:
-      - { type: "tmpfs", target: "/var" }
+      - psql_data:/var
     networks:
       localnode:
 
@@ -85,8 +87,9 @@ services:
       - "bfgd-postgres"
       - "electrs"
     ports:
-      - "8080:8080"
-      - "8383:8383"
+      ### CHANGE HOST PORTS
+      - "8082:8080"
+      - "8385:8383"
     environment:
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       ### XXXX Make this variable and set to recent block
@@ -128,7 +131,7 @@ services:
       - "--grpc-gateway-host=0.0.0.0"
       - "--enable-experimental-backfill"
     volumes:
-      - "./prysm-data:/data"
+      - prysm_data:/data
     ports:
       - 4000:4000
     networks:
@@ -141,7 +144,6 @@ services:
     working_dir: "/tmp/geth"
     command:
       - "--sepolia"
-      - "--keystore"
       - "--http"
       - "--http.port=8545"
       - "--http.addr"
@@ -156,7 +158,7 @@ services:
       - "/tmp/geth"
       - "--gpo.percentile=0"
     volumes:
-      - "./geth-l1:/tmp/geth"
+      - geth_data:/tmp/geth
     networks:
       localnode:
 
@@ -171,14 +173,14 @@ services:
     environment:
       OP_GETH_L1_RPC: "http://geth-l1:8545"
     working_dir: "/tmp"
-    command:
+    entrypoint:
       - "sh"
       - "/tmp/entrypointl2.sh"
     volumes:
-      - "./testnet-geneis.json:/tmp/testnet-geneis.json"
+      - "./testnet-genesis.json:/tmp/testnet-genesis.json"
       - "./jwt.txt:/tmp/jwt.txt:ro"
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
-      - "./op-geth-l2:/tmp/datadir"
+      - op-geth_data:/tmp/datadir
       - "./rollup.json:/tmp/rollup.json"
     networks:
       localnode:
@@ -222,3 +224,10 @@ services:
 
 networks:
   localnode:
+volumes:
+  bitcoin_data:
+  geth_data:
+  prysm_data:
+  psql_data:
+  op-geth_data:
+  electrs_data:

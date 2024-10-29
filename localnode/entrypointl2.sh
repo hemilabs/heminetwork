@@ -5,9 +5,9 @@
 
 set -xe
 
-/git/op-geth/build/bin/geth init --datadir /tmp/datadir /tmp/testnet-genesis.json
+geth init --datadir /tmp/datadir/geth /tmp/testnet-genesis.json
 
-/git/op-geth/build/bin/geth \
+geth \
 	--config=/tmp/op-geth-l2-config/config \
         --http \
         --http.corsdomain=* \
@@ -30,7 +30,7 @@ set -xe
         --authrpc.port=8551 \
         --authrpc.jwtsecret=/tmp/jwt/jwt.hex \
         --rollup.disabletxpoolgossip=false \
-        --datadir=/tmp/datadir \
+        --datadir=/tmp/datadir/geth \
         --nodiscover \
         --override.ecotone=1715865630 \
         --override.canyon=1715865630 \
