@@ -132,6 +132,7 @@ services:
       - "--enable-experimental-backfill"
     volumes:
       - prysm_data:/data
+      - "./jwt.txt:/tmp/jwt/jwt.hex:ro"
     ports:
       - 4000:4000
     networks:
@@ -182,6 +183,8 @@ services:
       - tbc_data:/tbcdata
 
   op-geth-l2:
+    ulimits:
+      memlock: -1
     image: "ghcr.io/hemilabs/op-geth:337407d@sha256:43860fcb691c85e344bd17a660a19e254924953b2ccebe03f2d87d425eeaecbb"
     depends_on:
       geth-l1: 
@@ -223,8 +226,8 @@ services:
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
-        - "op-node/bin/op-node"
-        - "--l1=http://op-geth-l1:8545"
+        - "op-node"
+        - "--l1=http://geth-l1:8545"
         - "--l1.rpckind=any"
         - "--l1.beacon=http://prysm:3500"
         - "--l2=ws://op-geth-l2:8551"
@@ -241,7 +244,7 @@ services:
         - "--log.level=trace"
         - "--syncmode=execution-layer"
     volumes:
-      - "./jwt.txt:/tmp/jwt.txt"
+      - "./jwt.txt:/tmp/jwt/jwt.txt"
       - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
       - "./rollup.json:/tmp/rollup.json"
     networks:
