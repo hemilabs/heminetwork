@@ -147,19 +147,19 @@ services:
       - "--sepolia"
       - "--http"
       - "--http.port=8545"
-      - "--http.addr"
-      - "0.0.0.0"
+      - "--http.addr=0.0.0.0"
+      - "--http.api=eth,net,engine,admin"
+      - "--authrpc.vhosts=*"
+      - "--authrpc.addr=0.0.0.0"
+      - "--authrpc.jwtsecret=/tmp/jwt/jwt.hex"
       - "--http.vhosts"
       - "*"
-      - "--nodiscover"
-      - "--maxpeers=0"
-      - "--authrpc.vhosts=\"*\""
-      - "--rpc.allow-unprotected-txs"
       - "--datadir"
       - "/tmp/geth"
       - "--gpo.percentile=0"
     volumes:
       - geth_data:/tmp/geth
+      - "./jwt.txt:/tmp/jwt/jwt.hex"
     networks:
       localnode:
 
