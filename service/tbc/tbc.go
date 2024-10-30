@@ -135,7 +135,6 @@ type Server struct {
 	pings  *ttl.TTL // outstanding pings
 
 	indexing bool // when set we are indexing
-	sodding  bool // when set p2p is considered "up enough"
 
 	db tbcd.Database
 
