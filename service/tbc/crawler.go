@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"sync"
 	"time"
 
@@ -71,6 +72,23 @@ var (
 		s2h("000000001aeae195809d120b5d66a39c83eb48792e068f8ea1fea19d84a4278a"): 50000,
 	}
 )
+
+func lastCheckpointHeight(height uint64, hhm map[chainhash.Hash]uint64) uint64 {
+	c := make([]HashHeight, 0, len(hhm))
+	for k, v := range hhm {
+		c = append(c, HashHeight{Height: v, Hash: k})
+	}
+	sort.Slice(c, func(i, j int) bool {
+		return uint64(c[i].Height) > uint64(c[j].Height)
+	})
+	for _, hh := range c {
+		if hh.Height > height {
+			continue
+		}
+		return hh.Height
+	}
+	return 0
+}
 
 type HashHeight struct {
 	Hash   chainhash.Hash
