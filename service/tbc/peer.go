@@ -139,14 +139,24 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 
 	// 3. ask for v2 addresses, this has to be done before verack despite
 	// what the spec says.
-	if v.ProtocolVersion >= 70016 {
-		err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgSendAddrV2(), p.protocolVersion, p.network)
+	if uint32(v.ProtocolVersion) >= wire.AddrV2Version {
+		err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgSendAddrV2(),
+			p.protocolVersion, p.network)
 		if err != nil {
 			return fmt.Errorf("could not send addrv2: %w", err)
 		}
 	}
 
-	// 4. send verack
+	// 4. ask for headers.
+	if uint32(v.ProtocolVersion) >= wire.SendHeadersVersion {
+		err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgSendHeaders(),
+			p.protocolVersion, p.network)
+		if err != nil {
+			return fmt.Errorf("could not send addrv2: %w", err)
+		}
+	}
+
+	// 5. send verack
 	err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgVerAck(), p.protocolVersion, p.network)
 	if err != nil {
 		return fmt.Errorf("could not send verack: %w", err)
