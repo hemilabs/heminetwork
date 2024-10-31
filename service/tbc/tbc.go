@@ -1108,7 +1108,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
-			if err = s.SyncIndexersToBest(ctx); err != nil && !errors.Is(err, ErrAlreadyIndexing) && errors.Is(err, context.Canceled) {
+			if err = s.SyncIndexersToBest(ctx); err != nil && !errors.Is(err, ErrAlreadyIndexing) && !errors.Is(err, context.Canceled) {
 				// XXX this is probably not a panic.
 				panic(fmt.Errorf("sync blocks: %w", err))
 			}
