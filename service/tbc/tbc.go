@@ -853,14 +853,11 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		go func() {
 			if err = s.SyncIndexersToBest(ctx); err != nil && !errors.Is(err, ErrAlreadyIndexing) && !errors.Is(err, context.Canceled) {
 				// XXX this is probably not a panic.
-				panic(fmt.Errorf("sync blocks: %w", err))
+				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
 
 			// Get block headers
 			if s.Synced(ctx).Synced {
-				// Flush out blocks we saw during quiece.
-				log.Infof("flush missed")
-
 				s.mtx.Lock()
 				ib := make([]*chainhash.Hash, 0, len(s.invBlocks))
 				for k := range s.invBlocks {
@@ -868,6 +865,9 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				}
 				clear(s.invBlocks)
 				s.mtx.Unlock()
+
+				// Flush out blocks we saw during quiece.
+				log.Infof("flush missed headers %v", len(ib))
 
 				if len(ib) == 0 {
 					log.Infof("nothing to do")
@@ -917,10 +917,18 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	log.Tracef("handleHeaders (%v): %v %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
-	// When quiesced do not handle headers
+	// When quiesced do not handle headers but do cache them.
 	s.mtx.Lock()
 	if s.indexing {
-		log.Debugf("handleHeaders indexing %v", s.indexing)
+		for k := range msg.Headers {
+			if _, ok := s.invBlocks[msg.Headers[k].BlockHash()]; !ok {
+				s.invBlocks[msg.Headers[k].BlockHash()] = struct{}{}
+			}
+		}
+		if len(s.invBlocks) != 0 {
+			log.Infof("handleHeaders indexing %v %v",
+				len(msg.Headers), len(s.invBlocks))
+		}
 		s.mtx.Unlock()
 		return ErrAlreadyIndexing
 	}
@@ -1158,6 +1166,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw []byte) error {
 	switch msg.InvList[0].Type {
 	case wire.InvTypeTx:
+	case wire.InvTypeBlock:
 	default:
 		// log.Infof("%v: %T", p, m)
 		log.Infof("handleInv (%v) %v", p, msg.InvList[0].Type)

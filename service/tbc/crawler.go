@@ -195,6 +195,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 	}
 	// Move best block header backwards until we find bh.
 	for {
+		log.Infof("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
 		// log.Debugf("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
 		if height, ok := s.checkpoints[bhb.Hash]; ok && bh.Height <= height {
 			return true, nil
@@ -213,6 +214,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 }
 
 func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+	log.Infof("findCanonicalParent %v", bh)
 	log.Tracef("findCanonicalParent %v", bh)
 
 	// Genesis is always canonical.
@@ -230,6 +232,7 @@ func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) 
 			return nil, err
 		}
 		if canonical {
+			log.Infof("findCanonicalParent exit %v", bh)
 			log.Tracef("findCanonicalParent exit %v", bh)
 			return bh, nil
 		}
@@ -1358,6 +1361,8 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		return err
 	}
 
+	log.Infof("Sync indexers to best: %v @ %v", bhb, bhb.Height)
+
 	// Index Utxo
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
@@ -1405,9 +1410,13 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cp, err = s.findCanonicalParent(ctx, txBH)
-	if err != nil {
-		return err
+	// We can short circuit looking up canonical parent if txBH == utxoBH.
+	ptxHash := &txBH.Hash
+	if !ptxHash.IsEqual(&utxoBH.Hash) {
+		cp, err = s.findCanonicalParent(ctx, txBH)
+		if err != nil {
+			return err
+		}
 	}
 	if !cp.Hash.IsEqual(&txBH.Hash) {
 		log.Infof("Syncing tx index to: %v from: %v via: %v",
