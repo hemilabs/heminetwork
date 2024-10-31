@@ -690,12 +690,14 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 	// Get p2p information.
 	err = p.write(defaultCmdTimeout, wire.NewMsgGetAddr())
 	if err != nil {
+		readError = err
 		return err
 	}
 
 	// Broadcast all tx's to new node.
 	err = s.TxBroadcastAllToPeer(ctx, p)
 	if err != nil {
+		readError = err
 		return err
 	}
 
@@ -704,6 +706,7 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 		s.Synced(ctx).Synced {
 		err := p.write(defaultCmdTimeout, wire.NewMsgMemPool())
 		if err != nil {
+			readError = err
 			return fmt.Errorf("mempool %v: %w", p, err)
 		}
 	}
@@ -743,6 +746,7 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 
 		handled, err := s.handleGeneric(ctx, p, msg, raw)
 		if err != nil {
+			readError = err
 			return err
 		}
 		if handled {
@@ -1104,7 +1108,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
-			if err = s.SyncIndexersToBest(ctx); err != nil && !errors.Is(err, ErrAlreadyIndexing) && errors.Is(err, context.Canceled) {
+			if err = s.SyncIndexersToBest(ctx); err != nil && !errors.Is(err, ErrAlreadyIndexing) && !errors.Is(err, context.Canceled) {
 				// XXX this is probably not a panic.
 				panic(fmt.Errorf("sync blocks: %w", err))
 			}
