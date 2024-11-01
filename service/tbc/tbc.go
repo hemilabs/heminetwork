@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -856,7 +857,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
 
-			// Get block headers
+			// Get block headers that we missed during indexing.
 			if s.Synced(ctx).Synced {
 				s.mtx.Lock()
 				ib := make([]*chainhash.Hash, 0, len(s.invBlocks))
@@ -866,11 +867,18 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				clear(s.invBlocks)
 				s.mtx.Unlock()
 
+				// Fixup ib array to not ask for block headers
+				// we already have.
+				ib = slices.DeleteFunc(ib, func(h *chainhash.Hash) bool {
+					_, _, err := s.BlockHeaderByHash(ctx, h)
+					return err == nil
+				})
+
 				// Flush out blocks we saw during quiece.
-				log.Infof("flush missed headers %v", len(ib))
+				log.Debugf("flush missed headers %v", len(ib))
 
 				if len(ib) == 0 {
-					log.Infof("nothing to do")
+					log.Debugf("nothing to do")
 					return
 				}
 
@@ -884,7 +892,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				s.pm.All(ctx, hp)
 
 			} else {
-				log.Infof("handle all")
+				log.Debugf("handle all")
 				s.pm.All(ctx, s.headersPeer)
 			}
 		}()
