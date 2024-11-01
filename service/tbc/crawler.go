@@ -36,7 +36,6 @@ var (
 	UtxoIndexHashKey = []byte("utxoindexhash") // last indexed utxo hash
 	TxIndexHashKey   = []byte("txindexhash")   // last indexed tx hash
 
-	ErrNotLinear       = errors.New("not linear") // not a valid chain
 	ErrAlreadyIndexing = errors.New("already indexing")
 
 	testnet3Checkpoints = map[chainhash.Hash]uint64{
@@ -72,6 +71,19 @@ var (
 		s2h("000000001aeae195809d120b5d66a39c83eb48792e068f8ea1fea19d84a4278a"): 50000,
 	}
 )
+
+type NotLinear string
+
+func (en NotLinear) Error() string {
+	return string(en)
+}
+
+func (nl NotLinear) Is(target error) bool {
+	_, ok := target.(NotLinear)
+	return ok
+}
+
+var ErrNotLinear = NotLinear("not linear")
 
 func lastCheckpointHeight(height uint64, hhm map[chainhash.Hash]uint64) uint64 {
 	c := make([]HashHeight, 0, len(hhm))
@@ -196,9 +208,9 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 	// Move best block header backwards until we find bh.
 	for {
 		log.Infof("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
-		// log.Debugf("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
-		if height, ok := s.checkpoints[bhb.Hash]; ok && bh.Height <= height {
-			return true, nil
+		if height, ok := s.checkpoints[bhb.Hash]; ok && height <= bh.Height {
+			// Did not find bh in path
+			return false, nil
 		}
 		bhb, err = s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
 		if err != nil {
@@ -214,7 +226,6 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 }
 
 func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
-	log.Infof("findCanonicalParent %v", bh)
 	log.Tracef("findCanonicalParent %v", bh)
 
 	// Genesis is always canonical.
@@ -226,13 +237,14 @@ func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) 
 	if err != nil {
 		return nil, err
 	}
+	log.Infof("findCanonicalParent %v @ %v best %v @ %v",
+		bh, bh.Height, bhb, bhb.Height)
 	for {
 		canonical, err := s.isCanonical(ctx, bh)
 		if err != nil {
 			return nil, err
 		}
 		if canonical {
-			log.Infof("findCanonicalParent exit %v", bh)
 			log.Tracef("findCanonicalParent exit %v", bh)
 			return bh, nil
 		}
@@ -1278,7 +1290,8 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		log.Infof("startBH %v %v", startBH, startBH.Difficulty)
 		log.Infof("endBH %v %v", endBH, endBH.Difficulty)
 		log.Infof("direction %v", direction)
-		return 0, ErrNotLinear
+		return 0, NotLinear(fmt.Sprintf("start %v end %v direction %v",
+			startBH, endBH, direction))
 	}
 	for {
 		// log.Infof("sod %v %v", x, h)
@@ -1298,7 +1311,8 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 			return direction, nil
 		}
 		if h.IsEqual(s.chainParams.GenesisHash) {
-			return direction, ErrNotLinear
+			return 0, NotLinear(fmt.Sprintf("start %v end %v "+
+				"direction %v: genesis", startBH, endBH, direction))
 		}
 	}
 }
@@ -1361,7 +1375,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		return err
 	}
 
-	log.Infof("Sync indexers to best: %v @ %v", bhb, bhb.Height)
+	log.Debugf("Sync indexers to best: %v @ %v", bhb, bhb.Height)
 
 	// Index Utxo
 	utxoHH, err := s.UtxoIndexHash(ctx)
@@ -1382,6 +1396,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log.Infof("cp %v", cp)
 	if !cp.Hash.IsEqual(&utxoBH.Hash) {
 		log.Infof("Syncing utxo index to: %v from: %v via: %v",
 			bhb.HH(), utxoBH.HH(), cp.HH())
