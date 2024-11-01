@@ -316,9 +316,9 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
 
-	if len(m.BlockLocatorHashes) != 1 {
-		return nil, fmt.Errorf("get headers: invalid count got %v wanted %v",
-			len(m.BlockLocatorHashes), 1)
+	if len(m.BlockLocatorHashes) == 0 {
+		return nil, fmt.Errorf("get headers: invalid count got 0 wanted %v",
+			len(m.BlockLocatorHashes))
 	}
 	locator := m.BlockLocatorHashes[0]
 	from, ok := b.chain[locator.String()]
