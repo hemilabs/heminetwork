@@ -149,7 +149,7 @@ go run ./integrationtest
 
 ## ▶️ Running a full node
 
-To run a full (non-sequencing) node locally see [NODE_RUNNING](NODE_RUNNING.md).
+To run a full (non-sequencing) node locally see [NODE_RUNNING](localnode/NODE_RUNNING.md).
 
 ## ▶️ Running the localnet network
 
