@@ -24,7 +24,7 @@ Currently, testnet needs a minimum of 3TB storage.
 
 docker
 
-docker-compose
+docker compose
 
 ### Get the hemi software
 
@@ -47,6 +47,15 @@ The following daemons are needed as part of the hemi software.  They are all con
 8. bfgd
 9. postgres
 
+### Important Note on Security
+
+Many of the credentials are hard-coded in this directory, as this assumption is
+that you're not exposing the associated services' ports to the outside world.  
+This allows communication between the services locally. 
+It is ok if you do expose the ports however; just ensure that you change the 
+values of the credentials to something that is not shared with others. 
+(ex. jwt token, cookie)
+
 ## Running the network
 
 ```sh
@@ -57,7 +66,11 @@ docker compose -f localnode/docker-compose.yml up --build
 
 To access the node, you can use rpc or websockets at the following ports:
 
-XXX (clayton, please add in)
+* op-node
+  * rpc `8547`
+* op-geth
+  * rpc `18546`
+  * wsrpc `28546`
 
 ## p2p
 

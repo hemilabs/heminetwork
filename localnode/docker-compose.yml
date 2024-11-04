@@ -34,8 +34,11 @@ services:
       - "bitcoind:18443"
       - --network
       - testnet
+      
+      # if you expose electrs ports, you may want to ensure that this is changed
       - --cookie
       - "user:password"
+      
       - "-vvv"
       - "--timestamp"
       - --utxos-limit
@@ -132,6 +135,8 @@ services:
       - "--enable-experimental-backfill"
     volumes:
       - prysm_data:/data
+      # change this token value if you expose this service's ports for 
+      # connection from other machines 
       - "./jwt.txt:/tmp/jwt/jwt.hex:ro"
     ports:
       - 4000:4000
@@ -159,6 +164,8 @@ services:
       - "--gpo.percentile=0"
     volumes:
       - geth_data:/tmp/geth
+      # change this token value if you expose this service's ports for 
+      # connection from other machines 
       - "./jwt.txt:/tmp/jwt/jwt.hex"
     networks:
       localnode:
@@ -204,6 +211,8 @@ services:
       - "/tmp/entrypointl2.sh"
     volumes:
       - "./testnet-genesis.json:/tmp/testnet-genesis.json"
+      # change this token value if you expose this service's ports for 
+      # connection from other machines 
       - "./jwt.txt:/tmp/jwt/jwt.hex:ro"
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - op-geth_data:/tmp/datadir
@@ -212,6 +221,9 @@ services:
       - tbc_data:/tbcdata
     networks:
       localnode:
+    ports:
+      - "18546:18546"
+      - "28546:28546"
 
   op-node:
     image: "ghcr.io/hemilabs/op-node:6b46f50@sha256:8a190294b5ee6acc200e9cdfbef95143e604be2ba37b60e42e419118edc1f376"
@@ -244,11 +256,15 @@ services:
         - "--log.level=trace"
         - "--syncmode=execution-layer"
     volumes:
+      # change this token value if you expose this service's ports for 
+      # connection from other machines 
       - "./jwt.txt:/tmp/jwt/jwt.txt"
       - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
       - "./rollup.json:/tmp/rollup.json"
     networks:
       localnode:
+    ports:
+      - "8547:8547"
 
 networks:
   localnode:
