@@ -34,11 +34,9 @@ services:
       - "bitcoind:18443"
       - --network
       - testnet
-      
       # if you expose electrs ports, you may want to ensure that this is changed
       - --cookie
       - "user:password"
-      
       - "-vvv"
       - "--timestamp"
       - --utxos-limit
@@ -135,8 +133,8 @@ services:
       - "--enable-experimental-backfill"
     volumes:
       - prysm_data:/data
-      # change this token value if you expose this service's ports for 
-      # connection from other machines 
+      # change this token value if you expose this service's ports for
+      # connection from other machines
       - "./jwt.txt:/tmp/jwt/jwt.hex:ro"
     ports:
       - 4000:4000
@@ -164,8 +162,8 @@ services:
       - "--gpo.percentile=0"
     volumes:
       - geth_data:/tmp/geth
-      # change this token value if you expose this service's ports for 
-      # connection from other machines 
+      # change this token value if you expose this service's ports for
+      # connection from other machines
       - "./jwt.txt:/tmp/jwt/jwt.hex"
     networks:
       localnode:
@@ -194,11 +192,11 @@ services:
       memlock: -1
     image: "ghcr.io/hemilabs/op-geth:337407d@sha256:43860fcb691c85e344bd17a660a19e254924953b2ccebe03f2d87d425eeaecbb"
     depends_on:
-      geth-l1: 
+      geth-l1:
         condition: service_started
-      op-geth-l2-init: 
+      op-geth-l2-init:
         condition: "service_completed_successfully"
-      op-geth-l2-init-tbc: 
+      op-geth-l2-init-tbc:
         condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/rollup.json"]
@@ -211,8 +209,8 @@ services:
       - "/tmp/entrypointl2.sh"
     volumes:
       - "./testnet-genesis.json:/tmp/testnet-genesis.json"
-      # change this token value if you expose this service's ports for 
-      # connection from other machines 
+      # change this token value if you expose this service's ports for
+      # connection from other machines
       - "./jwt.txt:/tmp/jwt/jwt.hex:ro"
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - op-geth_data:/tmp/datadir
@@ -256,8 +254,8 @@ services:
         - "--log.level=trace"
         - "--syncmode=execution-layer"
     volumes:
-      # change this token value if you expose this service's ports for 
-      # connection from other machines 
+      # change this token value if you expose this service's ports for
+      # connection from other machines
       - "./jwt.txt:/tmp/jwt/jwt.txt"
       - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
       - "./rollup.json:/tmp/rollup.json"

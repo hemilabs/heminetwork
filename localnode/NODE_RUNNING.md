@@ -20,6 +20,10 @@ Due to the need for a full bitcoin and ethereum node, a large amount of SSD or N
 
 Currently, testnet needs a minimum of 3TB storage.
 
+### ulimits
+
+A hemi node requires a very large number of open files.  The startup will attempt to set the `ulimits` properly, but will fail quickly with an error if your system does not allow high enough ulimits.
+
 ### install pre-reqs
 
 docker
@@ -50,10 +54,10 @@ The following daemons are needed as part of the hemi software.  They are all con
 ### Important Note on Security
 
 Many of the credentials are hard-coded in this directory, as this assumption is
-that you're not exposing the associated services' ports to the outside world.  
-This allows communication between the services locally. 
-It is ok if you do expose the ports however; just ensure that you change the 
-values of the credentials to something that is not shared with others. 
+that you're not exposing the associated services' ports to the outside world.
+This allows communication between the services locally.
+It is ok if you do expose the ports however; just ensure that you change the
+values of the credentials to something that is not shared with others.
 (ex. jwt token, cookie)
 
 ## Running the network
