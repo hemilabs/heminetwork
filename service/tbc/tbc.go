@@ -870,6 +870,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
+			var eval *database.BlockNotFoundError
 			err := s.SyncIndexersToBest(ctx)
 			switch {
 			case errors.Is(err, nil):
@@ -878,11 +879,13 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				return
 			case errors.Is(err, ErrAlreadyIndexing):
 				return
-			case errors.Is(err, database.ErrBlockNotFound):
-				panic(err)
+			case errors.As(err, &eval):
+				block := chainhash.Hash(*eval)
+				panic(block)
 			default:
 				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
+			log.Infof("flush -- %v", spew.Sdump(s.Synced(ctx).Synced))
 
 			// Get block headers that we missed during indexing.
 			if s.Synced(ctx).Synced {

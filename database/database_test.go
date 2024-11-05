@@ -337,7 +337,7 @@ func TestErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = BlockNotFoundError(*hash)
+	err = BlockNotFoundError{*hash}
 	if !errors.Is(err, ErrBlockNotFound) {
 		t.Fatalf("expected block not found, got %T", err)
 	}
@@ -345,6 +345,14 @@ func TestErrors(t *testing.T) {
 	if !errors.Is(err, ErrBlockNotFound) {
 		t.Fatalf("expected wrapped block not found, got %T", err)
 	}
+	x := err.(BlockNotFoundError)
+	t.Logf("%v", spew.Sdump(x))
+	var e *BlockNotFoundError
+	if !errors.As(err, &e) {
+		t.Fatalf("expected wrapped block not found, got %T %v", err, err)
+	}
+	block := e.Hash
+	t.Logf("%v", block)
 	err = errors.New("moo")
 	if errors.Is(err, ErrBlockNotFound) {
 		t.Fatalf("did not expected block not found, got %T", err)

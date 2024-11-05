@@ -208,7 +208,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 	}
 	// Move best block header backwards until we find bh.
 	for {
-		//log.Infof("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
+		// log.Infof("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
 		if height, ok := s.checkpoints[bhb.Hash]; ok && height <= bh.Height {
 			// Did not find bh in path
 			return false, nil

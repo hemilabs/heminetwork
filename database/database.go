@@ -37,19 +37,17 @@ func (nfe NotFoundError) Is(target error) bool {
 	return ok
 }
 
-type BlockNotFoundError chainhash.Hash
+type BlockNotFoundError struct {
+	chainhash.Hash
+}
 
 func (bnfe BlockNotFoundError) Error() string {
-	return fmt.Sprintf("block not found: %v", chainhash.Hash(bnfe).String())
+	return fmt.Sprintf("block not found: %v", bnfe.Hash)
 }
 
 func (bnfe BlockNotFoundError) Is(target error) bool {
 	_, ok := target.(BlockNotFoundError)
 	return ok
-}
-
-func (bnfe BlockNotFoundError) Hash() chainhash.Hash {
-	return chainhash.Hash(bnfe)
 }
 
 type DuplicateError string
@@ -89,7 +87,7 @@ var (
 	ErrDuplicate     = DuplicateError("duplicate")
 	ErrNotFound      = NotFoundError("not found")
 	ErrValidation    = ValidationError("validation")
-	ErrBlockNotFound = BlockNotFoundError(chainhash.Hash{})
+	ErrBlockNotFound BlockNotFoundError
 )
 
 // ByteArray is a type that corresponds to BYTEA in a database. It supports
