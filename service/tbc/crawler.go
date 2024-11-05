@@ -39,6 +39,7 @@ var (
 	ErrAlreadyIndexing = errors.New("already indexing")
 
 	testnet3Checkpoints = map[chainhash.Hash]uint64{
+		s2h("000000000000098faa89ab34c3ec0e6e037698e3e54c8d1bbb9dcfe0054a8e7a"): 3200000,
 		s2h("0000000000001242d96bedebc9f45a2ecdd40d393ca0d725f500fb4977a50582"): 3100000,
 		s2h("0000000000003c46fc60e56b9c2ae202b1efec83fcc7899d21de16757dea40a4"): 3000000,
 		s2h("000000000000001669469c0354b3f341a36b10ab099d1962f7ec4fae528b1f1d"): 2900000,
@@ -207,7 +208,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 	}
 	// Move best block header backwards until we find bh.
 	for {
-		log.Infof("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
+		//log.Infof("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
 		if height, ok := s.checkpoints[bhb.Hash]; ok && height <= bh.Height {
 			// Did not find bh in path
 			return false, nil
@@ -237,7 +238,7 @@ func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) 
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("findCanonicalParent %v @ %v best %v @ %v",
+	log.Debugf("findCanonicalParent %v @ %v best %v @ %v",
 		bh, bh.Height, bhb, bhb.Height)
 	for {
 		canonical, err := s.isCanonical(ctx, bh)
@@ -271,21 +272,21 @@ func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, 
 	// When this happens we have to walk back from endHash to find the
 	// connecting block. There is no shortcut possible without hitting edge
 	// conditions.
-	for k, v := range bhs {
-		h := endHash
-		for {
-			bh, err := s.db.BlockHeaderByHash(ctx, h)
-			if err != nil {
-				return -1, fmt.Errorf("block header by hash: %w", err)
-			}
+	h := endHash
+	for {
+		bh, err := s.db.BlockHeaderByHash(ctx, h)
+		if err != nil {
+			return -1, fmt.Errorf("block header by hash: %w", err)
+		}
+		for k, v := range bhs {
 			if h.IsEqual(v.BlockHash()) {
 				return k, nil
 			}
-			if h.IsEqual(s.chainParams.GenesisHash) {
-				break
-			}
-			h = bh.ParentHash()
 		}
+		if h.IsEqual(s.chainParams.GenesisHash) {
+			break
+		}
+		h = bh.ParentHash()
 	}
 	return -1, errors.New("path not found")
 }
@@ -1294,18 +1295,10 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 			startBH, endBH, direction))
 	}
 	for {
-		// log.Infof("sod %v %v", x, h)
 		bh, err := s.db.BlockHeaderByHash(ctx, h)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
 		}
-		// bhs, err := s.db.BlockHeadersByHeight(ctx, bh.Height)
-		// if err != nil {
-		//	return -1, fmt.Errorf("block header by height: %w", err)
-		// }
-		// if len(bhs) != 1 {
-		//	panic(fmt.Sprintf("%v", spew.Sdump(bhs)))
-		// }
 		h = bh.ParentHash()
 		if h.IsEqual(e) {
 			return direction, nil
@@ -1396,7 +1389,6 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	log.Infof("cp %v", cp)
 	if !cp.Hash.IsEqual(&utxoBH.Hash) {
 		log.Infof("Syncing utxo index to: %v from: %v via: %v",
 			bhb.HH(), utxoBH.HH(), cp.HH())
@@ -1456,8 +1448,9 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 }
 
 func (s *Server) SyncIndexersToBest(ctx context.Context) error {
+	t := time.Now()
 	log.Tracef("SyncIndexersToBest")
-	defer log.Tracef("SyncIndexersToBest exit")
+	defer log.Tracef("SyncIndexersToBest exit %v", time.Now().Sub(t))
 
 	s.mtx.Lock()
 	if s.indexing {
