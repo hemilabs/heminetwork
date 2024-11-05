@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
 type Database interface {
@@ -32,6 +34,19 @@ func (nfe NotFoundError) Error() string {
 
 func (nfe NotFoundError) Is(target error) bool {
 	_, ok := target.(NotFoundError)
+	return ok
+}
+
+type BlockNotFoundError struct {
+	chainhash.Hash
+}
+
+func (bnfe BlockNotFoundError) Error() string {
+	return fmt.Sprintf("block not found: %v", bnfe.Hash)
+}
+
+func (bnfe BlockNotFoundError) Is(target error) bool {
+	_, ok := target.(BlockNotFoundError)
 	return ok
 }
 
@@ -69,9 +84,10 @@ func (ze ZeroRowsError) Is(target error) bool {
 }
 
 var (
-	ErrDuplicate  = DuplicateError("duplicate")
-	ErrNotFound   = NotFoundError("not found")
-	ErrValidation = ValidationError("validation")
+	ErrDuplicate     = DuplicateError("duplicate")
+	ErrNotFound      = NotFoundError("not found")
+	ErrValidation    = ValidationError("validation")
+	ErrBlockNotFound BlockNotFoundError
 )
 
 // ByteArray is a type that corresponds to BYTEA in a database. It supports
