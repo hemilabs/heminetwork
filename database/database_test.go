@@ -345,9 +345,7 @@ func TestErrors(t *testing.T) {
 	if !errors.Is(err, ErrBlockNotFound) {
 		t.Fatalf("expected wrapped block not found, got %T", err)
 	}
-	x := err.(BlockNotFoundError)
-	t.Logf("%v", spew.Sdump(x))
-	var e *BlockNotFoundError
+	var e BlockNotFoundError
 	if !errors.As(err, &e) {
 		t.Fatalf("expected wrapped block not found, got %T %v", err, err)
 	}
