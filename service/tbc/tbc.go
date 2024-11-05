@@ -121,11 +121,10 @@ type Server struct {
 	// broadcast
 	broadcast map[chainhash.Hash]*wire.MsgTx
 
-	// inv blocks see
+	// missed block inventories during indexing
 	invBlocks []*chainhash.Hash
 
 	// bitcoin network
-	seeds       []string // XXX remove
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
@@ -787,7 +786,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 		return fmt.Errorf("is canonical: %w", err)
 	}
 	if !canonical {
-		log.Infof("deleting from blocks missing: %v %v %v",
+		log.Infof("Deleting from blocks missing database: %v %v %v",
 			p, bhX.Height, bhX)
 		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), &bhX.Hash)
 		if err != nil {
@@ -798,7 +797,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 		return nil
 	}
 
-	log.Infof("block expired %v %v", p, hash)
+	log.Infof("Block expired: %v %v", p, hash)
 
 	// Legit timeout, return error so that it can be retried.
 	return fmt.Errorf("timeout %v", key)
