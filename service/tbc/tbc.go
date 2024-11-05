@@ -122,7 +122,7 @@ type Server struct {
 	broadcast map[chainhash.Hash]*wire.MsgTx
 
 	// inv blocks see
-	invBlocks map[chainhash.Hash]struct{}
+	invBlocks []*chainhash.Hash
 
 	// bitcoin network
 	seeds       []string // XXX remove
@@ -185,7 +185,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		sessions:        make(map[string]*tbcWs),
 		requestTimeout:  defaultRequestTimeout,
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
-		invBlocks:       make(map[chainhash.Hash]struct{}, 16),
+		invBlocks:       make([]*chainhash.Hash, 0, 16),
 		promPollVerbose: false,
 	}
 
@@ -225,6 +225,24 @@ func NewServer(cfg *Config) (*Server, error) {
 	s.pm = pm
 
 	return s, nil
+}
+
+func (s *Server) invInsertUnlocked(h chainhash.Hash) bool {
+	for k := range s.invBlocks {
+		if s.invBlocks[k].IsEqual(&h) {
+			return false
+		}
+	}
+
+	// Not found, thus return true for inserted
+	s.invBlocks = append(s.invBlocks, &h)
+	return true
+}
+
+func (s *Server) invInsert(h chainhash.Hash) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return s.invInsertUnlocked(h)
 }
 
 func (s *Server) getHeadersByHashes(ctx context.Context, p *peer, hashes ...*chainhash.Hash) error {
@@ -852,29 +870,37 @@ func (s *Server) syncBlocks(ctx context.Context) {
 		}
 		// XXX rethink closure, this is because of index flag mutex.
 		go func() {
-			if err = s.SyncIndexersToBest(ctx); err != nil && !errors.Is(err, ErrAlreadyIndexing) && !errors.Is(err, context.Canceled) {
-				// XXX this is probably not a panic.
+			err := s.SyncIndexersToBest(ctx)
+			switch {
+			case errors.Is(err, nil):
+				fallthrough
+			case errors.Is(err, context.Canceled):
+				return
+			case errors.Is(err, ErrAlreadyIndexing):
+				return
+			case errors.Is(err, database.ErrBlockNotFound):
+				panic(err)
+			default:
 				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
 
 			// Get block headers that we missed during indexing.
 			if s.Synced(ctx).Synced {
 				s.mtx.Lock()
-				ib := make([]*chainhash.Hash, 0, len(s.invBlocks))
-				for k := range s.invBlocks {
-					ib = append(ib, &k)
-				}
-				clear(s.invBlocks)
+				ib := s.invBlocks
+				s.invBlocks = make([]*chainhash.Hash, 0, 16)
 				s.mtx.Unlock()
 
 				// Fixup ib array to not ask for block headers
 				// we already have.
+				log.Infof("flush missed headers %v", len(ib))
 				ib = slices.DeleteFunc(ib, func(h *chainhash.Hash) bool {
 					_, _, err := s.BlockHeaderByHash(ctx, h)
 					return err == nil
 				})
 
 				// Flush out blocks we saw during quiece.
+				log.Infof("flush missed headers AFTER %v", len(ib))
 				log.Debugf("flush missed headers %v", len(ib))
 
 				if len(ib) == 0 {
@@ -928,12 +954,11 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	// When quiesced do not handle headers but do cache them.
 	s.mtx.Lock()
 	if s.indexing {
+		x := len(s.invBlocks)
 		for k := range msg.Headers {
-			if _, ok := s.invBlocks[msg.Headers[k].BlockHash()]; !ok {
-				s.invBlocks[msg.Headers[k].BlockHash()] = struct{}{}
-			}
+			s.invInsertUnlocked(msg.Headers[k].BlockHash())
 		}
-		if len(s.invBlocks) != 0 {
+		if len(s.invBlocks) != x {
 			log.Infof("handleHeaders indexing %v %v",
 				len(msg.Headers), len(s.invBlocks))
 		}
@@ -1193,12 +1218,15 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 			// at a time while taking a mutex.
 			txsFound = true
 		case wire.InvTypeBlock:
-			log.Infof("inventory block: %v", v.Hash)
-			s.mtx.Lock()
-			if _, ok := s.invBlocks[v.Hash]; !ok {
-				s.invBlocks[v.Hash] = struct{}{}
+			// Make sure we haven't seen block header yet.
+			_, _, err := s.BlockHeaderByHash(ctx, &v.Hash)
+			if err == nil {
+				return nil
 			}
-			s.mtx.Unlock()
+			// XXX we should grab it from p2p if not indexing
+			if s.invInsert(v.Hash) {
+				log.Infof("inventory block: %v", v.Hash)
+			}
 		case wire.InvTypeFilteredBlock:
 			log.Debugf("inventory filtered block: %v", v.Hash)
 		case wire.InvTypeWitnessBlock:

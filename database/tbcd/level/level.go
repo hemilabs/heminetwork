@@ -746,7 +746,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	eb, err := bDB.Get(hash[:])
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.NotFoundError(fmt.Sprintf("block not found: %v", hash))
+			return nil, database.BlockNotFoundError(*hash)
 		}
 		return nil, fmt.Errorf("block get: %w", err)
 	}
