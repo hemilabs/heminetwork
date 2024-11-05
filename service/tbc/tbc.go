@@ -443,7 +443,7 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 		}
 		blks := s.blocks.DeleteByValue(findPeer)
 		pings := s.pings.DeleteByValue(findPeer)
-		log.Infof("disconnected: %v blocks %v pings %v%v", p, blks, pings, re)
+		log.Infof("Disconnected: %v blocks %v pings %v%v", p, blks, pings, re)
 
 		s.pm.Bad(ctx, p.String()) // always close peer
 	}()
@@ -497,9 +497,8 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 
 	// Only now can we consider the peer connected
 	verbose := false
-	log.Infof("connected: %v version %v agent %v", p,
-		p.remoteVersion.ProtocolVersion,
-		p.remoteVersion.UserAgent)
+	log.Infof("Connected: %v version %v agent %v", p,
+		p.remoteVersion.ProtocolVersion, p.remoteVersion.UserAgent)
 	defer log.Debugf("disconnect: %v", p)
 	for {
 		// See if we were interrupted, for the love of pete add ctx to wire
@@ -979,7 +978,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 			s.invInsertUnlocked(msg.Headers[k].BlockHash())
 		}
 		if len(s.invBlocks) != x {
-			log.Infof("handleHeaders indexing %v %v",
+			log.Debugf("handleHeaders indexing %v %v",
 				len(msg.Headers), len(s.invBlocks))
 		}
 		s.mtx.Unlock()
@@ -1244,9 +1243,8 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 			if err == nil {
 				return nil
 			}
-			// XXX we should grab it from p2p if not indexing
 			if s.invInsert(v.Hash) {
-				log.Infof("inventory block: %v", v.Hash)
+				log.Debugf("inventory block: %v", v.Hash)
 			}
 		case wire.InvTypeFilteredBlock:
 			log.Debugf("inventory filtered block: %v", v.Hash)
