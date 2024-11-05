@@ -73,18 +73,18 @@ var (
 	}
 )
 
-type NotLinear string
+type NotLinearError string
 
-func (en NotLinear) Error() string {
-	return string(en)
+func (e NotLinearError) Error() string {
+	return string(e)
 }
 
-func (nl NotLinear) Is(target error) bool {
-	_, ok := target.(NotLinear)
+func (e NotLinearError) Is(target error) bool {
+	_, ok := target.(NotLinearError)
 	return ok
 }
 
-var ErrNotLinear = NotLinear("not linear")
+var ErrNotLinear = NotLinearError("not linear")
 
 func lastCheckpointHeight(height uint64, hhm map[chainhash.Hash]uint64) uint64 {
 	c := make([]HashHeight, 0, len(hhm))
@@ -1291,7 +1291,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 		log.Infof("startBH %v %v", startBH, startBH.Difficulty)
 		log.Infof("endBH %v %v", endBH, endBH.Difficulty)
 		log.Infof("direction %v", direction)
-		return 0, NotLinear(fmt.Sprintf("start %v end %v direction %v",
+		return 0, NotLinearError(fmt.Sprintf("start %v end %v direction %v",
 			startBH, endBH, direction))
 	}
 	for {
@@ -1304,7 +1304,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 			return direction, nil
 		}
 		if h.IsEqual(s.chainParams.GenesisHash) {
-			return 0, NotLinear(fmt.Sprintf("start %v end %v "+
+			return 0, NotLinearError(fmt.Sprintf("start %v end %v "+
 				"direction %v: genesis", startBH, endBH, direction))
 		}
 	}
