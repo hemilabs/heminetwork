@@ -199,8 +199,11 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		return false, err
 	}
 	if bhb.Height < bh.Height {
-		return false, fmt.Errorf("best height less than provided height: %v < %v",
+		// We either hit a race or the caller did something wrong.
+		// Either way, it cannot be canonical.
+		log.Debugf("best height less than provided height: %v < %v",
 			bhb.Height, bh.Height)
+		return false, nil
 	}
 	if bhb.Hash.IsEqual(&bh.Hash) {
 		// Self == best
