@@ -1,45 +1,82 @@
-# Running a full node
+# Running the Hemi stack
 
-The following document describes how to run a full p2p node with rpc access.  This does NOT run a batcher or sequencer.
+This document details how to run the full Hemi stack with P2P nodes and RPC access. *This does NOT run a batcher or
+sequencer.*
+
+<details>
+  <summary>Table of Contents</summary>
+
+<!-- TOC -->
+* [Running the Hemi stack](#running-the-hemi-stack)
+  * [Prerequisites](#prerequisites)
+    * [System requirements](#system-requirements)
+      * [CPU and RAM](#cpu-and-ram)
+      * [Disk](#disk)
+      * [ulimits](#ulimits)
+  * [Setup](#setup)
+    * [Check prerequisites](#check-prerequisites)
+    * [Clone the heminetwork repository](#clone-the-heminetwork-repository)
+    * [Required components](#required-components)
+    * [⚠️ Important Note on Security](#-important-note-on-security)
+  * [Running with Docker Compose](#running-with-docker-compose)
+  * [Accessing the nodes](#accessing-the-nodes)
+  * [Peer-to-Peer (P2P)](#peer-to-peer-p2p)
+  * [Mainnet](#mainnet)
+  * [Running without Docker](#running-without-docker)
+<!-- TOC -->
+</details>
 
 ## Prerequisites
 
-This assumes you are running on docker + docker compose on Ubuntu 24.04 (the latest LTS).  Other systems are possible but may not be fully supported.
+This guide assumes you are running [Docker](https://docs.docker.com/get-started/get-docker/)
+and [Docker Compose](https://docs.docker.com/compose/) on Ubuntu 24.04 (the latest LTS). Running on other setups is
+possible, but may not be fully supported.
 
-Docker files are already provided for all of the [Hemi software](https://hub.docker.com/u/hemilabs).
+Docker images for each Hemi Network component is published to [Docker Hub](https://hub.docker.com/u/hemilabs).
 
-## System requirements
+### System requirements
 
-### CPU/RAM
+#### CPU and RAM
 
-16 vCPUS and 64GB RAM.
+At least 16 CPU cores and 64GB RAM is required to run the stack.
 
-### DISK
+#### Disk
 
-Due to the need for a full bitcoin and ethereum node, a large amount of SSD or NVME disk space is needed.
+As running the full Hemi stack requires running full Bitcoin and Ethereum nodes, a large amount of high performance
+storage is required. **As of November 2024, testnet currently requires a minimum of 3TB of storage.**
 
-Currently, testnet needs a minimum of 3TB storage.
+#### ulimits
 
-### ulimits
+Certain components of the network require a very large number of open files. The startup will attempt to set
+the `ulimits` properly, however it will exit quickly with an error if your system does not allow high enough ulimits.
 
-A hemi node requires a very large number of open files.  The startup will attempt to set the `ulimits` properly, but will fail quickly with an error if your system does not allow high enough ulimits.
+## Setup
 
-### install pre-reqs
+### Check prerequisites
 
-docker
+Check that your system matches the [prerequisites](#prerequisites). Make sure that the following are installed and
+setup:
 
-docker compose
+- [Docker](https://docs.docker.com/get-started/get-docker/)
+- [Docker Compose](https://docs.docker.com/compose/)
 
-### Get the hemi software
+### Clone the heminetwork repository
+
+To get started, clone this repository:
 
 ```sh
-git clone git@github.com:hemilabs/heminetwork.git
+# Clone with HTTP
+git clone https://github.com/hemilabs/heminetwork.git
+cd heminetwork
+
+# OR Clone with SSH
+git clone ssh://git@github.com/hemilabs/heminetwork.git
 cd heminetwork
 ```
 
-## Required components
+### Required components
 
-The following daemons are needed as part of the hemi software.  They are all controlled by the docker compose file:
+The following daemons are needed as part of the Hemi stack. They are all run under Docker Compose:
 
 1. bitcoind
 2. electrs
@@ -49,42 +86,42 @@ The following daemons are needed as part of the hemi software.  They are all con
 6. op-node
 7. bssd
 8. bfgd
-9. postgres
+9. postgres (used by bfgd)
 
-### Important Note on Security
+### ⚠️ Important Note on Security
 
-Many of the credentials are hard-coded in this directory, as this assumption is
-that you're not exposing the associated services' ports to the outside world.
-This allows communication between the services locally.
-It is ok if you do expose the ports however; just ensure that you change the
-values of the credentials to something that is not shared with others.
-(ex. jwt token, cookie)
+**Many of the required credentials are hard-coded in this directory, as the assumption is you are not exposing the
+services' ports to the outside world.** This allows communication between the services locally.
 
-## Running the network
+**In setups where you plan to expose the ports, ensure that you change any credential values (e.g. JWT token, cookie).**
+
+## Running with Docker Compose
+
+Run the following to start each of the required daemons as Docker containers:
 
 ```sh
 docker compose -f localnode/docker-compose.yml up --build
 ```
 
-## Accessing the node
+## Accessing the nodes
 
-To access the node, you can use rpc or websockets at the following ports:
+To access the nodes, you can use JSON-RPC or WebSockets exposed on the following ports:
 
-* op-node
-  * rpc `8547`
-* op-geth
-  * rpc `18546`
-  * wsrpc `28546`
+| Name                  | Port    |
+|:----------------------|:--------|
+| op-node JSON-RPC      | `8547`  |
+| op-geth JSON-RPC      | `18546` |
+| op-geth WebSocket RPC | `28546` |
 
-## p2p
+## Peer-to-Peer (P2P)
 
-The current version gets data from the ethereum network.  For fastest access to block, direct p2p connection to the hemi network will be necessary.  This is coming soon.
+The current version gets data from the Ethereum network. For fastest access to blocks, direct P2P connections to the
+Hemi network will be necessary. This is coming soon.
 
 ## Mainnet
 
 Mainnet support coming soon.
 
-## Running without docker
+## Running without Docker
 
-Running without docker will be described at a later date.
-
+Steps to run the Hemi stack without Docker will be detailed at a later date.
