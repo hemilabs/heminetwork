@@ -147,9 +147,9 @@ go run ./integrationtest
 
 - Connect to a live [bfgd](#-running-bfgd) instance.
 
-## ▶️ Running a full node
+## ▶️ Running the Hemi stack
 
-To run a full (non-sequencing) node locally see [NODE_RUNNING](localnode/NODE_RUNNING.md).
+To run the full Hemi stack (non-sequencing), please see [NODE_RUNNING](localnode/NODE_RUNNING.md).
 
 ## ▶️ Running the localnet network
 
