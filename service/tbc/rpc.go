@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
@@ -159,6 +160,20 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.TxBroadcastRawRequest)
 				return s.handleTxBroadcastRawRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBlockInsertRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockInsertRequest)
+				return s.handleBlockInsertRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBlockInsertRawRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockInsertRawRequest)
+				return s.handleBlockInsertRawRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -513,6 +528,13 @@ func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBro
 	log.Tracef("handleTxBroadcastRequest")
 	defer log.Tracef("handleTxBroadcastRequest exit")
 
+	if req.Tx == nil {
+		err := errors.New("no tx provided")
+		return &tbcapi.TxBroadcastResponse{
+			Error: protocol.RequestError(err),
+		}, err
+	}
+
 	txid, err := s.TxBroadcast(ctx, req.Tx, req.Force)
 	if err != nil {
 		if errors.Is(err, ErrTxAlreadyBroadcast) || errors.Is(err, ErrTxBroadcastNoPeers) {
@@ -545,7 +567,50 @@ func (s *Server) handleTxBroadcastRawRequest(ctx context.Context, req *tbcapi.Tx
 		return &tbcapi.TxBroadcastResponse{Error: e.ProtocolError()}, e
 	}
 
-	return &tbcapi.TxBroadcastResponse{TxID: txid}, nil
+	return &tbcapi.TxBroadcastRawResponse{TxID: txid}, nil
+}
+
+func (s *Server) handleBlockInsertRequest(ctx context.Context, req *tbcapi.BlockInsertRequest) (any, error) {
+	log.Tracef("handleBlockInsertRequest")
+	defer log.Tracef("handleBlockInsertRequest exit")
+
+	if req.Block == nil {
+		err := errors.New("no block provided")
+		return &tbcapi.BlockInsertResponse{
+			Error: protocol.RequestError(err),
+		}, err
+	}
+
+	_, err := s.db.BlockInsert(ctx, btcutil.NewBlock(req.Block))
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
+	}
+
+	hash := req.Block.Header.BlockHash()
+	return &tbcapi.BlockInsertResponse{BlockHash: &hash}, nil
+}
+
+func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.BlockInsertRawRequest) (any, error) {
+	log.Tracef("handleBlockInsertRawRequest")
+	defer log.Tracef("handleBlockInsertRawRequest exit")
+
+	b := wire.NewMsgBlock(nil)
+	err := b.Deserialize(bytes.NewBuffer(req.Block))
+	if err != nil {
+		return &tbcapi.BlockInsertResponse{
+			Error: protocol.RequestError(err),
+		}, nil
+	}
+
+	_, err = s.db.BlockInsert(ctx, btcutil.NewBlock(b))
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
+	}
+
+	hash := b.Header.BlockHash()
+	return &tbcapi.BlockInsertRawResponse{BlockHash: &hash}, nil
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
