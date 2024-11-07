@@ -64,6 +64,12 @@ const (
 
 	CmdTxBroadcastRawRequest  = "tbcapi-tx-broadcast-raw-request"
 	CmdTxBroadcastRawResponse = "tbcapi-tx-broadcast-raw-response"
+
+	CmdBlockInsertRequest  = "tbcapi-block-insert-request"
+	CmdBlockInsertResponse = "tbcapi-block-insert-response"
+
+	CmdBlockInsertRawRequest  = "tbcapi-block-insert-raw-request"
+	CmdBlockInsertRawResponse = "tbcapi-block-insert-raw-response"
 )
 
 var (
@@ -259,6 +265,24 @@ type TxBroadcastRawResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
+type BlockInsertRequest struct {
+	Block *wire.MsgBlock `json:"block"`
+}
+
+type BlockInsertResponse struct {
+	BlockHash *chainhash.Hash `json:"block_hash"`
+	Error     *protocol.Error `json:"error,omitempty"`
+}
+
+type BlockInsertRawRequest struct {
+	Block api.ByteSlice `json:"block"`
+}
+
+type BlockInsertRawResponse struct {
+	BlockHash *chainhash.Hash `json:"block_hash"`
+	Error     *protocol.Error `json:"error,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                     reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                    reflect.TypeOf(PingResponse{}),
@@ -288,6 +312,10 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdTxBroadcastResponse:             reflect.TypeOf(TxBroadcastResponse{}),
 	CmdTxBroadcastRawRequest:           reflect.TypeOf(TxBroadcastRawRequest{}),
 	CmdTxBroadcastRawResponse:          reflect.TypeOf(TxBroadcastRawResponse{}),
+	CmdBlockInsertRequest:              reflect.TypeOf(BlockInsertRequest{}),
+	CmdBlockInsertResponse:             reflect.TypeOf(BlockInsertResponse{}),
+	CmdBlockInsertRawRequest:           reflect.TypeOf(BlockInsertRawRequest{}),
+	CmdBlockInsertRawResponse:          reflect.TypeOf(BlockInsertRawResponse{}),
 }
 
 type tbcAPI struct{}
