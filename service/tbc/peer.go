@@ -187,6 +187,47 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 	}
 }
 
+func (p *peer) connectNoHandshake(ctx context.Context) error {
+	log.Tracef("connect %v", p.address) // not locked but ok
+	defer log.Tracef("connect exit %v", p.address)
+
+	p.mtx.Lock()
+	if p.isDialing {
+		p.mtx.Unlock()
+		return fmt.Errorf("already dialing %v", p.address)
+	}
+	if p.conn != nil {
+		p.mtx.Unlock()
+		return fmt.Errorf("already open %v", p.address)
+	}
+	p.isDialing = true
+	p.mtx.Unlock()
+
+	d := net.Dialer{
+		Deadline: time.Now().Add(5 * time.Second),
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     7 * time.Second,
+			Interval: 7 * time.Second,
+			Count:    2,
+		},
+	}
+
+	log.Debugf("dialing %s", p.address)
+	conn, err := d.DialContext(ctx, "tcp", p.address)
+	if err != nil {
+		return fmt.Errorf("dial %v: %w", p.address, err)
+	}
+
+	p.mtx.Lock()
+	p.conn = conn
+	p.isDialing = false
+	p.connected = time.Now()
+	p.mtx.Unlock()
+
+	return nil
+}
+
 func (p *peer) connect(ctx context.Context) error {
 	log.Tracef("connect %v", p.address) // not locked but ok
 	defer log.Tracef("connect exit %v", p.address)
