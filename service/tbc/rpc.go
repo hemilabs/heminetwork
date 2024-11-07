@@ -528,6 +528,13 @@ func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBro
 	log.Tracef("handleTxBroadcastRequest")
 	defer log.Tracef("handleTxBroadcastRequest exit")
 
+	if req.Tx == nil {
+		err := errors.New("no tx provided")
+		return &tbcapi.TxBroadcastResponse{
+			Error: protocol.RequestError(err),
+		}, err
+	}
+
 	txid, err := s.TxBroadcast(ctx, req.Tx, req.Force)
 	if err != nil {
 		if errors.Is(err, ErrTxAlreadyBroadcast) || errors.Is(err, ErrTxBroadcastNoPeers) {
@@ -566,6 +573,13 @@ func (s *Server) handleTxBroadcastRawRequest(ctx context.Context, req *tbcapi.Tx
 func (s *Server) handleBlockInsertRequest(ctx context.Context, req *tbcapi.BlockInsertRequest) (any, error) {
 	log.Tracef("handleBlockInsertRequest")
 	defer log.Tracef("handleBlockInsertRequest exit")
+
+	if req.Block == nil {
+		err := errors.New("no block provided")
+		return &tbcapi.BlockInsertResponse{
+			Error: protocol.RequestError(err),
+		}, err
+	}
 
 	_, err := s.db.BlockInsert(ctx, btcutil.NewBlock(req.Block))
 	if err != nil {
