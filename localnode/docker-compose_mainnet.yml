@@ -2,7 +2,7 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-name: "Hemi Network Stack - Testnet"
+name: "Hemi Network Stack"
 
 services:
   # Bitcoin Finality Governor
@@ -16,7 +16,7 @@ services:
     environment:
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       ### XXXX Make this variable and set to recent block
-      BFG_BTC_START_HEIGHT: "3195980"
+      BFG_BTC_START_HEIGHT: "869309"
       BFG_EXBTC_ADDRESS: "electrs:50001"
       BFG_LOG_LEVEL: "INFO"
       BFG_PUBLIC_ADDRESS: ":8383"
@@ -58,17 +58,16 @@ services:
     volumes:
       - bitcoin_data:/bitcoin/.bitcoin
     ports:
-      - '18443:18443'
-      - '18444:18444'
+      - '8443:8443'
+      - '8444:8444'
     networks:
       - "localnode"
     command:
       - "bitcoind"
-      - "-testnet=1"
       - "-rpcuser=user"
       - "-rpcpassword=password"
       - "-rpcallowip=0.0.0.0/0"
-      - "-rpcbind=0.0.0.0:18443"
+      - "-rpcbind=0.0.0.0:8443"
       - "-txindex=1"
       - "-rpcworkqueue=400"
 
@@ -106,9 +105,7 @@ services:
       - "--electrum-rpc-addr"
       - "0.0.0.0:50001"
       - "--daemon-rpc-addr"
-      - "bitcoind:18443"
-      - "--network"
-      - "testnet"
+      - "bitcoind:8443"
       # NOTE: If you expose electrs ports, you may want to ensure that this is changed!
       - "--cookie"
       - "user:password"
@@ -137,7 +134,6 @@ services:
     networks:
       - "localnode"
     command:
-      - "--sepolia"
       - "--http"
       - "--http.port=8545"
       - "--http.addr=0.0.0.0"
@@ -163,13 +159,13 @@ services:
       op-geth-l2-init-tbc:
         condition: "service_completed_successfully"
     volumes:
-      - ./testnet-genesis.json:/tmp/testnet-genesis.json
+      - ./mainnet-genesis.json:/tmp/mainnet-genesis.json
       # change this token value if you expose this service's ports for
       # connection from other machines
       - ./jwt.txt:/tmp/jwt/jwt.hex:ro
       - ./entrypointl2.sh:/tmp/entrypointl2.sh
       - op-geth_data:/tmp/datadir
-      - ./rollup.json:/tmp/rollup.json
+      - ./mainnet-rollup.json:/tmp/rollup.json
       - ./l2-config.toml:/tmp/l2-config.toml
       - tbc_data:/tbcdata
     environment:
@@ -224,7 +220,7 @@ services:
       # connection from other machines
       - ./jwt.txt:/tmp/jwt/jwt.txt
       - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
-      - ./rollup.json:/tmp/rollup.json
+      - ./mainnet-rollup.json:/tmp/rollup.json
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     ports:
@@ -270,10 +266,9 @@ services:
       - "localnode"
     command:
       - "--execution-endpoint=http://geth-l1:8551"
-      - "--sepolia"
       - "--jwt-secret=/tmp/jwt/jwt.hex"
-      - "--checkpoint-sync-url=https://sepolia.beaconstate.info"
-      - "--genesis-beacon-api-url=https://sepolia.beaconstate.info"
+      - "--checkpoint-sync-url=https://beaconstate.info"
+      - "--genesis-beacon-api-url=https://beaconstate.info"
       - "--accept-terms-of-use"
       - "--datadir=/data/prysm"
       - "--rpc-host=0.0.0.0"
