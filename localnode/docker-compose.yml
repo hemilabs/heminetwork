@@ -1,0 +1,294 @@
+# Copyright (c) 2024 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+name: "Hemi Network Stack"
+
+services:
+  # Bitcoin Finality Governor
+  bfgd:
+    build:
+      dockerfile: "./docker/bfgd/Dockerfile"
+      context: "./.."
+    depends_on:
+      - "bfgd-postgres"
+      - "electrs"
+    environment:
+      BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
+      ### XXXX Make this variable and set to recent block
+      BFG_BTC_START_HEIGHT: "3195980"
+      BFG_EXBTC_ADDRESS: "electrs:50001"
+      BFG_LOG_LEVEL: "INFO"
+      BFG_PUBLIC_ADDRESS: ":8383"
+      BFG_PRIVATE_ADDRESS: ":8080"
+    ports:
+      ### CHANGE HOST PORTS
+      - '8082:8080'
+      - '8385:8383'
+    networks:
+      - "localnode"
+    deploy:
+      restart_policy:
+        condition: "any"
+
+  # Bitcoin Finality Governor PostgreSQL
+  bfgd-postgres:
+    build:
+      dockerfile: "./localnode/postgres.Dockerfile"
+      context: "./.."
+    volumes:
+      - psql_data:/var
+    environment:
+      POSTGRES_DB: "bfg"
+      POSTGRES_HOST_AUTH_METHOD: "trust"
+    ports:
+      - '5432:5432'
+    networks:
+      - "localnode"
+    command:
+      - "postgres"
+      # lower random_page_cost (opposed to default 4.0) to cause planner
+      # to choose index scans vs sequential scans when at fewer rows in a table
+      - "-c"
+      - "random_page_cost=1.0"
+
+  # Bitcoind Node
+  bitcoind:
+    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
+    volumes:
+      - bitcoin_data:/bitcoin/.bitcoin
+    ports:
+      - '18443:18443'
+      - '18444:18444'
+    networks:
+      - "localnode"
+    command:
+      - "bitcoind"
+      - "-testnet=1"
+      - "-rpcuser=user"
+      - "-rpcpassword=password"
+      - "-rpcallowip=0.0.0.0/0"
+      - "-rpcbind=0.0.0.0:18443"
+      - "-txindex=1"
+      - "-rpcworkqueue=400"
+
+  # Bitcoin Secure Sequencer
+  bssd:
+    build:
+      dockerfile: "./docker/bssd/Dockerfile"
+      context: "./.."
+    depends_on:
+      - "bfgd"
+    environment:
+      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
+      BSS_LOG_LEVEL: "INFO"
+      BSS_ADDRESS: ":8081"
+    ports:
+      - '8081:8081'
+    networks:
+      - "localnode"
+
+  # Electrs (Bitcoin indexer, used by BFG)
+  electrs:
+    image: "blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8"
+    depends_on:
+      - "bitcoind"
+    volumes:
+      - ./cookie:/tmp/.cookie
+      - electrs_data:/data/electrs
+    environment:
+      RUST_LOG: debug
+      RUST_BACKTRACE: "full"
+    networks:
+      - "localnode"
+    command:
+      - "electrs_bitcoin/bin/electrs"
+      - "--electrum-rpc-addr"
+      - "0.0.0.0:50001"
+      - "--daemon-rpc-addr"
+      - "bitcoind:18443"
+      - "--network"
+      - "testnet"
+      # NOTE: If you expose electrs ports, you may want to ensure that this is changed!
+      - "--cookie"
+      - "user:password"
+      - "-vvv"
+      - "--timestamp"
+      - "--utxos-limit"
+      - "50000"
+      - "--electrum-txs-limit"
+      - "50000"
+      - "--jsonrpc-import"
+      - "--db-dir=/data/electrs/blockstream"
+    deploy:
+      restart_policy:
+        condition: "on-failure"
+
+  # Ethereum L1 node
+  geth-l1:
+    image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
+    volumes:
+      - geth_data:/tmp/geth
+      # change this token value if you expose this service's ports for
+      # connection from other machines
+      - ./jwt.txt:/tmp/jwt/jwt.hex
+    ports:
+      - '8545:8545'
+    networks:
+      - "localnode"
+    command:
+      - "--sepolia"
+      - "--http"
+      - "--http.port=8545"
+      - "--http.addr=0.0.0.0"
+      - "--http.api=eth,net,engine,admin"
+      - "--authrpc.vhosts=*"
+      - "--authrpc.addr=0.0.0.0"
+      - "--authrpc.jwtsecret=/tmp/jwt/jwt.hex"
+      - "--http.vhosts"
+      - "*"
+      - "--datadir"
+      - "/tmp/geth"
+      - "--gpo.percentile=0"
+    working_dir: "/tmp/geth"
+
+  # Hemi L2 node
+  op-geth-l2:
+    image: "ghcr.io/hemilabs/op-geth@sha256:43860fcb691c85e344bd17a660a19e254924953b2ccebe03f2d87d425eeaecbb" # 337407d
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+      op-geth-l2-init:
+        condition: "service_completed_successfully"
+      op-geth-l2-init-tbc:
+        condition: "service_completed_successfully"
+    volumes:
+      - ./testnet-genesis.json:/tmp/testnet-genesis.json
+      # change this token value if you expose this service's ports for
+      # connection from other machines
+      - ./jwt.txt:/tmp/jwt/jwt.hex:ro
+      - ./entrypointl2.sh:/tmp/entrypointl2.sh
+      - op-geth_data:/tmp/datadir
+      - ./rollup.json:/tmp/rollup.json
+      - ./l2-config.toml:/tmp/l2-config.toml
+      - tbc_data:/tbcdata
+    environment:
+      OP_GETH_L1_RPC: "http://geth-l1:8545"
+    ports:
+      - '18546:18546'
+      - '28546:28546'
+    networks:
+      - "localnode"
+    entrypoint:
+      - "sh"
+      - "/tmp/entrypointl2.sh"
+    working_dir: "/tmp"
+    healthcheck:
+      test: [ "CMD-SHELL", "ls /tmp/rollup.json" ]
+      timeout: "60s"
+    ulimits:
+      memlock: -1
+
+  # Init container for Hemi L2 node
+  op-geth-l2-init:
+    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    volumes:
+      - op-geth_data:/tmp/datadir
+    command:
+      - "chown"
+      - "-R"
+      - "65532" # geth user
+      - "/tmp/datadir"
+
+  # Init TBC container for Hemi L2 node
+  op-geth-l2-init-tbc:
+    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    volumes:
+      - tbc_data:/tbcdata
+    command:
+      - "chown"
+      - "-R"
+      - "65532" # geth user
+      - "/tbcdata"
+
+  # Hemi op-node
+  op-node:
+    image: "ghcr.io/hemilabs/op-node@sha256:8a190294b5ee6acc200e9cdfbef95143e604be2ba37b60e42e419118edc1f376" # 6b46f50
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+      op-geth-l2:
+        condition: "service_healthy"
+    volumes:
+      # change this token value if you expose this service's ports for
+      # connection from other machines
+      - ./jwt.txt:/tmp/jwt/jwt.txt
+      - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
+      - ./rollup.json:/tmp/rollup.json
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+    ports:
+      - '8547:8547'
+    networks:
+      - "localnode"
+    command:
+      - "op-node"
+      - "--l1=http://geth-l1:8545"
+      - "--l1.rpckind=any"
+      - "--l1.beacon=http://prysm:3500"
+      - "--l2=ws://op-geth-l2:8551"
+      - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
+      - "--sequencer.enabled=false"
+      - "--rollup.config=/tmp/rollup.json"
+      - "--override.ecotone=1715865630"
+      - "--override.canyon=1715865630"
+      - "--override.delta=1715865630"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--p2p.static=/ip4/10.8.112.38/tcp/9003/p2p/16Uiu2HAkuSSGeLtxjZeb7CwCaS\
+        oThqizmjNm47j1vMUWAnchLnEH,/ip4/10.8.112.39/tcp/9003/p2p/16Uiu2HAmKzout\
+        3yxku6An7gAbhbNzp2LJ7Fr3k1NheEKyNxxvEgA,/ip4/10.8.112.40/tcp/9003/p2p/1\
+        6Uiu2HAmMCAptRoWXvC1EvrjFVNuWeN8h6PMGacLtG2U7sWmNTsH"
+      - "--p2p.no-discovery"
+      - "--log.level=trace"
+      - "--syncmode=execution-layer"
+    deploy:
+      restart_policy:
+        condition: "any"
+
+  # Prysm
+  prysm:
+    image: "gcr.io/prysmaticlabs/prysm/beacon-chain@sha256:ea7d64346cd51cb0a6979779bdfd284a13aedb5642a795637935daacdfe1675d" # stable
+    volumes:
+      - prysm_data:/data
+      # change this token value if you expose this service's ports for
+      # connection from other machines
+      - ./jwt.txt:/tmp/jwt/jwt.hex:ro
+    ports:
+      - '4000:4000'
+    networks:
+      - "localnode"
+    command:
+      - "--execution-endpoint=http://geth-l1:8551"
+      - "--sepolia"
+      - "--jwt-secret=/tmp/jwt/jwt.hex"
+      - "--checkpoint-sync-url=https://sepolia.beaconstate.info"
+      - "--genesis-beacon-api-url=https://sepolia.beaconstate.info"
+      - "--accept-terms-of-use"
+      - "--datadir=/data/prysm"
+      - "--rpc-host=0.0.0.0"
+      - "--enable-debug-rpc-endpoints"
+      - "--grpc-gateway-host=0.0.0.0"
+      - "--enable-experimental-backfill"
+
+networks:
+  localnode: {}
+
+volumes:
+  bitcoin_data: {}
+  geth_data: {}
+  prysm_data: {}
+  psql_data: {}
+  op-geth_data: {}
+  electrs_data: {}
+  tbc_data: {}
