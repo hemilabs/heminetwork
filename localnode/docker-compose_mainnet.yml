@@ -2,7 +2,7 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-name: "Hemi Network Stack"
+name: "hemi"
 
 services:
   # Bitcoin Finality Governor
@@ -164,10 +164,10 @@ services:
       # change this token value if you expose this service's ports for
       # connection from other machines
       - ./jwt.txt:/tmp/jwt/jwt.hex:ro
-      - ./entrypointl2.sh:/tmp/entrypointl2.sh
+      - ./mainnet-entrypointl2.sh:/tmp/entrypointl2.sh
       - op-geth_data:/tmp/datadir
       - ./mainnet-rollup.json:/tmp/rollup.json
-      - ./l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
+      - ./mainnet-l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
       - tbc_data:/tbcdata
     environment:
       OP_GETH_L1_RPC: "http://geth-l1:8545"

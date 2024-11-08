@@ -5,7 +5,7 @@
 
 set -xe
 
-geth init --datadir /tmp/datadir/geth /tmp/testnet-genesis.json
+geth init --datadir /tmp/datadir/geth /tmp/genesis.json
 
 geth \
 	--config=/tmp/l2-config.toml \
@@ -23,8 +23,8 @@ geth \
 	--ws.api=eth,txpool,net \
 	--syncmode=snap \
 	--gcmode=archive \
-	--maxpeers=2 \
-	--networkid=743111 \
+	--maxpeers=100 \
+	--networkid=43111 \
 	--authrpc.vhosts=* \
 	--authrpc.addr=0.0.0.0 \
 	--authrpc.port=8551 \
