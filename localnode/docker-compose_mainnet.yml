@@ -273,6 +273,7 @@ services:
       - "--enable-debug-rpc-endpoints"
       - "--grpc-gateway-host=0.0.0.0"
       - "--enable-experimental-backfill"
+      - "--mainnet"
 
 networks:
   localnode: {}
