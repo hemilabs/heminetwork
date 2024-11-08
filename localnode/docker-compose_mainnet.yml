@@ -242,7 +242,7 @@ services:
       - "--override.delta=1715865630"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
-      - "--p2p.static=/ip4/34.13.162.152/tcp/9003/p2p/16Uiu2HAm1v7Na5SB9MfmCeoEnYcPtunVAWSKJT4U5rJCJNzj7r4j"
+      - "--p2p.static=/ip4/34.13.162.152/tcp/9003/p2p/16Uiu2HAmTRMUTLkvXhtqRYJv7nzxv9xGJpo2sMoEURYgJ1XxWzJt"
       - "--p2p.no-discovery"
       - "--log.level=trace"
       - "--syncmode=execution-layer"
