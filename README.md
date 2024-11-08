@@ -176,7 +176,7 @@ To run the full Hemi stack (non-sequencing), please see [NODE_RUNNING](localnode
    This initial build may take some time, but subsequent builds should benefit from caching.
 
 > [!NOTE]
-> During rebuilding, `popmd`, `bssd`, and `bfgd` may force a rebuild due to the `COPY` command, which can break the 
+> During rebuilding, `popmd`, `bssd`, and `bfgd` may force a rebuild due to the `COPY` command, which can break the
 > cache. If you need to deliberately break the cache for the op-stack, use the following arguments:
 
    - For op-geth + optimism (op-node):
