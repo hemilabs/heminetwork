@@ -31,7 +31,7 @@ fi
  --syncmode=full  \
  --gcmode=archive  \
  --nodiscover  \
- --maxpeers=100 \
+ --maxpeers=0 \
  --networkid=901 \
  --authrpc.vhosts="*"  \
  --rpc.allow-unprotected-txs \
