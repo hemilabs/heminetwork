@@ -146,6 +146,7 @@ services:
       - "--datadir"
       - "/tmp/geth"
       - "--gpo.percentile=0"
+      - "--mainnet"
     working_dir: "/tmp/geth"
 
   # Hemi L2 node
