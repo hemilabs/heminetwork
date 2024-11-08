@@ -120,7 +120,16 @@ Hemi network will be necessary. This is coming soon.
 
 ## Mainnet
 
-Mainnet support coming soon.
+To run a mainnet node, you must obtain a rollup config and genesis block file from Hemi Labs.  Place those files in:
+```sh
+localnode/mainnet-genesis.json
+localnode/mainnet-rollup.json
+```
+
+Then run the file:
+```sh
+docker compose -f localnode/docker-compose_mainnet.yml up --build
+```
 
 ## Running without Docker
 
