@@ -5,7 +5,7 @@
 
 set -xe
 
-geth init --datadir /tmp/datadir/geth /tmp/testnet-genesis.json
+geth init --datadir /tmp/datadir/geth /tmp/genesis.json
 
 geth \
 	--config=/tmp/l2-config.toml \
