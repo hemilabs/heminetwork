@@ -32,8 +32,8 @@ geth \
 	--rollup.disabletxpoolgossip=false \
 	--datadir=/tmp/datadir/geth \
 	--nodiscover \
-	--override.ecotone=1715865630 \
-	--override.canyon=1715865630 \
-	--override.cancun=1715865630 \
+	--override.ecotone=1725868497 \
+	--override.canyon=1725868497 \
+	--override.cancun=1725868497 \
 	--tbc.initheight=0 \
 	--tbc.leveldbhome=/tbcdata

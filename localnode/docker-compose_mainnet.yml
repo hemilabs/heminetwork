@@ -128,7 +128,7 @@ services:
       - geth_data:/tmp/geth
       # change this token value if you expose this service's ports for
       # connection from other machines
-      - ./jwt.txt:/tmp/jwt/jwt.hex
+      - ./jwt.hex:/tmp/jwt/jwt.hex
     ports:
       - '8545:8545'
     networks:
@@ -163,7 +163,7 @@ services:
       - ./mainnet-genesis.json:/tmp/genesis.json
       # change this token value if you expose this service's ports for
       # connection from other machines
-      - ./jwt.txt:/tmp/jwt/jwt.hex:ro
+      - ./jwt.hex:/tmp/jwt/jwt.hex:ro
       - ./mainnet-entrypointl2.sh:/tmp/entrypointl2.sh
       - op-geth_data:/tmp/datadir
       - ./mainnet-rollup.json:/tmp/rollup.json
@@ -219,7 +219,7 @@ services:
     volumes:
       # change this token value if you expose this service's ports for
       # connection from other machines
-      - ./jwt.txt:/tmp/jwt/jwt.txt
+      - ./jwt.hex:/tmp/jwt/jwt.hex
       - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
       - ./mainnet-rollup.json:/tmp/rollup.json
     environment:
@@ -257,7 +257,7 @@ services:
       - prysm_data:/data
       # change this token value if you expose this service's ports for
       # connection from other machines
-      - ./jwt.txt:/tmp/jwt/jwt.hex:ro
+      - ./jwt.hex:/tmp/jwt/jwt.hex:ro
     ports:
       - '4000:4000'
     networks:
