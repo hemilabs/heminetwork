@@ -166,7 +166,7 @@ services:
       - ./entrypointl2.sh:/tmp/entrypointl2.sh
       - op-geth_data:/tmp/datadir
       - ./mainnet-rollup.json:/tmp/rollup.json
-      - ./l2-config.toml:/tmp/l2-config.toml
+      - ./l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
       - tbc_data:/tbcdata
     environment:
       OP_GETH_L1_RPC: "http://geth-l1:8545"
@@ -241,10 +241,7 @@ services:
       - "--override.delta=1715865630"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
-      - "--p2p.static=/ip4/10.8.112.38/tcp/9003/p2p/16Uiu2HAkuSSGeLtxjZeb7CwCaS\
-        oThqizmjNm47j1vMUWAnchLnEH,/ip4/10.8.112.39/tcp/9003/p2p/16Uiu2HAmKzout\
-        3yxku6An7gAbhbNzp2LJ7Fr3k1NheEKyNxxvEgA,/ip4/10.8.112.40/tcp/9003/p2p/1\
-        6Uiu2HAmMCAptRoWXvC1EvrjFVNuWeN8h6PMGacLtG2U7sWmNTsH"
+      - "--p2p.static=/ip4/34.13.162.152/tcp/9003/p2p/16Uiu2HAm1v7Na5SB9MfmCeoEnYcPtunVAWSKJT4U5rJCJNzj7r4j"
       - "--p2p.no-discovery"
       - "--log.level=trace"
       - "--syncmode=execution-layer"
