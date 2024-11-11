@@ -23,7 +23,6 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/phayes/freeport"
@@ -689,21 +688,8 @@ func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container 
 			}},
 		},
 		Name: name,
-		HostConfigModifier: func(hostConfig *container.HostConfig) {
-			hostConfig.PortBindings = nat.PortMap{
-				"18443/tcp": []nat.PortBinding{
-					{
-						HostPort: "18443",
-					},
-				},
-				"18444/tcp": []nat.PortBinding{
-					{
-						HostPort: "18444",
-					},
-				},
-			}
-		},
 	}
+
 	bitcoindContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: req,
 		Started:          true,
@@ -828,7 +814,10 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 	cfg.LevelDBHome = home
 	cfg.Network = networkLocalnet
 	cfg.ListenAddress = tcbListenAddress
-	cfg.Seeds = localnetSeeds
+	cfg.Seeds = []string{
+		fmt.Sprintf("127.0.0.1:%s", mappedPeerPort.Port()),
+	}
+
 	tbcServer, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -1040,5 +1029,10 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 		t.Fatal(err)
 	}
 
-	return bitcoindContainer, nat.Port("18444")
+	mappedPeerPort, err := bitcoindContainer.MappedPort(ctx, "18444")
+	if err != nil {
+		t.Errorf("error getting mapped port %v", err)
+	}
+
+	return bitcoindContainer, mappedPeerPort
 }

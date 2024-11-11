@@ -61,10 +61,6 @@ const (
 var (
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
-	localnetSeeds = []string{
-		"127.0.0.1:18444",
-	}
-
 	ErrTxAlreadyBroadcast = errors.New("tx already broadcast")
 	ErrTxBroadcastNoPeers = errors.New("can't broadcast tx, no peers")
 )
