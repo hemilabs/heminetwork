@@ -2830,8 +2830,13 @@ func TestGetFinalitiesByL2KeystoneBFGWithPagination(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if v.Header.Command != bfgapi.CmdBTCFinalityByKeystonesResponse {
-			t.Fatalf("received unexpected command: %s", v.Header.Command)
+		// filter out notifications
+		for v.Header.Command != bfgapi.CmdBTCFinalityByKeystonesResponse {
+			t.Logf("received unexpected command: %s", v.Header.Command)
+			err = wsjson.Read(ctx, c, &v)
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		finalityResponse := bfgapi.BTCFinalityByRecentKeystonesResponse{}
