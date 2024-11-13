@@ -28,6 +28,7 @@ import (
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/service/tbc/peer"
 )
 
 type block struct {
@@ -84,7 +85,7 @@ type btcNode struct {
 	t    *testing.T // for logging
 	le   bool       // log enable
 	port string
-	p    *peer
+	p    *peer.Peer
 
 	mtx            sync.RWMutex
 	chain          map[string]*block
@@ -384,19 +385,17 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 	b.t.Logf("handleRPC %v", conn.RemoteAddr())
 	defer b.t.Logf("handleRPC exit %v", conn.RemoteAddr())
 
-	p := &peer{
-		conn:            conn,
-		connected:       time.Now(),
-		address:         conn.RemoteAddr().String(),
-		protocolVersion: wire.AddrV2Version,
-		network:         wire.TestNet, // regtest == testnet
+	p, err := peer.NewFromConn(conn, wire.TestNet, wire.AddrV2Version, 0xbeef)
+	if err != nil {
+		b.logf("new from connection %v: %v", conn.RemoteAddr(), err)
+		return err
 	}
 
 	// Send version
 	mv := &wire.MsgVersion{
 		ProtocolVersion: int32(wire.AddrV2Version),
 	}
-	if err := p.write(time.Second, mv); err != nil {
+	if err := p.Write(time.Second, mv); err != nil {
 		b.logf("write version %v: %v", p, err)
 		return err
 	}
@@ -412,7 +411,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 		default:
 		}
 
-		msg, _, err := p.read(5 * time.Second)
+		msg, _, err := p.Read(5 * time.Second)
 		if err != nil {
 			if errors.Is(err, wire.ErrUnknownMessage) {
 				// ignore unknown
@@ -428,12 +427,12 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 	}
 }
 
-func (b *btcNode) handleMsg(ctx context.Context, p *peer, msg wire.Message) error {
+func (b *btcNode) handleMsg(ctx context.Context, p *peer.Peer, msg wire.Message) error {
 	// b.t.Logf("%v", spew.Sdump(msg))
 	switch m := msg.(type) {
 	case *wire.MsgVersion:
 		mva := &wire.MsgVerAck{}
-		if err := p.write(time.Second, mva); err != nil {
+		if err := p.Write(time.Second, mva); err != nil {
 			return fmt.Errorf("write version ack: %w", err)
 		}
 
@@ -444,7 +443,7 @@ func (b *btcNode) handleMsg(ctx context.Context, p *peer, msg wire.Message) erro
 			return fmt.Errorf("handle get headers: %w", err)
 		}
 		// b.logf("%v", spew.Sdump(headers))
-		if err = p.write(time.Second, headers); err != nil {
+		if err = p.Write(time.Second, headers); err != nil {
 			return fmt.Errorf("write headers: %w", err)
 		}
 
@@ -455,7 +454,7 @@ func (b *btcNode) handleMsg(ctx context.Context, p *peer, msg wire.Message) erro
 			return fmt.Errorf("handle get data: %w", err)
 		}
 		// b.logf("%v", spew.Sdump(data))
-		if err = p.write(time.Second, data); err != nil {
+		if err = p.Write(time.Second, data); err != nil {
 			return fmt.Errorf("write data: %w", err)
 		}
 
@@ -469,7 +468,7 @@ func (b *btcNode) handleMsg(ctx context.Context, p *peer, msg wire.Message) erro
 func (b *btcNode) SendBlockheader(ctx context.Context, bh wire.BlockHeader) error {
 	msg := wire.NewMsgHeaders()
 	msg.AddBlockHeader(&bh)
-	return b.p.write(defaultCmdTimeout, msg)
+	return b.p.Write(defaultCmdTimeout, msg)
 }
 
 func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
@@ -755,7 +754,7 @@ func (b *btcNode) Stop() error {
 		return nil
 	}
 
-	if err := p.conn.Close(); err != nil {
+	if err := p.Close(); err != nil {
 		return err
 	}
 
