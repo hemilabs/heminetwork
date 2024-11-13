@@ -104,7 +104,11 @@ func (p *Peer) Write(timeout time.Duration, msg wire.Message) error {
 		return fmt.Errorf("write: no conn")
 	}
 
-	conn.SetWriteDeadline(time.Now().Add(timeout))
+	if timeout == 0 {
+		conn.SetWriteDeadline(time.Time{})
+	} else {
+		conn.SetWriteDeadline(time.Now().Add(timeout))
+	}
 	// XXX contexts would be nice
 	_, err := wire.WriteMessageWithEncodingN(conn, msg, p.protocolVersion,
 		p.network, wire.LatestEncoding)
@@ -123,7 +127,7 @@ func (p *Peer) Read(timeout time.Duration) (wire.Message, []byte, error) {
 	}
 
 	if timeout == 0 {
-		conn.SetReadDeadline(time.Time{}) // never timeout on reads
+		conn.SetReadDeadline(time.Time{})
 	} else {
 		conn.SetReadDeadline(time.Now().Add(timeout))
 	}

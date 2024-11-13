@@ -27,6 +27,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
@@ -42,6 +43,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/tbc"
+	"github.com/hemilabs/heminetwork/service/tbc/peer"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -628,6 +630,179 @@ func tbcdb() error {
 	return nil
 }
 
+func p2p() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	action, args, err := parseArgs(flag.Args()[1:])
+	if err != nil {
+		return err
+	}
+
+	loggo.ConfigureLoggers("TRACE")
+	network := wire.TestNet3
+	addr := "192.168.101.152:18333"
+	p, err := peer.New(network, 0xc0ffee, addr)
+	if err != nil {
+		return err
+	}
+	err = p.Connect(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		//err := p.Close()
+		//if err != nil {
+		//	fmt.Fprintf(os.Stderr, "close %v: %v\n", addr, err)
+		//}
+	}()
+	rv, err := p.RemoteVersion()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("connected: %v: version %v agent: %v\n",
+		addr, rv.ProtocolVersion, rv.UserAgent)
+
+	defaultCmdTimeout := 5 * time.Second
+
+	ivType := map[string]wire.InvType{
+		"ERROR":                      wire.InvTypeError,
+		"MSG_TX":                     wire.InvTypeTx,
+		"MSG_BLOCK":                  wire.InvTypeBlock,
+		"MSG_FILTERED_BLOCK":         wire.InvTypeFilteredBlock,
+		"MSG_WITNESS_BLOCK":          wire.InvTypeWitnessBlock,
+		"MSG_WITNESS_TX":             wire.InvTypeWitnessTx,
+		"MSG_FILTERED_WITNESS_BLOCK": wire.InvTypeFilteredWitnessBlock,
+	}
+
+	// commands
+	switch action {
+	case "getdata":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+		t, ok := ivType[args["invtype"]]
+		if !ok {
+			return fmt.Errorf("must provide invtype")
+		}
+
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		gd := wire.NewMsgGetData()
+		err = gd.AddInvVect(&wire.InvVect{
+			Type: t,
+			Hash: *ch,
+		})
+
+		err = p.Write(defaultCmdTimeout, gd)
+		if err != nil {
+			return fmt.Errorf("write inv: %w", err)
+		}
+
+	case "getheaders":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		gh := wire.NewMsgGetHeaders()
+		err = gh.AddBlockLocatorHash(ch)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		err = p.Write(defaultCmdTimeout, gh)
+		if err != nil {
+			return fmt.Errorf("write inv: %w", err)
+		}
+
+	// cooked
+	case "blockbyhash":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		// Assemble get data message
+		//getData := wire.NewMsgGetData()
+		//getData.InvList = append(getData.InvList,
+		//	&wire.InvVect{
+		//		Type: wire.InvTypeBlock,
+		//		Hash: *ch,
+		//	})
+		//gb := wire.NewMsgGetBlocks(ch)
+		//err = gb.AddBlockLocatorHash(ch)
+		//if err != nil {
+		//	return fmt.Errorf("add locator: %w", err)
+		//}
+		gd := wire.NewMsgGetData()
+		err = gd.AddInvVect(&wire.InvVect{
+			Type: wire.InvTypeBlock,
+			Hash: *ch,
+		})
+		if err != nil {
+			return fmt.Errorf("add locator: %w", err)
+		}
+		err = p.Write(defaultCmdTimeout, gd)
+		if err != nil {
+			return fmt.Errorf("write inv: %w", err)
+		}
+		//bh, height, err := s.BlockHeaderByHash(ctx, ch)
+		//if err != nil {
+		//	return fmt.Errorf("block header by hash: %w", err)
+		//}
+		//fmt.Printf("hash  : %v\n", bh)
+		//fmt.Printf("height: %v\n", height)
+
+	case "help", "h":
+		fmt.Println("p2p commands:")
+		fmt.Println("\tblockbyhash [hash]")
+
+	default:
+		return fmt.Errorf("invalid action: %v", action)
+	}
+
+	for {
+		msg, _, err := p.Read(defaultCmdTimeout)
+		if errors.Is(err, wire.ErrUnknownMessage) {
+			continue
+		} else if err != nil {
+			panic(err)
+		}
+
+		switch m := msg.(type) {
+		case *wire.MsgPing:
+			err := p.Write(defaultCmdTimeout, wire.NewMsgPong(m.Nonce))
+			if err != nil {
+				return err
+			}
+
+		case *wire.MsgFeeFilter:
+
+		case *wire.MsgInv:
+			if len(m.InvList) > 0 && m.InvList[0].Type == wire.InvTypeTx {
+				// ignore mempool gossip that's too loud
+				continue
+			}
+
+		default:
+			fmt.Printf("not handled: %T\n", msg)
+		}
+		spew.Dump(msg)
+	}
+}
+
 type bssClient struct {
 	wg     *sync.WaitGroup
 	bssURL string
@@ -817,6 +992,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
 	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
 	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
+	fmt.Fprintf(os.Stderr, "\tp2p p2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb datase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "Environment:\n")
 	config.Help(os.Stderr, cm)
@@ -886,6 +1062,8 @@ func _main() error {
 	case "help-verbose":
 		helpVerbose()
 		return nil
+	case "p2p":
+		return p2p()
 	case "tbcdb":
 		return tbcdb()
 	}
