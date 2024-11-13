@@ -244,7 +244,7 @@ func (s *Server) invInsert(h chainhash.Hash) bool {
 	return s.invInsertUnlocked(h)
 }
 
-func (s *Server) getHeadersByHashes(ctx context.Context, p *peer, hashes ...*chainhash.Hash) error {
+func (s *Server) getHeadersByHashes(ctx context.Context, p *Peer, hashes ...*chainhash.Hash) error {
 	log.Tracef("getHeadersByHashes %v %v", p, hashes)
 	defer log.Tracef("getHeadersByHashes exit %v %v", p, hashes)
 
@@ -264,7 +264,7 @@ func (s *Server) getHeadersByHashes(ctx context.Context, p *peer, hashes ...*cha
 	return nil
 }
 
-func (s *Server) getHeadersByHeights(ctx context.Context, p *peer, heights ...uint64) error {
+func (s *Server) getHeadersByHeights(ctx context.Context, p *Peer, heights ...uint64) error {
 	log.Tracef("getHeadersByHeights %v %v", p, heights)
 	defer log.Tracef("getHeadersByHeights exit %v %v", p, heights)
 
@@ -296,7 +296,7 @@ func (s *Server) pingExpired(ctx context.Context, key any, value any) {
 	log.Tracef("pingExpired")
 	defer log.Tracef("pingExpired exit")
 
-	p, ok := value.(*peer)
+	p, ok := value.(*Peer)
 	if !ok {
 		log.Errorf("invalid ping expired type: %T", value)
 		return
@@ -307,7 +307,7 @@ func (s *Server) pingExpired(ctx context.Context, key any, value any) {
 	}
 }
 
-func (s *Server) pingPeer(ctx context.Context, p *peer) {
+func (s *Server) pingPeer(ctx context.Context, p *Peer) {
 	log.Tracef("pingPeer %v", p)
 	defer log.Tracef("pingPeer %v exit", p)
 
@@ -329,7 +329,7 @@ func (s *Server) pingPeer(ctx context.Context, p *peer) {
 	s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
 }
 
-func (s *Server) mempoolPeer(ctx context.Context, p *peer) {
+func (s *Server) mempoolPeer(ctx context.Context, p *Peer) {
 	log.Tracef("mempoolPeer %v", p)
 	defer log.Tracef("mempoolPeer %v exit", p)
 
@@ -349,7 +349,7 @@ func (s *Server) mempoolPeer(ctx context.Context, p *peer) {
 	}
 }
 
-func (s *Server) headersPeer(ctx context.Context, p *peer) {
+func (s *Server) headersPeer(ctx context.Context, p *Peer) {
 	log.Tracef("headersPeer %v", p)
 	defer log.Tracef("headersPeer %v exit", p)
 
@@ -364,7 +364,7 @@ func (s *Server) headersPeer(ctx context.Context, p *peer) {
 	}
 }
 
-func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, raw []byte) error {
+func (s *Server) handleGeneric(ctx context.Context, p *Peer, msg wire.Message, raw []byte) error {
 	// Do accept addr and ping commands before we consider the peer up.
 	switch m := msg.(type) {
 	case *wire.MsgAddr:
@@ -425,7 +425,7 @@ func (s *Server) handleGeneric(ctx context.Context, p *peer, msg wire.Message, r
 	return nil
 }
 
-func (s *Server) handlePeer(ctx context.Context, p *peer) error {
+func (s *Server) handlePeer(ctx context.Context, p *Peer) error {
 	log.Tracef("handlePeer %v", p)
 
 	var readError error
@@ -436,7 +436,7 @@ func (s *Server) handlePeer(ctx context.Context, p *peer) error {
 		}
 		// kill pending blocks and pings
 		findPeer := func(value any) bool {
-			if pp, ok := value.(*peer); ok && pp.String() == p.String() {
+			if pp, ok := value.(*Peer); ok && pp.String() == p.String() {
 				return true
 			}
 			return false
@@ -659,7 +659,7 @@ func (s *Server) blksMissing(ctx context.Context) bool {
 	return len(bm) > 0
 }
 
-func (s *Server) handleAddr(_ context.Context, p *peer, msg *wire.MsgAddr) error {
+func (s *Server) handleAddr(_ context.Context, p *Peer, msg *wire.MsgAddr) error {
 	log.Tracef("handleAddr (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddr exit (%v)", p)
 
@@ -673,7 +673,7 @@ func (s *Server) handleAddr(_ context.Context, p *peer, msg *wire.MsgAddr) error
 	return nil
 }
 
-func (s *Server) handleAddrV2(_ context.Context, p *peer, msg *wire.MsgAddrV2) error {
+func (s *Server) handleAddrV2(_ context.Context, p *Peer, msg *wire.MsgAddrV2) error {
 	log.Tracef("handleAddrV2 (%v): %v", p, len(msg.AddrList))
 	defer log.Tracef("handleAddrV2 exit (%v)", p)
 
@@ -692,7 +692,7 @@ func (s *Server) handleAddrV2(_ context.Context, p *peer, msg *wire.MsgAddrV2) e
 	return nil
 }
 
-func (s *Server) handlePing(ctx context.Context, p *peer, msg *wire.MsgPing) error {
+func (s *Server) handlePing(ctx context.Context, p *Peer, msg *wire.MsgPing) error {
 	log.Tracef("handlePing %v", p.address)
 	defer log.Tracef("handlePing exit %v", p.address)
 
@@ -706,7 +706,7 @@ func (s *Server) handlePing(ctx context.Context, p *peer, msg *wire.MsgPing) err
 	return nil
 }
 
-func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) error {
+func (s *Server) handlePong(ctx context.Context, p *Peer, pong *wire.MsgPong) error {
 	log.Tracef("handlePong %v", p.address)
 	defer log.Tracef("handlePong exit %v", p.address)
 
@@ -718,7 +718,7 @@ func (s *Server) handlePong(ctx context.Context, p *peer, pong *wire.MsgPong) er
 	return nil
 }
 
-func (s *Server) downloadBlock(ctx context.Context, p *peer, ch *chainhash.Hash) error {
+func (s *Server) downloadBlock(ctx context.Context, p *Peer, ch *chainhash.Hash) error {
 	log.Tracef("downloadBlock")
 	defer log.Tracef("downloadBlock exit")
 
@@ -760,7 +760,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	log.Tracef("handleBlockExpired")
 	defer log.Tracef("handleBlockExpired exit")
 
-	p, ok := value.(*peer)
+	p, ok := value.(*Peer)
 	if !ok {
 		// this really should not happen
 		return fmt.Errorf("invalid peer type: %T", value)
@@ -809,14 +809,14 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	err := s.handleBlockExpired(ctx, key, value)
 	if err != nil {
 		// Close peer.
-		if p, ok := value.(*peer); ok {
+		if p, ok := value.(*Peer); ok {
 			p.close() // XXX kill peer
 			log.Errorf("block expired: %v %v", p, err)
 		}
 	}
 }
 
-func (s *Server) downloadMissingTx(ctx context.Context, p *peer) error {
+func (s *Server) downloadMissingTx(ctx context.Context, p *Peer) error {
 	log.Tracef("downloadMissingTx")
 	defer log.Tracef("downloadMissingTx exit")
 
@@ -836,7 +836,7 @@ func (s *Server) downloadMissingTx(ctx context.Context, p *peer) error {
 	return err
 }
 
-func (s *Server) handleTx(ctx context.Context, p *peer, msg *wire.MsgTx, raw []byte) error {
+func (s *Server) handleTx(ctx context.Context, p *Peer, msg *wire.MsgTx, raw []byte) error {
 	log.Tracef("handleTx")
 	defer log.Tracef("handleTx exit")
 
@@ -931,7 +931,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 					return
 				}
 
-				hp := func(ctx context.Context, p *peer) {
+				hp := func(ctx context.Context, p *Peer) {
 					if err = s.getHeadersByHashes(ctx, p, ib...); err != nil {
 						log.Errorf("missed block headers: %v %v",
 							p, err)
@@ -966,7 +966,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	}
 }
 
-func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeaders) error {
+func (s *Server) handleHeaders(ctx context.Context, p *Peer, msg *wire.MsgHeaders) error {
 	log.Tracef("handleHeaders (%v): %v %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
@@ -1113,7 +1113,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *peer, msg *wire.MsgHeader
 	return nil
 }
 
-func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, raw []byte) error {
+func (s *Server) handleBlock(ctx context.Context, p *Peer, msg *wire.MsgBlock, raw []byte) error {
 	log.Tracef("handleBlock (%v)", p)
 	defer log.Tracef("handleBlock exit (%v)", p)
 
@@ -1216,7 +1216,7 @@ func (s *Server) handleBlock(ctx context.Context, p *peer, msg *wire.MsgBlock, r
 	return nil
 }
 
-func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw []byte) error {
+func (s *Server) handleInv(ctx context.Context, p *Peer, msg *wire.MsgInv, raw []byte) error {
 	switch msg.InvList[0].Type {
 	case wire.InvTypeTx:
 	case wire.InvTypeBlock:
@@ -1268,7 +1268,7 @@ func (s *Server) handleInv(ctx context.Context, p *peer, msg *wire.MsgInv, raw [
 	return nil
 }
 
-func (s *Server) handleNotFound(ctx context.Context, p *peer, msg *wire.MsgNotFound, raw []byte) error {
+func (s *Server) handleNotFound(ctx context.Context, p *Peer, msg *wire.MsgNotFound, raw []byte) error {
 	// log.Infof("handleNotFound %v", spew.Sdump(msg))
 	// defer log.Infof("handleNotFound exit")
 
@@ -1278,7 +1278,7 @@ func (s *Server) handleNotFound(ctx context.Context, p *peer, msg *wire.MsgNotFo
 	return nil
 }
 
-func (s *Server) handleGetData(ctx context.Context, p *peer, msg *wire.MsgGetData, raw []byte) error {
+func (s *Server) handleGetData(ctx context.Context, p *Peer, msg *wire.MsgGetData, raw []byte) error {
 	log.Tracef("handleGetData %v", p)
 	defer log.Tracef("handleGetData %v exit", p)
 
@@ -1552,7 +1552,7 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	return nil, database.ErrNotFound
 }
 
-func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *peer) error {
+func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *Peer) error {
 	log.Tracef("TxBroadcastAllToPeer %v", p)
 	defer log.Tracef("TxBroadcastAllToPeer %v exit", p)
 
@@ -1602,7 +1602,7 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 		return nil, fmt.Errorf("invalid vector: %w", err)
 	}
 	var success atomic.Uint64
-	inv := func(ctx context.Context, p *peer) {
+	inv := func(ctx context.Context, p *Peer) {
 		log.Tracef("inv %v", p)
 		defer log.Tracef("inv %v exit", p)
 
@@ -1992,7 +1992,7 @@ func (s *Server) Run(pctx context.Context) error {
 				log.Errorf("random connect: %v", err)
 				return
 			}
-			go func(pp *peer) {
+			go func(pp *Peer) {
 				err := s.handlePeer(ctx, pp)
 				if err != nil {
 					log.Debugf("%v: %v", pp, err)

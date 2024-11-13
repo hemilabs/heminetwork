@@ -41,6 +41,7 @@ import (
 	ldb "github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/service/p2pproxy"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/version"
 )
@@ -628,6 +629,86 @@ func tbcdb() error {
 	return nil
 }
 
+func p2p() error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	action, args, err := parseArgs(flag.Args()[1:])
+	if err != nil {
+		return err
+	}
+
+	cfg := p2pproxy.NewDefaultConfig()
+	cfg.Network = "testnet3"
+	cfg.Address = "192.168.101.152:18333"
+	s, err := p2pproxy.NewServer(cfg)
+	if err != nil {
+		return fmt.Errorf("new server: %w", err)
+	}
+
+	var wg sync.WaitGroup
+	errC := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		wg.Done()
+		errC <- s.Run(ctx)
+	}()
+	time.Sleep(time.Second) // separate connect from Run
+
+	// commands
+	switch action {
+	case "blockbyhash":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+		mode := args["mode"]
+		switch mode {
+		case "spew", "":
+		case "json":
+		case "raw":
+		default:
+			return fmt.Errorf("invalid mode: %v", mode)
+		}
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		block, err := s.BlockByHash(ctx, ch)
+		if err != nil {
+			return fmt.Errorf("block header by hash: %w", err)
+		}
+		switch mode {
+		case "spew", "":
+			spew.Dump(block)
+		case "json":
+		case "raw":
+		}
+
+	case "help", "h":
+		fmt.Println("p2p commands:")
+		fmt.Println("\tblockbyhash [hash]")
+
+	default:
+		return fmt.Errorf("invalid action: %v", action)
+	}
+
+	select {
+	case <-time.After(5 * time.Second):
+		return errors.New("timeout")
+
+	case err := <-errC:
+		if err != nil {
+			return fmt.Errorf("run: %v", err)
+		}
+	}
+	cancel()
+
+	wg.Wait()
+
+	return nil
+}
+
 type bssClient struct {
 	wg     *sync.WaitGroup
 	bssURL string
@@ -817,6 +898,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
 	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
 	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
+	fmt.Fprintf(os.Stderr, "\tp2p bitcoin p2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb datase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "Environment:\n")
 	config.Help(os.Stderr, cm)
@@ -873,6 +955,7 @@ func _main() error {
 	}
 
 	cmd := flag.Arg(0) // command provided by user
+	log.Debugf("%v", cmd)
 
 	// Deal with non-generic commands
 	switch cmd {
@@ -888,6 +971,8 @@ func _main() error {
 		return nil
 	case "tbcdb":
 		return tbcdb()
+	case "p2p":
+		return p2p()
 	}
 
 	// Deal with generic commands

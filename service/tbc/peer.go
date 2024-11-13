@@ -34,7 +34,7 @@ func readTimeout(timeout time.Duration, conn net.Conn, pver uint32, btcnet wire.
 	return msg, err
 }
 
-type peer struct {
+type Peer struct {
 	mtx       sync.RWMutex
 	isDialing bool
 	conn      net.Conn
@@ -50,12 +50,12 @@ type peer struct {
 	addrV2        bool
 }
 
-func NewPeer(network wire.BitcoinNet, id int, address string) (*peer, error) {
+func NewPeer(network wire.BitcoinNet, id int, address string) (*Peer, error) {
 	_, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, fmt.Errorf("%v: %w", address, err)
 	}
-	return &peer{
+	return &Peer{
 		protocolVersion: wire.ProtocolVersion,
 		network:         network,
 		address:         address,
@@ -63,15 +63,15 @@ func NewPeer(network wire.BitcoinNet, id int, address string) (*peer, error) {
 	}, nil
 }
 
-func (p *peer) String() string {
+func (p *Peer) String() string {
 	return p.address
 }
 
-func (p *peer) Id() int {
+func (p *Peer) Id() int {
 	return p.id
 }
 
-func (p *peer) write(timeout time.Duration, msg wire.Message) error {
+func (p *Peer) write(timeout time.Duration, msg wire.Message) error {
 	p.mtx.Lock()
 	conn := p.conn
 	p.mtx.Unlock()
@@ -88,8 +88,11 @@ func (p *peer) write(timeout time.Duration, msg wire.Message) error {
 	}
 	return err
 }
+func (p *Peer) Write(timeout time.Duration, msg wire.Message) error {
+	return p.write(timeout, msg)
+}
 
-func (p *peer) read(timeout time.Duration) (wire.Message, []byte, error) {
+func (p *Peer) read(timeout time.Duration) (wire.Message, []byte, error) {
 	p.mtx.Lock()
 	conn := p.conn
 	p.mtx.Unlock()
@@ -111,7 +114,7 @@ func (p *peer) read(timeout time.Duration) (wire.Message, []byte, error) {
 	return msg, buf, err
 }
 
-func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
+func (p *Peer) handshake(ctx context.Context, conn net.Conn) error {
 	log.Tracef("handshake %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 	defer log.Tracef("handshake exit %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 
@@ -181,13 +184,18 @@ func (p *peer) handshake(ctx context.Context, conn net.Conn) error {
 			return nil
 		case *wire.MsgSendAddrV2:
 			p.addrV2 = true
+		case *wire.MsgWTxIdRelay:
 		default:
 			return fmt.Errorf("unexpected message type: %T", msg)
 		}
 	}
 }
 
-func (p *peer) connectNoHandshake(ctx context.Context) error {
+func (p *Peer) Read(timeout time.Duration) (wire.Message, []byte, error) {
+	return p.read(timeout)
+}
+
+func (p *Peer) connectNoHandshake(ctx context.Context) error {
 	log.Tracef("connect %v", p.address) // not locked but ok
 	defer log.Tracef("connect exit %v", p.address)
 
@@ -228,9 +236,9 @@ func (p *peer) connectNoHandshake(ctx context.Context) error {
 	return nil
 }
 
-func (p *peer) connect(ctx context.Context) error {
-	log.Tracef("connect %v", p.address) // not locked but ok
-	defer log.Tracef("connect exit %v", p.address)
+func (p *Peer) Connect(ctx context.Context) error {
+	log.Tracef("Connect %v", p.address) // not locked but ok
+	defer log.Tracef("Connect exit %v", p.address)
 
 	p.mtx.Lock()
 	if p.isDialing {
@@ -274,7 +282,7 @@ func (p *peer) connect(ctx context.Context) error {
 	return nil
 }
 
-func (p *peer) close() error {
+func (p *Peer) close() error {
 	log.Tracef("close")
 	defer log.Tracef("close exit")
 
@@ -289,7 +297,7 @@ func (p *peer) close() error {
 	return net.ErrClosed
 }
 
-func (p *peer) isConnected() bool {
+func (p *Peer) isConnected() bool {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	return !p.isDialing

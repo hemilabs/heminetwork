@@ -54,11 +54,11 @@ type PeerManager struct {
 	dnsSeeds []string // hard coded dns seeds
 	seeds    []string // seeds obtained from DNS
 
-	peers map[string]*peer // connected peers
+	peers map[string]*Peer // connected peers
 	good  map[string]struct{}
 	bad   map[string]struct{}
 
-	peersC chan *peer // blocking channel for RandomConnect
+	peersC chan *Peer // blocking channel for RandomConnect
 	slotsC chan int
 }
 
@@ -86,8 +86,8 @@ func NewPeerManager(net wire.BitcoinNet, seeds []string, want int) (*PeerManager
 		seeds:    seeds,
 		good:     make(map[string]struct{}, maxPeersGood),
 		bad:      make(map[string]struct{}, maxPeersBad),
-		peers:    make(map[string]*peer, want),
-		peersC:   make(chan *peer, 0),
+		peers:    make(map[string]*Peer, want),
+		peersC:   make(chan *Peer, 0),
 	}, nil
 }
 
@@ -250,7 +250,7 @@ func (pm *PeerManager) Bad(ctx context.Context, address string) error {
 }
 
 // Random returns a random connected peer.
-func (pm *PeerManager) Random() (*peer, error) {
+func (pm *PeerManager) Random() (*Peer, error) {
 	log.Tracef("Random")
 	defer log.Tracef("Random exit")
 
@@ -267,7 +267,7 @@ func (pm *PeerManager) Random() (*peer, error) {
 }
 
 // All runs a call back on all connected peers.
-func (pm *PeerManager) All(ctx context.Context, f func(ctx context.Context, p *peer)) {
+func (pm *PeerManager) All(ctx context.Context, f func(ctx context.Context, p *Peer)) {
 	log.Tracef("All")
 	defer log.Tracef("All")
 
@@ -281,7 +281,7 @@ func (pm *PeerManager) All(ctx context.Context, f func(ctx context.Context, p *p
 	}
 }
 
-func (pm *PeerManager) AllBlock(ctx context.Context, f func(ctx context.Context, p *peer)) {
+func (pm *PeerManager) AllBlock(ctx context.Context, f func(ctx context.Context, p *Peer)) {
 	log.Tracef("AllBlock")
 	defer log.Tracef("AllBlock")
 
@@ -305,7 +305,7 @@ func (pm *PeerManager) AllBlock(ctx context.Context, f func(ctx context.Context,
 }
 
 // RandomConnect blocks until there is a peer ready to use.
-func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
+func (pm *PeerManager) RandomConnect(ctx context.Context) (*Peer, error) {
 	log.Tracef("RandomConnect")
 	defer log.Tracef("RandomConnect")
 
@@ -318,7 +318,7 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*peer, error) {
 	}
 }
 
-func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*peer, error) {
+func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*Peer, error) {
 	pm.mtx.Lock()
 	defer pm.mtx.Unlock()
 
@@ -354,11 +354,11 @@ func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*peer, error) 
 	return nil, ErrNoAddresses
 }
 
-func (pm *PeerManager) connect(ctx context.Context, p *peer) error {
+func (pm *PeerManager) connect(ctx context.Context, p *Peer) error {
 	log.Tracef("connect: %v %v", p.Id(), p)
 	defer log.Tracef("connect exit: %v %v", p.Id(), p)
 
-	if err := p.connect(ctx); err != nil {
+	if err := p.Connect(ctx); err != nil {
 		return fmt.Errorf("new peer: %v", err)
 	}
 
@@ -378,7 +378,7 @@ func (pm *PeerManager) connect(ctx context.Context, p *peer) error {
 	return nil
 }
 
-func (pm *PeerManager) connectSlot(ctx context.Context, p *peer) {
+func (pm *PeerManager) connectSlot(ctx context.Context, p *Peer) {
 	if err := pm.connect(ctx, p); err != nil {
 		// log.Errorf("%v", err)
 		pm.slotsC <- p.Id() // give slot back
