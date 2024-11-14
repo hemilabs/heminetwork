@@ -710,7 +710,6 @@ func p2p() error {
 		}
 
 	case "getdata":
-		loggo.ConfigureLoggers("TRACE")
 		var typ wire.InvType
 		ty := args["type"]
 		switch ty {

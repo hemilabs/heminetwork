@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	logLevel = "DEBUG"
+	logLevel = "INFO"
 )
 
 var (
