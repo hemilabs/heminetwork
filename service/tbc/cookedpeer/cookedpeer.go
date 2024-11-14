@@ -26,8 +26,11 @@ const (
 var (
 	log = loggo.GetLogger("peer")
 
-	ErrPending = errors.New("pending")
-	ErrUnknown = errors.New("unknown")
+	ErrInvalidType = errors.New("invalid type")
+	ErrPending     = errors.New("pending")
+	ErrUnknown     = errors.New("unknown")
+
+	defaultCmdTimeout = 5 * time.Second
 )
 
 func init() {
@@ -41,52 +44,97 @@ type CookedPeer struct {
 	p           *peer.Peer
 	chainParams *chaincfg.Params
 
-	getHeadersPending func(context.Context, *wire.MsgHeaders) // only one pending get headers allowed
+	feeFilterLast *wire.MsgFeeFilter // last seen fee filter message
+
+	// default events
+	handlers map[string]func(context.Context, wire.Message) error
 }
 
-type CookedMessage struct {
-	ctx   context.Context
-	reply chan wire.Message
-	msg   wire.Message
+func (c *CookedPeer) dummyHandler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("dummyHandler %v", msg.Command())
+	defer log.Tracef("dummyHandler %v exit", msg.Command())
+
+	// XXX Make Debugf
+	log.Infof("dummy handler: %v", msg.Command())
+
+	return nil
+}
+
+func (c *CookedPeer) onFeeFilterHandler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("onFeeFilterHandler")
+	defer log.Tracef("onFeeFilterHandler exit")
+
+	if m, ok := msg.(*wire.MsgFeeFilter); ok {
+		log.Debugf("fee filter: %v", m.MinFee)
+		c.mtx.Lock()
+		c.feeFilterLast = m
+		c.mtx.Unlock()
+		return nil
+	}
+
+	return ErrInvalidType
+}
+
+func (c *CookedPeer) onPingHandler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("onPingHandler")
+	defer log.Tracef("onPingHandler exit")
+
+	m, ok := msg.(*wire.MsgPing)
+	if !ok {
+		return ErrInvalidType
+	}
+
+	err := c.p.Write(defaultCmdTimeout, wire.NewMsgPong(m.Nonce))
+	if err != nil {
+		return fmt.Errorf("could not write pong message %v: %w", c.p, err)
+	}
+	log.Debugf("onPingHandler %v: pong %v", c.p, m.Nonce)
+
+	return nil
 }
 
 func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, hashes []*chainhash.Hash, stop *chainhash.Hash) (*wire.MsgHeaders, error) {
-	log.Infof("GetHeaders")
-	defer log.Infof("GetHeaders exit")
+	log.Tracef("GetHeaders")
+	defer log.Tracef("GetHeaders exit")
 
 	if len(hashes) == 0 {
 		return nil, errors.New("no hashes")
 	}
 
-	// Setup call back
+	// Setup call back, we have to do this here or inside the mutex.
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
 	replyC := make(chan wire.Message)
 	defer close(replyC)
 
-	hp := func(ctx context.Context, msg *wire.MsgHeaders) {
+	hp := func(ctx context.Context, msg wire.Message) error {
+		m, ok := msg.(*wire.MsgHeaders)
+		if !ok {
+			return fmt.Errorf("invalid headers type, got %T", msg)
+		}
 		select {
 		case <-ctx.Done():
-			return
-		case replyC <- msg:
+			return ctx.Err()
+		case replyC <- m:
+			return nil
+		default:
+			return fmt.Errorf("no reader")
 		}
 	}
 
-	// Set callback if it doesnt exist
+	// Set callback if it doesnt exist. Note that getheaders is special in
+	// that only one of them may be outstaing to a peer at any time. Thus
+	// we reuse the normal callback map to set and unset it to prevent
+	// reentancy.
 	c.mtx.Lock()
-	if c.getHeadersPending != nil {
+	if _, ok := c.handlers[wire.CmdHeaders]; ok {
 		c.mtx.Unlock()
 		return nil, ErrPending
 	}
-	c.getHeadersPending = hp
+	c.handlers[wire.CmdHeaders] = hp
 	c.mtx.Unlock()
-
-	defer func() {
-		c.mtx.Lock()
-		c.getHeadersPending = nil
-		c.mtx.Unlock()
-	}()
+	defer c.SetHandler(wire.CmdHeaders, nil)
 
 	// Prepare message
 	gh := wire.NewMsgGetHeaders()
@@ -131,15 +179,27 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 	}
 }
 
-func (c *CookedPeer) handleQueues(ctx context.Context) {
-	log.Infof("handleQueues")
-	defer log.Infof("handleQueues exit")
+func (c *CookedPeer) callback(msg wire.Message) func(context.Context, wire.Message) error {
+	log.Tracef("callback %v", msg.Command())
+	defer log.Tracef("readLoop %v exit", msg.Command())
+
+	c.mtx.Lock()
+	cb := c.handlers[msg.Command()]
+	c.mtx.Unlock()
+	if cb == nil {
+		cb = c.dummyHandler
+	}
+	return cb
+}
+
+func (c *CookedPeer) readLoop(ctx context.Context) {
+	log.Tracef("readLoop")
+	defer log.Tracef("readLoop exit")
 
 	defer c.wg.Done()
 
 	for {
 		msg, raw, err := c.p.Read(0)
-		log.Infof("read %v", err)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue
 		} else if err != nil {
@@ -155,21 +215,16 @@ func (c *CookedPeer) handleQueues(ctx context.Context) {
 		default:
 		}
 
-		// handle
-		switch m := msg.(type) {
-		case *wire.MsgHeaders:
-			c.mtx.Lock()
-			c.getHeadersPending(ctx, m)
-			c.mtx.Unlock()
-		default:
-			log.Errorf("unhandled message: %T", msg)
+		cb := c.callback(msg)
+		if err := cb(ctx, msg); err != nil {
+			log.Errorf("%v: %v", msg.Command(), err)
 		}
 	}
 }
 
 func (c *CookedPeer) Connect(ctx context.Context) error {
-	log.Infof("Connect")
-	defer log.Infof("Connect exit")
+	log.Tracef("Connect")
+	defer log.Tracef("Connect exit")
 
 	err := c.p.Connect(ctx)
 	if err != nil {
@@ -177,9 +232,22 @@ func (c *CookedPeer) Connect(ctx context.Context) error {
 	}
 
 	c.wg.Add(1)
-	go c.handleQueues(ctx)
+	go c.readLoop(ctx)
 
 	return nil
+}
+
+func (c *CookedPeer) SetHandler(cmd string, f func(context.Context, wire.Message) error) {
+	log.Tracef("SetHandler %v", cmd)
+	defer log.Tracef("SetHandler %v exit", cmd)
+
+	c.mtx.Lock()
+	if f == nil {
+		delete(c.handlers, cmd)
+	} else {
+		c.handlers[cmd] = f
+	}
+	c.mtx.Unlock()
 }
 
 func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
@@ -188,12 +256,25 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 		return nil, err
 	}
 	cp := &CookedPeer{
-		wg: new(sync.WaitGroup),
-		p:  p,
+		wg:       new(sync.WaitGroup),
+		p:        p,
+		handlers: make(map[string]func(context.Context, wire.Message) error, 16),
 	}
+
 	switch network {
+	case wire.MainNet:
+		cp.chainParams = &chaincfg.MainNetParams
 	case wire.TestNet3:
 		cp.chainParams = &chaincfg.TestNet3Params
+	case wire.TestNet:
+		cp.chainParams = &chaincfg.RegressionNetParams
+	default:
+		return nil, fmt.Errorf("unsuported network: %v", network)
 	}
+
+	// Set default handlers
+	cp.SetHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
+	cp.SetHandler(wire.CmdPing, cp.onPingHandler)
+
 	return cp, nil
 }
