@@ -107,9 +107,8 @@ func (c *CookedPeer) onPongHandler(ctx context.Context, msg wire.Message) error 
 	if !ok {
 		return ErrInvalidType
 	}
-	log.Debugf("onPongHandler: nonce %v", m.Nonce)
-
 	id := tag(msg.Command(), m.Nonce)
+	log.Debugf("onPongHandler: %v", id)
 
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -132,9 +131,9 @@ func (c *CookedPeer) onHeadersHandler(ctx context.Context, msg wire.Message) err
 	if !ok {
 		return ErrInvalidType
 	}
-	log.Debugf("onHeadersHandler: %v", 0)
-
 	id := tag(msg.Command(), 0)
+	log.Debugf("onHeadersHandler: %v", id)
+
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	select {
@@ -148,34 +147,46 @@ func (c *CookedPeer) onHeadersHandler(ctx context.Context, msg wire.Message) err
 	return nil
 }
 
+func (c *CookedPeer) setPending(id string) (chan wire.Message, error) {
+	log.Tracef("setPending %v", tag)
+	defer log.Tracef("setPending %v exit", tag)
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	if _, ok := c.pending[id]; ok {
+		return nil, fmt.Errorf("pending: %v", id)
+	}
+	replyC := make(chan wire.Message)
+	c.pending[id] = replyC
+
+	return replyC, nil
+}
+
+func (c *CookedPeer) killPending(id string) {
+	c.mtx.Lock()
+	delete(c.pending, id)
+	c.mtx.Unlock()
+}
+
 func (c *CookedPeer) Ping(pctx context.Context, timeout time.Duration, nonce uint64) (*wire.MsgPong, error) {
 	log.Tracef("Ping %v", nonce)
 	defer log.Tracef("Ping %v exit", nonce)
 
 	// Setup call back, we have to do this here or inside the mutex.
+	id := tag(wire.CmdPong, nonce)
+	pongC, err := c.setPending(id)
+	if err != nil {
+		return nil, err
+	}
+	defer close(pongC)
+	defer c.killPending(id)
+
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
-	pongC := make(chan wire.Message)
-	defer close(pongC)
-
-	// Record outstanding pings
-	id := tag(wire.CmdPong, nonce)
-	c.mtx.Lock()
-	if _, ok := c.pending[id]; ok {
-		c.mtx.Unlock()
-		return nil, fmt.Errorf("pending nonce: %v", nonce)
-	}
-	c.pending[id] = pongC
-	c.mtx.Unlock()
-	defer func() {
-		c.mtx.Lock()
-		delete(c.pending, id)
-		c.mtx.Unlock()
-	}()
-
 	// Send message to peer
-	err := c.p.Write(timeout, &wire.MsgPing{Nonce: nonce})
+	err = c.p.Write(timeout, &wire.MsgPing{Nonce: nonce})
 	if err != nil {
 		return nil, err
 	}
@@ -200,27 +211,14 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 		return nil, errors.New("no hashes")
 	}
 
-	// Setup call back, we have to do this here or inside the mutex.
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	headersC := make(chan wire.Message)
-	defer close(headersC)
-
 	// Record outstanding headers
 	id := tag(wire.CmdHeaders, 0)
-	c.mtx.Lock()
-	if _, ok := c.pending[id]; ok {
-		c.mtx.Unlock()
-		return nil, errors.New("pending headers")
+	headersC, err := c.setPending(id)
+	if err != nil {
+		return nil, err
 	}
-	c.pending[id] = headersC
-	c.mtx.Unlock()
-	defer func() {
-		c.mtx.Lock()
-		delete(c.pending, id)
-		c.mtx.Unlock()
-	}()
+	defer close(headersC)
+	defer c.killPending(id)
 
 	// Prepare message
 	gh := wire.NewMsgGetHeaders()
@@ -234,8 +232,12 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 		}
 	}
 
+	// Setup call back, we have to do this here or inside the mutex.
+	ctx, cancel := context.WithTimeout(pctx, timeout)
+	defer cancel()
+
 	// Send get headers message to peer
-	err := c.p.Write(timeout, gh)
+	err = c.p.Write(timeout, gh)
 	if err != nil {
 		return nil, err
 	}
