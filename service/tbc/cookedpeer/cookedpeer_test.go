@@ -15,7 +15,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/davecgh/go-spew/spew"
 )
 
 func s2ch(s string) *chainhash.Hash {
@@ -177,6 +176,9 @@ func TestCookedPeer(t *testing.T) {
 	if err != ErrUnknown {
 		t.Fatal(err)
 	}
+	if tx != nil {
+		t.Fatal("expected no tx")
+	}
 
 	// Ask for a recent TX, will be pruned later
 	recentTx := s2ch("5b1ac1b1604868dfd78bc63ae821e00e7bebbd7b2de13584599d1ffca364714c")
@@ -184,5 +186,8 @@ func TestCookedPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(spew.Sdump(tx))
+	txhash := tx.TxHash()
+	if !recentTx.IsEqual(&txhash) {
+		t.Fatalf("invalid tx id: %v", txhash)
+	}
 }

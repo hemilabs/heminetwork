@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	logLevel = "TRACE"
+	logLevel = "INFO"
 )
 
 var (
@@ -253,7 +253,7 @@ func (c *CookedPeer) onTxHandler(ctx context.Context, msg wire.Message) error {
 	if !ok {
 		return ErrInvalidType
 	}
-	id := tag(wire.CmdInv+"-"+wire.InvTypeTx.String(), m.TxID())
+	id := tag(wire.CmdInv+"-"+wire.InvTypeTx.String(), m.TxHash())
 	log.Debugf("onTxHandler: %v", id)
 
 	c.mtx.Lock()
@@ -263,7 +263,7 @@ func (c *CookedPeer) onTxHandler(ctx context.Context, msg wire.Message) error {
 		return ctx.Err()
 	case c.pending[id] <- m:
 	default:
-		return fmt.Errorf("no reader tx: %v", m.TxID())
+		return fmt.Errorf("no reader tx: %v", m.TxHash())
 	}
 
 	return nil
