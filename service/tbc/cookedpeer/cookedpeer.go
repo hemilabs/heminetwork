@@ -66,30 +66,6 @@ func (c *CookedPeer) dummyHandler(ctx context.Context, msg wire.Message) error {
 	return nil
 }
 
-func (c *CookedPeer) onAddrV2Handler(ctx context.Context, msg wire.Message) error {
-	log.Tracef("onAddrV2Handler")
-	defer log.Tracef("onAddrV2Handler exit")
-
-	m, ok := msg.(*wire.MsgAddrV2)
-	if !ok {
-		return ErrInvalidType
-	}
-	id := tag(msg.Command(), 0)
-	log.Debugf("onAddrV2Handler: %v", id)
-
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case c.pending[id] <- m:
-	default:
-		return fmt.Errorf("no reader addrv2: %v", id)
-	}
-
-	return nil
-}
-
 func (c *CookedPeer) onFeeFilterHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onFeeFilterHandler")
 	defer log.Tracef("onFeeFilterHandler exit")
@@ -119,6 +95,32 @@ func (c *CookedPeer) onPingHandler(ctx context.Context, msg wire.Message) error 
 		return fmt.Errorf("could not write pong message %v: %w", c.p, err)
 	}
 	log.Debugf("onPingHandler %v: pong %v", c.p, m.Nonce)
+
+	return nil
+}
+
+func (c *CookedPeer) onAddrHandler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("onAddrHandler")
+	defer log.Tracef("onAddrHandler exit")
+
+	switch msg.(type) {
+	case *wire.MsgAddr:
+	case *wire.MsgAddrV2:
+	default:
+		return ErrInvalidType
+	}
+	id := tag(wire.CmdGetAddr, 0)
+	log.Debugf("onAddrHandler (%T): %v", msg, id)
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case c.pending[id] <- msg:
+	default:
+		return fmt.Errorf("no reader addr: %v", id)
+	}
 
 	return nil
 }
@@ -193,17 +195,17 @@ func (c *CookedPeer) killPending(id string) {
 	c.mtx.Unlock()
 }
 
-func (c *CookedPeer) AddrV2(pctx context.Context, timeout time.Duration) (*wire.MsgAddrV2, error) {
-	log.Tracef("AddrV2")
-	defer log.Tracef("AddrV2 %v exit")
+func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, error) {
+	log.Tracef("GetAddr")
+	defer log.Tracef("GetAddr %v exit")
 
 	// Setup call back, we have to do this here or inside the mutex.
-	id := tag(wire.CmdAddrV2, 0)
-	addrV2C, err := c.setPending(id)
+	id := tag(wire.CmdGetAddr, 0)
+	getAddrC, err := c.setPending(id)
 	if err != nil {
 		return nil, err
 	}
-	defer close(addrV2C)
+	defer close(getAddrC)
 	defer c.killPending(id)
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
@@ -219,11 +221,14 @@ func (c *CookedPeer) AddrV2(pctx context.Context, timeout time.Duration) (*wire.
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case msg := <-addrV2C:
+	case msg := <-getAddrC:
 		if addrV2, ok := msg.(*wire.MsgAddrV2); ok {
 			return addrV2, nil
 		}
-		return nil, fmt.Errorf("invalid addrv2 type: %T", msg)
+		if addr, ok := msg.(*wire.MsgAddr); ok {
+			return addr, nil
+		}
+		return nil, fmt.Errorf("invalid addr type: %T", msg)
 	}
 }
 
@@ -425,7 +430,8 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 
 	// Set default handlers
 	cp.setHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
-	cp.setHandler(wire.CmdAddrV2, cp.onAddrV2Handler)
+	cp.setHandler(wire.CmdAddr, cp.onAddrHandler)
+	cp.setHandler(wire.CmdAddrV2, cp.onAddrHandler)
 	cp.setHandler(wire.CmdHeaders, cp.onHeadersHandler)
 	cp.setHandler(wire.CmdPing, cp.onPingHandler)
 	cp.setHandler(wire.CmdPong, cp.onPongHandler)

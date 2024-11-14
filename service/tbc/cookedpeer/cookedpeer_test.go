@@ -143,7 +143,7 @@ func TestCookedPeer(t *testing.T) {
 	})
 
 	// Get addresses v2
-	a, err := cp.AddrV2(ctx, to)
+	a, err := cp.GetAddr(ctx, to)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -150,6 +150,7 @@ func (p *Peer) handshake(ctx context.Context, conn net.Conn) error {
 	them := &wire.NetAddress{Timestamp: time.Now()}
 	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
 	msg.UserAgent = fmt.Sprintf("/%v:%v/", version.Component, version.String())
+	msg.ProtocolVersion = int32(wire.AddrV2Version)
 	err := writeTimeout(defaultHandshakeTimeout, conn, msg, p.protocolVersion, p.network)
 	if err != nil {
 		return fmt.Errorf("could not write version message: %w", err)
