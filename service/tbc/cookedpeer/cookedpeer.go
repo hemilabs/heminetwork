@@ -66,6 +66,30 @@ func (c *CookedPeer) dummyHandler(ctx context.Context, msg wire.Message) error {
 	return nil
 }
 
+func (c *CookedPeer) onAddrV2Handler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("onAddrV2Handler")
+	defer log.Tracef("onAddrV2Handler exit")
+
+	m, ok := msg.(*wire.MsgAddrV2)
+	if !ok {
+		return ErrInvalidType
+	}
+	id := tag(msg.Command(), 0)
+	log.Debugf("onAddrV2Handler: %v", id)
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case c.pending[id] <- m:
+	default:
+		return fmt.Errorf("no reader addrv2: %v", id)
+	}
+
+	return nil
+}
+
 func (c *CookedPeer) onFeeFilterHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onFeeFilterHandler")
 	defer log.Tracef("onFeeFilterHandler exit")
@@ -167,6 +191,40 @@ func (c *CookedPeer) killPending(id string) {
 	c.mtx.Lock()
 	delete(c.pending, id)
 	c.mtx.Unlock()
+}
+
+func (c *CookedPeer) AddrV2(pctx context.Context, timeout time.Duration) (*wire.MsgAddrV2, error) {
+	log.Tracef("AddrV2")
+	defer log.Tracef("AddrV2 %v exit")
+
+	// Setup call back, we have to do this here or inside the mutex.
+	id := tag(wire.CmdAddrV2, 0)
+	addrV2C, err := c.setPending(id)
+	if err != nil {
+		return nil, err
+	}
+	defer close(addrV2C)
+	defer c.killPending(id)
+
+	ctx, cancel := context.WithTimeout(pctx, timeout)
+	defer cancel()
+
+	// Send message to peer
+	err = c.p.Write(timeout, &wire.MsgGetAddr{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for reply
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case msg := <-addrV2C:
+		if addrV2, ok := msg.(*wire.MsgAddrV2); ok {
+			return addrV2, nil
+		}
+		return nil, fmt.Errorf("invalid addrv2 type: %T", msg)
+	}
 }
 
 func (c *CookedPeer) Ping(pctx context.Context, timeout time.Duration, nonce uint64) (*wire.MsgPong, error) {
@@ -367,6 +425,7 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 
 	// Set default handlers
 	cp.setHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
+	cp.setHandler(wire.CmdAddrV2, cp.onAddrV2Handler)
 	cp.setHandler(wire.CmdHeaders, cp.onHeadersHandler)
 	cp.setHandler(wire.CmdPing, cp.onPingHandler)
 	cp.setHandler(wire.CmdPong, cp.onPongHandler)

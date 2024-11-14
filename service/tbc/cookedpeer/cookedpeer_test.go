@@ -141,4 +141,13 @@ func TestCookedPeer(t *testing.T) {
 		t.Fatalf("expected empty map: %v", k)
 		return false
 	})
+
+	// Get addresses v2
+	a, err := cp.AddrV2(ctx, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == nil {
+		t.Fatal("expected addrv2")
+	}
 }
