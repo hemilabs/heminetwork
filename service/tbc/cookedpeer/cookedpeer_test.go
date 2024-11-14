@@ -26,6 +26,8 @@ func s2ch(s string) *chainhash.Hash {
 }
 
 func TestCookedPeer(t *testing.T) {
+	t.Skip("requires bitcoind access that supports mempool")
+
 	addr := "192.168.101.152:18333"
 	p := &chaincfg.TestNet3Params
 	cp, err := New(wire.TestNet3, 0xc0ffee, addr)
