@@ -204,7 +204,66 @@ func (c *CookedPeer) onInvHandler(ctx context.Context, msg wire.Message) error {
 		default:
 			return fmt.Errorf("no reader inv: %v", 0)
 		}
+	}
 
+	return nil
+}
+
+func (c *CookedPeer) onNotFoundHandler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("onNotFoundHandler")
+	defer log.Tracef("onNotFoundHandler exit")
+
+	m, ok := msg.(*wire.MsgNotFound)
+	if !ok {
+		return ErrInvalidType
+	}
+
+	// XXX this is no longer correct but will flow through here when
+	// unsolicited inv comes through.
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	for _, v := range m.InvList {
+		id := tag(wire.CmdInv+"-"+v.Type.String(), v.Hash)
+		log.Debugf("onInvHandler: %v", id)
+		replyC, ok := c.pending[id]
+		if !ok {
+			continue
+		}
+		log.Debugf("onInvHandler: %v", id)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case replyC <- m:
+			return nil
+		default:
+			return fmt.Errorf("no reader inv: %v", 0)
+		}
+	}
+
+	return nil
+}
+
+func (c *CookedPeer) onTxHandler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("onTxHandler")
+	defer log.Tracef("onTxHandler exit")
+
+	m, ok := msg.(*wire.MsgTx)
+	if !ok {
+		return ErrInvalidType
+	}
+	id := tag(wire.CmdInv+"-"+wire.InvTypeTx.String(), m.TxID())
+	log.Debugf("onTxHandler: %v", id)
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case c.pending[id] <- m:
+	default:
+		return fmt.Errorf("no reader tx: %v", m.TxID())
 	}
 
 	return nil
@@ -364,8 +423,13 @@ func (c *CookedPeer) GetData(pctx context.Context, timeout time.Duration, vector
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case msg := <-getDataC:
-		if block, ok := msg.(*wire.MsgBlock); ok {
-			return block, nil
+		switch x := msg.(type) {
+		case *wire.MsgBlock:
+			return x, nil
+		case *wire.MsgTx:
+			return x, nil
+		case *wire.MsgNotFound:
+			return x, nil
 		}
 		return nil, fmt.Errorf("invalid get data type: %T", msg)
 	}
@@ -402,6 +466,27 @@ func (c *CookedPeer) GetBlock(pctx context.Context, timeout time.Duration, block
 	}
 
 	return nil, fmt.Errorf("invalid block type: %T", blk)
+}
+
+func (c *CookedPeer) GetTx(pctx context.Context, timeout time.Duration, txId *chainhash.Hash) (*wire.MsgTx, error) {
+	log.Tracef("GetTx %v", txId)
+	defer log.Tracef("GetTx %v exit", txId)
+
+	ctx, cancel := context.WithTimeout(pctx, timeout)
+	defer cancel()
+
+	tx, err := c.GetData(ctx, timeout, wire.NewInvVect(wire.InvTypeTx, txId))
+	if err != nil {
+		return nil, err
+	}
+	switch t := tx.(type) {
+	case *wire.MsgTx:
+		return t, nil
+	case *wire.MsgNotFound:
+		return nil, ErrUnknown
+	}
+
+	return nil, fmt.Errorf("invalid tx type: %T", tx)
 }
 
 func (c *CookedPeer) Ping(pctx context.Context, timeout time.Duration, nonce uint64) (*wire.MsgPong, error) {
@@ -607,8 +692,10 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 	cp.setHandler(wire.CmdInv, cp.onInvHandler)
 	cp.setHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
 	cp.setHandler(wire.CmdHeaders, cp.onHeadersHandler)
+	cp.setHandler(wire.CmdNotFound, cp.onNotFoundHandler)
 	cp.setHandler(wire.CmdPing, cp.onPingHandler)
 	cp.setHandler(wire.CmdPong, cp.onPongHandler)
+	cp.setHandler(wire.CmdTx, cp.onTxHandler)
 
 	return cp, nil
 }

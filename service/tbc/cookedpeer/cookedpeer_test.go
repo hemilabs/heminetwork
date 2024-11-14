@@ -15,6 +15,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/davecgh/go-spew/spew"
 )
 
 func s2ch(s string) *chainhash.Hash {
@@ -169,4 +170,19 @@ func TestCookedPeer(t *testing.T) {
 	if bxx != nil {
 		t.Fatal("didn't expect a block")
 	}
+
+	// Get coinbase Tx from block 1, has been pruned
+	txID := s2ch("f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba")
+	tx, err := cp.GetTx(ctx, to, txID)
+	if err != ErrUnknown {
+		t.Fatal(err)
+	}
+
+	// Ask for a recent TX, will be pruned later
+	recentTx := s2ch("5b1ac1b1604868dfd78bc63ae821e00e7bebbd7b2de13584599d1ffca364714c")
+	tx, err = cp.GetTx(ctx, to, recentTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(spew.Sdump(tx))
 }
