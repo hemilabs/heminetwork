@@ -37,6 +37,10 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
+func tag(prefix string, suffix any) string {
+	return fmt.Sprintf("%v_%v", prefix, suffix)
+}
+
 type CookedPeer struct {
 	mtx sync.Mutex
 
@@ -47,8 +51,7 @@ type CookedPeer struct {
 	feeFilterLast *wire.MsgFeeFilter // last seen fee filter message
 
 	// pending commands awaiting results
-	getHeaders map[uint64]chan *wire.MsgHeaders // [0]reply
-	pings      map[uint64]chan *wire.MsgPong    // [nonce]reply
+	pending map[string]chan wire.Message // [tag]replyC
 
 	// default events
 	handlers map[string]func(context.Context, wire.Message) error
@@ -106,12 +109,14 @@ func (c *CookedPeer) onPongHandler(ctx context.Context, msg wire.Message) error 
 	}
 	log.Debugf("onPongHandler: nonce %v", m.Nonce)
 
+	id := tag(msg.Command(), m.Nonce)
+
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case c.pings[m.Nonce] <- m:
+	case c.pending[id] <- m:
 	default:
 		return fmt.Errorf("no reader pong: %v", m.Nonce)
 	}
@@ -129,12 +134,13 @@ func (c *CookedPeer) onHeadersHandler(ctx context.Context, msg wire.Message) err
 	}
 	log.Debugf("onHeadersHandler: %v", 0)
 
+	id := tag(msg.Command(), 0)
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case c.getHeaders[0] <- m:
+	case c.pending[id] <- m:
 	default:
 		return fmt.Errorf("no reader headers: %v", 0)
 	}
@@ -150,20 +156,21 @@ func (c *CookedPeer) Ping(pctx context.Context, timeout time.Duration, nonce uin
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
-	pongC := make(chan *wire.MsgPong)
+	pongC := make(chan wire.Message)
 	defer close(pongC)
 
 	// Record outstanding pings
+	id := tag(wire.CmdPong, nonce)
 	c.mtx.Lock()
-	if _, ok := c.pings[nonce]; ok {
+	if _, ok := c.pending[id]; ok {
 		c.mtx.Unlock()
 		return nil, fmt.Errorf("pending nonce: %v", nonce)
 	}
-	c.pings[nonce] = pongC
+	c.pending[id] = pongC
 	c.mtx.Unlock()
 	defer func() {
 		c.mtx.Lock()
-		delete(c.pings, nonce)
+		delete(c.pending, id)
 		c.mtx.Unlock()
 	}()
 
@@ -177,8 +184,11 @@ func (c *CookedPeer) Ping(pctx context.Context, timeout time.Duration, nonce uin
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case pong := <-pongC:
-		return pong, nil
+	case msg := <-pongC:
+		if pong, ok := msg.(*wire.MsgPong); ok {
+			return pong, nil
+		}
+		return nil, fmt.Errorf("invalid pong type: %T", msg)
 	}
 }
 
@@ -194,20 +204,21 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
-	headersC := make(chan *wire.MsgHeaders)
+	headersC := make(chan wire.Message)
 	defer close(headersC)
 
 	// Record outstanding headers
+	id := tag(wire.CmdHeaders, 0)
 	c.mtx.Lock()
-	if _, ok := c.getHeaders[0]; ok {
+	if _, ok := c.pending[id]; ok {
 		c.mtx.Unlock()
 		return nil, errors.New("pending headers")
 	}
-	c.getHeaders[0] = headersC
+	c.pending[id] = headersC
 	c.mtx.Unlock()
 	defer func() {
 		c.mtx.Lock()
-		delete(c.getHeaders, 0)
+		delete(c.pending, id)
 		c.mtx.Unlock()
 	}()
 
@@ -233,7 +244,11 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case m := <-headersC:
+	case msg := <-headersC:
+		m, ok := msg.(*wire.MsgHeaders)
+		if !ok {
+			return nil, fmt.Errorf("invalid headers type: %T", msg)
+		}
 		// catch standard responses
 		if len(m.Headers) == 0 {
 			return m, nil // Peer caught up
@@ -308,9 +323,9 @@ func (c *CookedPeer) Connect(ctx context.Context) error {
 	return nil
 }
 
-func (c *CookedPeer) SetHandler(cmd string, f func(context.Context, wire.Message) error) {
-	log.Tracef("SetHandler %v", cmd)
-	defer log.Tracef("SetHandler %v exit", cmd)
+func (c *CookedPeer) setHandler(cmd string, f func(context.Context, wire.Message) error) {
+	log.Tracef("setHandler %v", cmd)
+	defer log.Tracef("setHandler %v exit", cmd)
 
 	c.mtx.Lock()
 	if f == nil {
@@ -334,8 +349,7 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 		handlers: make(map[string]func(context.Context, wire.Message) error, 16),
 
 		// Pending commands
-		getHeaders: make(map[uint64]chan *wire.MsgHeaders, 1),
-		pings:      make(map[uint64]chan *wire.MsgPong, 16),
+		pending: make(map[string]chan wire.Message, 64),
 	}
 
 	switch network {
@@ -350,10 +364,10 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 	}
 
 	// Set default handlers
-	cp.SetHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
-	cp.SetHandler(wire.CmdHeaders, cp.onHeadersHandler)
-	cp.SetHandler(wire.CmdPong, cp.onPongHandler)
-	cp.SetHandler(wire.CmdPong, cp.onPongHandler)
+	cp.setHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
+	cp.setHandler(wire.CmdHeaders, cp.onHeadersHandler)
+	cp.setHandler(wire.CmdPong, cp.onPongHandler)
+	cp.setHandler(wire.CmdPong, cp.onPongHandler)
 
 	return cp, nil
 }
