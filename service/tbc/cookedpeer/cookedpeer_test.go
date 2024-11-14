@@ -128,6 +128,9 @@ func TestCookedPeer(t *testing.T) {
 				panic(fmt.Sprintf("nonce not found: %v", nonce))
 			}
 		}(uint64(i))
+
+		// XXX bitcoind does not like a whole bunch of pings at the same time
+		time.Sleep(7 * time.Millisecond)
 	}
 	wg.Wait()
 	pongs.Range(func(k, v any) bool {

@@ -46,6 +46,7 @@ type CookedPeer struct {
 
 	feeFilterLast *wire.MsgFeeFilter // last seen fee filter message
 
+	// pending commands awaiting results
 	pings map[uint64]chan *wire.MsgPong // [nonce]reply
 
 	// default events
