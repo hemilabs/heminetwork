@@ -611,7 +611,7 @@ func (c *CookedPeer) readLoop(ctx context.Context) {
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue
 		} else if err != nil {
-			log.Errorf("%v: %v", c.p, err)
+			log.Debugf("%v: %v", c.p, err)
 			return
 		}
 		_ = raw
@@ -643,6 +643,13 @@ func (c *CookedPeer) Connect(ctx context.Context) error {
 	go c.readLoop(ctx)
 
 	return nil
+}
+
+func (c *CookedPeer) Close() error {
+	log.Tracef("Close")
+	defer log.Tracef("Close exit")
+
+	return c.p.Close()
 }
 
 func (c *CookedPeer) setHandler(cmd string, f func(context.Context, wire.Message) error) {

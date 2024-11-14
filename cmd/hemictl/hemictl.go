@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -43,7 +44,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/hemilabs/heminetwork/service/tbc/peer"
+	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -631,75 +632,90 @@ func tbcdb() error {
 }
 
 func p2p() error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	action, args, err := parseArgs(flag.Args()[1:])
 	if err != nil {
 		return err
 	}
 
-	loggo.ConfigureLoggers("TRACE")
+	addr := args["addr"]
+	if addr == "" {
+		return fmt.Errorf("addr required")
+	}
+
 	network := wire.TestNet3
-	addr := "192.168.101.152:18333"
-	p, err := peer.New(network, 0xc0ffee, addr)
-	if err != nil {
-		return err
+	net := args["net"]
+	switch net {
+	case "mainnet":
+		network = wire.MainNet
+	case "testnet":
+		network = wire.TestNet
+	case "", "testnet3":
+		network = wire.TestNet3
+	default:
+		return fmt.Errorf("invalid net: %v", net)
 	}
-	err = p.Connect(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		//err := p.Close()
-		//if err != nil {
-		//	fmt.Fprintf(os.Stderr, "close %v: %v\n", addr, err)
-		//}
-	}()
-	rv, err := p.RemoteVersion()
-	if err != nil {
-		return err
-	}
-	fmt.Printf("connected: %v: version %v agent: %v\n",
-		addr, rv.ProtocolVersion, rv.UserAgent)
 
-	defaultCmdTimeout := 5 * time.Second
+	timeout := 30 * time.Second
+	cp, err := cookedpeer.New(network, 0xc0ffee, addr)
+	if err != nil {
+		return err
+	}
 
-	ivType := map[string]wire.InvType{
-		"ERROR":                      wire.InvTypeError,
-		"MSG_TX":                     wire.InvTypeTx,
-		"MSG_BLOCK":                  wire.InvTypeBlock,
-		"MSG_FILTERED_BLOCK":         wire.InvTypeFilteredBlock,
-		"MSG_WITNESS_BLOCK":          wire.InvTypeWitnessBlock,
-		"MSG_WITNESS_TX":             wire.InvTypeWitnessTx,
-		"MSG_FILTERED_WITNESS_BLOCK": wire.InvTypeFilteredWitnessBlock,
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	err = cp.Connect(ctx)
+	if err != nil {
+		return err
 	}
 
 	// commands
+	var msg wire.Message
 	switch action {
-	case "getdata":
+	case "getaddr":
+		a, err := cp.GetAddr(ctx, timeout)
+		if err != nil {
+			return fmt.Errorf("get addr: %w", err)
+		}
+		switch m := a.(type) {
+		case *wire.MsgAddr:
+			msg = m
+		case *wire.MsgAddrV2:
+			msg = m
+		default:
+			return fmt.Errorf("invalid get addr type: %T", a)
+		}
+
+	case "getblock":
 		hash := args["hash"]
 		if hash == "" {
 			return errors.New("hash: must be set")
-		}
-		t, ok := ivType[args["invtype"]]
-		if !ok {
-			return fmt.Errorf("must provide invtype")
 		}
 
 		ch, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		gd := wire.NewMsgGetData()
-		err = gd.AddInvVect(&wire.InvVect{
-			Type: t,
-			Hash: *ch,
-		})
-
-		err = p.Write(defaultCmdTimeout, gd)
+		msg, err = cp.GetBlock(ctx, timeout, ch)
 		if err != nil {
-			return fmt.Errorf("write inv: %w", err)
+			return fmt.Errorf("get block: %v", err)
+		}
+
+	case "getdata":
+
+	case "gettx":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		msg, err = cp.GetTx(ctx, timeout, ch)
+		if err != nil {
+			return fmt.Errorf("get tx: %v", err)
 		}
 
 	case "getheaders":
@@ -712,95 +728,58 @@ func p2p() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		gh := wire.NewMsgGetHeaders()
-		err = gh.AddBlockLocatorHash(ch)
+		msg, err = cp.GetHeaders(ctx, timeout, []*chainhash.Hash{ch}, nil)
 		if err != nil {
-			return fmt.Errorf("chainhash: %w", err)
+			return fmt.Errorf("get headers: %w", err)
 		}
-
-		err = p.Write(defaultCmdTimeout, gh)
-		if err != nil {
-			return fmt.Errorf("write inv: %w", err)
-		}
-
-	// cooked
-	case "blockbyhash":
-		hash := args["hash"]
-		if hash == "" {
-			return errors.New("hash: must be set")
-		}
-		ch, err := chainhash.NewHashFromStr(hash)
-		if err != nil {
-			return fmt.Errorf("chainhash: %w", err)
-		}
-
-		// Assemble get data message
-		//getData := wire.NewMsgGetData()
-		//getData.InvList = append(getData.InvList,
-		//	&wire.InvVect{
-		//		Type: wire.InvTypeBlock,
-		//		Hash: *ch,
-		//	})
-		//gb := wire.NewMsgGetBlocks(ch)
-		//err = gb.AddBlockLocatorHash(ch)
-		//if err != nil {
-		//	return fmt.Errorf("add locator: %w", err)
-		//}
-		gd := wire.NewMsgGetData()
-		err = gd.AddInvVect(&wire.InvVect{
-			Type: wire.InvTypeBlock,
-			Hash: *ch,
-		})
-		if err != nil {
-			return fmt.Errorf("add locator: %w", err)
-		}
-		err = p.Write(defaultCmdTimeout, gd)
-		if err != nil {
-			return fmt.Errorf("write inv: %w", err)
-		}
-		//bh, height, err := s.BlockHeaderByHash(ctx, ch)
-		//if err != nil {
-		//	return fmt.Errorf("block header by hash: %w", err)
-		//}
-		//fmt.Printf("hash  : %v\n", bh)
-		//fmt.Printf("height: %v\n", height)
 
 	case "help", "h":
 		fmt.Println("p2p commands:")
+		fmt.Println("\tall commands support <net=mainnet|testnet|testnet3> <addr=url> [hash]")
+		fmt.Println("\tgetheaders [hash]")
 		fmt.Println("\tblockbyhash [hash]")
+
+	case "ping":
+		nonce := args["nonce"]
+		n := uint64(0)
+		if nonce != "" {
+			n, err = strconv.ParseUint(nonce, 10, 64)
+			if err != nil {
+				return fmt.Errorf("nonce: %v", err)
+			}
+		}
+		msg, err = cp.Ping(ctx, timeout, n)
+		if err != nil {
+			return fmt.Errorf("ping: %w", err)
+		}
 
 	default:
 		return fmt.Errorf("invalid action: %v", action)
 	}
 
-	for {
-		msg, _, err := p.Read(defaultCmdTimeout)
-		if errors.Is(err, wire.ErrUnknownMessage) {
-			continue
-		} else if err != nil {
-			panic(err)
+	out := args["out"]
+	switch out {
+	case "json":
+		j, err := json.MarshalIndent(msg, "", "  ")
+		if err != nil {
+			return fmt.Errorf("json: %v", err)
 		}
+		fmt.Printf("%v\n", string(j))
 
-		switch m := msg.(type) {
-		case *wire.MsgPing:
-			err := p.Write(defaultCmdTimeout, wire.NewMsgPong(m.Nonce))
-			if err != nil {
-				return err
-			}
-
-		case *wire.MsgFeeFilter:
-
-		case *wire.MsgInv:
-			if len(m.InvList) > 0 && m.InvList[0].Type == wire.InvTypeTx {
-				// ignore mempool gossip that's too loud
-				continue
-			}
-
-		default:
-			fmt.Printf("not handled: %T\n", msg)
-		}
+	case "", "spew":
 		spew.Dump(msg)
+	case "raw":
+		err := msg.BtcEncode(bufio.NewWriter(os.Stdout), wire.ProtocolVersion,
+			wire.LatestEncoding)
+		if err != nil {
+			return fmt.Errorf("raw: %v", err)
+		}
+
+	default:
+		return fmt.Errorf("invalid out: %v", out)
 	}
+
+	return nil
 }
 
 type bssClient struct {

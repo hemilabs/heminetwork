@@ -180,14 +180,19 @@ func TestCookedPeer(t *testing.T) {
 		t.Fatal("expected no tx")
 	}
 
-	// Ask for a recent TX, will be pruned later
-	recentTx := s2ch("5b1ac1b1604868dfd78bc63ae821e00e7bebbd7b2de13584599d1ffca364714c")
-	tx, err = cp.GetTx(ctx, to, recentTx)
+	//// Ask for a recent TX, will be pruned later
+	//recentTx := s2ch("5b1ac1b1604868dfd78bc63ae821e00e7bebbd7b2de13584599d1ffca364714c")
+	//tx, err = cp.GetTx(ctx, to, recentTx)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//txhash := tx.TxHash()
+	//if !recentTx.IsEqual(&txhash) {
+	//	t.Fatalf("invalid tx id: %v", txhash)
+	//}
+
+	err = cp.Close()
 	if err != nil {
 		t.Fatal(err)
-	}
-	txhash := tx.TxHash()
-	if !recentTx.IsEqual(&txhash) {
-		t.Fatalf("invalid tx id: %v", txhash)
 	}
 }
