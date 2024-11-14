@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	logLevel = "INFO"
+	logLevel = "DEBUG"
 )
 
 var (
@@ -187,14 +187,30 @@ func (c *CookedPeer) onInvHandler(ctx context.Context, msg wire.Message) error {
 
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
+	// See if we have a mempool command pending and if we received a bunch of TX'
+	id := tag(wire.CmdMemPool, 0)
+	if replyC, ok := c.pending[id]; ok {
+		if len(m.InvList) > 1 {
+			// Assume this was a mempool call
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case replyC <- m:
+				return nil
+			default:
+				return fmt.Errorf("no reader mempool: %v", 0)
+			}
+		}
+	}
+
 	for _, v := range m.InvList {
 		id := tag(wire.CmdInv+"-"+v.Type.String(), v.Hash)
-		log.Debugf("onInvHandler: %v", id)
+		log.Tracef("onInvHandler: %v", id)
 		replyC, ok := c.pending[id]
 		if !ok {
 			continue
 		}
-		log.Debugf("onInvHandler: %v", id)
+		log.Debugf("onInvHandler found: %v", id)
 
 		select {
 		case <-ctx.Done():
@@ -217,9 +233,6 @@ func (c *CookedPeer) onNotFoundHandler(ctx context.Context, msg wire.Message) er
 	if !ok {
 		return ErrInvalidType
 	}
-
-	// XXX this is no longer correct but will flow through here when
-	// unsolicited inv comes through.
 
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -584,6 +597,40 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 			return nil, ErrUnknown
 		}
 		return m, nil
+	}
+}
+
+func (c *CookedPeer) MemPool(pctx context.Context, timeout time.Duration) (*wire.MsgInv, error) {
+	log.Tracef("MemPool")
+	defer log.Tracef("MemPool exit")
+
+	// Setup call back, we have to do this here or inside the mutex.
+	id := tag(wire.CmdMemPool, 0)
+	memPoolC, err := c.setPending(id)
+	if err != nil {
+		return nil, err
+	}
+	defer close(memPoolC)
+	defer c.killPending(id)
+
+	ctx, cancel := context.WithTimeout(pctx, timeout)
+	defer cancel()
+
+	// Send message to peer
+	err = c.p.Write(timeout, &wire.MsgMemPool{})
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for reply
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case msg := <-memPoolC:
+		if inv, ok := msg.(*wire.MsgInv); ok {
+			return inv, nil
+		}
+		return nil, fmt.Errorf("invalid mempool type: %T", msg)
 	}
 }
 

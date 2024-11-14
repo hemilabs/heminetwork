@@ -637,6 +637,15 @@ func p2p() error {
 		return err
 	}
 
+	timeout := 30 * time.Second
+	to := args["timeout"]
+	if to != "" {
+		timeout, err = time.ParseDuration(to)
+		if err != nil {
+			return fmt.Errorf("timeout: %v", err)
+		}
+	}
+
 	addr := args["addr"]
 	if addr == "" {
 		return fmt.Errorf("addr required")
@@ -655,7 +664,6 @@ func p2p() error {
 		return fmt.Errorf("invalid net: %v", net)
 	}
 
-	timeout := 30 * time.Second
 	cp, err := cookedpeer.New(network, 0xc0ffee, addr)
 	if err != nil {
 		return err
@@ -702,8 +710,17 @@ func p2p() error {
 		}
 
 	case "getdata":
-
-	case "gettx":
+		loggo.ConfigureLoggers("TRACE")
+		var typ wire.InvType
+		ty := args["type"]
+		switch ty {
+		case "tx":
+			typ = wire.InvTypeTx
+		case "block":
+			typ = wire.InvTypeBlock
+		default:
+			return fmt.Errorf("invalid type: %v", ty)
+		}
 		hash := args["hash"]
 		if hash == "" {
 			return errors.New("hash: must be set")
@@ -713,9 +730,18 @@ func p2p() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		msg, err = cp.GetTx(ctx, timeout, ch)
+		gd, err := cp.GetData(ctx, timeout, wire.NewInvVect(typ, ch))
 		if err != nil {
-			return fmt.Errorf("get tx: %v", err)
+			return fmt.Errorf("get data: %w", err)
+		}
+		switch m := gd.(type) {
+		case *wire.MsgBlock:
+			msg = m
+		case *wire.MsgTx:
+			msg = m
+		case *wire.MsgNotFound:
+			// note that json will look like a successful not found error
+			msg = m
 		}
 
 	case "getheaders":
@@ -733,11 +759,37 @@ func p2p() error {
 			return fmt.Errorf("get headers: %w", err)
 		}
 
+	case "gettx":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		msg, err = cp.GetTx(ctx, timeout, ch)
+		if err != nil {
+			return fmt.Errorf("get tx: %v", err)
+		}
+
 	case "help", "h":
 		fmt.Println("p2p commands:")
-		fmt.Println("\tall commands support <net=mainnet|testnet|testnet3> <addr=url> [hash]")
+		fmt.Println("\tall commands support [addr=url] <net=mainnet|testnet|testnet3> timeout=<duration>")
+		fmt.Println("\tgetaddr")
+		fmt.Println("\tgetblock [hash]")
+		fmt.Println("\tgetdata [hash] [type=tx|block]")
 		fmt.Println("\tgetheaders [hash]")
-		fmt.Println("\tblockbyhash [hash]")
+		fmt.Println("\tgettx [hash]")
+		fmt.Println("\tmempool")
+		fmt.Println("\tping [nonce]")
+
+	case "mempool":
+		msg, err = cp.MemPool(ctx, timeout)
+		if err != nil {
+			return fmt.Errorf("mempool: %v", err)
+		}
 
 	case "ping":
 		nonce := args["nonce"]
@@ -768,6 +820,7 @@ func p2p() error {
 
 	case "", "spew":
 		spew.Dump(msg)
+
 	case "raw":
 		err := msg.BtcEncode(bufio.NewWriter(os.Stdout), wire.ProtocolVersion,
 			wire.LatestEncoding)

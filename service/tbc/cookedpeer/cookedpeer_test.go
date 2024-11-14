@@ -180,16 +180,28 @@ func TestCookedPeer(t *testing.T) {
 		t.Fatal("expected no tx")
 	}
 
-	//// Ask for a recent TX, will be pruned later
-	//recentTx := s2ch("5b1ac1b1604868dfd78bc63ae821e00e7bebbd7b2de13584599d1ffca364714c")
-	//tx, err = cp.GetTx(ctx, to, recentTx)
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//txhash := tx.TxHash()
-	//if !recentTx.IsEqual(&txhash) {
-	//	t.Fatalf("invalid tx id: %v", txhash)
-	//}
+	// Get mempool
+	mp, err := cp.MemPool(ctx, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mp.InvList) == 0 {
+		t.Fatal("no mempool")
+	}
+	if mp.InvList[0].Type != wire.InvTypeTx {
+		t.Fatalf("mempool returned invalid type: %v", mp.InvList[0].Type)
+	}
+
+	// Ask for a recent TX, will be pruned later
+	recentTx := &mp.InvList[0].Hash
+	tx, err = cp.GetTx(ctx, to, recentTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	txhash := tx.TxHash()
+	if !recentTx.IsEqual(&txhash) {
+		t.Fatalf("invalid tx id: %v", txhash)
+	}
 
 	err = cp.Close()
 	if err != nil {
