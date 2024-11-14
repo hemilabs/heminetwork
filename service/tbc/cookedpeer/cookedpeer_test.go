@@ -6,6 +6,8 @@ package cookedpeer
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -101,4 +103,35 @@ func TestCookedPeer(t *testing.T) {
 	if !block1Hash.IsEqual(&h.Headers[0].PrevBlock) {
 		t.Fatal("expected block 1 hash in previous block")
 	}
+
+	// Ping
+	wantPong := 13
+	var (
+		pongs sync.Map
+		wg    sync.WaitGroup
+	)
+	for i := 0; i < wantPong; i++ {
+		wg.Add(1)
+		go func(nonce uint64) {
+			defer wg.Done()
+
+			pongs.Store(nonce, struct{}{})
+			pong, err := cp.Ping(ctx, to, nonce)
+			if err != nil {
+				panic(err)
+			}
+			if pong.Nonce != nonce {
+				panic(fmt.Sprintf("invalid nonce got %v, wanted %v",
+					pong.Nonce, nonce))
+			}
+			if _, ok := pongs.LoadAndDelete(nonce); !ok {
+				panic(fmt.Sprintf("nonce not found: %v", nonce))
+			}
+		}(uint64(i))
+	}
+	wg.Wait()
+	pongs.Range(func(k, v any) bool {
+		t.Fatalf("expected empty map: %v", k)
+		return false
+	})
 }
