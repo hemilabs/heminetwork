@@ -368,7 +368,7 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 	// Set default handlers
 	cp.setHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
 	cp.setHandler(wire.CmdHeaders, cp.onHeadersHandler)
-	cp.setHandler(wire.CmdPong, cp.onPongHandler)
+	cp.setHandler(wire.CmdPing, cp.onPingHandler)
 	cp.setHandler(wire.CmdPong, cp.onPongHandler)
 
 	return cp, nil
