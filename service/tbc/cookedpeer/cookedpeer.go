@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	logLevel = "INFO"
+	logLevel = "DEBUG"
 )
 
 var (
@@ -57,8 +57,7 @@ func (c *CookedPeer) dummyHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("dummyHandler %v", msg.Command())
 	defer log.Tracef("dummyHandler %v exit", msg.Command())
 
-	// XXX Make Debugf
-	log.Infof("dummy handler: %v", msg.Command())
+	log.Debugf("dummy handler: %v", msg.Command())
 
 	return nil
 }

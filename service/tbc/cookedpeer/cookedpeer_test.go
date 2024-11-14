@@ -7,6 +7,7 @@ package cookedpeer
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -110,10 +111,15 @@ func TestCookedPeer(t *testing.T) {
 		pongs sync.Map
 		wg    sync.WaitGroup
 	)
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	for i := 0; i < wantPong; i++ {
 		wg.Add(1)
 		go func(nonce uint64) {
 			defer wg.Done()
+
+			// XXX bitcoind does not like a whole bunch of pings at
+			// the same time.
+			time.Sleep(time.Duration(r.Int31()%11) * time.Millisecond)
 
 			pongs.Store(nonce, struct{}{})
 			pong, err := cp.Ping(ctx, to, nonce)
@@ -129,8 +135,6 @@ func TestCookedPeer(t *testing.T) {
 			}
 		}(uint64(i))
 
-		// XXX bitcoind does not like a whole bunch of pings at the same time
-		time.Sleep(7 * time.Millisecond)
 	}
 	wg.Wait()
 	pongs.Range(func(k, v any) bool {
