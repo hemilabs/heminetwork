@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	logLevel = "DEBUG"
+	logLevel = "TRACE"
 )
 
 var (
@@ -149,6 +149,64 @@ func (c *CookedPeer) onPongHandler(ctx context.Context, msg wire.Message) error 
 	return nil
 }
 
+func (c *CookedPeer) onBlockHandler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("onBlockHandler")
+	defer log.Tracef("onBlockHandler exit")
+
+	m, ok := msg.(*wire.MsgBlock)
+	if !ok {
+		return ErrInvalidType
+	}
+	id := tag(wire.CmdInv+"-"+wire.InvTypeBlock.String(), m.Header.BlockHash())
+	log.Debugf("onBlockHandler: %v", id)
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case c.pending[id] <- m:
+	default:
+		return fmt.Errorf("no reader block: %v", m.Header.BlockHash())
+	}
+
+	return nil
+}
+
+func (c *CookedPeer) onInvHandler(ctx context.Context, msg wire.Message) error {
+	log.Tracef("onInvHandler")
+	defer log.Tracef("onInvHandler exit")
+
+	m, ok := msg.(*wire.MsgInv)
+	if !ok {
+		return ErrInvalidType
+	}
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+	for _, v := range m.InvList {
+		id := tag(wire.CmdInv+"-"+v.Type.String(), v.Hash)
+		log.Debugf("onInvHandler: %v", id)
+		replyC, ok := c.pending[id]
+		if !ok {
+			continue
+		}
+		log.Debugf("onInvHandler: %v", id)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case replyC <- m:
+			return nil
+		default:
+			return fmt.Errorf("no reader inv: %v", 0)
+		}
+
+	}
+
+	return nil
+}
+
 func (c *CookedPeer) onHeadersHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onHeadersHandler")
 	defer log.Tracef("onHeadersHandler exit")
@@ -174,8 +232,8 @@ func (c *CookedPeer) onHeadersHandler(ctx context.Context, msg wire.Message) err
 }
 
 func (c *CookedPeer) setPending(id string) (chan wire.Message, error) {
-	log.Tracef("setPending %v", tag)
-	defer log.Tracef("setPending %v exit", tag)
+	log.Tracef("setPending %v", id)
+	defer log.Tracef("setPending %v exit", id)
 
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -197,7 +255,7 @@ func (c *CookedPeer) killPending(id string) {
 
 func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, error) {
 	log.Tracef("GetAddr")
-	defer log.Tracef("GetAddr %v exit")
+	defer log.Tracef("GetAddr exit")
 
 	// Setup call back, we have to do this here or inside the mutex.
 	id := tag(wire.CmdGetAddr, 0)
@@ -230,6 +288,117 @@ func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, 
 		}
 		return nil, fmt.Errorf("invalid addr type: %T", msg)
 	}
+}
+
+//func (c *CookedPeer) GetBlocks(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgInv, error) {
+//	log.Tracef("GetBlock %v", blockHash)
+//	defer log.Tracef("GetBlocks %v exit", blockHash)
+//
+//	// Setup call back, we have to do this here or inside the mutex.
+//	id := tag(wire.CmdInv+"-"+wire.InvTypeBlock.String(), blockHash)
+//	getBlocksC, err := c.setPending(id)
+//	log.Infof("GetBlocks: %v", id)
+//	if err != nil {
+//		return nil, err
+//	}
+//	defer close(getBlocksC)
+//	defer c.killPending(id)
+//
+//	ctx, cancel := context.WithTimeout(pctx, timeout)
+//	defer cancel()
+//
+//	// Send message to peer
+//	gb := wire.NewMsgGetBlocks(&chainhash.Hash{})
+//	if err := gb.AddBlockLocatorHash(blockHash); err != nil {
+//		return nil, err
+//	}
+//	err = c.p.Write(timeout, gb)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	// Wait for reply
+//	select {
+//	case <-ctx.Done():
+//		return nil, ctx.Err()
+//	case msg := <-getBlocksC:
+//		if blocks, ok := msg.(*wire.MsgInv); ok {
+//			return blocks, nil
+//		}
+//		return nil, fmt.Errorf("invalid blocks type: %T", msg)
+//	}
+//}
+
+func (c *CookedPeer) GetData(pctx context.Context, timeout time.Duration, vector *wire.InvVect) (any, error) {
+	log.Tracef("GetData %v: %v", vector.Type, vector.Hash)
+	defer log.Tracef("GetData %v: %v exit", vector.Type, vector.Hash)
+
+	// Setup call back, we have to do this here or inside the mutex.
+	id := tag(wire.CmdInv+"-"+vector.Type.String(), vector.Hash)
+	log.Infof("GetData: %v", id)
+	getDataC, err := c.setPending(id)
+	if err != nil {
+		return nil, err
+	}
+	defer close(getDataC)
+	defer c.killPending(id)
+
+	ctx, cancel := context.WithTimeout(pctx, timeout)
+	defer cancel()
+
+	// Send message to peer
+	gd := wire.NewMsgGetData()
+	if err := gd.AddInvVect(vector); err != nil {
+		return nil, err
+	}
+	err = c.p.Write(timeout, gd)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wait for reply
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case msg := <-getDataC:
+		if block, ok := msg.(*wire.MsgBlock); ok {
+			return block, nil
+		}
+		return nil, fmt.Errorf("invalid get data type: %T", msg)
+	}
+}
+
+func (c *CookedPeer) GetBlock(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
+	log.Tracef("GetBlock %v", blockHash)
+	defer log.Tracef("GetBlock %v exit", blockHash)
+
+	// GetBlock is a compounded call. First it calls getheaders(hash)
+	// followed by a getdata(hash).
+
+	ctx, cancel := context.WithTimeout(pctx, timeout)
+	defer cancel()
+	headers, err := c.GetHeaders(ctx, timeout, []*chainhash.Hash{blockHash}, nil)
+	if err != nil {
+		return nil, err
+	}
+	// XXX we should cash the blocks the peer advertises since then we can
+	// skip the getheaders call.
+	if len(headers.Headers) == 0 {
+		return nil, ErrUnknown
+	}
+	if !blockHash.IsEqual(&headers.Headers[0].PrevBlock) {
+		return nil, ErrUnknown
+	}
+
+	blk, err := c.GetData(ctx, timeout, wire.NewInvVect(wire.InvTypeBlock, blockHash))
+	if err != nil {
+		return nil, err
+	}
+	if b, ok := blk.(*wire.MsgBlock); ok {
+		return b, nil
+	}
+
+	return nil, fmt.Errorf("invalid block type: %T", blk)
 }
 
 func (c *CookedPeer) Ping(pctx context.Context, timeout time.Duration, nonce uint64) (*wire.MsgPong, error) {
@@ -432,6 +601,8 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 	cp.setHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
 	cp.setHandler(wire.CmdAddr, cp.onAddrHandler)
 	cp.setHandler(wire.CmdAddrV2, cp.onAddrHandler)
+	cp.setHandler(wire.CmdBlock, cp.onBlockHandler)
+	cp.setHandler(wire.CmdInv, cp.onInvHandler)
 	cp.setHandler(wire.CmdHeaders, cp.onHeadersHandler)
 	cp.setHandler(wire.CmdPing, cp.onPingHandler)
 	cp.setHandler(wire.CmdPong, cp.onPongHandler)

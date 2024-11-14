@@ -150,4 +150,23 @@ func TestCookedPeer(t *testing.T) {
 	if a == nil {
 		t.Fatal("expected addrv2")
 	}
+
+	// Get block 1
+	block1, err := cp.GetBlock(ctx, to, block1Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b1hash := block1.Header.BlockHash()
+	if !block1Hash.IsEqual(&b1hash) {
+		t.Fatalf("unexpected hash: %v", b1hash)
+	}
+
+	// Get unknown block
+	bxx, err := cp.GetBlock(ctx, to, blockUnknown)
+	if err != ErrUnknown {
+		t.Fatal(err)
+	}
+	if bxx != nil {
+		t.Fatal("didn't expect a block")
+	}
 }
