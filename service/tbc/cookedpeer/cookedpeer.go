@@ -182,6 +182,9 @@ func (c *CookedPeer) onInvHandler(ctx context.Context, msg wire.Message) error {
 		return ErrInvalidType
 	}
 
+	// XXX this is no longer correct but will flow through here when
+	// unsolicited inv comes through.
+
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	for _, v := range m.InvList {
@@ -290,6 +293,7 @@ func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, 
 	}
 }
 
+// GetBlocks is really a legacy call; debating if we should bring it back.
 //func (c *CookedPeer) GetBlocks(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgInv, error) {
 //	log.Tracef("GetBlock %v", blockHash)
 //	defer log.Tracef("GetBlocks %v exit", blockHash)
@@ -335,7 +339,6 @@ func (c *CookedPeer) GetData(pctx context.Context, timeout time.Duration, vector
 
 	// Setup call back, we have to do this here or inside the mutex.
 	id := tag(wire.CmdInv+"-"+vector.Type.String(), vector.Hash)
-	log.Infof("GetData: %v", id)
 	getDataC, err := c.setPending(id)
 	if err != nil {
 		return nil, err
@@ -598,11 +601,11 @@ func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
 	}
 
 	// Set default handlers
-	cp.setHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
 	cp.setHandler(wire.CmdAddr, cp.onAddrHandler)
 	cp.setHandler(wire.CmdAddrV2, cp.onAddrHandler)
 	cp.setHandler(wire.CmdBlock, cp.onBlockHandler)
 	cp.setHandler(wire.CmdInv, cp.onInvHandler)
+	cp.setHandler(wire.CmdFeeFilter, cp.onFeeFilterHandler)
 	cp.setHandler(wire.CmdHeaders, cp.onHeadersHandler)
 	cp.setHandler(wire.CmdPing, cp.onPingHandler)
 	cp.setHandler(wire.CmdPong, cp.onPongHandler)
