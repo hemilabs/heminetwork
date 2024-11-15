@@ -61,6 +61,24 @@ func (c *CookedPeer) String() string {
 	return c.p.String()
 }
 
+func (c *CookedPeer) IsConnected() bool {
+	log.Tracef("IsConnected")
+	defer log.Tracef("IsConnected exit")
+
+	return c.p.IsConnected()
+}
+
+func (c *CookedPeer) HasService(f wire.ServiceFlag) bool {
+	log.Tracef("HasService 0x%0x", f)
+	defer log.Tracef("HasService exit 0x%0x", f)
+
+	v, err := c.p.RemoteVersion()
+	if err != nil {
+		return false
+	}
+	return v.HasService(f)
+}
+
 func (c *CookedPeer) dummyHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("dummyHandler %v", msg.Command())
 	defer log.Tracef("dummyHandler %v exit", msg.Command())

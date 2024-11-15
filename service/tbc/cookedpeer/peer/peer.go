@@ -293,7 +293,9 @@ func (p *Peer) HasService(f wire.ServiceFlag) bool {
 
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
-
+	if p.remoteVersion == nil {
+		return false
+	}
 	return p.remoteVersion.HasService(f)
 }
 
