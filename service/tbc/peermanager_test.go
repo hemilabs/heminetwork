@@ -13,7 +13,7 @@ import (
 
 	"github.com/btcsuite/btcd/wire"
 
-	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/rawpeer"
+	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
 )
 
 func ping(ctx context.Context, t *testing.T, p *rawpeer.RawPeer) error {

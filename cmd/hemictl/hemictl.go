@@ -44,7 +44,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer"
+	"github.com/hemilabs/heminetwork/service/tbc/peer"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -683,7 +683,7 @@ func p2p() error {
 		return fmt.Errorf("invalid net: %v", net)
 	}
 
-	cp, err := cookedpeer.New(network, 0xc0ffee, addr)
+	cp, err := peer.New(network, 0xc0ffee, addr)
 	if err != nil {
 		return err
 	}

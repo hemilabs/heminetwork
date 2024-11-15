@@ -2,7 +2,7 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-package cookedpeer
+package peer
 
 import (
 	"context"
@@ -16,7 +16,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/rawpeer"
+	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
 )
 
 const (
@@ -41,7 +41,7 @@ func tag(prefix string, suffix any) string {
 	return fmt.Sprintf("%v_%v", prefix, suffix)
 }
 
-type CookedPeer struct {
+type Peer struct {
 	mtx sync.Mutex
 
 	wg          *sync.WaitGroup
@@ -57,29 +57,29 @@ type CookedPeer struct {
 	handlers map[string]func(context.Context, wire.Message) error
 }
 
-func (c *CookedPeer) String() string {
-	return c.p.String()
+func (p *Peer) String() string {
+	return p.p.String()
 }
 
-func (c *CookedPeer) IsConnected() bool {
+func (p *Peer) IsConnected() bool {
 	log.Tracef("IsConnected")
 	defer log.Tracef("IsConnected exit")
 
-	return c.p.IsConnected()
+	return p.p.IsConnected()
 }
 
-func (c *CookedPeer) HasService(f wire.ServiceFlag) bool {
+func (p *Peer) HasService(f wire.ServiceFlag) bool {
 	log.Tracef("HasService 0x%0x", f)
 	defer log.Tracef("HasService exit 0x%0x", f)
 
-	v, err := c.p.RemoteVersion()
+	v, err := p.p.RemoteVersion()
 	if err != nil {
 		return false
 	}
 	return v.HasService(f)
 }
 
-func (c *CookedPeer) dummyHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) dummyHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("dummyHandler %v", msg.Command())
 	defer log.Tracef("dummyHandler %v exit", msg.Command())
 
@@ -88,22 +88,22 @@ func (c *CookedPeer) dummyHandler(ctx context.Context, msg wire.Message) error {
 	return nil
 }
 
-func (c *CookedPeer) onFeeFilterHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onFeeFilterHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onFeeFilterHandler")
 	defer log.Tracef("onFeeFilterHandler exit")
 
 	if m, ok := msg.(*wire.MsgFeeFilter); ok {
 		log.Debugf("fee filter: %v", m.MinFee)
-		c.mtx.Lock()
-		c.feeFilterLast = m
-		c.mtx.Unlock()
+		p.mtx.Lock()
+		p.feeFilterLast = m
+		p.mtx.Unlock()
 		return nil
 	}
 
 	return ErrInvalidType
 }
 
-func (c *CookedPeer) onPingHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onPingHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onPingHandler")
 	defer log.Tracef("onPingHandler exit")
 
@@ -112,16 +112,16 @@ func (c *CookedPeer) onPingHandler(ctx context.Context, msg wire.Message) error 
 		return ErrInvalidType
 	}
 
-	err := c.p.Write(defaultCmdTimeout, wire.NewMsgPong(m.Nonce))
+	err := p.p.Write(defaultCmdTimeout, wire.NewMsgPong(m.Nonce))
 	if err != nil {
-		return fmt.Errorf("could not write pong message %v: %w", c.p, err)
+		return fmt.Errorf("could not write pong message %v: %w", p.p, err)
 	}
-	log.Debugf("onPingHandler %v: pong %v", c.p, m.Nonce)
+	log.Debugf("onPingHandler %v: pong %v", p.p, m.Nonce)
 
 	return nil
 }
 
-func (c *CookedPeer) onAddrHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onAddrHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onAddrHandler")
 	defer log.Tracef("onAddrHandler exit")
 
@@ -134,12 +134,12 @@ func (c *CookedPeer) onAddrHandler(ctx context.Context, msg wire.Message) error 
 	id := tag(wire.CmdGetAddr, 0)
 	log.Debugf("onAddrHandler (%T): %v", msg, id)
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case c.pending[id] <- msg:
+	case p.pending[id] <- msg:
 	default:
 		return fmt.Errorf("no reader addr: %v", id)
 	}
@@ -147,7 +147,7 @@ func (c *CookedPeer) onAddrHandler(ctx context.Context, msg wire.Message) error 
 	return nil
 }
 
-func (c *CookedPeer) onPongHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onPongHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onPongHandler")
 	defer log.Tracef("onPongHandler exit")
 
@@ -158,12 +158,12 @@ func (c *CookedPeer) onPongHandler(ctx context.Context, msg wire.Message) error 
 	id := tag(msg.Command(), m.Nonce)
 	log.Debugf("onPongHandler: %v", id)
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case c.pending[id] <- m:
+	case p.pending[id] <- m:
 	default:
 		return fmt.Errorf("no reader pong: %v", m.Nonce)
 	}
@@ -171,7 +171,7 @@ func (c *CookedPeer) onPongHandler(ctx context.Context, msg wire.Message) error 
 	return nil
 }
 
-func (c *CookedPeer) onBlockHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onBlockHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onBlockHandler")
 	defer log.Tracef("onBlockHandler exit")
 
@@ -182,12 +182,12 @@ func (c *CookedPeer) onBlockHandler(ctx context.Context, msg wire.Message) error
 	id := tag(wire.CmdInv+"-"+wire.InvTypeBlock.String(), m.Header.BlockHash())
 	log.Debugf("onBlockHandler: %v", id)
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case c.pending[id] <- m:
+	case p.pending[id] <- m:
 	default:
 		return fmt.Errorf("no reader block: %v", m.Header.BlockHash())
 	}
@@ -195,7 +195,7 @@ func (c *CookedPeer) onBlockHandler(ctx context.Context, msg wire.Message) error
 	return nil
 }
 
-func (c *CookedPeer) onInvHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onInvHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onInvHandler")
 	defer log.Tracef("onInvHandler exit")
 
@@ -207,11 +207,11 @@ func (c *CookedPeer) onInvHandler(ctx context.Context, msg wire.Message) error {
 	// XXX this is no longer correct but will flow through here when
 	// unsolicited inv comes through.
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 	// See if we have a mempool command pending and if we received a bunch of TX'
 	id := tag(wire.CmdMemPool, 0)
-	if replyC, ok := c.pending[id]; ok {
+	if replyC, ok := p.pending[id]; ok {
 		if len(m.InvList) > 1 {
 			// Assume this was a mempool call
 			select {
@@ -228,7 +228,7 @@ func (c *CookedPeer) onInvHandler(ctx context.Context, msg wire.Message) error {
 	for _, v := range m.InvList {
 		id := tag(wire.CmdInv+"-"+v.Type.String(), v.Hash)
 		log.Tracef("onInvHandler: %v", id)
-		replyC, ok := c.pending[id]
+		replyC, ok := p.pending[id]
 		if !ok {
 			continue
 		}
@@ -247,7 +247,7 @@ func (c *CookedPeer) onInvHandler(ctx context.Context, msg wire.Message) error {
 	return nil
 }
 
-func (c *CookedPeer) onNotFoundHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onNotFoundHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onNotFoundHandler")
 	defer log.Tracef("onNotFoundHandler exit")
 
@@ -256,12 +256,12 @@ func (c *CookedPeer) onNotFoundHandler(ctx context.Context, msg wire.Message) er
 		return ErrInvalidType
 	}
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 	for _, v := range m.InvList {
 		id := tag(wire.CmdInv+"-"+v.Type.String(), v.Hash)
 		log.Debugf("onInvHandler: %v", id)
-		replyC, ok := c.pending[id]
+		replyC, ok := p.pending[id]
 		if !ok {
 			continue
 		}
@@ -280,7 +280,7 @@ func (c *CookedPeer) onNotFoundHandler(ctx context.Context, msg wire.Message) er
 	return nil
 }
 
-func (c *CookedPeer) onTxHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onTxHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onTxHandler")
 	defer log.Tracef("onTxHandler exit")
 
@@ -291,12 +291,12 @@ func (c *CookedPeer) onTxHandler(ctx context.Context, msg wire.Message) error {
 	id := tag(wire.CmdInv+"-"+wire.InvTypeTx.String(), m.TxHash())
 	log.Debugf("onTxHandler: %v", id)
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case c.pending[id] <- m:
+	case p.pending[id] <- m:
 	default:
 		return fmt.Errorf("no reader tx: %v", m.TxHash())
 	}
@@ -304,7 +304,7 @@ func (c *CookedPeer) onTxHandler(ctx context.Context, msg wire.Message) error {
 	return nil
 }
 
-func (c *CookedPeer) onHeadersHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onHeadersHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("onHeadersHandler")
 	defer log.Tracef("onHeadersHandler exit")
 
@@ -315,12 +315,12 @@ func (c *CookedPeer) onHeadersHandler(ctx context.Context, msg wire.Message) err
 	id := tag(msg.Command(), 0)
 	log.Debugf("onHeadersHandler: %v", id)
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case c.pending[id] <- m:
+	case p.pending[id] <- m:
 	default:
 		return fmt.Errorf("no reader headers: %v", 0)
 	}
@@ -328,46 +328,46 @@ func (c *CookedPeer) onHeadersHandler(ctx context.Context, msg wire.Message) err
 	return nil
 }
 
-func (c *CookedPeer) setPending(id string) (chan wire.Message, error) {
+func (p *Peer) setPending(id string) (chan wire.Message, error) {
 	log.Tracef("setPending %v", id)
 	defer log.Tracef("setPending %v exit", id)
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 
-	if _, ok := c.pending[id]; ok {
+	if _, ok := p.pending[id]; ok {
 		return nil, fmt.Errorf("pending: %v", id)
 	}
 	replyC := make(chan wire.Message)
-	c.pending[id] = replyC
+	p.pending[id] = replyC
 
 	return replyC, nil
 }
 
-func (c *CookedPeer) killPending(id string) {
-	c.mtx.Lock()
-	delete(c.pending, id)
-	c.mtx.Unlock()
+func (p *Peer) killPending(id string) {
+	p.mtx.Lock()
+	delete(p.pending, id)
+	p.mtx.Unlock()
 }
 
-func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, error) {
+func (p *Peer) GetAddr(pctx context.Context, timeout time.Duration) (any, error) {
 	log.Tracef("GetAddr")
 	defer log.Tracef("GetAddr exit")
 
 	// Setup call back, we have to do this here or inside the mutex.
 	id := tag(wire.CmdGetAddr, 0)
-	getAddrC, err := c.setPending(id)
+	getAddrC, err := p.setPending(id)
 	if err != nil {
 		return nil, err
 	}
 	defer close(getAddrC)
-	defer c.killPending(id)
+	defer p.killPending(id)
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
 	// Send message to peer
-	err = c.p.Write(timeout, &wire.MsgGetAddr{})
+	err = p.p.Write(timeout, &wire.MsgGetAddr{})
 	if err != nil {
 		return nil, err
 	}
@@ -388,19 +388,19 @@ func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, 
 }
 
 // GetBlocks is really a legacy call; debating if we should bring it back.
-//func (c *CookedPeer) GetBlocks(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgInv, error) {
+//func (p *Peer) GetBlocks(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgInv, error) {
 //	log.Tracef("GetBlock %v", blockHash)
 //	defer log.Tracef("GetBlocks %v exit", blockHash)
 //
 //	// Setup call back, we have to do this here or inside the mutex.
 //	id := tag(wire.CmdInv+"-"+wire.InvTypeBlock.String(), blockHash)
-//	getBlocksC, err := c.setPending(id)
+//	getBlocksC, err := p.setPending(id)
 //	log.Infof("GetBlocks: %v", id)
 //	if err != nil {
 //		return nil, err
 //	}
 //	defer close(getBlocksC)
-//	defer c.killPending(id)
+//	defer p.killPending(id)
 //
 //	ctx, cancel := context.WithTimeout(pctx, timeout)
 //	defer cancel()
@@ -410,7 +410,7 @@ func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, 
 //	if err := gb.AddBlockLocatorHash(blockHash); err != nil {
 //		return nil, err
 //	}
-//	err = c.p.Write(timeout, gb)
+//	err = p.p.Write(timeout, gb)
 //	if err != nil {
 //		return nil, err
 //	}
@@ -427,34 +427,34 @@ func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, 
 //	}
 //}
 
-func (c *CookedPeer) FeeFilter() (*wire.MsgFeeFilter, error) {
+func (p *Peer) FeeFilter() (*wire.MsgFeeFilter, error) {
 	log.Tracef("FeeFilter")
 	defer log.Tracef("FeeFilter exit")
 
-	c.mtx.Lock()
-	defer c.mtx.Unlock()
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
 
-	if c.feeFilterLast == nil {
+	if p.feeFilterLast == nil {
 		return nil, fmt.Errorf("no fee filter received")
 	}
 
-	ff := *c.feeFilterLast
+	ff := *p.feeFilterLast
 
 	return &ff, nil
 }
 
-func (c *CookedPeer) GetData(pctx context.Context, timeout time.Duration, vector *wire.InvVect) (any, error) {
+func (p *Peer) GetData(pctx context.Context, timeout time.Duration, vector *wire.InvVect) (any, error) {
 	log.Tracef("GetData %v: %v", vector.Type, vector.Hash)
 	defer log.Tracef("GetData %v: %v exit", vector.Type, vector.Hash)
 
 	// Setup call back, we have to do this here or inside the mutex.
 	id := tag(wire.CmdInv+"-"+vector.Type.String(), vector.Hash)
-	getDataC, err := c.setPending(id)
+	getDataC, err := p.setPending(id)
 	if err != nil {
 		return nil, err
 	}
 	defer close(getDataC)
-	defer c.killPending(id)
+	defer p.killPending(id)
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
@@ -464,7 +464,7 @@ func (c *CookedPeer) GetData(pctx context.Context, timeout time.Duration, vector
 	if err := gd.AddInvVect(vector); err != nil {
 		return nil, err
 	}
-	err = c.p.Write(timeout, gd)
+	err = p.p.Write(timeout, gd)
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +486,7 @@ func (c *CookedPeer) GetData(pctx context.Context, timeout time.Duration, vector
 	}
 }
 
-func (c *CookedPeer) GetBlock(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
+func (p *Peer) GetBlock(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
 	log.Tracef("GetBlock %v", blockHash)
 	defer log.Tracef("GetBlock %v exit", blockHash)
 
@@ -495,7 +495,7 @@ func (c *CookedPeer) GetBlock(pctx context.Context, timeout time.Duration, block
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
-	headers, err := c.GetHeaders(ctx, timeout, []*chainhash.Hash{blockHash}, nil)
+	headers, err := p.GetHeaders(ctx, timeout, []*chainhash.Hash{blockHash}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -508,7 +508,7 @@ func (c *CookedPeer) GetBlock(pctx context.Context, timeout time.Duration, block
 		return nil, ErrUnknown
 	}
 
-	blk, err := c.GetData(ctx, timeout, wire.NewInvVect(wire.InvTypeBlock, blockHash))
+	blk, err := p.GetData(ctx, timeout, wire.NewInvVect(wire.InvTypeBlock, blockHash))
 	if err != nil {
 		return nil, err
 	}
@@ -519,14 +519,14 @@ func (c *CookedPeer) GetBlock(pctx context.Context, timeout time.Duration, block
 	return nil, fmt.Errorf("invalid block type: %T", blk)
 }
 
-func (c *CookedPeer) GetTx(pctx context.Context, timeout time.Duration, txId *chainhash.Hash) (*wire.MsgTx, error) {
+func (p *Peer) GetTx(pctx context.Context, timeout time.Duration, txId *chainhash.Hash) (*wire.MsgTx, error) {
 	log.Tracef("GetTx %v", txId)
 	defer log.Tracef("GetTx %v exit", txId)
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
-	tx, err := c.GetData(ctx, timeout, wire.NewInvVect(wire.InvTypeTx, txId))
+	tx, err := p.GetData(ctx, timeout, wire.NewInvVect(wire.InvTypeTx, txId))
 	if err != nil {
 		return nil, err
 	}
@@ -540,24 +540,24 @@ func (c *CookedPeer) GetTx(pctx context.Context, timeout time.Duration, txId *ch
 	return nil, fmt.Errorf("invalid tx type: %T", tx)
 }
 
-func (c *CookedPeer) Ping(pctx context.Context, timeout time.Duration, nonce uint64) (*wire.MsgPong, error) {
+func (p *Peer) Ping(pctx context.Context, timeout time.Duration, nonce uint64) (*wire.MsgPong, error) {
 	log.Tracef("Ping %v", nonce)
 	defer log.Tracef("Ping %v exit", nonce)
 
 	// Setup call back, we have to do this here or inside the mutex.
 	id := tag(wire.CmdPong, nonce)
-	pongC, err := c.setPending(id)
+	pongC, err := p.setPending(id)
 	if err != nil {
 		return nil, err
 	}
 	defer close(pongC)
-	defer c.killPending(id)
+	defer p.killPending(id)
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
 	// Send message to peer
-	err = c.p.Write(timeout, &wire.MsgPing{Nonce: nonce})
+	err = p.p.Write(timeout, &wire.MsgPing{Nonce: nonce})
 	if err != nil {
 		return nil, err
 	}
@@ -574,7 +574,7 @@ func (c *CookedPeer) Ping(pctx context.Context, timeout time.Duration, nonce uin
 	}
 }
 
-func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, hashes []*chainhash.Hash, stop *chainhash.Hash) (*wire.MsgHeaders, error) {
+func (p *Peer) GetHeaders(pctx context.Context, timeout time.Duration, hashes []*chainhash.Hash, stop *chainhash.Hash) (*wire.MsgHeaders, error) {
 	log.Tracef("GetHeaders")
 	defer log.Tracef("GetHeaders exit")
 
@@ -584,12 +584,12 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 
 	// Record outstanding headers
 	id := tag(wire.CmdHeaders, 0)
-	headersC, err := c.setPending(id)
+	headersC, err := p.setPending(id)
 	if err != nil {
 		return nil, err
 	}
 	defer close(headersC)
-	defer c.killPending(id)
+	defer p.killPending(id)
 
 	// Prepare message
 	gh := wire.NewMsgGetHeaders()
@@ -608,7 +608,7 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 	defer cancel()
 
 	// Send get headers message to peer
-	err = c.p.Write(timeout, gh)
+	err = p.p.Write(timeout, gh)
 	if err != nil {
 		return nil, err
 	}
@@ -627,7 +627,7 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 			return m, nil // Peer caught up
 		}
 		// deal with genesis
-		if c.chainParams.GenesisHash.IsEqual(&m.Headers[0].PrevBlock) {
+		if p.chainParams.GenesisHash.IsEqual(&m.Headers[0].PrevBlock) {
 			if m.Headers[0].PrevBlock.IsEqual(hashes[0]) {
 				// Got genesis and asked for genesis.
 				return m, nil
@@ -638,24 +638,24 @@ func (c *CookedPeer) GetHeaders(pctx context.Context, timeout time.Duration, has
 	}
 }
 
-func (c *CookedPeer) MemPool(pctx context.Context, timeout time.Duration) (*wire.MsgInv, error) {
+func (p *Peer) MemPool(pctx context.Context, timeout time.Duration) (*wire.MsgInv, error) {
 	log.Tracef("MemPool")
 	defer log.Tracef("MemPool exit")
 
 	// Setup call back, we have to do this here or inside the mutex.
 	id := tag(wire.CmdMemPool, 0)
-	memPoolC, err := c.setPending(id)
+	memPoolC, err := p.setPending(id)
 	if err != nil {
 		return nil, err
 	}
 	defer close(memPoolC)
-	defer c.killPending(id)
+	defer p.killPending(id)
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
 	defer cancel()
 
 	// Send message to peer
-	err = c.p.Write(timeout, &wire.MsgMemPool{})
+	err = p.p.Write(timeout, &wire.MsgMemPool{})
 	if err != nil {
 		return nil, err
 	}
@@ -672,39 +672,39 @@ func (c *CookedPeer) MemPool(pctx context.Context, timeout time.Duration) (*wire
 	}
 }
 
-func (c *CookedPeer) Remote() (*wire.MsgVersion, error) {
+func (p *Peer) Remote() (*wire.MsgVersion, error) {
 	log.Tracef("Remote")
 	defer log.Tracef("Remote exit")
 
 	// raw peer returns a copy of the struct so just pass it on.
-	return c.p.RemoteVersion()
+	return p.p.RemoteVersion()
 }
 
-func (c *CookedPeer) callback(msg wire.Message) func(context.Context, wire.Message) error {
+func (p *Peer) callback(msg wire.Message) func(context.Context, wire.Message) error {
 	log.Tracef("callback %v", msg.Command())
 	defer log.Tracef("callback %v exit", msg.Command())
 
-	c.mtx.Lock()
-	cb := c.handlers[msg.Command()]
-	c.mtx.Unlock()
+	p.mtx.Lock()
+	cb := p.handlers[msg.Command()]
+	p.mtx.Unlock()
 	if cb == nil {
-		cb = c.dummyHandler
+		cb = p.dummyHandler
 	}
 	return cb
 }
 
-func (c *CookedPeer) readLoop(ctx context.Context) {
+func (p *Peer) readLoop(ctx context.Context) {
 	log.Tracef("readLoop")
 	defer log.Tracef("readLoop exit")
 
-	defer c.wg.Done()
+	defer p.wg.Done()
 
 	for {
-		msg, raw, err := c.p.Read(0)
+		msg, raw, err := p.p.Read(0)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue
 		} else if err != nil {
-			log.Debugf("%v: %v", c.p, err)
+			log.Debugf("%v: %v", p.p, err)
 			return
 		}
 		_ = raw
@@ -716,54 +716,54 @@ func (c *CookedPeer) readLoop(ctx context.Context) {
 		default:
 		}
 
-		cb := c.callback(msg)
+		cb := p.callback(msg)
 		if err := cb(ctx, msg); err != nil {
 			log.Errorf("%v: %v", msg.Command(), err)
 		}
 	}
 }
 
-func (c *CookedPeer) Connect(ctx context.Context) error {
+func (p *Peer) Connect(ctx context.Context) error {
 	log.Tracef("Connect")
 	defer log.Tracef("Connect exit")
 
-	err := c.p.Connect(ctx)
+	err := p.p.Connect(ctx)
 	if err != nil {
 		return err
 	}
 
-	c.wg.Add(1)
-	go c.readLoop(ctx)
+	p.wg.Add(1)
+	go p.readLoop(ctx)
 
 	return nil
 }
 
-func (c *CookedPeer) Close() error {
+func (p *Peer) Close() error {
 	log.Tracef("Close")
 	defer log.Tracef("Close exit")
 
-	return c.p.Close()
+	return p.p.Close()
 }
 
-func (c *CookedPeer) setHandler(cmd string, f func(context.Context, wire.Message) error) {
+func (p *Peer) setHandler(cmd string, f func(context.Context, wire.Message) error) {
 	log.Tracef("setHandler %v", cmd)
 	defer log.Tracef("setHandler %v exit", cmd)
 
-	c.mtx.Lock()
+	p.mtx.Lock()
 	if f == nil {
-		delete(c.handlers, cmd)
+		delete(p.handlers, cmd)
 	} else {
-		c.handlers[cmd] = f
+		p.handlers[cmd] = f
 	}
-	c.mtx.Unlock()
+	p.mtx.Unlock()
 }
 
-func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
+func New(network wire.BitcoinNet, id int, address string) (*Peer, error) {
 	p, err := rawpeer.New(network, id, address)
 	if err != nil {
 		return nil, err
 	}
-	cp := &CookedPeer{
+	cp := &Peer{
 		wg: new(sync.WaitGroup),
 		p:  p,
 
