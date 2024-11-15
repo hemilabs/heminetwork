@@ -6,6 +6,7 @@ package peer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -34,18 +35,17 @@ func TestPeer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	err = p.Connect(ctx)
-	if err != nil {
+
+	if err = p.Connect(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	to := 5 * time.Second
-
 	// Get genesis block
 	block0Hash := s2ch("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
-	h, err := p.GetHeaders(ctx, to, []*chainhash.Hash{block0Hash}, nil)
+	h, err := p.GetHeaders(ctx, []*chainhash.Hash{block0Hash}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,14 +55,14 @@ func TestPeer(t *testing.T) {
 
 	// Get unknown block
 	blockUnknown := &chainhash.Hash{}
-	h, err = p.GetHeaders(ctx, to, []*chainhash.Hash{blockUnknown}, nil)
-	if err != ErrUnknown {
+	h, err = p.GetHeaders(ctx, []*chainhash.Hash{blockUnknown}, nil)
+	if !errors.Is(err, ErrUnknown) {
 		t.Fatalf("expected unknown error, got %v", err)
 	}
 
 	// Get block 1 headers
 	block1Hash := s2ch("00000000b873e79784647a6c82962c70d228557d24a747ea4d1b8bbe878e1206")
-	h, err = p.GetHeaders(ctx, to, []*chainhash.Hash{block1Hash}, nil)
+	h, err = p.GetHeaders(ctx, []*chainhash.Hash{block1Hash}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Ask unknown and block 1
-	h, err = p.GetHeaders(ctx, to, []*chainhash.Hash{blockUnknown, block1Hash}, nil)
+	h, err = p.GetHeaders(ctx, []*chainhash.Hash{blockUnknown, block1Hash}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Ask block 1 and unknown
-	h, err = p.GetHeaders(ctx, to, []*chainhash.Hash{block1Hash, blockUnknown}, nil)
+	h, err = p.GetHeaders(ctx, []*chainhash.Hash{block1Hash, blockUnknown}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestPeer(t *testing.T) {
 
 	// Ask block 2 and block 1
 	block2Hash := s2ch("000000006c02c8ea6e4ff69651f7fcde348fb9d557a06e6957b65552002a7820")
-	h, err = p.GetHeaders(ctx, to, []*chainhash.Hash{block2Hash, block1Hash}, nil)
+	h, err = p.GetHeaders(ctx, []*chainhash.Hash{block2Hash, block1Hash}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Ask block 1 and block 2
-	h, err = p.GetHeaders(ctx, to, []*chainhash.Hash{block1Hash, block2Hash}, nil)
+	h, err = p.GetHeaders(ctx, []*chainhash.Hash{block1Hash, block2Hash}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestPeer(t *testing.T) {
 			time.Sleep(time.Duration(r.Int31()%11) * time.Millisecond)
 
 			pongs.Store(nonce, struct{}{})
-			pong, err := p.Ping(ctx, to, nonce)
+			pong, err := p.Ping(ctx, nonce)
 			if err != nil {
 				panic(err)
 			}
@@ -145,7 +145,7 @@ func TestPeer(t *testing.T) {
 	})
 
 	// Get addresses v2
-	a, err := p.GetAddr(ctx, to)
+	a, err := p.GetAddr(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Get block 1
-	block1, err := p.GetBlock(ctx, to, block1Hash)
+	block1, err := p.GetBlock(ctx, block1Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,8 +164,8 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Get unknown block
-	bxx, err := p.GetBlock(ctx, to, blockUnknown)
-	if err != ErrUnknown {
+	bxx, err := p.GetBlock(ctx, blockUnknown)
+	if !errors.Is(err, ErrUnknown) {
 		t.Fatal(err)
 	}
 	if bxx != nil {
@@ -174,7 +174,7 @@ func TestPeer(t *testing.T) {
 
 	// Get coinbase Tx from block 1, has been pruned
 	txID := s2ch("f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba")
-	tx, err := p.GetTx(ctx, to, txID)
+	tx, err := p.GetTx(ctx, txID)
 	if err != ErrUnknown {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestPeer(t *testing.T) {
 	}
 
 	// Get mempool
-	mp, err := p.MemPool(ctx, 30*time.Second)
+	mp, err := p.MemPool(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestPeer(t *testing.T) {
 
 	// Ask for a recent TX, will be pruned later
 	recentTx := &mp.InvList[0].Hash
-	tx, err = p.GetTx(ctx, to, recentTx)
+	tx, err = p.GetTx(ctx, recentTx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,8 +205,7 @@ func TestPeer(t *testing.T) {
 		t.Fatalf("invalid tx id: %v", txhash)
 	}
 
-	err = p.Close()
-	if err != nil {
+	if err = p.Close(); err != nil {
 		t.Fatal(err)
 	}
 }

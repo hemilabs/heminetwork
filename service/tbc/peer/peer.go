@@ -79,7 +79,7 @@ func (p *Peer) HasService(f wire.ServiceFlag) bool {
 	return v.HasService(f)
 }
 
-func (p *Peer) dummyHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) dummyHandler(_ context.Context, msg wire.Message) error {
 	log.Tracef("dummyHandler %v", msg.Command())
 	defer log.Tracef("dummyHandler %v exit", msg.Command())
 
@@ -88,7 +88,7 @@ func (p *Peer) dummyHandler(ctx context.Context, msg wire.Message) error {
 	return nil
 }
 
-func (p *Peer) onFeeFilterHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onFeeFilterHandler(_ context.Context, msg wire.Message) error {
 	log.Tracef("onFeeFilterHandler")
 	defer log.Tracef("onFeeFilterHandler exit")
 
@@ -103,7 +103,7 @@ func (p *Peer) onFeeFilterHandler(ctx context.Context, msg wire.Message) error {
 	return ErrInvalidType
 }
 
-func (p *Peer) onPingHandler(ctx context.Context, msg wire.Message) error {
+func (p *Peer) onPingHandler(_ context.Context, msg wire.Message) error {
 	log.Tracef("onPingHandler")
 	defer log.Tracef("onPingHandler exit")
 
@@ -350,82 +350,49 @@ func (p *Peer) killPending(id string) {
 	p.mtx.Unlock()
 }
 
-func (p *Peer) GetAddr(pctx context.Context, timeout time.Duration) (any, error) {
+func (p *Peer) GetAddr(ctx context.Context) (any, error) {
 	log.Tracef("GetAddr")
 	defer log.Tracef("GetAddr exit")
 
-	// Setup call back, we have to do this here or inside the mutex.
+	// Send message to peer and receive response
 	id := tag(wire.CmdGetAddr, 0)
-	getAddrC, err := p.setPending(id)
-	if err != nil {
-		return nil, err
-	}
-	defer close(getAddrC)
-	defer p.killPending(id)
-
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	// Send message to peer
-	err = p.p.Write(timeout, &wire.MsgGetAddr{})
+	msg, err := p.call(ctx, id, &wire.MsgGetAddr{})
 	if err != nil {
 		return nil, err
 	}
 
-	// Wait for reply
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case msg := <-getAddrC:
-		if addrV2, ok := msg.(*wire.MsgAddrV2); ok {
-			return addrV2, nil
-		}
-		if addr, ok := msg.(*wire.MsgAddr); ok {
-			return addr, nil
-		}
-		return nil, fmt.Errorf("invalid addr type: %T", msg)
+	switch x := msg.(type) {
+	case *wire.MsgGetAddr:
+		return x, nil
+	case *wire.MsgAddrV2:
+		return x, nil
 	}
+	return nil, fmt.Errorf("invalid addr type: %T", msg)
 }
 
 // GetBlocks is really a legacy call; debating if we should bring it back.
-//func (p *Peer) GetBlocks(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgInv, error) {
-//	log.Tracef("GetBlock %v", blockHash)
-//	defer log.Tracef("GetBlocks %v exit", blockHash)
+// func (p *Peer) GetBlocks(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgInv, error) {
+// 	log.Tracef("GetBlock %v", blockHash)
+// 	defer log.Tracef("GetBlocks %v exit", blockHash)
 //
-//	// Setup call back, we have to do this here or inside the mutex.
-//	id := tag(wire.CmdInv+"-"+wire.InvTypeBlock.String(), blockHash)
-//	getBlocksC, err := p.setPending(id)
-//	log.Infof("GetBlocks: %v", id)
-//	if err != nil {
-//		return nil, err
-//	}
-//	defer close(getBlocksC)
-//	defer p.killPending(id)
+// 	// Prepare message
+// 	gb := wire.NewMsgGetBlocks(&chainhash.Hash{})
+// 	if err := gb.AddBlockLocatorHash(blockHash); err != nil {
+// 		return nil, err
+// 	}
 //
-//	ctx, cancel := context.WithTimeout(pctx, timeout)
-//	defer cancel()
+// 	// Send message to peer and receive response
+// 	id := tag(wire.CmdInv+"-"+wire.InvTypeBlock.String(), blockHash)
+// 	msg, err := p.call(ctx, id, gb)
+// 	if err != nil {
+// 		return nil, err
+// 	}
 //
-//	// Send message to peer
-//	gb := wire.NewMsgGetBlocks(&chainhash.Hash{})
-//	if err := gb.AddBlockLocatorHash(blockHash); err != nil {
-//		return nil, err
-//	}
-//	err = p.p.Write(timeout, gb)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	// Wait for reply
-//	select {
-//	case <-ctx.Done():
-//		return nil, ctx.Err()
-//	case msg := <-getBlocksC:
-//		if blocks, ok := msg.(*wire.MsgInv); ok {
-//			return blocks, nil
-//		}
-//		return nil, fmt.Errorf("invalid blocks type: %T", msg)
-//	}
-//}
+// 	if blocks, ok := msg.(*wire.MsgInv); ok {
+// 		return blocks, nil
+// 	}
+// 	return nil, fmt.Errorf("invalid blocks type: %T", msg)
+// }
 
 func (p *Peer) FeeFilter() (*wire.MsgFeeFilter, error) {
 	log.Tracef("FeeFilter")
@@ -439,68 +406,53 @@ func (p *Peer) FeeFilter() (*wire.MsgFeeFilter, error) {
 	}
 
 	ff := *p.feeFilterLast
-
 	return &ff, nil
 }
 
-func (p *Peer) GetData(pctx context.Context, timeout time.Duration, vector *wire.InvVect) (any, error) {
+func (p *Peer) GetData(ctx context.Context, vector *wire.InvVect) (any, error) {
 	log.Tracef("GetData %v: %v", vector.Type, vector.Hash)
 	defer log.Tracef("GetData %v: %v exit", vector.Type, vector.Hash)
 
-	// Setup call back, we have to do this here or inside the mutex.
-	id := tag(wire.CmdInv+"-"+vector.Type.String(), vector.Hash)
-	getDataC, err := p.setPending(id)
-	if err != nil {
-		return nil, err
-	}
-	defer close(getDataC)
-	defer p.killPending(id)
-
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	// Send message to peer
+	// Prepare message
 	gd := wire.NewMsgGetData()
 	if err := gd.AddInvVect(vector); err != nil {
 		return nil, err
 	}
-	err = p.p.Write(timeout, gd)
+
+	// Send message to peer and receive response
+	id := tag(wire.CmdInv+"-"+vector.Type.String(), vector.Hash)
+	msg, err := p.call(ctx, id, gd)
 	if err != nil {
 		return nil, err
 	}
 
-	// Wait for reply
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case msg := <-getDataC:
-		switch x := msg.(type) {
-		case *wire.MsgBlock:
-			return x, nil
-		case *wire.MsgTx:
-			return x, nil
-		case *wire.MsgNotFound:
-			return x, nil
-		}
-		return nil, fmt.Errorf("invalid get data type: %T", msg)
+	switch x := msg.(type) {
+	case *wire.MsgBlock:
+		return x, nil
+	case *wire.MsgTx:
+		return x, nil
+	case *wire.MsgNotFound:
+		return x, nil
 	}
+	return nil, fmt.Errorf("invalid data type: %T", msg)
 }
 
-func (p *Peer) GetBlock(pctx context.Context, timeout time.Duration, blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
+// GetBlock sends a getheaders(hash) call, then a getdata(hash) call to the peer
+// and returns the block.
+func (p *Peer) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error) {
 	log.Tracef("GetBlock %v", blockHash)
 	defer log.Tracef("GetBlock %v exit", blockHash)
 
 	// GetBlock is a compounded call. First it calls getheaders(hash)
 	// followed by a getdata(hash).
 
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-	headers, err := p.GetHeaders(ctx, timeout, []*chainhash.Hash{blockHash}, nil)
+	// Retrieve headers for the block.
+	headers, err := p.GetHeaders(ctx, []*chainhash.Hash{blockHash}, nil)
 	if err != nil {
 		return nil, err
 	}
-	// XXX we should cash the blocks the peer advertises since then we can
-	// skip the getheaders call.
+	// XXX we should cache the blocks the peer advertises since then we can
+	//  skip the getheaders call.
 	if len(headers.Headers) == 0 {
 		return nil, ErrUnknown
 	}
@@ -508,7 +460,8 @@ func (p *Peer) GetBlock(pctx context.Context, timeout time.Duration, blockHash *
 		return nil, ErrUnknown
 	}
 
-	blk, err := p.GetData(ctx, timeout, wire.NewInvVect(wire.InvTypeBlock, blockHash))
+	// Retrieve block.
+	blk, err := p.GetData(ctx, wire.NewInvVect(wire.InvTypeBlock, blockHash))
 	if err != nil {
 		return nil, err
 	}
@@ -516,17 +469,15 @@ func (p *Peer) GetBlock(pctx context.Context, timeout time.Duration, blockHash *
 		return b, nil
 	}
 
-	return nil, fmt.Errorf("invalid block type: %T", blk)
+	return nil, fmt.Errorf("unexpected blk type: %T", blk)
 }
 
-func (p *Peer) GetTx(pctx context.Context, timeout time.Duration, txId *chainhash.Hash) (*wire.MsgTx, error) {
+// GetTx writes a tx message to the peer and returns the response.
+func (p *Peer) GetTx(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
 	log.Tracef("GetTx %v", txId)
 	defer log.Tracef("GetTx %v exit", txId)
 
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	tx, err := p.GetData(ctx, timeout, wire.NewInvVect(wire.InvTypeTx, txId))
+	tx, err := p.GetData(ctx, wire.NewInvVect(wire.InvTypeTx, txId))
 	if err != nil {
 		return nil, err
 	}
@@ -537,59 +488,35 @@ func (p *Peer) GetTx(pctx context.Context, timeout time.Duration, txId *chainhas
 		return nil, ErrUnknown
 	}
 
-	return nil, fmt.Errorf("invalid tx type: %T", tx)
+	return nil, fmt.Errorf("unexpected tx type: %T", tx)
 }
 
-func (p *Peer) Ping(pctx context.Context, timeout time.Duration, nonce uint64) (*wire.MsgPong, error) {
+// Ping writes a ping message to the peer and returns the pong.
+func (p *Peer) Ping(ctx context.Context, nonce uint64) (*wire.MsgPong, error) {
 	log.Tracef("Ping %v", nonce)
 	defer log.Tracef("Ping %v exit", nonce)
 
-	// Setup call back, we have to do this here or inside the mutex.
+	// Send message to peer and receive response
 	id := tag(wire.CmdPong, nonce)
-	pongC, err := p.setPending(id)
-	if err != nil {
-		return nil, err
-	}
-	defer close(pongC)
-	defer p.killPending(id)
-
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	// Send message to peer
-	err = p.p.Write(timeout, &wire.MsgPing{Nonce: nonce})
+	msg, err := p.call(ctx, id, &wire.MsgPing{Nonce: nonce})
 	if err != nil {
 		return nil, err
 	}
 
-	// Wait for reply
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case msg := <-pongC:
-		if pong, ok := msg.(*wire.MsgPong); ok {
-			return pong, nil
-		}
-		return nil, fmt.Errorf("invalid pong type: %T", msg)
+	if pong, ok := msg.(*wire.MsgPong); ok {
+		return pong, nil
 	}
+	return nil, fmt.Errorf("unexpected msg type: %T", msg)
 }
 
-func (p *Peer) GetHeaders(pctx context.Context, timeout time.Duration, hashes []*chainhash.Hash, stop *chainhash.Hash) (*wire.MsgHeaders, error) {
+// GetHeaders writes a getheaders message to the peer and returns the headers.
+func (p *Peer) GetHeaders(ctx context.Context, hashes []*chainhash.Hash, stop *chainhash.Hash) (*wire.MsgHeaders, error) {
 	log.Tracef("GetHeaders")
 	defer log.Tracef("GetHeaders exit")
 
 	if len(hashes) == 0 {
 		return nil, errors.New("no hashes")
 	}
-
-	// Record outstanding headers
-	id := tag(wire.CmdHeaders, 0)
-	headersC, err := p.setPending(id)
-	if err != nil {
-		return nil, err
-	}
-	defer close(headersC)
-	defer p.killPending(id)
 
 	// Prepare message
 	gh := wire.NewMsgGetHeaders()
@@ -603,73 +530,49 @@ func (p *Peer) GetHeaders(pctx context.Context, timeout time.Duration, hashes []
 		}
 	}
 
-	// Setup call back, we have to do this here or inside the mutex.
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	// Send get headers message to peer
-	err = p.p.Write(timeout, gh)
+	// Send message to peer and receive response
+	id := tag(wire.CmdHeaders, 0)
+	msg, err := p.call(ctx, id, gh)
 	if err != nil {
 		return nil, err
 	}
 
-	// Wait for reply
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case msg := <-headersC:
-		m, ok := msg.(*wire.MsgHeaders)
-		if !ok {
-			return nil, fmt.Errorf("invalid headers type: %T", msg)
-		}
-		// catch standard responses
-		if len(m.Headers) == 0 {
-			return m, nil // Peer caught up
-		}
-		// deal with genesis
-		if p.chainParams.GenesisHash.IsEqual(&m.Headers[0].PrevBlock) {
-			if m.Headers[0].PrevBlock.IsEqual(hashes[0]) {
-				// Got genesis and asked for genesis.
-				return m, nil
-			}
-			return nil, ErrUnknown
-		}
-		return m, nil
+	m, ok := msg.(*wire.MsgHeaders)
+	if !ok {
+		return nil, fmt.Errorf("unexpected msg type: %T", msg)
 	}
+	// catch standard responses
+	if len(m.Headers) == 0 {
+		return m, nil // Peer caught up
+	}
+	// deal with genesis
+	if p.chainParams.GenesisHash.IsEqual(&m.Headers[0].PrevBlock) {
+		if m.Headers[0].PrevBlock.IsEqual(hashes[0]) {
+			// Got genesis and asked for genesis.
+			return m, nil
+		}
+		return nil, ErrUnknown
+	}
+
+	return m, nil
 }
 
-func (p *Peer) MemPool(pctx context.Context, timeout time.Duration) (*wire.MsgInv, error) {
+// MemPool writes a mempool message to the peer and returns the inv response.
+func (p *Peer) MemPool(ctx context.Context) (*wire.MsgInv, error) {
 	log.Tracef("MemPool")
 	defer log.Tracef("MemPool exit")
 
-	// Setup call back, we have to do this here or inside the mutex.
+	// Send message to peer and receive response
 	id := tag(wire.CmdMemPool, 0)
-	memPoolC, err := p.setPending(id)
-	if err != nil {
-		return nil, err
-	}
-	defer close(memPoolC)
-	defer p.killPending(id)
-
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	// Send message to peer
-	err = p.p.Write(timeout, &wire.MsgMemPool{})
+	msg, err := p.call(ctx, id, &wire.MsgMemPool{})
 	if err != nil {
 		return nil, err
 	}
 
-	// Wait for reply
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case msg := <-memPoolC:
-		if inv, ok := msg.(*wire.MsgInv); ok {
-			return inv, nil
-		}
-		return nil, fmt.Errorf("invalid mempool type: %T", msg)
+	if inv, ok := msg.(*wire.MsgInv); ok {
+		return inv, nil
 	}
+	return nil, fmt.Errorf("unexpected msg type: %T", msg)
 }
 
 func (p *Peer) Remote() (*wire.MsgVersion, error) {
@@ -678,6 +581,35 @@ func (p *Peer) Remote() (*wire.MsgVersion, error) {
 
 	// raw peer returns a copy of the struct so just pass it on.
 	return p.p.RemoteVersion()
+}
+
+// call writes a message to the peer and waits for a response.
+func (p *Peer) call(ctx context.Context, id string, m wire.Message) (any, error) {
+	c, err := p.setPending(id)
+	if err != nil {
+		return nil, err
+	}
+	defer close(c)
+	defer p.killPending(id)
+
+	// Get timeout from context
+	var timeout time.Duration
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = time.Until(deadline)
+	}
+
+	// Send message to peer
+	if err = p.p.Write(timeout, m); err != nil {
+		return nil, err
+	}
+
+	// Wait for reply
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case msg := <-c:
+		return msg, nil
+	}
 }
 
 func (p *Peer) callback(msg wire.Message) func(context.Context, wire.Message) error {

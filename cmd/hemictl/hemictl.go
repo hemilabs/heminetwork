@@ -691,10 +691,10 @@ func p2p() error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	err = cp.Connect(ctx)
-	if err != nil {
+	if err = cp.Connect(ctx); err != nil {
 		return err
 	}
+	defer cp.Close() // XXX: handle error?
 
 	// commands
 	var msg wire.Message
@@ -713,7 +713,7 @@ func p2p() error {
 		}
 
 	case "getaddr":
-		a, err := cp.GetAddr(ctx, timeout)
+		a, err := cp.GetAddr(ctx)
 		if err != nil {
 			return fmt.Errorf("get addr: %w", err)
 		}
@@ -736,7 +736,7 @@ func p2p() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		msg, err = cp.GetBlock(ctx, timeout, ch)
+		msg, err = cp.GetBlock(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("get block: %w", err)
 		}
@@ -761,7 +761,7 @@ func p2p() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		gd, err := cp.GetData(ctx, timeout, wire.NewInvVect(typ, ch))
+		gd, err := cp.GetData(ctx, wire.NewInvVect(typ, ch))
 		if err != nil {
 			return fmt.Errorf("get data: %w", err)
 		}
@@ -785,7 +785,7 @@ func p2p() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		msg, err = cp.GetHeaders(ctx, timeout, []*chainhash.Hash{ch}, nil)
+		msg, err = cp.GetHeaders(ctx, []*chainhash.Hash{ch}, nil)
 		if err != nil {
 			return fmt.Errorf("get headers: %w", err)
 		}
@@ -800,13 +800,13 @@ func p2p() error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		msg, err = cp.GetTx(ctx, timeout, ch)
+		msg, err = cp.GetTx(ctx, ch)
 		if err != nil {
 			return fmt.Errorf("get tx: %w", err)
 		}
 
 	case "mempool":
-		msg, err = cp.MemPool(ctx, timeout)
+		msg, err = cp.MemPool(ctx)
 		if err != nil {
 			return fmt.Errorf("mempool: %w", err)
 		}
@@ -820,7 +820,7 @@ func p2p() error {
 				return fmt.Errorf("nonce: %w", err)
 			}
 		}
-		msg, err = cp.Ping(ctx, timeout, n)
+		msg, err = cp.Ping(ctx, n)
 		if err != nil {
 			return fmt.Errorf("ping: %w", err)
 		}
