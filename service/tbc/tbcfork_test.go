@@ -28,7 +28,7 @@ import (
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/service/tbc/peer"
+	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/peer"
 )
 
 type block struct {

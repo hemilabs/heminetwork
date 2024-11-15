@@ -37,7 +37,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
-	"github.com/hemilabs/heminetwork/service/tbc/peer"
+	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/peer"
 	"github.com/hemilabs/heminetwork/ttl"
 )
 
