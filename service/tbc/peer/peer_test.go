@@ -175,7 +175,7 @@ func TestPeer(t *testing.T) {
 	// Get coinbase Tx from block 1, has been pruned
 	txID := s2ch("f0315ffc38709d70ad5647e22048358dd3745f3ce3874223c80a7c92fab0c8ba")
 	tx, err := p.GetTx(ctx, txID)
-	if err != ErrUnknown {
+	if !errors.Is(err, ErrUnknown) {
 		t.Fatal(err)
 	}
 	if tx != nil {

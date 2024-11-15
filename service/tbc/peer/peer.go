@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,15 +28,78 @@ const (
 var (
 	log = loggo.GetLogger("peer")
 
-	ErrInvalidType = errors.New("invalid type")
-	ErrPending     = errors.New("pending")
-	ErrUnknown     = errors.New("unknown")
+	ErrInvalidType    = new(InvalidTypeError)
+	ErrAlreadyPending = new(AlreadyPendingError)
+	ErrUnknown        = new(UnknownError)
 
 	defaultCmdTimeout = 5 * time.Second
 )
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
+}
+
+// AlreadyPendingError is an error returned when a message is already pending
+// and cannot be called more than once at a given time.
+type AlreadyPendingError struct {
+	id string
+}
+
+// Error returns the error string.
+func (e *AlreadyPendingError) Error() string {
+	return "already pending: " + e.id
+}
+
+// UnknownError is an error returned when the requested data cannot be found.
+type UnknownError struct {
+	typ    string
+	hashes []*chainhash.Hash
+}
+
+// newUnknownError returns a new UnknownError.
+func newUnknownError(typ string, hashes ...*chainhash.Hash) *UnknownError {
+	return &UnknownError{
+		typ:    typ,
+		hashes: hashes,
+	}
+}
+
+// Error returns the error string.
+func (e *UnknownError) Error() string {
+	var hashes string
+	if len(e.hashes) > 0 {
+		hashes = e.hashes[0].String()
+		for _, h := range e.hashes[1:] {
+			hashes += ", " + h.String()
+		}
+	}
+	return fmt.Sprintf("unknown %s: %s", e.typ, hashes)
+}
+
+// InvalidTypeError is an error returned when a message was received and was not
+// of the expected type.
+type InvalidTypeError struct {
+	actual   string
+	expected []string
+}
+
+// newInvalidTypeError returns a new InvalidTypeError.
+func newInvalidTypeError(msg any, expected ...string) error {
+	return &InvalidTypeError{reflect.TypeOf(msg).String(), expected}
+}
+
+// Error returns the error string.
+func (e *InvalidTypeError) Error() string {
+	switch {
+	case len(e.expected) == 0:
+		return fmt.Sprintf("invalid type: %s", e.actual)
+	case len(e.expected) == 1:
+		return fmt.Sprintf("invalid type: %s, expected %s",
+			e.actual, e.expected[0])
+	default:
+		return fmt.Sprintf("invalid type: %s, expected one of: %s",
+			e.actual, strings.Join(e.expected, ", "))
+	}
 }
 
 func tag(prefix string, suffix any) string {
@@ -100,7 +165,7 @@ func (p *Peer) onFeeFilterHandler(_ context.Context, msg wire.Message) error {
 		return nil
 	}
 
-	return ErrInvalidType
+	return newInvalidTypeError(msg, "*wire.MsgFeeFilter")
 }
 
 func (p *Peer) onPingHandler(_ context.Context, msg wire.Message) error {
@@ -109,7 +174,7 @@ func (p *Peer) onPingHandler(_ context.Context, msg wire.Message) error {
 
 	m, ok := msg.(*wire.MsgPing)
 	if !ok {
-		return ErrInvalidType
+		return newInvalidTypeError(msg, "*wire.MsgPing")
 	}
 
 	err := p.p.Write(defaultCmdTimeout, wire.NewMsgPong(m.Nonce))
@@ -129,7 +194,7 @@ func (p *Peer) onAddrHandler(ctx context.Context, msg wire.Message) error {
 	case *wire.MsgAddr:
 	case *wire.MsgAddrV2:
 	default:
-		return ErrInvalidType
+		return newInvalidTypeError(msg, "*wire.MsgAddr", "*wire.MsgAddrV2")
 	}
 	id := tag(wire.CmdGetAddr, 0)
 	log.Debugf("onAddrHandler (%T): %v", msg, id)
@@ -153,7 +218,7 @@ func (p *Peer) onPongHandler(ctx context.Context, msg wire.Message) error {
 
 	m, ok := msg.(*wire.MsgPong)
 	if !ok {
-		return ErrInvalidType
+		return newInvalidTypeError(msg, "*wire.MsgPong")
 	}
 	id := tag(msg.Command(), m.Nonce)
 	log.Debugf("onPongHandler: %v", id)
@@ -177,7 +242,7 @@ func (p *Peer) onBlockHandler(ctx context.Context, msg wire.Message) error {
 
 	m, ok := msg.(*wire.MsgBlock)
 	if !ok {
-		return ErrInvalidType
+		return newInvalidTypeError(msg, "*wire.MsgBlock")
 	}
 	id := tag(wire.CmdInv+"-"+wire.InvTypeBlock.String(), m.Header.BlockHash())
 	log.Debugf("onBlockHandler: %v", id)
@@ -201,7 +266,7 @@ func (p *Peer) onInvHandler(ctx context.Context, msg wire.Message) error {
 
 	m, ok := msg.(*wire.MsgInv)
 	if !ok {
-		return ErrInvalidType
+		return newInvalidTypeError(msg, "*wire.MsgInv")
 	}
 
 	// XXX this is no longer correct but will flow through here when
@@ -253,7 +318,7 @@ func (p *Peer) onNotFoundHandler(ctx context.Context, msg wire.Message) error {
 
 	m, ok := msg.(*wire.MsgNotFound)
 	if !ok {
-		return ErrInvalidType
+		return newInvalidTypeError(msg, "*wire.MsgNotFound")
 	}
 
 	p.mtx.Lock()
@@ -286,7 +351,7 @@ func (p *Peer) onTxHandler(ctx context.Context, msg wire.Message) error {
 
 	m, ok := msg.(*wire.MsgTx)
 	if !ok {
-		return ErrInvalidType
+		return newInvalidTypeError(msg, "*wire.MsgTx")
 	}
 	id := tag(wire.CmdInv+"-"+wire.InvTypeTx.String(), m.TxHash())
 	log.Debugf("onTxHandler: %v", id)
@@ -310,7 +375,7 @@ func (p *Peer) onHeadersHandler(ctx context.Context, msg wire.Message) error {
 
 	m, ok := msg.(*wire.MsgHeaders)
 	if !ok {
-		return ErrInvalidType
+		return newInvalidTypeError(msg, "*wire.MsgHeaders")
 	}
 	id := tag(msg.Command(), 0)
 	log.Debugf("onHeadersHandler: %v", id)
@@ -336,7 +401,7 @@ func (p *Peer) setPending(id string) (chan wire.Message, error) {
 	defer p.mtx.Unlock()
 
 	if _, ok := p.pending[id]; ok {
-		return nil, fmt.Errorf("pending: %v", id)
+		return nil, &AlreadyPendingError{id: id}
 	}
 	replyC := make(chan wire.Message)
 	p.pending[id] = replyC
@@ -366,8 +431,10 @@ func (p *Peer) GetAddr(ctx context.Context) (any, error) {
 		return x, nil
 	case *wire.MsgAddrV2:
 		return x, nil
+	default:
+		return nil, newInvalidTypeError(msg,
+			"*wire.MsgGetAddr", "*wire.MsgAddrV2")
 	}
-	return nil, fmt.Errorf("invalid addr type: %T", msg)
 }
 
 // GetBlocks is really a legacy call; debating if we should bring it back.
@@ -383,15 +450,15 @@ func (p *Peer) GetAddr(ctx context.Context) (any, error) {
 //
 // 	// Send message to peer and receive response
 // 	id := tag(wire.CmdInv+"-"+wire.InvTypeBlock.String(), blockHash)
-// 	msg, err := p.call(ctx, id, gb)
+// 	actual, err := p.call(ctx, id, gb)
 // 	if err != nil {
 // 		return nil, err
 // 	}
 //
-// 	if blocks, ok := msg.(*wire.MsgInv); ok {
+// 	if blocks, ok := actual.(*wire.MsgInv); ok {
 // 		return blocks, nil
 // 	}
-// 	return nil, fmt.Errorf("invalid blocks type: %T", msg)
+// 	return nil, fmt.Errorf("invalid blocks type: %T", actual)
 // }
 
 func (p *Peer) FeeFilter() (*wire.MsgFeeFilter, error) {
@@ -433,8 +500,10 @@ func (p *Peer) GetData(ctx context.Context, vector *wire.InvVect) (any, error) {
 		return x, nil
 	case *wire.MsgNotFound:
 		return x, nil
+	default:
+		return nil, newInvalidTypeError(msg,
+			"*wire.MsgBlock", "*wire.MsgTx", "*wire.MsgNotFound")
 	}
-	return nil, fmt.Errorf("invalid data type: %T", msg)
 }
 
 // GetBlock sends a getheaders(hash) call, then a getdata(hash) call to the peer
@@ -454,10 +523,10 @@ func (p *Peer) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.M
 	// XXX we should cache the blocks the peer advertises since then we can
 	//  skip the getheaders call.
 	if len(headers.Headers) == 0 {
-		return nil, ErrUnknown
+		return nil, newUnknownError("block header", blockHash)
 	}
 	if !blockHash.IsEqual(&headers.Headers[0].PrevBlock) {
-		return nil, ErrUnknown
+		return nil, newUnknownError("block header", blockHash)
 	}
 
 	// Retrieve block.
@@ -465,19 +534,19 @@ func (p *Peer) GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.M
 	if err != nil {
 		return nil, err
 	}
+
 	if b, ok := blk.(*wire.MsgBlock); ok {
 		return b, nil
 	}
-
-	return nil, fmt.Errorf("unexpected blk type: %T", blk)
+	return nil, newInvalidTypeError(blk, "*wire.MsgBlock")
 }
 
 // GetTx writes a tx message to the peer and returns the response.
-func (p *Peer) GetTx(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
-	log.Tracef("GetTx %v", txId)
-	defer log.Tracef("GetTx %v exit", txId)
+func (p *Peer) GetTx(ctx context.Context, txID *chainhash.Hash) (*wire.MsgTx, error) {
+	log.Tracef("GetTx %v", txID)
+	defer log.Tracef("GetTx %v exit", txID)
 
-	tx, err := p.GetData(ctx, wire.NewInvVect(wire.InvTypeTx, txId))
+	tx, err := p.GetData(ctx, wire.NewInvVect(wire.InvTypeTx, txID))
 	if err != nil {
 		return nil, err
 	}
@@ -485,10 +554,10 @@ func (p *Peer) GetTx(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, er
 	case *wire.MsgTx:
 		return t, nil
 	case *wire.MsgNotFound:
-		return nil, ErrUnknown
+		return nil, newUnknownError("tx", txID)
+	default:
+		return nil, newInvalidTypeError(tx, "*wire.MsgTx", "*wire.MsgNotFound")
 	}
-
-	return nil, fmt.Errorf("unexpected tx type: %T", tx)
 }
 
 // Ping writes a ping message to the peer and returns the pong.
@@ -506,7 +575,7 @@ func (p *Peer) Ping(ctx context.Context, nonce uint64) (*wire.MsgPong, error) {
 	if pong, ok := msg.(*wire.MsgPong); ok {
 		return pong, nil
 	}
-	return nil, fmt.Errorf("unexpected msg type: %T", msg)
+	return nil, newInvalidTypeError(msg, "*wire.MsgPong")
 }
 
 // GetHeaders writes a getheaders message to the peer and returns the headers.
@@ -539,7 +608,7 @@ func (p *Peer) GetHeaders(ctx context.Context, hashes []*chainhash.Hash, stop *c
 
 	m, ok := msg.(*wire.MsgHeaders)
 	if !ok {
-		return nil, fmt.Errorf("unexpected msg type: %T", msg)
+		return nil, newInvalidTypeError(msg, "*wire.MsgHeaders")
 	}
 	// catch standard responses
 	if len(m.Headers) == 0 {
@@ -551,7 +620,7 @@ func (p *Peer) GetHeaders(ctx context.Context, hashes []*chainhash.Hash, stop *c
 			// Got genesis and asked for genesis.
 			return m, nil
 		}
-		return nil, ErrUnknown
+		return nil, newUnknownError("block headers", hashes...)
 	}
 
 	return m, nil
@@ -572,7 +641,7 @@ func (p *Peer) MemPool(ctx context.Context) (*wire.MsgInv, error) {
 	if inv, ok := msg.(*wire.MsgInv); ok {
 		return inv, nil
 	}
-	return nil, fmt.Errorf("unexpected msg type: %T", msg)
+	return nil, newInvalidTypeError(msg, "*wire.MsgInv")
 }
 
 func (p *Peer) Remote() (*wire.MsgVersion, error) {
@@ -714,7 +783,7 @@ func New(network wire.BitcoinNet, id int, address string) (*Peer, error) {
 	case wire.TestNet:
 		cp.chainParams = &chaincfg.RegressionNetParams
 	default:
-		return nil, fmt.Errorf("unsuported network: %v", network)
+		return nil, fmt.Errorf("unsupported network: %v", network)
 	}
 
 	// Set default handlers

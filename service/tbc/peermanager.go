@@ -89,7 +89,7 @@ func NewPeerManager(net wire.BitcoinNet, seeds []string, want int) (*PeerManager
 		good:     make(map[string]struct{}, maxPeersGood),
 		bad:      make(map[string]struct{}, maxPeersBad),
 		peers:    make(map[string]*rawpeer.RawPeer, want),
-		peersC:   make(chan *rawpeer.RawPeer, 0),
+		peersC:   make(chan *rawpeer.RawPeer),
 	}, nil
 }
 
