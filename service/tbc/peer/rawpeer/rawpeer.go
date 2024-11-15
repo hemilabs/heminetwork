@@ -2,11 +2,11 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-package rawpeer
-
 // Package rawpeer provides low level access to a bitcoin p2p node. It provides
-// connect/handshake/disconnect and read/write commands. Most implementations
-// should not use this package.
+// connect/handshake/disconnect and read/write commands.
+//
+// Most implementations should not use this package directly.
+package rawpeer
 
 import (
 	"context"
@@ -37,7 +37,7 @@ func init() {
 	loggo.ConfigureLoggers(logLevel)
 }
 
-// XXX wire could use some contexts,
+// XXX wire could use some contexts.
 
 func writeTimeout(timeout time.Duration, conn net.Conn, msg wire.Message, pver uint32, btcnet wire.BitcoinNet) error {
 	conn.SetWriteDeadline(time.Now().Add(timeout))
