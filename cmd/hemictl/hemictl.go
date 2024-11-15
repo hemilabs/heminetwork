@@ -680,7 +680,7 @@ func p2p() error {
 	case "", "testnet3":
 		network = wire.TestNet3
 	default:
-		return fmt.Errorf("invalid net: %w", net)
+		return fmt.Errorf("invalid net: %v", net)
 	}
 
 	cp, err := cookedpeer.New(network, 0xc0ffee, addr)
@@ -750,7 +750,7 @@ func p2p() error {
 		case "block":
 			typ = wire.InvTypeBlock
 		default:
-			return fmt.Errorf("invalid type: %w", ty)
+			return fmt.Errorf("invalid type: %v", ty)
 		}
 		hash := args["hash"]
 		if hash == "" {
@@ -832,7 +832,7 @@ func p2p() error {
 		}
 
 	default:
-		return fmt.Errorf("invalid action: %w", action)
+		return fmt.Errorf("invalid action: %v", action)
 	}
 
 	out := args["out"]
@@ -855,7 +855,7 @@ func p2p() error {
 		}
 
 	default:
-		return fmt.Errorf("invalid out: %w", out)
+		return fmt.Errorf("invalid out: %v", out)
 	}
 
 	return nil
