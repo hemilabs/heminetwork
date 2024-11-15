@@ -405,6 +405,22 @@ func (c *CookedPeer) GetAddr(pctx context.Context, timeout time.Duration) (any, 
 //	}
 //}
 
+func (c *CookedPeer) FeeFilter() (*wire.MsgFeeFilter, error) {
+	log.Tracef("FeeFilter")
+	defer log.Tracef("FeeFilter exit")
+
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	if c.feeFilterLast == nil {
+		return nil, fmt.Errorf("no fee filter received")
+	}
+
+	ff := *c.feeFilterLast
+
+	return &ff, nil
+}
+
 func (c *CookedPeer) GetData(pctx context.Context, timeout time.Duration, vector *wire.InvVect) (any, error) {
 	log.Tracef("GetData %v: %v", vector.Type, vector.Hash)
 	defer log.Tracef("GetData %v: %v exit", vector.Type, vector.Hash)
@@ -632,6 +648,14 @@ func (c *CookedPeer) MemPool(pctx context.Context, timeout time.Duration) (*wire
 		}
 		return nil, fmt.Errorf("invalid mempool type: %T", msg)
 	}
+}
+
+func (c *CookedPeer) Remote() (*wire.MsgVersion, error) {
+	log.Tracef("Remote")
+	defer log.Tracef("Remote exit")
+
+	// raw peer returns a copy of the struct so just pass it on.
+	return c.p.RemoteVersion()
 }
 
 func (c *CookedPeer) callback(msg wire.Message) func(context.Context, wire.Message) error {

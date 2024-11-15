@@ -642,7 +642,7 @@ func p2p() error {
 	if to != "" {
 		timeout, err = time.ParseDuration(to)
 		if err != nil {
-			return fmt.Errorf("timeout: %v", err)
+			return fmt.Errorf("timeout: %w", err)
 		}
 	}
 
@@ -661,7 +661,7 @@ func p2p() error {
 	case "", "testnet3":
 		network = wire.TestNet3
 	default:
-		return fmt.Errorf("invalid net: %v", net)
+		return fmt.Errorf("invalid net: %w", net)
 	}
 
 	cp, err := cookedpeer.New(network, 0xc0ffee, addr)
@@ -680,6 +680,19 @@ func p2p() error {
 	// commands
 	var msg wire.Message
 	switch action {
+	case "feefilter":
+		// loop here for a bit since fee filter shows up late
+		for i := 0; i < 10; i++ {
+			time.Sleep(100 * time.Millisecond)
+			msg, err = cp.FeeFilter()
+			if err != nil {
+				continue
+			}
+		}
+		if msg == nil {
+			return fmt.Errorf("fee filter: %w", err)
+		}
+
 	case "getaddr":
 		a, err := cp.GetAddr(ctx, timeout)
 		if err != nil {
@@ -706,7 +719,7 @@ func p2p() error {
 		}
 		msg, err = cp.GetBlock(ctx, timeout, ch)
 		if err != nil {
-			return fmt.Errorf("get block: %v", err)
+			return fmt.Errorf("get block: %w", err)
 		}
 
 	case "getdata":
@@ -718,7 +731,7 @@ func p2p() error {
 		case "block":
 			typ = wire.InvTypeBlock
 		default:
-			return fmt.Errorf("invalid type: %v", ty)
+			return fmt.Errorf("invalid type: %w", ty)
 		}
 		hash := args["hash"]
 		if hash == "" {
@@ -770,24 +783,26 @@ func p2p() error {
 		}
 		msg, err = cp.GetTx(ctx, timeout, ch)
 		if err != nil {
-			return fmt.Errorf("get tx: %v", err)
+			return fmt.Errorf("get tx: %w", err)
 		}
 
 	case "help", "h":
 		fmt.Println("p2p commands:")
 		fmt.Println("\tall commands support [addr=url] <net=mainnet|testnet|testnet3> timeout=<duration>")
+		fmt.Println("\tfeefilter")
 		fmt.Println("\tgetaddr")
 		fmt.Println("\tgetblock [hash]")
 		fmt.Println("\tgetdata [hash] [type=tx|block]")
 		fmt.Println("\tgetheaders [hash]")
 		fmt.Println("\tgettx [hash]")
 		fmt.Println("\tmempool")
+		fmt.Println("\tremote")
 		fmt.Println("\tping [nonce]")
 
 	case "mempool":
 		msg, err = cp.MemPool(ctx, timeout)
 		if err != nil {
-			return fmt.Errorf("mempool: %v", err)
+			return fmt.Errorf("mempool: %w", err)
 		}
 
 	case "ping":
@@ -796,7 +811,7 @@ func p2p() error {
 		if nonce != "" {
 			n, err = strconv.ParseUint(nonce, 10, 64)
 			if err != nil {
-				return fmt.Errorf("nonce: %v", err)
+				return fmt.Errorf("nonce: %w", err)
 			}
 		}
 		msg, err = cp.Ping(ctx, timeout, n)
@@ -804,8 +819,14 @@ func p2p() error {
 			return fmt.Errorf("ping: %w", err)
 		}
 
+	case "remote":
+		msg, err = cp.Remote()
+		if err != nil {
+			return fmt.Errorf("remote: %w", err)
+		}
+
 	default:
-		return fmt.Errorf("invalid action: %v", action)
+		return fmt.Errorf("invalid action: %w", action)
 	}
 
 	out := args["out"]
@@ -813,9 +834,9 @@ func p2p() error {
 	case "json":
 		j, err := json.MarshalIndent(msg, "", "  ")
 		if err != nil {
-			return fmt.Errorf("json: %v", err)
+			return fmt.Errorf("json: %w", err)
 		}
-		fmt.Printf("%v\n", string(j))
+		fmt.Printf("%w\n", string(j))
 
 	case "", "spew":
 		spew.Dump(msg)
@@ -824,11 +845,11 @@ func p2p() error {
 		err := msg.BtcEncode(bufio.NewWriter(os.Stdout), wire.ProtocolVersion,
 			wire.LatestEncoding)
 		if err != nil {
-			return fmt.Errorf("raw: %v", err)
+			return fmt.Errorf("raw: %w", err)
 		}
 
 	default:
-		return fmt.Errorf("invalid out: %v", out)
+		return fmt.Errorf("invalid out: %w", out)
 	}
 
 	return nil
