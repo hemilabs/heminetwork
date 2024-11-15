@@ -13,10 +13,10 @@ import (
 
 	"github.com/btcsuite/btcd/wire"
 
-	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/peer"
+	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/rawpeer"
 )
 
-func ping(ctx context.Context, t *testing.T, p *peer.Peer) error {
+func ping(ctx context.Context, t *testing.T, p *rawpeer.RawPeer) error {
 	err := p.Write(time.Second, wire.NewMsgPing(uint64(time.Now().Unix())))
 	if err != nil {
 		return err
@@ -62,7 +62,7 @@ func TestPeerManager(t *testing.T) {
 			t.Fatal(err)
 		}
 		wg.Add(1)
-		go func(pp *peer.Peer) {
+		go func(pp *rawpeer.RawPeer) {
 			defer wg.Done()
 			err := ping(ctx, t, pp)
 			if err != nil {

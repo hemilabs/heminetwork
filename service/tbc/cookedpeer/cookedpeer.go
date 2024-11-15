@@ -16,7 +16,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/peer"
+	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/rawpeer"
 )
 
 const (
@@ -45,7 +45,7 @@ type CookedPeer struct {
 	mtx sync.Mutex
 
 	wg          *sync.WaitGroup
-	p           *peer.Peer
+	p           *rawpeer.RawPeer
 	chainParams *chaincfg.Params
 
 	feeFilterLast *wire.MsgFeeFilter // last seen fee filter message
@@ -759,7 +759,7 @@ func (c *CookedPeer) setHandler(cmd string, f func(context.Context, wire.Message
 }
 
 func New(network wire.BitcoinNet, id int, address string) (*CookedPeer, error) {
-	p, err := peer.New(network, id, address)
+	p, err := rawpeer.New(network, id, address)
 	if err != nil {
 		return nil, err
 	}

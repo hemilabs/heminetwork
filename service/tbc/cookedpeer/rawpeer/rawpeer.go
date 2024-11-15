@@ -2,7 +2,11 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-package peer
+package rawpeer
+
+// Package rawpeer provides low level access to a bitcoin p2p node. It provides
+// connect/handshake/disconnect and read/write commands. Most implementations
+// should not use this package.
 
 import (
 	"context"
@@ -24,7 +28,7 @@ const (
 )
 
 var (
-	log = loggo.GetLogger("peer")
+	log = loggo.GetLogger("rawpeer")
 
 	ErrHandshakeNotComplete = errors.New("handshake not complete")
 )
@@ -49,7 +53,7 @@ func readTimeout(timeout time.Duration, conn net.Conn, pver uint32, btcnet wire.
 	return msg, err
 }
 
-type Peer struct {
+type RawPeer struct {
 	mtx       sync.RWMutex
 	isDialing bool
 	conn      net.Conn
@@ -65,12 +69,12 @@ type Peer struct {
 	addrV2        bool
 }
 
-func New(network wire.BitcoinNet, id int, address string) (*Peer, error) {
+func New(network wire.BitcoinNet, id int, address string) (*RawPeer, error) {
 	_, _, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, fmt.Errorf("%v: %w", address, err)
 	}
-	return &Peer{
+	return &RawPeer{
 		protocolVersion: wire.ProtocolVersion,
 		network:         network,
 		address:         address,
@@ -78,8 +82,8 @@ func New(network wire.BitcoinNet, id int, address string) (*Peer, error) {
 	}, nil
 }
 
-func NewFromConn(conn net.Conn, network wire.BitcoinNet, protocolVersion uint32, id int) (*Peer, error) {
-	return &Peer{
+func NewFromConn(conn net.Conn, network wire.BitcoinNet, protocolVersion uint32, id int) (*RawPeer, error) {
+	return &RawPeer{
 		conn:            conn,
 		connected:       time.Now(),
 		address:         conn.RemoteAddr().String(),
@@ -88,18 +92,18 @@ func NewFromConn(conn net.Conn, network wire.BitcoinNet, protocolVersion uint32,
 	}, nil
 }
 
-func (p *Peer) String() string {
-	return p.address
+func (r *RawPeer) String() string {
+	return r.address
 }
 
-func (p *Peer) Id() int {
-	return p.id
+func (r *RawPeer) Id() int {
+	return r.id
 }
 
-func (p *Peer) Write(timeout time.Duration, msg wire.Message) error {
-	p.mtx.Lock()
-	conn := p.conn
-	p.mtx.Unlock()
+func (r *RawPeer) Write(timeout time.Duration, msg wire.Message) error {
+	r.mtx.Lock()
+	conn := r.conn
+	r.mtx.Unlock()
 	if conn == nil {
 		return fmt.Errorf("write: no conn")
 	}
@@ -110,18 +114,18 @@ func (p *Peer) Write(timeout time.Duration, msg wire.Message) error {
 		conn.SetWriteDeadline(time.Now().Add(timeout))
 	}
 	// XXX contexts would be nice
-	_, err := wire.WriteMessageWithEncodingN(conn, msg, p.protocolVersion,
-		p.network, wire.LatestEncoding)
+	_, err := wire.WriteMessageWithEncodingN(conn, msg, r.protocolVersion,
+		r.network, wire.LatestEncoding)
 	if err != nil {
 		conn.Close()
 	}
 	return err
 }
 
-func (p *Peer) Read(timeout time.Duration) (wire.Message, []byte, error) {
-	p.mtx.Lock()
-	conn := p.conn
-	p.mtx.Unlock()
+func (r *RawPeer) Read(timeout time.Duration) (wire.Message, []byte, error) {
+	r.mtx.Lock()
+	conn := r.conn
+	r.mtx.Unlock()
 	if conn == nil {
 		return nil, nil, fmt.Errorf("read: no conn")
 	}
@@ -132,15 +136,15 @@ func (p *Peer) Read(timeout time.Duration) (wire.Message, []byte, error) {
 		conn.SetReadDeadline(time.Now().Add(timeout))
 	}
 	// XXX contexts would be nice
-	_, msg, buf, err := wire.ReadMessageWithEncodingN(conn, p.protocolVersion,
-		p.network, wire.LatestEncoding)
+	_, msg, buf, err := wire.ReadMessageWithEncodingN(conn, r.protocolVersion,
+		r.network, wire.LatestEncoding)
 	if err != nil && !errors.Is(err, wire.ErrUnknownMessage) {
 		conn.Close()
 	}
 	return msg, buf, err
 }
 
-func (p *Peer) handshake(ctx context.Context, conn net.Conn) error {
+func (r *RawPeer) handshake(ctx context.Context, conn net.Conn) error {
 	log.Tracef("handshake %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 	defer log.Tracef("handshake exit %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 
@@ -151,13 +155,13 @@ func (p *Peer) handshake(ctx context.Context, conn net.Conn) error {
 	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
 	msg.UserAgent = fmt.Sprintf("/%v:%v/", version.Component, version.String())
 	msg.ProtocolVersion = int32(wire.AddrV2Version)
-	err := writeTimeout(defaultHandshakeTimeout, conn, msg, p.protocolVersion, p.network)
+	err := writeTimeout(defaultHandshakeTimeout, conn, msg, r.protocolVersion, r.network)
 	if err != nil {
 		return fmt.Errorf("could not write version message: %w", err)
 	}
 
 	// 2. receive version
-	rmsg, err := readTimeout(defaultHandshakeTimeout, conn, p.protocolVersion, p.network)
+	rmsg, err := readTimeout(defaultHandshakeTimeout, conn, r.protocolVersion, r.network)
 	if err != nil {
 		return fmt.Errorf("could not read version message: %w", err)
 	}
@@ -165,13 +169,13 @@ func (p *Peer) handshake(ctx context.Context, conn net.Conn) error {
 	if !ok {
 		return errors.New("expected version message")
 	}
-	p.remoteVersion = v
+	r.remoteVersion = v
 
 	// 3. ask for v2 addresses, this has to be done before verack despite
 	// what the spec says.
 	if uint32(v.ProtocolVersion) >= wire.AddrV2Version {
 		err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgSendAddrV2(),
-			p.protocolVersion, p.network)
+			r.protocolVersion, r.network)
 		if err != nil {
 			return fmt.Errorf("could not send addrv2: %w", err)
 		}
@@ -180,14 +184,14 @@ func (p *Peer) handshake(ctx context.Context, conn net.Conn) error {
 	// 4. ask for headers.
 	if uint32(v.ProtocolVersion) >= wire.SendHeadersVersion {
 		err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgSendHeaders(),
-			p.protocolVersion, p.network)
+			r.protocolVersion, r.network)
 		if err != nil {
 			return fmt.Errorf("could not send addrv2: %w", err)
 		}
 	}
 
 	// 5. send verack
-	err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgVerAck(), p.protocolVersion, p.network)
+	err = writeTimeout(defaultHandshakeTimeout, conn, wire.NewMsgVerAck(), r.protocolVersion, r.network)
 	if err != nil {
 		return fmt.Errorf("could not send verack: %w", err)
 	}
@@ -197,7 +201,7 @@ func (p *Peer) handshake(ctx context.Context, conn net.Conn) error {
 		if time.Now().After(expire) {
 			return fmt.Errorf("timeout")
 		}
-		msg, err := readTimeout(defaultHandshakeTimeout, conn, p.protocolVersion, p.network)
+		msg, err := readTimeout(defaultHandshakeTimeout, conn, r.protocolVersion, r.network)
 		if errors.Is(err, wire.ErrUnknownMessage) {
 			continue
 		} else if err != nil {
@@ -207,31 +211,31 @@ func (p *Peer) handshake(ctx context.Context, conn net.Conn) error {
 		switch msg.(type) {
 		case *wire.MsgVerAck:
 			log.Debugf("handshake: %v %v %v %v",
-				p, v.UserAgent, v.ProtocolVersion, v.LastBlock)
+				r, v.UserAgent, v.ProtocolVersion, v.LastBlock)
 			return nil
 		case *wire.MsgSendAddrV2:
-			p.addrV2 = true
+			r.addrV2 = true
 		default:
 			return fmt.Errorf("unexpected message type: %T", msg)
 		}
 	}
 }
 
-func (p *Peer) Connect(ctx context.Context) error {
-	log.Tracef("Connect %v", p.address) // not locked but ok
-	defer log.Tracef("Connect exit %v", p.address)
+func (r *RawPeer) Connect(ctx context.Context) error {
+	log.Tracef("Connect %v", r.address) // not locked but ok
+	defer log.Tracef("Connect exit %v", r.address)
 
-	p.mtx.Lock()
-	if p.isDialing {
-		p.mtx.Unlock()
-		return fmt.Errorf("already dialing %v", p.address)
+	r.mtx.Lock()
+	if r.isDialing {
+		r.mtx.Unlock()
+		return fmt.Errorf("already dialing %v", r.address)
 	}
-	if p.conn != nil {
-		p.mtx.Unlock()
-		return fmt.Errorf("already open %v", p.address)
+	if r.conn != nil {
+		r.mtx.Unlock()
+		return fmt.Errorf("already open %v", r.address)
 	}
-	p.isDialing = true
-	p.mtx.Unlock()
+	r.isDialing = true
+	r.mtx.Unlock()
 
 	d := net.Dialer{
 		Deadline: time.Now().Add(5 * time.Second),
@@ -243,68 +247,68 @@ func (p *Peer) Connect(ctx context.Context) error {
 		},
 	}
 
-	log.Debugf("dialing %s", p.address)
-	conn, err := d.DialContext(ctx, "tcp", p.address)
+	log.Debugf("dialing %s", r.address)
+	conn, err := d.DialContext(ctx, "tcp", r.address)
 	if err != nil {
-		return fmt.Errorf("dial %v: %w", p.address, err)
+		return fmt.Errorf("dial %v: %w", r.address, err)
 	}
 
-	err = p.handshake(ctx, conn)
+	err = r.handshake(ctx, conn)
 	if err != nil {
-		return fmt.Errorf("handshake %v: %w", p.address, err)
+		return fmt.Errorf("handshake %v: %w", r.address, err)
 	}
 
-	p.mtx.Lock()
-	p.conn = conn
-	p.isDialing = false
-	p.connected = time.Now()
-	p.mtx.Unlock()
+	r.mtx.Lock()
+	r.conn = conn
+	r.isDialing = false
+	r.connected = time.Now()
+	r.mtx.Unlock()
 
 	return nil
 }
 
-func (p *Peer) Close() error {
+func (r *RawPeer) Close() error {
 	log.Tracef("Close")
 	defer log.Tracef("Close exit")
 
-	p.mtx.Lock()
-	conn := p.conn
-	p.conn = nil
-	p.isDialing = true // mark not connected
-	p.mtx.Unlock()
+	r.mtx.Lock()
+	conn := r.conn
+	r.conn = nil
+	r.isDialing = true // mark not connected
+	r.mtx.Unlock()
 	if conn != nil {
 		return conn.Close()
 	}
 	return net.ErrClosed
 }
 
-func (p *Peer) IsConnected() bool {
+func (r *RawPeer) IsConnected() bool {
 	log.Tracef("IsConnected")
 	defer log.Tracef("IsConnected exit")
 
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-	return !p.isDialing
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	return !r.isDialing
 }
 
-func (p *Peer) HasService(f wire.ServiceFlag) bool {
+func (r *RawPeer) HasService(f wire.ServiceFlag) bool {
 	log.Tracef("HasService 0x%0x", f)
 	defer log.Tracef("HasService exit 0x%0x", f)
 
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-	if p.remoteVersion == nil {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	if r.remoteVersion == nil {
 		return false
 	}
-	return p.remoteVersion.HasService(f)
+	return r.remoteVersion.HasService(f)
 }
 
-func (p *Peer) RemoteVersion() (*wire.MsgVersion, error) {
-	p.mtx.Lock()
-	defer p.mtx.Unlock()
-	if p.remoteVersion == nil {
+func (r *RawPeer) RemoteVersion() (*wire.MsgVersion, error) {
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+	if r.remoteVersion == nil {
 		return nil, ErrHandshakeNotComplete
 	}
-	version := *p.remoteVersion
+	version := *r.remoteVersion
 	return &version, nil
 }

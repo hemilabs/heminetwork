@@ -28,7 +28,7 @@ import (
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/peer"
+	"github.com/hemilabs/heminetwork/service/tbc/cookedpeer/rawpeer"
 )
 
 type block struct {
@@ -85,7 +85,7 @@ type btcNode struct {
 	t    *testing.T // for logging
 	le   bool       // log enable
 	port string
-	p    *peer.Peer
+	p    *rawpeer.RawPeer
 
 	mtx            sync.RWMutex
 	chain          map[string]*block
@@ -385,7 +385,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 	b.t.Logf("handleRPC %v", conn.RemoteAddr())
 	defer b.t.Logf("handleRPC exit %v", conn.RemoteAddr())
 
-	p, err := peer.NewFromConn(conn, wire.TestNet, wire.AddrV2Version, 0xbeef)
+	p, err := rawpeer.NewFromConn(conn, wire.TestNet, wire.AddrV2Version, 0xbeef)
 	if err != nil {
 		b.logf("new from connection %v: %v", conn.RemoteAddr(), err)
 		return err
@@ -427,7 +427,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 	}
 }
 
-func (b *btcNode) handleMsg(ctx context.Context, p *peer.Peer, msg wire.Message) error {
+func (b *btcNode) handleMsg(ctx context.Context, p *rawpeer.RawPeer, msg wire.Message) error {
 	// b.t.Logf("%v", spew.Sdump(msg))
 	switch m := msg.(type) {
 	case *wire.MsgVersion:
