@@ -637,6 +637,25 @@ func p2p() error {
 		return err
 	}
 
+	if action == "help" || action == "h" {
+		fmt.Println("p2p actions:")
+		fmt.Println("\tfeefilter                      - returns advertised fee filter")
+		fmt.Println("\tgetaddr                        - retrieve p2p information")
+		fmt.Println("\tgetblock [hash]                - this is a compounded command, returns a block")
+		fmt.Println("\tgetdata [hash] [type=tx|block] - returns a tx or block")
+		fmt.Println("\tgetheaders [hash]              - returns up to 2000 headers from provided hash")
+		fmt.Println("\tgettx [hash]                   - retrieve mempool tx")
+		fmt.Println("\tmempool                        - retrieve mempool from peer, slow and not always enabled")
+		fmt.Println("\tping <nonce>                   - ping remote node with a nonce")
+		fmt.Println("\tremote                         - return remote version")
+		fmt.Println("")
+		fmt.Println("All actions support [addr=netaddress] <out=[json|raw|spew]> <net=[mainnet|testnet|testnet3]> <timeout=duration>")
+		fmt.Println("")
+		fmt.Println("Example: hemictl p2p ping addr=127.0.0.1:18333 nonce=1337 out=json")
+
+		return nil
+	}
+
 	timeout := 30 * time.Second
 	to := args["timeout"]
 	if to != "" {
@@ -786,19 +805,6 @@ func p2p() error {
 			return fmt.Errorf("get tx: %w", err)
 		}
 
-	case "help", "h":
-		fmt.Println("p2p commands:")
-		fmt.Println("\tall commands support [addr=url] <net=mainnet|testnet|testnet3> timeout=<duration>")
-		fmt.Println("\tfeefilter")
-		fmt.Println("\tgetaddr")
-		fmt.Println("\tgetblock [hash]")
-		fmt.Println("\tgetdata [hash] [type=tx|block]")
-		fmt.Println("\tgetheaders [hash]")
-		fmt.Println("\tgettx [hash]")
-		fmt.Println("\tmempool")
-		fmt.Println("\tremote")
-		fmt.Println("\tping [nonce]")
-
 	case "mempool":
 		msg, err = cp.MemPool(ctx, timeout)
 		if err != nil {
@@ -836,7 +842,7 @@ func p2p() error {
 		if err != nil {
 			return fmt.Errorf("json: %w", err)
 		}
-		fmt.Printf("%w\n", string(j))
+		fmt.Printf("%v\n", string(j))
 
 	case "", "spew":
 		spew.Dump(msg)
