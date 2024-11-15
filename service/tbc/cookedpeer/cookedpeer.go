@@ -57,6 +57,10 @@ type CookedPeer struct {
 	handlers map[string]func(context.Context, wire.Message) error
 }
 
+func (c *CookedPeer) String() string {
+	return c.p.String()
+}
+
 func (c *CookedPeer) dummyHandler(ctx context.Context, msg wire.Message) error {
 	log.Tracef("dummyHandler %v", msg.Command())
 	defer log.Tracef("dummyHandler %v exit", msg.Command())
