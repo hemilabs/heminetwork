@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -27,6 +28,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
@@ -42,6 +44,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/tbc"
+	"github.com/hemilabs/heminetwork/service/tbc/peer"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -628,6 +631,236 @@ func tbcdb() error {
 	return nil
 }
 
+func p2p() error {
+	action, args, err := parseArgs(flag.Args()[1:])
+	if err != nil {
+		return err
+	}
+
+	if action == "help" || action == "h" {
+		fmt.Println("p2p actions:")
+		fmt.Println("\tfeefilter                      - returns advertised fee filter")
+		fmt.Println("\tgetaddr                        - retrieve p2p information")
+		fmt.Println("\tgetblock [hash]                - this is a compounded command, returns a block")
+		fmt.Println("\tgetdata [hash] [type=tx|block] - returns a tx or block")
+		fmt.Println("\tgetheaders [hash]              - returns up to 2000 headers from provided hash")
+		fmt.Println("\tgettx [hash]                   - retrieve mempool tx")
+		fmt.Println("\tmempool                        - retrieve mempool from peer, slow and not always enabled")
+		fmt.Println("\tping <nonce>                   - ping remote node with a nonce")
+		fmt.Println("\tremote                         - return remote version")
+		fmt.Println("")
+		fmt.Println("All actions support [addr=netaddress] <out=[json|raw|spew]> <net=[mainnet|testnet|testnet3]> <timeout=duration>")
+		fmt.Println("")
+		fmt.Println("Example: hemictl p2p ping addr=127.0.0.1:18333 nonce=1337 out=json")
+
+		return nil
+	}
+
+	timeout := 30 * time.Second
+	to := args["timeout"]
+	if to != "" {
+		timeout, err = time.ParseDuration(to)
+		if err != nil {
+			return fmt.Errorf("timeout: %w", err)
+		}
+	}
+
+	addr := args["addr"]
+	if addr == "" {
+		return fmt.Errorf("addr required")
+	}
+
+	network := wire.TestNet3
+	net := args["net"]
+	switch net {
+	case "mainnet":
+		network = wire.MainNet
+	case "testnet":
+		network = wire.TestNet
+	case "", "testnet3":
+		network = wire.TestNet3
+	default:
+		return fmt.Errorf("invalid net: %v", net)
+	}
+
+	cp, err := peer.New(network, 0xc0ffee, addr)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if err = cp.Connect(ctx); err != nil {
+		return err
+	}
+	defer cp.Close() // XXX: handle error?
+
+	// commands
+	var msg wire.Message
+	switch action {
+	case "feefilter":
+		// loop here for a bit since fee filter shows up late
+		for i := 0; i < 10; i++ {
+			time.Sleep(100 * time.Millisecond)
+			msg, err = cp.FeeFilter()
+			if err != nil {
+				continue
+			}
+		}
+		if msg == nil {
+			return fmt.Errorf("fee filter: %w", err)
+		}
+
+	case "getaddr":
+		a, err := cp.GetAddr(ctx)
+		if err != nil {
+			return fmt.Errorf("get addr: %w", err)
+		}
+		switch m := a.(type) {
+		case *wire.MsgAddr:
+			msg = m
+		case *wire.MsgAddrV2:
+			msg = m
+		default:
+			return fmt.Errorf("invalid get addr type: %T", a)
+		}
+
+	case "getblock":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		msg, err = cp.GetBlock(ctx, ch)
+		if err != nil {
+			return fmt.Errorf("get block: %w", err)
+		}
+
+	case "getdata":
+		var typ wire.InvType
+		ty := args["type"]
+		switch ty {
+		case "tx":
+			typ = wire.InvTypeTx
+		case "block":
+			typ = wire.InvTypeBlock
+		default:
+			return fmt.Errorf("invalid type: %v", ty)
+		}
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		gd, err := cp.GetData(ctx, wire.NewInvVect(typ, ch))
+		if err != nil {
+			return fmt.Errorf("get data: %w", err)
+		}
+		switch m := gd.(type) {
+		case *wire.MsgBlock:
+			msg = m
+		case *wire.MsgTx:
+			msg = m
+		case *wire.MsgNotFound:
+			// note that json will look like a successful not found error
+			msg = m
+		}
+
+	case "getheaders":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		msg, err = cp.GetHeaders(ctx, []*chainhash.Hash{ch}, nil)
+		if err != nil {
+			return fmt.Errorf("get headers: %w", err)
+		}
+
+	case "gettx":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(hash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+		msg, err = cp.GetTx(ctx, ch)
+		if err != nil {
+			return fmt.Errorf("get tx: %w", err)
+		}
+
+	case "mempool":
+		msg, err = cp.MemPool(ctx)
+		if err != nil {
+			return fmt.Errorf("mempool: %w", err)
+		}
+
+	case "ping":
+		nonce := args["nonce"]
+		n := uint64(0)
+		if nonce != "" {
+			n, err = strconv.ParseUint(nonce, 10, 64)
+			if err != nil {
+				return fmt.Errorf("nonce: %w", err)
+			}
+		}
+		msg, err = cp.Ping(ctx, n)
+		if err != nil {
+			return fmt.Errorf("ping: %w", err)
+		}
+
+	case "remote":
+		msg, err = cp.Remote()
+		if err != nil {
+			return fmt.Errorf("remote: %w", err)
+		}
+
+	default:
+		return fmt.Errorf("invalid action: %v", action)
+	}
+
+	out := args["out"]
+	switch out {
+	case "json":
+		j, err := json.MarshalIndent(msg, "", "  ")
+		if err != nil {
+			return fmt.Errorf("json: %w", err)
+		}
+		fmt.Printf("%v\n", string(j))
+
+	case "", "spew":
+		spew.Dump(msg)
+
+	case "raw":
+		err := msg.BtcEncode(bufio.NewWriter(os.Stdout), wire.ProtocolVersion,
+			wire.LatestEncoding)
+		if err != nil {
+			return fmt.Errorf("raw: %w", err)
+		}
+
+	default:
+		return fmt.Errorf("invalid out: %v", out)
+	}
+
+	return nil
+}
+
 type bssClient struct {
 	wg     *sync.WaitGroup
 	bssURL string
@@ -817,6 +1050,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
 	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
 	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
+	fmt.Fprintf(os.Stderr, "\tp2p p2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb datase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "Environment:\n")
 	config.Help(os.Stderr, cm)
@@ -886,6 +1120,8 @@ func _main() error {
 	case "help-verbose":
 		helpVerbose()
 		return nil
+	case "p2p":
+		return p2p()
 	case "tbcdb":
 		return tbcdb()
 	}
