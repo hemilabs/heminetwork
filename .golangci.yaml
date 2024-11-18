@@ -1,0 +1,71 @@
+run:
+  go: "1.23"
+  tests: false
+
+issues:
+  # TODO: Currently, we exclude all issues introduced before commit 8e55591c.
+  # If you're bored, uncomment these lines :)
+  new: true
+  new-from-rev: "8e55591ce900688a9bb1107584bcb014e76f22c9"
+
+  # Exclude sources following the Go generated file convention.
+  exclude-generated: "strict"
+
+  # Add exclusions here.
+  exclude-rules:
+    # Licensed under ISC License, with different copyright owners.
+    - path: version/version\.go
+      linters: [ "goheader" ]
+
+linters:
+  enable:
+    - "errcheck" # Checks for unchecked errors.
+    - "gci" # Enforces package import order, making it deterministic.
+    - "gofumpt" # Runs gofumpt.
+    - "goheader" # Enforces copyright header.
+    - "gosimple" # Checks for ways to simplify code.
+    - "gomoddirectives" # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
+    - "govet" # Runs go vet.
+    - "ineffassign" # Detects when assignments to variables are not used.
+    - "staticcheck" # Runs staticcheck.
+    - "unconvert" # Checks for unnecessary type conversions.
+    - "unused" # Checks for unused constants, variables, functions and types.
+
+linters-settings:
+  # Checks for unchecked errors.
+  errcheck:
+    exclude-functions:
+      - "loggo.ConfigureLoggers(string)"
+
+  # Enforces import order in Go source files
+  gci:
+    sections:
+      - "standard"
+      - "default"
+      - "blank"
+      - "dot"
+      - "localmodule"
+    custom-order: true
+
+  # Detects XXX/TODO/FIXME comments. Useful for finding old todo items.
+  #  Use: golangci-lint run --enable-only godox
+  godox:
+    keywords:
+      - "XXX"
+      - "TODO"
+      - "FIXME"
+
+  # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
+  gomoddirectives:
+    replace-allow-list:
+      - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
+
+  # Enforces copyright header
+  goheader:
+    values:
+      const:
+        COMPANY: "Hemi Labs, Inc."
+    template: |-
+      Copyright (c) {{ YEAR }} {{ COMPANY }}
+      Use of this source code is governed by the MIT License,
+      which can be found in the LICENSE file.

@@ -52,17 +52,10 @@ build:
 install: $(cmds)
 
 lint:
-	$(shell go env GOPATH)/bin/goimports -local github.com/hemilabs/heminetwork -w -l .
-	$(shell go env GOPATH)/bin/gofumpt -w -l .
-	$(shell go env GOPATH)/bin/addlicense -c "Hemi Labs, Inc." -f $(PROJECTPATH)/license_header.txt \
-		-ignore "{.idea,.vscode}/**" -ignore ".github/release.yml" -ignore ".github/ISSUE_TEMPLATE/**" \
-		-ignore "**/pnpm-{lock,workspace}.yaml" -ignore "**/node_modules/**" .
-	go vet ./...
+	$(shell go env GOPATH)/bin/golangci-lint run --fix ./...
 
 lint-deps:
-	GOBIN=$(shell go env GOPATH)/bin go install golang.org/x/tools/cmd/goimports@latest
-	GOBIN=$(shell go env GOPATH)/bin go install mvdan.cc/gofumpt@latest
-	GOBIN=$(shell go env GOPATH)/bin go install github.com/google/addlicense@latest
+	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
 
 staticcheck:
 	$(shell go env GOPATH)/bin/staticcheck ./...
