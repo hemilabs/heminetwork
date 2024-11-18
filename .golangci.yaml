@@ -4,8 +4,8 @@ run:
 
 issues:
   # TODO: Currently, we exclude all issues introduced before commit 8e55591c.
-  # If you're bored, uncomment these lines :)
-  new: true
+  # If you're bored, run this command to show all issues :)
+  #  golangci-lint run --show-stats --new-from-rev=""
   new-from-rev: "8e55591ce900688a9bb1107584bcb014e76f22c9"
 
   # Exclude sources following the Go generated file convention.
