@@ -9,20 +9,9 @@ import (
 	"errors"
 	"sync"
 	"time"
-
-	"github.com/juju/loggo"
 )
 
-var (
-	logLevel = "INFO"
-	log      = loggo.GetLogger("ttl")
-
-	ErrNotFound = errors.New("not found")
-)
-
-func init() {
-	loggo.ConfigureLoggers(logLevel)
-}
+var ErrNotFound = errors.New("not found")
 
 // value wraps a value stored in the TTL map and includes additional metadata.
 type value struct {

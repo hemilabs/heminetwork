@@ -858,7 +858,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			log.Errorf("sync blocks: %v", err)
 			return
 		}
-		if time.Now().Sub(bhb.Timestamp()) > 4*time.Hour {
+		if time.Since(bhb.Timestamp()) > 4*time.Hour {
 			return
 		}
 	}
@@ -1012,8 +1012,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		return nil
 	}
 
-	//// Diagnostic for a failed get headers command.
-	//if s.chainParams.GenesisHash.IsEqual(&msg.Headers[0].PrevBlock) {
+	// // Diagnostic for a failed get headers command.
+	// if s.chainParams.GenesisHash.IsEqual(&msg.Headers[0].PrevBlock) {
 	//	bhb, err := s.db.BlockHeaderBest(ctx)
 	//	if err != nil {
 	//		return fmt.Errorf("blockheaders genesis %v: %w", p, err)
@@ -1021,7 +1021,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	//	if bhb.Height != 0 {
 	//		panic("got genesis")
 	//	}
-	//}
+	// }
 
 	// This code works because duplicate blockheaders are rejected later on
 	// but only after a somewhat expensive parameter setup and database
@@ -1274,8 +1274,8 @@ func (s *Server) handleNotFound(ctx context.Context, p *rawpeer.RawPeer, msg *wi
 	// log.Infof("handleNotFound %v", spew.Sdump(msg))
 	// defer log.Infof("handleNotFound exit")
 
-	//// XXX keep here to see if it spams logs
-	//log.Infof("NotFound: %v %v", p, spew.Sdump(msg))
+	// // XXX keep here to see if it spams logs
+	// log.Infof("NotFound: %v %v", p, spew.Sdump(msg))
 
 	return nil
 }

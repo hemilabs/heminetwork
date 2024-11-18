@@ -148,14 +148,13 @@ func (l *Database) openRawDB(name string, blockSize int64) error {
 	return nil
 }
 
-func (l *Database) Version(ctx context.Context) (int, error) {
+func (l *Database) Version(_ context.Context) (int, error) {
 	mdDB := l.pool[MetadataDB]
 	value, err := mdDB.Get([]byte(versionKey), nil)
 	if err != nil {
 		return -1, fmt.Errorf("version: %w", err)
 	}
-	var dbVersion uint64
-	dbVersion = binary.BigEndian.Uint64(value)
+	dbVersion := binary.BigEndian.Uint64(value)
 
 	return int(dbVersion), nil
 }

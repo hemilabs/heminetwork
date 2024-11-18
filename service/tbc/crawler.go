@@ -1453,7 +1453,9 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 func (s *Server) SyncIndexersToBest(ctx context.Context) error {
 	t := time.Now()
 	log.Tracef("SyncIndexersToBest")
-	defer log.Tracef("SyncIndexersToBest exit %v", time.Now().Sub(t))
+	defer func() {
+		log.Tracef("SyncIndexersToBest exit %v", time.Since(t))
+	}()
 
 	s.mtx.Lock()
 	if s.indexing {

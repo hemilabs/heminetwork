@@ -10,7 +10,6 @@ import (
 	"io"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/database/bfgd"
@@ -25,8 +24,6 @@ const (
 
 	HEMIBase = 1000000000000000000
 )
-
-var log = loggo.GetLogger("hemi")
 
 type RawHeader [HeaderSize]byte
 
@@ -135,7 +132,8 @@ func NewHeaderFromBytes(b []byte) (*Header, error) {
 // L2KeystoneVersion designates hwta version of the L2 keystone we are using.
 const (
 	L2KeystoneAbrevVersion uint8 = 1
-	L2KeystoneAbrevSize          = 76
+
+	L2KeystoneAbrevSize = 76
 )
 
 // L2Keystone is the wire format of a keystone that is shared among several

@@ -670,7 +670,7 @@ func p2p() error {
 		return fmt.Errorf("addr required")
 	}
 
-	network := wire.TestNet3
+	var network wire.BitcoinNet
 	net := args["net"]
 	switch net {
 	case "mainnet":
@@ -1071,20 +1071,20 @@ func helpVerbose() {
 		cmdType := allCommands[v]
 		clone := reflect.New(cmdType).Interface()
 		fmt.Fprintf(os.Stderr, "%v:\n", v)
-		printJSON(os.Stderr, "  ", clone)
+		_ = printJSON(os.Stderr, "  ", clone)
 		fmt.Fprintf(os.Stderr, "\n")
 	}
 }
 
 func printJSON(where io.Writer, indent string, payload any) error {
 	w := &bytes.Buffer{}
-	fmt.Fprintf(where, indent) // lol first line doesnt work
+	fmt.Fprint(where, indent)
 	e := json.NewEncoder(w)
 	e.SetIndent(indent, "    ")
 	if err := e.Encode(payload); err != nil {
 		return fmt.Errorf("can't encode payload %T: %w", payload, err)
 	}
-	fmt.Fprintf(where, "%s", w.Bytes())
+	fmt.Fprint(where, w.String())
 	return nil
 }
 

@@ -10,7 +10,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
-//func TestIndex(t *testing.T) {
+// func TestIndex(t *testing.T) {
 //	t.Skip()
 //	logLevel := "INFO"
 //	loggo.ConfigureLoggers(logLevel)
@@ -37,10 +37,10 @@ import (
 //	if err != nil {
 //		t.Fatal(err)
 //	}
-//	t.Logf("done at %v", time.Now().Sub(start))
-//}
+//	t.Logf("done at %v", time.Since(start))
+// }
 //
-//func TestUtxo(t *testing.T) {
+// func TestUtxo(t *testing.T) {
 //	t.Skip()
 //
 //	dc := &spew.ConfigState{
@@ -78,7 +78,7 @@ import (
 //	t.Logf("%v", dc.Sdump(mm))
 //
 //	t.Logf("%v", spew.Sdump(utxos))
-//}
+// }
 
 // Test the various mapsizes
 // run with go test -v -bench . -benchmem -run=BenchmarkMap

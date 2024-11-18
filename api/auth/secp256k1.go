@@ -21,9 +21,9 @@ import (
 
 const (
 	CmdSecp256k1Error                  protocol.Command = "secp256k1-error"
-	CmdSecp256k1Hello                                   = "secp256k1-hello"
-	CmdSecp256k1HelloChallenge                          = "secp256k1-hello-challenge"
-	CmdSecp256k1HelloChallengeAccepted                  = "secp256k1-hello-challenge-accepted"
+	CmdSecp256k1Hello                  protocol.Command = "secp256k1-hello"
+	CmdSecp256k1HelloChallenge         protocol.Command = "secp256k1-hello-challenge"
+	CmdSecp256k1HelloChallengeAccepted protocol.Command = "secp256k1-hello-challenge-accepted"
 )
 
 // Secp256k1Hello is a client->server command that sends the client Secp256k1
