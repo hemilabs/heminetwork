@@ -49,6 +49,36 @@ type Row struct {
 	Error error
 }
 
+// Canonical chain geometry changes resulting from header removal
+type RemoveType int
+
+const (
+	RTInvalid      RemoveType = 0 // Invalid removal for generic reason (ex: no headers to remove)
+	RTChainDescend RemoveType = 1 // Removal walked the canonical chain backwards, but existing chain is still canonical
+	RTForkDescend  RemoveType = 2 // Removal walked a non-canonical chain backwards, no change to canonical chain remaining canonical
+	RTChainFork    RemoveType = 3 // Removal walked canonical chain backwards far enough that another chain is now canonical
+)
+
+var (
+	rtStrings = map[RemoveType]string{
+		RTInvalid:      "invalid",
+		RTChainDescend: "canonical chain descend",
+		RTForkDescend:  "fork chain descend",
+		RTChainFork:    "canonical descend changed canonical",
+	}
+
+	DefaultUpstreamStateId = [32]byte{
+		0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
+		0x44, 0x45, 0x46, 0x41, 0x55, 0x4C, 0x54, 0x55, 0x50, 0x53, // DEFAULTUPS
+		0x54, 0x52, 0x45, 0x41, 0x4D, 0x53, 0x54, 0x41, 0x54, 0x45, // TREAMSTATE
+		0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
+	}
+)
+
+func (rt RemoveType) String() string {
+	return rtStrings[rt]
+}
+
 type Database interface {
 	database.Database
 
@@ -62,11 +92,16 @@ type Database interface {
 	// Block header
 	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
 	BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*BlockHeader, error)
-	BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader) error
+	BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader, height uint64, diff *big.Int) error
+
+	// Upstream state id
+	UpstreamStateId(ctx context.Context) (*[32]byte, error)
+	SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]byte) error
 
 	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
-	BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (InsertType, *BlockHeader, *BlockHeader, int, error)
+	BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, upstreamStateId *[32]byte) (InsertType, *BlockHeader, *BlockHeader, int, error)
+	BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, upstreamStateId *[32]byte) (RemoveType, *BlockHeader, error)
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)

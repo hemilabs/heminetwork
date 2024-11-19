@@ -5,7 +5,9 @@
 package tbc
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/hemilabs/heminetwork/database/tbcd"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -1035,4 +1039,905 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 	}
 
 	return bitcoindContainer, mappedPeerPort
+}
+
+func cleanupTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home := fmt.Sprintf("%s/%s", wd, levelDbHome)
+
+	if err := os.RemoveAll(home); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Server {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home := fmt.Sprintf("%s/%s", wd, levelDbHome)
+	if err := os.RemoveAll(home); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := NewDefaultConfig()
+	cfg.LevelDBHome = home
+	cfg.ExternalHeaderMode = true
+	cfg.Network = networkLocalnet
+	cfg.BlockCache = 0
+	cfg.BlockheaderCache = 0
+	cfg.MempoolEnabled = false
+
+	tbcServer, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tbcServer.ignoreUlimit = true
+	tbcServer.ExternalHeaderSetup(ctx)
+	return tbcServer
+}
+
+func hexToRawHeader(hexStr string) (*[80]byte, error) {
+	if len(hexStr) != 80*2 {
+		return nil, fmt.Errorf("attempted to convert %s to a header but length (%d) is incorrect", hexStr, len(hexStr))
+	}
+
+	parsed, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, err
+	}
+
+	header := [80]byte{}
+	for i := 0; i < 80; i++ {
+		header[i] = parsed[i]
+	}
+
+	return &header, nil
+}
+
+func hexToHash(hexStr string) (*[32]byte, error) {
+	if len(hexStr) != 32*2 {
+		return nil, fmt.Errorf("attempted to convert %s to a hash but length (%d) is incorrect", hexStr, len(hexStr))
+	}
+
+	parsed, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, err
+	}
+
+	hash := [32]byte{}
+	for i := 0; i < 32; i++ {
+		hash[i] = parsed[i]
+	}
+
+	return &hash, nil
+}
+
+var (
+	regtestGenesisHeader = "0100000000000000000000000000000000000000000000000000000000000000000000003ba3edfd7a7b12b27ac72c3e67768f617fc81bc3888a51323a9fb8aa4b1e5e4adae5494dffff7f2002000000"
+	regtestGenesisHash   = "06226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f"
+)
+
+var simpleChainHeaders = [...]string{
+	"0000002006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f7f8d3254fe4edbe9490e7435863b654877e238842528042a89f26b877deadd0268dd9566ffff7f2000000000", // 1
+	"00000020954556f526b4b9691cb511ba38d6e710d89d5fce5c6d5d3020a9da22eaa0bc2499d5e1d516ccc57fa5794cf076d3a38ac9f81225286fd06b4ef8c9889fd04b21d3e39566ffff7f2000000000", // 2
+	"00000020e7d63d7e1e612d42d5d3dfb02fb80441eaf9e485289236b9de612ad6f5667d4fe0b53fbfb60b9cef5ad5ff58e3619d53f29a662b3246767828b0cef5dac5c10013e49566ffff7f2003000000", // 3
+	"000000203e8590212e33dd13cb8468df1d5783a414fcde86b19d1fe92c8e93063b07b26aba38cfcbdcdcf3deb865585bd17c33f15e95528e60b9779c638e7c67b39a7b4d37e49566ffff7f2002000000", // 4
+	"00000020fbd310b22ff1fae2baf96189eb37a7ad93ab625390be1ec8ad6a7c037b59e374ceaf8aa1ed66319e1bd858d012a37807ed894074e49678c5b6d0582dd4b7f3fc4fe49566ffff7f2000000000", // 5
+	"00000020da8f4d2b9cb85d920f4c1f322b59eded48a5c2009d046843f8fc40501f94c91fb5cd6d0b21e590871f46027c5739227156f72d156a383818508a6a946ec1d01366e49566ffff7f2000000000", // 6
+	"0000002042b4da2ec1f9d880d9a43c42e78426dff2ecb6c33b2f5b3b2552d40cdcea6a6f5fb1f6ac25c4f5bff5ea097d17ab7d4567702141a5585bfced189ed9f917fb417de49566ffff7f2000000000", // 7
+	"00000020e56ca4b20fb7f89d563be23bdd5d656b551686989062562deafa1786d332d019ff2578b22c2577a5679790f9515958990143de8a36aae784f2b15a85d8837b7a20e59566ffff7f2002000000", // 8
+	"00000020b899f492824f01d57357da84fa13a93aeef1e0a3d7b31580f3cdc6ca12e09e5821de432f7e2c78c266248c252dd21a8592e1a121778fe125de7aaaf1bfa17ce79cea9566ffff7f2003000000", // 9
+}
+
+var simpleChainHashes = [...]string{
+	"954556f526b4b9691cb511ba38d6e710d89d5fce5c6d5d3020a9da22eaa0bc24", // 1
+	"e7d63d7e1e612d42d5d3dfb02fb80441eaf9e485289236b9de612ad6f5667d4f", // 2
+	"3e8590212e33dd13cb8468df1d5783a414fcde86b19d1fe92c8e93063b07b26a", // 3
+	"fbd310b22ff1fae2baf96189eb37a7ad93ab625390be1ec8ad6a7c037b59e374", // 4
+	"da8f4d2b9cb85d920f4c1f322b59eded48a5c2009d046843f8fc40501f94c91f", // 5
+	"42b4da2ec1f9d880d9a43c42e78426dff2ecb6c33b2f5b3b2552d40cdcea6a6f", // 6
+	"e56ca4b20fb7f89d563be23bdd5d656b551686989062562deafa1786d332d019", // 7
+	"b899f492824f01d57357da84fa13a93aeef1e0a3d7b31580f3cdc6ca12e09e58", // 8
+	"2ecb4489c443da37ac78d4e02064fa2e3643ef7a8424ebc441956f202f52b702", // 9
+}
+
+func bytes2Header(header [80]byte) (*wire.BlockHeader, error) {
+	var bh wire.BlockHeader
+
+	err := bh.Deserialize(bytes.NewReader(header[:]))
+	if err != nil {
+		return nil, fmt.Errorf("deserialize block header: %w", err)
+	}
+
+	return &bh, nil
+}
+
+func getRegtestGenesisHeaderAndHash() (*[80]byte, *wire.BlockHeader, *chainhash.Hash, error) {
+	blockraw, err := hexToRawHeader(regtestGenesisHeader)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to parse hex header %s", regtestGenesisHeader)
+	}
+
+	blockheader, err := bytes2Header(*blockraw)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to parse raw header %s", regtestGenesisHeader)
+	}
+
+	blockhashcalc := blockheader.BlockHash()
+	blockhashexp, err := hexToHash(regtestGenesisHash)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to parse expected block header %s", regtestGenesisHeader)
+	}
+
+	if !bytes.Equal(blockhashcalc[:], blockhashexp[:]) {
+		return nil, nil, nil, fmt.Errorf("hash of header was %x but expected %x", blockhashcalc[:], blockhashexp[:])
+	}
+
+	return blockraw, blockheader, &blockhashcalc, nil
+}
+
+// Helper function to get a single parsed header and hash from headers defined by provided str arrays
+// Returns:
+// *[80]byte -> Raw header
+// *wire.BlockHeader -> Parsed header
+// *chainhash.Hash -> Hash of block, which is calculated and verified against expected values
+func getHeaderHashIndex(index int, headerStrs []string, hashStrs []string) (*[80]byte, *wire.BlockHeader, *chainhash.Hash, error) {
+	blockraw, err := hexToRawHeader(headerStrs[index])
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to parse hex header %s", headerStrs[index])
+	}
+
+	blockheader, err := bytes2Header(*blockraw)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to parse raw header %s", headerStrs[index])
+	}
+
+	blockhashcalc := blockheader.BlockHash()
+	blockhashexp, err := hexToHash(hashStrs[index])
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("unable to parse expected block header %s", hashStrs[index])
+	}
+
+	if !bytes.Equal(blockhashcalc[:], blockhashexp[:]) {
+		return nil, nil, nil, fmt.Errorf("hash of header was %x but expected %x", blockhashcalc[:], blockhashexp[:])
+	}
+
+	return blockraw, blockheader, &blockhashcalc, nil
+}
+
+// Helper function to get the parsed headers and hashes from headers defined by provided str arrays
+// start index to end index (inclusive).
+// list. Returns:
+// *[][80]byte -> Raw headers
+// *wire.MsgHeaders -> Parsed headers
+// *[]chainhash.Hash -> Hashes of blocks, which are calculated and verified against expected values
+func getHeaderHashesRange(start int, end int, headerStrs []string, hashStrs []string) ([][80]byte, *wire.MsgHeaders, []chainhash.Hash, error) {
+	if start > end {
+		return nil, nil, nil, fmt.Errorf("start %d must be less than end %d", start, end)
+	}
+
+	rawHeaders := make([][80]byte, end-start+1)
+	parsedHeaders := make([]*wire.BlockHeader, end-start+1)
+	calculatedHashes := make([]chainhash.Hash, end-start+1)
+
+	for i := start; i <= end; i++ {
+		raw, parsed, hash, err := getHeaderHashIndex(i, headerStrs, hashStrs)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		rawHeaders[i-start] = *raw
+		parsedHeaders[i-start] = parsed
+		calculatedHashes[i-start] = *hash
+	}
+
+	msgHeaders := &wire.MsgHeaders{
+		Headers: parsedHeaders,
+	}
+
+	return rawHeaders, msgHeaders, calculatedHashes, nil
+}
+
+// Starts at regtest genesis block, walks up the simpleChain defined above
+// one block at a time checking each new block added is correctly considered canonical
+// and then walks back down one block at a time until only genesis remains.
+// This test also tests to make sure upstreamStateIds are stored correctly.
+// XXX TODO: Refactor this to use convenience methods
+func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	tbc := createTbcServerExternalHeaderMode(ctx, t)
+	defer cleanupTbcServerExternalHeaderMode(ctx, t)
+
+	genHeight, genesis, err := tbc.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if genHeight != 0 {
+		t.Error("Height after inserting genesis block is not 0")
+	}
+
+	bh := genesis.BlockHash()
+	egh, _ := hexToHash(regtestGenesisHash)
+	if !bytes.Equal(bh[:], egh[:]) {
+		t.Errorf("Header hash was %x but expected %x", bh[:], egh[:])
+	}
+
+	// STEP 1: Walk chain forward 9 blocks after genesis
+	for i := 0; i < len(simpleChainHeaders); i++ {
+		blockraw, err := hexToRawHeader(simpleChainHeaders[i])
+		if err != nil {
+			t.Errorf("unable to parse hex header %s", simpleChainHeaders[i])
+		}
+
+		blockheader, err := bytes2Header(*blockraw)
+		if err != nil {
+			t.Errorf("unable to parse raw header %s", simpleChainHeaders[i])
+		}
+
+		blockhashcalc := blockheader.BlockHash()
+		t.Logf("Parsed block to add at index %d, hash: %x", i+1, blockhashcalc[:])
+		blockhashexp, err := hexToHash(simpleChainHashes[i])
+		if err != nil {
+			t.Errorf("unable to parse expected block header %s", simpleChainHashes[i])
+		}
+
+		if !bytes.Equal(blockhashcalc[:], blockhashexp[:]) {
+			t.Errorf("hash of header was %x but expected %x", blockhashcalc[:], blockhashexp[:])
+		}
+
+		headers := make([][80]byte, 1)
+		headers[0] = *blockraw
+		parsedHeaders := make([]*wire.BlockHeader, 1)
+		parsedHeaders[0] = blockheader
+
+		msgHeaders := &wire.MsgHeaders{
+			Headers: parsedHeaders,
+		}
+
+		stateId := [32]byte{byte(i)}
+		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, &stateId)
+		if err != nil {
+			t.Error(err)
+		}
+
+		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		if err != nil {
+			t.Errorf("unable to get upstream state id, err: %v", err)
+		}
+
+		if !bytes.Equal(stateIdRet[:], stateId[:]) {
+			t.Errorf("after adding external headers, state id should have been %x but got %x instead",
+				stateId[:], stateIdRet[:])
+		}
+
+		if it != tbcd.ITChainExtend {
+			t.Errorf("Adding header should have extended canonical chain")
+		}
+
+		canonHash := canon.BlockHash()
+		lastHash := last.BlockHash()
+		if !bytes.Equal(canonHash[:], blockhashcalc[:]) {
+			t.Errorf("Canonical hash %x does not match expected hash %x", canonHash[:], blockhashcalc[:])
+		}
+
+		if !bytes.Equal(canonHash[:], lastHash[:]) {
+			t.Errorf("Canonical hash %x does not match last hash %x which is expected in this scenario", canonHash[:], lastHash[:])
+		}
+
+		t.Logf("Added block %x, canonical tip is now %x\n", blockhashcalc[:], canonHash[:])
+		bestHeight, best, err := tbc.BlockHeaderBest(ctx)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if bestHeight != uint64(i+1) {
+			t.Errorf("Height from TBC is %d but %d was expected", bestHeight, uint64(i+1))
+		}
+
+		bestHash := best.BlockHash()
+		if !bytes.Equal(bestHash[:], blockhashcalc[:]) {
+			t.Errorf("best hash %x does not match expected hash %x", bestHash[:], blockhashcalc[:])
+		}
+
+		t.Logf("TBC canonical tip %x is at height %d\n", bestHash[:], bestHeight)
+	}
+
+	// STEP 2: Walk chain backwards 9 blocks to genesis
+	for i := len(simpleChainHeaders) - 1; i >= 0; i-- {
+		blockraw, err := hexToRawHeader(simpleChainHeaders[i])
+		if err != nil {
+			t.Errorf("unable to parse hex header %s", simpleChainHeaders[i])
+		}
+
+		blockheader, err := bytes2Header(*blockraw)
+		if err != nil {
+			t.Errorf("unable to parse raw header %s", simpleChainHeaders[i])
+		}
+
+		blockhashcalc := blockheader.BlockHash()
+		t.Logf("Parsed block to remove at index %d, hash: %x\n", i+1, blockhashcalc[:])
+		blockhashexp, err := hexToHash(simpleChainHashes[i])
+		if err != nil {
+			t.Errorf("unable to parse expected block header %s", simpleChainHashes[i])
+		}
+
+		if !bytes.Equal(blockhashcalc[:], blockhashexp[:]) {
+			t.Errorf("hash of header was %x but expected %x", blockhashcalc[:], blockhashexp[:])
+		}
+
+		headers := make([][80]byte, 1)
+		headers[0] = *blockraw
+		parsedHeaders := make([]*wire.BlockHeader, 1)
+		parsedHeaders[0], err = bytes2Header(headers[0])
+		if err != nil {
+			t.Errorf("Unable to parse header %s", simpleChainHeaders[i])
+		}
+
+		msgHeaders := &wire.MsgHeaders{
+			Headers: parsedHeaders,
+		}
+
+		prevHeaderStr := regtestGenesisHeader
+		if i > 0 {
+			prevHeaderStr = simpleChainHeaders[i-1]
+		}
+
+		prevHeader, err := hexToRawHeader(prevHeaderStr)
+		if err != nil {
+			t.Errorf("unable to parse hex header %s", simpleChainHeaders[i-1])
+		}
+
+		prevHeaderParsed, err := bytes2Header(*prevHeader)
+		if err != nil {
+			t.Errorf("unable to parse raw header %s", simpleChainHeaders[i])
+		}
+
+		prevHeaderHash := prevHeaderParsed.BlockHash()
+		// Different from the state IDs used earlier to ensure we differentiate
+		stateId := [32]byte{byte(i), 0xFF}
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, &stateId)
+		if err != nil {
+			t.Error(err)
+		}
+
+		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		if err != nil {
+			t.Errorf("unable to get upstream state id, err: %v", err)
+		}
+
+		if !bytes.Equal(stateIdRet[:], stateId[:]) {
+			t.Errorf("after removing external headers, state id should have been %x but got %x instead",
+				stateId[:], stateIdRet[:])
+		}
+
+		prtHash := postRemovalTip.BlockHash()
+		if !bytes.Equal(prtHash[:], prevHeaderHash[:]) {
+			t.Errorf("after removing header %x expected tip to be %x but was %x", headers[0][:], prevHeaderHash[:], prtHash[:])
+		}
+
+		if rt != tbcd.RTChainDescend {
+			t.Errorf("removing header should have descended canonical chain")
+		}
+
+		bestHeight, best, err := tbc.BlockHeaderBest(ctx)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if bestHeight != uint64(i) {
+			t.Errorf("Height from TBC is %d but %d was expected", bestHeight, uint64(i))
+		}
+
+		bestHash := best.BlockHash()
+		if !bytes.Equal(bestHash[:], prevHeaderHash[:]) {
+			t.Errorf("best hash %x does not match expected hash %x", bestHash[:], prevHeaderHash[:])
+		}
+
+		t.Logf("TBC canonical tip %x is at height %d\n", bestHash[:], bestHeight)
+	}
+}
+
+// Starts at regtest genesis block, walks up the simpleChain defined above
+// three blocks at a time checking all blocks are added correctly and the
+// last block is considered canonical, and then walks back down three blocks
+// at a time until only genesis remains.
+// XXX TODO: Refactor this to use convenience methods
+func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	tbc := createTbcServerExternalHeaderMode(ctx, t)
+	defer cleanupTbcServerExternalHeaderMode(ctx, t)
+
+	// No need to check genesis insertion works correctly as another test already covers that
+	// STEP 1: Walk chain forward 3 blocks at a time
+	for i := 0; i < len(simpleChainHeaders); i += 3 {
+		headers := make([][80]byte, 3)
+		parsedHeaders := make([]*wire.BlockHeader, 3)
+		var lastHashToAdd *chainhash.Hash
+
+		for j := 0; j < 3; j++ {
+			blockraw, err := hexToRawHeader(simpleChainHeaders[i+j])
+			if err != nil {
+				t.Errorf("unable to parse hex header %s", simpleChainHeaders[i+j])
+			}
+
+			blockheader, err := bytes2Header(*blockraw)
+			if err != nil {
+				t.Errorf("unable to parse raw header %s", simpleChainHeaders[i+j])
+			}
+
+			blockhashcalc := blockheader.BlockHash()
+			lastHashToAdd = &blockhashcalc
+			blockhashexp, err := hexToHash(simpleChainHashes[i+j])
+			if err != nil {
+				t.Errorf("unable to parse expected block header %s", simpleChainHashes[i+j])
+			}
+
+			if !bytes.Equal(blockhashcalc[:], blockhashexp[:]) {
+				t.Errorf("hash of header was %x but expected %x", blockhashcalc[:], blockhashexp[:])
+			}
+
+			headers[j] = *blockraw
+			parsedHeader, err := bytes2Header(headers[j])
+			if err != nil {
+				t.Errorf("Unable to parse header %s", simpleChainHeaders[i+j])
+			}
+
+			parsedHeaders[j] = parsedHeader
+		}
+
+		msgHeaders := &wire.MsgHeaders{
+			Headers: parsedHeaders,
+		}
+
+		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, nil)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if it != tbcd.ITChainExtend {
+			t.Errorf("Adding headers should have extended canonical chain")
+		}
+
+		canonHash := canon.BlockHash()
+		lastHash := last.BlockHash()
+
+		if !bytes.Equal(canonHash[:], lastHash[:]) {
+			t.Errorf("Canonical hash %x does not match expected hash %x", canonHash[:], lastHash[:])
+		}
+
+		if !bytes.Equal(canonHash[:], lastHashToAdd[:]) {
+			t.Errorf("Canonical hash %x does not match last hash %x which is expected in this scenario", canonHash[:], lastHashToAdd[:])
+		}
+
+		t.Logf("Added block %x, canonical tip is now %x\n", lastHashToAdd[:], canonHash[:])
+		bestHeight, best, err := tbc.BlockHeaderBest(ctx)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if bestHeight != uint64(i+3) {
+			t.Errorf("Height from TBC is %d but %d was expected", bestHeight, uint64(i+3))
+		}
+
+		bestHash := best.BlockHash()
+		if !bytes.Equal(bestHash[:], lastHashToAdd[:]) {
+			t.Errorf("best hash %x does not match expected hash %x", bestHash[:], lastHashToAdd[:])
+		}
+
+		t.Logf("TBC canonical tip %x is at height %d\n", bestHash[:], bestHeight)
+	}
+
+	// STEP 2: Walk chain backward 3 blocks at a time
+	for i := len(simpleChainHeaders) - 1; i > 0; i -= 3 {
+		headers := make([][80]byte, 3)
+		parsedHeaders := make([]*wire.BlockHeader, 3)
+
+		// Headers still need to be lowest-to-highest ordered
+		for j := -2; j <= 0; j++ {
+			blockraw, err := hexToRawHeader(simpleChainHeaders[i+j])
+			if err != nil {
+				t.Errorf("unable to parse hex header %s", simpleChainHeaders[i+j])
+			}
+
+			blockheader, err := bytes2Header(*blockraw)
+			if err != nil {
+				t.Errorf("unable to parse raw header %s", simpleChainHeaders[i+j])
+			}
+
+			blockhashcalc := blockheader.BlockHash()
+			blockhashexp, err := hexToHash(simpleChainHashes[i+j])
+			if err != nil {
+				t.Errorf("unable to parse expected block header %s", simpleChainHashes[i+j])
+			}
+
+			if !bytes.Equal(blockhashcalc[:], blockhashexp[:]) {
+				t.Errorf("hash of header was %x but expected %x", blockhashcalc[:], blockhashexp[:])
+			}
+
+			headers[j+2] = *blockraw
+			parsedHeader, err := bytes2Header(headers[j+2])
+			if err != nil {
+				t.Errorf("Unable to parse header %s", simpleChainHeaders[i+j])
+			}
+
+			parsedHeaders[j+2] = parsedHeader
+		}
+
+		msgHeaders := &wire.MsgHeaders{
+			Headers: parsedHeaders,
+		}
+
+		prevHeaderIdx := i - 3
+		prevHeaderStr := regtestGenesisHeader
+		if prevHeaderIdx > 0 {
+			prevHeaderStr = simpleChainHeaders[prevHeaderIdx]
+		}
+
+		prevHeader, err := hexToRawHeader(prevHeaderStr)
+		if err != nil {
+			t.Errorf("unable to parse hex header %s", simpleChainHeaders[i-1])
+		}
+
+		prevHeaderParsed, err := bytes2Header(*prevHeader)
+		if err != nil {
+			t.Errorf("unable to parse raw header %s", simpleChainHeaders[i])
+		}
+
+		prevHeaderHash := prevHeaderParsed.BlockHash()
+		t.Logf("Headers to remove:")
+		for k := len(headers) - 1; k >= 0; k-- {
+			nh, _ := bytes2Header(headers[k])
+			blockhashcalc := nh.BlockHash()
+			bh := blockhashcalc[:]
+			// slices.Reverse(bh)
+			t.Logf("%d: %x", k, bh)
+		}
+
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, nil)
+		if err != nil {
+			t.Error(err)
+		}
+
+		prtHash := postRemovalTip.BlockHash()
+		if !bytes.Equal(prtHash[:], prevHeaderHash[:]) {
+			t.Errorf("after removing lowest header %x expected tip to be %x but was %x", headers[0][:], prevHeaderHash[:], prtHash[:])
+		}
+
+		if rt != tbcd.RTChainDescend {
+			t.Errorf("removing headers should have descended canonical chain")
+		}
+
+		bestHeight, best, err := tbc.BlockHeaderBest(ctx)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if bestHeight != uint64(i-2) {
+			t.Errorf("Height from TBC is %d but %d was expected", bestHeight, uint64(i-2))
+		}
+
+		bestHash := best.BlockHash()
+		if !bytes.Equal(bestHash[:], prevHeaderHash[:]) {
+			t.Errorf("best hash %x does not match expected hash %x", bestHash[:], prevHeaderHash[:])
+		}
+
+		t.Logf("TBC canonical tip %x is at height %d\n", bestHash[:], bestHeight)
+	}
+}
+
+// Starts at regtest genesis block, walks up the simpleChain defined above
+// in one move to height 9, checking all blocks are added correctly and
+// the last block 9 is considered canonical, and then attempts to remove
+// various segments of blocks below the tip and ensures that TBC correctly
+// fails to perform the removal and does not make state changes.
+// Then, this test removes blocks [3-9] correctly and ensures block 2
+// is correctly set as the canonical tip.
+// Finally, this test adds blocks [3-8] again and ensures block 8
+// is correctly set as the canonical tip.
+func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	defer cancel()
+
+	tbc := createTbcServerExternalHeaderMode(ctx, t)
+	defer cleanupTbcServerExternalHeaderMode(ctx, t)
+
+	// STEP 1: Add headers from 1 to 9 in one go
+	processToHeight := 9
+	_, msgHeaders, hashes, err := getHeaderHashesRange(0, processToHeight-1, simpleChainHeaders[:], simpleChainHashes[:])
+	if err != nil {
+		t.Error(err)
+	}
+
+	// arbitrary values
+	origInsertStateId := [32]byte{0xFF, 0x33, 0x99, 0xE3}
+	it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, &origInsertStateId)
+	if err != nil {
+		t.Error(err)
+	}
+
+	stateIdRet, err := tbc.UpstreamStateId(ctx)
+	if err != nil {
+		t.Errorf("unable to get upstream state id, err: %v", err)
+	}
+
+	if !bytes.Equal(stateIdRet[:], origInsertStateId[:]) {
+		t.Errorf("after adding external headers, state id should have been %x but got %x instead",
+			origInsertStateId[:], stateIdRet[:])
+	} else {
+		t.Logf("after adding external headers, state id of %x is correct", stateIdRet[:])
+	}
+
+	if it != tbcd.ITChainExtend {
+		t.Errorf("Adding headers should have extended canonical chain")
+	}
+
+	canonHash := canon.BlockHash()
+	lastHash := last.BlockHash()
+	lastHashToAdd := hashes[len(hashes)-1]
+
+	if !bytes.Equal(canonHash[:], lastHash[:]) {
+		t.Errorf("Canonical hash %x does not match expected hash %x", canonHash[:], lastHash[:])
+	}
+
+	if !bytes.Equal(canonHash[:], hashes[len(hashes)-1][:]) {
+		t.Errorf("Canonical hash %x does not match last hash %x which is expected in this scenario", canonHash[:], hashes[len(hashes)-1][:])
+	}
+
+	bestHeight, best, err := tbc.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if bestHeight != uint64(processToHeight) {
+		t.Errorf("Height from TBC is %d but %d was expected", bestHeight, processToHeight)
+	}
+
+	bestHash := best.BlockHash()
+	if !bytes.Equal(bestHash[:], lastHashToAdd[:]) {
+		t.Errorf("best hash %x does not match expected hash %x", bestHash[:], lastHashToAdd[:])
+	}
+
+	// STEP 2: Attempt to remove several different chunks of the chain below the
+	// current tip (block 9) and ensure TBC returns an error and doesn't make any
+	// state changes underneath.
+	badRanges := [][]int{
+		{8, 8}, // Attempt to just remove block 8
+		{6, 8}, // Attempt to remove blocks 6 through 8 inclusive
+		{5, 8},
+		{1, 8},
+		{7, 7},
+		{4, 7},
+		{2, 7},
+		{4, 5},
+		{1, 5},
+		{1, 1},
+	}
+
+	canonicalHeightBefore, canonicalBefore, err := tbc.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Error(err)
+	}
+
+	canonicalBeforeHash := canonicalBefore.BlockHash()
+	for _, badRange := range badRanges {
+		start := badRange[0]
+		end := badRange[1]
+
+		// Subtract 1 from start and end because the ranges refer to block heights,
+		// but the defined simple chain headers/hashes start at block #1
+		_, msgHeaders, _, err := getHeaderHashesRange(start-1, end-1, simpleChainHeaders[:], simpleChainHashes[:])
+		rawWouldBeCanonical, _, _, err := getRegtestGenesisHeaderAndHash()
+		if err != nil {
+			t.Error(err)
+		}
+
+		if start > 1 { // would-be-canonical tip is not genesis
+			rawWouldBeCanonical, _, _, err = getHeaderHashIndex(start-2, simpleChainHeaders[:], simpleChainHashes[:])
+			if err != nil {
+				t.Error(err)
+			}
+		}
+
+		wouldBeCanonical, err := bytes2Header(*rawWouldBeCanonical)
+		if err != nil {
+			t.Errorf("unable to parse heacer %x", rawWouldBeCanonical[:])
+		}
+
+		removeStateId := [32]byte{0xAA, 0xBB, 0xCC, 0xDD}
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, wouldBeCanonical, &removeStateId)
+		if err == nil {
+			t.Errorf("removing headers from %d to %d when tip is %d should have failed but did not", start, end, canonicalHeightBefore)
+		}
+
+		if rt != tbcd.RTInvalid {
+			// Chain dangling
+			t.Errorf("removing headers from %d to %d when tip is %d should have failed with tbcd.RTInvalid", start, end, canonicalHeightBefore)
+		}
+
+		if postRemovalTip != nil {
+			t.Errorf("removing headers from %d to %d when tip is %d should not have returned a non-nil post removal tip", start, end, canonicalHeightBefore)
+		}
+
+		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		if err != nil {
+			t.Errorf("unable to get upstream state id, err: %v", err)
+		}
+
+		if !bytes.Equal(stateIdRet[:], origInsertStateId[:]) {
+			t.Errorf("after failing to remove external headers, state id should have been the original insert id %x but got %x instead",
+				origInsertStateId[:], stateIdRet[:])
+		} else {
+			t.Logf("after failing to remove external headers, state id of %x is correct", stateIdRet[:])
+		}
+
+		canonicalHeightAfter, canonicalAfter, err := tbc.BlockHeaderBest(ctx)
+		if err != nil {
+			t.Error(err)
+		}
+
+		canonicalAfterHash := canonicalAfter.BlockHash()
+		if canonicalHeightAfter != canonicalHeightBefore {
+			t.Errorf("an invalid removal changed the canonical height from %d to %d which should not happen", canonicalHeightBefore, canonicalHeightAfter)
+		}
+
+		if !bytes.Equal(canonicalAfterHash[:], canonicalBeforeHash[:]) {
+			t.Errorf("an invalid removal changed the canonical hash from %x to %x which should not happen", canonicalBeforeHash[:], canonicalAfterHash[:])
+		}
+	}
+
+	// STEP 3: Remove blocks 3 through 9 which should work correctly and verify 2 is canonical afterward
+	// Subtract 1 from start and end because the ranges refer to block heights,
+	// but the defined simple chain headers/hashes start at block #1
+	start := 3
+	end := 9
+	_, msgHeaders, _, err = getHeaderHashesRange(start-1, end-1, simpleChainHeaders[:], simpleChainHashes[:])
+	rawShouldBeCanonical, _, shouldBeCanonicalHash, err := getHeaderHashIndex(start-2, simpleChainHeaders[:], simpleChainHashes[:])
+	if err != nil {
+		t.Error(err)
+	}
+
+	shouldBeCanonical, err := bytes2Header(*rawShouldBeCanonical)
+	if err != nil {
+		t.Errorf("unable to parse heacer %x", rawShouldBeCanonical[:])
+	}
+
+	rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, shouldBeCanonical, nil)
+	if err != nil {
+		t.Errorf("removing headers from %d to %d when tip is %d should have succeeded but did not", start, end, canonicalHeightBefore)
+	}
+
+	if rt != tbcd.RTChainDescend {
+		t.Errorf("removing headers from %d to %d when tip is %d should have succeeded with tbcd.RTChainDescend", start, end, canonicalHeightBefore)
+	}
+
+	if postRemovalTip == nil {
+		t.Errorf("removing headers from %d to %d when tip is %d should have returned a non-nil post removal tip", start, end, canonicalHeightBefore)
+	}
+
+	stateIdRet, err = tbc.UpstreamStateId(ctx)
+	if err != nil {
+		t.Errorf("unable to get upstream state id, err: %v", err)
+	}
+
+	if !bytes.Equal(stateIdRet[:], tbcd.DefaultUpstreamStateId[:]) {
+		t.Errorf("after successfully removing external headers with no state id specified, state id should "+
+			"have been the default upstream state id %x but got %x instead",
+			tbcd.DefaultUpstreamStateId[:], stateIdRet[:])
+	} else {
+		t.Logf("after successfully removing external headers with no state id specified, state id of "+
+			"%x is correct (set to default)", stateIdRet[:])
+	}
+
+	updateStateWithoutModificationsId := [32]byte{0x4C, 0xA1, 0x62, 0xB6}
+	err = tbc.SetUpstreamStateId(ctx, &updateStateWithoutModificationsId)
+	if err != nil {
+		t.Errorf("unable to set upstream state id, err: %v", err)
+	}
+
+	stateIdRet, err = tbc.UpstreamStateId(ctx)
+	if err != nil {
+		t.Errorf("unable to get upstream state id, err: %v", err)
+	}
+
+	if !bytes.Equal(stateIdRet[:], updateStateWithoutModificationsId[:]) {
+		t.Errorf("after performing an explicit state id update without modifying header data state id should "+
+			"have been %x but got %x instead",
+			updateStateWithoutModificationsId[:], stateIdRet[:])
+	} else {
+		t.Logf("after performing an explicit state id update without modifying header data state, state id of "+
+			"%x is correct (set to default)", stateIdRet[:])
+	}
+
+	canonicalHeightAfter, canonicalAfter, err := tbc.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Error(err)
+	}
+
+	canonicalAfterHash := canonicalAfter.BlockHash()
+	if canonicalHeightAfter != uint64(start-1) {
+		t.Errorf("a valid removal of headers %d to %d should have set the canonical height to %d, but it is %d", start, end, uint64(start-1), canonicalHeightAfter)
+	}
+
+	if !bytes.Equal(canonicalAfterHash[:], shouldBeCanonicalHash[:]) {
+		t.Errorf("a valid removal should have changed the canonical hash from %x to %x, but instead got %x", canonicalBeforeHash[:], shouldBeCanonicalHash[:], canonicalAfterHash[:])
+	}
+
+	// Check to make sure none of the removed headers can be fetched from TBC
+	for i := start; i <= end; i++ {
+		headers, err := tbc.BlockHeadersByHeight(ctx, uint64(i))
+		if err == nil {
+			t.Errorf("getting headers at height %d when tip is %d should have returned an error but did not", i, canonicalHeightAfter)
+		}
+
+		if headers != nil {
+			t.Errorf("getting headers at height %d when tip is %d should have returned a nil headers array but did not", i, canonicalHeightAfter)
+		}
+
+		_, _, hash, err := getHeaderHashIndex(i-1, simpleChainHeaders[:], simpleChainHashes[:])
+		header, height, err := tbc.BlockHeaderByHash(ctx, hash)
+		if err == nil {
+			t.Errorf("getting header by hash %x should have returned an error but did not", hash[:])
+		}
+
+		if height != 0 {
+			t.Errorf("getting header by hash %x should have returned a height of 0 but did not", hash[:])
+		}
+
+		if header != nil {
+			t.Errorf("getting header by hash %x should have returned a nil header but did not", hash[:])
+		}
+	}
+
+	// STEP 4: Add blocks 3 through 8 again and make sure canonical is now 8
+	processToHeight = 8
+	_, msgHeaders, hashes, err = getHeaderHashesRange(3-1, processToHeight-1, simpleChainHeaders[:], simpleChainHashes[:])
+	if err != nil {
+		t.Error(err)
+	}
+
+	it, canon, last, _, err = tbc.AddExternalHeaders(ctx, msgHeaders, nil)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if it != tbcd.ITChainExtend {
+		t.Errorf("Adding headers should have extended canonical chain")
+	}
+
+	canonHash = canon.BlockHash()
+	lastHash = last.BlockHash()
+	lastHashToAdd = hashes[len(hashes)-1]
+	if !bytes.Equal(canonHash[:], lastHash[:]) {
+		t.Errorf("Canonical hash %x does not match expected hash %x", canonHash[:], lastHash[:])
+	}
+
+	if !bytes.Equal(canonHash[:], hashes[len(hashes)-1][:]) {
+		t.Errorf("Canonical hash %x does not match last hash %x which is expected in this scenario", canonHash[:], hashes[len(hashes)-1][:])
+	}
+
+	bestHeight, best, err = tbc.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if bestHeight != uint64(processToHeight) {
+		t.Errorf("Height from TBC is %d but %d was expected", bestHeight, processToHeight)
+	}
+
+	bestHash = best.BlockHash()
+	if !bytes.Equal(bestHash[:], lastHashToAdd[:]) {
+		t.Errorf("best hash %x does not match expected hash %x", bestHash[:], lastHashToAdd[:])
+	}
 }

@@ -50,6 +50,7 @@ const (
 	verbose  = false
 
 	bhsCanonicalTipKey = "canonicaltip"
+	upstreamStateIdKey = "upstreamstateid" // Key used for storing upstream state IDs representing a unique state of an upstream system driving TBC state
 )
 
 type IteratorError error
@@ -308,6 +309,71 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	return nil
 }
 
+// UpstreamStateId retrieves the upstream state ID that TBC currently holds, which
+// should correspond to TBC being in a deterministic state expected by upstream software
+// based on the upstream state ID which is set.
+func (l *ldb) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
+	log.Tracef("UpstreamStateId")
+	defer log.Tracef("UpstreamStateId exit")
+
+	bhsDB := l.pool[level.BlockHeadersDB]
+
+	// Get last record
+	upstreamStateId, err := bhsDB.Get([]byte(upstreamStateIdKey), nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError("upstream state id not found")
+		}
+		return nil, fmt.Errorf("upstream state id: %w", err)
+	}
+
+	var ret [32]byte
+	copy(ret[0:32], upstreamStateId[0:32])
+	return &ret, nil
+}
+
+// SetUpstreamStateId sets the upstream state ID which represents a unique upstream state
+// of the software that dictates the complete state of a TBC instance. Currently only used
+// for header-only mode TBC instances, where upstream software manages all of the headers
+// available to a TBC instance, and where the same upstream state ID should always correlate
+// to the same information being provided to TBC in the same order, which should render a
+// TBC instance with deterministic state. This externally exported method provides the
+// upstream software the ability to update the upstream state ID without making any other
+// state modifications to TBC, such that the upstream software can update TBC to reflect
+// a change in upstream state in the event that such a change does not result in any other
+// TBC state modifications.
+func (l *ldb) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]byte) error {
+	log.Tracef("SetUpstreamStateId")
+	defer log.Tracef("SetUpstreamStateId exit")
+
+	if upstreamStateId == nil {
+		return fmt.Errorf("cannot explicitly set upstream state id with a nil upstreamStateId")
+	}
+
+	// block headers
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
+	if err != nil {
+		return fmt.Errorf("block header open transaction: %w", err)
+	}
+
+	defer bhsDiscard()
+
+	bhBatch := new(leveldb.Batch)
+	bhBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
+
+	// Write block headers batch
+	if err = bhsTx.Write(bhBatch, nil); err != nil {
+		return fmt.Errorf("block header insert: %w", err)
+	}
+
+	// block headers commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("block header commit: %w", err)
+	}
+
+	return nil
+}
+
 func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
@@ -437,7 +503,7 @@ func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	return bh
 }
 
-func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader) error {
+func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader, height uint64, diff *big.Int) error {
 	log.Tracef("BlockHeaderGenesisInsert")
 	defer log.Tracef("BlockHeaderGenesisInsert exit")
 
@@ -477,14 +543,33 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 	bmBatch := new(leveldb.Batch)
 	bhBatch := new(leveldb.Batch)
 
-	hhKey := heightHashToKey(0, bhash[:])
+	// Genesis insert can be called with an effective genesis block at a particular height
+	// and with a particular cumulative difficulty which is guaranteed canonical (protocol
+	// assumes this effective genesis block will never fork), allowing a header-only TBC
+	// instance to maintain Bitcoin consensus starting from a non-genesis block rather
+	// than requiring all historical state which is irrelevant to conesnsus assuming the
+	// effective genesis block is never forked.
+	hhKey := heightHashToKey(height, bhash[:])
 	hhBatch.Put(hhKey, []byte{})
-	cdiff := big.NewInt(0)
-	cdiff = new(big.Int).Add(cdiff, blockchain.CalcWork(wbh.Bits))
-	ebh := encodeBlockHeader(0, h2b(wbh), cdiff)
+
+	// Handle the default case where the passed-in block is actually the genesis
+	cdiff := blockchain.CalcWork(wbh.Bits)
+
+	// If an effective starting difficulty is supplied and is not set to zero, then use it
+	// instead (used for external header mode). In the event that an effective genesis block
+	// is supplied but the cumulative difficulty is not set, the difficulty of that
+	// effective genesis block (set above) will be retained, which has no effect on local
+	// consensus determination but will not permit direct comparison of cumulative difficulty
+	// against the full chain, only relative comparisons between cumulative difficulties of
+	// blocks on top of the same effective genesis block are guaranteed valid.
+	if diff != nil && diff.Cmp(big.NewInt(0)) > 0 {
+		cdiff = diff
+	}
+	ebh := encodeBlockHeader(height, h2b(wbh), cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
+	bhBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
 
 	// Write height hash batch
 	if err = hhTx.Write(hhBatch, nil); err != nil {
@@ -519,13 +604,367 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 	return nil
 }
 
+// BlockHeadersRemove decodes and removes the passed blockheaders into the
+// database. Additionally it updates the canonical height/hash.
+// On return it informs the caller about the removal type which is self-evident
+// from the headers and post-removal canonical tip passed in as a convenience,
+// as well as the header the batch of headers was removed from which is now
+// the tip of that particular chain.
+//
+// The caller of this function must pass in the tipAfterRemoval which they
+// *know* to be the correct canonical tip after removal of the passed-in blocks.
+// This is critical to ensure that an operator of a TBC instance in External
+// Header mode can set a specific header as canonical in the event that removal
+// of header(s) results in a split tip where two or more headers are all at
+// the highest cumulative difficulty and TBC would otherwise have to choose one
+// without knowing what the upstream consumer considered canonical.
+//
+// This function is only intended to be used on a database which is used by
+// an instance of TBC running in External Header mode, where the header consensus
+// view needs to be walked back to account for information no longer being
+// known by an upstream consumer. For example, an L2 reorg could remove Bitcoin
+// consensus information from the L2 protocol's knowledge, so the External Header
+// mode TBC instance needs to represent Bitcoin consensus knowledge of the L2
+// protocol at the older tip height so that the full indexed TBC instance can
+// be moved to the correct indexed state to return queries that are consistent
+// with the L2's view of Bitcoin at that previous L2 block, otherwise L2 nodes
+// that processed the reorg versus L2 nodes that were always on the reorged-onto
+// chain could have a state divergence since queries against TBC would not be
+// deterministic between both types of nodes.
+//
+// All of the headers passed to the remove function must exist in the database.
+//
+// Headers must be ordered from lowest height to highest and must be contiguous,
+// meaning if header 0 is at height H, header N-1 must be at height H+N and for
+// each header N its previous block hash must be the hash of header N-1.
+//
+// The last header in the array must be the current tip of its chain (whether
+// canonical or fork); in other words the database must not have knowledge of
+// any headers who reference the last header as their previous block as this removal
+// would result in a dangling orphan chain segment in the database. A block can have
+// multiple children and calling this function with non-contiguous (non-linear)
+// blocks is not allowed, but this is correct behavior as removing chunks of
+// headers in the reverse order they were originally added will ensure that
+// a header being removed only has a maximum of one child (which must be included
+// in the headers passed to this function).
+//
+// For example given a chain:
+//
+//	_______/-[2a]-[3a]-[4a]
+//
+// [ G]-[ 1]-[2b]-[3b]-[4b]-[5b]
+//
+//	____________\-[3c]-[4c]-[5c]-[6c]
+//
+// Where the tip is [6c], the next removal could for example be:
+//
+//	[3a]-[4a]
+//	[3b]-[4b]-[5b]
+//	[5c]-[6c] (and pass in tipAfterRemoval=[5b])
+//
+// But the next removal could not for example be:
+//
+//	[2a]-[3a] // Leaves [4a] dangling
+//	[2b]-[3b]-[4b]-[5b] // Leaves "c" fork dangling
+//
+// The upstream user of a TBC instance in External Header mode is expected
+// to always remove chunks of headers in the opposite order they were
+// originally added. While this is not checked explicitly, failure to do so
+// can result in these types of dangling chain scenarios. In the above example,
+// block [2b] must have been added at or before the time of adding [3b] and [3c].
+//
+// It could have either been:
+// Update #1: ADD [2b]-[3b]-[4b]-[5b]
+// Update #2: ADD [3c]-[4c]-[5c]-[6c]
+// OR
+// Update #1: ADD [2b]-[3c]-[4c]-[5c]-[6c]
+// Update #2: ADD [3b]-[4b]-[5b]
+// (Or some similar order where some of the higher b/c blocks were added back
+// and forth between the chains or split into multiple smaller updates.)
+//
+// Assuming the upstream caller needs to remove the entire b and c chains:
+//
+// If it was the first order, then we would expect upstream caller to first
+// remove [3c]-...-[6c] (undo update #2), and then remove [2b]-...-[5b] (undo
+// update #1), which would never leave a chain dangling.
+//
+// Similarly, if it was the second order, then we would expect upstream caller
+// to first remove [3b]-...-[5b] (undo update #2), and then remove [2b]-...-[6c]
+// (undo update #1) which would also never leave a chain dangling.
+//
+// If the upstream caller removed [2b]-...-[5b] first, then they did not
+// remove headers in the same order that they added them, because it would
+// have been impossible to originally add [2b] after adding [3c].
+//
+// Calling this function with the incorrect tipAfterRemoval WILL FAIL as that
+// indicates incorrect upstream behavior.
+//
+// If any of the above requirements are not true, this function will return
+// an error. If this function returns an error, no changes have been made to
+// the underlying database state as all validity checks are done before db
+// modifications are applied.
+//
+// If an upstreamCursor is provided, it is updated atomically in the database
+// along with the state transition of removing the block headers.
+func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, upstreamStateId *[32]byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
+	log.Tracef("BlockHeadersRemove")
+	defer log.Tracef("BlockHeadersRemove exit")
+	if len(bhs.Headers) == 0 {
+		return tbcd.RTInvalid, nil,
+			errors.New("block headers remove: no block headers to remove")
+	}
+
+	// Get current canonical tip for later use
+	originalCanonicalTip, err := l.BlockHeaderBest(ctx)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to get canonical tip from db, err: %w", err)
+	}
+
+	headersParsed := bhs.Headers
+
+	// Looking up each full header (with height and cumulative difficulty)
+	// in the next check; store so that later we have the data to create deletion
+	// keys.
+	fullHeadersFromDb := make([]*tbcd.BlockHeader, len(headersParsed))
+	// Check that each header exists in the database, and that no header
+	// to remove has a child unless that child is also going to be removed;
+	// no dangling chains will be left. Also check that none of the blocks
+	// to be removed match the tip the caller wants to be canonical after
+	// the removal.
+	tipAfterRemovalHash := tipAfterRemoval.BlockHash()
+	for i := 0; i < len(headersParsed); i++ {
+		headerToCheck := headersParsed[i]
+		hash := headerToCheck.BlockHash()
+
+		// Ensure that the header which should be canonical after removal is not one
+		// of the blocks to remove
+		if tipAfterRemovalHash.IsEqual(&hash) {
+			return tbcd.RTInvalid, nil,
+				fmt.Errorf("block headers remove: cannot remove header with hash %s when that is supposed to be"+
+					" the tip after removal", hash.String())
+		}
+
+		// Get full header that has height in it for the block to remove we are checking
+		fullHeader, err := l.BlockHeaderByHash(ctx, &hash)
+		if err != nil {
+			return 0, nil,
+				fmt.Errorf("block headers remove: cannot find header with hash %s in database, err: %w",
+					hash.String(), err)
+		}
+
+		// Save the full header from database (with height and cumulative difficulty)
+		fullHeadersFromDb[i] = fullHeader
+		nextHeight := fullHeader.Height + 1
+
+		// Get all headers from the database that could possibly be children
+		potentialChildren, err := l.BlockHeadersByHeight(ctx, nextHeight)
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				// No blocks at nextHeight in database. We could check that we are at
+				// the end of our headers array, but continuing here is fine because
+				// that will be detected on the next iteration.
+				continue
+			}
+			return tbcd.RTInvalid, nil,
+				fmt.Errorf("block headers remove: cannot get potential children at height %d "+
+					"from database, err: %w", nextHeight, err)
+		}
+
+		// Check all potential children. If one has our header to remove's hash as their
+		// previous block, then make sure it is in the removal list. Two or more cannot
+		// be in our removal list because they would have failed contiguous check prior.
+		for j := 0; j < len(potentialChildren); j++ {
+			toCheck := potentialChildren[j]
+			parent := toCheck.ParentHash()
+			if !bytes.Equal(parent[:], hash[:]) {
+				// Not a child of header to remove
+				continue
+			}
+
+			// This is a child of the header we are going to remove, make sure it is
+			// also going to be removed.
+			if i == (len(headersParsed) - 1) {
+				// We do not have another header in our removal list, meaning it would
+				// be left dangling.
+				return tbcd.RTInvalid, nil,
+					fmt.Errorf("block headers remove: want to remove header with hash %s but it is the "+
+						"last header in our removal list, and database has a child header with hash %s which "+
+						"would be left dangling", hash.String(), toCheck.BlockHash().String())
+			}
+
+			// This check will always fail if there are two children which claim the
+			// current header as a child, as one of them will not match the next
+			// header to remove, which is the only block which could be the removed
+			// child.
+			nextBlockToRemove := headersParsed[i+1].BlockHash()
+			if !nextBlockToRemove.IsEqual(toCheck.BlockHash()) {
+				// The header of the confirmed child does not match the next header to
+				// remove, meaning it would be left dangling.
+				return tbcd.RTInvalid, nil,
+					fmt.Errorf("block headers remove: want to remove header with hash %s, but database "+
+						"has a child header with hash %s which would be left dangling", hash.String(),
+						toCheck.BlockHash().String())
+			}
+		}
+	}
+
+	// Ensure that the tip which the caller claims should be canonical after the
+	// removal is a valid block in the database.
+	tipAfterRemovalFromDb, err := l.BlockHeaderByHash(ctx, &tipAfterRemovalHash)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: cannot find tip after removal header with hash %s "+
+				"in database, err: %w", tipAfterRemovalHash.String(), err)
+	}
+
+	//
+	for i := 0; i < len(fullHeadersFromDb); i++ {
+		// This should be impossible since above loop should have errored when
+		// getting header, but extra sanity.
+		if fullHeadersFromDb[i] == nil {
+			return tbcd.RTInvalid, nil,
+				fmt.Errorf("block headers remove: unexpected internal error, header with hash %s at position "+
+					"%d in headers to remove was not retrieved from database", headersParsed[i].BlockHash().String(), i)
+		}
+
+		// Reconstitute the 80-byte header retrieved from the database for
+		// additional sanity checks
+		dbHeaderReconstituted, err := b2h(fullHeadersFromDb[i].Header[:])
+		if err != nil {
+			return tbcd.RTInvalid, nil,
+				fmt.Errorf("block headers remove: unexpected error parsing header %x, err: %w",
+					fullHeadersFromDb[i].Header[:], err)
+		}
+
+		// Check that the raw header we retrieved from the database matches the
+		// header we expected to move as an additional sanity check.
+		dbHeaderReconstitutedHash := dbHeaderReconstituted.BlockHash()
+		expectedHash := headersParsed[i].BlockHash()
+		if !expectedHash.IsEqual(&dbHeaderReconstitutedHash) {
+			// Recalculated hash of header from database doesn't match header of
+			// block, this should also be impossible but extra sanity.
+			return tbcd.RTInvalid, nil,
+				fmt.Errorf("block headers remove: unexpected internal error, header with hash %s at position %d"+
+					" in headers to remove does not match header %x with hash %s retrieved from db",
+					expectedHash.String(), i, fullHeadersFromDb[i].Header[:], expectedHash.String())
+		}
+	}
+
+	// Block headers
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to start block headers leveldb transaction, err: %w", err)
+	}
+	defer bhsDiscard()
+
+	// height hash
+	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to start height hash leveldb transaction, err: %w", err)
+	}
+	defer hhDiscard()
+
+	bhsBatch := new(leveldb.Batch)
+	hhBatch := new(leveldb.Batch)
+
+	// Insert each block header deletion into the batch (for header itself and
+	// height-header association)
+	for i := 0; i < len(headersParsed); i++ {
+		// Delete header i
+		bhash := headersParsed[i].BlockHash()
+		fh := fullHeadersFromDb[i]
+		bhsBatch.Delete(bhash[:])
+
+		// Delete height mapping for header i
+		hhKey := heightHashToKey(fh.Height, bhash[:])
+		hhBatch.Delete(hhKey)
+	}
+
+	// Insert updated canonical tip after removal of the provided block headers
+	tipAfterRemovalEncoded := h2b(tipAfterRemoval)
+	tipEbh := encodeBlockHeader(tipAfterRemovalFromDb.Height, tipAfterRemovalEncoded, &tipAfterRemovalFromDb.Difficulty)
+	bhsBatch.Put([]byte(bhsCanonicalTipKey), tipEbh[:])
+
+	if upstreamStateId != nil {
+		bhsBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
+	} else {
+		// On updates if no upstream state ID is specified, we always set a default
+		// so errors where the upstream state ID can be troubleshooted more easily
+		// by making it clear that a call without a specified upstream state ID
+		// occurred.
+		bhsBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
+	}
+
+	// Get parent block from database
+	parentToRemovalSet, err := l.BlockHeaderByHash(ctx, &headersParsed[0].PrevBlock)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: cannot find previous header (with hash %s) to lowest header"+
+				" removed (whth hash %s) in database, err: %w",
+				headersParsed[0].PrevBlock.String(), headersParsed[0].BlockHash().String(), err)
+	}
+
+	originalCanonicalTipHash := originalCanonicalTip.BlockHash()
+	heaviestRemovedBlockHash := headersParsed[len(headersParsed)-1].BlockHash()
+
+	removalType := tbcd.RTInvalid
+	if tipAfterRemovalHash.IsEqual(&parentToRemovalSet.Hash) {
+		// Canonical tip set by caller is the parent to the blocks removed
+		removalType = tbcd.RTChainDescend
+	} else if tipAfterRemovalHash.IsEqual(originalCanonicalTipHash) {
+		// Canonical tip did not change, meaning blocks we removed were on a non-canonical chain
+		removalType = tbcd.RTForkDescend
+	} else if originalCanonicalTipHash.IsEqual(&heaviestRemovedBlockHash) {
+		// The original canonical tip was a block we removed, but parent to removal set is
+		// not the new canonical per first condition, therefore we descended the canonical
+		// chain far enough that a previous fork is now canonical
+		removalType = tbcd.RTChainFork
+	} else {
+		// This should never happen, one of the above three conditions must be true.
+		// Do this before the end of function so we don't apply database changes.
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: none of the chain geometry checks applies to this removal")
+	}
+
+	// Write height hash batch
+	err = hhTx.Write(hhBatch, nil)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to write height hash batch: %w", err)
+	}
+
+	// Write block headers batch
+	err = bhsTx.Write(bhsBatch, nil)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to write block headers batch: %w", err)
+	}
+
+	// height hash commit
+	if err = hhCommit(); err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to commit height hash modifications: %w", err)
+	}
+
+	// block headers commit
+	if err = bhsCommit(); err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to commit block header modifications: %w", err)
+	}
+
+	return removalType, parentToRemovalSet, nil
+}
+
 // BlockHeadersInsert decodes and inserts the passed blockheaders into the
 // database. Additionally it updates the hight/hash and missing blocks table as
 // well.  On return it informs the caller about potential forking situations
 // and always returns the canonical and last inserted blockheader, which may be
 // the same.
 // This call uses the database to prevent reentrancy.
-func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, upstreamStateId *[32]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
@@ -698,6 +1137,16 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (tbc
 		// Extend current best tip
 		bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
 		it = tbcd.ITChainExtend
+	}
+
+	if upstreamStateId != nil {
+		bhsBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
+	} else {
+		// On updates if no upstream state ID is specified, we always set a default
+		// so errors where the upstream state ID can be troubleshooted more easily
+		// by making it clear that a call without a specified upstream state ID
+		// occurred.
+		bhsBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
 	}
 
 	// Write height hash batch
