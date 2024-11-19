@@ -41,8 +41,8 @@ jobs:
       - name: "run localnet"
         run: docker compose -f ./e2e/docker-compose.yml up -d
 
-      - name: "kill an op-node after a minute"
-        run: sleep 60 && docker compose -f ./e2e/docker-compose.yml down op-node
+      - name: "kill an op-node after 15 seconds, then wait 3 minutes (the healthcheck interval + time for another sequencer to take over)"
+        run: sleep 15 && docker compose -f ./e2e/docker-compose.yml down op-node && sleep 180
 
       - name: "get localnet stats"
         working-directory: ./e2e/monitor

@@ -209,8 +209,10 @@ services:
     depends_on:
       - "geth-l1"
     healthcheck:
-      test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
-      timeout: 60s
+      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 30303"]
+      timeout: 1s
+      retries: 300
+      interval: 1s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
@@ -240,8 +242,10 @@ services:
       op-geth-l2:
         condition: "service_healthy"
     healthcheck:
-      test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
-      timeout: 60s
+      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 30303"]
+      timeout: 1s
+      retries: 300
+      interval: 1s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
@@ -273,8 +277,10 @@ services:
       op-geth-l2:
         condition: "service_healthy"
     healthcheck:
-      test: ["CMD-SHELL", "ls /l2configs/rollup.json"]
-      timeout: 60s
+      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 30303"]
+      timeout: 1s
+      retries: 300
+      interval: 1s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
@@ -310,6 +316,11 @@ services:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 9222"]
+      timeout: 1s
+      retries: 300
+      interval: 1s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -329,7 +340,7 @@ services:
       - "--l1.trustrpc"
       - "--log.level=info"
       - "--l1.trustrpc=true"
-      - "--l1.http-poll-interval=6s"
+      - "--l1.http-poll-interval=1s"
       - "--p2p.no-discovery"
       - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
@@ -364,6 +375,11 @@ services:
         condition: "service_started"
       op-geth-l2-2:
         condition: "service_healthy"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 9222"]
+      timeout: 1s
+      retries: 300
+      interval: 1s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -415,6 +431,11 @@ services:
         condition: "service_started"
       op-geth-l2-3:
         condition: "service_healthy"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 9222"]
+      timeout: 1s
+      retries: 300
+      interval: 1s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -509,6 +530,58 @@ services:
       - "--private-key=${ADMIN_PRIVATE_KEY}"
       - "--l1-eth-rpc=http://geth-l1:8545"
       - "--rollup-rpc=http://op-node:8547,http://op-node-2:8547,http://op-node-3:8547"
+    networks:
+      e2e:
+
+  op-proposer-2:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+      op-geth-l2-2:
+        condition: "service_healthy"
+      op-node-2:
+        condition: "service_started"
+    command:
+      - "op-proposer/bin/op-proposer"
+      - "--poll-interval=1s"
+      - "--rpc.port=8560"
+      - "--rollup-rpc=http://op-node-2:8547"
+      - "--l2oo-address=${L2OO_ADDRESS}"
+      - "--private-key=${ADMIN_PRIVATE_KEY}"
+      - "--l1-eth-rpc=http://geth-l1:8545"
+    networks:
+      e2e:
+
+  op-proposer-3:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+      op-geth-l2-3:
+        condition: "service_healthy"
+      op-node-3:
+        condition: "service_started"
+    command:
+      - "op-proposer/bin/op-proposer"
+      - "--poll-interval=1s"
+      - "--rpc.port=8560"
+      - "--rollup-rpc=http://op-node-3:8547"
+      - "--l2oo-address=${L2OO_ADDRESS}"
+      - "--private-key=${ADMIN_PRIVATE_KEY}"
+      - "--l1-eth-rpc=http://geth-l1:8545"
+    networks:
+      e2e:
 
   op-conductor:
     build:
@@ -518,19 +591,20 @@ services:
       - "op-conductor/bin/op-conductor"
       - "--consensus.addr=op-conductor"
       - "--consensus.port=50050"
-      - "--raft.server.id=op-conductor-1"
+      - "--raft.server.id=op-conductor-1:50050"
       - "--raft.storage.dir=/tmp/raft"
       - "--raft.bootstrap"
       - "--node.rpc=http://op-node:8547"
       - "--execution.rpc=http://op-geth-l2:8546"
-      - "--healthcheck.unsafe-interval=10" 
+      - "--healthcheck.unsafe-interval=12" 
       - "--healthcheck.safe-interval=200"
       - "--healthcheck.min-peer-count=1"
-      - "--healthcheck.interval=60"
+      - "--healthcheck.interval=120"
       - "--rollup.config=/l2configs/rollup.json"
       - "--log.format=terminal"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
+      - "--paused"
     volumes:
       - "l2configs:/l2configs"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -539,7 +613,7 @@ services:
       e2e:
     depends_on:
       op-node:
-        condition: "service_started"
+        condition: "service_healthy"
       op-geth-l2:
         condition: "service_healthy"
     ports:
@@ -553,18 +627,19 @@ services:
       - "op-conductor/bin/op-conductor"
       - "--consensus.addr=op-conductor-2"
       - "--consensus.port=50051"
-      - "--raft.server.id=op-conductor-2"
+      - "--raft.server.id=op-conductor-2:50051"
       - "--raft.storage.dir=/tmp/raft"
       - "--node.rpc=http://op-node-2:8547"
       - "--execution.rpc=http://op-geth-l2-2:8546"
-      - "--healthcheck.unsafe-interval=10" 
+      - "--healthcheck.unsafe-interval=12" 
       - "--healthcheck.safe-interval=200"
       - "--healthcheck.min-peer-count=1"
-      - "--healthcheck.interval=60"
+      - "--healthcheck.interval=120"
       - "--rollup.config=/l2configs/rollup.json"
       - "--log.format=terminal"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
+      - "--paused"
     volumes:
       - "l2configs:/l2configs"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -573,7 +648,7 @@ services:
       e2e:
     depends_on:
       op-node-2:
-        condition: "service_started"
+        condition: "service_healthy"
       op-geth-l2-2:
         condition: "service_healthy"
     ports:
@@ -587,18 +662,19 @@ services:
       - "op-conductor/bin/op-conductor"
       - "--consensus.addr=op-conductor-3"
       - "--consensus.port=50052"
-      - "--raft.server.id=op-conductor-3"
+      - "--raft.server.id=op-conductor-3:50052"
       - "--raft.storage.dir=/tmp/raft"
       - "--node.rpc=http://op-node-3:8547"
       - "--execution.rpc=http://op-geth-l2-3:8546"
-      - "--healthcheck.unsafe-interval=10" 
+      - "--healthcheck.unsafe-interval=12"
       - "--healthcheck.safe-interval=200"
       - "--healthcheck.min-peer-count=1"
-      - "--healthcheck.interval=60"
+      - "--healthcheck.interval=120"
       - "--rollup.config=/l2configs/rollup.json"
       - "--log.format=terminal"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
+      - "--paused"
     volumes:
       - "l2configs:/l2configs"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -607,7 +683,7 @@ services:
       e2e:
     depends_on:
       op-node-3:
-        condition: "service_started"
+        condition: "service_healthy"
       op-geth-l2-3:
         condition: "service_healthy"
     ports:
@@ -619,6 +695,10 @@ services:
       context: "."
     entrypoint:
       - "bash"
+    environment:
+      OPNODE_RPCS: 'http://op-node:8547,http://op-node-2:8547,http://op-node-3:8547'
+      OPCONDUCTOR_RPCS: 'http://op-conductor:8547,http://op-conductor-2:8547,http://op-conductor-3:8547'
+      OPCONDUCTOR_RAFT_VOTERS: 'op-conductor:50050,op-conductor-2:50051,op-conductor-3:50052'
     command:
       - "/tmp/setup-raft.bash"
     depends_on:
