@@ -69,20 +69,6 @@ jobs:
           cache: true
           check-latest: true
 
-      - name: "Retrieve GOPATH"
-        id: retrieve
-        run: echo "GOPATH=$(go env GOPATH)" >> "$GITHUB_OUTPUT"
-
-      - name: "Setup GOPATH/bin cache"
-        uses: actions/cache@6849a6489940f00c2f30c0fb92c6274307ccb58a # v4.1.2
-        with:
-          path: "${{ steps.retrieve.outputs.GOPATH }}/bin/"
-          key: "${{ runner.os }}-${{ runner.arch }}-gobin-go${{ env.GO_VERSION }}-${{ hashFiles('**/Makefile') }}"
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-gobin-go${{ env.GO_VERSION }}-${{ hashFiles('**/Makefile') }}
-            ${{ runner.os }}-${{ runner.arch }}-gobin-go${{ env.GO_VERSION }}-
-            ${{ runner.os }}-${{ runner.arch }}-gobin-
-
       - name: "Download and verify dependencies"
         id: deps
         run: make GOCACHE="$(go env GOCACHE)" go-deps
