@@ -8,13 +8,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/juju/loggo"
-
 	"github.com/hemilabs/heminetwork/cmd/btctool/bdf"
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
 )
-
-var log = loggo.GetLogger("btctool")
 
 func GetAndStoreBlockHeader(ctx context.Context, height int, dir string) (string, error) {
 	hash, err := blockstream.BlockHeightHash(ctx, fmt.Sprintf("%v", height))

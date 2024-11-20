@@ -1413,7 +1413,7 @@ func writeNotificationResponse(bws *bfgWs, response any) {
 	}
 }
 
-func (s *Server) handleBtcFinalityNotification() error {
+func (s *Server) handleBtcFinalityNotification() {
 	log.Tracef("handleBtcFinalityNotification")
 	defer log.Tracef("handleBtcFinalityNotification exit")
 
@@ -1425,11 +1425,9 @@ func (s *Server) handleBtcFinalityNotification() error {
 		go writeNotificationResponse(bws, &bfgapi.BTCFinalityNotification{})
 	}
 	s.mtx.Unlock()
-
-	return nil
 }
 
-func (s *Server) handleBtcBlockNotification() error {
+func (s *Server) handleBtcBlockNotification() {
 	log.Tracef("handleBtcBlockNotification")
 	defer log.Tracef("handleBtcBlockNotification exit")
 
@@ -1441,8 +1439,6 @@ func (s *Server) handleBtcBlockNotification() error {
 		go writeNotificationResponse(bws, &bfgapi.BTCNewBlockNotification{})
 	}
 	s.mtx.Unlock()
-
-	return nil
 }
 
 func (s *Server) handleL2KeystonesNotification() {
@@ -1596,7 +1592,7 @@ func (s *Server) handleAccessPublicKeys(table string, action string, payload, pa
 		// encoding, ensure that the session string does for an equal comparison
 		sessionPublicKeyEncoded := fmt.Sprintf("\\x%s", hex.EncodeToString(v.publicKey))
 		if sessionPublicKeyEncoded == accessPublicKey.PublicKeyEncoded {
-			v.conn.CloseStatus(websocket.StatusProtocolError, "killed")
+			_ = v.conn.CloseStatus(websocket.StatusProtocolError, "killed")
 		}
 	}
 	s.mtx.Unlock()

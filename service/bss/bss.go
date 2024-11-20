@@ -71,9 +71,6 @@ type Server struct {
 
 	cfg *Config
 
-	currentKeystone  *hemi.Header
-	previousKeystone *hemi.Header
-
 	// requests
 	requestLimit   int       // Request limiter queue depth
 	requestLimiter chan bool // Maximum in progress websocket commands
@@ -483,24 +480,20 @@ func writeNotificationResponse(bws *bssWs, response any) {
 	}
 }
 
-func (s *Server) handleBtcFinalityNotification() error {
+func (s *Server) handleBtcFinalityNotification() {
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
 		go writeNotificationResponse(bws, &bssapi.BTCFinalityNotification{})
 	}
 	s.mtx.Unlock()
-
-	return nil
 }
 
-func (s *Server) handleBtcBlockNotification() error {
+func (s *Server) handleBtcBlockNotification() {
 	s.mtx.Lock()
 	for _, bws := range s.sessions {
 		go writeNotificationResponse(bws, &bssapi.BTCNewBlockNotification{})
 	}
 	s.mtx.Unlock()
-
-	return nil
 }
 
 func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {

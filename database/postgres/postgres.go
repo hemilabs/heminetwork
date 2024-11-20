@@ -127,7 +127,7 @@ func (p *Database) ntfnEventHandler(pqn *pq.Notification) {
 		return
 	}
 
-	payloadOld := reflect.Zero(reflect.PtrTo(pn.payload)).Interface()
+	payloadOld := reflect.Zero(reflect.PointerTo(pn.payload)).Interface()
 	if len(nw.DataOld) > 0 && !bytes.Equal(nw.DataOld, []byte("null")) {
 		payloadOld = reflect.New(pn.payload).Interface()
 		if err := json.Unmarshal([]byte(nw.DataOld), &payloadOld); err != nil {

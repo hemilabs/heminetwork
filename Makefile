@@ -41,6 +41,7 @@ deps: lint-deps vulncheck-deps go-deps
 
 go-deps:
 	go mod download
+	go mod tidy
 	go mod verify
 
 $(cmds):
@@ -52,23 +53,10 @@ build:
 install: $(cmds)
 
 lint:
-	$(shell go env GOPATH)/bin/goimports -local github.com/hemilabs/heminetwork -w -l .
-	$(shell go env GOPATH)/bin/gofumpt -w -l .
-	$(shell go env GOPATH)/bin/addlicense -c "Hemi Labs, Inc." -f $(PROJECTPATH)/license_header.txt \
-		-ignore "{.idea,.vscode}/**" -ignore ".github/release.yml" -ignore ".github/ISSUE_TEMPLATE/**" \
-		-ignore "**/pnpm-{lock,workspace}.yaml" -ignore "**/node_modules/**" .
-	go vet ./...
+	$(shell go env GOPATH)/bin/golangci-lint run --fix ./...
 
 lint-deps:
-	GOBIN=$(shell go env GOPATH)/bin go install golang.org/x/tools/cmd/goimports@latest
-	GOBIN=$(shell go env GOPATH)/bin go install mvdan.cc/gofumpt@latest
-	GOBIN=$(shell go env GOPATH)/bin go install github.com/google/addlicense@latest
-
-staticcheck:
-	$(shell go env GOPATH)/bin/staticcheck ./...
-
-staticcheck-deps:
-	GOBIN=$(shell go env GOPATH)/bin go install honnef.co/go/tools/cmd/staticcheck@latest
+	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
 
 tidy:
 	go mod tidy

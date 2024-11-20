@@ -492,7 +492,7 @@ func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte
 		WHERE l2_keystone_abrev_hash = $1
 	`
 
-	if excludeUnconfirmed == true {
+	if excludeUnconfirmed {
 		q += " AND btc_block_hash IS NOT NULL"
 	}
 
