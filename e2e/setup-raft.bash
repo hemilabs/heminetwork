@@ -26,6 +26,11 @@ for rpc in "${conductor_rpcs[@]}"; do
   curl -X POST -H "Content-Type: application/json" --data  '{"jsonrpc":"2.0","method":"conductor_pause","params":[],"id":4}' $rpc
 done
 
+for rpc in "${opnode_rpcs[@]}"; do
+  curl -X POST -H "Content-Type: application/json" --data "{\"jsonrpc\":\"2.0\",\"method\":\"admin_stopSequencer\",\"params\":[],\"id\":3}" $rpc
+done
+
+
 # for each raft port in op-conductor, add as a voter.  this may error when adding self as a voter with the leader, but that's ok, the others should succeed
 for raft in "${conductor_rafts[@]}"; do
     curl -X POST -H "Content-Type: application/json" --data  "{\"jsonrpc\":\"2.0\",\"method\":\"conductor_addServerAsVoter\",\"params\":[\"$raft\", \"$raft\"],\"id\":4}"  ${conductor_rpcs[0]}
