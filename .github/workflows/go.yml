@@ -29,6 +29,8 @@ jobs:
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
 
       - name: "Setup Go ${{ matrix.go-version }}"
         uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
@@ -83,7 +85,7 @@ jobs:
 
       - name: "Download and verify dependencies"
         id: deps
-        run: make GOCACHE="$(go env GOCACHE)" deps
+        run: make GOCACHE="$(go env GOCACHE)" go-deps
 
       - name: "make race"
         run: make GOCACHE="$(go env GOCACHE)" race
