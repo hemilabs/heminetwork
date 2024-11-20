@@ -95,6 +95,7 @@ jobs:
         env:
           PGTESTURI: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
           HEMI_DOCKER_TESTS: "1"
-        run: |
-          make GOCACHE="$(go env GOCACHE)" tidy test build
-          git diff --exit-code
+        run: make GOCACHE="$(go env GOCACHE)" test build
+
+      - name: "Check changes"
+        run: git diff --exit-code

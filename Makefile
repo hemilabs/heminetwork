@@ -41,6 +41,7 @@ deps: lint-deps vulncheck-deps go-deps
 
 go-deps:
 	go mod download
+	go mod tidy
 	go mod verify
 
 $(cmds):
@@ -56,12 +57,6 @@ lint:
 
 lint-deps:
 	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
-
-staticcheck:
-	$(shell go env GOPATH)/bin/staticcheck ./...
-
-staticcheck-deps:
-	GOBIN=$(shell go env GOPATH)/bin go install honnef.co/go/tools/cmd/staticcheck@latest
 
 tidy:
 	go mod tidy
