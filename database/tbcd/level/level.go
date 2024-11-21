@@ -858,6 +858,20 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 			fmt.Errorf("block headers remove: none of the chain geometry checks applies to this removal")
 	}
 
+	// Write height hash batch
+	err = hhTx.Write(hhBatch, nil)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to write height hash batch: %w", err)
+	}
+
+	// Write block headers batch
+	err = bhsTx.Write(bhsBatch, nil)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to write block headers batch: %w", err)
+	}
+
 	// Call post hook if set.
 	if postHook != nil {
 		dbTransactions := map[string]tbcd.Transaction{
@@ -874,20 +888,6 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		if err != nil {
 			return tbcd.RTInvalid, nil, fmt.Errorf("post hook: %w", err)
 		}
-	}
-
-	// Write height hash batch
-	err = hhTx.Write(hhBatch, nil)
-	if err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to write height hash batch: %w", err)
-	}
-
-	// Write block headers batch
-	err = bhsTx.Write(bhsBatch, nil)
-	if err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to write block headers batch: %w", err)
 	}
 
 	// height hash commit
@@ -1086,6 +1086,24 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 		it = tbcd.ITChainExtend
 	}
 
+	// Write height hash batch
+	if err = hhTx.Write(hhBatch, nil); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("height hash batch: %w", err)
+	}
+
+	// Write missing blocks batch
+	if err = bmTx.Write(bmBatch, nil); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("blocks missing batch: %w", err)
+	}
+
+	// Write block headers batch
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("block headers insert: %w", err)
+	}
+
 	// Call post hook if set.
 	if postHook != nil {
 		dbTransactions := map[string]tbcd.Transaction{
@@ -1107,24 +1125,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("post hook: %w", err)
 		}
-	}
-
-	// Write height hash batch
-	if err = hhTx.Write(hhBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash batch: %w", err)
-	}
-
-	// Write missing blocks batch
-	if err = bmTx.Write(bmBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("blocks missing batch: %w", err)
-	}
-
-	// Write block headers batch
-	if err = bhsTx.Write(bhsBatch, nil); err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// height hash commit
