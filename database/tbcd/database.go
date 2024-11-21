@@ -85,8 +85,8 @@ type Database interface {
 	Version(ctx context.Context) (int, error)
 	MetadataGet(ctx context.Context, key []byte) ([]byte, error)
 	MetadataPut(ctx context.Context, key, value []byte) error
-	MetadataBatchPut(ctx context.Context, rows []Row) error
 	MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byte) ([]Row, error)
+	MetadataBatchPut(ctx context.Context, rows []Row) error
 
 	// Block header
 	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
