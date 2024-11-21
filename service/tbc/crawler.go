@@ -1354,7 +1354,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	log.Debugf("Done syncing to: %v", hash)
 
 	bh, err := s.db.BlockHeaderByHash(ctx, hash)
-	if err == nil {
+	if err != nil {
 		return err
 	}
 	log.Infof("Syncing complete at: %v", bh.HH())
@@ -1442,7 +1442,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	}
 
 	bh, err := s.db.BlockHeaderByHash(ctx, &bhb.Hash)
-	if err == nil {
+	if err != nil {
 		return err
 	}
 	log.Infof("Syncing complete at: %v", bh.HH())
