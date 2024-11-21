@@ -2,7 +2,7 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-package tbcd
+package tbcd_test
 
 import (
 	"bytes"
@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 func TestNewOutpoint(t *testing.T) {
@@ -66,7 +68,7 @@ func TestNewOutpoint(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("%x/%d", tt.txid, tt.index), func(t *testing.T) {
-			op := NewOutpoint(tt.txid, tt.index)
+			op := tbcd.NewOutpoint(tt.txid, tt.index)
 			if !bytes.Equal(op[:], tt.want) {
 				t.Errorf("NewOutpoint() = %x, want %x", op[:], tt.want)
 			}
