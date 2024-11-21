@@ -30,7 +30,11 @@ import (
 )
 
 // Locking order:
+//	The theory here is to order these in somewhat "usage" order and to keep
+//	them from interacting too much. Metadata goes first because it is
+//	almost never used but may interact wildly.
 //
+//	Metadata	XXX debate this
 //	BlockHeaders
 //	BlocksMissing
 //	HeightHash
@@ -187,25 +191,121 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	return tx, cf, df, nil
 }
 
+func (l *ldb) metadataGet(ctx context.Context, t *leveldb.Transaction, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
+	rows := make([]tbcd.Row, len(keys))
+	for k := range keys {
+		value, err := t.Get(keys[k], nil)
+		if err != nil && allOrNone {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return nil, database.NotFoundError(fmt.Sprintf("%s: %v",
+					string(keys[k]), err))
+			}
+			return nil, fmt.Errorf("%s: %w", string(keys[k]), err)
+		}
+		if errors.Is(err, leveldb.ErrNotFound) {
+			// overload err
+			err = database.NotFoundError(err.Error())
+		}
+		rows[k] = tbcd.Row{Key: keys[k], Value: value, Error: err}
+	}
+	return rows, nil
+}
+
 func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 	log.Tracef("MetadataGet")
 	defer log.Tracef("MetadataGet exit")
 
-	mdDB := l.pool[level.MetadataDB]
-	v, err := mdDB.Get(key, nil)
-	if errors.Is(err, leveldb.ErrNotFound) {
-		return nil, database.NotFoundError(fmt.Sprintf("key not found: %v",
-			string(key)))
+	// Metadata transaction, we do this to simply lock the table.
+	// XXX reason if we can/want to remove the read lock.
+	mdDB, _, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	if err != nil {
+		return nil, fmt.Errorf("metadata open db transaction: %w", err)
 	}
-	return v, err
+	defer mdDiscard()
+
+	rows, err := l.metadataGet(ctx, mdDB, true, [][]byte{key})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) != 1 {
+		return nil, fmt.Errorf("unexpected rows length: %v", len(rows))
+	}
+	return rows[0].Value, err
+}
+
+func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
+	log.Tracef("MetadataGet")
+	defer log.Tracef("MetadataGet exit")
+
+	// Metadata transaction, we do this to simply lock the table.
+	// XXX reason if we can/want to remove the read lock.
+	mdDB, _, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	if err != nil {
+		return nil, fmt.Errorf("metadata open db transaction: %w", err)
+	}
+	defer mdDiscard()
+
+	return l.metadataGet(ctx, mdDB, allOrNone, keys)
+}
+
+func (l *ldb) metadataBatchPutCreate(ctx context.Context, rows []tbcd.Row) *leveldb.Batch {
+	mdBatch := new(leveldb.Batch)
+	for k := range rows {
+		mdBatch.Put(rows[k].Key, rows[k].Value)
+	}
+	return mdBatch
+}
+
+func (l *ldb) MetadataBatchPut(ctx context.Context, rows []tbcd.Row) error {
+	log.Tracef("MetadataBatchPut")
+	defer log.Tracef("MetadataBatchPut exit")
+
+	// Metadata transaction
+	mdDB, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	if err != nil {
+		return fmt.Errorf("metadata open db transaction: %w", err)
+	}
+	defer mdDiscard()
+
+	mdBatch := l.metadataBatchPutCreate(ctx, rows)
+
+	// Write metadata batch
+	if err = mdDB.Write(mdBatch, nil); err != nil {
+		return fmt.Errorf("transactions insert: %w", err)
+	}
+
+	// transactions commit
+	if err = mdCommit(); err != nil {
+		return fmt.Errorf("transactions commit: %w", err)
+	}
+
+	return nil
 }
 
 func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	log.Tracef("MetadataPut")
 	defer log.Tracef("MetadataPut exit")
 
-	mdDB := l.pool[level.MetadataDB]
-	return mdDB.Put(key, value, nil)
+	// Metadata transaction
+	mdDB, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	if err != nil {
+		return fmt.Errorf("metadata open db transaction: %w", err)
+	}
+	defer mdDiscard()
+
+	mdBatch := l.metadataBatchPutCreate(ctx, []tbcd.Row{{Key: key, Value: value}})
+
+	// Write metadata batch
+	if err = mdDB.Write(mdBatch, nil); err != nil {
+		return fmt.Errorf("transactions insert: %w", err)
+	}
+
+	// transactions commit
+	if err = mdCommit(); err != nil {
+		return fmt.Errorf("transactions commit: %w", err)
+	}
+
+	return nil
 }
 
 func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, error) {
