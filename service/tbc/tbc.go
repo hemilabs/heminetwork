@@ -105,7 +105,7 @@ func NewDefaultConfig() *Config {
 		BlockheaderCache:   1e6,
 		LogLevel:           logLevel,
 		MaxCachedTxs:       defaultMaxCachedTxs,
-		MempoolEnabled:     true,
+		MempoolEnabled:     false, // XXX default to false until it is fixed
 		PeersWanted:        defaultPeersWanted,
 		ExternalHeaderMode: false, // Default anyway, but for readability
 	}
@@ -167,6 +167,11 @@ type Server struct {
 func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
+	}
+
+	if cfg.MempoolEnabled {
+		cfg.MempoolEnabled = false // XXX
+		log.Infof("mempool forced disabled")
 	}
 
 	// Only populate pings and blocks if not in External Header Mode
