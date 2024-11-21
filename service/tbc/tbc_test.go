@@ -1041,29 +1041,8 @@ func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks u
 	return bitcoindContainer, mappedPeerPort
 }
 
-func cleanupTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) {
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	home := fmt.Sprintf("%s/%s", wd, levelDbHome)
-
-	if err := os.RemoveAll(home); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Server {
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	home := fmt.Sprintf("%s/%s", wd, levelDbHome)
-	if err := os.RemoveAll(home); err != nil {
-		t.Fatal(err)
-	}
+	home := t.TempDir()
 
 	cfg := NewDefaultConfig()
 	cfg.LevelDBHome = home
@@ -1255,7 +1234,6 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 	defer cancel()
 
 	tbc := createTbcServerExternalHeaderMode(ctx, t)
-	defer cleanupTbcServerExternalHeaderMode(ctx, t)
 
 	genHeight, genesis, err := tbc.BlockHeaderBest(ctx)
 	if err != nil {
@@ -1457,7 +1435,6 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 	defer cancel()
 
 	tbc := createTbcServerExternalHeaderMode(ctx, t)
-	defer cleanupTbcServerExternalHeaderMode(ctx, t)
 
 	// No need to check genesis insertion works correctly as another test already covers that
 	// STEP 1: Walk chain forward 3 blocks at a time
@@ -1651,7 +1628,6 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	defer cancel()
 
 	tbc := createTbcServerExternalHeaderMode(ctx, t)
-	defer cleanupTbcServerExternalHeaderMode(ctx, t)
 
 	// STEP 1: Add headers from 1 to 9 in one go
 	processToHeight := 9
