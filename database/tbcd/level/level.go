@@ -839,7 +839,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	originalCanonicalTipHash := originalCanonicalTip.BlockHash()
 	heaviestRemovedBlockHash := headersParsed[len(headersParsed)-1].BlockHash()
 
-	removalType := tbcd.RTInvalid
+	var removalType tbcd.RemoveType // FUCK YOU LINTER
 	if tipAfterRemovalHash.IsEqual(&parentToRemovalSet.Hash) {
 		// Canonical tip set by caller is the parent to the blocks removed
 		removalType = tbcd.RTChainDescend
