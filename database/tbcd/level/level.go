@@ -50,7 +50,6 @@ const (
 	verbose  = false
 
 	bhsCanonicalTipKey = "canonicaltip"
-	upstreamStateIdKey = "upstreamstateid" // Key used for storing upstream state IDs representing a unique state of an upstream system driving TBC state
 )
 
 type IteratorError error
@@ -309,71 +308,6 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	return nil
 }
 
-// UpstreamStateId retrieves the upstream state ID that TBC currently holds, which
-// should correspond to TBC being in a deterministic state expected by upstream software
-// based on the upstream state ID which is set.
-func (l *ldb) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
-	log.Tracef("UpstreamStateId")
-	defer log.Tracef("UpstreamStateId exit")
-
-	bhsDB := l.pool[level.BlockHeadersDB]
-
-	// Get last record
-	upstreamStateId, err := bhsDB.Get([]byte(upstreamStateIdKey), nil)
-	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.NotFoundError("upstream state id not found")
-		}
-		return nil, fmt.Errorf("upstream state id: %w", err)
-	}
-
-	var ret [32]byte
-	copy(ret[0:32], upstreamStateId[0:32])
-	return &ret, nil
-}
-
-// SetUpstreamStateId sets the upstream state ID which represents a unique upstream state
-// of the software that dictates the complete state of a TBC instance. Currently only used
-// for header-only mode TBC instances, where upstream software manages all of the headers
-// available to a TBC instance, and where the same upstream state ID should always correlate
-// to the same information being provided to TBC in the same order, which should render a
-// TBC instance with deterministic state. This externally exported method provides the
-// upstream software the ability to update the upstream state ID without making any other
-// state modifications to TBC, such that the upstream software can update TBC to reflect
-// a change in upstream state in the event that such a change does not result in any other
-// TBC state modifications.
-func (l *ldb) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]byte) error {
-	log.Tracef("SetUpstreamStateId")
-	defer log.Tracef("SetUpstreamStateId exit")
-
-	if upstreamStateId == nil {
-		return fmt.Errorf("cannot explicitly set upstream state id with a nil upstreamStateId")
-	}
-
-	// block headers
-	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
-	if err != nil {
-		return fmt.Errorf("block header open transaction: %w", err)
-	}
-
-	defer bhsDiscard()
-
-	bhBatch := new(leveldb.Batch)
-	bhBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
-
-	// Write block headers batch
-	if err = bhsTx.Write(bhBatch, nil); err != nil {
-		return fmt.Errorf("block header insert: %w", err)
-	}
-
-	// block headers commit
-	if err = bhsCommit(); err != nil {
-		return fmt.Errorf("block header commit: %w", err)
-	}
-
-	return nil
-}
-
 func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
@@ -569,7 +503,6 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
-	bhBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
 
 	// Write height hash batch
 	if err = hhTx.Write(hhBatch, nil); err != nil {
@@ -706,13 +639,16 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 //
 // If an upstreamCursor is provided, it is updated atomically in the database
 // along with the state transition of removing the block headers.
-func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, upstreamStateId *[32]byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, postHook tbcd.PostHook) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeadersRemove")
 	defer log.Tracef("BlockHeadersRemove exit")
 	if len(bhs.Headers) == 0 {
 		return tbcd.RTInvalid, nil,
 			errors.New("block headers remove: no block headers to remove")
 	}
+
+	// XXX this function looks broken; this looks ike everything should
+	// happen inside the database transaction.
 
 	// Get current canonical tip for later use
 	originalCanonicalTip, err := l.BlockHeaderBest(ctx)
@@ -888,17 +824,10 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	tipEbh := encodeBlockHeader(tipAfterRemovalFromDb.Height, tipAfterRemovalEncoded, &tipAfterRemovalFromDb.Difficulty)
 	bhsBatch.Put([]byte(bhsCanonicalTipKey), tipEbh[:])
 
-	if upstreamStateId != nil {
-		bhsBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
-	} else {
-		// On updates if no upstream state ID is specified, we always set a default
-		// so errors where the upstream state ID can be troubleshooted more easily
-		// by making it clear that a call without a specified upstream state ID
-		// occurred.
-		bhsBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
-	}
+	// XXX move upstreamStateId from here to right before Commit
 
 	// Get parent block from database
+	// XXX verify l. here instead of using the bh transaction to get the hash
 	parentToRemovalSet, err := l.BlockHeaderByHash(ctx, &headersParsed[0].PrevBlock)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
@@ -927,6 +856,24 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		// Do this before the end of function so we don't apply database changes.
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: none of the chain geometry checks applies to this removal")
+	}
+
+	// Call post hook if set.
+	if postHook != nil {
+		dbTransactions := map[string]tbcd.Transaction{
+			level.BlockHeadersDB: {
+				Transaction: bhsTx,
+				Batch:       bhsBatch,
+			},
+			level.HeightHashDB: {
+				Transaction: hhTx,
+				Batch:       hhBatch,
+			},
+		}
+		err := postHook(ctx, dbTransactions)
+		if err != nil {
+			return tbcd.RTInvalid, nil, fmt.Errorf("post hook: %w", err)
+		}
 	}
 
 	// Write height hash batch
@@ -964,7 +911,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 // and always returns the canonical and last inserted blockheader, which may be
 // the same.
 // This call uses the database to prevent reentrancy.
-func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, upstreamStateId *[32]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, postHook tbcd.PostHook) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
@@ -1139,14 +1086,27 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, upst
 		it = tbcd.ITChainExtend
 	}
 
-	if upstreamStateId != nil {
-		bhsBatch.Put([]byte(upstreamStateIdKey), upstreamStateId[:])
-	} else {
-		// On updates if no upstream state ID is specified, we always set a default
-		// so errors where the upstream state ID can be troubleshooted more easily
-		// by making it clear that a call without a specified upstream state ID
-		// occurred.
-		bhsBatch.Put([]byte(upstreamStateIdKey), tbcd.DefaultUpstreamStateId[:])
+	// Call post hook if set.
+	if postHook != nil {
+		dbTransactions := map[string]tbcd.Transaction{
+			level.BlockHeadersDB: {
+				Transaction: bhsTx,
+				Batch:       bhsBatch,
+			},
+			level.BlocksMissingDB: {
+				Transaction: bmTx,
+				Batch:       bmBatch,
+			},
+			level.HeightHashDB: {
+				Transaction: hhTx,
+				Batch:       hhBatch,
+			},
+		}
+		err := postHook(ctx, dbTransactions)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("post hook: %w", err)
+		}
 	}
 
 	// Write height hash batch
