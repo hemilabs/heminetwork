@@ -1831,10 +1831,10 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Errorf("unable to get upstream state id, err: %v", err)
 	}
 
-	if !bytes.Equal(stateIdRet[:], tbcd.DefaultUpstreamStateId[:]) {
+	if !bytes.Equal(stateIdRet[:], DefaultUpstreamStateId[:]) {
 		t.Errorf("after successfully removing external headers with no state id specified, state id should "+
 			"have been the default upstream state id %x but got %x instead",
-			tbcd.DefaultUpstreamStateId[:], stateIdRet[:])
+			DefaultUpstreamStateId[:], stateIdRet[:])
 	} else {
 		t.Logf("after successfully removing external headers with no state id specified, state id of "+
 			"%x is correct (set to default)", stateIdRet[:])
