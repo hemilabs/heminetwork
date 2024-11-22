@@ -1354,10 +1354,11 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	log.Debugf("Done syncing to: %v", hash)
 
 	bh, err := s.db.BlockHeaderByHash(ctx, hash)
-	if err == nil {
-		return err
+	if err != nil {
+		log.Errorf("block header by hash: %v", err)
+	} else {
+		log.Infof("Syncing complete at: %v", bh.HH())
 	}
-	log.Infof("Syncing complete at: %v", bh.HH())
 
 	return nil
 }
@@ -1442,10 +1443,11 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	}
 
 	bh, err := s.db.BlockHeaderByHash(ctx, &bhb.Hash)
-	if err == nil {
-		return err
+	if err != nil {
+		log.Errorf("block header by hash: %v", err)
+	} else {
+		log.Infof("Syncing complete at: %v", bh.HH())
 	}
-	log.Infof("Syncing complete at: %v", bh.HH())
 
 	return nil
 }
