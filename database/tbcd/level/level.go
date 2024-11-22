@@ -191,7 +191,10 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	return tx, cf, df, nil
 }
 
-func (l *ldb) metadataGet(ctx context.Context, t *leveldb.Transaction, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
+func (l *ldb) transactionBatchGet(ctx context.Context, t *leveldb.Transaction, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
+	log.Tracef("transactionBatchGet")
+	defer log.Tracef("transactionBatchGet exit")
+
 	rows := make([]tbcd.Row, len(keys))
 	for k := range keys {
 		value, err := t.Get(keys[k], nil)
@@ -223,7 +226,7 @@ func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 	}
 	defer mdDiscard()
 
-	rows, err := l.metadataGet(ctx, mdDB, true, [][]byte{key})
+	rows, err := l.transactionBatchGet(ctx, mdDB, true, [][]byte{key})
 	if err != nil {
 		return nil, err
 	}
@@ -238,22 +241,25 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 	defer log.Tracef("MetadataGet exit")
 
 	// Metadata transaction, we do this to simply lock the table.
-	// XXX reason if we can/want to remove the read lock.
 	mdDB, _, mdDiscard, err := l.startTransaction(level.MetadataDB)
 	if err != nil {
 		return nil, fmt.Errorf("metadata open db transaction: %w", err)
 	}
 	defer mdDiscard()
 
-	return l.metadataGet(ctx, mdDB, allOrNone, keys)
+	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
 }
 
-func (l *ldb) metadataBatchPutCreate(ctx context.Context, rows []tbcd.Row) *leveldb.Batch {
-	mdBatch := new(leveldb.Batch)
+// TransactionBatchAppend appends rows to batch b that is wrapped in
+// transaction t.
+func TransactionBatchAppend(ctx context.Context, t *leveldb.Transaction, b *leveldb.Batch, rows []tbcd.Row) error {
+	log.Tracef("transactionBatchAppend")
+	defer log.Tracef("transactionBatchAppend exit")
+
 	for k := range rows {
-		mdBatch.Put(rows[k].Key, rows[k].Value)
+		b.Put(rows[k].Key, rows[k].Value)
 	}
-	return mdBatch
+	return t.Write(b, nil)
 }
 
 func (l *ldb) MetadataBatchPut(ctx context.Context, rows []tbcd.Row) error {
@@ -267,11 +273,10 @@ func (l *ldb) MetadataBatchPut(ctx context.Context, rows []tbcd.Row) error {
 	}
 	defer mdDiscard()
 
-	mdBatch := l.metadataBatchPutCreate(ctx, rows)
-
-	// Write metadata batch
-	if err = mdDB.Write(mdBatch, nil); err != nil {
-		return fmt.Errorf("transactions insert: %w", err)
+	mdBatch := new(leveldb.Batch)
+	err = TransactionBatchAppend(ctx, mdDB, mdBatch, rows)
+	if err != nil {
+		return fmt.Errorf("transaction put batch: %w", err)
 	}
 
 	// transactions commit
@@ -293,11 +298,11 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	}
 	defer mdDiscard()
 
-	mdBatch := l.metadataBatchPutCreate(ctx, []tbcd.Row{{Key: key, Value: value}})
-
-	// Write metadata batch
-	if err = mdDB.Write(mdBatch, nil); err != nil {
-		return fmt.Errorf("transactions insert: %w", err)
+	mdBatch := new(leveldb.Batch)
+	err = TransactionBatchAppend(ctx, mdDB, mdBatch,
+		[]tbcd.Row{{Key: key, Value: value}})
+	if err != nil {
+		return fmt.Errorf("transaction put batch: %w", err)
 	}
 
 	// transactions commit
@@ -642,6 +647,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, postHook tbcd.PostHook) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeadersRemove")
 	defer log.Tracef("BlockHeadersRemove exit")
+
 	if len(bhs.Headers) == 0 {
 		return tbcd.RTInvalid, nil,
 			errors.New("block headers remove: no block headers to remove")
@@ -649,6 +655,14 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 	// XXX this function looks broken; this looks ike everything should
 	// happen inside the database transaction.
+
+	// Metadata
+	mdTx, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("metadata open transaction: %w", err)
+	}
+	defer mdDiscard()
 
 	// Get current canonical tip for later use
 	originalCanonicalTip, err := l.BlockHeaderBest(ctx)
@@ -803,6 +817,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	}
 	defer hhDiscard()
 
+	mdBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
 	hhBatch := new(leveldb.Batch)
 
@@ -872,9 +887,16 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 			fmt.Errorf("block headers remove: unable to write block headers batch: %w", err)
 	}
 
+	// Nothing to write for metadata but pass on the batch to the post
+	// hook.
+
 	// Call post hook if set.
 	if postHook != nil {
 		dbTransactions := map[string]tbcd.Transaction{
+			level.MetadataDB: {
+				Transaction: mdTx,
+				Batch:       mdBatch,
+			},
 			level.BlockHeadersDB: {
 				Transaction: bhsTx,
 				Batch:       bhsBatch,
@@ -902,6 +924,12 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 			fmt.Errorf("block headers remove: unable to commit block header modifications: %w", err)
 	}
 
+	// metadata commit
+	if err = mdCommit(); err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("metadata commit: %w", err)
+	}
+
 	return removalType, parentToRemovalSet, nil
 }
 
@@ -919,6 +947,14 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("block headers insert: invalid")
 	}
+
+	// Metadata
+	mdTx, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	if err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("metadata open transaction: %w", err)
+	}
+	defer mdDiscard()
 
 	// block headers
 	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
@@ -1006,6 +1042,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 	hhBatch := new(leveldb.Batch)
 	bmBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
+	mdBatch := new(leveldb.Batch)
 
 	cdiff := &pbh.Difficulty
 	height := pbh.Height
@@ -1104,9 +1141,16 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
+	// Nothing to write for metadata but pass on the batch to the post
+	// hook.
+
 	// Call post hook if set.
 	if postHook != nil {
 		dbTransactions := map[string]tbcd.Transaction{
+			level.MetadataDB: {
+				Transaction: mdTx,
+				Batch:       mdBatch,
+			},
 			level.BlockHeadersDB: {
 				Transaction: bhsTx,
 				Batch:       bhsBatch,
@@ -1143,6 +1187,12 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 	if err = bhsCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers commit: %w", err)
+	}
+
+	// metadata commit
+	if err = mdCommit(); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("metadata commit: %w", err)
 	}
 
 	return it, cbh, lbh, len(bhs.Headers), nil

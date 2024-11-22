@@ -34,6 +34,7 @@ import (
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database"
+	dbnames "github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/deucalion"
@@ -1071,7 +1072,13 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 	}
 
 	ph := func(ctx context.Context, transactions map[string]tbcd.Transaction) error {
-		return s.db.MetadataPut(ctx, upstreamStateIdKey, upstreamStateId[:])
+		txDB, ok := transactions[dbnames.MetadataDB]
+		if !ok {
+			return fmt.Errorf("post hook transaction not found: %v",
+				dbnames.MetadataDB)
+		}
+		return level.TransactionBatchAppend(ctx, txDB.Transaction, txDB.Batch,
+			[]tbcd.Row{{Key: upstreamStateIdKey, Value: upstreamStateId[:]}})
 	}
 
 	// We aren't checking error because we want to pass everything from db upstream
@@ -1117,7 +1124,13 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 	}
 
 	ph := func(ctx context.Context, transactions map[string]tbcd.Transaction) error {
-		return s.db.MetadataPut(ctx, upstreamStateIdKey, upstreamStateId[:])
+		txDB, ok := transactions[dbnames.MetadataDB]
+		if !ok {
+			return fmt.Errorf("post hook transaction not found: %v",
+				dbnames.MetadataDB)
+		}
+		return level.TransactionBatchAppend(ctx, txDB.Transaction, txDB.Batch,
+			[]tbcd.Row{{Key: upstreamStateIdKey, Value: upstreamStateId[:]}})
 	}
 
 	// We aren't checking error because we want to pass everything from db upstream
