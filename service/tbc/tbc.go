@@ -70,14 +70,6 @@ var (
 	// upstreamStateIdKey is used for storing upstream state IDs
 	// representing a unique state of an upstream system driving TBC state/
 	upstreamStateIdKey = []byte("upstreamstateid")
-
-	// XXX should this be moved to op-geth or the caller?
-	DefaultUpstreamStateId = [32]byte{
-		0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
-		0x44, 0x45, 0x46, 0x41, 0x55, 0x4C, 0x54, 0x55, 0x50, 0x53, // DEFAULTUPS
-		0x54, 0x52, 0x45, 0x41, 0x4D, 0x53, 0x54, 0x41, 0x54, 0x45, // TREAMSTATE
-		0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
-	}
 )
 
 var log = loggo.GetLogger("tbc")
@@ -1033,7 +1025,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 // corresponding TBC database state transition. Otherwise, an unexpected termination
 // between updating TBC state and recording the updated upstreamCursor could cause
 // state corruption.
-func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, upstreamStateId *[32]byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
+func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, upstreamStateId []byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
 	if !s.cfg.ExternalHeaderMode {
 		return tbcd.RTInvalid, nil,
 			errors.New("RemoveExternalHeaders called on TBC instance that is not in external header mode")
@@ -1042,6 +1034,11 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 	if len(headers.Headers) == 0 {
 		return tbcd.RTInvalid, nil,
 			errors.New("RemoveExternalHeaders called with no headers")
+	}
+
+	if upstreamStateId == nil {
+		return tbcd.RTInvalid, nil,
+			errors.New("upstream state invalid")
 	}
 
 	if tipAfterRemoval == nil {
@@ -1060,15 +1057,6 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 					"previous header with hash %s at index %d",
 					bh.String(), i, ph.String(), i-1)
 		}
-	}
-
-	// setup postHook call for BlockHeadersInsert.
-	if upstreamStateId == nil {
-		// On updates if no upstream state ID is specified, we always
-		// set a default so errors where the upstream state ID can be
-		// troubleshooted more easily by making it clear that a call
-		// without a specified upstream state ID occurred.
-		upstreamStateId = &DefaultUpstreamStateId
 	}
 
 	ph := func(ctx context.Context, transactions map[string]tbcd.Transaction) error {
@@ -1090,7 +1078,7 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 }
 
 // AddExternalHeaders XXX if we are passing in upstreamStateId then why does the default live in tbcd?
-func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, upstreamStateId *[32]byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, upstreamStateId []byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	if !s.cfg.ExternalHeaderMode {
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("AddExternalHeaders called on TBC instance that is not in external header mode")
@@ -1099,6 +1087,11 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 	if len(headers.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("AddExternalHeaders called with no headers")
+	}
+
+	if upstreamStateId == nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			errors.New("upstream state invalid")
 	}
 
 	// Check that chain is contiguous
@@ -1112,15 +1105,6 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 					"previous header with hash %s at index %d",
 					bh.String(), i, ph.String(), i-1)
 		}
-	}
-
-	// setup postHook call for BlockHeadersInsert.
-	if upstreamStateId == nil {
-		// On updates if no upstream state ID is specified, we always
-		// set a default so errors where the upstream state ID can be
-		// troubleshooted more easily by making it clear that a call
-		// without a specified upstream state ID occurred.
-		upstreamStateId = &DefaultUpstreamStateId
 	}
 
 	ph := func(ctx context.Context, transactions map[string]tbcd.Transaction) error {
@@ -2359,7 +2343,7 @@ func (s *Server) Run(pctx context.Context) error {
 	return err
 }
 
-func (s *Server) ExternalHeaderSetup(ctx context.Context) error {
+func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte) error {
 	log.Tracef("ExternalHeaderSetup")
 	defer log.Tracef("ExternalHeaderSetup exit")
 
@@ -2390,7 +2374,7 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context) error {
 		}
 
 		// Insert default upstreamStateId
-		err := s.db.MetadataPut(ctx, upstreamStateIdKey, DefaultUpstreamStateId[:])
+		err := s.db.MetadataPut(ctx, upstreamStateIdKey, upstreamStateId)
 		if err != nil {
 			return fmt.Errorf("default upstream state id insert: %w", err)
 		}

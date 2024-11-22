@@ -43,6 +43,13 @@ const (
 	levelDbHome = ".testleveldb"
 )
 
+var defaultUpstreamStateId = [32]byte{
+	0xFF, 0x00, 0xFF, 0x00, 0xFF, 0x00,
+	0x44, 0x45, 0x46, 0x41, 0x55, 0x4C, 0x54, 0x55, 0x50, 0x53, // DEFAULTUPS
+	0x54, 0x52, 0x45, 0x41, 0x4D, 0x53, 0x54, 0x41, 0x54, 0x45, // TREAMSTATE
+	0x00, 0xFF, 0x00, 0xFF, 0x00, 0xFF,
+}
+
 type StdoutLogConsumer struct {
 	Name string // name of service
 }
@@ -1058,7 +1065,7 @@ func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Serve
 	}
 
 	tbcServer.ignoreUlimit = true
-	tbcServer.ExternalHeaderSetup(ctx)
+	tbcServer.ExternalHeaderSetup(ctx, defaultUpstreamStateId[:])
 	return tbcServer
 }
 
@@ -1283,7 +1290,7 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 		}
 
 		stateId := [32]byte{byte(i)}
-		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, &stateId)
+		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, stateId[:])
 		if err != nil {
 			t.Error(err)
 		}
@@ -1383,7 +1390,7 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 		prevHeaderHash := prevHeaderParsed.BlockHash()
 		// Different from the state IDs used earlier to ensure we differentiate
 		stateId := [32]byte{byte(i), 0xFF}
-		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, &stateId)
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, stateId[:])
 		if err != nil {
 			t.Error(err)
 		}
@@ -1478,7 +1485,7 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 			Headers: parsedHeaders,
 		}
 
-		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, nil)
+		it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, defaultUpstreamStateId[:])
 		if err != nil {
 			t.Error(err)
 		}
@@ -1582,7 +1589,7 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 			t.Logf("%d: %x", k, bh)
 		}
 
-		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, nil)
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, prevHeaderParsed, defaultUpstreamStateId[:])
 		if err != nil {
 			t.Error(err)
 		}
@@ -1627,6 +1634,9 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
 	defer cancel()
 
+	// XXX all t.Error in here should be t.Fatal. There is no point in
+	// continuing the test.
+
 	tbc := createTbcServerExternalHeaderMode(ctx, t)
 
 	// STEP 1: Add headers from 1 to 9 in one go
@@ -1638,7 +1648,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 
 	// arbitrary values
 	origInsertStateId := [32]byte{0xFF, 0x33, 0x99, 0xE3}
-	it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, &origInsertStateId)
+	it, canon, last, _, err := tbc.AddExternalHeaders(ctx, msgHeaders, origInsertStateId[:])
 	if err != nil {
 		t.Error(err)
 	}
@@ -1732,7 +1742,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		}
 
 		removeStateId := [32]byte{0xAA, 0xBB, 0xCC, 0xDD}
-		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, wouldBeCanonical, &removeStateId)
+		rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, wouldBeCanonical, removeStateId[:])
 		if err == nil {
 			t.Errorf("removing headers from %d to %d when tip is %d should have failed but did not", start, end, canonicalHeightBefore)
 		}
@@ -1789,7 +1799,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Errorf("unable to parse heacer %x", rawShouldBeCanonical[:])
 	}
 
-	rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, shouldBeCanonical, nil)
+	rt, postRemovalTip, err := tbc.RemoveExternalHeaders(ctx, msgHeaders, shouldBeCanonical, defaultUpstreamStateId[:])
 	if err != nil {
 		t.Errorf("removing headers from %d to %d when tip is %d should have succeeded but did not", start, end, canonicalHeightBefore)
 	}
@@ -1807,10 +1817,10 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Errorf("unable to get upstream state id, err: %v", err)
 	}
 
-	if !bytes.Equal(stateIdRet[:], DefaultUpstreamStateId[:]) {
+	if !bytes.Equal(stateIdRet[:], defaultUpstreamStateId[:]) {
 		t.Errorf("after successfully removing external headers with no state id specified, state id should "+
 			"have been the default upstream state id %x but got %x instead",
-			DefaultUpstreamStateId[:], stateIdRet[:])
+			defaultUpstreamStateId[:], stateIdRet[:])
 	} else {
 		t.Logf("after successfully removing external headers with no state id specified, state id of "+
 			"%x is correct (set to default)", stateIdRet[:])
@@ -1883,7 +1893,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Error(err)
 	}
 
-	it, canon, last, _, err = tbc.AddExternalHeaders(ctx, msgHeaders, nil)
+	it, canon, last, _, err = tbc.AddExternalHeaders(ctx, msgHeaders, defaultUpstreamStateId[:])
 	if err != nil {
 		t.Error(err)
 	}
