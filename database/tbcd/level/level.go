@@ -664,6 +664,24 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	}
 	defer mdDiscard()
 
+	// Block headers
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to start block headers leveldb transaction, err: %w", err)
+	}
+	defer bhsDiscard()
+
+	// height hash
+	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to start height hash leveldb transaction, err: %w", err)
+	}
+	defer hhDiscard()
+
+	// <MAXMADNESS>
+
 	// Get current canonical tip for later use
 	originalCanonicalTip, err := l.BlockHeaderBest(ctx)
 	if err != nil {
@@ -801,22 +819,6 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		}
 	}
 
-	// Block headers
-	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
-	if err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to start block headers leveldb transaction, err: %w", err)
-	}
-	defer bhsDiscard()
-
-	// height hash
-	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
-	if err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to start height hash leveldb transaction, err: %w", err)
-	}
-	defer hhDiscard()
-
 	mdBatch := new(leveldb.Batch)
 	bhsBatch := new(leveldb.Batch)
 	hhBatch := new(leveldb.Batch)
@@ -872,6 +874,8 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: none of the chain geometry checks applies to this removal")
 	}
+
+	// </MAXMADNESS>
 
 	// Write height hash batch
 	err = hhTx.Write(hhBatch, nil)
