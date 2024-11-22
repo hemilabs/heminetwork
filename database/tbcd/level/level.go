@@ -645,7 +645,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 //
 // If an upstreamCursor is provided, it is updated atomically in the database
 // along with the state transition of removing the block headers.
-func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, postHook tbcd.PostHook) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, batchHook tbcd.BatchHook) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeadersRemove")
 	defer log.Tracef("BlockHeadersRemove exit")
 
@@ -879,13 +879,13 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	// </MAXMADNESS>
 
 	// Call post hook if set.
-	if postHook != nil {
+	if batchHook != nil {
 		dbBatches := map[string]tbcd.Batch{
 			level.MetadataDB:     {Batch: mdBatch},
 			level.BlockHeadersDB: {Batch: bhsBatch},
 			level.HeightHashDB:   {Batch: hhBatch},
 		}
-		err := postHook(ctx, dbBatches)
+		err := batchHook(ctx, dbBatches)
 		if err != nil {
 			return tbcd.RTInvalid, nil, fmt.Errorf("post hook: %w", err)
 		}
@@ -939,7 +939,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 // and always returns the canonical and last inserted blockheader, which may be
 // the same.
 // This call uses the database to prevent reentrancy.
-func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, postHook tbcd.PostHook) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batchHook tbcd.BatchHook) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
@@ -1124,14 +1124,14 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 	}
 
 	// Call post hook if set.
-	if postHook != nil {
+	if batchHook != nil {
 		dbBatches := map[string]tbcd.Batch{
 			level.MetadataDB:      {Batch: mdBatch},
 			level.BlockHeadersDB:  {Batch: bhsBatch},
 			level.BlocksMissingDB: {Batch: bmBatch},
 			level.HeightHashDB:    {Batch: hhBatch},
 		}
-		err := postHook(ctx, dbBatches)
+		err := batchHook(ctx, dbBatches)
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("post hook: %w", err)

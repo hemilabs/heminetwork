@@ -75,7 +75,7 @@ type Batch struct {
 	Batch *leveldb.Batch
 }
 
-type PostHook func(ctx context.Context, batches map[string]Batch) error
+type BatchHook func(ctx context.Context, batches map[string]Batch) error
 
 type Database interface {
 	database.Database
@@ -94,8 +94,8 @@ type Database interface {
 
 	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
-	BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, postHook PostHook) (InsertType, *BlockHeader, *BlockHeader, int, error)
-	BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, postHook PostHook) (RemoveType, *BlockHeader, error)
+	BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batchHook BatchHook) (InsertType, *BlockHeader, *BlockHeader, int, error)
+	BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, batchHook BatchHook) (RemoveType, *BlockHeader, error)
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
