@@ -71,12 +71,11 @@ func (rt RemoveType) String() string {
 	return rtStrings[rt]
 }
 
-type Transaction struct {
-	Batch       *leveldb.Batch
-	Transaction *leveldb.Transaction
+type Batch struct {
+	Batch *leveldb.Batch
 }
 
-type PostHook func(ctx context.Context, transactions map[string]Transaction) error
+type PostHook func(ctx context.Context, batches map[string]Batch) error
 
 type Database interface {
 	database.Database

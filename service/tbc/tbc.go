@@ -1059,14 +1059,16 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 		}
 	}
 
-	ph := func(ctx context.Context, transactions map[string]tbcd.Transaction) error {
-		txDB, ok := transactions[dbnames.MetadataDB]
+	ph := func(ctx context.Context, batches map[string]tbcd.Batch) error {
+		b, ok := batches[dbnames.MetadataDB]
 		if !ok {
-			return fmt.Errorf("post hook transaction not found: %v",
+			return fmt.Errorf("post hook batch not found: %v",
 				dbnames.MetadataDB)
 		}
-		return level.TransactionBatchAppend(ctx, txDB.Transaction, txDB.Batch,
-			[]tbcd.Row{{Key: upstreamStateIdKey, Value: upstreamStateId[:]}})
+		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
+			{Key: upstreamStateIdKey, Value: upstreamStateId[:]},
+		})
+		return nil
 	}
 
 	// We aren't checking error because we want to pass everything from db upstream
@@ -1107,14 +1109,16 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 		}
 	}
 
-	ph := func(ctx context.Context, transactions map[string]tbcd.Transaction) error {
-		txDB, ok := transactions[dbnames.MetadataDB]
+	ph := func(ctx context.Context, batches map[string]tbcd.Batch) error {
+		b, ok := batches[dbnames.MetadataDB]
 		if !ok {
-			return fmt.Errorf("post hook transaction not found: %v",
+			return fmt.Errorf("post hook batch not found: %v",
 				dbnames.MetadataDB)
 		}
-		return level.TransactionBatchAppend(ctx, txDB.Transaction, txDB.Batch,
-			[]tbcd.Row{{Key: upstreamStateIdKey, Value: upstreamStateId[:]}})
+		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
+			{Key: upstreamStateIdKey, Value: upstreamStateId[:]},
+		})
+		return nil
 	}
 
 	// We aren't checking error because we want to pass everything from db upstream

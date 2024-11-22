@@ -250,16 +250,14 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
 }
 
-// TransactionBatchAppend appends rows to batch b that is wrapped in
-// transaction t.
-func TransactionBatchAppend(ctx context.Context, t *leveldb.Transaction, b *leveldb.Batch, rows []tbcd.Row) error {
-	log.Tracef("transactionBatchAppend")
-	defer log.Tracef("transactionBatchAppend exit")
+// BatchAppend appends rows to batch b.
+func BatchAppend(ctx context.Context, b *leveldb.Batch, rows []tbcd.Row) {
+	log.Tracef("BatchAppend")
+	defer log.Tracef("BatchAppend exit")
 
 	for k := range rows {
 		b.Put(rows[k].Key, rows[k].Value)
 	}
-	return t.Write(b, nil)
 }
 
 func (l *ldb) MetadataBatchPut(ctx context.Context, rows []tbcd.Row) error {
@@ -274,14 +272,16 @@ func (l *ldb) MetadataBatchPut(ctx context.Context, rows []tbcd.Row) error {
 	defer mdDiscard()
 
 	mdBatch := new(leveldb.Batch)
-	err = TransactionBatchAppend(ctx, mdDB, mdBatch, rows)
-	if err != nil {
-		return fmt.Errorf("transaction put batch: %w", err)
+	BatchAppend(ctx, mdBatch, rows)
+
+	// Transaction write
+	if err := mdDB.Write(mdBatch, nil); err != nil {
+		return fmt.Errorf("metadata write: %w", err)
 	}
 
-	// transactions commit
+	// Transaction commit
 	if err = mdCommit(); err != nil {
-		return fmt.Errorf("transactions commit: %w", err)
+		return fmt.Errorf("metadata commit: %w", err)
 	}
 
 	return nil
@@ -299,13 +299,14 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	defer mdDiscard()
 
 	mdBatch := new(leveldb.Batch)
-	err = TransactionBatchAppend(ctx, mdDB, mdBatch,
-		[]tbcd.Row{{Key: key, Value: value}})
-	if err != nil {
-		return fmt.Errorf("transaction put batch: %w", err)
+	BatchAppend(ctx, mdBatch, []tbcd.Row{{Key: key, Value: value}})
+
+	// Transaction write
+	if err := mdDB.Write(mdBatch, nil); err != nil {
+		return fmt.Errorf("metadata write: %w", err)
 	}
 
-	// transactions commit
+	// Transaction commit
 	if err = mdCommit(); err != nil {
 		return fmt.Errorf("transactions commit: %w", err)
 	}
@@ -877,6 +878,19 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 	// </MAXMADNESS>
 
+	// Call post hook if set.
+	if postHook != nil {
+		dbBatches := map[string]tbcd.Batch{
+			level.MetadataDB:     {Batch: mdBatch},
+			level.BlockHeadersDB: {Batch: bhsBatch},
+			level.HeightHashDB:   {Batch: hhBatch},
+		}
+		err := postHook(ctx, dbBatches)
+		if err != nil {
+			return tbcd.RTInvalid, nil, fmt.Errorf("post hook: %w", err)
+		}
+	}
+
 	// Write height hash batch
 	err = hhTx.Write(hhBatch, nil)
 	if err != nil {
@@ -891,29 +905,11 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 			fmt.Errorf("block headers remove: unable to write block headers batch: %w", err)
 	}
 
-	// Nothing to write for metadata but pass on the batch to the post
-	// hook.
-
-	// Call post hook if set.
-	if postHook != nil {
-		dbTransactions := map[string]tbcd.Transaction{
-			level.MetadataDB: {
-				Transaction: mdTx,
-				Batch:       mdBatch,
-			},
-			level.BlockHeadersDB: {
-				Transaction: bhsTx,
-				Batch:       bhsBatch,
-			},
-			level.HeightHashDB: {
-				Transaction: hhTx,
-				Batch:       hhBatch,
-			},
-		}
-		err := postHook(ctx, dbTransactions)
-		if err != nil {
-			return tbcd.RTInvalid, nil, fmt.Errorf("post hook: %w", err)
-		}
+	// Write metadata batch
+	err = mdTx.Write(mdBatch, nil)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("block headers remove: unable to write metadata batch: %w", err)
 	}
 
 	// height hash commit
@@ -1127,6 +1123,21 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 		it = tbcd.ITChainExtend
 	}
 
+	// Call post hook if set.
+	if postHook != nil {
+		dbBatches := map[string]tbcd.Batch{
+			level.MetadataDB:      {Batch: mdBatch},
+			level.BlockHeadersDB:  {Batch: bhsBatch},
+			level.BlocksMissingDB: {Batch: bmBatch},
+			level.HeightHashDB:    {Batch: hhBatch},
+		}
+		err := postHook(ctx, dbBatches)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("post hook: %w", err)
+		}
+	}
+
 	// Write height hash batch
 	if err = hhTx.Write(hhBatch, nil); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
@@ -1145,34 +1156,10 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, post
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
-	// Nothing to write for metadata but pass on the batch to the post
-	// hook.
-
-	// Call post hook if set.
-	if postHook != nil {
-		dbTransactions := map[string]tbcd.Transaction{
-			level.MetadataDB: {
-				Transaction: mdTx,
-				Batch:       mdBatch,
-			},
-			level.BlockHeadersDB: {
-				Transaction: bhsTx,
-				Batch:       bhsBatch,
-			},
-			level.BlocksMissingDB: {
-				Transaction: bmTx,
-				Batch:       bmBatch,
-			},
-			level.HeightHashDB: {
-				Transaction: hhTx,
-				Batch:       hhBatch,
-			},
-		}
-		err := postHook(ctx, dbTransactions)
-		if err != nil {
-			return tbcd.ITInvalid, nil, nil, 0,
-				fmt.Errorf("post hook: %w", err)
-		}
+	// Write metadata batch
+	if err = mdTx.Write(mdBatch, nil); err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("metadata insert: %w", err)
 	}
 
 	// height hash commit
