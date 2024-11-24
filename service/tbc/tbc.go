@@ -1501,6 +1501,16 @@ func (s *Server) insertGenesis(ctx context.Context, height uint64, diff *big.Int
 	return nil
 }
 
+func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block *chainhash.Hash, peersToTry int) {
+	for i := 0; i < peersToTry; i++ {
+		err := s.downloadBlockFromRandomPeer(ctx, block)
+		if err != nil {
+			// Not escalating error as upstream's only recourse is to try again
+			log.Errorf("Error downloading block from peer: %v", err)
+		}
+	}
+}
+
 // BlockByHash returns a block with the given hash.
 func (s *Server) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
