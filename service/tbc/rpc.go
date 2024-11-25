@@ -627,13 +627,14 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 	return &tbcapi.BlockInsertRawResponse{BlockHash: &hash}, nil
 }
 
+// handleBlockDownloadAsyncRequest handles tbcapi.BlockDownloadAsyncRequest.
 func (s *Server) handleBlockDownloadAsyncRequest(ctx context.Context, req *tbcapi.BlockDownloadAsyncRequest) (any, error) {
 	log.Tracef("handleBlockAsyncDownloadRequest")
 	defer log.Tracef("handleBlockAsyncDownloadRequest exit")
 
 	if req.Hash == nil {
 		return &tbcapi.BlockDownloadAsyncResponse{
-			Error: protocol.RequestErrorf("no hash"),
+			Error: protocol.RequestErrorf("hash must be provided"),
 		}, nil
 	}
 	if req.Peers <= 0 || req.Peers > 5 {
@@ -648,18 +649,20 @@ func (s *Server) handleBlockDownloadAsyncRequest(ctx context.Context, req *tbcap
 		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
 	}
 	if blk == nil {
+		// Block will be downloaded in the background, asynchronously.
 		return &tbcapi.BlockDownloadAsyncResponse{}, nil
 	}
 	return &tbcapi.BlockDownloadAsyncResponse{Block: blk.MsgBlock()}, nil
 }
 
+// handleBlockDownloadAsyncRawRequest handles tbcapi.BlockDownloadAsyncRawRequest.
 func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tbcapi.BlockDownloadAsyncRawRequest) (any, error) {
 	log.Tracef("handleBlockDownloadAsyncRawRequest")
 	defer log.Tracef("handleBlockDownloadAsyncRawRequest exit")
 
 	if req.Hash == nil {
 		return &tbcapi.BlockDownloadAsyncRawResponse{
-			Error: protocol.RequestErrorf("no hash"),
+			Error: protocol.RequestErrorf("hash must be provided"),
 		}, nil
 	}
 	if req.Peers <= 0 || req.Peers > 5 {
@@ -674,6 +677,7 @@ func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tb
 		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
 	}
 	if blk == nil {
+		// Block will be downloaded in the background, asynchronously.
 		return &tbcapi.BlockDownloadAsyncRawResponse{}, nil
 	}
 
