@@ -52,7 +52,7 @@ const (
 	daemonName      = "hemictl"
 	defaultLogLevel = daemonName + "=INFO;bfgpostgres=INFO;postgres=INFO;protocol=INFO"
 
-	tbcReadLimit = 8 * (1 << 20)
+	tbcReadLimit = 8 * (1 << 20) // 8 MiB.
 )
 
 var (
