@@ -636,9 +636,9 @@ func (s *Server) handleBlockDownloadAsyncRequest(ctx context.Context, req *tbcap
 			Error: protocol.RequestErrorf("no hash"),
 		}, nil
 	}
-	if req.Peers > 5 {
+	if req.Peers <= 0 || req.Peers > 5 {
 		return &tbcapi.BlockDownloadAsyncResponse{
-			Error: protocol.RequestErrorf("too many peers"),
+			Error: protocol.RequestErrorf("invalid peers"),
 		}, nil
 	}
 
@@ -662,7 +662,7 @@ func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tb
 			Error: protocol.RequestErrorf("no hash"),
 		}, nil
 	}
-	if req.Peers > 5 {
+	if req.Peers <= 0 || req.Peers > 5 {
 		return &tbcapi.BlockDownloadAsyncRawResponse{
 			Error: protocol.RequestErrorf("too many peers"),
 		}, nil
