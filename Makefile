@@ -29,7 +29,7 @@ cmds = \
 .PHONY: all clean deps go-deps $(cmds) build install lint lint-deps tidy race test vulncheck \
 	vulncheck-deps
 
-all: lint tidy test build install
+all: tidy build lint test install
 
 clean: clean-test
 	rm -rf $(GOBIN) $(GOCACHE) $(GOPKG)
