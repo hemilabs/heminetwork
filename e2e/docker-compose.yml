@@ -197,7 +197,7 @@ services:
     volumes:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
-      - "./e2e/jwt.txt:/tmp/jwt.txt:ro"
+      - "./e2e/jwt.hex:/tmp/jwt.hex:ro"
       - { type: "tmpfs", target: "/tmp" }
     networks:
       e2e:
@@ -221,7 +221,7 @@ services:
     volumes:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
-      - "./jwt.txt:/tmp/jwt.txt:ro"
+      - "./jwt.hex:/tmp/jwt.hex:ro"
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - "./genesisl2.sh:/tmp/genesisl2.sh"
       - "./output:/tmp/output"
@@ -253,7 +253,7 @@ services:
     volumes:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
-      - "./jwt.txt:/tmp/jwt.txt:ro"
+      - "./jwt.hex:/tmp/jwt.hex:ro"
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - "./genesisl2.sh:/tmp/genesisl2.sh"
       - "./output:/tmp/output"
@@ -286,7 +286,7 @@ services:
     volumes:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
-      - "./jwt.txt:/tmp/jwt.txt:ro"
+      - "./jwt.hex:/tmp/jwt.hex:ro"
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - "./genesisl2.sh:/tmp/genesisl2.sh"
       - "./output:/tmp/output"
@@ -315,7 +315,7 @@ services:
     command:
       - "op-node/bin/op-node"
       - "--l2=ws://op-geth-l2:8551"
-      - "--l2.jwt-secret=/tmp/jwt.txt"
+      - "--l2.jwt-secret=/tmp/jwt.hex"
       - "--sequencer.enabled=true"
       - "--sequencer.l1-confs=0"
       - "--sequencer.stopped=true"
@@ -345,7 +345,7 @@ services:
       - "--l1.beacon.ignore=true"
     volumes:
       - "l2configs:/l2configs"
-      - "./jwt.txt:/tmp/jwt.txt"
+      - "./jwt.hex:/tmp/jwt.hex"
       - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
     networks:
       e2e:
@@ -369,7 +369,7 @@ services:
     command:
       - "op-node/bin/op-node"
       - "--l2=ws://op-geth-l2-2:8551"
-      - "--l2.jwt-secret=/tmp/jwt.txt"
+      - "--l2.jwt-secret=/tmp/jwt.hex"
       - "--sequencer.enabled=true"
       - "--sequencer.l1-confs=0"
       - "--sequencer.stopped=true"
@@ -397,7 +397,7 @@ services:
       - "--l1.beacon.ignore=true"
     volumes:
       - "l2configs:/l2configs"
-      - "./jwt.txt:/tmp/jwt.txt"
+      - "./jwt.hex:/tmp/jwt.hex"
       - "./op-node-priv-key-2.txt:/tmp/op-node-priv-key.txt"
     networks:
       e2e:
@@ -420,7 +420,7 @@ services:
     command:
       - "op-node/bin/op-node"
       - "--l2=ws://op-geth-l2-3:8551"
-      - "--l2.jwt-secret=/tmp/jwt.txt"
+      - "--l2.jwt-secret=/tmp/jwt.hex"
       - "--sequencer.enabled=true"
       - "--sequencer.l1-confs=0"
       - "--sequencer.stopped=true"
@@ -448,7 +448,7 @@ services:
       - "--l1.beacon.ignore=true"
     volumes:
       - "l2configs:/l2configs"
-      - "./jwt.txt:/tmp/jwt.txt"
+      - "./jwt.hex:/tmp/jwt.hex"
       - "./op-node-priv-key-3.txt:/tmp/op-node-priv-key.txt"
     networks:
       e2e:
@@ -649,7 +649,7 @@ services:
       - "--rpc.port=8547"
     volumes:
       - "l2configs:/l2configs"
-      - "./jwt.txt:/tmp/jwt.txt"
+      - "./jwt.hex:/tmp/jwt.hex"
     restart: always
     networks:
       e2e:
@@ -683,7 +683,7 @@ services:
       - "--rpc.port=8547"
     volumes:
       - "l2configs:/l2configs"
-      - "./jwt.txt:/tmp/jwt.txt"
+      - "./jwt.hex:/tmp/jwt.hex"
     restart: always
     networks:
       e2e:
@@ -717,7 +717,7 @@ services:
       - "--rpc.port=8547"
     volumes:
       - "l2configs:/l2configs"
-      - "./jwt.txt:/tmp/jwt.txt"
+      - "./jwt.hex:/tmp/jwt.hex"
     restart: always
     networks:
       e2e:
