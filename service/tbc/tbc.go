@@ -758,6 +758,28 @@ func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block *chainha
 	return nil
 }
 
+func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block *chainhash.Hash, count uint) (*btcutil.Block, error) {
+	log.Tracef("DownloadBlockFromRandomPeers %v %v", count, block)
+	defer log.Tracef("DownloadBlockFromRandomPeers %v %v exit", count, block)
+
+	blk, err := s.db.BlockByHash(ctx, block)
+	if err != nil {
+		if errors.Is(err, database.ErrBlockNotFound) {
+			for range count {
+				err := s.downloadBlockFromRandomPeer(ctx, block)
+				if err != nil {
+					log.Errorf("async download: %v", err)
+					continue
+				}
+			}
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return blk, nil
+}
+
 func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) error {
 	log.Tracef("handleBlockExpired")
 	defer log.Tracef("handleBlockExpired exit")
@@ -1113,6 +1135,10 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	log.Infof("Inserted (%v) %v block headers height %v %v", it, n, height, p)
 
 	return nil
+}
+
+func (s *Server) BlockInsert(ctx context.Context, blk *wire.MsgBlock) (int64, error) {
+	return s.db.BlockInsert(ctx, btcutil.NewBlock(blk))
 }
 
 func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgBlock, raw []byte) error {

@@ -177,6 +177,20 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBlockDownloadAsyncRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockDownloadAsyncRequest)
+				return s.handleBlockDownloadAsyncRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdBlockDownloadAsyncRawRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.BlockDownloadAsyncRawRequest)
+				return s.handleBlockDownloadAsyncRawRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -611,6 +625,64 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 
 	hash := b.Header.BlockHash()
 	return &tbcapi.BlockInsertRawResponse{BlockHash: &hash}, nil
+}
+
+func (s *Server) handleBlockDownloadAsyncRequest(ctx context.Context, req *tbcapi.BlockDownloadAsyncRequest) (any, error) {
+	log.Tracef("handleBlockAsyncDownloadRequest")
+	defer log.Tracef("handleBlockAsyncDownloadRequest exit")
+
+	if req.Hash == nil {
+		return &tbcapi.BlockDownloadAsyncResponse{
+			Error: protocol.RequestErrorf("no hash"),
+		}, nil
+	}
+	if req.Peers > 5 {
+		return &tbcapi.BlockDownloadAsyncResponse{
+			Error: protocol.RequestErrorf("too many peers"),
+		}, nil
+	}
+
+	blk, err := s.DownloadBlockFromRandomPeers(ctx, req.Hash, req.Peers)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
+	}
+	if blk == nil {
+		return &tbcapi.BlockDownloadAsyncResponse{}, nil
+	}
+	return &tbcapi.BlockDownloadAsyncResponse{Block: blk.MsgBlock()}, nil
+}
+
+func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tbcapi.BlockDownloadAsyncRawRequest) (any, error) {
+	log.Tracef("handleBlockDownloadAsyncRawRequest")
+	defer log.Tracef("handleBlockDownloadAsyncRawRequest exit")
+
+	if req.Hash == nil {
+		return &tbcapi.BlockDownloadAsyncRawResponse{
+			Error: protocol.RequestErrorf("no hash"),
+		}, nil
+	}
+	if req.Peers > 5 {
+		return &tbcapi.BlockDownloadAsyncRawResponse{
+			Error: protocol.RequestErrorf("too many peers"),
+		}, nil
+	}
+
+	blk, err := s.DownloadBlockFromRandomPeers(ctx, req.Hash, req.Peers)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
+	}
+	if blk == nil {
+		return &tbcapi.BlockDownloadAsyncRawResponse{}, nil
+	}
+
+	rb, err := blk.Bytes()
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
+	}
+	return &tbcapi.BlockDownloadAsyncRawResponse{Block: rb}, nil
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {

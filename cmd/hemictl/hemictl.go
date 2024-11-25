@@ -1153,7 +1153,7 @@ func _main() error {
 	default:
 		return fmt.Errorf("can't derive URL from command: %v", cmd)
 	}
-	conn, err := protocol.NewConn(u, nil)
+	conn, err := protocol.NewConn(u, &protocol.ConnOptions{ReadLimit: 8 * 1024 * 1024})
 	if err != nil {
 		return err
 	}
