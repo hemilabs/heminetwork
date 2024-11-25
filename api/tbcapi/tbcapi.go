@@ -70,6 +70,12 @@ const (
 
 	CmdBlockInsertRawRequest  = "tbcapi-block-insert-raw-request"
 	CmdBlockInsertRawResponse = "tbcapi-block-insert-raw-response"
+
+	CmdBlockDownloadAsyncRequest  = "tbcapi-block-download-async-request"
+	CmdBlockDownloadAsyncResponse = "tbcapi-block-download-async-response"
+
+	CmdBlockDownloadAsyncRawRequest  = "tbcapi-block-download-async-raw-request"
+	CmdBlockDownloadAsyncRawResponse = "tbcapi-block-download-async-raw-response"
 )
 
 var (
@@ -283,6 +289,31 @@ type BlockInsertRawResponse struct {
 	Error     *protocol.Error `json:"error,omitempty"`
 }
 
+// BlockDownloadAsyncResponse returns a block if it exists or attempts to
+// download the block from p2p asynchronously.
+type BlockDownloadAsyncRequest struct {
+	Hash  *chainhash.Hash `json:"hash"`
+	Peers uint            `json:"peers"`
+}
+
+// BlockDownloadAsyncResponse replies with a block, an error or nothing. When
+// bot Error and Block are nil it measn the block download request was issued
+// to p2p.
+type BlockDownloadAsyncResponse struct {
+	Block *wire.MsgBlock  `json:"block,omitempty"`
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
+type BlockDownloadAsyncRawRequest struct {
+	Hash  *chainhash.Hash `json:"hash"`
+	Peers uint            `json:"peers"`
+}
+
+type BlockDownloadAsyncRawResponse struct {
+	Block api.ByteSlice   `json:"block,omitempty"`
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                     reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                    reflect.TypeOf(PingResponse{}),
@@ -316,6 +347,10 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockInsertResponse:             reflect.TypeOf(BlockInsertResponse{}),
 	CmdBlockInsertRawRequest:           reflect.TypeOf(BlockInsertRawRequest{}),
 	CmdBlockInsertRawResponse:          reflect.TypeOf(BlockInsertRawResponse{}),
+	CmdBlockDownloadAsyncRequest:       reflect.TypeOf(BlockDownloadAsyncRequest{}),
+	CmdBlockDownloadAsyncResponse:      reflect.TypeOf(BlockDownloadAsyncResponse{}),
+	CmdBlockDownloadAsyncRawRequest:    reflect.TypeOf(BlockDownloadAsyncRawRequest{}),
+	CmdBlockDownloadAsyncRawResponse:   reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
 }
 
 type tbcAPI struct{}

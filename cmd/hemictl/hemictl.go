@@ -51,6 +51,8 @@ import (
 const (
 	daemonName      = "hemictl"
 	defaultLogLevel = daemonName + "=INFO;bfgpostgres=INFO;postgres=INFO;protocol=INFO"
+
+	tbcReadLimit = 8 * (1 << 20) // 8 MiB.
 )
 
 var (
@@ -1153,7 +1155,9 @@ func _main() error {
 	default:
 		return fmt.Errorf("can't derive URL from command: %v", cmd)
 	}
-	conn, err := protocol.NewConn(u, nil)
+	conn, err := protocol.NewConn(u, &protocol.ConnOptions{
+		ReadLimit: tbcReadLimit,
+	})
 	if err != nil {
 		return err
 	}
