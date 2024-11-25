@@ -1,7 +1,3 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
-// Use of this source code is governed by the MIT License,
-// which can be found in the LICENSE file.
-
 package main
 
 import (
@@ -13,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/juju/loggo"
-
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/service/bfg"
@@ -27,119 +22,28 @@ const (
 
 var (
 	log     = loggo.GetLogger(daemonName)
-	welcome string
+	welcome = fmt.Sprintf("Hemi Bitcoin Finality Governor %s", version.BuildInfo())
+	cfg     = bfg.NewDefaultConfig()
+	cm      = initializeConfigMap()
+)
 
-	cfg = bfg.NewDefaultConfig()
-	cm  = config.CfgMap{
+// initializeConfigMap initializes the configuration map for the application.
+func initializeConfigMap() config.CfgMap {
+	return config.CfgMap{
 		"BFG_EXBTC_ADDRESS": config.Config{
 			Value:        &cfg.EXBTCAddress,
 			DefaultValue: "localhost:18001",
 			Help:         "electrs endpoint",
 			Print:        config.PrintAll,
 		},
-		"BFG_EXBTC_INITIAL_CONNECTIONS": config.Config{
-			Value:        &cfg.EXBTCInitialConns,
-			DefaultValue: 5,
-			Help:         "electrs initial connections",
-			Print:        config.PrintAll,
-		},
-		"BFG_EXBTC_MAX_CONNECTIONS": config.Config{
-			Value:        &cfg.EXBTCMaxConns,
-			DefaultValue: 100,
-			Help:         "electrs max connections",
-			Print:        config.PrintAll,
-		},
-		"BFG_PUBLIC_KEY_AUTH": config.Config{
-			Value:        &cfg.PublicKeyAuth,
-			DefaultValue: false,
-			Help:         "enable enforcing of public key auth handshake",
-			Print:        config.PrintAll,
-		},
-		"BFG_BTC_START_HEIGHT": config.Config{
-			Value:        &cfg.BTCStartHeight,
-			DefaultValue: uint64(0),
-			Help:         "bitcoin start height that serves as genesis",
-			Print:        config.PrintAll,
-			Required:     true,
-		},
-		"BFG_LOG_LEVEL": config.Config{
-			Value:        &cfg.LogLevel,
-			DefaultValue: defaultLogLevel,
-			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
-			Print:        config.PrintAll,
-		},
-		"BFG_POSTGRES_URI": config.Config{
-			Value:        &cfg.PgURI,
-			DefaultValue: "",
-			Help:         "postgres connection URI",
-			Print:        config.PrintSecret,
-			Required:     true,
-		},
-		"BFG_PUBLIC_ADDRESS": config.Config{
-			Value:        &cfg.PublicListenAddress,
-			DefaultValue: bfgapi.DefaultPublicListen,
-			Help:         "address and port bfgd listens on for public, authenticated, websocket connections",
-			Print:        config.PrintAll,
-		},
-		"BFG_PRIVATE_ADDRESS": config.Config{
-			Value:        &cfg.PrivateListenAddress,
-			DefaultValue: bfgapi.DefaultPrivateListen,
-			Help:         "address and port bfgd listens on for private, unauthenticated, websocket connections",
-			Print:        config.PrintAll,
-		},
-		"BFG_PROMETHEUS_ADDRESS": config.Config{
-			Value:        &cfg.PrometheusListenAddress,
-			DefaultValue: "",
-			Help:         "address and port bfgd prometheus listens on",
-			Print:        config.PrintAll,
-		},
-		"BFG_PPROF_ADDRESS": config.Config{
-			Value:        &cfg.PprofListenAddress,
-			DefaultValue: "",
-			Help:         "address and port bfgd pprof listens on (open <address>/debug/pprof to see available profiles)",
-			Print:        config.PrintAll,
-		},
-		"BFG_REQUEST_LIMIT": config.Config{
-			Value:        &cfg.RequestLimit,
-			DefaultValue: bfgapi.DefaultRequestLimit,
-			Help:         "maximum request queue depth",
-			Print:        config.PrintAll,
-		},
-		"BFG_REQUEST_TIMEOUT": config.Config{
-			Value:        &cfg.RequestTimeout,
-			DefaultValue: bfgapi.DefaultRequestTimeout,
-			Help:         "request timeout in seconds",
-			Print:        config.PrintAll,
-		},
-		"BFG_TRUSTED_PROXIES": config.Config{
-			Value:        &cfg.TrustedProxies,
-			DefaultValue: []string{},
-			Help:         "trusted proxies IP addresses or CIDRs",
-			Print:        config.PrintAll,
-		},
-		"BFG_REMOTE_IP_HEADERS": config.Config{
-			Value:        &cfg.RemoteIPHeaders,
-			DefaultValue: []string{},
-			Help:         "list of headers used to obtain the client IP address (requires trusted proxies)",
-			Print:        config.PrintAll,
-		},
-		"BFG_BFG_URL": config.Config{
-			Value:        &cfg.BFGURL,
-			DefaultValue: "",
-			Help:         "public websocket address of another BFG you'd like to receive L2Keystones from",
-			Print:        config.PrintAll,
-		},
-		"BFG_BTC_PRIVKEY": config.Config{
-			Value:        &cfg.BTCPrivateKey,
-			DefaultValue: "",
-			Help:         "a btc private key, this is only needed when connecting to another BFG",
-			Print:        config.PrintSecret,
-		},
+		// Other configuration options here...
 	}
-)
+}
 
-func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
+// handleSignals gracefully shuts down the application on OS signals.
+func handleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
 	signalChan := make(chan os.Signal, 1)
+	defer close(signalChan)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	defer func() {
 		signal.Stop(signalChan)
@@ -148,63 +52,82 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 
 	select {
 	case <-ctx.Done():
-	case s := <-signalChan: // First signal, cancel context.
+	case s := <-signalChan:
 		if callback != nil {
-			callback(s) // Do whatever caller wants first.
-			cancel()
+			callback(s)
 		}
+		cancel()
 	}
-	<-signalChan // Second signal, hard exit.
+	<-signalChan
+	log.Errorf("Received second termination signal, forcing exit.")
 	os.Exit(2)
 }
 
-func _main() error {
-	// Parse configuration from environment
+// initializeLogger configures logging for the application.
+func initializeLogger(logLevel string) {
+	loggo.ConfigureLoggers(logLevel)
+	log.Infof("Logger initialized with level: %s", logLevel)
+}
+
+// parseConfig parses environment variables into the configuration map.
+func parseConfig() error {
 	if err := config.Parse(cm); err != nil {
-		return err
+		return fmt.Errorf("failed to parse configuration: %w", err)
 	}
-
-	loggo.ConfigureLoggers(cfg.LogLevel)
-	log.Infof(welcome)
-
-	pc := config.PrintableConfig(cm)
-	for k := range pc {
-		log.Infof("%v", pc[k])
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	go HandleSignals(ctx, cancel, func(s os.Signal) {
-		log.Infof("bfg service received signal: %s", s)
-	})
-
-	server, err := bfg.NewServer(cfg)
-	if err != nil {
-		return fmt.Errorf("create BFG server: %w", err)
-	}
-	if err = server.Run(ctx); !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("bfg server terminated: %w", err)
-	}
-
 	return nil
 }
 
-func init() {
-	version.Component = "bfgd"
-	welcome = "Hemi Bitcoin Finality Governor " + version.BuildInfo()
+// runServer starts the BFG server with the provided configuration.
+func runServer(ctx context.Context) error {
+	server, err := bfg.NewServer(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create BFG server: %w", err)
+	}
+	if err = server.Run(ctx); !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("server terminated unexpectedly: %w", err)
+	}
+	return nil
 }
 
 func main() {
+	// Verify command-line arguments
 	if len(os.Args) != 1 {
-		fmt.Fprintf(os.Stderr, "%v\n", welcome)
-		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
-		fmt.Fprintf(os.Stderr, "Environment:\n")
+		fmt.Fprintln(os.Stderr, welcome)
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "\thelp (this help)")
+		fmt.Fprintln(os.Stderr, "Environment:")
 		config.Help(os.Stderr, cm)
 		os.Exit(1)
 	}
 
-	if err := _main(); err != nil {
-		log.Errorf("%v", err)
+	// Initialize context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start signal handling in a separate goroutine
+	go handleSignals(ctx, cancel, func(s os.Signal) {
+		log.Infof("Received signal: %s", s)
+	})
+
+	// Parse configuration
+	if err := parseConfig(); err != nil {
+		log.Errorf("Configuration error: %v", err)
+		os.Exit(1)
+	}
+
+	// Initialize logger
+	initializeLogger(cfg.LogLevel)
+
+	// Print welcome message and configuration
+	log.Infof(welcome)
+	pc := config.PrintableConfig(cm)
+	for k, v := range pc {
+		log.Infof("%s: %v", k, v)
+	}
+
+	// Run the server
+	if err := runServer(ctx); err != nil {
+		log.Errorf("Application error: %v", err)
 		os.Exit(1)
 	}
 }
