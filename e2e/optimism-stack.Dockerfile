@@ -61,3 +61,5 @@ RUN forge build
 WORKDIR /git/optimism
 
 RUN make devnet-allocs
+
+RUN apt-get install -y netcat-openbsd
