@@ -18,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/database"
 )
@@ -49,6 +50,33 @@ type Row struct {
 	Error error
 }
 
+// Canonical chain geometry changes resulting from header removal
+type RemoveType int
+
+const (
+	RTInvalid      RemoveType = 0 // Invalid removal for generic reason (ex: no headers to remove)
+	RTChainDescend RemoveType = 1 // Removal walked the canonical chain backwards, but existing chain is still canonical
+	RTForkDescend  RemoveType = 2 // Removal walked a non-canonical chain backwards, no change to canonical chain remaining canonical
+	RTChainFork    RemoveType = 3 // Removal walked canonical chain backwards far enough that another chain is now canonical
+)
+
+var rtStrings = map[RemoveType]string{
+	RTInvalid:      "invalid",
+	RTChainDescend: "canonical chain descend",
+	RTForkDescend:  "fork chain descend",
+	RTChainFork:    "canonical descend changed canonical",
+}
+
+func (rt RemoveType) String() string {
+	return rtStrings[rt]
+}
+
+type Batch struct {
+	Batch *leveldb.Batch
+}
+
+type BatchHook func(ctx context.Context, batches map[string]Batch) error
+
 type Database interface {
 	database.Database
 
@@ -56,17 +84,18 @@ type Database interface {
 	Version(ctx context.Context) (int, error)
 	MetadataGet(ctx context.Context, key []byte) ([]byte, error)
 	MetadataPut(ctx context.Context, key, value []byte) error
-	MetadataBatchPut(ctx context.Context, rows []Row) error
 	MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byte) ([]Row, error)
+	MetadataBatchPut(ctx context.Context, rows []Row) error
 
 	// Block header
 	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
 	BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*BlockHeader, error)
-	BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader) error
+	BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader, height uint64, diff *big.Int) error
 
 	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
-	BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders) (InsertType, *BlockHeader, *BlockHeader, int, error)
+	BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batchHook BatchHook) (InsertType, *BlockHeader, *BlockHeader, int, error)
+	BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, batchHook BatchHook) (RemoveType, *BlockHeader, error)
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
