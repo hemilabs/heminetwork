@@ -7,6 +7,6 @@ BEGIN;
 
 UPDATE version SET version = 11;
 
-CREATE INDEX pop_pasis_published_pop_txs_desc_idx ON pop_basis (l2_keystone_abrev_hash, id DESC) WHERE btc_block_hash IS NOT NULL;
+CREATE INDEX pop_pasis_published_pop_txs_desc_idx ON pop_basis (l2_keystone_abrev_hash, id ASC) WHERE btc_block_hash IS NOT NULL;
 
 COMMIT;
