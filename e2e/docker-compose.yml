@@ -463,8 +463,8 @@ services:
         condition: "any"
     command:
       - "op-batcher/bin/op-batcher"
-      - "--l2-eth-rpc=http://op-geth-l2:8546"
-      - "--rollup-rpc=http://op-node:8547"
+      - "--l2-eth-rpc=http://op-geth-l2:8546,http://op-geth-l2-2:8546,http://op-geth-l2-3:8546"
+      - "--rollup-rpc=http://op-node:8547,http://op-node-2:8547,http://op-node-3:8547"
       - "--poll-interval=1s"
       - "--sub-safety-margin=1"
       - "--num-confirmations=1"
@@ -483,72 +483,6 @@ services:
       op-geth-l2:
         condition: "service_healthy"
       op-node:
-        condition: "service_started"
-    networks:
-      e2e:
-
-  op-batcher-2:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
-    deploy:
-      restart_policy:
-        condition: "any"
-    command:
-      - "op-batcher/bin/op-batcher"
-      - "--l2-eth-rpc=http://op-geth-l2-2:8546"
-      - "--rollup-rpc=http://op-node-2:8547"
-      - "--poll-interval=1s"
-      - "--sub-safety-margin=1"
-      - "--num-confirmations=1"
-      - "--safe-abort-nonce-too-low-count=3"
-      - "--resubmission-timeout=30s"
-      - "--rpc.addr=0.0.0.0"
-      - "--rpc.port=8548"
-      - "--rpc.enable-admin"
-      - "--max-channel-duration=1"
-      - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
-    depends_on:
-      geth-l1:
-        condition: "service_started"
-      op-geth-l2-2:
-        condition: "service_healthy"
-      op-node-2:
-        condition: "service_started"
-    networks:
-      e2e:
-
-  op-batcher-3:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
-    deploy:
-      restart_policy:
-        condition: "any"
-    command:
-      - "op-batcher/bin/op-batcher"
-      - "--l2-eth-rpc=http://op-geth-l2-3:8546"
-      - "--rollup-rpc=http://op-node-3:8547"
-      - "--poll-interval=1s"
-      - "--sub-safety-margin=1"
-      - "--num-confirmations=1"
-      - "--safe-abort-nonce-too-low-count=3"
-      - "--resubmission-timeout=30s"
-      - "--rpc.addr=0.0.0.0"
-      - "--rpc.port=8548"
-      - "--rpc.enable-admin"
-      - "--max-channel-duration=1"
-      - "--max-pending-tx=1"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
-    depends_on:
-      geth-l1:
-        condition: "service_started"
-      op-geth-l2-3:
-        condition: "service_healthy"
-      op-node-3:
         condition: "service_started"
     networks:
       e2e:
@@ -571,60 +505,10 @@ services:
       - "op-proposer/bin/op-proposer"
       - "--poll-interval=1s"
       - "--rpc.port=8560"
-      - "--rollup-rpc=http://op-node:8547"
       - "--l2oo-address=${L2OO_ADDRESS}"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
       - "--l1-eth-rpc=http://geth-l1:8545"
-
-  op-proposer-2:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
-    deploy:
-      restart_policy:
-        condition: "any"
-    depends_on:
-      geth-l1:
-        condition: "service_started"
-      op-geth-l2-2:
-        condition: "service_healthy"
-      op-node-2:
-        condition: "service_started"
-    command:
-      - "op-proposer/bin/op-proposer"
-      - "--poll-interval=1s"
-      - "--rpc.port=8560"
-      - "--rollup-rpc=http://op-node-2:8547"
-      - "--l2oo-address=${L2OO_ADDRESS}"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-    networks:
-      e2e:
-
-  op-proposer-3:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
-    deploy:
-      restart_policy:
-        condition: "any"
-    depends_on:
-      geth-l1:
-        condition: "service_started"
-      op-geth-l2-3:
-        condition: "service_healthy"
-      op-node-3:
-        condition: "service_started"
-    command:
-      - "op-proposer/bin/op-proposer"
-      - "--poll-interval=1s"
-      - "--rpc.port=8560"
-      - "--rollup-rpc=http://op-node-3:8547"
-      - "--l2oo-address=${L2OO_ADDRESS}"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-    networks:
-      e2e:
+      - "--rollup-rpc=http://op-node:8547,http://op-node-2:8547,http://op-node-3:8547"
 
   op-conductor:
     build:
