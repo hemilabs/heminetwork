@@ -2166,9 +2166,10 @@ func (s *Server) Run(pctx context.Context) error {
 			return fmt.Errorf("block header best: %w", err)
 		}
 
-		// This Run function is only called in regular (not external header) mode, so this is true genesis block @ 0
-		// and we pass in a nil difficulty so it calculates the starting difficulty as the genesis block's own local
-		// difficulty.
+		// This Run function is only called in regular (not external
+		// header) mode, so this is true genesis block @ 0 and we pass
+		// in a nil difficulty so it calculates the starting difficulty
+		// as the genesis block's own local difficulty.
 		if err = s.insertGenesis(ctx, 0, nil); err != nil {
 			return fmt.Errorf("insert genesis: %w", err)
 		}
@@ -2456,22 +2457,4 @@ func (s *Server) ExternalHeaderTearDown() error {
 		return err
 	}
 	return nil
-}
-
-type valueVecFunc[T prometheus.Collector] struct {
-	metric T
-	fn     func(t T)
-}
-
-func newValueVecFunc[T prometheus.Collector](metric T, fn func(t T)) prometheus.Collector {
-	return &valueVecFunc[T]{metric: metric, fn: fn}
-}
-
-func (v *valueVecFunc[T]) Describe(descs chan<- *prometheus.Desc) {
-	v.metric.Describe(descs)
-}
-
-func (v *valueVecFunc[T]) Collect(metrics chan<- prometheus.Metric) {
-	v.fn(v.metric)
-	v.metric.Collect(metrics)
 }
