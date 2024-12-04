@@ -608,10 +608,13 @@ func (s *Server) promSynced() float64 {
 	return 0
 }
 
-func (s *Server) promBlockHeader() float64 {
+func (s *Server) promBlockHeader(m *prometheus.GaugeVec) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.syncInfo.BlockHeader.Height)
+
+	m.Reset()
+	m.With(prometheus.Labels{"hash": s.prom.syncInfo.BlockHeader.Hash.String()}).
+		Set(float64(s.prom.syncInfo.BlockHeader.Height))
 }
 
 func (s *Server) promUtxo() float64 {
@@ -2453,4 +2456,22 @@ func (s *Server) ExternalHeaderTearDown() error {
 		return err
 	}
 	return nil
+}
+
+type valueVecFunc[T prometheus.Collector] struct {
+	metric T
+	fn     func(t T)
+}
+
+func newValueVecFunc[T prometheus.Collector](metric T, fn func(t T)) prometheus.Collector {
+	return &valueVecFunc[T]{metric: metric, fn: fn}
+}
+
+func (v *valueVecFunc[T]) Describe(descs chan<- *prometheus.Desc) {
+	v.metric.Describe(descs)
+}
+
+func (v *valueVecFunc[T]) Collect(metrics chan<- prometheus.Metric) {
+	v.fn(v.metric)
+	v.metric.Collect(metrics)
 }
