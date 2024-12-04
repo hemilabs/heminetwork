@@ -31,6 +31,8 @@ var (
 	log = loggo.GetLogger("rawpeer")
 
 	ErrHandshakeNotComplete = errors.New("handshake not complete")
+
+	ErrNoConn = errors.New("no conn")
 )
 
 func init() {
@@ -105,7 +107,7 @@ func (r *RawPeer) Write(timeout time.Duration, msg wire.Message) error {
 	conn := r.conn
 	r.mtx.Unlock()
 	if conn == nil {
-		return fmt.Errorf("write: no conn")
+		return fmt.Errorf("write: %w", ErrNoConn)
 	}
 
 	if timeout == 0 {
@@ -127,7 +129,7 @@ func (r *RawPeer) Read(timeout time.Duration) (wire.Message, []byte, error) {
 	conn := r.conn
 	r.mtx.Unlock()
 	if conn == nil {
-		return nil, nil, fmt.Errorf("read: no conn")
+		return nil, nil, fmt.Errorf("read: %w", ErrNoConn)
 	}
 
 	if timeout == 0 {

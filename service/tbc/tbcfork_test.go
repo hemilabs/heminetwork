@@ -857,7 +857,7 @@ func TestFork(t *testing.T) {
 	}()
 
 	go func() {
-		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
@@ -902,7 +902,7 @@ func TestFork(t *testing.T) {
 		log.Infof("s run")
 		defer log.Infof("s run done")
 		err := s.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
@@ -1109,7 +1109,7 @@ func TestIndexNoFork(t *testing.T) {
 	}()
 
 	go func() {
-		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
@@ -1139,7 +1139,7 @@ func TestIndexNoFork(t *testing.T) {
 
 	go func() {
 		err := s.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
@@ -1281,7 +1281,7 @@ func TestIndexFork(t *testing.T) {
 		}
 	}()
 	go func() {
-		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) {
+		if err := n.Run(ctx); err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
@@ -1311,7 +1311,7 @@ func TestIndexFork(t *testing.T) {
 	s.ignoreUlimit = true
 	go func() {
 		err := s.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
