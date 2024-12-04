@@ -2248,11 +2248,11 @@ func (s *Server) Run(pctx context.Context) error {
 				Name:      "synced",
 				Help:      "Is tbc synced.",
 			}, s.promSynced),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
 				Subsystem: promSubsystem,
 				Name:      "blockheader_height",
 				Help:      "Blockheader height.",
-			}, s.promBlockHeader),
+			}, []string{"hash"}), s.promBlockHeader),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Subsystem: promSubsystem,
 				Name:      "utxo_sync_height",
