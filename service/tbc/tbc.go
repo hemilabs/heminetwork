@@ -2153,6 +2153,67 @@ func (s *Server) DBClose() error {
 
 // Collectors returns the Prometheus collectors available for the server.
 func (s *Server) Collectors() []prometheus.Collector {
+	if s.promCollectors == nil {
+		// Naming: https://prometheus.io/docs/practices/naming/
+		s.promCollectors = []prometheus.Collector{
+			s.cmdsProcessed,
+			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "blockheader_height", // XXX: rename to block_height?
+				Help:      "Best block canonical height and hash",
+			}, []string{"hash", "timestamp"}), s.promBlockHeader),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "blocks_missing",
+				Help:      "Number of missing blocks. -1 means more than 64 missing",
+			}, s.promBlocksMissing),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "running",
+				Help:      "Whether the TBC service is running",
+			}, s.promRunning),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "synced",
+				Help:      "Whether the TBC service is synced",
+			}, s.promSynced),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "utxo_sync_height",
+				Help:      "Height of the UTXO indexer",
+			}, s.promUtxo),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "tx_sync_height",
+				Help:      "Height of transaction indexer",
+			}, s.promTx),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "peers_connected",
+				Help:      "Number of peers connected",
+			}, s.promConnectedPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "peers_good",
+				Help:      "Number of good peers",
+			}, s.promGoodPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "peers_bad",
+				Help:      "Number of bad peers",
+			}, s.promBadPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "mempool_count",
+				Help:      "Number of transactions in mempool",
+			}, s.promMempoolCount),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "mempool_size_bytes",
+				Help:      "Size of mempool in bytes",
+			}, s.promMempoolSize),
+		}
+	}
 	return s.promCollectors
 }
 
@@ -2278,70 +2339,10 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-
-		// Naming: https://prometheus.io/docs/practices/naming/
-		s.promCollectors = []prometheus.Collector{
-			s.cmdsProcessed,
-			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "blockheader_height", // XXX: rename to block_height?
-				Help:      "Best block canonical height and hash",
-			}, []string{"hash", "timestamp"}), s.promBlockHeader),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "blocks_missing",
-				Help:      "Number of missing blocks. -1 means more than 64 missing",
-			}, s.promBlocksMissing),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "running",
-				Help:      "Whether the TBC service is running",
-			}, s.promRunning),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "synced",
-				Help:      "Whether the TBC service is synced",
-			}, s.promSynced),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "utxo_sync_height",
-				Help:      "Height of the UTXO indexer",
-			}, s.promUtxo),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "tx_sync_height",
-				Help:      "Height of transaction indexer",
-			}, s.promTx),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "peers_connected",
-				Help:      "Number of peers connected",
-			}, s.promConnectedPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "peers_good",
-				Help:      "Number of good peers",
-			}, s.promGoodPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "peers_bad",
-				Help:      "Number of bad peers",
-			}, s.promBadPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "mempool_count",
-				Help:      "Number of transactions in mempool",
-			}, s.promMempoolCount),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "mempool_size_bytes",
-				Help:      "Size of mempool in bytes",
-			}, s.promMempoolSize),
-		}
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, s.promCollectors); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, s.Collectors()); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
