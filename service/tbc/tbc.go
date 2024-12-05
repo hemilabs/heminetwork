@@ -202,7 +202,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		blocks:     blocks,
 		pings:      pings,
 		timeSource: blockchain.NewMedianTime(),
-		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
+		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{ // XXX: move into Collectors func
 			Subsystem: cfg.PrometheusSubsystem,
 			Name:      "rpc_calls_total",
 			Help:      "The total number of successful RPC commands",
