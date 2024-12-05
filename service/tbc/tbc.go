@@ -90,7 +90,7 @@ type Config struct {
 	Network                 string
 	PeersWanted             int
 	PrometheusListenAddress string
-	PrometheusSubsystem     string
+	PrometheusNamespace     string
 	PprofListenAddress      string
 	Seeds                   []string
 
@@ -112,7 +112,7 @@ func NewDefaultConfig() *Config {
 		MaxCachedTxs:        defaultMaxCachedTxs,
 		MempoolEnabled:      false, // XXX default to false until it is fixed
 		PeersWanted:         defaultPeersWanted,
-		PrometheusSubsystem: appName,
+		PrometheusNamespace: appName,
 		ExternalHeaderMode:  false, // Default anyway, but for readability
 	}
 }
@@ -203,7 +203,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		pings:      pings,
 		timeSource: blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{ // XXX: move into Collectors func
-			Subsystem: cfg.PrometheusSubsystem,
+			Namespace: cfg.PrometheusNamespace,
 			Name:      "rpc_calls_total",
 			Help:      "The total number of successful RPC commands",
 		}),
@@ -2151,73 +2151,63 @@ func (s *Server) DBClose() error {
 }
 
 // Collectors returns the Prometheus collectors available for the server.
-func (s *Server) Collectors(namespace, subsystem string) []prometheus.Collector {
+func (s *Server) Collectors() []prometheus.Collector {
 	// Naming: https://prometheus.io/docs/practices/naming/
+	namespace := s.cfg.PrometheusNamespace
 	return []prometheus.Collector{
 		s.cmdsProcessed,
 		newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "blockheader_height", // XXX: rename to block_height?
 			Help:      "Best block canonical height and hash",
 		}, []string{"hash", "timestamp"}), s.promBlockHeader),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "blocks_missing",
 			Help:      "Number of missing blocks. -1 means more than 64 missing",
 		}, s.promBlocksMissing),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "running",
 			Help:      "Whether the TBC service is running",
 		}, s.promRunning),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "synced",
 			Help:      "Whether the TBC service is synced",
 		}, s.promSynced),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "utxo_sync_height",
 			Help:      "Height of the UTXO indexer",
 		}, s.promUtxo),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "tx_sync_height",
 			Help:      "Height of transaction indexer",
 		}, s.promTx),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "peers_connected",
 			Help:      "Number of peers connected",
 		}, s.promConnectedPeers),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "peers_good",
 			Help:      "Number of good peers",
 		}, s.promGoodPeers),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "peers_bad",
 			Help:      "Number of bad peers",
 		}, s.promBadPeers),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "mempool_count",
 			Help:      "Number of transactions in mempool",
 		}, s.promMempoolCount),
 		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 			Namespace: namespace,
-			Subsystem: subsystem,
 			Name:      "mempool_size_bytes",
 			Help:      "Size of mempool in bytes",
 		}, s.promMempoolSize),
@@ -2346,7 +2336,7 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-		cs := s.Collectors(appName, s.cfg.PrometheusSubsystem)
+		cs := s.Collectors()
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
