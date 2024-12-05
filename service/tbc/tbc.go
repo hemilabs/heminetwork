@@ -45,8 +45,7 @@ import (
 
 const (
 	logLevel = "INFO"
-
-	promSubsystem = "tbc_service" // Prometheus
+	appName  = "tbc"
 
 	defaultPeersWanted   = 64
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
@@ -72,7 +71,7 @@ var (
 	upstreamStateIdKey = []byte("upstreamstateid")
 )
 
-var log = loggo.GetLogger("tbc")
+var log = loggo.GetLogger(appName)
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
@@ -91,6 +90,7 @@ type Config struct {
 	Network                 string
 	PeersWanted             int
 	PrometheusListenAddress string
+	PrometheusSubsystem     string
 	PprofListenAddress      string
 	Seeds                   []string
 
@@ -105,14 +105,15 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress:      tbcapi.DefaultListen,
-		BlockCache:         250,
-		BlockheaderCache:   1e6,
-		LogLevel:           logLevel,
-		MaxCachedTxs:       defaultMaxCachedTxs,
-		MempoolEnabled:     false, // XXX default to false until it is fixed
-		PeersWanted:        defaultPeersWanted,
-		ExternalHeaderMode: false, // Default anyway, but for readability
+		ListenAddress:       tbcapi.DefaultListen,
+		BlockCache:          250,
+		BlockheaderCache:    1e6,
+		LogLevel:            logLevel,
+		MaxCachedTxs:        defaultMaxCachedTxs,
+		MempoolEnabled:      false, // XXX default to false until it is fixed
+		PeersWanted:         defaultPeersWanted,
+		PrometheusSubsystem: appName,
+		ExternalHeaderMode:  false, // Default anyway, but for readability
 	}
 }
 
@@ -202,7 +203,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		pings:      pings,
 		timeSource: blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
-			Subsystem: promSubsystem,
+			Subsystem: cfg.PrometheusSubsystem,
 			Name:      "rpc_calls_total",
 			Help:      "The total number of successful RPC commands",
 		}),
@@ -2242,53 +2243,53 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 		cs := []prometheus.Collector{
 			s.cmdsProcessed,
+			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Subsystem: s.cfg.PrometheusSubsystem,
+				Name:      "blockheader_height",
+				Help:      "Blockheader canonical height and hash.",
+			}, []string{"hash"}), s.promBlockHeader),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "running",
 				Help:      "Is tbc service running.",
 			}, s.promRunning),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "synced",
 				Help:      "Is tbc synced.",
 			}, s.promSynced),
-			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "blockheader_height",
-				Help:      "Blockheader height.",
-			}, []string{"hash"}), s.promBlockHeader),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "utxo_sync_height",
 				Help:      "Height of utxo indexer.",
 			}, s.promUtxo),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "tx_sync_height",
 				Help:      "Height of tx indexer.",
 			}, s.promTx),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "peers_connected",
 				Help:      "Number of peers connected.",
 			}, s.promConnectedPeers),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "peers_good",
 				Help:      "Number of good peers.",
 			}, s.promGoodPeers),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "peers_bad",
 				Help:      "Number of bad peers.",
 			}, s.promBadPeers),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "mempool_count",
 				Help:      "Number of txs in mempool.",
 			}, s.promMempoolCount),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
+				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "mempool_size",
 				Help:      "Size of mempool in bytes.",
 			}, s.promMempoolSize),

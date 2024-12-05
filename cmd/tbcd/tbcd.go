@@ -106,6 +106,12 @@ var (
 			Help:         "address and port tbcd prometheus listens on",
 			Print:        config.PrintAll,
 		},
+		"TBC_PROMETHEUS_SUBSYTEM": config.Config{
+			Value:        &cfg.PrometheusSubsystem,
+			DefaultValue: "tbc",
+			Help:         "prefix of prometheus subsystem",
+			Print:        config.PrintAll,
+		},
 		"TBC_PPROF_ADDRESS": config.Config{
 			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",
