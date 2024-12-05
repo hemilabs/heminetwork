@@ -106,12 +106,6 @@ var (
 			Help:         "address and port tbcd prometheus listens on",
 			Print:        config.PrintAll,
 		},
-		"TBC_PROMETHEUS_NAMESPACE": config.Config{
-			Value:        &cfg.PrometheusNamespace,
-			DefaultValue: "tbc",
-			Help:         "prefix of prometheus namespace",
-			Print:        config.PrintAll,
-		},
 		"TBC_PPROF_ADDRESS": config.Config{
 			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",

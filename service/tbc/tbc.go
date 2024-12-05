@@ -203,7 +203,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		blocks:     blocks,
 		pings:      pings,
 		timeSource: blockchain.NewMedianTime(),
-		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{ // XXX: move into Collectors func
+		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: cfg.PrometheusNamespace,
 			Name:      "rpc_calls_total",
 			Help:      "The total number of successful RPC commands",
@@ -2159,7 +2159,7 @@ func (s *Server) Collectors() []prometheus.Collector {
 			s.cmdsProcessed,
 			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
-				Name:      "blockheader_height", // XXX: rename to block_height?
+				Name:      "block_height",
 				Help:      "Best block canonical height and hash",
 			}, []string{"hash", "timestamp"}), s.promBlockHeader),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
