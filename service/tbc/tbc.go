@@ -600,6 +600,12 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+func (s *Server) promBlocksMissing() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.syncInfo.AtLeastMissing)
+}
+
 func (s *Server) promSynced() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -614,8 +620,10 @@ func (s *Server) promBlockHeader(m *prometheus.GaugeVec) {
 	defer s.mtx.Unlock()
 
 	m.Reset()
-	m.With(prometheus.Labels{"hash": s.prom.syncInfo.BlockHeader.Hash.String()}).
-		Set(float64(s.prom.syncInfo.BlockHeader.Height))
+	m.With(prometheus.Labels{
+		"hash":      s.prom.syncInfo.BlockHeader.Hash.String(),
+		"timestamp": strconv.Itoa(int(s.prom.syncInfo.BlockHeader.Timestamp)),
+	}).Set(float64(s.prom.syncInfo.BlockHeader.Height))
 }
 
 func (s *Server) promUtxo() float64 {
@@ -2012,10 +2020,11 @@ func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]by
 }
 
 type SyncInfo struct {
-	Synced      bool // True when all indexing is caught up
-	BlockHeader HashHeight
-	Utxo        HashHeight
-	Tx          HashHeight
+	Synced         bool // True when all indexing is caught up
+	AtLeastMissing int  // Blocks missing 0-63 is counted, >=64 returns -1
+	BlockHeader    HashHeight
+	Utxo           HashHeight
+	Tx             HashHeight
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2047,6 +2056,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	}
 	si.BlockHeader.Hash = bhb.Hash
 	si.BlockHeader.Height = bhb.Height
+	si.BlockHeader.Timestamp = bhb.Timestamp().Unix()
 
 	// utxo index
 	utxoHH, err := s.UtxoIndexHash(ctx)
@@ -2062,8 +2072,28 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	}
 	si.Tx = *txHH
 
+	// Find out how many blocks are missing.
+	var (
+		blksMissing bool = true
+		maxMissing  int  = 64
+	)
+	// expensive check
+	bm, err := s.db.BlocksMissing(ctx, maxMissing)
+	if err != nil {
+		panic(err)
+	}
+	if len(bm) >= maxMissing {
+		// -1 is sentinel meaning > 64
+		si.AtLeastMissing = -1
+	} else {
+		si.AtLeastMissing = len(bm)
+		if si.AtLeastMissing == 0 {
+			blksMissing = false
+		}
+	}
+
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
-		!s.indexing && !s.blksMissing(ctx) {
+		!s.indexing && !blksMissing {
 		si.Synced = true
 	}
 	return
@@ -2247,7 +2277,12 @@ func (s *Server) Run(pctx context.Context) error {
 				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "blockheader_height",
 				Help:      "Blockheader canonical height and hash.",
-			}, []string{"hash"}), s.promBlockHeader),
+			}, []string{"hash", "timestamp"}), s.promBlockHeader),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Subsystem: s.cfg.PrometheusSubsystem,
+				Name:      "blocks_missing",
+				Help:      "How many blocks are missing >= 64 returns -1.",
+			}, s.promBlocksMissing),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Subsystem: s.cfg.PrometheusSubsystem,
 				Name:      "running",
