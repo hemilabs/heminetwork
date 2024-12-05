@@ -618,12 +618,13 @@ func (s *Server) promSynced() float64 {
 func (s *Server) promBlockHeader(m *prometheus.GaugeVec) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
+	bh := s.prom.syncInfo.BlockHeader
 
 	m.Reset()
 	m.With(prometheus.Labels{
-		"hash":      s.prom.syncInfo.BlockHeader.Hash.String(),
-		"timestamp": strconv.Itoa(int(s.prom.syncInfo.BlockHeader.Timestamp)),
-	}).Set(float64(s.prom.syncInfo.BlockHeader.Height))
+		"hash":      bh.Hash.String(),
+		"timestamp": strconv.Itoa(int(bh.Timestamp)),
+	}).Set(float64(bh.Height))
 }
 
 func (s *Server) promUtxo() float64 {
@@ -2149,6 +2150,80 @@ func (s *Server) DBClose() error {
 	return s.db.Close()
 }
 
+// Collectors returns the Prometheus collectors available for the server.
+func (s *Server) Collectors(namespace, subsystem string) []prometheus.Collector {
+	// Naming: https://prometheus.io/docs/practices/naming/
+	return []prometheus.Collector{
+		s.cmdsProcessed,
+		newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "blockheader_height", // XXX: rename to block_height?
+			Help:      "Best block canonical height and hash",
+		}, []string{"hash", "timestamp"}), s.promBlockHeader),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "blocks_missing",
+			Help:      "Number of missing blocks. -1 means more than 64 missing",
+		}, s.promBlocksMissing),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "running",
+			Help:      "Whether the TBC service is running",
+		}, s.promRunning),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "synced",
+			Help:      "Whether the TBC service is synced",
+		}, s.promSynced),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "utxo_sync_height",
+			Help:      "Height of the UTXO indexer",
+		}, s.promUtxo),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "tx_sync_height",
+			Help:      "Height of transaction indexer",
+		}, s.promTx),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "peers_connected",
+			Help:      "Number of peers connected",
+		}, s.promConnectedPeers),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "peers_good",
+			Help:      "Number of good peers",
+		}, s.promGoodPeers),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "peers_bad",
+			Help:      "Number of bad peers",
+		}, s.promBadPeers),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "mempool_count",
+			Help:      "Number of transactions in mempool",
+		}, s.promMempoolCount),
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "mempool_size_bytes",
+			Help:      "Size of mempool in bytes",
+		}, s.promMempoolSize),
+	}
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -2271,64 +2346,7 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-		cs := []prometheus.Collector{
-			s.cmdsProcessed,
-			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "blockheader_height",
-				Help:      "Blockheader canonical height and hash.",
-			}, []string{"hash", "timestamp"}), s.promBlockHeader),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "blocks_missing",
-				Help:      "How many blocks are missing >= 64 returns -1.",
-			}, s.promBlocksMissing),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "running",
-				Help:      "Is tbc service running.",
-			}, s.promRunning),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "synced",
-				Help:      "Is tbc synced.",
-			}, s.promSynced),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "utxo_sync_height",
-				Help:      "Height of utxo indexer.",
-			}, s.promUtxo),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "tx_sync_height",
-				Help:      "Height of tx indexer.",
-			}, s.promTx),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "peers_connected",
-				Help:      "Number of peers connected.",
-			}, s.promConnectedPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "peers_good",
-				Help:      "Number of good peers.",
-			}, s.promGoodPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "peers_bad",
-				Help:      "Number of bad peers.",
-			}, s.promBadPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "mempool_count",
-				Help:      "Number of txs in mempool.",
-			}, s.promMempoolCount),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: s.cfg.PrometheusSubsystem,
-				Name:      "mempool_size",
-				Help:      "Size of mempool in bytes.",
-			}, s.promMempoolSize),
-		}
+		cs := s.Collectors(appName, s.cfg.PrometheusSubsystem)
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
