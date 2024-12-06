@@ -45,8 +45,7 @@ import (
 
 const (
 	logLevel = "INFO"
-
-	promSubsystem = "tbc_service" // Prometheus
+	appName  = "tbc"
 
 	defaultPeersWanted   = 64
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
@@ -72,7 +71,7 @@ var (
 	upstreamStateIdKey = []byte("upstreamstateid")
 )
 
-var log = loggo.GetLogger("tbc")
+var log = loggo.GetLogger(appName)
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
@@ -91,6 +90,7 @@ type Config struct {
 	Network                 string
 	PeersWanted             int
 	PrometheusListenAddress string
+	PrometheusNamespace     string
 	PprofListenAddress      string
 	Seeds                   []string
 
@@ -105,14 +105,15 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress:      tbcapi.DefaultListen,
-		BlockCache:         250,
-		BlockheaderCache:   1e6,
-		LogLevel:           logLevel,
-		MaxCachedTxs:       defaultMaxCachedTxs,
-		MempoolEnabled:     false, // XXX default to false until it is fixed
-		PeersWanted:        defaultPeersWanted,
-		ExternalHeaderMode: false, // Default anyway, but for readability
+		ListenAddress:       tbcapi.DefaultListen,
+		BlockCache:          250,
+		BlockheaderCache:    1e6,
+		LogLevel:            logLevel,
+		MaxCachedTxs:        defaultMaxCachedTxs,
+		MempoolEnabled:      false, // XXX default to false until it is fixed
+		PeersWanted:         defaultPeersWanted,
+		PrometheusNamespace: appName,
+		ExternalHeaderMode:  false, // Default anyway, but for readability
 	}
 }
 
@@ -151,6 +152,7 @@ type Server struct {
 	db tbcd.Database
 
 	// Prometheus
+	promCollectors  []prometheus.Collector
 	promPollVerbose bool // set to true to print stats during poll
 	prom            struct {
 		syncInfo                  SyncInfo
@@ -202,7 +204,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		pings:      pings,
 		timeSource: blockchain.NewMedianTime(),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
-			Subsystem: promSubsystem,
+			Namespace: cfg.PrometheusNamespace,
 			Name:      "rpc_calls_total",
 			Help:      "The total number of successful RPC commands",
 		}),
@@ -599,6 +601,12 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+func (s *Server) promBlocksMissing() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return float64(s.prom.syncInfo.AtLeastMissing)
+}
+
 func (s *Server) promSynced() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -608,10 +616,16 @@ func (s *Server) promSynced() float64 {
 	return 0
 }
 
-func (s *Server) promBlockHeader() float64 {
+func (s *Server) promBlockHeader(m *prometheus.GaugeVec) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.syncInfo.BlockHeader.Height)
+	bh := s.prom.syncInfo.BlockHeader
+
+	m.Reset()
+	m.With(prometheus.Labels{
+		"hash":      bh.Hash.String(),
+		"timestamp": strconv.Itoa(int(bh.Timestamp)),
+	}).Set(float64(bh.Height))
 }
 
 func (s *Server) promUtxo() float64 {
@@ -2008,10 +2022,11 @@ func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]by
 }
 
 type SyncInfo struct {
-	Synced      bool // True when all indexing is caught up
-	BlockHeader HashHeight
-	Utxo        HashHeight
-	Tx          HashHeight
+	Synced         bool // True when all indexing is caught up
+	AtLeastMissing int  // Blocks missing 0-63 is counted, >=64 returns -1
+	BlockHeader    HashHeight
+	Utxo           HashHeight
+	Tx             HashHeight
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2043,6 +2058,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	}
 	si.BlockHeader.Hash = bhb.Hash
 	si.BlockHeader.Height = bhb.Height
+	si.BlockHeader.Timestamp = bhb.Timestamp().Unix()
 
 	// utxo index
 	utxoHH, err := s.UtxoIndexHash(ctx)
@@ -2058,8 +2074,28 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	}
 	si.Tx = *txHH
 
+	// Find out how many blocks are missing.
+	var (
+		blksMissing bool = true
+		maxMissing  int  = 64
+	)
+	// expensive check
+	bm, err := s.db.BlocksMissing(ctx, maxMissing)
+	if err != nil {
+		panic(err)
+	}
+	if len(bm) >= maxMissing {
+		// -1 is sentinel meaning > 64
+		si.AtLeastMissing = -1
+	} else {
+		si.AtLeastMissing = len(bm)
+		if si.AtLeastMissing == 0 {
+			blksMissing = false
+		}
+	}
+
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
-		!s.indexing && !s.blksMissing(ctx) {
+		!s.indexing && !blksMissing {
 		si.Synced = true
 	}
 	return
@@ -2115,6 +2151,75 @@ func (s *Server) DBClose() error {
 	return s.db.Close()
 }
 
+// Collectors returns the Prometheus collectors available for the server.
+func (s *Server) Collectors() []prometheus.Collector {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if s.promCollectors == nil {
+		// Naming: https://prometheus.io/docs/practices/naming/
+		s.promCollectors = []prometheus.Collector{
+			s.cmdsProcessed,
+			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_height",
+				Help:      "Best block canonical height and hash",
+			}, []string{"hash", "timestamp"}), s.promBlockHeader),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "blocks_missing",
+				Help:      "Number of missing blocks. -1 means more than 64 missing",
+			}, s.promBlocksMissing),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "running",
+				Help:      "Whether the TBC service is running",
+			}, s.promRunning),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "synced",
+				Help:      "Whether the TBC service is synced",
+			}, s.promSynced),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "utxo_sync_height",
+				Help:      "Height of the UTXO indexer",
+			}, s.promUtxo),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "tx_sync_height",
+				Help:      "Height of transaction indexer",
+			}, s.promTx),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "peers_connected",
+				Help:      "Number of peers connected",
+			}, s.promConnectedPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "peers_good",
+				Help:      "Number of good peers",
+			}, s.promGoodPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "peers_bad",
+				Help:      "Number of bad peers",
+			}, s.promBadPeers),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "mempool_count",
+				Help:      "Number of transactions in mempool",
+			}, s.promMempoolCount),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "mempool_size_bytes",
+				Help:      "Size of mempool in bytes",
+			}, s.promMempoolSize),
+		}
+	}
+	return s.promCollectors
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -2163,9 +2268,10 @@ func (s *Server) Run(pctx context.Context) error {
 			return fmt.Errorf("block header best: %w", err)
 		}
 
-		// This Run function is only called in regular (not external header) mode, so this is true genesis block @ 0
-		// and we pass in a nil difficulty so it calculates the starting difficulty as the genesis block's own local
-		// difficulty.
+		// This Run function is only called in regular (not external
+		// header) mode, so this is true genesis block @ 0 and we pass
+		// in a nil difficulty so it calculates the starting difficulty
+		// as the genesis block's own local difficulty.
 		if err = s.insertGenesis(ctx, 0, nil); err != nil {
 			return fmt.Errorf("insert genesis: %w", err)
 		}
@@ -2236,63 +2342,10 @@ func (s *Server) Run(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("create server: %w", err)
 		}
-		cs := []prometheus.Collector{
-			s.cmdsProcessed,
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "running",
-				Help:      "Is tbc service running.",
-			}, s.promRunning),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "synced",
-				Help:      "Is tbc synced.",
-			}, s.promSynced),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "blockheader_height",
-				Help:      "Blockheader height.",
-			}, s.promBlockHeader),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "utxo_sync_height",
-				Help:      "Height of utxo indexer.",
-			}, s.promUtxo),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "tx_sync_height",
-				Help:      "Height of tx indexer.",
-			}, s.promTx),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "peers_connected",
-				Help:      "Number of peers connected.",
-			}, s.promConnectedPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "peers_good",
-				Help:      "Number of good peers.",
-			}, s.promGoodPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "peers_bad",
-				Help:      "Number of bad peers.",
-			}, s.promBadPeers),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "mempool_count",
-				Help:      "Number of txs in mempool.",
-			}, s.promMempoolCount),
-			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Subsystem: promSubsystem,
-				Name:      "mempool_size",
-				Help:      "Size of mempool in bytes.",
-			}, s.promMempoolSize),
-		}
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, cs); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, s.Collectors()); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}

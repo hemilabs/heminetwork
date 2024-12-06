@@ -104,8 +104,9 @@ func lastCheckpointHeight(height uint64, hhm map[chainhash.Hash]uint64) uint64 {
 }
 
 type HashHeight struct {
-	Hash   chainhash.Hash
-	Height uint64
+	Hash      chainhash.Hash
+	Height    uint64
+	Timestamp int64 // optional
 }
 
 func (h HashHeight) String() string {
@@ -127,7 +128,11 @@ func (s *Server) mdHashHeight(ctx context.Context, key []byte) (*HashHeight, err
 	if err != nil {
 		return nil, fmt.Errorf("metadata block header: %w", err)
 	}
-	return &HashHeight{Hash: *ch, Height: bh.Height}, nil
+	return &HashHeight{
+		Hash:      *ch,
+		Height:    bh.Height,
+		Timestamp: bh.Timestamp().Unix(),
+	}, nil
 }
 
 // UtxoIndexHash returns the last hash that has been been UTxO indexed.
