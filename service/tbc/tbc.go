@@ -2153,6 +2153,9 @@ func (s *Server) DBClose() error {
 
 // Collectors returns the Prometheus collectors available for the server.
 func (s *Server) Collectors() []prometheus.Collector {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
 	if s.promCollectors == nil {
 		// Naming: https://prometheus.io/docs/practices/naming/
 		s.promCollectors = []prometheus.Collector{
