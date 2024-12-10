@@ -13,7 +13,6 @@ import (
 	"syscall"
 
 	"github.com/juju/loggo"
-
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/service/bfg"
@@ -28,9 +27,13 @@ const (
 var (
 	log     = loggo.GetLogger(daemonName)
 	welcome string
+	cfg     = bfg.NewDefaultConfig()
+	cm      = initializeConfigMap()
+)
 
-	cfg = bfg.NewDefaultConfig()
-	cm  = config.CfgMap{
+// initConfigMap initialises the configuration map.
+func initConfigMap() config.CfgMap {
+	return config.CfgMap{
 		"BFG_EXBTC_ADDRESS": config.Config{
 			Value:        &cfg.EXBTCAddress,
 			DefaultValue: "localhost:18001",
@@ -136,10 +139,12 @@ var (
 			Print:        config.PrintSecret,
 		},
 	}
-)
+}
 
-func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
+// handleSignals gracefully shuts down the application on OS signals.
+func handleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
 	signalChan := make(chan os.Signal, 1)
+	defer close(signalChan)
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	defer func() {
 		signal.Stop(signalChan)
@@ -148,59 +153,98 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 
 	select {
 	case <-ctx.Done():
-	case s := <-signalChan: // First signal, cancel context.
+	case s := <-signalChan:
 		if callback != nil {
-			callback(s) // Do whatever caller wants first.
-			cancel()
+			callback(s)
 		}
+		cancel()
 	}
-	<-signalChan // Second signal, hard exit.
+	<-signalChan
+	log.Errorf("Received second termination signal, forcing exit.")
 	os.Exit(2)
 }
 
-func _main() error {
-	// Parse configuration from environment
-	if err := config.Parse(cm); err != nil {
-		return err
+// initializeLogger configures logging for the application.
+func initializeLogger(logLevel string) error {
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		return fmt.Errorf("failed to configure logger with level %s: %w", logLevel, err)
 	}
+	log.Infof("Logger initialized with level: %s", logLevel)
+	return nil
+}
 
-	loggo.ConfigureLoggers(cfg.LogLevel)
-	log.Infof(welcome)
 
-	pc := config.PrintableConfig(cm)
-	for k := range pc {
-		log.Infof("%v", pc[k])
-	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go HandleSignals(ctx, cancel, func(s os.Signal) {
-		log.Infof("bfg service received signal: %s", s)
-	})
-
+// runServer starts the BFG server with the provided configuration.
+func runServer(ctx context.Context) error {
 	server, err := bfg.NewServer(cfg)
 	if err != nil {
 		return fmt.Errorf("create BFG server: %w", err)
 	}
 	if err = server.Run(ctx); !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("bfg server terminated: %w", err)
+		return fmt.Errorf("server terminated unexpectedly: %w", err)
 	}
-
 	return nil
 }
 
-func init() {
-	version.Component = "bfgd"
-	welcome = "Hemi Bitcoin Finality Governor " + version.BuildInfo()
+func _main() error {
+    // Parse configuration
+    if err := config.Parse(cm); err != nil {
+        return fmt.Errorf("failed to parse configuration: %w", err)
+    }
+
+    // Configure loggers
+    if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+        return fmt.Errorf("failed to configure logger with level %s: %w", cfg.LogLevel, err)
+    }
+    log.Infof("Logger initialized with level: %s", cfg.LogLevel)
+
+    // Print parsed configuration
+    for key, value := range config.PrintableConfig(cm) {
+        log.Infof("%s: %v", key, value)
+    }
+
+    // Set up signal handling
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go handleSignals(ctx, cancel, func(s os.Signal) {
+        log.Infof("Received signal: %s", s)
+    })
+
+    // Initialize and run server
+    server, err := bfg.NewServer(cfg)
+    if err != nil {
+        return fmt.Errorf("failed to create server: %w", err)
+    }
+
+    log.Infof("Starting server...")
+    if err := server.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+        return fmt.Errorf("server terminated unexpectedly: %w", err)
+    }
+
+    log.Infof("Server shut down gracefully.")
+    return nil
 }
 
+
+
 func main() {
+	// Verify command-line arguments
 	if len(os.Args) != 1 {
-		fmt.Fprintf(os.Stderr, "%v\n", welcome)
-		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
-		fmt.Fprintf(os.Stderr, "Environment:\n")
+		fmt.Fprintln(os.Stderr, welcome)
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "\thelp (this help)")
+		fmt.Fprintln(os.Stderr, "Environment:")
 		config.Help(os.Stderr, cm)
 		os.Exit(1)
+	}
+
+	// Print welcome message and configuration
+	log.Infof(welcome)
+	pc := config.PrintableConfig(cm)
+	for k, v := range pc {
+		log.Infof("%s: %v", k, v)
 	}
 
 	if err := _main(); err != nil {
