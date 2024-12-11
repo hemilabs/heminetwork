@@ -1045,6 +1045,13 @@ func (s *Server) syncBlocks(ctx context.Context) {
 	}
 }
 
+func (s *Server) IsDbReady() bool {
+	if s.db == nil {
+		return false
+	}
+	return true
+}
+
 // RemoveExternalHeaders removes the provided headers from TBC's state knowledge,
 // setting the canonical tip to the provided tip. This method can only be
 // used when TBC is running in External Header Mode.
