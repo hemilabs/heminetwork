@@ -165,10 +165,6 @@ type Server struct {
 	// WebSockets
 	sessions       map[string]*tbcWs
 	requestTimeout time.Duration
-
-	// ignoreUlimit will explicitly not check ulimit settings on the host
-	// machine, this is useful for very small datasets/chains
-	ignoreUlimit bool
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -579,7 +575,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	}
 }
 
-func (s *Server) running() bool {
+func (s *Server) Running() bool {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 	return s.isRunning
@@ -594,7 +590,7 @@ func (s *Server) testAndSetRunning(b bool) bool {
 }
 
 func (s *Server) promRunning() float64 {
-	r := s.running()
+	r := s.Running()
 	if r {
 		return 1
 	}
@@ -2228,28 +2224,9 @@ func (s *Server) Run(pctx context.Context) error {
 		return errors.New("run called but External Header mode is enabled")
 	}
 
-	if !s.testAndSetRunning(true) {
-		return errors.New("tbc already running")
-	}
-	defer s.testAndSetRunning(false)
-
-	// We need a lot of open files and memory for the indexes. Best effort
-	// to echo to the user what the ulimits are.
-	s.ignoreUlimit = true
-	if s.ignoreUlimit || s.cfg.Network == networkLocalnet {
-		log.Warningf("ignoring ulimit requirements")
-	} else if ulimitSupported {
-		if err := verifyUlimits(); err != nil {
-			return fmt.Errorf("verify ulimits: %w", err)
-		}
-	} else {
-		log.Errorf("This architecture does not supported ulimit verification. " +
-			"Consult the README for minimum values.")
-	}
-
+	// Rely on DBOpen failing if the database is already open.
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
-
 	err := s.DBOpen(ctx)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
@@ -2260,6 +2237,11 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Errorf("db close: %v", err)
 		}
 	}()
+
+	if !s.testAndSetRunning(true) {
+		return errors.New("tbc already running")
+	}
+	defer s.testAndSetRunning(false)
 
 	// Find out where IBD is at
 	bhb, err := s.db.BlockHeaderBest(ctx)

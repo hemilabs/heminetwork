@@ -834,8 +834,6 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 		t.Fatal(err)
 	}
 
-	tbcServer.ignoreUlimit = true
-
 	go func() {
 		err := tbcServer.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -1064,7 +1062,6 @@ func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Serve
 		t.Fatal(err)
 	}
 
-	tbcServer.ignoreUlimit = true
 	tbcServer.ExternalHeaderSetup(ctx, defaultUpstreamStateId[:])
 	return tbcServer
 }
