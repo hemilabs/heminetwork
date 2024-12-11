@@ -173,6 +173,7 @@ type Server struct {
 
 // metrics stores prometheus metrics.
 type metrics struct {
+	canonicalHeight  prometheus.Gauge         // Total number of PoP transaction broadcasts
 	popBroadcasts    prometheus.Counter       // Total number of PoP transaction broadcasts
 	rpcCallsTotal    *prometheus.CounterVec   // Total number of successful RPC commands
 	rpcCallsDuration *prometheus.HistogramVec // RPC calls duration in seconds
@@ -183,6 +184,11 @@ type metrics struct {
 func newMetrics(cfg *Config) *metrics {
 	// When adding a metric here, remember to add it to metrics.collectors().
 	return &metrics{
+		canonicalHeight: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: cfg.PrometheusNamespace,
+			Name:      "canonical_height",
+			Help:      "Last measured canonical height.",
+		}),
 		popBroadcasts: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: cfg.PrometheusNamespace,
 			Name:      "pop_broadcasts_total",
@@ -219,6 +225,7 @@ func newMetrics(cfg *Config) *metrics {
 // collectors returns all prometheus collectors.
 func (m *metrics) collectors() []prometheus.Collector {
 	return []prometheus.Collector{
+		m.canonicalHeight,
 		m.popBroadcasts,
 		m.rpcCallsTotal,
 		m.rpcCallsDuration,
@@ -272,6 +279,9 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	}
 
+	// XXX this is not right. NewServer should always return. The call to
+	// electrs.NewClient should be in Run. Or, electrs should be a service
+	// so that we can mirror the New/Run paradig, the New/Run paradigm,
 	s.btcClient, err = electrs.NewClient(cfg.EXBTCAddress, &electrs.ClientOptions{
 		InitialConnections:  cfg.EXBTCInitialConns,
 		MaxConnections:      cfg.EXBTCMaxConns,
@@ -1549,7 +1559,7 @@ func (s *Server) handleStateUpdates(table string, action string, payload, payloa
 	s.mtx.RUnlock()
 
 	// get the current canoncial chain height from the db
-	heightAfter, err := s.db.BtcBlockCanonicalHeight(ctx)
+	heightAfter, err := s.BtcBlockCanonicalHeight(ctx)
 	if err != nil {
 		log.Errorf("error occurred getting canonical height: %s", err)
 	}
@@ -1790,6 +1800,15 @@ func (s *Server) bfg(ctx context.Context) {
 	}
 }
 
+func (s *Server) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
+	height, err := s.db.BtcBlockCanonicalHeight(ctx)
+	if err != nil {
+		return 0, err
+	}
+	s.metrics.canonicalHeight.Set(float64(height))
+	return height, nil
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -1812,7 +1831,7 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.db.Close()
 
-	if s.btcHeight, err = s.db.BtcBlockCanonicalHeight(ctx); err != nil {
+	if s.btcHeight, err = s.BtcBlockCanonicalHeight(ctx); err != nil {
 		return err
 	}
 
