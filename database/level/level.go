@@ -181,7 +181,10 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	unwind := true
 	defer func() {
 		if unwind {
-			log.Errorf("new unwind exited with: %v", l.Close())
+			err := l.Close()
+			if err != nil {
+				log.Errorf("new unwind exited with: %v", err)
+			}
 		}
 	}()
 
