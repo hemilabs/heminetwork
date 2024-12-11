@@ -78,9 +78,6 @@ func (r *RawDB) Close() error {
 	log.Tracef("Close")
 	defer log.Tracef("Close exit")
 
-	r.mtx.Lock()
-	defer r.mtx.Unlock()
-
 	err := r.index.Close()
 	if err != nil {
 		return err
