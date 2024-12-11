@@ -49,17 +49,18 @@ type notificationId string
 
 const (
 	logLevel = "INFO"
-
-	promNamespace = "bfg" // Prometheus
+	appName  = "bfg" // Prometheus
 
 	notifyBtcBlocks     notificationId = "btc_blocks"
 	notifyBtcFinalities notificationId = "btc_finalities"
 	notifyL2Keystones   notificationId = "l2_keystones"
 )
 
-var log = loggo.GetLogger("bfg")
+var (
+	log = loggo.GetLogger(appName)
 
-var ErrBTCPrivateKeyMissing error = errors.New("you must specify a BTC private key")
+	ErrBTCPrivateKeyMissing error = errors.New("you must specify a BTC private key")
+)
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
@@ -71,6 +72,7 @@ func NewDefaultConfig() *Config {
 		EXBTCInitialConns:    5,
 		EXBTCMaxConns:        100,
 		PrivateListenAddress: ":8080",
+		PrometheusNamespace:  appName,
 		PublicListenAddress:  ":8383",
 		RequestLimit:         bfgapi.DefaultRequestLimit,
 		RequestTimeout:       bfgapi.DefaultRequestTimeout,
@@ -108,6 +110,7 @@ type Config struct {
 	LogLevel                string
 	PgURI                   string
 	PrometheusListenAddress string
+	PrometheusNamespace     string
 	PprofListenAddress      string
 	PublicKeyAuth           bool
 	RequestLimit            int
@@ -177,17 +180,17 @@ type metrics struct {
 }
 
 // newMetrics returns a new metrics struct containing prometheus collectors.
-func newMetrics() *metrics {
+func newMetrics(cfg *Config) *metrics {
 	// When adding a metric here, remember to add it to metrics.collectors().
 	return &metrics{
 		popBroadcasts: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: promNamespace,
+			Namespace: cfg.PrometheusNamespace,
 			Name:      "pop_broadcasts_total",
 			Help:      "Total number of PoP transaction broadcasts",
 		}),
 		rpcCallsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: promNamespace,
+				Namespace: cfg.PrometheusNamespace,
 				Name:      "rpc_calls_total",
 				Help:      "Total number of successful RPC commands",
 			},
@@ -195,7 +198,7 @@ func newMetrics() *metrics {
 		),
 		rpcCallsDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Namespace: promNamespace,
+				Namespace: cfg.PrometheusNamespace,
 				Name:      "rpc_calls_duration_seconds",
 				Help:      "RPC call durations in seconds",
 				Buckets:   prometheus.DefBuckets,
@@ -204,7 +207,7 @@ func newMetrics() *metrics {
 		),
 		rpcConnections: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Namespace: promNamespace,
+				Namespace: cfg.PrometheusNamespace,
 				Name:      "rpc_connections",
 				Help:      "Number of active RPC WebSocket connections",
 			},
@@ -248,7 +251,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		btcHeight:             cfg.BTCStartHeight,
 		server:                http.NewServeMux(),
 		publicServer:          http.NewServeMux(),
-		metrics:               newMetrics(),
+		metrics:               newMetrics(cfg),
 		sessions:              make(map[string]*bfgWs),
 		checkForInvalidBlocks: make(chan struct{}),
 		holdoffTimeout:        6 * time.Second,
@@ -270,9 +273,9 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s.btcClient, err = electrs.NewClient(cfg.EXBTCAddress, &electrs.ClientOptions{
-		InitialConnections: cfg.EXBTCInitialConns,
-		MaxConnections:     cfg.EXBTCMaxConns,
-		PromNamespace:      promNamespace,
+		InitialConnections:  cfg.EXBTCInitialConns,
+		MaxConnections:      cfg.EXBTCMaxConns,
+		PrometheusNamespace: cfg.PrometheusNamespace,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create electrs client: %w", err)
@@ -1994,7 +1997,7 @@ func (s *Server) Run(pctx context.Context) error {
 		cs := append(
 			append(s.metrics.collectors(), s.btcClient.Metrics()...),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: promNamespace,
+				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
 				Help:      "Whether the BFG service is running",
 			}, s.promRunning),

@@ -61,6 +61,8 @@ const (
 )
 
 var (
+	log = loggo.GetLogger(appName)
+
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
 	ErrTxAlreadyBroadcast = errors.New("tx already broadcast")
@@ -70,8 +72,6 @@ var (
 	// representing a unique state of an upstream system driving TBC state/
 	upstreamStateIdKey = []byte("upstreamstateid")
 )
-
-var log = loggo.GetLogger(appName)
 
 func init() {
 	loggo.ConfigureLoggers(logLevel)
