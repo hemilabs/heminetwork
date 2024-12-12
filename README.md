@@ -188,7 +188,10 @@ To run the full Hemi stack (non-sequencing), please see [NODE_RUNNING](localnode
    Blocks at a **high rate**:
 
    ```shell
-   docker compose -f ./e2e/docker-compose.yml up --build
+   docker compose -f ./e2e/docker-compose.yml build
+
+   # set the hvm phase 0 timestamp slightly in the future, but ensure that all op-geths have the same
+   HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up
    ```
 
 > [!NOTE]
