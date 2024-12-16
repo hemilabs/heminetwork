@@ -650,7 +650,7 @@ Response for a request with **id** `68656d69`, **showing 5 UTXOs** for the addre
 | Type     | `command` value                 |
 |----------|---------------------------------|
 | Request  | `tbcapi-tx-by-id-raw-request`   |
-| Response | `ttbcapi-tx-by-id-raw-response` |
+| Response | `tbcapi-tx-by-id-raw-response` |
 
 #### 📤 Request
 
