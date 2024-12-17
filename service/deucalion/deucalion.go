@@ -113,6 +113,14 @@ func New(cfg *Config) (*Deucalion, error) {
 	return &Deucalion{cfg: cfg}, nil
 }
 
+func Uint64ToFloat(x uint64) float64 {
+	return float64(x)
+}
+
+func IntToFloat(x int) float64 {
+	return float64(x)
+}
+
 func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.HandleFunc(pattern, handler)
 	log.Infof("handle (%v): %v", service, pattern)
