@@ -604,7 +604,7 @@ func (s *Server) promRunning() float64 {
 func (s *Server) promBlocksMissing() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.syncInfo.AtLeastMissing)
+	return deucalion.IntToFloat((s.prom.syncInfo.AtLeastMissing))
 }
 
 func (s *Server) promSynced() float64 {
@@ -625,49 +625,49 @@ func (s *Server) promBlockHeader(m *prometheus.GaugeVec) {
 	m.With(prometheus.Labels{
 		"hash":      bh.Hash.String(),
 		"timestamp": strconv.Itoa(int(bh.Timestamp)),
-	}).Set(float64(bh.Height))
+	}).Set(deucalion.Uint64ToFloat(bh.Height))
 }
 
 func (s *Server) promUtxo() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.syncInfo.Utxo.Height)
+	return deucalion.Uint64ToFloat(s.prom.syncInfo.Utxo.Height)
 }
 
 func (s *Server) promTx() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.syncInfo.Tx.Height)
+	return deucalion.Uint64ToFloat(s.prom.syncInfo.Tx.Height)
 }
 
 func (s *Server) promConnectedPeers() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.connected)
+	return deucalion.IntToFloat(s.prom.connected)
 }
 
 func (s *Server) promGoodPeers() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.good)
+	return deucalion.IntToFloat(s.prom.good)
 }
 
 func (s *Server) promBadPeers() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.bad)
+	return deucalion.IntToFloat(s.prom.bad)
 }
 
 func (s *Server) promMempoolCount() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.mempoolCount)
+	return deucalion.IntToFloat(s.prom.mempoolCount)
 }
 
 func (s *Server) promMempoolSize() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return float64(s.prom.mempoolSize)
+	return deucalion.IntToFloat(s.prom.mempoolSize)
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
