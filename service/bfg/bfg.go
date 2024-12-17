@@ -22,7 +22,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
-	secp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -62,8 +62,7 @@ var log = loggo.GetLogger("bfg")
 var ErrBTCPrivateKeyMissing error = errors.New("you must specify a BTC private key")
 
 func init() {
-	err := loggo.ConfigureLoggers(logLevel)
-	if err != nil {
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
 		panic(err)
 	}
 }

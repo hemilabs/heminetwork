@@ -513,8 +513,8 @@ func _main() error {
 	// flag.StringVar(&downloadDir, "downloaddir", "", "Directory to download block header and data to. Leave empty to dump to stdout.")
 	flag.Parse()
 
-	err := loggo.ConfigureLoggers("info") // XXX make flag
-	if err != nil {
+	// XXX make flag
+	if err := loggo.ConfigureLoggers("info"); err != nil {
 		return fmt.Errorf("configure loggers: %w", err)
 	}
 

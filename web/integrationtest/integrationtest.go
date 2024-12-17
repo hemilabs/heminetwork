@@ -31,8 +31,7 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		_, err = rw.Write(byteArray)
-		if err != nil {
+		if _, err = rw.Write(byteArray); err != nil {
 			fmt.Println(err)
 		}
 	})

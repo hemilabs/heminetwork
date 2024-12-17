@@ -75,8 +75,7 @@ func init() {
 		return
 	}
 
-	err := loggo.ConfigureLoggers(cfg.logLevel)
-	if err != nil {
+	if err := loggo.ConfigureLoggers(cfg.logLevel); err != nil {
 		panic(err)
 	}
 

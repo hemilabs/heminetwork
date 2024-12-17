@@ -57,8 +57,7 @@ var log = loggo.GetLogger("level")
 var ErrIterator = IteratorError(errors.New("iteration error"))
 
 func init() {
-	err := loggo.ConfigureLoggers(logLevel)
-	if err != nil {
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
 		panic(err)
 	}
 }
