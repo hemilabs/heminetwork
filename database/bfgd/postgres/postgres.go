@@ -46,7 +46,10 @@ const effectiveHeightSql = `
 var log = loggo.GetLogger("bfgpostgres")
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	err := loggo.ConfigureLoggers(logLevel)
+	if err != nil {
+		panic(err)
+	}
 }
 
 type pgdb struct {
@@ -1127,7 +1130,8 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		if err := rows.Scan(&serializedTx); err != nil {
 			return nil, err
 		}
-
+		// LIMIT 1 above so linter needs to shut up
+		// nolint:staticcheck
 		return serializedTx, nil
 	}
 

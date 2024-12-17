@@ -1100,7 +1100,9 @@ func _main() error {
 		return err
 	}
 
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		return err
+	}
 	log.Debugf("%v", welcome)
 
 	pc := config.PrintableConfig(cm)

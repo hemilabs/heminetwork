@@ -31,7 +31,10 @@ var (
 )
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	err := loggo.ConfigureLoggers(logLevel)
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 type RawDB struct {

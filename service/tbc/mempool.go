@@ -112,7 +112,7 @@ func (m *mempool) stats(ctx context.Context) (int, int) {
 	return len(m.txs), m.size + (len(m.txs) * chainhash.HashSize)
 }
 
-func (m *mempool) dump(ctx context.Context) string {
+func (m *mempool) Dump(ctx context.Context) string {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 

@@ -52,7 +52,10 @@ var PublicKeyAuthError = websocket.CloseError{
 }
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	err := loggo.ConfigureLoggers(logLevel)
+	if err != nil {
+		panic(err)
+	}
 }
 
 // random returns a variable number of random bytes.

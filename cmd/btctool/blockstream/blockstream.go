@@ -15,8 +15,8 @@ import (
 
 var (
 	bsTestnetURL = "https://blockstream.info/testnet/api" // XXX wrap in structure
-	bsMainnetURL = "https://blockstream.info/api"         // XXX wrap in structure
-	bsURL        = bsTestnetURL                           // XXX wrap in structure
+	// bsMainnetURL = "https://blockstream.info/api"         // XXX wrap in structure
+	bsURL = bsTestnetURL // XXX wrap in structure
 )
 
 type TBlock struct {

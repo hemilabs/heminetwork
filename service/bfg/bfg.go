@@ -62,7 +62,10 @@ var log = loggo.GetLogger("bfg")
 var ErrBTCPrivateKeyMissing error = errors.New("you must specify a BTC private key")
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	err := loggo.ConfigureLoggers(logLevel)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func NewDefaultConfig() *Config {

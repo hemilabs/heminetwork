@@ -11,8 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
-	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -59,12 +57,13 @@ var log = loggo.GetLogger("level")
 var ErrIterator = IteratorError(errors.New("iteration error"))
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	err := loggo.ConfigureLoggers(logLevel)
+	if err != nil {
+		panic(err)
+	}
 }
 
 type ldb struct {
-	mtx sync.Mutex
-
 	*level.Database
 	pool    level.Pool
 	rawPool level.RawPool
@@ -1187,11 +1186,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	}
 
 	return it, cbh, lbh, len(bhs.Headers), nil
-}
-
-type cacheEntry struct {
-	height    uint64
-	timestamp time.Time
 }
 
 // XXX return hash and height only

@@ -147,6 +147,8 @@ func (p *connPool) freeConn(conn *clientConn) {
 }
 
 // size returns the number of connections in the pool.
+// Linter narrator, it is indeed used.
+// nolint:unused
 func (p *connPool) size() int {
 	p.poolMx.Lock()
 	defer p.poolMx.Unlock()

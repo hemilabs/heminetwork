@@ -41,7 +41,10 @@ const (
 var log = loggo.GetLogger("bss")
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	err := loggo.ConfigureLoggers(logLevel)
+	if err != nil {
+		panic(err)
+	}
 }
 
 // Wrap for calling bfg commands

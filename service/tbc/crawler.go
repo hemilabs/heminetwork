@@ -92,7 +92,7 @@ func lastCheckpointHeight(height uint64, hhm map[chainhash.Hash]uint64) uint64 {
 		c = append(c, HashHeight{Height: v, Hash: k})
 	}
 	sort.Slice(c, func(i, j int) bool {
-		return uint64(c[i].Height) > uint64(c[j].Height)
+		return c[i].Height > c[j].Height
 	})
 	for _, hh := range c {
 		if hh.Height > height {

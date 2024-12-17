@@ -29,7 +29,10 @@ const (
 var log = loggo.GetLogger("postgres")
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	err := loggo.ConfigureLoggers(logLevel)
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 type psqlNotification struct {
@@ -179,7 +182,12 @@ func (p *Database) ntfnListenHandler(ctx context.Context) {
 		case <-time.After(60 * time.Second):
 			go func() {
 				// log.Tracef("ntfnHandler: ping")
-				p.listener.Ping()
+				err := p.listener.Ping()
+				if err != nil {
+					// This is probably too loud but shut
+					// the linter up.
+					log.Errorf("pg ping: %v", err)
+				}
 			}()
 		}
 	}

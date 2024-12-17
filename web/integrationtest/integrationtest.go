@@ -31,7 +31,10 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		rw.Write(byteArray)
+		_, err = rw.Write(byteArray)
+		if err != nil {
+			fmt.Println(err)
+		}
 	})
 
 	if err := http.ListenAndServe(listen, nil); err != nil {

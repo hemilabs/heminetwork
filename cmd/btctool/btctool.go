@@ -35,8 +35,6 @@ import (
 	"github.com/hemilabs/heminetwork/version"
 )
 
-var log = loggo.GetLogger("bdf")
-
 func parseBlockFromHex(blk string) (*btcutil.Block, error) {
 	eb, err := hex.DecodeString(strings.Trim(blk, "\n"))
 	if err != nil {
@@ -113,7 +111,7 @@ func (p *peer) connect(ctx context.Context) error {
 	return nil
 }
 
-func (p *peer) close() error {
+func (p *peer) Close() error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	if p.conn != nil {
