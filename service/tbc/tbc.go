@@ -499,7 +499,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 		readError = err
 		return fmt.Errorf("peer remote version: %w", err)
 	}
-	if remoteVersion.LastBlock < int32(bhb.Height) {
+	if uint64(remoteVersion.LastBlock) < bhb.Height {
 		// Disconnect for now. We only want more or less synced peers.
 		readError = err
 		return fmt.Errorf("remote peer height below ours")
