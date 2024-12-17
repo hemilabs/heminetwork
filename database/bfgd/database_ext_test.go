@@ -1565,11 +1565,7 @@ func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
 			l2BlockNumber := uint32(1000)
 			lastHash := []byte{}
 			for i, blockCountAtHeight := range tti.chainPattern {
-				tmp := height
-				if tti.unconfirmedIndices[i] == true {
-					tmp = -1
-				}
-				_onChainBlocks := createBtcBlocksAtStaticHeight(ctx, t, db, blockCountAtHeight, true, tmp, lastHash, l2BlockNumber)
+				_onChainBlocks := createBtcBlocksAtStaticHeight(ctx, t, db, blockCountAtHeight, true, height, lastHash, l2BlockNumber)
 				l2BlockNumber++
 				height++
 				lastHash = _onChainBlocks[0].Hash
@@ -1579,20 +1575,34 @@ func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
 				}
 			}
 
-			bfs, err := db.L2BTCFinalityMostRecent(ctx, 100)
+			rows, err := sdb.QueryContext(ctx, `
+				SELECT hash FROM btc_blocks_can ORDER BY height DESC
+			`)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if len(onChainBlocks) != len(bfs) {
-				t.Fatalf("length of onChainBlocks and pbs differs %d != %d", len(onChainBlocks), len(bfs))
+			defer rows.Close()
+
+			hashes := []database.ByteArray{}
+
+			for rows.Next() {
+				var hash database.ByteArray
+				if err := rows.Scan(&hash); err != nil {
+					t.Fatal(err)
+				}
+				hashes = append(hashes, hash)
+			}
+
+			if len(onChainBlocks) != len(hashes) {
+				t.Fatalf("length of onChainBlocks and pbs differs %d != %d", len(onChainBlocks), len(hashes))
 			}
 
 			slices.Reverse(onChainBlocks)
 
 			for i := range onChainBlocks {
-				if slices.Equal(onChainBlocks[i].Hash, bfs[i].BTCPubHeaderHash[:]) == false {
-					t.Fatalf("hash mismatch: %s != %s", onChainBlocks[i].Hash, bfs[i].BTCPubHeaderHash)
+				if slices.Equal(onChainBlocks[i].Hash, hashes[i]) == false {
+					t.Fatalf("hash mismatch: %s != %s", onChainBlocks[i].Hash, hashes[i])
 				}
 			}
 		})

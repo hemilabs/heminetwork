@@ -819,6 +819,29 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 		case <-ticker.C:
 			log.Tracef("Checking BTC height...")
 
+			log.Infof("getting finalities")
+			finalities, err := s.db.L2BTCFinalityMostRecent(ctx, 100)
+			if err != nil {
+				log.Errorf("error getting finalities, %s", err)
+			}
+			log.Infof("done getting finalities")
+
+			apiFinalities := make([]hemi.L2BTCFinality, 0, len(finalities))
+			for _, finality := range finalities {
+				apiFinality, err := hemi.L2BTCFinalityFromBfgd(
+					&finality,
+					finality.BTCTipHeight,
+					finality.EffectiveHeight,
+				)
+				if err != nil {
+					log.Errorf("could not convert finality: %s", err)
+				} else {
+					apiFinalities = append(apiFinalities, *apiFinality)
+				}
+			}
+
+			log.Infof("finalities are %s", spew.Sdump(apiFinalities))
+
 			btcHeight, err := s.btcClient.Height(ctx)
 			if err != nil {
 				if printMsg {
