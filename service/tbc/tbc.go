@@ -356,8 +356,7 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	// Cancel outstanding ping, should not happen
 	peer := p.String()
 	// No need to check error; this always races and simply is not an error.
-	// nolint:errcheck
-	s.pings.Cancel(peer)
+	_ = s.pings.Cancel(peer)
 
 	// We don't really care about the response. We just want to
 	// write to the connection to make it fail if the other side
@@ -490,8 +489,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 		log.Infof("Disconnected: %v blocks %v pings %v%v", p, blks, pings, re)
 
 		// Not an interesting error since it races.
-		// nolint:errcheck
-		s.pm.Bad(ctx, p.String()) // always close peer
+		_ = s.pm.Bad(ctx, p.String()) // always close peer
 	}()
 
 	// Ensure peer height is greater than ours.
@@ -1333,8 +1331,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	block := btcutil.NewBlock(msg)
 	bhs := block.Hash().String()
 	// Not an error due to normal racing conditions.
-	// nolint:errcheck
-	s.blocks.Delete(bhs) // remove block from ttl regardless of insert result
+	_, _ = s.blocks.Delete(bhs) // remove block from ttl regardless of insert result
 
 	// Whatever happens, kick cache in the nuts on the way out.
 	defer func() {
