@@ -1122,10 +1122,14 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 	var serializedTx []byte
 	err := p.db.QueryRowContext(ctx, querySql).Scan(&serializedTx)
 	if err != nil {
-		return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %w", err)
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %w", err)
+		}
+		// Query may return 1 or 0 rows.
+		return nil, nil
 	}
 
-	return nil, nil
+	return serializedTx, nil
 }
 
 // BtcTransactionBroadcastRequestConfirmBroadcast sets a broadcast request to
