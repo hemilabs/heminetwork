@@ -163,6 +163,9 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 
+	// Care must be taken to not shadow err and l in this function. The
+	// defer will overwrite those if an unwind condition occurs.
+
 	h, err := homedir.Expand(home)
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
@@ -181,7 +184,14 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	unwind := true
 	defer func() {
 		if unwind {
-			log.Errorf("new unwind exited with: %v", l.Close())
+			cerr := l.Close()
+			if cerr != nil {
+				log.Debugf("new unwind exited with: %v", cerr)
+				err = errors.Join(err, cerr)
+			}
+			clear(l.pool)
+			clear(l.rawPool)
+			l = nil // Reset l
 		}
 	}()
 
@@ -240,7 +250,8 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 			dbVersion, version)
 	}
 
-	unwind = false
+	unwind = false // Everything is good, do not unwind.
 
-	return l, nil
+	// The defer above will set/reset these values.
+	return l, err
 }
