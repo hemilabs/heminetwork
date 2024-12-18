@@ -1178,7 +1178,7 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 		}
 		if !exists {
 			log.Errorf("unauthorized public key: %s", publicKeyEncoded)
-			conn.Close(protocol.PublicKeyAuthError.Code, protocol.PublicKeyAuthError.Reason)
+			conn.Close(protocol.ErrPublicKeyAuth.Code, protocol.ErrPublicKeyAuth.Reason)
 			return
 		}
 	}

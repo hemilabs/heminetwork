@@ -755,7 +755,7 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 		cmd, rid, payload, err := bfgapi.ReadConn(ctx, conn)
 		if err != nil {
 			// XXX kinda don't want to do thi here
-			if errors.Is(err, protocol.PublicKeyAuthError) {
+			if errors.Is(err, protocol.ErrPublicKeyAuth) {
 				return err
 			}
 
@@ -879,7 +879,7 @@ func (m *Miner) bfg(ctx context.Context) error {
 		if err := m.connectBFG(ctx); err != nil {
 			log.Debugf("connectBFG: %v", err)
 
-			if errors.Is(err, protocol.PublicKeyAuthError) {
+			if errors.Is(err, protocol.ErrPublicKeyAuth) {
 				return err
 			}
 		}

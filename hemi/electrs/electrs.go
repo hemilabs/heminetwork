@@ -433,7 +433,7 @@ func (c *Client) UTXOs(ctx context.Context, scriptHash []byte) ([]*UTXO, error) 
 	if err := c.call(ctx, "blockchain.scripthash.listunspent", &params, &eutxos); err != nil {
 		return nil, err
 	}
-	var utxos []*UTXO
+	utxos := make([]*UTXO, 0, len(eutxos))
 	for _, eutxo := range eutxos {
 		hash, err := btcchainhash.NewHashFromStr(eutxo.Hash)
 		if err != nil {

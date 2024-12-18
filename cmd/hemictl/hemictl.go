@@ -1051,6 +1051,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
 	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
 	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
+	// nolint:dupword
 	fmt.Fprintf(os.Stderr, "\tp2p p2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb datase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "Environment:\n")

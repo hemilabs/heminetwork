@@ -245,6 +245,7 @@ func handleBlock(p *peer, msg *wire.MsgBlock) {
 		len(msg.Transactions))
 }
 
+// nolint:dupword
 func btcConnect(ctx context.Context, btcNet string) error {
 	// ips, err := net.LookupIP("seed.bitcoin.sipa.be")
 	// if err != nil {

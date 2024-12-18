@@ -431,7 +431,7 @@ func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi
 		}, nil
 	}
 
-	var responseUtxos []api.ByteSlice
+	responseUtxos := make([]api.ByteSlice, 0, len(utxos))
 	for _, utxo := range utxos {
 		responseUtxos = append(responseUtxos, utxo[:])
 	}
@@ -459,7 +459,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UT
 		}, nil
 	}
 
-	var responseUtxos []*tbcapi.UTXO
+	responseUtxos := make([]*tbcapi.UTXO, 0, len(utxos))
 	for _, utxo := range utxos {
 		txId, err := chainhash.NewHash(utxo.ScriptHashSlice())
 		if err != nil {

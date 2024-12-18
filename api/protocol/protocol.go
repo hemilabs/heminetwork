@@ -46,7 +46,7 @@ func (he HandshakeError) Is(target error) bool {
 	return ok
 }
 
-var PublicKeyAuthError = websocket.CloseError{
+var ErrPublicKeyAuth = websocket.CloseError{
 	Code:   StatusHandshakeErr,
 	Reason: HandshakeError("invalid public key").Error(),
 }

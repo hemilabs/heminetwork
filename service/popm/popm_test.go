@@ -1263,7 +1263,7 @@ func TestConnectToBFGAndPerformMineWithAuthError(t *testing.T) {
 	}()
 	if err := miner.Run(ctx); err != nil {
 		for err != nil {
-			if errors.Is(err, protocol.PublicKeyAuthError) {
+			if errors.Is(err, protocol.ErrPublicKeyAuth) {
 				return
 			}
 			err = errors.Unwrap(err)
@@ -1323,7 +1323,7 @@ func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string, keyst
 			}
 
 			if !found {
-				c.Close(protocol.PublicKeyAuthError.Code, protocol.PublicKeyAuthError.Reason)
+				c.Close(protocol.ErrPublicKeyAuth.Code, protocol.ErrPublicKeyAuth.Reason)
 				return
 			}
 

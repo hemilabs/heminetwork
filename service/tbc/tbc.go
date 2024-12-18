@@ -1599,7 +1599,7 @@ func (s *Server) RawBlockHeadersByHeight(ctx context.Context, height uint64) ([]
 		return nil, err
 	}
 
-	var headers []api.ByteSlice
+	headers := make([]api.ByteSlice, 0, len(bhs))
 	for _, bh := range bhs {
 		headers = append(headers, bh.Header[:])
 	}
