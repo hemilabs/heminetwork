@@ -59,7 +59,7 @@ const (
 var (
 	log = loggo.GetLogger(appName)
 
-	ErrBTCPrivateKeyMissing error = errors.New("you must specify a BTC private key")
+	ErrBTCPrivateKeyMissing = errors.New("you must specify a BTC private key")
 )
 
 func init() {
