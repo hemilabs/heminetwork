@@ -27,7 +27,7 @@ const (
 )
 
 const effectiveHeightSql = `
-	SELECT COALESCE((SELECT height
+	COALESCE((SELECT height
 
 	FROM 
 	(
@@ -37,7 +37,7 @@ const effectiveHeightSql = `
 			INNER JOIN l2_keystones ll ON ll.l2_keystone_abrev_hash 
 				= pop_basis.l2_keystone_abrev_hash
 
-		WHERE ll.l2_block_number >= $1
+		WHERE ll.l2_block_number >= l2_keystones.l2_block_number
 		AND height > (SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1) - 100
 		ORDER BY height ASC LIMIT 1
 	)), 0)
@@ -547,17 +547,6 @@ func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte
 	return pbs, nil
 }
 
-func (p *pgdb) attachEffectiveHeight(ctx context.Context, finalities []bfgd.L2BTCFinality) error {
-	for i := range finalities {
-		row := p.db.QueryRowContext(ctx, effectiveHeightSql, finalities[i].L2Keystone.L2BlockNumber)
-		if err := row.Scan(&finalities[i].EffectiveHeight); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // L2BTCFinalityMostRecent gets the most recent L2BtcFinalities sorted
 // descending by l2_block_number
 func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfgd.L2BTCFinality, error) {
@@ -633,13 +622,14 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.state_root,
 			l2_keystones.ep_hash,
 			l2_keystones.version,
+			%s,
 			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
-		` +
+		`+
 		// for each l2_keystone <-> pop_basis pair (i.e. every mining)
 		`
 		FROM l2_keystones
 		INNER JOIN pop_basis ON l2_keystones.l2_keystone_abrev_hash = pop_basis.l2_keystone_abrev_hash
-		` +
+		`+
 		// give me the lowest block this was mined in on the canonical chain
 		`
 		LEFT JOIN LATERAL (
@@ -655,7 +645,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		OFFSET $2
 
 		LIMIT $3
-	`)
+	`, effectiveHeightSql)
 
 	l2KeystoneAbrevHashesStr := [][]byte{}
 	for _, l := range l2KeystoneAbrevHashes {
@@ -684,6 +674,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			&l2BtcFinality.L2Keystone.StateRoot,
 			&l2BtcFinality.L2Keystone.EPHash,
 			&l2BtcFinality.L2Keystone.Version,
+			&l2BtcFinality.EffectiveHeight,
 			&l2BtcFinality.BTCTipHeight,
 		)
 		if err != nil {
@@ -701,10 +692,6 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 	}
 
 	rows.Close() // can be called more than once
-
-	if err := p.attachEffectiveHeight(ctx, finalities); err != nil {
-		return nil, err
-	}
 
 	return finalities, nil
 }
