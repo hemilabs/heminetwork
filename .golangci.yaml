@@ -50,6 +50,13 @@ linters-settings:
       - "localmodule"
     custom-order: true
 
+  gocritic:
+    disabled-checks:
+      - "elseif"
+      - "exitAfterDefer"
+      - "ifElseChain"
+      - "singleCaseSwitch"
+
   # Detects XXX/TODO/FIXME comments. Useful for finding old todo items.
   #  Use: golangci-lint run --enable-only godox
   godox:

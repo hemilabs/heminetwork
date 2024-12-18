@@ -349,7 +349,7 @@ func NewScriptHashFromBytes(hash []byte) (scriptHash ScriptHash, err error) {
 		err = errors.New("invalid script hash length")
 		return
 	}
-	copy(scriptHash[:], hash[:])
+	copy(scriptHash[:], hash)
 	return
 }
 

@@ -855,7 +855,8 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	originalCanonicalTipHash := originalCanonicalTip.BlockHash()
 	heaviestRemovedBlockHash := headersParsed[len(headersParsed)-1].BlockHash()
 
-	removalType := tbcd.RTInvalid //nolint:ineffassign
+	// nolint:ineffassign
+	removalType := tbcd.RTInvalid
 	if tipAfterRemovalHash.IsEqual(&parentToRemovalSet.Hash) {
 		// Canonical tip set by caller is the parent to the blocks removed
 		removalType = tbcd.RTChainDescend
@@ -1507,7 +1508,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 		// irrelevant.
 		if utxo.IsDelete() {
 			// Delete balance and utxos
-			outsBatch.Delete(op[:][:])
+			outsBatch.Delete(op[:])
 			outsBatch.Delete(hop[:])
 		} else {
 			// Add utxo to balance and utxos

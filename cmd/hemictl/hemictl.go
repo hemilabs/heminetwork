@@ -952,8 +952,7 @@ func (bsc *bssClient) connectBSS(ctx context.Context) {
 	log.Tracef("bssClient")
 	defer log.Tracef("bssClient exit")
 
-	bssURI := filepath.Join(bsc.bssURL)
-	log.Infof("Connecting to: %v", bssURI)
+	log.Infof("Connecting to: %v", bsc.bssURL)
 	for {
 		if err := bsc.connect(ctx); err != nil {
 			// Do nothing
@@ -968,7 +967,7 @@ func (bsc *bssClient) connectBSS(ctx context.Context) {
 
 		// hold off reconnect for a couple of seconds
 		time.Sleep(5 * time.Second)
-		log.Debugf("Reconnecting to: %v", bssURI)
+		log.Debugf("Reconnecting to: %v", bsc.bssURL)
 	}
 }
 

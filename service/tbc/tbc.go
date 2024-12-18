@@ -1109,7 +1109,7 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 				dbnames.MetadataDB)
 		}
 		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
-			{Key: upstreamStateIdKey, Value: upstreamStateId[:]},
+			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
 	}
@@ -1159,7 +1159,7 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 				dbnames.MetadataDB)
 		}
 		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
-			{Key: upstreamStateIdKey, Value: upstreamStateId[:]},
+			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
 	}
@@ -2012,7 +2012,7 @@ func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 		return nil, err
 	}
 	var x [32]byte
-	copy(x[:], usi[:])
+	copy(x[:], usi)
 	return &x, nil
 }
 
