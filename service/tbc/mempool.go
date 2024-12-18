@@ -65,6 +65,10 @@ func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 	log.Tracef("invTxsInsert")
 	defer log.Tracef("invTxsInsert exit")
 
+	if len(inv.InvList) == 0 {
+		return errors.New("empty inventory")
+	}
+
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -78,6 +82,7 @@ func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 		}
 	}
 
+	// if the map length does not change, nothing was inserted.
 	if len(m.txs) != l {
 		return errors.New("insert inventory tx: already exists")
 	}
@@ -85,8 +90,12 @@ func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 }
 
 func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
-	log.Tracef("insertInvTxs")
-	defer log.Tracef("insertInvTxs exit")
+	log.Tracef("txsRemove")
+	defer log.Tracef("txsRemove exit")
+
+	if len(txs) == 0 {
+		return errors.New("no transactions provided")
+	}
 
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
@@ -98,6 +107,8 @@ func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
 			delete(m.txs, txs[k])
 		}
 	}
+
+	// if the map length does not change, nothing was deleted.
 	if len(m.txs) != l {
 		return errors.New("remove txs: nothing removed")
 	}
