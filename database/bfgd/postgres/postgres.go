@@ -1124,14 +1124,10 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 
 	defer rows.Close()
 
-	for rows.Next() {
-		var serializedTx []byte
-		if err := rows.Scan(&serializedTx); err != nil {
-			return nil, err
-		}
-		// LIMIT 1 above so linter needs to shut up
-		// nolint:staticcheck
-		return serializedTx, nil
+	var serializedTx []byte
+	err = p.db.QueryRowContext(ctx, querySql).Scan(&serializedTx)
+	if err != nil {
+		return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %w", err)
 	}
 
 	return nil, nil
