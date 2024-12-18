@@ -778,12 +778,19 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.ep_hash,
 			l2_keystones.version,
 			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
-
+		` +
+		// for each l2_keystone <-> pop_basis pair (i.e. every mining)
+		`
 		FROM l2_keystones
-		LEFT JOIN pop_basis ON l2_keystones.l2_keystone_abrev_hash 
-			= pop_basis.l2_keystone_abrev_hash
-		LEFT JOIN btc_blocks_can ON pop_basis.btc_block_hash 
-			= btc_blocks_can.hash
+		INNER JOIN pop_basis ON l2_keystones.l2_keystone_abrev_hash = pop_basis.l2_keystone_abrev_hash
+		` +
+		// give me the lowest block this was mined in on the canonical chain
+		`
+		LEFT JOIN LATERAL (
+			SELECT * FROM btc_blocks_can WHERE hash = pop_basis.btc_block_hash
+			ORDER BY height ASC LIMIT 1
+		) btc_blocks_can ON TRUE
+		
 
 		WHERE l2_keystones.l2_keystone_abrev_hash = ANY($1)
 
