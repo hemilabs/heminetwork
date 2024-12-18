@@ -30,7 +30,7 @@ var log = loggo.GetLogger("postgres")
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
-		fmt.Println(err)
+		panic(err)
 	}
 }
 
