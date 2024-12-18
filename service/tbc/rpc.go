@@ -252,8 +252,7 @@ func (s *Server) handlePingRequest(ctx context.Context, ws *tbcWs, payload any, 
 	log.Tracef("responding with %v", spew.Sdump(res))
 
 	if err := tbcapi.Write(ctx, ws.conn, id, res); err != nil {
-		return fmt.Errorf("handlePingRequest write: %v %v",
-			ws.addr, err)
+		return fmt.Errorf("handlePingRequest write: %v %w", ws.addr, err)
 	}
 
 	// Ping request processed successfully

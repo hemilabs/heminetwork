@@ -361,7 +361,7 @@ func (pm *PeerManager) connect(ctx context.Context, p *rawpeer.RawPeer) error {
 	defer log.Tracef("connect exit: %v %v", p.Id(), p)
 
 	if err := p.Connect(ctx); err != nil {
-		return fmt.Errorf("new peer: %v", err)
+		return fmt.Errorf("new peer: %w", err)
 	}
 
 	pm.mtx.Lock()

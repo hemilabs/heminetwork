@@ -2,6 +2,10 @@ run:
   tests: false
 
 issues:
+  # Show all errors
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
   # Exclude sources following the Go generated file convention.
   exclude-generated: "strict"
 
@@ -14,13 +18,18 @@ issues:
 linters:
   enable:
     - "errcheck" # Checks for unchecked errors.
+    - "errorlint" # Verifies errors are properly wrapped.
     - "gci" # Enforces package import order, making it deterministic.
     - "gofumpt" # Runs gofumpt.
     - "goheader" # Enforces copyright header.
+    # TODO enable gosec, when bored run 'golangci-lint run -Egosec' to fix these
+    # - "gosec" # Checks for potential security issues
     - "gosimple" # Checks for ways to simplify code.
     - "gomoddirectives" # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
     - "govet" # Runs go vet.
     - "ineffassign" # Detects when assignments to variables are not used.
+    # TODO enable revive, when bored run 'golangci-lint run -Erevive' to fix these
+    # - "revive" # Checks for potential security issues
     - "staticcheck" # Runs staticcheck.
     - "unconvert" # Checks for unnecessary type conversions.
     - "unused" # Checks for unused constants, variables, functions and types.

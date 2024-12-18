@@ -645,8 +645,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 	rbh, err := s.btcClient.RawBlockHeader(ctx, height)
 	if err != nil {
-		return fmt.Errorf("get block header at height %v: %v",
-			height, err)
+		return fmt.Errorf("get block header at height %v: %w", height, err)
 	}
 
 	// grab the merkle root from the header, I am not sure if there is a
@@ -735,7 +734,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 		publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mtx.TxIn[0].SignatureScript)
 		if err != nil {
-			return fmt.Errorf("could not parse signature script: %s", err)
+			return fmt.Errorf("could not parse signature script: %w", err)
 		}
 
 		popTxIdFull := []byte{}
@@ -1231,8 +1230,7 @@ func (s *Server) handlePingRequest(ctx context.Context, bws *bfgWs, payload any,
 	log.Tracef("responding with %v", spew.Sdump(response))
 
 	if err := bfgapi.Write(ctx, bws.conn, id, response); err != nil {
-		return fmt.Errorf("handlePingRequest write: %v %v",
-			bws.addr, err)
+		return fmt.Errorf("handlePingRequest write: %v %w", bws.addr, err)
 	}
 	return nil
 }

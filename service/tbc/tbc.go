@@ -991,6 +991,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				return
 
 			default:
+				// nolint:errorlint
 				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
 
@@ -1963,7 +1964,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 
 		// walk block tx'
 		if err = feesFromTransactions(b.Transactions()); err != nil {
-			return 0, fmt.Errorf("fees from transactions %v %v: %v",
+			return 0, fmt.Errorf("fees from transactions %v %v: %w",
 				height, b.Hash(), err)
 		}
 	}
