@@ -691,8 +691,6 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		return nil, rows.Err()
 	}
 
-	rows.Close() // can be called more than once
-
 	return finalities, nil
 }
 
