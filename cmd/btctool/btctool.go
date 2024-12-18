@@ -35,8 +35,6 @@ import (
 	"github.com/hemilabs/heminetwork/version"
 )
 
-var log = loggo.GetLogger("bdf")
-
 func parseBlockFromHex(blk string) (*btcutil.Block, error) {
 	eb, err := hex.DecodeString(strings.Trim(blk, "\n"))
 	if err != nil {
@@ -113,7 +111,7 @@ func (p *peer) connect(ctx context.Context) error {
 	return nil
 }
 
-func (p *peer) close() error {
+func (p *peer) Close() error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 	if p.conn != nil {
@@ -247,6 +245,7 @@ func handleBlock(p *peer, msg *wire.MsgBlock) {
 		len(msg.Transactions))
 }
 
+//nolint:dupword // False positive in commented-out code.
 func btcConnect(ctx context.Context, btcNet string) error {
 	// ips, err := net.LookupIP("seed.bitcoin.sipa.be")
 	// if err != nil {
@@ -515,8 +514,8 @@ func _main() error {
 	// flag.StringVar(&downloadDir, "downloaddir", "", "Directory to download block header and data to. Leave empty to dump to stdout.")
 	flag.Parse()
 
-	err := loggo.ConfigureLoggers("info") // XXX make flag
-	if err != nil {
+	// XXX make flag
+	if err := loggo.ConfigureLoggers("info"); err != nil {
 		return fmt.Errorf("configure loggers: %w", err)
 	}
 

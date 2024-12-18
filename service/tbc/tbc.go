@@ -74,7 +74,9 @@ var (
 var log = loggo.GetLogger(appName)
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
 }
 
 type Config struct {
@@ -349,7 +351,8 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 
 	// Cancel outstanding ping, should not happen
 	peer := p.String()
-	s.pings.Cancel(peer)
+	// No need to check error; this always races and simply is not an error.
+	_ = s.pings.Cancel(peer)
 
 	// We don't really care about the response. We just want to
 	// write to the connection to make it fail if the other side
@@ -481,7 +484,8 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 		pings := s.pings.DeleteByValue(findPeer)
 		log.Infof("Disconnected: %v blocks %v pings %v%v", p, blks, pings, re)
 
-		s.pm.Bad(ctx, p.String()) // always close peer
+		// Not an interesting error since it races.
+		_ = s.pm.Bad(ctx, p.String()) // always close peer
 	}()
 
 	// Ensure peer height is greater than ours.
@@ -804,6 +808,8 @@ func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block *chainha
 	}
 	s.blocks.Put(ctx, defaultBlockPendingTimeout, block.String(), rp,
 		s.blockExpired, nil)
+	// Not an error. Checking and logging this will fill up logs with EOF.
+	//nolint:errcheck // Error is intentionally ignored.
 	go s.downloadBlock(ctx, rp, block)
 
 	return nil
@@ -1098,7 +1104,7 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 				dbnames.MetadataDB)
 		}
 		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
-			{Key: upstreamStateIdKey, Value: upstreamStateId[:]},
+			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
 	}
@@ -1148,7 +1154,7 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 				dbnames.MetadataDB)
 		}
 		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
-			{Key: upstreamStateIdKey, Value: upstreamStateId[:]},
+			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
 	}
@@ -1320,7 +1326,8 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 
 	block := btcutil.NewBlock(msg)
 	bhs := block.Hash().String()
-	s.blocks.Delete(bhs) // remove block from ttl regardless of insert result
+	// Not an error due to normal racing conditions.
+	_, _ = s.blocks.Delete(bhs) // remove block from ttl regardless of insert result
 
 	// Whatever happens, kick cache in the nuts on the way out.
 	defer func() {
@@ -1462,6 +1469,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 
 	if s.cfg.MempoolEnabled && txsFound {
 		if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
+			//nolint:errcheck // Error is intentionally ignored.
 			go s.downloadMissingTx(ctx, p)
 		}
 	}
@@ -1586,7 +1594,7 @@ func (s *Server) RawBlockHeadersByHeight(ctx context.Context, height uint64) ([]
 		return nil, err
 	}
 
-	var headers []api.ByteSlice
+	headers := make([]api.ByteSlice, 0, len(bhs))
 	for _, bh := range bhs {
 		headers = append(headers, bh.Header[:])
 	}
@@ -1934,7 +1942,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 		return 0, errors.New("height - count is less than 0")
 	}
 	var fees uint64
-	for i := int64(0); i < int64(count); i++ {
+	for i := int64(0); i < count; i++ {
 		log.Infof("%v", uint64(height-i))
 		bhs, err := s.db.BlockHeadersByHeight(ctx, uint64(height-i))
 		if err != nil {
@@ -1951,7 +1959,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 
 		// walk block tx'
 		if err = feesFromTransactions(b.Transactions()); err != nil {
-			return 0, fmt.Errorf("fees from transactions %v %v: %v",
+			return 0, fmt.Errorf("fees from transactions %v %v: %w",
 				height, b.Hash(), err)
 		}
 	}
@@ -1999,7 +2007,7 @@ func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 		return nil, err
 	}
 	var x [32]byte
-	copy(x[:], usi[:])
+	copy(x[:], usi)
 	return &x, nil
 }
 

@@ -2,10 +2,9 @@ run:
   tests: false
 
 issues:
-  # TODO: Currently, we exclude all issues introduced before commit 8e55591c.
-  # If you're bored, run this command to show all issues :)
-  #  golangci-lint run --show-stats --new-from-rev=""
-  new-from-rev: "8e55591ce900688a9bb1107584bcb014e76f22c9"
+  # Show all errors
+  max-issues-per-linter: 0
+  max-same-issues: 0
 
   # Exclude sources following the Go generated file convention.
   exclude-generated: "strict"
@@ -18,15 +17,34 @@ issues:
 
 linters:
   enable:
+    - "asasalint" # Check for pass []any as any in variadic func(...any).
+    - "bodyclose" # Checks whether HTTP response body is closed successfully.
+    - "dupword" # Checks for duplicate words in the source code.
     - "errcheck" # Checks for unchecked errors.
+    - "errorlint" # Verifies errors are properly wrapped.
+    - "errname" # Checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error.
     - "gci" # Enforces package import order, making it deterministic.
+    - "gocheckcompilerdirectives" # Checks that go compiler directive comments (//go:) are valid.
+    - "gochecksumtype" # Run exhaustiveness checks on Go "sum types".
     - "gofumpt" # Runs gofumpt.
     - "goheader" # Enforces copyright header.
+    # TODO enable gosec, when bored run 'golangci-lint run -Egosec' to fix these
+    # - "gosec" # Checks for potential security issues
     - "gosimple" # Checks for ways to simplify code.
     - "gomoddirectives" # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
+    - "gosmopolitan" # Report certain i18n/l10n anti-patterns in your Go codebase.
     - "govet" # Runs go vet.
     - "ineffassign" # Detects when assignments to variables are not used.
+    # TODO enable revive, when bored run 'golangci-lint run -Erevive' to fix these
+    # - "revive" # Checks for potential security issues
+    - "nilerr" # Finds the code that returns nil even if it checks that the error is not nil.
+    - "nolintlint" # Reports ill-formed or insufficient nolint directives.
+    - "prealloc" # Finds slice declarations that could potentially be pre-allocated.
+    - "predeclared" # Find code that shadows one of Go's predeclared identifiers.
+    - "promlinter" # Check Prometheus metrics naming via promlint.
     - "staticcheck" # Runs staticcheck.
+    - "sqlclosecheck" # Checks that sql.Rows, sql.Stmt, sqlx.NamedStmt, pgx.Query are closed.
+    - "rowserrcheck" # Checks whether Rows.Err of rows is checked successfully.
     - "unconvert" # Checks for unnecessary type conversions.
     - "unused" # Checks for unused constants, variables, functions and types.
 
@@ -45,6 +63,13 @@ linters-settings:
       - "dot"
       - "localmodule"
     custom-order: true
+
+  gocritic:
+    disabled-checks:
+      - "elseif"
+      - "exitAfterDefer"
+      - "ifElseChain"
+      - "singleCaseSwitch"
 
   # Detects XXX/TODO/FIXME comments. Useful for finding old todo items.
   #  Use: golangci-lint run --enable-only godox
@@ -68,3 +93,10 @@ linters-settings:
       Copyright (c) {{ YEAR }} {{ COMPANY }}
       Use of this source code is governed by the MIT License,
       which can be found in the LICENSE file.
+
+  # Lints nolint directives.
+  nolintlint:
+    # Require an explanation after each nolint directive.
+    # Explanation format example: '//nolint:ineffassign // Explanation goes here.'
+    # If this becomes too annoying, disable it.
+    require-explanation: true

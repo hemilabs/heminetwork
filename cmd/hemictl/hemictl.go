@@ -952,8 +952,7 @@ func (bsc *bssClient) connectBSS(ctx context.Context) {
 	log.Tracef("bssClient")
 	defer log.Tracef("bssClient exit")
 
-	bssURI := filepath.Join(bsc.bssURL)
-	log.Infof("Connecting to: %v", bssURI)
+	log.Infof("Connecting to: %v", bsc.bssURL)
 	for {
 		if err := bsc.connect(ctx); err != nil {
 			// Do nothing
@@ -968,7 +967,7 @@ func (bsc *bssClient) connectBSS(ctx context.Context) {
 
 		// hold off reconnect for a couple of seconds
 		time.Sleep(5 * time.Second)
-		log.Debugf("Reconnecting to: %v", bssURI)
+		log.Debugf("Reconnecting to: %v", bsc.bssURL)
 	}
 }
 
@@ -1052,6 +1051,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
 	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
 	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
+	//nolint:dupword // command help, not sentence.
 	fmt.Fprintf(os.Stderr, "\tp2p p2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb datase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "Environment:\n")
@@ -1100,7 +1100,9 @@ func _main() error {
 		return err
 	}
 
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		return err
+	}
 	log.Debugf("%v", welcome)
 
 	pc := config.PrintableConfig(cm)

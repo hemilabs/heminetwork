@@ -46,7 +46,9 @@ const effectiveHeightSql = `
 var log = loggo.GetLogger("bfgpostgres")
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
 }
 
 type pgdb struct {
@@ -548,7 +550,7 @@ func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte
 }
 
 // nextL2BTCFinalitiesPublished , given a block number (lessThanL2BlockNumber)
-// will find the the next smallest published finality on the canoncial chain
+// will find the next smallest published finality on the canoncial chain
 func (p *pgdb) nextL2BTCFinalitiesPublished(ctx context.Context, lessThanL2BlockNumber uint32, limit int) ([]bfgd.L2BTCFinality, error) {
 	sql := fmt.Sprintf(`
 		SELECT
@@ -613,9 +615,10 @@ func (p *pgdb) nextL2BTCFinalitiesPublished(ctx context.Context, lessThanL2Block
 	return finalities, nil
 }
 
-// nextL2BTCFinalitiesAssumedUnpublished , given a block number (lessThanL2BlockNumber)
-// will find the the next smallest published finality that is not within explicitExcludeL2BlockNumbers
-// and assume it is unpublished (returning nothing for BTC fields)
+// nextL2BTCFinalitiesAssumedUnpublished , given a block number
+// (lessThanL2BlockNumber) will find the next smallest published finality that
+// is not within explicitExcludeL2BlockNumbers and assume it is unpublished
+// (returning nothing for BTC fields)
 func (p *pgdb) nextL2BTCFinalitiesAssumedUnpublished(ctx context.Context, lessThanL2BlockNumber uint32, limit int, explicitExcludeL2BlockNumbers []uint32) ([]bfgd.L2BTCFinality, error) {
 	sql := fmt.Sprintf(`
 		SELECT
@@ -1115,23 +1118,17 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		RETURNING serialized_tx
 	`, onlyNewClause, orderClause)
 
-	rows, err := p.db.QueryContext(ctx, querySql)
+	var serializedTx []byte
+	err := p.db.QueryRowContext(ctx, querySql).Scan(&serializedTx)
 	if err != nil {
-		return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %w", err)
-	}
-
-	defer rows.Close()
-
-	for rows.Next() {
-		var serializedTx []byte
-		if err := rows.Scan(&serializedTx); err != nil {
-			return nil, err
+		if !errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %w", err)
 		}
-
-		return serializedTx, nil
+		// Query may return 1 or 0 rows.
+		return nil, nil
 	}
 
-	return nil, nil
+	return serializedTx, nil
 }
 
 // BtcTransactionBroadcastRequestConfirmBroadcast sets a broadcast request to

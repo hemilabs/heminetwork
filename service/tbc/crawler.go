@@ -92,7 +92,7 @@ func lastCheckpointHeight(height uint64, hhm map[chainhash.Hash]uint64) uint64 {
 		c = append(c, HashHeight{Height: v, Hash: k})
 	}
 	sort.Slice(c, func(i, j int) bool {
-		return uint64(c[i].Height) > uint64(c[j].Height)
+		return c[i].Height > c[j].Height
 	})
 	for _, hh := range c {
 		if hh.Height > height {
@@ -135,12 +135,12 @@ func (s *Server) mdHashHeight(ctx context.Context, key []byte) (*HashHeight, err
 	}, nil
 }
 
-// UtxoIndexHash returns the last hash that has been been UTxO indexed.
+// UtxoIndexHash returns the last hash that has been UTxO indexed.
 func (s *Server) UtxoIndexHash(ctx context.Context) (*HashHeight, error) {
 	return s.mdHashHeight(ctx, UtxoIndexHashKey)
 }
 
-// TxIndexHash returns the last hash that has been been Tx indexed.
+// TxIndexHash returns the last hash that has been Tx indexed.
 func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
 	return s.mdHashHeight(ctx, TxIndexHashKey)
 }
@@ -1320,9 +1320,9 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 
 // SyncIndexersToHash tries to move the various indexers to the supplied
 // hash (inclusive).
-// Note: on unwind it means that it WILL unwind the the various indexers
-// including the hash that was passed in. E.g. if this unwinds from 1001 to
-// 1000 the indexes for block 1000 WILL be updated as well.
+// Note: on unwind it means that it WILL unwind the various indexers including
+// the hash that was passed in. E.g. if this unwinds from 1001 to 1000 the
+// indexes for block 1000 WILL be updated as well.
 func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) error {
 	log.Tracef("SyncIndexersToHash")
 	defer log.Tracef("SyncIndexersToHash exit")

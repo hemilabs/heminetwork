@@ -41,7 +41,9 @@ const (
 var log = loggo.GetLogger("bss")
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
 }
 
 // Wrap for calling bfg commands
@@ -217,8 +219,7 @@ func (s *Server) handlePingRequest(ctx context.Context, bws *bssWs, payload any,
 	log.Tracef("responding with %v", spew.Sdump(response))
 
 	if err := bssapi.Write(ctx, bws.conn, id, response); err != nil {
-		return fmt.Errorf("handlePingRequest write: %v %v",
-			bws.addr, err)
+		return fmt.Errorf("handlePingRequest write: %v %w", bws.addr, err)
 	}
 	return nil
 }

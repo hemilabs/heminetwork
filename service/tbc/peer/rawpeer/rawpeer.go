@@ -36,20 +36,26 @@ var (
 )
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
 }
 
 // XXX wire could use some contexts.
 
 func writeTimeout(timeout time.Duration, conn net.Conn, msg wire.Message, pver uint32, btcnet wire.BitcoinNet) error {
-	conn.SetWriteDeadline(time.Now().Add(timeout))
+	if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
 	_, err := wire.WriteMessageWithEncodingN(conn, msg, pver, btcnet,
 		wire.LatestEncoding)
 	return err
 }
 
 func readTimeout(timeout time.Duration, conn net.Conn, pver uint32, btcnet wire.BitcoinNet) (wire.Message, error) {
-	conn.SetReadDeadline(time.Now().Add(timeout))
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, err
+	}
 	_, msg, _, err := wire.ReadMessageWithEncodingN(conn, pver, btcnet,
 		wire.LatestEncoding)
 	return msg, err
@@ -111,9 +117,13 @@ func (r *RawPeer) Write(timeout time.Duration, msg wire.Message) error {
 	}
 
 	if timeout == 0 {
-		conn.SetWriteDeadline(time.Time{})
+		if err := conn.SetWriteDeadline(time.Time{}); err != nil {
+			return err
+		}
 	} else {
-		conn.SetWriteDeadline(time.Now().Add(timeout))
+		if err := conn.SetWriteDeadline(time.Now().Add(timeout)); err != nil {
+			return err
+		}
 	}
 	// XXX contexts would be nice
 	_, err := wire.WriteMessageWithEncodingN(conn, msg, r.protocolVersion,
@@ -133,9 +143,13 @@ func (r *RawPeer) Read(timeout time.Duration) (wire.Message, []byte, error) {
 	}
 
 	if timeout == 0 {
-		conn.SetReadDeadline(time.Time{})
+		if err := conn.SetReadDeadline(time.Time{}); err != nil {
+			return nil, nil, err
+		}
 	} else {
-		conn.SetReadDeadline(time.Now().Add(timeout))
+		if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return nil, nil, err
+		}
 	}
 	// XXX contexts would be nice
 	_, msg, buf, err := wire.ReadMessageWithEncodingN(conn, r.protocolVersion,

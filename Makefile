@@ -56,7 +56,7 @@ lint:
 	$(shell go env GOPATH)/bin/golangci-lint run --fix ./...
 
 lint-deps:
-	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.0
+	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62
 
 tidy:
 	go mod tidy

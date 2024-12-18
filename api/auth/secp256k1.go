@@ -86,7 +86,7 @@ func handleSecp256k1HelloChallenge(privKey *dcrsecpk256k1.PrivateKey, hc *Secp25
 	}
 
 	signatureHash := am.Hash()
-	signature := dcrecdsa.SignCompact(privKey, signatureHash[:], true)
+	signature := dcrecdsa.SignCompact(privKey, signatureHash, true)
 	return &Secp256k1HelloChallengeAccepted{
 		Signature: hex.EncodeToString(signature),
 	}, nil
@@ -101,7 +101,7 @@ func handleSecp256k1HelloChallengeAccepted(am *AuthenticateMessage, hca *Secp256
 		return nil, fmt.Errorf("hex decode: %w", err)
 	}
 	signatureHash := am.Hash()
-	derived, _, err := dcrecdsa.RecoverCompact(signature, signatureHash[:])
+	derived, _, err := dcrecdsa.RecoverCompact(signature, signatureHash)
 	if err != nil {
 		return nil, fmt.Errorf("hex decode: %w", err)
 	}

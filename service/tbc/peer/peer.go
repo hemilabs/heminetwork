@@ -36,7 +36,9 @@ var (
 )
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
 }
 
 // AlreadyPendingError is an error returned when a message is already pending

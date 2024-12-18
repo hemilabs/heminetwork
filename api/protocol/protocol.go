@@ -46,13 +46,15 @@ func (he HandshakeError) Is(target error) bool {
 	return ok
 }
 
-var PublicKeyAuthError = websocket.CloseError{
+var ErrPublicKeyAuth = websocket.CloseError{
 	Code:   StatusHandshakeErr,
 	Reason: HandshakeError("invalid public key").Error(),
 }
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
 }
 
 // random returns a variable number of random bytes.
@@ -374,6 +376,7 @@ func (ac *Conn) Connect(ctx context.Context) error {
 	// package.
 	// Note that we cannot have DialOptions on a WASM websocket
 	log.Tracef("Connect: dialing %v", ac.serverURL)
+	//nolint:bodyclose // Response body closure is handled by websocket library.
 	conn, _, err := websocket.Dial(connectCtx, ac.serverURL, newDialOptions(ac.opts))
 	if err != nil {
 		return fmt.Errorf("dial server: %w", err)

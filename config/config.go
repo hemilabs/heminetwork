@@ -62,7 +62,7 @@ func Parse(c CfgMap) error {
 			if v.Parse != nil {
 				val, err := v.Parse(envValue)
 				if err != nil {
-					return fmt.Errorf("invalid value for %v: %v", k, err)
+					return fmt.Errorf("invalid value for %v: %w", k, err)
 				}
 				reflect.ValueOf(v.Value).Elem().Set(reflect.ValueOf(val))
 				return nil
@@ -74,7 +74,7 @@ func Parse(c CfgMap) error {
 
 				evTyped, err := strconv.ParseInt(envValue, 10, 64)
 				if err != nil {
-					return fmt.Errorf("invalid integer for %v: %v",
+					return fmt.Errorf("invalid integer for %v: %w",
 						k, err)
 				}
 				reflect.ValueOf(v.Value).Elem().SetInt(evTyped)
@@ -84,7 +84,7 @@ func Parse(c CfgMap) error {
 
 				evTyped, err := strconv.ParseUint(envValue, 10, 64)
 				if err != nil {
-					return fmt.Errorf("invalid unsigned for %v: %v",
+					return fmt.Errorf("invalid unsigned for %v: %w",
 						k, err)
 				}
 				reflect.ValueOf(v.Value).Elem().SetUint(evTyped)

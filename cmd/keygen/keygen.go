@@ -59,8 +59,7 @@ func _main() error {
 		btcAddress, err := btcutil.NewAddressPubKey(privKey.PubKey().SerializeCompressed(),
 			btcChainParams)
 		if err != nil {
-			return fmt.Errorf("create BTC address from public key: %v",
-				err)
+			return fmt.Errorf("create BTC address from public key: %w", err)
 		}
 		hash := btcAddress.AddressPubKeyHash().String()
 		ethAddress := ethereum.AddressFromPrivateKey(privKey)

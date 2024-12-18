@@ -75,7 +75,9 @@ func init() {
 		return
 	}
 
-	loggo.ConfigureLoggers(cfg.logLevel)
+	if err := loggo.ConfigureLoggers(cfg.logLevel); err != nil {
+		panic(err)
+	}
 
 	// launch prometheus automatically
 	ctx := context.Background()
@@ -126,7 +128,7 @@ func handle(service string, mux *http.ServeMux, pattern string, handler func(htt
 	log.Infof("handle (%v): %v", service, pattern)
 }
 
-func (d *Deucalion) running() bool {
+func (d *Deucalion) Running() bool {
 	d.mtx.RLock()
 	defer d.mtx.RUnlock()
 	return d.isRunning

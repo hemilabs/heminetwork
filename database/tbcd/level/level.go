@@ -11,8 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
-	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -59,12 +57,12 @@ var log = loggo.GetLogger("level")
 var ErrIterator = IteratorError(errors.New("iteration error"))
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
 }
 
 type ldb struct {
-	mtx sync.Mutex
-
 	*level.Database
 	pool    level.Pool
 	rawPool level.RawPool
@@ -857,7 +855,8 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	originalCanonicalTipHash := originalCanonicalTip.BlockHash()
 	heaviestRemovedBlockHash := headersParsed[len(headersParsed)-1].BlockHash()
 
-	removalType := tbcd.RTInvalid //nolint:ineffassign
+	//nolint:ineffassign // tbcd.RTInvalid is being used as the default.
+	removalType := tbcd.RTInvalid
 	if tipAfterRemovalHash.IsEqual(&parentToRemovalSet.Hash) {
 		// Canonical tip set by caller is the parent to the blocks removed
 		removalType = tbcd.RTChainDescend
@@ -1189,11 +1188,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	return it, cbh, lbh, len(bhs.Headers), nil
 }
 
-type cacheEntry struct {
-	height    uint64
-	timestamp time.Time
-}
-
 // XXX return hash and height only
 func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentifier, error) {
 	log.Tracef("BlocksMissing")
@@ -1514,7 +1508,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 		// irrelevant.
 		if utxo.IsDelete() {
 			// Delete balance and utxos
-			outsBatch.Delete(op[:][:])
+			outsBatch.Delete(op[:])
 			outsBatch.Delete(hop[:])
 		} else {
 			// Add utxo to balance and utxos

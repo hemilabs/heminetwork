@@ -43,7 +43,9 @@ const (
 var log = loggo.GetLogger("level")
 
 func init() {
-	loggo.ConfigureLoggers(logLevel)
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
 }
 
 type Pool map[string]*leveldb.DB
