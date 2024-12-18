@@ -49,17 +49,18 @@ type notificationId string
 
 const (
 	logLevel = "INFO"
-
-	promNamespace = "bfg" // Prometheus
+	appName  = "bfg" // Prometheus
 
 	notifyBtcBlocks     notificationId = "btc_blocks"
 	notifyBtcFinalities notificationId = "btc_finalities"
 	notifyL2Keystones   notificationId = "l2_keystones"
 )
 
-var log = loggo.GetLogger("bfg")
+var (
+	log = loggo.GetLogger(appName)
 
-var ErrBTCPrivateKeyMissing error = errors.New("you must specify a BTC private key")
+	ErrBTCPrivateKeyMissing = errors.New("you must specify a BTC private key")
+)
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -73,6 +74,7 @@ func NewDefaultConfig() *Config {
 		EXBTCInitialConns:    5,
 		EXBTCMaxConns:        100,
 		PrivateListenAddress: ":8080",
+		PrometheusNamespace:  appName,
 		PublicListenAddress:  ":8383",
 		RequestLimit:         bfgapi.DefaultRequestLimit,
 		RequestTimeout:       bfgapi.DefaultRequestTimeout,
@@ -110,6 +112,7 @@ type Config struct {
 	LogLevel                string
 	PgURI                   string
 	PrometheusListenAddress string
+	PrometheusNamespace     string
 	PprofListenAddress      string
 	PublicKeyAuth           bool
 	RequestLimit            int
@@ -172,6 +175,7 @@ type Server struct {
 
 // metrics stores prometheus metrics.
 type metrics struct {
+	canonicalHeight  prometheus.Gauge         // Total number of PoP transaction broadcasts
 	popBroadcasts    prometheus.Counter       // Total number of PoP transaction broadcasts
 	rpcCallsTotal    *prometheus.CounterVec   // Total number of successful RPC commands
 	rpcCallsDuration *prometheus.HistogramVec // RPC calls duration in seconds
@@ -179,17 +183,22 @@ type metrics struct {
 }
 
 // newMetrics returns a new metrics struct containing prometheus collectors.
-func newMetrics() *metrics {
+func newMetrics(cfg *Config) *metrics {
 	// When adding a metric here, remember to add it to metrics.collectors().
 	return &metrics{
+		canonicalHeight: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: cfg.PrometheusNamespace,
+			Name:      "canonical_height",
+			Help:      "Last measured canonical height.",
+		}),
 		popBroadcasts: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: promNamespace,
+			Namespace: cfg.PrometheusNamespace,
 			Name:      "pop_broadcasts_total",
 			Help:      "Total number of PoP transaction broadcasts",
 		}),
 		rpcCallsTotal: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: promNamespace,
+				Namespace: cfg.PrometheusNamespace,
 				Name:      "rpc_calls_total",
 				Help:      "Total number of successful RPC commands",
 			},
@@ -197,7 +206,7 @@ func newMetrics() *metrics {
 		),
 		rpcCallsDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Namespace: promNamespace,
+				Namespace: cfg.PrometheusNamespace,
 				Name:      "rpc_calls_duration_seconds",
 				Help:      "RPC call durations in seconds",
 				Buckets:   prometheus.DefBuckets,
@@ -206,7 +215,7 @@ func newMetrics() *metrics {
 		),
 		rpcConnections: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
-				Namespace: promNamespace,
+				Namespace: cfg.PrometheusNamespace,
 				Name:      "rpc_connections",
 				Help:      "Number of active RPC WebSocket connections",
 			},
@@ -218,6 +227,7 @@ func newMetrics() *metrics {
 // collectors returns all prometheus collectors.
 func (m *metrics) collectors() []prometheus.Collector {
 	return []prometheus.Collector{
+		m.canonicalHeight,
 		m.popBroadcasts,
 		m.rpcCallsTotal,
 		m.rpcCallsDuration,
@@ -250,7 +260,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		btcHeight:             cfg.BTCStartHeight,
 		server:                http.NewServeMux(),
 		publicServer:          http.NewServeMux(),
-		metrics:               newMetrics(),
+		metrics:               newMetrics(cfg),
 		sessions:              make(map[string]*bfgWs),
 		checkForInvalidBlocks: make(chan struct{}),
 		holdoffTimeout:        6 * time.Second,
@@ -271,10 +281,13 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	}
 
+	// XXX this is not right. NewServer should always return. The call to
+	// electrs.NewClient should be in Run. Or, electrs should be a service
+	// so that we can mirror the New/Run paradig, the New/Run paradigm,
 	s.btcClient, err = electrs.NewClient(cfg.EXBTCAddress, &electrs.ClientOptions{
-		InitialConnections: cfg.EXBTCInitialConns,
-		MaxConnections:     cfg.EXBTCMaxConns,
-		PromNamespace:      promNamespace,
+		InitialConnections:  cfg.EXBTCInitialConns,
+		MaxConnections:      cfg.EXBTCMaxConns,
+		PrometheusNamespace: cfg.PrometheusNamespace,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create electrs client: %w", err)
@@ -1546,7 +1559,7 @@ func (s *Server) handleStateUpdates(table string, action string, payload, payloa
 	s.mtx.RUnlock()
 
 	// get the current canoncial chain height from the db
-	heightAfter, err := s.db.BtcBlockCanonicalHeight(ctx)
+	heightAfter, err := s.BtcBlockCanonicalHeight(ctx)
 	if err != nil {
 		log.Errorf("error occurred getting canonical height: %s", err)
 	}
@@ -1787,6 +1800,15 @@ func (s *Server) bfg(ctx context.Context) {
 	}
 }
 
+func (s *Server) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
+	height, err := s.db.BtcBlockCanonicalHeight(ctx)
+	if err != nil {
+		return 0, err
+	}
+	s.metrics.canonicalHeight.Set(float64(height))
+	return height, nil
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -1809,7 +1831,7 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.db.Close()
 
-	if s.btcHeight, err = s.db.BtcBlockCanonicalHeight(ctx); err != nil {
+	if s.btcHeight, err = s.BtcBlockCanonicalHeight(ctx); err != nil {
 		return err
 	}
 
@@ -1994,7 +2016,7 @@ func (s *Server) Run(pctx context.Context) error {
 		cs := append(
 			append(s.metrics.collectors(), s.btcClient.Metrics()...),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-				Namespace: promNamespace,
+				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
 				Help:      "Whether the BFG service is running",
 			}, s.promRunning),

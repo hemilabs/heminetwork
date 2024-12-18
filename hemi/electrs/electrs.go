@@ -148,7 +148,7 @@ type ClientOptions struct {
 	MaxConnections int
 
 	// PromNamespace is the application Prometheus namespace.
-	PromNamespace string
+	PrometheusNamespace string
 }
 
 type metrics struct {
@@ -232,7 +232,7 @@ func NewClient(address string, opts *ClientOptions) (*Client, error) {
 	}
 
 	c := &Client{
-		metrics: newMetrics(opts.PromNamespace),
+		metrics: newMetrics(opts.PrometheusNamespace),
 	}
 
 	// The address may be empty during tests, ignore empty addresses.
