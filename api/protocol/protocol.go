@@ -376,6 +376,7 @@ func (ac *Conn) Connect(ctx context.Context) error {
 	// package.
 	// Note that we cannot have DialOptions on a WASM websocket
 	log.Tracef("Connect: dialing %v", ac.serverURL)
+	// nolint:bodyclose
 	conn, _, err := websocket.Dial(connectCtx, ac.serverURL, newDialOptions(ac.opts))
 	if err != nil {
 		return fmt.Errorf("dial server: %w", err)

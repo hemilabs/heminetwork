@@ -18,6 +18,7 @@ issues:
 linters:
   enable:
     - "asasalint" # Check for pass []any as any in variadic func(...any).
+    - "bodyclose" # Checks whether HTTP response body is closed successfully.
     - "dupword" # Checks for duplicate words in the source code.
     - "errcheck" # Checks for unchecked errors.
     - "errorlint" # Verifies errors are properly wrapped.
