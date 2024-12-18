@@ -991,7 +991,6 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				return
 
 			default:
-				//nolint:errorlint // The error type is being printed separately.
 				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
 
