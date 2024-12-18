@@ -38,6 +38,7 @@ linters:
     # TODO enable revive, when bored run 'golangci-lint run -Erevive' to fix these
     # - "revive" # Checks for potential security issues
     - "nilerr" # Finds the code that returns nil even if it checks that the error is not nil.
+    - "nolintlint" # Reports ill-formed or insufficient nolint directives.
     - "prealloc" # Finds slice declarations that could potentially be pre-allocated.
     - "predeclared" # Find code that shadows one of Go's predeclared identifiers.
     - "promlinter" # Check Prometheus metrics naming via promlint.
@@ -92,3 +93,8 @@ linters-settings:
       Copyright (c) {{ YEAR }} {{ COMPANY }}
       Use of this source code is governed by the MIT License,
       which can be found in the LICENSE file.
+
+  # Lints nolint directives.
+  nolintlint:
+    # Require an explanation after each nolint directive.
+    require-explanation: true

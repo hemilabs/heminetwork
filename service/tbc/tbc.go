@@ -813,7 +813,7 @@ func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block *chainha
 	s.blocks.Put(ctx, defaultBlockPendingTimeout, block.String(), rp,
 		s.blockExpired, nil)
 	// Not an error. Checking and logging this will fill up logs with EOF.
-	// nolint:errcheck
+	//nolint:errcheck // Error is intentionally ignored.
 	go s.downloadBlock(ctx, rp, block)
 
 	return nil
@@ -991,7 +991,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				return
 
 			default:
-				// nolint:errorlint
+				//nolint:errorlint // The error type is being printed separately.
 				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
 
@@ -1474,7 +1474,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 
 	if s.cfg.MempoolEnabled && txsFound {
 		if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
-			// nolint:errcheck
+			//nolint:errcheck // Error is intentionally ignored.
 			go s.downloadMissingTx(ctx, p)
 		}
 	}

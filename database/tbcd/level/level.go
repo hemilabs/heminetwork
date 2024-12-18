@@ -855,7 +855,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	originalCanonicalTipHash := originalCanonicalTip.BlockHash()
 	heaviestRemovedBlockHash := headersParsed[len(headersParsed)-1].BlockHash()
 
-	// nolint:ineffassign
+	//nolint:ineffassign // tbcd.RTInvalid is being used as the default.
 	removalType := tbcd.RTInvalid
 	if tipAfterRemovalHash.IsEqual(&parentToRemovalSet.Hash) {
 		// Canonical tip set by caller is the parent to the blocks removed

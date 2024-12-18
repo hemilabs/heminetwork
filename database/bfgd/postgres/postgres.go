@@ -762,7 +762,6 @@ func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfg
 			}
 		}
 
-		// nolint:ifElseChain
 		if publishedFinality == nil {
 			finality = unpublishedFinality
 		} else if unpublishedFinality == nil {
