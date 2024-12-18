@@ -97,4 +97,6 @@ linters-settings:
   # Lints nolint directives.
   nolintlint:
     # Require an explanation after each nolint directive.
+    # Explanation format example: '//nolint:ineffassign // Explanation goes here.'
+    # If this becomes too annoying, disable it.
     require-explanation: true
