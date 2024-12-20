@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 11
+	bfgdVersion = 12
 
 	logLevel = "INFO"
 	verbose  = false
@@ -78,6 +78,11 @@ func New(ctx context.Context, uri string) (*pgdb, error) {
 	// first, refresh the materialized view so it can be used in case it was
 	// never refreshed before this point
 	err = p.refreshBTCBlocksCanonical(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	err = p.refreshPopBasisBlocks(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -622,10 +627,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 	}
 
 	sql := fmt.Sprintf(`
-		SELECT` +
-		// DISTINCT ON returns the first result for each unique l2 block number
-		`
-			DISTINCT ON (l2_block_number)
+		SELECT
 			btc_blocks_can.hash,
 			COALESCE(btc_blocks_can.height, 0),
 			l2_keystones.l2_keystone_abrev_hash,
@@ -637,16 +639,12 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.ep_hash,
 			l2_keystones.version,
 			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
-		` +
-		// give me each pop mining
-		`
+
 		FROM l2_keystones
-		INNER JOIN pop_basis ON l2_keystones.l2_keystone_abrev_hash = pop_basis.l2_keystone_abrev_hash
-		` +
-		// give me the lowest mined btc block for that keystone
-		`
+
 		LEFT JOIN LATERAL (
-			SELECT * FROM btc_blocks_can WHERE hash = pop_basis.btc_block_hash
+			SELECT * FROM pop_basis_blocks
+			WHERE l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
 			ORDER BY height ASC LIMIT 1
 		) btc_blocks_can ON TRUE
 
@@ -874,6 +872,16 @@ func (p *pgdb) refreshBTCBlocksCanonical(ctx context.Context) error {
 	// however, this is more testable at the moment and we're in a time crunch,
 	// this works
 	sql := "REFRESH MATERIALIZED VIEW btc_blocks_can"
+	_, err := p.db.ExecContext(ctx, sql)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *pgdb) refreshPopBasisBlocks(ctx context.Context) error {
+	sql := "REFRESH MATERIALIZED VIEW pop_basis_blocks"
 	_, err := p.db.ExecContext(ctx, sql)
 	if err != nil {
 		return err
