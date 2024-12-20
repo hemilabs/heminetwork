@@ -643,7 +643,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		FROM l2_keystones
 
 		LEFT JOIN LATERAL (
-			SELECT * FROM pop_basis_blocks
+			SELECT * FROM l2_keystone_lowest_btc_block
 			WHERE l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
 			ORDER BY height ASC LIMIT 1
 		) btc_blocks_can ON TRUE
@@ -881,7 +881,7 @@ func (p *pgdb) refreshBTCBlocksCanonical(ctx context.Context) error {
 }
 
 func (p *pgdb) refreshPopBasisBlocks(ctx context.Context) error {
-	sql := "REFRESH MATERIALIZED VIEW pop_basis_blocks"
+	sql := "REFRESH MATERIALIZED VIEW l2_keystone_lowest_btc_block"
 	_, err := p.db.ExecContext(ctx, sql)
 	if err != nil {
 		return err
