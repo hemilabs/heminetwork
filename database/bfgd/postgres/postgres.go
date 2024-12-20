@@ -622,7 +622,10 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 	}
 
 	sql := fmt.Sprintf(`
-		SELECT
+		SELECT` +
+		// DISTINCT ON returns the first result for each unique l2 block number
+		`
+			DISTINCT ON (l2_block_number)
 			btc_blocks_can.hash,
 			COALESCE(btc_blocks_can.height, 0),
 			l2_keystones.l2_keystone_abrev_hash,
@@ -635,18 +638,17 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.version,
 			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
 		` +
-		// for each l2_keystone <-> pop_basis pair (i.e. every mining)
+		// give me each pop mining
 		`
 		FROM l2_keystones
 		INNER JOIN pop_basis ON l2_keystones.l2_keystone_abrev_hash = pop_basis.l2_keystone_abrev_hash
 		` +
-		// give me the lowest block this was mined in on the canonical chain
+		// give me the lowest mined btc block for that keystone
 		`
 		LEFT JOIN LATERAL (
 			SELECT * FROM btc_blocks_can WHERE hash = pop_basis.btc_block_hash
 			ORDER BY height ASC LIMIT 1
 		) btc_blocks_can ON TRUE
-		
 
 		WHERE l2_keystones.l2_keystone_abrev_hash = ANY($1)
 
