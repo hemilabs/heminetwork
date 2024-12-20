@@ -616,11 +616,11 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		}
 
 		// Add tx's back to the mempool.
-		if s.cfg.MempoolEnabled {
-			// XXX this may not be the right spot.
-			txHashes, _ := b.MsgBlock().TxHashes()
-			_ = s.mempool.txsRemove(ctx, txHashes)
-		}
+		//if s.cfg.MempoolEnabled {
+		//	// XXX this may not be the right spot.
+		//	txHashes, _ := b.MsgBlock().TxHashes()
+		//	_ = s.mempool.txsRemove(ctx, txHashes)
+		//}
 
 		blocksProcessed++
 
@@ -1001,11 +1001,11 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		// This is probably not needed here since we alreayd dealt with
 		// it via the utxo unindexer but since it will be mostly a
 		// no-op just go ahead.
-		if s.cfg.MempoolEnabled {
-			// XXX this may not be the right spot.
-			txHashes, _ := b.MsgBlock().TxHashes()
-			_ = s.mempool.txsRemove(ctx, txHashes)
-		}
+		//if s.cfg.MempoolEnabled {
+		//	// XXX this may not be the right spot.
+		//	txHashes, _ := b.MsgBlock().TxHashes()
+		//	_ = s.mempool.txsRemove(ctx, txHashes)
+		//}
 
 		blocksProcessed++
 
