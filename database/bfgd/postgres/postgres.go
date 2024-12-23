@@ -825,32 +825,6 @@ func (p *pgdb) BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, er
 	}
 }
 
-// canonicalChainTipL2BlockNumber gets our best guess of the canonical tip
-// and returns it.  it finds the highest btc block with an associated
-// l2 keystone where only 1 btc block exists at that height
-func (p *pgdb) canonicalChainTipL2BlockNumber(ctx context.Context) (*uint32, error) {
-	log.Tracef("canonicalChainTipL2BlockNumber")
-	defer log.Tracef("canonicalChainTipL2BlockNumber exit")
-
-	const q = `
-		SELECT l2_keystones.l2_block_number
-		FROM btc_blocks_can
-
-		INNER JOIN pop_basis ON pop_basis.btc_block_hash = btc_blocks_can.hash
-		INNER JOIN l2_keystones ON l2_keystones.l2_keystone_abrev_hash 
-			= pop_basis.l2_keystone_abrev_hash
-
-		ORDER BY l2_block_number DESC LIMIT 1
-	`
-
-	var l2BlockNumber uint32
-	if err := p.db.QueryRowContext(ctx, q).Scan(&l2BlockNumber); err != nil {
-		return nil, err
-	}
-
-	return &l2BlockNumber, nil
-}
-
 func (p *pgdb) refreshBTCBlocksCanonical(ctx context.Context) error {
 	// XXX this probably should be REFRESH MATERIALIZED VIEW CONCURRENTLY
 	// however, this is more testable at the moment and we're in a time crunch,
