@@ -131,7 +131,7 @@ type Server struct {
 	blocksInserted int    // blocks inserted since last print
 
 	// mempool
-	// nolint:dupword // fuck you linter
+	//nolint:dupword // False positive, commented-out code.
 	// mempool *mempool
 
 	// broadcast
@@ -992,7 +992,6 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				return
 
 			default:
-				//nolint:errorlint // fuck you linter
 				panic(fmt.Errorf("sync blocks: %T %w", err, err))
 			}
 
