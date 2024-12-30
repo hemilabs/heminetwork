@@ -665,13 +665,6 @@ func (s *Server) chainWalker(ctx context.Context) {
 	log.Infof("chainWalker started")
 
 	lastTip := ""
-	// checkpoint := struct {
-	// 	L2KeystoneAbrevHash string
-	// 	BtcBlockHash        string
-	// }{
-	// 	L2KeystoneAbrevHash: "",
-	// 	BtcBlockHash:        "",
-	// }
 
 	for {
 		select {
@@ -691,25 +684,77 @@ func (s *Server) chainWalker(ctx context.Context) {
 
 			log.Tracef("the tip has changed to %s", tip)
 
-			lastTip = tip
-
 			current := tip
+
+			var walkErr error
 
 			for {
 				block, err := getBlock(ctx, s.cfg.BitcoindURI, current)
 				if err != nil {
-					log.Errorf("could not get block with hash %s: %w", current, err)
-					continue
+					walkErr = fmt.Errorf("could not get block with hash %s: %w", current, err)
+					break
+				}
+
+				for _, tx := range block.txHashes {
+					rawTx, err := getRawTransaction(ctx, s.cfg.BitcoindURI, tx, current)
+					if err != nil {
+						walkErr = fmt.Errorf("error getting raw transaction for block (%s, %s): %s", tx, block, err)
+						break
+					}
+
+					log.Tracef("got raw transaction %s: %s", tx, rawTx)
+
+					b, err := hex.DecodeString(rawTx)
+					if err != nil {
+						walkErr = fmt.Errorf("failed to decode rawTx: %s", err)
+						break
+					}
+
+					mtx := &wire.MsgTx{}
+					if err := mtx.Deserialize(bytes.NewReader(b)); err != nil {
+						walkErr = fmt.Errorf("Failed to deserialize transaction: %v", err)
+						break
+					}
+
+					var tl2 *pop.TransactionL2
+
+					for _, txo := range mtx.TxOut {
+						tl2, err = pop.ParseTransactionL2FromOpReturn(txo.PkScript)
+						if err == nil {
+							break
+						}
+					}
+
+					if tl2 == nil {
+						log.Infof("no l2 keystone found")
+						continue
+					}
+
+					// IF l2 keystone btc height <= old l2keystone btc height OR
+					// does not exist, upsert
+
+				}
+
+				if walkErr != nil {
+					break
 				}
 
 				if block.previousBlockHash == "" {
-					log.Infof("walked all the way to genesis")
+					log.Infof("no previous block hash")
 					break
 				}
 
 				current = block.previousBlockHash
 			}
 
+			if walkErr != nil {
+				log.Errorf("error occurred while walking the chain: %s", walkErr)
+				continue
+			}
+
+			// we finished with no errors, save the last valid tip, don't
+			// reprocess blocks before this
+			lastTip = tip
 		}
 	}
 }
@@ -2255,6 +2300,45 @@ type BitcoindRPCRequestBody struct {
 type rpcBlock struct {
 	previousBlockHash string
 	txHashes          []string
+	height            uint64
+}
+
+func getRawTransaction(ctx context.Context, url string, txHash string, blockHash string) (string, error) {
+	type getRawTransactionResponseBody struct {
+		Result string `json:"result"`
+		Error  string `json:"error"`
+	}
+
+	verbose := 0
+
+	resp, err := makeRequest(ctx, url, BitcoindRPCRequestBody{
+		JSONRPC: "1.0",
+		ID:      "something",
+		Method:  "getrawtransaction",
+		Params:  []any{&txHash, &verbose, &blockHash},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	defer resp.Body.Close()
+
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	getRawTransactionResponse := getRawTransactionResponseBody{}
+	err = json.Unmarshal(b, &getRawTransactionResponse)
+	if err != nil {
+		return "", err
+	}
+
+	if getRawTransactionResponse.Error != "" {
+		return "", errors.New(getRawTransactionResponse.Error)
+	}
+
+	return getRawTransactionResponse.Result, nil
 }
 
 func getBlock(ctx context.Context, url string, hash string) (*rpcBlock, error) {
@@ -2262,7 +2346,9 @@ func getBlock(ctx context.Context, url string, hash string) (*rpcBlock, error) {
 		Result struct {
 			PreviousBlockHash string   `json:"previousblockhash"`
 			TX                []string `json:"tx"`
+			Height            uint64   `json:"height"`
 		} `json:"result"`
+		Error string `json:"error"`
 	}
 
 	resp, err := makeRequest(ctx, url, BitcoindRPCRequestBody{
@@ -2288,18 +2374,25 @@ func getBlock(ctx context.Context, url string, hash string) (*rpcBlock, error) {
 		return nil, err
 	}
 
+	if getBlockResponse.Error != "" {
+		return nil, errors.New(getBlockResponse.Error)
+	}
+
 	return &rpcBlock{
 		previousBlockHash: getBlockResponse.Result.PreviousBlockHash,
 		txHashes:          getBlockResponse.Result.TX,
+		height:            getBlockResponse.Result.Height,
 	}, nil
 }
 
+// replace with getbestblockhash?
 func getChainTip(ctx context.Context, url string) (string, error) {
 	type getChainTipsResponseBody struct {
 		Result []struct {
 			Hash   string `json:"hash"`
 			Status string `json:"status"`
 		} `json:"result"`
+		Error string `json:"error"`
 	}
 
 	resp, err := makeRequest(ctx, url, BitcoindRPCRequestBody{
@@ -2323,6 +2416,10 @@ func getChainTip(ctx context.Context, url string) (string, error) {
 	err = json.Unmarshal(b, &getChainTipsResponse)
 	if err != nil {
 		return "", err
+	}
+
+	if getChainTipsResponse.Error != "" {
+		return "", errors.New(getChainTipsResponse.Error)
 	}
 
 	for _, tip := range getChainTipsResponse.Result {
