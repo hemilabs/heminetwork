@@ -10,8 +10,10 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -48,7 +50,7 @@ import (
 type notificationId string
 
 const (
-	logLevel = "INFO"
+	logLevel = "TRACE"
 	appName  = "bfg" // Prometheus
 
 	notifyBtcBlocks     notificationId = "btc_blocks"
@@ -121,6 +123,7 @@ type Config struct {
 	TrustedProxies          []string
 	BFGURL                  string
 	BTCPrivateKey           string
+	BitcoindURI             string
 }
 
 type Server struct {
@@ -651,6 +654,64 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 	}
 
 	return &bfgapi.AccessPublicKeyDeleteResponse{}, nil
+}
+
+func (s *Server) chainWalker(ctx context.Context) {
+	if s.cfg.BitcoindURI == "" {
+		log.Infof("can not walk chain without bitcoind uri set")
+		return
+	}
+
+	log.Infof("chainWalker started")
+
+	lastTip := ""
+	// checkpoint := struct {
+	// 	L2KeystoneAbrevHash string
+	// 	BtcBlockHash        string
+	// }{
+	// 	L2KeystoneAbrevHash: "",
+	// 	BtcBlockHash:        "",
+	// }
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(1 * time.Second):
+			tip, err := getChainTip(ctx, s.cfg.BitcoindURI)
+			if err != nil {
+				log.Errorf("could not get chain tip: %s", err)
+				continue
+			}
+
+			if lastTip == tip {
+				log.Tracef("tip has not changed, no-op")
+				continue
+			}
+
+			log.Tracef("the tip has changed to %s", tip)
+
+			lastTip = tip
+
+			current := tip
+
+			for {
+				block, err := getBlock(ctx, s.cfg.BitcoindURI, current)
+				if err != nil {
+					log.Errorf("could not get block with hash %s: %w", current, err)
+					continue
+				}
+
+				if block.previousBlockHash == "" {
+					log.Infof("walked all the way to genesis")
+					break
+				}
+
+				current = block.previousBlockHash
+			}
+
+		}
+	}
 }
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
@@ -2048,6 +2109,7 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go s.trackBitcoin(ctx)
 	go s.invalidBlockChecker(ctx)
+	go s.chainWalker(ctx)
 
 	select {
 	case <-ctx.Done():
@@ -2181,4 +2243,118 @@ func singleCIDR(ip string) (string, error) {
 		ip += "/128"
 	}
 	return ip, nil
+}
+
+type BitcoindRPCRequestBody struct {
+	JSONRPC string `json:"jsonrpc,omitempty"`
+	ID      string `json:"id,omitempty"`
+	Method  string `json:"method,omitempty"`
+	Params  []any  `json:"params,omitempty"`
+}
+
+type rpcBlock struct {
+	previousBlockHash string
+	txHashes          []string
+}
+
+func getBlock(ctx context.Context, url string, hash string) (*rpcBlock, error) {
+	type getBlockResponseBody struct {
+		Result struct {
+			PreviousBlockHash string   `json:"previousblockhash"`
+			TX                []string `json:"tx"`
+		} `json:"result"`
+	}
+
+	resp, err := makeRequest(ctx, url, BitcoindRPCRequestBody{
+		JSONRPC: "1.0",
+		ID:      "something",
+		Method:  "getblock",
+		Params:  []any{&hash},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	defer resp.Body.Close()
+
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	getBlockResponse := getBlockResponseBody{}
+	err = json.Unmarshal(b, &getBlockResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return &rpcBlock{
+		previousBlockHash: getBlockResponse.Result.PreviousBlockHash,
+		txHashes:          getBlockResponse.Result.TX,
+	}, nil
+}
+
+func getChainTip(ctx context.Context, url string) (string, error) {
+	type getChainTipsResponseBody struct {
+		Result []struct {
+			Hash   string `json:"hash"`
+			Status string `json:"status"`
+		} `json:"result"`
+	}
+
+	resp, err := makeRequest(ctx, url, BitcoindRPCRequestBody{
+		JSONRPC: "1.0",
+		ID:      "something",
+		Method:  "getchaintips",
+		Params:  []any{},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	defer resp.Body.Close()
+
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+
+	getChainTipsResponse := getChainTipsResponseBody{}
+	err = json.Unmarshal(b, &getChainTipsResponse)
+	if err != nil {
+		return "", err
+	}
+
+	for _, tip := range getChainTipsResponse.Result {
+		if tip.Status == "active" {
+			return tip.Hash, nil
+		}
+	}
+
+	return "", errors.New("could not find active chain tip")
+}
+
+func makeRequest(ctx context.Context, url string, body BitcoindRPCRequestBody) (*http.Response, error) {
+	b, err := json.Marshal(&body)
+	if err != nil {
+		return nil, err
+	}
+
+	reader := bytes.NewReader(b)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, reader)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code %d", resp.StatusCode)
+	}
+
+	return resp, nil
 }

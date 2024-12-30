@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 	btctxscript "github.com/btcsuite/btcd/txscript"
@@ -45,12 +47,15 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/go-test/deep"
 	"github.com/phayes/freeport"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/auth"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/database/bfgd"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/ethereum"
@@ -68,6 +73,7 @@ const (
 	mockTxPos                 = 3
 	mockTxheight              = 2
 	mockElectrsConnectTimeout = 3 * time.Second
+	bitcoindPrivateKey        = "72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219740f"
 )
 
 var mockMerkleHashes = []string{
@@ -284,7 +290,7 @@ func nextPort(ctx context.Context, t *testing.T) int {
 	}
 }
 
-func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, auth bool, otherBfgUrl string) (*bfg.Server, string, string, string) {
+func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, auth bool, otherBfgUrl string, bitcoindUri string) (*bfg.Server, string, string, string) {
 	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
@@ -298,6 +304,8 @@ func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, el
 		RequestLimit:         bfgapi.DefaultRequestLimit,
 		RequestTimeout:       bfgapi.DefaultRequestTimeout,
 		BFGURL:               otherBfgUrl,
+		LogLevel:             "TRACE",
+		BitcoindURI:          bitcoindUri,
 	}
 
 	if cfg.BFGURL != "" {
@@ -335,12 +343,88 @@ func createBfgServerWithAuth(ctx context.Context, t *testing.T, pgUri string, el
 	return bfgServer, bfgPrivateListenAddress, bfgWsPrivateUrl, bfgWsPublicUrl
 }
 
+type StdoutLogConsumer struct {
+	Name string // name of service
+}
+
+func (t *StdoutLogConsumer) Accept(l testcontainers.Log) {
+	fmt.Printf("%s: %s", t.Name, string(l.Content))
+}
+
+func createBitcoindWithInitialBlocks(ctx context.Context, t *testing.T, blocks uint64, overrideAddress string) testcontainers.Container {
+	t.Helper()
+
+	bitcoindContainer := createBitcoind(ctx, t)
+
+	_, _, btcAddress, err := bitcoin.KeysAndAddressFromHexString(
+		bitcoindPrivateKey,
+		&chaincfg.RegressionNetParams,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var address string
+	if overrideAddress != "" {
+		address = overrideAddress
+	} else {
+		address = btcAddress.EncodeAddress()
+	}
+
+	_, err = runBitcoinCommand(
+		ctx,
+		t,
+		bitcoindContainer,
+		[]string{
+			"bitcoin-cli",
+			"-regtest=1",
+			"-rpcuser=user",
+			"-rpcpassword=password",
+			"generatetoaddress",
+			strconv.FormatUint(blocks, 10),
+			address,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return bitcoindContainer
+}
+
+func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
+	req := testcontainers.ContainerRequest{
+		Image:        "kylemanna/bitcoind",
+		Cmd:          []string{"bitcoind", "-regtest=1", "-debug=1", "-rpcallowip=0.0.0.0/0", "-rpcbind=0.0.0.0:18443", "-txindex=1", "-noonion", "-listenonion=0", "-fallbackfee=0.01", "-peerbloomfilters=1", "-debug", "-rpcuser=user", "-rpcpassword=password"},
+		ExposedPorts: []string{"18443", "18444"},
+		WaitingFor:   wait.ForLog("dnsseed thread exit").WithPollInterval(1 * time.Second),
+		LogConsumerCfg: &testcontainers.LogConsumerConfig{
+			Consumers: []testcontainers.LogConsumer{&StdoutLogConsumer{
+				Name: "bitcoind",
+			}},
+		},
+	}
+
+	bitcoindContainer, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: req,
+		Started:          true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return bitcoindContainer
+}
+
+func createBFGServerBitcoindOnly(ctx context.Context, t *testing.T, pgUri string, bitcoindURI string) (*bfg.Server, string, string, string) {
+	return createBfgServerWithAuth(ctx, t, pgUri, "", 1, false, "", bitcoindURI)
+}
+
 func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64) (*bfg.Server, string, string, string) {
-	return createBfgServerWithAuth(ctx, t, pgUri, electrsAddr, btcStartHeight, false, "")
+	return createBfgServerWithAuth(ctx, t, pgUri, electrsAddr, btcStartHeight, false, "", "")
 }
 
 func createBfgServerConnectedToAnother(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string, string) {
-	return createBfgServerWithAuth(ctx, t, pgUri, electrsAddr, btcStartHeight, false, otherBfgUrl)
+	return createBfgServerWithAuth(ctx, t, pgUri, electrsAddr, btcStartHeight, false, otherBfgUrl, "")
 }
 
 func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
@@ -3386,7 +3470,7 @@ func TestNotifyOnL2KeystonesBFGClientsViaOtherBFG(t *testing.T) {
 	defer cancel()
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
-	_, _, _, otherBfgPublicWsUrl := createBfgServerWithAuth(ctx, t, otherPgUri, "", 1, false, bfgPublicWsUrl)
+	_, _, _, otherBfgPublicWsUrl := createBfgServerWithAuth(ctx, t, otherPgUri, "", 1, false, bfgPublicWsUrl, "")
 
 	c, _, err := websocket.Dial(ctx, otherBfgPublicWsUrl, nil)
 	if err != nil {
@@ -3460,7 +3544,7 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 	defer cancel()
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
-	_, _, _, otherBfgPublicWsUrl := createBfgServerWithAuth(ctx, t, otherPgUri, "", 1, false, bfgPublicWsUrl)
+	_, _, _, otherBfgPublicWsUrl := createBfgServerWithAuth(ctx, t, otherPgUri, "", 1, false, bfgPublicWsUrl, "")
 
 	c, _, err := websocket.Dial(ctx, otherBfgPublicWsUrl, nil)
 	if err != nil {
@@ -3882,7 +3966,7 @@ func TestBFGAuthNoKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "")
+	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "", "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -3914,7 +3998,7 @@ func TestBFGAuthPing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "")
+	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "", "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -3968,7 +4052,7 @@ func TestBFGAuthPingThenRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsPrivateUrl, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "")
+	_, _, bfgWsPrivateUrl, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "", "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -4025,7 +4109,7 @@ func TestBFGAuthWrongKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "")
+	_, _, _, bfgPublicWsUrl := createBfgServerWithAuth(ctx, t, pgUri, "", 1, true, "", "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -4342,6 +4426,31 @@ func TestDeleteAccessPublicKey(t *testing.T) {
 	}
 }
 
+func TestChainWalker(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, pgUri, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	bitcoindContainer := createBitcoindWithInitialBlocks(ctx, t, 100, "")
+
+	bitcoindRPCPort, err := bitcoindContainer.MappedPort(ctx, "18443")
+	if err != nil {
+		t.Errorf("error getting mapped port %v", err)
+	}
+
+	bitcoindRPCURI := fmt.Sprintf("http://user:password@localhost:%d", bitcoindRPCPort.Int())
+
+	createBFGServerBitcoindOnly(ctx, t, pgUri, bitcoindRPCURI)
+
+	time.Sleep(10 * time.Second)
+}
+
 func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count int, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {
 	header := make([]byte, 80)
 	hash := make([]byte, 32)
@@ -4437,4 +4546,29 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 	}
 
 	return btcBlock
+}
+
+func runBitcoinCommand(ctx context.Context, t *testing.T, bitcoindContainer testcontainers.Container, cmd []string) (string, error) {
+	exitCode, result, err := bitcoindContainer.Exec(ctx, cmd)
+	if err != nil {
+		return "", err
+	}
+
+	buf := new(strings.Builder)
+	_, err = io.Copy(buf, result)
+	if err != nil {
+		return "", err
+	}
+	t.Log(buf.String())
+
+	if exitCode != 0 {
+		return "", fmt.Errorf("error code received: %d", exitCode)
+	}
+
+	if len(buf.String()) == 0 {
+		return "", nil
+	}
+
+	// first 8 bytes are header, there is also a newline character at the end of the response
+	return buf.String()[8 : len(buf.String())-1], nil
 }
