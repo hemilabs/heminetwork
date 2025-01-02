@@ -675,11 +675,16 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
 			return fmt.Errorf("could not get block with hash %s: %w", current, err)
 		}
 
+		if err := s.db.L2KeystonesBTCBlockDelete(ctx, database.ByteArray(blockHash), block.height); err != nil {
+			return fmt.Errorf("error upserting: %w", err)
+		}
+
 		for i, tx := range block.txHashes {
 			if i == 0 {
 				log.Tracef("skipping coinbase transaction")
 				continue
 			}
+
 			rawTx, err := getRawTransaction(ctx, s.cfg.BitcoindURI, tx, current)
 			if err != nil {
 				return fmt.Errorf("error getting raw transaction for block (%s, %s): %w", tx, current, err)
@@ -716,7 +721,7 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
 				return fmt.Errorf("error decoding block hash from string: %w", err)
 			}
 
-			if err := s.db.L2KeystonesLowestBTCBlockUpsert(ctx, database.ByteArray(tl2.L2Keystone.Hash()), database.ByteArray(blockHash), block.height); err != nil {
+			if err := s.db.L2KeystonesBTCBlockInsert(ctx, database.ByteArray(tl2.L2Keystone.Hash()), database.ByteArray(blockHash), block.height); err != nil {
 				return fmt.Errorf("error upserting: %w", err)
 			}
 		}
@@ -2357,45 +2362,6 @@ func getBlock(ctx context.Context, url string, hash string) (*rpcBlock, error) {
 		txHashes:          getBlockResponse.Result.TX,
 		height:            getBlockResponse.Result.Height,
 	}, nil
-}
-
-func blockWasReorged(ctx context.Context, height uint64, knownBlockHashAtHeight string) (bool, error) {
-	// https: //developer.bitcoin.org/reference/rpc/getblockstats.html
-	type getBlockStatsResponseBody struct {
-		Result struct {
-			BlockHash `json:"blockhash"`
-		}
-		Error string `json:"error"`
-	}
-
-	resp, err := makeRequest(ctx, url, BitcoindRPCRequestBody{
-		JSONRPC: "1.0",
-		ID:      "something",
-		Method:  "getblockstats",
-		Params:  []any{height},
-	})
-	if err != nil {
-		return false, err
-	}
-
-	defer resp.Body.Close()
-
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, err
-	}
-
-	getBlockStatsResponse := getBlockStatsResponseBody{}
-	err = json.Unmarshal(b, &getBlockStatsResponse)
-	if err != nil {
-		return false, err
-	}
-
-	if getBlockStatsResponse.Error != "" {
-		return false, errors.New(getBlockStatsResponse.Error)
-	}
-
-	return getBlockStatsResponse.Result.BlockHash != knownBlockHashAtHeight
 }
 
 // replace with getbestblockhash?

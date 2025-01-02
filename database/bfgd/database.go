@@ -48,8 +48,8 @@ type Database interface {
 	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
 	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
 
-	L2KeystonesLowestBTCBlockDelete(ctx context.Context, btcBlockHash database.ByteArray) error
-	L2KeystonesLowestBTCBlockUpsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
+	L2KeystonesBTCBlockDelete(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
+	L2KeystonesBTCBlockInsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
 }
 
 // NotificationName identifies a database notification type.
