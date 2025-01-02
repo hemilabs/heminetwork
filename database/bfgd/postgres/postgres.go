@@ -123,7 +123,7 @@ func (p *pgdb) L2KeystonesLowestBTCBLockTrimAtHeight(ctx context.Context, btcBlo
 // this is used when a block becomes orphaned.
 func (p *pgdb) L2KeystonesLowestBTCBlockDelete(ctx context.Context, btcBlockHash database.ByteArray) error {
 	sql := `
-		DELETE FROM l2_keystones_lowest_btc_block WHERE btc_block_hash = $1
+		DELETE FROM l2_keystones_lowest_btc_block WHERE btc_block_hash != $1
 	`
 
 	if _, err := p.db.ExecContext(ctx, sql, btcBlockHash); err != nil {
@@ -142,10 +142,6 @@ func (p *pgdb) L2KeystonesLowestBTCBlockUpsert(ctx context.Context, l2KeystoneAb
 			btc_block_height
 		)
 		VALUES ($1, $2, $3)
-
-		ON CONFLICT (l2_keystone_abrev_hash) 
-		DO UPDATE SET btc_block_hash = $2, btc_block_height = $3
-		WHERE l.btc_block_height >= EXCLUDED.btc_block_height
 	`
 
 	_, err := p.db.ExecContext(ctx, sql, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight)

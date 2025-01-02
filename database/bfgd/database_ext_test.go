@@ -2431,7 +2431,7 @@ func TestL2KeystonesLowestBTCBlockDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.L2KeystonesLowestBTCBlockDelete(ctx, btcBlockHash); err != nil {
+	if err := db.L2KeystonesLowestBTCBlockDelete(ctx, database.ByteArray(fillOutBytes("myinvalidbtcblockhash", 32))); err != nil {
 		t.Fatal(err)
 	}
 
