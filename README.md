@@ -167,7 +167,7 @@ You may then connect your local `popmd` to your aforementioned local `bfgd` via 
 
 ### 🏁 Prerequisites
 
-- Connect to a live [bfgd](#-running-bfgd) instance.
+- Connect to a live [bfgd](cmd/bfgd) instance.
 
 ## ▶️ Running the Hemi stack
 
