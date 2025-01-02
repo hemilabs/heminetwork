@@ -656,7 +656,7 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 	return &bfgapi.AccessPublicKeyDeleteResponse{}, nil
 }
 
-func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
+func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string, stopAtKnownBlock bool) error {
 	tip, err := getChainTip(ctx, s.cfg.BitcoindURI)
 	if err != nil {
 		return fmt.Errorf("could not get chain tip: %w", err)
@@ -675,8 +675,10 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
 			return fmt.Errorf("could not get block with hash %s: %w", current, err)
 		}
 
+		// if block exists at height and hash and we've set "stopAtKnownBlock", no-op
+
 		if err := s.db.L2KeystonesBTCBlockDelete(ctx, database.ByteArray(blockHash), block.height); err != nil {
-			return fmt.Errorf("error upserting: %w", err)
+			return fmt.Errorf("error deleting: %w", err)
 		}
 
 		for i, tx := range block.txHashes {
