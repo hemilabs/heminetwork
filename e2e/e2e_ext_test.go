@@ -4426,7 +4426,7 @@ func TestDeleteAccessPublicKey(t *testing.T) {
 	}
 }
 
-func TestChainWalker(t *testing.T) {
+func TestInsertSingleFinality(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
@@ -4446,9 +4446,12 @@ func TestChainWalker(t *testing.T) {
 
 	bitcoindRPCURI := fmt.Sprintf("http://user:password@localhost:%d", bitcoindRPCPort.Int())
 
-	createBFGServerBitcoindOnly(ctx, t, pgUri, bitcoindRPCURI)
+	bfgServer, _, _, _ := createBFGServerBitcoindOnly(ctx, t, pgUri, bitcoindRPCURI)
 
-	time.Sleep(10 * time.Second)
+	err = bfgServer.WalkBTCChain(ctx, nil)
+	if err != nil {
+		t.Fatalf("error walking btc chain: %s", err)
+	}
 }
 
 func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count int, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {

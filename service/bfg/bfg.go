@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -656,107 +656,83 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 	return &bfgapi.AccessPublicKeyDeleteResponse{}, nil
 }
 
-func (s *Server) chainWalker(ctx context.Context) {
-	if s.cfg.BitcoindURI == "" {
-		log.Infof("can not walk chain without bitcoind uri set")
-		return
+func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
+	tip, err := getChainTip(ctx, s.cfg.BitcoindURI)
+	if err != nil {
+		return fmt.Errorf("could not get chain tip: %w", err)
 	}
 
-	log.Infof("chainWalker started")
+	if lastTip != nil && *lastTip == tip {
+		log.Tracef("tip has not changed, no-op")
+		return nil
+	}
 
-	lastTip := ""
+	current := tip
 
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(1 * time.Second):
-			tip, err := getChainTip(ctx, s.cfg.BitcoindURI)
-			if err != nil {
-				log.Errorf("could not get chain tip: %s", err)
-				continue
-			}
-
-			if lastTip == tip {
-				log.Tracef("tip has not changed, no-op")
-				continue
-			}
-
-			log.Tracef("the tip has changed to %s", tip)
-
-			current := tip
-
-			var walkErr error
-
-			for {
-				block, err := getBlock(ctx, s.cfg.BitcoindURI, current)
-				if err != nil {
-					walkErr = fmt.Errorf("could not get block with hash %s: %w", current, err)
-					break
-				}
-
-				for _, tx := range block.txHashes {
-					rawTx, err := getRawTransaction(ctx, s.cfg.BitcoindURI, tx, current)
-					if err != nil {
-						walkErr = fmt.Errorf("error getting raw transaction for block (%s, %s): %s", tx, block, err)
-						break
-					}
-
-					log.Tracef("got raw transaction %s: %s", tx, rawTx)
-
-					b, err := hex.DecodeString(rawTx)
-					if err != nil {
-						walkErr = fmt.Errorf("failed to decode rawTx: %s", err)
-						break
-					}
-
-					mtx := &wire.MsgTx{}
-					if err := mtx.Deserialize(bytes.NewReader(b)); err != nil {
-						walkErr = fmt.Errorf("Failed to deserialize transaction: %v", err)
-						break
-					}
-
-					var tl2 *pop.TransactionL2
-
-					for _, txo := range mtx.TxOut {
-						tl2, err = pop.ParseTransactionL2FromOpReturn(txo.PkScript)
-						if err == nil {
-							break
-						}
-					}
-
-					if tl2 == nil {
-						log.Infof("no l2 keystone found")
-						continue
-					}
-
-					// IF l2 keystone btc height <= old l2keystone btc height OR
-					// does not exist, upsert
-
-				}
-
-				if walkErr != nil {
-					break
-				}
-
-				if block.previousBlockHash == "" {
-					log.Infof("no previous block hash")
-					break
-				}
-
-				current = block.previousBlockHash
-			}
-
-			if walkErr != nil {
-				log.Errorf("error occurred while walking the chain: %s", walkErr)
-				continue
-			}
-
-			// we finished with no errors, save the last valid tip, don't
-			// reprocess blocks before this
-			lastTip = tip
+		block, err := getBlock(ctx, s.cfg.BitcoindURI, current)
+		if err != nil {
+			return fmt.Errorf("could not get block with hash %s: %w", current, err)
 		}
+
+		for i, tx := range block.txHashes {
+			if i == 0 {
+				log.Tracef("skipping coinbase transaction")
+				continue
+			}
+			rawTx, err := getRawTransaction(ctx, s.cfg.BitcoindURI, tx, current)
+			if err != nil {
+				return fmt.Errorf("error getting raw transaction for block (%s, %s): %w", tx, current, err)
+			}
+
+			log.Tracef("got raw transaction %s: %s", tx, rawTx)
+
+			b, err := hex.DecodeString(rawTx)
+			if err != nil {
+				return fmt.Errorf("failed to decode rawTx: %w", err)
+			}
+
+			mtx := &wire.MsgTx{}
+			if err := mtx.Deserialize(bytes.NewReader(b)); err != nil {
+				return fmt.Errorf("Failed to deserialize transaction: %w", err)
+			}
+
+			var tl2 *pop.TransactionL2
+
+			for _, txo := range mtx.TxOut {
+				tl2, err = pop.ParseTransactionL2FromOpReturn(txo.PkScript)
+				if err == nil {
+					break
+				}
+			}
+
+			if tl2 == nil {
+				log.Tracef("no l2 keystone found")
+				continue
+			}
+
+			// IF l2 keystone btc height <= old l2keystone btc height OR
+			// does not exist, upsert
+
+			blockHash, err := hex.DecodeString(current)
+			if err != nil {
+				return fmt.Errorf("error decoding block hash from string: %w", err)
+			}
+
+			if err := s.db.L2KeystonesLowestBTCBlockUpsert(ctx, database.ByteArray(tl2.L2Keystone.Hash()), database.ByteArray(blockHash), block.height); err != nil {
+				return fmt.Errorf("error upserting: %w", err)
+			}
+		}
+
+		if block.previousBlockHash == "" {
+			log.Tracef("no previous block hash, likely genesis")
+			break
+		}
+
+		current = block.previousBlockHash
 	}
+
+	return nil
 }
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
@@ -2154,7 +2130,6 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go s.trackBitcoin(ctx)
 	go s.invalidBlockChecker(ctx)
-	go s.chainWalker(ctx)
 
 	select {
 	case <-ctx.Done():
@@ -2328,6 +2303,8 @@ func getRawTransaction(ctx context.Context, url string, txHash string, blockHash
 		return "", err
 	}
 
+	log.Infof("response: %s", string(b))
+
 	getRawTransactionResponse := getRawTransactionResponseBody{}
 	err = json.Unmarshal(b, &getRawTransactionResponse)
 	if err != nil {
@@ -2447,10 +2424,6 @@ func makeRequest(ctx context.Context, url string, body BitcoindRPCRequestBody) (
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code %d", resp.StatusCode)
 	}
 
 	return resp, nil

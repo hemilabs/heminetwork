@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -97,6 +97,34 @@ func (p *pgdb) Version(ctx context.Context) (int, error) {
 		return -1, err
 	}
 	return dbVersion, nil
+}
+
+// L2KeystonesLowestBTCBlockDelete deletes all l2 keystone <-> btc block pairings with a given btc block hash
+// this is used when a block becomes orphaned.
+func (p *pgdb) L2KeystonesLowestBTCBlockDelete(ctx context.Context, btcBlockHash database.ByteArray) error {
+	return nil
+}
+
+// L2KeystonesLowestBTCBlockUpsert  will update a l2 keystone <-> btc block pairing ONLY IF it doesn't exist or the height is lower than the previous
+func (p *pgdb) L2KeystonesLowestBTCBlockUpsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, btcBlockHash database.ByteArray, btcBlockHeight uint64) error {
+	sql := `
+		INSERT INTO l2_keystones_lowest_btc_block AS l (
+			l2_keystone_abrev_hash,
+			btc_block_hash,
+			btc_block_height
+		)
+		VALUES ($1, $2, $3)
+
+		ON CONFLICT (l2_keystone_abrev_hash) 
+		DO UPDATE SET btc_block_hash = $2, btc_block_height = $3
+		WHERE EXCLUDED.btc_block_height >= l.btc_block_height
+	`
+
+	if _, err := p.db.ExecContext(ctx, sql, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) error {

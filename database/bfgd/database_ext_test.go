@@ -2241,7 +2241,7 @@ func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
 	}
 }
 
-func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
+func TestBtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
@@ -2279,7 +2279,7 @@ func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 	}
 }
 
-func BtcTransactionBroadcastRequestTrim(t *testing.T) {
+func TestBtcTransactionBroadcastRequestTrim(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 

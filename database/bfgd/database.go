@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -47,6 +47,9 @@ type Database interface {
 	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
 	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
 	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
+
+	L2KeystonesLowestBTCBlockDelete(ctx context.Context, btcBlockHash database.ByteArray) error
+	L2KeystonesLowestBTCBlockUpsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
 }
 
 // NotificationName identifies a database notification type.
