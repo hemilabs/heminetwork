@@ -123,6 +123,12 @@ type L2BTCFinality struct {
 	BTCTipHeight     uint32
 }
 
+type L2KeystoneLowestBTCBlock struct {
+	L2KeystoneAbrevHash database.ByteArray
+	BtcBlockHash        database.ByteArray
+	BtcBlockHeight      uint64
+}
+
 // XXX this needs to be generic
 type Notification struct {
 	ID string

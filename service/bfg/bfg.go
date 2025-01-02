@@ -667,6 +667,8 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
 		return nil
 	}
 
+	// first, trim blocks with mismatched height
+
 	current := tip
 
 	for {

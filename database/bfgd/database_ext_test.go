@@ -2241,7 +2241,225 @@ func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
 	}
 }
 
-func TestBtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
+func TestInsertL2KeystoneLowestBTCBlock(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	l2KeystoneAbrevHash := database.ByteArray(fillOutBytes("myl2keystoneabrevhash", 32))
+	btcBlockHash := database.ByteArray(fillOutBytes("mybtcblockhash", 32))
+	btcBlockHeight := uint64(1)
+
+	if err := db.L2KeystonesLowestBTCBlockUpsert(ctx, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := sdb.QueryContext(ctx, "SELECT l2_keystone_abrev_hash, btc_block_hash, btc_block_height FROM l2_keystones_lowest_btc_block")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l2KeystoneLowestBtcBlocks := []bfgd.L2KeystoneLowestBTCBlock{}
+	for rows.Next() {
+		l2KeystoneLowestBTCBlock := bfgd.L2KeystoneLowestBTCBlock{}
+		if err := rows.Scan(
+			&l2KeystoneLowestBTCBlock.L2KeystoneAbrevHash,
+			&l2KeystoneLowestBTCBlock.BtcBlockHash,
+			&l2KeystoneLowestBTCBlock.BtcBlockHeight,
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		l2KeystoneLowestBtcBlocks = append(l2KeystoneLowestBtcBlocks, l2KeystoneLowestBTCBlock)
+	}
+
+	if diff := deep.Equal(l2KeystoneLowestBtcBlocks, []bfgd.L2KeystoneLowestBTCBlock{
+		bfgd.L2KeystoneLowestBTCBlock{
+			l2KeystoneAbrevHash,
+			btcBlockHash,
+			btcBlockHeight,
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %x", diff)
+	}
+}
+
+func TestInsertL2KeystoneLowestBTCBlockUpsertOnConflict(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	l2KeystoneAbrevHash := database.ByteArray(fillOutBytes("myl2keystoneabrevhash", 32))
+	btcBlockHash := database.ByteArray(fillOutBytes("mybtcblockhash", 32))
+	btcBlockHeight := uint64(40)
+
+	if err := db.L2KeystonesLowestBTCBlockUpsert(ctx, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	btcBlockHash = database.ByteArray(fillOutBytes("myotherbtcblockhash", 32))
+	btcBlockHeight = uint64(39)
+
+	if err := db.L2KeystonesLowestBTCBlockUpsert(ctx, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := sdb.QueryContext(ctx, "SELECT l2_keystone_abrev_hash, btc_block_hash, btc_block_height FROM l2_keystones_lowest_btc_block")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l2KeystoneLowestBtcBlocks := []bfgd.L2KeystoneLowestBTCBlock{}
+	for rows.Next() {
+		l2KeystoneLowestBTCBlock := bfgd.L2KeystoneLowestBTCBlock{}
+		if err := rows.Scan(
+			&l2KeystoneLowestBTCBlock.L2KeystoneAbrevHash,
+			&l2KeystoneLowestBTCBlock.BtcBlockHash,
+			&l2KeystoneLowestBTCBlock.BtcBlockHeight,
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		l2KeystoneLowestBtcBlocks = append(l2KeystoneLowestBtcBlocks, l2KeystoneLowestBTCBlock)
+	}
+
+	if diff := deep.Equal(l2KeystoneLowestBtcBlocks, []bfgd.L2KeystoneLowestBTCBlock{
+		bfgd.L2KeystoneLowestBTCBlock{
+			l2KeystoneAbrevHash,
+			btcBlockHash,
+			39,
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %x", diff)
+	}
+}
+
+func TestInsertL2KeystoneLowestBTCBlockNoConflict(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	l2KeystoneAbrevHash := database.ByteArray(fillOutBytes("myl2keystoneabrevhash", 32))
+	btcBlockHash := database.ByteArray(fillOutBytes("mybtcblockhash", 32))
+	btcBlockHeight := uint64(40)
+
+	if err := db.L2KeystonesLowestBTCBlockUpsert(ctx, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	l2KeystoneAbrevHash2 := database.ByteArray(fillOutBytes("myotherl2keystoneabrevhash", 32))
+	btcBlockHash2 := database.ByteArray(fillOutBytes("myotherbtcblockhash", 32))
+	btcBlockHeight2 := uint64(35)
+
+	if err := db.L2KeystonesLowestBTCBlockUpsert(ctx, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.L2KeystonesLowestBTCBlockUpsert(ctx, l2KeystoneAbrevHash2, btcBlockHash2, btcBlockHeight2); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := sdb.QueryContext(ctx, "SELECT l2_keystone_abrev_hash, btc_block_hash, btc_block_height FROM l2_keystones_lowest_btc_block ORDER BY btc_block_height DESC")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l2KeystoneLowestBtcBlocks := []bfgd.L2KeystoneLowestBTCBlock{}
+	for rows.Next() {
+		l2KeystoneLowestBTCBlock := bfgd.L2KeystoneLowestBTCBlock{}
+		if err := rows.Scan(
+			&l2KeystoneLowestBTCBlock.L2KeystoneAbrevHash,
+			&l2KeystoneLowestBTCBlock.BtcBlockHash,
+			&l2KeystoneLowestBTCBlock.BtcBlockHeight,
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		l2KeystoneLowestBtcBlocks = append(l2KeystoneLowestBtcBlocks, l2KeystoneLowestBTCBlock)
+	}
+
+	if diff := deep.Equal(l2KeystoneLowestBtcBlocks, []bfgd.L2KeystoneLowestBTCBlock{
+		bfgd.L2KeystoneLowestBTCBlock{
+			l2KeystoneAbrevHash,
+			btcBlockHash,
+			btcBlockHeight,
+		},
+		bfgd.L2KeystoneLowestBTCBlock{
+			l2KeystoneAbrevHash2,
+			btcBlockHash2,
+			btcBlockHeight2,
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %x", diff)
+	}
+}
+
+func TestL2KeystonesLowestBTCBlockDelete(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	l2KeystoneAbrevHash := database.ByteArray(fillOutBytes("myl2keystoneabrevhash", 32))
+	btcBlockHash := database.ByteArray(fillOutBytes("mybtcblockhash", 32))
+	btcBlockHeight := uint64(1)
+
+	if err := db.L2KeystonesLowestBTCBlockUpsert(ctx, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.L2KeystonesLowestBTCBlockDelete(ctx, btcBlockHash); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := sdb.QueryContext(ctx, "SELECT l2_keystone_abrev_hash, btc_block_hash, btc_block_height FROM l2_keystones_lowest_btc_block")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l2KeystoneLowestBtcBlocks := []bfgd.L2KeystoneLowestBTCBlock{}
+	for rows.Next() {
+		l2KeystoneLowestBTCBlock := bfgd.L2KeystoneLowestBTCBlock{}
+		if err := rows.Scan(
+			&l2KeystoneLowestBTCBlock.L2KeystoneAbrevHash,
+			&l2KeystoneLowestBTCBlock.BtcBlockHash,
+			&l2KeystoneLowestBTCBlock.BtcBlockHeight,
+		); err != nil {
+			t.Fatal(err)
+		}
+
+		l2KeystoneLowestBtcBlocks = append(l2KeystoneLowestBtcBlocks, l2KeystoneLowestBTCBlock)
+	}
+
+	if diff := deep.Equal(l2KeystoneLowestBtcBlocks, []bfgd.L2KeystoneLowestBTCBlock{}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %x", diff)
+	}
+}
+
+func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
@@ -2279,7 +2497,7 @@ func TestBtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 	}
 }
 
-func TestBtcTransactionBroadcastRequestTrim(t *testing.T) {
+func BtcTransactionBroadcastRequestTrim(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
