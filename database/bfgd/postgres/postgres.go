@@ -113,6 +113,22 @@ func (p *pgdb) L2KeystonesBTCBlockDelete(ctx context.Context, btcBlockHash datab
 	return nil
 }
 
+func (p *pgdb) L2KeystonesBTCBlockKnown(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) (bool, error) {
+	sql := `
+		SELECT EXISTS(SELECT * FROM l2_keystones_btc_block WHERE btc_block_hash = $1 AND btc_block_height = $2)
+	`
+
+	row := p.db.QueryRowContext(ctx, sql, btcBlockHash, btcBlockHeight)
+
+	exists := false
+
+	if err := row.Scan(&exists); err != nil {
+		return false, err
+	}
+
+	return exists, nil
+}
+
 // L2KeystonesBTCBlockInsert will update a l2 keystone <-> btc block pairing ONLY IF it doesn't exist or the height is lower than the previous
 func (p *pgdb) L2KeystonesBTCBlockInsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, btcBlockHash database.ByteArray, btcBlockHeight uint64) error {
 	sql := `

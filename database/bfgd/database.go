@@ -50,6 +50,7 @@ type Database interface {
 
 	L2KeystonesBTCBlockDelete(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
 	L2KeystonesBTCBlockInsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
+	L2KeystonesBTCBlockKnown(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) (bool, error)
 }
 
 // NotificationName identifies a database notification type.

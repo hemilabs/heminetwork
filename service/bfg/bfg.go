@@ -676,6 +676,17 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string, stopAtKnownB
 		}
 
 		// if block exists at height and hash and we've set "stopAtKnownBlock", no-op
+		if stopAtKnownBlock {
+			known, err := L2KeystonesBTCBlockKnown(ctx context.Context, database.ByteArray(blockHash), block.height) 
+			if err != nil {
+				return fmt.Errorf("error determining if block is known: %w", err)
+			}
+
+			if known {
+				log.Infof("block already known %s:%d, exiting", blockHash, block.height)
+			}
+		}
+
 
 		if err := s.db.L2KeystonesBTCBlockDelete(ctx, database.ByteArray(blockHash), block.height); err != nil {
 			return fmt.Errorf("error deleting: %w", err)
