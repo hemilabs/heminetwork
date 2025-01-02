@@ -99,23 +99,6 @@ func (p *pgdb) Version(ctx context.Context) (int, error) {
 	return dbVersion, nil
 }
 
-// L2KeystonesLowestBTCBLockHighestHeight retrieves the height of the highest block that a keystone exists in
-func (p *pgdb) L2KeystonesLowestBTCBLockHighest(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) (uint64, error) {
-	sql := `
-		SELECT btc_block_height FROM l2_keystones_lowest_btc_block ORDER BY btc_block_height DESC LIMIT 1
-	`
-
-	row := p.db.QueryRowContext(ctx, sql)
-
-	result := uint64(0)
-
-	if err := row.Scan(ctx, &result); err != nil {
-		return 0, err
-	}
-
-	return result, nil
-}
-
 // L2KeystonesLowestBTCBLockTrimAtHeight delete all l2 keystone <-> btc block pairings that have a block hash at a height
 // that does NOT match this block hash.  upon re-orgs, a block at a specific height will have a different hash, so none of these blocks are valid
 func (p *pgdb) L2KeystonesLowestBTCBLockTrimAtHeight(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) (bool, error) {

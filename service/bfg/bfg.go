@@ -667,8 +667,6 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
 		return nil
 	}
 
-	// first, trim blocks with mismatched height
-
 	current := tip
 
 	for {
@@ -713,9 +711,6 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
 				continue
 			}
 
-			// IF l2 keystone btc height <= old l2keystone btc height OR
-			// does not exist, upsert
-
 			blockHash, err := hex.DecodeString(current)
 			if err != nil {
 				return fmt.Errorf("error decoding block hash from string: %w", err)
@@ -727,7 +722,7 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string) error {
 		}
 
 		if block.previousBlockHash == "" {
-			log.Tracef("no previous block hash, likely genesis")
+			log.Tracef("no previous block hash")
 			break
 		}
 
@@ -2362,6 +2357,45 @@ func getBlock(ctx context.Context, url string, hash string) (*rpcBlock, error) {
 		txHashes:          getBlockResponse.Result.TX,
 		height:            getBlockResponse.Result.Height,
 	}, nil
+}
+
+func blockWasReorged(ctx context.Context, height uint64, knownBlockHashAtHeight string) (bool, error) {
+	// https: //developer.bitcoin.org/reference/rpc/getblockstats.html
+	type getBlockStatsResponseBody struct {
+		Result struct {
+			BlockHash `json:"blockhash"`
+		}
+		Error string `json:"error"`
+	}
+
+	resp, err := makeRequest(ctx, url, BitcoindRPCRequestBody{
+		JSONRPC: "1.0",
+		ID:      "something",
+		Method:  "getblockstats",
+		Params:  []any{height},
+	})
+	if err != nil {
+		return false, err
+	}
+
+	defer resp.Body.Close()
+
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, err
+	}
+
+	getBlockStatsResponse := getBlockStatsResponseBody{}
+	err = json.Unmarshal(b, &getBlockStatsResponse)
+	if err != nil {
+		return false, err
+	}
+
+	if getBlockStatsResponse.Error != "" {
+		return false, errors.New(getBlockStatsResponse.Error)
+	}
+
+	return getBlockStatsResponse.Result.BlockHash != knownBlockHashAtHeight
 }
 
 // replace with getbestblockhash?
