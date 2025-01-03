@@ -7,6 +7,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,7 +21,7 @@ import (
 )
 
 const (
-	bfgdVersion = 12
+	bfgdVersion = 13
 
 	logLevel = "INFO"
 	verbose  = false
@@ -205,7 +206,7 @@ func (p *pgdb) L2KeystoneByAbrevHash(ctx context.Context, aHash [32]byte) (*bfgd
 	return l2ks, nil
 }
 
-func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32) ([]bfgd.L2Keystone, error) {
+func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32) ([]bfgd.L2Keystone, error) {
 	log.Tracef("L2KeystonesMostRecentN")
 	defer log.Tracef("L2KeystonesMostRecentN exit")
 
@@ -227,11 +228,11 @@ func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32) ([]bfgd.L2K
 			updated_at
 
 		FROM l2_keystones
-		ORDER BY l2_block_number DESC LIMIT $1
+		ORDER BY l2_block_number DESC, l2_keystone_abrev_hash DESC OFFSET $1 LIMIT $2
 	`
 
 	var ks []bfgd.L2Keystone
-	rows, err := p.db.QueryContext(ctx, q, n)
+	rows, err := p.db.QueryContext(ctx, q, page*n, n)
 	if err != nil {
 		return nil, err
 	}
@@ -549,141 +550,58 @@ func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte
 	return pbs, nil
 }
 
-// nextL2BTCFinalitiesPublished , given a block number (lessThanL2BlockNumber)
-// will find the next smallest published finality on the canoncial chain
-func (p *pgdb) nextL2BTCFinalitiesPublished(ctx context.Context, lessThanL2BlockNumber uint32, limit int) ([]bfgd.L2BTCFinality, error) {
-	sql := fmt.Sprintf(`
-		SELECT
-			btc_blocks_can.hash,
-		    btc_blocks_can.height,
-			l2_keystones.l2_keystone_abrev_hash,
-			l2_keystones.l1_block_number,
-			l2_keystones.l2_block_number,
-			l2_keystones.parent_ep_hash,
-			l2_keystones.prev_keystone_ep_hash,
-			l2_keystones.state_root,
-			l2_keystones.ep_hash,
-			l2_keystones.version,
-			%s,
-			COALESCE((SELECT MAX(height) FROM btc_blocks_can), 0)
-		FROM btc_blocks_can
-
-		INNER JOIN pop_basis ON pop_basis.btc_block_hash = btc_blocks_can.hash
-		INNER JOIN l2_keystones ON l2_keystones.l2_keystone_abrev_hash 
-			= pop_basis.l2_keystone_abrev_hash
-
-		WHERE l2_keystones.l2_block_number <= $1
-		ORDER BY height DESC, l2_keystones.l2_block_number DESC LIMIT $2
-	`, effectiveHeightSql)
-
-	rows, err := p.db.QueryContext(ctx, sql, lessThanL2BlockNumber, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	defer rows.Close()
-
-	finalities := []bfgd.L2BTCFinality{}
-
-	for rows.Next() {
-		var l2BtcFinality bfgd.L2BTCFinality
-		err = rows.Scan(
-			&l2BtcFinality.BTCPubHeaderHash,
-			&l2BtcFinality.BTCPubHeight,
-			&l2BtcFinality.L2Keystone.Hash,
-			&l2BtcFinality.L2Keystone.L1BlockNumber,
-			&l2BtcFinality.L2Keystone.L2BlockNumber,
-			&l2BtcFinality.L2Keystone.ParentEPHash,
-			&l2BtcFinality.L2Keystone.PrevKeystoneEPHash,
-			&l2BtcFinality.L2Keystone.StateRoot,
-			&l2BtcFinality.L2Keystone.EPHash,
-			&l2BtcFinality.L2Keystone.Version,
-			&l2BtcFinality.EffectiveHeight,
-			&l2BtcFinality.BTCTipHeight,
+func (p *pgdb) L2KeystoneLowestBtcBlockUpsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray) error {
+	sql := `
+		WITH lowest_btc_block AS (
+			SELECT btc_blocks_can.hash, btc_blocks_can.height
+			FROM pop_basis
+			INNER JOIN btc_blocks_can ON btc_blocks_can.hash = pop_basis.btc_block_hash
+			WHERE pop_basis.l2_keystone_abrev_hash = $1
+			ORDER BY btc_blocks_can.height ASC LIMIT 1
 		)
-		if err != nil {
-			return nil, err
-		}
+		INSERT INTO l2_keystones_lowest_btc_block (l2_keystone_abrev_hash, btc_block_hash, btc_block_height)
+		VALUES (
+			$1,
+			(SELECT hash FROM lowest_btc_block),
+			(SELECT height FROM lowest_btc_block)
+		)
+		ON CONFLICT (l2_keystone_abrev_hash) DO UPDATE SET btc_block_hash = EXCLUDED.btc_block_hash
+	`
 
-		finalities = append(finalities, l2BtcFinality)
+	_, err := p.db.ExecContext(ctx, sql, l2KeystoneAbrevHash)
+	if err != nil {
+		return err
 	}
 
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
-
-	return finalities, nil
+	return nil
 }
 
-// nextL2BTCFinalitiesAssumedUnpublished , given a block number
-// (lessThanL2BlockNumber) will find the next smallest published finality that
-// is not within explicitExcludeL2BlockNumbers and assume it is unpublished
-// (returning nothing for BTC fields)
-func (p *pgdb) nextL2BTCFinalitiesAssumedUnpublished(ctx context.Context, lessThanL2BlockNumber uint32, limit int, explicitExcludeL2BlockNumbers []uint32) ([]bfgd.L2BTCFinality, error) {
-	sql := fmt.Sprintf(`
-		SELECT
-			NULL,
-			0,
-			l2_keystones.l2_keystone_abrev_hash,
-			l2_keystones.l1_block_number,
-			l2_keystones.l2_block_number,
-			l2_keystones.parent_ep_hash,
-			l2_keystones.prev_keystone_ep_hash,
-			l2_keystones.state_root,
-			l2_keystones.ep_hash,
-			l2_keystones.version,
-			%s,
-			COALESCE((SELECT MAX(height) FROM btc_blocks_can),0)
+// BackfillL2KeystonesLowestBtcBlocks (should only) runs on startup and is
+// a quick check that all existing keystones have an associated lowest btc
+// block if it exists.  this is essential for new deploys
+func (p *pgdb) BackfillL2KeystonesLowestBtcBlocks(ctx context.Context) error {
+	limit := uint32(1)
+	page := uint32(0)
 
-		FROM l2_keystones
-		WHERE l2_block_number != ANY($3)
-		AND l2_block_number <= $1
-		ORDER BY l2_block_number DESC LIMIT $2
-	`, effectiveHeightSql)
-
-	rows, err := p.db.QueryContext(
-		ctx,
-		sql,
-		lessThanL2BlockNumber,
-		limit,
-		pq.Array(explicitExcludeL2BlockNumbers),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	defer rows.Close()
-
-	finalities := []bfgd.L2BTCFinality{}
-
-	for rows.Next() {
-		var l2BtcFinality bfgd.L2BTCFinality
-		err = rows.Scan(
-			&l2BtcFinality.BTCPubHeaderHash,
-			&l2BtcFinality.BTCPubHeight,
-			&l2BtcFinality.L2Keystone.Hash,
-			&l2BtcFinality.L2Keystone.L1BlockNumber,
-			&l2BtcFinality.L2Keystone.L2BlockNumber,
-			&l2BtcFinality.L2Keystone.ParentEPHash,
-			&l2BtcFinality.L2Keystone.PrevKeystoneEPHash,
-			&l2BtcFinality.L2Keystone.StateRoot,
-			&l2BtcFinality.L2Keystone.EPHash,
-			&l2BtcFinality.L2Keystone.Version,
-			&l2BtcFinality.EffectiveHeight,
-			&l2BtcFinality.BTCTipHeight,
-		)
-		if err != nil {
-			return nil, err
+	for {
+		l2ks, err := p.L2KeystonesMostRecentN(ctx, limit, page)
+		if err != nil && !errors.Is(err, database.ErrNotFound) {
+			return err
 		}
-		l2BtcFinality.BTCPubHeight = -1
-		finalities = append(finalities, l2BtcFinality)
-	}
 
-	if rows.Err() != nil {
-		return nil, rows.Err()
-	}
+		if len(l2ks) == 0 {
+			log.Infof("done backfilling l2 keystones <-> lowest btc block")
+			return nil
+		}
 
-	return finalities, nil
+		for _, ks := range l2ks {
+			log.Tracef("backfilling l2keystone=%s, l2blocknumber=%d", hex.EncodeToString(ks.Hash), ks.L2BlockNumber)
+			if err := p.L2KeystoneLowestBtcBlockUpsert(ctx, ks.Hash); err != nil {
+				return err
+			}
+		}
+		page++
+	}
 }
 
 // L2BTCFinalityMostRecent gets the most recent L2BtcFinalities sorted
@@ -696,100 +614,37 @@ func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfg
 		)
 	}
 
-	tip, err := p.canonicalChainTipL2BlockNumber(ctx)
+	l2Keystones, err := p.L2KeystonesMostRecentN(ctx, limit, 0)
 	if err != nil {
 		return nil, err
-	}
-
-	// we found no canonical tip, return nothing
-	if tip == nil {
-		return []bfgd.L2BTCFinality{}, nil
 	}
 
 	finalities := []bfgd.L2BTCFinality{}
 
-	// first, get all of the most recent published finalities up to the limit
-	// from the tip
-	publishedFinalities, err := p.nextL2BTCFinalitiesPublished(
-		ctx,
-		*tip,
-		int(limit),
-	)
-	if err != nil {
-		return nil, err
-	}
-	pfi := 0
-
-	// it is possible that there will be some unpublished finalities between
-	// the published
-	// ones, get all finalities up to the limit that are NOT in published.
-	// IMPORTANT NOTE: we call these explicity "assumed unpublished"
-	// instead of explicity looking for unpublished
-	// finalities, because a finality could get published between these two
-	// queries.  this is why we call these "assumed".  the idea is to make
-	// this worst-case scenario slighty out-of-date, rather than incorrect
-	excludeL2BlockNumbers := []uint32{}
-	for _, v := range publishedFinalities {
-		excludeL2BlockNumbers = append(
-			excludeL2BlockNumbers,
-			v.L2Keystone.L2BlockNumber,
-		)
+	hashes := []database.ByteArray{}
+	for _, l := range l2Keystones {
+		hashes = append(hashes, l.Hash)
 	}
 
-	unpublishedFinalities, err := p.nextL2BTCFinalitiesAssumedUnpublished(
-		ctx,
-		*tip,
-		int(limit),
-		excludeL2BlockNumbers)
-	if err != nil {
-		return nil, err
-	}
-
+	page := uint32(0)
 	for {
-
-		var publishedFinality *bfgd.L2BTCFinality
-		if pfi < len(publishedFinalities) {
-			publishedFinality = &publishedFinalities[pfi]
+		finalitiesTmp, err := p.L2BTCFinalityByL2KeystoneAbrevHash(ctx, hashes, page, 100)
+		if err != nil {
+			return nil, err
 		}
 
-		var finality *bfgd.L2BTCFinality
+		if len(finalitiesTmp) == 0 {
+			break
+		}
 
-		var unpublishedFinality *bfgd.L2BTCFinality
-		for _, u := range unpublishedFinalities {
-			if u.L2Keystone.L2BlockNumber <= *tip {
-				unpublishedFinality = &u
-				break
+		for _, f := range finalitiesTmp {
+			finalities = append(finalities, f)
+			if uint32(len(finalities)) >= limit {
+				return finalities, nil
 			}
 		}
 
-		if publishedFinality == nil {
-			finality = unpublishedFinality
-		} else if unpublishedFinality == nil {
-			finality = publishedFinality
-			pfi++
-		} else if publishedFinality.L2Keystone.L2BlockNumber >=
-			unpublishedFinality.L2Keystone.L2BlockNumber {
-			finality = publishedFinality
-			pfi++
-		} else {
-			finality = unpublishedFinality
-		}
-
-		// if we couldn't find finality, there are no more possibilities
-		if finality == nil {
-			break
-		}
-
-		finalities = append(finalities, *finality)
-		if uint32(len(finalities)) >= limit {
-			break
-		}
-
-		if finality.L2Keystone.L2BlockNumber == 0 {
-			break
-		}
-
-		*tip = finality.L2Keystone.L2BlockNumber - 1
+		page++
 	}
 
 	return finalities, nil
@@ -814,8 +669,8 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 
 	sql := fmt.Sprintf(`
 		SELECT
-			btc_blocks_can.hash,
-			COALESCE(btc_blocks_can.height, 0),
+			btc_block_hash,
+			COALESCE(btc_block_height, 0),
 			l2_keystones.l2_keystone_abrev_hash,
 			l2_keystones.l1_block_number,
 			l2_keystones.l2_block_number,
@@ -828,10 +683,8 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
 
 		FROM l2_keystones
-		LEFT JOIN pop_basis ON l2_keystones.l2_keystone_abrev_hash 
-			= pop_basis.l2_keystone_abrev_hash
-		LEFT JOIN btc_blocks_can ON pop_basis.btc_block_hash 
-			= btc_blocks_can.hash
+		LEFT JOIN l2_keystones_lowest_btc_block
+		ON l2_keystones.l2_keystone_abrev_hash = l2_keystones_lowest_btc_block.l2_keystone_abrev_hash
 
 		WHERE l2_keystones.l2_keystone_abrev_hash = ANY($1)
 
@@ -957,32 +810,6 @@ func (p *pgdb) BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, er
 			return nil, rows.Err()
 		}
 	}
-}
-
-// canonicalChainTipL2BlockNumber gets our best guess of the canonical tip
-// and returns it.  it finds the highest btc block with an associated
-// l2 keystone where only 1 btc block exists at that height
-func (p *pgdb) canonicalChainTipL2BlockNumber(ctx context.Context) (*uint32, error) {
-	log.Tracef("canonicalChainTipL2BlockNumber")
-	defer log.Tracef("canonicalChainTipL2BlockNumber exit")
-
-	const q = `
-		SELECT l2_keystones.l2_block_number
-		FROM btc_blocks_can
-
-		INNER JOIN pop_basis ON pop_basis.btc_block_hash = btc_blocks_can.hash
-		INNER JOIN l2_keystones ON l2_keystones.l2_keystone_abrev_hash 
-			= pop_basis.l2_keystone_abrev_hash
-
-		ORDER BY l2_block_number DESC LIMIT 1
-	`
-
-	var l2BlockNumber uint32
-	if err := p.db.QueryRowContext(ctx, q).Scan(&l2BlockNumber); err != nil {
-		return nil, err
-	}
-
-	return &l2BlockNumber, nil
 }
 
 func (p *pgdb) refreshBTCBlocksCanonical(ctx context.Context) error {
