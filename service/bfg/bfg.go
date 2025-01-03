@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -305,7 +305,16 @@ func (s *Server) queueCheckForInvalidBlocks() {
 	}
 }
 
+func (s *Server) backfillL2KeystonesLowestBtcBlocks(ctx context.Context) {
+	defer s.wg.Done()
+
+	if err := s.db.BackfillL2KeystonesLowestBtcBlocks(ctx); err != nil {
+		log.Errorf("error backfilling lowest block per keystone: %s", err)
+	}
+}
+
 func (s *Server) invalidBlockChecker(ctx context.Context) {
+	defer s.wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
@@ -431,6 +440,14 @@ func (s *Server) handleOneBroadcastRequest(ctx context.Context, highPriority boo
 	if tl2 == nil {
 		log.Errorf("could not find pop tx")
 		return
+	}
+
+	// attempt to insert the abbreviated keystone, this is in case we have
+	// not heard of this keystone from op node yet
+	if err := s.db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{
+		hemiL2KeystoneAbrevToDb(*tl2.L2Keystone),
+	}); err != nil {
+		log.Infof("could not insert l2 keystone: %s", err)
 	}
 
 	_, err = pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
@@ -745,6 +762,15 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		btcTxIndex := index
 		log.Infof("found tl2: %v at position %d", tl2, btcTxIndex)
 
+		// attempt to insert the abbreviated keystone, this is in case we have
+		// not heard of this keystone from op node yet
+		if err := s.db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{
+			hemiL2KeystoneAbrevToDb(*tl2.L2Keystone),
+		}); err != nil {
+			// this is not necessarily an error, should it be trace?
+			log.Infof("could not insert l2 keystone: %s", err)
+		}
+
 		publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mtx.TxIn[0].SignatureScript)
 		if err != nil {
 			return fmt.Errorf("could not parse signature script: %w", err)
@@ -788,7 +814,6 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 				return err
 			}
 		}
-
 	}
 }
 
@@ -1380,7 +1405,7 @@ func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
-	results, err := s.db.L2KeystonesMostRecentN(ctx, 100)
+	results, err := s.db.L2KeystonesMostRecentN(ctx, 100, 0)
 	if err != nil {
 		log.Errorf("error getting keystones %v", err)
 		return
@@ -1466,6 +1491,27 @@ func (s *Server) handleL2KeystonesNotification() {
 		go writeNotificationResponse(bws, &bfgapi.L2KeystonesNotification{})
 	}
 	s.mtx.Unlock()
+}
+
+func hemiL2KeystoneAbrevToDb(l2ks hemi.L2KeystoneAbrev) bfgd.L2Keystone {
+	padBytes := func(s []byte) database.ByteArray {
+		// allocated zeroed array
+		r := make([]byte, 32)
+		// copy s into r, this will pad the ending bytes with 0s
+		copy(r, s)
+		return database.ByteArray(r)
+	}
+
+	return bfgd.L2Keystone{
+		Hash:               l2ks.Hash(),
+		Version:            uint32(l2ks.Version),
+		L1BlockNumber:      l2ks.L1BlockNumber,
+		L2BlockNumber:      l2ks.L2BlockNumber,
+		ParentEPHash:       padBytes(l2ks.ParentEPHash[:]),
+		PrevKeystoneEPHash: padBytes(l2ks.PrevKeystoneEPHash[:]),
+		StateRoot:          padBytes(l2ks.StateRoot[:]),
+		EPHash:             padBytes(l2ks.EPHash[:]),
+	}
 }
 
 func hemiL2KeystoneToDb(l2ks hemi.L2Keystone) bfgd.L2Keystone {
@@ -1613,6 +1659,34 @@ func (s *Server) handleAccessPublicKeys(table string, action string, payload, pa
 
 func (s *Server) handleL2KeystonesChange(table string, action string, payload, payloadOld any) {
 	go s.refreshCacheAndNotifiyL2Keystones()
+}
+
+func (s *Server) handlePopBasisChange(table string, action string, payload, payloadOld any) {
+	for _, p := range []any{payload, payloadOld} {
+		if p == nil {
+			continue
+		}
+
+		popBasisPayload, ok := p.(*bfgd.PopBasis)
+		if !ok {
+			panic(fmt.Sprintf("incorrect type: %T", p))
+		}
+
+		if popBasisPayload == nil {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		log.Tracef("updating lowest btc block for l2 keystone: %s", hex.EncodeToString(popBasisPayload.L2KeystoneAbrevHash))
+
+		err := s.updateLowestL2Keystone(ctx, popBasisPayload.L2KeystoneAbrevHash)
+		if err != nil {
+			log.Errorf("could not update lowest l2 keystone: %s", err)
+			return
+		}
+	}
 }
 
 func (s *Server) fetchRemoteL2Keystones(pctx context.Context) {
@@ -1809,6 +1883,10 @@ func (s *Server) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
 	return height, nil
 }
 
+func (s *Server) updateLowestL2Keystone(ctx context.Context, l2KeystoneAbrevHash []byte) error {
+	return s.db.L2KeystoneLowestBtcBlockUpsert(ctx, l2KeystoneAbrevHash)
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -1874,6 +1952,14 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	if err := s.db.RegisterNotification(ctx, bfgd.NotificationL2Keystones,
 		s.handleL2KeystonesChange, l2KeystonesPayload); err != nil {
+		return err
+	}
+
+	popBasisPayload, ok := bfgd.NotificationPayload(bfgd.NotificationPopBasis)
+	if !ok {
+		return fmt.Errorf("could not obtain type: %v", bfgd.NotificationPopBasis)
+	}
+	if err := s.db.RegisterNotification(ctx, bfgd.NotificationPopBasis, s.handlePopBasisChange, popBasisPayload); err != nil {
 		return err
 	}
 
@@ -2047,7 +2133,13 @@ func (s *Server) Run(pctx context.Context) error {
 
 	s.wg.Add(1)
 	go s.trackBitcoin(ctx)
+
+	s.wg.Add(1)
 	go s.invalidBlockChecker(ctx)
+
+	// backfill known blocks, any new blocks will be handled by notifications
+	s.wg.Add(1)
+	go s.backfillL2KeystonesLowestBtcBlocks(ctx)
 
 	select {
 	case <-ctx.Done():
