@@ -53,7 +53,8 @@ build:
 install: $(cmds)
 
 lint:
-	$(shell go env GOPATH)/bin/golangci-lint run --fix ./...
+	# TODO: re-enable autofix with --fix, after removing buggy goheader linter
+	$(shell go env GOPATH)/bin/golangci-lint run ./...
 
 lint-deps:
 	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62

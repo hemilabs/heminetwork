@@ -85,12 +85,14 @@ linters-settings:
       - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
 
   # Enforces copyright header
-  goheader:
+  goheader: # TODO: Replace goheader, autofix is too buggy.
     values:
       const:
         COMPANY: "Hemi Labs, Inc."
+      regexp:
+        YEAR_RANGE: "(\\d{4}-{{MOD-YEAR}})|({{MOD-YEAR}})"
     template: |-
-      Copyright (c) {{ YEAR }} {{ COMPANY }}
+      Copyright (c) {{ YEAR_RANGE }} {{ COMPANY }}
       Use of this source code is governed by the MIT License,
       which can be found in the LICENSE file.
 
