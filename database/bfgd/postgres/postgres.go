@@ -99,9 +99,57 @@ func (p *pgdb) Version(ctx context.Context) (int, error) {
 	return dbVersion, nil
 }
 
-// L2KeystonesBTCBlockDelete deletes all l2 keystone <-> btc block pairings with a given btc block hash
+func (p *pgdb) L2KeystonesBTCBlockGetLowestForL2BlockNumber(ctx context.Context, l2BlockNumber uint64) (*bfgd.L2KeystoneLowestBTCBlock, error) {
+	sql := `
+		SELECT 
+		l2_keystone_abrev_hash, l2_block_number, btc_block_hash, btc_block_height
+		FROM l2_keystones_btc_block
+		WHERE l2_block_number = $1
+		ORDER BY btc_block_height ASC LIMIT 1
+	`
+
+	result := bfgd.L2KeystoneLowestBTCBlock{}
+
+	row := p.db.QueryRowContext(ctx, sql, l2BlockNumber)
+	if err := row.Scan(
+		&result.L2KeystoneAbrevHash,
+		&result.L2BlockNumber,
+		&result.BtcBlockHash,
+		&result.BtcBlockHeight,
+	); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (p *pgdb) L2KeystonesBTCBlockGetLowestForL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHash database.ByteArray) (*bfgd.L2KeystoneLowestBTCBlock, error) {
+	sql := `
+		SELECT 
+		l2_keystone_abrev_hash, l2_block_number, btc_block_hash, btc_block_height
+		FROM l2_keystones_btc_block
+		WHERE l2_keystone_abrev_hash = $1
+		ORDER BY btc_block_height ASC LIMIT 1
+	`
+
+	result := bfgd.L2KeystoneLowestBTCBlock{}
+
+	row := p.db.QueryRowContext(ctx, sql, l2KeystoneAbrevHash)
+	if err := row.Scan(
+		&result.L2KeystoneAbrevHash,
+		&result.L2BlockNumber,
+		&result.BtcBlockHash,
+		&result.BtcBlockHeight,
+	); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+// L2KeystonesBTCBlockDeleteOrphaned deletes all l2 keystone <-> btc block pairings with a given btc block hash
 // this is used when a block becomes orphaned.
-func (p *pgdb) L2KeystonesBTCBlockDelete(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) error {
+func (p *pgdb) L2KeystonesBTCBlockDeleteOrphaned(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) error {
 	sql := `
 		DELETE FROM l2_keystones_btc_block WHERE btc_block_hash != $1 AND btc_block_height = $2
 	`
@@ -130,17 +178,18 @@ func (p *pgdb) L2KeystonesBTCBlockKnown(ctx context.Context, btcBlockHash databa
 }
 
 // L2KeystonesBTCBlockInsert will update a l2 keystone <-> btc block pairing ONLY IF it doesn't exist or the height is lower than the previous
-func (p *pgdb) L2KeystonesBTCBlockInsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, btcBlockHash database.ByteArray, btcBlockHeight uint64) error {
+func (p *pgdb) L2KeystonesBTCBlockInsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, l2BlockNumber uint64, btcBlockHash database.ByteArray, btcBlockHeight uint64) error {
 	sql := `
 		INSERT INTO l2_keystones_btc_block AS l (
 			l2_keystone_abrev_hash,
+			l2_block_number,
 			btc_block_hash,
 			btc_block_height
 		)
-		VALUES ($1, $2, $3)
+		VALUES ($1, $2, $3, $4)
 	`
 
-	_, err := p.db.ExecContext(ctx, sql, l2KeystoneAbrevHash, btcBlockHash, btcBlockHeight)
+	_, err := p.db.ExecContext(ctx, sql, l2KeystoneAbrevHash, l2BlockNumber, btcBlockHash, btcBlockHeight)
 	if err != nil {
 		return err
 	}

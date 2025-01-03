@@ -656,15 +656,10 @@ func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (
 	return &bfgapi.AccessPublicKeyDeleteResponse{}, nil
 }
 
-func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string, stopAtKnownBlock bool) error {
+func (s *Server) walkBTCChain(ctx context.Context) error {
 	tip, err := getChainTip(ctx, s.cfg.BitcoindURI)
 	if err != nil {
 		return fmt.Errorf("could not get chain tip: %w", err)
-	}
-
-	if lastTip != nil && *lastTip == tip {
-		log.Tracef("tip has not changed, no-op")
-		return nil
 	}
 
 	current := tip
@@ -675,20 +670,17 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string, stopAtKnownB
 			return fmt.Errorf("could not get block with hash %s: %w", current, err)
 		}
 
-		// if block exists at height and hash and we've set "stopAtKnownBlock", no-op
-		if stopAtKnownBlock {
-			known, err := L2KeystonesBTCBlockKnown(ctx context.Context, database.ByteArray(blockHash), block.height) 
-			if err != nil {
-				return fmt.Errorf("error determining if block is known: %w", err)
-			}
-
-			if known {
-				log.Infof("block already known %s:%d, exiting", blockHash, block.height)
-			}
+		known, err := s.db.L2KeystonesBTCBlockKnown(ctx, database.ByteArray(current), block.height)
+		if err != nil {
+			return fmt.Errorf("error determining if block is known: %w", err)
 		}
 
+		if known {
+			log.Infof("block already known %s:%d, exiting", current, block.height)
+			return nil
+		}
 
-		if err := s.db.L2KeystonesBTCBlockDelete(ctx, database.ByteArray(blockHash), block.height); err != nil {
+		if err := s.db.L2KeystonesBTCBlockDeleteOrphaned(ctx, database.ByteArray(current), block.height); err != nil {
 			return fmt.Errorf("error deleting: %w", err)
 		}
 
@@ -734,7 +726,7 @@ func (s *Server) WalkBTCChain(ctx context.Context, lastTip *string, stopAtKnownB
 				return fmt.Errorf("error decoding block hash from string: %w", err)
 			}
 
-			if err := s.db.L2KeystonesBTCBlockInsert(ctx, database.ByteArray(tl2.L2Keystone.Hash()), database.ByteArray(blockHash), block.height); err != nil {
+			if err := s.db.L2KeystonesBTCBlockInsert(ctx, database.ByteArray(tl2.L2Keystone.Hash()), uint64(tl2.L2Keystone.L2BlockNumber), database.ByteArray(blockHash), block.height); err != nil {
 				return fmt.Errorf("error upserting: %w", err)
 			}
 		}

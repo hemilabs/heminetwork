@@ -48,8 +48,8 @@ type Database interface {
 	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
 	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
 
-	L2KeystonesBTCBlockDelete(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
-	L2KeystonesBTCBlockInsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
+	L2KeystonesBTCBlockDeleteOrphaned(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
+	L2KeystonesBTCBlockInsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray, l2BlockNumber uint64, btcBlockHash database.ByteArray, btcBlockHeight uint64) error
 	L2KeystonesBTCBlockKnown(ctx context.Context, btcBlockHash database.ByteArray, btcBlockHeight uint64) (bool, error)
 }
 
@@ -126,6 +126,7 @@ type L2BTCFinality struct {
 
 type L2KeystoneLowestBTCBlock struct {
 	L2KeystoneAbrevHash database.ByteArray
+	L2BlockNumber       uint64
 	BtcBlockHash        database.ByteArray
 	BtcBlockHeight      uint64
 }
