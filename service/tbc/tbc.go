@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -131,7 +131,7 @@ type Server struct {
 	blocksInserted int    // blocks inserted since last print
 
 	// mempool
-	//nolint:dupword // False positive, commented-out code.
+	//nolint:nolintlint // False positive, commented-out code.
 	// mempool *mempool
 
 	// broadcast
