@@ -27,23 +27,6 @@ const (
 	verbose  = false
 )
 
-const effectiveHeightSql = `
-	COALESCE((SELECT height
-
-	FROM 
-	(
-		SELECT height FROM btc_blocks_can
-			INNER JOIN pop_basis ON pop_basis.btc_block_hash 
-				= btc_blocks_can.hash
-			INNER JOIN l2_keystones ll ON ll.l2_keystone_abrev_hash 
-				= pop_basis.l2_keystone_abrev_hash
-
-		WHERE ll.l2_block_number >= l2_keystones.l2_block_number
-		AND height > (SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1) - 100
-		ORDER BY height ASC LIMIT 1
-	)), 0)
-`
-
 var log = loggo.GetLogger("bfgpostgres")
 
 func init() {
@@ -668,7 +651,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		limit = 100
 	}
 
-	sql := fmt.Sprintf(`
+	sql := `
 		SELECT
 			btc_block_hash,
 			COALESCE(btc_block_height, 0),
@@ -680,7 +663,18 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.state_root,
 			l2_keystones.ep_hash,
 			l2_keystones.version,
-			%s,
+			COALESCE((SELECT height
+				FROM 
+				(
+					SELECT height FROM btc_blocks_can
+					INNER JOIN l2_keystones_lowest_btc_block lll
+					ON lll.btc_block_hash = btc_blocks_can.hash
+					INNER JOIN l2_keystones ll
+					ON ll.l2_keystone_abrev_hash = lll.l2_keystone_abrev_hash
+					WHERE ll.l2_block_number >= l2_keystones.l2_block_number
+					AND height > (SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1) - 100
+					ORDER BY height ASC LIMIT 1
+				)), 0),
 			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
 
 		FROM l2_keystones
@@ -694,7 +688,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		OFFSET $2
 
 		LIMIT $3
-	`, effectiveHeightSql)
+	`
 
 	l2KeystoneAbrevHashesStr := [][]byte{}
 	for _, l := range l2KeystoneAbrevHashes {
