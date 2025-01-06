@@ -565,7 +565,8 @@ func (p *pgdb) L2KeystoneLowestBtcBlockUpsert(ctx context.Context, l2KeystoneAbr
 			(SELECT hash FROM lowest_btc_block),
 			(SELECT height FROM lowest_btc_block)
 		)
-		ON CONFLICT (l2_keystone_abrev_hash) DO UPDATE SET btc_block_hash = EXCLUDED.btc_block_hash
+		ON CONFLICT (l2_keystone_abrev_hash) DO UPDATE SET btc_block_hash = EXCLUDED.btc_block_hash 
+		WHERE l2_keystones_lowest_btc_block.btc_block_hash != EXCLUDED.btc_block_hash
 	`
 
 	_, err := p.db.ExecContext(ctx, sql, l2KeystoneAbrevHash)
