@@ -1565,13 +1565,13 @@ func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
 			l2BlockNumber := uint32(1000)
 			lastHash := []byte{}
 			for i, blockCountAtHeight := range tti.chainPattern {
-				_onChainBlocks := createBtcBlocksAtStaticHeight(ctx, t, db, blockCountAtHeight, true, height, lastHash, l2BlockNumber)
+				onChainBlocksTmp := createBtcBlocksAtStaticHeight(ctx, t, db, blockCountAtHeight, true, height, lastHash, l2BlockNumber)
 				l2BlockNumber++
 				height++
-				lastHash = _onChainBlocks[0].Hash
+				lastHash = onChainBlocksTmp[0].Hash
 
 				if (blockCountAtHeight > 1 && i == len(tti.chainPattern)-1) == false {
-					onChainBlocks = append(onChainBlocks, _onChainBlocks[0])
+					onChainBlocks = append(onChainBlocks, onChainBlocksTmp[0])
 				}
 			}
 
@@ -1645,8 +1645,8 @@ func TestPublications(t *testing.T) {
 
 			lastHash := []byte{}
 			for _, height := range tti.heightPattern {
-				_onChainBlocks := createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, height, lastHash, l2BlockNumber)
-				lastHash = _onChainBlocks[0].Hash
+				onChainBlocksTmp := createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, height, lastHash, l2BlockNumber)
+				lastHash = onChainBlocksTmp[0].Hash
 				l2BlockNumber++
 			}
 
