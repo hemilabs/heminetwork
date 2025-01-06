@@ -9,13 +9,13 @@ This document provides details on the RPC protocol and available commands for th
 
 <!-- TOC -->
 * [📡 Hemi Tiny Bitcoin Daemon RPC](#-hemi-tiny-bitcoin-daemon-rpc)
-  * [⚙️ Implementations](#-implementations)
-    * [⚙️ `tbcd` Daemon](#-tbcd-daemon)
-    * [👉 RPC Client](#-rpc-client)
+  * [⚙️ Implementations](#️-implementations)
+    * [⚙️ `tbcd` Daemon](#️-tbcd-daemon)
+    * [🔧 RPC Client](#-rpc-client)
   * [📚 Resources](#-resources)
   * [📡 Protocol](#-protocol)
     * [🚫 Errors](#-errors)
-    * [🗄️ Serialized Types](#-serialized-types)
+    * [🗄️ Serialized Types](#️-serialized-types)
       * [Block Header](#block-header)
       * [Address](#address)
       * [UTXO](#utxo)
@@ -101,26 +101,29 @@ The `tbcd` daemon runs an RPC server that listens on the address provided by the
 You can run the `tbcd` daemon with the RPC server enabled with the following command:
 
 ```shell
+# Make sure to replace localhost:8082 with your desired address and port
 TBC_ADDRESS=localhost:8082 /path/to/tbcd
 ```
 
-### 👉 RPC Client
+### 🔧 RPC Client
 
 [`hemictl`](../../cmd/hemictl) serves as a reference implementation of an RPC client tailored for interacting
-with the `tbcd` daemon.
+with the `tbcd` daemon. The client provides a command-line interface for all supported RPC commands.
 
 ---
 
 ## 📚 Resources
 
-For developers looking to integrate or extend functionality, view the raw Go types used in TBC's RPC commands:
-[View `tbcapi.go`](tbcapi.go).
+For developers looking to integrate or extend functionality:
+- View the raw Go types used in TBC's RPC commands: [View `tbcapi.go`](tbcapi.go)
+- Check our [contribution guidelines](../../CONTRIBUTING.md)
+- Review our [security policy](../../SECURITY.md)
 
 ---
 
 ## 📡 Protocol
 
-The **RPC protocol** is WebSocket-based and follows a standard request/response model. For more detailed information,
+The **RPC protocol** is WebSocket-based and follows a standard request/response model. All communications are done via JSON messages. For more detailed information,
 refer to the [protocol documentation](../protocol/README.md).
 
 ### 🚫 Errors
@@ -128,86 +131,124 @@ refer to the [protocol documentation](../protocol/README.md).
 If an error occurs during a request, the response payload will include an `error` value containing the following
 details:
 
-| Field       | Description                                                                          |
-|-------------|--------------------------------------------------------------------------------------|
-| `timestamp` | The time at which the error occurred, in Unix seconds.                               |
-| `trace`     | A unique string for tracing errors between server and client (internal errors only). |
-| `message`   | The error message. For internal server errors, this will read `internal error`.      |
+| Field       | Description                                                                          | Example |
+|-------------|--------------------------------------------------------------------------------------|---------|
+| `timestamp` | The time at which the error occurred, in Unix seconds.                               | `1679198400` |
+| `trace`     | A unique string for tracing errors between server and client (internal errors only). | `err_xyz123` |
+| `message`   | The error message. For internal server errors, this will read `internal error`.      | `invalid address format` |
 
 ### 🗄️ Serialized Types
+
+The following types are used throughout the API. All integer values are encoded in little-endian format unless specified otherwise.
 
 #### Block Header
 
 A serialized block header contains the following data:
 
-| Field         | Description                                                                                                                   |
-|---------------|-------------------------------------------------------------------------------------------------------------------------------|
-| `version`     | The version of the block.                                                                                                     |
-| `prev_hash`   | The hash of the previous block header in the blockchain, in reverse byte order and encoded as a hexadecimal string.           |
-| `merkle_root` | The hash derived from the hashes of all transactions in the block, in reverse byte order and encoded as a hexadecimal string. |
-| `timestamp`   | The time the miner began hashing the header, represented in Unix seconds.                                                     |
-| `bits`        | The difficulty target for the block.                                                                                          |
-| `nonce`       | The nonce used to create the hash that is less than or equal to the target threshold.                                         |
+| Field         | Description                                                                                                                   | Format |
+|---------------|-------------------------------------------------------------------------------------------------------------------------------|---------|
+| `version`     | The version of the block.                                                                                                     | uint32 |
+| `prev_hash`   | The hash of the previous block header in the blockchain, in reverse byte order and encoded as a hexadecimal string.           | string[64] |
+| `merkle_root` | The hash derived from the hashes of all transactions in the block, in reverse byte order and encoded as a hexadecimal string. | string[64] |
+| `timestamp`   | The time the miner began hashing the header, represented in Unix seconds.                                                     | uint32 |
+| `bits`        | The difficulty target for the block.                                                                                          | string[8] |
+| `nonce`       | The nonce used to create the hash that is less than or equal to the target threshold.                                         | uint32 |
 
 #### Address
 
-Represents an encoded Bitcoin address, supporting these types:
+Represents an encoded Bitcoin address. The following address types are supported:
 
-- `P2PKH`
-- `P2SH`
-- `P2WPKH`
-- `P2WSH`
-- `P2TR`
+| Type | Description | Example |
+|------|-------------|---------|
+| `P2PKH` | Pay to Public Key Hash | `mxVFsFW5N4mu1HPkxPttorvocvzeZ7KZyk` |
+| `P2SH` | Pay to Script Hash | `2N3zXjbwdTcPsJiy8sUK9FhWJhqQCxA8Jjr` |
+| `P2WPKH` | Pay to Witness Public Key Hash | `tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx` |
+| `P2WSH` | Pay to Witness Script Hash | `tb1qrp33g0q5c5txsp9arysrx4k6zdkfs4nce4xj0gdcccefvpysxf3q0sl5k7` |
+| `P2TR` | Pay to Taproot | `tb1p6h5fuzxvqnlhkucpszs7g5h3qc4dhkj99uet6tzxz6k64ch7mgwsyf8jg4` |
 
 #### UTXO
 
-A serialized UTXO contains the following data:
+A serialized UTXO (Unspent Transaction Output) contains the following data:
 
-| Field       | Description                                                                    |
-|-------------|--------------------------------------------------------------------------------|
-| `tx_id`     | The transaction ID, in reverse byte order and encoded as a hexadecimal string. |
-| `value`     | The value of the UTXO.                                                         |
-| `out_index` | The output index of the UTXO.                                                  |
+| Field       | Description                                                                    | Format |
+|-------------|--------------------------------------------------------------------------------|---------|
+| `tx_id`     | The transaction ID, in reverse byte order and encoded as a hexadecimal string. | string[64] |
+| `value`     | The value of the UTXO in satoshis.                                            | uint64 |
+| `out_index` | The output index of the UTXO in the transaction.                              | uint32 |
+
+Example UTXO:
+```json
+{
+  "tx_id": "0012a33f3c301c90427d81f256d8a4848dcbfc289e8325725e7657e9a643d6fd",
+  "value": 2026,
+  "out_index": 1
+}
+```
 
 #### Transaction
 
 A serialized transaction contains the following data:
 
-| Field       | Description                                                              |
-|-------------|--------------------------------------------------------------------------|
-| `version`   | The transaction version.                                                 |
-| `lock_time` | The block height or timestamp after which the transaction becomes final. |
-| `tx_in`     | An array of [**transaction inputs**](#transaction-input).                |
-| `tx_out`    | An array of [**transaction outputs**](#transaction-output).              |
+| Field       | Description                                                              | Format |
+|-------------|--------------------------------------------------------------------------|---------|
+| `version`   | The transaction version number.                                          | uint32 |
+| `lock_time` | The block height or timestamp after which the transaction becomes final. | uint32 |
+| `tx_in`     | An array of [transaction inputs](#transaction-input).                    | array |
+| `tx_out`    | An array of [transaction outputs](#transaction-output).                  | array |
+
+Example Transaction:
+```json
+{
+  "version": 2,
+  "lock_time": 0,
+  "tx_in": [
+    {
+      "outpoint": {
+        "hash": "9554a7eb8bc903ea957c87964ab04a58d177692f15d7271cccb95258202f14b5",
+        "index": 189
+      },
+      "signature_script": "",
+      "witness": ["304402..."],
+      "sequence": 4294967293
+    }
+  ],
+  "tx_out": [
+    {
+      "value": 330,
+      "pk_script": "51208ec88237b5978e75e93feaeeb1343ff86ae2f2c348a903c9c9c4ad0819267735"
+    }
+  ]
+}
+```
 
 #### Transaction Input
 
 A serialized transaction input contains the following data:
 
-| Field              | Description                                                            |
-|--------------------|------------------------------------------------------------------------|
-| `outpoint`         | The [**outpoint**](#outpoint) for the previous transaction output.     |
-| `signature_script` | The signature script for the transaction.                              |
-| `witness`          | An array of the transaction witnesses, encoded as hexadecimal strings. |
-| `sequence`         | The transaction sequence number.                                       |
+| Field              | Description                                                            | Format |
+|--------------------|------------------------------------------------------------------------|---------|
+| `outpoint`         | The [outpoint](#outpoint) for the previous transaction output.         | object |
+| `signature_script` | The signature script that satisfies the spending conditions.           | string |
+| `witness`          | An array of witness data for Segregated Witness transactions.          | array[string] |
+| `sequence`         | The transaction sequence number for Replace-By-Fee or timelock.        | uint32 |
 
 #### Transaction Output
 
 A serialized transaction output contains the following data:
 
-| Field       | Description                                                                   |
-|-------------|-------------------------------------------------------------------------------|
-| `value`     | The value of the transaction output in satoshis.                              |
-| `pk_script` | The pubkey script of the transaction output, encoded as a hexadecimal string. |
+| Field       | Description                                                                   | Format |
+|-------------|-------------------------------------------------------------------------------|---------|
+| `value`     | The value of the transaction output in satoshis.                              | uint64 |
+| `pk_script` | The pubkey script defining the conditions to spend this output.               | string |
 
 #### Outpoint
 
 A serialized outpoint contains the following data:
 
-| Field   | Description                                                                                                          |
-|---------|----------------------------------------------------------------------------------------------------------------------|
-| `hash`  | The ID of the transaction holding the output to be spent, in reverse byte order and encoded as a hexadecimal string. |
-| `index` | The index of the specific output to spend from the transaction.                                                      |
+| Field   | Description                                                                                                          | Format |
+|---------|----------------------------------------------------------------------------------------------------------------------|---------|
+| `hash`  | The ID of the transaction holding the output to be spent, in reverse byte order and encoded as a hexadecimal string. | string[64] |
+| `index` | The index of the specific output to spend from the transaction.                                                      | uint32 |
 
 ---
 
