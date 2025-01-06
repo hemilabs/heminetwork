@@ -62,6 +62,13 @@ func (c *clientConn) call(ctx context.Context, method string, params, result any
 	log.Tracef("call")
 	defer log.Tracef("call exit")
 
+	// Check context before acquiring lock
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	c.mx.Lock()
 	defer c.mx.Unlock()
 
@@ -86,6 +93,14 @@ func (c *clientConn) call(ctx context.Context, method string, params, result any
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}
+
+	// Check context again before writing
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	if err = writeRequest(ctx, c.conn, req); err != nil {
 		return fmt.Errorf("write request: %w", err)
 	}
@@ -131,37 +146,38 @@ func readResponse(ctx context.Context, r io.Reader, reqID uint64) (*JSONRPCRespo
 	log.Tracef("readResponse")
 	defer log.Tracef("readResponse exit")
 
-	reader := bufio.NewReader(r)
-	b, err := reader.ReadBytes('\n')
-	if err != nil {
-		return nil, err
-	}
-
-	var res JSONRPCResponse
-	if err = json.Unmarshal(b, &res); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-	if res.Error != "" {
-		return nil, RPCError(res.Error)
-	}
-
-	if res.ID != reqID {
-		if res.ID == 0 {
-			// Electrs may have sent a request, ignore it and try again.
-			// TODO(joshuasing): We should probably handle incoming requests by
-			//  having a separate goroutine that handles reading.
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			default:
-			}
-			log.Debugf("Received a response from Electrs with ID 0, retrying read response...")
-			return readResponse(ctx, r, reqID)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
 		}
-		return nil, fmt.Errorf("response ID differs from request ID (%d != %d)", res.ID, reqID)
-	}
 
-	return &res, nil
+		reader := bufio.NewReader(r)
+		b, err := reader.ReadBytes('\n')
+		if err != nil {
+			return nil, err
+		}
+
+		var res JSONRPCResponse
+		if err = json.Unmarshal(b, &res); err != nil {
+			return nil, fmt.Errorf("unmarshal response: %w", err)
+		}
+		if res.Error != "" {
+			return nil, RPCError(res.Error)
+		}
+
+		if res.ID != reqID {
+			if res.ID == 0 {
+				// Log the ignored request for debugging purposes
+				log.Debugf("Ignored incoming request from Electrs with ID 0: %s", string(b))
+				continue
+			}
+			return nil, fmt.Errorf("response ID differs from request ID (%d != %d)", res.ID, reqID)
+		}
+
+		return &res, nil
+	}
 }
 
 // ping writes a ping request to the connection.
