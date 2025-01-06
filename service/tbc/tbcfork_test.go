@@ -853,9 +853,11 @@ func errorIsOneOf(err error, errs []error) bool {
 }
 
 func TestFork(t *testing.T) {
+	wg := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
+		wg.Wait()
 	}()
 
 	n, err := newFakeNode(t, "18444") // TODO: should use random free port
@@ -911,7 +913,10 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		log.Infof("s run")
 		defer log.Infof("s run done")
 		err := s.Run(ctx)
@@ -1104,9 +1109,11 @@ func TestWork(t *testing.T) {
 }
 
 func TestIndexNoFork(t *testing.T) {
+	wg := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
+		wg.Wait()
 	}()
 
 	n, err := newFakeNode(t, "18444")
@@ -1149,7 +1156,9 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
@@ -1277,9 +1286,11 @@ func TestIndexNoFork(t *testing.T) {
 }
 
 func TestIndexFork(t *testing.T) {
+	wg := sync.WaitGroup{}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
+		wg.Wait()
 	}()
 
 	n, err := newFakeNode(t, "18444")
@@ -1320,7 +1331,10 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
