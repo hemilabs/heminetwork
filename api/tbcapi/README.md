@@ -134,7 +134,7 @@ details:
 | Field       | Description                                                                          | Example |
 |-------------|--------------------------------------------------------------------------------------|---------|
 | `timestamp` | The time at which the error occurred, in Unix seconds.                               | `1679198400` |
-| `trace`     | A unique string for tracing errors between server and client (internal errors only). | `err_xyz123` |
+| `trace`     | A unique string for tracing errors between server and client (internal errors only). | `804d952f893e686c` |
 | `message`   | The error message. For internal server errors, this will read `internal error`.      | `invalid address format` |
 
 ### 🗄️ Serialized Types
