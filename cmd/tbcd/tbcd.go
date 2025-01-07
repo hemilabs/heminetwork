@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -25,7 +25,7 @@ const (
 	defaultLogLevel = daemonName + "=INFO;tbc=INFO;level=INFO"
 	defaultNetwork  = "testnet3" // XXX make this mainnet
 	defaultHome     = "~/." + daemonName
-	bhsDefault      = int(1e6) // enough for mainnet
+	bhsDefaultSize  = "128mb" // enough for mainnet
 )
 
 var (
@@ -52,10 +52,10 @@ var (
 			Help:         "number of cached blocks",
 			Print:        config.PrintAll,
 		},
-		"TBC_BLOCKHEADER_CACHE": config.Config{
-			Value:        &cfg.BlockheaderCache,
-			DefaultValue: bhsDefault,
-			Help:         "number of cached blockheaders",
+		"TBC_BLOCKHEADER_CACHE_SIZE": config.Config{
+			Value:        &cfg.BlockheaderCacheSize,
+			DefaultValue: bhsDefaultSize,
+			Help:         "size of blockheader cache",
 			Print:        config.PrintAll,
 		},
 		"TBC_BLOCK_SANITY": config.Config{

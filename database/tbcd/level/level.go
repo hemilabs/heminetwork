@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -17,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/dustin/go-humanize"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -108,16 +110,26 @@ func headerHash(header []byte) *chainhash.Hash {
 }
 
 type Config struct {
-	Home             string // home directory
-	BlockCache       int    // number of blocks to cache
-	BlockheaderCache int    // number of blocks headers to cache
+	Home                 string // home directory
+	BlockCache           int    // number of blocks to cache
+	BlockheaderCacheSize string // size of block header cache
+	blockheaderCacheSize int    // paser size of block header cache,
 }
 
 func NewConfig(home string) *Config {
+	sizeS := "128mb" // Cache all blockheaders on mainnet
+	size, err := humanize.ParseBytes(sizeS)
+	if err != nil {
+		panic(err)
+	}
+	if size > math.MaxInt64 {
+		panic("invalid size")
+	}
 	return &Config{
-		Home:             home, // require user to set home.
-		BlockCache:       250,  // max 4GB on mainnet
-		BlockheaderCache: 1e6,  // Cache all blockheaders on mainnet
+		Home:                 home, // require user to set home.
+		BlockCache:           250,
+		BlockheaderCacheSize: sizeS,
+		blockheaderCacheSize: int(size),
 	}
 }
 
@@ -146,10 +158,14 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	} else {
 		log.Infof("block cache: DISABLED")
 	}
-	if cfg.BlockheaderCache > 0 {
-		l.headerCache = lowIQMapNew(cfg.BlockheaderCache)
+	if cfg.blockheaderCacheSize > 0 {
+		l.headerCache, err = lowIQMapNewSize(cfg.blockheaderCacheSize)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't setup block header cache: %w", err)
+		}
 
-		log.Infof("blockheader cache: %v", cfg.BlockheaderCache)
+		log.Infof("blockheader cache: %v",
+			humanize.Bytes(uint64(cfg.blockheaderCacheSize)))
 	} else {
 		log.Infof("blockheader cache: DISABLED")
 	}
@@ -316,7 +332,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
-	if l.cfg.BlockheaderCache > 0 {
+	if l.cfg.blockheaderCacheSize > 0 {
 		// Try cache first
 		if b, ok := l.headerCache.Get(hash); ok {
 			return b, nil
@@ -338,7 +354,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 	bh := decodeBlockHeader(ebh)
 
 	// Insert into cache, roughly 150 byte cost.
-	if l.cfg.BlockheaderCache > 0 {
+	if l.cfg.blockheaderCacheSize > 0 {
 		l.headerCache.Put(bh)
 	}
 

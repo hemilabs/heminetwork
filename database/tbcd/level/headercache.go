@@ -1,10 +1,11 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
 package level
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -12,12 +13,14 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
+const blockHeaderSize = 8 + 32 + 80 + 8
+
 type lowIQMap struct {
 	mtx sync.RWMutex
 
 	count int
 
-	m map[chainhash.Hash]*tbcd.BlockHeader
+	m map[chainhash.Hash]*tbcd.BlockHeader // 32+8+80+len([]Word ~ 8)
 }
 
 func (l *lowIQMap) Put(v *tbcd.BlockHeader) {
@@ -47,9 +50,24 @@ func (l *lowIQMap) Get(k *chainhash.Hash) (*tbcd.BlockHeader, bool) {
 	return bh, ok
 }
 
-func lowIQMapNew(count int) *lowIQMap {
+func lowIQMapNewCount(count int) (*lowIQMap, error) {
+	if count <= 0 {
+		return nil, fmt.Errorf("invalid size %v", count)
+	}
 	return &lowIQMap{
 		count: count,
 		m:     make(map[chainhash.Hash]*tbcd.BlockHeader, count),
+	}, nil
+}
+
+// lowIQMapNewSize does a bit of math to estimate the number of cache items.
+// Since it is an estimate it will overflow if Difficulty becomes bigger than
+// 64 bits. This is not an issue since 100MB caches all of mainnet in Jan 2025
+// (~819200 items).
+func lowIQMapNewSize(size int) (*lowIQMap, error) {
+	if size <= 0 {
+		return nil, fmt.Errorf("invalid size %v", size)
 	}
+	// approximate number of headers
+	return lowIQMapNewCount(blockHeaderSize / size)
 }

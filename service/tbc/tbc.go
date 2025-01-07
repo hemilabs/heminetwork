@@ -82,7 +82,7 @@ func init() {
 type Config struct {
 	AutoIndex               bool
 	BlockCache              int
-	BlockheaderCache        int
+	BlockheaderCacheSize    string
 	BlockSanity             bool
 	LevelDBHome             string
 	ListenAddress           string
@@ -107,15 +107,15 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress:       tbcapi.DefaultListen,
-		BlockCache:          250,
-		BlockheaderCache:    1e6,
-		LogLevel:            logLevel,
-		MaxCachedTxs:        defaultMaxCachedTxs,
-		MempoolEnabled:      false, // XXX default to false until it is fixed
-		PeersWanted:         defaultPeersWanted,
-		PrometheusNamespace: appName,
-		ExternalHeaderMode:  false, // Default anyway, but for readability
+		ListenAddress:        tbcapi.DefaultListen,
+		BlockCache:           250,
+		BlockheaderCacheSize: "128mb",
+		LogLevel:             logLevel,
+		MaxCachedTxs:         defaultMaxCachedTxs,
+		MempoolEnabled:       false, // XXX default to false until it is fixed
+		PeersWanted:          defaultPeersWanted,
+		PrometheusNamespace:  appName,
+		ExternalHeaderMode:   false, // Default anyway, but for readability
 	}
 }
 
@@ -173,6 +173,13 @@ type Server struct {
 func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
+	}
+	if cfg.BlockheaderCacheSize != "" {
+		var err error
+		cfg.blockheaderCacheSize, err = humanize.ParseBytes(cfg.BlockheaderCacheSize)
+		if err != nil {
+			return nil, fmt.Errorf("invalid blockheader cache size: %w", err)
+		}
 	}
 
 	if cfg.MempoolEnabled {
@@ -2143,7 +2150,7 @@ func (s *Server) DBOpen(ctx context.Context) error {
 	var err error
 	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
 	cfg.BlockCache = s.cfg.BlockCache
-	cfg.BlockheaderCache = s.cfg.BlockheaderCache
+	cfg.BlockheaderCacheSize = s.cfg.BlockheaderCacheSize
 	s.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
