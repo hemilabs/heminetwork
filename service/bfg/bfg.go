@@ -1336,20 +1336,6 @@ func (s *Server) handleBtcFinalityNotification() {
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleBtcBlockNotification() {
-	log.Tracef("handleBtcBlockNotification")
-	defer log.Tracef("handleBtcBlockNotification exit")
-
-	s.mtx.Lock()
-	for _, bws := range s.sessions {
-		if _, ok := bws.notify[notifyBtcBlocks]; !ok {
-			continue
-		}
-		go writeNotificationResponse(bws, &bfgapi.BTCNewBlockNotification{})
-	}
-	s.mtx.Unlock()
-}
-
 func (s *Server) handleL2KeystonesNotification() {
 	log.Tracef("handleL2KeystonesNotification")
 	defer log.Tracef("handleL2KeystonesNotification exit")
@@ -1465,7 +1451,6 @@ func (s *Server) handleStateUpdates(table string, action string, payload, payloa
 	// will change
 	if heightAfter > heightBefore {
 		go s.handleBtcFinalityNotification()
-		go s.handleBtcBlockNotification()
 	}
 
 	s.mtx.Lock()

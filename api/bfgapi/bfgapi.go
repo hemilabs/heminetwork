@@ -155,8 +155,6 @@ type BTCFinalityByKeystonesResponse struct {
 
 type BTCFinalityNotification struct{}
 
-type BTCNewBlockNotification struct{}
-
 type L2KeystonesNotification struct{}
 
 type PopTx struct {
