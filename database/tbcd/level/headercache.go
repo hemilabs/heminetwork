@@ -50,13 +50,6 @@ func (l *lowIQMap) Get(k *chainhash.Hash) (*tbcd.BlockHeader, bool) {
 	return bh, ok
 }
 
-func (l *lowIQMap) Purge(k *chainhash.Hash) {
-	l.mtx.Lock()
-	defer l.mtx.Unlock()
-
-	delete(l.m, *k)
-}
-
 func (l *lowIQMap) PurgeBatch(ks []*chainhash.Hash) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
