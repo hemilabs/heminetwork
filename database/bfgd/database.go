@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -37,10 +37,6 @@ type Database interface {
 	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray, page uint32, limit uint32) ([]L2BTCFinality, error)
 
 	BtcBlockCanonicalHeight(ctx context.Context) (uint64, error)
-
-	AccessPublicKeyInsert(ctx context.Context, publicKey *AccessPublicKey) error
-	AccessPublicKeyExists(ctx context.Context, publicKey *AccessPublicKey) (bool, error)
-	AccessPublicKeyDelete(ctx context.Context, publicKey *AccessPublicKey) error
 
 	BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txId string) error
 	BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error)

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -114,7 +114,6 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
-	PublicKeyAuth           bool
 	RequestLimit            int
 	RequestTimeout          int // in seconds
 	RemoteIPHeaders         []string
@@ -583,76 +582,6 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 	return buResp, nil
 }
 
-func (s *Server) handleAccessPublicKeyCreateRequest(ctx context.Context, acpkc *bfgapi.AccessPublicKeyCreateRequest) (any, error) {
-	log.Tracef("handleAccessPublicKeyCreateRequest")
-	defer log.Tracef("handleAccessPublicKeyCreateRequest exit")
-
-	publicKey, err := hex.DecodeString(acpkc.PublicKey)
-	if err != nil {
-		return &bfgapi.AccessPublicKeyCreateResponse{
-			Error: protocol.RequestErrorf("public key decode: %v", err),
-		}, nil
-	}
-
-	if err := s.db.AccessPublicKeyInsert(ctx, &bfgd.AccessPublicKey{
-		PublicKey: publicKey,
-	}); err != nil {
-		if errors.Is(err, database.ErrDuplicate) {
-			return &bfgapi.AccessPublicKeyCreateResponse{
-				Error: protocol.RequestErrorf("public key already exists"),
-			}, nil
-		}
-
-		if errors.Is(err, database.ErrValidation) {
-			return &bfgapi.AccessPublicKeyCreateResponse{
-				Error: protocol.RequestErrorf("invalid access public key"),
-			}, nil
-		}
-
-		e := protocol.NewInternalErrorf("insert public key: %w", err)
-		return &bfgapi.AccessPublicKeyCreateResponse{
-			Error: protocol.RequestErrorf("invalid access public key"),
-		}, e
-	}
-
-	return &bfgapi.AccessPublicKeyCreateResponse{}, nil
-}
-
-func (s *Server) handleAccessPublicKeyDelete(ctx context.Context, payload any) (any, error) {
-	log.Tracef("handleAccessPublicKeyDelete")
-	defer log.Tracef("handleAccessPublicKeyDelete exit")
-
-	accessPublicKeyDeleteRequest, ok := payload.(*bfgapi.AccessPublicKeyDeleteRequest)
-	if !ok {
-		return nil, fmt.Errorf("incorrect type %T", payload)
-	}
-
-	b, err := hex.DecodeString(accessPublicKeyDeleteRequest.PublicKey)
-	if err != nil {
-		return &bfgapi.AccessPublicKeyDeleteResponse{
-			Error: protocol.RequestErrorf("public key decode: %v", err),
-		}, nil
-	}
-
-	if err := s.db.AccessPublicKeyDelete(ctx, &bfgd.AccessPublicKey{
-		PublicKey: b,
-	}); err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			// XXX not sure I like giving this information away.
-			return &bfgapi.AccessPublicKeyDeleteResponse{
-				Error: protocol.RequestErrorf("public key not found"),
-			}, nil
-		}
-		e := protocol.NewInternalErrorf("error deleting access public key: %w",
-			err)
-		return &bfgapi.AccessPublicKeyDeleteResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	return &bfgapi.AccessPublicKeyDeleteResponse{}, nil
-}
-
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
@@ -922,20 +851,6 @@ func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
 			}
 
 			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdAccessPublicKeyCreateRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.AccessPublicKeyCreateRequest)
-				return s.handleAccessPublicKeyCreateRequest(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdAccessPublicKeyDeleteRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.AccessPublicKeyDeleteRequest)
-				return s.handleAccessPublicKeyDelete(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
 		default:
 			// Terminal error, exit.
 			log.Errorf("handleWebsocketRead %v %v %v: unknown command",
@@ -1175,25 +1090,6 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	userAgent := r.UserAgent()
 	if ua := authenticator.RemoteUserAgent(); ua != "" {
 		userAgent = ua
-	}
-
-	if s.cfg.PublicKeyAuth {
-		log.Tracef("will enforce auth")
-
-		// XXX this code should be a function that returns just true
-		// and false; that function logs errors.
-		exists, err := s.db.AccessPublicKeyExists(hsCtx, &bfgd.AccessPublicKey{
-			PublicKey: publicKey,
-		})
-		if err != nil {
-			log.Errorf("error occurred checking if public key exists: %s", err)
-			return
-		}
-		if !exists {
-			log.Errorf("unauthorized public key: %s", publicKeyEncoded)
-			conn.Close(protocol.ErrPublicKeyAuth.Code, protocol.ErrPublicKeyAuth.Reason)
-			return
-		}
 	}
 
 	bws.publicKey = publicKey

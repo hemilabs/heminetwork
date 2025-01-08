@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -40,10 +40,6 @@ const (
 	CmdBitcoinInfoResponse                  = "bfgapi-bitcoin-info-response"
 	CmdBitcoinUTXOsRequest                  = "bfgapi-bitcoin-utxos-request"
 	CmdBitcoinUTXOsResponse                 = "bfgapi-bitcoin-utxos-response"
-	CmdAccessPublicKeyCreateRequest         = "bfgapi-access-public-key-create-request"
-	CmdAccessPublicKeyCreateResponse        = "bfgapi-access-public-key-create-response"
-	CmdAccessPublicKeyDeleteRequest         = "bfgapi-access-public-key-delete-request"
-	CmdAccessPublicKeyDeleteResponse        = "bfgapi-access-public-key-delete-response"
 )
 
 var (
@@ -164,22 +160,6 @@ type BTCNewBlockNotification struct{}
 
 type L2KeystonesNotification struct{}
 
-type AccessPublicKeyCreateRequest struct {
-	PublicKey string `json:"public_key"` // encoded compressed public key
-}
-
-type AccessPublicKeyCreateResponse struct {
-	Error *protocol.Error `json:"error,omitempty"`
-}
-
-type AccessPublicKeyDeleteRequest struct {
-	PublicKey string `json:"public_key"`
-}
-
-type AccessPublicKeyDeleteResponse struct {
-	Error *protocol.Error `json:"error,omitempty"`
-}
-
 type PopTx struct {
 	BtcTxId             api.ByteSlice `json:"btc_tx_id"`
 	BtcRawTx            api.ByteSlice `json:"btc_raw_tx"`
@@ -215,10 +195,6 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBitcoinInfoResponse:                  reflect.TypeOf(BitcoinInfoResponse{}),
 	CmdBitcoinUTXOsRequest:                  reflect.TypeOf(BitcoinUTXOsRequest{}),
 	CmdBitcoinUTXOsResponse:                 reflect.TypeOf(BitcoinUTXOsResponse{}),
-	CmdAccessPublicKeyCreateRequest:         reflect.TypeOf(AccessPublicKeyCreateRequest{}),
-	CmdAccessPublicKeyCreateResponse:        reflect.TypeOf(AccessPublicKeyCreateResponse{}),
-	CmdAccessPublicKeyDeleteRequest:         reflect.TypeOf(AccessPublicKeyDeleteRequest{}),
-	CmdAccessPublicKeyDeleteResponse:        reflect.TypeOf(AccessPublicKeyDeleteResponse{}),
 }
 
 type bfgAPI struct{}
