@@ -13,7 +13,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
-const blockHeaderSize = 8 + 32 + 80 + 8
+const blockHeaderSize = 8 + 32 + 80 + 8 // rough size of tbcd.BlockHeader
 
 type lowIQMap struct {
 	mtx sync.RWMutex
