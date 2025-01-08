@@ -25,6 +25,7 @@ const (
 	defaultLogLevel = daemonName + "=INFO;tbc=INFO;level=INFO"
 	defaultNetwork  = "testnet3" // XXX make this mainnet
 	defaultHome     = "~/." + daemonName
+	bDefaultSize    = "2gb"   // ~1280 blocks on mainnet
 	bhsDefaultSize  = "128mb" // enough for mainnet
 )
 
@@ -46,10 +47,10 @@ var (
 			Help:         "enable auto utxo and tx indexes",
 			Print:        config.PrintAll,
 		},
-		"TBC_BLOCK_CACHE": config.Config{
-			Value:        &cfg.BlockCache,
-			DefaultValue: 250,
-			Help:         "number of cached blocks",
+		"TBC_BLOCK_CACHE_SIZE": config.Config{
+			Value:        &cfg.BlockCacheSize,
+			DefaultValue: bDefaultSize,
+			Help:         "size of block cache",
 			Print:        config.PrintAll,
 		},
 		"TBC_BLOCKHEADER_CACHE_SIZE": config.Config{

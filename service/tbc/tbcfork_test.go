@@ -894,7 +894,7 @@ func TestFork(t *testing.T) {
 	// Connect tbc service
 	cfg := &Config{
 		AutoIndex:            false,
-		BlockCache:           1000,
+		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
 		LevelDBHome:          t.TempDir(),
@@ -1131,7 +1131,7 @@ func TestIndexNoFork(t *testing.T) {
 	// Connect tbc service
 	cfg := &Config{
 		AutoIndex:            false,
-		BlockCache:           1000,
+		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
 		LevelDBHome:          t.TempDir(),
@@ -1302,7 +1302,7 @@ func TestIndexFork(t *testing.T) {
 	// Connect tbc service
 	cfg := &Config{
 		AutoIndex:            false,
-		BlockCache:           1000,
+		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
 		LevelDBHome:          t.TempDir(),

@@ -81,7 +81,7 @@ func init() {
 
 type Config struct {
 	AutoIndex               bool
-	BlockCache              int
+	BlockCacheSize          string
 	BlockheaderCacheSize    string
 	BlockSanity             bool
 	LevelDBHome             string
@@ -108,7 +108,7 @@ type Config struct {
 func NewDefaultConfig() *Config {
 	return &Config{
 		ListenAddress:        tbcapi.DefaultListen,
-		BlockCache:           250,
+		BlockCacheSize:       "2gb",
 		BlockheaderCacheSize: "128mb",
 		LogLevel:             logLevel,
 		MaxCachedTxs:         defaultMaxCachedTxs,
@@ -2142,7 +2142,7 @@ func (s *Server) DBOpen(ctx context.Context) error {
 	// Open db.
 	var err error
 	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
-	cfg.BlockCache = s.cfg.BlockCache
+	cfg.BlockCacheSize = s.cfg.BlockCacheSize
 	cfg.BlockheaderCacheSize = s.cfg.BlockheaderCacheSize
 	s.db, err = level.New(ctx, cfg)
 	if err != nil {

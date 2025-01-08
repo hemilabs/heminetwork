@@ -19,7 +19,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.14.8
 	github.com/go-test/deep v1.1.1
-	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/juju/loggo v1.0.0
 	github.com/lib/pq v1.10.9
 	github.com/mitchellh/go-homedir v1.1.0
