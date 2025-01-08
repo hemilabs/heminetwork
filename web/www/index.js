@@ -19,19 +19,22 @@ async function dispatch(args) {
   return wasm.dispatch(args);
 }
 
+async function handleDispatch(method, options = {}, displayElement) {
+  try {
+    const result = await dispatch({ method, ...options });
+    displayElement.innerText = JSON.stringify(result, null, 2);
+  } catch (err) {
+    displayElement.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
+    console.error('Caught exception', err);
+  }
+}
+
+
 // version
 const VersionShow = document.querySelector('.VersionShow');
 
 async function Version() {
-  try {
-    const result = await dispatch({
-      method: 'version',
-    });
-    VersionShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    VersionShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch('version', {}, document.querySelector('.VersionShow'));
 }
 
 VersionButton.addEventListener('click', () => {
@@ -42,16 +45,11 @@ VersionButton.addEventListener('click', () => {
 const GenerateKeyShow = document.querySelector('.GenerateKeyShow');
 
 async function GenerateKey() {
-  try {
-    const result = await dispatch({
-      method: 'generateKey',
-      network: GenerateKeyNetworkInput.value,
-    });
-    GenerateKeyShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    GenerateKeyShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch(
+    'generateKey',
+    { network: GenerateKeyNetworkInput.value },
+    document.querySelector('.GenerateKeyShow')
+  );
 }
 
 GenerateKeyButton.addEventListener('click', () => {
@@ -61,17 +59,14 @@ GenerateKeyButton.addEventListener('click', () => {
 const ParseKeyShow = document.querySelector('.ParseKeyShow');
 
 async function ParseKey() {
-  try {
-    const result = await dispatch({
-      method: 'parseKey',
+  handleDispatch(
+    'parseKey',
+    {
       network: ParseKeyNetworkInput.value,
       privateKey: ParseKeyPrivateKeyInput.value,
-    });
-    ParseKeyShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    ParseKeyShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+    },
+    document.querySelector('.ParseKeyShow')
+  );
 }
 
 ParseKeyButton.addEventListener('click', () => {
@@ -81,17 +76,14 @@ ParseKeyButton.addEventListener('click', () => {
 const BitcoinAddressToScriptHashAddressShow = document.querySelector('.BitcoinAddressToScriptHashAddressShow');
 
 async function BitcoinAddressToScriptHashAddress() {
-  try {
-    const result = await dispatch({
-      method: 'bitcoinAddressToScriptHash',
+  handleDispatch(
+    'bitcoinAddressToScriptHash',
+    {
       network: BitcoinAddressToScriptHashNetworkInput.value,
       address: BitcoinAddressToScriptHashAddressInput.value,
-    });
-    BitcoinAddressToScriptHashAddressShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    BitcoinAddressToScriptHashAddressShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+    },
+    document.querySelector('.BitcoinAddressToScriptHashAddressShow')
+  );
 }
 
 BitcoinAddressToScriptHashAddressButton.addEventListener('click', () => {
@@ -102,13 +94,13 @@ BitcoinAddressToScriptHashAddressButton.addEventListener('click', () => {
 const StartPopMinerShow = document.querySelector('.StartPopMinerShow');
 
 async function StartPopMiner() {
-  try {
-    let automaticFees = StartPopMinerAutomaticFeesInput.value;
-    if (automaticFees === 'false' || automaticFees === 'true') {
-      automaticFees = automaticFees === 'true';
-    }
-    const result = await dispatch({
-      method: 'startPoPMiner',
+  let automaticFees = StartPopMinerAutomaticFeesInput.value;
+  if (automaticFees === 'false' || automaticFees === 'true') {
+    automaticFees = automaticFees === 'true';
+  }
+  handleDispatch(
+    'startPoPMiner',
+    {
       network: StartPopMinerNetworkInput.value,
       logLevel: StartPopMinerLogLevelInput.value,
       privateKey: StartPopMinerPrivateKeyInput.value,
@@ -116,12 +108,9 @@ async function StartPopMiner() {
       automaticFeeMultiplier: Number(StartPopMinerAutomaticFeeMultiplierInput.value),
       automaticFeeRefreshSeconds: Number(StartPopMinerAutomaticFeeRefreshInput.value),
       staticFee: Number(StartPopMinerStaticFeeInput.value),
-    });
-    StartPopMinerShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    StartPopMinerShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+    },
+    document.querySelector('.StartPopMinerShow')
+  );
 }
 
 StartPopMinerButton.addEventListener('click', () => {
@@ -132,15 +121,7 @@ StartPopMinerButton.addEventListener('click', () => {
 const StopPopMinerShow = document.querySelector('.StopPopMinerShow');
 
 async function StopPopMiner() {
-  try {
-    const result = await dispatch({
-      method: 'stopPoPMiner',
-    });
-    StopPopMinerShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    StopPopMinerShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch('stopPoPMiner', {}, StopPopMinerShow);
 }
 
 StopPopMinerButton.addEventListener('click', () => {
@@ -151,15 +132,7 @@ StopPopMinerButton.addEventListener('click', () => {
 const minerStatusDisplay = document.querySelector('.minerStatusDisplay');
 
 async function minerStatus() {
-  try {
-    const result = await dispatch({
-      method: 'minerStatus',
-    });
-    minerStatusDisplay.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    minerStatusDisplay.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch('minerStatus', {}, document.querySelector('.minerStatusDisplay'));
 }
 
 minerStatusButton.addEventListener('click', () => {
@@ -170,15 +143,7 @@ minerStatusButton.addEventListener('click', () => {
 const PingShow = document.querySelector('.PingShow');
 
 async function Ping() {
-  try {
-    const result = await dispatch({
-      method: 'ping', // Timestamp is handled by Go.
-    });
-    PingShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    PingShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch('ping', {}, document.querySelector('.PingShow'));
 }
 
 PingButton.addEventListener('click', () => {
@@ -189,16 +154,11 @@ PingButton.addEventListener('click', () => {
 const L2KeystonesShow = document.querySelector('.L2KeystonesShow');
 
 async function L2Keystones() {
-  try {
-    const result = await dispatch({
-      method: 'l2Keystones',
-      numL2Keystones: Number(L2KeystonesNumL2KeystonesInput.value),
-    });
-    L2KeystonesShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    L2KeystonesShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch(
+    'l2Keystones',
+    { numL2Keystones: Number(L2KeystonesNumL2KeystonesInput.value) },
+    document.querySelector('.L2KeystonesShow')
+  );
 }
 
 L2KeystonesButton.addEventListener('click', () => {
@@ -209,16 +169,11 @@ L2KeystonesButton.addEventListener('click', () => {
 const BitcoinBalanceShow = document.querySelector('.BitcoinBalanceShow');
 
 async function BitcoinBalance() {
-  try {
-    const result = await dispatch({
-      method: 'bitcoinBalance',
-      scriptHash: BitcoinBalanceScriptHashInput.value,
-    });
-    BitcoinBalanceShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    BitcoinBalanceShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch(
+    'bitcoinBalance',
+    { scriptHash: BitcoinBalanceScriptHashInput.value },
+    document.querySelector('.BitcoinBalanceShow')
+  );
 }
 
 BitcoinBalanceButton.addEventListener('click', () => {
@@ -229,15 +184,7 @@ BitcoinBalanceButton.addEventListener('click', () => {
 const BitcoinInfoShow = document.querySelector('.BitcoinInfoShow');
 
 async function BitcoinInfo() {
-  try {
-    const result = await dispatch({
-      method: 'bitcoinInfo',
-    });
-    BitcoinInfoShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    BitcoinInfoShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch('bitcoinInfo', {}, document.querySelector('.BitcoinInfoShow'));
 }
 
 BitcoinInfoButton.addEventListener('click', () => {
@@ -248,16 +195,11 @@ BitcoinInfoButton.addEventListener('click', () => {
 const BitcoinUTXOsShow = document.querySelector('.BitcoinUTXOsShow');
 
 async function BitcoinUTXOs() {
-  try {
-    const result = await dispatch({
-      method: 'bitcoinUTXOs',
-      scriptHash: BitcoinUTXOsScriptHashInput.value,
-    });
-    BitcoinUTXOsShow.innerText = JSON.stringify(result, null, 2);
-  } catch (err) {
-    BitcoinUTXOsShow.innerText = 'Promise rejected: \n' + JSON.stringify(err, null, 2);
-    console.error('Caught exception', err);
-  }
+  handleDispatch(
+    'bitcoinUTXOs',
+    { scriptHash: BitcoinUTXOsScriptHashInput.value },
+    document.querySelector('.BitcoinUTXOsShow')
+  );
 }
 
 BitcoinUTXOsButton.addEventListener('click', () => {
