@@ -174,13 +174,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
-	if cfg.BlockheaderCacheSize != "" {
-		var err error
-		cfg.blockheaderCacheSize, err = humanize.ParseBytes(cfg.BlockheaderCacheSize)
-		if err != nil {
-			return nil, fmt.Errorf("invalid blockheader cache size: %w", err)
-		}
-	}
 
 	if cfg.MempoolEnabled {
 		log.Infof("mempool forced disabled")

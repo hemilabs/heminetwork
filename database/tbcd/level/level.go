@@ -161,9 +161,9 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	if cfg.blockheaderCacheSize > 0 {
 		l.headerCache, err = lowIQMapNewSize(cfg.blockheaderCacheSize)
 		if err != nil {
+			panic(spew.Sdump(cfg))
 			return nil, fmt.Errorf("couldn't setup block header cache: %w", err)
 		}
-
 		log.Infof("blockheader cache: %v",
 			humanize.Bytes(uint64(cfg.blockheaderCacheSize)))
 	} else {
@@ -845,6 +845,10 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		bhash := headersParsed[i].BlockHash()
 		fh := fullHeadersFromDb[i]
 		bhsBatch.Delete(bhash[:])
+		// Make batch
+		if l.cfg.blockheaderCacheSize > 0 {
+			l.headerCache.Purge(&bhash)
+		}
 
 		// Delete height mapping for header i
 		hhKey := heightHashToKey(fh.Height, bhash[:])
