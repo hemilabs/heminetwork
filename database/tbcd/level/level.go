@@ -837,21 +837,33 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	bhsBatch := new(leveldb.Batch)
 	hhBatch := new(leveldb.Batch)
 
+	var bhCacheBatch []*chainhash.Hash
+	if l.cfg.blockheaderCacheSize > 0 {
+		// cache batch to delete blockheaders
+		bhCacheBatch = make([]*chainhash.Hash, 0, len(headersParsed))
+	}
+
 	// Insert each block header deletion into the batch (for header itself and
 	// height-header association)
 	for i := 0; i < len(headersParsed); i++ {
 		// Delete header i
 		bhash := headersParsed[i].BlockHash()
 		fh := fullHeadersFromDb[i]
+		// Make db delete batch
 		bhsBatch.Delete(bhash[:])
-		// Make batch
+
+		// Remove from header cache as well in a batch
 		if l.cfg.blockheaderCacheSize > 0 {
-			l.headerCache.Purge(&bhash)
+			bhCacheBatch = append(bhCacheBatch, &bhash)
 		}
 
 		// Delete height mapping for header i
 		hhKey := heightHashToKey(fh.Height, bhash[:])
 		hhBatch.Delete(hhKey)
+	}
+	if l.cfg.blockheaderCacheSize > 0 {
+		// Delete right away. Cache can always be rehydrated.
+		l.headerCache.PurgeBatch(bhCacheBatch)
 	}
 
 	// Insert updated canonical tip after removal of the provided block headers
