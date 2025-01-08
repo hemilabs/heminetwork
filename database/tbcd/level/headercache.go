@@ -51,15 +51,24 @@ func (l *lowIQMap) Get(k *chainhash.Hash) (*tbcd.BlockHeader, bool) {
 }
 
 func (l *lowIQMap) Purge(k *chainhash.Hash) {
-	l.mtx.RLock()
-	defer l.mtx.RUnlock()
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
 
 	delete(l.m, *k)
 }
 
+func (l *lowIQMap) PurgeBatch(ks []*chainhash.Hash) {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+
+	for v := range ks {
+		delete(l.m, *ks[v])
+	}
+}
+
 func lowIQMapNewCount(count int) (*lowIQMap, error) {
 	if count <= 0 {
-		return nil, fmt.Errorf("invalid count %v", count)
+		return nil, fmt.Errorf("invalid count: %v", count)
 	}
 	return &lowIQMap{
 		count: count,
@@ -73,7 +82,7 @@ func lowIQMapNewCount(count int) (*lowIQMap, error) {
 // (~819200 items).
 func lowIQMapNewSize(size int) (*lowIQMap, error) {
 	if size <= 0 {
-		return nil, fmt.Errorf("invalid size %v", size)
+		return nil, fmt.Errorf("invalid size: %v", size)
 	}
 	// approximate number of headers
 	return lowIQMapNewCount(size / blockHeaderSize)
