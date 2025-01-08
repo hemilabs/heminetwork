@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -489,14 +489,6 @@ func (s *Server) handleBtcFinalityNotification() {
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleBtcBlockNotification() {
-	s.mtx.Lock()
-	for _, bws := range s.sessions {
-		go writeNotificationResponse(bws, &bssapi.BTCNewBlockNotification{})
-	}
-	s.mtx.Unlock()
-}
-
 func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.HandleFunc(pattern, handler)
 	log.Infof("handle (%v): %v", service, pattern)
@@ -537,8 +529,6 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 			}
 		case bfgapi.CmdBTCFinalityNotification:
 			go s.handleBtcFinalityNotification()
-		case bfgapi.CmdBTCNewBlockNotification:
-			go s.handleBtcBlockNotification()
 		default:
 			log.Errorf("unknown command: %v", cmd)
 			return

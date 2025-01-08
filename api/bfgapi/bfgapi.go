@@ -28,7 +28,6 @@ const (
 	CmdBTCFinalityByKeystonesRequest        = "bfgapi-btc-finality-by-keystones-request"
 	CmdBTCFinalityByKeystonesResponse       = "bfgapi-btc-finality-by-keystones-response"
 	CmdBTCFinalityNotification              = "bfgapi-btc-finality-notification"
-	CmdBTCNewBlockNotification              = "bfgapi-btc-new-block-notification"
 	CmdL2KeystonesNotification              = "bfgapi-l2-keystones-notification"
 	CmdL2KeystonesRequest                   = "bfgapi-l2-keystones-request"
 	CmdL2KeystonesResponse                  = "bfgapi-l2-keystones-response"
@@ -183,7 +182,6 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),
 	CmdBTCFinalityByKeystonesResponse:       reflect.TypeOf(BTCFinalityByKeystonesResponse{}),
 	CmdBTCFinalityNotification:              reflect.TypeOf(BTCFinalityNotification{}),
-	CmdBTCNewBlockNotification:              reflect.TypeOf(BTCNewBlockNotification{}),
 	CmdL2KeystonesNotification:              reflect.TypeOf(L2KeystonesNotification{}),
 	CmdL2KeystonesRequest:                   reflect.TypeOf(L2KeystonesRequest{}),
 	CmdL2KeystonesResponse:                  reflect.TypeOf(L2KeystonesResponse{}),

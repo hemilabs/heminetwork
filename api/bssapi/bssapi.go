@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -110,7 +110,6 @@ const (
 	CmdBTCFinalityByKeystonesRequest        protocol.Command = "bssapi-btc-finality-by-keystones-request"
 	CmdBTCFinalityByKeystonesResponse       protocol.Command = "bssapi-btc-finality-by-keystones-response"
 	CmdBTCFinalityNotification              protocol.Command = "bssapi-btc-finality-notification"
-	CmdBTCNewBlockNotification              protocol.Command = "bssapi-btc-new-block-notification"
 )
 
 // commands contains the command key and type. This is used during RPC calls.
@@ -126,7 +125,6 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),
 	CmdBTCFinalityByKeystonesResponse:       reflect.TypeOf(BTCFinalityByKeystonesResponse{}),
 	CmdBTCFinalityNotification:              reflect.TypeOf(BTCFinalityNotification{}),
-	CmdBTCNewBlockNotification:              reflect.TypeOf(BTCNewBlockNotification{}),
 }
 
 // apiCmd is an empty structure used to satisfy the protocol.API interface.
