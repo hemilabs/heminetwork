@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -47,12 +47,6 @@ var (
 			Value:        &cfg.EXBTCMaxConns,
 			DefaultValue: 100,
 			Help:         "electrs max connections",
-			Print:        config.PrintAll,
-		},
-		"BFG_PUBLIC_KEY_AUTH": config.Config{
-			Value:        &cfg.PublicKeyAuth,
-			DefaultValue: false,
-			Help:         "enable enforcing of public key auth handshake",
 			Print:        config.PrintAll,
 		},
 		"BFG_BTC_START_HEIGHT": config.Config{

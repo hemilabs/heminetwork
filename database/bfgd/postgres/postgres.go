@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 11
+	bfgdVersion = 12
 
 	logLevel = "INFO"
 	verbose  = false
@@ -906,71 +906,6 @@ func (p *pgdb) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
 	}
 
 	return result, nil
-}
-
-func (p *pgdb) AccessPublicKeyInsert(ctx context.Context, publicKey *bfgd.AccessPublicKey) error {
-	log.Tracef("AccessPublicKeyInsert")
-	defer log.Tracef("AccessPublicKeyInsert exit")
-
-	const sql = `
-		INSERT INTO access_public_keys (
-			public_key
-		) VALUES ($1)
-	`
-
-	_, err := p.db.ExecContext(ctx, sql, publicKey.PublicKey)
-	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Constraint == "access_public_keys_pkey" {
-			return database.DuplicateError("public key already exists")
-		}
-
-		return err
-	}
-
-	return nil
-}
-
-func (p *pgdb) AccessPublicKeyExists(ctx context.Context, publicKey *bfgd.AccessPublicKey) (bool, error) {
-	log.Tracef("AccessPublicKeyExists")
-	defer log.Tracef("AccessPublicKeyExists exit")
-
-	const q = `
-		SELECT EXISTS (
-			SELECT * FROM access_public_keys WHERE public_key = $1
-		)
-	`
-
-	var exists bool
-	if err := p.db.QueryRowContext(ctx, q, publicKey.PublicKey).Scan(&exists); err != nil {
-		return false, err
-	}
-
-	return exists, nil
-}
-
-func (p *pgdb) AccessPublicKeyDelete(ctx context.Context, publicKey *bfgd.AccessPublicKey) error {
-	log.Tracef("AccessPublicKeyDelete")
-	defer log.Tracef("AccessPublicKeyDelete exit")
-
-	const q = `
-		DELETE FROM access_public_keys WHERE public_key = $1
-	`
-
-	res, err := p.db.ExecContext(ctx, q, publicKey.PublicKey)
-	if err != nil {
-		return err
-	}
-
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return database.NotFoundError("public key not found")
-	}
-
-	return nil
 }
 
 // BtcBlocksHeightsWithNoChildren returns the heights of blocks stored in the
