@@ -563,8 +563,8 @@ func (p *pgdb) L2KeystoneLowestBtcBlockUpsert(ctx context.Context, l2KeystoneAbr
 // BackfillL2KeystonesLowestBtcBlocks (should only) runs on startup and is
 // a quick check that all existing keystones have an associated lowest btc
 // block if it exists.  this is essential for new deploys
-func (p *pgdb) BackfillL2KeystonesLowestBtcBlocks(ctx context.Context) error {
-	limit := uint32(1)
+func (p *pgdb) BackfillL2KeystonesLowestBtcBlocks(ctx context.Context, pageSize uint32) error {
+	limit := pageSize
 	page := uint32(0)
 
 	for {

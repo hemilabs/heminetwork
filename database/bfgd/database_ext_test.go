@@ -1789,7 +1789,7 @@ func TestL2KeystoneLowestBtcBlockUpsert(t *testing.T) {
 
 				for i := range tti.l2KeystoneAbrevHashes {
 					if withBackfill {
-						if err := db.BackfillL2KeystonesLowestBtcBlocks(ctx); err != nil {
+						if err := db.BackfillL2KeystonesLowestBtcBlocks(ctx, 1); err != nil {
 							t.Fatal(err)
 						}
 					} else {

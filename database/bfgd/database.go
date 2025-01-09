@@ -46,7 +46,7 @@ type Database interface {
 
 	L2KeystoneLowestBtcBlockUpsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray) error
 
-	BackfillL2KeystonesLowestBtcBlocks(ctx context.Context) error
+	BackfillL2KeystonesLowestBtcBlocks(ctx context.Context, pageSize uint32) error
 }
 
 // NotificationName identifies a database notification type.

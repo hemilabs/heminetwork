@@ -307,7 +307,7 @@ func (s *Server) queueCheckForInvalidBlocks() {
 func (s *Server) backfillL2KeystonesLowestBtcBlocks(ctx context.Context) {
 	defer s.wg.Done()
 
-	if err := s.db.BackfillL2KeystonesLowestBtcBlocks(ctx); err != nil {
+	if err := s.db.BackfillL2KeystonesLowestBtcBlocks(ctx, 100); err != nil {
 		log.Errorf("error backfilling lowest block per keystone: %s", err)
 	}
 }
