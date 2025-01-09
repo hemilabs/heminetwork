@@ -26,8 +26,6 @@ const (
 	CmdBTCFinalityByKeystonesRequest        = "bfgapi-btc-finality-by-keystones-request"
 	CmdBTCFinalityByKeystonesResponse       = "bfgapi-btc-finality-by-keystones-response"
 	CmdBTCFinalityNotification              = "bfgapi-btc-finality-notification"
-	CmdBitcoinBroadcastRequest              = "bfgapi-bitcoin-broadcast-request"
-	CmdBitcoinBroadcastResponse             = "bfgapi-bitcoin-broadcast-response"
 )
 
 var (
@@ -53,15 +51,6 @@ type (
 	PingRequest  protocol.PingRequest
 	PingResponse protocol.PingResponse
 )
-
-type BitcoinBroadcastRequest struct {
-	Transaction api.ByteSlice `json:"transaction"` // XXX this needs to be plural
-}
-
-type BitcoinBroadcastResponse struct {
-	TXID  api.ByteSlice   `json:"txid"`
-	Error *protocol.Error `json:"error,omitempty"`
-}
 
 type BitcoinInfoResponse struct {
 	Height uint64          `json:"height"`
@@ -132,8 +121,6 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),
 	CmdBTCFinalityByKeystonesResponse:       reflect.TypeOf(BTCFinalityByKeystonesResponse{}),
 	CmdBTCFinalityNotification:              reflect.TypeOf(BTCFinalityNotification{}),
-	CmdBitcoinBroadcastRequest:              reflect.TypeOf(BitcoinBroadcastRequest{}),
-	CmdBitcoinBroadcastResponse:             reflect.TypeOf(BitcoinBroadcastResponse{}),
 }
 
 type bfgAPI struct{}

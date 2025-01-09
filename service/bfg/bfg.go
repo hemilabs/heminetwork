@@ -458,54 +458,6 @@ func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) 
 	}
 }
 
-func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.BitcoinBroadcastRequest) (any, error) {
-	log.Tracef("handleBitcoinBroadcast")
-	defer log.Tracef("handleBitcoinBroadcast exit")
-
-	rr := bytes.NewReader(bbr.Transaction)
-	mb := wire.MsgTx{}
-	if err := mb.Deserialize(rr); err != nil {
-		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.RequestErrorf(
-			"failed to deserialize tx: %s", err,
-		)}, nil
-	}
-
-	var (
-		tl2 *pop.TransactionL2
-		err error
-	)
-	for _, v := range mb.TxOut {
-		tl2, err = pop.ParseTransactionL2FromOpReturn(v.PkScript)
-		if err == nil {
-			break // Found the pop transaction.
-		}
-	}
-
-	if tl2 == nil {
-		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.RequestErrorf("could not find l2 keystone abbrev in btc tx"),
-		}, nil
-	}
-
-	_, err = pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
-	if err != nil {
-		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.RequestErrorf("could not parse signature script: %v", err),
-		}, nil
-	}
-
-	err = s.db.BtcTransactionBroadcastRequestInsert(ctx, bbr.Transaction, mb.TxID())
-	if err != nil && !errors.Is(err, database.ErrDuplicate) {
-		e := protocol.NewInternalErrorf("insert broadcast request : %w", err)
-		return &bfgapi.BitcoinBroadcastResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	hash := mb.TxHash()
-	return &bfgapi.BitcoinBroadcastResponse{TXID: hash[:]}, nil
-}
-
 func (s *Server) updateBtcHeightCache(height uint64) {
 	log.Tracef("updateBtcHeightCache")
 	defer log.Tracef("updateBtcHeightCache exit")
@@ -819,13 +771,6 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 					bws.addr, cmd, id, err)
 				return
 			}
-		case bfgapi.CmdBitcoinBroadcastRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.BitcoinBroadcastRequest)
-				return s.handleBitcoinBroadcast(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
 		default:
 			// Terminal error, exit.
 			log.Errorf("handleWebsocketRead %v %v %v: unknown command",

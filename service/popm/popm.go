@@ -194,25 +194,9 @@ func (m *Miner) SetFee(fee uint) {
 	m.txFee.Store(uint32(fee))
 }
 
+// TODO need new way to broadcast btc transaction
 func (m *Miner) bitcoinBroadcast(ctx context.Context, tx []byte) ([]byte, error) {
-	bbr := &bfgapi.BitcoinBroadcastRequest{
-		Transaction: tx,
-	}
-	res, err := m.callBFG(ctx, m.requestTimeout, bbr)
-	if err != nil {
-		return nil, err
-	}
-
-	bbResp, ok := res.(*bfgapi.BitcoinBroadcastResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a bitcoin broadcast response %T", res)
-	}
-
-	if bbResp.Error != nil {
-		return nil, bbResp.Error
-	}
-
-	return bbResp.TXID, nil
+	return nil, nil
 }
 
 // TODO need new way to do this
