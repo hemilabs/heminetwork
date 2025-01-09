@@ -533,54 +533,14 @@ func ping(_ js.Value, _ []js.Value) (any, error) {
 	}, nil
 }
 
+// TODO need new way to get keystones
 func l2Keystones(_ js.Value, args []js.Value) (any, error) {
-	log.Tracef("l2Keystones")
-	defer log.Tracef("l2Keystones exit")
-
-	c := args[0].Get("numL2Keystones").Int()
-	if c < 0 || c > 10 {
-		c = 2
-	}
-	count := uint64(c)
-
-	miner, err := runningMiner()
-	if err != nil {
-		return nil, err
-	}
-	pr, err := miner.L2Keystones(miner.ctx, count)
-	if err != nil {
-		return nil, err
-	}
-
-	keystones := make([]L2Keystone, len(pr.L2Keystones))
-	for i, ks := range pr.L2Keystones {
-		keystones[i] = convertL2Keystone(&ks)
-	}
-
-	return L2KeystoneResult{
-		L2Keystones: keystones,
-	}, nil
+	return nil, nil
 }
 
+// TODO need new way to get the balance
 func bitcoinBalance(_ js.Value, args []js.Value) (any, error) {
-	log.Tracef("bitcoinBalance")
-	defer log.Tracef("bitcoinBalance exit")
-
-	scriptHash := args[0].Get("scriptHash").String()
-
-	miner, err := runningMiner()
-	if err != nil {
-		return nil, err
-	}
-	pr, err := miner.BitcoinBalance(miner.ctx, scriptHash)
-	if err != nil {
-		return nil, err
-	}
-
-	return BitcoinBalanceResult{
-		Confirmed:   pr.Confirmed,
-		Unconfirmed: pr.Unconfirmed,
-	}, nil
+	return nil, nil
 }
 
 func bitcoinInfo(_ js.Value, _ []js.Value) (any, error) {
