@@ -171,16 +171,16 @@ func intHash(b int) chainhash.Hash {
 }
 
 func TestHC(t *testing.T) {
-	_, err := lowIQMapNewSize(0)
+	_, err := lowIQMapSizeNew(0)
 	if err == nil {
 		t.Fatalf("expected invalid size error for size <= 0")
 	}
-	_, err = lowIQMapNewSize(1)
+	_, err = lowIQMapSizeNew(1)
 	if err == nil {
 		t.Fatalf("expected invalid count error for count <= 0")
 	}
 	size := 1024
-	l, err := lowIQMapNewSize(size)
+	l, err := lowIQMapSizeNew(size)
 	if err != nil {
 		t.Fatal(err)
 	}
