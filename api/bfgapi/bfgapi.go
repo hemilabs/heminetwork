@@ -30,8 +30,6 @@ const (
 	CmdBitcoinBroadcastResponse             = "bfgapi-bitcoin-broadcast-response"
 	CmdBitcoinInfoRequest                   = "bfgapi-bitcoin-info-request"
 	CmdBitcoinInfoResponse                  = "bfgapi-bitcoin-info-response"
-	CmdBitcoinUTXOsRequest                  = "bfgapi-bitcoin-utxos-request"
-	CmdBitcoinUTXOsResponse                 = "bfgapi-bitcoin-utxos-response"
 )
 
 var (
@@ -78,10 +76,6 @@ type BitcoinUTXO struct {
 	Hash  api.ByteSlice `json:"hash"`
 	Index uint32        `json:"index"`
 	Value int64         `json:"value"`
-}
-
-type BitcoinUTXOsRequest struct {
-	ScriptHash api.ByteSlice `json:"script_hash"`
 }
 
 type BitcoinUTXOsResponse struct {
@@ -146,8 +140,6 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBitcoinBroadcastResponse:             reflect.TypeOf(BitcoinBroadcastResponse{}),
 	CmdBitcoinInfoRequest:                   reflect.TypeOf(BitcoinInfoRequest{}),
 	CmdBitcoinInfoResponse:                  reflect.TypeOf(BitcoinInfoResponse{}),
-	CmdBitcoinUTXOsRequest:                  reflect.TypeOf(BitcoinUTXOsRequest{}),
-	CmdBitcoinUTXOsResponse:                 reflect.TypeOf(BitcoinUTXOsResponse{}),
 }
 
 type bfgAPI struct{}

@@ -872,14 +872,6 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			electrs: false,
 			skip:    true,
 		},
-		{
-			name:          "bitcoin utxos electrs error",
-			expectedError: "internal error",
-			requests: []bfgapi.BitcoinUTXOsRequest{
-				{},
-			},
-			electrs: false,
-		},
 	}
 
 	for _, tti := range testTable {
@@ -1058,92 +1050,6 @@ func TestBitcoinInfo(t *testing.T) {
 
 	if diff := deep.Equal(bitcoinInfoResponse, &bfgapi.BitcoinInfoResponse{
 		Height: 10,
-	}); len(diff) > 0 {
-		t.Fatalf("unexpected diff %s", diff)
-	}
-}
-
-func TestBitcoinUTXOs(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
-	defer func() {
-		db.Close()
-		sdb.Close()
-		cleanup()
-	}()
-
-	ctx, cancel := defaultTestContext()
-	defer cancel()
-
-	l2Keystone := hemi.L2Keystone{
-		Version:            1,
-		L1BlockNumber:      5,
-		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-	}
-
-	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
-
-	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
-	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
-
-	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	protocolConn := protocol.NewWSConn(c)
-	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
-		t.Fatal(err)
-	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
-
-	bws := &bfgWs{
-		conn: protocol.NewWSConn(c),
-	}
-
-	sh := make([]byte, 32)
-	_, err = rand.Read(sh)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := bfgapi.Write(ctx, bws.conn, "someid", &bfgapi.BitcoinUTXOsRequest{
-		ScriptHash: sh,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	command, _, v, err := bfgapi.Read(ctx, bws.conn)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if command != bfgapi.CmdBitcoinUTXOsResponse {
-		t.Fatalf("unexpected command: %s", command)
-	}
-	bitcoinUTXOsResponse := v.(*bfgapi.BitcoinUTXOsResponse)
-
-	if diff := deep.Equal(bitcoinUTXOsResponse, &bfgapi.BitcoinUTXOsResponse{
-		UTXOs: []*bfgapi.BitcoinUTXO{
-			{
-				Index: 9999,
-				Value: 999999,
-				Hash: []byte{
-					2, 1, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 10, 9, 8,
-					7, 6, 5, 4, 3, 2, 1, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
-				},
-			},
-		},
 	}); len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
 	}

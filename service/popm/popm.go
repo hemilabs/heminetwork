@@ -235,26 +235,9 @@ func (m *Miner) bitcoinHeight(ctx context.Context) (uint64, error) {
 	return biResp.Height, nil
 }
 
+// TODO need new way to determine UTXO
 func (m *Miner) bitcoinUTXOs(ctx context.Context, scriptHash []byte) ([]*bfgapi.BitcoinUTXO, error) {
-	bur := &bfgapi.BitcoinUTXOsRequest{
-		ScriptHash: scriptHash,
-	}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, bur)
-	if err != nil {
-		return nil, err
-	}
-
-	buResp, ok := res.(*bfgapi.BitcoinUTXOsResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a buResp %T", res)
-	}
-
-	if buResp.Error != nil {
-		return nil, buResp.Error
-	}
-
-	return buResp.UTXOs, nil
+	return nil, nil
 }
 
 func pickUTXO(utxos []*bfgapi.BitcoinUTXO, amount int64) (*bfgapi.BitcoinUTXO, error) {
@@ -456,31 +439,9 @@ func (m *Miner) BitcoinInfo(ctx context.Context) (*bfgapi.BitcoinInfoResponse, e
 	return ir, nil
 }
 
+// TODO need new way to do this
 func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.BitcoinUTXOsResponse, error) {
-	if scriptHash[0:2] == "0x" || scriptHash[0:2] == "0X" {
-		scriptHash = scriptHash[2:]
-	}
-	sh, err := hex.DecodeString(scriptHash)
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinUTXOsRequest{
-		ScriptHash: sh,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinUTXOs: %w", err)
-	}
-
-	ir, ok := res.(*bfgapi.BitcoinUTXOsResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinUTXOsResponse: %T", res)
-	}
-
-	if ir.Error != nil {
-		return nil, ir.Error
-	}
-
-	return ir, nil
+	return nil, nil
 }
 
 func (m *Miner) mineKnownKeystones(ctx context.Context) {

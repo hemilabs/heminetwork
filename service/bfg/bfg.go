@@ -537,30 +537,6 @@ func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoR
 	}, nil
 }
 
-func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXOsRequest) (any, error) {
-	log.Tracef("handleBitcoinUTXOs")
-	defer log.Tracef("handleBitcoinUTXOs exit")
-
-	utxos, err := s.btcClient.UTXOs(ctx, bur.ScriptHash)
-	if err != nil {
-		e := protocol.NewInternalErrorf("bitcoin utxos: %w", err)
-		return &bfgapi.BitcoinUTXOsResponse{
-			Error: e.ProtocolError(),
-		}, e
-
-	}
-	buResp := bfgapi.BitcoinUTXOsResponse{}
-	for _, utxo := range utxos {
-		buResp.UTXOs = append(buResp.UTXOs, &bfgapi.BitcoinUTXO{
-			Hash:  utxo.Hash,
-			Index: utxo.Index,
-			Value: utxo.Value,
-		})
-	}
-
-	return buResp, nil
-}
-
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
@@ -875,13 +851,6 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BitcoinInfoRequest)
 				return s.handleBitcoinInfo(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdBitcoinUTXOsRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.BitcoinUTXOsRequest)
-				return s.handleBitcoinUTXOs(c, msg)
 			}
 
 			go s.handleRequest(ctx, bws, id, cmd, handler)
