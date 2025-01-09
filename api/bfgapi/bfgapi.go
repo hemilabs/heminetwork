@@ -19,27 +19,11 @@ const (
 
 	CmdPingRequest                          = "bfgapi-ping-request"
 	CmdPingResponse                         = "bfgapi-ping-response"
-	CmdPopTxForL2BlockRequest               = "bfgapi-pop-txs-for-l2-block-request"
-	CmdPopTxForL2BlockResponse              = "bfgapi-pop-txs-for-l2-block-response"
-	CmdNewL2KeystonesRequest                = "bfgapi-new-l2-keystones-request"
-	CmdNewL2KeystonesResponse               = "bfgapi-new-l2-keystones-response"
 	CmdBTCFinalityByRecentKeystonesRequest  = "bfgapi-btc-finality-by-recent-keystones-request"
 	CmdBTCFinalityByRecentKeystonesResponse = "bfgapi-btc-finality-by-recent-keystones-response"
 	CmdBTCFinalityByKeystonesRequest        = "bfgapi-btc-finality-by-keystones-request"
 	CmdBTCFinalityByKeystonesResponse       = "bfgapi-btc-finality-by-keystones-response"
 	CmdBTCFinalityNotification              = "bfgapi-btc-finality-notification"
-	CmdBTCNewBlockNotification              = "bfgapi-btc-new-block-notification"
-	CmdL2KeystonesNotification              = "bfgapi-l2-keystones-notification"
-	CmdL2KeystonesRequest                   = "bfgapi-l2-keystones-request"
-	CmdL2KeystonesResponse                  = "bfgapi-l2-keystones-response"
-	CmdBitcoinBalanceRequest                = "bfgapi-bitcoin-balance-request"
-	CmdBitcoinBalanceResponse               = "bfgapi-bitcoin-balance-response"
-	CmdBitcoinBroadcastRequest              = "bfgapi-bitcoin-broadcast-request"
-	CmdBitcoinBroadcastResponse             = "bfgapi-bitcoin-broadcast-response"
-	CmdBitcoinInfoRequest                   = "bfgapi-bitcoin-info-request"
-	CmdBitcoinInfoResponse                  = "bfgapi-bitcoin-info-response"
-	CmdBitcoinUTXOsRequest                  = "bfgapi-bitcoin-utxos-request"
-	CmdBitcoinUTXOsResponse                 = "bfgapi-bitcoin-utxos-response"
 )
 
 var (
@@ -66,44 +50,6 @@ type (
 	PingResponse protocol.PingResponse
 )
 
-type NewL2KeystonesRequest struct {
-	L2Keystones []hemi.L2Keystone `json:"l2_keystones"`
-}
-
-type NewL2KeystonesResponse struct {
-	Error *protocol.Error `json:"error,omitempty"`
-}
-
-type L2KeystonesRequest struct {
-	NumL2Keystones uint64 `json:"num_l2_keystones"`
-}
-
-type L2KeystonesResponse struct {
-	L2Keystones []hemi.L2Keystone `json:"l2_keystones"`
-	Error       *protocol.Error   `json:"error,omitempty"`
-}
-
-type BitcoinBalanceRequest struct {
-	ScriptHash api.ByteSlice `json:"script_hash"`
-}
-
-type BitcoinBalanceResponse struct {
-	Confirmed   uint64          `json:"confirmed"`
-	Unconfirmed int64           `json:"unconfirmed"`
-	Error       *protocol.Error `json:"error,omitempty"`
-}
-
-type BitcoinBroadcastRequest struct {
-	Transaction api.ByteSlice `json:"transaction"` // XXX this needs to be plural
-}
-
-type BitcoinBroadcastResponse struct {
-	TXID  api.ByteSlice   `json:"txid"`
-	Error *protocol.Error `json:"error,omitempty"`
-}
-
-type BitcoinInfoRequest struct{}
-
 type BitcoinInfoResponse struct {
 	Height uint64          `json:"height"`
 	Error  *protocol.Error `json:"error,omitempty"`
@@ -115,23 +61,9 @@ type BitcoinUTXO struct {
 	Value int64         `json:"value"`
 }
 
-type BitcoinUTXOsRequest struct {
-	ScriptHash api.ByteSlice `json:"script_hash"`
-}
-
 type BitcoinUTXOsResponse struct {
 	UTXOs []*BitcoinUTXO  `json:"utxos"`
 	Error *protocol.Error `json:"error,omitempty"`
-}
-
-type PopTxsForL2BlockRequest struct {
-	L2Block api.ByteSlice `json:"l2_block"`
-	Page    uint32        `json:"page,omitempty"`
-}
-
-type PopTxsForL2BlockResponse struct {
-	PopTxs []PopTx         `json:"pop_txs"`
-	Error  *protocol.Error `json:"error,omitempty"`
 }
 
 type BTCFinalityByRecentKeystonesRequest struct {
@@ -156,10 +88,6 @@ type BTCFinalityByKeystonesResponse struct {
 
 type BTCFinalityNotification struct{}
 
-type BTCNewBlockNotification struct{}
-
-type L2KeystonesNotification struct{}
-
 type PopTx struct {
 	BtcTxId             api.ByteSlice `json:"btc_tx_id"`
 	BtcRawTx            api.ByteSlice `json:"btc_raw_tx"`
@@ -174,27 +102,11 @@ type PopTx struct {
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                          reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                         reflect.TypeOf(PingResponse{}),
-	CmdPopTxForL2BlockRequest:               reflect.TypeOf(PopTxsForL2BlockRequest{}),
-	CmdPopTxForL2BlockResponse:              reflect.TypeOf(PopTxsForL2BlockResponse{}),
-	CmdNewL2KeystonesRequest:                reflect.TypeOf(NewL2KeystonesRequest{}),
-	CmdNewL2KeystonesResponse:               reflect.TypeOf(NewL2KeystonesResponse{}),
 	CmdBTCFinalityByRecentKeystonesRequest:  reflect.TypeOf(BTCFinalityByRecentKeystonesRequest{}),
 	CmdBTCFinalityByRecentKeystonesResponse: reflect.TypeOf(BTCFinalityByRecentKeystonesResponse{}),
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),
 	CmdBTCFinalityByKeystonesResponse:       reflect.TypeOf(BTCFinalityByKeystonesResponse{}),
 	CmdBTCFinalityNotification:              reflect.TypeOf(BTCFinalityNotification{}),
-	CmdBTCNewBlockNotification:              reflect.TypeOf(BTCNewBlockNotification{}),
-	CmdL2KeystonesNotification:              reflect.TypeOf(L2KeystonesNotification{}),
-	CmdL2KeystonesRequest:                   reflect.TypeOf(L2KeystonesRequest{}),
-	CmdL2KeystonesResponse:                  reflect.TypeOf(L2KeystonesResponse{}),
-	CmdBitcoinBalanceRequest:                reflect.TypeOf(BitcoinBalanceRequest{}),
-	CmdBitcoinBalanceResponse:               reflect.TypeOf(BitcoinBalanceResponse{}),
-	CmdBitcoinBroadcastRequest:              reflect.TypeOf(BitcoinBroadcastRequest{}),
-	CmdBitcoinBroadcastResponse:             reflect.TypeOf(BitcoinBroadcastResponse{}),
-	CmdBitcoinInfoRequest:                   reflect.TypeOf(BitcoinInfoRequest{}),
-	CmdBitcoinInfoResponse:                  reflect.TypeOf(BitcoinInfoResponse{}),
-	CmdBitcoinUTXOsRequest:                  reflect.TypeOf(BitcoinUTXOsRequest{}),
-	CmdBitcoinUTXOsResponse:                 reflect.TypeOf(BitcoinUTXOsResponse{}),
 }
 
 type bfgAPI struct{}

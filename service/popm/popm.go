@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -6,7 +6,6 @@ package popm
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -124,8 +123,6 @@ type Miner struct {
 	btcPublicKey   *dcrsecp256k1.PublicKey
 	btcAddress     *btcutil.AddressPubKeyHash
 
-	lastKeystone *hemi.L2Keystone
-
 	// Prometheus
 	isRunning bool
 
@@ -197,67 +194,19 @@ func (m *Miner) SetFee(fee uint) {
 	m.txFee.Store(uint32(fee))
 }
 
+// TODO need new way to broadcast btc transaction
 func (m *Miner) bitcoinBroadcast(ctx context.Context, tx []byte) ([]byte, error) {
-	bbr := &bfgapi.BitcoinBroadcastRequest{
-		Transaction: tx,
-	}
-	res, err := m.callBFG(ctx, m.requestTimeout, bbr)
-	if err != nil {
-		return nil, err
-	}
-
-	bbResp, ok := res.(*bfgapi.BitcoinBroadcastResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a bitcoin broadcast response %T", res)
-	}
-
-	if bbResp.Error != nil {
-		return nil, bbResp.Error
-	}
-
-	return bbResp.TXID, nil
+	return nil, nil
 }
 
+// TODO need new way to do this
 func (m *Miner) bitcoinHeight(ctx context.Context) (uint64, error) {
-	bir := &bfgapi.BitcoinInfoRequest{}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, bir)
-	if err != nil {
-		return 0, err
-	}
-
-	biResp, ok := res.(*bfgapi.BitcoinInfoResponse)
-	if !ok {
-		return 0, errors.New("not a BitcoinIfnoResponse")
-	}
-
-	if biResp.Error != nil {
-		return 0, biResp.Error
-	}
-
-	return biResp.Height, nil
+	return 0, nil
 }
 
+// TODO need new way to determine UTXO
 func (m *Miner) bitcoinUTXOs(ctx context.Context, scriptHash []byte) ([]*bfgapi.BitcoinUTXO, error) {
-	bur := &bfgapi.BitcoinUTXOsRequest{
-		ScriptHash: scriptHash,
-	}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, bur)
-	if err != nil {
-		return nil, err
-	}
-
-	buResp, ok := res.(*bfgapi.BitcoinUTXOsResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a buResp %T", res)
-	}
-
-	if buResp.Error != nil {
-		return nil, buResp.Error
-	}
-
-	return buResp.UTXOs, nil
+	return nil, nil
 }
 
 func pickUTXO(utxos []*bfgapi.BitcoinUTXO, amount int64) (*bfgapi.BitcoinUTXO, error) {
@@ -441,96 +390,14 @@ func (m *Miner) Ping(ctx context.Context, timestamp int64) (*bfgapi.PingResponse
 	return pr, nil
 }
 
-func (m *Miner) L2Keystones(ctx context.Context, count uint64) (*bfgapi.L2KeystonesResponse, error) {
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.L2KeystonesRequest{
-		NumL2Keystones: count,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("l2keystones: %w", err)
-	}
-
-	kr, ok := res.(*bfgapi.L2KeystonesResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a L2KeystonesResponse: %T", res)
-	}
-
-	if kr.Error != nil {
-		return nil, kr.Error
-	}
-
-	return kr, nil
-}
-
-func (m *Miner) BitcoinBalance(ctx context.Context, scriptHash string) (*bfgapi.BitcoinBalanceResponse, error) {
-	if scriptHash[0:2] == "0x" || scriptHash[0:2] == "0X" {
-		scriptHash = scriptHash[2:]
-	}
-	sh, err := hex.DecodeString(scriptHash)
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinBalanceRequest{
-		ScriptHash: sh,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-
-	br, ok := res.(*bfgapi.BitcoinBalanceResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinBalanceResponse: %T", res)
-	}
-
-	if br.Error != nil {
-		return nil, br.Error
-	}
-
-	return br, nil
-}
-
+// TODO need new way to get BTC Info
 func (m *Miner) BitcoinInfo(ctx context.Context) (*bfgapi.BitcoinInfoResponse, error) {
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinInfoRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinInfo: %w", err)
-	}
-
-	ir, ok := res.(*bfgapi.BitcoinInfoResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinInfoResponse: %T", res)
-	}
-
-	if ir.Error != nil {
-		return nil, ir.Error
-	}
-
-	return ir, nil
+	return nil, nil
 }
 
+// TODO need new way to do this
 func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.BitcoinUTXOsResponse, error) {
-	if scriptHash[0:2] == "0x" || scriptHash[0:2] == "0X" {
-		scriptHash = scriptHash[2:]
-	}
-	sh, err := hex.DecodeString(scriptHash)
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinUTXOsRequest{
-		ScriptHash: sh,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinUTXOs: %w", err)
-	}
-
-	ir, ok := res.(*bfgapi.BitcoinUTXOsResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinUTXOsResponse: %T", res)
-	}
-
-	if ir.Error != nil {
-		return nil, ir.Error
-	}
-
-	return ir, nil
+	return nil, nil
 }
 
 func (m *Miner) mineKnownKeystones(ctx context.Context) {
@@ -576,61 +443,6 @@ func (m *Miner) mine(ctx context.Context) {
 	}
 }
 
-func (m *Miner) queueKeystoneForMining(keystone *hemi.L2Keystone) {
-	m.AddL2Keystone(*keystone)
-	select {
-	case m.mineNowCh <- struct{}{}:
-	default:
-	}
-}
-
-func sortL2KeystonesByL2BlockNumberAsc(a, b hemi.L2Keystone) int {
-	return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
-}
-
-func (m *Miner) processReceivedKeystones(ctx context.Context, l2Keystones []hemi.L2Keystone) {
-	slices.SortFunc(l2Keystones, sortL2KeystonesByL2BlockNumberAsc)
-
-	for _, kh := range l2Keystones {
-		if ctx.Err() != nil {
-			return
-		}
-
-		var lastL2BlockNumber uint32
-		if m.lastKeystone != nil {
-			lastL2BlockNumber = m.lastKeystone.L2BlockNumber
-			log.Debugf(
-				"Checking keystone received with height %d against last keystone %d",
-				kh.L2BlockNumber, lastL2BlockNumber,
-			)
-		}
-
-		if m.lastKeystone == nil || kh.L2BlockNumber > m.lastKeystone.L2BlockNumber {
-			log.Debugf("Received new keystone with block height %d", kh.L2BlockNumber)
-			m.lastKeystone = &kh
-			m.queueKeystoneForMining(&kh)
-			continue
-		}
-
-		if m.cfg.RetryMineThreshold > 0 {
-			retryThreshold := uint32(m.cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod
-			if (lastL2BlockNumber - kh.L2BlockNumber) <= retryThreshold {
-				log.Debugf(
-					"Received keystone old keystone with block height %d, within threshold %d",
-					kh.L2BlockNumber, retryThreshold,
-				)
-				m.queueKeystoneForMining(&kh)
-				continue
-			}
-		}
-
-		log.Debugf(
-			"Refusing to mine keystone with block height %d, highest received: %d",
-			kh.L2BlockNumber, lastL2BlockNumber,
-		)
-	}
-}
-
 func (m *Miner) callBFG(parrentCtx context.Context, timeout time.Duration, msg any) (any, error) {
 	log.Tracef("callBFG %T", msg)
 	defer log.Tracef("callBFG exit %T", msg)
@@ -664,34 +476,6 @@ func (m *Miner) callBFG(parrentCtx context.Context, timeout time.Duration, msg a
 	}
 
 	// Won't get here
-}
-
-func (m *Miner) checkForKeystones(ctx context.Context) error {
-	log.Tracef("Checking for new keystone headers...")
-
-	ghkr := &bfgapi.L2KeystonesRequest{
-		NumL2Keystones: 3, // XXX this needs to be a bit smarter, do this based on some sort of time calculation. Do keep it simple, we don't need keystones that are older than let's say, 30 minbutes.
-	}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, ghkr)
-	if err != nil {
-		return err
-	}
-
-	ghkrResp, ok := res.(*bfgapi.L2KeystonesResponse)
-	if !ok {
-		return errors.New("not an L2KeystonesResponse")
-	}
-
-	if ghkrResp.Error != nil {
-		return ghkrResp.Error
-	}
-
-	log.Tracef("Got response with %v keystones", len(ghkrResp.L2Keystones))
-
-	m.processReceivedKeystones(ctx, ghkrResp.L2Keystones)
-
-	return nil
 }
 
 func (m *Miner) Connected() bool {
@@ -781,12 +565,6 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			if err := bfgapi.Write(ctx, conn, rid, response); err != nil {
 				log.Errorf("Failed to write ping response to BFG server: %v", err)
 			}
-		case bfgapi.CmdL2KeystonesNotification:
-			go func() {
-				if err := m.checkForKeystones(ctx); err != nil {
-					log.Errorf("An error occurred while checking for keystones: %v", err)
-				}
-			}()
 		default:
 			return fmt.Errorf("unknown command: %v", cmd)
 		}

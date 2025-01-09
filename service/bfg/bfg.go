@@ -26,7 +26,6 @@ import (
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/auth"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
@@ -53,7 +52,6 @@ const (
 
 	notifyBtcBlocks     notificationId = "btc_blocks"
 	notifyBtcFinalities notificationId = "btc_finalities"
-	notifyL2Keystones   notificationId = "l2_keystones"
 )
 
 var (
@@ -157,8 +155,6 @@ type Server struct {
 	canonicalChainHeight uint64
 
 	checkForInvalidBlocks chan struct{}
-
-	l2keystonesCache []hemi.L2Keystone
 
 	btcHeightCache uint64
 
@@ -374,24 +370,6 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 	}
 }
 
-func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBalanceRequest) (any, error) {
-	log.Tracef("handleBitcoinBalance")
-	defer log.Tracef("handleBitcoinBalance exit")
-
-	balance, err := s.btcClient.Balance(ctx, bbr.ScriptHash)
-	if err != nil {
-		e := protocol.NewInternalErrorf("bitcoin balance: %w", err)
-		return &bfgapi.BitcoinBalanceResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	return &bfgapi.BitcoinBalanceResponse{
-		Confirmed:   balance.Confirmed,
-		Unconfirmed: balance.Unconfirmed,
-	}, nil
-}
-
 func (s *Server) handleOneBroadcastRequest(ctx context.Context, highPriority bool) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -479,54 +457,6 @@ func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) 
 	}
 }
 
-func (s *Server) handleBitcoinBroadcast(ctx context.Context, bbr *bfgapi.BitcoinBroadcastRequest) (any, error) {
-	log.Tracef("handleBitcoinBroadcast")
-	defer log.Tracef("handleBitcoinBroadcast exit")
-
-	rr := bytes.NewReader(bbr.Transaction)
-	mb := wire.MsgTx{}
-	if err := mb.Deserialize(rr); err != nil {
-		return &bfgapi.BitcoinBroadcastResponse{Error: protocol.RequestErrorf(
-			"failed to deserialize tx: %s", err,
-		)}, nil
-	}
-
-	var (
-		tl2 *pop.TransactionL2
-		err error
-	)
-	for _, v := range mb.TxOut {
-		tl2, err = pop.ParseTransactionL2FromOpReturn(v.PkScript)
-		if err == nil {
-			break // Found the pop transaction.
-		}
-	}
-
-	if tl2 == nil {
-		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.RequestErrorf("could not find l2 keystone abbrev in btc tx"),
-		}, nil
-	}
-
-	_, err = pop.ParsePublicKeyFromSignatureScript(mb.TxIn[0].SignatureScript)
-	if err != nil {
-		return &bfgapi.BitcoinBroadcastResponse{
-			Error: protocol.RequestErrorf("could not parse signature script: %v", err),
-		}, nil
-	}
-
-	err = s.db.BtcTransactionBroadcastRequestInsert(ctx, bbr.Transaction, mb.TxID())
-	if err != nil && !errors.Is(err, database.ErrDuplicate) {
-		e := protocol.NewInternalErrorf("insert broadcast request : %w", err)
-		return &bfgapi.BitcoinBroadcastResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	hash := mb.TxHash()
-	return &bfgapi.BitcoinBroadcastResponse{TXID: hash[:]}, nil
-}
-
 func (s *Server) updateBtcHeightCache(height uint64) {
 	log.Tracef("updateBtcHeightCache")
 	defer log.Tracef("updateBtcHeightCache exit")
@@ -535,51 +465,6 @@ func (s *Server) updateBtcHeightCache(height uint64) {
 	defer s.mtx.Unlock()
 
 	s.btcHeightCache = height
-}
-
-func (s *Server) getBtcHeightCache() uint64 {
-	log.Tracef("getBtcHeightCache")
-	defer log.Tracef("getBtcHeightCache exit")
-
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	return s.btcHeightCache
-}
-
-func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoRequest) (any, error) {
-	log.Tracef("handleBitcoinInfo")
-	defer log.Tracef("handleBitcoinInfo exit")
-
-	height := s.getBtcHeightCache()
-
-	return &bfgapi.BitcoinInfoResponse{
-		Height: height,
-	}, nil
-}
-
-func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXOsRequest) (any, error) {
-	log.Tracef("handleBitcoinUTXOs")
-	defer log.Tracef("handleBitcoinUTXOs exit")
-
-	utxos, err := s.btcClient.UTXOs(ctx, bur.ScriptHash)
-	if err != nil {
-		e := protocol.NewInternalErrorf("bitcoin utxos: %w", err)
-		return &bfgapi.BitcoinUTXOsResponse{
-			Error: e.ProtocolError(),
-		}, e
-
-	}
-	buResp := bfgapi.BitcoinUTXOsResponse{}
-	for _, utxo := range utxos {
-		buResp.UTXOs = append(buResp.UTXOs, &bfgapi.BitcoinUTXO{
-			Hash:  utxo.Hash,
-			Index: utxo.Index,
-			Value: utxo.Value,
-		})
-	}
-
-	return buResp, nil
 }
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
@@ -823,20 +708,6 @@ func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
 					bws.addr, cmd, id, err)
 				return
 			}
-		case bfgapi.CmdPopTxForL2BlockRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.PopTxsForL2BlockRequest)
-				return s.handlePopTxsForL2Block(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdNewL2KeystonesRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.NewL2KeystonesRequest)
-				return s.handleNewL2Keystones(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBTCFinalityByRecentKeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BTCFinalityByRecentKeystonesRequest)
@@ -892,41 +763,6 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 					bws.addr, cmd, id, err)
 				return
 			}
-		case bfgapi.CmdL2KeystonesRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.L2KeystonesRequest)
-				return s.handleL2KeystonesRequest(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdBitcoinBalanceRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.BitcoinBalanceRequest)
-				return s.handleBitcoinBalance(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdBitcoinBroadcastRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.BitcoinBroadcastRequest)
-				return s.handleBitcoinBroadcast(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdBitcoinInfoRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.BitcoinInfoRequest)
-				return s.handleBitcoinInfo(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdBitcoinUTXOsRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.BitcoinUTXOsRequest)
-				return s.handleBitcoinUTXOs(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
 		default:
 			// Terminal error, exit.
 			log.Errorf("handleWebsocketRead %v %v %v: unknown command",
@@ -1063,9 +899,7 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 		conn:           protocol.NewWSConn(conn),
 		listenerName:   "public",
 		requestContext: r.Context(),
-		notify: map[notificationId]struct{}{
-			notifyL2Keystones: {},
-		},
+		notify:         map[notificationId]struct{}{},
 	}
 
 	// Must complete handshake in WSHandshakeTimeout.
@@ -1142,40 +976,6 @@ func (s *Server) handlePingRequest(ctx context.Context, bws *bfgWs, payload any,
 		return fmt.Errorf("handlePingRequest write: %v %w", bws.addr, err)
 	}
 	return nil
-}
-
-func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxsForL2BlockRequest) (any, error) {
-	log.Tracef("handlePopTxsForL2Block")
-	defer log.Tracef("handlePopTxsForL2Block exit")
-
-	hash := hemi.HashSerializedL2KeystoneAbrev(ptl2.L2Block)
-	var h [32]byte
-	copy(h[:], hash)
-
-	response := &bfgapi.PopTxsForL2BlockResponse{}
-
-	popTxs, err := s.db.PopBasisByL2KeystoneAbrevHash(ctx, h, true, ptl2.Page)
-	if err != nil {
-		e := protocol.NewInternalErrorf("error getting pop basis: %w", err)
-		return &bfgapi.PopTxsForL2BlockResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	for k := range popTxs {
-		response.PopTxs = append(response.PopTxs, bfgapi.PopTx{
-			BtcTxId:             api.ByteSlice(popTxs[k].BtcTxId),
-			BtcRawTx:            api.ByteSlice(popTxs[k].BtcRawTx),
-			BtcHeaderHash:       api.ByteSlice(popTxs[k].BtcHeaderHash),
-			BtcTxIndex:          popTxs[k].BtcTxIndex,
-			BtcMerklePath:       popTxs[k].BtcMerklePath,
-			PopTxId:             api.ByteSlice(popTxs[k].PopTxId),
-			PopMinerPublicKey:   api.ByteSlice(popTxs[k].PopMinerPublicKey),
-			L2KeystoneAbrevHash: api.ByteSlice(popTxs[k].L2KeystoneAbrevHash),
-		})
-	}
-
-	return response, nil
 }
 
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, bfrk *bfgapi.BTCFinalityByRecentKeystonesRequest) (any, error) {
@@ -1256,66 +1056,6 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	}, nil
 }
 
-func (s *Server) getL2KeystonesCache() []hemi.L2Keystone {
-	log.Tracef("getL2KeystonesCache")
-	defer log.Tracef("getL2KeystonesCache exit")
-
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	results := make([]hemi.L2Keystone, len(s.l2keystonesCache))
-	copy(results, s.l2keystonesCache)
-
-	return results
-}
-
-func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
-	log.Tracef("refreshL2KeystoneCache")
-	defer log.Tracef("refreshL2KeystoneCache exit")
-
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	results, err := s.db.L2KeystonesMostRecentN(ctx, 100)
-	if err != nil {
-		log.Errorf("error getting keystones %v", err)
-		return
-	}
-
-	l2Keystones := make([]hemi.L2Keystone, 0, len(results))
-	for _, v := range results {
-		l2Keystones = append(l2Keystones, hemi.L2Keystone{
-			Version:            uint8(v.Version),
-			L1BlockNumber:      v.L1BlockNumber,
-			L2BlockNumber:      v.L2BlockNumber,
-			ParentEPHash:       api.ByteSlice(v.ParentEPHash),
-			PrevKeystoneEPHash: api.ByteSlice(v.PrevKeystoneEPHash),
-			StateRoot:          api.ByteSlice(v.StateRoot),
-			EPHash:             api.ByteSlice(v.EPHash),
-		})
-	}
-
-	s.l2keystonesCache = l2Keystones
-}
-
-func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
-	log.Tracef("handleL2KeystonesRequest")
-	defer log.Tracef("handleL2KeystonesRequest exit")
-
-	results := []hemi.L2Keystone{}
-	for i, v := range s.getL2KeystonesCache() {
-		if uint64(i) < l2kr.NumL2Keystones {
-			results = append(results, v)
-		} else {
-			break
-		}
-	}
-
-	return &bfgapi.L2KeystonesResponse{
-		L2Keystones: results,
-	}, nil
-}
-
 func writeNotificationResponse(bws *bfgWs, response any) {
 	if err := bfgapi.Write(bws.requestContext, bws.conn, "", response); err != nil {
 		log.Errorf("handleBtcFinalityNotification write: %v %v", bws.addr, err)
@@ -1334,89 +1074,6 @@ func (s *Server) handleBtcFinalityNotification() {
 		go writeNotificationResponse(bws, &bfgapi.BTCFinalityNotification{})
 	}
 	s.mtx.Unlock()
-}
-
-func (s *Server) handleBtcBlockNotification() {
-	log.Tracef("handleBtcBlockNotification")
-	defer log.Tracef("handleBtcBlockNotification exit")
-
-	s.mtx.Lock()
-	for _, bws := range s.sessions {
-		if _, ok := bws.notify[notifyBtcBlocks]; !ok {
-			continue
-		}
-		go writeNotificationResponse(bws, &bfgapi.BTCNewBlockNotification{})
-	}
-	s.mtx.Unlock()
-}
-
-func (s *Server) handleL2KeystonesNotification() {
-	log.Tracef("handleL2KeystonesNotification")
-	defer log.Tracef("handleL2KeystonesNotification exit")
-
-	s.mtx.Lock()
-	for _, bws := range s.sessions {
-		if _, ok := bws.notify[notifyL2Keystones]; !ok {
-			continue
-		}
-		go writeNotificationResponse(bws, &bfgapi.L2KeystonesNotification{})
-	}
-	s.mtx.Unlock()
-}
-
-func hemiL2KeystoneToDb(l2ks hemi.L2Keystone) bfgd.L2Keystone {
-	return bfgd.L2Keystone{
-		Hash:               hemi.L2KeystoneAbbreviate(l2ks).Hash(),
-		Version:            uint32(l2ks.Version),
-		L1BlockNumber:      l2ks.L1BlockNumber,
-		L2BlockNumber:      l2ks.L2BlockNumber,
-		ParentEPHash:       database.ByteArray(l2ks.ParentEPHash),
-		PrevKeystoneEPHash: database.ByteArray(l2ks.PrevKeystoneEPHash),
-		StateRoot:          database.ByteArray(l2ks.StateRoot),
-		EPHash:             database.ByteArray(l2ks.EPHash),
-	}
-}
-
-func hemiL2KeystonesToDb(l2ks []hemi.L2Keystone) []bfgd.L2Keystone {
-	dbks := make([]bfgd.L2Keystone, 0, len(l2ks))
-	for k := range l2ks {
-		dbks = append(dbks, hemiL2KeystoneToDb(l2ks[k]))
-	}
-	return dbks
-}
-
-func (s *Server) refreshCacheAndNotifiyL2Keystones() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	s.refreshL2KeystoneCache(ctx)
-	go s.handleL2KeystonesNotification()
-}
-
-func (s *Server) saveL2Keystones(ctx context.Context, l2k []hemi.L2Keystone) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	ks := hemiL2KeystonesToDb(l2k)
-
-	err := s.db.L2KeystonesInsert(ctx, ks)
-	if err != nil {
-		log.Errorf("error saving keystone %v", err)
-		return
-	}
-
-	go s.refreshCacheAndNotifiyL2Keystones()
-}
-
-func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
-	log.Tracef("handleNewL2Keystones")
-	defer log.Tracef("handleNewL2Keystones exit")
-
-	response := bfgapi.NewL2KeystonesResponse{}
-
-	go s.saveL2Keystones(context.Background(), nlkr.L2Keystones)
-
-	return response, nil
 }
 
 func (s *Server) running() bool {
@@ -1465,7 +1122,6 @@ func (s *Server) handleStateUpdates(table string, action string, payload, payloa
 	// will change
 	if heightAfter > heightBefore {
 		go s.handleBtcFinalityNotification()
-		go s.handleBtcBlockNotification()
 	}
 
 	s.mtx.Lock()
@@ -1507,26 +1163,6 @@ func (s *Server) handleAccessPublicKeys(table string, action string, payload, pa
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleL2KeystonesChange(table string, action string, payload, payloadOld any) {
-	go s.refreshCacheAndNotifiyL2Keystones()
-}
-
-func (s *Server) fetchRemoteL2Keystones(pctx context.Context) {
-	ctx, cancel := context.WithTimeout(pctx, 10*time.Second)
-	defer cancel()
-
-	resp, err := s.callBFG(ctx, &bfgapi.L2KeystonesRequest{
-		NumL2Keystones: 3,
-	})
-	if err != nil {
-		log.Errorf("callBFG error: %v", err)
-		return
-	}
-
-	l2ksr := resp.(*bfgapi.L2KeystonesResponse)
-	s.saveL2Keystones(ctx, l2ksr.L2Keystones)
-}
-
 func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 	defer s.bfgWG.Done()
 
@@ -1547,50 +1183,11 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 		log.Tracef("handleBFGWebsocketReadUnauth %v", cmd)
 
 		switch cmd {
-		case bfgapi.CmdL2KeystonesNotification:
-			go s.fetchRemoteL2Keystones(ctx)
 		default:
 			log.Errorf("unknown command: %v", cmd)
 			return
 		}
 	}
-}
-
-func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
-	log.Tracef("callBFG %T", msg)
-	defer log.Tracef("callBFG exit %T", msg)
-
-	bc := bfgCmd{
-		msg: msg,
-		ch:  make(chan any),
-	}
-
-	ctx, cancel := context.WithTimeout(parrentCtx, s.bfgCallTimeout)
-	defer cancel()
-
-	// attempt to send
-	select {
-	case <-ctx.Done():
-		return nil, protocol.NewInternalErrorf("callBFG send context error: %w",
-			ctx.Err())
-	case s.bfgCmdCh <- bc:
-	default:
-		return nil, protocol.NewInternalErrorf("bfg command queue full")
-	}
-
-	// Wait for response
-	select {
-	case <-ctx.Done():
-		return nil, protocol.NewInternalErrorf("callBFG received context error: %w",
-			ctx.Err())
-	case payload := <-bc.ch:
-		if err, ok := payload.(error); ok {
-			return nil, err // XXX is this an error or internal error
-		}
-		return payload, nil
-	}
-
-	// Won't get here
 }
 
 func (s *Server) handleBFGCallCompletion(parrentCtx context.Context, conn *protocol.Conn, bc bfgCmd) {
@@ -1764,48 +1361,12 @@ func (s *Server) Run(pctx context.Context) error {
 		return err
 	}
 
-	l2KeystonesPayload, ok := bfgd.NotificationPayload(bfgd.NotificationL2Keystones)
-	if !ok {
-		return fmt.Errorf("could not obtain type: %v", bfgd.NotificationL2Keystones)
-	}
-	if err := s.db.RegisterNotification(ctx, bfgd.NotificationL2Keystones,
-		s.handleL2KeystonesChange, l2KeystonesPayload); err != nil {
-		return err
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for {
-			select {
-			case <-time.After(1 * time.Minute):
-				log.Infof("sending notifications of l2 keystones")
-				go s.handleL2KeystonesNotification()
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
 	for _, p := range []bool{true, false} {
 		for range 4 {
 			s.wg.Add(1)
 			go s.bitcoinBroadcastWorker(ctx, p)
 		}
 	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(1 * time.Second):
-				s.refreshL2KeystoneCache(ctx)
-			}
-		}
-	}()
 
 	s.wg.Add(1)
 	go func() {

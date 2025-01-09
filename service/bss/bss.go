@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"net"
 	"net/http"
 	"sync"
@@ -24,8 +23,6 @@ import (
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/ethereum"
-	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
@@ -92,44 +89,6 @@ type Server struct {
 	// request contexts
 	requestTimeout time.Duration     // Request timeout, must be 2X BFG call timeout
 	sessions       map[string]*bssWs // Session id to connections map
-}
-
-func DerivePopPayoutFromPopTx(popTx bfgapi.PopTx) bssapi.PopPayout {
-	amount := big.NewInt(hemi.HEMIBase)
-
-	return bssapi.PopPayout{
-		// as of now, this is static at 10^18 atomic units == 1 HEMI
-		Amount:       amount,
-		MinerAddress: ethereum.PublicKeyToAddress(popTx.PopMinerPublicKey),
-	}
-}
-
-// XXX this function needs documentation. It is not obvious what it does.
-func ConvertPopTxsToPopPayouts(popTxs []bfgapi.PopTx) []bssapi.PopPayout {
-	popPayoutsMapping := make(map[string]bssapi.PopPayout)
-
-	for _, v := range popTxs {
-		popPayout := DerivePopPayoutFromPopTx(v)
-		key := popPayout.MinerAddress.String()
-		existingPopPayout, ok := popPayoutsMapping[key]
-		if !ok {
-			popPayoutsMapping[key] = popPayout
-			continue
-		}
-
-		popPayoutsMapping[key] = bssapi.PopPayout{
-			MinerAddress: existingPopPayout.MinerAddress,
-			Amount:       existingPopPayout.Amount.Add(existingPopPayout.Amount, popPayout.Amount),
-		}
-	}
-
-	popPayouts := []bssapi.PopPayout{}
-
-	for k := range popPayoutsMapping {
-		popPayouts = append(popPayouts, popPayoutsMapping[k])
-	}
-
-	return popPayouts
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -224,45 +183,6 @@ func (s *Server) handlePingRequest(ctx context.Context, bws *bssWs, payload any,
 	return nil
 }
 
-func (s *Server) handlePopPayoutsRequest(ctx context.Context, msg *bssapi.PopPayoutsRequest) (*bssapi.PopPayoutsResponse, error) {
-	log.Tracef("handlePopPayoutsRequest")
-	defer log.Tracef("handlePopPayoutsRequest exit")
-
-	popTxsForL2BlockRes, err := s.callBFG(ctx, bfgapi.PopTxsForL2BlockRequest{
-		L2Block: msg.L2BlockForPayout,
-		Page:    msg.Page,
-	})
-	if err != nil {
-		e := protocol.NewInternalErrorf("pop tx for l2: block %w", err)
-		return &bssapi.PopPayoutsResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	return &bssapi.PopPayoutsResponse{
-		PopPayouts: ConvertPopTxsToPopPayouts(
-			(popTxsForL2BlockRes.(*bfgapi.PopTxsForL2BlockResponse)).PopTxs,
-		),
-	}, nil
-}
-
-func (s *Server) handleL2KeystoneRequest(ctx context.Context, msg *bssapi.L2KeystoneRequest) (*bssapi.L2KeystoneResponse, error) {
-	log.Tracef("handleL2KeystoneRequest")
-	defer log.Tracef("handleL2KeystoneRequest exit")
-
-	_, err := s.callBFG(ctx, &bfgapi.NewL2KeystonesRequest{
-		L2Keystones: []hemi.L2Keystone{msg.L2Keystone},
-	})
-	if err != nil {
-		e := protocol.NewInternalErrorf("new l2 keytsones: %w", err)
-		return &bssapi.L2KeystoneResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	return &bssapi.L2KeystoneResponse{}, nil
-}
-
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByRecentKeystonesRequest) (*bssapi.BTCFinalityByRecentKeystonesResponse, error) {
 	log.Tracef("handleBtcFinalityByRecentKeystonesRequest")
 	defer log.Tracef("handleBtcFinalityByRecentKeystonesRequest exit")
@@ -336,20 +256,6 @@ func (s *Server) handleWebsocketRead(ctx context.Context, bws *bssWs) {
 		case bssapi.CmdPingRequest:
 			// quick call
 			err = s.handlePingRequest(ctx, bws, payload, id)
-		case bssapi.CmdPopPayoutRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bssapi.PopPayoutsRequest)
-				return s.handlePopPayoutsRequest(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, "handle pop payouts request", handler)
-		case bssapi.CmdL2KeystoneRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bssapi.L2KeystoneRequest)
-				return s.handleL2KeystoneRequest(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, "handle l2 keystone request", handler)
 		case bssapi.CmdBTCFinalityByRecentKeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bssapi.BTCFinalityByRecentKeystonesRequest)
@@ -489,14 +395,6 @@ func (s *Server) handleBtcFinalityNotification() {
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleBtcBlockNotification() {
-	s.mtx.Lock()
-	for _, bws := range s.sessions {
-		go writeNotificationResponse(bws, &bssapi.BTCNewBlockNotification{})
-	}
-	s.mtx.Unlock()
-}
-
 func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.HandleFunc(pattern, handler)
 	log.Infof("handle (%v): %v", service, pattern)
@@ -537,8 +435,6 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 			}
 		case bfgapi.CmdBTCFinalityNotification:
 			go s.handleBtcFinalityNotification()
-		case bfgapi.CmdBTCNewBlockNotification:
-			go s.handleBtcBlockNotification()
 		default:
 			log.Errorf("unknown command: %v", cmd)
 			return
