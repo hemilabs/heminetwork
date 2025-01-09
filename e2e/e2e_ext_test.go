@@ -51,6 +51,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/bfgd"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/ethereum"
@@ -616,6 +617,17 @@ func assertPing(ctx context.Context, t *testing.T, c *websocket.Conn, cmd protoc
 	if v.Header.Command != cmd {
 		t.Fatalf("unexpected command: %s", v.Header.Command)
 	}
+}
+
+// fillOutBytesWith0s will take a string and return a slice of bytes
+// with values from the string suffixed until a size with bytes '_'
+func fillOutBytesWith0s(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, 0)
+	}
+
+	return result
 }
 
 // fillOutBytes will take a string and return a slice of bytes
@@ -1451,6 +1463,36 @@ func TestBitcoinBroadcast(t *testing.T) {
 			break
 		}
 	}
+
+	l2k, err := db.L2KeystonesMostRecentN(ctx, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert that the L2Keystone was stored in the database,
+	// IMPORTANT NOTE: since we derive this from a btc pop tx, only the
+	// abbreviated keystone is stored.  we still want to store this if we
+	// have not seen it before so it's stored with padded 0 bytes. this will
+	// go away in the future once we add "missing keystone" logic and
+	// functionality
+	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
+		bfgd.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      5,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
+	}
+
+	if len(l2k) != 1 {
+		t.Fatalf("unexpected number of keystones: %d", len(l2k))
+	}
 }
 
 // TestBitcoinBroadcastDuplicate calls BitcoinBroadcast twice with the same
@@ -1700,6 +1742,32 @@ loop:
 	if len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
 	}
+
+	l2k, err := db.L2KeystonesMostRecentN(ctx, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert that the L2Keystone was stored in the database,
+	// IMPORTANT NOTE: since we derive this from a btc pop tx, only the
+	// abbreviated keystone is stored.  we still want to store this if we
+	// have not seen it before so it's stored with padded 0 bytes. this will
+	// go away in the future once we add "missing keystone" logic and
+	// functionality
+	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
+		bfgd.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      5,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
+	}
 }
 
 // TestProcessBitcoinBlockNewFullPopBasis takes a full btc tx from the mock
@@ -1812,6 +1880,55 @@ loop:
 
 	if len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
+	}
+
+	l2k, err := db.L2KeystonesMostRecentN(ctx, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert that the L2Keystone was stored in the database,
+	// IMPORTANT NOTE: since we derive this from a btc pop tx, only the
+	// abbreviated keystone is stored.  we still want to store this if we
+	// have not seen it before so it's stored with padded 0 bytes. this will
+	// go away in the future once we add "missing keystone" logic and
+	// functionality
+	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
+		bfgd.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      5,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
+	}
+
+	// assert that we have inserted an l2_keystones_lowest_btc_block row
+	var btcBlockHash database.ByteArray
+	var btcBlockHeight uint64
+	var l2KeystoneAbrevHash database.ByteArray
+	row := sdb.QueryRowContext(ctx, "SELECT btc_block_hash, btc_block_height, l2_keystone_abrev_hash FROM l2_keystones_lowest_btc_block LIMIT 1")
+	if err := row.Scan(&btcBlockHash, &btcBlockHeight, &l2KeystoneAbrevHash); err != nil {
+		t.Fatal(err)
+	}
+
+	if btcBlockHeight != 2 {
+		t.Fatalf("unexpected height: %d", btcBlockHeight)
+	}
+
+	if diff := deep.Equal([]database.ByteArray{
+		btcBlockHash,
+		l2KeystoneAbrevHash,
+	}, []database.ByteArray{
+		popBases[0].BtcHeaderHash,
+		popBases[0].L2KeystoneAbrevHash,
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
 	}
 }
 

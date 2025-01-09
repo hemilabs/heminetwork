@@ -19,7 +19,7 @@ type Database interface {
 	// L2 keystone table
 	L2KeystonesInsert(ctx context.Context, l2ks []L2Keystone) error
 	L2KeystoneByAbrevHash(ctx context.Context, aHash [32]byte) (*L2Keystone, error)
-	L2KeystonesMostRecentN(ctx context.Context, n uint32) ([]L2Keystone, error)
+	L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32) ([]L2Keystone, error)
 
 	// Btc block table
 	BtcBlockInsert(ctx context.Context, bb *BtcBlock) error
@@ -43,6 +43,10 @@ type Database interface {
 	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
 	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
 	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
+
+	L2KeystoneLowestBtcBlockUpsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray) error
+
+	BackfillL2KeystonesLowestBtcBlocks(ctx context.Context, pageSize uint32) error
 }
 
 // NotificationName identifies a database notification type.
@@ -50,6 +54,7 @@ const (
 	NotificationBtcBlocks             database.NotificationName = "btc_blocks"
 	NotificationAccessPublicKeyDelete database.NotificationName = "access_public_keys"
 	NotificationL2Keystones           database.NotificationName = "l2_keystones"
+	NotificationPopBasis              database.NotificationName = "pop_basis"
 )
 
 // NotificationPayload returns the data structure corresponding to the given
@@ -65,6 +70,7 @@ var notifications = map[database.NotificationName]any{
 	NotificationBtcBlocks:             BtcBlock{},
 	NotificationAccessPublicKeyDelete: AccessPublicKey{},
 	NotificationL2Keystones:           []L2Keystone{},
+	NotificationPopBasis:              PopBasis{},
 }
 
 // we use the `deep:"-"` tag to ignore checking for these
@@ -103,7 +109,7 @@ type PopBasis struct {
 	BtcMerklePath       []string
 	PopTxId             database.ByteArray
 	PopMinerPublicKey   database.ByteArray
-	L2KeystoneAbrevHash database.ByteArray
+	L2KeystoneAbrevHash database.ByteArray `json:"l2_keystone_abrev_hash"`
 	CreatedAt           database.Timestamp `deep:"-"`
 	UpdatedAt           database.Timestamp `deep:"-"`
 }
