@@ -165,3 +165,64 @@ func TestMapCache(t *testing.T) {
 
 	t.Logf(spew.Sdump(s))
 }
+
+func intHash(b int) chainhash.Hash {
+	return chainhash.Hash{byte(b)}
+}
+
+func TestHC(t *testing.T) {
+	_, err := lowIQMapNewSize(0)
+	if err == nil {
+		t.Fatalf("expected invalid size error for size <= 0")
+	}
+	_, err = lowIQMapNewSize(1)
+	if err == nil {
+		t.Fatalf("expected invalid count error for count <= 0")
+	}
+	size := 1024
+	l, err := lowIQMapNewSize(size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := intHash(0)
+	for range 2 {
+		l.Put(&tbcd.BlockHeader{
+			Hash: hs,
+		})
+	}
+	if len(l.m) > 1 {
+		t.Fatalf("duplicate headers not excluded by hash")
+	}
+	if _, ok := l.Get(&hs); !ok {
+		t.Fatalf("failed to retrieve header present in map")
+	}
+	hs = intHash(1)
+	if _, ok := l.Get(&hs); ok {
+		t.Fatalf("invalid header retrieved from Map")
+	}
+	for k := range l.count + 5 {
+		l.Put(&tbcd.BlockHeader{
+			Hash: intHash(k),
+		})
+	}
+	if len(l.m) > l.count {
+		t.Fatalf("map size exceeded bounds. expected %v, got %v", l.count, len(l.m))
+	}
+	storedHashes := make([]*chainhash.Hash, 0, len(l.m)-1)
+	var lastHash *chainhash.Hash
+	for key := range l.m {
+		keyc := key
+		if len(storedHashes) >= len(l.m)-1 {
+			lastHash = &keyc
+		} else {
+			storedHashes = append(storedHashes, &keyc)
+		}
+	}
+	l.PurgeBatch(storedHashes)
+	if len(l.m) != 1 {
+		t.Fatalf("expected %d elements to be purged, purged %d", len(storedHashes), l.count-len(l.m))
+	}
+	if _, ok := l.Get(lastHash); !ok {
+		t.Fatalf("incorrect element purged")
+	}
+}
