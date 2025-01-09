@@ -959,10 +959,6 @@ func TestBFGPublicErrorCases(t *testing.T) {
 				}
 
 				switch v := response.(type) {
-				case *bfgapi.BitcoinBalanceResponse:
-					if v.Error.Message != tti.expectedError {
-						t.Fatalf("%s != %s", v.Error.Message, tti.expectedError)
-					}
 				case *bfgapi.BitcoinBroadcastResponse:
 					if v.Error.Message != tti.expectedError {
 						t.Fatalf("%s != %s", v.Error.Message, tti.expectedError)

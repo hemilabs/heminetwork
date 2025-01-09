@@ -246,23 +246,6 @@ func (s *Server) handlePopPayoutsRequest(ctx context.Context, msg *bssapi.PopPay
 	}, nil
 }
 
-func (s *Server) handleL2KeystoneRequest(ctx context.Context, msg *bssapi.L2KeystoneRequest) (*bssapi.L2KeystoneResponse, error) {
-	log.Tracef("handleL2KeystoneRequest")
-	defer log.Tracef("handleL2KeystoneRequest exit")
-
-	_, err := s.callBFG(ctx, &bfgapi.NewL2KeystonesRequest{
-		L2Keystones: []hemi.L2Keystone{msg.L2Keystone},
-	})
-	if err != nil {
-		e := protocol.NewInternalErrorf("new l2 keytsones: %w", err)
-		return &bssapi.L2KeystoneResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	return &bssapi.L2KeystoneResponse{}, nil
-}
-
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, msg *bssapi.BTCFinalityByRecentKeystonesRequest) (*bssapi.BTCFinalityByRecentKeystonesResponse, error) {
 	log.Tracef("handleBtcFinalityByRecentKeystonesRequest")
 	defer log.Tracef("handleBtcFinalityByRecentKeystonesRequest exit")
@@ -343,13 +326,6 @@ func (s *Server) handleWebsocketRead(ctx context.Context, bws *bssWs) {
 			}
 
 			go s.handleRequest(ctx, bws, id, "handle pop payouts request", handler)
-		case bssapi.CmdL2KeystoneRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bssapi.L2KeystoneRequest)
-				return s.handleL2KeystoneRequest(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, "handle l2 keystone request", handler)
 		case bssapi.CmdBTCFinalityByRecentKeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bssapi.BTCFinalityByRecentKeystonesRequest)
