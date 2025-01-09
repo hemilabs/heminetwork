@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -17,7 +18,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
-	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -67,7 +68,7 @@ type ldb struct {
 	pool    level.Pool
 	rawPool level.RawPool
 
-	blockCache *lru.Cache[chainhash.Hash, *btcutil.Block] // block cache
+	blockCache *lowIQLRU
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
@@ -108,16 +109,38 @@ func headerHash(header []byte) *chainhash.Hash {
 }
 
 type Config struct {
-	Home             string // home directory
-	BlockCache       int    // number of blocks to cache
-	BlockheaderCache int    // number of blocks headers to cache
+	Home                 string // home directory
+	BlockCacheSize       string // size of block cache
+	BlockheaderCacheSize string // size of block header cache
+	blockCacheSize       int    // parsed size of block cache
+	blockheaderCacheSize int    // parsed size of block header cache
 }
 
 func NewConfig(home string) *Config {
+	blockheaderCacheSizeS := "128mb" // Cache all blockheaders on mainnet
+	blockheaderCacheSize, err := humanize.ParseBytes(blockheaderCacheSizeS)
+	if err != nil {
+		panic(err)
+	}
+	if blockheaderCacheSize > math.MaxInt64 {
+		panic("invalid blockheaderCacheSize")
+	}
+
+	blockCacheSizeS := "1gb" // ~640 blocks on mainnet
+	blockCacheSize, err := humanize.ParseBytes(blockCacheSizeS)
+	if err != nil {
+		panic(err)
+	}
+	if blockCacheSize > math.MaxInt64 {
+		panic("invalid blockCacheSize")
+	}
+
 	return &Config{
-		Home:             home, // require user to set home.
-		BlockCache:       250,  // max 4GB on mainnet
-		BlockheaderCache: 1e6,  // Cache all blockheaders on mainnet
+		Home:                 home, // require user to set home.
+		BlockCacheSize:       blockCacheSizeS,
+		blockCacheSize:       int(blockCacheSize),
+		BlockheaderCacheSize: blockheaderCacheSizeS,
+		blockheaderCacheSize: int(blockheaderCacheSize),
 	}
 }
 
@@ -137,19 +160,22 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		cfg:      cfg,
 	}
 
-	if cfg.BlockCache > 0 {
-		l.blockCache, err = lru.New[chainhash.Hash, *btcutil.Block](cfg.BlockCache)
+	if cfg.blockCacheSize > 0 {
+		l.blockCache, err = lowIQLRUSizeNew(cfg.blockCacheSize)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 		}
-		log.Infof("block cache: %v", cfg.BlockCache)
+		log.Infof("block cache: %v", humanize.Bytes(uint64(cfg.blockCacheSize)))
 	} else {
 		log.Infof("block cache: DISABLED")
 	}
-	if cfg.BlockheaderCache > 0 {
-		l.headerCache = lowIQMapNew(cfg.BlockheaderCache)
-
-		log.Infof("blockheader cache: %v", cfg.BlockheaderCache)
+	if cfg.blockheaderCacheSize > 0 {
+		l.headerCache, err = lowIQMapSizeNew(cfg.blockheaderCacheSize)
+		if err != nil {
+			return nil, fmt.Errorf("couldn't setup block header cache: %w", err)
+		}
+		log.Infof("blockheader cache: %v",
+			humanize.Bytes(uint64(cfg.blockheaderCacheSize)))
 	} else {
 		log.Infof("blockheader cache: DISABLED")
 	}
@@ -316,7 +342,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
-	if l.cfg.BlockheaderCache > 0 {
+	if l.cfg.blockheaderCacheSize > 0 {
 		// Try cache first
 		if b, ok := l.headerCache.Get(hash); ok {
 			return b, nil
@@ -338,7 +364,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 	bh := decodeBlockHeader(ebh)
 
 	// Insert into cache, roughly 150 byte cost.
-	if l.cfg.BlockheaderCache > 0 {
+	if l.cfg.blockheaderCacheSize > 0 {
 		l.headerCache.Put(bh)
 	}
 
@@ -822,17 +848,33 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	bhsBatch := new(leveldb.Batch)
 	hhBatch := new(leveldb.Batch)
 
+	var bhCacheBatch []*chainhash.Hash
+	if l.cfg.blockheaderCacheSize > 0 {
+		// cache batch to delete blockheaders
+		bhCacheBatch = make([]*chainhash.Hash, 0, len(headersParsed))
+	}
+
 	// Insert each block header deletion into the batch (for header itself and
 	// height-header association)
 	for i := 0; i < len(headersParsed); i++ {
 		// Delete header i
 		bhash := headersParsed[i].BlockHash()
 		fh := fullHeadersFromDb[i]
+		// Make db delete batch
 		bhsBatch.Delete(bhash[:])
+
+		// Remove from header cache as well in a batch
+		if l.cfg.blockheaderCacheSize > 0 {
+			bhCacheBatch = append(bhCacheBatch, &bhash)
+		}
 
 		// Delete height mapping for header i
 		hhKey := heightHashToKey(fh.Height, bhash[:])
 		hhBatch.Delete(hhKey)
+	}
+	if l.cfg.blockheaderCacheSize > 0 {
+		// Delete right away. Cache can always be rehydrated.
+		l.headerCache.PurgeBatch(bhCacheBatch)
 	}
 
 	// Insert updated canonical tip after removal of the provided block headers
@@ -1242,8 +1284,8 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 		if err = bDB.Insert(b.Hash()[:], raw); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
-		if l.cfg.BlockCache > 0 {
-			l.blockCache.Add(*b.Hash(), b)
+		if l.cfg.blockCacheSize > 0 {
+			l.blockCache.Put(b)
 		}
 	}
 
@@ -1279,9 +1321,9 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
-	if l.cfg.BlockCache > 0 {
+	if l.cfg.blockCacheSize > 0 {
 		// Try cache first
-		if cb, ok := l.blockCache.Get(*hash); ok {
+		if cb, ok := l.blockCache.Get(hash); ok {
 			return cb, nil
 		}
 	}
@@ -1298,8 +1340,8 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	if err != nil {
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))
 	}
-	if l.cfg.BlockCache > 0 {
-		l.blockCache.Add(*hash, b)
+	if l.cfg.blockCacheSize > 0 {
+		l.blockCache.Put(b)
 	}
 	return b, nil
 }
@@ -1612,4 +1654,12 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 
 	return nil
+}
+
+func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
+	return l.headerCache.Stats()
+}
+
+func (l *ldb) BlockCacheStats() tbcd.CacheStats {
+	return l.blockCache.Stats()
 }
