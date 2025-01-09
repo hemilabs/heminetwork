@@ -61,20 +61,14 @@ func (l *lowIQLRU) Put(v *btcutil.Block) {
 		// LET THEM EAT PANIC
 		re := l.l.Front()
 		rha := l.l.Remove(re)
-		// fmt.Printf("rha %v\n", spew.Sdump(rha))
-		// fmt.Printf("==== re %T rha %T\n", re, rha)
-		rh := rha.(*list.Element).Value.(*chainhash.Hash)
+		rh := rha.(*chainhash.Hash)
 		l.totalSize -= len(l.m[*rh].block)
 		delete(l.m, *rh)
 		l.c.Purges++
 	}
 
-	// lru list
-	element := &list.Element{Value: hash}
-	l.l.PushBack(element)
-
-	// block lookup
-	l.m[*hash] = blockElement{element: element, block: block}
+	// block lookup and lru append
+	l.m[*hash] = blockElement{element: l.l.PushBack(hash), block: block}
 	l.totalSize += len(block)
 }
 
