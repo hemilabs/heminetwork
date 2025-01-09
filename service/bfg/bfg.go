@@ -371,24 +371,6 @@ func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid strin
 	}
 }
 
-func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBalanceRequest) (any, error) {
-	log.Tracef("handleBitcoinBalance")
-	defer log.Tracef("handleBitcoinBalance exit")
-
-	balance, err := s.btcClient.Balance(ctx, bbr.ScriptHash)
-	if err != nil {
-		e := protocol.NewInternalErrorf("bitcoin balance: %w", err)
-		return &bfgapi.BitcoinBalanceResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	return &bfgapi.BitcoinBalanceResponse{
-		Confirmed:   balance.Confirmed,
-		Unconfirmed: balance.Unconfirmed,
-	}, nil
-}
-
 func (s *Server) handleOneBroadcastRequest(ctx context.Context, highPriority bool) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -882,13 +864,6 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 					bws.addr, cmd, id, err)
 				return
 			}
-		case bfgapi.CmdBitcoinBalanceRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.BitcoinBalanceRequest)
-				return s.handleBitcoinBalance(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBitcoinBroadcastRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BitcoinBroadcastRequest)

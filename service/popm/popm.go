@@ -438,33 +438,6 @@ func (m *Miner) Ping(ctx context.Context, timestamp int64) (*bfgapi.PingResponse
 	return pr, nil
 }
 
-func (m *Miner) BitcoinBalance(ctx context.Context, scriptHash string) (*bfgapi.BitcoinBalanceResponse, error) {
-	if scriptHash[0:2] == "0x" || scriptHash[0:2] == "0X" {
-		scriptHash = scriptHash[2:]
-	}
-	sh, err := hex.DecodeString(scriptHash)
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinBalanceRequest{
-		ScriptHash: sh,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-
-	br, ok := res.(*bfgapi.BitcoinBalanceResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinBalanceResponse: %T", res)
-	}
-
-	if br.Error != nil {
-		return nil, br.Error
-	}
-
-	return br, nil
-}
-
 func (m *Miner) BitcoinInfo(ctx context.Context) (*bfgapi.BitcoinInfoResponse, error) {
 	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinInfoRequest{})
 	if err != nil {

@@ -28,7 +28,6 @@ const (
 	CmdBTCFinalityByKeystonesRequest        = "bfgapi-btc-finality-by-keystones-request"
 	CmdBTCFinalityByKeystonesResponse       = "bfgapi-btc-finality-by-keystones-response"
 	CmdBTCFinalityNotification              = "bfgapi-btc-finality-notification"
-	CmdBitcoinBalanceRequest                = "bfgapi-bitcoin-balance-request"
 	CmdBitcoinBalanceResponse               = "bfgapi-bitcoin-balance-response"
 	CmdBitcoinBroadcastRequest              = "bfgapi-bitcoin-broadcast-request"
 	CmdBitcoinBroadcastResponse             = "bfgapi-bitcoin-broadcast-response"
@@ -68,10 +67,6 @@ type NewL2KeystonesRequest struct {
 
 type NewL2KeystonesResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
-}
-
-type BitcoinBalanceRequest struct {
-	ScriptHash api.ByteSlice `json:"script_hash"`
 }
 
 type BitcoinBalanceResponse struct {
@@ -166,7 +161,6 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),
 	CmdBTCFinalityByKeystonesResponse:       reflect.TypeOf(BTCFinalityByKeystonesResponse{}),
 	CmdBTCFinalityNotification:              reflect.TypeOf(BTCFinalityNotification{}),
-	CmdBitcoinBalanceRequest:                reflect.TypeOf(BitcoinBalanceRequest{}),
 	CmdBitcoinBalanceResponse:               reflect.TypeOf(BitcoinBalanceResponse{}),
 	CmdBitcoinBroadcastRequest:              reflect.TypeOf(BitcoinBroadcastRequest{}),
 	CmdBitcoinBroadcastResponse:             reflect.TypeOf(BitcoinBroadcastResponse{}),
