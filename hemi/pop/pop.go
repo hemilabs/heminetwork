@@ -35,6 +35,24 @@ func MinerAddressFromString(address string) (*MinerAddress, error) {
 	return &ma, nil
 }
 
+
+func serializeTransaction(magic []byte, keystoneData []byte) []byte {
+	var b []byte
+	b = append(b, magic...)
+	b = append(b, keystoneData...)
+	return b
+}
+
+func encodeToOpReturn(magic []byte, keystoneData []byte) ([]byte, error) {
+	txb := serializeTransaction(magic, keystoneData)
+	tsb := txscript.NewScriptBuilder()
+	tsb.AddOp(txscript.OP_RETURN)
+	tsb.AddData(txb)
+
+	return tsb.Script()
+}
+
+
 // XXX does this belong here? this feels more hemi-y.
 
 // TransactionL2 rename to Transaction and fixup this code
@@ -44,25 +62,13 @@ type TransactionL2 struct {
 
 // Serialize serializes a PoP transaction to its byte representation.
 func (tx *TransactionL2) Serialize() []byte {
-	khb := tx.L2Keystone.Serialize()
-
-	var b []byte
-	b = append(b, magic...)
-	b = append(b, khb[:]...)
-
-	return b
+	return serializeTransaction(MagicBytes, tx.L2Keystone.Serialize())
 }
 
 // EncodeToOpReturn produces the pay to script necessary to publish this
 // PoP transaction on Bitcoin using OP_RETURN.
 func (tx *TransactionL2) EncodeToOpReturn() ([]byte, error) {
-	txb := tx.Serialize()
-
-	tsb := txscript.NewScriptBuilder()
-	tsb.AddOp(txscript.OP_RETURN)
-	tsb.AddData(txb)
-
-	return tsb.Script()
+	return encodeToOpReturn(MagicBytes, tx.L2Keystone.Serialize())
 }
 
 // ParseTransactionFromOpReturn attempts to parse the given data
@@ -99,25 +105,13 @@ type Transaction struct {
 
 // Serialize serializes a PoP transaction to its byte representation.
 func (tx *Transaction) Serialize() []byte {
-	khb := tx.Keystone.Serialize()
-
-	var b []byte
-	b = append(b, magic...)
-	b = append(b, khb[:]...)
-
-	return b
+	return serializeTransaction(MagicBytes, tx.Keystone.Serialize())
 }
 
 // EncodeToOpReturn produces the pay to script necessary to publish this
 // PoP transaction on Bitcoin using OP_RETURN.
 func (tx *Transaction) EncodeToOpReturn() ([]byte, error) {
-	txb := tx.Serialize()
-
-	tsb := txscript.NewScriptBuilder()
-	tsb.AddOp(txscript.OP_RETURN)
-	tsb.AddData(txb)
-
-	return tsb.Script()
+	return encodeToOpReturn(MagicBytes, tx.Keystone.Serialize())
 }
 
 // ParseTransactionFromOpReturn attempts to parse the given data
