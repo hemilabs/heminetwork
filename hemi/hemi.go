@@ -243,7 +243,7 @@ func NewL2KeystoneAbrevFromBytes(b []byte) (*L2KeystoneAbrev, error) {
 		copy(ka.StateRoot[:], b[32:64])
 		copy(ka.EPHash[:], b[64:76])
 	default:
-		return nil, fmt.Errorf("unsuported version: %v", ka.Version)
+		return nil, fmt.Errorf("unsupported version: %v", ka.Version)
 	}
 	return ka, nil
 }
