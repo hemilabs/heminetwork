@@ -61,5 +61,25 @@ func TestLRUCache(t *testing.T) {
 		prevHash = h
 	}
 
-	t.Logf("%v", spew.Sdump(l.Stats()))
+	// verify purges are maxBlocks
+	s = l.Stats()
+	if s.Hits != 10 && s.Misses != 0 && s.Purges != 10 {
+		t.Fatal(spew.Sdump(s))
+	}
+
+	// retrieve purged blocks
+	for k := range blocks {
+		if k >= maxCache {
+			break
+		}
+		if _, ok := l.Get(&blocks[k]); ok {
+			t.Fatalf("block found: %v", blocks[k])
+		}
+	}
+
+	// verify misses are maxBlocks
+	s = l.Stats()
+	if s.Hits != 10 && s.Misses != 10 && s.Purges != 10 {
+		t.Fatal(spew.Sdump(s))
+	}
 }
