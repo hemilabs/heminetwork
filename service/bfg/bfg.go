@@ -26,7 +26,6 @@ import (
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/auth"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
@@ -709,13 +708,6 @@ func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
 					bws.addr, cmd, id, err)
 				return
 			}
-		case bfgapi.CmdPopTxForL2BlockRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.PopTxsForL2BlockRequest)
-				return s.handlePopTxsForL2Block(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBTCFinalityByRecentKeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BTCFinalityByRecentKeystonesRequest)
@@ -984,40 +976,6 @@ func (s *Server) handlePingRequest(ctx context.Context, bws *bfgWs, payload any,
 		return fmt.Errorf("handlePingRequest write: %v %w", bws.addr, err)
 	}
 	return nil
-}
-
-func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxsForL2BlockRequest) (any, error) {
-	log.Tracef("handlePopTxsForL2Block")
-	defer log.Tracef("handlePopTxsForL2Block exit")
-
-	hash := hemi.HashSerializedL2KeystoneAbrev(ptl2.L2Block)
-	var h [32]byte
-	copy(h[:], hash)
-
-	response := &bfgapi.PopTxsForL2BlockResponse{}
-
-	popTxs, err := s.db.PopBasisByL2KeystoneAbrevHash(ctx, h, true, ptl2.Page)
-	if err != nil {
-		e := protocol.NewInternalErrorf("error getting pop basis: %w", err)
-		return &bfgapi.PopTxsForL2BlockResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	for k := range popTxs {
-		response.PopTxs = append(response.PopTxs, bfgapi.PopTx{
-			BtcTxId:             api.ByteSlice(popTxs[k].BtcTxId),
-			BtcRawTx:            api.ByteSlice(popTxs[k].BtcRawTx),
-			BtcHeaderHash:       api.ByteSlice(popTxs[k].BtcHeaderHash),
-			BtcTxIndex:          popTxs[k].BtcTxIndex,
-			BtcMerklePath:       popTxs[k].BtcMerklePath,
-			PopTxId:             api.ByteSlice(popTxs[k].PopTxId),
-			PopMinerPublicKey:   api.ByteSlice(popTxs[k].PopMinerPublicKey),
-			L2KeystoneAbrevHash: api.ByteSlice(popTxs[k].L2KeystoneAbrevHash),
-		})
-	}
-
-	return response, nil
 }
 
 func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, bfrk *bfgapi.BTCFinalityByRecentKeystonesRequest) (any, error) {

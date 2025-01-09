@@ -8,12 +8,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"math/big"
 	"reflect"
 
-	"github.com/ethereum/go-ethereum/common"
-
-	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -29,30 +25,6 @@ var (
 	DefaultPrometheusListen = "localhost:2112"
 	DefaultURL              = "ws://" + DefaultListen + RouteWebsocket
 )
-
-type PopPayout struct {
-	MinerAddress common.Address `json:"miner_address"`
-	Amount       *big.Int       `json:"amount"`
-}
-
-type PopPayoutsRequest struct {
-	L2BlockForPayout api.ByteSlice `json:"l2_block_for_payout"`
-	Page             uint32        `json:"page,omitempty"`
-
-	// these are unused at this point, they will be used in the future to determine the
-	// total payout to miners
-	PopDifficultyNumerator   uint64 `json:"popDifficultyNumerator,omitempty"`
-	PopDifficultyDenominator uint64 `json:"popDifficultyDenominator,omitempty"`
-}
-
-type PopPayoutsResponse struct {
-	PopPayouts []PopPayout `json:"pop_payouts"`
-
-	// unused for now
-	PopScore uint64 `json:"pop_score,omitempty"`
-
-	Error *protocol.Error `json:"error,omitempty"`
-}
 
 type OptimismKeystone hemi.L2Keystone // dop only
 
@@ -93,8 +65,6 @@ const (
 	CmdPingResponse = "bssapi-ping-response"
 
 	// Custom RPC commands
-	CmdPopPayoutRequest                     protocol.Command = "bssapi-pop-payout-request"
-	CmdPopPayoutResponse                    protocol.Command = "bssapi-pop-payout-response"
 	CmdBTCFinalityByRecentKeystonesRequest  protocol.Command = "bssapi-btc-finality-by-recent-keystones-request"
 	CmdBTCFinalityByRecentKeystonesResponse protocol.Command = "bssapi-btc-finality-by-recent-keystones-response"
 	CmdBTCFinalityByKeystonesRequest        protocol.Command = "bssapi-btc-finality-by-keystones-request"
@@ -106,8 +76,6 @@ const (
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                          reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                         reflect.TypeOf(PingResponse{}),
-	CmdPopPayoutRequest:                     reflect.TypeOf(PopPayoutsRequest{}),
-	CmdPopPayoutResponse:                    reflect.TypeOf(PopPayoutsResponse{}),
 	CmdBTCFinalityByRecentKeystonesRequest:  reflect.TypeOf(BTCFinalityByRecentKeystonesRequest{}),
 	CmdBTCFinalityByRecentKeystonesResponse: reflect.TypeOf(BTCFinalityByRecentKeystonesResponse{}),
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),

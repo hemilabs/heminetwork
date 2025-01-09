@@ -19,8 +19,6 @@ const (
 
 	CmdPingRequest                          = "bfgapi-ping-request"
 	CmdPingResponse                         = "bfgapi-ping-response"
-	CmdPopTxForL2BlockRequest               = "bfgapi-pop-txs-for-l2-block-request"
-	CmdPopTxForL2BlockResponse              = "bfgapi-pop-txs-for-l2-block-response"
 	CmdBTCFinalityByRecentKeystonesRequest  = "bfgapi-btc-finality-by-recent-keystones-request"
 	CmdBTCFinalityByRecentKeystonesResponse = "bfgapi-btc-finality-by-recent-keystones-response"
 	CmdBTCFinalityByKeystonesRequest        = "bfgapi-btc-finality-by-keystones-request"
@@ -68,16 +66,6 @@ type BitcoinUTXOsResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type PopTxsForL2BlockRequest struct {
-	L2Block api.ByteSlice `json:"l2_block"`
-	Page    uint32        `json:"page,omitempty"`
-}
-
-type PopTxsForL2BlockResponse struct {
-	PopTxs []PopTx         `json:"pop_txs"`
-	Error  *protocol.Error `json:"error,omitempty"`
-}
-
 type BTCFinalityByRecentKeystonesRequest struct {
 	NumRecentKeystones uint32 `json:"num_recent_keystones"`
 }
@@ -114,8 +102,6 @@ type PopTx struct {
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                          reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                         reflect.TypeOf(PingResponse{}),
-	CmdPopTxForL2BlockRequest:               reflect.TypeOf(PopTxsForL2BlockRequest{}),
-	CmdPopTxForL2BlockResponse:              reflect.TypeOf(PopTxsForL2BlockResponse{}),
 	CmdBTCFinalityByRecentKeystonesRequest:  reflect.TypeOf(BTCFinalityByRecentKeystonesRequest{}),
 	CmdBTCFinalityByRecentKeystonesResponse: reflect.TypeOf(BTCFinalityByRecentKeystonesResponse{}),
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),
