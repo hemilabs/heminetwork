@@ -13,11 +13,17 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
-const blockSize = 1677721 // ~1.6MB rough size of a mainnet block as of Jan 2025
+var blockSize = 1677721 // ~1.6MB rough size of a mainnet block as of Jan 2025
 
-type timeBlock struct {
+type blockElement struct {
 	element *list.Element
 	block   []byte
+}
+
+type CacheStats struct {
+	Hits   int
+	Misses int
+	Purges int
 }
 
 type lowIQLRU struct {
@@ -25,11 +31,14 @@ type lowIQLRU struct {
 
 	size int // this is the approximate max size
 
-	m         map[chainhash.Hash]timeBlock
+	m         map[chainhash.Hash]blockElement
 	totalSize int
 
-	// lru list
+	// lru list, when used move to back of the list
 	l *list.List
+
+	// stats
+	c CacheStats
 }
 
 func (l *lowIQLRU) Put(v *btcutil.Block) {
@@ -43,18 +52,21 @@ func (l *lowIQLRU) Put(v *btcutil.Block) {
 
 	block, err := v.Bytes()
 	if err != nil {
+		// data corruption, panic
 		panic(err)
-		// XXX don't cache but panic for now for diagnostic
 	}
 
 	// evict first element in list
-	if l.totalSize+len(block) >= l.size {
+	if l.totalSize+len(block) > l.size {
 		// LET THEM EAT PANIC
 		re := l.l.Front()
 		rha := l.l.Remove(re)
-		rh := rha.(chainhash.Hash)
-		l.totalSize -= len(l.m[rh].block)
-		delete(l.m, rh)
+		// fmt.Printf("rha %v\n", spew.Sdump(rha))
+		// fmt.Printf("==== re %T rha %T\n", re, rha)
+		rh := rha.(*list.Element).Value.(*chainhash.Hash)
+		l.totalSize -= len(l.m[*rh].block)
+		delete(l.m, *rh)
+		l.c.Purges++
 	}
 
 	// lru list
@@ -62,7 +74,7 @@ func (l *lowIQLRU) Put(v *btcutil.Block) {
 	l.l.PushBack(element)
 
 	// block lookup
-	l.m[*hash] = timeBlock{element: element, block: block}
+	l.m[*hash] = blockElement{element: element, block: block}
 	l.totalSize += len(block)
 }
 
@@ -72,17 +84,27 @@ func (l *lowIQLRU) Get(k *chainhash.Hash) (*btcutil.Block, bool) {
 
 	be, ok := l.m[*k]
 	if !ok {
+		l.c.Misses++
 		return nil, false
 	}
 	b, err := btcutil.NewBlockFromBytes(be.block)
 	if err != nil {
-		panic(err) // XXX delete from cache and return nil, false but panic for diagnostics at this time
+		// panic for diagnostics at this time
+		panic(err)
 	}
 
 	// update access
 	l.l.MoveToBack(be.element)
 
+	l.c.Hits++
+
 	return b, true
+}
+
+func (l *lowIQLRU) Stats() CacheStats {
+	l.mtx.RLock()
+	defer l.mtx.RUnlock()
+	return l.c
 }
 
 func lowIQLRUNewSize(size int) (*lowIQLRU, error) {
@@ -96,7 +118,7 @@ func lowIQLRUNewSize(size int) (*lowIQLRU, error) {
 	}
 	return &lowIQLRU{
 		size: size,
-		m:    make(map[chainhash.Hash]timeBlock, count),
+		m:    make(map[chainhash.Hash]blockElement, count),
 		l:    list.New(),
 	}, nil
 }
