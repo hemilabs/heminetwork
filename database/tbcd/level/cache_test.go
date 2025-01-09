@@ -82,4 +82,6 @@ func TestLRUCache(t *testing.T) {
 	if s.Hits != 10 && s.Misses != 10 && s.Purges != 10 {
 		t.Fatal(spew.Sdump(s))
 	}
+
+	t.Logf(spew.Sdump(s))
 }

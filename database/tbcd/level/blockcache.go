@@ -11,6 +11,8 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 var blockSize = 1677721 // ~1.6MB rough size of a mainnet block as of Jan 2025
@@ -18,12 +20,6 @@ var blockSize = 1677721 // ~1.6MB rough size of a mainnet block as of Jan 2025
 type blockElement struct {
 	element *list.Element
 	block   []byte
-}
-
-type CacheStats struct {
-	Hits   int
-	Misses int
-	Purges int
 }
 
 type lowIQLRU struct {
@@ -38,7 +34,7 @@ type lowIQLRU struct {
 	l *list.List
 
 	// stats
-	c CacheStats
+	c tbcd.CacheStats
 }
 
 func (l *lowIQLRU) Put(v *btcutil.Block) {
@@ -70,6 +66,8 @@ func (l *lowIQLRU) Put(v *btcutil.Block) {
 	// block lookup and lru append
 	l.m[*hash] = blockElement{element: l.l.PushBack(hash), block: block}
 	l.totalSize += len(block)
+
+	l.c.Size = l.totalSize
 }
 
 func (l *lowIQLRU) Get(k *chainhash.Hash) (*btcutil.Block, bool) {
@@ -95,9 +93,10 @@ func (l *lowIQLRU) Get(k *chainhash.Hash) (*btcutil.Block, bool) {
 	return b, true
 }
 
-func (l *lowIQLRU) Stats() CacheStats {
+func (l *lowIQLRU) Stats() tbcd.CacheStats {
 	l.mtx.RLock()
 	defer l.mtx.RUnlock()
+	l.c.Items = len(l.m)
 	return l.c
 }
 

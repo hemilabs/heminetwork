@@ -108,7 +108,7 @@ type Config struct {
 func NewDefaultConfig() *Config {
 	return &Config{
 		ListenAddress:        tbcapi.DefaultListen,
-		BlockCacheSize:       "2gb",
+		BlockCacheSize:       "1gb",
 		BlockheaderCacheSize: "128mb",
 		LogLevel:             logLevel,
 		MaxCachedTxs:         defaultMaxCachedTxs,
@@ -161,6 +161,7 @@ type Server struct {
 		syncInfo                  SyncInfo
 		connected, good, bad      int
 		mempoolCount, mempoolSize int
+		blockCache                tbcd.CacheStats
 	} // periodically updated by promPoll
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
@@ -671,6 +672,36 @@ func (s *Server) promMempoolSize() float64 {
 	return deucalion.IntToFloat(s.prom.mempoolSize)
 }
 
+func (s *Server) promBlockCacheHits() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Hits)
+}
+
+func (s *Server) promBlockCacheMisses() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Misses)
+}
+
+func (s *Server) promBlockCachePurges() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Purges)
+}
+
+func (s *Server) promBlockCacheSize() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Size)
+}
+
+func (s *Server) promBlockCacheItems() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Items)
+}
+
 func (s *Server) promPoll(ctx context.Context) error {
 	for {
 		select {
@@ -681,17 +712,25 @@ func (s *Server) promPoll(ctx context.Context) error {
 
 		s.prom.syncInfo = s.Synced(ctx)
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
+		s.prom.blockCache = s.db.BlockCacheStats()
 		//if s.cfg.MempoolEnabled {
 		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
 		//}
 
+		s.promPollVerbose = true
 		if s.promPollVerbose {
 			s.mtx.RLock()
 			log.Infof("Pending blocks %v/%v connected peers %v "+
-				"good peers %v bad peers %v mempool %v %v",
+				"good peers %v bad peers %v mempool %v %v "+
+				"block cache hits: %v misses: %v purges: %v size: %v "+
+				"blocks: %v",
 				s.blocks.Len(), defaultPendingBlocks, s.prom.connected,
 				s.prom.good, s.prom.bad, s.prom.mempoolCount,
-				humanize.Bytes(uint64(s.prom.mempoolSize)))
+				humanize.Bytes(uint64(s.prom.mempoolSize)),
+				s.prom.blockCache.Hits, s.prom.blockCache.Misses,
+				s.prom.blockCache.Purges,
+				humanize.Bytes(uint64(s.prom.blockCache.Size)),
+				s.prom.blockCache.Items)
 			s.mtx.RUnlock()
 		}
 
@@ -2224,6 +2263,31 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "mempool_size_bytes",
 				Help:      "Size of mempool in bytes",
 			}, s.promMempoolSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_hits",
+				Help:      "Block cache hits",
+			}, s.promBlockCacheHits),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_misses",
+				Help:      "Block cache misses",
+			}, s.promBlockCacheMisses),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_purges",
+				Help:      "Block cache purges",
+			}, s.promBlockCachePurges),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_size",
+				Help:      "Block cache size",
+			}, s.promBlockCacheSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_items",
+				Help:      "Number of cached blocks",
+			}, s.promBlockCacheItems),
 		}
 	}
 	return s.promCollectors

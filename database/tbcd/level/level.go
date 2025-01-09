@@ -126,7 +126,7 @@ func NewConfig(home string) *Config {
 		panic("invalid blockheaderCacheSize")
 	}
 
-	blockCacheSizeS := "2gb" // ~512 blocks on mainnet
+	blockCacheSizeS := "1gb" // ~640 blocks on mainnet
 	blockCacheSize, err := humanize.ParseBytes(blockCacheSizeS)
 	if err != nil {
 		panic(err)
@@ -1654,4 +1654,8 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 
 	return nil
+}
+
+func (l *ldb) BlockCacheStats() tbcd.CacheStats {
+	return l.blockCache.Stats()
 }

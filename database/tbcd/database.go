@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -103,6 +103,7 @@ type Database interface {
 	BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error)
 	// BlocksInsert(ctx context.Context, bs []*btcutil.Block) (int64, error)
 	BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error)
+	BlockCacheStats() CacheStats
 
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
@@ -412,4 +413,13 @@ func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, erro
 		return nil, nil, fmt.Errorf("invalid block hash: %w", err)
 	}
 	return txId, blockHash, nil
+}
+
+// Cache
+type CacheStats struct {
+	Hits   int
+	Misses int
+	Purges int
+	Size   int
+	Items  int
 }
