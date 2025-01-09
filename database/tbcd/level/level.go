@@ -1656,6 +1656,10 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	return nil
 }
 
+func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
+	return l.headerCache.Stats()
+}
+
 func (l *ldb) BlockCacheStats() tbcd.CacheStats {
 	return l.blockCache.Stats()
 }

@@ -162,6 +162,7 @@ type Server struct {
 		connected, good, bad      int
 		mempoolCount, mempoolSize int
 		blockCache                tbcd.CacheStats
+		headerCache               tbcd.CacheStats
 	} // periodically updated by promPoll
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
@@ -702,6 +703,36 @@ func (s *Server) promBlockCacheItems() float64 {
 	return deucalion.IntToFloat(s.prom.blockCache.Items)
 }
 
+func (s *Server) promHeaderCacheHits() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Hits)
+}
+
+func (s *Server) promHeaderCacheMisses() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Misses)
+}
+
+func (s *Server) promHeaderCachePurges() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Purges)
+}
+
+func (s *Server) promHeaderCacheSize() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Size)
+}
+
+func (s *Server) promHeaderCacheItems() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Items)
+}
+
 func (s *Server) promPoll(ctx context.Context) error {
 	for {
 		select {
@@ -713,6 +744,7 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.syncInfo = s.Synced(ctx)
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
 		s.prom.blockCache = s.db.BlockCacheStats()
+		s.prom.headerCache = s.db.BlockHeaderCacheStats()
 		//if s.cfg.MempoolEnabled {
 		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
 		//}
@@ -2282,6 +2314,31 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "block_cache_size",
 				Help:      "Block cache size",
 			}, s.promBlockCacheSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_items",
+				Help:      "Number of cached blocks",
+			}, s.promHeaderCacheItems),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_hits",
+				Help:      "Header cache hits",
+			}, s.promHeaderCacheHits),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_misses",
+				Help:      "Header cache misses",
+			}, s.promHeaderCacheMisses),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_purges",
+				Help:      "Header cache purges",
+			}, s.promHeaderCachePurges),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_size",
+				Help:      "Header cache size",
+			}, s.promHeaderCacheSize),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "block_cache_items",

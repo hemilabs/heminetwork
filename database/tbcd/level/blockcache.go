@@ -23,7 +23,7 @@ type blockElement struct {
 }
 
 type lowIQLRU struct {
-	mtx sync.RWMutex
+	mtx sync.Mutex
 
 	size int // this is the approximate max size
 
@@ -71,8 +71,8 @@ func (l *lowIQLRU) Put(v *btcutil.Block) {
 }
 
 func (l *lowIQLRU) Get(k *chainhash.Hash) (*btcutil.Block, bool) {
-	l.mtx.RLock()
-	defer l.mtx.RUnlock()
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
 
 	be, ok := l.m[*k]
 	if !ok {
@@ -94,8 +94,8 @@ func (l *lowIQLRU) Get(k *chainhash.Hash) (*btcutil.Block, bool) {
 }
 
 func (l *lowIQLRU) Stats() tbcd.CacheStats {
-	l.mtx.RLock()
-	defer l.mtx.RUnlock()
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
 	l.c.Items = len(l.m)
 	return l.c
 }

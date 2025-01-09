@@ -16,11 +16,14 @@ import (
 const blockHeaderSize = 8 + 32 + 80 + 8 // rough size of tbcd.BlockHeader
 
 type lowIQMap struct {
-	mtx sync.RWMutex
+	mtx sync.Mutex
 
 	count int
 
 	m map[chainhash.Hash]*tbcd.BlockHeader // 32+8+80+len([]Word ~ 8)
+
+	// stats
+	c tbcd.CacheStats
 }
 
 func (l *lowIQMap) Put(v *tbcd.BlockHeader) {
@@ -32,9 +35,10 @@ func (l *lowIQMap) Put(v *tbcd.BlockHeader) {
 	}
 
 	if len(l.m) >= l.count {
-		// evict entry
+		// evict random entry
 		for k := range l.m {
 			delete(l.m, k)
+			l.c.Purges++
 			break
 		}
 	}
@@ -43,10 +47,15 @@ func (l *lowIQMap) Put(v *tbcd.BlockHeader) {
 }
 
 func (l *lowIQMap) Get(k *chainhash.Hash) (*tbcd.BlockHeader, bool) {
-	l.mtx.RLock()
-	defer l.mtx.RUnlock()
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
 
 	bh, ok := l.m[*k]
+	if ok {
+		l.c.Hits++
+	} else {
+		l.c.Misses++
+	}
 	return bh, ok
 }
 
@@ -56,7 +65,16 @@ func (l *lowIQMap) PurgeBatch(ks []*chainhash.Hash) {
 
 	for v := range ks {
 		delete(l.m, *ks[v])
+		l.c.Purges++
 	}
+}
+
+func (l *lowIQMap) Stats() tbcd.CacheStats {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+	l.c.Items = len(l.m)
+	l.c.Size = len(l.m) * blockHeaderSize // rough size
+	return l.c
 }
 
 func lowIQMapNewCount(count int) (*lowIQMap, error) {
