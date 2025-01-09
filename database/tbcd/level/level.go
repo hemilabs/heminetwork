@@ -161,7 +161,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	}
 
 	if cfg.blockCacheSize > 0 {
-		l.blockCache, err = lowIQLRUNewSize(cfg.blockCacheSize)
+		l.blockCache, err = lowIQLRUSizeNew(cfg.blockCacheSize)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 		}
@@ -170,7 +170,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		log.Infof("block cache: DISABLED")
 	}
 	if cfg.blockheaderCacheSize > 0 {
-		l.headerCache, err = lowIQMapNewSize(cfg.blockheaderCacheSize)
+		l.headerCache, err = lowIQMapSizeNew(cfg.blockheaderCacheSize)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block header cache: %w", err)
 		}

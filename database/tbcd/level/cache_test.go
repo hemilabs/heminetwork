@@ -21,7 +21,7 @@ func newBlock(prevHash *chainhash.Hash, nonce uint32) (chainhash.Hash, *btcutil.
 func TestLRUCache(t *testing.T) {
 	maxCache := 10
 	blockSize = 81 // we'll use empty blocks
-	l, err := lowIQLRUNewSize(blockSize * maxCache)
+	l, err := lowIQLRUSizeNew(blockSize * maxCache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func newHeader(prevHash *chainhash.Hash, nonce uint32) (chainhash.Hash, *tbcd.Bl
 
 func TestMapCache(t *testing.T) {
 	maxCacheCount := 10
-	l, err := lowIQMapNewCount(maxCacheCount)
+	l, err := lowIQMapCountNew(maxCacheCount)
 	if err != nil {
 		t.Fatal(err)
 	}

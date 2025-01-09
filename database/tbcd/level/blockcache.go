@@ -100,7 +100,7 @@ func (l *lowIQLRU) Stats() tbcd.CacheStats {
 	return l.c
 }
 
-func lowIQLRUNewSize(size int) (*lowIQLRU, error) {
+func lowIQLRUSizeNew(size int) (*lowIQLRU, error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("invalid size: %v", size)
 	}

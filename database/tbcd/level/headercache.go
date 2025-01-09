@@ -77,7 +77,7 @@ func (l *lowIQMap) Stats() tbcd.CacheStats {
 	return l.c
 }
 
-func lowIQMapNewCount(count int) (*lowIQMap, error) {
+func lowIQMapCountNew(count int) (*lowIQMap, error) {
 	if count <= 0 {
 		return nil, fmt.Errorf("invalid count: %v", count)
 	}
@@ -91,10 +91,10 @@ func lowIQMapNewCount(count int) (*lowIQMap, error) {
 // Since it is an estimate it will overflow if Difficulty becomes bigger than
 // 64 bits. This is not an issue since 100MB caches all of mainnet in Jan 2025
 // (~819200 items).
-func lowIQMapNewSize(size int) (*lowIQMap, error) {
+func lowIQMapSizeNew(size int) (*lowIQMap, error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("invalid size: %v", size)
 	}
 	// approximate number of headers
-	return lowIQMapNewCount(size / blockHeaderSize)
+	return lowIQMapCountNew(size / blockHeaderSize)
 }
