@@ -717,7 +717,6 @@ func (s *Server) promPoll(ctx context.Context) error {
 		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
 		//}
 
-		s.promPollVerbose = true
 		if s.promPollVerbose {
 			s.mtx.RLock()
 			log.Infof("Pending blocks %v/%v connected peers %v "+
