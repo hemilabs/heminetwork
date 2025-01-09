@@ -54,14 +54,6 @@ type PopPayoutsResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type L2KeystoneRequest struct {
-	L2Keystone hemi.L2Keystone
-}
-
-type L2KeystoneResponse struct {
-	Error *protocol.Error `json:"error,omitempty"`
-}
-
 type OptimismKeystone hemi.L2Keystone // dop only
 
 // Websocket stuff follows.
@@ -103,8 +95,6 @@ const (
 	// Custom RPC commands
 	CmdPopPayoutRequest                     protocol.Command = "bssapi-pop-payout-request"
 	CmdPopPayoutResponse                    protocol.Command = "bssapi-pop-payout-response"
-	CmdL2KeystoneRequest                    protocol.Command = "bssapi-l2-keystone-request"
-	CmdL2KeystoneResponse                   protocol.Command = "bssapi-l2-keystone-response"
 	CmdBTCFinalityByRecentKeystonesRequest  protocol.Command = "bssapi-btc-finality-by-recent-keystones-request"
 	CmdBTCFinalityByRecentKeystonesResponse protocol.Command = "bssapi-btc-finality-by-recent-keystones-response"
 	CmdBTCFinalityByKeystonesRequest        protocol.Command = "bssapi-btc-finality-by-keystones-request"
@@ -118,8 +108,6 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdPingResponse:                         reflect.TypeOf(PingResponse{}),
 	CmdPopPayoutRequest:                     reflect.TypeOf(PopPayoutsRequest{}),
 	CmdPopPayoutResponse:                    reflect.TypeOf(PopPayoutsResponse{}),
-	CmdL2KeystoneRequest:                    reflect.TypeOf(L2KeystoneRequest{}),
-	CmdL2KeystoneResponse:                   reflect.TypeOf(L2KeystoneResponse{}),
 	CmdBTCFinalityByRecentKeystonesRequest:  reflect.TypeOf(BTCFinalityByRecentKeystonesRequest{}),
 	CmdBTCFinalityByRecentKeystonesResponse: reflect.TypeOf(BTCFinalityByRecentKeystonesResponse{}),
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),

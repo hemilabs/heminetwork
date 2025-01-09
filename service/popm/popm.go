@@ -215,24 +215,9 @@ func (m *Miner) bitcoinBroadcast(ctx context.Context, tx []byte) ([]byte, error)
 	return bbResp.TXID, nil
 }
 
+// TODO need new way to do this
 func (m *Miner) bitcoinHeight(ctx context.Context) (uint64, error) {
-	bir := &bfgapi.BitcoinInfoRequest{}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, bir)
-	if err != nil {
-		return 0, err
-	}
-
-	biResp, ok := res.(*bfgapi.BitcoinInfoResponse)
-	if !ok {
-		return 0, errors.New("not a BitcoinIfnoResponse")
-	}
-
-	if biResp.Error != nil {
-		return 0, biResp.Error
-	}
-
-	return biResp.Height, nil
+	return 0, nil
 }
 
 // TODO need new way to determine UTXO
@@ -421,22 +406,9 @@ func (m *Miner) Ping(ctx context.Context, timestamp int64) (*bfgapi.PingResponse
 	return pr, nil
 }
 
+// TODO need new way to get BTC Info
 func (m *Miner) BitcoinInfo(ctx context.Context) (*bfgapi.BitcoinInfoResponse, error) {
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinInfoRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinInfo: %w", err)
-	}
-
-	ir, ok := res.(*bfgapi.BitcoinInfoResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinInfoResponse: %T", res)
-	}
-
-	if ir.Error != nil {
-		return nil, ir.Error
-	}
-
-	return ir, nil
+	return nil, nil
 }
 
 // TODO need new way to do this

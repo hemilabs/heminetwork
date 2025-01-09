@@ -516,27 +516,6 @@ func (s *Server) updateBtcHeightCache(height uint64) {
 	s.btcHeightCache = height
 }
 
-func (s *Server) getBtcHeightCache() uint64 {
-	log.Tracef("getBtcHeightCache")
-	defer log.Tracef("getBtcHeightCache exit")
-
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	return s.btcHeightCache
-}
-
-func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoRequest) (any, error) {
-	log.Tracef("handleBitcoinInfo")
-	defer log.Tracef("handleBitcoinInfo exit")
-
-	height := s.getBtcHeightCache()
-
-	return &bfgapi.BitcoinInfoResponse{
-		Height: height,
-	}, nil
-}
-
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
@@ -844,13 +823,6 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BitcoinBroadcastRequest)
 				return s.handleBitcoinBroadcast(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdBitcoinInfoRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.BitcoinInfoRequest)
-				return s.handleBitcoinInfo(c, msg)
 			}
 
 			go s.handleRequest(ctx, bws, id, cmd, handler)

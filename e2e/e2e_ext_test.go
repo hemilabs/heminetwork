@@ -696,90 +696,6 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 	return buf.Bytes()
 }
 
-// TestNewL2Keystone sends an L2Keystone, via websocket, to BSS which proxies
-// it to BFG.  This test then ensures that that L2Keystone was saved in the db
-// 1. Create a new L2Keystone
-// 2. Send aforementioned L2Keystone to BSS via websocket
-// 3. Query database to ensure that the L2Keystone was saved
-func TestNewL2Keystone(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
-	defer func() {
-		db.Close()
-		sdb.Close()
-		cleanup()
-	}()
-
-	ctx, cancel := defaultTestContext()
-	defer cancel()
-
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
-
-	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
-
-	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
-
-	// 1
-	l2Keystone := hemi.L2Keystone{
-		Version:            1,
-		L1BlockNumber:      11,
-		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-	}
-
-	l2KeystoneRequest := bssapi.L2KeystoneRequest{
-		L2Keystone: l2Keystone,
-	}
-
-	bws := &bssWs{
-		conn: protocol.NewWSConn(c),
-	}
-
-	// 2
-	err = bssapi.Write(ctx, bws.conn, "someid", l2KeystoneRequest)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var v protocol.Message
-
-	for {
-		err = wsjson.Read(ctx, c, &v)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if v.Header.Command == bssapi.CmdL2KeystoneResponse {
-			break
-		}
-	}
-
-	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(l2KeystoneRequest.L2Keystone).Hash()
-
-	time.Sleep(2 * time.Second)
-
-	// 3
-	l2KeystoneSavedDB, err := db.L2KeystoneByAbrevHash(ctx, [32]byte(l2KeystoneAbrevHash))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	l2KeystoneSaved := bfgdL2KeystoneToHemiL2Keystone(l2KeystoneSavedDB)
-
-	diff := deep.Equal(l2KeystoneSaved, &l2Keystone)
-	if len(diff) != 0 {
-		t.Fatalf("unexpected diff %s", diff)
-	}
-}
-
 func TestPublicPing(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {
@@ -862,15 +778,6 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			},
 			skip:    true,
 			electrs: true,
-		},
-		{
-			name:          "bitcoin info electrs error",
-			expectedError: "internal error",
-			requests: []bfgapi.BitcoinInfoRequest{
-				{},
-			},
-			electrs: false,
-			skip:    true,
 		},
 	}
 
@@ -968,90 +875,6 @@ func TestBFGPublicErrorCases(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestBitcoinInfo(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
-	defer func() {
-		db.Close()
-		sdb.Close()
-		cleanup()
-	}()
-
-	ctx, cancel := defaultTestContext()
-	defer cancel()
-
-	l2Keystone := hemi.L2Keystone{
-		Version:            1,
-		L1BlockNumber:      5,
-		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-	}
-
-	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
-
-	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
-	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
-
-	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	protocolConn := protocol.NewWSConn(c)
-	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
-		t.Fatal(err)
-	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
-
-	bws := &bfgWs{
-		conn: protocol.NewWSConn(c),
-	}
-
-	sh := make([]byte, 32)
-	_, err = rand.Read(sh)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	time.Sleep(6 * time.Second)
-
-	if err := bfgapi.Write(
-		ctx, bws.conn, "someid", &bfgapi.BitcoinInfoRequest{},
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	var v any
-	var command protocol.Command
-
-	for {
-		command, _, v, err = bfgapi.Read(ctx, bws.conn)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if command == bfgapi.CmdBitcoinInfoResponse {
-			break
-		}
-	}
-	bitcoinInfoResponse := v.(*bfgapi.BitcoinInfoResponse)
-
-	if diff := deep.Equal(bitcoinInfoResponse, &bfgapi.BitcoinInfoResponse{
-		Height: 10,
-	}); len(diff) > 0 {
-		t.Fatalf("unexpected diff %s", diff)
 	}
 }
 
