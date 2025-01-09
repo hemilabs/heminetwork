@@ -28,9 +28,6 @@ const (
 	CmdBTCFinalityByKeystonesRequest        = "bfgapi-btc-finality-by-keystones-request"
 	CmdBTCFinalityByKeystonesResponse       = "bfgapi-btc-finality-by-keystones-response"
 	CmdBTCFinalityNotification              = "bfgapi-btc-finality-notification"
-	CmdL2KeystonesNotification              = "bfgapi-l2-keystones-notification"
-	CmdL2KeystonesRequest                   = "bfgapi-l2-keystones-request"
-	CmdL2KeystonesResponse                  = "bfgapi-l2-keystones-response"
 	CmdBitcoinBalanceRequest                = "bfgapi-bitcoin-balance-request"
 	CmdBitcoinBalanceResponse               = "bfgapi-bitcoin-balance-response"
 	CmdBitcoinBroadcastRequest              = "bfgapi-bitcoin-broadcast-request"
@@ -71,15 +68,6 @@ type NewL2KeystonesRequest struct {
 
 type NewL2KeystonesResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
-}
-
-type L2KeystonesRequest struct {
-	NumL2Keystones uint64 `json:"num_l2_keystones"`
-}
-
-type L2KeystonesResponse struct {
-	L2Keystones []hemi.L2Keystone `json:"l2_keystones"`
-	Error       *protocol.Error   `json:"error,omitempty"`
 }
 
 type BitcoinBalanceRequest struct {
@@ -155,8 +143,6 @@ type BTCFinalityByKeystonesResponse struct {
 
 type BTCFinalityNotification struct{}
 
-type L2KeystonesNotification struct{}
-
 type PopTx struct {
 	BtcTxId             api.ByteSlice `json:"btc_tx_id"`
 	BtcRawTx            api.ByteSlice `json:"btc_raw_tx"`
@@ -180,9 +166,6 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBTCFinalityByKeystonesRequest:        reflect.TypeOf(BTCFinalityByKeystonesRequest{}),
 	CmdBTCFinalityByKeystonesResponse:       reflect.TypeOf(BTCFinalityByKeystonesResponse{}),
 	CmdBTCFinalityNotification:              reflect.TypeOf(BTCFinalityNotification{}),
-	CmdL2KeystonesNotification:              reflect.TypeOf(L2KeystonesNotification{}),
-	CmdL2KeystonesRequest:                   reflect.TypeOf(L2KeystonesRequest{}),
-	CmdL2KeystonesResponse:                  reflect.TypeOf(L2KeystonesResponse{}),
 	CmdBitcoinBalanceRequest:                reflect.TypeOf(BitcoinBalanceRequest{}),
 	CmdBitcoinBalanceResponse:               reflect.TypeOf(BitcoinBalanceResponse{}),
 	CmdBitcoinBroadcastRequest:              reflect.TypeOf(BitcoinBroadcastRequest{}),

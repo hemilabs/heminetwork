@@ -53,7 +53,6 @@ const (
 
 	notifyBtcBlocks     notificationId = "btc_blocks"
 	notifyBtcFinalities notificationId = "btc_finalities"
-	notifyL2Keystones   notificationId = "l2_keystones"
 )
 
 var (
@@ -157,8 +156,6 @@ type Server struct {
 	canonicalChainHeight uint64
 
 	checkForInvalidBlocks chan struct{}
-
-	l2keystonesCache []hemi.L2Keystone
 
 	btcHeightCache uint64
 
@@ -830,13 +827,6 @@ func (s *Server) handleWebsocketPrivateRead(ctx context.Context, bws *bfgWs) {
 			}
 
 			go s.handleRequest(ctx, bws, id, cmd, handler)
-		case bfgapi.CmdNewL2KeystonesRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.NewL2KeystonesRequest)
-				return s.handleNewL2Keystones(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBTCFinalityByRecentKeystonesRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BTCFinalityByRecentKeystonesRequest)
@@ -892,13 +882,6 @@ func (s *Server) handleWebsocketPublicRead(ctx context.Context, bws *bfgWs) {
 					bws.addr, cmd, id, err)
 				return
 			}
-		case bfgapi.CmdL2KeystonesRequest:
-			handler := func(c context.Context) (any, error) {
-				msg := payload.(*bfgapi.L2KeystonesRequest)
-				return s.handleL2KeystonesRequest(c, msg)
-			}
-
-			go s.handleRequest(ctx, bws, id, cmd, handler)
 		case bfgapi.CmdBitcoinBalanceRequest:
 			handler := func(c context.Context) (any, error) {
 				msg := payload.(*bfgapi.BitcoinBalanceRequest)
@@ -1063,9 +1046,7 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 		conn:           protocol.NewWSConn(conn),
 		listenerName:   "public",
 		requestContext: r.Context(),
-		notify: map[notificationId]struct{}{
-			notifyL2Keystones: {},
-		},
+		notify:         map[notificationId]struct{}{},
 	}
 
 	// Must complete handshake in WSHandshakeTimeout.
@@ -1256,66 +1237,6 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	}, nil
 }
 
-func (s *Server) getL2KeystonesCache() []hemi.L2Keystone {
-	log.Tracef("getL2KeystonesCache")
-	defer log.Tracef("getL2KeystonesCache exit")
-
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	results := make([]hemi.L2Keystone, len(s.l2keystonesCache))
-	copy(results, s.l2keystonesCache)
-
-	return results
-}
-
-func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
-	log.Tracef("refreshL2KeystoneCache")
-	defer log.Tracef("refreshL2KeystoneCache exit")
-
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	results, err := s.db.L2KeystonesMostRecentN(ctx, 100)
-	if err != nil {
-		log.Errorf("error getting keystones %v", err)
-		return
-	}
-
-	l2Keystones := make([]hemi.L2Keystone, 0, len(results))
-	for _, v := range results {
-		l2Keystones = append(l2Keystones, hemi.L2Keystone{
-			Version:            uint8(v.Version),
-			L1BlockNumber:      v.L1BlockNumber,
-			L2BlockNumber:      v.L2BlockNumber,
-			ParentEPHash:       api.ByteSlice(v.ParentEPHash),
-			PrevKeystoneEPHash: api.ByteSlice(v.PrevKeystoneEPHash),
-			StateRoot:          api.ByteSlice(v.StateRoot),
-			EPHash:             api.ByteSlice(v.EPHash),
-		})
-	}
-
-	s.l2keystonesCache = l2Keystones
-}
-
-func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
-	log.Tracef("handleL2KeystonesRequest")
-	defer log.Tracef("handleL2KeystonesRequest exit")
-
-	results := []hemi.L2Keystone{}
-	for i, v := range s.getL2KeystonesCache() {
-		if uint64(i) < l2kr.NumL2Keystones {
-			results = append(results, v)
-		} else {
-			break
-		}
-	}
-
-	return &bfgapi.L2KeystonesResponse{
-		L2Keystones: results,
-	}, nil
-}
-
 func writeNotificationResponse(bws *bfgWs, response any) {
 	if err := bfgapi.Write(bws.requestContext, bws.conn, "", response); err != nil {
 		log.Errorf("handleBtcFinalityNotification write: %v %v", bws.addr, err)
@@ -1334,75 +1255,6 @@ func (s *Server) handleBtcFinalityNotification() {
 		go writeNotificationResponse(bws, &bfgapi.BTCFinalityNotification{})
 	}
 	s.mtx.Unlock()
-}
-
-func (s *Server) handleL2KeystonesNotification() {
-	log.Tracef("handleL2KeystonesNotification")
-	defer log.Tracef("handleL2KeystonesNotification exit")
-
-	s.mtx.Lock()
-	for _, bws := range s.sessions {
-		if _, ok := bws.notify[notifyL2Keystones]; !ok {
-			continue
-		}
-		go writeNotificationResponse(bws, &bfgapi.L2KeystonesNotification{})
-	}
-	s.mtx.Unlock()
-}
-
-func hemiL2KeystoneToDb(l2ks hemi.L2Keystone) bfgd.L2Keystone {
-	return bfgd.L2Keystone{
-		Hash:               hemi.L2KeystoneAbbreviate(l2ks).Hash(),
-		Version:            uint32(l2ks.Version),
-		L1BlockNumber:      l2ks.L1BlockNumber,
-		L2BlockNumber:      l2ks.L2BlockNumber,
-		ParentEPHash:       database.ByteArray(l2ks.ParentEPHash),
-		PrevKeystoneEPHash: database.ByteArray(l2ks.PrevKeystoneEPHash),
-		StateRoot:          database.ByteArray(l2ks.StateRoot),
-		EPHash:             database.ByteArray(l2ks.EPHash),
-	}
-}
-
-func hemiL2KeystonesToDb(l2ks []hemi.L2Keystone) []bfgd.L2Keystone {
-	dbks := make([]bfgd.L2Keystone, 0, len(l2ks))
-	for k := range l2ks {
-		dbks = append(dbks, hemiL2KeystoneToDb(l2ks[k]))
-	}
-	return dbks
-}
-
-func (s *Server) refreshCacheAndNotifiyL2Keystones() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	s.refreshL2KeystoneCache(ctx)
-	go s.handleL2KeystonesNotification()
-}
-
-func (s *Server) saveL2Keystones(ctx context.Context, l2k []hemi.L2Keystone) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	ks := hemiL2KeystonesToDb(l2k)
-
-	err := s.db.L2KeystonesInsert(ctx, ks)
-	if err != nil {
-		log.Errorf("error saving keystone %v", err)
-		return
-	}
-
-	go s.refreshCacheAndNotifiyL2Keystones()
-}
-
-func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
-	log.Tracef("handleNewL2Keystones")
-	defer log.Tracef("handleNewL2Keystones exit")
-
-	response := bfgapi.NewL2KeystonesResponse{}
-
-	go s.saveL2Keystones(context.Background(), nlkr.L2Keystones)
-
-	return response, nil
 }
 
 func (s *Server) running() bool {
@@ -1492,26 +1344,6 @@ func (s *Server) handleAccessPublicKeys(table string, action string, payload, pa
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleL2KeystonesChange(table string, action string, payload, payloadOld any) {
-	go s.refreshCacheAndNotifiyL2Keystones()
-}
-
-func (s *Server) fetchRemoteL2Keystones(pctx context.Context) {
-	ctx, cancel := context.WithTimeout(pctx, 10*time.Second)
-	defer cancel()
-
-	resp, err := s.callBFG(ctx, &bfgapi.L2KeystonesRequest{
-		NumL2Keystones: 3,
-	})
-	if err != nil {
-		log.Errorf("callBFG error: %v", err)
-		return
-	}
-
-	l2ksr := resp.(*bfgapi.L2KeystonesResponse)
-	s.saveL2Keystones(ctx, l2ksr.L2Keystones)
-}
-
 func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 	defer s.bfgWG.Done()
 
@@ -1532,50 +1364,11 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 		log.Tracef("handleBFGWebsocketReadUnauth %v", cmd)
 
 		switch cmd {
-		case bfgapi.CmdL2KeystonesNotification:
-			go s.fetchRemoteL2Keystones(ctx)
 		default:
 			log.Errorf("unknown command: %v", cmd)
 			return
 		}
 	}
-}
-
-func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
-	log.Tracef("callBFG %T", msg)
-	defer log.Tracef("callBFG exit %T", msg)
-
-	bc := bfgCmd{
-		msg: msg,
-		ch:  make(chan any),
-	}
-
-	ctx, cancel := context.WithTimeout(parrentCtx, s.bfgCallTimeout)
-	defer cancel()
-
-	// attempt to send
-	select {
-	case <-ctx.Done():
-		return nil, protocol.NewInternalErrorf("callBFG send context error: %w",
-			ctx.Err())
-	case s.bfgCmdCh <- bc:
-	default:
-		return nil, protocol.NewInternalErrorf("bfg command queue full")
-	}
-
-	// Wait for response
-	select {
-	case <-ctx.Done():
-		return nil, protocol.NewInternalErrorf("callBFG received context error: %w",
-			ctx.Err())
-	case payload := <-bc.ch:
-		if err, ok := payload.(error); ok {
-			return nil, err // XXX is this an error or internal error
-		}
-		return payload, nil
-	}
-
-	// Won't get here
 }
 
 func (s *Server) handleBFGCallCompletion(parrentCtx context.Context, conn *protocol.Conn, bc bfgCmd) {
@@ -1749,48 +1542,12 @@ func (s *Server) Run(pctx context.Context) error {
 		return err
 	}
 
-	l2KeystonesPayload, ok := bfgd.NotificationPayload(bfgd.NotificationL2Keystones)
-	if !ok {
-		return fmt.Errorf("could not obtain type: %v", bfgd.NotificationL2Keystones)
-	}
-	if err := s.db.RegisterNotification(ctx, bfgd.NotificationL2Keystones,
-		s.handleL2KeystonesChange, l2KeystonesPayload); err != nil {
-		return err
-	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for {
-			select {
-			case <-time.After(1 * time.Minute):
-				log.Infof("sending notifications of l2 keystones")
-				go s.handleL2KeystonesNotification()
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
 	for _, p := range []bool{true, false} {
 		for range 4 {
 			s.wg.Add(1)
 			go s.bitcoinBroadcastWorker(ctx, p)
 		}
 	}
-
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(1 * time.Second):
-				s.refreshL2KeystoneCache(ctx)
-			}
-		}
-	}()
 
 	s.wg.Add(1)
 	go func() {
