@@ -304,14 +304,6 @@ func (s *Server) queueCheckForInvalidBlocks() {
 	}
 }
 
-func (s *Server) backfillL2KeystonesLowestBtcBlocks(ctx context.Context) {
-	defer s.wg.Done()
-
-	if err := s.db.BackfillL2KeystonesLowestBtcBlocks(ctx, 100); err != nil {
-		log.Errorf("error backfilling lowest block per keystone: %s", err)
-	}
-}
-
 func (s *Server) invalidBlockChecker(ctx context.Context) {
 	defer s.wg.Done()
 	for {
@@ -1250,8 +1242,6 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	finalities, err := s.db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		l2KeystoneAbrevHashes,
-		bfkr.Page,
-		bfkr.Limit,
 	)
 	if err != nil {
 		e := protocol.NewInternalErrorf("l2 keystones: %w", err)
@@ -1557,34 +1547,6 @@ func (s *Server) handleL2KeystonesChange(table string, action string, payload, p
 	go s.refreshCacheAndNotifiyL2Keystones()
 }
 
-func (s *Server) handlePopBasisChange(table string, action string, payload, payloadOld any) {
-	for _, p := range []any{payload, payloadOld} {
-		if p == nil {
-			continue
-		}
-
-		popBasisPayload, ok := p.(*bfgd.PopBasis)
-		if !ok {
-			panic(fmt.Sprintf("incorrect type: %T", p))
-		}
-
-		if popBasisPayload == nil {
-			continue
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		log.Tracef("updating lowest btc block for l2 keystone: %s", hex.EncodeToString(popBasisPayload.L2KeystoneAbrevHash))
-
-		err := s.updateLowestL2Keystone(ctx, popBasisPayload.L2KeystoneAbrevHash)
-		if err != nil {
-			log.Errorf("could not update lowest l2 keystone: %s", err)
-			return
-		}
-	}
-}
-
 func (s *Server) fetchRemoteL2Keystones(pctx context.Context) {
 	ctx, cancel := context.WithTimeout(pctx, 10*time.Second)
 	defer cancel()
@@ -1779,10 +1741,6 @@ func (s *Server) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
 	return height, nil
 }
 
-func (s *Server) updateLowestL2Keystone(ctx context.Context, l2KeystoneAbrevHash []byte) error {
-	return s.db.L2KeystoneLowestBtcBlockUpsert(ctx, l2KeystoneAbrevHash)
-}
-
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -1848,14 +1806,6 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	if err := s.db.RegisterNotification(ctx, bfgd.NotificationL2Keystones,
 		s.handleL2KeystonesChange, l2KeystonesPayload); err != nil {
-		return err
-	}
-
-	popBasisPayload, ok := bfgd.NotificationPayload(bfgd.NotificationPopBasis)
-	if !ok {
-		return fmt.Errorf("could not obtain type: %v", bfgd.NotificationPopBasis)
-	}
-	if err := s.db.RegisterNotification(ctx, bfgd.NotificationPopBasis, s.handlePopBasisChange, popBasisPayload); err != nil {
 		return err
 	}
 
@@ -2032,10 +1982,6 @@ func (s *Server) Run(pctx context.Context) error {
 
 	s.wg.Add(1)
 	go s.invalidBlockChecker(ctx)
-
-	// backfill known blocks, any new blocks will be handled by notifications
-	s.wg.Add(1)
-	go s.backfillL2KeystonesLowestBtcBlocks(ctx)
 
 	select {
 	case <-ctx.Done():

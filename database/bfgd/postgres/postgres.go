@@ -7,7 +7,6 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 13
+	bfgdVersion = 14
 
 	logLevel = "INFO"
 	verbose  = false
@@ -533,61 +532,6 @@ func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte
 	return pbs, nil
 }
 
-func (p *pgdb) L2KeystoneLowestBtcBlockUpsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray) error {
-	sql := `
-		WITH lowest_btc_block AS (
-			SELECT btc_blocks_can.hash, btc_blocks_can.height
-			FROM pop_basis
-			INNER JOIN btc_blocks_can ON btc_blocks_can.hash = pop_basis.btc_block_hash
-			WHERE pop_basis.l2_keystone_abrev_hash = $1
-			ORDER BY btc_blocks_can.height ASC LIMIT 1
-		)
-		INSERT INTO l2_keystones_lowest_btc_block (l2_keystone_abrev_hash, btc_block_hash, btc_block_height)
-		VALUES (
-			$1,
-			(SELECT hash FROM lowest_btc_block),
-			(SELECT height FROM lowest_btc_block)
-		)
-		ON CONFLICT (l2_keystone_abrev_hash) DO UPDATE SET btc_block_hash = EXCLUDED.btc_block_hash 
-		WHERE l2_keystones_lowest_btc_block.btc_block_hash != EXCLUDED.btc_block_hash
-	`
-
-	_, err := p.db.ExecContext(ctx, sql, l2KeystoneAbrevHash)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// BackfillL2KeystonesLowestBtcBlocks (should only) runs on startup and is
-// a quick check that all existing keystones have an associated lowest btc
-// block if it exists.  this is essential for new deploys
-func (p *pgdb) BackfillL2KeystonesLowestBtcBlocks(ctx context.Context, pageSize uint32) error {
-	limit := pageSize
-	page := uint32(0)
-
-	for {
-		l2ks, err := p.L2KeystonesMostRecentN(ctx, limit, page)
-		if err != nil && !errors.Is(err, database.ErrNotFound) {
-			return err
-		}
-
-		if len(l2ks) == 0 {
-			log.Infof("done backfilling l2 keystones <-> lowest btc block")
-			return nil
-		}
-
-		for _, ks := range l2ks {
-			log.Tracef("backfilling l2keystone=%s, l2blocknumber=%d", hex.EncodeToString(ks.Hash), ks.L2BlockNumber)
-			if err := p.L2KeystoneLowestBtcBlockUpsert(ctx, ks.Hash); err != nil {
-				return err
-			}
-		}
-		page++
-	}
-}
-
 // L2BTCFinalityMostRecent gets the most recent L2BtcFinalities sorted
 // descending by l2_block_number
 func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfgd.L2BTCFinality, error) {
@@ -603,32 +547,14 @@ func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfg
 		return nil, err
 	}
 
-	finalities := []bfgd.L2BTCFinality{}
-
 	hashes := []database.ByteArray{}
 	for _, l := range l2Keystones {
 		hashes = append(hashes, l.Hash)
 	}
 
-	page := uint32(0)
-	for {
-		finalitiesTmp, err := p.L2BTCFinalityByL2KeystoneAbrevHash(ctx, hashes, page, 100)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(finalitiesTmp) == 0 {
-			break
-		}
-
-		for _, f := range finalitiesTmp {
-			finalities = append(finalities, f)
-			if uint32(len(finalities)) >= limit {
-				return finalities, nil
-			}
-		}
-
-		page++
+	finalities, err := p.L2BTCFinalityByL2KeystoneAbrevHash(ctx, hashes)
+	if err != nil {
+		return nil, err
 	}
 
 	return finalities, nil
@@ -636,7 +562,7 @@ func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfg
 
 // L2BTCFinalityByL2KeystoneAbrevHash queries for finalities by L2KeystoneAbrevHash
 // and returns them descending by l2_block_number
-func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray, page uint32, limit uint32) ([]bfgd.L2BTCFinality, error) {
+func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray) ([]bfgd.L2BTCFinality, error) {
 	log.Tracef("L2BTCFinalityByL2KeystoneAbrevHash")
 	defer log.Tracef("L2BTCFinalityByL2KeystoneAbrevHash exit")
 
@@ -644,17 +570,9 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		return nil, errors.New("l2KeystoneAbrevHashes cannot be longer than 100")
 	}
 
-	// don't let users query for more than 100 at a time, default 0 to 100 for
-	// backwards compatibility
-	if limit > 100 || limit == 0 {
-		log.Tracef("limit was set to %d, defaulting to 100", limit)
-		limit = 100
-	}
-
 	sql := `
-		SELECT
-			btc_block_hash,
-			COALESCE(btc_block_height, 0),
+		WITH l2_keystones_lowest_btc_block AS (
+			SELECT 
 			l2_keystones.l2_keystone_abrev_hash,
 			l2_keystones.l1_block_number,
 			l2_keystones.l2_block_number,
@@ -663,31 +581,50 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.state_root,
 			l2_keystones.ep_hash,
 			l2_keystones.version,
+			btc_blocks_can_tmp.hash AS btc_block_hash,
+			btc_blocks_can_tmp.height AS btc_block_height
+			FROM l2_keystones LEFT JOIN LATERAL (
+				SELECT pop_basis.l2_keystone_abrev_hash, btc_blocks_can.hash, btc_blocks_can.height
+				FROM pop_basis
+				LEFT JOIN LATERAL (
+					SELECT hash, height FROM btc_blocks_can WHERE hash = pop_basis.btc_block_hash
+					ORDER BY height ASC LIMIT 1
+				) btc_blocks_can ON TRUE
+				WHERE pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
+				LIMIT 1
+			) btc_blocks_can_tmp ON TRUE
+			WHERE l2_keystones.l2_keystone_abrev_hash = ANY($1)
+		)
+		SELECT
+			btc_block_hash,
+			COALESCE(btc_block_height, 0),
+			l2_keystones_lowest_btc_block.l2_keystone_abrev_hash,
+			l2_keystones_lowest_btc_block.l1_block_number,
+			l2_keystones_lowest_btc_block.l2_block_number,
+			l2_keystones_lowest_btc_block.parent_ep_hash,
+			l2_keystones_lowest_btc_block.prev_keystone_ep_hash,
+			l2_keystones_lowest_btc_block.state_root,
+			l2_keystones_lowest_btc_block.ep_hash,
+			l2_keystones_lowest_btc_block.version,
 			COALESCE((SELECT height
 				FROM 
 				(
 					SELECT height FROM btc_blocks_can
-					INNER JOIN l2_keystones_lowest_btc_block lll
-					ON lll.btc_block_hash = btc_blocks_can.hash
-					INNER JOIN l2_keystones ll
-					ON ll.l2_keystone_abrev_hash = lll.l2_keystone_abrev_hash
-					WHERE ll.l2_block_number >= l2_keystones.l2_block_number
-					AND height > (SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1) - 100
+						LEFT JOIN pop_basis ON pop_basis.btc_block_hash 
+							= btc_blocks_can.hash
+						LEFT JOIN l2_keystones ll ON ll.l2_keystone_abrev_hash 
+							= pop_basis.l2_keystone_abrev_hash
+			
+					AND ll.l2_block_number >= l2_keystones_lowest_btc_block.l2_block_number
+					AND ll.l2_keystone_abrev_hash IS NOT NULL
+					WHERE height > (SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1) - 100
 					ORDER BY height ASC LIMIT 1
 				)), 0),
 			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
 
-		FROM l2_keystones
-		LEFT JOIN l2_keystones_lowest_btc_block
-		ON l2_keystones.l2_keystone_abrev_hash = l2_keystones_lowest_btc_block.l2_keystone_abrev_hash
+		FROM l2_keystones_lowest_btc_block
 
-		WHERE l2_keystones.l2_keystone_abrev_hash = ANY($1)
-
-		ORDER BY l2_keystones.l2_block_number DESC
-
-		OFFSET $2
-
-		LIMIT $3
+		ORDER BY l2_keystones_lowest_btc_block.l2_block_number DESC
 	`
 
 	l2KeystoneAbrevHashesStr := [][]byte{}
@@ -695,10 +632,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		l2KeystoneAbrevHashesStr = append(l2KeystoneAbrevHashesStr, []byte(l))
 	}
 
-	// XXX this doesn't go here
-	log.Infof("the hashes are %v", l2KeystoneAbrevHashesStr)
-
-	rows, err := p.db.QueryContext(ctx, sql, pq.Array(l2KeystoneAbrevHashesStr), page*limit, limit)
+	rows, err := p.db.QueryContext(ctx, sql, pq.Array(l2KeystoneAbrevHashesStr))
 	if err != nil {
 		return nil, err
 	}

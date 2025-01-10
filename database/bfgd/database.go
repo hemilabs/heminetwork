@@ -34,7 +34,7 @@ type Database interface {
 	PopBasisUpdateBTCFields(ctx context.Context, pb *PopBasis) (int64, error)
 
 	L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]L2BTCFinality, error)
-	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray, page uint32, limit uint32) ([]L2BTCFinality, error)
+	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray) ([]L2BTCFinality, error)
 
 	BtcBlockCanonicalHeight(ctx context.Context) (uint64, error)
 
@@ -43,10 +43,6 @@ type Database interface {
 	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
 	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
 	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
-
-	L2KeystoneLowestBtcBlockUpsert(ctx context.Context, l2KeystoneAbrevHash database.ByteArray) error
-
-	BackfillL2KeystonesLowestBtcBlocks(ctx context.Context, pageSize uint32) error
 }
 
 // NotificationName identifies a database notification type.
@@ -54,7 +50,6 @@ const (
 	NotificationBtcBlocks             database.NotificationName = "btc_blocks"
 	NotificationAccessPublicKeyDelete database.NotificationName = "access_public_keys"
 	NotificationL2Keystones           database.NotificationName = "l2_keystones"
-	NotificationPopBasis              database.NotificationName = "pop_basis"
 )
 
 // NotificationPayload returns the data structure corresponding to the given
@@ -70,7 +65,6 @@ var notifications = map[database.NotificationName]any{
 	NotificationBtcBlocks:             BtcBlock{},
 	NotificationAccessPublicKeyDelete: AccessPublicKey{},
 	NotificationL2Keystones:           []L2Keystone{},
-	NotificationPopBasis:              PopBasis{},
 }
 
 // we use the `deep:"-"` tag to ignore checking for these
