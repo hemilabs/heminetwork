@@ -1668,165 +1668,6 @@ func TestPublications(t *testing.T) {
 	}
 }
 
-func TestL2KeystoneLowestBtcBlockUpsert(t *testing.T) {
-	type result struct {
-		btcBlockHash        database.ByteArray
-		btcBlockHeight      uint64
-		l2KeystoneAbrevHash database.ByteArray
-	}
-
-	type testTableItem struct {
-		name                  string
-		l2KeystoneAbrevHashes []database.ByteArray
-		blockHashes           []database.ByteArray
-		heights               []uint64
-		expected              []result
-	}
-
-	testTable := []testTableItem{
-		testTableItem{
-			name:                  "none exist",
-			l2KeystoneAbrevHashes: []database.ByteArray{fillOutBytes("myl2hash", 32)},
-			blockHashes:           []database.ByteArray{fillOutBytes("myhash", 32)},
-			heights:               []uint64{9},
-			expected: []result{
-				result{
-					btcBlockHeight:      9,
-					btcBlockHash:        fillOutBytes("myhash", 32),
-					l2KeystoneAbrevHash: fillOutBytes("myl2hash", 32),
-				},
-			},
-		},
-		testTableItem{
-			name:                  "overwrite one",
-			l2KeystoneAbrevHashes: []database.ByteArray{fillOutBytes("myl2hash", 32), fillOutBytes("myl2hash", 32)},
-			blockHashes:           []database.ByteArray{fillOutBytes("myhash", 32), fillOutBytes("myotherhash", 32)},
-			heights:               []uint64{77, 4},
-			expected: []result{
-				result{
-					btcBlockHeight:      4,
-					btcBlockHash:        fillOutBytes("myotherhash", 32),
-					l2KeystoneAbrevHash: fillOutBytes("myl2hash", 32),
-				},
-			},
-		},
-		testTableItem{
-			name:                  "two",
-			l2KeystoneAbrevHashes: []database.ByteArray{fillOutBytes("myl2hash", 32), fillOutBytes("myotherl2hash", 32)},
-			blockHashes:           []database.ByteArray{fillOutBytes("myhash", 32), fillOutBytes("myotherhash", 32)},
-			heights:               []uint64{77, 4},
-			expected: []result{
-				result{
-					btcBlockHeight:      77,
-					btcBlockHash:        fillOutBytes("myhash", 32),
-					l2KeystoneAbrevHash: fillOutBytes("myl2hash", 32),
-				},
-				result{
-					btcBlockHeight:      4,
-					btcBlockHash:        fillOutBytes("myotherhash", 32),
-					l2KeystoneAbrevHash: fillOutBytes("myotherl2hash", 32),
-				},
-			},
-		},
-	}
-
-	for _, tti := range testTable {
-		for _, withBackfill := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s:withBackfill=%t", tti.name, withBackfill), func(t *testing.T) {
-				ctx, cancel := defaultTestContext()
-				defer cancel()
-
-				db, sdb, cleanup := createTestDB(ctx, t)
-				defer func() {
-					db.Close()
-					sdb.Close()
-					cleanup()
-				}()
-
-				t.Logf(tti.name)
-				for i := range tti.blockHashes {
-					btcBlock := bfgd.BtcBlock{
-						Hash:   tti.blockHashes[i],
-						Height: tti.heights[i],
-						Header: fillOutBytes("someheader", 80),
-					}
-
-					if err := db.BtcBlockInsert(ctx, &btcBlock); err != nil {
-						t.Fatal(err)
-					}
-
-					l2Keystone := bfgd.L2Keystone{
-						Version:            1,
-						L1BlockNumber:      11,
-						L2BlockNumber:      22,
-						ParentEPHash:       fillOutBytes("parentephash", 32),
-						PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-						StateRoot:          fillOutBytes("stateroot", 32),
-						EPHash:             fillOutBytes("ephash", 32),
-						Hash:               tti.l2KeystoneAbrevHashes[i],
-					}
-
-					if err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}); err != nil {
-						t.Fatal(err)
-					}
-
-					txIndex := uint64(99)
-
-					popBasis := bfgd.PopBasis{
-						BtcTxId:             fillOutBytes("btctxid", 32),
-						BtcRawTx:            []byte("btcrawtx"),
-						PopTxId:             fillOutBytes("poptxid", 32),
-						L2KeystoneAbrevHash: tti.l2KeystoneAbrevHashes[i],
-						PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
-						BtcHeaderHash:       tti.blockHashes[i],
-						BtcTxIndex:          &txIndex,
-					}
-
-					if err := db.PopBasisInsertFull(ctx, &popBasis); err != nil {
-						t.Fatal(err)
-					}
-				}
-
-				for i := range tti.l2KeystoneAbrevHashes {
-					if withBackfill {
-						if err := db.BackfillL2KeystonesLowestBtcBlocks(ctx, 1); err != nil {
-							t.Fatal(err)
-						}
-					} else {
-						if err := db.L2KeystoneLowestBtcBlockUpsert(ctx, tti.l2KeystoneAbrevHashes[i]); err != nil {
-							t.Fatal(err)
-						}
-					}
-				}
-
-				results := []result{}
-				rows, err := sdb.QueryContext(ctx, `
-					SELECT 
-						btc_block_height, btc_block_hash, l2_keystone_abrev_hash 
-					FROM l2_keystones_lowest_btc_block
-					ORDER BY btc_block_height DESC
-				`)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				for rows.Next() {
-					r := result{}
-					if err := rows.Scan(&r.btcBlockHeight, &r.btcBlockHash, &r.l2KeystoneAbrevHash); err != nil {
-						t.Fatal(err)
-					}
-
-					results = append(results, r)
-				}
-
-				if diff := deep.Equal(tti.expected, results); len(diff) > 0 {
-					t.Fatalf("unexpected diff: %s", diff)
-				}
-			})
-		}
-	}
-}
-
 func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
@@ -1847,15 +1688,9 @@ func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 
 	firstKeystone := l2Keystones[0]
 
-	if err := db.L2KeystoneLowestBtcBlockUpsert(ctx, firstKeystone.Hash); err != nil {
-		t.Fatal(err)
-	}
-
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
-		0,
-		100,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1895,15 +1730,9 @@ func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
 
 	firstKeystone := l2Keystones[0]
 
-	if err := db.L2KeystoneLowestBtcBlockUpsert(ctx, firstKeystone.Hash); err != nil {
-		t.Fatal(err)
-	}
-
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
-		0,
-		100,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -2566,10 +2395,6 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 			t.Fatal(err)
 		}
 
-		if err := db.L2KeystoneLowestBtcBlockUpsert(ctx, popBasis.L2KeystoneAbrevHash); err != nil {
-			t.Fatal(err)
-		}
-
 		return bfgd.BtcBlock{}
 	}
 
@@ -2585,10 +2410,6 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 
 	err = db.PopBasisInsertFull(ctx, &popBasis)
 	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := db.L2KeystoneLowestBtcBlockUpsert(ctx, popBasis.L2KeystoneAbrevHash); err != nil {
 		t.Fatal(err)
 	}
 
