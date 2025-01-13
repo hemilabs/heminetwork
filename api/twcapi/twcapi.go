@@ -6,6 +6,7 @@ package twcapi
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"reflect"
 
@@ -28,6 +29,14 @@ const (
 	CmdBitcoinInfoResponse      = "twcapi-bitcoin-info-response"
 	CmdBitcoinUTXOsRequest      = "twcapi-bitcoin-utxos-request"
 	CmdBitcoinUTXOsResponse     = "twcapi-bitcoin-utxos-response"
+)
+
+var (
+	APIVersionRoute = fmt.Sprintf("v%d", APIVersion)
+	RouteWebsocket  = fmt.Sprintf("/%s/ws", APIVersionRoute)
+
+	DefaultListen = "localhost:8083" //XXX confirm port is ok
+	DefaultURL    = fmt.Sprintf("ws://%s/%s", DefaultListen, RouteWebsocket)
 )
 
 type (
