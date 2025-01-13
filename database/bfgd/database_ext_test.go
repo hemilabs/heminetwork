@@ -1516,6 +1516,7 @@ func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
 		name               string
 		chainPattern       []int
 		unconfirmedIndices []bool
+		addOne             bool
 	}
 
 	testTable := []testTableItem{
@@ -1523,6 +1524,12 @@ func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
 			name:               "fork at tip",
 			chainPattern:       []int{1, 1, 2},
 			unconfirmedIndices: []bool{false, false, false, false},
+		},
+		{
+			name:               "fork at tip...jk, add one more to older one in fork",
+			chainPattern:       []int{1, 1, 2},
+			unconfirmedIndices: []bool{false, false, false, false},
+			addOne:             true,
 		},
 		{
 			name:               "fork in middle",
@@ -1564,6 +1571,9 @@ func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
 
 			l2BlockNumber := uint32(1000)
 			lastHash := []byte{}
+
+			var lastUnconditionalBlock bfgd.BtcBlock
+
 			for i, blockCountAtHeight := range tti.chainPattern {
 				onChainBlocksTmp := createBtcBlocksAtStaticHeight(ctx, t, db, blockCountAtHeight, true, height, lastHash, l2BlockNumber)
 				l2BlockNumber++
@@ -1573,6 +1583,19 @@ func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
 				if (blockCountAtHeight > 1 && i == len(tti.chainPattern)-1) == false {
 					onChainBlocks = append(onChainBlocks, onChainBlocksTmp[0])
 				}
+
+				lastUnconditionalBlock = onChainBlocksTmp[len(onChainBlocksTmp)-1]
+			}
+
+			if tti.addOne {
+
+				// the only test case that runs this assumes that the last block
+				// was a fork so by our definition of the "tip" is not considered
+				// canonical.  add it here for accurate test results
+				onChainBlocks = append(onChainBlocks, lastUnconditionalBlock)
+
+				lastBlocks := createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, height, lastUnconditionalBlock.Hash, l2BlockNumber)
+				onChainBlocks = append(onChainBlocks, lastBlocks[0])
 			}
 
 			rows, err := sdb.QueryContext(ctx, `
