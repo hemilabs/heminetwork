@@ -2237,7 +2237,7 @@ func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
 	}
 }
 
-func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
+func TestBtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
@@ -2256,7 +2256,7 @@ func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '59 minutes'")
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '29 minutes'")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2275,7 +2275,7 @@ func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 	}
 }
 
-func BtcTransactionBroadcastRequestTrim(t *testing.T) {
+func TestBtcTransactionBroadcastRequestTrim(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
