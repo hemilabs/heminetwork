@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 14
+	bfgdVersion = 15
 
 	logLevel = "INFO"
 	verbose  = false
@@ -58,13 +58,6 @@ func New(ctx context.Context, uri string) (*pgdb, error) {
 	p := &pgdb{
 		Database: pg,
 		db:       pg.DB(),
-	}
-
-	// first, refresh the materialized view so it can be used in case it was
-	// never refreshed before this point
-	err = p.refreshBTCBlocksCanonical(ctx)
-	if err != nil {
-		return nil, err
 	}
 
 	return p, nil
@@ -240,6 +233,36 @@ func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32
 	}
 
 	return ks, nil
+}
+
+func (p *pgdb) BtcBlockReplace(ctx context.Context, btcBlock *bfgd.BtcBlock) (int64, error) {
+	log.Tracef("BtcBlockReplace")
+	defer log.Tracef("BtcBlockReplace exit")
+
+	// since we are now trusting our btc client to construct the canonical chain,
+	// height is now unique to our btc blocks.  if there is a conflict where
+	// the block at a given height is not what we have saved in the database (comparing header+hash)
+	// then we must have had a re-org so we replace
+
+	insertSql := `
+		INSERT INTO btc_blocks (hash, header, height)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (height) 
+		DO UPDATE SET hash = EXCLUDED.hash, header = EXCLUDED.header, height = EXCLUDED.height
+		WHERE btc_blocks.hash != EXCLUDED.hash OR btc_blocks.header != EXCLUDED.header
+	`
+
+	results, err := p.db.ExecContext(ctx, insertSql, btcBlock.Hash, btcBlock.Header, btcBlock.Height)
+	if err != nil {
+		return 0, err
+	}
+
+	rowsAffected, err := results.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return rowsAffected, nil
 }
 
 func (p *pgdb) BtcBlockInsert(ctx context.Context, bb *bfgd.BtcBlock) error {
@@ -573,7 +596,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 	sql := `
 		WITH relevant_pop_basis AS (
 			SELECT l2_keystone_abrev_hash, btc_block_hash FROM pop_basis WHERE btc_block_hash = ANY(
-				SELECT hash FROM btc_blocks_can ORDER BY height DESC LIMIT 100
+				SELECT hash FROM btc_blocks ORDER BY height DESC LIMIT 100
 			)
 		),
 		l2_keystones_lowest_btc_block AS (
@@ -586,18 +609,18 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.state_root,
 			l2_keystones.ep_hash,
 			l2_keystones.version,
-			btc_blocks_can_tmp.hash AS btc_block_hash,
-			btc_blocks_can_tmp.height AS btc_block_height
+			btc_blocks_tmp.hash AS btc_block_hash,
+			btc_blocks_tmp.height AS btc_block_height
 			FROM l2_keystones LEFT JOIN LATERAL (
-				SELECT pop_basis.l2_keystone_abrev_hash, btc_blocks_can.hash, btc_blocks_can.height
+				SELECT pop_basis.l2_keystone_abrev_hash, btc_blocks.hash, btc_blocks.height
 				FROM pop_basis
 				LEFT JOIN LATERAL (
-					SELECT hash, height FROM btc_blocks_can WHERE hash = pop_basis.btc_block_hash
+					SELECT hash, height FROM btc_blocks WHERE hash = pop_basis.btc_block_hash
 					ORDER BY height ASC LIMIT 1
-				) btc_blocks_can ON TRUE
+				) btc_blocks ON TRUE
 				WHERE pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
 				LIMIT 1
-			) btc_blocks_can_tmp ON TRUE
+			) btc_blocks_tmp ON TRUE
 			WHERE l2_keystones.l2_keystone_abrev_hash = ANY($1)
 		)
 		SELECT
@@ -614,18 +637,18 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			COALESCE((SELECT height
 				FROM 
 				(
-					SELECT height FROM btc_blocks_can
+					SELECT height FROM btc_blocks
 						LEFT JOIN relevant_pop_basis ON relevant_pop_basis.btc_block_hash 
-							= btc_blocks_can.hash
+							= btc_blocks.hash
 						LEFT JOIN l2_keystones ll ON ll.l2_keystone_abrev_hash 
 							= relevant_pop_basis.l2_keystone_abrev_hash
 			
 					AND ll.l2_block_number >= l2_keystones_lowest_btc_block.l2_block_number
-					WHERE height > (SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1) - 100
+					WHERE height > (SELECT height FROM btc_blocks ORDER BY height DESC LIMIT 1) - 100
 					AND ll.l2_keystone_abrev_hash IS NOT NULL
 					ORDER BY height ASC LIMIT 1
 				)), 0),
-			COALESCE((SELECT height FROM btc_blocks_can ORDER BY height DESC LIMIT 1),0)
+			COALESCE((SELECT height FROM btc_blocks ORDER BY height DESC LIMIT 1),0)
 
 		FROM l2_keystones_lowest_btc_block
 
@@ -685,7 +708,7 @@ func (p *pgdb) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
 	log.Tracef("BtcBlockCanonicalHeight")
 	defer log.Tracef("BtcBlockCanonicalHeight exit")
 
-	const q = `SELECT COALESCE(MAX(height),0) FROM btc_blocks_can LIMIT 1`
+	const q = `SELECT COALESCE(MAX(height),0) FROM btc_blocks LIMIT 1`
 
 	var result uint64
 	if err := p.db.QueryRowContext(ctx, q).Scan(&result); err != nil {
@@ -693,70 +716,6 @@ func (p *pgdb) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
 	}
 
 	return result, nil
-}
-
-// BtcBlocksHeightsWithNoChildren returns the heights of blocks stored in the
-// database that do not have any children, these represent possible forks that
-// have not been handled yet.
-func (p *pgdb) BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, error) {
-	log.Tracef("BtcBlocksHeightsWithNoChildren")
-	defer log.Tracef("BtcBlocksHeightsWithNoChildren exit")
-
-	// Query all heights from btc_blocks where the block does not have any
-	// children and there are no other blocks at the same height with children.
-	// Excludes the tip because it will not have any children.
-	const q = `
-		SELECT height FROM btc_blocks bb1
-		WHERE NOT EXISTS (SELECT * FROM btc_blocks bb2 WHERE substr(bb2.header, 5, 32) = bb1.hash)
-		AND NOT EXISTS (
-			SELECT * FROM btc_blocks bb3 WHERE bb1.height = bb3.height 
-			AND EXISTS (
-				SELECT * FROM btc_blocks bb4 WHERE substr(bb4.header, 5, 32) = bb3.hash
-			)
-		)
-		ORDER BY height DESC
-		OFFSET $1 + 1
-		LIMIT 100
-	`
-
-	var heights []uint64
-	for offset := 0; ; offset += 100 {
-		rows, err := p.db.QueryContext(ctx, q, offset)
-		if err != nil {
-			return nil, err
-		}
-		defer rows.Close()
-
-		startingLength := len(heights)
-		for rows.Next() {
-			var v uint64
-			if err := rows.Scan(&v); err != nil {
-				return nil, err
-			}
-			heights = append(heights, v)
-		}
-
-		if startingLength == len(heights) {
-			return heights, nil
-		}
-
-		if rows.Err() != nil {
-			return nil, rows.Err()
-		}
-	}
-}
-
-func (p *pgdb) refreshBTCBlocksCanonical(ctx context.Context) error {
-	// XXX this probably should be REFRESH MATERIALIZED VIEW CONCURRENTLY
-	// however, this is more testable at the moment and we're in a time crunch,
-	// this works
-	sql := "REFRESH MATERIALIZED VIEW btc_blocks_can"
-	_, err := p.db.ExecContext(ctx, sql)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txId string) error {
