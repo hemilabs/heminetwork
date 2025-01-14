@@ -156,7 +156,7 @@ type Server struct {
 	// if this grows we need to notify subscribers
 	canonicalChainHeight uint64
 
-	checkForInvalidBlocks chan struct{}
+	checkForTipChange chan struct{}
 
 	l2keystonesCache []hemi.L2Keystone
 
@@ -254,17 +254,17 @@ func NewServer(cfg *Config) (*Server, error) {
 		)
 	}
 	s := &Server{
-		cfg:                   cfg,
-		requestLimiter:        make(chan bool, cfg.RequestLimit),
-		btcHeight:             cfg.BTCStartHeight,
-		server:                http.NewServeMux(),
-		publicServer:          http.NewServeMux(),
-		metrics:               newMetrics(cfg),
-		sessions:              make(map[string]*bfgWs),
-		checkForInvalidBlocks: make(chan struct{}),
-		holdoffTimeout:        6 * time.Second,
-		bfgCallTimeout:        20 * time.Second,
-		bfgCmdCh:              make(chan bfgCmd),
+		cfg:               cfg,
+		requestLimiter:    make(chan bool, cfg.RequestLimit),
+		btcHeight:         cfg.BTCStartHeight,
+		server:            http.NewServeMux(),
+		publicServer:      http.NewServeMux(),
+		metrics:           newMetrics(cfg),
+		sessions:          make(map[string]*bfgWs),
+		checkForTipChange: make(chan struct{}),
+		holdoffTimeout:    6 * time.Second,
+		bfgCallTimeout:    20 * time.Second,
+		bfgCmdCh:          make(chan bfgCmd),
 	}
 	for range cfg.RequestLimit {
 		s.requestLimiter <- true
@@ -297,33 +297,45 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) queueCheckForInvalidBlocks() {
+func (s *Server) queueCheckForTipChange() {
 	select {
-	case s.checkForInvalidBlocks <- struct{}{}:
+	case s.checkForTipChange <- struct{}{}:
 	default:
 	}
 }
 
-func (s *Server) invalidBlockChecker(ctx context.Context) {
+func (s *Server) tipChangeChecker(ctx context.Context) {
 	defer s.wg.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.checkForInvalidBlocks:
-			heights, err := s.db.BtcBlocksHeightsWithNoChildren(ctx)
+		case <-s.checkForTipChange:
+			height, err := s.btcClient.Height(ctx)
 			if err != nil {
-				log.Errorf("error trying to get heights for btc blocks: %s", err)
-				return
+				log.Errorf("error getting height: %s", err)
+				s.queueCheckForTipChange()
+				continue
 			}
 
-			log.Infof("received %d heights with no children, will re-check", len(heights))
-			for _, height := range heights {
-				log.Infof("reprocessing block at height %d", height)
-				if err := s.processBitcoinBlock(ctx, height); err != nil {
-					log.Errorf("error processing bitcoin block: %s", err)
+			log.Tracef("checking for missing blocks, walking from tip %d to %d", height, s.cfg.BTCStartHeight)
+
+			for height > s.cfg.BTCStartHeight {
+				err := s.processBitcoinBlock(ctx, height, true)
+				if errors.Is(err, database.ErrDuplicate) {
+					log.Tracef("block is already found, exiting")
+					break
 				}
+
+				if err != nil {
+					log.Errorf("error processing bitcoin block: %s", err)
+					break
+				}
+
+				height--
 			}
+
+			s.queueCheckForTipChange()
 		}
 	}
 }
@@ -591,7 +603,7 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 	return buResp, nil
 }
 
-func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
+func (s *Server) processBitcoinBlock(ctx context.Context, height uint64, failOnDuplicate bool) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
 	rbh, err := s.btcClient.RawBlockHeader(ctx, height)
@@ -619,6 +631,11 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		// XXX  don't return err here so we keep counting up, need to be smarter
 		if errors.Is(err, database.ErrDuplicate) {
 			log.Errorf("could not insert btc block: %s", err)
+
+			if failOnDuplicate {
+				return err
+			}
+
 			return nil
 		}
 	}
@@ -740,12 +757,11 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 func (s *Server) processBitcoinBlocks(ctx context.Context, start, end uint64) error {
 	for i := start; i <= end; i++ {
-		if err := s.processBitcoinBlock(ctx, i); err != nil {
+		if err := s.processBitcoinBlock(ctx, i, false); err != nil {
 			return fmt.Errorf("process bitcoin block at height %d: %w", i, err)
 		}
 		s.btcHeight = i
 	}
-	s.queueCheckForInvalidBlocks()
 	return nil
 }
 
@@ -794,6 +810,11 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 				log.Errorf("Failed to process Bitcoin blocks: %v", err)
 				continue
 			}
+
+			// once we process up the chain once, in the future let's process
+			// down from the tip in case it changes
+			s.queueCheckForTipChange()
+			return
 		}
 	}
 }
@@ -1981,7 +2002,7 @@ func (s *Server) Run(pctx context.Context) error {
 	go s.trackBitcoin(ctx)
 
 	s.wg.Add(1)
-	go s.invalidBlockChecker(ctx)
+	go s.tipChangeChecker(ctx)
 
 	select {
 	case <-ctx.Done():

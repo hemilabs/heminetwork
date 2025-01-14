@@ -25,7 +25,6 @@ type Database interface {
 	BtcBlockInsert(ctx context.Context, bb *BtcBlock) error
 	BtcBlockByHash(ctx context.Context, hash [32]byte) (*BtcBlock, error)
 	BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64, error)
-	BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, error)
 
 	// Pop data
 	PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool, page uint32) ([]PopBasis, error)
