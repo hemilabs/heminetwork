@@ -306,22 +306,38 @@ func (s *Server) queueCheckForTipChange() {
 
 func (s *Server) tipChangeChecker(ctx context.Context) {
 	defer s.wg.Done()
+
+	select {
+	case <-ctx.Done():
+		return
+	case <-s.checkForTipChange:
+	}
+
+	log.Tracef("starting tip change checker ticker")
+
+	btcInterval := 5 * time.Second
+	ticker := time.NewTicker(btcInterval)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.checkForTipChange:
+		case <-ticker.C:
+
 			height, err := s.btcClient.Height(ctx)
 			if err != nil {
 				log.Errorf("error getting height: %s", err)
-				s.queueCheckForTipChange()
 				continue
 			}
 
-			log.Tracef("checking for missing blocks, walking from tip %d to %d", height, s.cfg.BTCStartHeight)
+			s.updateBtcHeightCache(height)
+
+			log.Tracef("checking for missing blocks, walking from tip %d to %d or first known block from tip", height, s.cfg.BTCStartHeight)
 
 			for height > s.cfg.BTCStartHeight {
 				err := s.processBitcoinBlock(ctx, height, true)
+
+				// we have seen this block, done walking back
 				if errors.Is(err, database.ErrDuplicate) {
 					log.Tracef("block is already found, exiting")
 					break
@@ -334,8 +350,6 @@ func (s *Server) tipChangeChecker(ctx context.Context) {
 
 				height--
 			}
-
-			s.queueCheckForTipChange()
 		}
 	}
 }
@@ -628,10 +642,10 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64, failOnD
 
 	err = s.db.BtcBlockInsert(ctx, &btcBlock)
 	if err != nil {
+		log.Errorf("could not insert btc block: %s", err)
+
 		// XXX  don't return err here so we keep counting up, need to be smarter
 		if errors.Is(err, database.ErrDuplicate) {
-			log.Errorf("could not insert btc block: %s", err)
-
 			if failOnDuplicate {
 				return err
 			}
@@ -813,7 +827,7 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 
 			// once we process up the chain once, in the future let's process
 			// down from the tip in case it changes
-			s.queueCheckForTipChange()
+			go s.queueCheckForTipChange()
 			return
 		}
 	}
