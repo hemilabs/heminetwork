@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -96,7 +96,7 @@ type ntfnWrapper struct {
 	DataOld json.RawMessage `json:"data_old"` // JSON payload for old row
 }
 
-func (p *Database) ntfnEventHandler(pqn *pq.Notification) {
+func (p *Database) ntfnEventHandler(ctx context.Context, pqn *pq.Notification) {
 	log.Tracef("ntfnEventHandler notify: %v", spew.Sdump(pqn))
 
 	// A nil notification can be received on database shutdown.
@@ -142,7 +142,7 @@ func (p *Database) ntfnEventHandler(pqn *pq.Notification) {
 	log.Tracef("ntfnEventHandler: payload new %v", spew.Sdump(payloadNew))
 	log.Tracef("ntfnEventHandler: payload old %v", spew.Sdump(payloadOld))
 
-	pn.callback(nw.Table, nw.Action, payloadNew, payloadOld)
+	pn.callback(ctx, nw.Table, nw.Action, payloadNew, payloadOld)
 }
 
 // ntfnListenHandler listens for database notifications.
@@ -176,7 +176,7 @@ func (p *Database) ntfnListenHandler(ctx context.Context) {
 		case pqn := <-p.listener.Notify:
 			// TODO: Consider limiting the number of notifications being
 			// processed at the same time.
-			go p.ntfnEventHandler(pqn)
+			go p.ntfnEventHandler(ctx, pqn)
 
 		case <-time.After(60 * time.Second):
 			go func() {

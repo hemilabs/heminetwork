@@ -296,7 +296,7 @@ type btcBlocksNtfn struct {
 	expected *bfgd.BtcBlock
 }
 
-func (b *btcBlocksNtfn) handleBtcBlocksNotification(table string, action string, payload, payloadOld interface{}) {
+func (b *btcBlocksNtfn) handleBtcBlocksNotification(pctx context.Context, table string, action string, payload, payloadOld interface{}) {
 	defer b.cancel()
 	bb := payload.(*bfgd.BtcBlock)
 	if !reflect.DeepEqual(*b.expected, *bb) {

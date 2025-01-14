@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -376,7 +376,7 @@ func (tz TimeZone) Value() (driver.Value, error) {
 var _ driver.Valuer = (*TimeZone)(nil)
 
 // NotificationCallback is a callback function for a database notification.
-type NotificationCallback func(string, string, interface{}, interface{})
+type NotificationCallback func(context.Context, string, string, interface{}, interface{})
 
 // NotificationName identifies a database notification type.
 type NotificationName string
