@@ -1,4 +1,4 @@
-## hemictl
+![image](https://github.com/user-attachments/assets/0d0ea1df-5f9a-42b8-a42d-15fb814e5ac9)## hemictl
 
 The `hemictl` command is a generic tool to script commands to various daemons.
 
@@ -29,8 +29,8 @@ hemictl bss ping '{"timestamp":1}'
 Response:
 ```json
 {
-"origintimestamp": 1,
-"timestamp": 1701091119
+    "origintimestamp": 1,
+    "timestamp": 1701091119
 }
 ```
 
@@ -42,11 +42,11 @@ hemictl bss l1tick '{"l1_height":0}'
 Response:
 ```json
 {
-"error": {
-"timestamp": 1701091156,
-"trace": "804d952f893e686c",
-"error": "L1 tick notification with height zero"
-}
+    "error": {
+        "timestamp": 1701091156,
+        "trace": "804d952f893e686c",
+        "error": "L1 tick notification with height zero"
+    }
 }
 ```
 
