@@ -24,7 +24,8 @@ cmds = \
 	hemictl	\
 	keygen	\
 	popmd	\
-	tbcd
+	tbcd \
+	twcd
 
 .PHONY: all clean deps go-deps $(cmds) build install lint lint-deps tidy race test vulncheck \
 	vulncheck-deps

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -38,6 +38,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/api/twcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	ldb "github.com/hemilabs/heminetwork/database/level"
@@ -104,6 +105,16 @@ func handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 func handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
 	for {
 		if _, _, _, err := tbcapi.ReadConn(ctx, conn); err != nil {
+			return
+		}
+	}
+}
+
+// handleTBCWebsocketRead discards all reads but has to exist in order to
+// be able to use twcapi.Call.
+func handleTWCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
+	for {
+		if _, _, _, err := twcapi.ReadConn(ctx, conn); err != nil {
 			return
 		}
 	}
@@ -1035,6 +1046,9 @@ func init() {
 	for k, v := range tbcapi.APICommands() {
 		allCommands[string(k)] = v
 	}
+	for k, v := range twcapi.APICommands() {
+		allCommands[string(k)] = v
+	}
 
 	sortedCommands = make([]string, 0, len(allCommands))
 	for k := range allCommands {
@@ -1154,6 +1168,10 @@ func _main() error {
 		u = tbcapi.DefaultURL
 		callHandler = handleTBCWebsocketRead
 		call = tbcapi.Call // XXX yuck?
+	case strings.HasPrefix(cmd, "twcapi"):
+		u = twcapi.DefaultURL
+		callHandler = handleTWCWebsocketRead
+		call = twcapi.Call // XXX probably yuck
 	default:
 		return fmt.Errorf("can't derive URL from command: %v", cmd)
 	}
