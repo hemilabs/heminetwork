@@ -329,12 +329,11 @@ func (s *Server) invalidBlockChecker(ctx context.Context) {
 }
 
 // handleRequest is called as a go routine to handle a long-lived command.
-func (s *Server) handleRequest(parentCtx context.Context, bws *bfgWs, wsid string, cmd protocol.Command, handler func(ctx context.Context) (any, error)) {
+func (s *Server) handleRequest(pctx context.Context, bws *bfgWs, wsid string, cmd protocol.Command, handler func(ctx context.Context) (any, error)) {
 	log.Tracef("handleRequest: %v", bws.addr)
 	defer log.Tracef("handleRequest exit: %v", bws.addr)
 
-	ctx, cancel := context.WithTimeout(bws.requestContext,
-		time.Duration(s.cfg.RequestTimeout)*time.Second)
+	ctx, cancel := context.WithTimeout(pctx, time.Duration(s.cfg.RequestTimeout)*time.Second)
 	defer cancel()
 
 	select {
@@ -393,8 +392,8 @@ func (s *Server) handleBitcoinBalance(ctx context.Context, bbr *bfgapi.BitcoinBa
 	}, nil
 }
 
-func (s *Server) handleOneBroadcastRequest(ctx context.Context, highPriority bool) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+func (s *Server) handleOneBroadcastRequest(pctx context.Context, highPriority bool) {
+	ctx, cancel := context.WithTimeout(pctx, 5*time.Second)
 	defer cancel()
 
 	serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, highPriority)
@@ -803,8 +802,8 @@ type bfgWs struct {
 	addr           string
 	conn           *protocol.WSConn
 	sessionId      string
-	listenerName   string // "public" or "private"
-	requestContext context.Context
+	listenerName   string          // "public" or "private"
+	requestContext context.Context // XXX get rid of this
 	notify         map[notificationId]struct{}
 	publicKey      []byte
 }
@@ -1086,8 +1085,7 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Must complete handshake in WSHandshakeTimeout.
-	hsCtx, hsCancel := context.WithTimeout(context.Background(),
-		protocol.WSHandshakeTimeout)
+	hsCtx, hsCancel := context.WithTimeout(r.Context(), protocol.WSHandshakeTimeout)
 	defer hsCancel()
 
 	authenticator, err := auth.NewSecp256k1AuthServer()
@@ -1421,16 +1419,16 @@ func hemiL2KeystonesToDb(l2ks []hemi.L2Keystone) []bfgd.L2Keystone {
 	return dbks
 }
 
-func (s *Server) refreshCacheAndNotifiyL2Keystones() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (s *Server) refreshCacheAndNotifiyL2Keystones(pctx context.Context) {
+	ctx, cancel := context.WithTimeout(pctx, 10*time.Second)
 	defer cancel()
 
 	s.refreshL2KeystoneCache(ctx)
 	go s.handleL2KeystonesNotification()
 }
 
-func (s *Server) saveL2Keystones(ctx context.Context, l2k []hemi.L2Keystone) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+func (s *Server) saveL2Keystones(pctx context.Context, l2k []hemi.L2Keystone) {
+	ctx, cancel := context.WithTimeout(pctx, 5*time.Second)
 	defer cancel()
 
 	ks := hemiL2KeystonesToDb(l2k)
@@ -1441,7 +1439,7 @@ func (s *Server) saveL2Keystones(ctx context.Context, l2k []hemi.L2Keystone) {
 		return
 	}
 
-	go s.refreshCacheAndNotifiyL2Keystones()
+	go s.refreshCacheAndNotifiyL2Keystones(pctx)
 }
 
 func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
@@ -1482,9 +1480,7 @@ func handle(service string, mux *http.ServeMux, pattern string, handler func(htt
 	log.Infof("handle (%v): %v", service, pattern)
 }
 
-func (s *Server) handleStateUpdates(table string, action string, payload, payloadOld interface{}) {
-	ctx := context.Background()
-
+func (s *Server) handleStateUpdates(ctx context.Context, table string, action string, payload, payloadOld interface{}) {
 	// get the last known canonical chain height
 	s.mtx.RLock()
 	heightBefore := s.canonicalChainHeight
@@ -1509,7 +1505,7 @@ func (s *Server) handleStateUpdates(table string, action string, payload, payloa
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleAccessPublicKeys(table string, action string, payload, payloadOld interface{}) {
+func (s *Server) handleAccessPublicKeys(ctx context.Context, table string, action string, payload, payloadOld interface{}) {
 	log.Tracef("received payloads: %v, %v", payload, payloadOld)
 
 	if action != "DELETE" {
@@ -1543,8 +1539,8 @@ func (s *Server) handleAccessPublicKeys(table string, action string, payload, pa
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleL2KeystonesChange(table string, action string, payload, payloadOld any) {
-	go s.refreshCacheAndNotifiyL2Keystones()
+func (s *Server) handleL2KeystonesChange(ctx context.Context, table string, action string, payload, payloadOld any) {
+	go s.refreshCacheAndNotifiyL2Keystones(ctx)
 }
 
 func (s *Server) fetchRemoteL2Keystones(pctx context.Context) {
@@ -1592,7 +1588,7 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 	}
 }
 
-func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
+func (s *Server) callBFG(pctx context.Context, msg any) (any, error) {
 	log.Tracef("callBFG %T", msg)
 	defer log.Tracef("callBFG exit %T", msg)
 
@@ -1601,7 +1597,7 @@ func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
 		ch:  make(chan any),
 	}
 
-	ctx, cancel := context.WithTimeout(parrentCtx, s.bfgCallTimeout)
+	ctx, cancel := context.WithTimeout(pctx, s.bfgCallTimeout)
 	defer cancel()
 
 	// attempt to send
@@ -1629,11 +1625,11 @@ func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
 	// Won't get here
 }
 
-func (s *Server) handleBFGCallCompletion(parrentCtx context.Context, conn *protocol.Conn, bc bfgCmd) {
+func (s *Server) handleBFGCallCompletion(pctx context.Context, conn *protocol.Conn, bc bfgCmd) {
 	log.Tracef("handleBFGCallCompletion")
 	defer log.Tracef("handleBFGCallCompletion exit")
 
-	ctx, cancel := context.WithTimeout(parrentCtx, s.bfgCallTimeout)
+	ctx, cancel := context.WithTimeout(pctx, s.bfgCallTimeout)
 	defer cancel()
 
 	log.Tracef("handleBFGCallCompletion: %v", spew.Sdump(bc.msg))
