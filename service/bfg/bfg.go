@@ -1808,7 +1808,7 @@ func (s *Server) Run(pctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(1 * time.Second):
+			case <-time.After(12 * time.Second):
 				s.refreshL2KeystoneCache(ctx)
 			}
 		}
