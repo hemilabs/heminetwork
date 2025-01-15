@@ -121,6 +121,9 @@ type Config struct {
 }
 
 func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
+	if blockheaderCacheSizeS == "" {
+		blockheaderCacheSizeS = "0"
+	}
 	blockheaderCacheSize, err := humanize.ParseBytes(blockheaderCacheSizeS)
 	if err != nil {
 		panic(err)
@@ -129,6 +132,9 @@ func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
 		panic("invalid blockheaderCacheSize")
 	}
 
+	if blockCacheSizeS == "" {
+		blockCacheSizeS = "0"
+	}
 	blockCacheSize, err := humanize.ParseBytes(blockCacheSizeS)
 	if err != nil {
 		panic(err)
