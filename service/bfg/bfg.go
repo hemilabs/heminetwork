@@ -365,6 +365,14 @@ func (s *Server) handleOneBroadcastRequest(pctx context.Context, highPriority bo
 	serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, highPriority)
 	if err != nil {
 		log.Errorf("error getting next broadcast request: %v", err)
+
+		// if there is a communication error, backoff a bit
+		select {
+		case <-time.After(1 * time.Second):
+			return
+		case <-ctx.Done():
+			return
+		}
 	}
 
 	// if there are no new serialized txs, backoff a bit
@@ -740,7 +748,12 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 				continue
 			}
 
-			go s.updateBtcHeightCache(btcHeight)
+			cachedHeight := s.getBtcHeightCache()
+			if cachedHeight == btcHeight {
+				continue
+			}
+
+			s.updateBtcHeightCache(btcHeight)
 
 			err = s.walkChain(ctx, btcHeight, !initialWalk)
 			if err != nil {
