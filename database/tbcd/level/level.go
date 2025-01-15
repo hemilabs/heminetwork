@@ -53,9 +53,13 @@ const (
 
 type IteratorError error
 
-var log = loggo.GetLogger("level")
+var (
+	log = loggo.GetLogger("level")
 
-var ErrIterator = IteratorError(errors.New("iteration error"))
+	ErrIterator = IteratorError(errors.New("iteration error"))
+
+	noStats tbcd.CacheStats
+)
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -116,8 +120,7 @@ type Config struct {
 	blockheaderCacheSize int    // parsed size of block header cache
 }
 
-func NewConfig(home string) *Config {
-	blockheaderCacheSizeS := "128mb" // Cache all blockheaders on mainnet
+func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
 	blockheaderCacheSize, err := humanize.ParseBytes(blockheaderCacheSizeS)
 	if err != nil {
 		panic(err)
@@ -126,7 +129,6 @@ func NewConfig(home string) *Config {
 		panic("invalid blockheaderCacheSize")
 	}
 
-	blockCacheSizeS := "1gb" // ~640 blocks on mainnet
 	blockCacheSize, err := humanize.ParseBytes(blockCacheSizeS)
 	if err != nil {
 		panic(err)
@@ -1657,9 +1659,15 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
+	if l.cfg.blockheaderCacheSize == 0 {
+		return noStats
+	}
 	return l.headerCache.Stats()
 }
 
 func (l *ldb) BlockCacheStats() tbcd.CacheStats {
+	if l.cfg.blockCacheSize == 0 {
+		return noStats
+	}
 	return l.blockCache.Stats()
 }
