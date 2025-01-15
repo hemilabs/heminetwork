@@ -6,8 +6,6 @@ package twc
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -26,7 +24,6 @@ type twcWs struct {
 	wg             sync.WaitGroup
 	addr           string
 	conn           *protocol.WSConn
-	sessionID      string
 	requestContext context.Context
 }
 
@@ -115,12 +112,6 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		requestContext: r.Context(),
 	}
 
-	if ws.sessionID, err = s.newSession(ws); err != nil {
-		log.Errorf("An error occurred while creating session: %v", err)
-		return
-	}
-	defer s.deleteSession(ws.sessionID)
-
 	ws.wg.Add(1)
 	go s.handleWebsocketRead(r.Context(), ws)
 
@@ -140,45 +131,4 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	ws.wg.Wait()
 
 	log.Infof("Connection terminated from %v", r.RemoteAddr)
-}
-
-func (s *Server) newSession(ws *twcWs) (string, error) {
-	for {
-		// Create random hexadecimal string to use as an ID
-		id, err := randHexId(16)
-		if err != nil {
-			return "", fmt.Errorf("generate session id: %w", err)
-		}
-
-		// Ensure the key is not already in use, if it is then try again.
-		// XXX should be safe, but still scary to not have a timeout
-		s.mtx.Lock()
-		if _, ok := s.sessions[id]; ok {
-			s.mtx.Unlock()
-			continue
-		}
-		s.sessions[id] = ws
-		s.mtx.Unlock()
-
-		return id, nil
-	}
-}
-
-func (s *Server) deleteSession(id string) {
-	s.mtx.Lock()
-	_, ok := s.sessions[id]
-	delete(s.sessions, id)
-	s.mtx.Unlock()
-
-	if !ok {
-		log.Errorf("id not found in sessions %s", id)
-	}
-}
-
-func randHexId(length int) (string, error) {
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("read random bytes: %w", err)
-	}
-	return hex.EncodeToString(b), nil
 }

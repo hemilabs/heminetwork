@@ -73,7 +73,6 @@ type Server struct {
 	printTime time.Time
 
 	// WebSockets
-	sessions       map[string]*twcWs
 	requestTimeout time.Duration
 
 	isRunning bool
@@ -90,7 +89,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		requestLimiter: make(chan bool, cfg.RequestLimit),
 		printTime:      time.Now().Add(10 * time.Second),
 		requestTimeout: defaultRequestTimeout,
-		sessions:       make(map[string]*twcWs),
 	}
 	for range cfg.RequestLimit {
 		s.requestLimiter <- true
