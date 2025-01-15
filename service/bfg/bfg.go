@@ -730,13 +730,12 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 	initialWalk := true
 
 	btcInterval := 5 * time.Second
-	ticker := time.NewTicker(btcInterval)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(btcInterval):
 			log.Tracef("Checking BTC height...")
 
 			btcHeight, err := s.btcClient.Height(ctx)
