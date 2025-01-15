@@ -590,18 +590,8 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		Height: btcHeight,
 	}
 
-	// XXX: these database inserts should be in a transaction, or simply be atomic
-	// but they never have been.  in the future, let's make sure they are with the
-	// next solution
-
-	rowsAffected, err := s.db.BtcBlockReplace(ctx, &btcBlock)
-	if err != nil {
-		return fmt.Errorf("error replacing bitcoin block: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("no rows affected: %w", ErrAlreadyProcessed)
-	}
+	l2Keystones := []bfgd.L2Keystone{}
+	popBases := []bfgd.PopBasis{}
 
 	for index := uint64(0); ; index++ {
 		log.Tracef("calling tx at pos")
@@ -614,7 +604,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			if errors.Is(err, electrs.ErrNoTxAtPosition) {
 				// There is no way to tell how many transactions are
 				// in a block, so hopefully we've got them all...
-				return nil
+				break
 			}
 			return fmt.Errorf("get transaction at position (height %v, index %v): %w", height, index, err)
 		}
@@ -669,14 +659,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		btcTxIndex := index
 		log.Infof("found tl2: %v at position %d", tl2, btcTxIndex)
 
-		// attempt to insert the abbreviated keystone, this is in case we have
-		// not heard of this keystone from op node yet
-		if err := s.db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{
-			hemiL2KeystoneAbrevToDb(*tl2.L2Keystone),
-		}); err != nil {
-			// this is not necessarily an error, should it be trace?
-			log.Infof("could not insert l2 keystone: %s", err)
-		}
+		l2Keystones = append(l2Keystones, hemiL2KeystoneAbrevToDb(*tl2.L2Keystone))
 
 		publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mtx.TxIn[0].SignatureScript)
 		if err != nil {
@@ -703,6 +686,35 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			BtcMerklePath:       merkleHashes,
 		}
 
+		popBases = append(popBases, popBasis)
+	}
+
+	// XXX: these database inserts should be in a transaction, or simply be atomic
+	// but they never have been.  in the future, let's make sure they are with the
+	// next solution
+	// we need to AT LEAST try to insert them here, in case there are network timeouts
+	// with the above and electrs.
+
+	rowsAffected, err := s.db.BtcBlockReplace(ctx, &btcBlock)
+	if err != nil {
+		return fmt.Errorf("error replacing bitcoin block: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows affected: %w", ErrAlreadyProcessed)
+	}
+
+	// this for loop seems weird but its used to check errors per keystone
+	for _, l2Keystone := range l2Keystones {
+		// attempt to insert the abbreviated keystone, this is in case we have
+		// not heard of this keystone from op node yet
+		if err := s.db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}); err != nil {
+			// this is not necessarily an error, should it be trace?
+			log.Infof("could not insert l2 keystone: %s", err)
+		}
+	}
+
+	for _, popBasis := range popBases {
 		// first, try to update a pop_basis row with NULL btc fields
 		rowsAffected, err := s.db.PopBasisUpdateBTCFields(ctx, &popBasis)
 		if err != nil {
@@ -722,6 +734,8 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			}
 		}
 	}
+
+	return nil
 }
 
 func (s *Server) trackBitcoin(ctx context.Context) {
