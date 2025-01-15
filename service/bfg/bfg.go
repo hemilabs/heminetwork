@@ -602,8 +602,10 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	}
 
 	for index := uint64(0); ; index++ {
+		log.Tracef("calling tx at pos")
 		txHash, merkleHashes, err := s.btcClient.TransactionAtPosition(ctx,
 			height, index)
+		log.Tracef("done calling tx as pos")
 		if err != nil {
 			if errors.Is(err, electrs.ErrNoTxAtPosition) {
 				// There is no way to tell how many transactions are
@@ -730,12 +732,13 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 	initialWalk := true
 
 	btcInterval := 5 * time.Second
+	ticker := time.NewTicker(btcInterval)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(btcInterval):
+		case <-ticker.C:
 			log.Tracef("Checking BTC height...")
 
 			btcHeight, err := s.btcClient.Height(ctx)
