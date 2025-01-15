@@ -365,14 +365,6 @@ func (s *Server) handleOneBroadcastRequest(pctx context.Context, highPriority bo
 	serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, highPriority)
 	if err != nil {
 		log.Errorf("error getting next broadcast request: %v", err)
-
-		// if there is a communication error, backoff a bit
-		select {
-		case <-time.After(1 * time.Second):
-			return
-		case <-ctx.Done():
-			return
-		}
 	}
 
 	// if there are no new serialized txs, backoff a bit
@@ -1808,7 +1800,7 @@ func (s *Server) Run(pctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(12 * time.Second):
+			case <-time.After(1 * time.Second):
 				s.refreshL2KeystoneCache(ctx)
 			}
 		}

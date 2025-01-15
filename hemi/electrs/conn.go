@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -155,7 +155,7 @@ func readResponse(ctx context.Context, r io.Reader, reqID uint64) (*JSONRPCRespo
 				return nil, ctx.Err()
 			default:
 			}
-			log.Debugf("Received a response from Electrs with ID 0, retrying read response...")
+			log.Debugf("Received a response from Electrs with ID 0, retrying read response... %x", res)
 			return readResponse(ctx, r, reqID)
 		}
 		return nil, fmt.Errorf("response ID differs from request ID (%d != %d)", res.ID, reqID)
