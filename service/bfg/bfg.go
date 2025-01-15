@@ -568,7 +568,9 @@ var ErrAlreadyProcessed error = fmt.Errorf("Already Processed BTC Block")
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
-	rbh, err := s.btcClient.RawBlockHeader(ctx, height)
+	netCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	rbh, err := s.btcClient.RawBlockHeader(netCtx, height)
+	cancel()
 	if err != nil {
 		return fmt.Errorf("get block header at height %v: %w", height, err)
 	}
@@ -603,8 +605,10 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 	for index := uint64(0); ; index++ {
 		log.Tracef("calling tx at pos")
-		txHash, merkleHashes, err := s.btcClient.TransactionAtPosition(ctx,
+		netCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		txHash, merkleHashes, err := s.btcClient.TransactionAtPosition(netCtx,
 			height, index)
+		cancel()
 		log.Tracef("done calling tx as pos")
 		if err != nil {
 			if errors.Is(err, electrs.ErrNoTxAtPosition) {
@@ -633,7 +637,9 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			log.Infof("btc tx is valid with hash %s", txHashEncoded)
 		}
 
-		rtx, err := s.btcClient.RawTransaction(ctx, txHash)
+		netCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		rtx, err := s.btcClient.RawTransaction(netCtx, txHash)
+		cancel()
 		if err != nil {
 			return fmt.Errorf("get raw transaction with txid %x: %w", txHash, err)
 		}
@@ -741,7 +747,9 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 		case <-ticker.C:
 			log.Tracef("Checking BTC height...")
 
-			btcHeight, err := s.btcClient.Height(ctx)
+			netCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			btcHeight, err := s.btcClient.Height(netCtx)
+			cancel()
 			if err != nil {
 				// XXX add this to prometheus
 				log.Errorf("Failed to get Bitcoin height: %v", err)
