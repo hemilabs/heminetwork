@@ -21,6 +21,6 @@ ALTER TABLE btc_blocks ADD UNIQUE (height);
 -- when a btc block becomes "invalid" (orphaned), delete it and all pop_bases 
 -- that referenced it
 ALTER TABLE pop_basis DROP CONSTRAINT pop_basis_btc_block_hash_fkey;
-ALTER TABLE pop_basis ADD CONSTRAINT pop_basis_btc_block_hash_fkey FOREIGN KEY (btc_block_hash) REFERENCES btc_blocks (hash) ON UPDATE CASCADE;
+ALTER TABLE pop_basis ADD CONSTRAINT pop_basis_btc_block_hash_fkey FOREIGN KEY (btc_block_hash) REFERENCES btc_blocks (hash) ON DELETE CASCADE;
 
 COMMIT;
