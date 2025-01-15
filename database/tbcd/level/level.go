@@ -1287,7 +1287,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 		if l.cfg.blockCacheSize > 0 {
-			l.blockCache.Put(b)
+			l.blockCache.Put(b.Hash(), raw)
 		}
 	}
 
@@ -1323,27 +1323,35 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
+	// get from cache
+	var (
+		eb  []byte
+		err error
+	)
 	if l.cfg.blockCacheSize > 0 {
 		// Try cache first
-		if cb, ok := l.blockCache.Get(hash); ok {
-			return cb, nil
+		eb, _ = l.blockCache.Get(hash)
+	}
+
+	// get from db
+	if eb == nil {
+		bDB := l.rawPool[level.BlocksDB]
+		eb, err = bDB.Get(hash[:])
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return nil, database.BlockNotFoundError{Hash: *hash}
+			}
+			return nil, fmt.Errorf("block get: %w", err)
 		}
 	}
 
-	bDB := l.rawPool[level.BlocksDB]
-	eb, err := bDB.Get(hash[:])
-	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.BlockNotFoundError{Hash: *hash}
-		}
-		return nil, fmt.Errorf("block get: %w", err)
-	}
+	// if we get here eb MUST exist
 	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))
 	}
 	if l.cfg.blockCacheSize > 0 {
-		l.blockCache.Put(b)
+		l.blockCache.Put(hash, eb)
 	}
 	return b, nil
 }

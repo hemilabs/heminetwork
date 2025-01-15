@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -37,23 +36,18 @@ type lowIQLRU struct {
 	c tbcd.CacheStats
 }
 
-func (l *lowIQLRU) Put(v *btcutil.Block) {
+func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	hash := v.Hash()
-	if _, ok := l.m[*hash]; ok {
+	if be, ok := l.m[*hash]; ok {
+		// update access
+		l.l.MoveToBack(be.element)
 		return
 	}
 
-	block, err := v.Bytes()
-	if err != nil {
-		// data corruption, panic
-		panic(err)
-	}
-
 	// evict first element in list
-	if l.totalSize+len(block) > l.size {
+	for l.totalSize+len(block) > l.size {
 		// LET THEM EAT PANIC
 		re := l.l.Front()
 		rha := l.l.Remove(re)
@@ -70,7 +64,7 @@ func (l *lowIQLRU) Put(v *btcutil.Block) {
 	l.c.Size = l.totalSize
 }
 
-func (l *lowIQLRU) Get(k *chainhash.Hash) (*btcutil.Block, bool) {
+func (l *lowIQLRU) Get(k *chainhash.Hash) ([]byte, bool) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
@@ -79,18 +73,13 @@ func (l *lowIQLRU) Get(k *chainhash.Hash) (*btcutil.Block, bool) {
 		l.c.Misses++
 		return nil, false
 	}
-	b, err := btcutil.NewBlockFromBytes(be.block)
-	if err != nil {
-		// panic for diagnostics at this time
-		panic(err)
-	}
 
 	// update access
 	l.l.MoveToBack(be.element)
 
 	l.c.Hits++
 
-	return b, true
+	return be.block, true
 }
 
 func (l *lowIQLRU) Stats() tbcd.CacheStats {

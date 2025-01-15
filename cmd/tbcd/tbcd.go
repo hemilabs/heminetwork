@@ -25,8 +25,8 @@ const (
 	defaultLogLevel = daemonName + "=INFO;tbc=INFO;level=INFO"
 	defaultNetwork  = "testnet3" // XXX make this mainnet
 	defaultHome     = "~/." + daemonName
-	bDefaultSize    = "1gb"   // ~640 blocks on mainnet
-	bhsDefaultSize  = "128mb" // enough for mainnet
+	bDefaultSize    = "512mb" // ~320 blocks on mainnet
+	bhsDefaultSize  = "2mb"
 )
 
 var (
