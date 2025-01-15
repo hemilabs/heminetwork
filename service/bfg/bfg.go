@@ -748,6 +748,8 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 				continue
 			}
 
+			btcHeight--
+
 			cachedHeight := s.getBtcHeightCache()
 			if cachedHeight == btcHeight {
 				continue
