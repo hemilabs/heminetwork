@@ -12,10 +12,15 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
-func newBlock(prevHash *chainhash.Hash, nonce uint32) (chainhash.Hash, *btcutil.Block) {
+func newBlock(prevHash *chainhash.Hash, nonce uint32) (chainhash.Hash, *btcutil.Block, []byte) {
 	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
 	b := wire.NewMsgBlock(bh)
-	return bh.BlockHash(), btcutil.NewBlock(b)
+	ub := btcutil.NewBlock(b)
+	r, err := ub.Bytes()
+	if err != nil {
+		panic(err)
+	}
+	return bh.BlockHash(), ub, r
 }
 
 func TestLRUCache(t *testing.T) {
@@ -29,10 +34,10 @@ func TestLRUCache(t *testing.T) {
 	prevHash := chainhash.Hash{} // genesis
 	blocks := make([]chainhash.Hash, 0, maxCache*2)
 	for i := 0; i < maxCache; i++ {
-		h, b := newBlock(&prevHash, uint32(i))
+		h, _, r := newBlock(&prevHash, uint32(i))
 		t.Logf("%v: %v", i, h)
 		blocks = append(blocks, h)
-		l.Put(b)
+		l.Put(&h, r)
 		prevHash = h
 	}
 
@@ -57,10 +62,10 @@ func TestLRUCache(t *testing.T) {
 
 	// purge oldest cache entries
 	for i := maxCache; i < maxCache*2; i++ {
-		h, b := newBlock(&prevHash, uint32(i))
+		h, _, r := newBlock(&prevHash, uint32(i))
 		t.Logf("%v: %v", i, h)
 		blocks = append(blocks, h)
-		l.Put(b)
+		l.Put(&h, r)
 		prevHash = h
 	}
 
