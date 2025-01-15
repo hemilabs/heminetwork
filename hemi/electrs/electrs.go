@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -263,13 +263,11 @@ func (c *Client) call(ctx context.Context, method string, params, result any) er
 	return retry.Do(ctx, backoff, func(ctx context.Context) error {
 		conn, err := c.connPool.acquireConn()
 		if err != nil {
-			log.Tracef("retryable error: %s", err)
 			return retry.RetryableError(fmt.Errorf("acquire connection: %w", err))
 		}
 
 		if err = conn.call(ctx, method, params, result); err != nil {
 			if errors.Is(err, net.ErrClosed) || errors.Is(err, syscall.EPIPE) {
-				log.Tracef("retryable error: %s", err)
 				return retry.RetryableError(err)
 			}
 			c.connPool.freeConn(conn)
