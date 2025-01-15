@@ -678,7 +678,8 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 		publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mtx.TxIn[0].SignatureScript)
 		if err != nil {
-			return fmt.Errorf("could not parse signature script: %w", err)
+			log.Errorf("could not parse signature script: %w", err)
+			continue
 		}
 
 		popTxIdFull := []byte{}
