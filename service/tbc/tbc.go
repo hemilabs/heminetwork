@@ -2211,9 +2211,8 @@ func (s *Server) DBOpen(ctx context.Context) error {
 
 	// Open db.
 	var err error
-	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
-	cfg.BlockCacheSize = s.cfg.BlockCacheSize
-	cfg.BlockheaderCacheSize = s.cfg.BlockheaderCacheSize
+	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network),
+		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
 	s.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)

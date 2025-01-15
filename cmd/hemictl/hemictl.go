@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -305,7 +305,7 @@ func tbcdb() error {
 
 		levelDBHome := "~/.tbcd" // XXX
 		network := "testnet3"
-		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network)))
+		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
 		if err != nil {
 			return err
 		}
@@ -322,7 +322,7 @@ func tbcdb() error {
 
 		levelDBHome := "~/.tbcd" // XXX
 		network := "testnet3"
-		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network)))
+		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
 		if err != nil {
 			return err
 		}
@@ -340,7 +340,7 @@ func tbcdb() error {
 
 		levelDBHome := "~/.tbcd" // XXX
 		network := "testnet3"
-		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network)))
+		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
 		if err != nil {
 			return err
 		}

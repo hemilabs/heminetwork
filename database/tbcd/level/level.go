@@ -53,9 +53,13 @@ const (
 
 type IteratorError error
 
-var log = loggo.GetLogger("level")
+var (
+	log = loggo.GetLogger("level")
 
-var ErrIterator = IteratorError(errors.New("iteration error"))
+	ErrIterator = IteratorError(errors.New("iteration error"))
+
+	noStats tbcd.CacheStats
+)
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -116,8 +120,10 @@ type Config struct {
 	blockheaderCacheSize int    // parsed size of block header cache
 }
 
-func NewConfig(home string) *Config {
-	blockheaderCacheSizeS := "128mb" // Cache all blockheaders on mainnet
+func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
+	if blockheaderCacheSizeS == "" {
+		blockheaderCacheSizeS = "0"
+	}
 	blockheaderCacheSize, err := humanize.ParseBytes(blockheaderCacheSizeS)
 	if err != nil {
 		panic(err)
@@ -126,7 +132,9 @@ func NewConfig(home string) *Config {
 		panic("invalid blockheaderCacheSize")
 	}
 
-	blockCacheSizeS := "1gb" // ~640 blocks on mainnet
+	if blockCacheSizeS == "" {
+		blockCacheSizeS = "0"
+	}
 	blockCacheSize, err := humanize.ParseBytes(blockCacheSizeS)
 	if err != nil {
 		panic(err)
@@ -1285,7 +1293,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 		if l.cfg.blockCacheSize > 0 {
-			l.blockCache.Put(b)
+			l.blockCache.Put(b.Hash(), raw)
 		}
 	}
 
@@ -1321,27 +1329,35 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
+	// get from cache
+	var (
+		eb  []byte
+		err error
+	)
 	if l.cfg.blockCacheSize > 0 {
 		// Try cache first
-		if cb, ok := l.blockCache.Get(hash); ok {
-			return cb, nil
+		eb, _ = l.blockCache.Get(hash)
+	}
+
+	// get from db
+	if eb == nil {
+		bDB := l.rawPool[level.BlocksDB]
+		eb, err = bDB.Get(hash[:])
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				return nil, database.BlockNotFoundError{Hash: *hash}
+			}
+			return nil, fmt.Errorf("block get: %w", err)
 		}
 	}
 
-	bDB := l.rawPool[level.BlocksDB]
-	eb, err := bDB.Get(hash[:])
-	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.BlockNotFoundError{Hash: *hash}
-		}
-		return nil, fmt.Errorf("block get: %w", err)
-	}
+	// if we get here eb MUST exist
 	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))
 	}
 	if l.cfg.blockCacheSize > 0 {
-		l.blockCache.Put(b)
+		l.blockCache.Put(hash, eb)
 	}
 	return b, nil
 }
@@ -1657,9 +1673,15 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
+	if l.cfg.blockheaderCacheSize == 0 {
+		return noStats
+	}
 	return l.headerCache.Stats()
 }
 
 func (l *ldb) BlockCacheStats() tbcd.CacheStats {
+	if l.cfg.blockCacheSize == 0 {
+		return noStats
+	}
 	return l.blockCache.Stats()
 }

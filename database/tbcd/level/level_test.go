@@ -21,7 +21,7 @@ func TestMD(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	cfg := level.NewConfig(home)
+	cfg := level.NewConfig(home, "128kb", "1m")
 	db, err := level.New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
