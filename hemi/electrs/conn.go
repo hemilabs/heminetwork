@@ -155,7 +155,8 @@ func readResponse(ctx context.Context, r io.Reader, reqID uint64) (*JSONRPCRespo
 				return nil, ctx.Err()
 			default:
 			}
-			log.Debugf("Received a response from Electrs with ID 0, retrying read response... %x", res)
+
+			log.Debugf("Received a response from Electrs with ID 0, retrying read response... %s", res.Result)
 			return readResponse(ctx, r, reqID)
 		}
 		return nil, fmt.Errorf("response ID differs from request ID (%d != %d)", res.ID, reqID)
