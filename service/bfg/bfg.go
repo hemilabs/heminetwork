@@ -584,6 +584,16 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	btcHeight := height
 	btcHeader := rbh
 
+	btcBlockTmpChk, err := s.db.BtcBlockByHash(ctx, [32]byte(btcHeaderHash))
+	if err != nil && !errors.Is(err, database.ErrNotFound) {
+		return err
+	}
+
+	// block with hash is already at height, no-reorg
+	if btcBlockTmpChk != nil && btcBlockTmpChk.Height == btcHeight {
+		return fmt.Errorf("already processed block block: %w", ErrAlreadyProcessed)
+	}
+
 	btcBlock := bfgd.BtcBlock{
 		Hash:   btcHeaderHash,
 		Header: btcHeader[:],
