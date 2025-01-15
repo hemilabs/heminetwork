@@ -590,7 +590,11 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		Height: btcHeight,
 	}
 
-	l2Keystones := []bfgd.L2Keystone{}
+	// these might get quite large; we store all found keystones and
+	// pop bases here to insert at the end
+	// we will likely find many of the same keystones so store them in a map
+	// to remove duplicates
+	l2Keystones := map[string]bfgd.L2Keystone{}
 	popBases := []bfgd.PopBasis{}
 
 	for index := uint64(0); ; index++ {
@@ -601,7 +605,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		cancel()
 		log.Tracef("done calling tx as pos")
 		if err != nil {
-			if errors.Is(err, electrs.ErrNoTxAtPosition) {
+			if errors.Is(err, electrs.ErrNoTxAtPosition) || strings.HasSuffix(err.Error(), "no tx at position") {
 				// There is no way to tell how many transactions are
 				// in a block, so hopefully we've got them all...
 				break
@@ -659,7 +663,8 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		btcTxIndex := index
 		log.Infof("found tl2: %v at position %d", tl2, btcTxIndex)
 
-		l2Keystones = append(l2Keystones, hemiL2KeystoneAbrevToDb(*tl2.L2Keystone))
+		l2kdb := hemiL2KeystoneAbrevToDb(*tl2.L2Keystone)
+		l2Keystones[hex.EncodeToString(l2kdb.Hash)] = l2kdb
 
 		publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mtx.TxIn[0].SignatureScript)
 		if err != nil {
@@ -767,11 +772,6 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 			if err != nil {
 				// XXX add this to prometheus
 				log.Errorf("Failed to get Bitcoin height: %v", err)
-				continue
-			}
-
-			cachedHeight := s.getBtcHeightCache()
-			if cachedHeight == btcHeight {
 				continue
 			}
 
