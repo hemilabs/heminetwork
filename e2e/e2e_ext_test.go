@@ -66,7 +66,7 @@ const (
 	mockEncodedBlockHeader    = "\"0000c02048cd664586152c3dcf356d010cbb9216fdeb3b1aeae256d59a0700000000000086182c855545356ec11d94972cf31b97ef01ae7c9887f4349ad3f0caf2d3c0b118e77665efdf2819367881fb\""
 	mockTxHash                = "7fe9c3262f8fe26764b01955b4c996296f7c0c72945af1556038a084fcb37dbb"
 	mockTxPos                 = 3
-	mockTxheight              = 2
+	mockTxheight              = 10
 	mockElectrsConnectTimeout = 3 * time.Second
 )
 
@@ -1705,7 +1705,7 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 	}
 
 	btcHeaderHash := btcchainhash.DoubleHashB(expectedBtcBlockHeader)
-	btcHeight := 2
+	btcHeight := 10
 	btcHeader := expectedBtcBlockHeader
 
 	// 2
@@ -1742,9 +1742,15 @@ loop:
 		t.Fatalf("unexpected diff %s", diff)
 	}
 
-	l2k, err := db.L2KeystonesMostRecentN(ctx, 100, 0)
-	if err != nil {
-		t.Fatal(err)
+	var l2k []bfgd.L2Keystone
+	for {
+		l2k, err = db.L2KeystonesMostRecentN(ctx, 100, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l2k != nil {
+			break
+		}
 	}
 
 	// assert that the L2Keystone was stored in the database,

@@ -156,8 +156,6 @@ type Server struct {
 	// if this grows we need to notify subscribers
 	canonicalChainHeight uint64
 
-	checkForInvalidBlocks chan struct{}
-
 	l2keystonesCache []hemi.L2Keystone
 
 	btcHeightCache uint64
@@ -254,17 +252,16 @@ func NewServer(cfg *Config) (*Server, error) {
 		)
 	}
 	s := &Server{
-		cfg:                   cfg,
-		requestLimiter:        make(chan bool, cfg.RequestLimit),
-		btcHeight:             cfg.BTCStartHeight,
-		server:                http.NewServeMux(),
-		publicServer:          http.NewServeMux(),
-		metrics:               newMetrics(cfg),
-		sessions:              make(map[string]*bfgWs),
-		checkForInvalidBlocks: make(chan struct{}),
-		holdoffTimeout:        6 * time.Second,
-		bfgCallTimeout:        20 * time.Second,
-		bfgCmdCh:              make(chan bfgCmd),
+		cfg:            cfg,
+		requestLimiter: make(chan bool, cfg.RequestLimit),
+		btcHeight:      cfg.BTCStartHeight,
+		server:         http.NewServeMux(),
+		publicServer:   http.NewServeMux(),
+		metrics:        newMetrics(cfg),
+		sessions:       make(map[string]*bfgWs),
+		holdoffTimeout: 6 * time.Second,
+		bfgCallTimeout: 20 * time.Second,
+		bfgCmdCh:       make(chan bfgCmd),
 	}
 	for range cfg.RequestLimit {
 		s.requestLimiter <- true
@@ -295,37 +292,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	// We could use a PGURI verification here.
 
 	return s, nil
-}
-
-func (s *Server) queueCheckForInvalidBlocks() {
-	select {
-	case s.checkForInvalidBlocks <- struct{}{}:
-	default:
-	}
-}
-
-func (s *Server) invalidBlockChecker(ctx context.Context) {
-	defer s.wg.Done()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-s.checkForInvalidBlocks:
-			heights, err := s.db.BtcBlocksHeightsWithNoChildren(ctx)
-			if err != nil {
-				log.Errorf("error trying to get heights for btc blocks: %s", err)
-				return
-			}
-
-			log.Infof("received %d heights with no children, will re-check", len(heights))
-			for _, height := range heights {
-				log.Infof("reprocessing block at height %d", height)
-				if err := s.processBitcoinBlock(ctx, height); err != nil {
-					log.Errorf("error processing bitcoin block: %s", err)
-				}
-			}
-		}
-	}
 }
 
 // handleRequest is called as a go routine to handle a long-lived command.
@@ -399,7 +365,14 @@ func (s *Server) handleOneBroadcastRequest(pctx context.Context, highPriority bo
 	serializedTx, err := s.db.BtcTransactionBroadcastRequestGetNext(ctx, highPriority)
 	if err != nil {
 		log.Errorf("error getting next broadcast request: %v", err)
-		return
+
+		// if there is a communication error, backoff a bit
+		select {
+		case <-time.After(1 * time.Second):
+			return
+		case <-ctx.Done():
+			return
+		}
 	}
 
 	// if there are no new serialized txs, backoff a bit
@@ -590,10 +563,14 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 	return buResp, nil
 }
 
+var ErrAlreadyProcessed error = fmt.Errorf("Already Processed BTC Block")
+
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
-	rbh, err := s.btcClient.RawBlockHeader(ctx, height)
+	netCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	rbh, err := s.btcClient.RawBlockHeader(netCtx, height)
+	cancel()
 	if err != nil {
 		return fmt.Errorf("get block header at height %v: %w", height, err)
 	}
@@ -607,29 +584,41 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	btcHeight := height
 	btcHeader := rbh
 
+	btcBlockTmpChk, err := s.db.BtcBlockByHash(ctx, [32]byte(btcHeaderHash))
+	if err != nil && !errors.Is(err, database.ErrNotFound) {
+		return err
+	}
+
+	// block with hash is already at height, no-reorg
+	if btcBlockTmpChk != nil && btcBlockTmpChk.Height == btcHeight {
+		return fmt.Errorf("already processed block block: %w", ErrAlreadyProcessed)
+	}
+
 	btcBlock := bfgd.BtcBlock{
 		Hash:   btcHeaderHash,
 		Header: btcHeader[:],
 		Height: btcHeight,
 	}
 
-	err = s.db.BtcBlockInsert(ctx, &btcBlock)
-	if err != nil {
-		// XXX  don't return err here so we keep counting up, need to be smarter
-		if errors.Is(err, database.ErrDuplicate) {
-			log.Errorf("could not insert btc block: %s", err)
-			return nil
-		}
-	}
+	// these might get quite large; we store all found keystones and
+	// pop bases here to insert at the end
+	// we will likely find many of the same keystones so store them in a map
+	// to remove duplicates
+	l2Keystones := map[string]bfgd.L2Keystone{}
+	popBases := []bfgd.PopBasis{}
 
 	for index := uint64(0); ; index++ {
-		txHash, merkleHashes, err := s.btcClient.TransactionAtPosition(ctx,
+		log.Tracef("calling tx at pos")
+		netCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		txHash, merkleHashes, err := s.btcClient.TransactionAtPosition(netCtx,
 			height, index)
+		cancel()
+		log.Tracef("done calling tx as pos")
 		if err != nil {
-			if errors.Is(err, electrs.ErrNoTxAtPosition) {
+			if errors.Is(err, electrs.ErrNoTxAtPosition) || strings.HasSuffix(err.Error(), "no tx at position") {
 				// There is no way to tell how many transactions are
 				// in a block, so hopefully we've got them all...
-				return nil
+				break
 			}
 			return fmt.Errorf("get transaction at position (height %v, index %v): %w", height, index, err)
 		}
@@ -652,7 +641,9 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			log.Infof("btc tx is valid with hash %s", txHashEncoded)
 		}
 
-		rtx, err := s.btcClient.RawTransaction(ctx, txHash)
+		netCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		rtx, err := s.btcClient.RawTransaction(netCtx, txHash)
+		cancel()
 		if err != nil {
 			return fmt.Errorf("get raw transaction with txid %x: %w", txHash, err)
 		}
@@ -682,14 +673,8 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		btcTxIndex := index
 		log.Infof("found tl2: %v at position %d", tl2, btcTxIndex)
 
-		// attempt to insert the abbreviated keystone, this is in case we have
-		// not heard of this keystone from op node yet
-		if err := s.db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{
-			hemiL2KeystoneAbrevToDb(*tl2.L2Keystone),
-		}); err != nil {
-			// this is not necessarily an error, should it be trace?
-			log.Infof("could not insert l2 keystone: %s", err)
-		}
+		l2kdb := hemiL2KeystoneAbrevToDb(*tl2.L2Keystone)
+		l2Keystones[hex.EncodeToString(l2kdb.Hash)] = l2kdb
 
 		publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(mtx.TxIn[0].SignatureScript)
 		if err != nil {
@@ -716,6 +701,35 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			BtcMerklePath:       merkleHashes,
 		}
 
+		popBases = append(popBases, popBasis)
+	}
+
+	// XXX: these database inserts should be in a transaction, or simply be atomic
+	// but they never have been.  in the future, let's make sure they are with the
+	// next solution
+	// we need to AT LEAST try to insert them here, in case there are network timeouts
+	// with the above and electrs.
+
+	rowsAffected, err := s.db.BtcBlockReplace(ctx, &btcBlock)
+	if err != nil {
+		return fmt.Errorf("error replacing bitcoin block: %w", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows affected: %w", ErrAlreadyProcessed)
+	}
+
+	// this for loop seems weird but its used to check errors per keystone
+	for _, l2Keystone := range l2Keystones {
+		// attempt to insert the abbreviated keystone, this is in case we have
+		// not heard of this keystone from op node yet
+		if err := s.db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}); err != nil {
+			// this is not necessarily an error, should it be trace?
+			log.Infof("could not insert l2 keystone: %s", err)
+		}
+	}
+
+	for _, popBasis := range popBases {
 		// first, try to update a pop_basis row with NULL btc fields
 		rowsAffected, err := s.db.PopBasisUpdateBTCFields(ctx, &popBasis)
 		if err != nil {
@@ -735,16 +749,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			}
 		}
 	}
-}
 
-func (s *Server) processBitcoinBlocks(ctx context.Context, start, end uint64) error {
-	for i := start; i <= end; i++ {
-		if err := s.processBitcoinBlock(ctx, i); err != nil {
-			return fmt.Errorf("process bitcoin block at height %d: %w", i, err)
-		}
-		s.btcHeight = i
-	}
-	s.queueCheckForInvalidBlocks()
 	return nil
 }
 
@@ -754,9 +759,16 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 	log.Tracef("trackBitcoin")
 	defer log.Tracef("trackBitcoin exit")
 
+	// upon startup we walk every block between the tip and our
+	// configured start block.  IMPORTANT NOTE: we ONLY process
+	// transactions in blocks that we have not seen, so whilst we
+	// walk quite a few blocks, most will be essentially no-ops
+	// except for when you have an empty database table
+	initialWalk := true
+
 	btcInterval := 5 * time.Second
 	ticker := time.NewTicker(btcInterval)
-	printMsg := true
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -764,37 +776,54 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 		case <-ticker.C:
 			log.Tracef("Checking BTC height...")
 
-			btcHeight, err := s.btcClient.Height(ctx)
+			netCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			btcHeight, err := s.btcClient.Height(netCtx)
+			cancel()
 			if err != nil {
-				if printMsg {
-					// XXX add this to prometheus
-					log.Errorf("Failed to get Bitcoin height: %v", err)
-					printMsg = false
-				}
+				// XXX add this to prometheus
+				log.Errorf("Failed to get Bitcoin height: %v", err)
 				continue
 			}
 
 			s.updateBtcHeightCache(btcHeight)
 
-			printMsg = true
-			if s.btcHeight > btcHeight {
-				// XXX do we need this check?
-				log.Errorf("invalid height: current %v > requested %v",
-					btcHeight, s.btcHeight)
-				continue
-			}
-			if btcHeight <= s.btcHeight {
+			err = s.walkChain(ctx, btcHeight, !initialWalk)
+			if err != nil {
+				log.Errorf("could not walk chain: %s", err)
 				continue
 			}
 
-			log.Infof("Bitcoin block height increased to %v", btcHeight)
-
-			if err := s.processBitcoinBlocks(ctx, s.btcHeight+1, btcHeight); err != nil {
-				log.Errorf("Failed to process Bitcoin blocks: %v", err)
-				continue
-			}
+			// after we have done the initial walk with no errors,
+			// in the future we only walk back until a block that we've seen
+			initialWalk = false
 		}
 	}
+}
+
+func (s *Server) walkChain(ctx context.Context, tip uint64, exitFast bool) error {
+	log.Tracef("walkChain")
+	defer log.Tracef("walkChain exit")
+
+	log.Tracef("starting to walk chain; tip=%d, s.cfg.BTCStartHeight=%d, exitFast=%b", tip, s.cfg.BTCStartHeight, exitFast)
+	for tip >= s.cfg.BTCStartHeight {
+		log.Tracef("walkChain progress; processing block at height %d", tip)
+		err := s.processBitcoinBlock(ctx, tip)
+		if errors.Is(err, ErrAlreadyProcessed) {
+			log.Infof("block known at height %d", tip)
+
+			// if we have already seen the block, and the caller wishes
+			// to exit on first known block, do so
+			if exitFast {
+				return nil
+			}
+		} else if err != nil {
+			return err
+		}
+
+		tip--
+	}
+
+	return nil
 }
 
 type bfgWs struct {
@@ -1759,23 +1788,6 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.db.Close()
 
-	if s.btcHeight, err = s.BtcBlockCanonicalHeight(ctx); err != nil {
-		return err
-	}
-
-	// if there is no height in the db, check the config
-	if s.btcHeight == 0 {
-		s.btcHeight = s.cfg.BTCStartHeight
-		log.Infof("received height of 0 from the db, height of %v from config",
-			s.cfg.BTCStartHeight)
-	}
-
-	// if the config doesn't set a height, error
-	if s.btcHeight == 0 {
-		return errors.New("could not determine btc start height")
-	}
-	log.Debugf("resuming at height %d", s.btcHeight)
-
 	// Database notifications
 	btcBlocksPayload, ok := bfgd.NotificationPayload(bfgd.NotificationBtcBlocks)
 	if !ok {
@@ -1975,9 +1987,6 @@ func (s *Server) Run(pctx context.Context) error {
 
 	s.wg.Add(1)
 	go s.trackBitcoin(ctx)
-
-	s.wg.Add(1)
-	go s.invalidBlockChecker(ctx)
 
 	select {
 	case <-ctx.Done():
