@@ -29,6 +29,7 @@ const (
 	BlockHeadersDB  = "blockheaders"
 	BlocksMissingDB = "blocksmissing"
 	MetadataDB      = "metadata"
+	KeystonesDB     = "keystones"
 	HeightHashDB    = "heighthash"
 	PeersDB         = "peers"
 	OutputsDB       = "outputs"
@@ -220,6 +221,10 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	err = l.openDB(TransactionsDB, nil)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", TransactionsDB, err)
+	}
+	err = l.openDB(KeystonesDB, nil)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
 	}
 
 	// Blocks database is special
