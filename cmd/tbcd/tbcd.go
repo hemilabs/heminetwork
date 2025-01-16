@@ -61,8 +61,14 @@ var (
 		},
 		"TBC_BLOCK_SANITY": config.Config{
 			Value:        &cfg.BlockSanity,
-			DefaultValue: false,
+			DefaultValue: true,
 			Help:         "enable/disable block sanity checks before inserting",
+			Print:        config.PrintAll,
+		},
+		"TBC_HEMI_INDEX": config.Config{
+			Value:        &cfg.HemiIndex,
+			DefaultValue: false,
+			Help:         "enable/disable various hemi related indexes",
 			Print:        config.PrintAll,
 		},
 		"TBC_LEVELDB_HOME": config.Config{
@@ -75,6 +81,12 @@ var (
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
+			Print:        config.PrintAll,
+		},
+		"TBC_MAX_CACHED_KEYSTONES": config.Config{
+			Value:        &cfg.MaxCachedKeystones,
+			DefaultValue: int(1e6),
+			Help:         "maximum cached keystones during indexing",
 			Print:        config.PrintAll,
 		},
 		"TBC_MAX_CACHED_TXS": config.Config{

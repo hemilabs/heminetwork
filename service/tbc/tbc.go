@@ -51,6 +51,8 @@ const (
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
+	defaultMaxCachedKeystones = 1e5 // number of cached keystones prior to flush
+
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
@@ -84,9 +86,11 @@ type Config struct {
 	BlockCacheSize          string
 	BlockheaderCacheSize    string
 	BlockSanity             bool
+	HemiIndex               bool
 	LevelDBHome             string
 	ListenAddress           string
 	LogLevel                string
+	MaxCachedKeystones      int
 	MaxCachedTxs            int
 	MempoolEnabled          bool
 	Network                 string
@@ -111,6 +115,7 @@ func NewDefaultConfig() *Config {
 		BlockCacheSize:       "1gb",
 		BlockheaderCacheSize: "128mb",
 		LogLevel:             logLevel,
+		MaxCachedKeystones:   defaultMaxCachedKeystones,
 		MaxCachedTxs:         defaultMaxCachedTxs,
 		MempoolEnabled:       false, // XXX default to false until it is fixed
 		PeersWanted:          defaultPeersWanted,

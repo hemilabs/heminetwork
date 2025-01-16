@@ -1707,6 +1707,17 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	return nil
 }
 
+func (l *ldb) BlockHemiUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Outpoint) error {
+	log.Tracef("BlockHemiUpdate")
+	defer log.Tracef("BlockHemiUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	return fmt.Errorf("not yet")
+}
+
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
 	if l.cfg.blockheaderCacheSize == 0 {
 		return noStats
