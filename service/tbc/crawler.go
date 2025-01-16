@@ -35,10 +35,12 @@ func s2h(s string) chainhash.Hash {
 var (
 	UtxoIndexHashKey = []byte("utxoindexhash") // last indexed utxo hash
 	TxIndexHashKey   = []byte("txindexhash")   // last indexed tx hash
+	HemiIndexHashKey = []byte("hemiindexhash") // last indexed hemi hash
 
 	ErrAlreadyIndexing = errors.New("already indexing")
 
 	testnet3Checkpoints = map[chainhash.Hash]uint64{
+		s2h("0000000000002b9408d001dd42f830e16a9c28ed8daa828523e67e09ea9e0411"): 3600000,
 		s2h("000000000000098faa89ab34c3ec0e6e037698e3e54c8d1bbb9dcfe0054a8e7a"): 3200000,
 		s2h("0000000000001242d96bedebc9f45a2ecdd40d393ca0d725f500fb4977a50582"): 3100000,
 		s2h("0000000000003c46fc60e56b9c2ae202b1efec83fcc7899d21de16757dea40a4"): 3000000,
@@ -143,6 +145,11 @@ func (s *Server) UtxoIndexHash(ctx context.Context) (*HashHeight, error) {
 // TxIndexHash returns the last hash that has been Tx indexed.
 func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
 	return s.mdHashHeight(ctx, TxIndexHashKey)
+}
+
+// HemiIndexHash returns the last hash that has been Hemi indexed.
+func (s *Server) HemiIndexHash(ctx context.Context) (*HashHeight, error) {
+	return s.mdHashHeight(ctx, HemiIndexHashKey)
 }
 
 func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
@@ -1215,6 +1222,385 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	return fmt.Errorf("invalid direction: %v", direction)
 }
 
+func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map[chainhash.Hash]tbcd.Outpoint) error {
+	for _, tx := range txs {
+		//// cache txid <-> block
+		//txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
+
+		// Don't keep track of spent coinbase inputs
+		if blockchain.IsCoinBase(tx) {
+			// Skip coinbase inputs
+			continue
+		}
+
+		//for txInIdx, txIn := range tx.MsgTx().TxIn {
+		//	txk, txv := tbcd.NewTxSpent(
+		//		blockHash,
+		//		tx.Hash(),
+		//		&txIn.PreviousOutPoint.Hash,
+		//		txIn.PreviousOutPoint.Index,
+		//		uint32(txInIdx))
+		//	txsCache[txk] = &txv
+		//}
+	}
+	return nil
+}
+
+// indexKeystonesInBlocks indexes txs from the last processed block until the
+// provided end hash, inclusive. It returns the number of blocks processed and
+// the last hash it has processedd.
+func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Outpoint) (int, *HashHeight, error) {
+	log.Tracef("indexKeystonesInBlocks")
+	defer log.Tracef("indexKeystonesInBlocks exit")
+
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	// Find start hash
+	ksHH, err := s.HemiIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return 0, last, fmt.Errorf("hemi index hash: %w", err)
+		}
+		ksHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash, // XXX use proper block
+			Height: 0,
+		}
+	}
+
+	kssPercentage := 95 // flush cache at >95% capacity
+	blocksProcessed := 0
+	hh := ksHH
+	for {
+		log.Debugf("indexing keystones: %v", hh)
+
+		hash := hh.Hash
+		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
+		if err != nil {
+			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
+		}
+
+		// Index block
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
+		if err != nil {
+			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
+		}
+
+		err = processKeystones(b.Hash(), b.Transactions(), kss)
+		if err != nil {
+			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
+		}
+
+		blocksProcessed++
+
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
+		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
+			log.Infof("Tx indexer: %v tx cache %v%%", hh, cp)
+		}
+		if cp > kssPercentage {
+			// Set kssMax to the largest tx capacity seen
+			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
+			last = hh
+			// Flush
+			break
+		}
+
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
+		// Move to next block
+		height := bh.Height + 1
+		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		if err != nil {
+			return 0, last, fmt.Errorf("block headers by height %v: %w",
+				height, err)
+		}
+		index, err := s.findPathFromHash(ctx, endHash, bhs)
+		if err != nil {
+			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
+				height, err)
+		}
+		// Verify it connects to parent
+		if !hash.IsEqual(bhs[index].ParentHash()) {
+			return 0, last, fmt.Errorf("%v does not connect to: %v",
+				bhs[index], hash)
+		}
+		hh.Hash = *bhs[index].BlockHash()
+		hh.Height = bhs[index].Height
+	}
+
+	return blocksProcessed, last, nil
+}
+
+// unindexKeystonesInBlocks indexes keystones from the last processed block
+// until the provided end hash, inclusive. It returns the number of blocks
+// processed and the last hash it has processedd.
+func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Outpoint) (int, *HashHeight, error) {
+	log.Tracef("unindexKeystonesInBlocks")
+	defer log.Tracef("unindexKeystonesInBlocks exit")
+
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	// Find start hash
+	ksHH, err := s.HemiIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return 0, last, fmt.Errorf("hemi index hash: %w", err)
+		}
+		ksHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+
+	kssPercentage := 95 // flush cache at >95% capacity
+	blocksProcessed := 0
+	hh := ksHH
+	for {
+		log.Debugf("unindexing keystones: %v", hh)
+
+		hash := hh.Hash
+
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
+		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
+		if err != nil {
+			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
+		}
+
+		// Index block
+		b, err := s.db.BlockByHash(ctx, &bh.Hash)
+		if err != nil {
+			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
+		}
+
+		err = processKeystones(b.Hash(), b.Transactions(), kss)
+		if err != nil {
+			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
+		}
+
+		blocksProcessed++
+
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
+		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
+			log.Infof("Keystone unindexer: %v keystone cache %v%%", hh, cp)
+		}
+		if cp > kssPercentage {
+			// Set kssMax to the largest keystone capacity seen
+			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
+			last = hh
+			// Flush
+			break
+		}
+
+		// Move to previous block
+		height := bh.Height - 1
+		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
+		if err != nil {
+			return 0, last, fmt.Errorf("block headers by height %v: %w",
+				height, err)
+		}
+		hh.Hash = *pbh.BlockHash()
+		hh.Height = pbh.Height
+	}
+
+	return blocksProcessed, last, nil
+}
+
+func (s *Server) HemiIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("HemiIndexerUnwind")
+	defer log.Tracef("HemiIndexerUnwind exit")
+
+	// XXX dedup with HemiIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+
+	s.mtx.Lock()
+	if !s.indexing {
+		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
+		panic("HemiIndexerUnwind indexing not true")
+	}
+	s.mtx.Unlock()
+	// Allocate here so that we don't waste space when not indexing.
+	kss := make(map[chainhash.Hash]tbcd.Outpoint, s.cfg.MaxCachedKeystones)
+	defer clear(kss)
+
+	log.Infof("Start unwinding keystones at hash %v height %v", startBH, startBH.Height)
+	log.Infof("End unwinding keystones at hash %v height %v", endBH, endBH.Height)
+	endHash := endBH.BlockHash()
+	for {
+		start := time.Now()
+		blocksProcessed, last, err := s.unindexKeystonesInBlocks(ctx, endHash, kss)
+		if err != nil {
+			return fmt.Errorf("unindex keystones in blocks: %w", err)
+		}
+		if blocksProcessed == 0 {
+			return nil
+		}
+		kssCached := len(kss)
+		log.Infof("Keystone unwinder blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
+			blocksProcessed, time.Since(start), kssCached,
+			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
+
+		// Flush to disk
+		start = time.Now()
+		if err = s.db.BlockHemiUpdate(ctx, -1, kss); err != nil {
+			return fmt.Errorf("block keystone update: %w", err)
+		}
+		// leveldb does all kinds of allocations, force GC to lower
+		// memory pressure.
+		logMemStats()
+		runtime.GC()
+
+		log.Infof("Flushing unwind keystones complete %v took %v",
+			kssCached, time.Since(start))
+
+		// Record height in metadata
+		err = s.db.MetadataPut(ctx, HemiIndexHashKey, last.Hash[:])
+		if err != nil {
+			return fmt.Errorf("metadata hemi hash: %w", err)
+		}
+
+		if endHash.IsEqual(&last.Hash) {
+			break
+		}
+
+	}
+	return nil
+}
+
+func (s *Server) HemiIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("HemiIndexerWind")
+	defer log.Tracef("HemiIndexerWind exit")
+
+	s.mtx.Lock()
+	if !s.indexing {
+		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
+		panic("HemiIndexerWind not true")
+	}
+	s.mtx.Unlock()
+
+	// Allocate here so that we don't waste space when not indexing.
+	kss := make(map[chainhash.Hash]tbcd.Outpoint, s.cfg.MaxCachedKeystones)
+	defer clear(kss)
+
+	log.Infof("Start indexing keystones at hash %v height %v", startBH, startBH.Height)
+	log.Infof("End indexing keystones at hash %v height %v", endBH, endBH.Height)
+	endHash := endBH.BlockHash()
+	for {
+		start := time.Now()
+		blocksProcessed, last, err := s.indexKeystonesInBlocks(ctx, endHash, kss)
+		if err != nil {
+			return fmt.Errorf("index blocks: %w", err)
+		}
+		if blocksProcessed == 0 {
+			return nil
+		}
+		kssCached := len(kss)
+		log.Infof("Keystone indexer blocks processed %v in %v transactions cached %v cache unused %v avg keystones/blk %v",
+			blocksProcessed, time.Since(start), kssCached,
+			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
+
+		// Flush to disk
+		start = time.Now()
+		if err = s.db.BlockHemiUpdate(ctx, 1, kss); err != nil {
+			return fmt.Errorf("block hemi update: %w", err)
+		}
+		// leveldb does all kinds of allocations, force GC to lower
+		// memory pressure.
+		logMemStats()
+		runtime.GC()
+
+		log.Infof("Flushing keysyones complete %v took %v",
+			kssCached, time.Since(start))
+
+		// Record height in metadata
+		err = s.db.MetadataPut(ctx, HemiIndexHashKey, last.Hash[:])
+		if err != nil {
+			return fmt.Errorf("metadata hemi hash: %w", err)
+		}
+
+		if endHash.IsEqual(&last.Hash) {
+			break
+		}
+
+	}
+
+	return nil
+}
+
+func (s *Server) HemiIndexer(ctx context.Context, endHash *chainhash.Hash) error {
+	log.Tracef("HemiIndexer")
+	defer log.Tracef("HemiIndexer exit")
+
+	// XXX this is basically duplicate from TxIndexIsLinear
+
+	if !s.cfg.HemiIndex {
+		return errors.New("disabled")
+	}
+	s.mtx.Lock()
+	if !s.indexing {
+		// XXX this prob should be an error but pusnish bad callers for now
+		s.mtx.Unlock()
+		panic("HemiIndexer not true")
+	}
+	s.mtx.Unlock()
+
+	// Verify exit condition hash
+	if endHash == nil {
+		return errors.New("must provide an end hash")
+	}
+	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+
+	// Verify start point is not after the end point
+	hemiHH, err := s.HemiIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("hemi indexer: %w", err)
+		}
+		hemiHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash, // XXX use HEMI genesis hash
+			Height: 0,
+		}
+	}
+
+	// Make sure there is no gap between start and end or vice versa.
+	startBH, err := s.db.BlockHeaderByHash(ctx, &hemiHH.Hash)
+	if err != nil {
+		return fmt.Errorf("blockheader hash: %w", err)
+	}
+	direction, err := s.HemiIndexIsLinear(ctx, endHash)
+	if err != nil {
+		return fmt.Errorf("hemi index is linear: %w", err)
+	}
+	switch direction {
+	case 1:
+		return s.HemiIndexerWind(ctx, startBH, endBH)
+	case -1:
+		return s.HemiIndexerUnwind(ctx, startBH, endBH)
+	case 0:
+		// Because we call HemiIndexIsLinear we know it's the same block.
+		return nil
+	}
+
+	return fmt.Errorf("invalid direction: %v", direction)
+}
+
 func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
 	log.Tracef("UtxoIndexIsLinear")
 	defer log.Tracef("UtxoIndexIsLinear exit")
@@ -1251,6 +1637,25 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 	}
 
 	return s.IndexIsLinear(ctx, &txHH.Hash, endHash)
+}
+
+func (s *Server) HemiIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
+	log.Tracef("HemiIndexIsLinear")
+	defer log.Tracef("HemiIndexIsLinear exit")
+
+	// Verify start point is not after the end point
+	hemiHH, err := s.HemiIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return 0, fmt.Errorf("hemi indexer: %w", err)
+		}
+		hemiHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+
+	return s.IndexIsLinear(ctx, &hemiHH.Hash, endHash)
 }
 
 func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhash.Hash) (int, error) {
@@ -1356,6 +1761,14 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	if err := s.TxIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
+
+	// Hemi index
+	if s.cfg.HemiIndex {
+		if err := s.HemiIndexer(ctx, hash); err != nil {
+			return fmt.Errorf("hemi indexer: %w", err)
+		}
+	}
+
 	log.Debugf("Done syncing to: %v", hash)
 
 	bh, err := s.db.BlockHeaderByHash(ctx, hash)
@@ -1368,18 +1781,11 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) e
 	return nil
 }
 
-func (s *Server) syncIndexersToBest(ctx context.Context) error {
-	log.Tracef("syncIndexersToBest")
-	defer log.Tracef("syncIndexersToBest exit")
+func (s *Server) utxoIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) error {
+	log.Tracef("utxoIndexersToBest")
+	defer log.Tracef("utxoIndexersToBest exit")
 
-	bhb, err := s.db.BlockHeaderBest(ctx)
-	if err != nil {
-		return err
-	}
-
-	log.Debugf("Sync indexers to best: %v @ %v", bhb, bhb.Height)
-
-	// Index Utxo
+	// Index Utxos to best
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
@@ -1411,6 +1817,13 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
+	return nil
+}
+
+func (s *Server) txIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) error {
+	log.Tracef("txIndexersToBest")
+	defer log.Tracef("txIndexersToBest exit")
+
 	// Index Tx
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
@@ -1426,13 +1839,9 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// We can short circuit looking up canonical parent if txBH == utxoBH.
-	ptxHash := &txBH.Hash
-	if !ptxHash.IsEqual(&utxoBH.Hash) {
-		cp, err = s.findCanonicalParent(ctx, txBH)
-		if err != nil {
-			return err
-		}
+	cp, err := s.findCanonicalParent(ctx, txBH)
+	if err != nil {
+		return err
 	}
 	if !cp.Hash.IsEqual(&txBH.Hash) {
 		log.Infof("Syncing tx index to: %v from: %v via: %v",
@@ -1447,6 +1856,74 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
+	return nil
+}
+
+func (s *Server) hemiIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) error {
+	log.Tracef("hemiIndexersToBest")
+	defer log.Tracef("hemiIndexersToBest exit")
+
+	// Index Hemis to best
+	hemiHH, err := s.HemiIndexHash(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("hemi index hash: %w", err)
+		}
+		hemiHH = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+	hemiBH, err := s.db.BlockHeaderByHash(ctx, &hemiHH.Hash)
+	if err != nil {
+		return err
+	}
+	cp, err := s.findCanonicalParent(ctx, hemiBH)
+	if err != nil {
+		return err
+	}
+	if !cp.Hash.IsEqual(&hemiBH.Hash) {
+		log.Infof("Syncing hemi index to: %v from: %v via: %v",
+			bhb.HH(), hemiBH.HH(), cp.HH())
+		// hemiBH is NOT on canonical chain, unwind first
+		if err := s.HemiIndexer(ctx, &cp.Hash); err != nil {
+			return fmt.Errorf("hemi indexer unwind: %w", err)
+		}
+	}
+	// Index hemi to best block
+	if err := s.HemiIndexer(ctx, &bhb.Hash); err != nil {
+		return fmt.Errorf("hemi indexer: %w", err)
+	}
+
+	return nil
+}
+
+func (s *Server) syncIndexersToBest(ctx context.Context) error {
+	log.Tracef("syncIndexersToBest")
+	defer log.Tracef("syncIndexersToBest exit")
+
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Debugf("Sync indexers to best: %v @ %v", bhb, bhb.Height)
+
+	if err := s.utxoIndexersToBest(ctx, bhb); err != nil {
+		return err
+	}
+
+	if err := s.txIndexersToBest(ctx, bhb); err != nil {
+		return err
+	}
+
+	if s.cfg.HemiIndex {
+		if err := s.hemiIndexersToBest(ctx, bhb); err != nil {
+			return err
+		}
+	}
+
+	// Print nice message to indicate completion.
 	bh, err := s.db.BlockHeaderByHash(ctx, &bhb.Hash)
 	if err != nil {
 		log.Errorf("block header by hash: %v", err)
