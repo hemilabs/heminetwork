@@ -862,7 +862,8 @@ func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch *chai
 	err := p.Write(defaultCmdTimeout, getData)
 	if err != nil {
 		if !errors.Is(err, net.ErrClosed) &&
-			!errors.Is(err, os.ErrDeadlineExceeded) {
+			!errors.Is(err, os.ErrDeadlineExceeded) &&
+			!errors.Is(err, rawpeer.ErrNoConn) {
 			log.Errorf("download block write: %v %v", p, err)
 		}
 	}
@@ -911,6 +912,14 @@ func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block *chainh
 func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) error {
 	log.Tracef("handleBlockExpired")
 	defer log.Tracef("handleBlockExpired exit")
+
+	// handleBlockExpired is called numerous times after SIGTERM. This call
+	// wil fail with database closed error and is very loud.
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
 
 	p, ok := value.(*rawpeer.RawPeer)
 	if !ok {
@@ -1116,6 +1125,11 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			// This can happen during startup or when the network
 			// is starved.
 			// XXX: Probably too loud, remove later.
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			log.Errorf("random peer %v: %v", hashS, err)
 			return
 		}
@@ -2470,7 +2484,9 @@ func (s *Server) Run(pctx context.Context) error {
 			defer s.wg.Done()
 			err := s.promPoll(ctx)
 			if err != nil {
-				log.Errorf("prometheus poll terminated with error: %v", err)
+				if !errors.Is(err, context.Canceled) {
+					log.Errorf("prometheus poll terminated with error: %v", err)
+				}
 				return
 			}
 		}()
@@ -2480,11 +2496,15 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if err := s.pm.Run(ctx); err != nil {
+		err := s.pm.Run(ctx)
+		log.Infof("Peer manager shutting down")
+		if err != nil {
 			select {
 			case errC <- err:
 			default:
 			}
+		} else {
+			log.Infof("Peer manager clean shutdown")
 		}
 	}()
 
