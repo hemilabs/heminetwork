@@ -440,7 +440,7 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
-			return ctx.Err()
+			return err
 		}
 	}
 }
