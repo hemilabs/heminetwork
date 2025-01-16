@@ -1715,7 +1715,34 @@ func (l *ldb) BlockHemiUpdate(ctx context.Context, direction int, keystones map[
 		return fmt.Errorf("invalid direction: %v", direction)
 	}
 
-	return fmt.Errorf("not yet")
+	// keystones
+	kssTx, kssCommit, kssDiscard, err := l.startTransaction(level.KeystonesDB)
+	if err != nil {
+		return fmt.Errorf("keystones open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	kssBatch := new(leveldb.Batch)
+	for k, v := range keystones {
+		switch direction {
+		case -1:
+			kssBatch.Delete(k[:])
+		case 1:
+			kssBatch.Put(k[:], v)
+		}
+	}
+
+	// Write keystones batch
+	if err = kssTx.Write(kssBatch, nil); err != nil {
+		return fmt.Errorf("keystones insert: %w", err)
+	}
+
+	// keystones commit
+	if err = kssCommit(); err != nil {
+		return fmt.Errorf("keystones commit: %w", err)
+	}
+
+	return nil
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
