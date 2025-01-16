@@ -774,7 +774,7 @@ func TestNewL2Keystone(t *testing.T) {
 		}
 	}
 
-	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(l2KeystoneRequest.L2Keystone).Hash()
+	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(l2KeystoneRequest.L2Keystone).HashB()
 
 	time.Sleep(2 * time.Second)
 
@@ -1475,7 +1475,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 	// go away in the future once we add "missing keystone" logic and
 	// functionality
 	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
-		bfgd.L2Keystone{
+		{
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
@@ -1483,7 +1483,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
 			StateRoot:          fillOutBytes("stateroot", 32),
 			EPHash:             fillOutBytesWith0s("ephash______", 32),
-			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
 		t.Fatalf("unexpected diff: %s", diff)
@@ -1586,7 +1586,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	publicKeyUncompressed := publicKey.SerializeUncompressed()
 
 	// 3
-	popBases, err := db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false, 0)
+	popBases, err := db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).HashB()), false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1600,7 +1600,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 
 	diff := deep.Equal(popBases, []bfgd.PopBasis{
 		{
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcRawTx:            btx,
 			BtcTxId:             btcTxId[:],
@@ -1760,7 +1760,7 @@ loop:
 	// go away in the future once we add "missing keystone" logic and
 	// functionality
 	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
-		bfgd.L2Keystone{
+		{
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
@@ -1768,7 +1768,7 @@ loop:
 			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
 			StateRoot:          fillOutBytes("stateroot", 32),
 			EPHash:             fillOutBytesWith0s("ephash______", 32),
-			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
 		t.Fatalf("unexpected diff: %s", diff)
@@ -1829,7 +1829,7 @@ loop:
 		case <-lctx.Done():
 			break loop
 		case <-time.After(1 * time.Second):
-			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false, 0)
+			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).HashB()), false, 0)
 			if len(popBases) > 0 {
 				break loop
 			}
@@ -1876,7 +1876,7 @@ loop:
 			BtcHeaderHash:       btcHeaderHash,
 			BtcTxIndex:          &txIndex,
 			PopTxId:             popTxId,
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 			BtcRawTx:            btx,
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcMerklePath:       mockMerkleHashes,
@@ -1899,7 +1899,7 @@ loop:
 	// go away in the future once we add "missing keystone" logic and
 	// functionality
 	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
-		bfgd.L2Keystone{
+		{
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
@@ -1907,7 +1907,7 @@ loop:
 			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
 			StateRoot:          fillOutBytes("stateroot", 32),
 			EPHash:             fillOutBytesWith0s("ephash______", 32),
-			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
 		t.Fatalf("unexpected diff: %s", diff)
@@ -2025,7 +2025,7 @@ loop:
 		case <-lctx.Done():
 			break loop
 		case <-time.After(1 * time.Second):
-			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), true, 0)
+			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).HashB()), true, 0)
 			if len(popBases) > 0 {
 				break loop
 			}
@@ -2061,7 +2061,7 @@ loop:
 			BtcHeaderHash:       btcHeaderHash,
 			BtcTxIndex:          &txIndex,
 			PopTxId:             popTxId,
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 			BtcRawTx:            btx,
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcMerklePath:       mockMerkleHashes,
@@ -2150,7 +2150,7 @@ func TestPopPayouts(t *testing.T) {
 		BtcTxId:             fillOutBytes("btctxid1", 32),
 		BtcRawTx:            []byte("btcrawtx1"),
 		PopTxId:             fillOutBytes("poptxid1", 32),
-		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
 		BtcTxIndex:          &txIndex,
@@ -2167,7 +2167,7 @@ func TestPopPayouts(t *testing.T) {
 		BtcTxId:             fillOutBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
 		PopTxId:             fillOutBytes("poptxid2", 32),
-		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   otherPublicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
 		BtcTxIndex:          &txIndex,
@@ -2184,7 +2184,7 @@ func TestPopPayouts(t *testing.T) {
 		BtcTxId:             fillOutBytes("btctxid3", 32),
 		BtcRawTx:            []byte("btcrawtx3"),
 		PopTxId:             fillOutBytes("poptxid3", 32),
-		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
 		BtcTxIndex:          &txIndex,
@@ -2201,7 +2201,7 @@ func TestPopPayouts(t *testing.T) {
 		BtcTxId:             fillOutBytes("btctxid4", 32),
 		BtcRawTx:            []byte("btcrawtx4"),
 		PopTxId:             fillOutBytes("poptxid4", 32),
-		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(differentL2Keystone).Hash(),
+		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(differentL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
 		BtcTxIndex:          &txIndex,
@@ -2354,7 +2354,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 			BtcTxId:             fillOutBytes("btctxid1", 32),
 			BtcRawTx:            []byte("btcrawtx1"),
 			PopTxId:             fillOutBytes("poptxid1", 32),
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcHeaderHash:       btcHeaderHash,
 			BtcTxIndex:          &txIndex,
@@ -3692,7 +3692,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 		L2BlockNumber:      l2BlockNumber,
 	}
 
-	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(hemiL2Keystone).Hash()
+	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(hemiL2Keystone).HashB()
 	l2Keystone := bfgd.L2Keystone{
 		Hash:               l2KeystoneAbrevHash,
 		ParentEPHash:       parentEpHash,

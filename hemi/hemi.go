@@ -200,13 +200,24 @@ func L2KeystoneAbrevDeserialize(r RawAbreviatedL2Keystone) *L2KeystoneAbrev {
 	return &a
 }
 
-func (a *L2KeystoneAbrev) Hash() []byte {
+func (a *L2KeystoneAbrev) HashB() []byte {
 	b := a.Serialize()
 	return chainhash.DoubleHashB(b[:])
 }
 
-func HashSerializedL2KeystoneAbrev(s []byte) []byte {
+func HashSerializedL2KeystoneAbrevB(s []byte) []byte {
 	return chainhash.DoubleHashB(s)
+}
+
+func (a *L2KeystoneAbrev) Hash() *chainhash.Hash {
+	b := a.Serialize()
+	h := chainhash.DoubleHashH(b[:])
+	return &h
+}
+
+func HashSerializedL2KeystoneAbrev(s []byte) *chainhash.Hash {
+	h := chainhash.DoubleHashH(s)
+	return &h
 }
 
 func L2KeystoneAbbreviate(l2ks L2Keystone) *L2KeystoneAbrev {
@@ -233,7 +244,7 @@ func NewL2KeystoneAbrevFromBytes(b []byte) (*L2KeystoneAbrev, error) {
 	switch ka.Version {
 	case L2KeystoneAbrevVersion:
 		if len(b) != L2KeystoneAbrevSize {
-			return nil, fmt.Errorf("invalid keystone sbrev length (%d)",
+			return nil, fmt.Errorf("invalid keystone abrev length (%d)",
 				len(b))
 		}
 		ka.L1BlockNumber = binary.BigEndian.Uint32(b[1:5])

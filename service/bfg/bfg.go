@@ -441,7 +441,7 @@ func (s *Server) handleOneBroadcastRequest(pctx context.Context, highPriority bo
 		return
 	}
 
-	log.Infof("successfully broadcast tx %s, for l2 keystone %s", mb.TxID(), hex.EncodeToString(tl2.L2Keystone.Hash()))
+	log.Infof("successfully broadcast tx %s, for l2 keystone %s", mb.TxID(), tl2.L2Keystone.Hash())
 }
 
 func (s *Server) bitcoinBroadcastWorker(ctx context.Context, highPriority bool) {
@@ -696,7 +696,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			BtcHeaderHash:       btcHeaderHash,
 			BtcTxIndex:          &btcTxIndex,
 			PopTxId:             popTxId,
-			L2KeystoneAbrevHash: tl2.L2Keystone.Hash(),
+			L2KeystoneAbrevHash: tl2.L2Keystone.HashB(),
 			BtcRawTx:            rtx,
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcMerklePath:       merkleHashes,
@@ -1195,7 +1195,7 @@ func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxs
 
 	hash := hemi.HashSerializedL2KeystoneAbrev(ptl2.L2Block)
 	var h [32]byte
-	copy(h[:], hash)
+	copy(h[:], hash[:])
 
 	response := &bfgapi.PopTxsForL2BlockResponse{}
 
@@ -1264,7 +1264,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	l2KeystoneAbrevHashes := make([]database.ByteArray, 0, len(bfkr.L2Keystones))
 	for _, l := range bfkr.L2Keystones {
 		a := hemi.L2KeystoneAbbreviate(l)
-		l2KeystoneAbrevHashes = append(l2KeystoneAbrevHashes, a.Hash())
+		l2KeystoneAbrevHashes = append(l2KeystoneAbrevHashes, a.HashB())
 	}
 
 	finalities, err := s.db.L2BTCFinalityByL2KeystoneAbrevHash(
@@ -1417,7 +1417,7 @@ func hemiL2KeystoneAbrevToDb(l2ks hemi.L2KeystoneAbrev) bfgd.L2Keystone {
 	}
 
 	return bfgd.L2Keystone{
-		Hash:               l2ks.Hash(),
+		Hash:               l2ks.HashB(),
 		Version:            uint32(l2ks.Version),
 		L1BlockNumber:      l2ks.L1BlockNumber,
 		L2BlockNumber:      l2ks.L2BlockNumber,
@@ -1430,7 +1430,7 @@ func hemiL2KeystoneAbrevToDb(l2ks hemi.L2KeystoneAbrev) bfgd.L2Keystone {
 
 func hemiL2KeystoneToDb(l2ks hemi.L2Keystone) bfgd.L2Keystone {
 	return bfgd.L2Keystone{
-		Hash:               hemi.L2KeystoneAbbreviate(l2ks).Hash(),
+		Hash:               hemi.L2KeystoneAbbreviate(l2ks).HashB(),
 		Version:            uint32(l2ks.Version),
 		L1BlockNumber:      l2ks.L1BlockNumber,
 		L2BlockNumber:      l2ks.L2BlockNumber,
