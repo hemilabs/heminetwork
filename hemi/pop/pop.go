@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -39,7 +39,7 @@ func MinerAddressFromString(address string) (*MinerAddress, error) {
 
 // TransactionL2 rename to Transaction and fixup this code
 type TransactionL2 struct {
-	L2Keystone *hemi.L2KeystoneAbrev
+	L2Keystone *hemi.L2KeystoneAbrev // XXX wtf is this a pointer?
 }
 
 // Serialize serializes a PoP transaction to its byte representation.

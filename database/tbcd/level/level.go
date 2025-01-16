@@ -1707,7 +1707,7 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	return nil
 }
 
-func (l *ldb) BlockHemiUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Outpoint) error {
+func (l *ldb) BlockHemiUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash][]byte) error {
 	log.Tracef("BlockHemiUpdate")
 	defer log.Tracef("BlockHemiUpdate exit")
 
