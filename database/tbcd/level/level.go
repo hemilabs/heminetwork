@@ -1707,9 +1707,9 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	return nil
 }
 
-func (l *ldb) BlockHemiUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash][]byte) error {
-	log.Tracef("BlockHemiUpdate")
-	defer log.Tracef("BlockHemiUpdate exit")
+func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash][]byte) error {
+	log.Tracef("BlockKeystoneUpdate")
+	defer log.Tracef("BlockKeystoneUpdate exit")
 
 	if !(direction == 1 || direction == -1) {
 		return fmt.Errorf("invalid direction: %v", direction)

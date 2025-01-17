@@ -2459,7 +2459,7 @@ func (s *Server) Run(pctx context.Context) error {
 		log.Infof("Tx index %v", txHH)
 	}
 	if s.cfg.HemiIndex {
-		hemiHH, _ := s.HemiIndexHash(ctx)
+		hemiHH, _ := s.KeystoneIndexHash(ctx)
 		if s.hemiGenesis != hemiHH {
 			log.Infof("Keystone index %v", txHH)
 		}
