@@ -73,6 +73,19 @@ var (
 	// upstreamStateIdKey is used for storing upstream state IDs
 	// representing a unique state of an upstream system driving TBC state/
 	upstreamStateIdKey = []byte("upstreamstateid")
+
+	mainnetHemiGenesis = &HashHeight{
+		Hash:   *chaincfg.MainNetParams.GenesisHash, // XXX fixme
+		Height: 0,
+	}
+	testnet3HemiGenesis = &HashHeight{
+		Hash:   s2h("000000000001323071f38f21ea5aae529ece491eadaccce506a59bcc2d968917"),
+		Height: 2815000,
+	}
+	localnetHemiGenesis = &HashHeight{
+		Hash:   *chaincfg.RegressionNetParams.GenesisHash, // XXX fixme
+		Height: 0,
+	}
 )
 
 func init() {
@@ -150,6 +163,7 @@ type Server struct {
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
 	checkpoints map[chainhash.Hash]uint64
+	hemiGenesis *HashHeight
 	pm          *PeerManager
 
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
@@ -244,16 +258,19 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
 		s.checkpoints = mainnetCheckpoints
+		s.hemiGenesis = mainnetHemiGenesis
 
 	case "testnet3":
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
 		s.checkpoints = testnet3Checkpoints
+		s.hemiGenesis = testnet3HemiGenesis
 
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
 		s.checkpoints = make(map[chainhash.Hash]uint64)
+		s.hemiGenesis = localnetHemiGenesis
 		wanted = 1
 
 	default:
@@ -2433,13 +2450,19 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Infof("Genesis: %v", s.chainParams.GenesisHash) // XXX make debug
 	log.Infof("Starting block headers sync at %v height: %v time %v",
 		bhb, bhb.Height, bhb.Timestamp())
-	utxoHH, err := s.UtxoIndexHash(ctx)
-	if err == nil {
+	utxoHH, _ := s.UtxoIndexHash(ctx)
+	if s.hemiGenesis != utxoHH {
 		log.Infof("Utxo index %v", utxoHH)
 	}
-	txHH, err := s.TxIndexHash(ctx)
-	if err == nil {
+	txHH, _ := s.TxIndexHash(ctx)
+	if s.hemiGenesis != txHH {
 		log.Infof("Tx index %v", txHH)
+	}
+	if s.cfg.HemiIndex {
+		hemiHH, _ := s.HemiIndexHash(ctx)
+		if s.hemiGenesis != hemiHH {
+			log.Infof("Keystone index %v", txHH)
+		}
 	}
 
 	// HTTP server
