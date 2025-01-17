@@ -140,17 +140,44 @@ func (s *Server) mdHashHeight(ctx context.Context, key []byte) (*HashHeight, err
 
 // UtxoIndexHash returns the last hash that has been UTxO indexed.
 func (s *Server) UtxoIndexHash(ctx context.Context) (*HashHeight, error) {
-	return s.mdHashHeight(ctx, UtxoIndexHashKey)
+	h, err := s.mdHashHeight(ctx, UtxoIndexHashKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return nil, err
+		}
+		h = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+	return h, nil
 }
 
 // TxIndexHash returns the last hash that has been Tx indexed.
 func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
-	return s.mdHashHeight(ctx, TxIndexHashKey)
+	h, err := s.mdHashHeight(ctx, TxIndexHashKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return nil, err
+		}
+		h = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
+	}
+	return h, nil
 }
 
 // HemiIndexHash returns the last hash that has been Hemi indexed.
 func (s *Server) HemiIndexHash(ctx context.Context) (*HashHeight, error) {
-	return s.mdHashHeight(ctx, HemiIndexHashKey)
+	h, err := s.mdHashHeight(ctx, HemiIndexHashKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return nil, err
+		}
+		h = s.hemiGenesis
+	}
+	return h, nil
 }
 
 func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
@@ -486,13 +513,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 	// Find start hash
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, last, fmt.Errorf("utxo index hash: %w", err)
-		}
-		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return 0, last, fmt.Errorf("utxo index hash: %w", err)
 	}
 
 	utxosPercentage := 95 // flush cache at >95% capacity
@@ -585,13 +606,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 	// Find start hash
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, last, fmt.Errorf("utxo index hash: %w", err)
-		}
-		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return 0, last, fmt.Errorf("utxo index hash: %w", err)
 	}
 
 	utxosPercentage := 95 // flush cache at >95% capacity
@@ -805,13 +820,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	// Verify start point is not after the end point
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("utxo indexer: %w", err)
-		}
-		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return fmt.Errorf("utxo index hash: %w", err)
 	}
 
 	// XXX make sure there is no gap between start and end or vice versa.
@@ -876,13 +885,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 	// Find start hash
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, last, fmt.Errorf("tx index hash: %w", err)
-		}
-		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return 0, last, fmt.Errorf("tx index hash: %w", err)
 	}
 
 	txsPercentage := 95 // flush cache at >95% capacity
@@ -967,13 +970,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 	// Find start hash
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, last, fmt.Errorf("tx index hash: %w", err)
-		}
-		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return 0, last, fmt.Errorf("tx index hash: %w", err)
 	}
 
 	txsPercentage := 95 // flush cache at >95% capacity
@@ -1192,13 +1189,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	// Verify start point is not after the end point
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("tx indexer: %w", err)
-		}
-		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return fmt.Errorf("tx index hash: %w", err)
 	}
 
 	// Make sure there is no gap between start and end or vice versa.
@@ -1256,13 +1247,7 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 	// Find start hash
 	ksHH, err := s.HemiIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, last, fmt.Errorf("hemi index hash: %w", err)
-		}
-		ksHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash, // XXX use proper block
-			Height: 0,
-		}
+		return 0, last, fmt.Errorf("hemi index hash: %w", err)
 	}
 
 	kssPercentage := 95 // flush cache at >95% capacity
@@ -1347,13 +1332,7 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 	// Find start hash
 	ksHH, err := s.HemiIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, last, fmt.Errorf("hemi index hash: %w", err)
-		}
-		ksHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return 0, last, fmt.Errorf("hemi index hash: %w", err)
 	}
 
 	kssPercentage := 95 // flush cache at >95% capacity
@@ -1566,13 +1545,7 @@ func (s *Server) HemiIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	// Verify start point is not after the end point
 	hemiHH, err := s.HemiIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("hemi indexer: %w", err)
-		}
-		hemiHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash, // XXX use HEMI genesis hash
-			Height: 0,
-		}
+		return fmt.Errorf("hemi index hash: %w", err)
 	}
 
 	// Make sure there is no gap between start and end or vice versa.
@@ -1604,13 +1577,7 @@ func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 	// Verify start point is not after the end point
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("tx indexer: %w", err)
-		}
-		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return 0, fmt.Errorf("utxo index hash: %w", err)
 	}
 
 	return s.IndexIsLinear(ctx, &utxoHH.Hash, endHash)
@@ -1623,13 +1590,7 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 	// Verify start point is not after the end point
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("tx indexer: %w", err)
-		}
-		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return 0, fmt.Errorf("tx index hash: %w", err)
 	}
 
 	return s.IndexIsLinear(ctx, &txHH.Hash, endHash)
@@ -1642,13 +1603,7 @@ func (s *Server) HemiIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 	// Verify start point is not after the end point
 	hemiHH, err := s.HemiIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return 0, fmt.Errorf("hemi indexer: %w", err)
-		}
-		hemiHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return 0, fmt.Errorf("hemi index hash: %w", err)
 	}
 
 	return s.IndexIsLinear(ctx, &hemiHH.Hash, endHash)
@@ -1784,13 +1739,7 @@ func (s *Server) utxoIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) 
 	// Index Utxos to best
 	utxoHH, err := s.UtxoIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("utxo index hash: %w", err)
-		}
-		utxoHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return fmt.Errorf("utxo index hash: %w", err)
 	}
 	utxoBH, err := s.db.BlockHeaderByHash(ctx, &utxoHH.Hash)
 	if err != nil {
@@ -1823,13 +1772,7 @@ func (s *Server) txIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) er
 	// Index Tx
 	txHH, err := s.TxIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("tx index hash: %w", err)
-		}
-		txHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return fmt.Errorf("tx index hash: %w", err)
 	}
 	txBH, err := s.db.BlockHeaderByHash(ctx, &txHH.Hash)
 	if err != nil {
@@ -1862,13 +1805,7 @@ func (s *Server) hemiIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) 
 	// Index Hemis to best
 	hemiHH, err := s.HemiIndexHash(ctx)
 	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("hemi index hash: %w", err)
-		}
-		hemiHH = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-		}
+		return fmt.Errorf("hemi index hash: %w", err)
 	}
 	hemiBH, err := s.db.BlockHeaderByHash(ctx, &hemiHH.Hash)
 	if err != nil {
