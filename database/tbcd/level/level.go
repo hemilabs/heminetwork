@@ -1727,8 +1727,18 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 	for k, v := range keystones {
 		switch direction {
 		case -1:
-			kssBatch.Delete(k[:])
-			panic("not yet")
+			foundKeystone, err := kssTx.Get(k[:], nil)
+			if err != nil {
+				continue
+			}
+			fbh, err := chainhash.NewHash(foundKeystone[0:32])
+			if err != nil {
+				return err // XXX really can't happen
+			}
+			// Only delete keystone if it is in the previously found block.
+			if fbh.IsEqual(&v.BlockHash) {
+				kssBatch.Delete(k[:])
+			}
 		case 1:
 			has, err := kssTx.Has(k[:], nil)
 			if err != nil {
