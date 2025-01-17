@@ -26,6 +26,7 @@ import (
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 // Locking order:
@@ -1707,7 +1708,7 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	return nil
 }
 
-func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash][]byte) error {
+func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone) error {
 	log.Tracef("BlockKeystoneUpdate")
 	defer log.Tracef("BlockKeystoneUpdate exit")
 
@@ -1727,8 +1728,20 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 		switch direction {
 		case -1:
 			kssBatch.Delete(k[:])
+			panic("not yet")
 		case 1:
-			kssBatch.Put(k[:], v)
+			has, err := kssTx.Has(k[:], nil)
+			if err != nil {
+				return fmt.Errorf("keystone update has: %w", err)
+			}
+			if has {
+				// Only store unknown keystones
+				continue
+			}
+			var value [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte
+			copy(value[0:32], v.BlockHash[:])
+			copy(value[32:], v.AbbreviatedKeystone)
+			kssBatch.Put(k[:], value[:])
 		}
 	}
 
