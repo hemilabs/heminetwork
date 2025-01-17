@@ -122,7 +122,7 @@ type Database interface {
 
 	// Hemi
 	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone) error
-	L2KeystoneAbrevByAbrevHash(ctx context.Context, abrevhash []byte) (*hemi.L2KeystoneAbrev, error)
+	BlockKeystoneAbrevByL2KeystoneAbrevHash(ctx context.Context, abrevhash []byte) (*hemi.L2KeystoneAbrev, error)
 }
 
 type Keystone struct {

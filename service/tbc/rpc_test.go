@@ -15,10 +15,17 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
+	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
+	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/testcontainers/testcontainers-go"
@@ -27,7 +34,9 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 func bytes2Tx(b []byte) (*wire.MsgTx, error) {
@@ -1490,7 +1499,17 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 }
 
-func TestL2KeystoneAbrevByAbrevHash(t *testing.T) {
+func TestBlockKeystoneAbrevByL2KeystoneAbrevHash(t *testing.T) {
+
+	l2Keystone := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      5,
+		L2BlockNumber:      44,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+	}
 
 	type testTableItem struct {
 		name                    string
@@ -1507,7 +1526,12 @@ func TestL2KeystoneAbrevByAbrevHash(t *testing.T) {
 		name:                "invalidL2KeystoneAbrevHash",
 		l2KeystoneAbrevHash: []byte{1, 2, 3, 4},
 		expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
-	}}
+	},
+		{
+			name:                    "validL2KeystoneAbrevHash",
+			l2KeystoneAbrevHash:     hemi.L2KeystoneAbbreviate(l2Keystone).Hash().CloneBytes(),
+			expectedL2KeystoneAbrev: hemi.L2KeystoneAbbreviate(l2Keystone),
+		}}
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
@@ -1517,7 +1541,7 @@ func TestL2KeystoneAbrevByAbrevHash(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, tbcUrl := createTbcServer(ctx, t, port)
+			s, tbcUrl := createTbcServer(ctx, t, port)
 
 			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
 			if err != nil {
@@ -1531,14 +1555,26 @@ func TestL2KeystoneAbrevByAbrevHash(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var response tbcapi.L2KeystoneAbrevByAbrevHashResponse
+			var response tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashResponse
 			select {
 			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.L2KeystoneAbrevByAbrevHashRequest{
+			// 1
+			btx := createBtcTx(t, 199, &l2Keystone, []byte{1, 2, 3})
+
+			kssCache := make(map[chainhash.Hash]tbcd.Keystone)
+
+			kssCache[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
+				BlockHash:           btcchainhash.Hash(fillOutBytes("blockhash", 32)),
+				AbbreviatedKeystone: btx,
+			}
+
+			s.db.BlockKeystoneUpdate(ctx, 1, kssCache)
+
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashRequest{
 				L2KeystoneAbrevHash: tti.l2KeystoneAbrevHash,
 			}); err != nil {
 				t.Fatal(err)
@@ -1549,7 +1585,7 @@ func TestL2KeystoneAbrevByAbrevHash(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if v.Header.Command != tbcapi.CmdL2KeystoneAbrevByAbrevHashResponse {
+			if v.Header.Command != tbcapi.CmdBlockKeystoneAbrevByL2KeystoneAbrevHashResponse {
 				t.Fatalf("received unexpected command: %s", v.Header.Command)
 			}
 
@@ -1558,6 +1594,10 @@ func TestL2KeystoneAbrevByAbrevHash(t *testing.T) {
 			}
 
 			if diff := deep.Equal(response.Error, tti.expectedError); len(diff) > 0 {
+				t.Fatalf("unexpected diff: %s", diff)
+			}
+
+			if diff := deep.Equal(response.L2KeystoneAbrev, tti.expectedL2KeystoneAbrev); len(diff) > 0 {
 				t.Fatalf("unexpected diff: %s", diff)
 			}
 		})
@@ -1587,4 +1627,64 @@ func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
 	if err := tbcServer.SyncIndexersToHash(ctx, &hash); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func fillOutBytes(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, '_')
+	}
+
+	return result
+}
+
+func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
+	btx := &btcwire.MsgTx{
+		Version:  2,
+		LockTime: uint32(btcHeight),
+	}
+
+	popTx := pop.TransactionL2{
+		L2Keystone: hemi.L2KeystoneAbbreviate(*l2Keystone),
+	}
+
+	popTxOpReturn, err := popTx.EncodeToOpReturn()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	publicKey := privateKey.PubKey()
+	pubKeyBytes := publicKey.SerializeCompressed()
+	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(payToScript) != 25 {
+		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
+	}
+
+	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
+	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
+
+	changeAmount := int64(100)
+	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
+
+	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
+
+	sig := dcrecdsa.Sign(privateKey, []byte{})
+	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
+	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	btx.TxIn[0].SignatureScript = sigScript
+
+	return btx.TxOut[0].PkScript
 }
