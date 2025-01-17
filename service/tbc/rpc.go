@@ -191,10 +191,10 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdL2KeystoneAbrevByAbrevHashRequest:
+		case tbcapi.CmdBlockKeystoneAbrevByL2KeystoneAbrevHashRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.L2KeystoneAbrevByAbrevHashRequest)
-				return s.handleL2KeystoneAbrevByAbrevHashRequest(ctx, req)
+				req := payload.(*tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashRequest)
+				return s.handleBlockKeystoneAbrevByL2KeystoneAbrevHashRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -633,20 +633,20 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 	return &tbcapi.BlockInsertRawResponse{BlockHash: &hash}, nil
 }
 
-func (s *Server) handleL2KeystoneAbrevByAbrevHashRequest(ctx context.Context, req *tbcapi.L2KeystoneAbrevByAbrevHashRequest) (any, error) {
-	log.Tracef("handleL2KeystoneAbrevByAbrevHashRequest")
-	defer log.Tracef("handleL2KeystoneAbrevByAbrevHashRequest exit")
+func (s *Server) handleBlockKeystoneAbrevByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashRequest) (any, error) {
+	log.Tracef("handleBlockKeystoneAbrevByL2KeystoneAbrevHashRequest")
+	defer log.Tracef("handleBlockKeystoneAbrevByL2KeystoneAbrevHashRequest exit")
 
-	ks, err := s.db.L2KeystoneAbrevByAbrevHash(ctx, req.L2KeystoneAbrevHash)
+	ks, err := s.db.BlockKeystoneAbrevByL2KeystoneAbrevHash(ctx, req.L2KeystoneAbrevHash)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.L2KeystoneAbrevByAbrevHashResponse{Error: protocol.RequestErrorf("could not find l2 keystone")}, nil
+			return &tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashResponse{Error: protocol.RequestErrorf("could not find l2 keystone")}, nil
 		}
 		e := protocol.NewInternalError(err)
-		return &tbcapi.L2KeystoneAbrevByAbrevHashResponse{Error: e.ProtocolError()}, e
+		return &tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashResponse{Error: e.ProtocolError()}, e
 	}
 
-	return &tbcapi.L2KeystoneAbrevByAbrevHashResponse{L2KeystoneAbrev: ks}, nil
+	return &tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashResponse{L2KeystoneAbrev: ks}, nil
 }
 
 // handleBlockDownloadAsyncRequest handles tbcapi.BlockDownloadAsyncRequest.
