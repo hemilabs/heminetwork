@@ -27,6 +27,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 // Locking order:
@@ -281,6 +282,27 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 	defer mdDiscard()
 
 	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
+}
+
+func (l *ldb) L2KeystoneAbrevByAbrevHash(ctx context.Context, abrevhash []byte) (*hemi.L2KeystoneAbrev, error) {
+	log.Tracef("L2KeystoneAbrevByAbrevHash")
+	defer log.Tracef("L2KeystoneAbrevByAbrevHash exit")
+
+	kssDB := l.pool[level.KeystonesDB]
+	eks, err := kssDB.Get(abrevhash, nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
+		}
+		return nil, fmt.Errorf("l2 keystone get: %w", err)
+	}
+	tl2, err := pop.ParseTransactionL2FromOpReturn(eks)
+	if err != nil {
+		log.Errorf("can't parse PKScript from keystone DB: %s", err)
+		return nil, err
+	}
+
+	return tl2.L2Keystone, nil
 }
 
 // BatchAppend appends rows to batch b.

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -188,6 +188,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.BlockDownloadAsyncRawRequest)
 				return s.handleBlockDownloadAsyncRawRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdL2KeystoneAbrevByAbrevHashRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.L2KeystoneAbrevByAbrevHashRequest)
+				return s.handleL2KeystoneAbrevByAbrevHashRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -624,6 +631,22 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 
 	hash := b.Header.BlockHash()
 	return &tbcapi.BlockInsertRawResponse{BlockHash: &hash}, nil
+}
+
+func (s *Server) handleL2KeystoneAbrevByAbrevHashRequest(ctx context.Context, req *tbcapi.L2KeystoneAbrevByAbrevHashRequest) (any, error) {
+	log.Tracef("handleL2KeystoneAbrevByAbrevHashRequest")
+	defer log.Tracef("handleL2KeystoneAbrevByAbrevHashRequest exit")
+
+	ks, err := s.db.L2KeystoneAbrevByAbrevHash(ctx, req.L2KeystoneAbrevHash)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.L2KeystoneAbrevByAbrevHashResponse{Error: protocol.RequestErrorf("could not find l2 keystone")}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.L2KeystoneAbrevByAbrevHashResponse{Error: e.ProtocolError()}, e
+	}
+
+	return &tbcapi.L2KeystoneAbrevByAbrevHashResponse{L2KeystoneAbrev: ks}, nil
 }
 
 // handleBlockDownloadAsyncRequest handles tbcapi.BlockDownloadAsyncRequest.

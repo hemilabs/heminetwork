@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -15,6 +15,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 // XXX we should kill the wrapping types that are basically identical to wire.
@@ -76,6 +77,9 @@ const (
 
 	CmdBlockDownloadAsyncRawRequest  = "tbcapi-block-download-async-raw-request"
 	CmdBlockDownloadAsyncRawResponse = "tbcapi-block-download-async-raw-response"
+
+	CmdL2KeystoneAbrevByAbrevHashRequest  = "tbcapi-l2-keystone-abrev-by-abrev-hash-request"
+	CmdL2KeystoneAbrevByAbrevHashResponse = "tbcapi-l2-keystone-abrev-by-abrev-hash-response"
 )
 
 var (
@@ -284,6 +288,15 @@ type BlockInsertRawRequest struct {
 	Block api.ByteSlice `json:"block"`
 }
 
+type L2KeystoneAbrevByAbrevHashRequest struct {
+	L2KeystoneAbrevHash api.ByteSlice `json:"l2_keystones_abrev_hash"`
+}
+
+type L2KeystoneAbrevByAbrevHashResponse struct {
+	L2KeystoneAbrev *hemi.L2KeystoneAbrev `json:"l2_keystone_abrev"`
+	Error           *protocol.Error       `json:"error,omitempty"`
+}
+
 type BlockInsertRawResponse struct {
 	BlockHash *chainhash.Hash `json:"block_hash"`
 	Error     *protocol.Error `json:"error,omitempty"`
@@ -315,42 +328,44 @@ type BlockDownloadAsyncRawResponse struct {
 }
 
 var commands = map[protocol.Command]reflect.Type{
-	CmdPingRequest:                     reflect.TypeOf(PingRequest{}),
-	CmdPingResponse:                    reflect.TypeOf(PingResponse{}),
-	CmdBlockByHashRequest:              reflect.TypeOf(BlockByHashRequest{}),
-	CmdBlockByHashResponse:             reflect.TypeOf(BlockByHashResponse{}),
-	CmdBlockByHashRawRequest:           reflect.TypeOf(BlockByHashRawRequest{}),
-	CmdBlockByHashRawResponse:          reflect.TypeOf(BlockByHashRawResponse{}),
-	CmdBlockHeadersByHeightRawRequest:  reflect.TypeOf(BlockHeadersByHeightRawRequest{}),
-	CmdBlockHeadersByHeightRawResponse: reflect.TypeOf(BlockHeadersByHeightRawResponse{}),
-	CmdBlockHeadersByHeightRequest:     reflect.TypeOf(BlockHeadersByHeightRequest{}),
-	CmdBlockHeadersByHeightResponse:    reflect.TypeOf(BlockHeadersByHeightResponse{}),
-	CmdBlockHeaderBestRawRequest:       reflect.TypeOf(BlockHeaderBestRawRequest{}),
-	CmdBlockHeaderBestRawResponse:      reflect.TypeOf(BlockHeaderBestRawResponse{}),
-	CmdBlockHeaderBestRequest:          reflect.TypeOf(BlockHeaderBestRequest{}),
-	CmdBlockHeaderBestResponse:         reflect.TypeOf(BlockHeaderBestResponse{}),
-	CmdBalanceByAddressRequest:         reflect.TypeOf(BalanceByAddressRequest{}),
-	CmdBalanceByAddressResponse:        reflect.TypeOf(BalanceByAddressResponse{}),
-	CmdUTXOsByAddressRawRequest:        reflect.TypeOf(UTXOsByAddressRawRequest{}),
-	CmdUTXOsByAddressRawResponse:       reflect.TypeOf(UTXOsByAddressRawResponse{}),
-	CmdUTXOsByAddressRequest:           reflect.TypeOf(UTXOsByAddressRequest{}),
-	CmdUTXOsByAddressResponse:          reflect.TypeOf(UTXOsByAddressResponse{}),
-	CmdTxByIdRawRequest:                reflect.TypeOf(TxByIdRawRequest{}),
-	CmdTxByIdRawResponse:               reflect.TypeOf(TxByIdRawResponse{}),
-	CmdTxByIdRequest:                   reflect.TypeOf(TxByIdRequest{}),
-	CmdTxByIdResponse:                  reflect.TypeOf(TxByIdResponse{}),
-	CmdTxBroadcastRequest:              reflect.TypeOf(TxBroadcastRequest{}),
-	CmdTxBroadcastResponse:             reflect.TypeOf(TxBroadcastResponse{}),
-	CmdTxBroadcastRawRequest:           reflect.TypeOf(TxBroadcastRawRequest{}),
-	CmdTxBroadcastRawResponse:          reflect.TypeOf(TxBroadcastRawResponse{}),
-	CmdBlockInsertRequest:              reflect.TypeOf(BlockInsertRequest{}),
-	CmdBlockInsertResponse:             reflect.TypeOf(BlockInsertResponse{}),
-	CmdBlockInsertRawRequest:           reflect.TypeOf(BlockInsertRawRequest{}),
-	CmdBlockInsertRawResponse:          reflect.TypeOf(BlockInsertRawResponse{}),
-	CmdBlockDownloadAsyncRequest:       reflect.TypeOf(BlockDownloadAsyncRequest{}),
-	CmdBlockDownloadAsyncResponse:      reflect.TypeOf(BlockDownloadAsyncResponse{}),
-	CmdBlockDownloadAsyncRawRequest:    reflect.TypeOf(BlockDownloadAsyncRawRequest{}),
-	CmdBlockDownloadAsyncRawResponse:   reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
+	CmdPingRequest:                        reflect.TypeOf(PingRequest{}),
+	CmdPingResponse:                       reflect.TypeOf(PingResponse{}),
+	CmdBlockByHashRequest:                 reflect.TypeOf(BlockByHashRequest{}),
+	CmdBlockByHashResponse:                reflect.TypeOf(BlockByHashResponse{}),
+	CmdBlockByHashRawRequest:              reflect.TypeOf(BlockByHashRawRequest{}),
+	CmdBlockByHashRawResponse:             reflect.TypeOf(BlockByHashRawResponse{}),
+	CmdBlockHeadersByHeightRawRequest:     reflect.TypeOf(BlockHeadersByHeightRawRequest{}),
+	CmdBlockHeadersByHeightRawResponse:    reflect.TypeOf(BlockHeadersByHeightRawResponse{}),
+	CmdBlockHeadersByHeightRequest:        reflect.TypeOf(BlockHeadersByHeightRequest{}),
+	CmdBlockHeadersByHeightResponse:       reflect.TypeOf(BlockHeadersByHeightResponse{}),
+	CmdBlockHeaderBestRawRequest:          reflect.TypeOf(BlockHeaderBestRawRequest{}),
+	CmdBlockHeaderBestRawResponse:         reflect.TypeOf(BlockHeaderBestRawResponse{}),
+	CmdBlockHeaderBestRequest:             reflect.TypeOf(BlockHeaderBestRequest{}),
+	CmdBlockHeaderBestResponse:            reflect.TypeOf(BlockHeaderBestResponse{}),
+	CmdBalanceByAddressRequest:            reflect.TypeOf(BalanceByAddressRequest{}),
+	CmdBalanceByAddressResponse:           reflect.TypeOf(BalanceByAddressResponse{}),
+	CmdUTXOsByAddressRawRequest:           reflect.TypeOf(UTXOsByAddressRawRequest{}),
+	CmdUTXOsByAddressRawResponse:          reflect.TypeOf(UTXOsByAddressRawResponse{}),
+	CmdUTXOsByAddressRequest:              reflect.TypeOf(UTXOsByAddressRequest{}),
+	CmdUTXOsByAddressResponse:             reflect.TypeOf(UTXOsByAddressResponse{}),
+	CmdTxByIdRawRequest:                   reflect.TypeOf(TxByIdRawRequest{}),
+	CmdTxByIdRawResponse:                  reflect.TypeOf(TxByIdRawResponse{}),
+	CmdTxByIdRequest:                      reflect.TypeOf(TxByIdRequest{}),
+	CmdTxByIdResponse:                     reflect.TypeOf(TxByIdResponse{}),
+	CmdTxBroadcastRequest:                 reflect.TypeOf(TxBroadcastRequest{}),
+	CmdTxBroadcastResponse:                reflect.TypeOf(TxBroadcastResponse{}),
+	CmdTxBroadcastRawRequest:              reflect.TypeOf(TxBroadcastRawRequest{}),
+	CmdTxBroadcastRawResponse:             reflect.TypeOf(TxBroadcastRawResponse{}),
+	CmdBlockInsertRequest:                 reflect.TypeOf(BlockInsertRequest{}),
+	CmdBlockInsertResponse:                reflect.TypeOf(BlockInsertResponse{}),
+	CmdBlockInsertRawRequest:              reflect.TypeOf(BlockInsertRawRequest{}),
+	CmdBlockInsertRawResponse:             reflect.TypeOf(BlockInsertRawResponse{}),
+	CmdBlockDownloadAsyncRequest:          reflect.TypeOf(BlockDownloadAsyncRequest{}),
+	CmdBlockDownloadAsyncResponse:         reflect.TypeOf(BlockDownloadAsyncResponse{}),
+	CmdBlockDownloadAsyncRawRequest:       reflect.TypeOf(BlockDownloadAsyncRawRequest{}),
+	CmdBlockDownloadAsyncRawResponse:      reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
+	CmdL2KeystoneAbrevByAbrevHashRequest:  reflect.TypeOf(L2KeystoneAbrevByAbrevHashRequest{}),
+	CmdL2KeystoneAbrevByAbrevHashResponse: reflect.TypeOf(L2KeystoneAbrevByAbrevHashResponse{}),
 }
 
 type tbcAPI struct{}

@@ -27,6 +27,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 func bytes2Tx(b []byte) (*wire.MsgTx, error) {
@@ -1486,6 +1487,80 @@ func TestTxByIdNotFound(t *testing.T) {
 		if !strings.Contains(response.Error.Message, "tx not found") {
 			t.Fatalf("incorrect error found: %s", response.Error.Message)
 		}
+	}
+}
+
+func TestL2KeystoneAbrevByAbrevHash(t *testing.T) {
+
+	type testTableItem struct {
+		name                    string
+		l2KeystoneAbrevHash     []byte
+		expectedError           *protocol.Error
+		expectedL2KeystoneAbrev *hemi.L2KeystoneAbrev
+	}
+
+	testTable := []testTableItem{{
+		name:                "nilL2KeystoneAbrevHash",
+		l2KeystoneAbrevHash: nil,
+		expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
+	}, {
+		name:                "invalidL2KeystoneAbrevHash",
+		l2KeystoneAbrevHash: []byte{1, 2, 3, 4},
+		expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
+	}}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			port, err := nat.NewPort("tcp", "9999")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, tbcUrl := createTbcServer(ctx, t, port)
+
+			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.CloseNow()
+
+			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+			tws := &tbcWs{
+				conn: protocol.NewWSConn(c),
+			}
+
+			var response tbcapi.L2KeystoneAbrevByAbrevHashResponse
+			select {
+			case <-time.After(1 * time.Second):
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.L2KeystoneAbrevByAbrevHashRequest{
+				L2KeystoneAbrevHash: tti.l2KeystoneAbrevHash,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			var v protocol.Message
+			if err := wsjson.Read(ctx, c, &v); err != nil {
+				t.Fatal(err)
+			}
+
+			if v.Header.Command != tbcapi.CmdL2KeystoneAbrevByAbrevHashResponse {
+				t.Fatalf("received unexpected command: %s", v.Header.Command)
+			}
+
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+
+			if diff := deep.Equal(response.Error, tti.expectedError); len(diff) > 0 {
+				t.Fatalf("unexpected diff: %s", diff)
+			}
+		})
 	}
 }
 
