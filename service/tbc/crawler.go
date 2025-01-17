@@ -22,6 +22,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
@@ -1228,6 +1229,11 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map
 			}
 			if _, ok := kssCache[*aPoPTx.L2Keystone.Hash()]; ok {
 				// Multiple keystones may exist in block, only store first
+				continue
+			}
+			if len(txOut.PkScript) != hemi.L2KeystoneAbrevSize {
+				log.Errorf("keystone pkscript invalid length: %v",
+					len(txOut.PkScript))
 				continue
 			}
 
