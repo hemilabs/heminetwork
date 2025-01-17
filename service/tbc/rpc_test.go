@@ -1499,7 +1499,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 }
 
-func TestBlockKeystoneAbrevByL2KeystoneAbrevHash(t *testing.T) {
+func TestBlockKeystoneByL2KeystoneAbrevHash(t *testing.T) {
 
 	l2Keystone := hemi.L2Keystone{
 		Version:            1,
@@ -1511,26 +1511,42 @@ func TestBlockKeystoneAbrevByL2KeystoneAbrevHash(t *testing.T) {
 		EPHash:             fillOutBytes("ephash", 32),
 	}
 
+	popTx := pop.TransactionL2{
+		L2Keystone: hemi.L2KeystoneAbbreviate(l2Keystone),
+	}
+
+	popTxOpReturn, err := popTx.EncodeToOpReturn()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log(spew.Sdump(popTxOpReturn))
+
+	btcBlockHash := btcchainhash.Hash(fillOutBytes("blockhash", 32))
+
+	invalidL2KeystoneAbrevHash := chainhash.Hash(fillOutBytes("123", 32))
+
 	type testTableItem struct {
 		name                    string
-		l2KeystoneAbrevHash     []byte
+		l2KeystoneAbrevHash     *chainhash.Hash
 		expectedError           *protocol.Error
 		expectedL2KeystoneAbrev *hemi.L2KeystoneAbrev
+		expectedBTCBlockHash    *chainhash.Hash
 	}
 
 	testTable := []testTableItem{{
-		name:                "nilL2KeystoneAbrevHash",
-		l2KeystoneAbrevHash: nil,
-		expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
+		name:          "nilL2KeystoneAbrevHash",
+		expectedError: protocol.RequestErrorf("invalid nil abrev hash"),
 	}, {
 		name:                "invalidL2KeystoneAbrevHash",
-		l2KeystoneAbrevHash: []byte{1, 2, 3, 4},
+		l2KeystoneAbrevHash: &invalidL2KeystoneAbrevHash,
 		expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
 	},
 		{
 			name:                    "validL2KeystoneAbrevHash",
-			l2KeystoneAbrevHash:     hemi.L2KeystoneAbbreviate(l2Keystone).Hash().CloneBytes(),
+			l2KeystoneAbrevHash:     hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
 			expectedL2KeystoneAbrev: hemi.L2KeystoneAbbreviate(l2Keystone),
+			expectedBTCBlockHash:    &btcBlockHash,
 		}}
 
 	for _, tti := range testTable {
@@ -1555,7 +1571,7 @@ func TestBlockKeystoneAbrevByL2KeystoneAbrevHash(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var response tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashResponse
+			var response tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse
 			select {
 			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
@@ -1565,16 +1581,25 @@ func TestBlockKeystoneAbrevByL2KeystoneAbrevHash(t *testing.T) {
 			// 1
 			btx := createBtcTx(t, 199, &l2Keystone, []byte{1, 2, 3})
 
+			aPoPTx, err := pop.ParseTransactionL2FromOpReturn(btx)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			abrvKss := aPoPTx.L2Keystone.Serialize()
+
 			kssCache := make(map[chainhash.Hash]tbcd.Keystone)
 
 			kssCache[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
-				BlockHash:           btcchainhash.Hash(fillOutBytes("blockhash", 32)),
-				AbbreviatedKeystone: btx,
+				BlockHash:           btcBlockHash,
+				AbbreviatedKeystone: abrvKss[:],
 			}
 
-			s.db.BlockKeystoneUpdate(ctx, 1, kssCache)
+			if err := s.db.BlockKeystoneUpdate(ctx, 1, kssCache); err != nil {
+				t.Fatal(err)
+			}
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockKeystoneAbrevByL2KeystoneAbrevHashRequest{
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest{
 				L2KeystoneAbrevHash: tti.l2KeystoneAbrevHash,
 			}); err != nil {
 				t.Fatal(err)
@@ -1585,7 +1610,7 @@ func TestBlockKeystoneAbrevByL2KeystoneAbrevHash(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if v.Header.Command != tbcapi.CmdBlockKeystoneAbrevByL2KeystoneAbrevHashResponse {
+			if v.Header.Command != tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashResponse {
 				t.Fatalf("received unexpected command: %s", v.Header.Command)
 			}
 
@@ -1594,11 +1619,19 @@ func TestBlockKeystoneAbrevByL2KeystoneAbrevHash(t *testing.T) {
 			}
 
 			if diff := deep.Equal(response.Error, tti.expectedError); len(diff) > 0 {
-				t.Fatalf("unexpected diff: %s", diff)
+				t.Fatalf("unexpected error diff: %s", diff)
+			}
+
+			if response.L2KeystoneAbrev != nil {
+				t.Logf("%s\n\n%s", spew.Sdump(response.L2KeystoneAbrev.Serialize()), spew.Sdump(tti.expectedL2KeystoneAbrev.Serialize()))
+			}
+
+			if diff := deep.Equal(response.BtcBlockHash, tti.expectedBTCBlockHash); len(diff) > 0 {
+				t.Fatalf("unexpected retrieved block hash diff: %s", diff)
 			}
 
 			if diff := deep.Equal(response.L2KeystoneAbrev, tti.expectedL2KeystoneAbrev); len(diff) > 0 {
-				t.Fatalf("unexpected diff: %s", diff)
+				t.Fatalf("unexpected retrieved keystone diff: %s", diff)
 			}
 		})
 	}
@@ -1686,5 +1719,7 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 	}
 	btx.TxIn[0].SignatureScript = sigScript
 
-	return btx.TxOut[0].PkScript
+	t.Logf("%s", spew.Sdump(btx.TxOut[1].PkScript))
+
+	return btx.TxOut[1].PkScript
 }
