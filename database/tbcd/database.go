@@ -21,6 +21,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 type InsertType int
@@ -121,6 +122,7 @@ type Database interface {
 
 	// Hemi
 	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone) error
+	L2KeystoneAbrevByAbrevHash(ctx context.Context, abrevhash []byte) (*hemi.L2KeystoneAbrev, error)
 }
 
 type Keystone struct {

@@ -1225,6 +1225,7 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map
 		for _, txOut := range tx.MsgTx().TxOut {
 			aPoPTx, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
 			if err != nil {
+				log.Errorf("error parsing tx l2: %s", err)
 				continue
 			}
 			if _, ok := kssCache[*aPoPTx.L2Keystone.Hash()]; ok {
