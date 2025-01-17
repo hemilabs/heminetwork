@@ -1214,7 +1214,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	return fmt.Errorf("invalid direction: %v", direction)
 }
 
-func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map[chainhash.Hash][]byte) error {
+func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map[chainhash.Hash]tbcd.Keystone) error {
 	for _, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
 			// Skip coinbase inputs
@@ -1226,8 +1226,15 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map
 			if err != nil {
 				continue
 			}
+			if _, ok := kssCache[*aPoPTx.L2Keystone.Hash()]; ok {
+				// Multiple keystones may exist in block, only store first
+				continue
+			}
 
-			kssCache[*aPoPTx.L2Keystone.Hash()] = txOut.PkScript
+			kssCache[*aPoPTx.L2Keystone.Hash()] = tbcd.Keystone{
+				BlockHash:           *blockHash,
+				AbbreviatedKeystone: txOut.PkScript,
+			}
 		}
 	}
 	return nil
@@ -1236,7 +1243,7 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map
 // indexKeystonesInBlocks indexes txs from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
 // the last hash it has processedd.
-func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash][]byte) (int, *HashHeight, error) {
+func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Keystone) (int, *HashHeight, error) {
 	log.Tracef("indexKeystonesInBlocks")
 	defer log.Tracef("indexKeystonesInBlocks exit")
 
@@ -1321,7 +1328,7 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 // unindexKeystonesInBlocks indexes keystones from the last processed block
 // until the provided end hash, inclusive. It returns the number of blocks
 // processed and the last hash it has processedd.
-func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash][]byte) (int, *HashHeight, error) {
+func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Keystone) (int, *HashHeight, error) {
 	log.Tracef("unindexKeystonesInBlocks")
 	defer log.Tracef("unindexKeystonesInBlocks exit")
 
@@ -1408,7 +1415,7 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 	}
 	s.mtx.Unlock()
 	// Allocate here so that we don't waste space when not indexing.
-	kss := make(map[chainhash.Hash][]byte, s.cfg.MaxCachedKeystones)
+	kss := make(map[chainhash.Hash]tbcd.Keystone, s.cfg.MaxCachedKeystones)
 	defer clear(kss)
 
 	log.Infof("Start unwinding keystones at hash %v height %v", startBH, startBH.Height)
@@ -1468,7 +1475,7 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 	s.mtx.Unlock()
 
 	// Allocate here so that we don't waste space when not indexing.
-	kss := make(map[chainhash.Hash][]byte, s.cfg.MaxCachedKeystones)
+	kss := make(map[chainhash.Hash]tbcd.Keystone, s.cfg.MaxCachedKeystones)
 	defer clear(kss)
 
 	log.Infof("Start indexing keystones at hash %v height %v", startBH, startBH.Height)

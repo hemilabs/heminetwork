@@ -109,7 +109,6 @@ type Database interface {
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
-	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash][]byte) error
 	BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error)
 	SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]SpentInfo, error)
 
@@ -118,6 +117,14 @@ type Database interface {
 	BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error)
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)
+
+	// Hemi
+	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone) error
+}
+
+type Keystone struct {
+	BlockHash           chainhash.Hash // Block that contains abbreviated keystone
+	AbbreviatedKeystone []byte         // Abbreviated keystone
 }
 
 // XXX there exist various types in this file that need to be reevaluated.
