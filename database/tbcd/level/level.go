@@ -27,7 +27,6 @@ import (
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 // Locking order:
@@ -284,25 +283,25 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
 }
 
-func (l *ldb) BlockKeystoneAbrevByL2KeystoneAbrevHash(ctx context.Context, abrevhash []byte) (*hemi.L2KeystoneAbrev, error) {
-	log.Tracef("BlockKeystoneAbrevByL2KeystoneAbrevHash")
-	defer log.Tracef("BlockKeystoneAbrevByL2KeystoneAbrevHash exit")
+func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
+	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
+	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
 	kssDB := l.pool[level.KeystonesDB]
-	eks, err := kssDB.Get(abrevhash, nil)
+	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
 		}
 		return nil, fmt.Errorf("l2 keystone get: %w", err)
 	}
-	tl2, err := pop.ParseTransactionL2FromOpReturn(eks)
-	if err != nil {
-		log.Errorf("can't parse PKScript from keystone DB: %s", err)
-		return nil, err
+
+	ks := tbcd.Keystone{
+		BlockHash:           chainhash.Hash(eks[:32]),
+		AbbreviatedKeystone: eks[32:],
 	}
 
-	return tl2.L2Keystone, nil
+	return &ks, nil
 }
 
 // BatchAppend appends rows to batch b.
@@ -1770,7 +1769,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// Only store unknown keystones
 				continue
 			}
-			var value [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte
+			var value [chainhash.HashSize + hemi.L2KeystoneAbrevSize + 7]byte
 			copy(value[0:32], v.BlockHash[:])
 			copy(value[32:], v.AbbreviatedKeystone)
 			kssBatch.Put(k[:], value[:])
