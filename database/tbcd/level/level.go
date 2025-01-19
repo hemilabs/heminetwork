@@ -357,7 +357,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 		}
 	}
 
-	// It stands to reason that this code does not need a trasaction. The
+	// It stands to reason that this code does not need a transaction. The
 	// caller code will either receive or not receice an answer. It does
 	// not seem likely to be racing higher up in the stack.
 
