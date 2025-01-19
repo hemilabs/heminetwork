@@ -202,7 +202,7 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	bhsDB := l.pool[db]
 	tx, err := bhsDB.OpenTransaction()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%v open tansaction: %w", db, err)
+		return nil, nil, nil, fmt.Errorf("%v open transaction: %w", db, err)
 	}
 	d := true
 	discard := &d
