@@ -1231,16 +1231,8 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map
 				// Multiple keystones may exist in block, only store first
 				continue
 			}
-			/*
-				if len(txOut.PkScript) != hemi.L2KeystoneAbrevSize {
-					log.Errorf("keystone pkscript invalid length: %v",
-						len(txOut.PkScript))
-					continue
-				}
-			*/
 
 			abvKss := aPoPTx.L2Keystone.Serialize()
-
 			kssCache[*aPoPTx.L2Keystone.Hash()] = tbcd.Keystone{
 				BlockHash:           *blockHash,
 				AbbreviatedKeystone: abvKss[:],
