@@ -1114,17 +1114,24 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 
 		// Store height_hash for future reference
 		hhKey := heightHashToKey(height, bhash[:])
-		hhBatch.Put(hhKey, []byte{}) // XXX nil?
+		ok, err := hhTx.Has(hhKey, nil)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("height hash has: %w", err)
+		} else if !ok {
+			hhBatch.Put(hhKey, []byte{})
+		}
 
 		// Insert a synthesized height_hash key that serves as an index
 		// to see which blocks are missing.
-		ok, err := blocksDB.Has(hhKey)
+		ok, err = blocksDB.Has(hhKey)
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("blocks has: %w", err)
 		} else if !ok {
 			bmBatch.Put(hhKey, []byte{})
 		}
+
 		// XXX reason about pre encoding. Due to the caller code being
 		// heavily reentrant the odds are not good that encoding would
 		// only happens once. The downside is that this encoding
