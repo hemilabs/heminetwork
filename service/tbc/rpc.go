@@ -558,8 +558,11 @@ func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBro
 
 	txid, err := s.TxBroadcast(ctx, req.Tx, req.Force)
 	if err != nil {
-		if errors.Is(err, ErrTxAlreadyBroadcast) || errors.Is(err, ErrTxBroadcastNoPeers) {
-			return &tbcapi.TxBroadcastResponse{Error: protocol.RequestError(err)}, err
+		if errors.Is(err, ErrTxAlreadyBroadcast) ||
+			errors.Is(err, ErrTxBroadcastNoPeers) {
+			return &tbcapi.TxBroadcastResponse{
+				Error: protocol.RequestError(err),
+			}, err
 		}
 		e := protocol.NewInternalError(err)
 		return &tbcapi.TxBroadcastResponse{Error: e.ProtocolError()}, e
@@ -581,8 +584,11 @@ func (s *Server) handleTxBroadcastRawRequest(ctx context.Context, req *tbcapi.Tx
 	}
 	txid, err := s.TxBroadcast(ctx, tx, req.Force)
 	if err != nil {
-		if errors.Is(err, ErrTxAlreadyBroadcast) || errors.Is(err, ErrTxBroadcastNoPeers) {
-			return &tbcapi.TxBroadcastResponse{Error: protocol.RequestError(err)}, err
+		if errors.Is(err, ErrTxAlreadyBroadcast) ||
+			errors.Is(err, ErrTxBroadcastNoPeers) {
+			return &tbcapi.TxBroadcastResponse{
+				Error: protocol.RequestError(err),
+			}, err
 		}
 		e := protocol.NewInternalError(err)
 		return &tbcapi.TxBroadcastResponse{Error: e.ProtocolError()}, e
@@ -639,17 +645,26 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
 
 	if req.L2KeystoneAbrevHash == nil {
-		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{Error: protocol.RequestErrorf("invalid nil abrev hash")}, nil
+		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+			Error: protocol.RequestErrorf("invalid nil abrev hash"),
+		}, nil
 	}
 	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *req.L2KeystoneAbrevHash)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{Error: protocol.RequestErrorf("could not find l2 keystone")}, nil
+			return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+				Error: protocol.RequestErrorf("could not find l2 keystone"),
+			}, nil
 		}
 		e := protocol.NewInternalError(err)
-		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{Error: e.ProtocolError()}, e
+		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+			Error: e.ProtocolError(),
+		}, e
 	}
-	return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{L2KeystoneAbrev: hemi.L2KeystoneAbrevDeserialize(hemi.RawAbreviatedL2Keystone(ks.AbbreviatedKeystone)), BtcBlockHash: &ks.BlockHash}, nil
+	return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+		L2KeystoneAbrev: hemi.L2KeystoneAbrevDeserialize(hemi.RawAbreviatedL2Keystone(ks.AbbreviatedKeystone)),
+		BtcBlockHash:    &ks.BlockHash,
+	}, nil
 }
 
 // handleBlockDownloadAsyncRequest handles tbcapi.BlockDownloadAsyncRequest.
