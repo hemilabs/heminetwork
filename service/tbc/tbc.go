@@ -1409,6 +1409,10 @@ func (s *Server) BlockInsert(ctx context.Context, blk *wire.MsgBlock) (int64, er
 	return s.db.BlockInsert(ctx, btcutil.NewBlock(blk))
 }
 
+func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+	return s.db.BlockHeadersInsert(ctx, headers, nil)
+}
+
 func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgBlock, raw []byte) error {
 	log.Tracef("handleBlock (%v)", p)
 	defer log.Tracef("handleBlock exit (%v)", p)
