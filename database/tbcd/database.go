@@ -229,7 +229,7 @@ func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 // memory conservation reasons.
 type CacheOutput [32 + 8 + 4]byte // script_hash + value + out_idx
 
-// String reutrns pretty printable CacheOutput. Hash is not reversed since it is an
+// String returns pretty printable CacheOutput. Hash is not reversed since it is an
 // opaque pointer. It prints satoshis@script_hash:output_index
 func (c CacheOutput) String() string {
 	return fmt.Sprintf("%d @ %x:%d", binary.BigEndian.Uint64(c[32:40]),
@@ -291,7 +291,7 @@ func NewDeleteCacheOutput(hash [32]byte, outIndex uint32) (co CacheOutput) {
 // Utxo packs a transaction id, the value and the out index.
 type Utxo [32 + 8 + 4]byte // tx_id + value + out_idx
 
-// String reutrns pretty printable CacheOutput. Hash is not reversed since it is an
+// String returns pretty printable CacheOutput. Hash is not reversed since it is an
 // opaque pointer. It prints satoshis@script_hash:output_index
 func (u Utxo) String() string {
 	ch, _ := chainhash.NewHash(u[0:32])

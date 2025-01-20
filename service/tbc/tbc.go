@@ -2131,7 +2131,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		// XXX this happens because we shut down and blocks come in.
-		// The context is canceled but wire isn't smart enought so we
+		// The context is canceled but wire isn't smart enough so we
 		// make it here. We should not be testing for leveldb errors
 		// here but the real fix is return an error or add ctx to wire.
 		// This is a workaround. Code prints a bunch of crap during IBD

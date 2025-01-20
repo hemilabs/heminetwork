@@ -342,7 +342,7 @@ func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*rawpeer.RawPe
 		if _, ok := pm.bad[k]; ok {
 			// Should not happen but let's make sure we aren't
 			// reusing an address.
-			log.Errorf("found addres on bad list: %v", k)
+			log.Errorf("found address on bad list: %v", k)
 			continue
 		}
 

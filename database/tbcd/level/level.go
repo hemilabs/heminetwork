@@ -202,7 +202,7 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	bhsDB := l.pool[db]
 	tx, err := bhsDB.OpenTransaction()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%v open tansaction: %w", db, err)
+		return nil, nil, nil, fmt.Errorf("%v open transaction: %w", db, err)
 	}
 	d := true
 	discard := &d
@@ -357,7 +357,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 		}
 	}
 
-	// It stands to reason that this code does not need a trasaction. The
+	// It stands to reason that this code does not need a transaction. The
 	// caller code will either receive or not receice an answer. It does
 	// not seem likely to be racing higher up in the stack.
 
