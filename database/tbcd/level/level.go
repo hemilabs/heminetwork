@@ -1061,6 +1061,9 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	}
 	defer hhDiscard()
 
+	// blocks
+	blocksDB := l.rawPool[level.BlocksDB]
+
 	// retrieve best/canonical block header
 	bbh, err := bhsTx.Get([]byte(bhsCanonicalTipKey), nil)
 	if err != nil {
@@ -1115,9 +1118,13 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 
 		// Insert a synthesized height_hash key that serves as an index
 		// to see which blocks are missing.
-		// XXX should we always insert or should we verify prior to insert?
-		bmBatch.Put(hhKey, []byte{})
-
+		ok, err := blocksDB.Has(hhKey)
+		if err != nil {
+			return tbcd.ITInvalid, nil, nil, 0,
+				fmt.Errorf("blocks has: %w", err)
+		} else if !ok {
+			bmBatch.Put(hhKey, []byte{})
+		}
 		// XXX reason about pre encoding. Due to the caller code being
 		// heavily reentrant the odds are not good that encoding would
 		// only happens once. The downside is that this encoding
