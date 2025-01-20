@@ -1769,7 +1769,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// Only store unknown keystones
 				continue
 			}
-			var value [chainhash.HashSize + hemi.L2KeystoneAbrevSize + 7]byte
+			var value [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte
 			copy(value[0:32], v.BlockHash[:])
 			copy(value[32:], v.AbbreviatedKeystone)
 			kssBatch.Put(k[:], value[:])
