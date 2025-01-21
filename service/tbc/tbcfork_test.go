@@ -673,7 +673,10 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		StateRoot:          fillOutBytes("stateroot", 32),
 		EPHash:             fillOutBytes("ephash", 32),
 	}
-	btx := createBtcTx(nil, 199, &l2Keystone, minerPrivateKeyBytes)
+	btx, err := createBtcUtilTx(199, &l2Keystone, minerPrivateKeyBytes)
+	if err != nil {
+		return nil, err
+	}
 	mempool = append(mempool, btx)
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,

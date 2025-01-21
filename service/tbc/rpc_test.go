@@ -1673,7 +1673,7 @@ func fillOutBytes(prefix string, size int) []byte {
 	return result
 }
 
-func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) (*btcutil.Tx, err) {
+func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) (*btcutil.Tx, error) {
 	btx := &btcwire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
@@ -1685,7 +1685,7 @@ func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivate
 
 	popTxOpReturn, err := popTx.EncodeToOpReturn()
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 
 	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
@@ -1693,16 +1693,16 @@ func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivate
 	pubKeyBytes := publicKey.SerializeCompressed()
 	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 
 	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 
 	if len(payToScript) != 25 {
-		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
+		return nil, fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
 	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
@@ -1717,19 +1717,19 @@ func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivate
 	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
 	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	btx.TxIn[0].SignatureScript = sigScript
 
-	t.Logf("%s", spew.Sdump(btx.TxOut[1].PkScript))
+	tx := btcutil.NewTx(btx)
 
-	return btx.TxOut[1].PkScript, btx
+	return tx, nil
 }
 
 func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx, err := createBtcUtilTx(btcHeight)
+	btx, err := createBtcUtilTx(btcHeight, l2Keystone, minerPrivateKeyBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return btx.TxOut[1].PkScript
+	return btx.MsgTx().TxOut[1].PkScript
 }
