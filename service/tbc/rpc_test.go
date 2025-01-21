@@ -1500,7 +1500,6 @@ func TestTxByIdNotFound(t *testing.T) {
 }
 
 func TestBlockKeystoneByL2KeystoneAbrevHash(t *testing.T) {
-
 	l2Keystone := hemi.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      5,
@@ -1534,20 +1533,23 @@ func TestBlockKeystoneByL2KeystoneAbrevHash(t *testing.T) {
 		expectedBTCBlockHash    *chainhash.Hash
 	}
 
-	testTable := []testTableItem{{
-		name:          "nilL2KeystoneAbrevHash",
-		expectedError: protocol.RequestErrorf("invalid nil abrev hash"),
-	}, {
-		name:                "invalidL2KeystoneAbrevHash",
-		l2KeystoneAbrevHash: &invalidL2KeystoneAbrevHash,
-		expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
-	},
+	testTable := []testTableItem{
+		{
+			name:          "nilL2KeystoneAbrevHash",
+			expectedError: protocol.RequestErrorf("invalid nil abrev hash"),
+		},
+		{
+			name:                "invalidL2KeystoneAbrevHash",
+			l2KeystoneAbrevHash: &invalidL2KeystoneAbrevHash,
+			expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
+		},
 		{
 			name:                    "validL2KeystoneAbrevHash",
 			l2KeystoneAbrevHash:     hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
 			expectedL2KeystoneAbrev: hemi.L2KeystoneAbbreviate(l2Keystone),
 			expectedBTCBlockHash:    &btcBlockHash,
-		}}
+		},
+	}
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
@@ -1671,7 +1673,7 @@ func fillOutBytes(prefix string, size int) []byte {
 	return result
 }
 
-func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
+func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) (*btcutil.Tx, err) {
 	btx := &btcwire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
@@ -1721,5 +1723,13 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 
 	t.Logf("%s", spew.Sdump(btx.TxOut[1].PkScript))
 
+	return btx.TxOut[1].PkScript, btx
+}
+
+func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
+	btx, err := createBtcUtilTx(btcHeight)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return btx.TxOut[1].PkScript
 }
