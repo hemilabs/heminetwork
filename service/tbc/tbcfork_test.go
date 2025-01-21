@@ -28,6 +28,7 @@ import (
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
 )
 
@@ -619,6 +620,8 @@ func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
 	})
 }
 
+var minerPrivateKeyBytes = []byte{1, 2, 3, 4, 5, 6, 7, 199} // XXX make this a real hardcoded key
+
 func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
@@ -659,6 +662,19 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			tx2.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx, tx2}
 	}
+
+	// create pop tx
+	l2Keystone := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      5,
+		L2BlockNumber:      44,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+	}
+	btx := createBtcTx(nil, 199, &l2Keystone, minerPrivateKeyBytes)
+	mempool = append(mempool, btx)
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
 		parent.Hash(), extraNonce, mempool)
@@ -1134,10 +1150,12 @@ func TestIndexNoFork(t *testing.T) {
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
+		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
 		ListenAddress:        "localhost:8882",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",

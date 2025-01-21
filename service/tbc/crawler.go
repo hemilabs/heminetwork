@@ -1870,7 +1870,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		log.Errorf("block header by hash: %v", err)
 	} else {
-		log.Infof("Syncing complete at: %v", bh.HH())
+		log.Infof("Syncing complete at: %v", bh.HH()) // XXX this prints too often
 	}
 
 	return nil
