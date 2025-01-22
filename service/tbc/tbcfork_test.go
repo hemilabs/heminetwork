@@ -155,7 +155,7 @@ func (b *btcNode) lookupKey(a btcutil.Address) (*btcec.PrivateKey, bool, error) 
 	return nk.key, true, nil
 }
 
-// newKey creates and inserts a new key into thw lookup table.
+// newKey creates and inserts a new key into the lookup table.
 // Must be called locked
 func (b *btcNode) newKey(name string) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
 	privateKey, err := btcec.NewPrivateKey()
@@ -620,7 +620,7 @@ func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
 	})
 }
 
-var minerPrivateKeyBytes = []byte{1, 2, 3, 4, 5, 6, 7, 199} // XXX make this a real hardcoded key
+var popPrivate *btcec.PrivateKey //xxx hardcode an actual miner key
 
 func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
@@ -643,6 +643,21 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
+
+		l2Keystone := hemi.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      3,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytes("parentephash", 32),
+			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytes("ephash", 32),
+		}
+		btx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, popPrivate.Serialize(), tx)
+		if err != nil {
+			return nil, err
+		}
+		mempool = append(mempool, btx)
 	case 3:
 		// spend block 2 transaction 1
 		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(1), 1100000000)
@@ -661,23 +676,23 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
 			tx2.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx, tx2}
-	}
 
-	// create pop tx
-	l2Keystone := hemi.L2Keystone{
-		Version:            1,
-		L1BlockNumber:      5,
-		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		l2Keystone := hemi.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      4,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytes("parentephash", 32),
+			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytes("ephash", 32),
+		}
+
+		btx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, popPrivate.Serialize(), tx2)
+		if err != nil {
+			return nil, err
+		}
+		mempool = append(mempool, btx)
 	}
-	btx, err := createBtcUtilTx(199, &l2Keystone, minerPrivateKeyBytes)
-	if err != nil {
-		return nil, err
-	}
-	mempool = append(mempool, btx)
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
 		parent.Hash(), extraNonce, mempool)
@@ -894,6 +909,16 @@ func TestFork(t *testing.T) {
 			panic(err)
 		}
 	}()
+
+	popPriv, popPublic, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	popPrivate = popPriv
+	t.Logf("pop keys:")
+	t.Logf("  private    : %x", popPrivate.Serialize())
+	t.Logf("  public     : %x", popPublic.SerializeCompressed())
+	t.Logf("  address    : %v", popAddress)
 
 	startHash := n.Best()
 	count := 9
@@ -1133,6 +1158,16 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	popPriv, popPublic, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	popPrivate = popPriv
+	t.Logf("pop keys:")
+	t.Logf("  private    : %x", popPrivate.Serialize())
+	t.Logf("  public     : %x", popPublic.SerializeCompressed())
+	t.Logf("  address    : %v", popAddress)
+
 	defer func() {
 		err := n.Stop()
 		if err != nil {
@@ -1206,7 +1241,6 @@ func TestIndexNoFork(t *testing.T) {
 	if direction <= 0 {
 		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
 	}
-
 	// Index to b3
 	err = s.SyncIndexersToHash(ctx, b3.Hash())
 	if err != nil {
@@ -1236,6 +1270,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("genesis not found: %v", err)
 	}
+
 	// make sure gensis was not spent
 	_, err = s.SpentOutputsByTxId(ctx, n.gtx.Hash())
 	if err == nil {
@@ -1269,6 +1304,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
+
 	err = mustHave(ctx, s, n.genesis, b1)
 	if err != nil {
 		t.Fatalf("expected an error from mustHave: %v", err)
