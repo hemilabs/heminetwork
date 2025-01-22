@@ -1,4 +1,4 @@
-![image](https://github.com/user-attachments/assets/0d0ea1df-5f9a-42b8-a42d-15fb814e5ac9)## hemictl
+## hemictl
 
 The `hemictl` command is a generic tool to script commands to various daemons.
 
