@@ -1669,11 +1669,10 @@ func fillOutBytes(prefix string, size int) []byte {
 	for len(result) < size {
 		result = append(result, '_')
 	}
-
 	return result
 }
 
-func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) (*btcutil.Tx, error) {
+func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte, inTx *btcutil.Tx) (*btcutil.Tx, error) {
 	btx := &btcwire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
@@ -1705,7 +1704,12 @@ func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivate
 		return nil, fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
-	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
+	var outPoint btcwire.OutPoint
+	if inTx != nil {
+		outPoint = *wire.NewOutPoint(inTx.Hash(), uint32(1)) //XXX hardcoded index
+	} else {
+		outPoint = btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
+	}
 	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
 
 	changeAmount := int64(100)
@@ -1727,7 +1731,7 @@ func createBtcUtilTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivate
 }
 
 func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx, err := createBtcUtilTx(btcHeight, l2Keystone, minerPrivateKeyBytes)
+	btx, err := createPopTx(btcHeight, l2Keystone, minerPrivateKeyBytes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
