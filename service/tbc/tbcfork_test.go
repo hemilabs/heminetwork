@@ -146,13 +146,22 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 }
 
 // lookupKey is used by the sign function.
-// Must be called locked.
 func (b *btcNode) lookupKey(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
 	nk, ok := b.keys[a.String()]
 	if !ok {
 		return nil, false, fmt.Errorf("key not found: %v", a.String())
 	}
 	return nk.key, true, nil
+}
+
+func (b *btcNode) findKeyByName(name string) (*btcec.PrivateKey, error) {
+	for k, v := range b.keys {
+		b.t.Logf("findKeyByName %v == %v ---- %v", name, v.name, k)
+		if v.name == name {
+			return v.key, nil
+		}
+	}
+	return nil, errors.New("not found")
 }
 
 // newKey creates and inserts a new key into the lookup table.
@@ -230,7 +239,7 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 	if err != nil {
 		return nil, err
 	}
-	b.t.Logf("rdeeem pkScript: %x", pkScript)
+	b.t.Logf("rdeeem pkScript (%v): %x", name, pkScript)
 	b.t.Logf("redeem keys:")
 	b.t.Logf("  private    : %x", redeemPrivate.Serialize())
 	b.t.Logf("  public     : %x", redeemPublic.SerializeCompressed())
@@ -271,12 +280,14 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 		change := value - left
 		if change != 0 {
 			payToAddress := as[0]
+			b.t.Logf("%v", spew.Sdump(as[0]))
 			changeScript, err := txscript.PayToAddrScript(payToAddress)
 			if err != nil {
 				return nil, err
 			}
 			txOutChange := wire.NewTxOut(int64(change), changeScript)
 			redeemTx.AddTxOut(txOutChange)
+			b.t.Logf("change address %v value %v", payToAddress, change)
 		}
 		break
 	}
@@ -620,7 +631,45 @@ func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
 	})
 }
 
-var popPrivate *btcec.PrivateKey //xxx hardcode an actual miner key
+var popPrivate *btcec.PrivateKey // xxx hardcode an actual miner key
+
+func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) error {
+	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
+		txscript.ScriptStrictMultiSig | txscript.ScriptDiscourageUpgradableNops
+	vm, err := txscript.NewEngine(scriptPubKey, tx.MsgTx(), 0, flags, nil, nil, -1, nil)
+	if err != nil {
+		return err
+	}
+	if dump {
+		t.Logf("=== executing tx %v", tx.Hash())
+	}
+	for i := 0; ; i++ {
+		d, err := vm.DisasmPC()
+		if dump {
+			t.Logf("%v: %v", i, d)
+		}
+		done, err := vm.Step()
+		if err != nil {
+			return err
+		}
+		stack := vm.GetStack()
+		if dump {
+			t.Logf("%v: stack %v", i, spew.Sdump(stack))
+		}
+		if done {
+			break
+		}
+	}
+	err = vm.CheckErrorCondition(true)
+	if err != nil {
+		return err
+	}
+
+	if dump {
+		t.Logf("=== SUCCESS tx %v", tx.Hash())
+	}
+	return nil
+}
 
 func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
@@ -653,11 +702,64 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			StateRoot:          fillOutBytes("stateroot", 32),
 			EPHash:             fillOutBytes("ephash", 32),
 		}
-		btx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, popPrivate.Serialize(), tx)
+		signer, err := b.findKeyByName("miner")
 		if err != nil {
 			return nil, err
 		}
-		mempool = append(mempool, btx)
+		popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, signer.Serialize(), tx)
+		if err != nil {
+			return nil, err
+		}
+
+		err = executeTX(b.t, true, tx.MsgTx().TxOut[1].PkScript, popTx)
+		if err != nil {
+			return nil, err
+		}
+		///////
+		//b.t.Logf("name %v %v", name, spew.Sdump(popTx))
+		//flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
+		//	txscript.ScriptStrictMultiSig | txscript.ScriptDiscourageUpgradableNops
+		//vm, err := txscript.NewEngine(tx.MsgTx().TxOut[1].PkScript, popTx.MsgTx(), 0, flags, nil, nil, -1, nil)
+		//if err != nil {
+		//	return nil, err
+		//}
+		////
+		//for i := 0; ; i++ {
+		//	d, err := vm.DisasmPC()
+		//	b.t.Logf("%v: %v", i, d)
+		//	done, err := vm.Step()
+		//	if err != nil {
+		//		return nil, err
+		//	}
+		//	stack := vm.GetStack()
+		//	dumpStack := true
+		//	if dumpStack {
+		//		b.t.Logf("%v: stack %v", i, spew.Sdump(stack))
+		//	}
+		//	// b.t.Logf("%v: stack len %v", i, len(vm.GetStack()))
+		//	if done {
+		//		break
+		//	}
+		//}
+		//////
+		////ds, err := vm.DisasmScript(0)
+		////if err != nil {
+		////	return nil, err
+		////}
+		////de, err := vm.DisasmScript(1)
+		////if err != nil {
+		////	return nil, err
+		////}
+		////b.t.Logf("%v %v", ds, de)
+		////if err := vm.Execute(); err != nil {
+		////	return nil, err
+		////}
+		//err = vm.CheckErrorCondition(true)
+		//if err != nil {
+		//	return nil, err
+		//}
+		mempool = append(mempool, popTx)
+		// b.t.Logf("added popTx %v", popTx)
 	case 3:
 		// spend block 2 transaction 1
 		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(1), 1100000000)
@@ -668,30 +770,30 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
 
-		// spend above tx in same block
-		tx2, err := b.newSignedTxFromTx(name+":1", tx, 3000000000)
-		if err != nil {
-			return nil, fmt.Errorf("new tx from tx: %w", err)
-		}
-		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
-			tx2.MsgTx().TxIn[0].PreviousOutPoint)
-		mempool = []*btcutil.Tx{tx, tx2}
+		//// spend above tx in same block
+		//tx2, err := b.newSignedTxFromTx(name+":1", tx, 3000000000)
+		//if err != nil {
+		//	return nil, fmt.Errorf("new tx from tx: %w", err)
+		//}
+		//b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
+		//	tx2.MsgTx().TxIn[0].PreviousOutPoint)
+		//mempool = []*btcutil.Tx{tx, tx2}
 
-		l2Keystone := hemi.L2Keystone{
-			Version:            1,
-			L1BlockNumber:      4,
-			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytes("parentephash", 32),
-			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-			StateRoot:          fillOutBytes("stateroot", 32),
-			EPHash:             fillOutBytes("ephash", 32),
-		}
+		//l2Keystone := hemi.L2Keystone{
+		//	Version:            1,
+		//	L1BlockNumber:      4,
+		//	L2BlockNumber:      44,
+		//	ParentEPHash:       fillOutBytes("parentephash", 32),
+		//	PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		//	StateRoot:          fillOutBytes("stateroot", 32),
+		//	EPHash:             fillOutBytes("ephash", 32),
+		//}
 
-		btx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, popPrivate.Serialize(), tx2)
-		if err != nil {
-			return nil, err
-		}
-		mempool = append(mempool, btx)
+		//popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, popPrivate.Serialize(), tx2)
+		//if err != nil {
+		//	return nil, err
+		//}
+		//mempool = append(mempool, popTx)
 	}
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
