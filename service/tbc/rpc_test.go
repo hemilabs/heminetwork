@@ -25,7 +25,6 @@ import (
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
-	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/testcontainers/testcontainers-go"
@@ -1706,8 +1705,9 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 
 	var outPoint btcwire.OutPoint
 	if inTx != nil {
-		outPoint = *wire.NewOutPoint(inTx.Hash(), uint32(1)) //XXX hardcoded index
+		outPoint = *wire.NewOutPoint(inTx.Hash(), uint32(1)) // XXX hardcoded index
 	} else {
+		// XXX this is hacky
 		outPoint = btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
 	}
 	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
@@ -1717,13 +1717,18 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 
 	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
 
-	sig := dcrecdsa.Sign(privateKey, []byte{})
-	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
-	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
+	//sig := dcrecdsa.Sign(privateKey, []byte{})
+	//sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
+	//sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
+	//if err != nil {
+	//	return nil, err
+	//}
+	//btx.TxIn[0].SignatureScript = sigScript
+
+	err = bitcoin.SignTx(btx, inTx.MsgTx().TxOut[1].PkScript, privateKey, publicKey)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("sign Bitcoin transaction: %w", err)
 	}
-	btx.TxIn[0].SignatureScript = sigScript
 
 	tx := btcutil.NewTx(btx)
 
