@@ -1825,10 +1825,23 @@ func (s *Server) UtxosByScriptHash(ctx context.Context, hash tbcd.ScriptHash, st
 	defer log.Tracef("UtxosByScriptHash exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call UtxosByScriptHash on TBC running in External Header mode")
+		return nil, errors.New("cannot call UtxosByScriptHash on " +
+			"TBC running in External Header mode")
 	}
 
 	return s.db.UtxosByScriptHash(ctx, hash, start, count)
+}
+
+func (s *Server) UtxosByScriptHashCount(ctx context.Context, hash tbcd.ScriptHash) (uint64, error) {
+	log.Tracef("UtxosByScriptHashCount")
+	defer log.Tracef("UtxosByScriptHashCount exit")
+
+	if s.cfg.ExternalHeaderMode {
+		return 0, errors.New("cannot call UtxosByScriptHashCount on " +
+			"TBC running in External Header mode")
+	}
+
+	return s.db.UtxosByScriptHashCount(ctx, hash)
 }
 
 // ScriptHashAvailableToSpend returns a boolean which indicates whether
