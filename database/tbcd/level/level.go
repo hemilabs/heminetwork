@@ -1551,6 +1551,27 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start u
 	return utxos, nil
 }
 
+func (l *ldb) UtxosByScriptHashCount(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
+	log.Tracef("UtxosByScriptHashCount")
+	defer log.Tracef("UtxosByScriptHashCount exit")
+
+	var prefix [33]byte
+	prefix[0] = 'h'
+	copy(prefix[1:], sh[:])
+	oDB := l.pool[level.OutputsDB]
+	it := oDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
+	defer it.Release()
+	var x uint64
+	for it.Next() {
+		x++
+	}
+	if err := it.Error(); err != nil {
+		return 0, IteratorError(err)
+	}
+
+	return x, nil
+}
+
 func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	log.Tracef("BlockUtxoUpdate")
 	defer log.Tracef("BlockUtxoUpdate exit")

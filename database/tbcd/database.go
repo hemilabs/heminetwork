@@ -117,6 +117,7 @@ type Database interface {
 	BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error)
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)
+	UtxosByScriptHashCount(ctx context.Context, sh ScriptHash) (uint64, error)
 }
 
 // XXX there exist various types in this file that need to be reevaluated.
