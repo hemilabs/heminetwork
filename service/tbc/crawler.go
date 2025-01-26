@@ -552,7 +552,9 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		//	_ = s.mempool.txsRemove(ctx, txHashes)
 		//}
 
-		exit, err := s.postProcessBlockUnindex(ctx, &s.cfg.MaxCachedKeystones, &blocksProcessed, utxosPercentage, len(utxos), bh, hh, endHash, hash)
+		blocksProcessed++
+
+		exit, err := s.postProcessBlockUnindex(ctx, &s.cfg.MaxCachedKeystones, blocksProcessed, utxosPercentage, len(utxos), bh, hh)
 		if err != nil {
 			return 0, last, err
 		}
@@ -747,7 +749,9 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
 		}
 
-		exit, err := s.postProcessBlockIndex(ctx, &s.cfg.MaxCachedTxs, &blocksProcessed, txsPercentage, len(txs), bh, hh, endHash, hash)
+		blocksProcessed++
+
+		exit, err := s.postProcessBlockIndex(ctx, &s.cfg.MaxCachedTxs, blocksProcessed, txsPercentage, len(txs), bh, hh, endHash)
 		if err != nil {
 			return 0, last, err
 		}
@@ -817,7 +821,9 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		//	_ = s.mempool.txsRemove(ctx, txHashes)
 		//}
 
-		exit, err := s.postProcessBlockUnindex(ctx, &s.cfg.MaxCachedKeystones, &blocksProcessed, txsPercentage, len(txs), bh, hh, endHash, hash)
+		blocksProcessed++
+
+		exit, err := s.postProcessBlockUnindex(ctx, &s.cfg.MaxCachedKeystones, blocksProcessed, txsPercentage, len(txs), bh, hh)
 		if err != nil {
 			return 0, last, err
 		}
@@ -899,7 +905,9 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
 		}
 
-		exit, err := s.postProcessBlockIndex(ctx, &s.cfg.MaxCachedKeystones, &blocksProcessed, kssPercentage, len(kss), bh, hh, endHash, hash)
+		blocksProcessed++
+
+		exit, err := s.postProcessBlockIndex(ctx, &s.cfg.MaxCachedKeystones, blocksProcessed, kssPercentage, len(kss), bh, hh, endHash)
 		if err != nil {
 			return 0, last, err
 		}
@@ -960,7 +968,9 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
 		}
 
-		exit, err := s.postProcessBlockUnindex(ctx, &s.cfg.MaxCachedKeystones, &blocksProcessed, kssPercentage, len(kss), bh, hh, endHash, hash)
+		blocksProcessed++
+
+		exit, err := s.postProcessBlockUnindex(ctx, &s.cfg.MaxCachedKeystones, blocksProcessed, kssPercentage, len(kss), bh, hh)
 		if err != nil {
 			return 0, last, err
 		}
@@ -974,15 +984,14 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) postProcessBlockUnindex(ctx context.Context, maxCache, blocksProcessed *int, utxosPercentage, lenItems int, bh *tbcd.BlockHeader, hh *HashHeight, endHash *chainhash.Hash, hash chainhash.Hash) (bool, error) {
-	*blocksProcessed++
+func (s *Server) postProcessBlockUnindex(ctx context.Context, maxCache *int, blocksProcessed, itemsPercentage, lenItems int, bh *tbcd.BlockHeader, hh *HashHeight) (bool, error) {
 
 	// Try not to overshoot the cache to prevent costly allocations
 	cp := lenItems * 100 / *maxCache
-	if bh.Height%10000 == 0 || cp > utxosPercentage || *blocksProcessed == 1 {
+	if bh.Height%10000 == 0 || cp > itemsPercentage || blocksProcessed == 1 {
 		log.Infof("unindexer: %v cache %v%%", hh, cp)
 	}
-	if cp > utxosPercentage {
+	if cp > itemsPercentage {
 		// Set utxosMax to the largest utxo capacity seen
 		*maxCache = max(lenItems, *maxCache)
 		return true, nil
@@ -1002,15 +1011,16 @@ func (s *Server) postProcessBlockUnindex(ctx context.Context, maxCache, blocksPr
 	return false, nil
 }
 
-func (s *Server) postProcessBlockIndex(ctx context.Context, maxCache, blocksProcessed *int, utxosPercentage, lenItems int, bh *tbcd.BlockHeader, hh *HashHeight, endHash *chainhash.Hash, hash chainhash.Hash) (bool, error) {
-	*blocksProcessed++
+func (s *Server) postProcessBlockIndex(ctx context.Context, maxCache *int, blocksProcessed, itemsPercentage, lenItems int, bh *tbcd.BlockHeader, hh *HashHeight, endHash *chainhash.Hash) (bool, error) {
+
+	hash := hh.Hash
 
 	// Try not to overshoot the cache to prevent costly allocations
 	cp := lenItems * 100 / *maxCache
-	if bh.Height%10000 == 0 || cp > utxosPercentage || *blocksProcessed == 1 {
+	if bh.Height%10000 == 0 || cp > itemsPercentage || blocksProcessed == 1 {
 		log.Infof("indexer: %v cache %v%%", hh, cp)
 	}
-	if cp > utxosPercentage {
+	if cp > itemsPercentage {
 		// Set utxosMax to the largest utxo capacity seen
 		*maxCache = max(lenItems, *maxCache)
 		return true, nil
@@ -1092,7 +1102,9 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
 		}
 
-		exit, err := s.postProcessBlockIndex(ctx, &s.cfg.MaxCachedTxs, &blocksProcessed, utxosPercentage, len(utxos), bh, hh, endHash, hash)
+		blocksProcessed++
+
+		exit, err := s.postProcessBlockIndex(ctx, &s.cfg.MaxCachedTxs, blocksProcessed, utxosPercentage, len(utxos), bh, hh, endHash)
 		if err != nil {
 			return 0, last, err
 		}
@@ -1127,8 +1139,8 @@ func (s *Server) IndexIsLinear(ctx context.Context, endHash *chainhash.Hash, nam
 	}
 	startHash := &HH.Hash
 
-	if startHash == nil || endHash == nil {
-		return 0, errors.New("must provide start and end hash")
+	if endHash == nil {
+		return 0, errors.New("must provide end hash")
 	}
 	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
