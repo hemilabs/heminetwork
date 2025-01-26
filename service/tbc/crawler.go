@@ -575,12 +575,15 @@ type (
 	IndexHashFunc                                    func(ctx context.Context) (*HashHeight, error)
 )
 
-// TODO Fix logs based on direction
 func genericIndexerWind[gkey comparable, gvalue any](s *Server, ctx context.Context, direction int, startBH, endBH *tbcd.BlockHeader, name string, maxCacheSize int, indexInBlocks IndexerInBlocksFunc[gkey, gvalue], dbBlockUpdate dbBlockUpdate[gkey, gvalue]) error {
-	log.Tracef("%sIndexerWind", name)
-	defer log.Tracef("%sIndexerWind exit", name)
 
-	if direction != 1 && direction != -1 {
+	var typeOfFunc string
+	switch direction {
+	case 1:
+		typeOfFunc = "Wind"
+	case -1:
+		typeOfFunc = "Unwind"
+	default:
 		return fmt.Errorf("invalid direction: %v", direction)
 	}
 
@@ -588,12 +591,15 @@ func genericIndexerWind[gkey comparable, gvalue any](s *Server, ctx context.Cont
 		return err
 	}
 
+	log.Tracef("%sIndexer%s", name, typeOfFunc)
+	defer log.Tracef("%sIndexer%s exit", name, typeOfFunc)
+
 	// Allocate here so that we don't waste space when not indexing.
 	items := make(map[gkey]gvalue, maxCacheSize)
 	defer clear(items)
 
-	log.Infof("Start indexing %ss at hash %v height %v", name, startBH, startBH.Height)
-	log.Infof("End indexing %ss at hash %v height %v", name, endBH, endBH.Height)
+	log.Infof("Start %s %ss at hash %v height %v", typeOfFunc, name, startBH, startBH.Height)
+	log.Infof("End %s %ss at hash %v height %v", typeOfFunc, name, endBH, endBH.Height)
 	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
@@ -619,8 +625,8 @@ func genericIndexerWind[gkey comparable, gvalue any](s *Server, ctx context.Cont
 		logMemStats()
 		runtime.GC()
 
-		log.Infof("Flushing txs complete %v took %v",
-			itemsCached, time.Since(start))
+		log.Infof("Flushing %s complete %v took %v",
+			name, itemsCached, time.Since(start))
 
 		// Record height in metadata
 		err = s.db.MetadataPut(ctx, TxIndexHashKey, last.Hash[:])
