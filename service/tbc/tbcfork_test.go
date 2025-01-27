@@ -719,49 +719,6 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		if err != nil {
 			return nil, err
 		}
-		///////
-		//b.t.Logf("name %v %v", name, spew.Sdump(popTx))
-		//flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
-		//	txscript.ScriptStrictMultiSig | txscript.ScriptDiscourageUpgradableNops
-		//vm, err := txscript.NewEngine(tx.MsgTx().TxOut[1].PkScript, popTx.MsgTx(), 0, flags, nil, nil, -1, nil)
-		//if err != nil {
-		//	return nil, err
-		//}
-		////
-		//for i := 0; ; i++ {
-		//	d, err := vm.DisasmPC()
-		//	b.t.Logf("%v: %v", i, d)
-		//	done, err := vm.Step()
-		//	if err != nil {
-		//		return nil, err
-		//	}
-		//	stack := vm.GetStack()
-		//	dumpStack := true
-		//	if dumpStack {
-		//		b.t.Logf("%v: stack %v", i, spew.Sdump(stack))
-		//	}
-		//	// b.t.Logf("%v: stack len %v", i, len(vm.GetStack()))
-		//	if done {
-		//		break
-		//	}
-		//}
-		//////
-		////ds, err := vm.DisasmScript(0)
-		////if err != nil {
-		////	return nil, err
-		////}
-		////de, err := vm.DisasmScript(1)
-		////if err != nil {
-		////	return nil, err
-		////}
-		////b.t.Logf("%v %v", ds, de)
-		////if err := vm.Execute(); err != nil {
-		////	return nil, err
-		////}
-		//err = vm.CheckErrorCondition(true)
-		//if err != nil {
-		//	return nil, err
-		//}
 		mempool = append(mempool, popTx)
 		// b.t.Logf("added popTx %v", popTx)
 	case 3:
@@ -856,7 +813,7 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 	if err != nil {
 		return nil, err
 	}
-
+	b.t.Logf("mined %v: %v", blk.name, blk.MsgBlock().Header.BlockHash())
 	err = b.SendBlockheader(ctx, blk.MsgBlock().Header)
 	if err != nil {
 		return nil, err
@@ -1264,6 +1221,13 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
 	popPriv, popPublic, popAddress, err := n.newKey("pop")
 	if err != nil {
 		t.Fatal(err)
@@ -1273,13 +1237,6 @@ func TestIndexNoFork(t *testing.T) {
 	t.Logf("  private    : %x", popPrivate.Serialize())
 	t.Logf("  public     : %x", popPublic.SerializeCompressed())
 	t.Logf("  address    : %v", popAddress)
-
-	defer func() {
-		err := n.Stop()
-		if err != nil {
-			t.Logf("node stop: %v", err)
-		}
-	}()
 
 	go func() {
 		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
@@ -1303,6 +1260,7 @@ func TestIndexNoFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
+		MempoolEnabled:          false,
 		Seeds:                   []string{"127.0.0.1:18444"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -1455,6 +1413,17 @@ func TestIndexFork(t *testing.T) {
 			t.Logf("node stop: %v", err)
 		}
 	}()
+
+	popPriv, popPublic, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	popPrivate = popPriv
+	t.Logf("pop keys:")
+	t.Logf("  private    : %x", popPrivate.Serialize())
+	t.Logf("  public     : %x", popPublic.SerializeCompressed())
+	t.Logf("  address    : %v", popAddress)
+
 	go func() {
 		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
@@ -1468,10 +1437,12 @@ func TestIndexFork(t *testing.T) {
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
+		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
 		ListenAddress:        "localhost:8883",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
@@ -1534,6 +1505,8 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	time.Sleep(2 * time.Second)
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 

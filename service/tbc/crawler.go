@@ -175,7 +175,13 @@ func (s *Server) KeystoneIndexHash(ctx context.Context) (*HashHeight, error) {
 		if !errors.Is(err, database.ErrNotFound) {
 			return nil, err
 		}
-		h = s.hemiGenesis
+		// h = s.hemiGenesis // XXX disable this for now until we are
+		// sure we may or may not have to pass "genesis" around in the
+		// various functions.
+		h = &HashHeight{
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
+		}
 	}
 	return h, nil
 }
@@ -1548,7 +1554,7 @@ func (s *Server) KeystoneIndexer(ctx context.Context, endHash *chainhash.Hash) e
 	}
 	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
-		return fmt.Errorf("blockheader hash: %w", err)
+		return fmt.Errorf("blockheader end hash: %w", err)
 	}
 
 	// Verify start point is not after the end point
@@ -1560,7 +1566,7 @@ func (s *Server) KeystoneIndexer(ctx context.Context, endHash *chainhash.Hash) e
 	// Make sure there is no gap between start and end or vice versa.
 	startBH, err := s.db.BlockHeaderByHash(ctx, &keystoneHH.Hash)
 	if err != nil {
-		return fmt.Errorf("blockheader hash: %w", err)
+		return fmt.Errorf("blockheader keystone hash: %w", err)
 	}
 	direction, err := s.KeystoneIndexIsLinear(ctx, endHash)
 	if err != nil {

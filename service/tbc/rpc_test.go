@@ -1716,23 +1716,23 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 	var (
 		outPoint     btcwire.OutPoint
 		changeAmount int64
+		PkScript     []byte
 	)
 	if inTx != nil {
 		idx := uint32(1)
 		outPoint = *wire.NewOutPoint(inTx.Hash(), idx) // hardcoded index
 		changeAmount = inTx.MsgTx().TxOut[idx].Value   // spend entire tx
+		PkScript = inTx.MsgTx().TxOut[idx].PkScript    // Lift PkScript from utxo we are spending
 	} else {
 		// XXX this is hacky
 		outPoint = btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
 		changeAmount = int64(100)
+		PkScript = payToScript // super hack
 	}
 	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
-
 	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
-
 	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
-
-	err = bitcoin.SignTx(btx, inTx.MsgTx().TxOut[1].PkScript, privateKey, publicKey)
+	err = bitcoin.SignTx(btx, PkScript, privateKey, publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("sign Bitcoin transaction: %w", err)
 	}

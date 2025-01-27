@@ -2451,18 +2451,12 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Infof("Starting block headers sync at %v height: %v time %v",
 		bhb, bhb.Height, bhb.Timestamp())
 	utxoHH, _ := s.UtxoIndexHash(ctx)
-	if s.hemiGenesis != utxoHH {
-		log.Infof("Utxo index %v", utxoHH)
-	}
+	log.Infof("Utxo index %v", utxoHH)
 	txHH, _ := s.TxIndexHash(ctx)
-	if s.hemiGenesis != txHH {
-		log.Infof("Tx index %v", txHH)
-	}
+	log.Infof("Tx index %v", txHH)
 	if s.cfg.HemiIndex {
 		hemiHH, _ := s.KeystoneIndexHash(ctx)
-		if s.hemiGenesis != hemiHH {
-			log.Infof("Keystone index %v", txHH)
-		}
+		log.Infof("Keystone index %v", hemiHH)
 	}
 
 	// HTTP server
@@ -2663,10 +2657,10 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 		}
 		gh := genesis.BlockHash()
 		if !bytes.Equal(gb[0].Hash[:], gh[:]) {
-			return fmt.Errorf("effective genesis block hash mismatch, db has %x but genesis should be %x", gb[0].Hash, gh)
+			return fmt.Errorf("effective genesis block hash mismatch, db has %v but genesis should be %v", gb[0].Hash, gh)
 		}
 	}
-	log.Infof("TBC set up in External Header Mode, effectiveGenesis=%x, tip=%x", genesis.BlockHash(), bhb.Hash)
+	log.Infof("TBC set up in External Header Mode, effectiveGenesis=%v, tip=%v", genesis.BlockHash(), bhb.Hash)
 
 	return nil
 }
