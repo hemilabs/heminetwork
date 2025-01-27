@@ -24,6 +24,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
@@ -1671,7 +1672,7 @@ func fillOutBytes(prefix string, size int) []byte {
 	return result
 }
 
-func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte, inTx *btcutil.Tx) (*btcutil.Tx, error) {
+func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte, recipient *secp256k1.PublicKey, inTx *btcutil.Tx) (*btcutil.Tx, error) {
 	btx := &btcwire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
@@ -1687,11 +1688,20 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 	}
 
 	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
-	publicKey := privateKey.PubKey()
-	pubKeyBytes := publicKey.SerializeCompressed()
-	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
-	if err != nil {
-		return nil, err
+	publicKey := privateKey.PubKey() // just send it back to the miner
+	var btcAddress *btcutil.AddressPubKey
+	if recipient == nil {
+		pubKeyBytes := publicKey.SerializeCompressed()
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		pubKeyBytes := recipient.SerializeCompressed()
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
@@ -1703,27 +1713,24 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 		return nil, fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
-	var outPoint btcwire.OutPoint
+	var (
+		outPoint     btcwire.OutPoint
+		changeAmount int64
+	)
 	if inTx != nil {
-		outPoint = *wire.NewOutPoint(inTx.Hash(), uint32(1)) // XXX hardcoded index
+		idx := uint32(1)
+		outPoint = *wire.NewOutPoint(inTx.Hash(), idx) // hardcoded index
+		changeAmount = inTx.MsgTx().TxOut[idx].Value   // spend entire tx
 	} else {
 		// XXX this is hacky
 		outPoint = btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
+		changeAmount = int64(100)
 	}
 	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
 
-	changeAmount := int64(100)
 	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
 
 	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
-
-	//sig := dcrecdsa.Sign(privateKey, []byte{})
-	//sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
-	//sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
-	//if err != nil {
-	//	return nil, err
-	//}
-	//btx.TxIn[0].SignatureScript = sigScript
 
 	err = bitcoin.SignTx(btx, inTx.MsgTx().TxOut[1].PkScript, privateKey, publicKey)
 	if err != nil {
@@ -1736,7 +1743,7 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 }
 
 func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx, err := createPopTx(btcHeight, l2Keystone, minerPrivateKeyBytes, nil)
+	btx, err := createPopTx(btcHeight, l2Keystone, minerPrivateKeyBytes, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

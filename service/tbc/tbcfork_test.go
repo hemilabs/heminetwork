@@ -706,7 +706,11 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		if err != nil {
 			return nil, err
 		}
-		popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, signer.Serialize(), tx)
+		recipient, err := b.findKeyByName("pop")
+		if err != nil {
+			return nil, err
+		}
+		popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, signer.Serialize(), recipient.PubKey(), tx)
 		if err != nil {
 			return nil, err
 		}
