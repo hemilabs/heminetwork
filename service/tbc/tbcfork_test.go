@@ -766,9 +766,10 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
 
+		// Add keystone
 		l2Keystone := hemi.L2Keystone{
 			Version:            1,
-			L1BlockNumber:      3,
+			L1BlockNumber:      2,
 			L2BlockNumber:      44,
 			ParentEPHash:       fillOutBytes("parentephash", 32),
 			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
@@ -796,7 +797,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		// b.t.Logf("added popTx %v", popTx)
 	case 3:
 		// spend block 2 transaction 1
-		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(1), 1100000000)
+		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(0), 1100000000)
 		if err != nil {
 			return nil, fmt.Errorf("new tx from tx: %w", err)
 		}
@@ -804,30 +805,35 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
 
-		//// spend above tx in same block
-		//tx2, err := b.newSignedTxFromTx(name+":1", tx, 3000000000)
-		//if err != nil {
-		//	return nil, fmt.Errorf("new tx from tx: %w", err)
-		//}
-		//b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
-		//	tx2.MsgTx().TxIn[0].PreviousOutPoint)
-		//mempool = []*btcutil.Tx{tx, tx2}
+		// Add keystone
+		l2Keystone := hemi.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      3,
+			L2BlockNumber:      55,
+			ParentEPHash:       fillOutBytes("PARENTEPHASH", 32),
+			PrevKeystoneEPHash: fillOutBytes("PREVKEYSTONEEPHASH", 32),
+			StateRoot:          fillOutBytes("STATEROOT", 32),
+			EPHash:             fillOutBytes("EPHASH", 32),
+		}
+		signer, err := b.findKeyByName("miner")
+		if err != nil {
+			return nil, err
+		}
+		recipient, err := b.findKeyByName("pop")
+		if err != nil {
+			return nil, err
+		}
+		popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, signer.Serialize(), recipient.PubKey(), tx)
+		if err != nil {
+			return nil, err
+		}
 
-		//l2Keystone := hemi.L2Keystone{
-		//	Version:            1,
-		//	L1BlockNumber:      4,
-		//	L2BlockNumber:      44,
-		//	ParentEPHash:       fillOutBytes("parentephash", 32),
-		//	PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		//	StateRoot:          fillOutBytes("stateroot", 32),
-		//	EPHash:             fillOutBytes("ephash", 32),
-		//}
-
-		//popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, popPrivate.Serialize(), tx2)
-		//if err != nil {
-		//	return nil, err
-		//}
-		//mempool = append(mempool, popTx)
+		err = executeTX(b.t, true, tx.MsgTx().TxOut[1].PkScript, popTx)
+		if err != nil {
+			return nil, err
+		}
+		mempool = append(mempool, popTx)
+		// b.t.Logf("added popTx %v", popTx)
 	}
 
 	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
