@@ -104,7 +104,7 @@ func Parse(c CfgMap) error {
 				value.Set(reflect.AppendSlice(value, reflect.ValueOf(strings.Split(envValue, ","))))
 
 			default:
-				return fmt.Errorf("unsuported type for %v: %v",
+				return fmt.Errorf("unsupported type for %v: %v",
 					k, reflect.TypeOf(v.Value).Elem().Kind())
 			}
 		}
