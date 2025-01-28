@@ -17,7 +17,7 @@ CREATE FUNCTION notify_event() RETURNS TRIGGER AS $$
 		data_old = row_to_json(OLD);
 		data_new = row_to_json(NEW);
 
-		-- Contruct the notification as a JSON string.
+		-- Construct the notification as a JSON string.
 		notification = json_build_object(
 			'table', TG_TABLE_NAME,
 			'action', TG_OP,
