@@ -21,14 +21,21 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
 
+	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
 )
 
@@ -37,6 +44,7 @@ type block struct {
 	b    *btcutil.Block
 
 	txs map[tbcd.TxKey]*tbcd.TxValue // Parsed Txs in cache format
+
 }
 
 func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
@@ -671,6 +679,71 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 	return nil
 }
 
+func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte, recipient *secp256k1.PublicKey, inTx *btcutil.Tx) (*btcutil.Tx, error) {
+	btx := &btcwire.MsgTx{
+		Version:  2,
+		LockTime: uint32(btcHeight),
+	}
+
+	popTx := pop.TransactionL2{
+		L2Keystone: hemi.L2KeystoneAbbreviate(*l2Keystone),
+	}
+
+	popTxOpReturn, err := popTx.EncodeToOpReturn()
+	if err != nil {
+		return nil, err
+	}
+
+	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	publicKey := privateKey.PubKey() // just send it back to the miner
+	var btcAddress *btcutil.AddressPubKey
+	if recipient == nil {
+		pubKeyBytes := publicKey.SerializeCompressed()
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		pubKeyBytes := recipient.SerializeCompressed()
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
+	if err != nil {
+		return nil, err
+	}
+
+	if len(payToScript) != 25 {
+		return nil, fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
+	}
+
+	var (
+		outPoint     btcwire.OutPoint
+		changeAmount int64
+		PkScript     []byte
+	)
+
+	idx := uint32(1)
+	outPoint = *wire.NewOutPoint(inTx.Hash(), idx) // hardcoded index
+	changeAmount = inTx.MsgTx().TxOut[idx].Value   // spend entire tx
+	PkScript = inTx.MsgTx().TxOut[idx].PkScript    // Lift PkScript from utxo we are spending
+
+	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
+	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
+	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
+	err = bitcoin.SignTx(btx, PkScript, privateKey, publicKey)
+	if err != nil {
+		return nil, fmt.Errorf("sign Bitcoin transaction: %w", err)
+	}
+
+	tx := btcutil.NewTx(btx)
+
+	return tx, nil
+}
+
 func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
@@ -871,6 +944,39 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey,
 		return nil, nil, nil, err
 	}
 	return key, key.PubKey(), address, nil
+}
+
+func mustHaveKss(ctx context.Context, s *Server, blocks ...*block) (int, error) {
+
+	totalTxs := 0
+	for _, b := range blocks {
+		txsInBlock := 0
+		_, height, err := s.BlockHeaderByHash(ctx, b.Hash())
+		if err != nil {
+			return totalTxs, err
+		}
+		if height != uint64(b.Height()) {
+			return totalTxs, fmt.Errorf("%v != %v", height, uint64(b.Height()))
+		}
+
+		kssCache := make(map[chainhash.Hash]tbcd.Keystone, 10)
+
+		err = processKeystones(b.b.Hash(), b.b.Transactions(), kssCache)
+		if err != nil {
+			panic(fmt.Errorf("processKeystones: %w", err))
+		}
+
+		for _, vkss := range kssCache {
+			if !bytes.Equal(b.Hash()[:], vkss.BlockHash[:]) {
+				return totalTxs, fmt.Errorf("block mismatch %v", vkss.BlockHash[:])
+			}
+			txsInBlock++
+		}
+		log.Infof("got %v PopTxs in block %s", txsInBlock, b.name)
+		totalTxs += txsInBlock
+	}
+
+	return totalTxs, nil
 }
 
 func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
@@ -1329,6 +1435,15 @@ func TestIndexNoFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
+	//check if keystones exist in txs
+	kssNum, err := mustHaveKss(ctx, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kssNum <= 0 {
+		t.Fatal("no poptxs found")
+	}
+
 	// make sure genesis tx is in db
 	_, err = s.TxById(ctx, n.gtx.Hash())
 	if err != nil {
@@ -1395,6 +1510,24 @@ func TestIndexNoFork(t *testing.T) {
 				key.name, address, btcutil.Amount(balance))
 		}
 	}
+
+	lastKssHeight, err := s.KeystoneIndexHash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	//check if keystones unwound to genesis
+	if lastKssHeight.Height != 0 {
+		t.Fatalf("expected keystone index hash 0, got %v", lastKssHeight.Height)
+	}
+
+	kssNum, err = mustHaveKss(ctx, s, n.blocksAtHeight[0]...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kssNum > 0 {
+		t.Fatalf("expected no popTxs, got %v", kssNum)
+	}
+
 }
 
 func TestIndexFork(t *testing.T) {

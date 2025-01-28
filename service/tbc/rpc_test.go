@@ -24,8 +24,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/testcontainers/testcontainers-go"
@@ -1499,7 +1499,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 }
 
-func TestBlockKeystoneByL2KeystoneAbrevHash(t *testing.T) {
+func TestL2BlockByAbrevHash(t *testing.T) {
 	l2Keystone := hemi.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      5,
@@ -1672,7 +1672,7 @@ func fillOutBytes(prefix string, size int) []byte {
 	return result
 }
 
-func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte, recipient *secp256k1.PublicKey, inTx *btcutil.Tx) (*btcutil.Tx, error) {
+func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
 	btx := &btcwire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
@@ -1684,68 +1684,41 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 
 	popTxOpReturn, err := popTx.EncodeToOpReturn()
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
 	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
-	publicKey := privateKey.PubKey() // just send it back to the miner
-	var btcAddress *btcutil.AddressPubKey
-	if recipient == nil {
-		pubKeyBytes := publicKey.SerializeCompressed()
-		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		pubKeyBytes := recipient.SerializeCompressed()
-		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
-		if err != nil {
-			return nil, err
-		}
+	publicKey := privateKey.PubKey()
+	pubKeyBytes := publicKey.SerializeCompressed()
+	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
 	if len(payToScript) != 25 {
-		return nil, fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
+		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
-	var (
-		outPoint     btcwire.OutPoint
-		changeAmount int64
-		PkScript     []byte
-	)
-	if inTx != nil {
-		idx := uint32(1)
-		outPoint = *wire.NewOutPoint(inTx.Hash(), idx) // hardcoded index
-		changeAmount = inTx.MsgTx().TxOut[idx].Value   // spend entire tx
-		PkScript = inTx.MsgTx().TxOut[idx].PkScript    // Lift PkScript from utxo we are spending
-	} else {
-		// XXX this is hacky
-		outPoint = btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
-		changeAmount = int64(100)
-		PkScript = payToScript // super hack
-	}
+	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
 	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
+
+	changeAmount := int64(100)
 	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
+
 	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
-	err = bitcoin.SignTx(btx, PkScript, privateKey, publicKey)
-	if err != nil {
-		return nil, fmt.Errorf("sign Bitcoin transaction: %w", err)
-	}
 
-	tx := btcutil.NewTx(btx)
-
-	return tx, nil
-}
-
-func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx, err := createPopTx(btcHeight, l2Keystone, minerPrivateKeyBytes, nil, nil)
+	sig := dcrecdsa.Sign(privateKey, []byte{})
+	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
+	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return btx.MsgTx().TxOut[1].PkScript
+	btx.TxIn[0].SignatureScript = sigScript
+
+	return btx.TxOut[1].PkScript
 }
