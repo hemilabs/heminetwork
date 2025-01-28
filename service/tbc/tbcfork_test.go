@@ -952,16 +952,27 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey,
 	return key, key.PubKey(), address, nil
 }
 
-func mustHaveKss(ctx context.Context, t *testing.T, s *Server, blocks ...*block) (int, error) {
-	totalTxs := 0
+func checkKeystoneDB(ctx context.Context, t *testing.T, s *Server, kssAbrev ...chainhash.Hash) error {
+	for _, k := range kssAbrev {
+		_, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k)
+		if err != nil {
+			return err
+		}
+		t.Logf("%v: keystone in db", k)
+	}
+	return nil
+}
+
+func mustHaveKss(ctx context.Context, t *testing.T, s *Server, blocks ...*block) ([]chainhash.Hash, error) {
+	processedKss := make([]chainhash.Hash, 0)
 	for _, b := range blocks {
 		txsInBlock := 0
 		_, height, err := s.BlockHeaderByHash(ctx, b.Hash())
 		if err != nil {
-			return totalTxs, err
+			return nil, err
 		}
 		if height != uint64(b.Height()) {
-			return totalTxs, fmt.Errorf("%v != %v", height, uint64(b.Height()))
+			return nil, fmt.Errorf("%v != %v", height, uint64(b.Height()))
 		}
 
 		kssCache := make(map[chainhash.Hash]tbcd.Keystone, 10)
@@ -971,17 +982,17 @@ func mustHaveKss(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 			panic(fmt.Errorf("processKeystones: %w", err))
 		}
 
-		for _, vkss := range kssCache {
+		for kkss, vkss := range kssCache {
 			if !bytes.Equal(b.Hash()[:], vkss.BlockHash[:]) {
-				return totalTxs, fmt.Errorf("block mismatch %v", vkss.BlockHash[:])
+				return nil, fmt.Errorf("block mismatch %v", vkss.BlockHash[:])
 			}
 			txsInBlock++
+			processedKss = append(processedKss, kkss)
 		}
 		t.Logf("got %v keystone txs in block %s", txsInBlock, b.name)
-		totalTxs += txsInBlock
 	}
 
-	return totalTxs, nil
+	return processedKss, nil
 }
 
 func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
@@ -1438,12 +1449,18 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystones exist in txs
-	kssNum, err := mustHaveKss(ctx, t, s, n.genesis, b1, b2, b3)
+	foundKss, err := mustHaveKss(ctx, t, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kssNum <= 0 {
+	if len(foundKss) < 1 {
 		t.Fatal("no keystone txs found")
+	}
+
+	// check if keystones exist in DB
+	err = checkKeystoneDB(ctx, t, s, foundKss...)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// make sure genesis tx is in db
@@ -1521,12 +1538,20 @@ func TestIndexNoFork(t *testing.T) {
 	if lastKssHeight.Height != 0 {
 		t.Fatalf("expected keystone index hash 0, got %v", lastKssHeight.Height)
 	}
-	kssNum, err = mustHaveKss(ctx, t, s, n.blocksAtHeight[0]...)
+	finalKss, err := mustHaveKss(ctx, t, s, n.blocksAtHeight[0]...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kssNum > 0 {
-		t.Fatalf("expected no keystone txs, got %v", kssNum)
+	if len(finalKss) > 0 {
+		t.Fatalf("expected no keystone txs, got %v", len(finalKss))
+	}
+
+	// check if keystones removed from DB
+	for _, k := range foundKss {
+		err = checkKeystoneDB(ctx, t, s, k)
+		if err == nil {
+			t.Fatal("expected fail in keystone db query")
+		}
 	}
 }
 
@@ -1675,6 +1700,21 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, utxos)
+	}
+
+	// check if keystones exist in txs
+	foundKss, err := mustHaveKss(ctx, t, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(foundKss) < 1 {
+		t.Fatal("no keystone txs found")
+	}
+
+	// check if keystones exist in DB
+	err = checkKeystoneDB(ctx, t, s, foundKss...)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// Verify linear indexing. Current TxIndex is sitting at b3
@@ -1846,6 +1886,30 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, utxos)
+	}
+
+	lastKssHeight, err := s.KeystoneIndexHash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check if keystones unwound to genesis
+	if lastKssHeight.Height != 0 {
+		t.Fatalf("expected keystone index hash 0, got %v", lastKssHeight.Height)
+	}
+	finalKss, err := mustHaveKss(ctx, t, s, n.blocksAtHeight[0]...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(finalKss) > 0 {
+		t.Fatalf("expected no keystone txs, got %v", len(finalKss))
+	}
+
+	// check if keystones removed from DB
+	for _, k := range foundKss {
+		err = checkKeystoneDB(ctx, t, s, k)
+		if err == nil {
+			t.Fatal("expected fail in keystone db query")
+		}
 	}
 	// err = mustHave(ctx, s, n.genesis, b1, b2, b3)
 	// if err == nil {
