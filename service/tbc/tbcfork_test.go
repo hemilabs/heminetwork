@@ -44,7 +44,6 @@ type block struct {
 	b    *btcutil.Block
 
 	txs map[tbcd.TxKey]*tbcd.TxValue // Parsed Txs in cache format
-
 }
 
 func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
@@ -510,7 +509,7 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 	}
 }
 
-func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64, mempool []*btcutil.Tx) (*btcutil.Block, error) {
+func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64, mempool []*btcutil.Tx) (*btcutil.Block, error) {
 	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
 	if err != nil {
 		return nil, err
@@ -520,7 +519,7 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("coinbase tx %v: %v", nextBlockHeight, coinbaseTx.Hash())
+	t.Logf("coinbase tx %v: %v", nextBlockHeight, coinbaseTx.Hash())
 
 	reqDifficulty := uint32(0x1d00ffff) // XXX
 
@@ -823,7 +822,8 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		if err != nil {
 			return nil, err
 		}
-		popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, signer.Serialize(), recipient.PubKey(), tx)
+		popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone,
+			signer.Serialize(), recipient.PubKey(), tx)
 		if err != nil {
 			return nil, err
 		}
@@ -836,7 +836,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		// b.t.Logf("added popTx %v", popTx)
 	}
 
-	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
+	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextBlockHeight,
 		parent.Hash(), extraNonce, mempool)
 	if err != nil {
 		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
@@ -952,8 +952,7 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey,
 	return key, key.PubKey(), address, nil
 }
 
-func mustHaveKss(ctx context.Context, s *Server, blocks ...*block) (int, error) {
-
+func mustHaveKss(ctx context.Context, t *testing.T, s *Server, blocks ...*block) (int, error) {
 	totalTxs := 0
 	for _, b := range blocks {
 		txsInBlock := 0
@@ -978,14 +977,14 @@ func mustHaveKss(ctx context.Context, s *Server, blocks ...*block) (int, error) 
 			}
 			txsInBlock++
 		}
-		log.Infof("got %v PopTxs in block %s", txsInBlock, b.name)
+		t.Logf("got %v keystone txs in block %s", txsInBlock, b.name)
 		totalTxs += txsInBlock
 	}
 
 	return totalTxs, nil
 }
 
-func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
+func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
 	for _, b := range blocks {
 		_, height, err := s.BlockHeaderByHash(ctx, b.Hash())
 		if err != nil {
@@ -995,7 +994,7 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 			return fmt.Errorf("%v != %v", height, uint64(b.Height()))
 		}
 
-		log.Infof("mustHave: %v", b.Hash())
+		t.Logf("mustHave: %v", b.Hash())
 		// Verify Txs cache
 		for ktx, vtx := range b.txs {
 			switch ktx[0] {
@@ -1018,10 +1017,10 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 					break
 				}
 				if !found {
-					log.Infof("tx hash: %v", tx)
-					log.Infof("ktx: %v", spew.Sdump(ktx))
-					log.Infof("vtx: %v", spew.Sdump(vtx))
-					log.Infof(spew.Sdump(sis))
+					t.Logf("tx hash: %v", tx)
+					t.Logf("ktx: %v", spew.Sdump(ktx))
+					t.Logf("vtx: %v", spew.Sdump(vtx))
+					t.Logf(spew.Sdump(sis))
 					return errors.New("block mismatch")
 				}
 
@@ -1131,8 +1130,6 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		log.Infof("s run")
-		defer log.Infof("s run done")
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
@@ -1149,7 +1146,6 @@ func TestFork(t *testing.T) {
 		// See if we are at the right height
 		si := s.Synced(ctx)
 		if si.BlockHeader.Height != expectedHeight {
-			log.Infof("not synced")
 			continue
 		}
 
@@ -1422,7 +1418,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1441,13 +1437,13 @@ func TestIndexNoFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
-	//check if keystones exist in txs
-	kssNum, err := mustHaveKss(ctx, s, n.genesis, b1, b2, b3)
+	// check if keystones exist in txs
+	kssNum, err := mustHaveKss(ctx, t, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if kssNum <= 0 {
-		t.Fatal("no poptxs found")
+		t.Fatal("no keystone txs found")
 	}
 
 	// make sure genesis tx is in db
@@ -1490,7 +1486,7 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
 
-	err = mustHave(ctx, s, n.genesis, b1)
+	err = mustHave(ctx, t, s, n.genesis, b1)
 	if err != nil {
 		t.Fatalf("expected an error from mustHave: %v", err)
 	}
@@ -1510,7 +1506,7 @@ func TestIndexNoFork(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		log.Infof("balance address %v  %v", address, btcutil.Amount(balance))
+		t.Logf("balance address %v  %v", address, btcutil.Amount(balance))
 		if balance != 0 {
 			t.Fatalf("%v (%v) invalid balance expected 0, got %v",
 				key.name, address, btcutil.Amount(balance))
@@ -1521,19 +1517,17 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	//check if keystones unwound to genesis
+	// check if keystones unwound to genesis
 	if lastKssHeight.Height != 0 {
 		t.Fatalf("expected keystone index hash 0, got %v", lastKssHeight.Height)
 	}
-
-	kssNum, err = mustHaveKss(ctx, s, n.blocksAtHeight[0]...)
+	kssNum, err = mustHaveKss(ctx, t, s, n.blocksAtHeight[0]...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if kssNum > 0 {
-		t.Fatalf("expected no popTxs, got %v", kssNum)
+		t.Fatalf("expected no keystone txs, got %v", kssNum)
 	}
-
 }
 
 func TestIndexFork(t *testing.T) {
@@ -1664,7 +1658,7 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// XXX verify indexes
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1727,7 +1721,7 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
@@ -1789,7 +1783,7 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
@@ -1972,7 +1966,7 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	redeemTx.TxIn[0].SignatureScript = sigScript
-	log.Infof("redeem tx: %v", spew.Sdump(redeemTx))
+	t.Logf("redeem tx: %v", spew.Sdump(redeemTx))
 
 	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
 		txscript.ScriptStrictMultiSig |
