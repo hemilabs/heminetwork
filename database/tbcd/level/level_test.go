@@ -295,9 +295,8 @@ func TestKeystoneUpdate(t *testing.T) {
 				if err == nil {
 					t.Fatalf("keystone in db: %v", spew.Sdump(v))
 				} else {
-					_, ok := err.(database.NotFoundError)
-					if !ok {
-						t.Fatal(ok)
+					if !errors.Is(err, database.ErrNotFound) {
+						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
 					}
 				}
 			}
