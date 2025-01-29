@@ -5,26 +5,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"reflect"
 	"testing"
 
-	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
 
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
-	btctxscript "github.com/btcsuite/btcd/txscript"
-	btcwire "github.com/btcsuite/btcd/wire"
-	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
-	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 func TestMD(t *testing.T) {
@@ -126,21 +118,31 @@ func TestMD(t *testing.T) {
 	}
 }
 
-func mergeKssMaps(source ...*map[chainhash.Hash]tbcd.Keystone) map[chainhash.Hash]tbcd.Keystone {
-	final := make(map[chainhash.Hash]tbcd.Keystone)
-
-	for _, mp := range source {
-		maps.Copy(final, *mp)
+func fillOutBytes(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, '_')
 	}
+	return result
+}
 
-	return final
+func makeKssMap(kssList []hemi.L2Keystone) map[chainhash.Hash]tbcd.Keystone {
+	kssMap := make(map[chainhash.Hash]tbcd.Keystone)
+	for _, l2Keystone := range kssList {
+		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
+		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
+			BlockHash:           btcchainhash.Hash(fillOutBytes("blockhash", 32)),
+			AbbreviatedKeystone: abrvKs[:],
+		}
+	}
+	return kssMap
 }
 
 func TestKeystoneUpdate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	allKss := []hemi.L2Keystone{
+	kssList := []hemi.L2Keystone{
 		{
 			Version:            1,
 			L1BlockNumber:      5,
@@ -176,35 +178,6 @@ func TestKeystoneUpdate(t *testing.T) {
 			EPHash:             fillOutBytes("i2ephash", 32),
 		}}
 
-	btcBlockHash := btcchainhash.Hash(fillOutBytes("blockhash", 32))
-	validKssCache := make(map[chainhash.Hash]tbcd.Keystone)
-	invalidKssCache := make(map[chainhash.Hash]tbcd.Keystone)
-
-	// first 2 keystones will be inserted into db, rest are created but not inserted
-	for i, l2Keystone := range allKss {
-
-		btx := createBtcTx(t, 199, &l2Keystone, []byte{1, 2, 3})
-
-		aPoPTx, err := pop.ParseTransactionL2FromOpReturn(btx)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		abrvKss := aPoPTx.L2Keystone.Serialize()
-
-		kssCache := validKssCache
-		if i > 2 {
-			kssCache = invalidKssCache
-		}
-
-		kssCache[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
-			BlockHash:           btcBlockHash,
-			AbbreviatedKeystone: abrvKss[:],
-		}
-	}
-
-	anyKssCache := mergeKssMaps(&validKssCache, &invalidKssCache)
-
 	type testTableItem struct {
 		name           string
 		direction      []int
@@ -219,19 +192,19 @@ func TestKeystoneUpdate(t *testing.T) {
 		{
 			name:          "invalidDirection",
 			direction:     []int{0},
-			expectedOutDB: anyKssCache,
+			expectedOutDB: makeKssMap(kssList[:]),
 			expectedError: fmt.Errorf("invalid direction: %v", 0),
 		},
 		{
 			name:          "nilMap",
 			direction:     []int{-1, 1},
-			expectedOutDB: anyKssCache,
+			expectedOutDB: makeKssMap(kssList),
 		},
 		{
 			name:          "emptyMap",
 			direction:     []int{-1, 1},
-			kssMap:        mergeKssMaps(),
-			expectedOutDB: anyKssCache,
+			kssMap:        makeKssMap(nil),
+			expectedOutDB: makeKssMap(kssList),
 		},
 
 		{
@@ -239,43 +212,43 @@ func TestKeystoneUpdate(t *testing.T) {
 			direction:      []int{1},
 			expectedError:  nil,
 			preInsertValid: true,
-			kssMap:         validKssCache,
-			expectedInDB:   validKssCache,
-			expectedOutDB:  invalidKssCache,
+			kssMap:         makeKssMap(kssList[:2]),
+			expectedInDB:   makeKssMap(kssList[:2]),
+			expectedOutDB:  makeKssMap(kssList[2:]),
 		},
 
 		{
 			name:          "invalidRemove",
 			direction:     []int{-1},
-			kssMap:        invalidKssCache,
-			expectedOutDB: anyKssCache,
+			kssMap:        makeKssMap(kssList[2:]),
+			expectedOutDB: makeKssMap(kssList),
 		},
 		{
 			name:          "validInsert",
 			direction:     []int{1},
-			kssMap:        validKssCache,
-			expectedInDB:  validKssCache,
-			expectedOutDB: invalidKssCache,
+			kssMap:        makeKssMap(kssList[:2]),
+			expectedInDB:  makeKssMap(kssList[:2]),
+			expectedOutDB: makeKssMap(kssList[2:]),
 		},
 		{
 			name:          "validRemove",
 			direction:     []int{1, -1},
-			kssMap:        invalidKssCache,
-			expectedOutDB: anyKssCache,
+			kssMap:        makeKssMap(kssList[2:]),
+			expectedOutDB: makeKssMap(kssList),
 		},
 		{
 			name:           "mixedRemove",
 			direction:      []int{-1},
 			preInsertValid: true,
-			kssMap:         anyKssCache,
-			expectedOutDB:  anyKssCache,
+			kssMap:         makeKssMap(kssList),
+			expectedOutDB:  makeKssMap(kssList),
 		},
 		{
 			name:           "mixedInsert",
 			direction:      []int{1},
 			preInsertValid: true,
-			kssMap:         anyKssCache,
-			expectedInDB:   anyKssCache,
+			kssMap:         makeKssMap(kssList),
+			expectedInDB:   makeKssMap(kssList),
 		},
 	}
 
@@ -298,7 +271,7 @@ func TestKeystoneUpdate(t *testing.T) {
 			}()
 
 			if tti.preInsertValid {
-				if err := db.BlockKeystoneUpdate(ctx, 1, validKssCache); err != nil {
+				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(kssList[:2])); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -330,63 +303,4 @@ func TestKeystoneUpdate(t *testing.T) {
 			}
 		})
 	}
-}
-
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-	return result
-}
-
-func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx := &btcwire.MsgTx{
-		Version:  2,
-		LockTime: uint32(btcHeight),
-	}
-
-	popTx := pop.TransactionL2{
-		L2Keystone: hemi.L2KeystoneAbbreviate(*l2Keystone),
-	}
-
-	popTxOpReturn, err := popTx.EncodeToOpReturn()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
-	publicKey := privateKey.PubKey()
-	pubKeyBytes := publicKey.SerializeCompressed()
-	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(payToScript) != 25 {
-		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
-	}
-
-	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
-	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
-
-	changeAmount := int64(100)
-	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
-
-	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
-
-	sig := dcrecdsa.Sign(privateKey, []byte{})
-	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
-	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
-	if err != nil {
-		t.Fatal(err)
-	}
-	btx.TxIn[0].SignatureScript = sigScript
-
-	return btx.TxOut[1].PkScript
 }

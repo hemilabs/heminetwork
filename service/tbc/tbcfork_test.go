@@ -30,6 +30,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/go-test/deep"
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/bitcoin"
@@ -43,7 +44,8 @@ type block struct {
 	name string
 	b    *btcutil.Block
 
-	txs map[tbcd.TxKey]*tbcd.TxValue // Parsed Txs in cache format
+	txs map[tbcd.TxKey]*tbcd.TxValue     // Parsed Txs in cache format
+	kss map[chainhash.Hash]tbcd.Keystone // Keystones passed in txs
 }
 
 func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
@@ -51,6 +53,7 @@ func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
 		name: name,
 		b:    b,
 		txs:  make(map[tbcd.TxKey]*tbcd.TxValue, 10),
+		kss:  make(map[chainhash.Hash]tbcd.Keystone, 10),
 	}
 	err := processTxs(b.Hash(), b.Transactions(), blk.txs)
 	if err != nil {
@@ -754,6 +757,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	var mempool []*btcutil.Tx
 
 	nextBlockHeight := parent.Height() + 1
+	kssList := []hemi.L2Keystone{}
 	switch nextBlockHeight {
 	case 2:
 		// spend block 1 coinbase
@@ -775,6 +779,8 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			StateRoot:          fillOutBytes("stateroot", 32),
 			EPHash:             fillOutBytes("ephash", 32),
 		}
+		kssList = append(kssList, l2Keystone)
+
 		signer, err := b.findKeyByName("miner")
 		if err != nil {
 			return nil, err
@@ -814,6 +820,8 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			StateRoot:          fillOutBytes("STATEROOT", 32),
 			EPHash:             fillOutBytes("EPHASH", 32),
 		}
+		kssList = append(kssList, l2Keystone)
+
 		signer, err := b.findKeyByName("miner")
 		if err != nil {
 			return nil, err
@@ -850,6 +858,15 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	// XXX this really sucks, we should get rid of height as a best indicator
 	if blk.Height() > b.height {
 		b.height = blk.Height()
+	}
+
+	// store values manually to check if keystone processing is correct
+	for _, l2Keystone := range kssList {
+		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
+		blk.kss[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
+			BlockHash:           *blk.Hash(),
+			AbbreviatedKeystone: abrvKs[:],
+		}
 	}
 
 	return blk, nil
@@ -985,6 +1002,9 @@ func mustHaveKss(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 		for kkss, vkss := range kssCache {
 			if !bytes.Equal(b.Hash()[:], vkss.BlockHash[:]) {
 				return nil, fmt.Errorf("block mismatch %v", vkss.BlockHash[:])
+			}
+			if diff := deep.Equal(b.kss[kkss], vkss); len(diff) > 0 {
+				t.Fatalf("processKeystones: returned %v, expected %v", spew.Sdump(b.kss[kkss]), spew.Sdump(vkss))
 			}
 			txsInBlock++
 			processedKss = append(processedKss, kkss)
