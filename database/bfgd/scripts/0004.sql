@@ -1,4 +1,4 @@
--- Copyright (c) 2024 Hemi Labs, Inc.
+-- Copyright (c) 2024-2025 Hemi Labs, Inc.
 -- Use of this source code is governed by the MIT License,
 -- which can be found in the LICENSE file.
 
@@ -17,7 +17,7 @@ CREATE FUNCTION notify_event() RETURNS TRIGGER AS $$
 		data_old = row_to_json(OLD);
 		data_new = row_to_json(NEW);
 
-		-- Contruct the notification as a JSON string.
+		-- Construct the notification as a JSON string.
 		notification = json_build_object(
 			'table', TG_TABLE_NAME,
 			'action', TG_OP,

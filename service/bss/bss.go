@@ -145,7 +145,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Subsystem: promSubsystem,
 			Name:      "rpc_calls_total",
-			Help:      "The total number of succesful RPC commands",
+			Help:      "The total number of successful RPC commands",
 		}),
 		requestTimeout: defaultRequestTimeout,
 		bfgCallTimeout: 20 * time.Second,

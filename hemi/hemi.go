@@ -124,7 +124,7 @@ func NewHeaderFromBytes(b []byte) (*Header, error) {
 		copy(h.StateRoot[:], b[29:61])
 		copy(h.EPHash[:], b[61:73])
 	default:
-		return nil, fmt.Errorf("unsuported version: %v", h.Version)
+		return nil, fmt.Errorf("unsupported version: %v", h.Version)
 	}
 	return h, nil
 }

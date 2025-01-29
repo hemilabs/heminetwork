@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -370,7 +370,7 @@ func (b *btcNode) handleGetData(m *wire.MsgGetData) (*wire.MsgBlock, error) {
 
 	v := m.InvList[0]
 	if v.Type != wire.InvTypeBlock {
-		return nil, fmt.Errorf("unsuported data type: %v", v.Type)
+		return nil, fmt.Errorf("unsupported data type: %v", v.Type)
 	}
 
 	blk, ok := b.chain[v.Hash.String()]
