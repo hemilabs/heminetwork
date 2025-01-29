@@ -330,7 +330,7 @@ services:
       bssd:
         condition: "service_started"
     healthcheck:
-      start_period: 120s
+      start_period: 180s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -388,7 +388,7 @@ services:
       bssd:
         condition: "service_started"
     healthcheck:
-      start_period: 120s
+      start_period: 180s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -443,7 +443,7 @@ services:
       bssd:
         condition: "service_started"
     healthcheck:
-      start_period: 120s
+      start_period: 180s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -491,7 +491,7 @@ services:
       restart_policy:
         condition: "any"
     healthcheck:
-      start_period: 120s
+      start_period: 180s
     command:
       - "op-batcher/bin/op-batcher"
       - "--l2-eth-rpc=http://op-geth-l2:8546,http://op-geth-l2-2:8546,http://op-geth-l2-3:8546"
@@ -541,7 +541,7 @@ services:
       op-node-3:
         condition: "service_started"
     healthcheck:
-      start_period: 120s
+      start_period: 180s
     command:
       - "op-proposer/bin/op-proposer"
       - "--poll-interval=1s"
@@ -587,7 +587,7 @@ services:
       op-geth-l2:
         condition: "service_healthy"
     healthcheck:
-      start_period: 120s
+      start_period: 180s
     ports:
       - "127.0.0.1:50050:50050"
 
