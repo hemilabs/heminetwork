@@ -140,21 +140,6 @@ func TestKeystoneUpdate(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	home := t.TempDir()
-	t.Logf("temp: %v", home)
-
-	cfg := level.NewConfig(home, "", "")
-	db, err := level.New(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		err := db.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-	}()
-
 	allKss := []hemi.L2Keystone{
 		{
 			Version:            1,
@@ -218,93 +203,106 @@ func TestKeystoneUpdate(t *testing.T) {
 		}
 	}
 
-	if err := db.BlockKeystoneUpdate(ctx, 1, validKssCache); err != nil {
-		t.Fatal(err)
-	}
+	anyKssCache := mergeKssMaps(&validKssCache, &invalidKssCache)
 
 	type testTableItem struct {
-		name          string
-		direction     []int
-		kssMap        map[chainhash.Hash]tbcd.Keystone
-		expectedInDB  map[chainhash.Hash]tbcd.Keystone
-		expectedOutDB map[chainhash.Hash]tbcd.Keystone
-		expectedError error
+		name           string
+		direction      []int
+		preInsertValid bool
+		kssMap         map[chainhash.Hash]tbcd.Keystone
+		expectedInDB   map[chainhash.Hash]tbcd.Keystone
+		expectedOutDB  map[chainhash.Hash]tbcd.Keystone
+		expectedError  error
 	}
 
 	testTable := []testTableItem{
 		{
 			name:          "invalidDirection",
 			direction:     []int{0},
-			expectedInDB:  validKssCache,
-			expectedOutDB: invalidKssCache,
+			expectedOutDB: anyKssCache,
 			expectedError: fmt.Errorf("invalid direction: %v", 0),
 		},
 		{
 			name:          "nilMap",
 			direction:     []int{-1, 1},
-			expectedInDB:  validKssCache,
-			expectedOutDB: invalidKssCache,
+			expectedOutDB: anyKssCache,
 		},
 		{
 			name:          "emptyMap",
 			direction:     []int{-1, 1},
 			kssMap:        mergeKssMaps(),
-			expectedInDB:  validKssCache,
-			expectedOutDB: invalidKssCache,
+			expectedOutDB: anyKssCache,
 		},
 
 		{
-			name:          "duplicateInsert",
-			direction:     []int{1},
-			expectedError: nil,
-			kssMap:        validKssCache,
-			expectedInDB:  validKssCache,
-			expectedOutDB: invalidKssCache,
+			name:           "duplicateInsert",
+			direction:      []int{1},
+			expectedError:  nil,
+			preInsertValid: true,
+			kssMap:         validKssCache,
+			expectedInDB:   validKssCache,
+			expectedOutDB:  invalidKssCache,
 		},
 
 		{
 			name:          "invalidRemove",
 			direction:     []int{-1},
 			kssMap:        invalidKssCache,
-			expectedInDB:  validKssCache,
-			expectedOutDB: invalidKssCache,
+			expectedOutDB: anyKssCache,
 		},
 		{
-			name:         "validInsert",
-			direction:    []int{1},
-			kssMap:       invalidKssCache,
-			expectedInDB: mergeKssMaps(&validKssCache, &invalidKssCache),
-		},
-		{
-			name:          "validRemove",
-			direction:     []int{-1},
-			kssMap:        invalidKssCache,
-			expectedInDB:  validKssCache,
-			expectedOutDB: invalidKssCache,
-		},
-		{
-			name:          "mixedRemove",
-			direction:     []int{-1},
-			kssMap:        mergeKssMaps(&validKssCache, &invalidKssCache),
-			expectedOutDB: mergeKssMaps(&validKssCache, &invalidKssCache),
-		},
-		{
-			name:          "validInsert2",
+			name:          "validInsert",
 			direction:     []int{1},
 			kssMap:        validKssCache,
 			expectedInDB:  validKssCache,
 			expectedOutDB: invalidKssCache,
 		},
 		{
-			name:         "mixedInsert",
-			direction:    []int{1},
-			kssMap:       mergeKssMaps(&validKssCache, &invalidKssCache),
-			expectedInDB: validKssCache,
+			name:          "validRemove",
+			direction:     []int{1, -1},
+			kssMap:        invalidKssCache,
+			expectedOutDB: anyKssCache,
+		},
+		{
+			name:           "mixedRemove",
+			direction:      []int{-1},
+			preInsertValid: true,
+			kssMap:         anyKssCache,
+			expectedOutDB:  anyKssCache,
+		},
+		{
+			name:           "mixedInsert",
+			direction:      []int{1},
+			preInsertValid: true,
+			kssMap:         anyKssCache,
+			expectedInDB:   anyKssCache,
 		},
 	}
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
+
+			home := t.TempDir()
+			t.Logf("temp: %v", home)
+
+			cfg := level.NewConfig(home, "", "")
+			db, err := level.New(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				err := db.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}()
+
+			if tti.preInsertValid {
+				if err := db.BlockKeystoneUpdate(ctx, 1, validKssCache); err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			for _, dir := range tti.direction {
 				err := db.BlockKeystoneUpdate(ctx, dir, tti.kssMap)
 				if diff := deep.Equal(err, tti.expectedError); len(diff) > 0 {
@@ -323,6 +321,11 @@ func TestKeystoneUpdate(t *testing.T) {
 				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k)
 				if err == nil {
 					t.Fatalf("keystone in db: %v", spew.Sdump(v))
+				} else {
+					_, ok := err.(database.NotFoundError)
+					if !ok {
+						t.Fatal(ok)
+					}
 				}
 			}
 		})
