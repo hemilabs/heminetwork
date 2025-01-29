@@ -254,7 +254,7 @@ services:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
       interval: 5s
       retries: 300
-      start_period: 60s
+      start_period: 120s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
@@ -290,7 +290,7 @@ services:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
       interval: 5s
       retries: 300
-      start_period: 60s
+      start_period: 120s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
