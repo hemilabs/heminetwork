@@ -275,7 +275,7 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - { type: "tmpfs", target: "/tmp" }
-    restart: on-failure
+    restart: always
     networks:
       e2e:
 
@@ -311,7 +311,7 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - { type: "tmpfs", target: "/tmp" }
-    restart: on-failure
+    restart: always
     networks:
       e2e:
 
