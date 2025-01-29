@@ -1333,9 +1333,9 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 	return blocksProcessed, last, nil
 }
 
-// unindexKeystonesInBlocks indexes keystones from the last processed block
+// unindexKeystonesInBlocks unindexes keystones from the last processed block
 // until the provided end hash, inclusive. It returns the number of blocks
-// processed and the last hash it has processedd.
+// processed and the last hash it processed.
 func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Keystone) (int, *HashHeight, error) {
 	log.Tracef("unindexKeystonesInBlocks")
 	defer log.Tracef("unindexKeystonesInBlocks exit")
