@@ -1250,7 +1250,7 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map
 
 // indexKeystonesInBlocks indexes txs from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processedd.
+// the last hash it processed.
 func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Keystone) (int, *HashHeight, error) {
 	log.Tracef("indexKeystonesInBlocks")
 	defer log.Tracef("indexKeystonesInBlocks exit")
