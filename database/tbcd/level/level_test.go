@@ -13,6 +13,7 @@ import (
 	"github.com/go-test/deep"
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
+
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
@@ -132,7 +133,7 @@ func makeKssMap(kssList []hemi.L2Keystone) map[chainhash.Hash]tbcd.Keystone {
 		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 			BlockHash:           btcchainhash.Hash(fillOutBytes("blockhash", 32)),
-			AbbreviatedKeystone: abrvKs[:],
+			AbbreviatedKeystone: abrvKs,
 		}
 	}
 	return kssMap
@@ -151,7 +152,8 @@ func TestKeystoneUpdate(t *testing.T) {
 			PrevKeystoneEPHash: fillOutBytes("v1prevkeystoneephash", 32),
 			StateRoot:          fillOutBytes("v1stateroot", 32),
 			EPHash:             fillOutBytes("v1ephash", 32),
-		}, {
+		},
+		{
 			Version:            1,
 			L1BlockNumber:      6,
 			L2BlockNumber:      44,
@@ -168,7 +170,8 @@ func TestKeystoneUpdate(t *testing.T) {
 			PrevKeystoneEPHash: fillOutBytes("i1prevkeystoneephash", 32),
 			StateRoot:          fillOutBytes("i1stateroot", 32),
 			EPHash:             fillOutBytes("i1ephash", 32),
-		}, {
+		},
+		{
 			Version:            1,
 			L1BlockNumber:      6,
 			L2BlockNumber:      44,
@@ -176,7 +179,8 @@ func TestKeystoneUpdate(t *testing.T) {
 			PrevKeystoneEPHash: fillOutBytes("i2prevkeystoneephash", 32),
 			StateRoot:          fillOutBytes("i2stateroot", 32),
 			EPHash:             fillOutBytes("i2ephash", 32),
-		}}
+		},
+	}
 
 	type testTableItem struct {
 		name           string
@@ -254,7 +258,6 @@ func TestKeystoneUpdate(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-
 			home := t.TempDir()
 			t.Logf("temp: %v", home)
 

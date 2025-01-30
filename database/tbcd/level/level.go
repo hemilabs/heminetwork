@@ -1778,7 +1778,6 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 			// Only delete keystone if it is in the previously found block.
 			if ks.BlockHash.IsEqual(&v.BlockHash) {
 				kssBatch.Delete(k[:])
-			} else {
 			}
 		case 1:
 			has, err := kssTx.Has(k[:], nil)
