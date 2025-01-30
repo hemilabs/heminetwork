@@ -1594,7 +1594,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 
 			kssCache[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 				BlockHash:           btcBlockHash,
-				AbbreviatedKeystone: abrvKss[:],
+				AbbreviatedKeystone: abrvKss,
 			}
 
 			if err := s.db.BlockKeystoneUpdate(ctx, 1, kssCache); err != nil {

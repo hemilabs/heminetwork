@@ -21,6 +21,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 type InsertType int
@@ -125,8 +126,8 @@ type Database interface {
 }
 
 type Keystone struct {
-	BlockHash           chainhash.Hash // Block that contains abbreviated keystone
-	AbbreviatedKeystone []byte         // Abbreviated keystone
+	BlockHash           chainhash.Hash                 // Block that contains abbreviated keystone
+	AbbreviatedKeystone [hemi.L2KeystoneAbrevSize]byte // Abbreviated keystone
 }
 
 // XXX there exist various types in this file that need to be reevaluated.

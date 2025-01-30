@@ -865,7 +865,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
 		blk.kss[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 			BlockHash:           *blk.Hash(),
-			AbbreviatedKeystone: abrvKs[:],
+			AbbreviatedKeystone: abrvKs,
 		}
 	}
 

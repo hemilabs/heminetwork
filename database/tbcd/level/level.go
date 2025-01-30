@@ -296,11 +296,7 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 		return nil, fmt.Errorf("l2 keystone get: %w", err)
 	}
 
-	ks := tbcd.Keystone{
-		BlockHash:           chainhash.Hash(eks[:32]),
-		AbbreviatedKeystone: eks[32:],
-	}
-
+	ks := decodeKeystone(eks)
 	return &ks, nil
 }
 
@@ -1729,6 +1725,32 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	return nil
 }
 
+// encodeKeystone encodes a database keystone as
+// [blockhash,abbreviated keystone] or [32+76] bytes. The abbreviated keystone
+// hash is the leveldb table key.
+func encodeKeystone(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte) {
+	copy(eks[0:32], ks.BlockHash[:])
+	copy(eks[32:], ks.AbbreviatedKeystone[:])
+	return
+}
+
+func encodeKeystoneToSlice(ks tbcd.Keystone) []byte {
+	eks := encodeKeystone(ks)
+	return eks[:]
+}
+
+// decodeKeystone reverse the process of encodeKeystone.
+func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
+	bh, err := chainhash.NewHash(eks[0:32])
+	if err != nil {
+		panic(err) // Can't happen
+	}
+	ks.BlockHash = *bh
+	// copy the values to prevent slicing reentrancy problems.
+	copy(ks.AbbreviatedKeystone[:], eks[32:])
+	return ks
+}
+
 func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone) error {
 	log.Tracef("BlockKeystoneUpdate")
 	defer log.Tracef("BlockKeystoneUpdate exit")
@@ -1748,17 +1770,15 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 	for k, v := range keystones {
 		switch direction {
 		case -1:
-			foundKeystone, err := kssTx.Get(k[:], nil)
+			eks, err := kssTx.Get(k[:], nil)
 			if err != nil {
 				continue
 			}
-			fbh, err := chainhash.NewHash(foundKeystone[0:32])
-			if err != nil {
-				return err // XXX really can't happen
-			}
+			ks := decodeKeystone(eks)
 			// Only delete keystone if it is in the previously found block.
-			if fbh.IsEqual(&v.BlockHash) {
+			if ks.BlockHash.IsEqual(&v.BlockHash) {
 				kssBatch.Delete(k[:])
+			} else {
 			}
 		case 1:
 			has, err := kssTx.Has(k[:], nil)
@@ -1769,10 +1789,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// Only store unknown keystones
 				continue
 			}
-			var value [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte
-			copy(value[0:32], v.BlockHash[:])
-			copy(value[32:], v.AbbreviatedKeystone)
-			kssBatch.Put(k[:], value[:])
+			kssBatch.Put(k[:], encodeKeystoneToSlice(v))
 		}
 	}
 
