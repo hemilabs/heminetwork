@@ -1001,10 +1001,12 @@ func mustHaveKss(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 
 		for kkss, vkss := range kssCache {
 			if !bytes.Equal(b.Hash()[:], vkss.BlockHash[:]) {
-				return nil, fmt.Errorf("block mismatch %v", vkss.BlockHash[:])
+				return nil, fmt.Errorf("block mismatch %v",
+					vkss.BlockHash[:])
 			}
 			if diff := deep.Equal(b.kss[kkss], vkss); len(diff) > 0 {
-				t.Fatalf("processKeystones: returned %v, expected %v", spew.Sdump(b.kss[kkss]), spew.Sdump(vkss))
+				t.Fatalf("processKeystones: returned %v, expected %v",
+					spew.Sdump(b.kss[kkss]), spew.Sdump(vkss))
 			}
 			txsInBlock++
 			processedKss = append(processedKss, kkss)
