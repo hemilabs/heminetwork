@@ -9,7 +9,7 @@ WORKDIR /git
 ARG OP_GETH_CACHE_BREAK=12F2
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout db09f46746b33a008d32d550b4ed0e91c33f1cd4
+RUN git checkout a7ab4addbe8402714cf4e2f03ffdd272838ece71
 
 WORKDIR /git/op-geth
 
