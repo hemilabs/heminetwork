@@ -372,3 +372,83 @@ func TestKeystoneUpdate(t *testing.T) {
 		})
 	}
 }
+
+func newKeystone(blockhash *chainhash.Hash, l1, l2 uint32) (*chainhash.Hash, tbcd.Keystone) {
+	hks := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      l1,
+		L2BlockNumber:      l2,
+		ParentEPHash:       fillOutBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("v1prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("v1stateroot", 32),
+		EPHash:             fillOutBytes("v1ephash", 32),
+	}
+	abrvKs := hemi.L2KeystoneAbbreviate(hks)
+	return abrvKs.Hash(), tbcd.Keystone{
+		BlockHash:           *blockhash,
+		AbbreviatedKeystone: abrvKs.Serialize(),
+	}
+}
+
+func TestKeystoneDBWindUnwind(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	defer cancel()
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	cfg := level.NewConfig(home, "", "")
+	db, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	blk1Hash := chainhash.Hash{1}
+	k1hash, k1 := newKeystone(&blk1Hash, 1, 2)
+	blk2Hash := chainhash.Hash{1}
+	k2hash, k2 := newKeystone(&blk2Hash, 2, 3)
+	ksm := map[chainhash.Hash]tbcd.Keystone{
+		*k1hash: k1,
+		*k2hash: k2,
+	}
+	err = db.BlockKeystoneUpdate(ctx, 1, ksm)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get keystones back out
+	ks1, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *k1hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(k1, *ks1) {
+		t.Fatalf("%v%v", spew.Sdump(k1), spew.Sdump(*ks1))
+	}
+	ks2, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *k2hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(k2, *ks2) {
+		t.Fatalf("%v%v", spew.Sdump(k2), spew.Sdump(*ks2))
+	}
+
+	// Unwind
+	err = db.BlockKeystoneUpdate(ctx, -1, ksm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *k1hash)
+	if err == nil {
+		t.Fatal("k1 found")
+	}
+	_, err = db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *k2hash)
+	if err == nil {
+		t.Fatal("k2 found")
+	}
+}
