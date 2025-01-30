@@ -10,14 +10,6 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 )
 
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-	return result
-}
-
 func TestKeystoneEncodeDecode(t *testing.T) {
 	hks := hemi.L2Keystone{
 		Version:            1,

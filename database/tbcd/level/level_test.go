@@ -139,23 +139,24 @@ func makeKssMap(kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.H
 }
 
 func TestKssEncoding(t *testing.T) {
-	keystones := []hemi.L2Keystone{{
-		Version:            1,
-		L1BlockNumber:      5,
-		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-	}, {
-		Version:            1,
-		L1BlockNumber:      5,
-		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("altparentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("altprevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("altstateroot", 32),
-		EPHash:             fillOutBytes("altephash", 32),
-	},
+	keystones := []hemi.L2Keystone{
+		{
+			Version:            1,
+			L1BlockNumber:      5,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytes("parentephash", 32),
+			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytes("ephash", 32),
+		}, {
+			Version:            1,
+			L1BlockNumber:      5,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytes("altparentephash", 32),
+			PrevKeystoneEPHash: fillOutBytes("altprevkeystoneephash", 32),
+			StateRoot:          fillOutBytes("altstateroot", 32),
+			EPHash:             fillOutBytes("altephash", 32),
+		},
 	}
 
 	altKeystone := hemi.L2Keystone{
@@ -195,7 +196,6 @@ func TestKssEncoding(t *testing.T) {
 			t.Fatalf("abrv Ks diff: %v", diff)
 		}
 	}
-
 }
 
 func TestKeystoneUpdate(t *testing.T) {
@@ -397,8 +397,8 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	cfg := level.NewConfig(home, "", "")
-	db, err := level.New(ctx, cfg)
+	cfg := NewConfig(home, "", "")
+	db, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
