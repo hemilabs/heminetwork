@@ -1,6 +1,9 @@
 # ⚡️ The Hemi Network
 
-Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin with the programmability of Ethereum.
+Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin with the programmability of Ethereum. It provides a robust, scalable solution for decentralized applications while leveraging Bitcoin's proven security model.
+
+[![GitHub license](https://img.shields.io/github/license/hemilabs/heminetwork)](https://github.com/hemilabs/heminetwork/blob/main/LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/hemilabs/heminetwork)](https://goreportcard.com/report/github.com/hemilabs/heminetwork)
 
 <details>
   <summary>Table of Contents</summary>
@@ -32,6 +35,14 @@ Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin wi
 </details>
 
 ---
+
+## 🌟 Key Features
+
+- **Bitcoin Security**: Leverages Bitcoin's proven security model
+- **EVM Compatibility**: Full support for Ethereum smart contracts and tools
+- **Scalability**: High-performance L2 solution with optimized throughput
+- **Developer-Friendly**: Comprehensive tooling and documentation
+- **Decentralized**: Maintains true blockchain decentralization principles
 
 ## 🔧 Services
 
@@ -188,10 +199,7 @@ To run the full Hemi stack (non-sequencing), please see [NODE_RUNNING](localnode
    Blocks at a **high rate**:
 
    ```shell
-   docker compose -f ./e2e/docker-compose.yml build
-
-   # set the hvm phase 0 timestamp slightly in the future, but ensure that all op-geths have the same
-   HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up
+   docker compose -f ./e2e/docker-compose.yml up --build
    ```
 
 > [!NOTE]
@@ -227,6 +235,48 @@ clean environment. It can be omitted.
 
 ---
 
+## 🤝 Contributing
+
+We welcome contributions from the community! Here's how you can help:
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+Please read our [Contributing Guidelines](CONTRIBUTING.md) for more details.
+
+## 🔍 Troubleshooting
+
+Common issues and their solutions:
+
+1. **Connection Issues**
+   - Verify your network connectivity
+   - Check if the required ports are open
+   - Ensure your Bitcoin node is fully synced
+
+2. **Build Errors**
+   - Make sure all prerequisites are installed
+   - Update to the latest Go version
+   - Clear your build cache and try again
+
+For more detailed troubleshooting, please check our [Wiki](https://github.com/hemilabs/heminetwork/wiki) or open an issue.
+
+## 📚 Additional Resources
+
+- [Official Documentation](https://docs.hemi.network)
+- [API Reference](https://api.hemi.network)
+- [Community Forum](https://forum.hemi.network)
+- [Discord Community](https://discord.gg/hemi)
+
 ## 📄 License
 
 This project is licensed under the [MIT License](https://github.com/hemilabs/heminetwork/blob/main/LICENSE).
+
+---
+
+<div align="center">
+  <p>Built with ❤️ by the Hemi Labs team and contributors.</p>
+  <p>© 2024 Hemi Labs. All Rights Reserved.</p>
+</div>
