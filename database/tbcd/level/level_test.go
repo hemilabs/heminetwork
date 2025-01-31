@@ -452,3 +452,62 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 		t.Fatal("k2 found")
 	}
 }
+
+func TestKeystoneDBCache(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	defer cancel()
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	cfg := NewConfig(home, "", "")
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	const KSSNUM = 1 //XXX make this higher when cache fixed
+	const CYCLES = 1 //XXX make this higher when cache fixed
+
+	for i := range CYCLES {
+		ksm := make(map[chainhash.Hash]tbcd.Keystone, KSSNUM)
+		for j := range KSSNUM {
+			blkHash := chainhash.Hash{byte(i)}
+			ksHash, ks := newKeystone(&blkHash, uint32(j), uint32(j))
+			ksm[*ksHash] = ks
+		}
+
+		err = db.BlockKeystoneUpdate(ctx, 1, ksm)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for ksHash, ks := range ksm {
+			dks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, ksHash)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := deep.Equal(ks, *dks); len(diff) > 0 {
+				t.Fatalf("(cycle %v) unexpected error diff: %v", i, diff)
+			}
+		}
+
+		err = db.BlockKeystoneUpdate(ctx, -1, ksm)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for ksHash := range ksm {
+			ks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, ksHash)
+			if err == nil {
+				t.Fatalf("(cycle %v) deleted keystone found %v", i, spew.Sdump(ks))
+			}
+		}
+	}
+}
