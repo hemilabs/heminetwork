@@ -472,12 +472,15 @@ func TestKeystoneDBCache(t *testing.T) {
 		}
 	}()
 
-	const KSSNUM = 1 //XXX make this higher when cache fixed
-	const CYCLES = 1 //XXX make this higher when cache fixed
+	//XXX make these higher when cache fixed
+	const (
+		kssNum = 1
+		cycles = 1
+	)
 
-	for i := range CYCLES {
-		ksm := make(map[chainhash.Hash]tbcd.Keystone, KSSNUM)
-		for j := range KSSNUM {
+	for i := range cycles {
+		ksm := make(map[chainhash.Hash]tbcd.Keystone, kssNum)
+		for j := range kssNum {
 			blkHash := chainhash.Hash{byte(i)}
 			ksHash, ks := newKeystone(&blkHash, uint32(j), uint32(j))
 			ksm[*ksHash] = ks
