@@ -1093,7 +1093,7 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	wao := &websocket.AcceptOptions{
 		CompressionMode:    websocket.CompressionContextTakeover,
 		OriginPatterns:     []string{"localhost:43111"},
-		InsecureSkipVerify: true, // XXX sucks but we don't want to whitelist every locahost port
+		InsecureSkipVerify: true, // XXX sucks but we don't want to whitelist every localhost port
 	}
 
 	conn, err := websocket.Accept(w, r, wao)
