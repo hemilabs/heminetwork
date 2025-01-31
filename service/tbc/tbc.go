@@ -51,6 +51,8 @@ const (
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
+	defaultMaxCachedKeystones = 1e5 // number of cached keystones prior to flush
+
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
@@ -71,6 +73,19 @@ var (
 	// upstreamStateIdKey is used for storing upstream state IDs
 	// representing a unique state of an upstream system driving TBC state/
 	upstreamStateIdKey = []byte("upstreamstateid")
+
+	mainnetHemiGenesis = &HashHeight{
+		Hash:   *chaincfg.MainNetParams.GenesisHash, // XXX fixme
+		Height: 0,
+	}
+	testnet3HemiGenesis = &HashHeight{
+		Hash:   s2h("000000000001323071f38f21ea5aae529ece491eadaccce506a59bcc2d968917"),
+		Height: 2815000,
+	}
+	localnetHemiGenesis = &HashHeight{
+		Hash:   *chaincfg.RegressionNetParams.GenesisHash, // XXX fixme
+		Height: 0,
+	}
 )
 
 func init() {
@@ -84,9 +99,11 @@ type Config struct {
 	BlockCacheSize          string
 	BlockheaderCacheSize    string
 	BlockSanity             bool
+	HemiIndex               bool
 	LevelDBHome             string
 	ListenAddress           string
 	LogLevel                string
+	MaxCachedKeystones      int
 	MaxCachedTxs            int
 	MempoolEnabled          bool
 	Network                 string
@@ -111,6 +128,7 @@ func NewDefaultConfig() *Config {
 		BlockCacheSize:       "1gb",
 		BlockheaderCacheSize: "128mb",
 		LogLevel:             logLevel,
+		MaxCachedKeystones:   defaultMaxCachedKeystones,
 		MaxCachedTxs:         defaultMaxCachedTxs,
 		MempoolEnabled:       false, // XXX default to false until it is fixed
 		PeersWanted:          defaultPeersWanted,
@@ -145,6 +163,7 @@ type Server struct {
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
 	checkpoints map[chainhash.Hash]uint64
+	hemiGenesis *HashHeight
 	pm          *PeerManager
 
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
@@ -239,16 +258,19 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
 		s.checkpoints = mainnetCheckpoints
+		s.hemiGenesis = mainnetHemiGenesis
 
 	case "testnet3":
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
 		s.checkpoints = testnet3Checkpoints
+		s.hemiGenesis = testnet3HemiGenesis
 
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
 		s.checkpoints = make(map[chainhash.Hash]uint64)
+		s.hemiGenesis = localnetHemiGenesis
 		wanted = 1
 
 	default:
@@ -2428,13 +2450,13 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Infof("Genesis: %v", s.chainParams.GenesisHash) // XXX make debug
 	log.Infof("Starting block headers sync at %v height: %v time %v",
 		bhb, bhb.Height, bhb.Timestamp())
-	utxoHH, err := s.UtxoIndexHash(ctx)
-	if err == nil {
-		log.Infof("Utxo index %v", utxoHH)
-	}
-	txHH, err := s.TxIndexHash(ctx)
-	if err == nil {
-		log.Infof("Tx index %v", txHH)
+	utxoHH, _ := s.UtxoIndexHash(ctx)
+	log.Infof("Utxo index %v", utxoHH)
+	txHH, _ := s.TxIndexHash(ctx)
+	log.Infof("Tx index %v", txHH)
+	if s.cfg.HemiIndex {
+		hemiHH, _ := s.KeystoneIndexHash(ctx)
+		log.Infof("Keystone index %v", hemiHH)
 	}
 
 	// HTTP server
@@ -2635,10 +2657,10 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 		}
 		gh := genesis.BlockHash()
 		if !bytes.Equal(gb[0].Hash[:], gh[:]) {
-			return fmt.Errorf("effective genesis block hash mismatch, db has %x but genesis should be %x", gb[0].Hash, gh)
+			return fmt.Errorf("effective genesis block hash mismatch, db has %v but genesis should be %v", gb[0].Hash, gh)
 		}
 	}
-	log.Infof("TBC set up in External Header Mode, effectiveGenesis=%x, tip=%x", genesis.BlockHash(), bhb.Hash)
+	log.Infof("TBC set up in External Header Mode, effectiveGenesis=%v, tip=%v", genesis.BlockHash(), bhb.Hash)
 
 	return nil
 }

@@ -21,13 +21,22 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/go-test/deep"
 	"github.com/juju/loggo"
 
+	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
 )
 
@@ -35,7 +44,8 @@ type block struct {
 	name string
 	b    *btcutil.Block
 
-	txs map[tbcd.TxKey]*tbcd.TxValue // Parsed Txs in cache format
+	txs map[tbcd.TxKey]*tbcd.TxValue     // Parsed Txs in cache format
+	kss map[chainhash.Hash]tbcd.Keystone // Keystones passed in txs
 }
 
 func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
@@ -43,6 +53,7 @@ func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
 		name: name,
 		b:    b,
 		txs:  make(map[tbcd.TxKey]*tbcd.TxValue, 10),
+		kss:  make(map[chainhash.Hash]tbcd.Keystone, 10),
 	}
 	err := processTxs(b.Hash(), b.Transactions(), blk.txs)
 	if err != nil {
@@ -145,7 +156,6 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 }
 
 // lookupKey is used by the sign function.
-// Must be called locked.
 func (b *btcNode) lookupKey(a btcutil.Address) (*btcec.PrivateKey, bool, error) {
 	nk, ok := b.keys[a.String()]
 	if !ok {
@@ -154,7 +164,17 @@ func (b *btcNode) lookupKey(a btcutil.Address) (*btcec.PrivateKey, bool, error) 
 	return nk.key, true, nil
 }
 
-// newKey creates and inserts a new key into thw lookup table.
+func (b *btcNode) findKeyByName(name string) (*btcec.PrivateKey, error) {
+	for k, v := range b.keys {
+		b.t.Logf("findKeyByName %v == %v ---- %v", name, v.name, k)
+		if v.name == name {
+			return v.key, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
+// newKey creates and inserts a new key into the lookup table.
 // Must be called locked
 func (b *btcNode) newKey(name string) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
 	privateKey, err := btcec.NewPrivateKey()
@@ -229,7 +249,7 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 	if err != nil {
 		return nil, err
 	}
-	b.t.Logf("rdeeem pkScript: %x", pkScript)
+	b.t.Logf("redeem pkScript (%v): %x", name, pkScript)
 	b.t.Logf("redeem keys:")
 	b.t.Logf("  private    : %x", redeemPrivate.Serialize())
 	b.t.Logf("  public     : %x", redeemPublic.SerializeCompressed())
@@ -270,12 +290,14 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 		change := value - left
 		if change != 0 {
 			payToAddress := as[0]
+			b.t.Logf("%v", spew.Sdump(as[0]))
 			changeScript, err := txscript.PayToAddrScript(payToAddress)
 			if err != nil {
 				return nil, err
 			}
 			txOutChange := wire.NewTxOut(int64(change), changeScript)
 			redeemTx.AddTxOut(txOutChange)
+			b.t.Logf("change address %v value %v", payToAddress, change)
 		}
 		break
 	}
@@ -490,7 +512,7 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 	}
 }
 
-func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64, mempool []*btcutil.Tx) (*btcutil.Block, error) {
+func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64, mempool []*btcutil.Tx) (*btcutil.Block, error) {
 	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
 	if err != nil {
 		return nil, err
@@ -500,7 +522,7 @@ func newBlockTemplate(params *chaincfg.Params, payToAddress btcutil.Address, nex
 	if err != nil {
 		return nil, err
 	}
-	log.Infof("coinbase tx %v: %v", nextBlockHeight, coinbaseTx.Hash())
+	t.Logf("coinbase tx %v: %v", nextBlockHeight, coinbaseTx.Hash())
 
 	reqDifficulty := uint32(0x1d00ffff) // XXX
 
@@ -619,6 +641,111 @@ func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
 	})
 }
 
+var popPrivate *btcec.PrivateKey // xxx hardcode an actual miner key
+
+func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) error {
+	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
+		txscript.ScriptStrictMultiSig | txscript.ScriptDiscourageUpgradableNops
+	vm, err := txscript.NewEngine(scriptPubKey, tx.MsgTx(), 0, flags, nil, nil, -1, nil)
+	if err != nil {
+		return err
+	}
+	if dump {
+		t.Logf("=== executing tx %v", tx.Hash())
+	}
+	for i := 0; ; i++ {
+		d, err := vm.DisasmPC()
+		if dump {
+			t.Logf("%v: %v", i, d)
+		}
+		done, err := vm.Step()
+		if err != nil {
+			return err
+		}
+		stack := vm.GetStack()
+		if dump {
+			t.Logf("%v: stack %v", i, spew.Sdump(stack))
+		}
+		if done {
+			break
+		}
+	}
+	err = vm.CheckErrorCondition(true)
+	if err != nil {
+		return err
+	}
+
+	if dump {
+		t.Logf("=== SUCCESS tx %v", tx.Hash())
+	}
+	return nil
+}
+
+func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte, recipient *secp256k1.PublicKey, inTx *btcutil.Tx) (*btcutil.Tx, error) {
+	btx := &btcwire.MsgTx{
+		Version:  2,
+		LockTime: uint32(btcHeight),
+	}
+
+	popTx := pop.TransactionL2{
+		L2Keystone: hemi.L2KeystoneAbbreviate(*l2Keystone),
+	}
+
+	popTxOpReturn, err := popTx.EncodeToOpReturn()
+	if err != nil {
+		return nil, err
+	}
+
+	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	publicKey := privateKey.PubKey() // just send it back to the miner
+	var btcAddress *btcutil.AddressPubKey
+	if recipient == nil {
+		pubKeyBytes := publicKey.SerializeCompressed()
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		pubKeyBytes := recipient.SerializeCompressed()
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
+	if err != nil {
+		return nil, err
+	}
+
+	if len(payToScript) != 25 {
+		return nil, fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
+	}
+
+	var (
+		outPoint     btcwire.OutPoint
+		changeAmount int64
+		PkScript     []byte
+	)
+
+	idx := uint32(1)
+	outPoint = *wire.NewOutPoint(inTx.Hash(), idx) // hardcoded index
+	changeAmount = inTx.MsgTx().TxOut[idx].Value   // spend entire tx
+	PkScript = inTx.MsgTx().TxOut[idx].PkScript    // Lift PkScript from utxo we are spending
+
+	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
+	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
+	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
+	err = bitcoin.SignTx(btx, PkScript, privateKey, publicKey)
+	if err != nil {
+		return nil, fmt.Errorf("sign Bitcoin transaction: %w", err)
+	}
+
+	tx := btcutil.NewTx(btx)
+
+	return tx, nil
+}
+
 func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
 	parent, ok := b.chain[from.String()]
 	if !ok {
@@ -630,6 +757,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	var mempool []*btcutil.Tx
 
 	nextBlockHeight := parent.Height() + 1
+	kssList := []hemi.L2Keystone{}
 	switch nextBlockHeight {
 	case 2:
 		// spend block 1 coinbase
@@ -640,9 +768,41 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
+
+		// Add keystone
+		l2Keystone := hemi.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      2,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytes("parentephash", 32),
+			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytes("ephash", 32),
+		}
+		kssList = append(kssList, l2Keystone)
+
+		signer, err := b.findKeyByName("miner")
+		if err != nil {
+			return nil, err
+		}
+		recipient, err := b.findKeyByName("pop")
+		if err != nil {
+			return nil, err
+		}
+		popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone, signer.Serialize(), recipient.PubKey(), tx)
+		if err != nil {
+			return nil, err
+		}
+
+		err = executeTX(b.t, true, tx.MsgTx().TxOut[1].PkScript, popTx)
+		if err != nil {
+			return nil, err
+		}
+		mempool = append(mempool, popTx)
+		// b.t.Logf("added popTx %v", popTx)
 	case 3:
 		// spend block 2 transaction 1
-		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(1), 1100000000)
+		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(0), 1100000000)
 		if err != nil {
 			return nil, fmt.Errorf("new tx from tx: %w", err)
 		}
@@ -650,17 +810,41 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
 		mempool = []*btcutil.Tx{tx}
 
-		// spend above tx in same block
-		tx2, err := b.newSignedTxFromTx(name+":1", tx, 3000000000)
-		if err != nil {
-			return nil, fmt.Errorf("new tx from tx: %w", err)
+		// Add keystone
+		l2Keystone := hemi.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      3,
+			L2BlockNumber:      55,
+			ParentEPHash:       fillOutBytes("PARENTEPHASH", 32),
+			PrevKeystoneEPHash: fillOutBytes("PREVKEYSTONEEPHASH", 32),
+			StateRoot:          fillOutBytes("STATEROOT", 32),
+			EPHash:             fillOutBytes("EPHASH", 32),
 		}
-		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
-			tx2.MsgTx().TxIn[0].PreviousOutPoint)
-		mempool = []*btcutil.Tx{tx, tx2}
+		kssList = append(kssList, l2Keystone)
+
+		signer, err := b.findKeyByName("miner")
+		if err != nil {
+			return nil, err
+		}
+		recipient, err := b.findKeyByName("pop")
+		if err != nil {
+			return nil, err
+		}
+		popTx, err := createPopTx(uint64(nextBlockHeight), &l2Keystone,
+			signer.Serialize(), recipient.PubKey(), tx)
+		if err != nil {
+			return nil, err
+		}
+
+		err = executeTX(b.t, true, tx.MsgTx().TxOut[1].PkScript, popTx)
+		if err != nil {
+			return nil, err
+		}
+		mempool = append(mempool, popTx)
+		// b.t.Logf("added popTx %v", popTx)
 	}
 
-	bt, err := newBlockTemplate(b.params, payToAddress, nextBlockHeight,
+	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextBlockHeight,
 		parent.Hash(), extraNonce, mempool)
 	if err != nil {
 		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
@@ -674,6 +858,15 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	// XXX this really sucks, we should get rid of height as a best indicator
 	if blk.Height() > b.height {
 		b.height = blk.Height()
+	}
+
+	// store values manually to check if keystone processing is correct
+	for _, l2Keystone := range kssList {
+		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
+		blk.kss[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
+			BlockHash:           *blk.Hash(),
+			AbbreviatedKeystone: abrvKs,
+		}
 	}
 
 	return blk, nil
@@ -716,7 +909,7 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 	if err != nil {
 		return nil, err
 	}
-
+	b.t.Logf("mined %v: %v", blk.name, blk.MsgBlock().Header.BlockHash())
 	err = b.SendBlockheader(ctx, blk.MsgBlock().Header)
 	if err != nil {
 		return nil, err
@@ -776,7 +969,55 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey,
 	return key, key.PubKey(), address, nil
 }
 
-func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
+func checkKeystoneDB(ctx context.Context, t *testing.T, s *Server, kssAbrev ...chainhash.Hash) error {
+	for _, k := range kssAbrev {
+		_, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k)
+		if err != nil {
+			return err
+		}
+		t.Logf("%v: keystone in db", k)
+	}
+	return nil
+}
+
+func mustHaveKss(ctx context.Context, t *testing.T, s *Server, blocks ...*block) ([]chainhash.Hash, error) {
+	processedKss := make([]chainhash.Hash, 0)
+	for _, b := range blocks {
+		txsInBlock := 0
+		_, height, err := s.BlockHeaderByHash(ctx, b.Hash())
+		if err != nil {
+			return nil, err
+		}
+		if height != uint64(b.Height()) {
+			return nil, fmt.Errorf("%v != %v", height, uint64(b.Height()))
+		}
+
+		kssCache := make(map[chainhash.Hash]tbcd.Keystone, 10)
+
+		err = processKeystones(b.b.Hash(), b.b.Transactions(), kssCache)
+		if err != nil {
+			panic(fmt.Errorf("processKeystones: %w", err))
+		}
+
+		for kkss, vkss := range kssCache {
+			if !bytes.Equal(b.Hash()[:], vkss.BlockHash[:]) {
+				return nil, fmt.Errorf("block mismatch %v",
+					vkss.BlockHash[:])
+			}
+			if diff := deep.Equal(b.kss[kkss], vkss); len(diff) > 0 {
+				t.Fatalf("processKeystones: returned %v, expected %v",
+					spew.Sdump(b.kss[kkss]), spew.Sdump(vkss))
+			}
+			txsInBlock++
+			processedKss = append(processedKss, kkss)
+		}
+		t.Logf("got %v keystone txs in block %s", txsInBlock, b.name)
+	}
+
+	return processedKss, nil
+}
+
+func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
 	for _, b := range blocks {
 		_, height, err := s.BlockHeaderByHash(ctx, b.Hash())
 		if err != nil {
@@ -786,7 +1027,7 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 			return fmt.Errorf("%v != %v", height, uint64(b.Height()))
 		}
 
-		log.Infof("mustHave: %v", b.Hash())
+		t.Logf("mustHave: %v", b.Hash())
 		// Verify Txs cache
 		for ktx, vtx := range b.txs {
 			switch ktx[0] {
@@ -809,10 +1050,10 @@ func mustHave(ctx context.Context, s *Server, blocks ...*block) error {
 					break
 				}
 				if !found {
-					log.Infof("tx hash: %v", tx)
-					log.Infof("ktx: %v", spew.Sdump(ktx))
-					log.Infof("vtx: %v", spew.Sdump(vtx))
-					log.Infof(spew.Sdump(sis))
+					t.Logf("tx hash: %v", tx)
+					t.Logf("ktx: %v", spew.Sdump(ktx))
+					t.Logf("vtx: %v", spew.Sdump(vtx))
+					t.Logf(spew.Sdump(sis))
 					return errors.New("block mismatch")
 				}
 
@@ -876,6 +1117,16 @@ func TestFork(t *testing.T) {
 		}
 	}()
 
+	popPriv, popPublic, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	popPrivate = popPriv
+	t.Logf("pop keys:")
+	t.Logf("  private    : %x", popPrivate.Serialize())
+	t.Logf("  public     : %x", popPublic.SerializeCompressed())
+	t.Logf("  address    : %v", popAddress)
+
 	startHash := n.Best()
 	count := 9
 	expectedHeight := uint64(count)
@@ -912,8 +1163,6 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		log.Infof("s run")
-		defer log.Infof("s run done")
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
@@ -930,7 +1179,6 @@ func TestFork(t *testing.T) {
 		// See if we are at the right height
 		si := s.Synced(ctx)
 		if si.BlockHeader.Height != expectedHeight {
-			log.Infof("not synced")
 			continue
 		}
 
@@ -1121,6 +1369,16 @@ func TestIndexNoFork(t *testing.T) {
 		}
 	}()
 
+	popPriv, popPublic, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	popPrivate = popPriv
+	t.Logf("pop keys:")
+	t.Logf("  private    : %x", popPrivate.Serialize())
+	t.Logf("  public     : %x", popPublic.SerializeCompressed())
+	t.Logf("  address    : %v", popAddress)
+
 	go func() {
 		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
@@ -1134,13 +1392,16 @@ func TestIndexNoFork(t *testing.T) {
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
+		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
 		ListenAddress:        "localhost:8882",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
+		MempoolEnabled:          false,
 		Seeds:                   []string{"127.0.0.1:18444"},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -1185,13 +1446,12 @@ func TestIndexNoFork(t *testing.T) {
 	if direction <= 0 {
 		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
 	}
-
 	// Index to b3
 	err = s.SyncIndexersToHash(ctx, b3.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1210,11 +1470,27 @@ func TestIndexNoFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
+	// check if keystones exist in txs
+	foundKss, err := mustHaveKss(ctx, t, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(foundKss) < 1 {
+		t.Fatal("no keystone txs found")
+	}
+
+	// check if keystones exist in DB
+	err = checkKeystoneDB(ctx, t, s, foundKss...)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// make sure genesis tx is in db
 	_, err = s.TxById(ctx, n.gtx.Hash())
 	if err != nil {
 		t.Fatalf("genesis not found: %v", err)
 	}
+
 	// make sure gensis was not spent
 	_, err = s.SpentOutputsByTxId(ctx, n.gtx.Hash())
 	if err == nil {
@@ -1248,7 +1524,8 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
-	err = mustHave(ctx, s, n.genesis, b1)
+
+	err = mustHave(ctx, t, s, n.genesis, b1)
 	if err != nil {
 		t.Fatalf("expected an error from mustHave: %v", err)
 	}
@@ -1268,10 +1545,34 @@ func TestIndexNoFork(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		log.Infof("balance address %v  %v", address, btcutil.Amount(balance))
+		t.Logf("balance address %v  %v", address, btcutil.Amount(balance))
 		if balance != 0 {
 			t.Fatalf("%v (%v) invalid balance expected 0, got %v",
 				key.name, address, btcutil.Amount(balance))
+		}
+	}
+
+	lastKssHeight, err := s.KeystoneIndexHash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check if keystones unwound to genesis
+	if lastKssHeight.Height != 0 {
+		t.Fatalf("expected keystone index hash 0, got %v", lastKssHeight.Height)
+	}
+	finalKss, err := mustHaveKss(ctx, t, s, n.blocksAtHeight[0]...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(finalKss) > 0 {
+		t.Fatalf("expected no keystone txs, got %v", len(finalKss))
+	}
+
+	// check if keystones removed from DB
+	for _, k := range foundKss {
+		err = checkKeystoneDB(ctx, t, s, k)
+		if err == nil {
+			t.Fatal("expected fail in keystone db query")
 		}
 	}
 }
@@ -1292,6 +1593,17 @@ func TestIndexFork(t *testing.T) {
 			t.Logf("node stop: %v", err)
 		}
 	}()
+
+	popPriv, popPublic, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	popPrivate = popPriv
+	t.Logf("pop keys:")
+	t.Logf("  private    : %x", popPrivate.Serialize())
+	t.Logf("  public     : %x", popPublic.SerializeCompressed())
+	t.Logf("  address    : %v", popAddress)
+
 	go func() {
 		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
@@ -1305,10 +1617,12 @@ func TestIndexFork(t *testing.T) {
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
+		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
 		ListenAddress:        "localhost:8883",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
@@ -1372,6 +1686,8 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	time.Sleep(2 * time.Second)
+
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
@@ -1389,7 +1705,7 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// XXX verify indexes
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1406,6 +1722,21 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, utxos)
+	}
+
+	// check if keystones exist in txs
+	foundKss, err := mustHaveKss(ctx, t, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(foundKss) < 1 {
+		t.Fatal("no keystone txs found")
+	}
+
+	// check if keystones exist in DB
+	err = checkKeystoneDB(ctx, t, s, foundKss...)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// Verify linear indexing. Current TxIndex is sitting at b3
@@ -1452,7 +1783,7 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
@@ -1514,7 +1845,7 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
-	err = mustHave(ctx, s, n.genesis, b1, b2, b3)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
@@ -1577,6 +1908,30 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, utxos)
+	}
+
+	lastKssHeight, err := s.KeystoneIndexHash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check if keystones unwound to genesis
+	if lastKssHeight.Height != 0 {
+		t.Fatalf("expected keystone index hash 0, got %v", lastKssHeight.Height)
+	}
+	finalKss, err := mustHaveKss(ctx, t, s, n.blocksAtHeight[0]...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(finalKss) > 0 {
+		t.Fatalf("expected no keystone txs, got %v", len(finalKss))
+	}
+
+	// check if keystones removed from DB
+	for _, k := range foundKss {
+		err = checkKeystoneDB(ctx, t, s, k)
+		if err == nil {
+			t.Fatal("expected fail in keystone db query")
+		}
 	}
 	// err = mustHave(ctx, s, n.genesis, b1, b2, b3)
 	// if err == nil {
@@ -1697,7 +2052,7 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	redeemTx.TxIn[0].SignatureScript = sigScript
-	log.Infof("redeem tx: %v", spew.Sdump(redeemTx))
+	t.Logf("redeem tx: %v", spew.Sdump(redeemTx))
 
 	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
 		txscript.ScriptStrictMultiSig |

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -29,6 +29,7 @@ const (
 	BlockHeadersDB  = "blockheaders"
 	BlocksMissingDB = "blocksmissing"
 	MetadataDB      = "metadata"
+	KeystonesDB     = "keystones"
 	HeightHashDB    = "heighthash"
 	PeersDB         = "peers"
 	OutputsDB       = "outputs"
@@ -220,6 +221,10 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	err = l.openDB(TransactionsDB, nil)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", TransactionsDB, err)
+	}
+	err = l.openDB(KeystonesDB, nil)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
 	}
 
 	// Blocks database is special

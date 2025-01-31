@@ -26,6 +26,7 @@ import (
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 // Locking order:
@@ -213,8 +214,12 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 		}
 	}
 	cf := func() error {
-		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%v discard: %w", db, err)
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("%v commit: %w", db, err)
+		}
+		// Always flush transaction to disk
+		if err := bhsDB.CompactRange(util.Range{}); err != nil {
+			return fmt.Errorf("%v compact: %w", db, err)
 		}
 		*discard = false
 		return nil
@@ -280,6 +285,23 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 	defer mdDiscard()
 
 	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
+}
+
+func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
+	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
+	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
+
+	kssDB := l.pool[level.KeystonesDB]
+	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
+		}
+		return nil, fmt.Errorf("l2 keystone get: %w", err)
+	}
+
+	ks := decodeKeystone(eks)
+	return &ks, nil
 }
 
 // BatchAppend appends rows to batch b.
@@ -1702,6 +1724,86 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	// transactions commit
 	if err = txsCommit(); err != nil {
 		return fmt.Errorf("transactions commit: %w", err)
+	}
+
+	return nil
+}
+
+// encodeKeystone encodes a database keystone as
+// [blockhash,abbreviated keystone] or [32+76] bytes. The abbreviated keystone
+// hash is the leveldb table key.
+func encodeKeystone(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte) {
+	copy(eks[0:32], ks.BlockHash[:])
+	copy(eks[32:], ks.AbbreviatedKeystone[:])
+	return
+}
+
+func encodeKeystoneToSlice(ks tbcd.Keystone) []byte {
+	eks := encodeKeystone(ks)
+	return eks[:]
+}
+
+// decodeKeystone reverse the process of encodeKeystone.
+func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
+	bh, err := chainhash.NewHash(eks[0:32])
+	if err != nil {
+		panic(err) // Can't happen
+	}
+	ks.BlockHash = *bh
+	// copy the values to prevent slicing reentrancy problems.
+	copy(ks.AbbreviatedKeystone[:], eks[32:])
+	return ks
+}
+
+func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone) error {
+	log.Tracef("BlockKeystoneUpdate")
+	defer log.Tracef("BlockKeystoneUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	// keystones
+	kssTx, kssCommit, kssDiscard, err := l.startTransaction(level.KeystonesDB)
+	if err != nil {
+		return fmt.Errorf("keystones open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	kssBatch := new(leveldb.Batch)
+	for k, v := range keystones {
+		switch direction {
+		case -1:
+			eks, err := kssTx.Get(k[:], nil)
+			if err != nil {
+				continue
+			}
+			ks := decodeKeystone(eks)
+			// Only delete keystone if it is in the previously found block.
+			if ks.BlockHash.IsEqual(&v.BlockHash) {
+				kssBatch.Delete(k[:])
+			}
+		case 1:
+			has, err := kssTx.Has(k[:], nil)
+			if err != nil {
+				return fmt.Errorf("keystone update has: %w", err)
+			}
+			if has {
+				// Only store unknown keystones
+				continue
+			}
+			kssBatch.Put(k[:], encodeKeystoneToSlice(v))
+		}
+	}
+
+	// Write keystones batch
+	if err = kssTx.Write(kssBatch, nil); err != nil {
+		return fmt.Errorf("keystones insert: %w", err)
+	}
+
+	// keystones commit
+	if err = kssCommit(); err != nil {
+		return fmt.Errorf("keystones commit: %w", err)
 	}
 
 	return nil
