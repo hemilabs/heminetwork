@@ -249,7 +249,7 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 	if err != nil {
 		return nil, err
 	}
-	b.t.Logf("rdeeem pkScript (%v): %x", name, pkScript)
+	b.t.Logf("redeem pkScript (%v): %x", name, pkScript)
 	b.t.Logf("redeem keys:")
 	b.t.Logf("  private    : %x", redeemPrivate.Serialize())
 	b.t.Logf("  public     : %x", redeemPublic.SerializeCompressed())
