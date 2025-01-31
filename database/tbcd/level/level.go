@@ -214,8 +214,12 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 		}
 	}
 	cf := func() error {
-		if err = tx.Commit(); err != nil {
-			return fmt.Errorf("%v discard: %w", db, err)
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("%v commit: %w", db, err)
+		}
+		// Always flush transaction to disk
+		if err := bhsDB.CompactRange(util.Range{}); err != nil {
+			return fmt.Errorf("%v compact: %w", db, err)
 		}
 		*discard = false
 		return nil
