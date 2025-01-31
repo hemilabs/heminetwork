@@ -2,15 +2,30 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-FROM golang:1.22.6-bookworm@sha256:f020456572fc292e9627b3fb435c6de5dfb8020fbcef1fd7b65dd092c0ac56bb
+FROM golang:1.23.4-bookworm@sha256:ef30001eeadd12890c7737c26f3be5b3a8479ccdcdc553b999c84879875a27ce AS build_1
+
+WORKDIR /git
+
+ARG OP_GETH_CACHE_BREAK=12F2
+RUN git clone https://github.com/hemilabs/op-geth
+WORKDIR /git/op-geth
+RUN git checkout a7ab4addbe8402714cf4e2f03ffdd272838ece71
+
+WORKDIR /git/op-geth
+
+RUN make
+
+RUN go build -o /tmp ./...
+
+FROM golang:1.22.6-bookworm@sha256:f020456572fc292e9627b3fb435c6de5dfb8020fbcef1fd7b65dd092c0ac56bb AS build_2
+
+# store the latest geth here, build with go 1.23
+COPY --from=build_1 /tmp/geth /bin/geth
 
 RUN apt-get update
 
-RUN apt-get install -y nodejs npm jq
+RUN apt-get install -y jq nodejs npm
 
-RUN npm install -g pnpm
-
-WORKDIR /git
 
 RUN curl -L https://foundry.paradigm.xyz | bash
 
@@ -20,25 +35,14 @@ ENV PATH="${PATH}:/root/.foundry/bin"
 
 RUN foundryup
 
-ARG OP_GETH_CACHE_BREAK=12F
-RUN git clone https://github.com/hemilabs/op-geth
-WORKDIR /git/op-geth
-RUN git checkout 4c818bcfa33873c808cfb697ea1b713748338117
+RUN npm install -g pnpm
 
 WORKDIR /git
-
-ARG OPTIMISM_CACHE_BREAK=1
+COPY --from=build_1 /git/op-geth /git/op-geth
+WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout adf68923d2b278641e405dd5bfc4f53196d58bbe
-
-WORKDIR /git/op-geth
-
-RUN make
-RUN go install ./...
-
-WORKDIR /git/optimism
-
+RUN git checkout 5467ea32639c3cad6845161107939097587436d6
 RUN git submodule update --init --recursive
 RUN pnpm install
 RUN pnpm install:abigen

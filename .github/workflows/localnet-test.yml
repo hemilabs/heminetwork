@@ -39,7 +39,7 @@ jobs:
         run: docker compose -f ./e2e/docker-compose.yml build
 
       - name: "run localnet"
-        run: docker compose -f ./e2e/docker-compose.yml up -d
+        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d
 
       - name: "kill an op-node after 15 seconds, then wait 3 minutes (the healthcheck interval + time for another sequencer to take over)"
         run: sleep 15 && docker compose -f ./e2e/docker-compose.yml down op-node && sleep 180

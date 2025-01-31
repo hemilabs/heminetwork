@@ -48,7 +48,10 @@ services:
       restart_policy:
         condition: "any"
     depends_on:
-      - "bitcoind"
+      bitcoind: 
+        condition: "service_started"
+      raft: 
+        condition: "service_completed_successfully"
     command:
       - "bitcoin-cli"
       - "-regtest=1"
@@ -207,15 +210,21 @@ services:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
     depends_on:
-      - "geth-l1"
+      geth-l1:
+        condition: "service_started"
+      bitcoind:
+        condition: "service_started"
+      bitcoind-initialblocks:
+        condition: "service_completed_successfully"
     healthcheck:
-      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 30303"]
-      timeout: 1s
+      test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
+      interval: 5s
       retries: 300
-      interval: 1s
+      start_period: 30s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
+      HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
     working_dir: "/tmp"
     command:
       - "sh"
@@ -242,14 +251,15 @@ services:
       op-geth-l2:
         condition: "service_healthy"
     healthcheck:
-      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 30303"]
-      timeout: 1s
+      test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
+      interval: 5s
       retries: 300
-      interval: 1s
+      start_period: 120s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
       ENTRYPOINT_SKIP_GENESIS: "true"
+      HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
     working_dir: "/tmp"
     command:
       - "sh"
@@ -265,7 +275,7 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - { type: "tmpfs", target: "/tmp" }
-    restart: on-failure
+    restart: always
     networks:
       e2e:
 
@@ -277,14 +287,15 @@ services:
       op-geth-l2:
         condition: "service_healthy"
     healthcheck:
-      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 30303"]
-      timeout: 1s
+      test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
+      interval: 5s
       retries: 300
-      interval: 1s
+      start_period: 120s
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
       ENTRYPOINT_SKIP_GENESIS: "true"
+      HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
     working_dir: "/tmp"
     command:
       - "sh"
@@ -300,7 +311,7 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - { type: "tmpfs", target: "/tmp" }
-    restart: on-failure
+    restart: always
     networks:
       e2e:
 
@@ -316,11 +327,10 @@ services:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
+      bssd:
+        condition: "service_started"
     healthcheck:
-      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 9222"]
-      timeout: 1s
-      retries: 300
-      interval: 1s
+      start_period: 180s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -375,11 +385,10 @@ services:
         condition: "service_started"
       op-geth-l2-2:
         condition: "service_healthy"
+      bssd:
+        condition: "service_started"
     healthcheck:
-      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 9222"]
-      timeout: 1s
-      retries: 300
-      interval: 1s
+      start_period: 180s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -431,11 +440,10 @@ services:
         condition: "service_started"
       op-geth-l2-3:
         condition: "service_healthy"
+      bssd:
+        condition: "service_started"
     healthcheck:
-      test: ["CMD-SHELL", "nc -w 1 -vz 0.0.0.0 9222"]
-      timeout: 1s
-      retries: 300
-      interval: 1s
+      start_period: 180s
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
@@ -482,6 +490,8 @@ services:
     deploy:
       restart_policy:
         condition: "any"
+    healthcheck:
+      start_period: 180s
     command:
       - "op-batcher/bin/op-batcher"
       - "--l2-eth-rpc=http://op-geth-l2:8546,http://op-geth-l2-2:8546,http://op-geth-l2-3:8546"
@@ -505,6 +515,10 @@ services:
         condition: "service_healthy"
       op-node:
         condition: "service_started"
+      op-node-2:
+        condition: "service_started"
+      op-node-3:
+        condition: "service_started"
     networks:
       e2e:
 
@@ -522,6 +536,12 @@ services:
         condition: "service_healthy"
       op-node:
         condition: "service_started"
+      op-node-2:
+        condition: "service_started"
+      op-node-3:
+        condition: "service_started"
+    healthcheck:
+      start_period: 180s
     command:
       - "op-proposer/bin/op-proposer"
       - "--poll-interval=1s"
@@ -530,56 +550,6 @@ services:
       - "--private-key=${ADMIN_PRIVATE_KEY}"
       - "--l1-eth-rpc=http://geth-l1:8545"
       - "--rollup-rpc=http://op-node:8547,http://op-node-2:8547,http://op-node-3:8547"
-    networks:
-      e2e:
-
-  op-proposer-2:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
-    deploy:
-      restart_policy:
-        condition: "any"
-    depends_on:
-      geth-l1:
-        condition: "service_started"
-      op-geth-l2-2:
-        condition: "service_healthy"
-      op-node-2:
-        condition: "service_started"
-    command:
-      - "op-proposer/bin/op-proposer"
-      - "--poll-interval=1s"
-      - "--rpc.port=8560"
-      - "--rollup-rpc=http://op-node-2:8547"
-      - "--l2oo-address=${L2OO_ADDRESS}"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-    networks:
-      e2e:
-
-  op-proposer-3:
-    build:
-      dockerfile: "optimism-stack.Dockerfile"
-      context: "."
-    deploy:
-      restart_policy:
-        condition: "any"
-    depends_on:
-      geth-l1:
-        condition: "service_started"
-      op-geth-l2-3:
-        condition: "service_healthy"
-      op-node-3:
-        condition: "service_started"
-    command:
-      - "op-proposer/bin/op-proposer"
-      - "--poll-interval=1s"
-      - "--rpc.port=8560"
-      - "--rollup-rpc=http://op-node-3:8547"
-      - "--l2oo-address=${L2OO_ADDRESS}"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://geth-l1:8545"
     networks:
       e2e:
 
@@ -613,9 +583,11 @@ services:
       e2e:
     depends_on:
       op-node:
-        condition: "service_healthy"
+        condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
+    healthcheck:
+      start_period: 180s
     ports:
       - "127.0.0.1:50050:50050"
 
@@ -648,9 +620,9 @@ services:
       e2e:
     depends_on:
       op-node-2:
-        condition: "service_healthy"
+        condition: "service_started"
       op-geth-l2-2:
-        condition: "service_healthy"
+        condition: "service_started"
     ports:
       - "127.0.0.1:50051:50051"
   
@@ -683,9 +655,9 @@ services:
       e2e:
     depends_on:
       op-node-3:
-        condition: "service_healthy"
+        condition: "service_started"
       op-geth-l2-3:
-        condition: "service_healthy"
+        condition: "service_started"
     ports:
       - "127.0.0.1:50052:50052"
 
