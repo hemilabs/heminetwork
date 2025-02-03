@@ -30,6 +30,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -1078,6 +1079,8 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			switch {
 			case errors.Is(err, nil):
 			case errors.Is(err, context.Canceled):
+				return
+			case errors.Is(err, leveldb.ErrClosed):
 				return
 			case errors.Is(err, ErrAlreadyIndexing):
 				return
