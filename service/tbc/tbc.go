@@ -666,6 +666,12 @@ func (s *Server) promTx() float64 {
 	return deucalion.Uint64ToFloat(s.prom.syncInfo.Tx.Height)
 }
 
+func (s *Server) promKeystone() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.Uint64ToFloat(s.prom.syncInfo.Keystone.Height)
+}
+
 func (s *Server) promConnectedPeers() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -2416,6 +2422,14 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "block_cache_items",
 				Help:      "Number of cached blocks",
 			}, s.promBlockCacheItems),
+		}
+		if s.cfg.HemiIndex {
+			s.promCollectors = append(s.promCollectors,
+				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+					Namespace: s.cfg.PrometheusNamespace,
+					Name:      "keystone_sync_height",
+					Help:      "Height of the keystone indexer",
+				}, s.promKeystone))
 		}
 	}
 	return s.promCollectors
