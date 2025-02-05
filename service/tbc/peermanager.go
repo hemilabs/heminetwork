@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -342,7 +342,7 @@ func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*rawpeer.RawPe
 		if _, ok := pm.bad[k]; ok {
 			// Should not happen but let's make sure we aren't
 			// reusing an address.
-			log.Errorf("found addres on bad list: %v", k)
+			log.Errorf("found address on bad list: %v", k)
 			continue
 		}
 
@@ -393,7 +393,7 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 	defer log.Tracef("Run")
 
 	if len(pm.seeds) == 0 {
-		log.Infof("Starting DNS seeder")
+		log.Infof("DNS seeder started")
 		minW := 5
 		maxW := 59
 		for {
@@ -415,8 +415,8 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 	}
 	pm.HandleAddr(pm.seeds) // Add all seeds to good list
 
-	log.Infof("Starting peer manager")
-	defer log.Infof("Peer manager stopped")
+	log.Debugf("Peer manager starting")
+	defer log.Debugf("Peer manager stopped")
 
 	// Start connecting "want" number of peers.
 	pm.slotsC = make(chan int, pm.want)
@@ -436,8 +436,11 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 			go pm.connectSlot(ctx, p)
 
 		case <-ctx.Done():
-			log.Infof("exit")
-			return ctx.Err()
+			err := ctx.Err()
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
 		}
 	}
 }

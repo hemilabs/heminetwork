@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -145,7 +145,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Subsystem: promSubsystem,
 			Name:      "rpc_calls_total",
-			Help:      "The total number of succesful RPC commands",
+			Help:      "The total number of successful RPC commands",
 		}),
 		requestTimeout: defaultRequestTimeout,
 		bfgCallTimeout: 20 * time.Second,
@@ -288,8 +288,6 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, msg *b
 
 	response, err := s.callBFG(ctx, &bfgapi.BTCFinalityByKeystonesRequest{
 		L2Keystones: msg.L2Keystones,
-		Limit:       msg.Limit,
-		Page:        msg.Page,
 	})
 	if err != nil {
 		e := protocol.NewInternalErrorf("btc finality keystones: %w", err)

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -124,7 +124,7 @@ func NewHeaderFromBytes(b []byte) (*Header, error) {
 		copy(h.StateRoot[:], b[29:61])
 		copy(h.EPHash[:], b[61:73])
 	default:
-		return nil, fmt.Errorf("unsuported version: %v", h.Version)
+		return nil, fmt.Errorf("unsupported version: %v", h.Version)
 	}
 	return h, nil
 }
@@ -200,13 +200,24 @@ func L2KeystoneAbrevDeserialize(r RawAbreviatedL2Keystone) *L2KeystoneAbrev {
 	return &a
 }
 
-func (a *L2KeystoneAbrev) Hash() []byte {
+func (a *L2KeystoneAbrev) HashB() []byte {
 	b := a.Serialize()
 	return chainhash.DoubleHashB(b[:])
 }
 
-func HashSerializedL2KeystoneAbrev(s []byte) []byte {
+func HashSerializedL2KeystoneAbrevB(s []byte) []byte {
 	return chainhash.DoubleHashB(s)
+}
+
+func (a *L2KeystoneAbrev) Hash() *chainhash.Hash {
+	b := a.Serialize()
+	h := chainhash.DoubleHashH(b[:])
+	return &h
+}
+
+func HashSerializedL2KeystoneAbrev(s []byte) *chainhash.Hash {
+	h := chainhash.DoubleHashH(s)
+	return &h
 }
 
 func L2KeystoneAbbreviate(l2ks L2Keystone) *L2KeystoneAbrev {
@@ -233,7 +244,7 @@ func NewL2KeystoneAbrevFromBytes(b []byte) (*L2KeystoneAbrev, error) {
 	switch ka.Version {
 	case L2KeystoneAbrevVersion:
 		if len(b) != L2KeystoneAbrevSize {
-			return nil, fmt.Errorf("invalid keystone sbrev length (%d)",
+			return nil, fmt.Errorf("invalid keystone abrev length (%d)",
 				len(b))
 		}
 		ka.L1BlockNumber = binary.BigEndian.Uint32(b[1:5])
@@ -243,7 +254,7 @@ func NewL2KeystoneAbrevFromBytes(b []byte) (*L2KeystoneAbrev, error) {
 		copy(ka.StateRoot[:], b[32:64])
 		copy(ka.EPHash[:], b[64:76])
 	default:
-		return nil, fmt.Errorf("unsuported version: %v", ka.Version)
+		return nil, fmt.Errorf("unsupported version: %v", ka.Version)
 	}
 	return ka, nil
 }

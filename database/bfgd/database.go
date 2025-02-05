@@ -19,13 +19,13 @@ type Database interface {
 	// L2 keystone table
 	L2KeystonesInsert(ctx context.Context, l2ks []L2Keystone) error
 	L2KeystoneByAbrevHash(ctx context.Context, aHash [32]byte) (*L2Keystone, error)
-	L2KeystonesMostRecentN(ctx context.Context, n uint32) ([]L2Keystone, error)
+	L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32) ([]L2Keystone, error)
 
 	// Btc block table
 	BtcBlockInsert(ctx context.Context, bb *BtcBlock) error
+	BtcBlockReplace(ctx context.Context, btcBlock *BtcBlock) (int64, error)
 	BtcBlockByHash(ctx context.Context, hash [32]byte) (*BtcBlock, error)
 	BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64, error)
-	BtcBlocksHeightsWithNoChildren(ctx context.Context) ([]uint64, error)
 
 	// Pop data
 	PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool, page uint32) ([]PopBasis, error)
@@ -34,7 +34,7 @@ type Database interface {
 	PopBasisUpdateBTCFields(ctx context.Context, pb *PopBasis) (int64, error)
 
 	L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]L2BTCFinality, error)
-	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray, page uint32, limit uint32) ([]L2BTCFinality, error)
+	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray) ([]L2BTCFinality, error)
 
 	BtcBlockCanonicalHeight(ctx context.Context) (uint64, error)
 
@@ -103,7 +103,7 @@ type PopBasis struct {
 	BtcMerklePath       []string
 	PopTxId             database.ByteArray
 	PopMinerPublicKey   database.ByteArray
-	L2KeystoneAbrevHash database.ByteArray
+	L2KeystoneAbrevHash database.ByteArray `json:"l2_keystone_abrev_hash"`
 	CreatedAt           database.Timestamp `deep:"-"`
 	UpdatedAt           database.Timestamp `deep:"-"`
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -82,8 +82,6 @@ type BTCFinalityByRecentKeystonesResponse struct {
 
 type BTCFinalityByKeystonesRequest struct {
 	L2Keystones []hemi.L2Keystone `json:"l2_keystones"`
-	Page        uint32            `json:"page,omitempty"`
-	Limit       uint32            `json:"limit,omitempty"`
 }
 
 type BTCFinalityByKeystonesResponse struct {

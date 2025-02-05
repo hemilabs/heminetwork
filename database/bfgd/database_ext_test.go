@@ -66,7 +66,7 @@ func createTestDB(ctx context.Context, t *testing.T) (bfgd.Database, *sql.DB, fu
 		t.Fatalf("Failed to connect to database: %v", err)
 	}
 
-	dbn := mathrand.IntN(9999)
+	dbn := mathrand.IntN(999999999)
 	dbName := fmt.Sprintf("%v_%d", testDBPrefix, dbn)
 
 	t.Logf("Creating test database %v", dbName)
@@ -211,7 +211,7 @@ func TestDatabasePostgres(t *testing.T) {
 		}
 	}
 	// Most recent
-	l2ksOut, err := db.L2KeystonesMostRecentN(ctx, 1)
+	l2ksOut, err := db.L2KeystonesMostRecentN(ctx, 1, 0)
 	if err != nil {
 		t.Fatalf("Failed to get most recent L2 keystone: %v", err)
 	}
@@ -296,12 +296,167 @@ type btcBlocksNtfn struct {
 	expected *bfgd.BtcBlock
 }
 
-func (b *btcBlocksNtfn) handleBtcBlocksNotification(table string, action string, payload, payloadOld interface{}) {
+func (b *btcBlocksNtfn) handleBtcBlocksNotification(pctx context.Context, table string, action string, payload, payloadOld interface{}) {
 	defer b.cancel()
 	bb := payload.(*bfgd.BtcBlock)
 	if !reflect.DeepEqual(*b.expected, *bb) {
 		b.t.Fatalf("expected %v, got %v",
 			spew.Sdump(*b.expected), spew.Sdump(*bb))
+	}
+}
+
+func TestBtcBlockReplaceNotIfSameBlock(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	btcBlock := bfgd.BtcBlock{
+		Hash:   fillOutBytes("MyHaSh", 32),
+		Header: fillOutBytes("myHeAdEr", 80),
+		Height: 1,
+	}
+
+	rowsAffected, err := db.BtcBlockReplace(ctx, &btcBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rowsAffected != 1 {
+		t.Fatalf("unexpected rows affected: %d", rowsAffected)
+	}
+
+	rowsAffected, err = db.BtcBlockReplace(ctx, &btcBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rowsAffected != 0 {
+		t.Fatalf("unexpected rows affected: %d", rowsAffected)
+	}
+
+	result, err := db.BtcBlockByHash(ctx, [32]byte(btcBlock.Hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := deep.Equal(result, &btcBlock); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
+	}
+}
+
+func TestBtcBlockReplaceIfDifferentBlocks(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	btcBlock := bfgd.BtcBlock{
+		Hash:   fillOutBytes("MyHaSh", 32),
+		Header: fillOutBytes("myHeAdEr", 80),
+		Height: 1,
+	}
+
+	rowsAffected, err := db.BtcBlockReplace(ctx, &btcBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rowsAffected != 1 {
+		t.Fatalf("unexpected rows affected: %d", rowsAffected)
+	}
+
+	btcBlock.Hash = fillOutBytes("differenthash", 32)
+	btcBlock.Header = fillOutBytes("differentheader", 80)
+
+	rowsAffected, err = db.BtcBlockReplace(ctx, &btcBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rowsAffected != 1 {
+		t.Fatalf("unexpected rows affected: %d", rowsAffected)
+	}
+
+	result, err := db.BtcBlockByHash(ctx, [32]byte(btcBlock.Hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := deep.Equal(result, &btcBlock); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
+	}
+}
+
+func TestBtcBlockNoReplaceIfDifferentBlocksAtDifferentHeights(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	btcBlock := bfgd.BtcBlock{
+		Hash:   fillOutBytes("MyHaSh", 32),
+		Header: fillOutBytes("myHeAdEr", 80),
+		Height: 1,
+	}
+
+	rowsAffected, err := db.BtcBlockReplace(ctx, &btcBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rowsAffected != 1 {
+		t.Fatalf("unexpected rows affected: %d", rowsAffected)
+	}
+
+	btcBlock.Hash = fillOutBytes("differenthash", 32)
+	btcBlock.Header = fillOutBytes("differentheader", 80)
+	btcBlock.Height = 7
+
+	rowsAffected, err = db.BtcBlockReplace(ctx, &btcBlock)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if rowsAffected != 1 {
+		t.Fatalf("unexpected rows affected: %d", rowsAffected)
+	}
+
+	result, err := db.BtcBlockByHash(ctx, [32]byte(fillOutBytes("MyHaSh", 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := deep.Equal(result, &bfgd.BtcBlock{
+		Hash:   fillOutBytes("MyHaSh", 32),
+		Header: fillOutBytes("myHeAdEr", 80),
+		Height: 1,
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
+	}
+
+	result, err = db.BtcBlockByHash(ctx, [32]byte(btcBlock.Hash))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if diff := deep.Equal(result, &btcBlock); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
 	}
 }
 
@@ -827,7 +982,7 @@ func TestL2KeystoneInsertMostRecentNMoreThanSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l2KeystonesSaved, err := db.L2KeystonesMostRecentN(ctx, 5)
+	l2KeystonesSaved, err := db.L2KeystonesMostRecentN(ctx, 5, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -880,7 +1035,7 @@ func TestL2KeystoneInsertMostRecentNFewerThanSaved(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l2KeystonesSaved, err := db.L2KeystonesMostRecentN(ctx, 1)
+	l2KeystonesSaved, err := db.L2KeystonesMostRecentN(ctx, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -931,7 +1086,7 @@ func TestL2KeystoneInsertMostRecentNLimit100(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	l2KeystonesSaved, err := db.L2KeystonesMostRecentN(ctx, 1000)
+	l2KeystonesSaved, err := db.L2KeystonesMostRecentN(ctx, 1000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1027,7 +1182,7 @@ func TestL2KeystoneInsertDuplicateOK(t *testing.T) {
 		t.Fatalf("received unexpected error: %s", err)
 	}
 
-	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 5)
+	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 5, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1408,197 +1563,6 @@ func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
 	}
 }
 
-func TestBtcBlockGetCanonicalChain(t *testing.T) {
-	type testTableItem struct {
-		name          string
-		onChainCount  int
-		offChainCount int
-	}
-
-	testTable := []testTableItem{
-		{
-			name:          "2 on, 1 off",
-			onChainCount:  2,
-			offChainCount: 1,
-		},
-		{
-			name:          "1 on, 2 off",
-			onChainCount:  1,
-			offChainCount: 2,
-		},
-		{
-			name:          "100 on, 99 off",
-			onChainCount:  100,
-			offChainCount: 99,
-		},
-	}
-
-	for _, tti := range testTable {
-		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := defaultTestContext()
-			defer cancel()
-
-			db, sdb, cleanup := createTestDB(ctx, t)
-			defer func() {
-				db.Close()
-				sdb.Close()
-				cleanup()
-			}()
-
-			height := 1
-			l2BlockNumber := uint32(9999)
-
-			onChainBlocks := []bfgd.BtcBlock{}
-
-			// create off-chain blocks
-			offChainBlocks := createBtcBlocksAtStartingHeight(ctx, t, db, tti.offChainCount, false, height, []byte{}, l2BlockNumber)
-			if len(offChainBlocks) != tti.offChainCount {
-				t.Fatalf("created an incorrect number of on-chain blocks %d",
-					len(offChainBlocks),
-				)
-			}
-
-			height += 10000
-			l2BlockNumber += 1000
-			// create on-chain blocks
-			onChainBlocks = createBtcBlocksAtStartingHeight(ctx, t, db, tti.onChainCount, true, height, []byte{}, l2BlockNumber)
-
-			limit := tti.onChainCount
-
-			bfs, err := db.L2BTCFinalityMostRecent(ctx, uint32(limit))
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if len(bfs) > limit {
-				t.Fatalf("bfs too long %d", len(bfs))
-			}
-
-			slices.Reverse(onChainBlocks)
-
-			for i, block := range onChainBlocks {
-				if i == limit {
-					break
-				}
-				found := false
-				for k, v := range bfs {
-					if slices.Equal(block.Hash, v.BTCPubHeaderHash) == true {
-						t.Logf("found hash in result set: %s", block.Hash)
-						found = true
-						if k < len(bfs)-1 {
-							t.Logf("next has is %s", bfs[k+1].BTCPubHeaderHash)
-						}
-					}
-				}
-				if found == false {
-					t.Fatalf("could not find hash in result set: %s", block.Hash)
-				}
-			}
-
-			for _, block := range offChainBlocks {
-				found := false
-				for _, v := range bfs {
-					if slices.Equal(block.Hash, v.BTCPubHeaderHash) == true {
-						t.Logf("found hash in result set: %s", block.Hash)
-						found = true
-					}
-				}
-				if found == true {
-					t.Fatalf("hash should not have been included in result set: %s", block.Hash)
-				}
-			}
-		})
-	}
-}
-
-func TestBtcBlockGetCanonicalChainWithForks(t *testing.T) {
-	type testTableItem struct {
-		name               string
-		chainPattern       []int
-		unconfirmedIndices []bool
-	}
-
-	testTable := []testTableItem{
-		{
-			name:               "fork at tip",
-			chainPattern:       []int{1, 1, 2},
-			unconfirmedIndices: []bool{false, false, false, false},
-		},
-		{
-			name:               "fork in middle",
-			chainPattern:       []int{1, 2, 1},
-			unconfirmedIndices: []bool{false, false, false, false},
-		},
-		{
-			name:               "fork in beginning",
-			chainPattern:       []int{2, 1, 1},
-			unconfirmedIndices: []bool{false, false, false, false},
-		},
-		{
-			name:               "fork in beginning with break",
-			chainPattern:       []int{2, 1, 1, 1},
-			unconfirmedIndices: []bool{false, false, true, false},
-		},
-		{
-			name:               "fork in beginning with multiple breaks",
-			chainPattern:       []int{2, 1, 1, 1, 1},
-			unconfirmedIndices: []bool{false, true, false, true, false},
-		},
-	}
-
-	for _, tti := range testTable {
-		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := defaultTestContext()
-			defer cancel()
-
-			db, sdb, cleanup := createTestDB(ctx, t)
-			defer func() {
-				db.Close()
-				sdb.Close()
-				cleanup()
-			}()
-
-			height := 1
-
-			onChainBlocks := []bfgd.BtcBlock{}
-
-			l2BlockNumber := uint32(1000)
-			lastHash := []byte{}
-			for i, blockCountAtHeight := range tti.chainPattern {
-				tmp := height
-				if tti.unconfirmedIndices[i] == true {
-					tmp = -1
-				}
-				_onChainBlocks := createBtcBlocksAtStaticHeight(ctx, t, db, blockCountAtHeight, true, tmp, lastHash, l2BlockNumber)
-				l2BlockNumber++
-				height++
-				lastHash = _onChainBlocks[0].Hash
-
-				if (blockCountAtHeight > 1 && i == len(tti.chainPattern)-1) == false {
-					onChainBlocks = append(onChainBlocks, _onChainBlocks[0])
-				}
-			}
-
-			bfs, err := db.L2BTCFinalityMostRecent(ctx, 100)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if len(onChainBlocks) != len(bfs) {
-				t.Fatalf("length of onChainBlocks and pbs differs %d != %d", len(onChainBlocks), len(bfs))
-			}
-
-			slices.Reverse(onChainBlocks)
-
-			for i := range onChainBlocks {
-				if slices.Equal(onChainBlocks[i].Hash, bfs[i].BTCPubHeaderHash[:]) == false {
-					t.Fatalf("hash mismatch: %s != %s", onChainBlocks[i].Hash, bfs[i].BTCPubHeaderHash)
-				}
-			}
-		})
-	}
-}
-
 func TestPublications(t *testing.T) {
 	type testTableItem struct {
 		name            string
@@ -1635,8 +1599,8 @@ func TestPublications(t *testing.T) {
 
 			lastHash := []byte{}
 			for _, height := range tti.heightPattern {
-				_onChainBlocks := createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, height, lastHash, l2BlockNumber)
-				lastHash = _onChainBlocks[0].Hash
+				onChainBlocksTmp := createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, height, lastHash, l2BlockNumber)
+				lastHash = onChainBlocksTmp[0].Hash
 				l2BlockNumber++
 			}
 
@@ -1671,7 +1635,7 @@ func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 
 	createBtcBlocksAtStartingHeight(ctx, t, db, 2, true, 8987, []byte{}, 646464)
 
-	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 2)
+	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1681,8 +1645,6 @@ func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
-		0,
-		100,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1715,7 +1677,7 @@ func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
 
 	createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, -1, []byte{}, 646464)
 
-	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 2)
+	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 2, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1725,8 +1687,6 @@ func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
-		0,
-		100,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1743,168 +1703,6 @@ func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
 
 	if finalities[0].BTCPubHeight != -1 {
 		t.Fatalf("incorrect height %d", finalities[0].BTCPubHeight)
-	}
-}
-
-func TestBtcHeightsNoChildren(t *testing.T) {
-	type testTableItem struct {
-		name                         string
-		numberToCreateWithChildren   int
-		numberToCreateWithNoChildren int
-		overlapCount                 int
-	}
-
-	testTable := []testTableItem{
-		{
-			name:                         "0",
-			numberToCreateWithNoChildren: 0,
-			numberToCreateWithChildren:   43,
-		},
-		{
-			name:                         "less than 100",
-			numberToCreateWithNoChildren: 76,
-			numberToCreateWithChildren:   4,
-		},
-		{
-			name:                         "more than 100",
-			numberToCreateWithNoChildren: 126,
-			numberToCreateWithChildren:   333,
-		},
-		{
-			name:                         "more than 100 and overlap",
-			numberToCreateWithNoChildren: 126,
-			numberToCreateWithChildren:   333,
-			overlapCount:                 98,
-		},
-	}
-
-	createBlocksWithNoChildren := func(ctx context.Context, count int, db bfgd.Database) []int64 {
-		heights := make([]int64, count)
-		for i := range count {
-			height := mathrand.Int64()
-			hash := make([]byte, 32)
-			if _, err := rand.Read(hash); err != nil {
-				t.Fatal(err)
-			}
-			header := make([]byte, 80)
-			if _, err := rand.Read(header); err != nil {
-				t.Fatal(err)
-			}
-
-			btcBlock := bfgd.BtcBlock{
-				Height: uint64(height),
-				Hash:   hash,
-				Header: header,
-			}
-
-			if err := db.BtcBlockInsert(ctx, &btcBlock); err != nil {
-				t.Fatal(err)
-			}
-
-			heights[i] = height
-		}
-
-		return heights
-	}
-
-	createBlocksWithChildren := func(ctx context.Context, count int, db bfgd.Database, avoidHeights []int64, overlapHeights []int64) []int64 {
-		var prevHash []byte
-		overlapHeightI := 0
-		heights := make([]int64, count)
-		for i := range count {
-			var height int64
-			for {
-				if overlapHeightI < len(overlapHeights) {
-					height = overlapHeights[overlapHeightI]
-					overlapHeightI++
-					break
-				}
-
-				height = mathrand.Int64()
-				if !slices.Contains(avoidHeights, height) {
-					break
-				}
-			}
-			hash := make([]byte, 32)
-			if _, err := rand.Read(hash); err != nil {
-				t.Fatal(err)
-			}
-			header := make([]byte, 80)
-			if _, err := rand.Read(header); err != nil {
-				t.Fatal(err)
-			}
-
-			if len(prevHash) > 0 {
-				for k := range 32 {
-					header[k+4] = prevHash[k]
-				}
-			}
-
-			btcBlock := bfgd.BtcBlock{
-				Height: uint64(height),
-				Hash:   hash,
-				Header: header,
-			}
-
-			if err := db.BtcBlockInsert(ctx, &btcBlock); err != nil {
-				t.Fatal(err)
-			}
-			prevHash = hash
-			heights[i] = height
-		}
-		return heights
-	}
-
-	for _, tti := range testTable {
-		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := defaultTestContext()
-			defer cancel()
-
-			db, sdb, cleanup := createTestDB(ctx, t)
-			defer func() {
-				db.Close()
-				sdb.Close()
-				cleanup()
-			}()
-
-			var overlapHeights []int64
-			noChildrenHeights := createBlocksWithNoChildren(ctx, tti.numberToCreateWithNoChildren, db)
-
-			childrenHeights := createBlocksWithChildren(ctx, tti.numberToCreateWithChildren, db, nil, overlapHeights)
-
-			if tti.overlapCount > 0 {
-				overlapHeights = noChildrenHeights[:tti.overlapCount]
-				oldChildrenHeights := childrenHeights
-				for _, o := range oldChildrenHeights {
-					if !slices.Contains(overlapHeights, o) {
-						childrenHeights = append(childrenHeights, o)
-					}
-				}
-			}
-
-			heights, err := db.BtcBlocksHeightsWithNoChildren(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			toCmp := make([]uint64, len(noChildrenHeights)+1)
-			for i, c := range noChildrenHeights {
-				toCmp[i] = uint64(c)
-			}
-			toCmp[len(toCmp)-1] = uint64(childrenHeights[len(childrenHeights)-1])
-
-			slices.Sort(heights)
-			slices.Sort(toCmp)
-
-			// we return a nil slice if emtpy, change that here for deep.Equal
-			if len(heights) == 0 {
-				heights = []uint64{}
-			}
-
-			if diff := deep.Equal(toCmp[:len(toCmp)-1], heights); len(diff) != 0 {
-				t.Fatalf("unexpected diff %s", diff)
-			}
-		})
 	}
 }
 
@@ -2231,7 +2029,7 @@ func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
 	}
 }
 
-func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
+func TestBtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
@@ -2250,7 +2048,7 @@ func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '59 minutes'")
+	_, err = sdb.ExecContext(ctx, "UPDATE btc_transaction_broadcast_request SET created_at = NOW() - INTERVAL '29 minutes'")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2269,7 +2067,7 @@ func BtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 	}
 }
 
-func BtcTransactionBroadcastRequestTrim(t *testing.T) {
+func TestBtcTransactionBroadcastRequestTrim(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 

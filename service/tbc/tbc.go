@@ -30,6 +30,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -51,6 +52,8 @@ const (
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
+	defaultMaxCachedKeystones = 1e5 // number of cached keystones prior to flush
+
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
@@ -71,6 +74,19 @@ var (
 	// upstreamStateIdKey is used for storing upstream state IDs
 	// representing a unique state of an upstream system driving TBC state/
 	upstreamStateIdKey = []byte("upstreamstateid")
+
+	mainnetHemiGenesis = &HashHeight{
+		Hash:   *chaincfg.MainNetParams.GenesisHash, // XXX fixme
+		Height: 0,
+	}
+	testnet3HemiGenesis = &HashHeight{
+		Hash:   s2h("000000000001323071f38f21ea5aae529ece491eadaccce506a59bcc2d968917"),
+		Height: 2815000,
+	}
+	localnetHemiGenesis = &HashHeight{
+		Hash:   *chaincfg.RegressionNetParams.GenesisHash, // XXX fixme
+		Height: 0,
+	}
 )
 
 func init() {
@@ -81,12 +97,14 @@ func init() {
 
 type Config struct {
 	AutoIndex               bool
-	BlockCache              int
-	BlockheaderCache        int
+	BlockCacheSize          string
+	BlockheaderCacheSize    string
 	BlockSanity             bool
+	HemiIndex               bool
 	LevelDBHome             string
 	ListenAddress           string
 	LogLevel                string
+	MaxCachedKeystones      int
 	MaxCachedTxs            int
 	MempoolEnabled          bool
 	Network                 string
@@ -107,15 +125,16 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress:       tbcapi.DefaultListen,
-		BlockCache:          250,
-		BlockheaderCache:    1e6,
-		LogLevel:            logLevel,
-		MaxCachedTxs:        defaultMaxCachedTxs,
-		MempoolEnabled:      false, // XXX default to false until it is fixed
-		PeersWanted:         defaultPeersWanted,
-		PrometheusNamespace: appName,
-		ExternalHeaderMode:  false, // Default anyway, but for readability
+		ListenAddress:        tbcapi.DefaultListen,
+		BlockCacheSize:       "1gb",
+		BlockheaderCacheSize: "128mb",
+		LogLevel:             logLevel,
+		MaxCachedKeystones:   defaultMaxCachedKeystones,
+		MaxCachedTxs:         defaultMaxCachedTxs,
+		MempoolEnabled:       false, // XXX default to false until it is fixed
+		PeersWanted:          defaultPeersWanted,
+		PrometheusNamespace:  appName,
+		ExternalHeaderMode:   false, // Default anyway, but for readability
 	}
 }
 
@@ -145,6 +164,7 @@ type Server struct {
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
 	checkpoints map[chainhash.Hash]uint64
+	hemiGenesis *HashHeight
 	pm          *PeerManager
 
 	blocks *ttl.TTL // outstanding block downloads [hash]when/where
@@ -161,6 +181,8 @@ type Server struct {
 		syncInfo                  SyncInfo
 		connected, good, bad      int
 		mempoolCount, mempoolSize int
+		blockCache                tbcd.CacheStats
+		headerCache               tbcd.CacheStats
 	} // periodically updated by promPoll
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
@@ -237,16 +259,19 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
 		s.checkpoints = mainnetCheckpoints
+		s.hemiGenesis = mainnetHemiGenesis
 
 	case "testnet3":
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
 		s.checkpoints = testnet3Checkpoints
+		s.hemiGenesis = testnet3HemiGenesis
 
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
 		s.checkpoints = make(map[chainhash.Hash]uint64)
+		s.hemiGenesis = localnetHemiGenesis
 		wanted = 1
 
 	default:
@@ -671,6 +696,66 @@ func (s *Server) promMempoolSize() float64 {
 	return deucalion.IntToFloat(s.prom.mempoolSize)
 }
 
+func (s *Server) promBlockCacheHits() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Hits)
+}
+
+func (s *Server) promBlockCacheMisses() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Misses)
+}
+
+func (s *Server) promBlockCachePurges() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Purges)
+}
+
+func (s *Server) promBlockCacheSize() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Size)
+}
+
+func (s *Server) promBlockCacheItems() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.blockCache.Items)
+}
+
+func (s *Server) promHeaderCacheHits() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Hits)
+}
+
+func (s *Server) promHeaderCacheMisses() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Misses)
+}
+
+func (s *Server) promHeaderCachePurges() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Purges)
+}
+
+func (s *Server) promHeaderCacheSize() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Size)
+}
+
+func (s *Server) promHeaderCacheItems() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.IntToFloat(s.prom.headerCache.Items)
+}
+
 func (s *Server) promPoll(ctx context.Context) error {
 	for {
 		select {
@@ -681,6 +766,8 @@ func (s *Server) promPoll(ctx context.Context) error {
 
 		s.prom.syncInfo = s.Synced(ctx)
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
+		s.prom.blockCache = s.db.BlockCacheStats()
+		s.prom.headerCache = s.db.BlockHeaderCacheStats()
 		//if s.cfg.MempoolEnabled {
 		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
 		//}
@@ -688,10 +775,16 @@ func (s *Server) promPoll(ctx context.Context) error {
 		if s.promPollVerbose {
 			s.mtx.RLock()
 			log.Infof("Pending blocks %v/%v connected peers %v "+
-				"good peers %v bad peers %v mempool %v %v",
+				"good peers %v bad peers %v mempool %v %v "+
+				"block cache hits: %v misses: %v purges: %v size: %v "+
+				"blocks: %v",
 				s.blocks.Len(), defaultPendingBlocks, s.prom.connected,
 				s.prom.good, s.prom.bad, s.prom.mempoolCount,
-				humanize.Bytes(uint64(s.prom.mempoolSize)))
+				humanize.Bytes(uint64(s.prom.mempoolSize)),
+				s.prom.blockCache.Hits, s.prom.blockCache.Misses,
+				s.prom.blockCache.Purges,
+				humanize.Bytes(uint64(s.prom.blockCache.Size)),
+				s.prom.blockCache.Items)
 			s.mtx.RUnlock()
 		}
 
@@ -792,7 +885,8 @@ func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch *chai
 	err := p.Write(defaultCmdTimeout, getData)
 	if err != nil {
 		if !errors.Is(err, net.ErrClosed) &&
-			!errors.Is(err, os.ErrDeadlineExceeded) {
+			!errors.Is(err, os.ErrDeadlineExceeded) &&
+			!errors.Is(err, rawpeer.ErrNoConn) {
 			log.Errorf("download block write: %v %v", p, err)
 		}
 	}
@@ -841,6 +935,14 @@ func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block *chainh
 func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) error {
 	log.Tracef("handleBlockExpired")
 	defer log.Tracef("handleBlockExpired exit")
+
+	// handleBlockExpired is called numerous times after SIGTERM. This call
+	// wil fail with database closed error and is very loud.
+	select {
+	case <-ctx.Done():
+		return nil
+	default:
+	}
 
 	p, ok := value.(*rawpeer.RawPeer)
 	if !ok {
@@ -978,6 +1080,8 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			case errors.Is(err, nil):
 			case errors.Is(err, context.Canceled):
 				return
+			case errors.Is(err, leveldb.ErrClosed):
+				return
 			case errors.Is(err, ErrAlreadyIndexing):
 				return
 
@@ -1046,6 +1150,11 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			// This can happen during startup or when the network
 			// is starved.
 			// XXX: Probably too loud, remove later.
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
 			log.Errorf("random peer %v: %v", hashS, err)
 			return
 		}
@@ -1323,6 +1432,10 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 
 func (s *Server) BlockInsert(ctx context.Context, blk *wire.MsgBlock) (int64, error) {
 	return s.db.BlockInsert(ctx, btcutil.NewBlock(blk))
+}
+
+func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+	return s.db.BlockHeadersInsert(ctx, headers, nil)
 }
 
 func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgBlock, raw []byte) error {
@@ -1737,10 +1850,23 @@ func (s *Server) UtxosByScriptHash(ctx context.Context, hash tbcd.ScriptHash, st
 	defer log.Tracef("UtxosByScriptHash exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call UtxosByScriptHash on TBC running in External Header mode")
+		return nil, errors.New("cannot call UtxosByScriptHash on " +
+			"TBC running in External Header mode")
 	}
 
 	return s.db.UtxosByScriptHash(ctx, hash, start, count)
+}
+
+func (s *Server) UtxosByScriptHashCount(ctx context.Context, hash tbcd.ScriptHash) (uint64, error) {
+	log.Tracef("UtxosByScriptHashCount")
+	defer log.Tracef("UtxosByScriptHashCount exit")
+
+	if s.cfg.ExternalHeaderMode {
+		return 0, errors.New("cannot call UtxosByScriptHashCount on " +
+			"TBC running in External Header mode")
+	}
+
+	return s.db.UtxosByScriptHashCount(ctx, hash)
 }
 
 // ScriptHashAvailableToSpend returns a boolean which indicates whether
@@ -2047,7 +2173,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		// XXX this happens because we shut down and blocks come in.
-		// The context is canceled but wire isn't smart enought so we
+		// The context is canceled but wire isn't smart enough so we
 		// make it here. We should not be testing for leveldb errors
 		// here but the real fix is return an error or add ctx to wire.
 		// This is a workaround. Code prints a bunch of crap during IBD
@@ -2141,9 +2267,8 @@ func (s *Server) DBOpen(ctx context.Context) error {
 
 	// Open db.
 	var err error
-	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network))
-	cfg.BlockCache = s.cfg.BlockCache
-	cfg.BlockheaderCache = s.cfg.BlockheaderCache
+	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network),
+		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
 	s.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
@@ -2224,6 +2349,56 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "mempool_size_bytes",
 				Help:      "Size of mempool in bytes",
 			}, s.promMempoolSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_hits",
+				Help:      "Block cache hits",
+			}, s.promBlockCacheHits),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_misses",
+				Help:      "Block cache misses",
+			}, s.promBlockCacheMisses),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_purges",
+				Help:      "Block cache purges",
+			}, s.promBlockCachePurges),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_size",
+				Help:      "Block cache size",
+			}, s.promBlockCacheSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_items",
+				Help:      "Number of cached blocks",
+			}, s.promHeaderCacheItems),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_hits",
+				Help:      "Header cache hits",
+			}, s.promHeaderCacheHits),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_misses",
+				Help:      "Header cache misses",
+			}, s.promHeaderCacheMisses),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_purges",
+				Help:      "Header cache purges",
+			}, s.promHeaderCachePurges),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "header_cache_size",
+				Help:      "Header cache size",
+			}, s.promHeaderCacheSize),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "block_cache_items",
+				Help:      "Number of cached blocks",
+			}, s.promBlockCacheItems),
 		}
 	}
 	return s.promCollectors
@@ -2278,13 +2453,13 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Infof("Genesis: %v", s.chainParams.GenesisHash) // XXX make debug
 	log.Infof("Starting block headers sync at %v height: %v time %v",
 		bhb, bhb.Height, bhb.Timestamp())
-	utxoHH, err := s.UtxoIndexHash(ctx)
-	if err == nil {
-		log.Infof("Utxo index %v", utxoHH)
-	}
-	txHH, err := s.TxIndexHash(ctx)
-	if err == nil {
-		log.Infof("Tx index %v", txHH)
+	utxoHH, _ := s.UtxoIndexHash(ctx)
+	log.Infof("Utxo index %v", utxoHH)
+	txHH, _ := s.TxIndexHash(ctx)
+	log.Infof("Tx index %v", txHH)
+	if s.cfg.HemiIndex {
+		hemiHH, _ := s.KeystoneIndexHash(ctx)
+		log.Infof("Keystone index %v", hemiHH)
 	}
 
 	// HTTP server
@@ -2351,7 +2526,9 @@ func (s *Server) Run(pctx context.Context) error {
 			defer s.wg.Done()
 			err := s.promPoll(ctx)
 			if err != nil {
-				log.Errorf("prometheus poll terminated with error: %v", err)
+				if !errors.Is(err, context.Canceled) {
+					log.Errorf("prometheus poll terminated with error: %v", err)
+				}
 				return
 			}
 		}()
@@ -2361,11 +2538,15 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		if err := s.pm.Run(ctx); err != nil {
+		err := s.pm.Run(ctx)
+		log.Infof("Peer manager shutting down")
+		if err != nil {
 			select {
 			case errC <- err:
 			default:
 			}
+		} else {
+			log.Infof("Peer manager clean shutdown")
 		}
 	}()
 
@@ -2479,10 +2660,10 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 		}
 		gh := genesis.BlockHash()
 		if !bytes.Equal(gb[0].Hash[:], gh[:]) {
-			return fmt.Errorf("effective genesis block hash mismatch, db has %x but genesis should be %x", gb[0].Hash, gh)
+			return fmt.Errorf("effective genesis block hash mismatch, db has %v but genesis should be %v", gb[0].Hash, gh)
 		}
 	}
-	log.Infof("TBC set up in External Header Mode, effectiveGenesis=%x, tip=%x", genesis.BlockHash(), bhb.Hash)
+	log.Infof("TBC set up in External Header Mode, effectiveGenesis=%v, tip=%v", genesis.BlockHash(), bhb.Hash)
 
 	return nil
 }

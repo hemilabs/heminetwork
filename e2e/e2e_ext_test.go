@@ -66,7 +66,7 @@ const (
 	mockEncodedBlockHeader    = "\"0000c02048cd664586152c3dcf356d010cbb9216fdeb3b1aeae256d59a0700000000000086182c855545356ec11d94972cf31b97ef01ae7c9887f4349ad3f0caf2d3c0b118e77665efdf2819367881fb\""
 	mockTxHash                = "7fe9c3262f8fe26764b01955b4c996296f7c0c72945af1556038a084fcb37dbb"
 	mockTxPos                 = 3
-	mockTxheight              = 2
+	mockTxheight              = 10
 	mockElectrsConnectTimeout = 3 * time.Second
 )
 
@@ -618,6 +618,17 @@ func assertPing(ctx context.Context, t *testing.T, c *websocket.Conn, cmd protoc
 	}
 }
 
+// fillOutBytesWith0s will take a string and return a slice of bytes
+// with values from the string suffixed until a size with bytes '_'
+func fillOutBytesWith0s(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, 0)
+	}
+
+	return result
+}
+
 // fillOutBytes will take a string and return a slice of bytes
 // with values from the string suffixed until a size with bytes '_'
 func fillOutBytes(prefix string, size int) []byte {
@@ -763,7 +774,7 @@ func TestNewL2Keystone(t *testing.T) {
 		}
 	}
 
-	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(l2KeystoneRequest.L2Keystone).Hash()
+	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(l2KeystoneRequest.L2Keystone).HashB()
 
 	time.Sleep(2 * time.Second)
 
@@ -1451,6 +1462,36 @@ func TestBitcoinBroadcast(t *testing.T) {
 			break
 		}
 	}
+
+	l2k, err := db.L2KeystonesMostRecentN(ctx, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert that the L2Keystone was stored in the database,
+	// IMPORTANT NOTE: since we derive this from a btc pop tx, only the
+	// abbreviated keystone is stored.  we still want to store this if we
+	// have not seen it before so it's stored with padded 0 bytes. this will
+	// go away in the future once we add "missing keystone" logic and
+	// functionality
+	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
+		{
+			Version:            1,
+			L1BlockNumber:      5,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
+	}
+
+	if len(l2k) != 1 {
+		t.Fatalf("unexpected number of keystones: %d", len(l2k))
+	}
 }
 
 // TestBitcoinBroadcastDuplicate calls BitcoinBroadcast twice with the same
@@ -1545,7 +1586,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	publicKeyUncompressed := publicKey.SerializeUncompressed()
 
 	// 3
-	popBases, err := db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false, 0)
+	popBases, err := db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).HashB()), false, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1559,7 +1600,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 
 	diff := deep.Equal(popBases, []bfgd.PopBasis{
 		{
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcRawTx:            btx,
 			BtcTxId:             btcTxId[:],
@@ -1664,7 +1705,7 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 	}
 
 	btcHeaderHash := btcchainhash.DoubleHashB(expectedBtcBlockHeader)
-	btcHeight := 2
+	btcHeight := 10
 	btcHeader := expectedBtcBlockHeader
 
 	// 2
@@ -1699,6 +1740,38 @@ loop:
 
 	if len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
+	}
+
+	var l2k []bfgd.L2Keystone
+	for {
+		l2k, err = db.L2KeystonesMostRecentN(ctx, 100, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l2k != nil {
+			break
+		}
+	}
+
+	// assert that the L2Keystone was stored in the database,
+	// IMPORTANT NOTE: since we derive this from a btc pop tx, only the
+	// abbreviated keystone is stored.  we still want to store this if we
+	// have not seen it before so it's stored with padded 0 bytes. this will
+	// go away in the future once we add "missing keystone" logic and
+	// functionality
+	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
+		{
+			Version:            1,
+			L1BlockNumber:      5,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
 	}
 }
 
@@ -1756,7 +1829,7 @@ loop:
 		case <-lctx.Done():
 			break loop
 		case <-time.After(1 * time.Second):
-			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), false, 0)
+			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).HashB()), false, 0)
 			if len(popBases) > 0 {
 				break loop
 			}
@@ -1803,7 +1876,7 @@ loop:
 			BtcHeaderHash:       btcHeaderHash,
 			BtcTxIndex:          &txIndex,
 			PopTxId:             popTxId,
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 			BtcRawTx:            btx,
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcMerklePath:       mockMerkleHashes,
@@ -1812,6 +1885,32 @@ loop:
 
 	if len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
+	}
+
+	l2k, err := db.L2KeystonesMostRecentN(ctx, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert that the L2Keystone was stored in the database,
+	// IMPORTANT NOTE: since we derive this from a btc pop tx, only the
+	// abbreviated keystone is stored.  we still want to store this if we
+	// have not seen it before so it's stored with padded 0 bytes. this will
+	// go away in the future once we add "missing keystone" logic and
+	// functionality
+	if diff := deep.Equal(l2k, []bfgd.L2Keystone{
+		{
+			Version:            1,
+			L1BlockNumber:      5,
+			L2BlockNumber:      44,
+			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          fillOutBytes("stateroot", 32),
+			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
+		},
+	}); len(diff) > 0 {
+		t.Fatalf("unexpected diff: %s", diff)
 	}
 }
 
@@ -1926,7 +2025,7 @@ loop:
 		case <-lctx.Done():
 			break loop
 		case <-time.After(1 * time.Second):
-			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).Hash()), true, 0)
+			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).HashB()), true, 0)
 			if len(popBases) > 0 {
 				break loop
 			}
@@ -1962,7 +2061,7 @@ loop:
 			BtcHeaderHash:       btcHeaderHash,
 			BtcTxIndex:          &txIndex,
 			PopTxId:             popTxId,
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 			BtcRawTx:            btx,
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcMerklePath:       mockMerkleHashes,
@@ -2051,7 +2150,7 @@ func TestPopPayouts(t *testing.T) {
 		BtcTxId:             fillOutBytes("btctxid1", 32),
 		BtcRawTx:            []byte("btcrawtx1"),
 		PopTxId:             fillOutBytes("poptxid1", 32),
-		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
 		BtcTxIndex:          &txIndex,
@@ -2068,7 +2167,7 @@ func TestPopPayouts(t *testing.T) {
 		BtcTxId:             fillOutBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
 		PopTxId:             fillOutBytes("poptxid2", 32),
-		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   otherPublicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
 		BtcTxIndex:          &txIndex,
@@ -2085,7 +2184,7 @@ func TestPopPayouts(t *testing.T) {
 		BtcTxId:             fillOutBytes("btctxid3", 32),
 		BtcRawTx:            []byte("btcrawtx3"),
 		PopTxId:             fillOutBytes("poptxid3", 32),
-		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
 		BtcTxIndex:          &txIndex,
@@ -2102,7 +2201,7 @@ func TestPopPayouts(t *testing.T) {
 		BtcTxId:             fillOutBytes("btctxid4", 32),
 		BtcRawTx:            []byte("btcrawtx4"),
 		PopTxId:             fillOutBytes("poptxid4", 32),
-		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(differentL2Keystone).Hash(),
+		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(differentL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
 		BtcTxIndex:          &txIndex,
@@ -2255,7 +2354,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 			BtcTxId:             fillOutBytes("btctxid1", 32),
 			BtcRawTx:            []byte("btcrawtx1"),
 			PopTxId:             fillOutBytes("poptxid1", 32),
-			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).Hash(),
+			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcHeaderHash:       btcHeaderHash,
 			BtcTxIndex:          &txIndex,
@@ -2564,223 +2663,6 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	}
 
 	diff := deep.Equal(expectedApiResponse, finalityResponse)
-	if len(diff) > 0 {
-		t.Fatalf("unexpected diff %s", diff)
-	}
-}
-
-func TestGetFinalitiesByL2KeystoneBSSWithPagination(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
-	defer func() {
-		db.Close()
-		sdb.Close()
-		cleanup()
-	}()
-
-	ctx, cancel := defaultTestContext()
-	defer cancel()
-
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
-
-	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
-
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1)
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)
-	expectedFinalitiesDesc := []int32{-8, -6}
-
-	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
-
-	bws := &bssWs{
-		conn: protocol.NewWSConn(c),
-	}
-
-	// first and second btcBlocks
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	l2Keystones := []hemi.L2Keystone{}
-	for _, r := range recentFinalities[1:] {
-		l, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		l2Keystones = append(l2Keystones, l.L2Keystone)
-	}
-
-	receivedFinalities := []hemi.L2BTCFinality{}
-
-	// use pagination to get records 1 by 1 (there are two)
-
-	for i := range 2 {
-		finalityRequest := bssapi.BTCFinalityByKeystonesRequest{
-			L2Keystones: l2Keystones,
-			Page:        uint32(i),
-			Limit:       1,
-		}
-
-		err = bssapi.Write(ctx, bws.conn, "someid", finalityRequest)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		var v protocol.Message
-		err = wsjson.Read(ctx, c, &v)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// ignore "notifications"
-		for v.Header.Command != bssapi.CmdBTCFinalityByKeystonesResponse {
-			err = wsjson.Read(ctx, c, &v)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-
-		finalityResponse := bssapi.BTCFinalityByRecentKeystonesResponse{}
-		err = json.Unmarshal(v.Payload, &finalityResponse)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		t.Logf("length is %d", len(finalityResponse.L2BTCFinalities))
-
-		if len(finalityResponse.L2BTCFinalities) != 1 {
-			t.Fatalf("unexpected length %v", len(finalityResponse.L2BTCFinalities))
-		}
-
-		receivedFinalities = append(receivedFinalities, finalityResponse.L2BTCFinalities[0])
-	}
-
-	expectedResponse := []hemi.L2BTCFinality{}
-	for i, r := range recentFinalities[1:] {
-		f, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		f.BTCFinality = expectedFinalitiesDesc[i]
-		expectedResponse = append(expectedResponse, *f)
-	}
-
-	diff := deep.Equal(expectedResponse, receivedFinalities)
-	if len(diff) > 0 {
-		t.Fatalf("unexpected diff %s", diff)
-	}
-}
-
-func TestGetFinalitiesByL2KeystoneBFGWithPagination(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
-	defer func() {
-		db.Close()
-		sdb.Close()
-		cleanup()
-	}()
-
-	ctx, cancel := defaultTestContext()
-	defer cancel()
-
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
-
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1)
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)
-	expectedFinalitiesDesc := []int32{-8, -6}
-
-	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.CloseNow()
-
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
-
-	bws := &bssWs{
-		conn: protocol.NewWSConn(c),
-	}
-
-	// first and second btcBlocks
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	l2Keystones := []hemi.L2Keystone{}
-	for _, r := range recentFinalities[1:] {
-		l, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-		l2Keystones = append(l2Keystones, l.L2Keystone)
-	}
-
-	receivedFinalities := []hemi.L2BTCFinality{}
-
-	// use pagination to get records 1 by 1 (there are two)
-
-	for i := range 2 {
-		finalityRequest := bfgapi.BTCFinalityByKeystonesRequest{
-			L2Keystones: l2Keystones,
-			Page:        uint32(i),
-			Limit:       1,
-		}
-
-		err = bfgapi.Write(ctx, bws.conn, "someid", finalityRequest)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		var v protocol.Message
-		err = wsjson.Read(ctx, c, &v)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// filter out notifications
-		for v.Header.Command != bfgapi.CmdBTCFinalityByKeystonesResponse {
-			t.Logf("received unexpected command: %s", v.Header.Command)
-			err = wsjson.Read(ctx, c, &v)
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-
-		finalityResponse := bfgapi.BTCFinalityByRecentKeystonesResponse{}
-		err = json.Unmarshal(v.Payload, &finalityResponse)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		t.Logf("length is %d", len(finalityResponse.L2BTCFinalities))
-
-		if len(finalityResponse.L2BTCFinalities) != 1 {
-			t.Fatalf("unexpected length %v", len(finalityResponse.L2BTCFinalities))
-		}
-
-		receivedFinalities = append(receivedFinalities, finalityResponse.L2BTCFinalities[0])
-	}
-
-	expectedResponse := []hemi.L2BTCFinality{}
-	for i, r := range recentFinalities[1:] {
-		f, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		f.BTCFinality = expectedFinalitiesDesc[i]
-		expectedResponse = append(expectedResponse, *f)
-	}
-
-	diff := deep.Equal(expectedResponse, receivedFinalities)
 	if len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
 	}
@@ -3810,7 +3692,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 		L2BlockNumber:      l2BlockNumber,
 	}
 
-	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(hemiL2Keystone).Hash()
+	l2KeystoneAbrevHash := hemi.L2KeystoneAbbreviate(hemiL2Keystone).HashB()
 	l2Keystone := bfgd.L2Keystone{
 		Hash:               l2KeystoneAbrevHash,
 		ParentEPHash:       parentEpHash,

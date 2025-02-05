@@ -1053,8 +1053,8 @@ func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Serve
 	cfg.LevelDBHome = home
 	cfg.ExternalHeaderMode = true
 	cfg.Network = networkLocalnet
-	cfg.BlockCache = 0
-	cfg.BlockheaderCache = 0
+	cfg.BlockCacheSize = ""
+	cfg.BlockheaderCacheSize = ""
 	cfg.MempoolEnabled = false
 
 	tbcServer, err := NewServer(cfg)

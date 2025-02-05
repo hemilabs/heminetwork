@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -25,7 +25,8 @@ const (
 	defaultLogLevel = daemonName + "=INFO;tbc=INFO;level=INFO"
 	defaultNetwork  = "testnet3" // XXX make this mainnet
 	defaultHome     = "~/." + daemonName
-	bhsDefault      = int(1e6) // enough for mainnet
+	bDefaultSize    = "512mb" // ~320 blocks on mainnet
+	bhsDefaultSize  = "2mb"
 )
 
 var (
@@ -46,22 +47,28 @@ var (
 			Help:         "enable auto utxo and tx indexes",
 			Print:        config.PrintAll,
 		},
-		"TBC_BLOCK_CACHE": config.Config{
-			Value:        &cfg.BlockCache,
-			DefaultValue: 250,
-			Help:         "number of cached blocks",
+		"TBC_BLOCK_CACHE_SIZE": config.Config{
+			Value:        &cfg.BlockCacheSize,
+			DefaultValue: bDefaultSize,
+			Help:         "size of block cache",
 			Print:        config.PrintAll,
 		},
-		"TBC_BLOCKHEADER_CACHE": config.Config{
-			Value:        &cfg.BlockheaderCache,
-			DefaultValue: bhsDefault,
-			Help:         "number of cached blockheaders",
+		"TBC_BLOCKHEADER_CACHE_SIZE": config.Config{
+			Value:        &cfg.BlockheaderCacheSize,
+			DefaultValue: bhsDefaultSize,
+			Help:         "size of blockheader cache",
 			Print:        config.PrintAll,
 		},
 		"TBC_BLOCK_SANITY": config.Config{
 			Value:        &cfg.BlockSanity,
-			DefaultValue: false,
+			DefaultValue: true,
 			Help:         "enable/disable block sanity checks before inserting",
+			Print:        config.PrintAll,
+		},
+		"TBC_HEMI_INDEX": config.Config{
+			Value:        &cfg.HemiIndex,
+			DefaultValue: false,
+			Help:         "enable/disable various hemi related indexes",
 			Print:        config.PrintAll,
 		},
 		"TBC_LEVELDB_HOME": config.Config{
@@ -74,6 +81,12 @@ var (
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
+			Print:        config.PrintAll,
+		},
+		"TBC_MAX_CACHED_KEYSTONES": config.Config{
+			Value:        &cfg.MaxCachedKeystones,
+			DefaultValue: int(1e5),
+			Help:         "maximum cached keystones during indexing",
 			Print:        config.PrintAll,
 		},
 		"TBC_MAX_CACHED_TXS": config.Config{

@@ -15,10 +15,17 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
+	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
+	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
+	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/testcontainers/testcontainers-go"
@@ -27,6 +34,9 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 func bytes2Tx(b []byte) (*wire.MsgTx, error) {
@@ -1489,6 +1499,146 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 }
 
+func TestL2BlockByAbrevHash(t *testing.T) {
+	l2Keystone := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      5,
+		L2BlockNumber:      44,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+	}
+
+	popTx := pop.TransactionL2{
+		L2Keystone: hemi.L2KeystoneAbbreviate(l2Keystone),
+	}
+
+	popTxOpReturn, err := popTx.EncodeToOpReturn()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log(spew.Sdump(popTxOpReturn))
+
+	btcBlockHash := btcchainhash.Hash(fillOutBytes("blockhash", 32))
+
+	invalidL2KeystoneAbrevHash := chainhash.Hash(fillOutBytes("123", 32))
+
+	type testTableItem struct {
+		name                    string
+		l2KeystoneAbrevHash     *chainhash.Hash
+		expectedError           *protocol.Error
+		expectedL2KeystoneAbrev *hemi.L2KeystoneAbrev
+		expectedBTCBlockHash    *chainhash.Hash
+	}
+
+	testTable := []testTableItem{
+		{
+			name:          "nilL2KeystoneAbrevHash",
+			expectedError: protocol.RequestErrorf("invalid nil abrev hash"),
+		},
+		{
+			name:                "invalidL2KeystoneAbrevHash",
+			l2KeystoneAbrevHash: &invalidL2KeystoneAbrevHash,
+			expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
+		},
+		{
+			name:                    "validL2KeystoneAbrevHash",
+			l2KeystoneAbrevHash:     hemi.L2KeystoneAbbreviate(l2Keystone).Hash(),
+			expectedL2KeystoneAbrev: hemi.L2KeystoneAbbreviate(l2Keystone),
+			expectedBTCBlockHash:    &btcBlockHash,
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			port, err := nat.NewPort("tcp", "9999")
+			if err != nil {
+				t.Fatal(err)
+			}
+			s, tbcUrl := createTbcServer(ctx, t, port)
+
+			c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.CloseNow()
+
+			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+			tws := &tbcWs{
+				conn: protocol.NewWSConn(c),
+			}
+
+			var response tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse
+			select {
+			case <-time.After(1 * time.Second):
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+
+			// 1
+			btx := createBtcTx(t, 199, &l2Keystone, []byte{1, 2, 3})
+
+			aPoPTx, err := pop.ParseTransactionL2FromOpReturn(btx)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			abrvKss := aPoPTx.L2Keystone.Serialize()
+
+			kssCache := make(map[chainhash.Hash]tbcd.Keystone)
+
+			kssCache[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
+				BlockHash:           btcBlockHash,
+				AbbreviatedKeystone: abrvKss,
+			}
+
+			if err := s.db.BlockKeystoneUpdate(ctx, 1, kssCache); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest{
+				L2KeystoneAbrevHash: tti.l2KeystoneAbrevHash,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			var v protocol.Message
+			if err := wsjson.Read(ctx, c, &v); err != nil {
+				t.Fatal(err)
+			}
+
+			if v.Header.Command != tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashResponse {
+				t.Fatalf("received unexpected command: %s", v.Header.Command)
+			}
+
+			if err := json.Unmarshal(v.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+
+			if diff := deep.Equal(response.Error, tti.expectedError); len(diff) > 0 {
+				t.Fatalf("unexpected error diff: %s", diff)
+			}
+
+			if response.L2KeystoneAbrev != nil {
+				t.Logf("%s\n\n%s", spew.Sdump(response.L2KeystoneAbrev.Serialize()), spew.Sdump(tti.expectedL2KeystoneAbrev.Serialize()))
+			}
+
+			if diff := deep.Equal(response.BtcBlockHash, tti.expectedBTCBlockHash); len(diff) > 0 {
+				t.Fatalf("unexpected retrieved block hash diff: %s", diff)
+			}
+
+			if diff := deep.Equal(response.L2KeystoneAbrev, tti.expectedL2KeystoneAbrev); len(diff) > 0 {
+				t.Fatalf("unexpected retrieved keystone diff: %s", diff)
+			}
+		})
+	}
+}
+
 func assertPing(ctx context.Context, t *testing.T, c *websocket.Conn, cmd protocol.Command) {
 	var v protocol.Message
 	err := wsjson.Read(ctx, c, &v)
@@ -1512,4 +1662,63 @@ func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
 	if err := tbcServer.SyncIndexersToHash(ctx, &hash); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func fillOutBytes(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, '_')
+	}
+	return result
+}
+
+func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
+	btx := &btcwire.MsgTx{
+		Version:  2,
+		LockTime: uint32(btcHeight),
+	}
+
+	popTx := pop.TransactionL2{
+		L2Keystone: hemi.L2KeystoneAbbreviate(*l2Keystone),
+	}
+
+	popTxOpReturn, err := popTx.EncodeToOpReturn()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	publicKey := privateKey.PubKey()
+	pubKeyBytes := publicKey.SerializeCompressed()
+	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(payToScript) != 25 {
+		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
+	}
+
+	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
+	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
+
+	changeAmount := int64(100)
+	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
+
+	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
+
+	sig := dcrecdsa.Sign(privateKey, []byte{})
+	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
+	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
+	if err != nil {
+		t.Fatal(err)
+	}
+	btx.TxIn[0].SignatureScript = sigScript
+
+	return btx.TxOut[1].PkScript
 }

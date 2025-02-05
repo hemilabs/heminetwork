@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -21,6 +21,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 type InsertType int
@@ -91,6 +92,7 @@ type Database interface {
 	BlockHeaderBest(ctx context.Context) (*BlockHeader, error) // return canonical
 	BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*BlockHeader, error)
 	BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader, height uint64, diff *big.Int) error
+	BlockHeaderCacheStats() CacheStats
 
 	// Block headers
 	BlockHeadersByHeight(ctx context.Context, height uint64) ([]BlockHeader, error)
@@ -103,6 +105,7 @@ type Database interface {
 	BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error)
 	// BlocksInsert(ctx context.Context, bs []*btcutil.Block) (int64, error)
 	BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error)
+	BlockCacheStats() CacheStats
 
 	// Transactions
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
@@ -115,6 +118,16 @@ type Database interface {
 	BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error)
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)
+	UtxosByScriptHashCount(ctx context.Context, sh ScriptHash) (uint64, error)
+
+	// Hemi
+	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone) error
+	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*Keystone, error)
+}
+
+type Keystone struct {
+	BlockHash           chainhash.Hash                 // Block that contains abbreviated keystone
+	AbbreviatedKeystone [hemi.L2KeystoneAbrevSize]byte // Abbreviated keystone
 }
 
 // XXX there exist various types in this file that need to be reevaluated.
@@ -222,13 +235,13 @@ func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 	return
 }
 
-// CacheOutput is a densely packed representation of a bitcoin UTXo. The fields are
-// script_hash + value + out_index. It is packed for
-// memory conservation reasons.
+// CacheOutput is a densely packed representation of a bitcoin UTXo. The fields
+// are script_hash + value + out_index. It is packed for memory conservation
+// reasons.
 type CacheOutput [32 + 8 + 4]byte // script_hash + value + out_idx
 
-// String reutrns pretty printable CacheOutput. Hash is not reversed since it is an
-// opaque pointer. It prints satoshis@script_hash:output_index
+// String returns pretty printable CacheOutput. Hash is not reversed since it
+// is an opaque pointer. It prints satoshis@script_hash:output_index
 func (c CacheOutput) String() string {
 	return fmt.Sprintf("%d @ %x:%d", binary.BigEndian.Uint64(c[32:40]),
 		c[0:32], binary.BigEndian.Uint32(c[40:]))
@@ -289,8 +302,8 @@ func NewDeleteCacheOutput(hash [32]byte, outIndex uint32) (co CacheOutput) {
 // Utxo packs a transaction id, the value and the out index.
 type Utxo [32 + 8 + 4]byte // tx_id + value + out_idx
 
-// String reutrns pretty printable CacheOutput. Hash is not reversed since it is an
-// opaque pointer. It prints satoshis@script_hash:output_index
+// String returns pretty printable CacheOutput. Hash is not reversed since it
+// is an opaque pointer. It prints satoshis@script_hash:output_index
 func (u Utxo) String() string {
 	ch, _ := chainhash.NewHash(u[0:32])
 	return fmt.Sprintf("%d @ %v:%d", binary.BigEndian.Uint64(u[32:40]),
@@ -412,4 +425,13 @@ func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, erro
 		return nil, nil, fmt.Errorf("invalid block hash: %w", err)
 	}
 	return txId, blockHash, nil
+}
+
+// Cache
+type CacheStats struct {
+	Hits   int
+	Misses int
+	Purges int
+	Size   int
+	Items  int
 }

@@ -9,10 +9,21 @@ if [ -z "${ENTRYPOINT_SKIP_GENESIS}" ]; then
     sh /tmp/genesisl2.sh
 fi
 
+/bin/geth init --datadir /tmp/datadir /l2configs/genesis.json
 
-/git/op-geth/build/bin/geth init --datadir /tmp/datadir /l2configs/genesis.json
+BESTBLOCKHASH=$(curl --data-binary '{"jsonrpc": "1.0", "id": "curltest", "method": "getbestblockhash", "params": []}' -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq '.result')
 
-/git/op-geth/build/bin/geth \
+echo "best block hash $BESTBLOCKHASH"
+
+curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH]}" -H 'content-type: text/plain;' http://user:password@bitcoind:18443/
+
+BLOCKHEIGHT=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH]}" -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq '.result.height')
+
+BLOCKHEADER=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH, false]}" -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq -r '.result')
+
+echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
+
+/bin/geth \
  --keystore \
  /tmp/keystore \
  --password \
@@ -41,11 +52,16 @@ fi
  --authrpc.addr=0.0.0.0 \
  --authrpc.port=8551 \
  --authrpc.jwtsecret=/tmp/jwt.hex \
- --verbosity=5 \
  --gpo.maxprice=1 \
  --tbc.network=localnet \
- --tbc.initheight=1 \
  --tbc.seeds='bitcoind:18444' \
  --override.ecotone=1725868497 \
  --override.canyon=1725868497 \
- --override.cancun=1725868497
+ --override.cancun=1725868497 \
+ --hvm.headerdatadir=/tbc/headers \
+ --tbc.leveldbhome=/tbc/tbcdatadir \
+ --hvm.genesisheader=$BLOCKHEADER \
+ --hvm.genesisheight=$BLOCKHEIGHT \
+ --hvm.enabled \
+ --override.hvm0=$HVM_PHASE0_TIMESTAMP \
+ --tbc.network=localnet
