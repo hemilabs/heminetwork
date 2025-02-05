@@ -214,7 +214,7 @@ const (
 // WriteBuffer = 4 MiB
 // It would be cute if we could read this value from the underlying DB but no
 // such luck. Since we use defaults we can use this for now.
-var csFlushSize = 4 * 1024 * 1024 // default leveldb size
+// var csFlushSize = 4 * 1024 * 1024 // default leveldb size
 
 // blockheaderStrategy calculates if we should flush data to the underlying
 // database.
@@ -240,19 +240,23 @@ var csFlushSize = 4 * 1024 * 1024 // default leveldb size
 //	return csNeverFlush
 //}
 
-func keystoneStrategy(direction int, bhs *wire.MsgHeaders) cacheStrategy {
-	switch direction {
-	case 1:
-	case -1:
-	default:
-		panic("invalid direction")
-	}
-	size := len(bhs.Headers) * heighthashSize // encoded heighthash size
-	if size < csFlushSize {
-		return csAlwaysFlush
-	}
-	return csNeverFlush
-}
+// keystoneStrategy calculates if we should flush data to the underlying
+// database.
+// Commented out for now because this will be wildly expensive with  millions
+// of blocks.
+//func keystoneStrategy(direction int, bhs *wire.MsgHeaders) cacheStrategy {
+//	switch direction {
+//	case 1:
+//	case -1:
+//	default:
+//		panic("invalid direction")
+//	}
+//	size := len(bhs.Headers) * heighthashSize // encoded heighthash size
+//	if size < csFlushSize {
+//		return csAlwaysFlush
+//	}
+//	return csNeverFlush
+//}
 
 func (l *ldb) startTransaction(db string, strategy cacheStrategy) (*leveldb.Transaction, commitFunc, discardFunc, error) {
 	bhsDB := l.pool[db]

@@ -1001,7 +1001,9 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 		// Close peer.
 		if p, ok := value.(*rawpeer.RawPeer); ok {
 			p.Close() // kill peer
-			log.Errorf("block expired: %v %v", p, err)
+			if !errors.Is(err, leveldb.ErrClosed) {
+				log.Errorf("block expired: %v %v", p, err)
+			}
 		}
 	}
 }
