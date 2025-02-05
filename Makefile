@@ -19,7 +19,6 @@ version = $(shell git describe --tags 2>/dev/null || echo "v0.0.0")
 
 cmds = \
 	bfgd	\
-	bssd	\
 	extool	\
 	hemictl	\
 	keygen	\
