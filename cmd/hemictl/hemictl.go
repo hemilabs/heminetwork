@@ -22,7 +22,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -36,7 +35,6 @@ import (
 	"github.com/mitchellh/go-homedir"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
@@ -59,7 +57,6 @@ var (
 	log     = loggo.GetLogger(daemonName)
 	welcome string
 
-	bssURL      string
 	logLevel    string
 	leveldbHome string
 	network     string
@@ -76,12 +73,6 @@ var (
 			Help:         "hemictl network",
 			Print:        config.PrintAll,
 		},
-		"HEMICTL_BSS_URL": config.Config{
-			Value:        &bssURL,
-			DefaultValue: bssapi.DefaultURL,
-			Help:         "BSS websocket server host and route",
-			Print:        config.PrintAll,
-		},
 		"HEMICTL_LOG_LEVEL": config.Config{
 			Value:        &logLevel,
 			DefaultValue: defaultLogLevel,
@@ -92,16 +83,6 @@ var (
 
 	callTimeout = 100 * time.Second
 )
-
-// handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
-// be able to use bssapi.Call.
-func handleBSSWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
-	for {
-		if _, _, _, err := bssapi.ReadConn(ctx, conn); err != nil {
-			return
-		}
-	}
-}
 
 // handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
 // be able to use bfgapi.Call.
@@ -895,158 +876,6 @@ func p2p() error {
 	return nil
 }
 
-type bssClient struct {
-	wg     *sync.WaitGroup
-	bssURL string
-}
-
-func (bsc *bssClient) handleBSSWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
-	defer bsc.wg.Done()
-
-	log.Tracef("handleBSSWebsocketReadUnauth")
-	defer log.Tracef("handleBSSWebsocketReadUnauth exit")
-	for {
-		// See if we were terminated
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		cmd, rid, payload, err := bssapi.ReadConn(ctx, conn)
-		if err != nil {
-			log.Errorf("handleBSSWebsocketReadUnauth: %v", err)
-			time.Sleep(3 * time.Second)
-			continue
-			// return
-		}
-		log.Infof("cmd: %v rid: %v payload: %T", cmd, rid, payload)
-	}
-}
-
-func (bsc *bssClient) connect(ctx context.Context) error {
-	log.Tracef("connect")
-	defer log.Tracef("connect exit")
-
-	conn, err := protocol.NewConn(bsc.bssURL, nil)
-	if err != nil {
-		return err
-	}
-	err = conn.Connect(ctx)
-	if err != nil {
-		return err
-	}
-
-	bsc.wg.Add(1)
-	go bsc.handleBSSWebsocketReadUnauth(ctx, conn)
-
-	// Required ping
-	// _, _, _, err = bssapi.Call(ctx, conn, bssapi.PingRequest{
-	//	Timestamp: time.Now().Unix(),
-	// })
-	// if err != nil {
-	//	return fmt.Errorf("ping error: %w", err)
-	// }
-
-	simulatePingPong := false
-	if simulatePingPong {
-		bsc.wg.Add(1)
-		go func() {
-			defer bsc.wg.Done()
-			for {
-				// See if we were terminated
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				time.Sleep(5 * time.Second)
-				_, _, _, err = bssapi.Call(ctx, conn, bssapi.PingRequest{
-					Timestamp: time.Now().Unix(),
-				})
-				if err != nil {
-					log.Errorf("ping error: %v", err)
-					continue
-					// return fmt.Errorf("ping error: %w", err)
-				}
-			}
-		}()
-	}
-
-	// Wait for exit
-	bsc.wg.Wait()
-
-	return nil
-}
-
-func (bsc *bssClient) connectBSS(ctx context.Context) {
-	log.Tracef("bssClient")
-	defer log.Tracef("bssClient exit")
-
-	log.Infof("Connecting to: %v", bsc.bssURL)
-	for {
-		if err := bsc.connect(ctx); err != nil {
-			// Do nothing
-			log.Errorf("connect: %v", err) // remove this, too loud
-		}
-		// See if we were terminated
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// hold off reconnect for a couple of seconds
-		time.Sleep(5 * time.Second)
-		log.Debugf("Reconnecting to: %v", bsc.bssURL)
-	}
-}
-
-func bssLong(ctx context.Context) error {
-	bsc := &bssClient{
-		wg:     new(sync.WaitGroup),
-		bssURL: bssURL,
-	}
-
-	go bsc.connectBSS(ctx)
-
-	<-ctx.Done()
-	if !errors.Is(ctx.Err(), context.Canceled) {
-		return ctx.Err()
-	}
-
-	return nil
-}
-
-func client(which string) error {
-	log.Debugf("client %v", which)
-	defer log.Debugf("client %v exit", which)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	simulateCtrlC := false
-	if simulateCtrlC {
-		// XXX add signal handler instead of this poop
-		go func() {
-			time.Sleep(3 * time.Second)
-			cancel()
-		}()
-
-		defer func() {
-			log.Infof("waiting for exit")
-			time.Sleep(3 * time.Second)
-		}()
-	}
-
-	switch which {
-	case "bss":
-		return bssLong(ctx)
-	}
-	return fmt.Errorf("invalid client: %v", which)
-}
-
 var (
 	reSkip         = regexp.MustCompile(`(?i)(Response|Notification)$`)
 	allCommands    = make(map[string]reflect.Type)
@@ -1058,9 +887,6 @@ func init() {
 	welcome = "Hemi Network Controller " + version.BuildInfo()
 
 	// merge all command maps
-	for k, v := range bssapi.APICommands() {
-		allCommands[string(k)] = v
-	}
 	for k, v := range bfgapi.APICommands() {
 		allCommands[string(k)] = v
 	}
@@ -1080,7 +906,6 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\t%v <command> [payload]\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "Usage:\n")
 	fmt.Fprintf(os.Stderr, "\tbfgdb database connection\n")
-	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
 	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
 	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
 	//nolint:dupword // command help, not sentence.
@@ -1175,8 +1000,6 @@ func _main() error {
 	switch cmd {
 	case "bfgdb":
 		return bfgdb()
-	case "bss-client":
-		return client("bss")
 	case "help":
 		usage()
 		return nil
@@ -1201,10 +1024,6 @@ func _main() error {
 		call        func(context.Context, *protocol.Conn, any) (protocol.Command, string, any, error)
 	)
 	switch {
-	case strings.HasPrefix(cmd, "bssapi"):
-		u = bssapi.DefaultURL
-		callHandler = handleBSSWebsocketReadUnauth
-		call = bssapi.Call // XXX yuck
 	case strings.HasPrefix(cmd, "bfgapi"):
 		u = bfgapi.DefaultPrivateURL
 		callHandler = handleBFGWebsocketReadUnauth
