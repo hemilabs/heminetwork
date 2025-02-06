@@ -423,7 +423,7 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 
 	log.Tracef("responding with %v", spew.Sdump(ping))
 	if err := bssapi.Write(r.Context(), bws.conn, "0", ping); err != nil {
-		log.Errorf("Write: %v", err)
+		log.Tracef("Write: %v", err)
 	}
 
 	log.Infof("Unauthenticated connection from %v", r.RemoteAddr)
@@ -471,7 +471,7 @@ func (s *Server) deleteSession(id string) {
 
 func writeNotificationResponse(bws *bssWs, response any) {
 	if err := bssapi.Write(bws.requestContext, bws.conn, "", response); err != nil {
-		log.Errorf(
+		log.Tracef(
 			"handleBtcFinalityNotification write: %v %v",
 			bws.addr,
 			err,
@@ -530,7 +530,7 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 				Timestamp:       time.Now().Unix(),
 			}
 			if err := bfgapi.Write(ctx, conn, rid, response); err != nil {
-				log.Errorf("handleBFGWebsocketReadUnauth write: %v",
+				log.Tracef("handleBFGWebsocketReadUnauth write: %v",
 					err)
 			}
 		case bfgapi.CmdBTCFinalityNotification:

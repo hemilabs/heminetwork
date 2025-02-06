@@ -305,11 +305,11 @@ func (s *Server) handleRequest(pctx context.Context, bws *bfgWs, wsid string, cm
 	select {
 	case <-s.requestLimiter:
 	default:
-		log.Infof("Request limiter hit %v: %v", bws.addr, cmd)
+		log.Tracef("Request limiter hit %v: %v", bws.addr, cmd)
 		select {
 		case <-s.requestLimiter:
 		case <-ctx.Done():
-			log.Infof("request context done %v: %v", bws.addr, cmd)
+			log.Debugf("request context done %v: %v", bws.addr, cmd)
 			return
 		}
 	}
