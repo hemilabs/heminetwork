@@ -6,6 +6,7 @@ package bitcoin
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"testing"
 
@@ -328,7 +329,7 @@ func TestDeriveAddresses(t *testing.T) {
 	}
 	t.Log(spew.Sdump(acct0))
 
-	// Derive extended key for external hardned account 0 m/0'/0'
+	// Derive extended key for external hardened account 0 m/0'/0'
 	acct0eh, err := acct0.Derive(hdkeychain.HardenedKeyStart + 0)
 	if err != nil {
 		t.Fatal(err)
@@ -356,5 +357,52 @@ func TestDeriveAddresses(t *testing.T) {
 	t.Log(spew.Sdump(pkHash))
 	if pkHash.String() != "1KWtnYZmQwnwCdGNwjbzpvh3YibNV6KWb9" {
 		t.Fatal("invalid address")
+	}
+}
+
+func TestWalletCreate(t *testing.T) {
+	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
+	seed := "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634cb0602599b867332dfec245547baafae40dad247f21564a0de925527f2445a086fd"
+	xpriv := "xprv9s21ZrQH143K4H14eaYTxfuxn6eDqoPhuQx2sRr9ZvmvkBQ39KMHfaNQ9GDdUkgRbibGXu66XQTZj9QJRSXBEibqrHb34BdJRPvqqiZMTCA"
+	expectedAddress := "14fjqmZJU7qrRtWHgVjh6jcoKjqu6y1gyM"
+	expectedPub, _ := hex.DecodeString("02dc2f5439d4e4e1d7da99daa5707d7d7da72caf4e31c5aa206322e00bc1f2ce8c")
+
+	w, err := WalletNew(&chaincfg.MainNetParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for k, v := range []string{mnemonic, seed, "0x" + seed, xpriv} {
+		t.Logf("using secret: %v", v)
+		err = w.Unlock(v)
+		if err != nil {
+			t.Fatalf("failed %v: %v", k, err)
+		}
+
+		addr, pub, err := w.DeriveHD(0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if addr.String() != expectedAddress {
+			t.Fatal("invalid hardened address")
+		}
+		expub, err := Compressed(pub)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(expub, expectedPub) {
+			t.Fatal("invalid hardened compressed public key")
+		}
+		err = w.Lock()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// use a pub key to test negative path
+	failpub := "xpub68GbL9kRsJSW9YgqXTnAy1JsiCjZEwbecAx1dcNhxdypbFmsDP7NviUgvWmX7ighnsTe9eLJQHDcnoGQUtVKViSnAKzxQ2DHC6QeNbYiztE"
+	err = w.Unlock(failpub)
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
