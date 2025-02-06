@@ -307,6 +307,7 @@ func TestEntropyMnemonicSeed(t *testing.T) {
 }
 
 func TestDeriveAddresses(t *testing.T) {
+	// Test vectors generated on https://iancoleman.io/bip39 using bip32
 	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
 
 	seed, err := bip39.NewSeedWithErrorChecking(mnemonic, "")
