@@ -27,6 +27,7 @@ require (
 	github.com/sethvargo/go-retry v0.3.0
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.32.0
+	github.com/tyler-smith/go-bip39 v1.1.0
 )
 
 require (
