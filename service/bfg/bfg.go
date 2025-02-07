@@ -1361,7 +1361,7 @@ func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2Ke
 
 func writeNotificationResponse(bws *bfgWs, response any) {
 	if err := bfgapi.Write(bws.requestContext, bws.conn, "", response); err != nil {
-		log.Errorf("handleBtcFinalityNotification write: %v %v", bws.addr, err)
+		log.Tracef("handleBtcFinalityNotification write: %v %v", bws.addr, err)
 	}
 }
 
