@@ -9,12 +9,17 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/service/tbc"
+	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
+	"github.com/juju/loggo"
 	"github.com/tyler-smith/go-bip39"
 )
 
@@ -442,6 +447,83 @@ func TestTransactionCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	utxos, err := b.UtxosByAddress(ctx, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("balance %v: %v", addr, BalanceFromUtxos(utxos))
+}
+
+func TestTBCWallet(t *testing.T) {
+	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
+
+	w, err := WalletNew(&chaincfg.TestNet3Params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = w.Unlock(mnemonic)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addr, pub, err := w.DeriveHD(0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%v", addr)
+	t.Logf("%v", pub)
+
+	pkscript, err := ScriptFromPubKeyHash(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%x", pkscript)
+	scripthash := ScriptHashFromScript(pkscript)
+	t.Logf("%v", scripthash)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+
+	// Connect tbc service
+	tbcCfg := &tbc.Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		LevelDBHome:          t.TempDir(),
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 "localnet",
+		PrometheusListenAddress: "",
+		Seeds:                   []string{"127.0.0.1:18444"},
+		ListenAddress:           "localhost:8881",
+	}
+	_ = loggo.ConfigureLoggers(tbcCfg.LogLevel)
+	s, err := tbc.NewServer(tbcCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	cfg := &Config{
+		TBCWSURL:     fmt.Sprintf("ws://%s/%s", tbcCfg.ListenAddress, tbcapi.RouteWebsocket),
+		BTCChainName: "testnet3",
+	}
+
+	time.Sleep(1 * time.Second)
+
+	defer cancel()
+	b, err := TBCNodeNew(ctx, cfg, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(1 * time.Second)
+
 	utxos, err := b.UtxosByAddress(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
