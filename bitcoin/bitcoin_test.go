@@ -420,6 +420,12 @@ func TestWalletCreate(t *testing.T) {
 func TestTransactionCreate(t *testing.T) {
 	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
 
+	// KeyStore for key looksups during signing
+	ks, err := memoryKeyStoreNew(&chaincfg.TestNet3Params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	w, err := WalletNew(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
