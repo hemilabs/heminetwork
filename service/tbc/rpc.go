@@ -199,6 +199,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdFeeEstimateRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.FeeEstimateRequest)
+				return s.handleFeeEstimateRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -638,6 +645,22 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 
 	hash := b.Header.BlockHash()
 	return &tbcapi.BlockInsertRawResponse{BlockHash: &hash}, nil
+}
+
+// XXX this is hardcoded for testing
+func (s *Server) handleFeeEstimateRequest(ctx context.Context, req *tbcapi.FeeEstimateRequest) (any, error) {
+	log.Tracef("handleFeeEstimateRequest")
+	defer log.Tracef("handleFeeEstimateRequest exit")
+
+	em := make(map[uint]float64, 10)
+
+	for i := range 10 {
+		em[uint(i+1)] = 5
+	}
+
+	return &tbcapi.FeeEstimateResponse{
+		FeeEstimates: &em,
+	}, nil
 }
 
 func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest) (any, error) {

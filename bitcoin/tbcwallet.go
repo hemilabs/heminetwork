@@ -77,7 +77,29 @@ type tbcNode struct {
 }
 
 func (t *tbcNode) FeeEstimates(ctx context.Context) ([]FeeEstimate, error) {
-	return nil, errors.New("nein")
+
+	bur := &tbcapi.FeeEstimateRequest{}
+
+	res, err := t.callTBC(ctx, t.requestTimeout, bur)
+	if err != nil {
+		return nil, err
+	}
+
+	buResp, ok := res.(*tbcapi.FeeEstimateResponse)
+	if !ok {
+		return nil, fmt.Errorf("not a buResp %T", res)
+	}
+
+	if buResp.Error != nil {
+		return nil, buResp.Error
+	}
+
+	frv := make([]FeeEstimate, 0, len(*buResp.FeeEstimates))
+	for k, v := range *buResp.FeeEstimates {
+		frv = append(frv, FeeEstimate{Blocks: k, SatsPerByte: v})
+	}
+
+	return frv, nil
 }
 
 func (t *tbcNode) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error) {
@@ -85,7 +107,7 @@ func (t *tbcNode) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*
 	bur := &tbcapi.UTXOsByAddressRequest{
 		Address: addr.String(),
 		Start:   0,
-		Count:   uint(maxUint64), // xxx hack
+		Count:   uint(maxUint64), //xxx hack. consider making an api request that gets ALL utxos implicitely
 	}
 
 	res, err := t.callTBC(ctx, t.requestTimeout, bur)
@@ -339,7 +361,7 @@ func (t *tbcNode) Run(pctx context.Context) error {
 		t.cfg.TBCWSURL)
 
 	t.wg.Wait()
-	log.Infof("Connection to TBC Node cleanly")
+	log.Infof("Terminated connection to TBC Node cleanly")
 
 	return err
 }
