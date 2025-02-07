@@ -486,7 +486,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UT
 
 		responseUtxos = append(responseUtxos, &tbcapi.UTXO{
 			TxId:     *txId,
-			Value:    utxo.Value(),
+			Value:    btcutil.Amount(utxo.Value()),
 			OutIndex: utxo.OutputIndex(),
 		})
 	}

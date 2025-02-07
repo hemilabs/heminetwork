@@ -14,11 +14,16 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/btcsuite/btcwallet/wallet/txsizes"
 	"github.com/tyler-smith/go-bip39"
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/cmd/btctool/httpclient"
+	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 var (
@@ -77,7 +82,7 @@ func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address)
 	type utxosJSON struct {
 		TxId   chainhash.Hash `json:"txid"`
 		Vout   uint32         `json:"vout"`
-		Value  uint64         `json:"value"`
+		Value  btcutil.Amount `json:"value"`
 		Status statusJSON     `json:"status"`
 	}
 	var uj []utxosJSON
@@ -294,7 +299,7 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 	}
 
 	// find large enough utxo
-	total := uint64(amount + fee)
+	total := amount + fee
 	for k := range us {
 		if utxos[k].Value < total {
 			continue
@@ -319,4 +324,45 @@ func FeeByConfirmations(blocks uint, feeEstimates []FeeEstimate) (*FeeEstimate, 
 	}
 
 	return nil, errors.New("no suitable fee estimate")
+}
+
+func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte btcutil.Amount, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, error) {
+	// Create OP_RETURN
+	aks := hemi.L2KeystoneAbbreviate(*l2keystone)
+	popTx := pop.TransactionL2{L2Keystone: aks}
+	popTxOpReturn, err := popTx.EncodeToOpReturn()
+	if err != nil {
+		return nil, fmt.Errorf("encode pop transaction: %w", err)
+	}
+	popTxOut := wire.NewTxOut(0, popTxOpReturn)
+
+	// Calculate fee for 1 input and assume there is change
+	txSize := txsizes.EstimateSerializeSize(1, []*wire.TxOut{popTxOut}, true)
+	fee := btcutil.Amount(txSize) * satsPerByte
+
+	// Find utxo that is big enough for entire transaction
+	utxo, err := UtxoPickerSingle(0, fee, utxos) // no amount, just fees
+	if err != nil {
+		return nil, err
+	}
+
+	// Assemble transaction
+	tx := wire.NewMsgTx(2) // Latest supported version
+	tx.LockTime = locktime
+	outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
+	tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
+
+	// Change
+	change := utxo.Value - fee
+	changeTxOut := wire.NewTxOut(int64(change), script)
+	if !mempool.IsDust(changeTxOut, mempool.DefaultMinRelayTxFee) {
+		tx.AddTxOut(changeTxOut)
+	}
+
+	//
+
+	// OP_RETURN
+	tx.AddTxOut(wire.NewTxOut(0, popTxOpReturn))
+
+	return tx, nil
 }
