@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/davecgh/go-spew/spew"
@@ -443,15 +444,37 @@ func TestTransactionCreate(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+
 	b, err := BlockstreamNew(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	feeEstimates, err := b.FeeEstimates(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feeEstimate, err := FeeByConfirmations(6, feeEstimates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(spew.Sdump(feeEstimate))
+
 	utxos, err := b.UtxosByAddress(ctx, addr)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("balance %v: %v", addr, BalanceFromUtxos(utxos))
+
+	// pick utxo
+	amount := btcutil.Amount(1000000) // 0.01000000 BTC
+	fee := btcutil.Amount(50000)      // 0.00050000 BTC
+	total := amount + fee             // 0.01050000 BTC
+	utxo, err := UtxoPickerSingle(amount, fee, utxos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("utxo: %v > %v", btcutil.Amount(utxo.Value), total)
 }
 
 func TestTBCWallet(t *testing.T) {
