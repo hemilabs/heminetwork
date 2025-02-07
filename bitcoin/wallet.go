@@ -1,7 +1,10 @@
 package bitcoin
 
 import (
+	"context"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,8 +13,88 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/tyler-smith/go-bip39"
+
+	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/cmd/btctool/httpclient"
 )
+
+var (
+	bsMainnetURL  = "https://blockstream.info/api"
+	bsTestne3tURL = "https://blockstream.info/testnet/api"
+)
+
+type Bitcoin interface {
+	UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error)
+}
+
+type blockstream struct {
+	url string
+}
+
+func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error) {
+	u := fmt.Sprintf("%v/address/%v/utxo", bs.url, addr)
+	utxos, err := httpclient.Request(ctx, "GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("request: %w", err)
+	}
+
+	type statusJSON struct {
+		Confirmed   bool           `json:"confirmed"`
+		BlockHeight uint64         `json:"block_height"`
+		BlockHash   chainhash.Hash `json:"block_hash"`
+		BlockTime   int64          `json:"block_time"`
+	}
+	type utxosJSON struct {
+		TxId   chainhash.Hash `json:"txid"`
+		Vout   uint32         `json:"vout"`
+		Value  uint64         `json:"value"`
+		Status statusJSON     `json:"status"`
+	}
+	var uj []utxosJSON
+	err = json.Unmarshal(utxos, &uj)
+	if err != nil {
+		return nil, err
+	}
+
+	urv := make([]*tbcapi.UTXO, 0, len(uj))
+	for _, v := range uj {
+		if !v.Status.Confirmed {
+			continue
+		}
+		urv = append(urv, &tbcapi.UTXO{
+			TxId:     v.TxId,
+			OutIndex: v.Vout,
+			Value:    v.Value,
+		})
+	}
+	return urv, nil
+}
+
+func BlockstreamNew(params *chaincfg.Params) (Bitcoin, error) {
+	bs := &blockstream{}
+	switch params {
+	case &chaincfg.MainNetParams:
+		bs.url = bsMainnetURL
+	case &chaincfg.TestNet3Params:
+		bs.url = bsTestne3tURL
+	default:
+		return nil, errors.New("invalid net")
+	}
+	return bs, nil
+}
+
+var _ Bitcoin = (*blockstream)(nil)
+
+func BalanceFromUtxos(utxos []*tbcapi.UTXO) btcutil.Amount {
+	var amount btcutil.Amount
+	for k := range utxos {
+		amount += btcutil.Amount(utxos[k].Value)
+	}
+	return amount
+}
 
 func zero(s []byte) {
 	for k := range s {
@@ -96,19 +179,29 @@ func (w *Wallet) Unlock(secret string) error {
 	return err
 }
 
-func (w *Wallet) DeriveHD(account, extended uint32) (*btcutil.AddressPubKeyHash, *hdkeychain.ExtendedKey, error) {
+// derive derives the public extended key and address from the account and
+// child using BIP32 derivation. When offset is greater or equal to
+// hdkeychain.HardenedKeyStart it returns a hardened address.
+//
+// Hardened addresses require the private key to derive public keys whereas a
+// regular address can derive public keys without.
+//
+// This function uses the same paths as used in bitcoin core and electrum.
+func (w *Wallet) derive(account, child, offset uint32) (*btcutil.AddressPubKeyHash, *hdkeychain.ExtendedKey, error) {
 	if w.master == nil {
 		return nil, nil, errors.New("wallet locked")
 	}
 
-	// Derive extended key for hardened account 0: m/0'
-	acct, err := w.master.Derive(hdkeychain.HardenedKeyStart + account)
+	// Derive child key for (hardened) account.
+	// E.g. hardened account 0: m/0'
+	acct, err := w.master.Derive(offset + account)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Derive extended key for external hardened account 0 m/0'/0'
-	ek, err := acct.Derive(hdkeychain.HardenedKeyStart + extended)
+	// Derive child key for external (hardened) account.
+	// E.g. hardened account 0 external 0 -> m/0'/0'
+	ek, err := acct.Derive(offset + child)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -128,10 +221,41 @@ func (w *Wallet) DeriveHD(account, extended uint32) (*btcutil.AddressPubKeyHash,
 	return addr, pub, nil
 }
 
+// DeriveHD derives a hardened extended public key and address.
+// E.g. account 1 child 4 m/1'/4'
+func (w *Wallet) DeriveHD(account, child uint32) (btcutil.Address, *hdkeychain.ExtendedKey, error) {
+	return w.derive(account, child, hdkeychain.HardenedKeyStart)
+}
+
+// DeriveHD derives an extended public key and address.
+// E.g. account 0 child 1 m/0/1
+func (w *Wallet) Derive(account, child uint32) (btcutil.Address, *hdkeychain.ExtendedKey, error) {
+	return w.derive(account, child, 0)
+}
+
+//func (w *Wallet) BalanceByPubKey(addr *btcutil.AddressPubKeyHash) (btcutil.Amount, error) {
+//}
+//
+//func (w *Wallet) BalanceByPubKeyHash(addr *btcutil.AddressPubKeyHash) (btcutil.Amount, error) {
+//}
+
+// Compresses converts an extended key to the compressed public key representation.
 func Compressed(pub *hdkeychain.ExtendedKey) ([]byte, error) {
 	ecpub, err := pub.ECPubKey()
 	if err != nil {
 		return nil, err
 	}
 	return ecpub.SerializeCompressed(), nil
+}
+
+func ScriptFromPubKeyHash(pkh btcutil.Address) ([]byte, error) {
+	payToScript, err := txscript.PayToAddrScript(pkh)
+	if err != nil {
+		return nil, err
+	}
+	return payToScript, nil
+}
+
+func ScriptHashFromScript(pkscript []byte) chainhash.Hash {
+	return chainhash.Hash(sha256.Sum256(pkscript))
 }
