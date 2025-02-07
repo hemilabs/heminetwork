@@ -26,12 +26,39 @@ var (
 	bsTestne3tURL = "https://blockstream.info/testnet/api"
 )
 
+type FeeEstimate struct {
+	Blocks      uint
+	SatsPerByte float64
+}
+
 type Bitcoin interface {
+	FeeEstimates(ctx context.Context) ([]FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error)
 }
 
 type blockstream struct {
 	url string
+}
+
+func (bs *blockstream) FeeEstimates(ctx context.Context) ([]FeeEstimate, error) {
+	u := fmt.Sprintf("%v/fee-estimates", bs.url)
+	feeEstimates, err := httpclient.Request(ctx, "GET", u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("request: %w", err)
+	}
+
+	fm := make(map[uint]float64, len(u))
+	err = json.Unmarshal(feeEstimates, &fm)
+	if err != nil {
+		return nil, err
+	}
+
+	frv := make([]FeeEstimate, 0, len(fm))
+	for k, v := range fm {
+		frv = append(frv, FeeEstimate{Blocks: k, SatsPerByte: v})
+	}
+
+	return frv, nil
 }
 
 func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error) {
@@ -233,12 +260,6 @@ func (w *Wallet) Derive(account, child uint32) (btcutil.Address, *hdkeychain.Ext
 	return w.derive(account, child, 0)
 }
 
-//func (w *Wallet) BalanceByPubKey(addr *btcutil.AddressPubKeyHash) (btcutil.Amount, error) {
-//}
-//
-//func (w *Wallet) BalanceByPubKeyHash(addr *btcutil.AddressPubKeyHash) (btcutil.Amount, error) {
-//}
-
 // Compresses converts an extended key to the compressed public key representation.
 func Compressed(pub *hdkeychain.ExtendedKey) ([]byte, error) {
 	ecpub, err := pub.ECPubKey()
@@ -248,6 +269,7 @@ func Compressed(pub *hdkeychain.ExtendedKey) ([]byte, error) {
 	return ecpub.SerializeCompressed(), nil
 }
 
+// ScriptFromPubKeyHash creates a spend script for the specified address.
 func ScriptFromPubKeyHash(pkh btcutil.Address) ([]byte, error) {
 	payToScript, err := txscript.PayToAddrScript(pkh)
 	if err != nil {
@@ -256,6 +278,45 @@ func ScriptFromPubKeyHash(pkh btcutil.Address) ([]byte, error) {
 	return payToScript, nil
 }
 
+// ScriptHashFromScript returns the script hash of the provided script. Note
+// that this is a simple sha256 wrapped in a chainhash.Hash.
 func ScriptHashFromScript(pkscript []byte) chainhash.Hash {
 	return chainhash.Hash(sha256.Sum256(pkscript))
+}
+
+// UtxoPickerSingle is a simple utxo picker that returns a random utxo from the
+// provided list that has a larger value of amount + fee.
+func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi.UTXO, error) {
+	// poor mans random list
+	us := make(map[int]struct{}, len(utxos))
+	for k := range utxos {
+		us[k] = struct{}{}
+	}
+
+	// find large enough utxo
+	total := uint64(amount + fee)
+	for k := range us {
+		if utxos[k].Value < total {
+			continue
+		}
+
+		return utxos[k], nil
+	}
+
+	return nil, errors.New("no suitable utxo found")
+}
+
+func FeeByConfirmations(blocks uint, feeEstimates []FeeEstimate) (*FeeEstimate, error) {
+	if len(feeEstimates) == 0 {
+		return nil, errors.New("no estimates")
+	}
+
+	// We should probably add a variance check but for now be exact.
+	for _, v := range feeEstimates {
+		if v.Blocks == blocks {
+			return &v, nil
+		}
+	}
+
+	return nil, errors.New("no suitable fee estimate")
 }
