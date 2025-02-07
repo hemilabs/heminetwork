@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -126,6 +127,100 @@ func BalanceFromUtxos(utxos []*tbcapi.UTXO) btcutil.Amount {
 		amount += btcutil.Amount(utxos[k].Value)
 	}
 	return amount
+}
+
+var (
+	ErrExists      = errors.New("key exists")
+	ErrDoesntExist = errors.New("key does not exist")
+)
+
+type NamedKey struct {
+	Name string // User defined name
+
+	// Derivation path
+	Account uint
+	Child   uint
+	HD      bool
+
+	PrivateKey *hdkeychain.ExtendedKey
+}
+
+type KeyStore interface {
+	Put(nk *NamedKey) error
+	Get(addr btcutil.Address) (*NamedKey, error)
+	Purge(addr btcutil.Address) error
+	LookupByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) // signing lookup
+}
+
+type memoryKeyStore struct {
+	mtx    sync.Mutex
+	params *chaincfg.Params
+	keys   map[string]*NamedKey
+}
+
+func memoryKeyStoreNew(params *chaincfg.Params) (KeyStore, error) {
+	mks := &memoryKeyStore{
+		params: params,
+		keys:   make(map[string]*NamedKey, 10),
+	}
+	return mks, nil
+}
+
+func (m *memoryKeyStore) Put(nk *NamedKey) error {
+	// Generate address for lookup
+	addr, err := nk.PrivateKey.Address(m.params)
+	if err != nil {
+		return err
+	}
+
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	if _, ok := m.keys[addr.String()]; ok {
+		return ErrExists
+	}
+	m.keys[addr.String()] = nk
+	return nil
+}
+
+func (m *memoryKeyStore) Get(addr btcutil.Address) (*NamedKey, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	nk, ok := m.keys[addr.String()]
+	if !ok {
+		return nil, ErrDoesntExist
+	}
+	return nk, nil
+}
+
+func (m *memoryKeyStore) Purge(addr btcutil.Address) error {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	nk, ok := m.keys[addr.String()]
+	if !ok {
+		return ErrDoesntExist
+	}
+	delete(m.keys, addr.String())
+	nk.PrivateKey.Zero()
+	nk.PrivateKey = nil
+	return nil
+}
+
+func (m *memoryKeyStore) LookupByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) {
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+
+	nk, ok := m.keys[addr.String()]
+	if !ok {
+		return nil, false, ErrDoesntExist
+	}
+	priv, err := nk.PrivateKey.ECPrivKey()
+	if err != nil {
+		return nil, false, err
+	}
+	return priv, true, nil
 }
 
 func zero(s []byte) {
@@ -250,6 +345,8 @@ func (w *Wallet) derive(account, child, offset uint32) (*btcutil.AddressPubKeyHa
 		return nil, nil, err
 	}
 
+	// XXX should we store the key here or return extended key to caller and let the caller handle the store?
+
 	return addr, pub, nil
 }
 
@@ -365,4 +462,22 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	tx.AddTxOut(wire.NewTxOut(0, popTxOpReturn))
 
 	return tx, nil
+}
+
+func TransactionSign(params *chaincfg.Params, ks KeyStore, tx *wire.MsgTx) error {
+	for i, txIn := range tx.TxIn {
+		prevPkScript, ok := prevOuts[txIn.PreviousOutPoint.String()]
+		if !ok {
+			panic("xx")
+		}
+		sigScript, err := txscript.SignTxOutput(params, tx, i,
+			prevPkScript, txscript.SigHashAll,
+			txscript.KeyClosure(ks.LookupByAddr), nil, nil)
+		if err != nil {
+			return err
+		}
+		tx.TxIn[i].SignatureScript = sigScript
+	}
+
+	return nil
 }
