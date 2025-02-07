@@ -17,11 +17,13 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
 	"github.com/juju/loggo"
 	"github.com/tyler-smith/go-bip39"
+
+	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/service/tbc"
+	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
 )
 
 func TestValidateMerklePathOne(t *testing.T) {
@@ -466,15 +468,27 @@ func TestTransactionCreate(t *testing.T) {
 	}
 	t.Logf("balance %v: %v", addr, BalanceFromUtxos(utxos))
 
-	// pick utxo
-	amount := btcutil.Amount(1000000) // 0.01000000 BTC
-	fee := btcutil.Amount(50000)      // 0.00050000 BTC
-	total := amount + fee             // 0.01050000 BTC
-	utxo, err := UtxoPickerSingle(amount, fee, utxos)
+	//// pick utxo
+	//amount := btcutil.Amount(1000000) // 0.01000000 BTC
+	//fee := btcutil.Amount(50000)      // 0.00050000 BTC
+	//total := amount + fee             // 0.01050000 BTC
+	//utxo, err := UtxoPickerSingle(amount, fee, utxos)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//t.Logf("utxo: %v > %v", btcutil.Amount(utxo.Value), total)
+
+	keystone := &hemi.L2Keystone{
+		Version:       1,
+		L1BlockNumber: 1337,
+		L2BlockNumber: 0xdeadbeef,
+	}
+	tx, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
+		btcutil.Amount(feeEstimate.SatsPerByte), utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("utxo: %v > %v", btcutil.Amount(utxo.Value), total)
+	t.Logf("tx: %v", spew.Sdump(tx))
 }
 
 func TestTBCWallet(t *testing.T) {
