@@ -11,18 +11,17 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/juju/loggo"
+
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/juju/loggo"
 )
 
 const (
 	logLevel = "INFO"
 )
 
-var (
-	log = loggo.GetLogger("tbcwallet")
-)
+var log = loggo.GetLogger("tbcwallet")
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -77,13 +76,16 @@ type tbcNode struct {
 	isRunning bool
 }
 
-func (t *tbcNode) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error) {
+func (t *tbcNode) FeeEstimates(ctx context.Context) ([]FeeEstimate, error) {
+	return nil, errors.New("nein")
+}
 
+func (t *tbcNode) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error) {
 	maxUint64 := ^uint64(0)
 	bur := &tbcapi.UTXOsByAddressRequest{
 		Address: addr.String(),
 		Start:   0,
-		Count:   uint(maxUint64), //xxx hack
+		Count:   uint(maxUint64), // xxx hack
 	}
 
 	res, err := t.callTBC(ctx, t.requestTimeout, bur)
@@ -101,7 +103,6 @@ func (t *tbcNode) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*
 	}
 
 	return buResp.UTXOs, nil
-
 }
 
 func TBCNodeNew(pctx context.Context, cfg *Config, autoStart bool) (Bitcoin, error) {
@@ -200,7 +201,6 @@ func (t *tbcNode) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Con
 }
 
 func (t *tbcNode) handleTBCCallCompletion(pctx context.Context, conn *protocol.Conn, bc tbcCmd) {
-
 	log.Tracef("handleTBCCallCompletion")
 	defer log.Tracef("handleTBCCallCompletion exit")
 
@@ -222,7 +222,6 @@ func (t *tbcNode) handleTBCCallCompletion(pctx context.Context, conn *protocol.C
 		log.Tracef("handleTBCCallCompletion returned: %v", spew.Sdump(payload))
 	default:
 	}
-
 }
 
 func (t *tbcNode) handleTBCWebsocketCallUnauth(ctx context.Context, conn *protocol.Conn) {
