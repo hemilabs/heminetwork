@@ -10,6 +10,7 @@ import (
 	"maps"
 	"reflect"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 
@@ -132,7 +133,7 @@ type Tx struct {
 // UTXO represents a Bitcoin unspent transaction output.
 type UTXO struct {
 	TxId     chainhash.Hash `json:"tx_id"`
-	Value    uint64         `json:"value"`
+	Value    btcutil.Amount `json:"value"`
 	OutIndex uint32         `json:"out_index"`
 }
 
