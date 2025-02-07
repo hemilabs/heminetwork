@@ -6,9 +6,11 @@ package bitcoin
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -405,4 +407,44 @@ func TestWalletCreate(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+}
+
+func TestTransactionCreate(t *testing.T) {
+	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
+
+	w, err := WalletNew(&chaincfg.TestNet3Params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = w.Unlock(mnemonic)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addr, pub, err := w.DeriveHD(0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%v", addr)
+	t.Logf("%v", pub)
+
+	pkscript, err := ScriptFromPubKeyHash(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%x", pkscript)
+	scripthash := ScriptHashFromScript(pkscript)
+	t.Logf("%v", scripthash)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	b, err := BlockstreamNew(&chaincfg.TestNet3Params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	utxos, err := b.UtxosByAddress(ctx, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("balance %v: %v", addr, BalanceFromUtxos(utxos))
 }
