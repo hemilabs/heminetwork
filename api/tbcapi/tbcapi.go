@@ -81,6 +81,9 @@ const (
 	CmdBlockKeystoneByL2KeystoneAbrevHashRequest  = "tbcapi-l2-keystone-abrev-by-abrev-hash-request"
 	CmdBlockKeystoneByL2KeystoneAbrevHashResponse = "tbcapi-l2-keystone-abrev-by-abrev-hash-response"
 
+	CmdFeeEstimateRequest  = "tbcapi-fee-estimate-request"
+	CmdFeeEstimateResponse = "tbcapi-fee-estimate-response"
+
 	CmdKeystonesByHeightRequest  = "tbcapi-keystones-by-height-request"
 	CmdKeystonesByHeightResponse = "tbcapi-keystones-by-height-response"
 )
@@ -342,6 +345,13 @@ type BlockDownloadAsyncRawResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
+type FeeEstimateRequest struct{}
+
+type FeeEstimateResponse struct {
+	FeeEstimates *map[uint]float64 `json:"fee_estimate"`
+	Error        *protocol.Error   `json:"error,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                                reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                               reflect.TypeOf(PingResponse{}),
@@ -381,6 +391,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockDownloadAsyncRawResponse:              reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
 	CmdBlockKeystoneByL2KeystoneAbrevHashRequest:  reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashRequest{}),
 	CmdBlockKeystoneByL2KeystoneAbrevHashResponse: reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashResponse{}),
+	CmdFeeEstimateRequest:                         reflect.TypeOf(FeeEstimateRequest{}),
+	CmdFeeEstimateResponse:                        reflect.TypeOf(FeeEstimateResponse{}),
 	CmdKeystonesByHeightRequest:                   reflect.TypeOf(KeystonesByHeightRequest{}),
 	CmdKeystonesByHeightResponse:                  reflect.TypeOf(KeystonesByHeightResponse{}),
 }
