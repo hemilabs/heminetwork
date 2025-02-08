@@ -1,4 +1,4 @@
-// Copyright (c) 2024-2025 Hemi Labs, Inc.
+// Copyright (c) 2024 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -10,15 +10,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
+	"strings"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/dustin/go-humanize"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/juju/loggo"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -26,7 +26,7 @@ import (
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/log"
 )
 
 // Locking order:
@@ -50,17 +50,16 @@ const (
 	verbose  = false
 
 	bhsCanonicalTipKey = "canonicaltip"
+
+	// CompactionThreshold defines the number of transactions after which compaction should be triggered
+	CompactionThreshold = 1000
 )
 
 type IteratorError error
 
-var (
-	log = loggo.GetLogger("level")
+var log = loggo.GetLogger("level")
 
-	ErrIterator = IteratorError(errors.New("iteration error"))
-
-	noStats tbcd.CacheStats
-)
+var ErrIterator = IteratorError(errors.New("iteration error"))
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -73,7 +72,7 @@ type ldb struct {
 	pool    level.Pool
 	rawPool level.RawPool
 
-	blockCache *lowIQLRU
+	blockCache *lru.Cache[chainhash.Hash, *btcutil.Block] // block cache
 
 	// Block Header cache. Note that it is only primed during reads. Doing
 	// this during writes would be relatively expensive at nearly no gain.
@@ -114,42 +113,16 @@ func headerHash(header []byte) *chainhash.Hash {
 }
 
 type Config struct {
-	Home                 string // home directory
-	BlockCacheSize       string // size of block cache
-	BlockheaderCacheSize string // size of block header cache
-	blockCacheSize       int    // parsed size of block cache
-	blockheaderCacheSize int    // parsed size of block header cache
+	Home             string // home directory
+	BlockCache       int    // number of blocks to cache
+	BlockheaderCache int    // number of blocks headers to cache
 }
 
-func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
-	if blockheaderCacheSizeS == "" {
-		blockheaderCacheSizeS = "0"
-	}
-	blockheaderCacheSize, err := humanize.ParseBytes(blockheaderCacheSizeS)
-	if err != nil {
-		panic(err)
-	}
-	if blockheaderCacheSize > math.MaxInt64 {
-		panic("invalid blockheaderCacheSize")
-	}
-
-	if blockCacheSizeS == "" {
-		blockCacheSizeS = "0"
-	}
-	blockCacheSize, err := humanize.ParseBytes(blockCacheSizeS)
-	if err != nil {
-		panic(err)
-	}
-	if blockCacheSize > math.MaxInt64 {
-		panic("invalid blockCacheSize")
-	}
-
+func NewConfig(home string) *Config {
 	return &Config{
-		Home:                 home, // require user to set home.
-		BlockCacheSize:       blockCacheSizeS,
-		blockCacheSize:       int(blockCacheSize),
-		BlockheaderCacheSize: blockheaderCacheSizeS,
-		blockheaderCacheSize: int(blockheaderCacheSize),
+		Home:             home, // require user to set home.
+		BlockCache:       250,  // max 4GB on mainnet
+		BlockheaderCache: 1e6,  // Cache all blockheaders on mainnet
 	}
 }
 
@@ -169,22 +142,19 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		cfg:      cfg,
 	}
 
-	if cfg.blockCacheSize > 0 {
-		l.blockCache, err = lowIQLRUSizeNew(cfg.blockCacheSize)
+	if cfg.BlockCache > 0 {
+		l.blockCache, err = lru.New[chainhash.Hash, *btcutil.Block](cfg.BlockCache)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 		}
-		log.Infof("block cache: %v", humanize.Bytes(uint64(cfg.blockCacheSize)))
+		log.Infof("block cache: %v", cfg.BlockCache)
 	} else {
 		log.Infof("block cache: DISABLED")
 	}
-	if cfg.blockheaderCacheSize > 0 {
-		l.headerCache, err = lowIQMapSizeNew(cfg.blockheaderCacheSize)
-		if err != nil {
-			return nil, fmt.Errorf("couldn't setup block header cache: %w", err)
-		}
-		log.Infof("blockheader cache: %v",
-			humanize.Bytes(uint64(cfg.blockheaderCacheSize)))
+	if cfg.BlockheaderCache > 0 {
+		l.headerCache = lowIQMapNew(cfg.BlockheaderCache)
+
+		log.Infof("blockheader cache: %v", cfg.BlockheaderCache)
 	} else {
 		log.Infof("blockheader cache: DISABLED")
 	}
@@ -203,7 +173,7 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	bhsDB := l.pool[db]
 	tx, err := bhsDB.OpenTransaction()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%v open transaction: %w", db, err)
+		return nil, nil, nil, fmt.Errorf("%v open tansaction: %w", db, err)
 	}
 	d := true
 	discard := &d
@@ -214,14 +184,28 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 		}
 	}
 	cf := func() error {
-		if err := tx.Commit(); err != nil {
+		if err = tx.Commit(); err != nil {
 			return fmt.Errorf("%v commit: %w", db, err)
 		}
-		// Always flush transaction to disk
-		if err := bhsDB.CompactRange(util.Range{}); err != nil {
-			return fmt.Errorf("%v compact: %w", db, err)
-		}
 		*discard = false
+
+		// Check if compaction is needed
+		stats, err := bhsDB.GetProperty("leveldb.stats")
+		if err == nil {
+			// Parse stats to check if compaction is needed
+			if strings.Contains(stats, "Table files size") {
+				// Trigger compaction if database size is significant
+				go func() {
+					log.Debugf("starting background compaction for %v", db)
+					err := bhsDB.CompactRange(util.Range{})
+					if err != nil {
+						log.Errorf("compaction failed for %v: %v", db, err)
+					} else {
+						log.Debugf("compaction completed for %v", db)
+					}
+				}()
+			}
+		}
 		return nil
 	}
 
@@ -285,23 +269,6 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 	defer mdDiscard()
 
 	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
-}
-
-func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
-	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
-	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
-
-	kssDB := l.pool[level.KeystonesDB]
-	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
-	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
-		}
-		return nil, fmt.Errorf("l2 keystone get: %w", err)
-	}
-
-	ks := decodeKeystone(eks)
-	return &ks, nil
 }
 
 // BatchAppend appends rows to batch b.
@@ -372,14 +339,14 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
-	if l.cfg.blockheaderCacheSize > 0 {
+	if l.cfg.BlockheaderCache > 0 {
 		// Try cache first
 		if b, ok := l.headerCache.Get(hash); ok {
 			return b, nil
 		}
 	}
 
-	// It stands to reason that this code does not need a transaction. The
+	// It stands to reason that this code does not need a trasaction. The
 	// caller code will either receive or not receice an answer. It does
 	// not seem likely to be racing higher up in the stack.
 
@@ -394,7 +361,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 	bh := decodeBlockHeader(ebh)
 
 	// Insert into cache, roughly 150 byte cost.
-	if l.cfg.blockheaderCacheSize > 0 {
+	if l.cfg.BlockheaderCache > 0 {
 		l.headerCache.Put(bh)
 	}
 
@@ -878,33 +845,17 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	bhsBatch := new(leveldb.Batch)
 	hhBatch := new(leveldb.Batch)
 
-	var bhCacheBatch []*chainhash.Hash
-	if l.cfg.blockheaderCacheSize > 0 {
-		// cache batch to delete blockheaders
-		bhCacheBatch = make([]*chainhash.Hash, 0, len(headersParsed))
-	}
-
 	// Insert each block header deletion into the batch (for header itself and
 	// height-header association)
 	for i := 0; i < len(headersParsed); i++ {
 		// Delete header i
 		bhash := headersParsed[i].BlockHash()
 		fh := fullHeadersFromDb[i]
-		// Make db delete batch
 		bhsBatch.Delete(bhash[:])
-
-		// Remove from header cache as well in a batch
-		if l.cfg.blockheaderCacheSize > 0 {
-			bhCacheBatch = append(bhCacheBatch, &bhash)
-		}
 
 		// Delete height mapping for header i
 		hhKey := heightHashToKey(fh.Height, bhash[:])
 		hhBatch.Delete(hhKey)
-	}
-	if l.cfg.blockheaderCacheSize > 0 {
-		// Delete right away. Cache can always be rehydrated.
-		l.headerCache.PurgeBatch(bhCacheBatch)
 	}
 
 	// Insert updated canonical tip after removal of the provided block headers
@@ -1083,9 +1034,6 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	}
 	defer hhDiscard()
 
-	// blocks
-	blocksDB := l.rawPool[level.BlocksDB]
-
 	// retrieve best/canonical block header
 	bbh, err := bhsTx.Get([]byte(bhsCanonicalTipKey), nil)
 	if err != nil {
@@ -1136,23 +1084,12 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 
 		// Store height_hash for future reference
 		hhKey := heightHashToKey(height, bhash[:])
-		ok, err := hhTx.Has(hhKey, nil)
-		if err != nil {
-			return tbcd.ITInvalid, nil, nil, 0,
-				fmt.Errorf("height hash has: %w", err)
-		} else if !ok {
-			hhBatch.Put(hhKey, []byte{})
-		}
+		hhBatch.Put(hhKey, []byte{}) // XXX nil?
 
 		// Insert a synthesized height_hash key that serves as an index
 		// to see which blocks are missing.
-		ok, err = blocksDB.Has(hhKey)
-		if err != nil {
-			return tbcd.ITInvalid, nil, nil, 0,
-				fmt.Errorf("blocks has: %w", err)
-		} else if !ok {
-			bmBatch.Put(hhKey, []byte{})
-		}
+		// XXX should we always insert or should we verify prior to insert?
+		bmBatch.Put(hhKey, []byte{})
 
 		// XXX reason about pre encoding. Due to the caller code being
 		// heavily reentrant the odds are not good that encoding would
@@ -1328,8 +1265,8 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 		if err = bDB.Insert(b.Hash()[:], raw); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
-		if l.cfg.blockCacheSize > 0 {
-			l.blockCache.Put(b.Hash(), raw)
+		if l.cfg.BlockCache > 0 {
+			l.blockCache.Add(*b.Hash(), b)
 		}
 	}
 
@@ -1365,35 +1302,27 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
-	// get from cache
-	var (
-		eb  []byte
-		err error
-	)
-	if l.cfg.blockCacheSize > 0 {
+	if l.cfg.BlockCache > 0 {
 		// Try cache first
-		eb, _ = l.blockCache.Get(hash)
-	}
-
-	// get from db
-	if eb == nil {
-		bDB := l.rawPool[level.BlocksDB]
-		eb, err = bDB.Get(hash[:])
-		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
-				return nil, database.BlockNotFoundError{Hash: *hash}
-			}
-			return nil, fmt.Errorf("block get: %w", err)
+		if cb, ok := l.blockCache.Get(*hash); ok {
+			return cb, nil
 		}
 	}
 
-	// if we get here eb MUST exist
+	bDB := l.rawPool[level.BlocksDB]
+	eb, err := bDB.Get(hash[:])
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.BlockNotFoundError{Hash: *hash}
+		}
+		return nil, fmt.Errorf("block get: %w", err)
+	}
 	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))
 	}
-	if l.cfg.blockCacheSize > 0 {
-		l.blockCache.Put(hash, eb)
+	if l.cfg.BlockCache > 0 {
+		l.blockCache.Add(*hash, b)
 	}
 	return b, nil
 }
@@ -1573,27 +1502,6 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start u
 	return utxos, nil
 }
 
-func (l *ldb) UtxosByScriptHashCount(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
-	log.Tracef("UtxosByScriptHashCount")
-	defer log.Tracef("UtxosByScriptHashCount exit")
-
-	var prefix [33]byte
-	prefix[0] = 'h'
-	copy(prefix[1:], sh[:])
-	oDB := l.pool[level.OutputsDB]
-	it := oDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
-	defer it.Release()
-	var x uint64
-	for it.Next() {
-		x++
-	}
-	if err := it.Error(); err != nil {
-		return 0, IteratorError(err)
-	}
-
-	return x, nil
-}
-
 func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	log.Tracef("BlockUtxoUpdate")
 	defer log.Tracef("BlockUtxoUpdate exit")
@@ -1727,98 +1635,4 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 
 	return nil
-}
-
-// encodeKeystone encodes a database keystone as
-// [blockhash,abbreviated keystone] or [32+76] bytes. The abbreviated keystone
-// hash is the leveldb table key.
-func encodeKeystone(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte) {
-	copy(eks[0:32], ks.BlockHash[:])
-	copy(eks[32:], ks.AbbreviatedKeystone[:])
-	return
-}
-
-func encodeKeystoneToSlice(ks tbcd.Keystone) []byte {
-	eks := encodeKeystone(ks)
-	return eks[:]
-}
-
-// decodeKeystone reverse the process of encodeKeystone.
-func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
-	bh, err := chainhash.NewHash(eks[0:32])
-	if err != nil {
-		panic(err) // Can't happen
-	}
-	ks.BlockHash = *bh
-	// copy the values to prevent slicing reentrancy problems.
-	copy(ks.AbbreviatedKeystone[:], eks[32:])
-	return ks
-}
-
-func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone) error {
-	log.Tracef("BlockKeystoneUpdate")
-	defer log.Tracef("BlockKeystoneUpdate exit")
-
-	if !(direction == 1 || direction == -1) {
-		return fmt.Errorf("invalid direction: %v", direction)
-	}
-
-	// keystones
-	kssTx, kssCommit, kssDiscard, err := l.startTransaction(level.KeystonesDB)
-	if err != nil {
-		return fmt.Errorf("keystones open db transaction: %w", err)
-	}
-	defer kssDiscard()
-
-	kssBatch := new(leveldb.Batch)
-	for k, v := range keystones {
-		switch direction {
-		case -1:
-			eks, err := kssTx.Get(k[:], nil)
-			if err != nil {
-				continue
-			}
-			ks := decodeKeystone(eks)
-			// Only delete keystone if it is in the previously found block.
-			if ks.BlockHash.IsEqual(&v.BlockHash) {
-				kssBatch.Delete(k[:])
-			}
-		case 1:
-			has, err := kssTx.Has(k[:], nil)
-			if err != nil {
-				return fmt.Errorf("keystone update has: %w", err)
-			}
-			if has {
-				// Only store unknown keystones
-				continue
-			}
-			kssBatch.Put(k[:], encodeKeystoneToSlice(v))
-		}
-	}
-
-	// Write keystones batch
-	if err = kssTx.Write(kssBatch, nil); err != nil {
-		return fmt.Errorf("keystones insert: %w", err)
-	}
-
-	// keystones commit
-	if err = kssCommit(); err != nil {
-		return fmt.Errorf("keystones commit: %w", err)
-	}
-
-	return nil
-}
-
-func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
-	if l.cfg.blockheaderCacheSize == 0 {
-		return noStats
-	}
-	return l.headerCache.Stats()
-}
-
-func (l *ldb) BlockCacheStats() tbcd.CacheStats {
-	if l.cfg.blockCacheSize == 0 {
-		return noStats
-	}
-	return l.blockCache.Stats()
 }
