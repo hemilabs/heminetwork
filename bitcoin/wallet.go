@@ -427,13 +427,13 @@ func FeeByConfirmations(blocks uint, feeEstimates []FeeEstimate) (*FeeEstimate, 
 	return nil, errors.New("no suitable fee estimate")
 }
 
-func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte btcutil.Amount, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, error) {
+func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte btcutil.Amount, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
 	// Create OP_RETURN
 	aks := hemi.L2KeystoneAbbreviate(*l2keystone)
 	popTx := pop.TransactionL2{L2Keystone: aks}
 	popTxOpReturn, err := popTx.EncodeToOpReturn()
 	if err != nil {
-		return nil, fmt.Errorf("encode pop transaction: %w", err)
+		return nil, nil, fmt.Errorf("encode pop transaction: %w", err)
 	}
 	popTxOut := wire.NewTxOut(0, popTxOpReturn)
 
@@ -444,7 +444,7 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	// Find utxo that is big enough for entire transaction
 	utxo, err := UtxoPickerSingle(0, fee, utxos) // no amount, just fees
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Assemble transaction
@@ -453,6 +453,9 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
 	tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
 
+	// Return previous outs to caller so that they can be signed
+	prevOuts := map[string][]byte{outpoint.String(): script}
+
 	// Change
 	change := utxo.Value - fee
 	changeTxOut := wire.NewTxOut(int64(change), script)
@@ -460,22 +463,19 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 		tx.AddTxOut(changeTxOut)
 	}
 
-	//
-
 	// OP_RETURN
 	tx.AddTxOut(wire.NewTxOut(0, popTxOpReturn))
 
-	return tx, nil
+	return tx, prevOuts, nil
 }
 
-func TransactionSign(params *chaincfg.Params, ks KeyStore, tx *wire.MsgTx) error {
+func TransactionSign(params *chaincfg.Params, ks KeyStore, tx *wire.MsgTx, prevOuts map[string][]byte) error {
 	for i, txIn := range tx.TxIn {
-		//prevPkScript, ok := prevOuts[txIn.PreviousOutPoint.String()]
-		//if !ok {
-		//	panic("xx")
-		//}
-		prevPkScript := []byte{}
-		_ = txIn
+		prevPkScript, ok := prevOuts[txIn.PreviousOutPoint.String()]
+		if !ok {
+			return fmt.Errorf("previous out not found: %v",
+				txIn.PreviousOutPoint)
+		}
 		sigScript, err := txscript.SignTxOutput(params, tx, i,
 			prevPkScript, txscript.SigHashAll,
 			txscript.KeyClosure(ks.LookupByAddr), nil, nil)

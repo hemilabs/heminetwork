@@ -16,6 +16,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/tyler-smith/go-bip39"
@@ -421,6 +422,45 @@ func TestWalletCreate(t *testing.T) {
 	}
 }
 
+// XXX duplicate code
+func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) error {
+	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
+		txscript.ScriptStrictMultiSig | txscript.ScriptDiscourageUpgradableNops
+	vm, err := txscript.NewEngine(scriptPubKey, tx.MsgTx(), 0, flags, nil, nil, -1, nil)
+	if err != nil {
+		return err
+	}
+	if dump {
+		t.Logf("=== executing tx %v", tx.Hash())
+	}
+	for i := 0; ; i++ {
+		d, err := vm.DisasmPC()
+		if dump {
+			t.Logf("%v: %v", i, d)
+		}
+		done, err := vm.Step()
+		if err != nil {
+			return err
+		}
+		stack := vm.GetStack()
+		if dump {
+			t.Logf("%v: stack %v", i, spew.Sdump(stack))
+		}
+		if done {
+			break
+		}
+	}
+	err = vm.CheckErrorCondition(true)
+	if err != nil {
+		return err
+	}
+
+	if dump {
+		t.Logf("=== SUCCESS tx %v", tx.Hash())
+	}
+	return nil
+}
+
 func TestTransactionCreate(t *testing.T) {
 	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
 
@@ -509,12 +549,22 @@ func TestTransactionCreate(t *testing.T) {
 		L1BlockNumber: 1337,
 		L2BlockNumber: 0xdeadbeef,
 	}
-	tx, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
+	tx, prevOut, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
 		btcutil.Amount(feeEstimate.SatsPerByte), utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	err = TransactionSign(&chaincfg.TestNet3Params, ks, tx, prevOut)
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Logf("tx: %v", spew.Sdump(tx))
+
+	err = executeTX(t, true, tx.TxOut[0].PkScript, btcutil.NewTx(tx))
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestTBCWallet(t *testing.T) {
