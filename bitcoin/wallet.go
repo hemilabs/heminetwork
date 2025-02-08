@@ -453,7 +453,9 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
 	tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
 
-	// Return previous outs to caller so that they can be signed
+	// Return previous outs to caller so that they can be signed.
+	// This is a bit odd but in a real transaction we have to return all
+	// the scripts (and somehow obtain them). Think about this some more.
 	prevOuts := map[string][]byte{outpoint.String(): script}
 
 	// Change
