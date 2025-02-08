@@ -314,27 +314,45 @@ func (w *Wallet) Unlock(secret string) error {
 // regular address can derive public keys without.
 //
 // This function uses the same paths as used in bitcoin core and electrum.
-func (w *Wallet) derive(account, child, offset uint32) (*btcutil.AddressPubKeyHash, *hdkeychain.ExtendedKey, error) {
+func (w *Wallet) derive(account, child, offset uint32) (*hdkeychain.ExtendedKey, error) {
 	if w.master == nil {
-		return nil, nil, errors.New("wallet locked")
+		return nil, errors.New("wallet locked")
 	}
 
 	// Derive child key for (hardened) account.
 	// E.g. hardened account 0: m/0'
 	acct, err := w.master.Derive(offset + account)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Derive child key for external (hardened) account.
 	// E.g. hardened account 0 external 0 -> m/0'/0'
 	ek, err := acct.Derive(offset + child)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
+	return ek, nil
+}
+
+// DeriveHD derives a hardened extended public key and address.
+// E.g. account 1 child 4 m/1'/4'
+func (w *Wallet) DeriveHD(account, child uint32) (*hdkeychain.ExtendedKey, error) {
+	return w.derive(account, child, hdkeychain.HardenedKeyStart)
+}
+
+// DeriveHD derives an extended public key and address.
+// E.g. account 0 child 1 m/0/1
+func (w *Wallet) Derive(account, child uint32) (*hdkeychain.ExtendedKey, error) {
+	return w.derive(account, child, 0)
+}
+
+// AddressAndPublicFromExtended returns the public bits from a private extended
+// key.
+func AddressAndPublicFromExtended(params *chaincfg.Params, ek *hdkeychain.ExtendedKey) (btcutil.Address, *hdkeychain.ExtendedKey, error) {
 	// Generate address
-	addr, err := ek.Address(w.params)
+	addr, err := ek.Address(params)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -345,21 +363,7 @@ func (w *Wallet) derive(account, child, offset uint32) (*btcutil.AddressPubKeyHa
 		return nil, nil, err
 	}
 
-	// XXX should we store the key here or return extended key to caller and let the caller handle the store?
-
 	return addr, pub, nil
-}
-
-// DeriveHD derives a hardened extended public key and address.
-// E.g. account 1 child 4 m/1'/4'
-func (w *Wallet) DeriveHD(account, child uint32) (btcutil.Address, *hdkeychain.ExtendedKey, error) {
-	return w.derive(account, child, hdkeychain.HardenedKeyStart)
-}
-
-// DeriveHD derives an extended public key and address.
-// E.g. account 0 child 1 m/0/1
-func (w *Wallet) Derive(account, child uint32) (btcutil.Address, *hdkeychain.ExtendedKey, error) {
-	return w.derive(account, child, 0)
 }
 
 // Compresses converts an extended key to the compressed public key representation.
@@ -466,10 +470,12 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 
 func TransactionSign(params *chaincfg.Params, ks KeyStore, tx *wire.MsgTx) error {
 	for i, txIn := range tx.TxIn {
-		prevPkScript, ok := prevOuts[txIn.PreviousOutPoint.String()]
-		if !ok {
-			panic("xx")
-		}
+		//prevPkScript, ok := prevOuts[txIn.PreviousOutPoint.String()]
+		//if !ok {
+		//	panic("xx")
+		//}
+		prevPkScript := []byte{}
+		_ = txIn
 		sigScript, err := txscript.SignTxOutput(params, tx, i,
 			prevPkScript, txscript.SigHashAll,
 			txscript.KeyClosure(ks.LookupByAddr), nil, nil)
