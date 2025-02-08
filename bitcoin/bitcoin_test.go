@@ -389,7 +389,11 @@ func TestWalletCreate(t *testing.T) {
 			t.Fatalf("failed %v: %v", k, err)
 		}
 
-		addr, pub, err := w.DeriveHD(0, 0)
+		ek, err := w.DeriveHD(0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr, pub, err := AddressAndPublicFromExtended(&chaincfg.MainNetParams, ek)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -435,12 +439,28 @@ func TestTransactionCreate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	addr, pub, err := w.DeriveHD(0, 0)
+	ek, err := w.DeriveHD(0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr, pub, err := AddressAndPublicFromExtended(&chaincfg.TestNet3Params, ek)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("%v", addr)
 	t.Logf("%v", pub)
+
+	// Store in key store
+	err = ks.Put(&NamedKey{
+		Name:       "my private key",
+		Account:    0,
+		Child:      0,
+		HD:         true,
+		PrivateKey: ek,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	pkscript, err := ScriptFromPubKeyHash(addr)
 	if err != nil {
@@ -509,7 +529,11 @@ func TestTBCWallet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	addr, pub, err := w.DeriveHD(0, 0)
+	ek, err := w.DeriveHD(0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr, pub, err := AddressAndPublicFromExtended(&chaincfg.TestNet3Params, ek)
 	if err != nil {
 		t.Fatal(err)
 	}
