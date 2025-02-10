@@ -229,7 +229,7 @@ func (o Outpoint) TxIndexBytes() []byte {
 }
 
 func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
-	op[0] = 'u' // match leveldb cache so that we prevent a bunch of bcopy
+	op[0] = 'u' // match leveldb cache so that we preven a bunch of bcopy
 	copy(op[1:33], txid[:])
 	binary.BigEndian.PutUint32(op[33:], index)
 	return
