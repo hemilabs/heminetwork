@@ -7,6 +7,7 @@ package bitcoin
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -26,6 +27,11 @@ import (
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
 )
+
+func digest256(x []byte) []byte {
+	xx := sha256.Sum256(x)
+	return xx[:]
+}
 
 func TestValidateMerklePathOne(t *testing.T) {
 	index := 3
@@ -462,14 +468,13 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 }
 
 func TestTransactionCreate(t *testing.T) {
-	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
-
 	// KeyStore for key looksups during signing
 	ks, err := memoryKeyStoreNew(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
 	w, err := WalletNew(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
@@ -545,12 +550,16 @@ func TestTransactionCreate(t *testing.T) {
 	//t.Logf("utxo: %v > %v", btcutil.Amount(utxo.Value), total)
 
 	keystone := &hemi.L2Keystone{
-		Version:       1,
-		L1BlockNumber: 1337,
-		L2BlockNumber: 0xdeadbeef,
+		Version:            1,
+		L1BlockNumber:      0xbadc0ffe,
+		L2BlockNumber:      0xdeadbeef,
+		ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
+		PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
+		StateRoot:          digest256([]byte("Hello, world!")),
+		EPHash:             digest256([]byte{0xaa, 0x55}),
 	}
 	tx, prevOut, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
-		btcutil.Amount(feeEstimate.SatsPerByte), utxos, pkscript)
+		btcutil.Amount(feeEstimate.SatsPerByte+0.5), utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}
