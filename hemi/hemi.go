@@ -172,10 +172,10 @@ func (a *L2KeystoneAbrev) Dump(w io.Writer) {
 	fmt.Fprintf(w, "===========================\n")
 }
 
-type RawAbreviatedL2Keystone [L2KeystoneAbrevSize]byte
+type RawAbbreviatedL2Keystone [L2KeystoneAbrevSize]byte
 
-func (a *L2KeystoneAbrev) Serialize() RawAbreviatedL2Keystone {
-	var r RawAbreviatedL2Keystone
+func (a *L2KeystoneAbrev) Serialize() RawAbbreviatedL2Keystone {
+	var r RawAbbreviatedL2Keystone
 	r[0] = a.Version
 	binary.BigEndian.PutUint32(r[1:5], a.L1BlockNumber)
 	binary.BigEndian.PutUint32(r[5:9], a.L2BlockNumber)
@@ -186,7 +186,7 @@ func (a *L2KeystoneAbrev) Serialize() RawAbreviatedL2Keystone {
 	return r
 }
 
-func L2KeystoneAbrevDeserialize(r RawAbreviatedL2Keystone) *L2KeystoneAbrev {
+func L2KeystoneAbrevDeserialize(r RawAbbreviatedL2Keystone) *L2KeystoneAbrev {
 	a := L2KeystoneAbrev{}
 
 	a.Version = r[0]
