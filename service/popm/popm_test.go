@@ -16,6 +16,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/popapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 type opnode struct{}
@@ -51,9 +52,19 @@ func (o *opnode) handleL2KeystoneRequest(ctx context.Context, ws *opnodeWs, payl
 		return fmt.Errorf("invalid payload type: %T", payload), nil
 	}
 
+	l2Keystone := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      11,
+		L2BlockNumber:      22,
+		ParentEPHash:       fillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("stateroot", 32),
+		EPHash:             fillOutBytes("ephash", 32),
+	}
+
 	_ = p
 	res := &popapi.L2KeystoneResponse{
-		Error: protocol.RequestErrorf("not yet"),
+		L2Keystones: []*hemi.L2Keystone{&l2Keystone},
 	}
 
 	return res, nil
@@ -150,21 +161,22 @@ func (o *opnode) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("Write ping: %v", err)
 	}
 
-outer:
-	for {
-		select {
-		case <-ws.requestContext.Done():
-			break outer
-		case <-time.After(time.Second):
-			// XXX replace with L2Keystone
-			ping := popapi.PingRequest{
-				Timestamp: time.Now().Unix(),
-			}
-			if err := popapi.Write(ws.requestContext, ws.conn, "opnode", ping); err != nil {
-				panic(fmt.Errorf("handlePingRequest write: %v %w", ws.addr, err))
+	ws.wg.Add(1)
+	go func() {
+		defer ws.wg.Done()
+		for {
+			select {
+			case <-ws.requestContext.Done():
+				return
+			case <-time.After(time.Second):
+				kssNotif := popapi.L2KeystoneNotfication{}
+				if err := popapi.Write(ws.requestContext, ws.conn, "opnode", kssNotif); err != nil {
+					panic(fmt.Errorf("handleL2KeystoneNotification write: %v %w", ws.addr, err))
+				}
 			}
 		}
-	}
+	}()
+
 	// Wait for termination
 	ws.wg.Wait()
 
@@ -238,4 +250,15 @@ func TestPopMiner(t *testing.T) {
 	}()
 
 	time.Sleep(5 * time.Second)
+}
+
+// fillOutBytes will take a string and return a slice of bytes
+// with values from the string suffixed until a size with bytes '_'
+func fillOutBytes(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, '_')
+	}
+
+	return result
 }
