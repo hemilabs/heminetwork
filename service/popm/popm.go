@@ -92,7 +92,8 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg: cfg,
+		cfg:         cfg,
+		opnodeCmdCh: make(chan opnodeCmd, 10),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -148,7 +149,6 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-//nolint:unused // IT IS FUCKING USED
 func (s *Server) callOpnode(pctx context.Context, timeout time.Duration, msg any) (any, error) {
 	// XXX this code does not go here. move to caller
 	log.Tracef("callOpnode %T", msg)
@@ -168,7 +168,7 @@ func (s *Server) callOpnode(pctx context.Context, timeout time.Duration, msg any
 		return nil, ctx.Err()
 	case s.opnodeCmdCh <- bc:
 	default:
-		return nil, errors.New("pop command queue full")
+		return nil, errors.New("opnode command queue full")
 	}
 
 	// Wait for response
@@ -183,6 +183,47 @@ func (s *Server) callOpnode(pctx context.Context, timeout time.Duration, msg any
 	}
 
 	// Won't get here
+}
+
+func (s *Server) checkForKeystones(ctx context.Context) error {
+	log.Tracef("Checking for new keystone headers...")
+
+	ghkr := &popapi.L2KeystoneRequest{
+		Count: 3, // XXX this needs to be a bit smarter, do this based on some sort of time calculation. Do keep it simple, we don't need keystones that are older than let's say, 30 minbutes.
+	}
+
+	res, err := s.callOpnode(ctx, defaultRequestTimeout, ghkr)
+	if err != nil {
+		return err
+	}
+
+	ghkrResp, ok := res.(*popapi.L2KeystoneResponse)
+	if !ok {
+		return errors.New("not an L2KeystonesResponse")
+	}
+
+	if ghkrResp.Error != nil {
+		return ghkrResp.Error
+	}
+
+	log.Tracef("Got response with %v keystones", len(ghkrResp.L2Keystones))
+
+	return nil
+}
+
+func (s *Server) handleOpnodeWebsocketCall(ctx context.Context, conn *protocol.Conn) {
+	defer s.opnodeWG.Done()
+
+	log.Tracef("handleOpnodeWebsocketCall")
+	defer log.Tracef("handleOpnodeWebsocketCall exit")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case bc := <-s.opnodeCmdCh:
+			go s.handleOpnodeCallCompletion(ctx, conn, bc)
+		}
+	}
 }
 
 func (s *Server) handleOpnodeWebsocketRead(ctx context.Context, conn *protocol.Conn) error {
@@ -215,8 +256,11 @@ func (s *Server) handleOpnodeWebsocketRead(ctx context.Context, conn *protocol.C
 				log.Errorf("Failed to write ping response to opnode server: %v", err)
 			}
 		case popapi.CmdL2KeystoneNotification:
-			// TODO: Add L2KeystoneHandle
-			continue
+			go func() {
+				if err := s.checkForKeystones(ctx); err != nil {
+					log.Errorf("An error occurred while checking for keystones: %v", err)
+				}
+			}()
 		default:
 			return fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -266,15 +310,28 @@ func (s *Server) connectOpnode(pctx context.Context) error {
 		return err
 	}
 
+	rWSCh := make(chan error)
 	s.opnodeWG.Add(1)
-	go s.handleOpnodeWebsocketRead(ctx, conn)
+	go func() {
+		rWSCh <- s.handleOpnodeWebsocketRead(ctx, conn)
+	}()
+
+	s.opnodeWG.Add(1)
+	go s.handleOpnodeWebsocketCall(ctx, conn)
 
 	log.Debugf("connected to opnode: %s", s.cfg.OpnodeURL)
+
+	select {
+	case <-ctx.Done():
+		err = ctx.Err()
+	case err = <-rWSCh:
+	}
+	cancel()
 
 	// Wait for exit
 	s.opnodeWG.Wait()
 
-	return nil
+	return err
 }
 
 func (s *Server) opnode(ctx context.Context) {
