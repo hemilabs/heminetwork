@@ -25,7 +25,7 @@ import (
 
 const (
 	logLevel = "INFO"
-	appName  = "pop"
+	appName  = "popm"
 
 	defaultPopAccount = 1337
 	defaultPopChild   = 0
