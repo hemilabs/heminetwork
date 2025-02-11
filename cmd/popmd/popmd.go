@@ -30,10 +30,16 @@ var (
 
 	cfg = popm.NewDefaultConfig()
 	cm  = config.CfgMap{
-		"POPM_LOG_LEVEL": config.Config{
-			Value:        &cfg.LogLevel,
-			DefaultValue: defaultLogLevel,
-			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
+		"POPM_OPNODE_URL": config.Config{
+			Value:        &cfg.OpnodeURL,
+			DefaultValue: "localhost:9999",
+			Help:         "URL for opnode",
+			Print:        config.PrintAll,
+		},
+		"POPM_BITCOIN_NETWORK": config.Config{
+			Value:        &cfg.Network,
+			DefaultValue: "mainnet",
+			Help:         "bitcoin chain to connect to (ex. \"mainnet\", \"testnet3\")",
 			Print:        config.PrintAll,
 		},
 		"POPM_BITCOIN_SECRET": config.Config{
@@ -43,22 +49,22 @@ var (
 			Help:         "bitcoin secret (mnemonic, seed, xpriv)",
 			Print:        config.PrintSecret,
 		},
-		"POPM_BITCOIN_NETWORK": config.Config{
-			Value:        &cfg.Network,
-			DefaultValue: "mainnet",
-			Help:         "bitcoin chain to connect to (ex. \"mainnet\", \"testnet3\")",
-			Print:        config.PrintAll,
-		},
-		"POPM_PROMETHEUS_ADDRESS": config.Config{
-			Value:        &cfg.PrometheusListenAddress,
-			DefaultValue: "",
-			Help:         "address and port popm prometheus listens on",
+		"POPM_LOG_LEVEL": config.Config{
+			Value:        &cfg.LogLevel,
+			DefaultValue: defaultLogLevel,
+			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
 		},
 		"POPM_PPROF_ADDRESS": config.Config{
 			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",
 			Help:         "address and port popm pprof listens on (open <address>/debug/pprof to see available profiles)",
+			Print:        config.PrintAll,
+		},
+		"POPM_PROMETHEUS_ADDRESS": config.Config{
+			Value:        &cfg.PrometheusListenAddress,
+			DefaultValue: "",
+			Help:         "address and port popm prometheus listens on",
 			Print:        config.PrintAll,
 		},
 	}
