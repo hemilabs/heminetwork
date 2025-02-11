@@ -10,30 +10,25 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
-	"github.com/davecgh/go-spew/spew"
-	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/btcsuite/btcd/btcutil/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/juju/loggo"
+	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/bitcoin"
-	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
+	"github.com/hemilabs/heminetwork/service/deucalion"
+	"github.com/hemilabs/heminetwork/service/pprof"
 )
-
-// XXX we should debate if we can make pop miner fully transient. It feels like
-// it should be.
 
 const (
 	logLevel = "INFO"
+	appName  = "pop"
 
-	promSubsystem = "popm_service" // Prometheus
-
-	l2KeystonesMaxSize = 10
+	defaultPopAccount = 1337
+	defaultPopChild   = 0
 )
 
 var log = loggo.GetLogger("popm")
@@ -45,343 +40,354 @@ func init() {
 }
 
 type Config struct {
-	// TBCWSURL specifies the URL of the TBC private websocket endpoint
-	TBCWSURL string
-
-	// BTCChainName specifies the name of the Bitcoin chain that
-	// this PoP miner is operating on.
-	BTCChainName string // XXX are we brave enough to rename this BTCNetwork?
-
-	// BTCPrivateKey provides a BTC private key as a string of
-	// hexadecimal digits.
-	BTCPrivateKey string
-
-	TBCRequestTimeout time.Duration
-
-	LogLevel string
-
+	Network                 string
+	BitcoinSecret           string
+	LogLevel                string
 	PrometheusListenAddress string
-
-	PprofListenAddress string
-
-	RetryMineThreshold uint
-
-	StaticFee uint
+	PrometheusNamespace     string
+	PprofListenAddress      string
 }
-
-const DefaultTBCRequestTimeout = 15 * time.Second
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		BFGWSURL:          "http://localhost:8383/v1/ws/public",
-		BFGRequestTimeout: DefaultBFGRequestTimeout,
-		BTCChainName:      "mainnet",
-		TBCWSURL:          "http://localhost:8082/v1/ws",
-		TBCRequestTimeout: DefaultTBCRequestTimeout,
-		BTCChainName:      "testnet3",
+		Network:             "testnet3",
+		PrometheusNamespace: appName,
 	}
 }
 
-type Miner struct {
+type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
-	holdoffTimeout time.Duration
-	requestTimeout time.Duration
-
 	cfg *Config
 
-	btcChainParams *btcchaincfg.Params
-	btcPrivateKey  *dcrsecp256k1.PrivateKey
-	btcPublicKey   *dcrsecp256k1.PublicKey
-	btcAddress     *btcutil.AddressPubKeyHash
+	// bitcoin
+	params  *chaincfg.Params
+	public  *hdkeychain.ExtendedKey
+	address btcutil.Address
 
 	// Prometheus
-	isRunning bool
-
-	tbcCmdCh     chan tbcCmd // commands to send to tbc
-	tbcWg        sync.WaitGroup
-	tbcConnected atomic.Bool
-
-	l2Keystones []*hemi.L2Keystone
-
-	eventHandlersMtx sync.RWMutex
-	eventHandlers    []EventHandler
+	isRunning      bool
+	promCollectors []prometheus.Collector
 }
 
-// Wrap for calling tbc commands
-type tbcCmd struct {
-	msg any
-	ch  chan any
-}
-
-func NewMiner(cfg *Config) (*Miner, error) {
+func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
-	if cfg.TBCRequestTimeout <= 0 {
-		cfg.TBCRequestTimeout = DefaultTBCRequestTimeout
+
+	s := &Server{
+		cfg: cfg,
 	}
 
-	m := &Miner{
-		cfg:            cfg,
-		tbcCmdCh:       make(chan tbcCmd, 10),
-		holdoffTimeout: 5 * time.Second,
-		requestTimeout: cfg.TBCRequestTimeout,
-		l2Keystones:    make([]*hemi.L2Keystone, l2KeystonesMaxSize),
-	}
-
-	switch strings.ToLower(cfg.BTCChainName) {
+	switch strings.ToLower(cfg.Network) {
 	case "mainnet":
-		m.btcChainParams = &btcchaincfg.MainNetParams
+		s.params = &chaincfg.MainNetParams
 	case "testnet", "testnet3":
-		m.btcChainParams = &btcchaincfg.TestNet3Params
+		s.params = &chaincfg.TestNet3Params
 	default:
-		return nil, fmt.Errorf("unknown BTC chain name %q", cfg.BTCChainName)
+		return nil, fmt.Errorf("unknown bitcoin network %v", cfg.Network)
 	}
 
-	if cfg.BTCPrivateKey == "" {
-		return nil, errors.New("no BTC private key provided")
+	if cfg.BitcoinSecret == "" {
+		return nil, errors.New("no bitcoin secret provided")
 	}
-	var err error
-	m.btcPrivateKey, m.btcPublicKey, m.btcAddress, err = bitcoin.KeysAndAddressFromHexString(cfg.BTCPrivateKey, m.btcChainParams)
+	vc, err := vinzclortho.VinzClorthoNew(s.params)
 	if err != nil {
 		return nil, err
 	}
-	return m, nil
+	err = vc.Unlock(cfg.BitcoinSecret)
+	if err != nil {
+		return nil, err
+	}
+	ek, err := vc.DeriveHD(defaultPopAccount, defaultPopChild)
+	if err != nil {
+		return nil, err
+	}
+	s.address, s.public, err = vinzclortho.AddressAndPublicFromExtended(s.params, ek)
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
-func (m *Miner) Connected() bool {
-	return m.tbcConnected.Load()
+func (s *Server) running() bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return s.isRunning
 }
 
-func (m *Miner) running() bool {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	return m.isRunning
+func (s *Server) testAndSetRunning(b bool) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	old := s.isRunning
+	s.isRunning = b
+	return old != s.isRunning
 }
 
-func (m *Miner) testAndSetRunning(b bool) bool {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	old := m.isRunning
-	m.isRunning = b
-	return old != m.isRunning
-}
-
-func (m *Miner) promRunning() float64 {
-	r := m.running()
+func (s *Server) promRunning() float64 {
+	r := s.running()
 	if r {
 		return 1
 	}
 	return 0
 }
 
-//nolint:unused // IT IS FUCKING USED
-func (m *Miner) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {
-	log.Tracef("callTBC %T", msg)
-	defer log.Tracef("callTBC exit %T", msg)
+////nolint:unused // IT IS FUCKING USED
+//func (m *Miner) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {
+//	log.Tracef("callTBC %T", msg)
+//	defer log.Tracef("callTBC exit %T", msg)
+//
+//	bc := tbcCmd{
+//		msg: msg,
+//		ch:  make(chan any),
+//	}
+//
+//	ctx, cancel := context.WithTimeout(pctx, timeout)
+//	defer cancel()
+//
+//	// attempt to send
+//	select {
+//	case <-ctx.Done():
+//		return nil, ctx.Err()
+//	case m.tbcCmdCh <- bc:
+//	default:
+//		return nil, errors.New("tbc command queue full")
+//	}
+//
+//	// Wait for response
+//	select {
+//	case <-ctx.Done():
+//		return nil, ctx.Err()
+//	case payload := <-bc.ch:
+//		if err, ok := payload.(error); ok {
+//			return nil, err
+//		}
+//		return payload, nil
+//	}
+//
+//	// Won't get here
+//}
+//
+//func (m *Miner) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
+//	defer m.tbcWg.Done()
+//
+//	log.Tracef("handleTBCWebsocketRead")
+//	defer log.Tracef("handleTBCWebsocketRead exit")
+//	for {
+//		_, _, _, err := tbcapi.ReadConn(ctx, conn)
+//		if err != nil {
+//
+//			// See if we were terminated
+//			select {
+//			case <-ctx.Done():
+//				// XXX too loud
+//				log.Errorf("handleTBCWebsocketRead: %v", ctx.Err())
+//			case <-time.After(m.holdoffTimeout):
+//			}
+//
+//			log.Infof("Connection with TBC server was lost, reconnecting...")
+//			continue
+//		}
+//	}
+//}
+//
+//func (m *Miner) handleTBCCallCompletion(pctx context.Context, conn *protocol.Conn, bc tbcCmd) {
+//	log.Tracef("handleTBCCallCompletion")
+//	defer log.Tracef("handleTBCCallCompletion exit")
+//
+//	ctx, cancel := context.WithTimeout(pctx, m.requestTimeout)
+//	defer cancel()
+//
+//	log.Tracef("handleTBCCallCompletion: %v", spew.Sdump(bc.msg))
+//
+//	_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
+//	if err != nil {
+//		log.Errorf("handleTBCCallCompletion %T: %v", bc.msg, err)
+//		select {
+//		case bc.ch <- err:
+//		default:
+//		}
+//	}
+//	select {
+//	case bc.ch <- payload:
+//		log.Tracef("handleTBCCallCompletion returned: %v", spew.Sdump(payload))
+//	default:
+//	}
+//}
+//
+//func (m *Miner) handleTBCWebsocketCallUnauth(ctx context.Context, conn *protocol.Conn) {
+//	defer m.tbcWg.Done()
+//
+//	log.Tracef("handleTBCWebsocketCallUnauth")
+//	defer log.Tracef("handleTBCWebsocketCallUnauth exit")
+//	for {
+//		select {
+//		case <-ctx.Done():
+//			return
+//		case bc := <-m.tbcCmdCh:
+//			go m.handleTBCCallCompletion(ctx, conn, bc)
+//		}
+//	}
+//}
+//
+//func (m *Miner) connectTBC(pctx context.Context) error {
+//	log.Tracef("connectTBC")
+//	defer log.Tracef("connectTBC exit")
+//
+//	conn, err := protocol.NewConn(m.cfg.TBCWSURL, &protocol.ConnOptions{
+//		ReadLimit: 6 * (1 << 20), // 6 MiB
+//	})
+//	if err != nil {
+//		return err
+//	}
+//
+//	ctx, cancel := context.WithCancel(pctx)
+//	defer cancel()
+//
+//	err = conn.Connect(ctx)
+//	if err != nil {
+//		return err
+//	}
+//
+//	m.tbcWg.Add(1)
+//	go m.handleTBCWebsocketCallUnauth(ctx, conn)
+//
+//	m.tbcWg.Add(1)
+//	go m.handleTBCWebsocketRead(ctx, conn)
+//
+//	log.Debugf("Connected to TBC: %s", m.cfg.TBCWSURL)
+//	m.tbcConnected.Store(true)
+//
+//	// Wait for exit
+//	m.tbcWg.Wait()
+//	m.tbcConnected.Store(false)
+//
+//	return nil
+//}
+//
+//func (m *Miner) tbc(ctx context.Context) {
+//	defer m.wg.Done()
+//
+//	log.Tracef("tbc")
+//	defer log.Tracef("tbc exit")
+//
+//	for {
+//		if err := m.connectTBC(ctx); err != nil {
+//			// Do nothing
+//			log.Tracef("connectTBC: %v", err)
+//		} else {
+//			log.Infof("Connected to TBC: %s", m.cfg.TBCWSURL)
+//		}
+//		// See if we were terminated
+//		select {
+//		case <-ctx.Done():
+//			return
+//		case <-time.After(m.holdoffTimeout):
+//		}
+//
+//		log.Debugf("Reconnecting to: %v", m.cfg.TBCWSURL)
+//	}
+//}
 
-	bc := tbcCmd{
-		msg: msg,
-		ch:  make(chan any),
-	}
-
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	// attempt to send
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case m.tbcCmdCh <- bc:
-	default:
-		return nil, errors.New("tbc command queue full")
-	}
-
-	// Wait for response
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case payload := <-bc.ch:
-		if err, ok := payload.(error); ok {
-			return nil, err
-		}
-		return payload, nil
-	}
-
-	// Won't get here
-}
-
-func (m *Miner) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
-	defer m.tbcWg.Done()
-
-	log.Tracef("handleTBCWebsocketRead")
-	defer log.Tracef("handleTBCWebsocketRead exit")
-	for {
-		_, _, _, err := tbcapi.ReadConn(ctx, conn)
-		if err != nil {
-
-			// See if we were terminated
-			select {
-			case <-ctx.Done():
-				// XXX too loud
-				log.Errorf("handleTBCWebsocketRead: %v", ctx.Err())
-			case <-time.After(m.holdoffTimeout):
-			}
-
-			log.Infof("Connection with TBC server was lost, reconnecting...")
-			continue
-		}
-	}
-}
-
-func (m *Miner) handleTBCCallCompletion(pctx context.Context, conn *protocol.Conn, bc tbcCmd) {
-	log.Tracef("handleTBCCallCompletion")
-	defer log.Tracef("handleTBCCallCompletion exit")
-
-	ctx, cancel := context.WithTimeout(pctx, m.requestTimeout)
-	defer cancel()
-
-	log.Tracef("handleTBCCallCompletion: %v", spew.Sdump(bc.msg))
-
-	_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
-	if err != nil {
-		log.Errorf("handleTBCCallCompletion %T: %v", bc.msg, err)
-		select {
-		case bc.ch <- err:
-		default:
-		}
-	}
-	select {
-	case bc.ch <- payload:
-		log.Tracef("handleTBCCallCompletion returned: %v", spew.Sdump(payload))
-	default:
-	}
-}
-
-func (m *Miner) handleTBCWebsocketCallUnauth(ctx context.Context, conn *protocol.Conn) {
-	defer m.tbcWg.Done()
-
-	log.Tracef("handleTBCWebsocketCallUnauth")
-	defer log.Tracef("handleTBCWebsocketCallUnauth exit")
+func (s *Server) promPoll(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case bc := <-m.tbcCmdCh:
-			go m.handleTBCCallCompletion(ctx, conn, bc)
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
 		}
+
+		// Insert prometheus poll here
 	}
 }
 
-func (m *Miner) connectTBC(pctx context.Context) error {
-	log.Tracef("connectTBC")
-	defer log.Tracef("connectTBC exit")
+// Collectors returns the Prometheus collectors available for the server.
+func (s *Server) Collectors() []prometheus.Collector {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 
-	conn, err := protocol.NewConn(m.cfg.TBCWSURL, &protocol.ConnOptions{
-		ReadLimit: 6 * (1 << 20), // 6 MiB
-	})
-	if err != nil {
-		return err
+	if s.promCollectors == nil {
+		// Naming: https://prometheus.io/docs/practices/naming/
+		s.promCollectors = []prometheus.Collector{
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "running",
+				Help:      "Whether the TBC service is running",
+			}, s.promRunning),
+		}
 	}
-
-	ctx, cancel := context.WithCancel(pctx)
-	defer cancel()
-
-	err = conn.Connect(ctx)
-	if err != nil {
-		return err
-	}
-
-	m.tbcWg.Add(1)
-	go m.handleTBCWebsocketCallUnauth(ctx, conn)
-
-	m.tbcWg.Add(1)
-	go m.handleTBCWebsocketRead(ctx, conn)
-
-	log.Debugf("Connected to TBC: %s", m.cfg.TBCWSURL)
-	m.tbcConnected.Store(true)
-
-	// Wait for exit
-	m.tbcWg.Wait()
-	m.tbcConnected.Store(false)
-
-	return nil
+	return s.promCollectors
 }
 
-func (m *Miner) tbc(ctx context.Context) {
-	defer m.wg.Done()
-
-	log.Tracef("tbc")
-	defer log.Tracef("tbc exit")
-
-	for {
-		if err := m.connectTBC(ctx); err != nil {
-			// Do nothing
-			log.Tracef("connectTBC: %v", err)
-		} else {
-			log.Infof("Connected to TBC: %s", m.cfg.TBCWSURL)
-		}
-		// See if we were terminated
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(m.holdoffTimeout):
-		}
-
-		log.Debugf("Reconnecting to: %v", m.cfg.TBCWSURL)
-	}
-}
-
-func (m *Miner) Run(pctx context.Context) error {
-	if !m.testAndSetRunning(true) {
+func (s *Server) Run(pctx context.Context) error {
+	if !s.testAndSetRunning(true) {
 		return errors.New("popmd already running")
 	}
-	defer m.testAndSetRunning(false)
+	defer s.testAndSetRunning(false)
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
 	// Prometheus
-	if m.cfg.PrometheusListenAddress != "" {
-		if err := m.handlePrometheus(ctx); err != nil {
-			return fmt.Errorf("handlePrometheus: %w", err)
+	if s.cfg.PrometheusListenAddress != "" {
+		d, err := deucalion.New(&deucalion.Config{
+			ListenAddress: s.cfg.PrometheusListenAddress,
+		})
+		if err != nil {
+			return fmt.Errorf("create server: %w", err)
 		}
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := d.Run(ctx, s.Collectors()); !errors.Is(err, context.Canceled) {
+				log.Errorf("prometheus terminated with error: %v", err)
+				return
+			}
+			log.Infof("prometheus clean shutdown")
+		}()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			err := s.promPoll(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Errorf("prometheus poll terminated with error: %v", err)
+				}
+				return
+			}
+		}()
 	}
 
-	/* // pprof
-	if m.cfg.PprofListenAddress != "" {
+	// pprof
+	if s.cfg.PprofListenAddress != "" {
 		p, err := pprof.NewServer(&pprof.Config{
-			ListenAddress: m.cfg.PprofListenAddress,
+			ListenAddress: s.cfg.PprofListenAddress,
 		})
 		if err != nil {
 			return fmt.Errorf("create pprof server: %w", err)
 		}
-		m.wg.Add(1)
+		s.wg.Add(1)
 		go func() {
-			defer m.wg.Done()
+			defer s.wg.Done()
 			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
 				log.Errorf("pprof server terminated with error: %v", err)
 				return
 			}
 			log.Infof("pprof server clean shutdown")
 		}()
-	} */
+	}
 
-	log.Infof("Starting PoP miner with BTC address %v (public key %x)",
-		m.btcAddress.EncodeAddress(), m.btcPublicKey.SerializeCompressed())
-
-	m.wg.Add(1)
-	go m.tbc(ctx) // Attempt to talk to TBC
+	log.Infof("bitcoin address %v", s.address)
+	log.Infof("bitcoin public key %v", s.public)
 
 	<-ctx.Done()
 	err := ctx.Err()
 
-	log.Infof("PoP miner shutting down...")
+	log.Infof("pop miner shutting down")
 
-	m.wg.Wait()
-	log.Infof("PoP miner has shutdown cleanly")
+	s.wg.Wait()
+	log.Infof("pop miner has shutdown cleanly")
 
 	return err
 }
