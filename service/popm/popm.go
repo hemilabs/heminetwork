@@ -149,10 +149,10 @@ func (s *Server) promRunning() float64 {
 }
 
 //nolint:unused // IT IS FUCKING USED
-func (s *Server) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {
+func (s *Server) callOpnode(pctx context.Context, timeout time.Duration, msg any) (any, error) {
 	// XXX this code does not go here. move to caller
-	log.Tracef("callTBC %T", msg)
-	defer log.Tracef("callTBC exit %T", msg)
+	log.Tracef("callOpnode %T", msg)
+	defer log.Tracef("callOpnode exit %T", msg)
 
 	bc := opnodeCmd{
 		msg: msg,
@@ -303,7 +303,7 @@ func (s *Server) Collectors() []prometheus.Collector {
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
-				Help:      "Whether the TBC service is running",
+				Help:      "Whether the pop miner service is running",
 			}, s.promRunning),
 		}
 	}
