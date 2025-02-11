@@ -100,6 +100,9 @@ func (o *opnode) handleWebsocketRead(ctx context.Context, ws *opnodeWs) {
 		switch cmd {
 		case popapi.CmdPingRequest:
 			err = o.handlePingRequest(ctx, ws, payload, id)
+		case popapi.CmdPingResponse:
+			log.Infof("Received ping response from: %v", ws.addr)
+			continue
 		case popapi.CmdL2KeystoneRequest:
 			handler := func(ctx context.Context) (any, error) {
 				return o.handleL2KeystoneRequest(ctx, ws, payload, "")
@@ -147,19 +150,21 @@ func (o *opnode) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("Write ping: %v", err)
 	}
 
-	select {
-	case <-ws.requestContext.Done():
-		break
-	case <-time.After(time.Second):
-		// XXX replace with L2Keystone
-		ping := popapi.PingRequest{
-			Timestamp: time.Now().Unix(),
-		}
-		if err := popapi.Write(ws.requestContext, ws.conn, "opnode", ping); err != nil {
-			panic(fmt.Errorf("handlePingRequest write: %v %w", ws.addr, err))
+outer:
+	for {
+		select {
+		case <-ws.requestContext.Done():
+			break outer
+		case <-time.After(time.Second):
+			// XXX replace with L2Keystone
+			ping := popapi.PingRequest{
+				Timestamp: time.Now().Unix(),
+			}
+			if err := popapi.Write(ws.requestContext, ws.conn, "opnode", ping); err != nil {
+				panic(fmt.Errorf("handlePingRequest write: %v %w", ws.addr, err))
+			}
 		}
 	}
-
 	// Wait for termination
 	ws.wg.Wait()
 
@@ -232,5 +237,5 @@ func TestPopMiner(t *testing.T) {
 		}
 	}()
 
-	wg.Wait()
+	time.Sleep(5 * time.Second)
 }
