@@ -15,9 +15,12 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/hemilabs/heminetwork/api/popapi"
+	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
@@ -27,11 +30,17 @@ const (
 	logLevel = "INFO"
 	appName  = "popm"
 
-	defaultPopAccount = 1337
-	defaultPopChild   = 0
+	defaultPopAccount     = 1337
+	defaultPopChild       = 0
+	defaultRequestTimeout = 3 * time.Second
 )
 
 var log = loggo.GetLogger("popm")
+
+type opnodeCmd struct {
+	msg any
+	ch  chan any
+}
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -43,6 +52,7 @@ type Config struct {
 	Network                 string
 	BitcoinSecret           string
 	LogLevel                string
+	OpnodeURL               string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
@@ -52,6 +62,7 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		Network:             "testnet3",
 		PrometheusNamespace: appName,
+		OpnodeURL:           "http://127.0.0.1:9999/v1/ws", // XXX set this using defaults
 	}
 }
 
@@ -69,6 +80,10 @@ type Server struct {
 	// Prometheus
 	isRunning      bool
 	promCollectors []prometheus.Collector
+
+	// opnode
+	opnodeWG    sync.WaitGroup
+	opnodeCmdCh chan opnodeCmd
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -133,162 +148,137 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-////nolint:unused // IT IS FUCKING USED
-//func (m *Miner) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {
-//	log.Tracef("callTBC %T", msg)
-//	defer log.Tracef("callTBC exit %T", msg)
-//
-//	bc := tbcCmd{
-//		msg: msg,
-//		ch:  make(chan any),
-//	}
-//
-//	ctx, cancel := context.WithTimeout(pctx, timeout)
-//	defer cancel()
-//
-//	// attempt to send
-//	select {
-//	case <-ctx.Done():
-//		return nil, ctx.Err()
-//	case m.tbcCmdCh <- bc:
-//	default:
-//		return nil, errors.New("tbc command queue full")
-//	}
-//
-//	// Wait for response
-//	select {
-//	case <-ctx.Done():
-//		return nil, ctx.Err()
-//	case payload := <-bc.ch:
-//		if err, ok := payload.(error); ok {
-//			return nil, err
-//		}
-//		return payload, nil
-//	}
-//
-//	// Won't get here
-//}
-//
-//func (m *Miner) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
-//	defer m.tbcWg.Done()
-//
-//	log.Tracef("handleTBCWebsocketRead")
-//	defer log.Tracef("handleTBCWebsocketRead exit")
-//	for {
-//		_, _, _, err := tbcapi.ReadConn(ctx, conn)
-//		if err != nil {
-//
-//			// See if we were terminated
-//			select {
-//			case <-ctx.Done():
-//				// XXX too loud
-//				log.Errorf("handleTBCWebsocketRead: %v", ctx.Err())
-//			case <-time.After(m.holdoffTimeout):
-//			}
-//
-//			log.Infof("Connection with TBC server was lost, reconnecting...")
-//			continue
-//		}
-//	}
-//}
-//
-//func (m *Miner) handleTBCCallCompletion(pctx context.Context, conn *protocol.Conn, bc tbcCmd) {
-//	log.Tracef("handleTBCCallCompletion")
-//	defer log.Tracef("handleTBCCallCompletion exit")
-//
-//	ctx, cancel := context.WithTimeout(pctx, m.requestTimeout)
-//	defer cancel()
-//
-//	log.Tracef("handleTBCCallCompletion: %v", spew.Sdump(bc.msg))
-//
-//	_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
-//	if err != nil {
-//		log.Errorf("handleTBCCallCompletion %T: %v", bc.msg, err)
-//		select {
-//		case bc.ch <- err:
-//		default:
-//		}
-//	}
-//	select {
-//	case bc.ch <- payload:
-//		log.Tracef("handleTBCCallCompletion returned: %v", spew.Sdump(payload))
-//	default:
-//	}
-//}
-//
-//func (m *Miner) handleTBCWebsocketCallUnauth(ctx context.Context, conn *protocol.Conn) {
-//	defer m.tbcWg.Done()
-//
-//	log.Tracef("handleTBCWebsocketCallUnauth")
-//	defer log.Tracef("handleTBCWebsocketCallUnauth exit")
-//	for {
-//		select {
-//		case <-ctx.Done():
-//			return
-//		case bc := <-m.tbcCmdCh:
-//			go m.handleTBCCallCompletion(ctx, conn, bc)
-//		}
-//	}
-//}
-//
-//func (m *Miner) connectTBC(pctx context.Context) error {
-//	log.Tracef("connectTBC")
-//	defer log.Tracef("connectTBC exit")
-//
-//	conn, err := protocol.NewConn(m.cfg.TBCWSURL, &protocol.ConnOptions{
-//		ReadLimit: 6 * (1 << 20), // 6 MiB
-//	})
-//	if err != nil {
-//		return err
-//	}
-//
-//	ctx, cancel := context.WithCancel(pctx)
-//	defer cancel()
-//
-//	err = conn.Connect(ctx)
-//	if err != nil {
-//		return err
-//	}
-//
-//	m.tbcWg.Add(1)
-//	go m.handleTBCWebsocketCallUnauth(ctx, conn)
-//
-//	m.tbcWg.Add(1)
-//	go m.handleTBCWebsocketRead(ctx, conn)
-//
-//	log.Debugf("Connected to TBC: %s", m.cfg.TBCWSURL)
-//	m.tbcConnected.Store(true)
-//
-//	// Wait for exit
-//	m.tbcWg.Wait()
-//	m.tbcConnected.Store(false)
-//
-//	return nil
-//}
-//
-//func (m *Miner) tbc(ctx context.Context) {
-//	defer m.wg.Done()
-//
-//	log.Tracef("tbc")
-//	defer log.Tracef("tbc exit")
-//
-//	for {
-//		if err := m.connectTBC(ctx); err != nil {
-//			// Do nothing
-//			log.Tracef("connectTBC: %v", err)
-//		} else {
-//			log.Infof("Connected to TBC: %s", m.cfg.TBCWSURL)
-//		}
-//		// See if we were terminated
-//		select {
-//		case <-ctx.Done():
-//			return
-//		case <-time.After(m.holdoffTimeout):
-//		}
-//
-//		log.Debugf("Reconnecting to: %v", m.cfg.TBCWSURL)
-//	}
-//}
+//nolint:unused // IT IS FUCKING USED
+func (s *Server) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {
+	// XXX this code does not go here. move to caller
+	log.Tracef("callTBC %T", msg)
+	defer log.Tracef("callTBC exit %T", msg)
+
+	bc := opnodeCmd{
+		msg: msg,
+		ch:  make(chan any),
+	}
+
+	ctx, cancel := context.WithTimeout(pctx, timeout)
+	defer cancel()
+
+	// attempt to send
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case s.opnodeCmdCh <- bc:
+	default:
+		return nil, errors.New("pop command queue full")
+	}
+
+	// Wait for response
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case payload := <-bc.ch:
+		if err, ok := payload.(error); ok {
+			return nil, err
+		}
+		return payload, nil
+	}
+
+	// Won't get here
+}
+
+func (s *Server) handleOpnodeWebsocketRead(ctx context.Context, conn *protocol.Conn) {
+	defer s.opnodeWG.Done()
+
+	log.Tracef("handleOpnodeWebsocketRead")
+	defer log.Tracef("handleOpnodeWebsocketRead exit")
+	for {
+		_, _, _, err := popapi.ReadConn(ctx, conn)
+		if err != nil {
+
+			// See if we were terminated
+			select {
+			case <-ctx.Done():
+			}
+			continue
+		}
+	}
+}
+
+func (s *Server) handleOpnodeCallCompletion(pctx context.Context, conn *protocol.Conn, bc opnodeCmd) {
+	log.Tracef("handleOpnodeCallCompletion")
+	defer log.Tracef("handleOpnodeCallCompletion exit")
+
+	ctx, cancel := context.WithTimeout(pctx, defaultRequestTimeout)
+	defer cancel()
+
+	log.Tracef("handleOpnodeCallCompletion: %v", spew.Sdump(bc.msg))
+
+	_, _, payload, err := popapi.Call(ctx, conn, bc.msg)
+	if err != nil {
+		log.Errorf("handleOpnodeCallCompletion %T: %v", bc.msg, err)
+		select {
+		case bc.ch <- err:
+		default:
+		}
+	}
+	select {
+	case bc.ch <- payload:
+		log.Tracef("handleOpnodeCallCompletion returned: %v", spew.Sdump(payload))
+	default:
+	}
+}
+
+func (s *Server) connectOpnode(pctx context.Context) error {
+	log.Tracef("connectOpnode")
+	defer log.Tracef("connectOpnode exit")
+
+	conn, err := protocol.NewConn(s.cfg.OpnodeURL, &protocol.ConnOptions{
+		ReadLimit: 1 * (1 << 20), // 1 MiB
+	})
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
+	err = conn.Connect(ctx)
+	if err != nil {
+		return err
+	}
+
+	s.opnodeWG.Add(1)
+	go s.handleOpnodeWebsocketRead(ctx, conn)
+
+	log.Debugf("connected to opnode: %s", s.cfg.OpnodeURL)
+
+	// Wait for exit
+	s.opnodeWG.Wait()
+
+	return nil
+}
+
+func (s *Server) opnode(ctx context.Context) {
+	log.Tracef("opnode")
+	defer log.Tracef("opnode exit")
+
+	for {
+		log.Tracef("connecting to: %v", s.cfg.OpnodeURL)
+		if err := s.connectOpnode(ctx); err != nil {
+			// Do nothing
+			log.Tracef("connectOpnode: %v", err)
+		} else {
+			log.Infof("Connected to opnode: %s", s.cfg.OpnodeURL)
+		}
+		// See if we were terminated
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+
+		log.Debugf("reconnecting to: %v", s.cfg.OpnodeURL)
+	}
+}
 
 func (s *Server) promPoll(ctx context.Context) error {
 	for {
@@ -377,6 +367,12 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Infof("pprof server clean shutdown")
 		}()
 	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.opnode(ctx)
+	}()
 
 	log.Infof("bitcoin address %v", s.address)
 	log.Infof("bitcoin public key %v", s.public)
