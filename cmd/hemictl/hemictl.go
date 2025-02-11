@@ -67,16 +67,16 @@ var (
 			Help:         "leveldb home directory",
 			Print:        config.PrintAll,
 		},
-		"HEMICTL_NETWORK": config.Config{
-			Value:        &network,
-			DefaultValue: "mainnet",
-			Help:         "hemictl network",
-			Print:        config.PrintAll,
-		},
 		"HEMICTL_LOG_LEVEL": config.Config{
 			Value:        &logLevel,
 			DefaultValue: defaultLogLevel,
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
+			Print:        config.PrintAll,
+		},
+		"HEMICTL_NETWORK": config.Config{
+			Value:        &network,
+			DefaultValue: "mainnet",
+			Help:         "hemictl network",
 			Print:        config.PrintAll,
 		},
 	}
@@ -84,7 +84,7 @@ var (
 	callTimeout = 100 * time.Second
 )
 
-// handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
+// handleBFGWebsocketReadUnauth discards all reads but has to exist in order to
 // be able to use bfgapi.Call.
 func handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
 	for {

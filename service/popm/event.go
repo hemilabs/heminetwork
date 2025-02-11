@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -44,14 +44,14 @@ func (m *Miner) RegisterEventHandler(handler EventHandler) {
 	m.eventHandlers = append(m.eventHandlers, handler)
 }
 
-// dispatchEvent calls all registered event handlers with the given eventType
-// and data. It is recommended to call this function in a go routine to avoid
-// blocking operation while the event is being dispatched, as all event handlers
-// will be executed synchronously.
-func (m *Miner) dispatchEvent(eventType EventType, data any) {
-	m.eventHandlersMtx.RLock()
-	defer m.eventHandlersMtx.RUnlock()
-	for _, handler := range m.eventHandlers {
-		handler(eventType, data)
-	}
-}
+//// dispatchEvent calls all registered event handlers with the given eventType
+//// and data. It is recommended to call this function in a go routine to avoid
+//// blocking operation while the event is being dispatched, as all event handlers
+//// will be executed synchronously.
+//func (m *Miner) dispatchEvent(eventType EventType, data any) {
+//	m.eventHandlersMtx.RLock()
+//	defer m.eventHandlersMtx.RUnlock()
+//	for _, handler := range m.eventHandlers {
+//		handler(eventType, data)
+//	}
+//}
