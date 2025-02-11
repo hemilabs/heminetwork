@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/juju/loggo"
 
@@ -44,21 +43,21 @@ var (
 			Help:         "bitcoin private key",
 			Print:        config.PrintSecret,
 		},
-		"POPM_BFG_URL": config.Config{
-			Value:        &cfg.BFGWSURL,
-			DefaultValue: cfg.BFGWSURL,
-			Help:         "url for BFG (Bitcoin Finality Governor)",
-			Print:        config.PrintAll,
-		},
-		"POPM_BFG_REQUEST_TIMEOUT": config.Config{
-			Value:        &cfg.BFGRequestTimeout,
-			DefaultValue: cfg.BFGRequestTimeout,
-			Help:         "request timeout for BFG (Bitcoin Finality Governor)",
-			Print:        config.PrintAll,
-			Parse: func(envValue string) (any, error) {
-				return time.ParseDuration(envValue)
-			},
-		},
+		//"POPM_BFG_URL": config.Config{
+		//	Value:        &cfg.BFGWSURL,
+		//	DefaultValue: cfg.BFGWSURL,
+		//	Help:         "url for BFG (Bitcoin Finality Governor)",
+		//	Print:        config.PrintAll,
+		//},
+		//"POPM_BFG_REQUEST_TIMEOUT": config.Config{
+		//	Value:        &cfg.BFGRequestTimeout,
+		//	DefaultValue: cfg.BFGRequestTimeout,
+		//	Help:         "request timeout for BFG (Bitcoin Finality Governor)",
+		//	Print:        config.PrintAll,
+		//	Parse: func(envValue string) (any, error) {
+		//		return time.ParseDuration(envValue)
+		//	},
+		//},
 		"POPM_BTC_CHAIN_NAME": config.Config{
 			Value:        &cfg.BTCChainName,
 			DefaultValue: popm.NewDefaultConfig().BTCChainName,
