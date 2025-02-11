@@ -810,7 +810,7 @@ func (s *Server) walkChain(ctx context.Context, tip uint64, exitFast bool) error
 		log.Tracef("walkChain progress; processing block at height %d", tip)
 		err := s.processBitcoinBlock(ctx, tip)
 		if errors.Is(err, ErrAlreadyProcessed) {
-			log.Infof("block known at height %d", tip)
+			log.Tracef("block known at height %d", tip)
 
 			// if we have already seen the block, and the caller wishes
 			// to exit on first known block, do so
