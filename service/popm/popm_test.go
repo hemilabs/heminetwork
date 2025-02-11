@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/davecgh/go-spew/spew"
+	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/api/popapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
@@ -143,12 +143,22 @@ func (o *opnode) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now().Unix(),
 	}
 
-	log.Tracef("Responding with %v", spew.Sdump(ping))
 	if err = popapi.Write(r.Context(), ws.conn, "0", ping); err != nil {
 		log.Errorf("Write ping: %v", err)
 	}
 
-	log.Infof("Connection from %v", r.RemoteAddr)
+	select {
+	case <-ws.requestContext.Done():
+		break
+	case <-time.After(time.Second):
+		// XXX replace with L2Keystone
+		ping := popapi.PingRequest{
+			Timestamp: time.Now().Unix(),
+		}
+		if err := popapi.Write(ws.requestContext, ws.conn, "opnode", ping); err != nil {
+			panic(fmt.Errorf("handlePingRequest write: %v %w", ws.addr, err))
+		}
+	}
 
 	// Wait for termination
 	ws.wg.Wait()
@@ -156,13 +166,13 @@ func (o *opnode) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 	log.Infof("Connection terminated from %v", r.RemoteAddr)
 }
 
-func opnodeLaunch(ctx context.Context, wg *sync.WaitGroup, listenAddress string) {
+func opnodeLaunch(ctx context.Context, t *testing.T, wg *sync.WaitGroup, listenAddress string) {
 	defer wg.Done()
 
 	o := opnode{}
 
 	mux := http.NewServeMux()
-	log.Infof("handle (opnode): %s", popapi.RouteWebsocket)
+	t.Logf("handle (opnode): %s", popapi.RouteWebsocket)
 	mux.HandleFunc(popapi.RouteWebsocket, o.handleWebsocket)
 
 	httpServer := &http.Server{
@@ -172,15 +182,14 @@ func opnodeLaunch(ctx context.Context, wg *sync.WaitGroup, listenAddress string)
 	}
 	httpErrCh := make(chan error)
 	go func() {
-		log.Infof("Listening: %s", listenAddress)
+		t.Logf("Listening: %s", listenAddress)
 		httpErrCh <- httpServer.ListenAndServe()
 	}()
 	defer func() {
 		if err := httpServer.Shutdown(ctx); err != nil {
-			log.Errorf("http server exit: %v", err)
-			return
+			panic(fmt.Errorf("http server exit: %v", err))
 		}
-		log.Infof("RPC server shutdown cleanly")
+		t.Logf("RPC server shutdown cleanly")
 	}()
 
 	select {
@@ -200,21 +209,16 @@ func TestPopMiner(t *testing.T) {
 	// Setup fake op-node
 	wg.Add(1)
 	go func() {
-		defer wg.Done()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Second):
-				panic("ploink")
-			}
-		}
+		opnodeLaunch(ctx, t, &wg, "127.0.0.1:9999")
 	}()
 
 	// Setup pop miner
 	cfg := NewDefaultConfig()
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634cb0602599b867332dfec245547baafae40dad247f21564a0de925527f2445a086fd"
+	cfg.LogLevel = "popm=TRACE"
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
