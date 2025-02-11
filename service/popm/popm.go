@@ -185,20 +185,40 @@ func (s *Server) callOpnode(pctx context.Context, timeout time.Duration, msg any
 	// Won't get here
 }
 
-func (s *Server) handleOpnodeWebsocketRead(ctx context.Context, conn *protocol.Conn) {
+func (s *Server) handleOpnodeWebsocketRead(ctx context.Context, conn *protocol.Conn) error {
 	defer s.opnodeWG.Done()
 
 	log.Tracef("handleOpnodeWebsocketRead")
 	defer log.Tracef("handleOpnodeWebsocketRead exit")
 	for {
-		_, _, _, err := popapi.ReadConn(ctx, conn)
+		cmd, rid, payload, err := popapi.ReadConn(ctx, conn)
 		if err != nil {
 
-			// See if we were terminated
 			select {
 			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Second):
 			}
+			log.Infof("Connection to opnode was lost, reconnecting...")
 			continue
+		}
+
+		switch cmd {
+		case popapi.CmdPingRequest:
+			p := payload.(*popapi.PingRequest)
+			response := &popapi.PingResponse{
+				OriginTimestamp: p.Timestamp,
+				Timestamp:       time.Now().Unix(),
+			}
+
+			if err := popapi.Write(ctx, conn, rid, response); err != nil {
+				log.Errorf("Failed to write ping response to opnode server: %v", err)
+			}
+		case popapi.CmdL2KeystoneNotification:
+			// TODO: Add L2KeystoneHandle
+			continue
+		default:
+			return fmt.Errorf("unknown command: %v", cmd)
 		}
 	}
 }
