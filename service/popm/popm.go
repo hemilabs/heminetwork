@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -36,9 +36,7 @@ const (
 	l2KeystonesMaxSize = 10
 )
 
-var (
-	log = loggo.GetLogger("popm")
-)
+var log = loggo.GetLogger("popm")
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -234,7 +232,6 @@ func (m *Miner) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn)
 }
 
 func (m *Miner) handleTBCCallCompletion(pctx context.Context, conn *protocol.Conn, bc tbcCmd) {
-
 	log.Tracef("handleTBCCallCompletion")
 	defer log.Tracef("handleTBCCallCompletion exit")
 
@@ -256,7 +253,6 @@ func (m *Miner) handleTBCCallCompletion(pctx context.Context, conn *protocol.Con
 		log.Tracef("handleTBCCallCompletion returned: %v", spew.Sdump(payload))
 	default:
 	}
-
 }
 
 func (m *Miner) handleTBCWebsocketCallUnauth(ctx context.Context, conn *protocol.Conn) {

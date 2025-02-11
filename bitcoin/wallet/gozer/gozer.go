@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package gozer
 
 import (
@@ -44,7 +48,7 @@ func FeeByConfirmations(blocks uint, feeEstimates []FeeEstimate) (*FeeEstimate, 
 func BalanceFromUtxos(utxos []*tbcapi.UTXO) btcutil.Amount {
 	var amount btcutil.Amount
 	for k := range utxos {
-		amount += btcutil.Amount(utxos[k].Value)
+		amount += utxos[k].Value
 	}
 	return amount
 }
