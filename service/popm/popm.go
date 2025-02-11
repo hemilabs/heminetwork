@@ -177,6 +177,7 @@ func (m *Miner) promRunning() float64 {
 	return 0
 }
 
+//nolint:unused // IT IS FUCKING USED
 func (m *Miner) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {
 	log.Tracef("callTBC %T", msg)
 	defer log.Tracef("callTBC exit %T", msg)
@@ -212,7 +213,7 @@ func (m *Miner) callTBC(pctx context.Context, timeout time.Duration, msg any) (a
 	// Won't get here
 }
 
-func (m *Miner) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) error {
+func (m *Miner) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
 	defer m.tbcWg.Done()
 
 	log.Tracef("handleTBCWebsocketRead")
@@ -224,7 +225,8 @@ func (m *Miner) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			// See if we were terminated
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				// XXX too loud
+				log.Errorf("handleTBCWebsocketRead: %v", ctx.Err())
 			case <-time.After(m.holdoffTimeout):
 			}
 
@@ -296,7 +298,7 @@ func (m *Miner) connectTBC(pctx context.Context) error {
 	go m.handleTBCWebsocketCallUnauth(ctx, conn)
 
 	m.tbcWg.Add(1)
-	m.handleTBCWebsocketRead(ctx, conn)
+	go m.handleTBCWebsocketRead(ctx, conn)
 
 	log.Debugf("Connected to TBC: %s", m.cfg.TBCWSURL)
 	m.tbcConnected.Store(true)
