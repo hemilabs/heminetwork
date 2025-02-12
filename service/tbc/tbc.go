@@ -666,6 +666,12 @@ func (s *Server) promTx() float64 {
 	return deucalion.Uint64ToFloat(s.prom.syncInfo.Tx.Height)
 }
 
+func (s *Server) promKeystone() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.Uint64ToFloat(s.prom.syncInfo.Keystone.Height)
+}
+
 func (s *Server) promConnectedPeers() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -2157,11 +2163,13 @@ func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]by
 }
 
 type SyncInfo struct {
-	Synced         bool // True when all indexing is caught up
 	AtLeastMissing int  // Blocks missing 0-63 is counted, >=64 returns -1
-	BlockHeader    HashHeight
-	Utxo           HashHeight
-	Tx             HashHeight
+	Synced         bool // True when all indexing is caught up
+
+	BlockHeader HashHeight
+	Keystone    HashHeight
+	Tx          HashHeight
+	Utxo        HashHeight
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2231,7 +2239,22 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
 		!s.indexing && !blksMissing {
-		si.Synced = true
+		// If keystone indexers are disabled we are synced.
+		if !s.cfg.HemiIndex {
+			si.Synced = true
+			return
+		}
+
+		// Perform additional keystone indexer tests.
+		keystoneHH, err := s.KeystoneIndexHash(ctx)
+		if err != nil {
+			keystoneHH = &HashHeight{}
+		}
+		si.Keystone = *keystoneHH
+		if keystoneHH.Hash.IsEqual(&bhb.Hash) {
+			si.Synced = true
+			return
+		}
 	}
 	return
 }
@@ -2399,6 +2422,14 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "block_cache_items",
 				Help:      "Number of cached blocks",
 			}, s.promBlockCacheItems),
+		}
+		if s.cfg.HemiIndex {
+			s.promCollectors = append(s.promCollectors,
+				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+					Namespace: s.cfg.PrometheusNamespace,
+					Name:      "keystone_sync_height",
+					Help:      "Height of the keystone indexer",
+				}, s.promKeystone))
 		}
 	}
 	return s.promCollectors
