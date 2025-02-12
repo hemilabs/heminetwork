@@ -662,7 +662,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 		}, e
 	}
 	return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-		L2KeystoneAbrev: hemi.L2KeystoneAbrevDeserialize(hemi.RawAbreviatedL2Keystone(ks.AbbreviatedKeystone)),
+		L2KeystoneAbrev: hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
 		BtcBlockHash:    &ks.BlockHash,
 	}, nil
 }
