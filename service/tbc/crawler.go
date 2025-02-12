@@ -1439,7 +1439,7 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 			return nil
 		}
 		kssCached := len(kss)
-		log.Infof("Keystone unwinder blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
+		log.Infof("Keystone unwinder blocks processed %v in %v transactions cached %v cache unused %v avg keystone/blk %v",
 			blocksProcessed, time.Since(start), kssCached,
 			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
 
