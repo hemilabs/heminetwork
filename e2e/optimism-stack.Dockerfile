@@ -9,7 +9,7 @@ WORKDIR /git
 ARG OP_GETH_CACHE_BREAK=12F2
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout a7ab4addbe8402714cf4e2f03ffdd272838ece71
+RUN git checkout b531783
 
 WORKDIR /git/op-geth
 
@@ -42,7 +42,7 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout 5467ea32639c3cad6845161107939097587436d6
+RUN git checkout 4ab38c7
 RUN git submodule update --init --recursive
 RUN pnpm install
 RUN pnpm install:abigen
