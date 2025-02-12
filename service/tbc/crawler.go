@@ -1440,7 +1440,7 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 			return nil
 		}
 		kssCached := len(kss)
-		log.Infof("Keystone unwinder blocks processed %v in %v transactions cached %v cache unused %v avg keystone/blk %v",
+		log.Infof("Keystone unwinder blocks processed %v in %v keystones cached %v cache unused %v avg keystone/blk %v",
 			blocksProcessed, time.Since(start), kssCached,
 			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
 
@@ -1500,7 +1500,7 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 			return nil
 		}
 		kssCached := len(kss)
-		log.Infof("Keystone indexer blocks processed %v in %v transactions cached %v cache unused %v avg keystones/blk %v",
+		log.Infof("Keystone indexer blocks processed %v in %v keystones cached %v cache unused %v avg keystones/blk %v",
 			blocksProcessed, time.Since(start), kssCached,
 			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
 
@@ -1877,7 +1877,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		log.Errorf("block header by hash: %v", err)
 	} else {
-		log.Infof("Syncing complete at: %v", bh.HH()) // XXX this prints too often
+		log.Debugf("Syncing complete at: %v", bh.HH())
 	}
 
 	return nil
