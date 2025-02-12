@@ -52,7 +52,7 @@ const (
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
-	defaultMaxCachedKeystones = 1e5 // number of cached keystones prior to flush
+	defaultMaxCachedKeystones = 1024 // number of cached keystones prior to flush
 
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
 
@@ -1290,7 +1290,7 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 }
 
 func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgHeaders) error {
-	log.Tracef("handleHeaders (%v): %v %v", p, len(msg.Headers))
+	log.Tracef("handleHeaders (%v): %v", p, len(msg.Headers))
 	defer log.Tracef("handleHeaders exit (%v): %v", p, len(msg.Headers))
 
 	// When quiesced do not handle headers but do cache them.
@@ -1359,7 +1359,8 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 		pbhHash = &msg.Headers[k].PrevBlock
 	}
 
-	// When running in normal (not External Header) mode, do not set upstream state IDs
+	// When running in normal (not External Header) mode, do not set
+	// upstream state IDs
 	it, cbh, lbh, n, err := s.db.BlockHeadersInsert(ctx, msg, nil)
 	if err != nil {
 		// This ends the race between peers during IBD. It should
