@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -149,8 +150,8 @@ func TestMemoryZuul(t *testing.T) {
 								t.Fatal(err)
 							}
 						} else {
-							if err == nil {
-								t.Fatalf("expected '%v' error", zuul.ErrKeyExists)
+							if err == nil || !errors.Is(err, zuul.ErrKeyExists) {
+								t.Fatalf("expected '%v' error, got '%v'", zuul.ErrKeyExists, err)
 							}
 						}
 					}
@@ -167,8 +168,8 @@ func TestMemoryZuul(t *testing.T) {
 								t.Fatal(err)
 							}
 						} else {
-							if err == nil {
-								t.Fatalf("expected '%v' error", zuul.ErrKeyDoesntExist)
+							if err == nil || !errors.Is(err, zuul.ErrKeyDoesntExist) {
+								t.Fatalf("expected '%v' error, got '%v'", zuul.ErrKeyDoesntExist, err)
 							}
 						}
 					}
@@ -184,7 +185,7 @@ func TestMemoryZuul(t *testing.T) {
 			}
 			for _, ki := range expectedIn {
 
-				nk, err := m.Get(*(ki.addr))
+				nk, err := m.Get(*ki.addr)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -192,7 +193,7 @@ func TestMemoryZuul(t *testing.T) {
 					t.Fatalf("unexpected error diff: %s", diff)
 				}
 
-				priv, ok, err := m.LookupByAddr(*(ki.addr))
+				priv, ok, err := m.LookupByAddr(*ki.addr)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -212,13 +213,13 @@ func TestMemoryZuul(t *testing.T) {
 			}
 			for _, ki := range expectedOut {
 
-				_, err = m.Get(*(ki.addr))
-				if err == nil {
-					t.Fatalf("expected '%v' error", zuul.ErrKeyDoesntExist)
+				_, err = m.Get(*ki.addr)
+				if err == nil || !errors.Is(err, zuul.ErrKeyDoesntExist) {
+					t.Fatalf("expected '%v' error, got '%v'", zuul.ErrKeyDoesntExist, err)
 				}
-				_, _, err = m.LookupByAddr(*(ki.addr))
-				if err == nil {
-					t.Fatalf("expected '%v' error", zuul.ErrKeyDoesntExist)
+				_, _, err = m.LookupByAddr(*ki.addr)
+				if err == nil || !errors.Is(err, zuul.ErrKeyDoesntExist) {
+					t.Fatalf("expected '%v' error, got '%v'", zuul.ErrKeyDoesntExist, err)
 				}
 
 			}
