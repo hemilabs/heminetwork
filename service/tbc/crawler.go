@@ -1293,7 +1293,7 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 		// Try not to overshoot the cache to prevent costly allocations
 		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
 		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
-			log.Infof("Keystone indexer: %v tx cache %v%%", hh, cp)
+			log.Infof("Keystone indexer: %v keystone cache %v%%", hh, cp)
 		}
 		if cp > kssPercentage {
 			// Set kssMax to the largest tx capacity seen
