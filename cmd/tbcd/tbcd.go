@@ -85,7 +85,7 @@ var (
 		},
 		"TBC_MAX_CACHED_KEYSTONES": config.Config{
 			Value:        &cfg.MaxCachedKeystones,
-			DefaultValue: int(1e5),
+			DefaultValue: 1024,
 			Help:         "maximum cached keystones during indexing",
 			Print:        config.PrintAll,
 		},

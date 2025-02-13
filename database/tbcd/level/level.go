@@ -353,7 +353,6 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 
 	mdBatch := new(leveldb.Batch)
 	BatchAppend(ctx, mdBatch, []tbcd.Row{{Key: key, Value: value}})
-
 	// Transaction write
 	if err := mdDB.Write(mdBatch, nil); err != nil {
 		return fmt.Errorf("metadata write: %w", err)
@@ -1630,9 +1629,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 			outsBatch.Put(hop[:], utxo.ValueBytes())
 		}
 
-		// XXX this probably should be done by the caller but we do it
-		// here to lower memory pressure as large gobs of data are
-		// written to disk.
+		// Empty out cache.
 		delete(utxos, op)
 	}
 
@@ -1709,9 +1706,7 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 			}
 		}
 
-		// XXX this probably should be done by the caller but we do it
-		// here to lower memory pressure as large gobs of data are
-		// written to disk.
+		// Empty out cache.
 		delete(txs, k)
 	}
 
@@ -1771,28 +1766,32 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 
 	kssBatch := new(leveldb.Batch)
 	for k, v := range keystones {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
 		switch direction {
 		case -1:
 			eks, err := kssTx.Get(k[:], nil)
-			if err != nil {
-				continue
-			}
-			ks := decodeKeystone(eks)
-			// Only delete keystone if it is in the previously found block.
-			if ks.BlockHash.IsEqual(&v.BlockHash) {
-				kssBatch.Delete(k[:])
+			if err == nil {
+				ks := decodeKeystone(eks)
+				// Only delete keystone if it is in the
+				// previously found block.
+				if ks.BlockHash.IsEqual(&v.BlockHash) {
+					kssBatch.Delete(k[:])
+				}
 			}
 		case 1:
 			has, err := kssTx.Has(k[:], nil)
 			if err != nil {
 				return fmt.Errorf("keystone update has: %w", err)
 			}
-			if has {
+			if !has {
 				// Only store unknown keystones
-				continue
+				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
 			}
-			kssBatch.Put(k[:], encodeKeystoneToSlice(v))
 		}
+
+		// Empty out cache.
+		delete(keystones, k)
 	}
 
 	// Write keystones batch

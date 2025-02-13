@@ -179,9 +179,11 @@ func (s *Server) KeystoneIndexHash(ctx context.Context) (*HashHeight, error) {
 		// h = s.hemiGenesis // XXX disable this for now until we are
 		// sure we may or may not have to pass "genesis" around in the
 		// various functions.
+		// XXX
+		hh := s2h("0000000000000014a1717b82329a58e344f1821389d0415601f1b12ebce35881")
 		h = &HashHeight{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
+			Hash:   hh,
+			Height: 2577400,
 		}
 	}
 	return h, nil
@@ -1261,14 +1263,14 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 	var last *HashHeight
 
 	// Find start hash
-	ksHH, err := s.KeystoneIndexHash(ctx)
+	keystoneHH, err := s.KeystoneIndexHash(ctx)
 	if err != nil {
 		return 0, last, fmt.Errorf("keystone index hash: %w", err)
 	}
 
-	kssPercentage := 95 // flush cache at >95% capacity
+	keystonesPercentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
-	hh := ksHH
+	hh := keystoneHH
 	for {
 		log.Debugf("indexing keystones: %v", hh)
 
@@ -1293,11 +1295,12 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 
 		// Try not to overshoot the cache to prevent costly allocations
 		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
-		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
+		if bh.Height%10000 == 0 || cp > keystonesPercentage || blocksProcessed == 1 {
 			log.Infof("Keystone indexer: %v keystone cache %v%%", hh, cp)
 		}
-		if cp > kssPercentage {
-			// Set kssMax to the largest tx capacity seen
+
+		if cp > keystonesPercentage {
+			// Set keystonesMax to the largest keystone capacity seen
 			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
 			last = hh
 			// Flush
