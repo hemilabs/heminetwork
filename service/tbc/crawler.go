@@ -1517,7 +1517,7 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 		logMemStats()
 		runtime.GC()
 
-		log.Infof("Flushing keysyones complete %v took %v",
+		log.Infof("Flushing keystones complete %v took %v",
 			kssCached, time.Since(start))
 
 		// Record height in metadata
