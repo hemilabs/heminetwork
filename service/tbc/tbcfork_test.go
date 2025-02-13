@@ -994,7 +994,11 @@ func mustHaveKss(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 
 		kssCache := make(map[chainhash.Hash]tbcd.Keystone, 10)
 
-		err = processKeystones(b.b.Hash(), b.b.Transactions(), kssCache)
+		// XXX why is this succeeding?? We should care about direction.
+		// It looks like we don't have keystone from block 1 in block 2
+		// for example. So make sure we do in the test so that this
+		// breaks and thus cares about direction.
+		err = processKeystones(b.b.Hash(), b.b.Transactions(), 1, kssCache)
 		if err != nil {
 			panic(fmt.Errorf("processKeystones: %w", err))
 		}

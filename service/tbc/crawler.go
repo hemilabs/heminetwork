@@ -1232,7 +1232,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	return fmt.Errorf("invalid direction: %v", direction)
 }
 
-func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map[chainhash.Hash]tbcd.Keystone) error {
+func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, direction int, kssCache map[chainhash.Hash]tbcd.Keystone) error {
 	for _, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
 			// Skip coinbase inputs
@@ -1246,8 +1246,15 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map
 				continue
 			}
 			if _, ok := kssCache[*aPoPTx.L2Keystone.Hash()]; ok {
-				// Multiple keystones may exist in block, only store first
-				continue
+				// Multiple keystones may exist in block, only
+				// store first or last based on direction. When
+				// we move forward we only care about the first
+				// one, when we move backwards we only car
+				// about the last one thus overwrite the value
+				// in the map.
+				if direction == 1 {
+					continue
+				}
 			}
 
 			abvKss := aPoPTx.L2Keystone.Serialize()
@@ -1301,7 +1308,7 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 		}
 
 		// Index block
-		err = processKeystones(b.Hash(), b.Transactions(), kss)
+		err = processKeystones(b.Hash(), b.Transactions(), 1, kss)
 		if err != nil {
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
 		}
@@ -1380,7 +1387,7 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
 
-		err = processKeystones(b.Hash(), b.Transactions(), kss)
+		err = processKeystones(b.Hash(), b.Transactions(), -1, kss)
 		if err != nil {
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
 		}
