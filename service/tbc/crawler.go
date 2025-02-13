@@ -1909,9 +1909,10 @@ func (s *Server) SyncIndexersToBest(ctx context.Context) error {
 
 	// NOTE: the way this code works today is that it will ALWAYS reindex
 	// the last block it already indexed. This is wasteful for resources
-	// but so far does no other harm. The reason this happens is because
+	// but so far does no harm. The reason this happens is because
 	// the code to skip the last block is super awkward and potentially
-	// brittle. This needs to be revisited but reader beware of this
-	// reality.
+	// brittle. It would require special handling for genesis or skip the
+	// first block that's passed in. This needs to be revisited but reader
+	// beware of this reality.
 	return s.syncIndexersToBest(ctx)
 }
