@@ -345,10 +345,10 @@ func logMemStats() {
 	runtime.ReadMemStats(&mem)
 
 	// Go memory statistics are hard to interpret but the following list is
-	// an aproximation:
+	// an approximation:
 	//	Alloc is currently allocated memory
 	// 	TotalAlloc is all memory allocated over time
-	// 	Sys is basicaly a peak memory use
+	// 	Sys is basically a peak memory use
 	log.Infof("Alloc = %v, TotalAlloc = %v, Sys = %v, NumGC = %v\n",
 		humanize.IBytes(mem.Alloc),
 		humanize.IBytes(mem.TotalAlloc),
@@ -507,7 +507,7 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbc
 
 // indexUtxosInBlocks indexes utxos from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processedd.
+// the last hash it has processed.
 func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
 	log.Tracef("indexUtxoBlocks")
 	defer log.Tracef("indexUtxoBlocks exit")
@@ -600,7 +600,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 
 // unindexUtxosInBlocks unindexes utxos from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processedd.
+// the last hash it has processed.
 func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash, utxos map[tbcd.Outpoint]tbcd.CacheOutput) (int, *HashHeight, error) {
 	log.Tracef("unindexUtxoBlocks")
 	defer log.Tracef("unindexUtxoBlocks exit")
@@ -684,7 +684,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 	log.Tracef("UtxoIndexerUnwind")
 	defer log.Tracef("UtxoIndexerUnwind exit")
 
-	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start and endhas flipped
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
@@ -879,7 +879,7 @@ func processTxs(blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.
 
 // indexTxsInBlocks indexes txs from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processedd.
+// the last hash it has processed.
 func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, txs map[tbcd.TxKey]*tbcd.TxValue) (int, *HashHeight, error) {
 	log.Tracef("indexTxsInBlocks")
 	defer log.Tracef("indexTxsInBlocks exit")
@@ -964,7 +964,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 
 // unindexTxsInBlocks indexes txs from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processedd.
+// the last hash it has processed.
 func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, txs map[tbcd.TxKey]*tbcd.TxValue) (int, *HashHeight, error) {
 	log.Tracef("unindexTxsInBlocks")
 	defer log.Tracef("unindexTxsInBlocks exit")
