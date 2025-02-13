@@ -151,7 +151,7 @@ services:
 
   # Hemi L2 node
   op-geth-l2:
-    image: "ghcr.io/hemilabs/op-geth@sha256:43860fcb691c85e344bd17a660a19e254924953b2ccebe03f2d87d425eeaecbb" # 337407d
+    image: "ghcr.io/hemilabs/op-geth:a5a12ae@sha256:6e21d631b073a363ff859f4e82bbbcbde339801b5f5e5b9e42a5eb34081e054e"
     depends_on:
       geth-l1:
         condition: "service_started"
@@ -210,7 +210,7 @@ services:
 
   # Hemi op-node
   op-node:
-    image: "ghcr.io/hemilabs/op-node@sha256:8a190294b5ee6acc200e9cdfbef95143e604be2ba37b60e42e419118edc1f376" # 6b46f50
+    image: "ghcr.io/hemilabs/op-node:3a56733@sha256:99f692bd734f8fac8f6f2a531641cfdab11220c2aefa31a25525d916c96668c1"
     depends_on:
       geth-l1:
         condition: "service_started"
