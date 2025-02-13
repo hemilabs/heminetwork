@@ -43,7 +43,7 @@ import (
 )
 
 // XXX this code needs to be a bit smarter when syncing bitcoin. We should
-// return a "not ready" error whe that is the case.
+// return a "not ready" error when that is the case.
 
 type notificationId string
 
