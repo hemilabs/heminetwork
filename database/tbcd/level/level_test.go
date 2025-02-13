@@ -346,7 +346,11 @@ func TestKeystoneUpdate(t *testing.T) {
 			}
 
 			for _, dir := range tti.direction {
-				err := db.BlockKeystoneUpdate(ctx, dir, tti.kssMap)
+				kssMapCopy := make(map[btcchainhash.Hash]tbcd.Keystone)
+				for k, v := range tti.kssMap {
+					kssMapCopy[k] = v
+				}
+				err := db.BlockKeystoneUpdate(ctx, dir, kssMapCopy)
 				if diff := deep.Equal(err, tti.expectedError); len(diff) > 0 {
 					t.Fatalf("(direction %v) unexpected error diff: %s", dir, diff)
 				}
@@ -436,6 +440,11 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 	}
 	if !reflect.DeepEqual(k2, *ks2) {
 		t.Fatalf("%v%v", spew.Sdump(k2), spew.Sdump(*ks2))
+	}
+
+	ksm = map[chainhash.Hash]tbcd.Keystone{
+		*k1hash: k1,
+		*k2hash: k2,
 	}
 
 	// Unwind
