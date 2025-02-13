@@ -180,10 +180,10 @@ func (s *Server) KeystoneIndexHash(ctx context.Context) (*HashHeight, error) {
 		// sure we may or may not have to pass "genesis" around in the
 		// various functions.
 		// XXX
-		hh := s2h("0000000000000014a1717b82329a58e344f1821389d0415601f1b12ebce35881")
+		// hh := s2h("0000000000000014a1717b82329a58e344f1821389d0415601f1b12ebce35881")
 		h = &HashHeight{
-			Hash:   hh,
-			Height: 2577400,
+			Hash:   *s.chainParams.GenesisHash,
+			Height: 0,
 		}
 	}
 	return h, nil
