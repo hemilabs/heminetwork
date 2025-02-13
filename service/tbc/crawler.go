@@ -1907,5 +1907,11 @@ func (s *Server) SyncIndexersToBest(ctx context.Context) error {
 		s.mtx.Unlock()
 	}()
 
+	// NOTE: the way this code works today is that it will ALWAYS reindex
+	// the last block it already indexed. This is wasteful for resources
+	// but so far does no other harm. The reason this happens is because
+	// the code to skip the last block is super awkward and potentially
+	// brittle. This needs to be revisited but reader beware of this
+	// reality.
 	return s.syncIndexersToBest(ctx)
 }
