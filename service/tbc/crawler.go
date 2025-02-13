@@ -338,9 +338,9 @@ func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, 
 	return -1, errors.New("path not found")
 }
 
-func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhash.Hash, bh *tbcd.BlockHeader) (*HashHeight, error) {
+func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhash.Hash, hh *HashHeight) (*HashHeight, error) {
 	// Move to next block
-	height := bh.Height + 1
+	height := hh.Height + 1
 	bhs, err := s.db.BlockHeadersByHeight(ctx, height)
 	if err != nil {
 		return nil, fmt.Errorf("block headers by height %v: %w",
@@ -352,9 +352,8 @@ func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhas
 			height, err)
 	}
 	// Verify it connects to parent
-	if !bh.Hash.IsEqual(bhs[index].ParentHash()) {
-		return nil, fmt.Errorf("%v does not connect to: %v",
-			bhs[index], bh.Hash)
+	if !hh.Hash.IsEqual(bhs[index].ParentHash()) {
+		return nil, fmt.Errorf("%v does not connect to: %v", bhs[index], hh.Hash)
 	}
 	nbh := bhs[index]
 	return &HashHeight{Hash: *nbh.BlockHash(), Height: nbh.Height}, nil
@@ -562,14 +561,9 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 	// already indexed the last block.
 	hh := utxoHH
 	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
-		bh, err := s.db.BlockHeaderByHash(ctx, &utxoHH.Hash)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block header %v: %w",
-				utxoHH.Hash, err)
-		}
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, bh)
-		if err != nil {
-			return 0, last, fmt.Errorf("utxo next block %v: %w", bh, err)
+			return 0, last, fmt.Errorf("utxo next block %v: %w", hh, err)
 		}
 	}
 
@@ -618,7 +612,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Move to next block
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, bh)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
 			return 0, last, fmt.Errorf("utxo next block %v: %w", hh, err)
 		}
@@ -927,14 +921,9 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 	// already indexed the last block.
 	hh := txHH
 	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
-		bh, err := s.db.BlockHeaderByHash(ctx, &txHH.Hash)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block header %v: %w",
-				txHH.Hash, err)
-		}
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, bh)
-		if err != nil {
-			return 0, last, fmt.Errorf("tx next block %v: %w", bh, err)
+			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
 		}
 	}
 
@@ -976,7 +965,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		}
 
 		// Move to next block
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, bh)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
 			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
 		}
@@ -1292,14 +1281,9 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 	// already indexed the last block.
 	hh := keystoneHH
 	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
-		bh, err := s.db.BlockHeaderByHash(ctx, &keystoneHH.Hash)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block header %v: %w",
-				keystoneHH.Hash, err)
-		}
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, bh)
-		if err != nil {
-			return 0, last, fmt.Errorf("keystone next block %v: %w", bh, err)
+			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
 		}
 	} else {
 		// Keystone indexer is special, override genesis.
@@ -1345,7 +1329,7 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 		}
 
 		// Move to next block
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, bh)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
 			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
 		}
