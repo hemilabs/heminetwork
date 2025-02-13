@@ -343,6 +343,27 @@ func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, 
 	return -1, errors.New("path not found")
 }
 
+func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhash.Hash, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+	// Move to next block
+	height := bh.Height + 1
+	bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+	if err != nil {
+		return nil, fmt.Errorf("block headers by height %v: %w",
+			height, err)
+	}
+	index, err := s.findPathFromHash(ctx, endHash, bhs)
+	if err != nil {
+		return nil, fmt.Errorf("could not determine canonical path %v: %w",
+			height, err)
+	}
+	// Verify it connects to parent
+	if !bh.Hash.IsEqual(bhs[index].ParentHash()) {
+		return nil, fmt.Errorf("%v does not connect to: %v",
+			bhs[index], bh.Hash)
+	}
+	return &bhs[index], nil
+}
+
 func logMemStats() {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
@@ -578,24 +599,12 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Move to next block
-		height := bh.Height + 1
-		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		nbh, err := s.nextCanonicalBlockheader(ctx, endHash, bh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block headers by height %v: %w",
-				height, err)
+			return 0, last, fmt.Errorf("utxo next block %v: %w", hh, err)
 		}
-		index, err := s.findPathFromHash(ctx, endHash, bhs)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
-				height, err)
-		}
-		// Verify it connects to parent
-		if !hash.IsEqual(bhs[index].ParentHash()) {
-			return 0, last, fmt.Errorf("%v does not connect to: %v",
-				bhs[index], hash)
-		}
-		hh.Hash = *bhs[index].BlockHash()
-		hh.Height = bhs[index].Height
+		hh.Hash = *nbh.BlockHash()
+		hh.Height = nbh.Height
 	}
 
 	return blocksProcessed, last, nil
@@ -942,24 +951,12 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		}
 
 		// Move to next block
-		height := bh.Height + 1
-		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		nbh, err := s.nextCanonicalBlockheader(ctx, endHash, bh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block headers by height %v: %w",
-				height, err)
+			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
 		}
-		index, err := s.findPathFromHash(ctx, endHash, bhs)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
-				height, err)
-		}
-		// Verify it connects to parent
-		if !hash.IsEqual(bhs[index].ParentHash()) {
-			return 0, last, fmt.Errorf("%v does not connect to: %v",
-				bhs[index], hash)
-		}
-		hh.Hash = *bhs[index].BlockHash()
-		hh.Height = bhs[index].Height
+		hh.Hash = *nbh.BlockHash()
+		hh.Height = nbh.Height
 	}
 
 	return blocksProcessed, last, nil
@@ -1314,24 +1311,12 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 		}
 
 		// Move to next block
-		height := bh.Height + 1
-		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		nbh, err := s.nextCanonicalBlockheader(ctx, endHash, bh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block headers by height %v: %w",
-				height, err)
+			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
 		}
-		index, err := s.findPathFromHash(ctx, endHash, bhs)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
-				height, err)
-		}
-		// Verify it connects to parent
-		if !hash.IsEqual(bhs[index].ParentHash()) {
-			return 0, last, fmt.Errorf("%v does not connect to: %v",
-				bhs[index], hash)
-		}
-		hh.Hash = *bhs[index].BlockHash()
-		hh.Height = bhs[index].Height
+		hh.Hash = *nbh.BlockHash()
+		hh.Height = nbh.Height
 	}
 
 	return blocksProcessed, last, nil
