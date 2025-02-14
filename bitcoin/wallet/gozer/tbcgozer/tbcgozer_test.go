@@ -6,36 +6,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/juju/loggo"
 )
 
-func TestTBCWallet(t *testing.T) {
+func TestTBCGozer(t *testing.T) {
 
-	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
-	w, err := vinzclortho.VinzClorthoNew(&chaincfg.TestNet3Params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = w.Unlock(mnemonic)
-	if err != nil {
-		t.Fatal(err)
-	}
+	testAddrString := "n2BosBT7DvxWk1tZprk1tR1kyQmXwcv8M8"
 
-	ek, err := w.DeriveHD(0, 0)
+	testAddr, err := btcutil.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to decode address: %v", err)
 	}
-	addr, pub, err := vinzclortho.AddressAndPublicFromExtended(&chaincfg.TestNet3Params, ek)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("%v", addr)
-	t.Logf("%v", pub)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -66,12 +52,9 @@ func TestTBCWallet(t *testing.T) {
 		}
 	}()
 
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	defer cancel1()
-
 	time.Sleep(1 * time.Second)
 
-	b, err := TBCGozerNew(ctx1, "http://localhost:8881/v1/ws")
+	b, err := TBCGozerNew(ctx, "http://localhost:8881/v1/ws")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,9 +72,9 @@ func TestTBCWallet(t *testing.T) {
 	}
 	t.Log(spew.Sdump(feeEstimate))
 
-	utxos, err := b.UtxosByAddress(ctx, addr)
+	utxos, err := b.UtxosByAddress(ctx, testAddr)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("balance %v: %v", addr, gozer.BalanceFromUtxos(utxos))
+	t.Logf("balance %v: %v", testAddr, gozer.BalanceFromUtxos(utxos))
 }
