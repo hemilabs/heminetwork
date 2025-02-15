@@ -936,7 +936,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	defer log.Tracef("handleBlockExpired exit")
 
 	// handleBlockExpired is called numerous times after SIGTERM. This call
-	//will fail with database closed error and is very loud.
+	// will fail with database closed error and is very loud.
 	select {
 	case <-ctx.Done():
 		return nil
