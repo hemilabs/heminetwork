@@ -582,7 +582,7 @@ func _main() error {
 				}
 				fmt.Printf("%v", spew.Sdump(blk.MsgBlock()))
 			} else {
-				fmt.Printf("%v\n", b)
+				fmt.Printf("%v", b)
 			}
 		}
 	case "blockheader":
