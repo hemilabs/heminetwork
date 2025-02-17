@@ -284,6 +284,36 @@ dockers:
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
 
+  # hemictl amd64
+  - id: "hemictl-amd64"
+    goos: "linux"
+    goarch: "amd64"
+    dockerfile: "docker/hemictl/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/hemictl:{{ .Version }}-amd64"
+      - "ghcr.io/hemilabs/hemictl:{{ .Version }}-amd64"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
+  # hemictl arm64
+  - id: "hemictl-arm64"
+    goos: "linux"
+    goarch: "arm64"
+    dockerfile: "docker/hemictl/goreleaser.Dockerfile"
+    use: "buildx"
+    image_templates:
+      - "hemilabs/hemictl:{{ .Version }}-arm64"
+      - "ghcr.io/hemilabs/hemictl:{{ .Version }}-arm64"
+    build_flag_templates:
+      - "--platform=linux/arm64/v8"
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=VCS_REF={{ .FullCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
   # bssd amd64
   - id: "bssd-amd64"
     goos: "linux"
