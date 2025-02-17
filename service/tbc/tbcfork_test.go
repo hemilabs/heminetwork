@@ -755,6 +755,66 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	var mempool []*btcutil.Tx
 
 	nextBlockHeight := parent.Height() + 1
+	switch nextBlockHeight {
+	case 2:
+		// spend block 1 coinbase
+		tx, err := b.newSignedTxFromTx(name, parent.TxByIndex(0), 3000000000)
+		if err != nil {
+			return nil, fmt.Errorf("new tx from tx: %w", err)
+		}
+		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
+			tx.MsgTx().TxIn[0].PreviousOutPoint)
+		mempool = []*btcutil.Tx{tx}
+	case 3:
+		// spend block 2 transaction 1
+		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(1), 1100000000)
+		if err != nil {
+			return nil, fmt.Errorf("new tx from tx: %w", err)
+		}
+		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
+			tx.MsgTx().TxIn[0].PreviousOutPoint)
+		mempool = []*btcutil.Tx{tx}
+
+		// spend above tx in same block
+		tx2, err := b.newSignedTxFromTx(name+":1", tx, 3000000000)
+		if err != nil {
+			return nil, fmt.Errorf("new tx from tx: %w", err)
+		}
+		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
+			tx2.MsgTx().TxIn[0].PreviousOutPoint)
+		mempool = []*btcutil.Tx{tx, tx2}
+	}
+
+	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextBlockHeight,
+		parent.Hash(), extraNonce, mempool)
+	if err != nil {
+		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
+	}
+	blk := newBlock(b.params, name, bt)
+	_, err = b.insertBlock(blk)
+	if err != nil {
+		return nil, fmt.Errorf("insert block at height %v: %v",
+			nextBlockHeight, err)
+	}
+	// XXX this really sucks, we should get rid of height as a best indicator
+	if blk.Height() > b.height {
+		b.height = blk.Height()
+	}
+
+	return blk, nil
+}
+
+func (b *btcNode) mineKss(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+	parent, ok := b.chain[from.String()]
+	if !ok {
+		return nil, errors.New("parent hash not found")
+	}
+	// extra nonce is needed to prevent block collisions
+	en := random(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	var mempool []*btcutil.Tx
+
+	nextBlockHeight := parent.Height() + 1
 	kssList := []hemi.L2Keystone{}
 	switch nextBlockHeight {
 	case 2:
@@ -927,10 +987,14 @@ func (b *btcNode) mineN(count int, from *chainhash.Hash, payToAddress btcutil.Ad
 	return blocks, nil
 }
 
-func (b *btcNode) Mine(name string, parent *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+func (b *btcNode) Mine(name string, parent *chainhash.Hash, payToAddress btcutil.Address, kssEnabled bool) (*block, error) {
 	b.mtx.Lock()
 	defer b.mtx.Unlock()
-	return b.mine(name, parent, payToAddress)
+	if kssEnabled {
+		return b.mineKss(name, parent, payToAddress)
+	} else {
+		return b.mine(name, parent, payToAddress)
+	}
 }
 
 func (b *btcNode) MineN(count int, from *chainhash.Hash, payToAddress btcutil.Address) ([]*block, error) {
@@ -939,8 +1003,8 @@ func (b *btcNode) MineN(count int, from *chainhash.Hash, payToAddress btcutil.Ad
 	return b.mineN(count, from, payToAddress)
 }
 
-func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
-	blk, err := b.Mine(name, parent, payToAddress)
+func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhash.Hash, payToAddress btcutil.Address, kssEnabled bool) (*block, error) {
+	blk, err := b.Mine(name, parent, payToAddress, kssEnabled)
 	if err != nil {
 		return nil, err
 	}
@@ -1220,11 +1284,11 @@ func TestFork(t *testing.T) {
 
 	// Advance both heads
 	b9 := n.Best()[0]
-	b10a, err := n.MineAndSend(ctx, "b10a", b9, address)
+	b10a, err := n.MineAndSend(ctx, "b10a", b9, address, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b10b, err := n.MineAndSend(ctx, "b10b", b9, address)
+	b10b, err := n.MineAndSend(ctx, "b10b", b9, address, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1238,11 +1302,11 @@ func TestFork(t *testing.T) {
 	}
 
 	// Advance both heads again
-	b11a, err := n.MineAndSend(ctx, "b11a", b10a.Hash(), address)
+	b11a, err := n.MineAndSend(ctx, "b11a", b10a.Hash(), address, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b11b, err := n.MineAndSend(ctx, "b11b", b10b.Hash(), address)
+	b11b, err := n.MineAndSend(ctx, "b11b", b10b.Hash(), address, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1286,7 +1350,7 @@ func TestFork(t *testing.T) {
 	// 9 -> 10a  ->  11a ->
 	//   \-> 10b ->  11c -> 12
 	t.Logf("mine 11c")
-	b11c, err := n.MineAndSend(ctx, "b11c", b10b.Hash(), address)
+	b11c, err := n.MineAndSend(ctx, "b11c", b10b.Hash(), address, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1294,7 +1358,7 @@ func TestFork(t *testing.T) {
 
 	// 12
 	t.Logf("mine 12")
-	b12, err := n.MineAndSend(ctx, "b12", b11c.Hash(), address)
+	b12, err := n.MineAndSend(ctx, "b12", b11c.Hash(), address, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1377,6 +1441,179 @@ func TestIndexNoFork(t *testing.T) {
 		}
 	}()
 
+	go func() {
+		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+	time.Sleep(time.Second * 2)
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		LevelDBHome:          t.TempDir(),
+		ListenAddress:        "localhost:8882",
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		Seeds:                   []string{"127.0.0.1:18444"},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+
+	time.Sleep(2 * time.Second)
+
+	// creat a linear chain with some tx's
+	// g ->  b1 ->  b2 -> b3
+
+	// best chain
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// genesis -> b3 should work with negative direction (cdiff is less than target)
+	direction, err := s.TxIndexIsLinear(ctx, b3.Hash())
+	if err != nil {
+		t.Fatalf("expected success g -> b3, got %v", err)
+	}
+	if direction <= 0 {
+		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
+	}
+
+	// Index to b3
+	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// XXX verify all balances
+	for address, key := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v (%v): %v", address, key.name, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// make sure genesis tx is in db
+	_, err = s.TxById(ctx, n.gtx.Hash())
+	if err != nil {
+		t.Fatalf("genesis not found: %v", err)
+	}
+	// make sure gensis was not spent
+	_, err = s.SpentOutputsByTxId(ctx, n.gtx.Hash())
+	if err == nil {
+		t.Fatal("genesis coinbase tx should not be spent")
+	}
+
+	// Spot check tx 1 from b2
+	tx := b2.b.Transactions()[1]
+	txb2, err := s.TxById(ctx, tx.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
+		t.Fatal("hash not equal")
+	}
+	si, err := s.SpentOutputsByTxId(ctx, b1.b.Transactions()[0].Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = si
+	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
+	si, err = s.SpentOutputsByTxId(ctx, b2.b.Transactions()[1].Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// t.Logf("%v: %v", b2.b.Transactions()[1].Hash(), spew.Sdump(si))
+	_ = si
+
+	// unwind back to b3 (removes b3 and b2)
+	err = s.SyncIndexersToHash(ctx, b2.Hash())
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1)
+	if err != nil {
+		t.Fatalf("expected an error from mustHave: %v", err)
+	}
+
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.TxById(ctx, n.gtx.Hash())
+	if err != nil {
+		t.Fatal("expected genesis")
+	}
+
+	// Expect 0 balances everywhere
+	for address, key := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		log.Infof("balance address %v  %v", address, btcutil.Amount(balance))
+		if balance != 0 {
+			t.Fatalf("%v (%v) invalid balance expected 0, got %v",
+				key.name, address, btcutil.Amount(balance))
+		}
+	}
+}
+
+func TestKeystoneIndexNoFork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+	}()
+
+	n, err := newFakeNode(t, "18444")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
 	popPriv, popPublic, popAddress, err := n.newKey("pop")
 	if err != nil {
 		t.Fatal(err)
@@ -1432,15 +1669,15 @@ func TestIndexNoFork(t *testing.T) {
 	// best chain
 	parent := chaincfg.RegressionNetParams.GenesisHash
 	address := n.address
-	b1, err := n.MineAndSend(ctx, "b1", parent, address)
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address)
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address)
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1681,6 +1918,310 @@ func TestIndexFork(t *testing.T) {
 			t.Logf("node stop: %v", err)
 		}
 	}()
+	go func() {
+		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+	time.Sleep(time.Second * 2)
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		LevelDBHome:          t.TempDir(),
+		ListenAddress:        "localhost:8883",
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          false,
+		Seeds:                   []string{"127.0.0.1:18444"},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+	time.Sleep(2 * time.Second)
+
+	// Create a bunch of weird geometries to catch all corner cases in the indexer.
+
+	//   /-> b1a -> b2a
+	// g ->  b1 ->  b2 -> b3
+	//   \-> b1b -> b2b
+
+	// best is b3
+
+	// best chain
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// a chain
+	b1a, err := n.MineAndSend(ctx, "b1a", parent, address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b chain
+	b1b, err := n.MineAndSend(ctx, "b1b", parent, address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify linear indexing. Current TxIndex is sitting at genesis
+
+	// genesis -> b3 should work with negative direction (cdiff is less than target)
+	direction, err := s.TxIndexIsLinear(ctx, b3.Hash())
+	if err != nil {
+		t.Fatalf("expected success g -> b3, got %v", err)
+	}
+	if direction <= 0 {
+		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
+	}
+
+	// Index to b3
+	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// XXX verify indexes
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// XXX add mustNotHave
+	// verify tx
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// Verify linear indexing. Current TxIndex is sitting at b3
+	t.Logf("b3: %v", b3)
+
+	// b3 -> genesis should work with postive direction (cdiff is greater than target)
+	direction, err = s.TxIndexIsLinear(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("expected success b3 -> genesis, got %v", err)
+	}
+	if direction != -1 {
+		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
+	}
+
+	// b3 -> b1 should work with positive direction
+	direction, err = s.TxIndexIsLinear(ctx, b1.Hash())
+	if err != nil {
+		t.Fatalf("expected success b3 -> b1, got %v", err)
+	}
+	if direction != -1 {
+		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
+	}
+
+	// b3 -> b2a should fail
+	_, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	if !errors.Is(err, ErrNotLinear) {
+		t.Fatalf("b2a is not linear to b3: %v", err)
+	}
+
+	// b3 -> b2b should fail
+	_, err = s.TxIndexIsLinear(ctx, b2b.Hash())
+	if !errors.Is(err, ErrNotLinear) {
+		t.Fatalf("b2b is not linear to b3: %v", err)
+	}
+
+	// make sure syncing to iself is non linear
+	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	if err != nil {
+		t.Fatalf("at b3, should have returned nil, got %v", err)
+	}
+
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// XXX verify indexes
+	txHH, err := s.TxIndexHash(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	}
+	if txHH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	}
+
+	// see if we can move to b2a
+	direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	if err != nil {
+		t.Fatalf("expected success genesis -> b2a, got %v", err)
+	}
+	if direction != 1 {
+		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
+	}
+
+	err = s.SyncIndexersToHash(ctx, b2a.Hash())
+	if err != nil {
+		t.Fatalf("wind to b2a: %v", err)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+	txHH, err = s.TxIndexHash(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	}
+	if txHH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	}
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	t.Logf("---------------------------------------- going to b2b")
+	err = s.SyncIndexersToHash(ctx, b2b.Hash())
+	if err != nil {
+		t.Fatalf("wind to b2b: %v", err)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// t.Logf("---------------------------------------- going to b3")
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	if err != nil {
+		t.Fatalf("xxxx %v", err)
+	}
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+}
+
+func TestKeystoneIndexFork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+	}()
+
+	n, err := newFakeNode(t, "18444")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
 
 	popPriv, popPublic, popAddress, err := n.newKey("pop")
 	if err != nil {
@@ -1740,40 +2281,40 @@ func TestIndexFork(t *testing.T) {
 	// best chain
 	parent := chaincfg.RegressionNetParams.GenesisHash
 	address := n.address
-	b1, err := n.MineAndSend(ctx, "b1", parent, address)
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address)
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address)
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// a chain
-	b1a, err := n.MineAndSend(ctx, "b1a", parent, address)
+	b1a, err := n.MineAndSend(ctx, "b1a", parent, address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address)
+	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// b chain
-	b1b, err := n.MineAndSend(ctx, "b1b", parent, address)
+	b1b, err := n.MineAndSend(ctx, "b1b", parent, address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address)
+	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
