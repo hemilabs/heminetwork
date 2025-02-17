@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -582,7 +582,7 @@ func _main() error {
 				}
 				fmt.Printf("%v", spew.Sdump(blk.MsgBlock()))
 			} else {
-				fmt.Printf("%v\n", b)
+				fmt.Printf("%v", b)
 			}
 		}
 	case "blockheader":

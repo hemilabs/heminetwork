@@ -21,7 +21,10 @@ import (
 	"time"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 
+	"github.com/btcsuite/btcd/blockchain"
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
@@ -95,6 +98,98 @@ func TestBlockHeaderEncodeDecode(t *testing.T) {
 	}
 	if diff := deep.Equal(&gwbh, awbh); len(diff) > 0 {
 		t.Errorf("unexpected diff: %s", diff)
+	}
+}
+
+func countKeystones(b *btcutil.Block) int {
+	// Count ALL keystones
+	keystonesFound := 0
+	for _, tx := range b.Transactions() {
+		if blockchain.IsCoinBase(tx) {
+			// Skip coinbase inputs
+			continue
+		}
+
+		for _, txOut := range tx.MsgTx().TxOut {
+			_, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
+			if err != nil {
+				continue
+			}
+			keystonesFound++
+		}
+	}
+	return keystonesFound
+}
+
+func TestKeystonesInBlock(t *testing.T) {
+	hb1, err := os.ReadFile("testdata/0000000000000006200009cf36af2bbcb1362b887b4e2625113b6b44327435b8.hex") // Testnet3 block 3802508
+	if err != nil {
+		t.Fatal(err)
+	}
+	hb2, err := os.ReadFile("testdata/00000000055a5c34a021ab3b1f3f6f0304b403775feb9e5a235dc7f724c5833f.hex") // Testnet3 block 3802509
+	if err != nil {
+		t.Fatal(err)
+	}
+	rb1, err := hex.DecodeString(string(hb1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rb2, err := hex.DecodeString(string(hb2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b1, err := btcutil.NewBlockFromBytes(rb1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := btcutil.NewBlockFromBytes(rb2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Run through processKeystones
+	kssCache1 := make(map[chainhash.Hash]tbcd.Keystone, 10000)
+	err = processKeystones(b1.Hash(), b1.Transactions(), 1, kssCache1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = processKeystones(b2.Hash(), b2.Transactions(), 1, kssCache1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keystonesFound1 := countKeystones(b1)
+	keystonesFound2 := countKeystones(b2)
+
+	t.Logf("keystones in block 3802508: %v", keystonesFound1)
+	t.Logf("keystones in block 3802509: %v", keystonesFound2)
+	t.Logf("keystones dup in blocks   : %v", keystonesFound1+keystonesFound2-len(kssCache1))
+	t.Logf("keystones to db 1         : %v", len(kssCache1))
+
+	// go run btctool.go block hash=0000000000000006200009cf36af2bbcb1362b887b4e2625113b6b44327435b8 wire=true | grep HEMI | wc -l
+	// 3448
+	// go run btctool.go block hash=00000000055a5c34a021ab3b1f3f6f0304b403775feb9e5a235dc7f724c5833f wire=true | grep HEMI | wc -l
+	// 3521
+
+	if keystonesFound1 != 3448 {
+		t.Fatalf("found keystones %v, wanted %v", keystonesFound1, 3448)
+	}
+	if keystonesFound2 != 3521 {
+		t.Fatalf("found keystones %v, wanted %v", keystonesFound1, 3521)
+	}
+
+	// Pretend unwind
+	kssCache2 := make(map[chainhash.Hash]tbcd.Keystone, 10000)
+	err = processKeystones(b2.Hash(), b2.Transactions(), -1, kssCache2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = processKeystones(b1.Hash(), b1.Transactions(), -1, kssCache2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("keystones to db 2         : %v", len(kssCache2))
+	if len(kssCache1)-len(kssCache2) != 0 {
+		t.Fatalf("expected 0 cache, got %v", len(kssCache1)-len(kssCache2))
 	}
 }
 

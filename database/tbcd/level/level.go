@@ -50,6 +50,10 @@ const (
 	verbose  = false
 
 	bhsCanonicalTipKey = "canonicaltip"
+
+	heighthashSize  = 8 + 1 + chainhash.HashSize
+	blockheaderSize = 120
+	keystoneSize    = chainhash.HashSize + hemi.L2KeystoneAbrevSize
 )
 
 type IteratorError error
@@ -217,10 +221,6 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("%v commit: %w", db, err)
 		}
-		// Always flush transaction to disk
-		if err := bhsDB.CompactRange(util.Range{}); err != nil {
-			return fmt.Errorf("%v compact: %w", db, err)
-		}
 		*discard = false
 		return nil
 	}
@@ -256,7 +256,6 @@ func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 	defer log.Tracef("MetadataGet exit")
 
 	// Metadata transaction, we do this to simply lock the table.
-	// XXX reason if we can/want to remove the read lock.
 	mdDB, _, mdDiscard, err := l.startTransaction(level.MetadataDB)
 	if err != nil {
 		return nil, fmt.Errorf("metadata open db transaction: %w", err)
@@ -354,7 +353,6 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 
 	mdBatch := new(leveldb.Batch)
 	BatchAppend(ctx, mdBatch, []tbcd.Row{{Key: key, Value: value}})
-
 	// Transaction write
 	if err := mdDB.Write(mdBatch, nil); err != nil {
 		return fmt.Errorf("metadata write: %w", err)
@@ -459,7 +457,7 @@ func heightHashToKey(height uint64, hash []byte) []byte {
 	if len(hash) != chainhash.HashSize {
 		panic(fmt.Sprintf("invalid hash size: %v", len(hash)))
 	}
-	key := make([]byte, 8+1+chainhash.HashSize)
+	key := make([]byte, heighthashSize)
 	binary.BigEndian.PutUint64(key[0:8], height)
 	copy(key[9:], hash)
 	return key
@@ -477,10 +475,10 @@ func keyToHeightHash(key []byte) (uint64, *chainhash.Hash) {
 // encodeBlockHeader encodes a database block header as
 // [height,header,difficulty] or [8+80+32] bytes. The hash is the leveldb table
 // key.
-func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebhr [120]byte) {
+func encodeBlockHeader(height uint64, header [80]byte, difficulty *big.Int) (ebhr [blockheaderSize]byte) {
 	binary.BigEndian.PutUint64(ebhr[0:8], height)
 	copy(ebhr[8:88], header[:])
-	difficulty.FillBytes(ebhr[88:120])
+	difficulty.FillBytes(ebhr[88:blockheaderSize])
 	return
 }
 
@@ -1631,9 +1629,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 			outsBatch.Put(hop[:], utxo.ValueBytes())
 		}
 
-		// XXX this probably should be done by the caller but we do it
-		// here to lower memory pressure as large gobs of data are
-		// written to disk.
+		// Empty out cache.
 		delete(utxos, op)
 	}
 
@@ -1710,9 +1706,7 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 			}
 		}
 
-		// XXX this probably should be done by the caller but we do it
-		// here to lower memory pressure as large gobs of data are
-		// written to disk.
+		// Empty out cache.
 		delete(txs, k)
 	}
 
@@ -1732,7 +1726,7 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 // encodeKeystone encodes a database keystone as
 // [blockhash,abbreviated keystone] or [32+76] bytes. The abbreviated keystone
 // hash is the leveldb table key.
-func encodeKeystone(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte) {
+func encodeKeystone(ks tbcd.Keystone) (eks [keystoneSize]byte) {
 	copy(eks[0:32], ks.BlockHash[:])
 	copy(eks[32:], ks.AbbreviatedKeystone[:])
 	return
@@ -1772,28 +1766,32 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 
 	kssBatch := new(leveldb.Batch)
 	for k, v := range keystones {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
 		switch direction {
 		case -1:
 			eks, err := kssTx.Get(k[:], nil)
-			if err != nil {
-				continue
-			}
-			ks := decodeKeystone(eks)
-			// Only delete keystone if it is in the previously found block.
-			if ks.BlockHash.IsEqual(&v.BlockHash) {
-				kssBatch.Delete(k[:])
+			if err == nil {
+				ks := decodeKeystone(eks)
+				// Only delete keystone if it is in the
+				// previously found block.
+				if ks.BlockHash.IsEqual(&v.BlockHash) {
+					kssBatch.Delete(k[:])
+				}
 			}
 		case 1:
 			has, err := kssTx.Has(k[:], nil)
 			if err != nil {
 				return fmt.Errorf("keystone update has: %w", err)
 			}
-			if has {
+			if !has {
 				// Only store unknown keystones
-				continue
+				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
 			}
-			kssBatch.Put(k[:], encodeKeystoneToSlice(v))
 		}
+
+		// Empty out cache.
+		delete(keystones, k)
 	}
 
 	// Write keystones batch

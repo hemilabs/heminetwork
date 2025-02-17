@@ -41,6 +41,7 @@ var (
 	ErrAlreadyIndexing = errors.New("already indexing")
 
 	testnet3Checkpoints = map[chainhash.Hash]uint64{
+		s2h("0000000000c3410afe8a2bfef56757c8ba675eaa4bb786a2a02d4fc1124bedf2"): 3700000,
 		s2h("0000000000002b9408d001dd42f830e16a9c28ed8daa828523e67e09ea9e0411"): 3600000,
 		s2h("000000000000098faa89ab34c3ec0e6e037698e3e54c8d1bbb9dcfe0054a8e7a"): 3200000,
 		s2h("0000000000001242d96bedebc9f45a2ecdd40d393ca0d725f500fb4977a50582"): 3100000,
@@ -175,9 +176,6 @@ func (s *Server) KeystoneIndexHash(ctx context.Context) (*HashHeight, error) {
 		if !errors.Is(err, database.ErrNotFound) {
 			return nil, err
 		}
-		// h = s.hemiGenesis // XXX disable this for now until we are
-		// sure we may or may not have to pass "genesis" around in the
-		// various functions.
 		h = &HashHeight{
 			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
@@ -338,6 +336,43 @@ func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, 
 		h = bh.ParentHash()
 	}
 	return -1, errors.New("path not found")
+}
+
+func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhash.Hash, hh *HashHeight) (*HashHeight, error) {
+	// Move to next block
+	height := hh.Height + 1
+	bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+	if err != nil {
+		return nil, fmt.Errorf("block headers by height %v: %w",
+			height, err)
+	}
+	index, err := s.findPathFromHash(ctx, endHash, bhs)
+	if err != nil {
+		return nil, fmt.Errorf("could not determine canonical path %v: %w",
+			height, err)
+	}
+	// Verify it connects to parent
+	if !hh.Hash.IsEqual(bhs[index].ParentHash()) {
+		return nil, fmt.Errorf("%v does not connect to: %v", bhs[index], hh.Hash)
+	}
+	nbh := bhs[index]
+	return &HashHeight{Hash: *nbh.BlockHash(), Height: nbh.Height}, nil
+}
+
+// headerAndBlock retrieves both the blockheader and the block. While the
+// blockheader is part of the block we do this double database retrieval to
+// ensure both exist.
+func (s *Server) headerAndBlock(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, *btcutil.Block, error) {
+	bh, err := s.db.BlockHeaderByHash(ctx, hash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("block header %v: %w", hash, err)
+	}
+	b, err := s.db.BlockByHash(ctx, &bh.Hash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("block by hash %v: %w", bh, err)
+	}
+
+	return bh, b, nil
 }
 
 func logMemStats() {
@@ -522,22 +557,24 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		return 0, last, fmt.Errorf("utxo index hash: %w", err)
 	}
 
+	// If we have a real block move forward to the next block since we
+	// already indexed the last block.
+	hh := utxoHH
+	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
+		if err != nil {
+			return 0, last, fmt.Errorf("utxo next block %v: %w", hh, err)
+		}
+	}
+
 	utxosPercentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
-	hh := utxoHH
 	for {
 		log.Debugf("indexing utxos: %v", hh)
 
-		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
+		bh, b, err := s.headerAndBlock(ctx, &hh.Hash)
 		if err != nil {
-			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
-		}
-
-		// Index block
-		b, err := s.db.BlockByHash(ctx, &bh.Hash)
-		if err != nil {
-			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
+			return 0, last, err
 		}
 
 		// fixupCache is executed in parallel meaning that the utxos
@@ -569,30 +606,16 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
+		if endHash.IsEqual(&hh.Hash) {
 			last = hh
 			break
 		}
 
 		// Move to next block
-		height := bh.Height + 1
-		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block headers by height %v: %w",
-				height, err)
+			return 0, last, fmt.Errorf("utxo next block %v: %w", hh, err)
 		}
-		index, err := s.findPathFromHash(ctx, endHash, bhs)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
-				height, err)
-		}
-		// Verify it connects to parent
-		if !hash.IsEqual(bhs[index].ParentHash()) {
-			return 0, last, fmt.Errorf("%v does not connect to: %v",
-				bhs[index], hash)
-		}
-		hh.Hash = *bhs[index].BlockHash()
-		hh.Height = bhs[index].Height
 	}
 
 	return blocksProcessed, last, nil
@@ -894,24 +917,27 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		return 0, last, fmt.Errorf("tx index hash: %w", err)
 	}
 
+	// If we have a real block move forward to the next block since we
+	// already indexed the last block.
+	hh := txHH
+	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
+		if err != nil {
+			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
+		}
+	}
+
 	txsPercentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
-	hh := txHH
 	for {
 		log.Debugf("indexing txs: %v", hh)
 
-		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
+		bh, b, err := s.headerAndBlock(ctx, &hh.Hash)
 		if err != nil {
-			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
+			return 0, last, err
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, &bh.Hash)
-		if err != nil {
-			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-
 		err = processTxs(b.Hash(), b.Transactions(), txs)
 		if err != nil {
 			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
@@ -933,30 +959,16 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
+		if endHash.IsEqual(&hh.Hash) {
 			last = hh
 			break
 		}
 
 		// Move to next block
-		height := bh.Height + 1
-		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block headers by height %v: %w",
-				height, err)
+			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
 		}
-		index, err := s.findPathFromHash(ctx, endHash, bhs)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
-				height, err)
-		}
-		// Verify it connects to parent
-		if !hash.IsEqual(bhs[index].ParentHash()) {
-			return 0, last, fmt.Errorf("%v does not connect to: %v",
-				bhs[index], hash)
-		}
-		hh.Hash = *bhs[index].BlockHash()
-		hh.Height = bhs[index].Height
 	}
 
 	return blocksProcessed, last, nil
@@ -1220,7 +1232,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	return fmt.Errorf("invalid direction: %v", direction)
 }
 
-func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map[chainhash.Hash]tbcd.Keystone) error {
+func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, direction int, kssCache map[chainhash.Hash]tbcd.Keystone) error {
 	for _, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
 			// Skip coinbase inputs
@@ -1234,8 +1246,15 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, kssCache map
 				continue
 			}
 			if _, ok := kssCache[*aPoPTx.L2Keystone.Hash()]; ok {
-				// Multiple keystones may exist in block, only store first
-				continue
+				// Multiple keystones may exist in block, only
+				// store first or last based on direction. When
+				// we move forward we only care about the first
+				// one, when we move backwards we only car
+				// about the last one thus overwrite the value
+				// in the map.
+				if direction == 1 {
+					continue
+				}
 			}
 
 			abvKss := aPoPTx.L2Keystone.Serialize()
@@ -1260,30 +1279,36 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 	var last *HashHeight
 
 	// Find start hash
-	ksHH, err := s.KeystoneIndexHash(ctx)
+	keystoneHH, err := s.KeystoneIndexHash(ctx)
 	if err != nil {
 		return 0, last, fmt.Errorf("keystone index hash: %w", err)
 	}
 
-	kssPercentage := 95 // flush cache at >95% capacity
+	// If we have a real block move forward to the next block since we
+	// already indexed the last block.
+	hh := keystoneHH
+	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
+		if err != nil {
+			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
+		}
+	} else {
+		// Keystone indexer is special, override genesis.
+		hh = s.hemiGenesis
+	}
+
+	keystonesPercentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
-	hh := ksHH
 	for {
 		log.Debugf("indexing keystones: %v", hh)
 
-		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
+		bh, b, err := s.headerAndBlock(ctx, &hh.Hash)
 		if err != nil {
-			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
+			return 0, last, err
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, &bh.Hash)
-		if err != nil {
-			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-
-		err = processKeystones(b.Hash(), b.Transactions(), kss)
+		err = processKeystones(b.Hash(), b.Transactions(), 1, kss)
 		if err != nil {
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
 		}
@@ -1292,11 +1317,12 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 
 		// Try not to overshoot the cache to prevent costly allocations
 		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
-		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
-			log.Infof("Keystone indexer: %v tx cache %v%%", hh, cp)
+		if bh.Height%10000 == 0 || cp > keystonesPercentage || blocksProcessed == 1 {
+			log.Infof("Keystone indexer: %v keystone cache %v%%", hh, cp)
 		}
-		if cp > kssPercentage {
-			// Set kssMax to the largest tx capacity seen
+
+		if cp > keystonesPercentage {
+			// Set keystonesMax to the largest keystone capacity seen
 			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
 			last = hh
 			// Flush
@@ -1304,30 +1330,16 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 		}
 
 		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
+		if endHash.IsEqual(&hh.Hash) {
 			last = hh
 			break
 		}
 
 		// Move to next block
-		height := bh.Height + 1
-		bhs, err := s.db.BlockHeadersByHeight(ctx, height)
+		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
 		if err != nil {
-			return 0, last, fmt.Errorf("block headers by height %v: %w",
-				height, err)
+			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
 		}
-		index, err := s.findPathFromHash(ctx, endHash, bhs)
-		if err != nil {
-			return 0, last, fmt.Errorf("could not determine canonical path %v: %w",
-				height, err)
-		}
-		// Verify it connects to parent
-		if !hash.IsEqual(bhs[index].ParentHash()) {
-			return 0, last, fmt.Errorf("%v does not connect to: %v",
-				bhs[index], hash)
-		}
-		hh.Hash = *bhs[index].BlockHash()
-		hh.Height = bhs[index].Height
 	}
 
 	return blocksProcessed, last, nil
@@ -1375,7 +1387,7 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
 
-		err = processKeystones(b.Hash(), b.Transactions(), kss)
+		err = processKeystones(b.Hash(), b.Transactions(), -1, kss)
 		if err != nil {
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
 		}
@@ -1439,7 +1451,7 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 			return nil
 		}
 		kssCached := len(kss)
-		log.Infof("Keystone unwinder blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
+		log.Infof("Keystone unwinder blocks processed %v in %v keystones cached %v cache unused %v avg keystone/blk %v",
 			blocksProcessed, time.Since(start), kssCached,
 			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
 
@@ -1499,7 +1511,7 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 			return nil
 		}
 		kssCached := len(kss)
-		log.Infof("Keystone indexer blocks processed %v in %v transactions cached %v cache unused %v avg keystones/blk %v",
+		log.Infof("Keystone indexer blocks processed %v in %v keystones cached %v cache unused %v avg keystones/blk %v",
 			blocksProcessed, time.Since(start), kssCached,
 			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
 
@@ -1513,7 +1525,7 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 		logMemStats()
 		runtime.GC()
 
-		log.Infof("Flushing keysyones complete %v took %v",
+		log.Infof("Flushing keystones complete %v took %v",
 			kssCached, time.Since(start))
 
 		// Record height in metadata
@@ -1876,7 +1888,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	if err != nil {
 		log.Errorf("block header by hash: %v", err)
 	} else {
-		log.Infof("Syncing complete at: %v", bh.HH()) // XXX this prints too often
+		log.Debugf("Syncing complete at: %v", bh.HH())
 	}
 
 	return nil
@@ -1903,5 +1915,12 @@ func (s *Server) SyncIndexersToBest(ctx context.Context) error {
 		s.mtx.Unlock()
 	}()
 
+	// NOTE: the way this code works today is that it will ALWAYS reindex
+	// the last block it already indexed. This is wasteful for resources
+	// but so far does no harm. The reason this happens is because
+	// the code to skip the last block is super awkward and potentially
+	// brittle. It would require special handling for genesis or skip the
+	// first block that's passed in. This needs to be revisited but reader
+	// beware of this reality.
 	return s.syncIndexersToBest(ctx)
 }

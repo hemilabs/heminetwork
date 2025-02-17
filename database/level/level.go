@@ -198,31 +198,33 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 		}
 	}()
 
-	err = l.openDB(BlockHeadersDB, nil)
+	defaultOptions := &opt.Options{BlockCacheEvictRemoved: true}
+
+	err = l.openDB(BlockHeadersDB, defaultOptions)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", BlockHeadersDB, err)
 	}
-	err = l.openDB(BlocksMissingDB, nil)
+	err = l.openDB(BlocksMissingDB, defaultOptions)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", BlocksMissingDB, err)
 	}
-	err = l.openDB(HeightHashDB, nil)
+	err = l.openDB(HeightHashDB, defaultOptions)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", HeightHashDB, err)
 	}
-	err = l.openDB(PeersDB, nil)
+	err = l.openDB(PeersDB, defaultOptions)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
 	}
-	err = l.openDB(OutputsDB, nil)
+	err = l.openDB(OutputsDB, defaultOptions)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", OutputsDB, err)
 	}
-	err = l.openDB(TransactionsDB, nil)
+	err = l.openDB(TransactionsDB, defaultOptions)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", TransactionsDB, err)
 	}
-	err = l.openDB(KeystonesDB, nil)
+	err = l.openDB(KeystonesDB, defaultOptions)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
 	}
@@ -234,7 +236,10 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	}
 
 	// Treat metadata special so that we can insert some stuff.
-	err = l.openDB(MetadataDB, &opt.Options{ErrorIfMissing: true})
+	err = l.openDB(MetadataDB, &opt.Options{
+		BlockCacheEvictRemoved: true,
+		ErrorIfMissing:         true,
+	})
 	if errors.Is(err, fs.ErrNotExist) {
 		err = l.openDB(MetadataDB, &opt.Options{ErrorIfMissing: false})
 		if err != nil {
