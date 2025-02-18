@@ -2297,7 +2297,7 @@ func (s *Server) DBOpen(ctx context.Context) error {
 		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
 	s.db, err = level.New(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("open level database: %w", err)
+		return err
 	}
 
 	return nil

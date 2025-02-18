@@ -108,11 +108,12 @@ type Database interface {
 	BlockCacheStats() CacheStats
 
 	// Transactions
-	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput) error
-	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue) error
+	BlockHeaderByUtxoIndex(ctx context.Context) (*BlockHeader, error)
+	BlockHeaderByTxIndex(ctx context.Context) (*BlockHeader, error)
+	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput, utxoIndexHash *chainhash.Hash) error
+	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue, txIndexHash *chainhash.Hash) error
 	BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error)
 	SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]SpentInfo, error)
-
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 	BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error)
@@ -121,8 +122,9 @@ type Database interface {
 	UtxosByScriptHashCount(ctx context.Context, sh ScriptHash) (uint64, error)
 
 	// Hemi
-	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone) error
+	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone, keystoneIndexHash *chainhash.Hash) error
 	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*Keystone, error)
+	BlockHeaderByKeystoneIndex(ctx context.Context) (*BlockHeader, error)
 }
 
 type Keystone struct {

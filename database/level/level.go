@@ -6,10 +6,8 @@ package level
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -36,9 +34,6 @@ const (
 	TransactionsDB  = "transactions"
 
 	BlocksDB = "blocks" // raw database
-
-	versionKey      = "version"
-	databaseVersion = 1
 )
 
 var log = loggo.GetLogger("level")
@@ -151,17 +146,6 @@ func (l *Database) openRawDB(name string, blockSize int64) error {
 	return nil
 }
 
-func (l *Database) Version(_ context.Context) (int, error) {
-	mdDB := l.pool[MetadataDB]
-	value, err := mdDB.Get([]byte(versionKey), nil)
-	if err != nil {
-		return -1, fmt.Errorf("version: %w", err)
-	}
-	dbVersion := binary.BigEndian.Uint64(value)
-
-	return int(dbVersion), nil
-}
-
 func New(ctx context.Context, home string, version int) (*Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
@@ -228,38 +212,15 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
 	}
+	err = l.openDB(MetadataDB, defaultOptions)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", MetadataDB, err)
+	}
 
 	// Blocks database is special
 	err = l.openRawDB(BlocksDB, rawdb.DefaultMaxFileSize)
 	if err != nil {
 		return nil, fmt.Errorf("rawdb %v: %w", BlocksDB, err)
-	}
-
-	// Treat metadata special so that we can insert some stuff.
-	err = l.openDB(MetadataDB, &opt.Options{
-		BlockCacheEvictRemoved: true,
-		ErrorIfMissing:         true,
-	})
-	if errors.Is(err, fs.ErrNotExist) {
-		err = l.openDB(MetadataDB, &opt.Options{ErrorIfMissing: false})
-		if err != nil {
-			return nil, fmt.Errorf("leveldb initial %v: %w", MetadataDB, err)
-		}
-		versionData := make([]byte, 8)
-		binary.BigEndian.PutUint64(versionData, databaseVersion)
-		err = l.pool[MetadataDB].Put([]byte(versionKey), versionData, nil)
-	}
-	// Check metadata error
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", MetadataDB, err)
-	}
-	dbVersion, err := l.Version(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if dbVersion != version {
-		return nil, fmt.Errorf("invalid version: wanted %v got %v",
-			dbVersion, version)
 	}
 
 	unwind = false // Everything is good, do not unwind.
