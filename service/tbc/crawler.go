@@ -380,10 +380,10 @@ func logMemStats() {
 	runtime.ReadMemStats(&mem)
 
 	// Go memory statistics are hard to interpret but the following list is
-	// an aproximation:
+	// an approximation:
 	//	Alloc is currently allocated memory
 	// 	TotalAlloc is all memory allocated over time
-	// 	Sys is basicaly a peak memory use
+	// 	Sys is basically a peak memory use
 	log.Infof("Alloc = %v, TotalAlloc = %v, Sys = %v, NumGC = %v\n",
 		humanize.IBytes(mem.Alloc),
 		humanize.IBytes(mem.TotalAlloc),
@@ -1021,7 +1021,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
 		}
 
-		// This is probably not needed here since we alreayd dealt with
+		// This is probably not needed here since we already dealt with
 		// it via the utxo unindexer but since it will be mostly a
 		// no-op just go ahead.
 		//if s.cfg.MempoolEnabled {
