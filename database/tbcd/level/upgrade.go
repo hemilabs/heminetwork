@@ -50,7 +50,7 @@ func (l *ldb) v2(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.OutputsDB, err)
 		}
-		err = l.deleteTable(level.OutputsDB, utxoIndexHashKey)
+		err = l.deleteTable(level.MetadataDB, utxoIndexHashKey)
 		if err != nil {
 			return fmt.Errorf("delete table %v: %w", level.OutputsDB, err)
 		}
@@ -66,7 +66,7 @@ func (l *ldb) v2(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.TransactionsDB, err)
 		}
-		err = l.deleteTable(level.TransactionsDB, txIndexHashKey)
+		err = l.deleteTable(level.MetadataDB, txIndexHashKey)
 		if err != nil {
 			return fmt.Errorf("delete table %v: %w", level.TransactionsDB, err)
 		}
@@ -82,7 +82,7 @@ func (l *ldb) v2(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.KeystonesDB, err)
 		}
-		err = l.deleteTable(level.KeystonesDB, keystoneIndexHashKey)
+		err = l.deleteTable(level.MetadataDB, keystoneIndexHashKey)
 		if err != nil {
 			return fmt.Errorf("delete table %v: %w", level.KeystonesDB, err)
 		}
