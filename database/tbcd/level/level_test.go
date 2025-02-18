@@ -342,7 +342,7 @@ func TestKeystoneUpdate(t *testing.T) {
 			}()
 
 			if tti.preInsertValid {
-				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(kssList[:2], blockhash.String()), blockhash); err != nil {
+				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(kssList[:2], "blockhash"), blockhash); err != nil {
 					t.Fatal(err)
 				}
 			}
