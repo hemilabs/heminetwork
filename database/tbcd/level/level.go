@@ -1873,7 +1873,11 @@ func (l *ldb) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader
 
 	hash, err := kssTx.Get(keystoneIndexHashKey, nil)
 	if err != nil {
-		return nil, fmt.Errorf("keystone get: %w", err)
+		nerr := fmt.Errorf("keystone get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
 	}
 	ch, err := chainhash.NewHash(hash)
 	if err != nil {
@@ -1891,7 +1895,11 @@ func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, er
 
 	hash, err := utxoTx.Get(utxoIndexHashKey, nil)
 	if err != nil {
-		return nil, fmt.Errorf("utxo get: %w", err)
+		nerr := fmt.Errorf("utxo get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
 	}
 	ch, err := chainhash.NewHash(hash)
 	if err != nil {
@@ -1909,7 +1917,11 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 
 	hash, err := txTx.Get(txIndexHashKey, nil)
 	if err != nil {
-		return nil, fmt.Errorf("tx get: %w", err)
+		nerr := fmt.Errorf("tx get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
 	}
 	ch, err := chainhash.NewHash(hash)
 	if err != nil {
