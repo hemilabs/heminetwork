@@ -161,7 +161,7 @@ func TestDatabasePostgres(t *testing.T) {
 		cleanup()
 	}()
 
-	// Version, no need to verify because it is explicitely tested on db open
+	// Version, no need to verify because it is explicitly tested on db open
 	version, err := db.Version(ctx)
 	if err != nil {
 		t.Fatalf("Failed to get Version: %v", err)
@@ -475,7 +475,7 @@ func TestDatabaseNotification(t *testing.T) {
 		Header: fillOutBytes("myHeAdEr", 80),
 		Height: 1,
 	}
-	// Register notfication
+	// Register notification
 	ctx, cancel := context.WithTimeout(pctx, 5*time.Second)
 	defer cancel()
 	b := &btcBlocksNtfn{
