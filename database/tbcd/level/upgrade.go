@@ -6,8 +6,29 @@ package level
 
 import (
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
+
+	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/database/level"
 )
+
+func (l *ldb) insertTable(dbname string, key, value []byte) error {
+	db := l.pool[dbname]
+	if db == nil {
+		return fmt.Errorf("invalid db: %v", db)
+	}
+	return db.Put(key, value, nil)
+}
+
+func (l *ldb) deleteTable(dbname string, key []byte) error {
+	db := l.pool[dbname]
+	if db == nil {
+		return fmt.Errorf("invalid db: %v", db)
+	}
+	return db.Delete(key, nil)
+}
 
 // v2 upgrade the database from v1 to v2.
 // Changes:
@@ -17,13 +38,58 @@ func (l *ldb) v2(ctx context.Context) error {
 	log.Tracef("v2")
 	defer log.Tracef("v2 exit")
 
-	//mdDB := l.pool[MetadataDB]
-	//value, err := mdDB.Get([]byte(versionKey), nil)
-	//if err != nil {
-	//	return -1, fmt.Errorf("version: %w", err)
-	//}
-
 	log.Infof("Upgrading database from v1 to v2")
 
-	return fmt.Errorf("not yet")
+	// update outputs index hash
+	utxoH, err := l.MetadataGet(ctx, utxoIndexHashKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("utxo get: %w", err)
+		}
+		err := l.insertTable(level.OutputsDB, utxoIndexHashKey, utxoH)
+		if err != nil {
+			return fmt.Errorf("insert table %v: %w", level.OutputsDB, err)
+		}
+		err = l.deleteTable(level.OutputsDB, utxoIndexHashKey)
+		if err != nil {
+			return fmt.Errorf("delete table %v: %w", level.OutputsDB, err)
+		}
+	}
+
+	// update transaction index hash
+	txH, err := l.MetadataGet(ctx, txIndexHashKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("tx get: %w", err)
+		}
+		err := l.insertTable(level.TransactionsDB, txIndexHashKey, txH)
+		if err != nil {
+			return fmt.Errorf("insert table %v: %w", level.TransactionsDB, err)
+		}
+		err = l.deleteTable(level.TransactionsDB, txIndexHashKey)
+		if err != nil {
+			return fmt.Errorf("delete table %v: %w", level.TransactionsDB, err)
+		}
+	}
+
+	// update keystone index hash
+	keystoneH, err := l.MetadataGet(ctx, keystoneIndexHashKey)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return fmt.Errorf("keystone get: %w", err)
+		}
+		err := l.insertTable(level.KeystonesDB, keystoneIndexHashKey, keystoneH)
+		if err != nil {
+			return fmt.Errorf("insert table %v: %w", level.KeystonesDB, err)
+		}
+		err = l.deleteTable(level.KeystonesDB, keystoneIndexHashKey)
+		if err != nil {
+			return fmt.Errorf("delete table %v: %w", level.KeystonesDB, err)
+		}
+	}
+
+	// Write new version
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 2)
+	return l.MetadataPut(ctx, versionKey, v)
 }
