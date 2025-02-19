@@ -2946,6 +2946,107 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	}
 }
 
+func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
+	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
+
+	height := 100
+	createBtcBlock(ctx, t, db, 1, height, []byte{}, 1)
+	// get the btc block's finality, this is the only one that
+	// we care about in this test
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l2Keystones := []hemi.L2Keystone{}
+	for _, r := range recentFinalities {
+		l, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l2Keystones = append(l2Keystones, l.L2Keystone)
+	}
+
+	finalityRequest := bfgapi.BTCFinalityByKeystonesRequest{
+		L2Keystones: l2Keystones,
+	}
+
+	// create more than 100 blocks to achieve max finality threshold of 100
+	for height < 300 {
+		height++
+		createBtcBlock(ctx, t, db, 1, height, []byte{}, 1)
+	}
+
+	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+
+	bws := &bfgWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	time.Sleep(2 * time.Second)
+
+	err = bfgapi.Write(ctx, bws.conn, "someid", finalityRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var v protocol.Message
+
+	for {
+		err = wsjson.Read(ctx, c, &v)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if v.Header.Command == bfgapi.CmdBTCFinalityByKeystonesResponse {
+			break
+		}
+	}
+
+	expectedResponse := []hemi.L2BTCFinality{}
+	for _, r := range recentFinalities {
+		f, err := hemi.L2BTCFinalityFromBfgd(&r, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// expect finality of 100, this is the max
+		f.BTCFinality = 100
+		expectedResponse = append(expectedResponse, *f)
+	}
+
+	expectedApiResponse := bfgapi.BTCFinalityByRecentKeystonesResponse{
+		L2BTCFinalities: expectedResponse,
+	}
+
+	finalityResponse := bfgapi.BTCFinalityByRecentKeystonesResponse{}
+	err = json.Unmarshal(v.Payload, &finalityResponse)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	diff := deep.Equal(expectedApiResponse, finalityResponse)
+	if len(diff) > 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+}
+
 // TestNotifyOnNewBtcBlockBFGClients tests that upon getting a new btc block,
 // in this case from (mock) electrs, that a new btc block
 // notification will be sent to all clients connected to BFG
