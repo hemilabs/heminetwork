@@ -377,6 +377,7 @@ func tbcdb(pctx context.Context) error {
 		fmt.Println("\ttxindex <height> <count> <maxcache>")
 		fmt.Println("\tutxoindex <height> <count> <maxcache>")
 		fmt.Println("\tutxosbyscripthash [hash]")
+		fmt.Println("\tuversion")
 
 	case "utxoindex":
 		hash := args["hash"]
@@ -474,6 +475,7 @@ func tbcdb(pctx context.Context) error {
 		}
 
 	case "scripthashbyoutpoint":
+		// XXX this does not call ScriptHashByOutpoint FIXME
 		txid := args["txid"]
 		if txid == "" {
 			return errors.New("txid: must be set")
@@ -601,6 +603,25 @@ func tbcdb(pctx context.Context) error {
 			balance += utxos[k].Value()
 		}
 		fmt.Printf("utxos: %v total: %v\n", len(utxos), balance)
+
+	case "version":
+		version, err := s.DatabaseVersion(ctx)
+		if err != nil {
+			return fmt.Errorf("version: %v", err)
+		}
+		fmt.Printf("database version: %v\n", version)
+
+	case "metadatabatchget", "metadatabatchput", "blockheadergenesisinsert",
+		"blockheadercachestats", "blockheadersinsert", "blockheadersremove",
+		"blockmissingdelete", "blockinsert", "blockcachestats",
+		"blockutxoupdate", "BlockTxUpdate", "blockkeystoneupdate":
+		fmt.Printf("not yet: %v", action)
+
+	// XXX implement ASAP
+	case "metadatadel", "metadataget", "metadataput", "blockheaderbyutxoindex",
+		"blockheaderbytxindex", "utxosbyscripthashcount",
+		"blockkeystonebyl2keystoneabrevhash", "blockheaderbykeystoneindex":
+		fmt.Printf("not yet: %v", action)
 
 	default:
 		return fmt.Errorf("invalid action: %v", action)
