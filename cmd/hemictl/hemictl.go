@@ -607,7 +607,7 @@ func tbcdb(pctx context.Context) error {
 	case "version":
 		version, err := s.DatabaseVersion(ctx)
 		if err != nil {
-			return fmt.Errorf("version: %v", err)
+			return fmt.Errorf("version: %w", err)
 		}
 		fmt.Printf("database version: %v\n", version)
 
@@ -1189,7 +1189,8 @@ func _main() error {
 	}
 	defer conn.Close()
 
-	tctx, cancel := context.WithTimeout(ctx, callTimeout)
+	tctx, tcancel := context.WithTimeout(ctx, callTimeout)
+	defer tcancel()
 	go callHandler(tctx, conn) // Make sure we can use Call
 
 	clone := reflect.New(cmdType).Interface()
