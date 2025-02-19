@@ -299,6 +299,36 @@ func (l *ldb) Version(ctx context.Context) (int, error) {
 	return int(dbVersion), nil
 }
 
+func (l *ldb) MetadataDel(ctx context.Context, key []byte) error {
+	log.Tracef("MetadataDel")
+	defer log.Tracef("MetadataDel exit")
+
+	mdDB, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	if err != nil {
+		return fmt.Errorf("metadata open db transaction: %w", err)
+	}
+	defer mdDiscard()
+
+	if ok, err := mdDB.Has(key, nil); err != nil || !ok {
+		return database.NotFoundError(err.Error())
+	}
+
+	mdBatch := new(leveldb.Batch)
+	mdBatch.Delete(key)
+
+	// Transaction write
+	if err := mdDB.Write(mdBatch, nil); err != nil {
+		return fmt.Errorf("metadata write: %w", err)
+	}
+
+	// Transaction commit
+	if err = mdCommit(); err != nil {
+		return fmt.Errorf("transactions commit: %w", err)
+	}
+
+	return nil
+}
+
 func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 	log.Tracef("MetadataGet")
 	defer log.Tracef("MetadataGet exit")

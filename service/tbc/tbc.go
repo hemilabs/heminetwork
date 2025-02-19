@@ -2050,6 +2050,10 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 	return &txHash, nil
 }
 
+func (s *Server) DatabaseVersion(ctx context.Context) (int, error) {
+	return s.db.Version(ctx)
+}
+
 func feesFromTransactions(txs []*btcutil.Tx) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {

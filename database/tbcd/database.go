@@ -83,6 +83,7 @@ type Database interface {
 
 	// Metadata
 	Version(ctx context.Context) (int, error)
+	MetadataDel(ctx context.Context, key []byte) error
 	MetadataGet(ctx context.Context, key []byte) ([]byte, error)
 	MetadataPut(ctx context.Context, key, value []byte) error
 	MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byte) ([]Row, error)
