@@ -639,7 +639,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 							= pop_basis.l2_keystone_abrev_hash
 			
 					AND ll.l2_block_number >= l2_keystones_lowest_btc_block.l2_block_number
-					AND ll.l2_keystone_abrev_hash IS NOT NULL
+					WHERE ll.l2_keystone_abrev_hash IS NOT NULL
 					ORDER BY height ASC LIMIT 1
 				)), 0),
 			COALESCE((SELECT height FROM btc_blocks ORDER BY height DESC LIMIT 1),0)
