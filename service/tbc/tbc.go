@@ -2274,13 +2274,10 @@ func (s *Server) Synced(ctx context.Context) SyncInfo {
 	return s.synced(ctx)
 }
 
-// DBOpen opens the underlying server database. It has been put in its own
-// function to make it available during tests and hemictl.
-// It would be good if it can be deleted.
-// XXX remove and find a different way to do this.
-func (s *Server) DBOpen(ctx context.Context) error {
-	log.Tracef("DBOpen")
-	defer log.Tracef("DBOpen exit")
+// dbOpen opens the underlying server database.
+func (s *Server) dbOpen(ctx context.Context) error {
+	log.Tracef("dbOpen")
+	defer log.Tracef("dbOpen exit")
 
 	// This should have been verified but let's not make assumptions.
 	switch s.cfg.Network {
@@ -2303,10 +2300,9 @@ func (s *Server) DBOpen(ctx context.Context) error {
 	return nil
 }
 
-// XXX remove and find a different way to do this.
-func (s *Server) DBClose() error {
-	log.Tracef("DBClose")
-	defer log.Tracef("DBClose")
+func (s *Server) dbClose() error {
+	log.Tracef("dbClose")
+	defer log.Tracef("dbClose")
 
 	return s.db.Close()
 }
@@ -2446,15 +2442,15 @@ func (s *Server) Run(pctx context.Context) error {
 		return errors.New("run called but External Header mode is enabled")
 	}
 
-	// Rely on DBOpen failing if the database is already open.
+	// Rely on dbOpen failing if the database is already open.
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
-	err := s.DBOpen(ctx)
+	err := s.dbOpen(ctx)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
 	}
 	defer func() {
-		err := s.DBClose()
+		err := s.dbClose()
 		if err != nil {
 			log.Errorf("db close: %v", err)
 		}
@@ -2497,27 +2493,29 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 
 	// HTTP server
-	mux := http.NewServeMux()
-	log.Infof("handle (tbc): %s", tbcapi.RouteWebsocket)
-	mux.HandleFunc(tbcapi.RouteWebsocket, s.handleWebsocket)
-
-	httpServer := &http.Server{
-		Addr:        s.cfg.ListenAddress,
-		Handler:     mux,
-		BaseContext: func(_ net.Listener) context.Context { return ctx },
-	}
 	httpErrCh := make(chan error)
-	go func() {
-		log.Infof("Listening: %s", s.cfg.ListenAddress)
-		httpErrCh <- httpServer.ListenAndServe()
-	}()
-	defer func() {
-		if err = httpServer.Shutdown(ctx); err != nil {
-			log.Errorf("http server exit: %v", err)
-			return
+	if s.cfg.ListenAddress != "" {
+		mux := http.NewServeMux()
+		log.Infof("handle (tbc): %s", tbcapi.RouteWebsocket)
+		mux.HandleFunc(tbcapi.RouteWebsocket, s.handleWebsocket)
+
+		httpServer := &http.Server{
+			Addr:        s.cfg.ListenAddress,
+			Handler:     mux,
+			BaseContext: func(_ net.Listener) context.Context { return ctx },
 		}
-		log.Infof("RPC server shutdown cleanly")
-	}()
+		go func() {
+			log.Infof("Listening: %s", s.cfg.ListenAddress)
+			httpErrCh <- httpServer.ListenAndServe()
+		}()
+		defer func() {
+			if err = httpServer.Shutdown(ctx); err != nil {
+				log.Errorf("http server exit: %v", err)
+				return
+			}
+			log.Infof("RPC server shutdown cleanly")
+		}()
+	}
 
 	// pprof
 	if s.cfg.PprofListenAddress != "" {
@@ -2569,57 +2567,59 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 
 	errC := make(chan error)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		err := s.pm.Run(ctx)
-		log.Infof("Peer manager shutting down")
-		if err != nil {
-			select {
-			case errC <- err:
-			default:
-			}
-		} else {
-			log.Infof("Peer manager clean shutdown")
-		}
-	}()
-
-	// connected peers
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for {
-			p, err := s.pm.RandomConnect(ctx)
+	if s.cfg.PeersWanted > 0 {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			err := s.pm.Run(ctx)
+			log.Infof("Peer manager shutting down")
 			if err != nil {
-				if errors.Is(err, context.Canceled) {
+				select {
+				case errC <- err:
+				default:
+				}
+			} else {
+				log.Infof("Peer manager clean shutdown")
+			}
+		}()
+
+		// connected peers
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			for {
+				p, err := s.pm.RandomConnect(ctx)
+				if err != nil {
+					if errors.Is(err, context.Canceled) {
+						return
+					}
+					// Should not be reached
+					log.Errorf("random connect: %v", err)
 					return
 				}
-				// Should not be reached
-				log.Errorf("random connect: %v", err)
-				return
+				go func(pp *rawpeer.RawPeer) {
+					err := s.handlePeer(ctx, pp)
+					if err != nil {
+						log.Debugf("%v: %v", pp, err)
+					}
+				}(p)
 			}
-			go func(pp *rawpeer.RawPeer) {
-				err := s.handlePeer(ctx, pp)
-				if err != nil {
-					log.Debugf("%v: %v", pp, err)
-				}
-			}(p)
-		}
-	}()
+		}()
 
-	// ping loop
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(13 * time.Second):
+		// ping loop
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(13 * time.Second):
+				}
+				s.pm.All(ctx, s.pingPeer)
 			}
-			s.pm.All(ctx, s.pingPeer)
-		}
-	}()
+		}()
+	}
 
 	select {
 	case <-ctx.Done():
@@ -2641,10 +2641,11 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 	defer log.Tracef("ExternalHeaderSetup exit")
 
 	if !s.cfg.ExternalHeaderMode {
-		return errors.New("ExternalHeaderSetup called but external header mode is not enabled in config")
+		return errors.New("ExternalHeaderSetup called but external" +
+			"header mode is not enabled in config")
 	}
 
-	err := s.DBOpen(ctx)
+	err := s.dbOpen(ctx)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
 	}
@@ -2669,35 +2670,47 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 		// Insert default upstreamStateId
 		err := s.db.MetadataPut(ctx, upstreamStateIdKey, upstreamStateId)
 		if err != nil {
-			return fmt.Errorf("default upstream state id insert: %w", err)
+			return fmt.Errorf("default upstream state id insert: %w",
+				err)
 		}
 
-		// Getting best header returned ErrNotFound so assume initial startup
-		err = s.db.BlockHeaderGenesisInsert(ctx, genesis, genesisHeight, genesisDiff)
+		// Getting best header returned ErrNotFound so assume initial
+		// startup
+		err = s.db.BlockHeaderGenesisInsert(ctx, genesis, genesisHeight,
+			genesisDiff)
 		if err != nil {
 			return fmt.Errorf("genesis block header insert: %w", err)
 		}
 
-		// Ensure after inserting the effective genesis block, ensure we can get the best header
+		// Ensure after inserting the effective genesis block, ensure
+		// we can get the best header
 		bhb, err = s.db.BlockHeaderBest(ctx)
 		if err != nil {
 			return err
 		}
-	} else { // No error getting best header, no genesis insert, so check db genesis matches
+	} else {
+		// No error getting best header, no genesis insert, so check db
+		// genesis matches
 		gb, err := s.db.BlockHeadersByHeight(ctx, s.cfg.GenesisHeightOffset)
 		if err != nil {
-			return fmt.Errorf("error getting effective genesis block from db, %w", err)
+			return fmt.Errorf("error getting effective genesis "+
+				"block from db, %w", err)
 		}
 		if len(gb) > 1 {
-			// Impossible to have more than one block at the genesis height
-			return fmt.Errorf("invalid state, have %d effective genesis blocks", len(gb))
+			// Impossible to have more than one block at the
+			// genesis height
+			return fmt.Errorf("invalid state, have %d effective "+
+				"genesis blocks", len(gb))
 		}
 		gh := genesis.BlockHash()
 		if !bytes.Equal(gb[0].Hash[:], gh[:]) {
-			return fmt.Errorf("effective genesis block hash mismatch, db has %v but genesis should be %v", gb[0].Hash, gh)
+			return fmt.Errorf("effective genesis block hash mismatch, "+
+				"db has %v but genesis should be %v", gb[0].Hash, gh)
 		}
 	}
-	log.Infof("TBC set up in External Header Mode, effectiveGenesis=%v, tip=%v", genesis.BlockHash(), bhb.Hash)
+
+	log.Infof("External Header Mode, effectiveGenesis=%v, tip=%v",
+		genesis.BlockHash(), bhb.Hash)
 
 	return nil
 }
@@ -2707,10 +2720,11 @@ func (s *Server) ExternalHeaderTearDown() error {
 	defer log.Tracef("ExternalHeaderTearDown exit")
 
 	if !s.cfg.ExternalHeaderMode {
-		return errors.New("ExternalHeaderTearDown called but external header mode is not enabled in config")
+		return errors.New("ExternalHeaderTearDown called but external " +
+			"header mode is not enabled in config")
 	}
 
-	err := s.DBClose()
+	err := s.dbClose()
 	if err != nil {
 		log.Errorf("db close: %v", err)
 		return err

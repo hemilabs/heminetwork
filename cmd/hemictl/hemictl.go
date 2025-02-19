@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"os/user"
 	"path/filepath"
 	"reflect"
@@ -22,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -32,7 +34,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
-	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
@@ -40,9 +41,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
-	ldb "github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/service/tbc/peer"
 	"github.com/hemilabs/heminetwork/version"
@@ -59,9 +58,23 @@ var (
 	log     = loggo.GetLogger(daemonName)
 	welcome string
 
-	bssURL   string
-	logLevel string
-	cm       = config.CfgMap{
+	bssURL      string
+	logLevel    string
+	leveldbHome string
+	network     string
+	cm          = config.CfgMap{
+		"HEMICTL_LEVELDB_HOME": config.Config{
+			Value:        &leveldbHome,
+			DefaultValue: "~/.tbcd",
+			Help:         "leveldb home directory",
+			Print:        config.PrintAll,
+		},
+		"HEMICTL_NETWORK": config.Config{
+			Value:        &network,
+			DefaultValue: "mainnet",
+			Help:         "hemictl network",
+			Print:        config.PrintAll,
+		},
 		"HEMICTL_BSS_URL": config.Config{
 			Value:        &bssURL,
 			DefaultValue: bssapi.DefaultURL,
@@ -185,8 +198,8 @@ func parseArgs(args []string) (string, map[string]string, error) {
 	return action, parsed, nil
 }
 
-func tbcdb() error {
-	ctx, cancel := context.WithCancel(context.Background())
+func tbcdb(pctx context.Context) error {
+	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
 	action, args, err := parseArgs(flag.Args()[1:])
@@ -194,32 +207,23 @@ func tbcdb() error {
 		return err
 	}
 
-	// special commands
-	// switch action {
-	// case "crossreference":
-	//	return crossReference(ctx)
-	// }
-
-	// create fake service to call crawler
 	cfg := tbc.NewDefaultConfig()
-	cfg.LevelDBHome = "~/.tbcd"
-	cfg.Network = "testnet3"
+	cfg.LevelDBHome = leveldbHome
+	cfg.Network = network
+	cfg.PeersWanted = 0    // disable peer manager
+	cfg.ListenAddress = "" // disable RPC
 	s, err := tbc.NewServer(cfg)
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
-	// Open db.
-	err = s.DBOpen(ctx) // XXX kill this and verify all reversed hashes as parameters
-	if err != nil {
-		return fmt.Errorf("db open: %w", err)
-	}
-	defer func() {
-		err := s.DBClose()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "db close: %v\n", err)
-			os.Exit(1)
+	go func() {
+		if err := s.Run(ctx); err != nil {
+			panic(fmt.Errorf("run server: %w", err))
 		}
 	}()
+	for !s.Running() {
+		time.Sleep(time.Millisecond)
+	}
 
 	// commands
 	switch action {
@@ -301,63 +305,35 @@ func tbcdb() error {
 			return errors.New("key: must be set")
 		}
 
-		s.DBClose()
-
-		levelDBHome := "~/.tbcd" // XXX
-		network := "testnet3"
-		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		pool := db.DB()
-		mdDB := pool[ldb.MetadataDB]
-		err = mdDB.Delete([]byte(key), nil)
-		if err != nil {
-			return err
-		}
+		return fmt.Errorf("fixme deletemetadata")
 
 	case "dumpmetadata":
-		s.DBClose()
-
-		levelDBHome := "~/.tbcd" // XXX
-		network := "testnet3"
-		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		pool := db.DB()
-		mdDB := pool[ldb.MetadataDB]
-		it := mdDB.NewIterator(nil, nil)
-		defer it.Release()
-		for it.Next() {
-			fmt.Printf("metadata key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
-		}
+		return fmt.Errorf("fixme dumpmetadata")
 
 	case "dumpoutputs":
-		s.DBClose()
+		return fmt.Errorf("fixme dumpoutputs")
+		// s.DBClose()
 
-		levelDBHome := "~/.tbcd" // XXX
-		network := "testnet3"
-		db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
-		if err != nil {
-			return err
-		}
-		defer db.Close()
-		prefix := args["prefix"]
-		if len(prefix) > 1 {
-			return errors.New("prefix must be one byte")
-		} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
-			return errors.New("prefix must be h or u")
-		}
-		pool := db.DB()
-		outsDB := pool[ldb.OutputsDB]
-		it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
-		defer it.Release()
-		for it.Next() {
-			fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
-		}
+		//levelDBHome := "~/.tbcd" // XXX
+		//network := "testnet3"
+		//db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
+		//if err != nil {
+		//	return err
+		//}
+		//defer db.Close()
+		//prefix := args["prefix"]
+		//if len(prefix) > 1 {
+		//	return errors.New("prefix must be one byte")
+		//} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
+		//	return errors.New("prefix must be h or u")
+		//}
+		//pool := db.DB()
+		//outsDB := pool[ldb.OutputsDB]
+		//it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
+		//defer it.Release()
+		//for it.Next() {
+		//	fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		//}
 
 	case "feesbyheight":
 		height := args["height"]
@@ -1090,6 +1066,26 @@ func printJSON(where io.Writer, indent string, payload any) error {
 	return nil
 }
 
+func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
+	defer func() {
+		signal.Stop(signalChan)
+		cancel()
+	}()
+
+	select {
+	case <-ctx.Done():
+	case s := <-signalChan: // First signal, cancel context.
+		if callback != nil {
+			callback(s) // Do whatever caller wants first.
+			cancel()
+		}
+	}
+	<-signalChan // Second signal, hard exit.
+	os.Exit(2)
+}
+
 func _main() error {
 	if len(os.Args) < 2 {
 		usage()
@@ -1110,9 +1106,16 @@ func _main() error {
 		log.Debugf("%v", pc[k])
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go HandleSignals(ctx, cancel, func(s os.Signal) {
+		log.Infof("hemi received signal: %s", s)
+	})
+
 	cmd := flag.Arg(0) // command provided by user
 
 	// Deal with non-generic commands
+	// XXX fix all this shit
 	switch cmd {
 	case "bfgdb":
 		return bfgdb()
@@ -1127,7 +1130,7 @@ func _main() error {
 	case "p2p":
 		return p2p()
 	case "tbcdb":
-		return tbcdb()
+		return tbcdb(ctx)
 	}
 
 	// Deal with generic commands
@@ -1165,9 +1168,8 @@ func _main() error {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
-	defer cancel()
-	go callHandler(ctx, conn) // Make sure we can use Call
+	tctx, cancel := context.WithTimeout(ctx, callTimeout)
+	go callHandler(tctx, conn) // Make sure we can use Call
 
 	clone := reflect.New(cmdType).Interface()
 	log.Debugf("%v", spew.Sdump(clone))
@@ -1177,7 +1179,7 @@ func _main() error {
 			return fmt.Errorf("invalid payload: %w", err)
 		}
 	}
-	_, _, payload, err := call(ctx, conn, clone)
+	_, _, payload, err := call(tctx, conn, clone)
 	if err != nil {
 		return fmt.Errorf("%w", err)
 	}
