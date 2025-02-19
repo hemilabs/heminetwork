@@ -3222,6 +3222,8 @@ func TestNotifyOnL2KeystonesBFGClientsViaOtherBFG(t *testing.T) {
 }
 
 func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
+	t.Parallel()
+
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {
 		db.Close()
@@ -3309,6 +3311,14 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 	}()
 
 	wg.Wait()
+
+	// give a few seconds for the notification to be processed in the other
+	// bfg (saving keystones etc.)
+	select {
+	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
 
 	wg.Add(1)
 	go func() {
