@@ -1211,7 +1211,8 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 		bh := headers.Headers[i].PrevBlock
 		ph := headers.Headers[i-1].BlockHash()
 		if !bh.IsEqual(&ph) {
-			// Chain is not contiguous / linear as this block does not connect to parent
+			// Chain is not contiguous / linear as this block does
+			// not connect to parent
 			return tbcd.RTInvalid, nil,
 				fmt.Errorf("remove external headers: header with hash %s at index %d does not connect to "+
 					"previous header with hash %s at index %d",
@@ -1231,15 +1232,19 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 		return nil
 	}
 
-	// We aren't checking error because we want to pass everything from db upstream
+	// We aren't checking error because we want to pass everything from db
+	// upstream
 	it, por, err := s.db.BlockHeadersRemove(ctx, headers, tipAfterRemoval, ph)
 
-	// Caller of RemoveExternalHeaders wants fork geometry info, parent of removal set, and must handle error upstream
-	// as an error here generally represents an issue with the header additions/removals provided by upstream code.
+	// Caller of RemoveExternalHeaders wants fork geometry info, parent of
+	// removal set, and must handle error upstream as an error here
+	// generally represents an issue with the header additions/removals
+	// provided by upstream code.
 	return it, por, err
 }
 
-// AddExternalHeaders XXX if we are passing in upstreamStateId then why does the default live in tbcd?
+// AddExternalHeaders XXX if we are passing in upstreamStateId then why does
+// the default live in tbcd?
 func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, upstreamStateId []byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	if !s.cfg.ExternalHeaderMode {
 		return tbcd.ITInvalid, nil, nil, 0,
@@ -1261,7 +1266,8 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 		bh := headers.Headers[i].PrevBlock
 		ph := headers.Headers[i-1].BlockHash()
 		if !bh.IsEqual(&ph) {
-			// Chain is not contiguous / linear as this block does not connect to parent
+			// Chain is not contiguous / linear as this block does
+			// not connect to parent
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("add external headers: header with hash %s at index %d does not connect to "+
 					"previous header with hash %s at index %d",
@@ -1281,11 +1287,14 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 		return nil
 	}
 
-	// We aren't checking error because we want to pass everything from db upstream
+	// We aren't checking error because we want to pass everything from db
+	// upstream
 	it, cbh, lbh, n, err := s.db.BlockHeadersInsert(ctx, headers, ph)
 
-	// Caller of AddExternalHeaders wants fork geometry change, canonical and last inserted header, and must handle error upstream
-	// as an error here generally represents an issue with the header additions/removals provided by upstream code.
+	// Caller of AddExternalHeaders wants fork geometry change, canonical
+	// and last inserted header, and must handle error upstream as an error
+	// here generally represents an issue with the header
+	// additions/removals provided by upstream code.
 	return it, cbh, lbh, n, err
 }
 
