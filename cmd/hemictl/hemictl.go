@@ -620,7 +620,8 @@ func tbcdb(pctx context.Context) error {
 	// XXX implement ASAP
 	case "metadatadel", "metadataget", "metadataput", "blockheaderbyutxoindex",
 		"blockheaderbytxindex", "utxosbyscripthashcount",
-		"blockkeystonebyl2keystoneabrevhash", "blockheaderbykeystoneindex":
+		"blockkeystonebyl2keystoneabrevhash", "blockheaderbykeystoneindex",
+		"dbdel", "dbget", "dbput" /* these three are syntetic */ :
 		fmt.Printf("not yet: %v", action)
 
 	default:
