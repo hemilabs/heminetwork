@@ -1877,10 +1877,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				}
 			}
 		case 1:
-			has, err := kssTx.Has(k[:], nil)
-			if err != nil {
-				return fmt.Errorf("keystone update has: %w", err)
-			}
+			has, _ := kssTx.Has(k[:], nil)
 			if !has {
 				// Only store unknown keystones
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
