@@ -165,10 +165,23 @@ func TestDbUpgrade(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(1000 * time.Millisecond)
+	time.Sleep(1 * time.Second)
+
+	// check if db upgrade finished before checking for bh
+	for retry := 3; retry >= 0; retry-- {
+		if retry > 0 {
+			if !s.Running() {
+				t.Log("tbc not running, retrying...")
+				time.Sleep(1 * time.Second)
+			} else {
+				break
+			}
+		} else {
+			t.Fatal("tbc db upgrade timeout")
+		}
+	}
 
 	_, err = s.BlockHeadersByHeight(ctx, 9)
-
 	if err != nil {
 		t.Fatal(err)
 	}
