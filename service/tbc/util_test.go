@@ -21,8 +21,6 @@ import (
 
 // unzip unzips src to dst.
 // unzip borrowed from https://golangcode.com/unzip-files-in-go/
-//
-//nolint:unused // it is used in tests
 func unzip(src string, dest string) ([]string, error) {
 	r, err := zip.OpenReader(src)
 	if err != nil {
@@ -82,8 +80,6 @@ func unzip(src string, dest string) ([]string, error) {
 }
 
 // gunzip untars filename to destination.
-//
-//nolint:unused // it is used in tests
 func gunzip(filename, destination string) error {
 	a, err := os.ReadFile(filename)
 	if err != nil {
@@ -109,6 +105,14 @@ func gunzip(filename, destination string) error {
 		}
 		// log.Printf("Extracting: %v", hdr.Name)
 		target := filepath.Join(destination, hdr.Name)
+
+		// Check for ZipSlip.
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destination)+
+			string(os.PathSeparator)) {
+			return fmt.Errorf("%s: illegal file path",
+				target)
+		}
+
 		switch hdr.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {
@@ -138,8 +142,6 @@ func gunzip(filename, destination string) error {
 
 // extract extracts the provided archive to the provided destination. It
 // autodetects if it is a zip or a tar archive.
-//
-//nolint:unused // it is used in tests
 func extract(filename, dst string) error {
 	// log.Printf("Extracting: %v -> %v\n", filename, dst)
 	var err error

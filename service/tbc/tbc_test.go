@@ -123,7 +123,6 @@ func countKeystones(b *btcutil.Block) int {
 }
 
 func TestDbUpgrade(t *testing.T) {
-
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
@@ -168,16 +167,11 @@ func TestDbUpgrade(t *testing.T) {
 
 	time.Sleep(1000 * time.Millisecond)
 
-	s.syncBlocks(ctx)
-
 	_, err = s.BlockHeadersByHeight(ctx, 9)
 
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	t.Logf("testdb upgrade successful")
-
 }
 
 func TestKeystonesInBlock(t *testing.T) {
