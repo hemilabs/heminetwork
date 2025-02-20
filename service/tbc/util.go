@@ -1,6 +1,6 @@
-// Copyright (c) (\d{4}-2025)|(2025) Hemi Labs, Inc.
-// Use of this source code is governed by the MIT License,
-// which can be found in the LICENSE file.
+// Copyright (c) 2016-2022 The Decred developers
+// Use of this source code is governed by an ISC license that can be found in
+// the LICENSE file.
 
 package tbc
 
