@@ -351,8 +351,8 @@ func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 }
 
 func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
-	log.Tracef("MetadataGet")
-	defer log.Tracef("MetadataGet exit")
+	log.Tracef("MetadataBatchGet")
+	defer log.Tracef("MetadataBatchGet exit")
 
 	// Metadata transaction, we do this to simply lock the table.
 	mdDB, _, mdDiscard, err := l.startTransaction(level.MetadataDB)

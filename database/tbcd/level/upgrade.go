@@ -7,10 +7,8 @@ package level
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 
-	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/level"
 )
 
@@ -42,10 +40,7 @@ func (l *ldb) v2(ctx context.Context) error {
 
 	// update outputs index hash
 	utxoH, err := l.MetadataGet(ctx, utxoIndexHashKey)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("utxo get: %w", err)
-		}
+	if err == nil {
 		err := l.insertTable(level.OutputsDB, utxoIndexHashKey, utxoH)
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.OutputsDB, err)
@@ -58,10 +53,7 @@ func (l *ldb) v2(ctx context.Context) error {
 
 	// update transaction index hash
 	txH, err := l.MetadataGet(ctx, txIndexHashKey)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("tx get: %w", err)
-		}
+	if err == nil {
 		err := l.insertTable(level.TransactionsDB, txIndexHashKey, txH)
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.TransactionsDB, err)
@@ -74,10 +66,7 @@ func (l *ldb) v2(ctx context.Context) error {
 
 	// update keystone index hash
 	keystoneH, err := l.MetadataGet(ctx, keystoneIndexHashKey)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return fmt.Errorf("keystone get: %w", err)
-		}
+	if err == nil {
 		err := l.insertTable(level.KeystonesDB, keystoneIndexHashKey, keystoneH)
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.KeystonesDB, err)
