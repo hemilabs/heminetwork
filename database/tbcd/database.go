@@ -33,12 +33,16 @@ const (
 	ITForkExtend  InsertType = 3 // Extended a fork, does not require further action.
 )
 
-var itStrings = map[InsertType]string{
-	ITInvalid:     "invalid",
-	ITChainExtend: "chain extended",
-	ITChainFork:   "chain forked",
-	ITForkExtend:  "fork extended",
-}
+var (
+	itStrings = map[InsertType]string{
+		ITInvalid:     "invalid",
+		ITChainExtend: "chain extended",
+		ITChainFork:   "chain forked",
+		ITForkExtend:  "fork extended",
+	}
+
+	Welcome = true
+)
 
 func (it InsertType) String() string {
 	return itStrings[it]

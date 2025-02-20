@@ -61,6 +61,8 @@ type IteratorError error
 var (
 	log = loggo.GetLogger("level")
 
+	Welcome = true
+
 	ErrIterator = IteratorError(errors.New("iteration error"))
 
 	noStats tbcd.CacheStats
@@ -179,24 +181,32 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		cfg:      cfg,
 	}
 
+	welcome := make([]string, 0, 10)
 	if cfg.blockCacheSize > 0 {
 		l.blockCache, err = lowIQLRUSizeNew(cfg.blockCacheSize)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 		}
-		log.Infof("block cache: %v", humanize.Bytes(uint64(cfg.blockCacheSize)))
+		welcome = append(welcome, fmt.Sprintf("block cache: %v",
+			humanize.Bytes(uint64(cfg.blockCacheSize))))
 	} else {
-		log.Infof("block cache: DISABLED")
+		welcome = append(welcome, "block cache: DISABLED")
 	}
 	if cfg.blockheaderCacheSize > 0 {
 		l.headerCache, err = lowIQMapSizeNew(cfg.blockheaderCacheSize)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block header cache: %w", err)
 		}
-		log.Infof("blockheader cache: %v",
-			humanize.Bytes(uint64(cfg.blockheaderCacheSize)))
+		welcome = append(welcome, fmt.Sprintf("blockheader cache: %v",
+			humanize.Bytes(uint64(cfg.blockheaderCacheSize))))
 	} else {
-		log.Infof("blockheader cache: DISABLED")
+		welcome = append(welcome, "blockheader cache: DISABLED")
+	}
+
+	if Welcome {
+		for k := range welcome {
+			log.Infof("%v", welcome[k])
+		}
 	}
 
 	// Upgrade database
@@ -221,7 +231,10 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			err = l.v2(ctx)
 		default:
 			if ldbVersion == dbVersion {
-				log.Infof("tbcdb database version: %v", ldbVersion)
+				if Welcome {
+					log.Infof("tbcdb database version: %v",
+						ldbVersion)
+				}
 				return l, nil
 			}
 			return nil, fmt.Errorf("invalid version: wanted %v got %v",

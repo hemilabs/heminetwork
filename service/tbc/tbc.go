@@ -66,6 +66,8 @@ const (
 var (
 	log = loggo.GetLogger(appName)
 
+	Welcome = true // Use global to enable/disable welcome message
+
 	zeroHash = new(chainhash.Hash) // used to check if a hash is invalid
 
 	ErrTxAlreadyBroadcast = errors.New("tx already broadcast")
@@ -2497,17 +2499,6 @@ func (s *Server) Run(pctx context.Context) error {
 			return err
 		}
 	}
-	log.Infof("Genesis: %v", s.chainParams.GenesisHash) // XXX make debug
-	log.Infof("Starting block headers sync at %v height: %v time %v",
-		bhb, bhb.Height, bhb.Timestamp())
-	utxoHH, _ := s.UtxoIndexHash(ctx)
-	log.Infof("Utxo index %v", utxoHH)
-	txHH, _ := s.TxIndexHash(ctx)
-	log.Infof("Tx index %v", txHH)
-	if s.cfg.HemiIndex {
-		hemiHH, _ := s.KeystoneIndexHash(ctx)
-		log.Infof("Keystone index %v", hemiHH)
-	}
 
 	// HTTP server
 	httpErrCh := make(chan error)
@@ -2636,6 +2627,21 @@ func (s *Server) Run(pctx context.Context) error {
 				s.pm.All(ctx, s.pingPeer)
 			}
 		}()
+	}
+
+	// Welcome user.
+	if Welcome {
+		log.Infof("Genesis: %v", s.chainParams.GenesisHash) // XXX make debug
+		log.Infof("Starting block headers sync at %v height: %v time %v",
+			bhb, bhb.Height, bhb.Timestamp())
+		utxoHH, _ := s.UtxoIndexHash(ctx)
+		log.Infof("Utxo index %v", utxoHH)
+		txHH, _ := s.TxIndexHash(ctx)
+		log.Infof("Tx index %v", txHH)
+		if s.cfg.HemiIndex {
+			hemiHH, _ := s.KeystoneIndexHash(ctx)
+			log.Infof("Keystone index %v", hemiHH)
+		}
 	}
 
 	select {

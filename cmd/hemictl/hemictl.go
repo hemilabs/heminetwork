@@ -42,6 +42,7 @@ import (
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/service/tbc/peer"
 	"github.com/hemilabs/heminetwork/version"
@@ -207,6 +208,8 @@ func tbcdb(pctx context.Context) error {
 		return err
 	}
 
+	level.Welcome = false
+	tbc.Welcome = false
 	cfg := tbc.NewDefaultConfig()
 	cfg.LevelDBHome = leveldbHome
 	cfg.Network = network
