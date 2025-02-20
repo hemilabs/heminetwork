@@ -1,6 +1,8 @@
 // Copyright (c) 2016-2022 The Decred developers
 // Use of this source code is governed by an ISC license that can be found in
 // the LICENSE file.
+//
+// Copyright 2017 Edd Turtle, MIT
 
 package tbc
 
@@ -19,15 +21,16 @@ import (
 
 // unzip unzips src to dst.
 // unzip borrowed from https://golangcode.com/unzip-files-in-go/
+//
+//nolint:unused // it is used in tests
 func unzip(src string, dest string) ([]string, error) {
-	var filenames []string
-
 	r, err := zip.OpenReader(src)
 	if err != nil {
-		return filenames, err
+		return nil, err
 	}
 	defer r.Close()
 
+	filenames := make([]string, 0, len(r.File))
 	for _, f := range r.File {
 		// Store filename/path for returning and using later on
 		fpath := filepath.Join(dest, f.Name)
@@ -44,7 +47,7 @@ func unzip(src string, dest string) ([]string, error) {
 
 		if f.FileInfo().IsDir() {
 			// Make Folder
-			os.MkdirAll(fpath, os.ModePerm)
+			_ = os.MkdirAll(fpath, os.ModePerm)
 			continue
 		}
 
@@ -79,6 +82,8 @@ func unzip(src string, dest string) ([]string, error) {
 }
 
 // gunzip untars filename to destination.
+//
+//nolint:unused // it is used in tests
 func gunzip(filename, destination string) error {
 	a, err := os.ReadFile(filename)
 	if err != nil {
@@ -133,6 +138,8 @@ func gunzip(filename, destination string) error {
 
 // extract extracts the provided archive to the provided destination. It
 // autodetects if it is a zip or a tar archive.
+//
+//nolint:unused // it is used in tests
 func extract(filename, dst string) error {
 	// log.Printf("Extracting: %v -> %v\n", filename, dst)
 	var err error
