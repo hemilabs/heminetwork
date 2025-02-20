@@ -22,6 +22,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/juju/loggo"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -119,6 +120,64 @@ func countKeystones(b *btcutil.Block) int {
 		}
 	}
 	return keystonesFound
+}
+
+func TestDbUpgrade(t *testing.T) {
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	err := extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+	}()
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		LevelDBHome:          home,
+		//LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
+		Network:                 "testnet3",
+		PrometheusListenAddress: "",
+		ListenAddress:           "",
+		PeersWanted:             0,
+		MempoolEnabled:          false,
+		Seeds:                   []string{"127.0.0.1:18444"},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	time.Sleep(1000 * time.Millisecond)
+
+	s.syncBlocks(ctx)
+
+	_, err = s.BlockHeadersByHeight(ctx, 9)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("testdb upgrade successful")
+
 }
 
 func TestKeystonesInBlock(t *testing.T) {
