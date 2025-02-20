@@ -678,13 +678,6 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		if bh.Height%10000 == 0 || cp > utxosPercentage || blocksProcessed == 1 {
 			log.Infof("UTxo unindexer: %v utxo cache %v%%", hh, cp)
 		}
-		if cp > utxosPercentage {
-			// Set txsMax to the largest tx capacity seen
-			s.cfg.MaxCachedTxs = max(len(utxos), s.cfg.MaxCachedTxs)
-			last = hh
-			// Flush
-			break
-		}
 
 		// Move to previous block
 		height := bh.Height - 1
@@ -695,6 +688,16 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		}
 		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
+
+		// We check overflow AFTER obtaining the previous hash so that
+		// we can update the database with the LAST processed block.
+		if cp > utxosPercentage {
+			// Set txsMax to the largest tx capacity seen
+			s.cfg.MaxCachedTxs = max(len(utxos), s.cfg.MaxCachedTxs)
+			last = hh
+			// Flush
+			break
+		}
 	}
 
 	return blocksProcessed, last, nil
@@ -1023,13 +1026,6 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		if bh.Height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
 			log.Infof("Tx unindexer: %v tx cache %v%%", hh, cp)
 		}
-		if cp > txsPercentage {
-			// Set txsMax to the largest tx capacity seen
-			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
-			last = hh
-			// Flush
-			break
-		}
 
 		// Move to previous block
 		height := bh.Height - 1
@@ -1040,6 +1036,16 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
+
+		// We check overflow AFTER obtaining the previous hash so that
+		// we can update the database with the LAST processed block.
+		if cp > txsPercentage {
+			// Set txsMax to the largest tx capacity seen
+			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
+			last = hh
+			// Flush
+			break
+		}
 	}
 
 	return blocksProcessed, last, nil
@@ -1373,13 +1379,6 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
 			log.Infof("Keystone unindexer: %v keystone cache %v%%", hh, cp)
 		}
-		if cp > kssPercentage {
-			// Set kssMax to the largest keystone capacity seen
-			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
-			last = hh
-			// Flush
-			break
-		}
 
 		// Move to previous block
 		height := bh.Height - 1
@@ -1390,6 +1389,16 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 		}
 		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
+
+		// We check overflow AFTER obtaining the previous hash so that
+		// we can update the database with the LAST processed block.
+		if cp > kssPercentage {
+			// Set kssMax to the largest keystone capacity seen
+			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
+			last = hh
+			// Flush
+			break
+		}
 	}
 
 	return blocksProcessed, last, nil
