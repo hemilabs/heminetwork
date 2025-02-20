@@ -152,7 +152,7 @@ func extract(filename, dst string) error {
 	case ".gz":
 		err = gunzip(filename, dst)
 	default:
-		err = fmt.Errorf("Unknown archive type: %v", archive)
+		err = fmt.Errorf("unknown archive type: %v", archive)
 	}
 	return err
 }

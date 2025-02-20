@@ -131,7 +131,7 @@ func TestDbUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -158,6 +158,7 @@ func TestDbUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	go func() {
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -165,20 +166,9 @@ func TestDbUpgrade(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(1 * time.Second)
-
 	// check if db upgrade finished before checking for bh
-	for retry := 3; retry >= 0; retry-- {
-		if retry > 0 {
-			if !s.Running() {
-				t.Log("tbc not running, retrying...")
-				time.Sleep(1 * time.Second)
-			} else {
-				break
-			}
-		} else {
-			t.Fatal("tbc db upgrade timeout")
-		}
+	for !s.Running() {
+		time.Sleep(1 * time.Second)
 	}
 
 	_, err = s.BlockHeadersByHeight(ctx, 9)

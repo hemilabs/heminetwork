@@ -2658,7 +2658,7 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 	defer log.Tracef("ExternalHeaderSetup exit")
 
 	if !s.cfg.ExternalHeaderMode {
-		return errors.New("ExternalHeaderSetup called but external" +
+		return errors.New("ExternalHeaderSetup called but external " +
 			"header mode is not enabled in config")
 	}
 
