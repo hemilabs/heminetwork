@@ -323,6 +323,7 @@ func TestKeystoneUpdate(t *testing.T) {
 		},
 	}
 
+	blockhash := &chainhash.Hash{1, 3, 3, 7}
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -341,13 +342,13 @@ func TestKeystoneUpdate(t *testing.T) {
 			}()
 
 			if tti.preInsertValid {
-				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(kssList[:2], "blockhash")); err != nil {
+				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(kssList[:2], "blockhash"), blockhash); err != nil {
 					t.Fatal(err)
 				}
 			}
 
 			for _, dir := range tti.direction {
-				err := db.BlockKeystoneUpdate(ctx, dir, maps.Clone(tti.kssMap))
+				err := db.BlockKeystoneUpdate(ctx, dir, maps.Clone(tti.kssMap), blockhash)
 				if diff := deep.Equal(err, tti.expectedError); len(diff) > 0 {
 					t.Fatalf("(direction %v) unexpected error diff: %s", dir, diff)
 				}
@@ -410,6 +411,7 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 		}
 	}()
 
+	blockhash := &chainhash.Hash{0xde, 0xad, 0xbe, 0xef}
 	blk1Hash := chainhash.Hash{1}
 	k1hash, k1 := newKeystone(&blk1Hash, 1, 2)
 	blk2Hash := chainhash.Hash{1}
@@ -418,7 +420,7 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 		*k1hash: k1,
 		*k2hash: k2,
 	}
-	err = db.BlockKeystoneUpdate(ctx, 1, maps.Clone(ksm))
+	err = db.BlockKeystoneUpdate(ctx, 1, maps.Clone(ksm), blockhash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +443,7 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 
 	// Unwind
 	// Technically don't need to clone ksm here, but do it for coherency
-	err = db.BlockKeystoneUpdate(ctx, -1, maps.Clone(ksm))
+	err = db.BlockKeystoneUpdate(ctx, -1, maps.Clone(ksm), blockhash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -474,12 +476,13 @@ func TestKeystoneDBCache(t *testing.T) {
 		}
 	}()
 
-	//XXX make these higher when cache fixed
+	// XXX make these higher when cache fixed
 	const (
 		kssNum = 1
 		cycles = 1
 	)
 
+	blockhash := &chainhash.Hash{0xba, 0xdc, 0x0f, 0xfe}
 	for i := range cycles {
 		ksm := make(map[chainhash.Hash]tbcd.Keystone, kssNum)
 		for j := range kssNum {
@@ -488,7 +491,7 @@ func TestKeystoneDBCache(t *testing.T) {
 			ksm[*ksHash] = ks
 		}
 
-		err = db.BlockKeystoneUpdate(ctx, 1, ksm)
+		err = db.BlockKeystoneUpdate(ctx, 1, ksm, blockhash)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -503,7 +506,7 @@ func TestKeystoneDBCache(t *testing.T) {
 			}
 		}
 
-		err = db.BlockKeystoneUpdate(ctx, -1, ksm)
+		err = db.BlockKeystoneUpdate(ctx, -1, ksm, blockhash)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -15,6 +15,10 @@ issues:
     - path: version/version\.go
       linters: [ "goheader" ]
 
+    # Licensed under ISC License, 2016-2022 The Decred developers
+    - path: service/tbc/util\.go
+      linters: [ "goheader" ]
+
 linters:
   enable:
     - "asasalint" # Check for pass []any as any in variadic func(...any).

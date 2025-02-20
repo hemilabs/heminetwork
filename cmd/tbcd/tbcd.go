@@ -77,6 +77,12 @@ var (
 			Help:         "data directory for leveldb",
 			Print:        config.PrintAll,
 		},
+		"TBC_LISTEN_ADDRESS": config.Config{
+			Value:        &cfg.ListenAddress,
+			DefaultValue: tbcapi.DefaultListen,
+			Help:         "RPC listen address, leave empty to disable",
+			Print:        config.PrintAll,
+		},
 		"TBC_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,

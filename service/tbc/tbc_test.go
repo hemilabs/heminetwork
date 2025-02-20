@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/juju/loggo"
+
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 
@@ -119,6 +121,114 @@ func countKeystones(b *btcutil.Block) int {
 		}
 	}
 	return keystonesFound
+}
+
+func TestDbUpgrade(t *testing.T) {
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	err := extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          true,
+		HemiIndex:            true,
+		LevelDBHome:          home,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
+		Network:                 "testnet3",
+		PrometheusListenAddress: "",
+		ListenAddress:           "",
+		PeersWanted:             0,
+		MempoolEnabled:          false,
+		Seeds:                   []string{"127.0.0.1:18444"},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// check if db upgrade finished before checking for bh
+	for !s.Running() {
+	}
+
+	_, err = s.BlockHeadersByHeight(ctx, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pull version from DB
+	version, err := s.db.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 2 {
+		t.Fatalf("expected version 2, got %v", version)
+	}
+
+	// Copied from level package because this test can't be run there.
+	utxoIndexHashKey := []byte("utxoindexhash")
+	txIndexHashKey := []byte("txindexhash")
+	keystoneIndexHashKey := []byte("keystoneindexhash")
+	// Make sure db no longer has index keys
+	_, err = s.db.MetadataGet(ctx, utxoIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving utxo index hash")
+	}
+	_, err = s.db.MetadataGet(ctx, txIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving tx index hash")
+	}
+	_, err = s.db.MetadataGet(ctx, keystoneIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving keystone index hash")
+	}
+
+	// Make sure we get the ecxpected indexkeys from db
+	hash := s2h("0000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
+	utxobh, err := s.db.BlockHeaderByUtxoIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utxobh.Hash.IsEqual(&hash) {
+		t.Fatal("unexpected utxo hash")
+	}
+
+	txbh, err := s.db.BlockHeaderByTxIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !txbh.Hash.IsEqual(&hash) {
+		t.Fatal("unexpected tx hash")
+	}
+
+	keystonebh, err := s.db.BlockHeaderByKeystoneIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !keystonebh.Hash.IsEqual(&hash) {
+		t.Fatal("unexpected keystone hash")
+	}
 }
 
 func TestKeystonesInBlock(t *testing.T) {

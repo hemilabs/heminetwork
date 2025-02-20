@@ -5,6 +5,7 @@
 package tbc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,7 +18,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
-	"github.com/davecgh/go-spew/spew"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/dustin/go-humanize"
 
 	"github.com/hemilabs/heminetwork/database"
@@ -34,10 +35,6 @@ func s2h(s string) chainhash.Hash {
 }
 
 var (
-	UtxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
-	TxIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
-	KeystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
-
 	ErrAlreadyIndexing = errors.New("already indexing")
 
 	testnet3Checkpoints = map[chainhash.Hash]uint64{
@@ -107,6 +104,17 @@ func lastCheckpointHeight(height uint64, hhm map[chainhash.Hash]uint64) uint64 {
 	return 0
 }
 
+func h2b(wbh *wire.BlockHeader) [80]byte {
+	var b bytes.Buffer
+	err := wbh.Serialize(&b)
+	if err != nil {
+		panic(err)
+	}
+	var bh [80]byte
+	copy(bh[:], b.Bytes())
+	return bh
+}
+
 type HashHeight struct {
 	Hash      chainhash.Hash
 	Height    uint64
@@ -117,71 +125,60 @@ func (h HashHeight) String() string {
 	return fmt.Sprintf("%v @ %v", h.Hash, h.Height)
 }
 
-func (s *Server) mdHashHeight(ctx context.Context, key []byte) (*HashHeight, error) {
-	log.Tracef("mdHashHeight %v ", spew.Sdump(key))
-
-	hh, err := s.db.MetadataGet(ctx, key)
-	if err != nil {
-		return nil, fmt.Errorf("metadata get: %w", err)
-	}
-	ch, err := chainhash.NewHash(hh)
-	if err != nil {
-		return nil, fmt.Errorf("metadata hash: %w", err)
-	}
-	bh, err := s.db.BlockHeaderByHash(ctx, ch)
-	if err != nil {
-		return nil, fmt.Errorf("metadata block header: %w", err)
-	}
+func HashHeightFromBlockHeader(bh *tbcd.BlockHeader) *HashHeight {
 	return &HashHeight{
-		Hash:      *ch,
+		Hash:      bh.Hash,
 		Height:    bh.Height,
 		Timestamp: bh.Timestamp().Unix(),
-	}, nil
+	}
 }
 
 // UtxoIndexHash returns the last hash that has been UTxO indexed.
 func (s *Server) UtxoIndexHash(ctx context.Context) (*HashHeight, error) {
-	h, err := s.mdHashHeight(ctx, UtxoIndexHashKey)
+	bh, err := s.db.BlockHeaderByUtxoIndex(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return nil, err
 		}
-		h = &HashHeight{
+		bh = &tbcd.BlockHeader{
 			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
+			Header: h2b(&s.chainParams.GenesisBlock.Header),
 		}
 	}
-	return h, nil
+	return HashHeightFromBlockHeader(bh), nil
 }
 
 // TxIndexHash returns the last hash that has been Tx indexed.
 func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
-	h, err := s.mdHashHeight(ctx, TxIndexHashKey)
+	bh, err := s.db.BlockHeaderByTxIndex(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return nil, err
 		}
-		h = &HashHeight{
+		bh = &tbcd.BlockHeader{
 			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
+			Header: h2b(&s.chainParams.GenesisBlock.Header),
 		}
 	}
-	return h, nil
+	return HashHeightFromBlockHeader(bh), nil
 }
 
 // KeystoneIndexHash returns the last hash that has been Keystone indexed.
 func (s *Server) KeystoneIndexHash(ctx context.Context) (*HashHeight, error) {
-	h, err := s.mdHashHeight(ctx, KeystoneIndexHashKey)
+	bh, err := s.db.BlockHeaderByKeystoneIndex(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return nil, err
 		}
-		h = &HashHeight{
+		bh = &tbcd.BlockHeader{
 			Hash:   *s.chainParams.GenesisHash,
 			Height: 0,
+			Header: h2b(&s.chainParams.GenesisBlock.Header),
 		}
 	}
-	return h, nil
+	return HashHeightFromBlockHeader(bh), nil
 }
 
 func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
@@ -681,13 +678,6 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		if bh.Height%10000 == 0 || cp > utxosPercentage || blocksProcessed == 1 {
 			log.Infof("UTxo unindexer: %v utxo cache %v%%", hh, cp)
 		}
-		if cp > utxosPercentage {
-			// Set txsMax to the largest tx capacity seen
-			s.cfg.MaxCachedTxs = max(len(utxos), s.cfg.MaxCachedTxs)
-			last = hh
-			// Flush
-			break
-		}
 
 		// Move to previous block
 		height := bh.Height - 1
@@ -698,6 +688,16 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		}
 		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
+
+		// We check overflow AFTER obtaining the previous hash so that
+		// we can update the database with the LAST processed block.
+		if cp > utxosPercentage {
+			// Set txsMax to the largest tx capacity seen
+			s.cfg.MaxCachedTxs = max(len(utxos), s.cfg.MaxCachedTxs)
+			last = hh
+			// Flush
+			break
+		}
 	}
 
 	return blocksProcessed, last, nil
@@ -739,7 +739,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockUtxoUpdate(ctx, -1, utxos); err != nil {
+		if err = s.db.BlockUtxoUpdate(ctx, -1, utxos, &last.Hash); err != nil {
 			return fmt.Errorf("block utxo update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -749,12 +749,6 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 
 		log.Infof("Flushing unwind utxos complete %v took %v",
 			utxosCached, time.Since(start))
-
-		// Record height in metadata
-		err = s.db.MetadataPut(ctx, UtxoIndexHashKey, last.Hash[:])
-		if err != nil {
-			return fmt.Errorf("metadata utxo hash: %w", err)
-		}
 
 		if endHash.IsEqual(&last.Hash) {
 			break
@@ -799,7 +793,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockUtxoUpdate(ctx, 1, utxos); err != nil {
+		if err = s.db.BlockUtxoUpdate(ctx, 1, utxos, &last.Hash); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 
@@ -811,11 +805,6 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 		log.Infof("Flushing utxos complete %v took %v",
 			utxosCached, time.Since(start))
 
-		// Record height in metadata
-		err = s.db.MetadataPut(ctx, UtxoIndexHashKey, last.Hash[:])
-		if err != nil {
-			return fmt.Errorf("metadata utxo hash: %w", err)
-		}
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
@@ -1037,13 +1026,6 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		if bh.Height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
 			log.Infof("Tx unindexer: %v tx cache %v%%", hh, cp)
 		}
-		if cp > txsPercentage {
-			// Set txsMax to the largest tx capacity seen
-			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
-			last = hh
-			// Flush
-			break
-		}
 
 		// Move to previous block
 		height := bh.Height - 1
@@ -1054,6 +1036,16 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
+
+		// We check overflow AFTER obtaining the previous hash so that
+		// we can update the database with the LAST processed block.
+		if cp > txsPercentage {
+			// Set txsMax to the largest tx capacity seen
+			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
+			last = hh
+			// Flush
+			break
+		}
 	}
 
 	return blocksProcessed, last, nil
@@ -1095,7 +1087,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockTxUpdate(ctx, -1, txs); err != nil {
+		if err = s.db.BlockTxUpdate(ctx, -1, txs, &last.Hash); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -1105,12 +1097,6 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 
 		log.Infof("Flushing unwind txs complete %v took %v",
 			txsCached, time.Since(start))
-
-		// Record height in metadata
-		err = s.db.MetadataPut(ctx, TxIndexHashKey, last.Hash[:])
-		if err != nil {
-			return fmt.Errorf("metadata tx hash: %w", err)
-		}
 
 		if endHash.IsEqual(&last.Hash) {
 			break
@@ -1155,7 +1141,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockTxUpdate(ctx, 1, txs); err != nil {
+		if err = s.db.BlockTxUpdate(ctx, 1, txs, &last.Hash); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -1165,12 +1151,6 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 
 		log.Infof("Flushing txs complete %v took %v",
 			txsCached, time.Since(start))
-
-		// Record height in metadata
-		err = s.db.MetadataPut(ctx, TxIndexHashKey, last.Hash[:])
-		if err != nil {
-			return fmt.Errorf("metadata tx hash: %w", err)
-		}
 
 		if endHash.IsEqual(&last.Hash) {
 			break
@@ -1399,13 +1379,6 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
 			log.Infof("Keystone unindexer: %v keystone cache %v%%", hh, cp)
 		}
-		if cp > kssPercentage {
-			// Set kssMax to the largest keystone capacity seen
-			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
-			last = hh
-			// Flush
-			break
-		}
 
 		// Move to previous block
 		height := bh.Height - 1
@@ -1416,6 +1389,16 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 		}
 		hh.Hash = *pbh.BlockHash()
 		hh.Height = pbh.Height
+
+		// We check overflow AFTER obtaining the previous hash so that
+		// we can update the database with the LAST processed block.
+		if cp > kssPercentage {
+			// Set kssMax to the largest keystone capacity seen
+			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
+			last = hh
+			// Flush
+			break
+		}
 	}
 
 	return blocksProcessed, last, nil
@@ -1457,7 +1440,7 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockKeystoneUpdate(ctx, -1, kss); err != nil {
+		if err = s.db.BlockKeystoneUpdate(ctx, -1, kss, &last.Hash); err != nil {
 			return fmt.Errorf("block keystone update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -1467,12 +1450,6 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 
 		log.Infof("Flushing unwind keystones complete %v took %v",
 			kssCached, time.Since(start))
-
-		// Record height in metadata
-		err = s.db.MetadataPut(ctx, KeystoneIndexHashKey, last.Hash[:])
-		if err != nil {
-			return fmt.Errorf("metadata keystone hash: %w", err)
-		}
 
 		if endHash.IsEqual(&last.Hash) {
 			break
@@ -1517,7 +1494,7 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockKeystoneUpdate(ctx, 1, kss); err != nil {
+		if err = s.db.BlockKeystoneUpdate(ctx, 1, kss, &last.Hash); err != nil {
 			return fmt.Errorf("block hemi update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -1527,12 +1504,6 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 
 		log.Infof("Flushing keystones complete %v took %v",
 			kssCached, time.Since(start))
-
-		// Record height in metadata
-		err = s.db.MetadataPut(ctx, KeystoneIndexHashKey, last.Hash[:])
-		if err != nil {
-			return fmt.Errorf("metadata keystone hash: %w", err)
-		}
 
 		if endHash.IsEqual(&last.Hash) {
 			break

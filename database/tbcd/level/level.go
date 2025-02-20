@@ -44,7 +44,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 1
+	ldbVersion = 2
 
 	logLevel = "INFO"
 	verbose  = false
@@ -61,9 +61,17 @@ type IteratorError error
 var (
 	log = loggo.GetLogger("level")
 
+	Welcome = true
+
 	ErrIterator = IteratorError(errors.New("iteration error"))
 
 	noStats tbcd.CacheStats
+
+	versionKey = []byte("version")
+
+	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
+	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
+	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
 )
 
 func init() {
@@ -173,29 +181,71 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		cfg:      cfg,
 	}
 
+	welcome := make([]string, 0, 10)
 	if cfg.blockCacheSize > 0 {
 		l.blockCache, err = lowIQLRUSizeNew(cfg.blockCacheSize)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block cache: %w", err)
 		}
-		log.Infof("block cache: %v", humanize.Bytes(uint64(cfg.blockCacheSize)))
+		welcome = append(welcome, fmt.Sprintf("block cache: %v",
+			humanize.Bytes(uint64(cfg.blockCacheSize))))
 	} else {
-		log.Infof("block cache: DISABLED")
+		welcome = append(welcome, "block cache: DISABLED")
 	}
 	if cfg.blockheaderCacheSize > 0 {
 		l.headerCache, err = lowIQMapSizeNew(cfg.blockheaderCacheSize)
 		if err != nil {
 			return nil, fmt.Errorf("couldn't setup block header cache: %w", err)
 		}
-		log.Infof("blockheader cache: %v",
-			humanize.Bytes(uint64(cfg.blockheaderCacheSize)))
+		welcome = append(welcome, fmt.Sprintf("blockheader cache: %v",
+			humanize.Bytes(uint64(cfg.blockheaderCacheSize))))
 	} else {
-		log.Infof("blockheader cache: DISABLED")
+		welcome = append(welcome, "blockheader cache: DISABLED")
 	}
 
-	log.Infof("tbcdb database version: %v", ldbVersion)
+	if Welcome {
+		for k := range welcome {
+			log.Infof("%v", welcome[k])
+		}
+	}
 
-	return l, nil
+	// Upgrade database
+	for {
+		dbVersion, err := l.Version(ctx)
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				// New database, insert version.
+				v := make([]byte, 8)
+				binary.BigEndian.PutUint64(v, ldbVersion)
+				if err := l.MetadataPut(ctx, versionKey, v); err != nil {
+					return nil, err
+				}
+				dbVersion = ldbVersion
+			} else {
+				return nil, err
+			}
+		}
+		switch dbVersion {
+		case 1:
+			// Upgrade to v2
+			err = l.v2(ctx)
+		default:
+			if ldbVersion == dbVersion {
+				if Welcome {
+					log.Infof("tbcdb database version: %v",
+						ldbVersion)
+				}
+				return l, nil
+			}
+			return nil, fmt.Errorf("invalid version: wanted %v got %v",
+				ldbVersion, dbVersion)
+		}
+		// Check error
+		if err != nil {
+			return nil, fmt.Errorf("could not upgrade db from version %v: %w",
+				dbVersion, err)
+		}
+	}
 }
 
 type (
@@ -251,6 +301,47 @@ func (l *ldb) transactionBatchGet(ctx context.Context, t *leveldb.Transaction, a
 	return rows, nil
 }
 
+func (l *ldb) Version(ctx context.Context) (int, error) {
+	mdDB := l.pool[level.MetadataDB]
+	value, err := mdDB.Get(versionKey, nil)
+	if err != nil {
+		return -1, fmt.Errorf("version: %w", err)
+	}
+	dbVersion := binary.BigEndian.Uint64(value)
+
+	return int(dbVersion), nil
+}
+
+func (l *ldb) MetadataDel(ctx context.Context, key []byte) error {
+	log.Tracef("MetadataDel")
+	defer log.Tracef("MetadataDel exit")
+
+	mdDB, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	if err != nil {
+		return fmt.Errorf("metadata open db transaction: %w", err)
+	}
+	defer mdDiscard()
+
+	if ok, err := mdDB.Has(key, nil); err != nil || !ok {
+		return database.NotFoundError(err.Error())
+	}
+
+	mdBatch := new(leveldb.Batch)
+	mdBatch.Delete(key)
+
+	// Transaction write
+	if err := mdDB.Write(mdBatch, nil); err != nil {
+		return fmt.Errorf("metadata write: %w", err)
+	}
+
+	// Transaction commit
+	if err = mdCommit(); err != nil {
+		return fmt.Errorf("transactions commit: %w", err)
+	}
+
+	return nil
+}
+
 func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 	log.Tracef("MetadataGet")
 	defer log.Tracef("MetadataGet exit")
@@ -273,8 +364,8 @@ func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 }
 
 func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
-	log.Tracef("MetadataGet")
-	defer log.Tracef("MetadataGet exit")
+	log.Tracef("MetadataBatchGet")
+	defer log.Tracef("MetadataBatchGet exit")
 
 	// Metadata transaction, we do this to simply lock the table.
 	mdDB, _, mdDiscard, err := l.startTransaction(level.MetadataDB)
@@ -1592,7 +1683,7 @@ func (l *ldb) UtxosByScriptHashCount(ctx context.Context, sh tbcd.ScriptHash) (u
 	return x, nil
 }
 
-func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput, utxoIndexHash *chainhash.Hash) error {
 	log.Tracef("BlockUtxoUpdate")
 	defer log.Tracef("BlockUtxoUpdate exit")
 
@@ -1633,6 +1724,9 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 		delete(utxos, op)
 	}
 
+	// Store index
+	outsBatch.Put(utxoIndexHashKey, utxoIndexHash[:])
+
 	// Write outputs batch
 	if err = outsTx.Write(outsBatch, nil); err != nil {
 		return fmt.Errorf("outputs insert: %w", err)
@@ -1646,7 +1740,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 	return nil
 }
 
-func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxKey]*tbcd.TxValue) error {
+func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxKey]*tbcd.TxValue, txIndexHash *chainhash.Hash) error {
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
 
@@ -1710,6 +1804,9 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 		delete(txs, k)
 	}
 
+	// Store index
+	txsBatch.Put(txIndexHashKey, txIndexHash[:])
+
 	// Write transactions batch
 	if err = txsTx.Write(txsBatch, nil); err != nil {
 		return fmt.Errorf("transactions insert: %w", err)
@@ -1749,7 +1846,7 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	return ks
 }
 
-func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone) error {
+func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash *chainhash.Hash) error {
 	log.Tracef("BlockKeystoneUpdate")
 	defer log.Tracef("BlockKeystoneUpdate exit")
 
@@ -1780,10 +1877,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				}
 			}
 		case 1:
-			has, err := kssTx.Has(k[:], nil)
-			if err != nil {
-				return fmt.Errorf("keystone update has: %w", err)
-			}
+			has, _ := kssTx.Has(k[:], nil)
 			if !has {
 				// Only store unknown keystones
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
@@ -1793,6 +1887,9 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 		// Empty out cache.
 		delete(keystones, k)
 	}
+
+	// Store index
+	kssBatch.Put(keystoneIndexHashKey, keystoneIndexHash[:])
 
 	// Write keystones batch
 	if err = kssTx.Write(kssBatch, nil); err != nil {
@@ -1805,6 +1902,72 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 	}
 
 	return nil
+}
+
+func (l *ldb) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	kssTx, _, kssDiscard, err := l.startTransaction(level.KeystonesDB)
+	if err != nil {
+		return nil, fmt.Errorf("keystones open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	hash, err := kssTx.Get(keystoneIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("keystone get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, ch)
+}
+
+func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	utxoTx, _, utxoDiscard, err := l.startTransaction(level.OutputsDB)
+	if err != nil {
+		return nil, fmt.Errorf("utxos open db transaction: %w", err)
+	}
+	defer utxoDiscard()
+
+	hash, err := utxoTx.Get(utxoIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("utxo get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, ch)
+}
+
+func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	txTx, _, txDiscard, err := l.startTransaction(level.TransactionsDB)
+	if err != nil {
+		return nil, fmt.Errorf("txs open db transaction: %w", err)
+	}
+	defer txDiscard()
+
+	hash, err := txTx.Get(txIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("tx get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, ch)
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
