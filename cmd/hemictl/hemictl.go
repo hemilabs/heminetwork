@@ -299,42 +299,6 @@ func tbcdb(pctx context.Context) error {
 		}
 		spew.Dump(b)
 
-	case "deletemetadata":
-		key := args["key"]
-		if key == "" {
-			return errors.New("key: must be set")
-		}
-
-		return fmt.Errorf("fixme deletemetadata")
-
-	case "dumpmetadata":
-		return fmt.Errorf("fixme dumpmetadata")
-
-	case "dumpoutputs":
-		return fmt.Errorf("fixme dumpoutputs")
-		// s.DBClose()
-
-		//levelDBHome := "~/.tbcd" // XXX
-		//network := "testnet3"
-		//db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
-		//if err != nil {
-		//	return err
-		//}
-		//defer db.Close()
-		//prefix := args["prefix"]
-		//if len(prefix) > 1 {
-		//	return errors.New("prefix must be one byte")
-		//} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
-		//	return errors.New("prefix must be h or u")
-		//}
-		//pool := db.DB()
-		//outsDB := pool[ldb.OutputsDB]
-		//it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
-		//defer it.Release()
-		//for it.Next() {
-		//	fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
-		//}
-
 	case "feesbyheight":
 		height := args["height"]
 		if height == "" {
@@ -377,7 +341,7 @@ func tbcdb(pctx context.Context) error {
 		fmt.Println("\ttxindex <height> <count> <maxcache>")
 		fmt.Println("\tutxoindex <height> <count> <maxcache>")
 		fmt.Println("\tutxosbyscripthash [hash]")
-		fmt.Println("\tuversion")
+		fmt.Println("\tversion")
 
 	case "utxoindex":
 		hash := args["hash"]
@@ -604,6 +568,73 @@ func tbcdb(pctx context.Context) error {
 		}
 		fmt.Printf("utxos: %v total: %v\n", len(utxos), balance)
 
+	// XXX this needs to be hidden behind a debug flug of sorts.
+	// case "dbget":
+	//	dbname := args["dbname"]
+	//	if dbname == "" {
+	//		return errors.New("dbname: must be set")
+	//	}
+
+	//	key := args["key"]
+	//	if key == "" {
+	//		return errors.New("key: must be set")
+	//	}
+
+	//	value, err := s.DatabaseGet(ctx, dbname, []byte(key))
+	//	if err != nil {
+	//		return fmt.Errorf("metadata get: %w", err)
+	//	}
+	//	spew.Dump(value)
+
+	// XXX this needs to be hidden behind a debug flug of sorts.
+	case "metadatadel":
+		key := args["key"]
+		if key == "" {
+			return errors.New("key: must be set")
+		}
+
+		return fmt.Errorf("fixme deletemetadata")
+
+	// XXX this needs to be hidden behind a debug flug of sorts.
+	case "metadataget":
+		key := args["key"]
+		if key == "" {
+			return errors.New("key: must be set")
+		}
+
+		value, err := s.DatabaseMetadataGet(ctx, []byte(key))
+		if err != nil {
+			return fmt.Errorf("metadata get: %w", err)
+		}
+		spew.Dump(value)
+	case "dumpmetadata":
+		return fmt.Errorf("fixme dumpmetadata")
+
+	case "dumpoutputs":
+		return fmt.Errorf("fixme dumpoutputs")
+		// s.DBClose()
+
+		//levelDBHome := "~/.tbcd" // XXX
+		//network := "testnet3"
+		//db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
+		//if err != nil {
+		//	return err
+		//}
+		//defer db.Close()
+		//prefix := args["prefix"]
+		//if len(prefix) > 1 {
+		//	return errors.New("prefix must be one byte")
+		//} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
+		//	return errors.New("prefix must be h or u")
+		//}
+		//pool := db.DB()
+		//outsDB := pool[ldb.OutputsDB]
+		//it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
+		//defer it.Release()
+		//for it.Next() {
+		//	fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
+		//}
+
 	case "version":
 		version, err := s.DatabaseVersion(ctx)
 		if err != nil {
@@ -618,7 +649,7 @@ func tbcdb(pctx context.Context) error {
 		fmt.Printf("not yet: %v", action)
 
 	// XXX implement ASAP
-	case "metadatadel", "metadataget", "metadataput", "blockheaderbyutxoindex",
+	case "metadataput", "blockheaderbyutxoindex",
 		"blockheaderbytxindex", "utxosbyscripthashcount",
 		"blockkeystonebyl2keystoneabrevhash", "blockheaderbykeystoneindex",
 		"dbdel", "dbget", "dbput" /* these three are syntetic */ :

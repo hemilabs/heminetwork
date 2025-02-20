@@ -2063,6 +2063,10 @@ func (s *Server) DatabaseVersion(ctx context.Context) (int, error) {
 	return s.db.Version(ctx)
 }
 
+func (s *Server) DatabaseMetadataGet(ctx context.Context, key []byte) ([]byte, error) {
+	return s.db.MetadataGet(ctx, key)
+}
+
 func feesFromTransactions(txs []*btcutil.Tx) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
