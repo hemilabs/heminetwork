@@ -594,12 +594,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 	}
 
 	sql := `
-		WITH relevant_pop_basis AS (
-			SELECT l2_keystone_abrev_hash, btc_block_hash FROM pop_basis WHERE btc_block_hash = ANY(
-				SELECT hash FROM btc_blocks ORDER BY height DESC LIMIT 100
-			)
-		),
-		l2_keystones_lowest_btc_block AS (
+		WITH l2_keystones_lowest_btc_block AS (
 			SELECT 
 			l2_keystones.l2_keystone_abrev_hash,
 			l2_keystones.l1_block_number,
@@ -638,14 +633,13 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 				FROM 
 				(
 					SELECT height FROM btc_blocks
-						LEFT JOIN relevant_pop_basis ON relevant_pop_basis.btc_block_hash 
+						LEFT JOIN pop_basis ON pop_basis.btc_block_hash 
 							= btc_blocks.hash
 						LEFT JOIN l2_keystones ll ON ll.l2_keystone_abrev_hash 
-							= relevant_pop_basis.l2_keystone_abrev_hash
+							= pop_basis.l2_keystone_abrev_hash
 			
 					AND ll.l2_block_number >= l2_keystones_lowest_btc_block.l2_block_number
-					WHERE height > (SELECT height FROM btc_blocks ORDER BY height DESC LIMIT 1) - 100
-					AND ll.l2_keystone_abrev_hash IS NOT NULL
+					WHERE ll.l2_keystone_abrev_hash IS NOT NULL
 					ORDER BY height ASC LIMIT 1
 				)), 0),
 			COALESCE((SELECT height FROM btc_blocks ORDER BY height DESC LIMIT 1),0)
