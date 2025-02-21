@@ -1142,6 +1142,11 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 	os.Exit(2)
 }
 
+func IsJSON(str string) bool {
+	var js json.RawMessage
+	return json.Unmarshal([]byte(str), &js) == nil
+}
+
 func _main() error {
 	if len(os.Args) < 2 {
 		usage()
@@ -1231,7 +1236,21 @@ func _main() error {
 	clone := reflect.New(cmdType).Interface()
 	log.Debugf("%v", spew.Sdump(clone))
 	if flag.Arg(1) != "" {
-		err := json.Unmarshal([]byte(flag.Arg(1)), &clone)
+
+		b := flag.Arg(1)
+		if !IsJSON(b) {
+			b = "{"
+			for i, c := range flag.Args()[1:] {
+				if i != 0 {
+					b = b + ","
+				}
+				kv := strings.SplitN(c, "=", 2)
+				b = fmt.Sprintf("%s\"%s\": %v", b, kv[0], kv[1])
+			}
+			b = b + "}"
+		}
+		log.Infof(b)
+		err := json.Unmarshal([]byte(b), &clone)
 		if err != nil {
 			return fmt.Errorf("invalid payload: %w", err)
 		}
