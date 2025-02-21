@@ -63,11 +63,18 @@ var (
 	logLevel    string
 	leveldbHome string
 	network     string
+	tbcdebug    bool
 	cm          = config.CfgMap{
 		"HEMICTL_LEVELDB_HOME": config.Config{
 			Value:        &leveldbHome,
 			DefaultValue: "~/.tbcd",
 			Help:         "leveldb home directory",
+			Print:        config.PrintAll,
+		},
+		"HEMICTL_TBC_DEBUG": config.Config{
+			Value:        &tbcdebug,
+			DefaultValue: false,
+			Help:         "use TBC in debug mode",
 			Print:        config.PrintAll,
 		},
 		"HEMICTL_NETWORK": config.Config{
@@ -213,6 +220,8 @@ func tbcdb(pctx context.Context) error {
 	cfg := tbc.NewDefaultConfig()
 	cfg.LevelDBHome = leveldbHome
 	cfg.Network = network
+	cfg.DatabaseDebug = tbcdebug
+	cfg.LogLevel = "tbc=Debug"
 	cfg.PeersWanted = 0    // disable peer manager
 	cfg.ListenAddress = "" // disable RPC
 	s, err := tbc.NewServer(cfg)
@@ -596,7 +605,14 @@ func tbcdb(pctx context.Context) error {
 			return errors.New("key: must be set")
 		}
 
-		return fmt.Errorf("fixme deletemetadata")
+		db, err := s.DatabaseGet(ctx)
+		if err != nil {
+			return err
+		}
+
+		err = (*db).MetadataDel(ctx, []byte(key))
+
+		return err
 
 	// XXX this needs to be hidden behind a debug flug of sorts.
 	case "metadataget":

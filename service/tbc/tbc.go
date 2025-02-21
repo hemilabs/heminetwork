@@ -109,6 +109,7 @@ type Config struct {
 	MaxCachedKeystones      int
 	MaxCachedTxs            int
 	MempoolEnabled          bool
+	DatabaseDebug           bool
 	Network                 string
 	PeersWanted             int
 	PrometheusListenAddress string
@@ -137,6 +138,7 @@ func NewDefaultConfig() *Config {
 		PeersWanted:          defaultPeersWanted,
 		PrometheusNamespace:  appName,
 		ExternalHeaderMode:   false, // Default anyway, but for readability
+		DatabaseDebug:        false, // Default anyway, but dangerous so be explicit
 	}
 }
 
@@ -2063,6 +2065,13 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 
 func (s *Server) DatabaseVersion(ctx context.Context) (int, error) {
 	return s.db.Version(ctx)
+}
+
+func (s *Server) DatabaseGet(ctx context.Context) (*tbcd.Database, error) {
+	if !s.cfg.DatabaseDebug {
+		return nil, fmt.Errorf("direct database access only available in debug mode")
+	}
+	return &s.db, nil
 }
 
 func (s *Server) DatabaseMetadataGet(ctx context.Context, key []byte) ([]byte, error) {
