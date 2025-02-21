@@ -146,7 +146,7 @@ func (ba ByteArray) Value() (driver.Value, error) {
 	return []byte(ba), nil
 }
 
-// // XXX figure out why this doens't work
+// // XXX figure out why this doesn't work
 // func (ba *ByteArray) Value() (driver.Value, error) {
 //	return *ba, nil
 // }
