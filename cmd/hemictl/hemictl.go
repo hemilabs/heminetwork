@@ -611,8 +611,34 @@ func tbcdb(pctx context.Context) error {
 		}
 
 		err = (*db).MetadataDel(ctx, []byte(key))
+		if err != nil {
+			return err
+		}
 
-		return err
+		fmt.Printf("key %v: deleted from metadata\n", key)
+
+	case "metadataput":
+		key := args["key"]
+		if key == "" {
+			return errors.New("key: must be set")
+		}
+
+		value := args["value"]
+		if value == "" {
+			return errors.New("value: must be set")
+		}
+
+		db, err := s.DatabaseGet(ctx)
+		if err != nil {
+			return err
+		}
+
+		err = (*db).MetadataPut(ctx, []byte(key), []byte(value))
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("value %v with key %v added to metadata\n", value, key)
 
 	// XXX this needs to be hidden behind a debug flug of sorts.
 	case "metadataget":
@@ -627,6 +653,7 @@ func tbcdb(pctx context.Context) error {
 		}
 		spew.Dump(value)
 	case "dumpmetadata":
+
 		return fmt.Errorf("fixme dumpmetadata")
 
 	case "dumpoutputs":
@@ -668,7 +695,7 @@ func tbcdb(pctx context.Context) error {
 		fmt.Printf("not yet: %v", action)
 
 	// XXX implement ASAP
-	case "metadataput", "blockheaderbyutxoindex",
+	case "blockheaderbyutxoindex",
 		"blockheaderbytxindex", "utxosbyscripthashcount",
 		"blockkeystonebyl2keystoneabrevhash", "blockheaderbykeystoneindex",
 		"dbdel", "dbget", "dbput" /* these three are syntetic */ :
