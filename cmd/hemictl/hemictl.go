@@ -1163,6 +1163,23 @@ func IsJSON(str string) bool {
 	return json.Unmarshal([]byte(str), &js) == nil
 }
 
+func Jsonify(args []string) (string, error) {
+	formatted := "{"
+	for i, c := range args {
+		if i != 0 {
+			formatted += ","
+		}
+		kv := strings.SplitN(c, "=", 2)
+		if len(kv) != 2 {
+			return formatted, fmt.Errorf("invalid argument format: %v", c)
+		}
+		formatted = fmt.Sprintf("%s\"%s\": %v", formatted, kv[0], kv[1])
+	}
+	formatted += "}"
+
+	return formatted, nil
+}
+
 func _main() error {
 	if len(os.Args) < 2 {
 		usage()
@@ -1255,17 +1272,12 @@ func _main() error {
 
 		b := flag.Arg(1)
 		if !IsJSON(b) {
-			b = "{"
-			for i, c := range flag.Args()[1:] {
-				if i != 0 {
-					b = b + ","
-				}
-				kv := strings.SplitN(c, "=", 2)
-				b = fmt.Sprintf("%s\"%s\": %v", b, kv[0], kv[1])
+			b, err = Jsonify(flag.Args()[1:])
+			if err != nil {
+				return err
 			}
-			b = b + "}"
+			log.Infof("parsed arguments as %v", b)
 		}
-		log.Infof(b)
 		err := json.Unmarshal([]byte(b), &clone)
 		if err != nil {
 			return fmt.Errorf("invalid payload: %w", err)
