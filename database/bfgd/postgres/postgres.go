@@ -248,7 +248,7 @@ func (p *pgdb) BtcBlockReplace(ctx context.Context, btcBlock *bfgd.BtcBlock) (in
 		INSERT INTO btc_blocks (hash, header, height)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (height) 
-		DO UPDATE SET hash = EXCLUDED.hash, header = EXCLUDED.header, height = EXCLUDED.height
+		DO UPDATE SET hash = EXCLUDED.hash, header = EXCLUDED.header, height = EXCLUDED.height, updated_at = NOW()
 		WHERE btc_blocks.hash != EXCLUDED.hash OR btc_blocks.header != EXCLUDED.header
 	`
 
