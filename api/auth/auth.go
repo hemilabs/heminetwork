@@ -55,7 +55,7 @@ func MustNewAuthenticateMessage(message string) *AuthenticateMessage {
 
 func NewAuthenticateFromBytes(b []byte) (*AuthenticateMessage, error) {
 	if len(b) < nonceLength {
-		return nil, errors.New("authenicate message too short")
+		return nil, errors.New("authenticate message too short")
 	}
 	am := &AuthenticateMessage{}
 	copy(am.Nonce[0:], b[:nonceLength])
