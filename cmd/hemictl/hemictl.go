@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/signal"
 	"os/user"
@@ -362,6 +363,9 @@ func tbcdb(pctx context.Context) error {
 			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
 				return fmt.Errorf("maxCache: %w", err)
 			}
+			if mc > math.MaxInt32 {
+				return fmt.Errorf("maxcache exceeds max int value")
+			}
 			cfg.MaxCachedTxs = int(mc)
 		}
 		err = s.UtxoIndexer(ctx, eh)
@@ -384,6 +388,9 @@ func tbcdb(pctx context.Context) error {
 		if maxCache != "" {
 			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
 				return fmt.Errorf("maxCache: %w", err)
+			}
+			if mc > math.MaxInt32 {
+				return fmt.Errorf("maxcache exceeds max int value")
 			}
 			cfg.MaxCachedTxs = int(mc)
 		}
