@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -670,7 +670,7 @@ func (m *Miner) checkForKeystones(ctx context.Context) error {
 	log.Tracef("Checking for new keystone headers...")
 
 	ghkr := &bfgapi.L2KeystonesRequest{
-		NumL2Keystones: 3, // XXX this needs to be a bit smarter, do this based on some sort of time calculation. Do keep it simple, we don't need keystones that are older than let's say, 30 minbutes.
+		NumL2Keystones: 3, // XXX this needs to be a bit smarter, do this based on some sort of time calculation. Do keep it simple, we don't need keystones that are older than let's say, 30 minutes.
 	}
 
 	res, err := m.callBFG(ctx, m.requestTimeout, ghkr)

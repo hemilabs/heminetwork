@@ -267,7 +267,7 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 
 		// only support one address for now
 		if len(as) != 1 {
-			return nil, fmt.Errorf("only 1 address suported in pkSctipt got %v", len(as))
+			return nil, fmt.Errorf("only 1 address supported in pkSctipt got %v", len(as))
 		}
 
 		// b.t.Logf("left %v value %v", left, value)

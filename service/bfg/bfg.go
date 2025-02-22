@@ -43,7 +43,7 @@ import (
 )
 
 // XXX this code needs to be a bit smarter when syncing bitcoin. We should
-// return a "not ready" error whe that is the case.
+// return a "not ready" error when that is the case.
 
 type notificationId string
 
@@ -279,7 +279,7 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	// XXX this is not right. NewServer should always return. The call to
 	// electrs.NewClient should be in Run. Or, electrs should be a service
-	// so that we can mirror the New/Run paradig, the New/Run paradigm,
+	// so that we can mirror the New/Run paradigm, the New/Run paradigm,
 	s.btcClient, err = electrs.NewClient(cfg.EXBTCAddress, &electrs.ClientOptions{
 		InitialConnections:  cfg.EXBTCInitialConns,
 		MaxConnections:      cfg.EXBTCMaxConns,
@@ -1516,7 +1516,7 @@ func (s *Server) handleStateUpdates(ctx context.Context, table string, action st
 	heightBefore := s.canonicalChainHeight
 	s.mtx.RUnlock()
 
-	// get the current canoncial chain height from the db
+	// get the current canonical chain height from the db
 	heightAfter, err := s.BtcBlockCanonicalHeight(ctx)
 	if err != nil {
 		log.Errorf("error occurred getting canonical height: %s", err)

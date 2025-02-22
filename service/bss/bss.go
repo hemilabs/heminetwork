@@ -328,7 +328,7 @@ func (s *Server) handleWebsocketRead(ctx context.Context, bws *bssWs) {
 		// base context in the callback thus if we shadow it we
 		// overwrite the correct context that has a reasonable timeout.
 		//
-		// Make dead sure all contexts folloing in this code are not
+		// Make dead sure all contexts following in this code are not
 		// shadowed.
 		switch cmd {
 		case bssapi.CmdPingRequest:
@@ -505,7 +505,7 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 
 	log.Tracef("handleBFGWebsocketReadUnauth")
 	defer log.Tracef("handleBFGWebsocketReadUnauth exit")
-	s.setBFGConnected(conn.IsOnline()) // this is a bit inaccurate because on reconeect the code does not get past the ReadConn call. Moving the call into the for would be bouncing so let's assume bfg chatters soon so that the connection is marked online.
+	s.setBFGConnected(conn.IsOnline()) // this is a bit inaccurate because on reconnect the code does not get past the ReadConn call. Moving the call into the for would be bouncing so let's assume bfg chatters soon so that the connection is marked online.
 	for {
 		log.Infof("handleBFGWebsocketReadUnauth %v", "ReadConn")
 		cmd, rid, payload, err := bfgapi.ReadConn(ctx, conn)
