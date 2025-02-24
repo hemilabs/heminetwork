@@ -450,8 +450,8 @@ func (s *Server) Run(pctx context.Context) error {
 		s.opnode(ctx)
 	}()
 
-	log.Infof("bitcoin address %v", s.address)
-	log.Infof("bitcoin public key %v", s.public)
+	log.Infof("bitcoin address   : %v", s.address)
+	log.Infof("bitcoin public key: %v", s.public)
 
 	<-ctx.Done()
 	err := ctx.Err()
