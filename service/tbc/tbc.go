@@ -2091,6 +2091,27 @@ func (s *Server) DatabaseMetadataGet(ctx context.Context, key []byte) ([]byte, e
 	return s.db.MetadataGet(ctx, key)
 }
 
+func (s *Server) DatabaseBlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	if !s.cfg.DatabaseDebug {
+		return nil, ErrNotInDebugMode
+	}
+	return s.db.BlockHeaderByUtxoIndex(ctx)
+}
+
+func (s *Server) DatabaseBlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	if !s.cfg.DatabaseDebug {
+		return nil, ErrNotInDebugMode
+	}
+	return s.db.BlockHeaderByTxIndex(ctx)
+}
+
+func (s *Server) DatabaseBlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	if !s.cfg.DatabaseDebug {
+		return nil, ErrNotInDebugMode
+	}
+	return s.db.BlockHeaderByKeystoneIndex(ctx)
+}
+
 func feesFromTransactions(txs []*btcutil.Tx) error {
 	for idx, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {

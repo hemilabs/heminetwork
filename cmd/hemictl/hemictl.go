@@ -629,7 +629,6 @@ func tbcdb(pctx context.Context) error {
 
 		fmt.Printf("value (%v) with key (%v) added to metadata\n", value, key)
 
-	// XXX this needs to be hidden behind a debug flug of sorts.
 	case "metadataget":
 		key := args["key"]
 		if key == "" {
@@ -641,6 +640,28 @@ func tbcdb(pctx context.Context) error {
 			return fmt.Errorf("metadata get: %w", err)
 		}
 		spew.Dump(value)
+
+	case "blockheaderbyutxoindex":
+		bh, err := s.DatabaseBlockHeaderByUtxoIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
+	case "blockheaderbytxindex":
+		bh, err := s.DatabaseBlockHeaderByTxIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
+	case "blockheaderbykeystoneindex":
+		bh, err := s.DatabaseBlockHeaderByKeystoneIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
 	case "dumpmetadata":
 
 		return fmt.Errorf("fixme dumpmetadata")
@@ -684,9 +705,8 @@ func tbcdb(pctx context.Context) error {
 		fmt.Printf("not yet: %v", action)
 
 	// XXX implement ASAP
-	case "blockheaderbyutxoindex",
-		"blockheaderbytxindex", "utxosbyscripthashcount",
-		"blockkeystonebyl2keystoneabrevhash", "blockheaderbykeystoneindex",
+	case "utxosbyscripthashcount",
+		"blockkeystonebyl2keystoneabrevhash",
 		"dbdel", "dbget", "dbput" /* these three are syntetic */ :
 		fmt.Printf("not yet: %v", action)
 
