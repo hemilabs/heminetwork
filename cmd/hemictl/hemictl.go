@@ -63,11 +63,18 @@ var (
 	logLevel    string
 	leveldbHome string
 	network     string
+	tbcdebug    bool
 	cm          = config.CfgMap{
 		"HEMICTL_LEVELDB_HOME": config.Config{
 			Value:        &leveldbHome,
 			DefaultValue: "~/.tbcd",
 			Help:         "leveldb home directory",
+			Print:        config.PrintAll,
+		},
+		"HEMICTL_TBC_DEBUG": config.Config{
+			Value:        &tbcdebug,
+			DefaultValue: false,
+			Help:         "use TBC in debug mode",
 			Print:        config.PrintAll,
 		},
 		"HEMICTL_NETWORK": config.Config{
@@ -213,6 +220,7 @@ func tbcdb(pctx context.Context) error {
 	cfg := tbc.NewDefaultConfig()
 	cfg.LevelDBHome = leveldbHome
 	cfg.Network = network
+	cfg.DatabaseDebug = tbcdebug
 	cfg.PeersWanted = 0    // disable peer manager
 	cfg.ListenAddress = "" // disable RPC
 	s, err := tbc.NewServer(cfg)
@@ -571,6 +579,24 @@ func tbcdb(pctx context.Context) error {
 		}
 		fmt.Printf("utxos: %v total: %v\n", len(utxos), balance)
 
+	case "utxosbyscripthashcount":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		sh, err := tbcd.NewScriptHashFromString(hash)
+		if err != nil {
+			return err
+		}
+
+		count, err := s.UtxosByScriptHashCount(ctx, sh)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("count: %v\n", count)
+
 	// XXX this needs to be hidden behind a debug flug of sorts.
 	// case "dbget":
 	//	dbname := args["dbname"]
@@ -596,9 +622,31 @@ func tbcdb(pctx context.Context) error {
 			return errors.New("key: must be set")
 		}
 
-		return fmt.Errorf("fixme deletemetadata")
+		err = s.DatabaseMetadataDel(ctx, []byte(key))
+		if err != nil {
+			return err
+		}
 
-	// XXX this needs to be hidden behind a debug flug of sorts.
+		fmt.Printf("key %v: deleted from metadata\n", key)
+
+	case "metadataput":
+		key := args["key"]
+		if key == "" {
+			return errors.New("key: must be set")
+		}
+
+		value := args["value"]
+		if value == "" {
+			return errors.New("value: must be set")
+		}
+
+		err = s.DatabaseMetadataPut(ctx, []byte(key), []byte(value))
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("value (%v) with key (%v) added to metadata\n", value, key)
+
 	case "metadataget":
 		key := args["key"]
 		if key == "" {
@@ -610,6 +658,50 @@ func tbcdb(pctx context.Context) error {
 			return fmt.Errorf("metadata get: %w", err)
 		}
 		spew.Dump(value)
+
+	// XXX should this be an api call?
+	case "blockheaderbyutxoindex":
+		bh, err := s.BlockHeaderByUtxoIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
+	// XXX should this be an api call?
+	case "blockheaderbytxindex":
+		bh, err := s.BlockHeaderByTxIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
+	// XXX should this be an api call?
+	case "blockheaderbykeystoneindex":
+		bh, err := s.BlockHeaderByKeystoneIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
+	// XXX should this be an api call?
+	case "blockkeystonebyl2keystoneabrevhash":
+		abrevhash := args["abrevhash"]
+		if abrevhash == "" {
+			return errors.New("abrevhash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(abrevhash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		keystone, err := s.BlockKeystoneByL2KeystoneAbrevHash(ctx, *ch)
+		if err != nil {
+			return err
+		}
+
+		spew.Dump(keystone)
+
 	case "dumpmetadata":
 		return fmt.Errorf("fixme dumpmetadata")
 
@@ -652,10 +744,7 @@ func tbcdb(pctx context.Context) error {
 		fmt.Printf("not yet: %v", action)
 
 	// XXX implement ASAP
-	case "metadataput", "blockheaderbyutxoindex",
-		"blockheaderbytxindex", "utxosbyscripthashcount",
-		"blockkeystonebyl2keystoneabrevhash", "blockheaderbykeystoneindex",
-		"dbdel", "dbget", "dbput" /* these three are syntetic */ :
+	case "dbdel", "dbget", "dbput" /* these three are syntetic */ :
 		fmt.Printf("not yet: %v", action)
 
 	default:
@@ -1142,6 +1231,28 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 	os.Exit(2)
 }
 
+func IsJSON(str string) bool {
+	var js json.RawMessage
+	return json.Unmarshal([]byte(str), &js) == nil
+}
+
+func Jsonify(args []string) (string, error) {
+	formatted := "{"
+	for i, c := range args {
+		if i != 0 {
+			formatted += ","
+		}
+		kv := strings.SplitN(c, "=", 2)
+		if len(kv) != 2 {
+			return formatted, fmt.Errorf("invalid argument format: %v", c)
+		}
+		formatted = fmt.Sprintf("%s\"%s\": %v", formatted, kv[0], kv[1])
+	}
+	formatted += "}"
+
+	return formatted, nil
+}
+
 func _main() error {
 	if len(os.Args) < 2 {
 		usage()
@@ -1231,7 +1342,16 @@ func _main() error {
 	clone := reflect.New(cmdType).Interface()
 	log.Debugf("%v", spew.Sdump(clone))
 	if flag.Arg(1) != "" {
-		err := json.Unmarshal([]byte(flag.Arg(1)), &clone)
+
+		b := flag.Arg(1)
+		if !IsJSON(b) {
+			b, err = Jsonify(flag.Args()[1:])
+			if err != nil {
+				return err
+			}
+			log.Infof("parsed arguments as %v", b)
+		}
+		err := json.Unmarshal([]byte(b), &clone)
 		if err != nil {
 			return fmt.Errorf("invalid payload: %w", err)
 		}
