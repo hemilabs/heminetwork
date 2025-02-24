@@ -2075,7 +2075,7 @@ loop:
 
 // TestPopPayouts ensures that when querying for pop payouts by L2Keystone,
 // we can filter out pop payouts not in that keystone and we can reduce
-// mulitiple pop txs by the same miner to a single pop payout
+// multiple pop txs by the same miner to a single pop payout
 // 1 create all of the pop txs via the pop_basis table, there will be (4) total,
 // of those (1) will be filtered out, (2) will be for one pop miner, the remaining
 // (1) will be for the other
