@@ -1892,6 +1892,13 @@ func (s *Server) UtxosByScriptHashCount(ctx context.Context, hash tbcd.ScriptHas
 	return s.db.UtxosByScriptHashCount(ctx, hash)
 }
 
+func (s *Server) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
+	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
+	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
+
+	return s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, abrevhash)
+}
+
 // ScriptHashAvailableToSpend returns a boolean which indicates whether
 // a specific output (uniquely identified by TxId output index) is
 // available for spending in the UTXO table.
@@ -2072,7 +2079,6 @@ func (s *Server) DatabaseMetadataDel(ctx context.Context, key []byte) error {
 	if !s.cfg.DatabaseDebug {
 		return ErrNotInDebugMode
 	}
-
 	return s.db.MetadataDel(ctx, key)
 }
 
@@ -2080,7 +2086,6 @@ func (s *Server) DatabaseMetadataPut(ctx context.Context, key []byte, value []by
 	if !s.cfg.DatabaseDebug {
 		return ErrNotInDebugMode
 	}
-
 	return s.db.MetadataPut(ctx, key, value)
 }
 
@@ -2091,21 +2096,21 @@ func (s *Server) DatabaseMetadataGet(ctx context.Context, key []byte) ([]byte, e
 	return s.db.MetadataGet(ctx, key)
 }
 
-func (s *Server) DatabaseBlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (s *Server) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
 	if !s.cfg.DatabaseDebug {
 		return nil, ErrNotInDebugMode
 	}
 	return s.db.BlockHeaderByUtxoIndex(ctx)
 }
 
-func (s *Server) DatabaseBlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (s *Server) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
 	if !s.cfg.DatabaseDebug {
 		return nil, ErrNotInDebugMode
 	}
 	return s.db.BlockHeaderByTxIndex(ctx)
 }
 
-func (s *Server) DatabaseBlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
 	if !s.cfg.DatabaseDebug {
 		return nil, ErrNotInDebugMode
 	}

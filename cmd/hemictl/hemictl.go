@@ -579,6 +579,24 @@ func tbcdb(pctx context.Context) error {
 		}
 		fmt.Printf("utxos: %v total: %v\n", len(utxos), balance)
 
+	case "utxosbyscripthashcount":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		sh, err := tbcd.NewScriptHashFromString(hash)
+		if err != nil {
+			return err
+		}
+
+		count, err := s.UtxosByScriptHashCount(ctx, sh)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("count: %v\n", count)
+
 	// XXX this needs to be hidden behind a debug flug of sorts.
 	// case "dbget":
 	//	dbname := args["dbname"]
@@ -641,29 +659,50 @@ func tbcdb(pctx context.Context) error {
 		}
 		spew.Dump(value)
 
+	// XXX should this be an api call?
 	case "blockheaderbyutxoindex":
-		bh, err := s.DatabaseBlockHeaderByUtxoIndex(ctx)
+		bh, err := s.BlockHeaderByUtxoIndex(ctx)
 		if err != nil {
 			return err
 		}
 		spew.Dump(bh)
 
+	// XXX should this be an api call?
 	case "blockheaderbytxindex":
-		bh, err := s.DatabaseBlockHeaderByTxIndex(ctx)
+		bh, err := s.BlockHeaderByTxIndex(ctx)
 		if err != nil {
 			return err
 		}
 		spew.Dump(bh)
 
+	// XXX should this be an api call?
 	case "blockheaderbykeystoneindex":
-		bh, err := s.DatabaseBlockHeaderByKeystoneIndex(ctx)
+		bh, err := s.BlockHeaderByKeystoneIndex(ctx)
 		if err != nil {
 			return err
 		}
 		spew.Dump(bh)
+
+	// XXX should this be an api call?
+	case "blockkeystonebyl2keystoneabrevhash":
+		abrevhash := args["abrevhash"]
+		if abrevhash == "" {
+			return errors.New("abrevhash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(abrevhash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		keystone, err := s.BlockKeystoneByL2KeystoneAbrevHash(ctx, *ch)
+		if err != nil {
+			return err
+		}
+
+		spew.Dump(keystone)
 
 	case "dumpmetadata":
-
 		return fmt.Errorf("fixme dumpmetadata")
 
 	case "dumpoutputs":
@@ -705,9 +744,7 @@ func tbcdb(pctx context.Context) error {
 		fmt.Printf("not yet: %v", action)
 
 	// XXX implement ASAP
-	case "utxosbyscripthashcount",
-		"blockkeystonebyl2keystoneabrevhash",
-		"dbdel", "dbget", "dbput" /* these three are syntetic */ :
+	case "dbdel", "dbget", "dbput" /* these three are syntetic */ :
 		fmt.Printf("not yet: %v", action)
 
 	default:
