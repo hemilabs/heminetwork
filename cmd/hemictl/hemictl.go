@@ -221,7 +221,6 @@ func tbcdb(pctx context.Context) error {
 	cfg.LevelDBHome = leveldbHome
 	cfg.Network = network
 	cfg.DatabaseDebug = tbcdebug
-	cfg.LogLevel = "tbc=Debug"
 	cfg.PeersWanted = 0    // disable peer manager
 	cfg.ListenAddress = "" // disable RPC
 	s, err := tbc.NewServer(cfg)
@@ -605,12 +604,7 @@ func tbcdb(pctx context.Context) error {
 			return errors.New("key: must be set")
 		}
 
-		db, err := s.DatabaseGet(ctx)
-		if err != nil {
-			return err
-		}
-
-		err = (*db).MetadataDel(ctx, []byte(key))
+		err = s.DatabaseMetadataDel(ctx, []byte(key))
 		if err != nil {
 			return err
 		}
@@ -628,17 +622,12 @@ func tbcdb(pctx context.Context) error {
 			return errors.New("value: must be set")
 		}
 
-		db, err := s.DatabaseGet(ctx)
+		err = s.DatabaseMetadataPut(ctx, []byte(key), []byte(value))
 		if err != nil {
 			return err
 		}
 
-		err = (*db).MetadataPut(ctx, []byte(key), []byte(value))
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("value %v with key %v added to metadata\n", value, key)
+		fmt.Printf("value (%v) with key (%v) added to metadata\n", value, key)
 
 	// XXX this needs to be hidden behind a debug flug of sorts.
 	case "metadataget":

@@ -72,6 +72,7 @@ var (
 
 	ErrTxAlreadyBroadcast = errors.New("tx already broadcast")
 	ErrTxBroadcastNoPeers = errors.New("can't broadcast tx, no peers")
+	ErrNotInDebugMode     = errors.New("debug flag not set")
 
 	// upstreamStateIdKey is used for storing upstream state IDs
 	// representing a unique state of an upstream system driving TBC state/
@@ -2067,14 +2068,26 @@ func (s *Server) DatabaseVersion(ctx context.Context) (int, error) {
 	return s.db.Version(ctx)
 }
 
-func (s *Server) DatabaseGet(ctx context.Context) (*tbcd.Database, error) {
+func (s *Server) DatabaseMetadataDel(ctx context.Context, key []byte) error {
 	if !s.cfg.DatabaseDebug {
-		return nil, fmt.Errorf("direct database access only available in debug mode")
+		return ErrNotInDebugMode
 	}
-	return &s.db, nil
+
+	return s.db.MetadataDel(ctx, key)
+}
+
+func (s *Server) DatabaseMetadataPut(ctx context.Context, key []byte, value []byte) error {
+	if !s.cfg.DatabaseDebug {
+		return ErrNotInDebugMode
+	}
+
+	return s.db.MetadataPut(ctx, key, value)
 }
 
 func (s *Server) DatabaseMetadataGet(ctx context.Context, key []byte) ([]byte, error) {
+	if !s.cfg.DatabaseDebug {
+		return nil, ErrNotInDebugMode
+	}
 	return s.db.MetadataGet(ctx, key)
 }
 
