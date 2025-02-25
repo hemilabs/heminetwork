@@ -2559,7 +2559,7 @@ func (s *Server) Run(pctx context.Context) error {
 			httpErrCh <- httpServer.ListenAndServe()
 		}()
 		defer func() {
-			if err = httpServer.Shutdown(ctx); err != nil {
+			if err := httpServer.Shutdown(ctx); err != nil {
 				log.Errorf("http server exit: %v", err)
 				return
 			}

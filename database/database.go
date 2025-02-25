@@ -20,10 +20,6 @@ import (
 
 type Database interface {
 	Close() error // Close database
-
-	// SQL
-	RegisterNotification(context.Context, NotificationName, NotificationCallback, any) error
-	UnregisterNotification(NotificationName) error
 }
 
 type NotFoundError string
@@ -61,32 +57,32 @@ func (de DuplicateError) Is(target error) bool {
 	return ok
 }
 
-type ValidationError string
-
-func (ve ValidationError) Error() string {
-	return string(ve)
-}
-
-func (ve ValidationError) Is(target error) bool {
-	_, ok := target.(ValidationError)
-	return ok
-}
-
-type ZeroRowsError string
-
-func (ze ZeroRowsError) Error() string {
-	return string(ze)
-}
-
-func (ze ZeroRowsError) Is(target error) bool {
-	_, ok := target.(ZeroRowsError)
-	return ok
-}
+//type ValidationError string
+//
+//func (ve ValidationError) Error() string {
+//	return string(ve)
+//}
+//
+//func (ve ValidationError) Is(target error) bool {
+//	_, ok := target.(ValidationError)
+//	return ok
+//}
+//
+//type ZeroRowsError string
+//
+//func (ze ZeroRowsError) Error() string {
+//	return string(ze)
+//}
+//
+//func (ze ZeroRowsError) Is(target error) bool {
+//	_, ok := target.(ZeroRowsError)
+//	return ok
+//}
 
 var (
-	ErrDuplicate     = DuplicateError("duplicate")
-	ErrNotFound      = NotFoundError("not found")
-	ErrValidation    = ValidationError("validation")
+	ErrDuplicate = DuplicateError("duplicate")
+	ErrNotFound  = NotFoundError("not found")
+	// ErrValidation    = ValidationError("validation")
 	ErrBlockNotFound BlockNotFoundError
 )
 

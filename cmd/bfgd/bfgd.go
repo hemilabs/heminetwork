@@ -22,7 +22,7 @@ import (
 
 const (
 	daemonName      = "bfgd"
-	defaultLogLevel = daemonName + "=INFO;postgres=INFO;bfgpostgres=INFO;bfg=INFO"
+	defaultLogLevel = daemonName + "=INFO;bfg=INFO"
 )
 
 var (
@@ -31,54 +31,16 @@ var (
 
 	cfg = bfg.NewDefaultConfig()
 	cm  = config.CfgMap{
-		"BFG_EXBTC_ADDRESS": config.Config{
-			Value:        &cfg.EXBTCAddress,
-			DefaultValue: "localhost:18001",
-			Help:         "electrs endpoint",
-			Print:        config.PrintAll,
-		},
-		"BFG_EXBTC_INITIAL_CONNECTIONS": config.Config{
-			Value:        &cfg.EXBTCInitialConns,
-			DefaultValue: 5,
-			Help:         "electrs initial connections",
-			Print:        config.PrintAll,
-		},
-		"BFG_EXBTC_MAX_CONNECTIONS": config.Config{
-			Value:        &cfg.EXBTCMaxConns,
-			DefaultValue: 100,
-			Help:         "electrs max connections",
-			Print:        config.PrintAll,
-		},
-		"BFG_BTC_START_HEIGHT": config.Config{
-			Value:        &cfg.BTCStartHeight,
-			DefaultValue: uint64(0),
-			Help:         "bitcoin start height that serves as genesis",
-			Print:        config.PrintAll,
-			Required:     true,
-		},
 		"BFG_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
 		},
-		"BFG_POSTGRES_URI": config.Config{
-			Value:        &cfg.PgURI,
-			DefaultValue: "",
-			Help:         "postgres connection URI",
-			Print:        config.PrintSecret,
-			Required:     true,
-		},
-		"BFG_PUBLIC_ADDRESS": config.Config{
-			Value:        &cfg.PublicListenAddress,
-			DefaultValue: bfgapi.DefaultPublicListen,
-			Help:         "address and port bfgd listens on for public, authenticated, websocket connections",
-			Print:        config.PrintAll,
-		},
-		"BFG_PRIVATE_ADDRESS": config.Config{
-			Value:        &cfg.PrivateListenAddress,
-			DefaultValue: bfgapi.DefaultPrivateListen,
-			Help:         "address and port bfgd listens on for private, unauthenticated, websocket connections",
+		"BFG_LISTEN_ADDRESS": config.Config{
+			Value:        &cfg.ListenAddress,
+			DefaultValue: bfgapi.DefaultListenAddress,
+			Help:         "address and port bfgd listens on for http connections",
 			Print:        config.PrintAll,
 		},
 		"BFG_PROMETHEUS_ADDRESS": config.Config{
@@ -91,48 +53,6 @@ var (
 			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",
 			Help:         "address and port bfgd pprof listens on (open <address>/debug/pprof to see available profiles)",
-			Print:        config.PrintAll,
-		},
-		"BFG_REQUEST_LIMIT": config.Config{
-			Value:        &cfg.RequestLimit,
-			DefaultValue: bfgapi.DefaultRequestLimit,
-			Help:         "maximum request queue depth",
-			Print:        config.PrintAll,
-		},
-		"BFG_REQUEST_TIMEOUT": config.Config{
-			Value:        &cfg.RequestTimeout,
-			DefaultValue: bfgapi.DefaultRequestTimeout,
-			Help:         "request timeout in seconds",
-			Print:        config.PrintAll,
-		},
-		"BFG_TRUSTED_PROXIES": config.Config{
-			Value:        &cfg.TrustedProxies,
-			DefaultValue: []string{},
-			Help:         "trusted proxies IP addresses or CIDRs",
-			Print:        config.PrintAll,
-		},
-		"BFG_REMOTE_IP_HEADERS": config.Config{
-			Value:        &cfg.RemoteIPHeaders,
-			DefaultValue: []string{},
-			Help:         "list of headers used to obtain the client IP address (requires trusted proxies)",
-			Print:        config.PrintAll,
-		},
-		"BFG_BFG_URL": config.Config{
-			Value:        &cfg.BFGURL,
-			DefaultValue: "",
-			Help:         "public websocket address of another BFG you'd like to receive L2Keystones from",
-			Print:        config.PrintAll,
-		},
-		"BFG_BTC_PRIVKEY": config.Config{
-			Value:        &cfg.BTCPrivateKey,
-			DefaultValue: "",
-			Help:         "a btc private key, this is only needed when connecting to another BFG",
-			Print:        config.PrintSecret,
-		},
-		"BFG_DISABLE_PUBLIC_CONNS": config.Config{
-			Value:        &cfg.DisablePublicConns,
-			DefaultValue: false,
-			Help:         "disable public connections",
 			Print:        config.PrintAll,
 		},
 	}

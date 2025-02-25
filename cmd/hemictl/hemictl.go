@@ -15,8 +15,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"os/user"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
@@ -32,14 +30,10 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
-	"github.com/mitchellh/go-homedir"
 
-	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
-	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/service/tbc"
@@ -49,7 +43,7 @@ import (
 
 const (
 	daemonName      = "hemictl"
-	defaultLogLevel = daemonName + "=INFO;bfgpostgres=INFO;postgres=INFO;protocol=INFO"
+	defaultLogLevel = daemonName + "=INFO;protocol=INFO"
 
 	tbcReadLimit = 8 * (1 << 20) // 8 MiB.
 )
@@ -84,59 +78,6 @@ var (
 
 	callTimeout = 100 * time.Second
 )
-
-func bfgdb() error {
-	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
-	defer cancel()
-
-	pgURI := os.Getenv("PGURI") // XXX mpve into config
-	if pgURI == "" {
-		// construct pgURI based on reasonable defaults.
-		home, err := homedir.Dir()
-		if err != nil {
-			return fmt.Errorf("dir: %w", err)
-		}
-		user, err := user.Current()
-		if err != nil {
-			return fmt.Errorf("current: %w", err)
-		}
-
-		filename := filepath.Join(home, ".pgsql-bfgdb-"+user.Username)
-		password, err := os.ReadFile(filename)
-		if err != nil {
-			return fmt.Errorf("read file: %w", err)
-		}
-		pgURI = fmt.Sprintf("database=bfgdb password=%s", password)
-	}
-
-	db, err := postgres.New(ctx, pgURI)
-	if err != nil {
-		return fmt.Errorf("new: %w", err)
-	}
-	defer db.Close()
-
-	param := flag.Arg(2)
-	c := flag.Arg(1)
-	out := make(map[string]any, 10)
-	switch c {
-	case "version":
-		out["bfgdb_version"], err = db.Version(ctx)
-		if err != nil {
-			return fmt.Errorf("error received getting version: %s", err.Error())
-		}
-	default:
-		return fmt.Errorf("invalid bfgdb command: %v", c)
-	}
-	_ = param
-
-	o, err := json.Marshal(out)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	fmt.Printf("%s\n", o)
-
-	return nil
-}
 
 func parseArgs(args []string) (string, map[string]string, error) {
 	if len(args) < 1 {
@@ -1005,9 +946,6 @@ func init() {
 	welcome = "Hemi Network Controller " + version.BuildInfo()
 
 	// merge all command maps
-	for k, v := range bfgapi.APICommands() {
-		allCommands[string(k)] = v
-	}
 	for k, v := range tbcapi.APICommands() {
 		allCommands[string(k)] = v
 	}
@@ -1026,8 +964,6 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\t-h, -help\tDisplay help information (this help)\n\n")
 	fmt.Fprintf(os.Stderr, "COMMANDS:\n")
 	fmt.Fprintf(os.Stderr, "\tapi\t\tuse generic api command\n")
-	fmt.Fprintf(os.Stderr, "\tbfgdb\t\tdatabase connection\n")
-	fmt.Fprintf(os.Stderr, "\tbss-client\tlong connection to bss\n")
 	//nolint:dupword // command help, not sentence.
 	fmt.Fprintf(os.Stderr, "\tp2p\t\tp2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n\n")
@@ -1122,10 +1058,6 @@ func (f *hemictlAPI) Commands() map[protocol.Command]reflect.Type {
 	switch f.api {
 	case "tbcapi":
 		return tbcapi.APICommands()
-	case "bfgapi":
-		return bfgapi.APICommands()
-	case "bssapi":
-		return bssapi.APICommands()
 	}
 	return nil
 }
@@ -1220,10 +1152,6 @@ func api(ctx context.Context, args []string) error {
 
 	var response any
 	switch {
-	case strings.HasPrefix(cmd, "bssapi"):
-		response, err = apiHandler(ctx, "bssapi", bssapi.DefaultURL, payload)
-	case strings.HasPrefix(cmd, "bfgapi"):
-		response, err = apiHandler(ctx, "bfgapi", bfgapi.DefaultPrivateURL, payload)
 	case strings.HasPrefix(cmd, "tbcapi"):
 		response, err = apiHandler(ctx, "tbcapi", tbcapi.DefaultURL, payload)
 	default:
@@ -1266,8 +1194,6 @@ func _main(args []string) error {
 		return api(ctx, args[1:])
 	case "tbcdb":
 		return tbcdb(ctx, args[1:])
-	case "bfgdb":
-		return bfgdb()
 	case "p2p":
 		return p2p(args[1:])
 	default:
