@@ -12,7 +12,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/api"
-	"github.com/hemilabs/heminetwork/database/bfgd"
 )
 
 const (
@@ -35,44 +34,6 @@ type Header struct {
 	PrevKeystoneEPHash [12]byte // 17:29
 	StateRoot          [32]byte // 29:61
 	EPHash             [12]byte // 61:73
-}
-
-type L2BTCFinality struct {
-	L2Keystone       L2Keystone    `json:"l2_keystone"`
-	BTCPubHeight     int64         `json:"btc_pub_height"`
-	BTCPubHeaderHash api.ByteSlice `json:"btc_pub_header_hash"`
-	BTCFinality      int32         `json:"btc_finality"`
-}
-
-func L2BTCFinalityFromBfgd(l2BtcFinality *bfgd.L2BTCFinality, currentBTCHeight uint32, effectiveHeight uint32) (*L2BTCFinality, error) {
-	if effectiveHeight > currentBTCHeight {
-		return nil, fmt.Errorf("effective height greater than btc height (%d > %d)", effectiveHeight, currentBTCHeight)
-	}
-
-	fin := int64(-9)
-	if effectiveHeight > 0 {
-		fin = int64(currentBTCHeight) - int64(effectiveHeight) - 9 + 1
-	}
-
-	// set a reasonable upper bound so we can safely convert to int32
-	if fin > 100 {
-		fin = 100
-	}
-
-	return &L2BTCFinality{
-		L2Keystone: L2Keystone{
-			Version:            uint8(l2BtcFinality.L2Keystone.Version),
-			L1BlockNumber:      l2BtcFinality.L2Keystone.L1BlockNumber,
-			L2BlockNumber:      l2BtcFinality.L2Keystone.L2BlockNumber,
-			ParentEPHash:       api.ByteSlice(l2BtcFinality.L2Keystone.ParentEPHash),
-			PrevKeystoneEPHash: api.ByteSlice(l2BtcFinality.L2Keystone.PrevKeystoneEPHash),
-			StateRoot:          api.ByteSlice(l2BtcFinality.L2Keystone.StateRoot),
-			EPHash:             api.ByteSlice(l2BtcFinality.L2Keystone.EPHash),
-		},
-		BTCPubHeight:     l2BtcFinality.BTCPubHeight,
-		BTCPubHeaderHash: api.ByteSlice(l2BtcFinality.BTCPubHeaderHash),
-		BTCFinality:      int32(fin),
-	}, nil
 }
 
 func (h *Header) Dump(w io.Writer) {
