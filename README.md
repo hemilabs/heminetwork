@@ -138,32 +138,11 @@ go run ./integrationtest
 
 ### 🏁 Prerequisites
 
-- A **PostgreSQL database**, bfgd expects the sql scripts in `./database/bfgd/scripts/` to be run to set up your schema.
-- A **connection to an Electrs node** on the proper Bitcoin network (testnet or mainnet).
+- A **connection to a Bitcoin network source of truth.
 
 ### Running your own Bitcoin Finality Governor (bfgd) and PoP mining with it
 
-If you'd like to run your own `bfgd` and don't want to rely on Hemi Labs (or any third party) for _broadcasting transactions_, you may run `bfgd` and connect it to a _trusted_ `bfgd` run by a third party to _receive l2 keystones only_ (l2 keystones represent l2 state and are what are mined in PoP transactions).  In this case, the third party `bfgd` will only send you l2 keystones, your `bfgd` can notify your local pop miner and this will broadcast them to your Electrs+bitcoind setup so you don't rely on Hemi Labs--or any third party--which may be congested.
-
-You'll need the following running to do this:
-* bitcoind
-* electrs
-* postgres
-* bfgd
-
-_Note: make sure you run all of the *.sql files for bfg in `database/bfgd/postgres/scripts`_
-
-When running BFG, you'll want the following env variables set:
-
-* `BFG_BFG_URL`: the _trusted_ `bfgd`'s websocket url that you will connect to
-* `BFG_BTC_PRIVKEY`: your btc private key.  note that this can be an unfunded private key and you'll still receive l2 keystones to mine
-* `BFG_POSTGRES_URI`: the connection URI for your postgres instance
-* `BFG_BTC_START_HEIGHT`: when your db is empty, bfgd will need a starting point to parse btc blocks at, set this to the tip of the bitcoin chain at first deploy
-* `BFG_EXBTC_ADDRESS`: your electrs rpc address
-
-You may then connect your local `popmd` to your aforementioned local `bfgd` via the `POPM_BFG_URL` env variable
-
-## ▶️ Running bssd
+XXX FIXME
 
 ### 🏁 Prerequisites
 

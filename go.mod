@@ -21,7 +21,6 @@ require (
 	github.com/ethereum/go-ethereum v1.14.8
 	github.com/go-test/deep v1.1.1
 	github.com/juju/loggo v1.0.0
-	github.com/lib/pq v1.10.9
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
 	github.com/phayes/freeport v0.0.0-20220201140144-74d24b5ae9f5
