@@ -72,6 +72,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	s := &Server{
 		cfg:    cfg,
 		server: http.NewServeMux(),
+		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: cfg.PrometheusNamespace,
+			Name:      "web_calls_total",
+			Help:      "The total number of successful web commands",
+		}),
 	}
 
 	return s, nil
@@ -117,7 +122,7 @@ func (s *Server) Collectors() []prometheus.Collector {
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
-				Help:      "Whether the TBC service is running",
+				Help:      "Whether the BFG service is running",
 			}, s.promRunning),
 		}
 	}
