@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -85,7 +86,33 @@ func NewServer(cfg *Config) (*Server, error) {
 func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleKeystoneFinality: %v", r.RemoteAddr)
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
-	panic("fuck off")
+
+	if r.Method != "GET" {
+		http.Error(w, http.StatusText(http.StatusBadRequest),
+			http.StatusBadRequest)
+		return
+	}
+
+	q := r.URL.Query()
+	keystone, ok := q["keystone"]
+	if !ok || (ok && keystone[0] == "") {
+		fmt.Fprintf(w, "this is the last keystone")
+		return
+	}
+
+	ks, err := chainhash.NewHashFromStr(keystone[0])
+	if err != nil {
+		e := fmt.Sprintf("invalid keystone: %v\n\n%v - %v\n", err,
+			http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
+		http.Error(w, e, http.StatusBadRequest)
+		return
+	}
+
+	log.Infof("looking for keystone: %v", ks)
+
+	e := fmt.Sprintf("keystone not found: %v\n\n%v - %v\n", ks,
+		http.StatusNotFound, http.StatusText(http.StatusNotFound))
+	http.Error(w, e, http.StatusNotFound)
 }
 
 func (s *Server) running() bool {
