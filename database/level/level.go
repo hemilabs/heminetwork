@@ -100,20 +100,6 @@ func (l *Database) RawDB() RawPool {
 	return l.rawPool
 }
 
-func (l *Database) RegisterNotification(ctx context.Context, n database.NotificationName, f database.NotificationCallback, payload any) error {
-	log.Tracef("RegisterNotification")
-	defer log.Tracef("RegisterNotification exit")
-
-	return errors.New("unsupported")
-}
-
-func (l *Database) UnregisterNotification(n database.NotificationName) error {
-	log.Tracef("UnregisterNotification")
-	defer log.Tracef("UnregisterNotification exit")
-
-	return errors.New("unsupported")
-}
-
 func (l *Database) openDB(name string, options *opt.Options) error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
