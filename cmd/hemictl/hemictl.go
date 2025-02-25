@@ -100,36 +100,6 @@ var (
 	callTimeout = 100 * time.Second
 )
 
-// handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
-// be able to use bssapi.Call.
-func handleBSSWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
-	for {
-		if _, _, _, err := bssapi.ReadConn(ctx, conn); err != nil {
-			return
-		}
-	}
-}
-
-// handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
-// be able to use bfgapi.Call.
-func handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
-	for {
-		if _, _, _, err := bfgapi.ReadConn(ctx, conn); err != nil {
-			return
-		}
-	}
-}
-
-// handleTBCWebsocketRead discards all reads but has to exist in order to
-// be able to use tbcapi.Call.
-func handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
-	for {
-		if _, _, _, err := tbcapi.ReadConn(ctx, conn); err != nil {
-			return
-		}
-	}
-}
-
 func bfgdb() error {
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 	defer cancel()
@@ -1253,12 +1223,79 @@ func Jsonify(args []string) (string, error) {
 	return formatted, nil
 }
 
-func _main() error {
-	if len(os.Args) < 2 {
-		usage()
-		return errors.New("not enough parameters")
+func parseCmd(cmd string) (any, error) {
+	cmdType, ok := allCommands[cmd]
+	if !ok {
+		return nil, fmt.Errorf("unknown command: %v", cmd)
 	}
 
+	clone := reflect.New(cmdType).Interface()
+	log.Debugf("%v", spew.Sdump(clone))
+	if flag.Arg(1) != "" {
+
+		b := flag.Arg(1)
+		var err error
+		if !IsJSON(b) {
+			b, err = Jsonify(flag.Args()[1:])
+			if err != nil {
+				return nil, err
+			}
+			log.Infof("parsed arguments as %v", b)
+		}
+		err = json.Unmarshal([]byte(b), &clone)
+		if err != nil {
+			return nil, fmt.Errorf("invalid payload: %w", err)
+		}
+	}
+	return clone, nil
+}
+
+// fakeApi is an empty structure used to satisfy the protocol.API interface.
+type fakeApi struct {
+	api string
+}
+
+// Commands satisfies the protocol.API interface.
+func (f *fakeApi) Commands() map[protocol.Command]reflect.Type {
+	switch f.api {
+	case "tbcapi":
+		return tbcapi.APICommands()
+	case "bfgapi":
+		return bfgapi.APICommands()
+	case "bssapi":
+		return bssapi.APICommands()
+	}
+	return nil
+}
+
+func apiHandler(ctx context.Context, api string, URL string, cmd any) (any, error) {
+	conn, err := protocol.NewConn(URL, &protocol.ConnOptions{
+		ReadLimit: tbcReadLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	tctx, tcancel := context.WithTimeout(ctx, callTimeout)
+	defer tcancel()
+	go func() {
+		for {
+			if _, _, _, err := conn.Read(tctx, &fakeApi{api: api}); err != nil {
+				return
+			}
+		}
+	}()
+
+	_, _, payload, err := conn.Call(tctx, &fakeApi{api: api}, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("%w", err)
+	}
+
+	return payload, nil
+}
+
+func _main() error {
 	if err := config.Parse(cm); err != nil {
 		return err
 	}
@@ -1301,65 +1338,26 @@ func _main() error {
 	}
 
 	// Deal with generic commands
-	cmdType, ok := allCommands[cmd]
-	if !ok {
-		return fmt.Errorf("unknown command: %v", cmd)
-	}
-	// Figure out where and what we are calling based on command.
-	var (
-		u           string
-		callHandler func(context.Context, *protocol.Conn)
-		call        func(context.Context, *protocol.Conn, any) (protocol.Command, string, any, error)
-	)
-	switch {
-	case strings.HasPrefix(cmd, "bssapi"):
-		u = bssapi.DefaultURL
-		callHandler = handleBSSWebsocketReadUnauth
-		call = bssapi.Call // XXX yuck
-	case strings.HasPrefix(cmd, "bfgapi"):
-		u = bfgapi.DefaultPrivateURL
-		callHandler = handleBFGWebsocketReadUnauth
-		call = bfgapi.Call // XXX yuck
-	case strings.HasPrefix(cmd, "tbcapi"):
-		u = tbcapi.DefaultURL
-		callHandler = handleTBCWebsocketRead
-		call = tbcapi.Call // XXX yuck?
-	default:
-		return fmt.Errorf("can't derive URL from command: %v", cmd)
-	}
-	conn, err := protocol.NewConn(u, &protocol.ConnOptions{
-		ReadLimit: tbcReadLimit,
-	})
+	parsedCmd, err := parseCmd(cmd)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
 
-	tctx, tcancel := context.WithTimeout(ctx, callTimeout)
-	defer tcancel()
-	go callHandler(tctx, conn) // Make sure we can use Call
-
-	clone := reflect.New(cmdType).Interface()
-	log.Debugf("%v", spew.Sdump(clone))
-	if flag.Arg(1) != "" {
-
-		b := flag.Arg(1)
-		if !IsJSON(b) {
-			b, err = Jsonify(flag.Args()[1:])
-			if err != nil {
-				return err
-			}
-			log.Infof("parsed arguments as %v", b)
-		}
-		err := json.Unmarshal([]byte(b), &clone)
-		if err != nil {
-			return fmt.Errorf("invalid payload: %w", err)
-		}
+	var payload any
+	switch {
+	case strings.HasPrefix(cmd, "bssapi"):
+		payload, err = apiHandler(ctx, "bssapi", bssapi.DefaultURL, parsedCmd)
+	case strings.HasPrefix(cmd, "bfgapi"):
+		payload, err = apiHandler(ctx, "bfgapi", bfgapi.DefaultPrivateURL, parsedCmd)
+	case strings.HasPrefix(cmd, "tbcapi"):
+		payload, err = apiHandler(ctx, "tbcapi", tbcapi.DefaultURL, parsedCmd)
+	default:
+		return fmt.Errorf("can't derive URL from command: %v", cmd)
 	}
-	_, _, payload, err := call(tctx, conn, clone)
 	if err != nil {
-		return fmt.Errorf("%w", err)
+		return err
 	}
+
 	log.Debugf("%v", spew.Sdump(payload))
 
 	return printJSON(os.Stdout, "", payload)
