@@ -254,13 +254,13 @@ func (t *tbcGozer) run(ctx context.Context) {
 	}
 }
 
-func TBCGozerNew(pctx context.Context, tbcUrl string) (gozer.Gozer, error) {
+func TBCGozerNew(ctx context.Context, tbcUrl string) (gozer.Gozer, error) {
 	t := &tbcGozer{
 		url:   tbcUrl,
 		cmdCh: make(chan tbcCmd, 10),
 	}
 
-	go t.run(pctx)
+	go t.run(ctx) // XXX rethink this
 
 	return t, nil
 }
