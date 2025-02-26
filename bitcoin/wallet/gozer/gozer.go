@@ -9,8 +9,10 @@ import (
 	"errors"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 // Gozer was originally worshiped as a god by the Hittites, Mesopotamians, and
@@ -20,6 +22,7 @@ import (
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
+	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash *chainhash.Hash) (*chainhash.Hash, *hemi.L2KeystoneAbrev, error)
 }
 
 type FeeEstimate struct {
