@@ -31,6 +31,18 @@ var (
 
 	cfg = bfg.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"BFG_BITCOIN_SOURCE": config.Config{
+			Value:        &cfg.BitcoinSource,
+			DefaultValue: "blockstream",
+			Help:         "which bitcoin source of truth is used (blockstream and tbc)",
+			Print:        config.PrintAll,
+		},
+		"BFG_BITCOIN_URL": config.Config{
+			Value:        &cfg.BitcoinURL,
+			DefaultValue: "",
+			Help:         "conection url for bitcoin source if needed e.g. ws://localhost:8082/v1/ws",
+			Print:        config.PrintAll,
+		},
 		"BFG_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
@@ -43,16 +55,22 @@ var (
 			Help:         "address and port bfgd listens on for http connections",
 			Print:        config.PrintAll,
 		},
-		"BFG_PROMETHEUS_ADDRESS": config.Config{
-			Value:        &cfg.PrometheusListenAddress,
-			DefaultValue: "",
-			Help:         "address and port bfgd prometheus listens on",
+		"BFG_NETWORK": config.Config{
+			Value:        &cfg.Network,
+			DefaultValue: "mainnet",
+			Help:         "network bfg is working on (mainnet/testnet3)",
 			Print:        config.PrintAll,
 		},
 		"BFG_PPROF_ADDRESS": config.Config{
 			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",
 			Help:         "address and port bfgd pprof listens on (open <address>/debug/pprof to see available profiles)",
+			Print:        config.PrintAll,
+		},
+		"BFG_PROMETHEUS_ADDRESS": config.Config{
+			Value:        &cfg.PrometheusListenAddress,
+			DefaultValue: "",
+			Help:         "address and port bfgd prometheus listens on",
 			Print:        config.PrintAll,
 		},
 	}
