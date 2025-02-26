@@ -139,6 +139,15 @@ func BadRequestF(w http.ResponseWriter, format string, args ...any) {
 	http.Error(w, string(je), http.StatusBadRequest)
 }
 
+func MethodNotAllowed(w http.ResponseWriter, format string, args ...any) {
+	e, je, err := Error(format, args...)
+	if err != nil {
+		panic(err)
+	}
+	log.Tracef("method not allowed: %v trace %v error %v", e.Timestamp, e.Trace, e.Error)
+	http.Error(w, string(je), http.StatusMethodNotAllowed)
+}
+
 func NotFound(w http.ResponseWriter, format string, args ...any) {
 	e, je, err := Error(format, args...)
 	if err != nil {
@@ -153,7 +162,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
 
 	if r.Method != "GET" {
-		BadRequestF(w, "must use http GET")
+		MethodNotAllowed(w, "method not allowed %v", r.Method)
 		return
 	}
 
