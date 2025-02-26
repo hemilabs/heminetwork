@@ -1776,7 +1776,7 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	defer s.testAndSetRunning(false)
 
-	// XXX this funciton seems a bit heavy. Trim it by moving functionality to functions.
+	// XXX this function seems a bit heavy. Trim it by moving functionality to functions.
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 

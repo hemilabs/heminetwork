@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -55,7 +55,7 @@ func MustNewAuthenticateMessage(message string) *AuthenticateMessage {
 
 func NewAuthenticateFromBytes(b []byte) (*AuthenticateMessage, error) {
 	if len(b) < nonceLength {
-		return nil, errors.New("authenicate message too short")
+		return nil, errors.New("authenticate message too short")
 	}
 	am := &AuthenticateMessage{}
 	copy(am.Nonce[0:], b[:nonceLength])
