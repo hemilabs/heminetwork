@@ -6,8 +6,12 @@ package bfg
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -28,6 +32,12 @@ const (
 )
 
 var log = loggo.GetLogger(appName)
+
+type HttpError struct {
+	Timestamp int64  `json:"timestamp"`
+	Trace     string `json:"trace"`
+	Error     string `json:"error"`
+}
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -83,36 +93,73 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
+func random(n int) []byte {
+	buffer := make([]byte, n)
+	if _, err := io.ReadFull(rand.Reader, buffer); err != nil {
+		panic("random")
+	}
+	return buffer
+}
+
+func Error(format string, args ...any) (*HttpError, []byte, error) {
+	e := &HttpError{
+		Timestamp: time.Now().Unix(),
+		Trace:     hex.EncodeToString(random(8)),
+		Error:     fmt.Sprintf(format, args...),
+	}
+	je, err := json.MarshalIndent(e, "", "  ")
+	if err != nil {
+		return nil, nil, err
+	}
+	return e, je, err
+}
+
+func BadRequestF(w http.ResponseWriter, format string, args ...any) {
+	e, je, err := Error(format, args...)
+	if err != nil {
+		panic(err)
+	}
+	log.Errorf("bad request: %v trace %v error %v", e.Timestamp, e.Trace, e.Error)
+	http.Error(w, string(je), http.StatusBadRequest)
+}
+
+func NotFound(w http.ResponseWriter, format string, args ...any) {
+	e, je, err := Error(format, args...)
+	if err != nil {
+		panic(err)
+	}
+	log.Tracef("not found: %v trace %v error %v", e.Timestamp, e.Trace, e.Error)
+	http.Error(w, string(je), http.StatusNotFound)
+}
+
 func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleKeystoneFinality: %v", r.RemoteAddr)
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
 
 	if r.Method != "GET" {
-		http.Error(w, http.StatusText(http.StatusBadRequest),
-			http.StatusBadRequest)
+		BadRequestF(w, "must use http GET")
 		return
 	}
 
-	q := r.URL.Query()
-	keystone, ok := q["keystone"]
-	if !ok || (ok && keystone[0] == "") {
+	keystone := r.PathValue("hash")
+	if keystone == "" {
 		fmt.Fprintf(w, "this is the last keystone")
 		return
 	}
 
-	ks, err := chainhash.NewHashFromStr(keystone[0])
+	if len(keystone) != chainhash.MaxHashStringSize {
+		BadRequestF(w, "invalid keystone length")
+		return
+	}
+	ks, err := chainhash.NewHashFromStr(keystone)
 	if err != nil {
-		e := fmt.Sprintf("invalid keystone: %v\n\n%v - %v\n", err,
-			http.StatusBadRequest, http.StatusText(http.StatusBadRequest))
-		http.Error(w, e, http.StatusBadRequest)
+		BadRequestF(w, "invalid keystone: %v", err)
 		return
 	}
 
 	log.Infof("looking for keystone: %v", ks)
 
-	e := fmt.Sprintf("keystone not found: %v\n\n%v - %v\n", ks,
-		http.StatusNotFound, http.StatusText(http.StatusNotFound))
-	http.Error(w, e, http.StatusNotFound)
+	NotFound(w, "keystone not found: %v", ks)
 }
 
 func (s *Server) running() bool {

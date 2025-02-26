@@ -17,5 +17,5 @@ var (
 	DefaultListenAddress    = "localhost:8080"
 	DefaultPrometheusListen = "localhost:2112"
 
-	RouteKeystoneFinality = "/" + APIVersionRoute + "/" + "keystonefinality"
+	RouteKeystoneFinality = "/" + APIVersionRoute + "/" + "keystonefinality/{hash...}"
 )
