@@ -19,7 +19,7 @@ import (
 
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]FeeEstimate, error)
-	UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error)
+	UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
 }
 
 type FeeEstimate struct {
