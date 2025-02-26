@@ -181,12 +181,14 @@ func tbcdb(pctx context.Context, flags []string) error {
 	flagSet.Usage = func() {
 		fmt.Fprintf(os.Stderr, "%v\n", welcome)
 		fmt.Fprintf(os.Stderr, "Usage: %v tbcdb [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "COMMAND OVERVIEW:\n")
-		fmt.Fprintf(os.Stderr, "\tThe 'tbcd' command allows you to manipulate the tbcd db.\n\n")
-		fmt.Fprintf(os.Stderr, "OPTIONS:\n")
-		fmt.Fprintf(os.Stderr, "\t-h, -help\tDisplay help information\n")
-		fmt.Fprintf(os.Stderr, "\t-debug\t\tEnable debug mode (required for certain actions)\n\n")
-		fmt.Fprintf(os.Stderr, "ACTIONS:\n")
+		fmt.Println("COMMAND OVERVIEW:")
+		fmt.Println("\tThe 'tbcd' command allows you to manipulate the tbcd db.")
+		fmt.Println("")
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help\tDisplay help information")
+		fmt.Println("\t-debug\t\tEnable debug mode (required for certain actions)")
+		fmt.Println("")
+		fmt.Println("ACTIONS:")
 		fmt.Println("\tbalancebyscripthash [hash]")
 		fmt.Println("\tblockbyhash [hash]")
 		fmt.Println("\tblockheaderbyhash [hash]")
@@ -197,7 +199,6 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tdeletemetadata")
 		fmt.Println("\tdumpmetadata")
 		fmt.Println("\tdumpoutputs <prefix>")
-		fmt.Println("\thelp")
 		fmt.Println("\tscripthashbyoutpoint [txid] [index]")
 		fmt.Println("\tspentoutputsbytxid <txid>")
 		fmt.Println("\ttxbyid <hash>")
@@ -205,9 +206,10 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tutxoindex <height> <count> <maxcache>")
 		fmt.Println("\tutxosbyscripthash [hash]")
 		fmt.Println("\tversion")
-		fmt.Fprintf(os.Stderr, "\nARGUMENTS:\n")
-		fmt.Fprintf(os.Stderr, "\tThe action arguments are expected to be passed in as a key/value pair.\n")
-		fmt.Fprintf(os.Stderr, "\tExample: '%v tbcdb tblockheadersbyheight height=10'\n\n", os.Args[0])
+		fmt.Println("")
+		fmt.Println("ARGUMENTS:")
+		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
+		fmt.Fprintf(os.Stderr, "\tExample: '%v tbcdb tblockheadersbyheight height=10'\n", os.Args[0])
 	}
 
 	err := flagSet.Parse(flags)
@@ -773,7 +775,7 @@ func p2p(flags []string) error {
 		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
-		fmt.Println("\tExample: hemictl p2p ping addr=127.0.0.1:18333 nonce=1337 out=json")
+		fmt.Fprintf(os.Stderr, "\tExample: %v p2p ping addr=127.0.0.1:18333 nonce=1337 out=json\n", os.Args[0])
 	}
 
 	err := flagSet.Parse(flags)
@@ -1325,18 +1327,20 @@ func api(ctx context.Context, args []string) error {
 	var (
 		helpShort   = flagSet.Bool("h", false, "Display help information")
 		helpLong    = flagSet.Bool("help", false, "Display help information")
-		helpVerbose = flagSet.Bool("help-verbose", false, "Display help information and JSON print RPC default request/response")
+		helpVerbose = flagSet.Bool("help-verbose", false, "Display help information (verbose)")
 	)
 
 	flagSet.Usage = func() {
 		fmt.Fprintf(os.Stderr, "%v\n", welcome)
 		fmt.Fprintf(os.Stderr, "Usage: %v api [OPTION]... [API COMMAND] [PAYLOAD]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "COMMAND OVERVIEW:\n")
-		fmt.Fprintf(os.Stderr, "\tThe 'api' command allows you to use generic api commands.\n\n")
-		fmt.Fprintf(os.Stderr, "OPTIONS:\n")
-		fmt.Fprintf(os.Stderr, "\t-h, -help\t\tDisplay help information\n")
-		fmt.Fprintf(os.Stderr, "\t-help-verbose\tDisplay help information and JSON print RPC default request/response\n\n")
-		fmt.Fprintf(os.Stderr, "API COMMANDS:\n")
+		fmt.Println("\tThe 'api' command allows you to use generic api commands.")
+		fmt.Println("")
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help    \t\tDisplay help information")
+		fmt.Println("\t-help-verbose\t\tDisplay help information and JSON print RPC default request/response")
+		fmt.Println("")
+		fmt.Println("API COMMANDS:")
 		if *helpVerbose {
 			for _, v := range sortedCommands {
 				cmdType := allCommands[v]
@@ -1353,10 +1357,11 @@ func api(ctx context.Context, args []string) error {
 				fmt.Fprintf(os.Stderr, "\t%v [%v]\n", v, allCommands[v])
 			}
 		}
-		fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "PAYLOAD:\n")
-		fmt.Fprintf(os.Stderr, "\tThe payload refers to the expected arguments for the given api command.\n")
-		fmt.Fprintf(os.Stderr, "\tYou can provide the payload in two formats:\n\n")
+		fmt.Println("")
+		fmt.Println("PAYLOAD:")
+		fmt.Println("\tThe payload refers to the expected arguments for the given api command.")
+		fmt.Println("\tYou can provide the payload in two formats:")
+		fmt.Println("")
 		fmt.Fprintf(os.Stderr, "\t1. As key-value pairs:\t%v api tbcapi-block-headers-by-height-request height=2850\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "\t2. As a JSON object:\t%v api tbcapi-block-headers-by-height-request '{ \"height\": 2850 }'\n", os.Args[0])
 	}
