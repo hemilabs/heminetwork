@@ -51,7 +51,7 @@ func (bs *blockstream) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, e
 	return frv, nil
 }
 
-func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error) {
+func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
 	u := fmt.Sprintf("%v/address/%v/utxo", bs.url, addr)
 	utxos, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
