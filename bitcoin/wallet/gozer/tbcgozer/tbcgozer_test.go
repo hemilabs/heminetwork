@@ -9,13 +9,13 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/juju/loggo"
+
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/juju/loggo"
 )
 
 func TestTBCGozer(t *testing.T) {
-
 	testAddrString := "n2BosBT7DvxWk1tZprk1tR1kyQmXwcv8M8"
 
 	testAddr, err := btcutil.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
@@ -72,7 +72,7 @@ func TestTBCGozer(t *testing.T) {
 	}
 	t.Log(spew.Sdump(feeEstimate))
 
-	utxos, err := b.UtxosByAddress(ctx, testAddr)
+	utxos, err := b.UtxosByAddress(ctx, testAddr, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

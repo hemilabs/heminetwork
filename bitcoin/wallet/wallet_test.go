@@ -133,7 +133,7 @@ func TestIntegration(t *testing.T) {
 	}
 	t.Log(spew.Sdump(feeEstimate))
 
-	utxos, err := b.UtxosByAddress(ctx, addr)
+	utxos, err := b.UtxosByAddress(ctx, addr, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

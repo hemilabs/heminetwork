@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 )
 
@@ -52,7 +53,6 @@ func mockHttpServer() *httptest.Server {
 }
 
 func TestBlockstreamGozer(t *testing.T) {
-
 	testAddrString := "n2BosBT7DvxWk1tZprk1tR1kyQmXwcv8M8"
 
 	testAddr, err := btcutil.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
@@ -81,7 +81,7 @@ func TestBlockstreamGozer(t *testing.T) {
 	}
 	t.Log(spew.Sdump(feeEstimate))
 
-	utxos, err := b.UtxosByAddress(ctx, testAddr)
+	utxos, err := b.UtxosByAddress(ctx, testAddr, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
