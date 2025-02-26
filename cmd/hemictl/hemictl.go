@@ -186,7 +186,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("")
 		fmt.Println("OPTIONS:")
 		fmt.Println("\t-h, -help\tDisplay help information")
-		fmt.Println("\t-debug\t\tEnable debug mode (required for certain actions)")
+		fmt.Println("\t-debug   \tEnable debug mode (required for certain actions)")
 		fmt.Println("")
 		fmt.Println("ACTIONS:")
 		fmt.Println("\tbalancebyscripthash [hash]")
@@ -660,7 +660,6 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(value)
 
-	// XXX should this be an api call?
 	case "blockheaderbyutxoindex":
 		bh, err := s.BlockHeaderByUtxoIndex(ctx)
 		if err != nil {
@@ -668,7 +667,6 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(bh)
 
-	// XXX should this be an api call?
 	case "blockheaderbytxindex":
 		bh, err := s.BlockHeaderByTxIndex(ctx)
 		if err != nil {
@@ -676,7 +674,6 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(bh)
 
-	// XXX should this be an api call?
 	case "blockheaderbykeystoneindex":
 		bh, err := s.BlockHeaderByKeystoneIndex(ctx)
 		if err != nil {
@@ -684,7 +681,6 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(bh)
 
-	// XXX should this be an api call?
 	case "blockkeystonebyl2keystoneabrevhash":
 		abrevhash := args["abrevhash"]
 		if abrevhash == "" {
@@ -1258,7 +1254,7 @@ func Jsonify(args []string) (string, error) {
 	return formatted, nil
 }
 
-func parseCmd(cmd string, args []string) (any, error) {
+func parsePayload(cmd string, args []string) (any, error) {
 	cmdType, ok := allCommands[cmd]
 	if !ok {
 		return nil, fmt.Errorf("unknown command: %v", cmd)
@@ -1386,7 +1382,7 @@ func api(ctx context.Context, args []string) error {
 
 	cmd := args[0]
 
-	payload, err := parseCmd(cmd, args)
+	payload, err := parsePayload(cmd, args)
 	if err != nil {
 		return err
 	}
