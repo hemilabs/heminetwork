@@ -186,7 +186,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Fprintf(os.Stderr, "OPTIONS:\n")
 		fmt.Fprintf(os.Stderr, "\t-h, -help\tDisplay help information\n")
 		fmt.Fprintf(os.Stderr, "\t-debug\t\tEnable debug mode (required for certain actions)\n\n")
-		fmt.Fprintf(os.Stderr, "COMMANDS:\n")
+		fmt.Fprintf(os.Stderr, "ACTIONS:\n")
 		fmt.Println("\tbalancebyscripthash [hash]")
 		fmt.Println("\tblockbyhash [hash]")
 		fmt.Println("\tblockheaderbyhash [hash]")
@@ -745,14 +745,20 @@ func tbcdb(pctx context.Context, flags []string) error {
 	return nil
 }
 
-func p2p() error {
-	action, args, err := parseArgs(flag.Args()[1:])
-	if err != nil {
-		return err
-	}
+func p2p(flags []string) error {
+	flagSet := flag.NewFlagSet("tbcd commands", flag.ExitOnError)
+	var (
+		helpFlag     = flagSet.Bool("h", false, "displays help information")
+		helpLongFlag = flagSet.Bool("help", false, "displays help information")
+	)
 
-	if action == "help" || action == "h" {
-		fmt.Println("p2p actions:")
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%v\n", welcome)
+		fmt.Fprintf(os.Stderr, "Usage: %v p2p [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help\tDisplay help information")
+		fmt.Println("")
+		fmt.Println("ACTIONS:")
 		fmt.Println("\tfeefilter                      - returns advertised fee filter")
 		fmt.Println("\tgetaddr                        - retrieve p2p information")
 		fmt.Println("\tgetblock [hash]                - this is a compounded command, returns a block")
@@ -763,11 +769,26 @@ func p2p() error {
 		fmt.Println("\tping <nonce>                   - ping remote node with a nonce")
 		fmt.Println("\tremote                         - return remote version")
 		fmt.Println("")
-		fmt.Println("All actions support [addr=netaddress] <out=[json|raw|spew]> <net=[mainnet|testnet|testnet3]> <timeout=duration>")
+		fmt.Println("\tAll actions support [addr=netaddress] <out=[json|raw|spew]> <net=[mainnet|testnet|testnet3]> <timeout=duration>")
 		fmt.Println("")
-		fmt.Println("Example: hemictl p2p ping addr=127.0.0.1:18333 nonce=1337 out=json")
+		fmt.Println("ARGUMENTS:")
+		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
+		fmt.Println("\tExample: hemictl p2p ping addr=127.0.0.1:18333 nonce=1337 out=json")
+	}
 
+	err := flagSet.Parse(flags)
+	if err != nil {
+		return err
+	}
+
+	if len(flags) < 1 || *helpFlag || *helpLongFlag {
+		flagSet.Usage()
 		return nil
+	}
+
+	action, args, err := parseArgs(flagSet.Args())
+	if err != nil {
+		return err
 	}
 
 	timeout := 30 * time.Second
@@ -1410,7 +1431,7 @@ func _main(args []string) error {
 	case "bss-client":
 		return client("bss")
 	case "p2p":
-		return p2p()
+		return p2p(args[1:])
 	default:
 		return fmt.Errorf("unknown action: %v", cmd)
 	}
