@@ -17,11 +17,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
@@ -29,6 +33,9 @@ import (
 const (
 	logLevel = "INFO"
 	appName  = "bfg" // Prometheus
+
+	bitcoinSourceBlockstream = "blockstream"
+	bitcoinSourceTBC         = "tbc"
 )
 
 var log = loggo.GetLogger(appName)
@@ -46,17 +53,22 @@ func init() {
 }
 
 type Config struct {
+	BitcoinSource           string // gozer types
+	BitcoinURL              string // only used for certain types
 	ListenAddress           string
 	LogLevel                string
+	Network                 string // bitcoin network
+	PprofListenAddress      string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
-	PprofListenAddress      string
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
+		BitcoinSource:       bitcoinSourceBlockstream,
 		ListenAddress:       bfgapi.DefaultListenAddress,
 		LogLevel:            logLevel,
+		Network:             "mainnet",
 		PrometheusNamespace: appName,
 	}
 }
@@ -66,6 +78,10 @@ type Server struct {
 	wg  sync.WaitGroup
 
 	cfg *Config
+
+	params *chaincfg.Params
+
+	g gozer.Gozer
 
 	server *http.ServeMux
 
@@ -231,6 +247,35 @@ func (s *Server) Run(pctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
+
+	// Setup gozer
+	switch s.cfg.Network {
+	case "mainnet":
+		s.params = &chaincfg.MainNetParams
+	case "testnet3":
+		s.params = &chaincfg.TestNet3Params
+	default:
+		return fmt.Errorf("invalid network: %v", s.cfg.Network)
+	}
+
+	switch s.cfg.BitcoinSource {
+	case bitcoinSourceBlockstream:
+		var err error
+		s.g, err = blockstream.BlockstreamNew(s.params)
+		if err != nil {
+			return fmt.Errorf("could not setup %v blockstream: %v",
+				s.cfg.Network, err)
+		}
+	case bitcoinSourceTBC:
+		var err error
+		s.g, err = tbcgozer.TBCGozerNew(ctx, s.cfg.BitcoinURL)
+		if err != nil {
+			return fmt.Errorf("could not setup %v tbc: %v",
+				s.cfg.Network, err)
+		}
+	default:
+		return fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
+	}
 
 	// HTTP server
 	httpErrCh := make(chan error)
