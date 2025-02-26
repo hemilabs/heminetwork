@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -41,11 +40,17 @@ type tbcCmd struct {
 }
 
 type tbcGozer struct {
-	tbcWg    sync.WaitGroup
-	TbcURL   string
-	tbcCmdCh chan tbcCmd // commands to send to tbc
+	mtx       sync.Mutex
+	wg        sync.WaitGroup
+	url       string
+	cmdCh     chan tbcCmd // commands to send to tbc
+	connected bool
+}
 
-	connected atomic.Bool
+func (t *tbcGozer) Connected() bool {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+	return t.connected
 }
 
 func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, error) {
@@ -73,12 +78,16 @@ func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, error
 	return frv, nil
 }
 
-func (t *tbcGozer) UtxosByAddress(ctx context.Context, addr btcutil.Address) ([]*tbcapi.UTXO, error) {
-	maxUint64 := ^uint64(0)
+func (t *tbcGozer) UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
+	maxCount := uint(1000)
+	if count > maxCount {
+		return nil, fmt.Errorf("count must not exceed %v", maxCount)
+	}
+
 	bur := &tbcapi.UTXOsByAddressRequest{
 		Address: addr.String(),
-		Start:   0,
-		Count:   uint(maxUint64), // xxx hack. consider making an api request that gets ALL utxos implicitely
+		Start:   start,
+		Count:   count,
 	}
 
 	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
@@ -102,8 +111,8 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	log.Tracef("callTBC %T", msg)
 	defer log.Tracef("callTBC exit %T", msg)
 
-	if !t.connected.Load() {
-		return nil, errors.New("gozer not connected to tbc")
+	if !t.Connected() {
+		return nil, errors.New("not connected to tbc")
 	}
 
 	bc := tbcCmd{
@@ -118,7 +127,7 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
-	case t.tbcCmdCh <- bc:
+	case t.cmdCh <- bc:
 	default:
 		return nil, errors.New("tbc command queue full")
 	}
@@ -138,7 +147,7 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 }
 
 func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Conn) {
-	defer t.tbcWg.Done()
+	defer t.wg.Done()
 
 	log.Tracef("handleTBCWebsocketCall")
 	defer log.Tracef("handleTBCWebsocketCall exit")
@@ -146,7 +155,7 @@ func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Co
 		select {
 		case <-ctx.Done():
 			return
-		case bc := <-t.tbcCmdCh:
+		case bc := <-t.cmdCh:
 			_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
 			if err != nil {
 				log.Errorf("handleTBCWebsocketCall %T: %v", bc.msg, err)
@@ -165,7 +174,7 @@ func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Co
 }
 
 func (t *tbcGozer) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
-	defer t.tbcWg.Done()
+	defer t.wg.Done()
 
 	log.Tracef("handleTBCWebsocketRead")
 	defer log.Tracef("handleTBCWebsocketRead exit")
@@ -190,7 +199,7 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 	log.Tracef("connectTBC")
 	defer log.Tracef("connectTBC exit")
 
-	conn, err := protocol.NewConn(t.TbcURL, &protocol.ConnOptions{
+	conn, err := protocol.NewConn(t.url, &protocol.ConnOptions{
 		ReadLimit: 6 * (1 << 20), // 6 MiB
 	})
 	if err != nil {
@@ -206,29 +215,30 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 		return err
 	}
 
-	log.Infof("%v", t.TbcURL)
+	t.mtx.Lock()
+	t.connected = true
+	t.mtx.Unlock()
+	defer func() {
+		t.mtx.Lock()
+		t.connected = false
+		t.mtx.Unlock()
+	}()
 
-	t.connected.Store(true)
-
-	t.tbcWg.Add(1)
+	t.wg.Add(1)
 	go t.handleTBCWebsocketRead(ctx, conn)
 
-	t.tbcWg.Add(1)
+	t.wg.Add(1)
 	go t.handleTBCWebsocketCall(ctx, conn)
 
-	log.Debugf("Connected to TBC: %s", t.TbcURL)
+	log.Debugf("Connected to tbc: %s", t.url)
 
 	// Wait for exit
-	t.tbcWg.Wait()
-	t.connected.Store(false)
+	t.wg.Wait()
 
 	return nil
 }
 
-func (t *tbcGozer) run(pctx context.Context) {
-	ctx, cancel := context.WithCancel(pctx)
-	defer cancel()
-
+func (t *tbcGozer) run(ctx context.Context) {
 	for {
 		if err := t.connectTBC(ctx); err != nil {
 			log.Tracef("connectTBC: %v", err)
@@ -240,17 +250,17 @@ func (t *tbcGozer) run(pctx context.Context) {
 		case <-time.After(5 * time.Second):
 		}
 
-		log.Debugf("Reconnecting to: %v", t.TbcURL)
+		log.Debugf("Reconnecting to: %v", t.url)
 	}
 }
 
 func TBCGozerNew(pctx context.Context, tbcUrl string) (gozer.Gozer, error) {
-	tg := &tbcGozer{
-		TbcURL:   tbcUrl,
-		tbcCmdCh: make(chan tbcCmd, 10),
+	t := &tbcGozer{
+		url:   tbcUrl,
+		cmdCh: make(chan tbcCmd, 10),
 	}
 
-	go tg.run(pctx)
+	go t.run(pctx)
 
-	return tg, nil
+	return t, nil
 }
