@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -32,6 +33,7 @@ import (
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
 	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -679,6 +681,35 @@ func _main() error {
 			endHeight = int(e)
 		}
 		err = StoreBlockHeaders(ctx, endHeight, blockCount, downloadDir)
+
+	case "dumpkeystones":
+		filename := args["filename"]
+		if filename == "" {
+			return errors.New("filename: must be set")
+		}
+		var block *btcutil.Block
+		block, err = parseBlock(ctx, filename)
+		if err != nil {
+			return err
+		}
+
+		// parse keystones
+		for _, tx := range block.Transactions() {
+			if blockchain.IsCoinBase(tx) {
+				// Skip coinbase inputs
+				continue
+			}
+
+			for _, txOut := range tx.MsgTx().TxOut {
+				aPoPTx, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
+				if err != nil {
+					// log.Tracef("error parsing tx l2: %s", err)
+					continue
+				}
+				fmt.Printf("%v\n", aPoPTx.L2Keystone.Hash())
+			}
+		}
+
 	default:
 		return fmt.Errorf("invalid action: %v", os.Args[1])
 	}
