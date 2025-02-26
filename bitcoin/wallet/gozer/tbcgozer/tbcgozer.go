@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 const (
@@ -107,6 +109,28 @@ func (t *tbcGozer) UtxosByAddress(ctx context.Context, addr btcutil.Address, sta
 	}
 
 	return buResp.UTXOs, nil
+}
+
+func (t *tbcGozer) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash *chainhash.Hash) (*chainhash.Hash, *hemi.L2KeystoneAbrev, error) {
+	ksr := &tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest{
+		L2KeystoneAbrevHash: hash,
+	}
+
+	res, err := t.callTBC(ctx, defaultRequestTimeout, ksr)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bksr, ok := res.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse)
+	if !ok {
+		return nil, nil, fmt.Errorf("not a keystone response %T", res)
+	}
+
+	if bksr.Error != nil {
+		return nil, nil, bksr.Error
+	}
+
+	return bksr.BtcBlockHash, bksr.L2KeystoneAbrev, nil
 }
 
 func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {

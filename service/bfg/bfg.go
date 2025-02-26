@@ -26,6 +26,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
@@ -182,9 +183,22 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	log.Infof("looking for keystone: %v", ks)
+	blockHash, aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), ks)
+	if err != nil {
+		NotFound(w, "keystone not found: %v", ks)
+		return
+	}
 
-	NotFound(w, "keystone not found: %v", ks)
+	type KeystoneFinality struct {
+		L2KeystoneAbrev *hemi.L2KeystoneAbrev `json:"l2_keystone_abrev"`
+		BtcBlockHash    *chainhash.Hash       `json:"btc_block_hash"`
+	}
+
+	je := json.NewEncoder(w)
+	err = je.Encode(KeystoneFinality{
+		L2KeystoneAbrev: aks,
+		BtcBlockHash:    blockHash,
+	})
 }
 
 func (s *Server) running() bool {
