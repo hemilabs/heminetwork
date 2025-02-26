@@ -17,6 +17,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/cmd/btctool/httpclient"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 var (
@@ -88,6 +89,10 @@ func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address,
 		})
 	}
 	return urv, nil
+}
+
+func (bs *blockstream) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash *chainhash.Hash) (*chainhash.Hash, *hemi.L2KeystoneAbrev, error) {
+	return nil, nil, fmt.Errorf("not supported yet")
 }
 
 func BlockstreamNew(params *chaincfg.Params) (gozer.Gozer, error) {
