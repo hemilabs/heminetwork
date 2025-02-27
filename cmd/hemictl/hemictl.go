@@ -1232,11 +1232,6 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 	os.Exit(2)
 }
 
-func IsJSON(str string) bool {
-	var js json.RawMessage
-	return json.Unmarshal([]byte(str), &js) == nil
-}
-
 func Jsonify(args []string) (string, error) {
 	formatted := "{"
 	for i, c := range args {
@@ -1263,31 +1258,30 @@ func parsePayload(cmd string, args []string) (any, error) {
 	clone := reflect.New(cmdType).Interface()
 	log.Debugf("%v", spew.Sdump(clone))
 	if len(args) > 1 {
-
-		b := args[1]
-		var err error
-		if !IsJSON(b) {
-			b, err = Jsonify(args[1:])
+		err := json.Unmarshal([]byte(args[1]), &clone)
+		if err != nil {
+			b, err := Jsonify(args[1:])
 			if err != nil {
 				return nil, err
 			}
 			log.Infof("parsed arguments as %v", b)
-		}
-		err = json.Unmarshal([]byte(b), &clone)
-		if err != nil {
-			return nil, fmt.Errorf("invalid payload: %w", err)
+
+			err = json.Unmarshal([]byte(b), &clone)
+			if err != nil {
+				return nil, fmt.Errorf("invalid payload: %w", err)
+			}
 		}
 	}
 	return clone, nil
 }
 
-// hemictlApi is a structure used to satisfy the protocol.API interface.
-type hemictlApi struct {
+// hemictlAPI is a structure used to satisfy the protocol.API interface.
+type hemictlAPI struct {
 	api string
 }
 
 // Commands satisfies the protocol.API interface.
-func (f *hemictlApi) Commands() map[protocol.Command]reflect.Type {
+func (f *hemictlAPI) Commands() map[protocol.Command]reflect.Type {
 	switch f.api {
 	case "tbcapi":
 		return tbcapi.APICommands()
@@ -1312,13 +1306,13 @@ func apiHandler(ctx context.Context, api string, URL string, cmd any) (any, erro
 	defer tcancel()
 	go func() {
 		for {
-			if _, _, _, err := conn.Read(tctx, &hemictlApi{api: api}); err != nil {
+			if _, _, _, err := conn.Read(tctx, &hemictlAPI{api: api}); err != nil {
 				return
 			}
 		}
 	}()
 
-	_, _, payload, err := conn.Call(tctx, &hemictlApi{api: api}, cmd)
+	_, _, payload, err := conn.Call(tctx, &hemictlAPI{api: api}, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("%w", err)
 	}
