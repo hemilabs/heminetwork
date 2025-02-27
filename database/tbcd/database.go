@@ -128,7 +128,7 @@ type Database interface {
 
 	// Hemi
 	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone, keystoneIndexHash *chainhash.Hash) error
-	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*Keystone, error)
+	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash *chainhash.Hash) (*Keystone, error)
 	BlockHeaderByKeystoneIndex(ctx context.Context) (*BlockHeader, error)
 }
 
