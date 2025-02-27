@@ -695,7 +695,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 		// XXX add error not found type
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-				Error: protocol.RequestErrorf(err),
+				Error: protocol.RequestErrorf("%v", err),
 			}, nil
 		}
 		e := protocol.NewInternalError(err)
