@@ -26,7 +26,6 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
-	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
@@ -140,15 +139,6 @@ func BadRequestF(w http.ResponseWriter, format string, args ...any) {
 	http.Error(w, string(je), http.StatusBadRequest)
 }
 
-func MethodNotAllowed(w http.ResponseWriter, format string, args ...any) {
-	e, je, err := Error(format, args...)
-	if err != nil {
-		panic(err)
-	}
-	log.Tracef("method not allowed: %v trace %v error %v", e.Timestamp, e.Trace, e.Error)
-	http.Error(w, string(je), http.StatusMethodNotAllowed)
-}
-
 func NotFound(w http.ResponseWriter, format string, args ...any) {
 	e, je, err := Error(format, args...)
 	if err != nil {
@@ -161,11 +151,6 @@ func NotFound(w http.ResponseWriter, format string, args ...any) {
 func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleKeystoneFinality: %v", r.RemoteAddr)
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
-
-	if r.Method != "GET" {
-		MethodNotAllowed(w, "method not allowed %v", r.Method)
-		return
-	}
 
 	keystone := r.PathValue("hash")
 	if keystone == "" {
@@ -183,25 +168,17 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	blockHash, aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), ks)
+	aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), ks)
 	if err != nil {
 		NotFound(w, "keystone not found: %v", ks)
 		return
 	}
 
-	type KeystoneFinality struct {
-		L2KeystoneAbrev *hemi.L2KeystoneAbrev `json:"l2_keystone_abrev"`
-		BtcBlockHash    *chainhash.Hash       `json:"btc_block_hash"`
-	}
-
-	je := json.NewEncoder(w)
-	err = je.Encode(KeystoneFinality{
-		L2KeystoneAbrev: aks,
-		BtcBlockHash:    blockHash,
-	})
-	if err != nil {
+	if err := json.NewEncoder(w).Encode(aks); err != nil {
 		log.Errorf("encode: %v", err)
 	}
+
+	s.cmdsProcessed.Inc()
 }
 
 func (s *Server) running() bool {
