@@ -125,12 +125,12 @@ func (t *tbcGozer) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash 
 	if !ok {
 		return nil, nil, fmt.Errorf("not a keystone response %T", res)
 	}
-
+	log.Infof(spew.Sdump(bksr))
 	if bksr.Error != nil {
 		return nil, nil, bksr.Error
 	}
 
-	return bksr.BtcBlockHash, bksr.L2KeystoneAbrev, nil
+	return bksr.L2KeystoneBlockHash, bksr.L2KeystoneAbrev, nil
 }
 
 func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {
