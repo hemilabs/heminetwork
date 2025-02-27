@@ -199,6 +199,9 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		L2KeystoneAbrev: aks,
 		BtcBlockHash:    blockHash,
 	})
+	if err != nil {
+		log.Errorf("encode: %v", err)
+	}
 }
 
 func (s *Server) running() bool {
