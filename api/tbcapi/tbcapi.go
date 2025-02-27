@@ -297,9 +297,12 @@ type BlockKeystoneByL2KeystoneAbrevHashRequest struct {
 }
 
 type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
-	L2KeystoneAbrev *hemi.L2KeystoneAbrev `json:"l2_keystone_abrev"`
-	BtcBlockHash    *chainhash.Hash       `json:"btc_block_hash"`
-	Error           *protocol.Error       `json:"error,omitempty"`
+	L2KeystoneAbrev       *hemi.L2KeystoneAbrev `json:"l2_keystone_abrev"`
+	L2KeystoneBlockHash   *chainhash.Hash       `json:"l2_keystone_block_hash"`
+	L2KeystoneBlockHeight uint                  `json:"l2_keystone_block_height"`
+	BtcTipBlockHash       *chainhash.Hash       `json:"btc_tip_block_hash"`
+	BtcTipBlockHeight     uint                  `json:"btc_tip_block_height"`
+	Error                 *protocol.Error       `json:"error,omitempty"`
 }
 
 type BlockInsertRawResponse struct {

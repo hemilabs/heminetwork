@@ -26,6 +26,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -663,15 +664,38 @@ func (s *Server) handleFeeEstimateRequest(ctx context.Context, req *tbcapi.FeeEs
 	}, nil
 }
 
+func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, hash *chainhash.Hash) (*tbcd.Keystone, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
+	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("keystone by abbreviated hash: %v", err)
+	}
+	ksBh, err := s.db.BlockHeaderByHash(ctx, &ks.BlockHash)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("block header by hash: %v", err)
+	}
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("block header best: %v", err)
+	}
+	return ks, ksBh, bhb, nil
+}
+
 func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest) (any, error) {
 	log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest")
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
 
-	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, req.L2KeystoneAbrevHash)
+	if req.L2KeystoneAbrevHash == nil {
+		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+			Error: protocol.RequestErrorf("invalid nil abrev hash"),
+		}, nil
+	}
+
+	ks, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, req.L2KeystoneAbrevHash)
 	if err != nil {
+		// XXX add error not found type
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-				Error: protocol.RequestErrorf("could not find l2 keystone"),
+				Error: protocol.RequestErrorf(err),
 			}, nil
 		}
 		e := protocol.NewInternalError(err)
@@ -679,9 +703,13 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 			Error: e.ProtocolError(),
 		}, e
 	}
+
 	return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-		L2KeystoneAbrev: hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
-		BtcBlockHash:    &ks.BlockHash,
+		L2KeystoneAbrev:       hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
+		L2KeystoneBlockHash:   &ksBh.Hash,
+		L2KeystoneBlockHeight: uint(ksBh.Height),
+		BtcTipBlockHash:       &bhb.Hash,
+		BtcTipBlockHeight:     uint(bhb.Height),
 	}, nil
 }
 
