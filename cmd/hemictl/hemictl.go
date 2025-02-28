@@ -357,9 +357,9 @@ func tbcdb(pctx context.Context) error {
 		}
 
 		maxCache := args["maxcache"]
-		var mc uint64
 		if maxCache != "" {
-			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
+			mc, err := strconv.ParseInt(maxCache, 10, 0)
+			if err != nil {
 				return fmt.Errorf("maxCache: %w", err)
 			}
 			cfg.MaxCachedTxs = int(mc)
@@ -380,9 +380,9 @@ func tbcdb(pctx context.Context) error {
 		}
 
 		maxCache := args["maxcache"]
-		var mc uint64
 		if maxCache != "" {
-			if mc, err = strconv.ParseUint(maxCache, 10, 64); err != nil {
+			mc, err := strconv.ParseInt(maxCache, 10, 0)
+			if err != nil {
 				return fmt.Errorf("maxCache: %w", err)
 			}
 			cfg.MaxCachedTxs = int(mc)

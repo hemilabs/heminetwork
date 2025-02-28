@@ -1651,7 +1651,7 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start u
 		copy(txId[:], it.Key()[33:65])
 		utxos = append(utxos, tbcd.NewUtxo(txId, value, index))
 
-		if len(utxos) >= int(count) {
+		if uint64(len(utxos)) >= count {
 			break
 		}
 	}
