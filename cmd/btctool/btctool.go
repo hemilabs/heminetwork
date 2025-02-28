@@ -642,7 +642,7 @@ func _main() error {
 		blockCount := int(1024)
 		count := args["count"]
 		if count != "" {
-			bc, err := strconv.ParseInt(count, 10, 32)
+			bc, err := strconv.ParseInt(count, 10, 0)
 			if err != nil {
 				return fmt.Errorf("count: %w", err)
 			}
@@ -661,7 +661,7 @@ func _main() error {
 				return fmt.Errorf("tip: %w", err)
 			}
 		} else {
-			e, err := strconv.ParseInt(end, 10, 32)
+			e, err := strconv.ParseInt(end, 10, 0)
 			if err != nil {
 				return fmt.Errorf("end: %w", err)
 			}
