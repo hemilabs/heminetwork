@@ -58,8 +58,7 @@ services:
     volumes:
       - bitcoin_data:/bitcoin/.bitcoin
     ports:
-      - '18443:18443'
-      - '18444:18444'
+      - '18333:18333'
     networks:
       - "localnode"
     command:
@@ -68,7 +67,7 @@ services:
       - "-rpcuser=user"
       - "-rpcpassword=password"
       - "-rpcallowip=0.0.0.0/0"
-      - "-rpcbind=0.0.0.0:18443"
+      - "-rpcbind=0.0.0.0:18332"
       - "-txindex=1"
       - "-rpcworkqueue=400"
 
@@ -106,7 +105,7 @@ services:
       - "--electrum-rpc-addr"
       - "0.0.0.0:50001"
       - "--daemon-rpc-addr"
-      - "bitcoind:18443"
+      - "bitcoind:18332"
       - "--network"
       - "testnet"
       # NOTE: If you expose electrs ports, you may want to ensure that this is changed!
@@ -219,6 +218,8 @@ services:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
+      prysm:
+        condition: "service_started"
     volumes:
       # change this token value if you expose this service's ports for
       # connection from other machines
