@@ -14,7 +14,7 @@ services:
       - "bfgd-postgres"
       - "electrs"
     environment:
-      BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
+      BFG_POSTGRES_URI: "postgres://postgres@password:bfgd-postgres:5432/bfg?sslmode=disable"
       ### XXXX Make this variable and set to recent block
       BFG_BTC_START_HEIGHT: "3195980"
       BFG_EXBTC_ADDRESS: "electrs:50001"
@@ -40,7 +40,8 @@ services:
       - psql_data:/var
     environment:
       POSTGRES_DB: "bfg"
-      POSTGRES_HOST_AUTH_METHOD: "trust"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "password"
     networks:
       - "localnode"
     command:
