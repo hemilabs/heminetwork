@@ -41,8 +41,6 @@ services:
     environment:
       POSTGRES_DB: "bfg"
       POSTGRES_HOST_AUTH_METHOD: "trust"
-    ports:
-      - '5432:5432'
     networks:
       - "localnode"
     command:
