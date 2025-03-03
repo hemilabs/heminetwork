@@ -14,7 +14,7 @@ services:
       - "bfgd-postgres"
       - "electrs"
     environment:
-      BFG_POSTGRES_URI: "postgres://postgres@password:bfgd-postgres:5432/bfg?sslmode=disable"
+      BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       ### XXXX Make this variable and set to recent block
       BFG_BTC_START_HEIGHT: "869309"
       BFG_EXBTC_ADDRESS: "electrs:50001"
@@ -40,8 +40,7 @@ services:
       - psql_data:/var
     environment:
       POSTGRES_DB: "bfg"
-      POSTGRES_USER: "postgres"
-      POSTGRES_PASSWORD: "password"
+      POSTGRES_HOST_AUTH_METHOD: "trust"
     networks:
       - "localnode"
     command:
@@ -57,7 +56,7 @@ services:
     volumes:
       - bitcoin_data:/bitcoin/.bitcoin
     ports:
-      - '8333:333'
+      - '8333:8333'
     networks:
       - "localnode"
     command:
@@ -70,20 +69,20 @@ services:
       - "-rpcworkqueue=400"
 
   # Bitcoin Secure Sequencer
-  bssd:
-    build:
-      dockerfile: "./docker/bssd/Dockerfile"
-      context: "./.."
-    depends_on:
-      - "bfgd"
-    environment:
-      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
-      BSS_LOG_LEVEL: "INFO"
-      BSS_ADDRESS: ":8081"
-    ports:
-      - '8081:8081'
-    networks:
-      - "localnode"
+##  bssd:
+##    build:
+##      dockerfile: "./docker/bssd/Dockerfile"
+##      context: "./.."
+##    depends_on:
+##      - "bfgd"
+##    environment:
+##      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
+##      BSS_LOG_LEVEL: "INFO"
+##      BSS_ADDRESS: ":8081"
+##    ports:
+##      - '8081:8081'
+##    networks:
+##      - "localnode"
 
   # Electrs (Bitcoin indexer, used by BFG)
   electrs:
@@ -148,106 +147,106 @@ services:
     working_dir: "/tmp/geth"
 
   # Hemi L2 node
-  op-geth-l2:
-    image: "ghcr.io/hemilabs/op-geth:a5a12ae@sha256:6e21d631b073a363ff859f4e82bbbcbde339801b5f5e5b9e42a5eb34081e054e"
-    depends_on:
-      geth-l1:
-        condition: "service_started"
-      op-geth-l2-init:
-        condition: "service_completed_successfully"
-      op-geth-l2-init-tbc:
-        condition: "service_completed_successfully"
-    volumes:
-      - ./mainnet-genesis.json:/tmp/genesis.json
+##  op-geth-l2:
+##    image: "ghcr.io/hemilabs/op-geth:a5a12ae@sha256:6e21d631b073a363ff859f4e82bbbcbde339801b5f5e5b9e42a5eb34081e054e"
+##    depends_on:
+##      geth-l1:
+##        condition: "service_started"
+##      op-geth-l2-init:
+##        condition: "service_completed_successfully"
+##      op-geth-l2-init-tbc:
+##        condition: "service_completed_successfully"
+##    volumes:
+##      - ./mainnet-genesis.json:/tmp/genesis.json
       # change this token value if you expose this service's ports for
       # connection from other machines
-      - ./jwt.hex:/tmp/jwt/jwt.hex:ro
-      - ./mainnet-entrypointl2.sh:/tmp/entrypointl2.sh
-      - op-geth_data:/tmp/datadir
-      - ./mainnet-rollup.json:/tmp/rollup.json
-      - ./mainnet-l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
-      - tbc_data:/tbcdata
-    environment:
-      OP_GETH_L1_RPC: "http://geth-l1:8545"
-    ports:
-      - '18546:18546'
-      - '28546:28546'
-    networks:
-      - "localnode"
-    entrypoint:
-      - "sh"
-      - "/tmp/entrypointl2.sh"
-    working_dir: "/tmp"
-    healthcheck:
-      test: [ "CMD-SHELL", "ls /tmp/rollup.json" ]
-      timeout: "60s"
-    ulimits:
-      memlock: -1
+##      - ./jwt.hex:/tmp/jwt/jwt.hex:ro
+##      - ./mainnet-entrypointl2.sh:/tmp/entrypointl2.sh
+##      - op-geth_data:/tmp/datadir
+##      - ./mainnet-rollup.json:/tmp/rollup.json
+##      - ./mainnet-l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
+##      - tbc_data:/tbcdata
+##    environment:
+##      OP_GETH_L1_RPC: "http://geth-l1:8545"
+##    ports:
+##      - '18546:18546'
+##      - '28546:28546'
+##    networks:
+##      - "localnode"
+##    entrypoint:
+##      - "sh"
+##      - "/tmp/entrypointl2.sh"
+##    working_dir: "/tmp"
+##    healthcheck:
+##      test: [ "CMD-SHELL", "ls /tmp/rollup.json" ]
+##      timeout: "60s"
+##    ulimits:
+##      memlock: -1
 
   # Init container for Hemi L2 node
-  op-geth-l2-init:
-    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
-    volumes:
-      - op-geth_data:/tmp/datadir
-    command:
-      - "chown"
-      - "-R"
-      - "65532" # geth user
-      - "/tmp/datadir"
+##  op-geth-l2-init:
+##    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+##    volumes:
+##      - op-geth_data:/tmp/datadir
+##    command:
+##      - "chown"
+##      - "-R"
+##      - "65532" # geth user
+##      - "/tmp/datadir"
 
   # Init TBC container for Hemi L2 node
-  op-geth-l2-init-tbc:
-    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
-    volumes:
-      - tbc_data:/tbcdata
-    command:
-      - "chown"
-      - "-R"
-      - "65532" # geth user
-      - "/tbcdata"
+##  op-geth-l2-init-tbc:
+##    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+##    volumes:
+##      - tbc_data:/tbcdata
+##    command:
+##      - "chown"
+##      - "-R"
+##      - "65532" # geth user
+##      - "/tbcdata"
 
   # Hemi op-node
-  op-node:
-    image: "ghcr.io/hemilabs/op-node:3a56733@sha256:99f692bd734f8fac8f6f2a531641cfdab11220c2aefa31a25525d916c96668c1"
-    depends_on:
-      geth-l1:
-        condition: "service_started"
-      op-geth-l2:
-        condition: "service_healthy"
-      prysm:
-        condition: "service_started"
-    volumes:
+##  op-node:
+##    image: "ghcr.io/hemilabs/op-node:3a56733@sha256:99f692bd734f8fac8f6f2a531641cfdab11220c2aefa31a25525d916c96668c1"
+##    depends_on:
+##      geth-l1:
+##        condition: "service_started"
+##      op-geth-l2:
+##        condition: "service_healthy"
+##      prysm:
+##        condition: "service_started"
+##    volumes:
       # change this token value if you expose this service's ports for
       # connection from other machines
-      - ./jwt.hex:/tmp/jwt/jwt.hex
-      - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
-      - ./mainnet-rollup.json:/tmp/rollup.json
-    environment:
-      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
-    ports:
-      - '8547:8547'
-    networks:
-      - "localnode"
-    command:
-      - "op-node"
-      - "--l1=http://geth-l1:8545"
-      - "--l1.rpckind=any"
-      - "--l1.beacon=http://prysm:3500"
-      - "--l2=ws://op-geth-l2:8551"
-      - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
-      - "--sequencer.enabled=false"
-      - "--rollup.config=/tmp/rollup.json"
-      - "--override.ecotone=1725868497"
-      - "--override.canyon=1725868497"
-      - "--override.delta=1725868497"
-      - "--rpc.addr=0.0.0.0"
-      - "--rpc.port=8547"
-      - "--p2p.bootnodes=enr:-J64QACnJ0giPmPXowNCHP-FDleMMbDqYg5nuLABYfJeYbP9OA6_fZtvCsTbAwvlPD8_C6ZSXEk1-XPabDBwD8UTyNCGAZMxdy4tgmlkgnY0gmlwhCINopiHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED22EOmUryrNnFOwq6Ve1Hpw5CMFz_TnhIkVS4Sq8JhkmDdGNwgiMrg3VkcIKjLg,enr:-J64QA20VNMfLMtbSuHYmQH2I-xaqT4-9g7lqO-VHr0fFvtSB7QybJ_7W5fuEjLAa6kh82fGLjRUdZE0hW0pfVBcxP6GAZMxdwfngmlkgnY0gmlwhCJaFfaHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDjt3C-gv87B5rWa5M52WUFGy16mjQvFsC7OgPkqu-rn-DdGNwgiMrg3VkcIKRXQ,enr:-J64QLQyh3lXjQLzfCbfNw0DUb4A0OEcTLmVGexMbK-2jjCtHOIlRnDqLuedQ0orNHt7zmsILELYi4ozg-0bQzc34F-GAZMxdxNogmlkgnY0gmlwhCINq4uHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED1NV9w0EmnMXBNRnDWj6kdqzE6_4HigHopeu3ewQTwouDdGNwgiMrg3VkcIK1Iw,enr:-J64QNPfOEViWkN7U_ul5Zhw_mc5_Hta92eUufrgu6oTqSMzRsqCje-P0vPrOQ9XjVIk4VP7mmFVP6qoTrtkIwvwUV2GAZMxdv4zgmlkgnY0gmlwhCJb2HmHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDYAidV8rzABKrKAL9jwP1aoi3wj-GtuML4FKtUDOgzCGDdGNwgiMrg3VkcILijg,enr:-J64QFalFr9Y4r9v8Svh7XFwerJeLTRnfTixfCy_NZw3OTMVZL_dSAvcZ6JIeK0JAZf6-PU3YknV9m9Jd5V5WlnqHKWGAZMxdxT4gmlkgnY0gmlwhCKNlBOHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaECI1jqAzkQ0JRkwL-UBP2TBUfUdLyTaqAXtey82CTysdCDdGNwgiMrg3VkcILOyg"
-      - "--log.level=trace"
-      - "--syncmode=execution-layer"
-    deploy:
-      restart_policy:
-        condition: "any"
+##      - ./jwt.hex:/tmp/jwt/jwt.hex
+##      - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
+##      - ./mainnet-rollup.json:/tmp/rollup.json
+##    environment:
+##      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+##    ports:
+##     - '8547:8547'
+##    networks:
+##      - "localnode"
+##    command:
+##      - "op-node"
+##      - "--l1=http://geth-l1:8545"
+##      - "--l1.rpckind=any"
+##      - "--l1.beacon=http://prysm:3500"
+##      - "--l2=ws://op-geth-l2:8551"
+##      - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
+##      - "--sequencer.enabled=false"
+##      - "--rollup.config=/tmp/rollup.json"
+##      - "--override.ecotone=1725868497"
+##      - "--override.canyon=1725868497"
+##      - "--override.delta=1725868497"
+##      - "--rpc.addr=0.0.0.0"
+##      - "--rpc.port=8547"
+##      - "--p2p.bootnodes=enr:-J64QACnJ0giPmPXowNCHP-FDleMMbDqYg5nuLABYfJeYbP9OA6_fZtvCsTbAwvlPD8_C6ZSXEk1-XPabDBwD8UTyNCGAZMxdy4tgmlkgnY0gmlwhCINopiHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED22EOmUryrNnFOwq6Ve1Hpw5CMFz_TnhIkVS4Sq8JhkmDdGNwgiMrg3VkcIKjLg,enr:-J64QA20VNMfLMtbSuHYmQH2I-xaqT4-9g7lqO-VHr0fFvtSB7QybJ_7W5fuEjLAa6kh82fGLjRUdZE0hW0pfVBcxP6GAZMxdwfngmlkgnY0gmlwhCJaFfaHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDjt3C-gv87B5rWa5M52WUFGy16mjQvFsC7OgPkqu-rn-DdGNwgiMrg3VkcIKRXQ,enr:-J64QLQyh3lXjQLzfCbfNw0DUb4A0OEcTLmVGexMbK-2jjCtHOIlRnDqLuedQ0orNHt7zmsILELYi4ozg-0bQzc34F-GAZMxdxNogmlkgnY0gmlwhCINq4uHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED1NV9w0EmnMXBNRnDWj6kdqzE6_4HigHopeu3ewQTwouDdGNwgiMrg3VkcIK1Iw,enr:-J64QNPfOEViWkN7U_ul5Zhw_mc5_Hta92eUufrgu6oTqSMzRsqCje-P0vPrOQ9XjVIk4VP7mmFVP6qoTrtkIwvwUV2GAZMxdv4zgmlkgnY0gmlwhCJb2HmHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDYAidV8rzABKrKAL9jwP1aoi3wj-GtuML4FKtUDOgzCGDdGNwgiMrg3VkcILijg,enr:-J64QFalFr9Y4r9v8Svh7XFwerJeLTRnfTixfCy_NZw3OTMVZL_dSAvcZ6JIeK0JAZf6-PU3YknV9m9Jd5V5WlnqHKWGAZMxdxT4gmlkgnY0gmlwhCKNlBOHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaECI1jqAzkQ0JRkwL-UBP2TBUfUdLyTaqAXtey82CTysdCDdGNwgiMrg3VkcILOyg"
+##      - "--log.level=trace"
+##      - "--syncmode=execution-layer"
+##    deploy:
+##      restart_policy:
+##        condition: "any"
 
   # Prysm
   prysm:
