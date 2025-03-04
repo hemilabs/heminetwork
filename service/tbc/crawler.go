@@ -494,7 +494,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 func (s *Server) fetchOPParallel(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
 	defer w.Done()
 
-	pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
+	sh, err := s.db.ScriptHashByOutpoint(ctx, op)
 	if err != nil {
 		// This happens when a transaction is created and spent in the
 		// same block.
@@ -504,7 +504,7 @@ func (s *Server) fetchOPParallel(ctx context.Context, w *sync.WaitGroup, op tbcd
 		return
 	}
 	s.mtx.Lock()
-	utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
+	utxos[op] = tbcd.NewDeleteCacheOutput(*sh, op.TxIndex())
 	s.mtx.Unlock()
 }
 
@@ -551,14 +551,14 @@ func (s *Server) fixupCacheSerial(ctx context.Context, b *btcutil.Block, utxos m
 				continue
 			}
 
-			pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
+			sh, err := s.db.ScriptHashByOutpoint(ctx, op)
 			if err != nil {
 				// This happens when a transaction is created
 				// and spent in the same block.
 				continue
 			}
 			// utxo not found, retrieve pkscript from database.
-			utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
+			utxos[op] = tbcd.NewDeleteCacheOutput(*sh, op.TxIndex())
 		}
 	}
 
