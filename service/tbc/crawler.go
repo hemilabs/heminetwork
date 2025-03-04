@@ -565,7 +565,7 @@ func (s *Server) fixupCacheSerial(ctx context.Context, b *btcutil.Block, utxos m
 }
 
 func (s *Server) fixupCacheBatched(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
-	ops := make([]*tbcd.Outpoint, 0, 8192)
+	ops := make([]*tbcd.Outpoint, 0, 16384)
 	defer clear(ops)
 	for _, tx := range b.Transactions() {
 		for _, txIn := range tx.MsgTx().TxIn {
