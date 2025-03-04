@@ -667,15 +667,15 @@ func (s *Server) handleFeeEstimateRequest(ctx context.Context, req *tbcapi.FeeEs
 func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, hash *chainhash.Hash) (*tbcd.Keystone, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
 	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("keystone by abbreviated hash: %v", err)
+		return nil, nil, nil, fmt.Errorf("keystone by abbreviated hash: %w", err)
 	}
 	ksBh, err := s.db.BlockHeaderByHash(ctx, &ks.BlockHash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("block header by hash: %v", err)
+		return nil, nil, nil, fmt.Errorf("block header by hash: %w", err)
 	}
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("block header best: %v", err)
+		return nil, nil, nil, fmt.Errorf("block header best: %w", err)
 	}
 	return ks, ksBh, bhb, nil
 }
