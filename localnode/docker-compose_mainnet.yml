@@ -86,7 +86,9 @@ services:
 
   # Electrs (Bitcoin indexer, used by BFG)
   electrs:
-    image: "blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8"
+    build:
+      context: .
+      dockerfile: ./localnode/electrs.Dockerfile
     depends_on:
       - "bitcoind"
     volumes:
