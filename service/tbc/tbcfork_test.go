@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
+	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -718,7 +720,7 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 		PkScript     []byte
 	)
 
-	//idx := uint32(1)
+	// idx := uint32(1)
 	outPoint = *wire.NewOutPoint(inTx.Hash(), idx)
 	changeAmount = inTx.MsgTx().TxOut[idx].Value // spend entire tx
 	PkScript = inTx.MsgTx().TxOut[idx].PkScript  // Lift PkScript from utxo we are spending
@@ -1106,13 +1108,22 @@ func errorIsOneOf(err error, errs []error) bool {
 	return false
 }
 
+func GetFreePort() string {
+	port, err := freeport.GetFreePort()
+	if err != nil {
+		panic(err)
+	}
+	return strconv.Itoa(port)
+}
+
 func TestFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444") // TODO: should use random free port
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1166,8 +1177,7 @@ func TestFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{"127.0.0.1:18444"},
-		ListenAddress:           "localhost:8881",
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1369,7 +1379,8 @@ func TestIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444")
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1395,13 +1406,12 @@ func TestIndexNoFork(t *testing.T) {
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
 		LevelDBHome:          t.TempDir(),
-		ListenAddress:        "localhost:8882",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{"127.0.0.1:18444"},
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1542,7 +1552,8 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444")
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1581,7 +1592,6 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		BlockSanity:          false,
 		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
-		ListenAddress:        "localhost:8882",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -1589,7 +1599,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          false,
-		Seeds:                   []string{"127.0.0.1:18444"},
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1797,7 +1807,8 @@ func TestIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444")
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1821,14 +1832,13 @@ func TestIndexFork(t *testing.T) {
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
 		LevelDBHome:          t.TempDir(),
-		ListenAddress:        "localhost:8883",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          false,
-		Seeds:                   []string{"127.0.0.1:18444"},
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -2101,7 +2111,8 @@ func TestKeystoneIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444")
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2139,7 +2150,6 @@ func TestKeystoneIndexFork(t *testing.T) {
 		BlockSanity:          false,
 		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
-		ListenAddress:        "localhost:8883",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -2147,7 +2157,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          false,
-		Seeds:                   []string{"127.0.0.1:18444"},
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)

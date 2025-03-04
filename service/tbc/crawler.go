@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"runtime"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/blockchain"
@@ -359,12 +360,17 @@ func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhas
 // blockheader is part of the block we do this double database retrieval to
 // ensure both exist.
 func (s *Server) headerAndBlock(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, *btcutil.Block, error) {
+	// XXX move this into the database.
 	bh, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("block header %v: %w", hash, err)
 	}
 	b, err := s.db.BlockByHash(ctx, &bh.Hash)
 	if err != nil {
+		// XXX this should not happen antonio; block was mined and should thus exist
+		if true {
+			panic(err)
+		}
 		return nil, nil, fmt.Errorf("block by hash %v: %w", bh, err)
 	}
 
@@ -490,51 +496,53 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 	return nil
 }
 
-//func (s *Server) fetchOPParallel(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
-//	defer w.Done()
-//
-//	pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
-//	if err != nil {
-//		// This happens when a transaction is created and spent in the
-//		// same block.
-//		// XXX this is probably too loud but log for investigation and
-//		// remove later.
-//		log.Debugf("db missing pkscript: %v", op)
-//		return
-//	}
-//	s.mtx.Lock()
-//	utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
-//	s.mtx.Unlock()
-//}
-//
-//func (s *Server) fixupCacheParallel(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
-//	w := new(sync.WaitGroup)
-//	for _, tx := range b.Transactions() {
-//		for _, txIn := range tx.MsgTx().TxIn {
-//			if blockchain.IsCoinBase(tx) {
-//				// Skip coinbase inputs
-//				break
-//			}
-//
-//			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
-//				txIn.PreviousOutPoint.Index)
-//			s.mtx.Lock()
-//			if _, ok := utxos[op]; ok {
-//				s.mtx.Unlock()
-//				continue
-//			}
-//			s.mtx.Unlock()
-//
-//			// utxo not found, retrieve pkscript from database.
-//			w.Add(1)
-//			go s.fetchOPParallel(ctx, w, op, utxos)
-//		}
-//	}
-//
-//	w.Wait()
-//}
+func (s *Server) fetchOPParallel(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
+	defer w.Done()
 
-func (s *Server) fixupCacheSerial(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
+	pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
+	if err != nil {
+		// This happens when a transaction is created and spent in the
+		// same block.
+		// XXX this is probably too loud but log for investigation and
+		// remove later.
+		log.Debugf("db missing pkscript: %v", op)
+		return
+	}
+	s.mtx.Lock()
+	utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
+	s.mtx.Unlock()
+}
+
+func (s *Server) fixupCacheParallel(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+	w := new(sync.WaitGroup)
+	for _, tx := range b.Transactions() {
+		for _, txIn := range tx.MsgTx().TxIn {
+			if blockchain.IsCoinBase(tx) {
+				// Skip coinbase inputs
+				break
+			}
+
+			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index)
+			s.mtx.Lock()
+			if _, ok := utxos[op]; ok {
+				s.mtx.Unlock()
+				continue
+			}
+			s.mtx.Unlock()
+
+			// utxo not found, retrieve pkscript from database.
+			w.Add(1)
+			go s.fetchOPParallel(ctx, w, op, utxos)
+		}
+	}
+
+	w.Wait()
+
+	return nil
+}
+
+func (s *Server) fixupCacheSerial(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	for _, tx := range b.Transactions() {
 		for _, txIn := range tx.MsgTx().TxIn {
 			if blockchain.IsCoinBase(tx) {
@@ -558,6 +566,33 @@ func (s *Server) fixupCacheSerial(ctx context.Context, b *btcutil.Block, utxos m
 			utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
 		}
 	}
+
+	return nil
+}
+
+func (s *Server) fixupCacheBatched(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+	ops := make([]*tbcd.Outpoint, 0, 8192)
+	for _, tx := range b.Transactions() {
+		for _, txIn := range tx.MsgTx().TxIn {
+			if blockchain.IsCoinBase(tx) {
+				// Skip coinbase inputs
+				break
+			}
+
+			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index)
+			if _, ok := utxos[op]; ok {
+				continue
+			}
+
+			ops = append(ops, &op)
+		}
+	}
+	found := func(op tbcd.Outpoint, sh tbcd.ScriptHash) error {
+		utxos[op] = tbcd.NewDeleteCacheOutput(sh, op.TxIndex())
+		return nil
+	}
+	return s.db.ScriptHashesByOutpoint(ctx, ops, found)
 }
 
 // indexUtxosInBlocks indexes utxos from the last processed block until the
@@ -597,7 +632,10 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, err
 		}
 
-		s.fixupCacheSerial(ctx, b, utxos)
+		err = s.fixupCache(ctx, b, utxos)
+		if err != nil {
+			return 0, last, fmt.Errorf("process utxos fixup %v: %w", hh, err)
+		}
 		err = processUtxos(b.Transactions(), utxos)
 		if err != nil {
 			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)
