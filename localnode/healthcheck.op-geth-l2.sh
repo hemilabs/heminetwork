@@ -4,7 +4,7 @@ set -ex
 
 # example "http://op-geth-l2:18546"
 # explicitly do not set default so we don't get false positives if the default is working
-OP_GETH_L2_READINESS_RPC=""
+# OP_GETH_L2_READINESS_RPC
 
 hextimestamp=$(curl $OP_GETH_L2_READINESS_RPC -X POST -H "Content-Type: application/json" --data '{"method":"eth_getBlockByNumber","params":["latest", false],"id":1,"jsonrpc":"2.0"}' | jq '.result.timestamp')
 
