@@ -415,18 +415,18 @@ func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) e
 	return nil
 }
 
-func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int64, error) {
+func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire.TxOut, error) {
 	txId := op.TxIdHash()
 	txIndex := op.TxIndex()
 
 	// Find block hashes
 	blockHash, err := s.db.BlockHashByTxId(ctx, txId)
 	if err != nil {
-		return nil, 0, fmt.Errorf("block by txid: %w", err)
+		return nil, fmt.Errorf("block by txid: %w", err)
 	}
 	b, err := s.db.BlockByHash(ctx, blockHash)
 	if err != nil {
-		return nil, 0, fmt.Errorf("block by hash: %w", err)
+		return nil, fmt.Errorf("block by hash: %w", err)
 	}
 	for _, tx := range b.Transactions() {
 		if !tx.Hash().IsEqual(txId) {
@@ -434,13 +434,12 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 		}
 		txOuts := tx.MsgTx().TxOut
 		if len(txOuts) < int(txIndex) {
-			return nil, 0, fmt.Errorf("tx index invalid: %v", op)
+			return nil, fmt.Errorf("tx index invalid: %v", op)
 		}
-		tx := txOuts[txIndex]
-		return tx.PkScript, tx.Value, nil
+		return txOuts[txIndex], nil
 	}
 
-	return nil, 0, fmt.Errorf("tx id not found: %v", op)
+	return nil, fmt.Errorf("tx id not found: %v", op)
 }
 
 func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
@@ -456,7 +455,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
-			pkScript, value, err := s.scriptValue(ctx, op)
+			prevTxOut, err := s.txOutFromOutPoint(ctx, op)
 			if err != nil {
 				return fmt.Errorf("script value: %w", err)
 			}
@@ -466,8 +465,8 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 			if _, ok := utxos[op]; ok {
 				return fmt.Errorf("impossible collision: %v", op)
 			}
-			utxos[op] = tbcd.NewCacheOutput(tbcd.NewScriptHashFromScript(pkScript),
-				uint64(value), txIn.PreviousOutPoint.Index)
+			utxos[op] = tbcd.NewCacheOutput(tbcd.NewScriptHashFromScript(prevTxOut.PkScript),
+				uint64(prevTxOut.Value), txIn.PreviousOutPoint.Index)
 		}
 
 		// TxOut if those are in the cache delete from cache; if they
@@ -491,10 +490,10 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 	return nil
 }
 
-func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
+func (s *Server) fetchOPParallel(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
 	defer w.Done()
 
-	pkScript, err := s.db.ScriptHashByOutpoint(ctx, op)
+	sh, err := s.db.ScriptHashByOutpoint(ctx, op)
 	if err != nil {
 		// This happens when a transaction is created and spent in the
 		// same block.
@@ -504,11 +503,11 @@ func (s *Server) fetchOP(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoin
 		return
 	}
 	s.mtx.Lock()
-	utxos[op] = tbcd.NewDeleteCacheOutput(*pkScript, op.TxIndex())
+	utxos[op] = tbcd.NewDeleteCacheOutput(*sh, op.TxIndex())
 	s.mtx.Unlock()
 }
 
-func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+func (s *Server) fixupCacheParallel(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	w := new(sync.WaitGroup)
 	for _, tx := range b.Transactions() {
 		for _, txIn := range tx.MsgTx().TxIn {
@@ -528,13 +527,67 @@ func (s *Server) fixupCache(ctx context.Context, b *btcutil.Block, utxos map[tbc
 
 			// utxo not found, retrieve pkscript from database.
 			w.Add(1)
-			go s.fetchOP(ctx, w, op, utxos)
+			go s.fetchOPParallel(ctx, w, op, utxos)
 		}
 	}
 
 	w.Wait()
 
 	return nil
+}
+
+func (s *Server) fixupCacheSerial(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+	for _, tx := range b.Transactions() {
+		for _, txIn := range tx.MsgTx().TxIn {
+			if blockchain.IsCoinBase(tx) {
+				// Skip coinbase inputs
+				break
+			}
+
+			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index)
+			if _, ok := utxos[op]; ok {
+				continue
+			}
+
+			sh, err := s.db.ScriptHashByOutpoint(ctx, op)
+			if err != nil {
+				// This happens when a transaction is created
+				// and spent in the same block.
+				continue
+			}
+			// utxo not found, retrieve pkscript from database.
+			utxos[op] = tbcd.NewDeleteCacheOutput(*sh, op.TxIndex())
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) fixupCacheBatched(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+	ops := make([]*tbcd.Outpoint, 0, 16384)
+	defer clear(ops)
+	for _, tx := range b.Transactions() {
+		for _, txIn := range tx.MsgTx().TxIn {
+			if blockchain.IsCoinBase(tx) {
+				// Skip coinbase inputs
+				break
+			}
+
+			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index)
+			if _, ok := utxos[op]; ok {
+				continue
+			}
+
+			ops = append(ops, &op)
+		}
+	}
+	found := func(op tbcd.Outpoint, sh tbcd.ScriptHash) error {
+		utxos[op] = tbcd.NewDeleteCacheOutput(sh, op.TxIndex())
+		return nil
+	}
+	return s.db.ScriptHashesByOutpoint(ctx, ops, found)
 }
 
 // indexUtxosInBlocks indexes utxos from the last processed block until the
@@ -574,14 +627,10 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, err
 		}
 
-		// fixupCache is executed in parallel meaning that the utxos
-		// map must be locked as it is being processed.
-		if err = s.fixupCache(ctx, b, utxos); err != nil {
-			return 0, last, fmt.Errorf("parse block %v: %w", hh, err)
+		err = s.fixupCache(ctx, b, utxos)
+		if err != nil {
+			return 0, last, fmt.Errorf("process utxos fixup %v: %w", hh, err)
 		}
-		// At this point we can lockless since it is all single
-		// threaded again.
-		// log.Infof("processing utxo at height %d", height)
 		err = processUtxos(b.Transactions(), utxos)
 		if err != nil {
 			return 0, last, fmt.Errorf("process utxos %v: %w", hh, err)

@@ -1591,6 +1591,30 @@ func (l *ldb) BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, e
 	}
 }
 
+func (l *ldb) ScriptHashesByOutpoint(ctx context.Context, ops []*tbcd.Outpoint, result func(tbcd.Outpoint, tbcd.ScriptHash) error) error {
+	log.Tracef("ScriptHashesByOutpoint")
+	defer log.Tracef("ScriptHashesByOutpoint exit")
+
+	uDB := l.pool[level.OutputsDB]
+
+	for k := range ops {
+		scriptHash, err := uDB.Get(ops[k][:], nil)
+		if err != nil {
+			// not found, skip
+			continue
+		}
+		sh, err := tbcd.NewScriptHashFromBytes(scriptHash)
+		if err != nil {
+			return fmt.Errorf("script hash %x: %w", ops[k], err)
+		}
+		if err = result(*ops[k], sh); err != nil {
+			return fmt.Errorf("script hashes callback %x: %w", ops[k], err)
+		}
+	}
+
+	return nil
+}
+
 func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
 	log.Tracef("ScriptHashByOutpoint")
 	defer log.Tracef("ScriptHashByOutpoint exit")

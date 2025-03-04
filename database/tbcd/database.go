@@ -123,6 +123,7 @@ type Database interface {
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 	BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error)
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
+	ScriptHashesByOutpoint(ctx context.Context, ops []*Outpoint, result func(Outpoint, ScriptHash) error) error
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)
 	UtxosByScriptHashCount(ctx context.Context, sh ScriptHash) (uint64, error)
 
@@ -365,7 +366,7 @@ func NewScriptHashFromScript(script []byte) (scriptHash ScriptHash) {
 }
 
 func NewScriptHashFromBytes(hash []byte) (scriptHash ScriptHash, err error) {
-	if len(hash) != 32 {
+	if len(hash) != sha256.Size {
 		err = errors.New("invalid script hash length")
 		return
 	}

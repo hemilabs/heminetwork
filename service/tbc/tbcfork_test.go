@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +32,7 @@ import (
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
+	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -425,7 +427,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 		default:
 		}
 
-		msg, _, err := p.Read(5 * time.Second)
+		msg, _, err := p.Read(15 * time.Second)
 		if err != nil {
 			if errors.Is(err, wire.ErrUnknownMessage) {
 				// ignore unknown
@@ -718,7 +720,7 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 		PkScript     []byte
 	)
 
-	//idx := uint32(1)
+	// idx := uint32(1)
 	outPoint = *wire.NewOutPoint(inTx.Hash(), idx)
 	changeAmount = inTx.MsgTx().TxOut[idx].Value // spend entire tx
 	PkScript = inTx.MsgTx().TxOut[idx].PkScript  // Lift PkScript from utxo we are spending
@@ -976,9 +978,13 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 		return nil, err
 	}
 
-	time.Sleep(1000 * time.Millisecond)
-
 	return blk, nil
+}
+
+func (b *btcNode) MineAndSendEmpty(ctx context.Context) error {
+	b.t.Logf("send empty headers message")
+	time.Sleep(250 * time.Millisecond)
+	return b.p.Write(defaultCmdTimeout, wire.NewMsgHeaders())
 }
 
 func (b *btcNode) Run(ctx context.Context) error {
@@ -1106,13 +1112,22 @@ func errorIsOneOf(err error, errs []error) bool {
 	return false
 }
 
+func GetFreePort() string {
+	port, err := freeport.GetFreePort()
+	if err != nil {
+		panic(err)
+	}
+	return strconv.Itoa(port)
+}
+
 func TestFork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444") // TODO: should use random free port
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1152,7 +1167,7 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-	time.Sleep(2 * time.Second) // XXX
+	time.Sleep(500 * time.Millisecond) // XXX
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1166,8 +1181,7 @@ func TestFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{"127.0.0.1:18444"},
-		ListenAddress:           "localhost:8881",
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1369,7 +1383,8 @@ func TestIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444")
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1386,7 +1401,7 @@ func TestIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second * 2)
+	time.Sleep(500 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1395,13 +1410,12 @@ func TestIndexNoFork(t *testing.T) {
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
 		LevelDBHome:          t.TempDir(),
-		ListenAddress:        "localhost:8882",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		Seeds:                   []string{"127.0.0.1:18444"},
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1416,7 +1430,7 @@ func TestIndexNoFork(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(250 * time.Millisecond)
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -1434,6 +1448,11 @@ func TestIndexNoFork(t *testing.T) {
 	}
 	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, false)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1542,7 +1561,8 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444")
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1571,7 +1591,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second * 2)
+	time.Sleep(500 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1581,7 +1601,6 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		BlockSanity:          false,
 		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
-		ListenAddress:        "localhost:8882",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -1589,7 +1608,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          false,
-		Seeds:                   []string{"127.0.0.1:18444"},
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1604,7 +1623,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(250 * time.Millisecond)
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -1622,6 +1641,11 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, true)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1797,7 +1821,8 @@ func TestIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444")
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1812,7 +1837,7 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second * 2)
+	time.Sleep(500 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1821,14 +1846,13 @@ func TestIndexFork(t *testing.T) {
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
 		LevelDBHome:          t.TempDir(),
-		ListenAddress:        "localhost:8883",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          false,
-		Seeds:                   []string{"127.0.0.1:18444"},
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1841,7 +1865,7 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(2 * time.Second)
+	time.Sleep(250 * time.Millisecond)
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -1884,6 +1908,11 @@ func TestIndexFork(t *testing.T) {
 	}
 	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, false)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2101,7 +2130,8 @@ func TestKeystoneIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	n, err := newFakeNode(t, "18444")
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2129,7 +2159,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second * 2)
+	time.Sleep(500 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -2139,7 +2169,6 @@ func TestKeystoneIndexFork(t *testing.T) {
 		BlockSanity:          false,
 		HemiIndex:            true, // Test keystone index
 		LevelDBHome:          t.TempDir(),
-		ListenAddress:        "localhost:8883",
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
@@ -2147,7 +2176,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		MempoolEnabled:          false,
-		Seeds:                   []string{"127.0.0.1:18444"},
+		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -2160,7 +2189,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(2 * time.Second)
+	time.Sleep(250 * time.Millisecond)
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -2206,7 +2235,12 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(3 * time.Second)
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(2000 * time.Millisecond)
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 

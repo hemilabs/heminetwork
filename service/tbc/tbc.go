@@ -89,6 +89,8 @@ var (
 		Hash:   *chaincfg.RegressionNetParams.GenesisHash,
 		Height: 0,
 	}
+
+	fixupStrategy = 2 // Do not touch unless your name is marco
 )
 
 func init() {
@@ -145,6 +147,9 @@ type Server struct {
 	wg  sync.WaitGroup
 
 	cfg *Config
+
+	// fixup cache strategy
+	fixupCache func(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error
 
 	// stats
 	printTime      time.Time
@@ -287,6 +292,15 @@ func NewServer(cfg *Config) (*Server, error) {
 			return nil, err
 		}
 		s.pm = pm
+	}
+
+	switch fixupStrategy {
+	case 0:
+		s.fixupCache = s.fixupCacheParallel
+	case 1:
+		s.fixupCache = s.fixupCacheSerial
+	case 2:
+		s.fixupCache = s.fixupCacheBatched
 	}
 
 	return s, nil
