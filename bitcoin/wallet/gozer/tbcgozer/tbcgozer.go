@@ -13,6 +13,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
@@ -79,6 +80,29 @@ func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, error
 	}
 
 	return frv, nil
+}
+
+func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {
+	bur := &tbcapi.TxBroadcastRequest{
+		Tx:    tx,
+		Force: false, // XXX allow this to be passed in some way
+	}
+
+	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
+	if err != nil {
+		return nil, err
+	}
+
+	buResp, ok := res.(*tbcapi.TxBroadcastResponse)
+	if !ok {
+		return nil, fmt.Errorf("not a buResp %T", res)
+	}
+
+	if buResp.Error != nil {
+		return nil, buResp.Error
+	}
+
+	return buResp.TxID, nil
 }
 
 func (t *tbcGozer) UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
