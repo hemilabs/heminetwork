@@ -5,7 +5,9 @@
 package blockstream
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
@@ -49,6 +52,29 @@ func (bs *blockstream) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, e
 	}
 
 	return frv, nil
+}
+
+func (bs *blockstream) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {
+	u := fmt.Sprintf("%v/tx", bs.url)
+
+	var buf bytes.Buffer
+	if err := tx.Serialize(&buf); err != nil {
+		return nil, err
+	}
+	hexTx := hex.EncodeToString(buf.Bytes())
+
+	resp, err := httpclient.Request(ctx, "POST", u, hexTx)
+	if err != nil {
+		return nil, fmt.Errorf("request: %w", err)
+	}
+
+	var txID *chainhash.Hash
+	err = json.Unmarshal(resp, &txID)
+	if err != nil {
+		return nil, err
+	}
+
+	return txID, nil
 }
 
 func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
