@@ -197,8 +197,7 @@ services:
 
   # Init container for Hemi L2 node
   op-geth-l2-init:
-    # XXX make sure that this image is merged into the main "hemi" branch in op-geth
-    image: "ghcr.io/hemilabs/op-geth:2568259@sha256:a84ec6bdd3669cb73c918cb53f6e9ee3628cc3fc6f455e0b7b32a28d39e42f05"
+    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
     volumes:
       - op-geth_data:/tmp/datadir
     command:
@@ -209,8 +208,7 @@ services:
 
   # Init TBC container for Hemi L2 node
   op-geth-l2-init-tbc:
-    # XXX make sure that this image is merged into the main "hemi" branch in op-geth
-    image: "ghcr.io/hemilabs/op-geth:2568259@sha256:a84ec6bdd3669cb73c918cb53f6e9ee3628cc3fc6f455e0b7b32a28d39e42f05"
+    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
     volumes:
       - tbc_data:/tbcdata
     command:
