@@ -438,8 +438,8 @@ func TestCreateTxTxOutPopTx(t *testing.T) {
 		t.Fatalf("failed to encode PoP transaction: %v", err)
 	}
 
-	expectexTxOut := btcwire.NewTxOut(0, popTxOpReturn)
-	diff := deep.Equal(expectexTxOut, btx.TxOut[1])
+	expectedTxOut := btcwire.NewTxOut(0, popTxOpReturn)
+	diff := deep.Equal(expectedTxOut, btx.TxOut[1])
 	if len(diff) != 0 {
 		t.Fatalf("got unexpected diff %s", diff)
 	}
@@ -871,7 +871,7 @@ func TestProcessReceivedInAscOrderOverride(t *testing.T) {
 	}
 }
 
-func TestProcesAllKeystonesIfAble(t *testing.T) {
+func TestProcessAllKeystonesIfAble(t *testing.T) {
 	miner, err := NewMiner(&Config{
 		BTCPrivateKey: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
 		BTCChainName:  "testnet3",
