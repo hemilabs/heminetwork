@@ -183,6 +183,7 @@ services:
       - tbc_data:/tbcdata
     environment:
       OP_GETH_L1_RPC: "http://geth-l1:8545"
+      OP_GETH_L2_READINESS_RPC: "http://localhost:18546"
     ports:
       - '18546:18546'
       - '28546:28546'
