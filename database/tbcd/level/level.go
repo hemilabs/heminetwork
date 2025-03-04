@@ -1607,8 +1607,7 @@ func (l *ldb) ScriptHashesByOutpoint(ctx context.Context, ops []*tbcd.Outpoint, 
 		if err != nil {
 			return fmt.Errorf("script hash %x: %w", ops[k], err)
 		}
-		err = result(*ops[k], sh)
-		if err != nil {
+		if err = result(*ops[k], sh); err != nil {
 			return fmt.Errorf("script hashes callback %x: %w", ops[k], err)
 		}
 	}
