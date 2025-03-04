@@ -192,9 +192,6 @@ services:
       - "sh"
       - "/tmp/entrypointl2.sh"
     working_dir: "/tmp"
-    healthcheck:
-      test: [ "CMD-SHELL", "ls /tmp/rollup.json" ]
-      timeout: "60s"
     ulimits:
       memlock: -1
     deploy:
