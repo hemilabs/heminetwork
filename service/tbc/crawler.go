@@ -415,18 +415,18 @@ func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) e
 	return nil
 }
 
-func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int64, error) {
+func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire.TxOut, error) {
 	txId := op.TxIdHash()
 	txIndex := op.TxIndex()
 
 	// Find block hashes
 	blockHash, err := s.db.BlockHashByTxId(ctx, txId)
 	if err != nil {
-		return nil, 0, fmt.Errorf("block by txid: %w", err)
+		return nil, fmt.Errorf("block by txid: %w", err)
 	}
 	b, err := s.db.BlockByHash(ctx, blockHash)
 	if err != nil {
-		return nil, 0, fmt.Errorf("block by hash: %w", err)
+		return nil, fmt.Errorf("block by hash: %w", err)
 	}
 	for _, tx := range b.Transactions() {
 		if !tx.Hash().IsEqual(txId) {
@@ -434,13 +434,12 @@ func (s *Server) scriptValue(ctx context.Context, op tbcd.Outpoint) ([]byte, int
 		}
 		txOuts := tx.MsgTx().TxOut
 		if len(txOuts) < int(txIndex) {
-			return nil, 0, fmt.Errorf("tx index invalid: %v", op)
+			return nil, fmt.Errorf("tx index invalid: %v", op)
 		}
-		tx := txOuts[txIndex]
-		return tx.PkScript, tx.Value, nil
+		return txOuts[txIndex], nil
 	}
 
-	return nil, 0, fmt.Errorf("tx id not found: %v", op)
+	return nil, fmt.Errorf("tx id not found: %v", op)
 }
 
 func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
@@ -456,7 +455,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
-			pkScript, value, err := s.scriptValue(ctx, op)
+			prevTxOut, err := s.txOutFromOutPoint(ctx, op)
 			if err != nil {
 				return fmt.Errorf("script value: %w", err)
 			}
@@ -466,8 +465,8 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 			if _, ok := utxos[op]; ok {
 				return fmt.Errorf("impossible collision: %v", op)
 			}
-			utxos[op] = tbcd.NewCacheOutput(tbcd.NewScriptHashFromScript(pkScript),
-				uint64(value), txIn.PreviousOutPoint.Index)
+			utxos[op] = tbcd.NewCacheOutput(tbcd.NewScriptHashFromScript(prevTxOut.PkScript),
+				uint64(prevTxOut.Value), txIn.PreviousOutPoint.Index)
 		}
 
 		// TxOut if those are in the cache delete from cache; if they
