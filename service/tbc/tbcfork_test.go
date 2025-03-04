@@ -1167,7 +1167,7 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-	time.Sleep(2 * time.Second) // XXX
+	time.Sleep(250 * time.Millisecond) // XXX
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1401,7 +1401,7 @@ func TestIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second * 2)
+	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1430,7 +1430,7 @@ func TestIndexNoFork(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(250 * time.Millisecond)
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -1448,6 +1448,11 @@ func TestIndexNoFork(t *testing.T) {
 	}
 	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, false)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1586,7 +1591,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second * 2)
+	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1618,7 +1623,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(250 * time.Millisecond)
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -1636,6 +1641,11 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, true)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2149,7 +2159,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second * 2)
+	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -2179,7 +2189,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(2 * time.Second)
+	time.Sleep(250 * time.Millisecond)
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -2225,7 +2235,10 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(3 * time.Second)
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
