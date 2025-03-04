@@ -152,6 +152,7 @@ services:
   # Hemi L2 node
   op-geth-l2:
     image: "ghcr.io/hemilabs/op-geth@sha256:43860fcb691c85e344bd17a660a19e254924953b2ccebe03f2d87d425eeaecbb" # 337407d
+    # XXX does geth need to be fully synced
     depends_on:
       geth-l1:
         condition: "service_started"
@@ -185,6 +186,9 @@ services:
       timeout: "60s"
     ulimits:
       memlock: -1
+    deploy:
+      restart_policy:
+        condition: "on-failure"
 
   # Init container for Hemi L2 node
   op-geth-l2-init:
