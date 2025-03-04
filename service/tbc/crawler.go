@@ -360,17 +360,12 @@ func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhas
 // blockheader is part of the block we do this double database retrieval to
 // ensure both exist.
 func (s *Server) headerAndBlock(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, *btcutil.Block, error) {
-	// XXX move this into the database.
 	bh, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("block header %v: %w", hash, err)
 	}
 	b, err := s.db.BlockByHash(ctx, &bh.Hash)
 	if err != nil {
-		// XXX this should not happen antonio; block was mined and should thus exist
-		if true {
-			panic(err)
-		}
 		return nil, nil, fmt.Errorf("block by hash %v: %w", bh, err)
 	}
 
