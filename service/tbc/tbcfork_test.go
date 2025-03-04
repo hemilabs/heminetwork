@@ -427,7 +427,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 		default:
 		}
 
-		msg, _, err := p.Read(5 * time.Second)
+		msg, _, err := p.Read(15 * time.Second)
 		if err != nil {
 			if errors.Is(err, wire.ErrUnknownMessage) {
 				// ignore unknown
@@ -978,9 +978,13 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 		return nil, err
 	}
 
-	time.Sleep(1000 * time.Millisecond)
-
 	return blk, nil
+}
+
+func (b *btcNode) MineAndSendEmpty(ctx context.Context) error {
+	b.t.Logf("send empty headers message")
+	time.Sleep(250 * time.Millisecond)
+	return b.p.Write(defaultCmdTimeout, wire.NewMsgHeaders())
 }
 
 func (b *btcNode) Run(ctx context.Context) error {
@@ -1823,7 +1827,7 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(time.Second * 2)
+	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1851,7 +1855,7 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(2 * time.Second)
+	time.Sleep(250 * time.Millisecond)
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -1894,6 +1898,11 @@ func TestIndexFork(t *testing.T) {
 	}
 	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, false)
 	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
 

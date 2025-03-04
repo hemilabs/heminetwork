@@ -90,7 +90,7 @@ var (
 		Height: 0,
 	}
 
-	fixupStrategy = 1 // Do not touch unless your name is marco
+	fixupStrategy = 2 // Do not touch unless your name is marco
 )
 
 func init() {
