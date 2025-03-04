@@ -162,7 +162,13 @@ services:
         condition: "service_completed_successfully"
       op-geth-l2-init-tbc:
         condition: "service_completed_successfully"
+    healthcheck:
+      test: ["CMD", "sh", "/tmp/healthcheck.op-geth-l2.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 999999
     volumes:
+      - ./healthcheck.op-geth-l2.sh:/tmp/healthcheck.op-geth-l2.sh
       - ./mainnet-genesis.json:/tmp/genesis.json
       # change this token value if you expose this service's ports for
       # connection from other machines
