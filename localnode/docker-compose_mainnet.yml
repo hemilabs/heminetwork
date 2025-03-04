@@ -147,63 +147,67 @@ services:
     working_dir: "/tmp/geth"
 
   # Hemi L2 node
-##  op-geth-l2:
-##    image: "ghcr.io/hemilabs/op-geth:a5a12ae@sha256:6e21d631b073a363ff859f4e82bbbcbde339801b5f5e5b9e42a5eb34081e054e"
-##    depends_on:
-##      geth-l1:
-##        condition: "service_started"
-##      op-geth-l2-init:
-##        condition: "service_completed_successfully"
-##      op-geth-l2-init-tbc:
-##        condition: "service_completed_successfully"
-##    volumes:
-##      - ./mainnet-genesis.json:/tmp/genesis.json
+  op-geth-l2:
+    image: "ghcr.io/hemilabs/op-geth:a5a12ae@sha256:6e21d631b073a363ff859f4e82bbbcbde339801b5f5e5b9e42a5eb34081e054e"
+    # XXX does geth need to be fully synced
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+      op-geth-l2-init:
+        condition: "service_completed_successfully"
+      op-geth-l2-init-tbc:
+        condition: "service_completed_successfully"
+    volumes:
+      - ./mainnet-genesis.json:/tmp/genesis.json
       # change this token value if you expose this service's ports for
       # connection from other machines
-##      - ./jwt.hex:/tmp/jwt/jwt.hex:ro
-##      - ./mainnet-entrypointl2.sh:/tmp/entrypointl2.sh
-##      - op-geth_data:/tmp/datadir
-##      - ./mainnet-rollup.json:/tmp/rollup.json
-##      - ./mainnet-l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
-##      - tbc_data:/tbcdata
-##    environment:
-##      OP_GETH_L1_RPC: "http://geth-l1:8545"
-##    ports:
-##      - '18546:18546'
-##      - '28546:28546'
-##    networks:
-##      - "localnode"
-##    entrypoint:
-##      - "sh"
-##      - "/tmp/entrypointl2.sh"
-##    working_dir: "/tmp"
-##    healthcheck:
-##      test: [ "CMD-SHELL", "ls /tmp/rollup.json" ]
-##      timeout: "60s"
-##    ulimits:
-##      memlock: -1
+      - ./jwt.hex:/tmp/jwt/jwt.hex:ro
+      - ./mainnet-entrypointl2.sh:/tmp/entrypointl2.sh
+      - op-geth_data:/tmp/datadir
+      - ./mainnet-rollup.json:/tmp/rollup.json
+      - ./mainnet-l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
+      - tbc_data:/tbcdata
+    environment:
+      OP_GETH_L1_RPC: "http://geth-l1:8545"
+    ports:
+      - '18546:18546'
+      - '28546:28546'
+    networks:
+      - "localnode"
+    entrypoint:
+      - "sh"
+      - "/tmp/entrypointl2.sh"
+    working_dir: "/tmp"
+    healthcheck:
+      test: [ "CMD-SHELL", "ls /tmp/rollup.json" ]
+      timeout: "60s"
+    ulimits:
+      memlock: -1
+    deploy:
+      restart_policy:
+        condition: "on-failure"
 
   # Init container for Hemi L2 node
-##  op-geth-l2-init:
-##    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
-##    volumes:
-##      - op-geth_data:/tmp/datadir
-##    command:
-##      - "chown"
-##      - "-R"
-##      - "65532" # geth user
-##      - "/tmp/datadir"
+  op-geth-l2-init:
+    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    volumes:
+      - op-geth_data:/tmp/datadir
+    command:
+      - "chown"
+      - "-R"
+      - "65532" # geth user
+      - "/tmp/datadir"
 
   # Init TBC container for Hemi L2 node
-##  op-geth-l2-init-tbc:
-##    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
-##    volumes:
-##      - tbc_data:/tbcdata
-##    command:
-##      - "chown"
-##      - "-R"
-##      - "65532" # geth user
-##      - "/tbcdata"
+  op-geth-l2-init-tbc:
+    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    volumes:
+      - tbc_data:/tbcdata
+    command:
+      - "chown"
+      - "-R"
+      - "65532" # geth user
+      - "/tbcdata"
 
   # Hemi op-node
 ##  op-node:
