@@ -266,14 +266,14 @@ func (s *Server) Run(pctx context.Context) error {
 		var err error
 		s.g, err = blockstream.BlockstreamNew(s.params)
 		if err != nil {
-			return fmt.Errorf("could not setup %v blockstream: %v",
+			return fmt.Errorf("could not setup %v blockstream: %w",
 				s.cfg.Network, err)
 		}
 	case bitcoinSourceTBC:
 		var err error
 		s.g, err = tbcgozer.TBCGozerNew(ctx, s.cfg.BitcoinURL)
 		if err != nil {
-			return fmt.Errorf("could not setup %v tbc: %v",
+			return fmt.Errorf("could not setup %v tbc: %w",
 				s.cfg.Network, err)
 		}
 	default:

@@ -1624,7 +1624,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 				t.Logf("%s\n\n%s", spew.Sdump(response.L2KeystoneAbrev.Serialize()), spew.Sdump(tti.expectedL2KeystoneAbrev.Serialize()))
 			}
 
-			if diff := deep.Equal(response.BtcBlockHash, tti.expectedBTCBlockHash); len(diff) > 0 {
+			if diff := deep.Equal(response.L2KeystoneBlockHash, tti.expectedBTCBlockHash); len(diff) > 0 {
 				t.Fatalf("unexpected retrieved block hash diff: %s", diff)
 			}
 
