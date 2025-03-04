@@ -1339,6 +1339,7 @@ func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string, keyst
 		}
 
 		for {
+			time.Sleep(50 * time.Millisecond)
 			command, id, _, err := bfgapi.Read(ctx, conn)
 			if err != nil {
 				if !errors.Is(ctx.Err(), context.Canceled) {
