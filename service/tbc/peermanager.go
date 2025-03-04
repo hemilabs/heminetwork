@@ -324,7 +324,7 @@ func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*rawpeer.RawPe
 	pm.mtx.Lock()
 	defer pm.mtx.Unlock()
 
-	// Reset caluse
+	// Reset clause
 	// log.Infof("good %v bad %v seeds %v", len(pm.good), len(pm.bad), len(pm.seeds))
 	if len(pm.good) < len(pm.seeds) && len(pm.bad) >= len(pm.seeds) {
 		// Return an error to make the caller aware that we have reset
