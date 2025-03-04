@@ -4,4 +4,4 @@ RUN apt update
 
 RUN apt install -y netcat
 
-HEALTHCHECK --interval=5s --timeout=5s --retries=0 CMD nc -vz 0.0.0.0 50001
+HEALTHCHECK --interval=5s --timeout=5s --retries=999999 CMD nc -vz 0.0.0.0 50001
