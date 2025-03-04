@@ -87,7 +87,7 @@ services:
   # Electrs (Bitcoin indexer, used by BFG)
   electrs:
     build:
-      context: .
+      context: ./..
       dockerfile: ./localnode/electrs.Dockerfile
     depends_on:
       - "bitcoind"
