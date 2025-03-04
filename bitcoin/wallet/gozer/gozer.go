@@ -10,6 +10,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -23,6 +24,7 @@ type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
 	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash *chainhash.Hash) (*BlockKeystoneByL2KeystoneAbrevHashResponse, error)
+	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 }
 
 type FeeEstimate struct {
