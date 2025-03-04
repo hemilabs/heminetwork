@@ -43,6 +43,47 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 	return nil, errors.New("no suitable utxo found")
 }
 
+func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+	// Create TxOut
+	payToScript, err := txscript.PayToAddrScript(address)
+	if err != nil {
+		return nil, nil, err
+	}
+	txOut := wire.NewTxOut(int64(amount), payToScript)
+
+	// Calculate fee for 1 input and assume there is change
+	txSize := txsizes.EstimateSerializeSize(1, []*wire.TxOut{txOut}, true)
+	fee := btcutil.Amount(txSize) * satsPerByte
+
+	// Find utxo that is big enough for entire transaction
+	utxo, err := UtxoPickerSingle(amount, fee, utxos)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Assemble transaction
+	tx := wire.NewMsgTx(2) // Latest supported version
+	tx.LockTime = locktime
+	outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
+	tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
+
+	// Return previous outs to caller so that they can be signed.
+	// This is a bit odd but in a real transaction we have to return all
+	// the scripts (and somehow obtain them). Think about this some more.
+	prevOuts := map[string][]byte{outpoint.String(): script}
+
+	// Change
+	change := utxo.Value - fee
+	changeTxOut := wire.NewTxOut(int64(change), script)
+	if !mempool.IsDust(changeTxOut, mempool.DefaultMinRelayTxFee) {
+		tx.AddTxOut(changeTxOut)
+	}
+
+	tx.AddTxOut(txOut)
+
+	return tx, prevOuts, nil
+}
+
 func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte btcutil.Amount, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
 	// Create OP_RETURN
 	aks := hemi.L2KeystoneAbbreviate(*l2keystone)
