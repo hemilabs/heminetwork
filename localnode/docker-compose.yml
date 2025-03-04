@@ -11,8 +11,10 @@ services:
       dockerfile: "./docker/bfgd/Dockerfile"
       context: "./.."
     depends_on:
-      - "bfgd-postgres"
-      - "electrs"
+      bfgd-postgres:
+        condition: "service_started"
+      electrs:
+        condition: "service_healthy"
     environment:
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       ### XXXX Make this variable and set to recent block
@@ -87,7 +89,9 @@ services:
 
   # Electrs (Bitcoin indexer, used by BFG)
   electrs:
-    image: "blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8"
+    build:
+      context: ./..
+      dockerfile: ./localnode/electrs.Dockerfile
     depends_on:
       - "bitcoind"
     volumes:
@@ -151,7 +155,8 @@ services:
 
   # Hemi L2 node
   op-geth-l2:
-    image: "ghcr.io/hemilabs/op-geth@sha256:43860fcb691c85e344bd17a660a19e254924953b2ccebe03f2d87d425eeaecbb" # 337407d
+    # XXX make sure that this image is merged into the main "hemi" branch in op-geth
+    image: "ghcr.io/hemilabs/op-geth:2568259@sha256:a84ec6bdd3669cb73c918cb53f6e9ee3628cc3fc6f455e0b7b32a28d39e42f05"
     # XXX does geth need to be fully synced
     depends_on:
       geth-l1:
@@ -192,7 +197,8 @@ services:
 
   # Init container for Hemi L2 node
   op-geth-l2-init:
-    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    # XXX make sure that this image is merged into the main "hemi" branch in op-geth
+    image: "ghcr.io/hemilabs/op-geth:2568259@sha256:a84ec6bdd3669cb73c918cb53f6e9ee3628cc3fc6f455e0b7b32a28d39e42f05"
     volumes:
       - op-geth_data:/tmp/datadir
     command:
@@ -203,7 +209,8 @@ services:
 
   # Init TBC container for Hemi L2 node
   op-geth-l2-init-tbc:
-    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    # XXX make sure that this image is merged into the main "hemi" branch in op-geth
+    image: "ghcr.io/hemilabs/op-geth:2568259@sha256:a84ec6bdd3669cb73c918cb53f6e9ee3628cc3fc6f455e0b7b32a28d39e42f05"
     volumes:
       - tbc_data:/tbcdata
     command:
