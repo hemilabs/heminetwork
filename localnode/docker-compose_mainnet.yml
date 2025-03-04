@@ -11,8 +11,10 @@ services:
       dockerfile: "./docker/bfgd/Dockerfile"
       context: "./.."
     depends_on:
-      - "bfgd-postgres"
-      - "electrs"
+      bfgd-postgres:
+        condition: "service_started"
+      electrs:
+        condition: "service_healthy"
     environment:
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       ### XXXX Make this variable and set to recent block
