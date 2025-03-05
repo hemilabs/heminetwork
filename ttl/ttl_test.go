@@ -206,7 +206,7 @@ func TestTTLDelete(t *testing.T) {
 		if expired, err := tm.Delete(key); err != nil {
 			t.Fatal(err)
 		} else if expired {
-			t.Fatalf("%v: expired got %v wamted %v", key, expired, false)
+			t.Fatalf("%v: expired got %v wanted %v", key, expired, false)
 		}
 	}
 

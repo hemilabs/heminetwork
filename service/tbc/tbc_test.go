@@ -204,7 +204,7 @@ func TestDbUpgrade(t *testing.T) {
 		t.Fatal("expected failure retrieving keystone index hash")
 	}
 
-	// Make sure we get the ecxpected indexkeys from db
+	// Make sure we get the expected indexkeys from db
 	hash := s2h("0000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
 	utxobh, err := s.db.BlockHeaderByUtxoIndex(ctx)
 	if err != nil {

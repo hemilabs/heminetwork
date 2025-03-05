@@ -161,11 +161,11 @@ func NewServer(cfg *Config) (*Server, error) {
 }
 
 // handleRequest is called as a go routine to handle a long lived command.
-func (s *Server) handleRequest(parrentCtx context.Context, bws *bssWs, wsid string, requestType string, handler func(ctx context.Context) (any, error)) {
+func (s *Server) handleRequest(parentCtx context.Context, bws *bssWs, wsid string, requestType string, handler func(ctx context.Context) (any, error)) {
 	log.Tracef("handleRequest: %v", bws.addr)
 	defer log.Tracef("handleRequest exit: %v", bws.addr)
 
-	ctx, cancel := context.WithTimeout(parrentCtx, s.requestTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, s.requestTimeout)
 	defer cancel()
 
 	select {
@@ -544,11 +544,11 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 	}
 }
 
-func (s *Server) handleBFGCallCompletion(parrentCtx context.Context, conn *protocol.Conn, bc bfgCmd) {
+func (s *Server) handleBFGCallCompletion(parentCtx context.Context, conn *protocol.Conn, bc bfgCmd) {
 	log.Tracef("handleBFGCallCompletion")
 	defer log.Tracef("handleBFGCallCompletion exit")
 
-	ctx, cancel := context.WithTimeout(parrentCtx, s.bfgCallTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, s.bfgCallTimeout)
 	defer cancel()
 
 	log.Tracef("handleBFGCallCompletion: %v", spew.Sdump(bc.msg))
@@ -583,7 +583,7 @@ func (s *Server) handleBFGWebsocketCallUnauth(ctx context.Context, conn *protoco
 	}
 }
 
-func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
+func (s *Server) callBFG(parentCtx context.Context, msg any) (any, error) {
 	log.Tracef("callBFG %T", msg)
 	defer log.Tracef("callBFG exit %T", msg)
 
@@ -592,7 +592,7 @@ func (s *Server) callBFG(parrentCtx context.Context, msg any) (any, error) {
 		ch:  make(chan any),
 	}
 
-	ctx, cancel := context.WithTimeout(parrentCtx, s.bfgCallTimeout)
+	ctx, cancel := context.WithTimeout(parentCtx, s.bfgCallTimeout)
 	defer cancel()
 
 	// attempt to send
@@ -709,7 +709,7 @@ func (s *Server) isBFGConnected() float64 {
 	return 0
 }
 
-func (s *Server) Run(parrentCtx context.Context) error {
+func (s *Server) Run(parentCtx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
 
@@ -718,7 +718,7 @@ func (s *Server) Run(parrentCtx context.Context) error {
 	}
 	defer s.testAndSetRunning(false)
 
-	ctx, cancel := context.WithCancel(parrentCtx)
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel() // just in case
 
 	mux := http.NewServeMux()
