@@ -1,6 +1,6 @@
-#! /bin/sh
+#! /bin/bash
 
-set -ex
+set -exr
 
 # example "http://op-geth-l2:18546"
 # explicitly do not set default so we don't get false positives if the default is working
