@@ -56,7 +56,7 @@ WORKDIR /git/optimism
 RUN make op-bindings op-node op-batcher op-proposer
 RUN make -C ./op-conductor op-conductor
 
-RUN pnpm build
+# RUN pnpm build
 
 WORKDIR /git/optimism/packages/contracts-bedrock
 RUN forge install
