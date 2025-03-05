@@ -39,7 +39,7 @@ services:
       dockerfile: "./localnode/postgres.Dockerfile"
       context: "./.."
     volumes:
-      - psql_data:/var
+      - psql_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: "bfg"
       POSTGRES_HOST_AUTH_METHOD: "trust"
