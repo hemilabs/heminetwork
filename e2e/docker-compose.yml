@@ -242,6 +242,7 @@ services:
       - { type: "tmpfs", target: "/tmp" }
     networks:
       e2e:
+    restart: always
   
   op-geth-l2-2:
     build:
