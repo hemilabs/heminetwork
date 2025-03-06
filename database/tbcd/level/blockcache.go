@@ -36,11 +36,11 @@ type lowIQLRU struct {
 	c tbcd.CacheStats
 }
 
-func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
+func (l *lowIQLRU) Put(hash chainhash.Hash, block []byte) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	if be, ok := l.m[*hash]; ok {
+	if be, ok := l.m[hash]; ok {
 		// update access
 		l.l.MoveToBack(be.element)
 		return
@@ -60,13 +60,13 @@ func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
 			break
 		}
 		rha := l.l.Remove(re)
-		rh := *rha.(*chainhash.Hash)
+		rh := rha.(chainhash.Hash)
 		if b, ok := l.m[rh]; !ok {
+			_ = b
 			panic(fmt.Sprintf("WTF: total %v block "+
 				"%v size %v - map %v list %v - hash %v",
 				l.totalSize, len(block), l.size, len(l.m),
 				l.l.Len(), hash))
-			_ = b
 		}
 		l.totalSize -= len(l.m[rh].block)
 		delete(l.m, rh)
@@ -81,7 +81,7 @@ func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
 	}
 
 	// block lookup and lru append
-	l.m[*hash] = blockElement{element: l.l.PushBack(hash), block: block}
+	l.m[hash] = blockElement{element: l.l.PushBack(hash), block: block}
 	l.totalSize += len(block)
 
 	l.c.Size = l.totalSize
