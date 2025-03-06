@@ -42,7 +42,7 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout 3a56733
+RUN git checkout 7df0704587cfb1a9c104b1271d4ab31c87f5ad66
 RUN git submodule update --init --recursive
 RUN pnpm install
 RUN pnpm install:abigen
@@ -56,7 +56,7 @@ WORKDIR /git/optimism
 RUN make op-bindings op-node op-batcher op-proposer
 RUN make -C ./op-conductor op-conductor
 
-# RUN pnpm build
+RUN pnpm build
 
 WORKDIR /git/optimism/packages/contracts-bedrock
 RUN forge install
