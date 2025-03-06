@@ -53,9 +53,9 @@ func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
 		if re == nil {
 			if true {
 				panic(fmt.Sprintf("SHOW THIS TO ME: total %v block "+
-					"%v size %v - map %v list %v",
+					"%v size %v - map %v list %v - hash %v",
 					l.totalSize, len(block), l.size, len(l.m),
-					l.l.Len()))
+					l.l.Len(), hash))
 			}
 			break
 		}
