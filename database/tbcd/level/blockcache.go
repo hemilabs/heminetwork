@@ -61,9 +61,23 @@ func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
 		}
 		rha := l.l.Remove(re)
 		rh := *rha.(*chainhash.Hash)
+		if b, ok := l.m[rh]; !ok {
+			panic(fmt.Sprintf("WTF: total %v block "+
+				"%v size %v - map %v list %v - hash %v",
+				l.totalSize, len(block), l.size, len(l.m),
+				l.l.Len(), hash))
+			_ = b
+		}
 		l.totalSize -= len(l.m[rh].block)
 		delete(l.m, rh)
 		l.c.Purges++
+
+		if len(l.m) != l.l.Len() {
+			panic(fmt.Sprintf("whut whut: total %v block "+
+				"%v size %v - map %v list %v - hash %v",
+				l.totalSize, len(block), l.size, len(l.m),
+				l.l.Len(), hash))
+		}
 	}
 
 	// block lookup and lru append
