@@ -158,8 +158,9 @@ func TestIntegration(t *testing.T) {
 		StateRoot:          digest256([]byte("Hello, world!")),
 		EPHash:             digest256([]byte{0xaa, 0x55}),
 	}
-	tx, prevOut, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
-		btcutil.Amount(feeEstimate.SatsPerByte+0.5), utxos, pkscript)
+
+	tx, prevOut, err := TransactionCreate(uint32(time.Now().Unix()),
+		btcutil.Amount(1), btcutil.Amount(feeEstimate.SatsPerByte+0.5), addr, utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,4 +175,28 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	popTx, prevOut, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
+		btcutil.Amount(feeEstimate.SatsPerByte+0.5), utxos, pkscript)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = TransactionSign(&chaincfg.TestNet3Params, m, popTx, prevOut)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("tx: %v", spew.Sdump(popTx))
+
+	err = executeTX(t, true, popTx.TxOut[0].PkScript, btcutil.NewTx(popTx))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	txID, err := b.BroadcastTx(ctx, popTx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("txID: %v", txID)
 }

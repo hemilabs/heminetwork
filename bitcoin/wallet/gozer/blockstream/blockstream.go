@@ -11,6 +11,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"slices"
+	"strings"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -63,18 +67,35 @@ func (bs *blockstream) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainh
 	}
 	hexTx := hex.EncodeToString(buf.Bytes())
 
-	resp, err := httpclient.Request(ctx, "POST", u, hexTx)
+	resp, err := http.Post(u, "text/plain",
+		strings.NewReader(hexTx))
 	if err != nil {
-		return nil, fmt.Errorf("request: %w", err)
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request: %v %v",
+			resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 
-	var txID *chainhash.Hash
-	err = json.Unmarshal(resp, &txID)
+	respb, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	return txID, nil
+	txidBytes, err := hex.DecodeString(string(respb))
+	if err != nil {
+		return nil, err
+	}
+	slices.Reverse(txidBytes)
+
+	txidHash, err := chainhash.NewHash(txidBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return txidHash, nil
 }
 
 func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
