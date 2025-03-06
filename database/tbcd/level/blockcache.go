@@ -50,10 +50,19 @@ func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
 	for l.totalSize+len(block) > l.size {
 		// LET THEM EAT PANIC
 		re := l.l.Front()
+		if re == nil {
+			if true {
+				panic(fmt.Sprintf("SHOW THIS TO ME: total %v block "+
+					"%v size %v - map %v list %v",
+					l.totalSize, len(block), l.size, len(l.m),
+					l.l.Len()))
+			}
+			break
+		}
 		rha := l.l.Remove(re)
-		rh := rha.(*chainhash.Hash)
-		l.totalSize -= len(l.m[*rh].block)
-		delete(l.m, *rh)
+		rh := *rha.(*chainhash.Hash)
+		l.totalSize -= len(l.m[rh].block)
+		delete(l.m, rh)
 		l.c.Purges++
 	}
 
