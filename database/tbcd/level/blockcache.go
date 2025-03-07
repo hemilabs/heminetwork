@@ -36,6 +36,10 @@ type lowIQLRU struct {
 	c tbcd.CacheStats
 }
 
+// Put inserts a item in cache. If necessary the last item that was touched is
+// evicted.
+// Note that if the caller sends an item in that is larger than the size of the
+// cache the code will crash.
 func (l *lowIQLRU) Put(hash chainhash.Hash, block []byte) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
@@ -50,34 +54,11 @@ func (l *lowIQLRU) Put(hash chainhash.Hash, block []byte) {
 	for l.totalSize+len(block) > l.size {
 		// LET THEM EAT PANIC
 		re := l.l.Front()
-		if re == nil {
-			if true {
-				panic(fmt.Sprintf("SHOW THIS TO ME: total %v block "+
-					"%v size %v - map %v list %v - hash %v",
-					l.totalSize, len(block), l.size, len(l.m),
-					l.l.Len(), hash))
-			}
-			break
-		}
 		rha := l.l.Remove(re)
 		rh := rha.(chainhash.Hash)
-		if b, ok := l.m[rh]; !ok {
-			_ = b
-			panic(fmt.Sprintf("WTF: total %v block "+
-				"%v size %v - map %v list %v - hash %v",
-				l.totalSize, len(block), l.size, len(l.m),
-				l.l.Len(), hash))
-		}
 		l.totalSize -= len(l.m[rh].block)
 		delete(l.m, rh)
 		l.c.Purges++
-
-		if len(l.m) != l.l.Len() {
-			panic(fmt.Sprintf("whut whut: total %v block "+
-				"%v size %v - map %v list %v - hash %v",
-				l.totalSize, len(block), l.size, len(l.m),
-				l.l.Len(), hash))
-		}
 	}
 
 	// block lookup and lru append
