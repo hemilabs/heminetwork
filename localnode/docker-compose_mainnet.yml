@@ -152,7 +152,6 @@ services:
 
   # Hemi L2 node
   op-geth-l2:
-    # XXX make sure that this image is merged into the main "hemi" branch in op-geth
     image: "ghcr.io/hemilabs/op-geth:5e559a1@sha256:f1e8266fa21a5d56720fc8b443b630b93cb97f53299fd2f6aac350d79eaefbcb"
     # XXX does geth need to be fully synced
     depends_on:
@@ -163,12 +162,11 @@ services:
       op-geth-l2-init-tbc:
         condition: "service_completed_successfully"
     healthcheck:
-      test: ["CMD", "sh", "/tmp/healthcheck.op-geth-l2.sh"]
+      test: ["CMD", "nc", "-vz", "0.0.0.0", "18546"]
       interval: 5s
       timeout: 5s
       retries: 999999
     volumes:
-      - ./healthcheck.op-geth-l2.sh:/tmp/healthcheck.op-geth-l2.sh
       - ./mainnet-genesis.json:/tmp/genesis.json
       # change this token value if you expose this service's ports for
       # connection from other machines
