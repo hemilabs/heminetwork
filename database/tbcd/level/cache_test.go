@@ -37,7 +37,7 @@ func TestLRUCache(t *testing.T) {
 		h, _, r := newBlock(&prevHash, uint32(i))
 		t.Logf("%v: %v", i, h)
 		blocks = append(blocks, h)
-		l.Put(&h, r)
+		l.Put(h, r)
 		prevHash = h
 	}
 
@@ -65,7 +65,7 @@ func TestLRUCache(t *testing.T) {
 		h, _, r := newBlock(&prevHash, uint32(i))
 		t.Logf("%v: %v", i, h)
 		blocks = append(blocks, h)
-		l.Put(&h, r)
+		l.Put(h, r)
 		prevHash = h
 	}
 

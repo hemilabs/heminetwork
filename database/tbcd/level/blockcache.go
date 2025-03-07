@@ -36,11 +36,15 @@ type lowIQLRU struct {
 	c tbcd.CacheStats
 }
 
-func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
+// Put inserts a item in cache. If necessary the last item that was touched is
+// evicted.
+// Note that if the caller sends an item in that is larger than the size of the
+// cache the code will crash.
+func (l *lowIQLRU) Put(hash chainhash.Hash, block []byte) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	if be, ok := l.m[*hash]; ok {
+	if be, ok := l.m[hash]; ok {
 		// update access
 		l.l.MoveToBack(be.element)
 		return
@@ -51,14 +55,14 @@ func (l *lowIQLRU) Put(hash *chainhash.Hash, block []byte) {
 		// LET THEM EAT PANIC
 		re := l.l.Front()
 		rha := l.l.Remove(re)
-		rh := rha.(*chainhash.Hash)
-		l.totalSize -= len(l.m[*rh].block)
-		delete(l.m, *rh)
+		rh := rha.(chainhash.Hash)
+		l.totalSize -= len(l.m[rh].block)
+		delete(l.m, rh)
 		l.c.Purges++
 	}
 
 	// block lookup and lru append
-	l.m[*hash] = blockElement{element: l.l.PushBack(hash), block: block}
+	l.m[hash] = blockElement{element: l.l.PushBack(hash), block: block}
 	l.totalSize += len(block)
 
 	l.c.Size = l.totalSize
