@@ -738,6 +738,9 @@ func TestBFGPublicDisabled(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
+	if !errors.Is(err, protocol.ErrPublicKeyAuth) {
+		t.Fatal("expected ErrPublicKeyAuth")
+	}
 	if !strings.Contains(err.Error(), "status = StatusCode(4100)") {
 		t.Fatal(err)
 	}
