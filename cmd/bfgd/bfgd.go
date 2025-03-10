@@ -129,6 +129,12 @@ var (
 			Help:         "a btc private key, this is only needed when connecting to another BFG",
 			Print:        config.PrintSecret,
 		},
+		"BFG_DISABLE_PUBLIC_CONNS": config.Config{
+			Value:        &cfg.DisablePublicConns,
+			DefaultValue: false,
+			Help:         "disable public connections",
+			Print:        config.PrintAll,
+		},
 	}
 )
 

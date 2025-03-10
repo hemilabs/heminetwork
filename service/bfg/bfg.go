@@ -120,6 +120,7 @@ type Config struct {
 	TrustedProxies          []string
 	BFGURL                  string
 	BTCPrivateKey           string
+	DisablePublicConns      bool
 }
 
 type Server struct {
@@ -1103,6 +1104,11 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	if s.cfg.DisablePublicConns {
+		_ = conn.Close(protocol.ErrPublicKeyAuth.Code, protocol.ErrPublicKeyAuth.Reason)
+		return
+	}
 
 	bws := &bfgWs{
 		addr:           remoteAddr,
