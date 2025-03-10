@@ -33,7 +33,7 @@ linters:
     - "gofumpt" # Runs gofumpt.
     - "goheader" # Enforces copyright header.
     # TODO enable gosec, when bored run 'golangci-lint run -Egosec' to fix these
-    # - "gosec" # Checks for potential security issues
+    - "gosec" # Checks for potential security issues
     - "gosimple" # Checks for ways to simplify code.
     - "gomoddirectives" # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
     - "gosmopolitan" # Report certain i18n/l10n anti-patterns in your Go codebase.
@@ -87,6 +87,11 @@ linters-settings:
   gomoddirectives:
     replace-allow-list:
       - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
+
+  # Checks for potential security issues
+  gosec:
+    excludes:
+    - G115 # Potential integer overflow when converting between integer types
 
   # Enforces copyright header
   goheader: # TODO: Replace goheader, autofix is too buggy.
