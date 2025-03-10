@@ -1418,7 +1418,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 		if l.cfg.blockCacheSize > 0 {
-			l.blockCache.Put(b.Hash(), raw)
+			l.blockCache.Put(*b.Hash(), raw)
 		}
 	}
 
@@ -1474,15 +1474,14 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 			}
 			return nil, fmt.Errorf("block get: %w", err)
 		}
+		if l.cfg.blockCacheSize > 0 {
+			l.blockCache.Put(*hash, eb)
+		}
 	}
-
 	// if we get here eb MUST exist
 	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))
-	}
-	if l.cfg.blockCacheSize > 0 {
-		l.blockCache.Put(hash, eb)
 	}
 	return b, nil
 }
