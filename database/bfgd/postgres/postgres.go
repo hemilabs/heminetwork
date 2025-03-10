@@ -734,6 +734,8 @@ func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, seriali
 }
 
 // BtcTransactionBroadcastRequestGetNext
+//
+//nolint:gosec // no injection, only predefined clauses
 func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error) {
 	log.Tracef("BtcTransactionBroadcastRequestGetNext")
 	defer log.Tracef("BtcTransactionBroadcastRequestGetNext exit")
@@ -748,7 +750,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		orderClause = " ORDER BY created_at ASC "
 	}
 
-	querySql := `
+	querySql := fmt.Sprintf(`
 		UPDATE btc_transaction_broadcast_request 
 		SET last_broadcast_attempt_at = NOW(), 
 		
@@ -757,18 +759,18 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		WHERE tx_id = (
 			SELECT tx_id FROM btc_transaction_broadcast_request
 			WHERE 
-			$1
+			%s
 			AND broadcast_at IS NULL
 			AND created_at > NOW() - INTERVAL '30 minutes'
-			$2
+			%s
 			FOR UPDATE
 			LIMIT 1
 		)
 		RETURNING serialized_tx
-	`
+	`, onlyNewClause, orderClause)
 
 	var serializedTx []byte
-	err := p.db.QueryRowContext(ctx, querySql, onlyNewClause, orderClause).Scan(&serializedTx)
+	err := p.db.QueryRowContext(ctx, querySql).Scan(&serializedTx)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %w", err)
