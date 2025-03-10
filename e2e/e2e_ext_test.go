@@ -284,7 +284,7 @@ func nextPort(ctx context.Context, t *testing.T) int {
 	}
 }
 
-func createBfgServerGeneric(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string, string) {
+func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string, publicDisabled bool) (*bfg.Server, string, string, string) {
 	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
@@ -297,6 +297,7 @@ func createBfgServerGeneric(ctx context.Context, t *testing.T, pgUri string, ele
 		RequestLimit:         bfgapi.DefaultRequestLimit,
 		RequestTimeout:       bfgapi.DefaultRequestTimeout,
 		BFGURL:               otherBfgUrl,
+		DisablePublicConns:   publicDisabled,
 	}
 
 	if cfg.BFGURL != "" {
@@ -332,6 +333,10 @@ func createBfgServerGeneric(ctx context.Context, t *testing.T, pgUri string, ele
 	}
 
 	return bfgServer, bfgPrivateListenAddress, bfgWsPrivateUrl, bfgWsPublicUrl
+}
+
+func createBfgServerGeneric(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string, string) {
+	return createBfgServerWithAccess(ctx, t, pgUri, electrsAddr, btcStartHeight, otherBfgUrl, false)
 }
 
 func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64) (*bfg.Server, string, string, string) {
@@ -706,6 +711,36 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 	}
 
 	return buf.Bytes()
+}
+
+func TestBFGPublicDisabled(t *testing.T) {
+	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	_, _, _, bfgPublicWsUrl := createBfgServerWithAccess(ctx, t, pgUri, "", 1, "", true)
+
+	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	err = authClient.HandshakeClient(ctx, protocol.NewWSConn(c))
+
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	if !strings.Contains(err.Error(), "status = StatusCode(4100)") {
+		t.Fatal(err)
+	}
 }
 
 // TestNewL2Keystone sends an L2Keystone, via websocket, to BSS which proxies
