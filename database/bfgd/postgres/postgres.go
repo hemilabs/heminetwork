@@ -734,6 +734,8 @@ func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, seriali
 }
 
 // BtcTransactionBroadcastRequestGetNext
+//
+//nolint:gosec // no injection, only predefined clauses
 func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error) {
 	log.Tracef("BtcTransactionBroadcastRequestGetNext")
 	defer log.Tracef("BtcTransactionBroadcastRequestGetNext exit")
