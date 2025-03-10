@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -33,6 +33,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -171,9 +172,10 @@ func (d *Deucalion) Run(ctx context.Context, cs []prometheus.Collector) error {
 	handle("prometheus", prometheusMux, "/metrics", promhttp.HandlerFor(reg,
 		promhttp.HandlerOpts{Registry: reg}).ServeHTTP)
 	httpPrometheusServer := &http.Server{
-		Addr:        d.cfg.ListenAddress,
-		Handler:     prometheusMux,
-		BaseContext: func(net.Listener) context.Context { return ctx },
+		Addr:              d.cfg.ListenAddress,
+		Handler:           prometheusMux,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	httpPrometheusErrCh := make(chan error)
 	go func() {

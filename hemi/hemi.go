@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
@@ -57,6 +58,14 @@ func L2BTCFinalityFromBfgd(l2BtcFinality *bfgd.L2BTCFinality, currentBTCHeight u
 	// set a reasonable upper bound so we can safely convert to int32
 	if fin > 100 {
 		fin = 100
+	}
+
+	if l2BtcFinality.L2Keystone.Version > math.MaxUint8 {
+		return nil, fmt.Errorf("invalid keystone version %v", l2BtcFinality.L2Keystone.Version)
+	}
+
+	if fin > math.MaxInt32 {
+		return nil, fmt.Errorf("finality value exceeds int32 size %v", fin)
 	}
 
 	return &L2BTCFinality{

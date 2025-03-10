@@ -725,9 +725,10 @@ func (s *Server) Run(parentCtx context.Context) error {
 	handle("bss", mux, bssapi.RouteWebsocket, s.handleWebsocket)
 
 	httpServer := &http.Server{
-		Addr:        s.cfg.ListenAddress,
-		Handler:     mux,
-		BaseContext: func(net.Listener) context.Context { return ctx },
+		Addr:              s.cfg.ListenAddress,
+		Handler:           mux,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	httpErrCh := make(chan error)
 	go func() {
