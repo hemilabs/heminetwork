@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -10,9 +10,10 @@ package rawpeer
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"net"
 	"sync"
 	"time"
@@ -168,7 +169,13 @@ func (r *RawPeer) handshake(ctx context.Context, conn net.Conn) error {
 	defaultHandshakeTimeout := 2 * time.Second // This is cumulative.
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
-	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
+
+	var nonce uint64
+	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
+		return fmt.Errorf("could not generate rand: %w", err)
+	}
+
+	msg := wire.NewMsgVersion(us, them, nonce, 0)
 	msg.UserAgent = fmt.Sprintf("/%v:%v/", version.Component, version.String())
 	msg.ProtocolVersion = int32(wire.AddrV2Version)
 	err := writeTimeout(defaultHandshakeTimeout, conn, msg, r.protocolVersion, r.network)

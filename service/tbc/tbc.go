@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -993,6 +994,9 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if !canonical {
 		log.Infof("Deleting from blocks missing database: %v %v %v",
 			p, bhX.Height, bhX)
+		if bhX.Height > math.MaxInt64 {
+			return fmt.Errorf("block height exceeds int size")
+		}
 		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
 		if err != nil {
 			return fmt.Errorf("block expired delete missing: %w", err)
@@ -2514,9 +2518,10 @@ func (s *Server) Run(pctx context.Context) error {
 		mux.HandleFunc(tbcapi.RouteWebsocket, s.handleWebsocket)
 
 		httpServer := &http.Server{
-			Addr:        s.cfg.ListenAddress,
-			Handler:     mux,
-			BaseContext: func(_ net.Listener) context.Context { return ctx },
+			Addr:              s.cfg.ListenAddress,
+			Handler:           mux,
+			BaseContext:       func(_ net.Listener) context.Context { return ctx },
+			ReadHeaderTimeout: 10 * time.Second,
 		}
 		go func() {
 			log.Infof("Listening: %s", s.cfg.ListenAddress)

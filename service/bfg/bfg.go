@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"strings"
@@ -633,6 +634,9 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			height, index)
 		log.Tracef("validating bitcoin tx")
 
+		if index > math.MaxUint32 {
+			return fmt.Errorf("index exceeds uint32 max size during conversion: %v", index)
+		}
 		err = bitcoin.ValidateMerkleRoot(txHashEncoded, merkleHashes,
 			uint32(index), merkleRootEncoded)
 		if err != nil {
@@ -1333,6 +1337,10 @@ func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
 
 	l2Keystones := make([]hemi.L2Keystone, 0, len(results))
 	for _, v := range results {
+		if v.Version > math.MaxUint8 {
+			log.Errorf("invalid keystone version %v, skipping...", v.Version)
+			continue
+		}
 		l2Keystones = append(l2Keystones, hemi.L2Keystone{
 			Version:            uint8(v.Version),
 			L1BlockNumber:      v.L1BlockNumber,
@@ -1894,16 +1902,18 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 
 	publicHttpServer := &http.Server{
-		Addr:        s.cfg.PublicListenAddress,
-		Handler:     publicMux,
-		BaseContext: func(net.Listener) context.Context { return ctx },
+		Addr:              s.cfg.PublicListenAddress,
+		Handler:           publicMux,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	publicHttpErrCh := make(chan error)
 
 	privateHttpServer := &http.Server{
-		Addr:        s.cfg.PrivateListenAddress,
-		Handler:     privateMux,
-		BaseContext: func(net.Listener) context.Context { return ctx },
+		Addr:              s.cfg.PrivateListenAddress,
+		Handler:           privateMux,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	privateHttpErrCh := make(chan error)
 

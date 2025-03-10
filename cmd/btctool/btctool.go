@@ -6,11 +6,12 @@ package main // XXX wrap in structure
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
-	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -141,7 +142,13 @@ func (p *peer) handshake(ctx context.Context) error {
 
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
-	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
+
+	var nonce uint64
+	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
+		return fmt.Errorf("could not generate rand: %w", err)
+	}
+
+	msg := wire.NewMsgVersion(us, them, nonce, 0)
 	err := p.write(msg)
 	if err != nil {
 		return fmt.Errorf("could not write version message: %w", err)

@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -165,6 +166,14 @@ func (r *RawDB) Insert(key, value []byte) error {
 		} else {
 			// Encoded coordinates.
 			c := make([]byte, 4+4+4)
+
+			if fi.Size() > math.MaxUint32 {
+				return fmt.Errorf("file info exceeds max uint32 %v", fi.Size())
+			}
+			if len(value) > math.MaxUint32 {
+				return fmt.Errorf("size of value exceeds max uint32 %v", len(value))
+			}
+
 			binary.BigEndian.PutUint32(c[0:4], last)
 			binary.BigEndian.PutUint32(c[4:8], uint32(fi.Size()))
 			binary.BigEndian.PutUint32(c[8:12], uint32(len(value)))

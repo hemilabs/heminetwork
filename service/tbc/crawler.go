@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
 	"sort"
 	"sync"
@@ -406,6 +407,12 @@ func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) e
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
+
+			if outIndex > math.MaxUint32 {
+				log.Errorf("outindex conversion to uint32 %v, skipping...", outIndex)
+				continue
+			}
+
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
 				tbcd.NewScriptHashFromScript(txOut.PkScript),
 				uint64(txOut.Value),
@@ -474,6 +481,11 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 		// cache.
 		for outIndex, txOut := range tx.MsgTx().TxOut {
 			if txscript.IsUnspendable(txOut.PkScript) {
+				continue
+			}
+
+			if outIndex > math.MaxUint32 {
+				log.Errorf("outindex conversion to uint32 %v, skipping...", outIndex)
 				continue
 			}
 
@@ -923,6 +935,11 @@ func processTxs(blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.
 		}
 
 		for txInIdx, txIn := range tx.MsgTx().TxIn {
+			if txInIdx > math.MaxUint32 {
+				log.Errorf("txInIdx conversion to uint32 %v, skipping...", txInIdx)
+				continue
+			}
+
 			txk, txv := tbcd.NewTxSpent(
 				blockHash,
 				tx.Hash(),

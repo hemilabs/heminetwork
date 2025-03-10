@@ -6,9 +6,10 @@ package tbc
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/rand/v2"
+	"math/big"
 	"net"
 	"sync"
 	"time"
@@ -404,7 +405,14 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 				break
 			}
 
-			holdOff := time.Duration(minW+rand.IntN(maxW-minW)) * time.Second
+			bint := big.NewInt(int64(maxW) - int64(minW))
+			brint, err := rand.Int(rand.Reader, bint)
+			if err != nil {
+				return fmt.Errorf("error generating rand: %w", err)
+			}
+			rint := int64(minW) + brint.Int64()
+
+			holdOff := time.Duration(rint) * time.Second
 			select {
 			case <-ctx.Done():
 				return ctx.Err()

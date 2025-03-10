@@ -1432,6 +1432,10 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 		}
 	}
 
+	if bh.Height > math.MaxInt64 {
+		return -1, fmt.Errorf("invalid height conversion to int %v", bh.Height)
+	}
+
 	return int64(bh.Height), nil
 }
 
