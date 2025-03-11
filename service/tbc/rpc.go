@@ -272,7 +272,7 @@ func (s *Server) handleBlockByHashRequest(ctx context.Context, req *tbcapi.Block
 	log.Tracef("handleBlockByHashRequest")
 	defer log.Tracef("handleBlockByHashRequest exit")
 
-	block, err := s.BlockByHash(ctx, *req.Hash)
+	block, err := s.BlockByHash(ctx, req.Hash)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockByHashResponse{
@@ -295,7 +295,7 @@ func (s *Server) handleBlockByHashRawRequest(ctx context.Context, req *tbcapi.Bl
 	log.Tracef("handleBlockByHashRawRequest")
 	defer log.Tracef("handleBlockByHashRawRequest exit")
 
-	block, err := s.BlockByHash(ctx, *req.Hash)
+	block, err := s.BlockByHash(ctx, req.Hash)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockByHashRawResponse{
@@ -493,7 +493,7 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	log.Tracef("handleTxByIdRawRequest")
 	defer log.Tracef("handleTxByIdRawRequest exit")
 
-	tx, err := s.TxById(ctx, *req.TxID)
+	tx, err := s.TxById(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
@@ -525,7 +525,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	log.Tracef("handleTxByIdRequest")
 	defer log.Tracef("handleTxByIdRequest exit")
 
-	tx, err := s.TxById(ctx, *req.TxID)
+	tx, err := s.TxById(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
@@ -644,12 +644,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest")
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
 
-	if req.L2KeystoneAbrevHash == nil {
-		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-			Error: protocol.RequestErrorf("invalid nil abrev hash"),
-		}, nil
-	}
-	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *req.L2KeystoneAbrevHash)
+	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, req.L2KeystoneAbrevHash)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
@@ -672,18 +667,13 @@ func (s *Server) handleBlockDownloadAsyncRequest(ctx context.Context, req *tbcap
 	log.Tracef("handleBlockAsyncDownloadRequest")
 	defer log.Tracef("handleBlockAsyncDownloadRequest exit")
 
-	if req.Hash == nil {
-		return &tbcapi.BlockDownloadAsyncResponse{
-			Error: protocol.RequestErrorf("hash must be provided"),
-		}, nil
-	}
 	if req.Peers <= 0 || req.Peers > 5 {
 		return &tbcapi.BlockDownloadAsyncResponse{
 			Error: protocol.RequestErrorf("invalid peers"),
 		}, nil
 	}
 
-	blk, err := s.DownloadBlockFromRandomPeers(ctx, *req.Hash, req.Peers)
+	blk, err := s.DownloadBlockFromRandomPeers(ctx, req.Hash, req.Peers)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
@@ -700,18 +690,13 @@ func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tb
 	log.Tracef("handleBlockDownloadAsyncRawRequest")
 	defer log.Tracef("handleBlockDownloadAsyncRawRequest exit")
 
-	if req.Hash == nil {
-		return &tbcapi.BlockDownloadAsyncRawResponse{
-			Error: protocol.RequestErrorf("hash must be provided"),
-		}, nil
-	}
 	if req.Peers <= 0 || req.Peers > 5 {
 		return &tbcapi.BlockDownloadAsyncRawResponse{
 			Error: protocol.RequestErrorf("too many peers"),
 		}, nil
 	}
 
-	blk, err := s.DownloadBlockFromRandomPeers(ctx, *req.Hash, req.Peers)
+	blk, err := s.DownloadBlockFromRandomPeers(ctx, req.Hash, req.Peers)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
