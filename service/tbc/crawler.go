@@ -226,7 +226,7 @@ func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeade
 		}
 		if equals == len(bhs) {
 			// All blockheaders point to the same parent.
-			return s.db.BlockHeaderByHash(ctx, ph)
+			return s.db.BlockHeaderByHash(ctx, *ph)
 		}
 
 		// Decrease height
@@ -257,7 +257,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 			// Did not find bh in path
 			return false, nil
 		}
-		bhb, err = s.db.BlockHeaderByHash(ctx, bhb.ParentHash())
+		bhb, err = s.db.BlockHeaderByHash(ctx, *bhb.ParentHash())
 		if err != nil {
 			return false, err
 		}
@@ -318,7 +318,7 @@ func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, 
 	// conditions.
 	h := endHash
 	for {
-		bh, err := s.db.BlockHeaderByHash(ctx, h)
+		bh, err := s.db.BlockHeaderByHash(ctx, *h)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
 		}
@@ -359,7 +359,7 @@ func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhas
 // headerAndBlock retrieves both the blockheader and the block. While the
 // blockheader is part of the block we do this double database retrieval to
 // ensure both exist.
-func (s *Server) headerAndBlock(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, *btcutil.Block, error) {
+func (s *Server) headerAndBlock(ctx context.Context, hash chainhash.Hash) (*tbcd.BlockHeader, *btcutil.Block, error) {
 	bh, err := s.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("block header %v: %w", hash, err)
@@ -622,7 +622,7 @@ func (s *Server) indexUtxosInBlocks(ctx context.Context, endHash *chainhash.Hash
 	for {
 		log.Debugf("indexing utxos: %v", hh)
 
-		bh, b, err := s.headerAndBlock(ctx, &hh.Hash)
+		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
 		if err != nil {
 			return 0, last, err
 		}
@@ -691,7 +691,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		log.Debugf("unindexing utxos: %v", hh)
 
 		hash := hh.Hash
-		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
+		bh, err := s.db.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
@@ -730,7 +730,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 
 		// Move to previous block
 		height := bh.Height - 1
-		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
+		pbh, err := s.db.BlockHeaderByHash(ctx, *bh.ParentHash())
 		if err != nil {
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
@@ -862,7 +862,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 	return nil
 }
 
-func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error {
+func (s *Server) UtxoIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	log.Tracef("UtxoIndexer")
 	defer log.Tracef("UtxoIndexer exit")
 
@@ -876,9 +876,6 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	// XXX this is basically duplicate from UtxoIndexIsLinear
 
 	// Verify exit condition hash
-	if endHash == nil {
-		return errors.New("must provide an end hash")
-	}
 	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
@@ -891,7 +888,7 @@ func (s *Server) UtxoIndexer(ctx context.Context, endHash *chainhash.Hash) error
 	}
 
 	// XXX make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, &utxoHH.Hash)
+	startBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -970,7 +967,7 @@ func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, 
 	for {
 		log.Debugf("indexing txs: %v", hh)
 
-		bh, b, err := s.headerAndBlock(ctx, &hh.Hash)
+		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
 		if err != nil {
 			return 0, last, err
 		}
@@ -1043,7 +1040,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 			break
 		}
 
-		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
+		bh, err := s.db.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
@@ -1078,7 +1075,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 
 		// Move to previous block
 		height := bh.Height - 1
-		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
+		pbh, err := s.db.BlockHeaderByHash(ctx, *bh.ParentHash())
 		if err != nil {
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
@@ -1210,7 +1207,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 	return nil
 }
 
-func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
+func (s *Server) TxIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	log.Tracef("TxIndexer")
 	defer log.Tracef("TxIndexer exit")
 
@@ -1225,9 +1222,6 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	s.mtx.Unlock()
 
 	// Verify exit condition hash
-	if endHash == nil {
-		return errors.New("must provide an end hash")
-	}
 	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
@@ -1240,7 +1234,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash *chainhash.Hash) error {
 	}
 
 	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, &txHH.Hash)
+	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
 	if err != nil {
 		return fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -1331,7 +1325,7 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 	for {
 		log.Debugf("indexing keystones: %v", hh)
 
-		bh, b, err := s.headerAndBlock(ctx, &hh.Hash)
+		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
 		if err != nil {
 			return 0, last, err
 		}
@@ -1405,7 +1399,7 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 			break
 		}
 
-		bh, err := s.db.BlockHeaderByHash(ctx, &hash)
+		bh, err := s.db.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
 		}
@@ -1431,7 +1425,7 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 
 		// Move to previous block
 		height := bh.Height - 1
-		pbh, err := s.db.BlockHeaderByHash(ctx, bh.ParentHash())
+		pbh, err := s.db.BlockHeaderByHash(ctx, *bh.ParentHash())
 		if err != nil {
 			return 0, last, fmt.Errorf("block headers by height %v: %w",
 				height, err)
@@ -1563,7 +1557,7 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 	return nil
 }
 
-func (s *Server) KeystoneIndexer(ctx context.Context, endHash *chainhash.Hash) error {
+func (s *Server) KeystoneIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	log.Tracef("KeystoneIndexer")
 	defer log.Tracef("KeystoneIndexer exit")
 
@@ -1581,9 +1575,6 @@ func (s *Server) KeystoneIndexer(ctx context.Context, endHash *chainhash.Hash) e
 	s.mtx.Unlock()
 
 	// Verify exit condition hash
-	if endHash == nil {
-		return errors.New("must provide an end hash")
-	}
 	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("blockheader end hash: %w", err)
@@ -1596,7 +1587,7 @@ func (s *Server) KeystoneIndexer(ctx context.Context, endHash *chainhash.Hash) e
 	}
 
 	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, &keystoneHH.Hash)
+	startBH, err := s.db.BlockHeaderByHash(ctx, keystoneHH.Hash)
 	if err != nil {
 		return fmt.Errorf("blockheader keystone hash: %w", err)
 	}
@@ -1617,7 +1608,7 @@ func (s *Server) KeystoneIndexer(ctx context.Context, endHash *chainhash.Hash) e
 	return fmt.Errorf("invalid direction: %v", direction)
 }
 
-func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
+func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash chainhash.Hash) (int, error) {
 	log.Tracef("UtxoIndexIsLinear")
 	defer log.Tracef("UtxoIndexIsLinear exit")
 
@@ -1627,10 +1618,10 @@ func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash *chainhash.Hash)
 		return 0, fmt.Errorf("utxo index hash: %w", err)
 	}
 
-	return s.IndexIsLinear(ctx, &utxoHH.Hash, endHash)
+	return s.IndexIsLinear(ctx, utxoHH.Hash, endHash)
 }
 
-func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
+func (s *Server) TxIndexIsLinear(ctx context.Context, endHash chainhash.Hash) (int, error) {
 	log.Tracef("TxIndexIsLinear")
 	defer log.Tracef("TxIndexIsLinear exit")
 
@@ -1640,10 +1631,10 @@ func (s *Server) TxIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (
 		return 0, fmt.Errorf("tx index hash: %w", err)
 	}
 
-	return s.IndexIsLinear(ctx, &txHH.Hash, endHash)
+	return s.IndexIsLinear(ctx, txHH.Hash, endHash)
 }
 
-func (s *Server) KeystoneIndexIsLinear(ctx context.Context, endHash *chainhash.Hash) (int, error) {
+func (s *Server) KeystoneIndexIsLinear(ctx context.Context, endHash chainhash.Hash) (int, error) {
 	log.Tracef("KeystoneIndexIsLinear")
 	defer log.Tracef("KeystoneIndexIsLinear exit")
 
@@ -1653,17 +1644,14 @@ func (s *Server) KeystoneIndexIsLinear(ctx context.Context, endHash *chainhash.H
 		return 0, fmt.Errorf("keystone index hash: %w", err)
 	}
 
-	return s.IndexIsLinear(ctx, &keystoneHH.Hash, endHash)
+	return s.IndexIsLinear(ctx, keystoneHH.Hash, endHash)
 }
 
-func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhash.Hash) (int, error) {
+func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash chainhash.Hash) (int, error) {
 	log.Tracef("IndexIsLinear")
 	defer log.Tracef("IndexIsLinear exit")
 
 	// Verify exit condition hash
-	if startHash == nil || endHash == nil {
-		return 0, errors.New("must provide start and end hash")
-	}
 	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return 0, fmt.Errorf("blockheader hash: %w", err)
@@ -1706,7 +1694,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 			startBH, endBH, direction))
 	}
 	for {
-		bh, err := s.db.BlockHeaderByHash(ctx, h)
+		bh, err := s.db.BlockHeaderByHash(ctx, *h)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
 		}
@@ -1726,7 +1714,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash *chainhas
 // Note: on unwind it means that it WILL unwind the various indexers including
 // the hash that was passed in. E.g. if this unwinds from 1001 to 1000 the
 // indexes for block 1000 WILL be updated as well.
-func (s *Server) SyncIndexersToHash(ctx context.Context, hash *chainhash.Hash) error {
+func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) error {
 	log.Tracef("SyncIndexersToHash")
 	defer log.Tracef("SyncIndexersToHash exit")
 
@@ -1788,7 +1776,7 @@ func (s *Server) utxoIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) 
 	if err != nil {
 		return fmt.Errorf("utxo index hash: %w", err)
 	}
-	utxoBH, err := s.db.BlockHeaderByHash(ctx, &utxoHH.Hash)
+	utxoBH, err := s.db.BlockHeaderByHash(ctx, utxoHH.Hash)
 	if err != nil {
 		return err
 	}
@@ -1800,12 +1788,12 @@ func (s *Server) utxoIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) 
 		log.Infof("Syncing utxo index to: %v from: %v via: %v",
 			bhb.HH(), utxoBH.HH(), cp.HH())
 		// utxoBH is NOT on canonical chain, unwind first
-		if err := s.UtxoIndexer(ctx, &cp.Hash); err != nil {
+		if err := s.UtxoIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("utxo indexer unwind: %w", err)
 		}
 	}
 	// Index utxo to best block
-	if err := s.UtxoIndexer(ctx, &bhb.Hash); err != nil {
+	if err := s.UtxoIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
@@ -1821,7 +1809,7 @@ func (s *Server) txIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) er
 	if err != nil {
 		return fmt.Errorf("tx index hash: %w", err)
 	}
-	txBH, err := s.db.BlockHeaderByHash(ctx, &txHH.Hash)
+	txBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
 	if err != nil {
 		return err
 	}
@@ -1833,12 +1821,12 @@ func (s *Server) txIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) er
 		log.Infof("Syncing tx index to: %v from: %v via: %v",
 			bhb.HH(), txBH.HH(), cp.HH())
 		// txBH is NOT on canonical chain, unwind first
-		if err := s.TxIndexer(ctx, &cp.Hash); err != nil {
+		if err := s.TxIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("tx indexer unwind: %w", err)
 		}
 	}
 	// Transactions index
-	if err := s.TxIndexer(ctx, &bhb.Hash); err != nil {
+	if err := s.TxIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
@@ -1854,7 +1842,7 @@ func (s *Server) keystoneIndexersToBest(ctx context.Context, bhb *tbcd.BlockHead
 	if err != nil {
 		return fmt.Errorf("keystone index hash: %w", err)
 	}
-	keystoneBH, err := s.db.BlockHeaderByHash(ctx, &keystoneHH.Hash)
+	keystoneBH, err := s.db.BlockHeaderByHash(ctx, keystoneHH.Hash)
 	if err != nil {
 		return err
 	}
@@ -1866,12 +1854,12 @@ func (s *Server) keystoneIndexersToBest(ctx context.Context, bhb *tbcd.BlockHead
 		log.Infof("Syncing keystone index to: %v from: %v via: %v",
 			bhb.HH(), keystoneBH.HH(), cp.HH())
 		// keystoneBH is NOT on canonical chain, unwind first
-		if err := s.KeystoneIndexer(ctx, &cp.Hash); err != nil {
+		if err := s.KeystoneIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("keystone indexer unwind: %w", err)
 		}
 	}
 	// Index keystones to best block
-	if err := s.KeystoneIndexer(ctx, &bhb.Hash); err != nil {
+	if err := s.KeystoneIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("keystone indexer: %w", err)
 	}
 
@@ -1904,7 +1892,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	}
 
 	// Print nice message to indicate completion.
-	bh, err := s.db.BlockHeaderByHash(ctx, &bhb.Hash)
+	bh, err := s.db.BlockHeaderByHash(ctx, bhb.Hash)
 	if err != nil {
 		log.Errorf("block header by hash: %v", err)
 	} else {

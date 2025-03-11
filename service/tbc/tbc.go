@@ -982,7 +982,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("new hash: %w", err)
 	}
-	bhX, err := s.db.BlockHeaderByHash(ctx, hash)
+	bhX, err := s.db.BlockHeaderByHash(ctx, *hash)
 	if err != nil {
 		return fmt.Errorf("block header by hash: %w", err)
 	}
@@ -1133,7 +1133,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				// Fixup ib array to not ask for block headers
 				// we already have.
 				ib = slices.DeleteFunc(ib, func(h *chainhash.Hash) bool {
-					_, _, err := s.BlockHeaderByHash(ctx, h)
+					_, _, err := s.BlockHeaderByHash(ctx, *h)
 					return err == nil
 				})
 
@@ -1599,7 +1599,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 			// txsFound = true
 		case wire.InvTypeBlock:
 			// Make sure we haven't seen block header yet.
-			_, _, err := s.BlockHeaderByHash(ctx, &v.Hash)
+			_, _, err := s.BlockHeaderByHash(ctx, v.Hash)
 			if err == nil {
 				return nil
 			}
@@ -1711,7 +1711,7 @@ func (s *Server) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil
 
 // XXX should we return a form of tbcd.BlockHeader which contains all info? and
 // note that the return parameters here are reversed from BlockHeaderBest call.
-func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*wire.BlockHeader, uint64, error) {
+func (s *Server) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*wire.BlockHeader, uint64, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
@@ -1786,7 +1786,7 @@ func (s *Server) RawBlockHeaderBest(ctx context.Context) (uint64, api.ByteSlice,
 	return bhb.Height, bhb.Header[:], nil
 }
 
-func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*big.Int, error) {
+func (s *Server) DifficultyAtHash(ctx context.Context, hash chainhash.Hash) (*big.Int, error) {
 	log.Tracef("DifficultyAtHash")
 	defer log.Tracef("DifficultyAtHash exit")
 

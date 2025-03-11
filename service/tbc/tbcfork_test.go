@@ -1038,7 +1038,7 @@ func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey,
 
 func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
 	for _, b := range blocks {
-		_, height, err := s.BlockHeaderByHash(ctx, b.Hash())
+		_, height, err := s.BlockHeaderByHash(ctx, *b.Hash())
 		if err != nil {
 			return err
 		}
@@ -1229,7 +1229,7 @@ func TestFork(t *testing.T) {
 	}
 
 	// Check cumulative difficulty
-	difficulty, err := s.DifficultyAtHash(ctx, n.Best()[0])
+	difficulty, err := s.DifficultyAtHash(ctx, *n.Best()[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1457,7 +1457,7 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := s.TxIndexIsLinear(ctx, b3.Hash())
+	direction, err := s.TxIndexIsLinear(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("expected success g -> b3, got %v", err)
 	}
@@ -1466,7 +1466,7 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// Index to b3
-	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1523,7 +1523,7 @@ func TestIndexNoFork(t *testing.T) {
 	_ = si
 
 	// unwind back to b3 (removes b3 and b2)
-	err = s.SyncIndexersToHash(ctx, b2.Hash())
+	err = s.SyncIndexersToHash(ctx, *b2.Hash())
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -1532,7 +1532,7 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatalf("expected an error from mustHave: %v", err)
 	}
 
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1650,7 +1650,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := s.TxIndexIsLinear(ctx, b3.Hash())
+	direction, err := s.TxIndexIsLinear(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("expected success g -> b3, got %v", err)
 	}
@@ -1659,7 +1659,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// Index to b2
-	err = s.SyncIndexersToHash(ctx, b2.Hash())
+	err = s.SyncIndexersToHash(ctx, *b2.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1676,7 +1676,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// Index to b3
-	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1754,7 +1754,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	_ = si
 
 	// unwind back to b3 (removes b3 and b2)
-	err = s.SyncIndexersToHash(ctx, b2.Hash())
+	err = s.SyncIndexersToHash(ctx, *b2.Hash())
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -1774,7 +1774,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
 	}
 
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1919,7 +1919,7 @@ func TestIndexFork(t *testing.T) {
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := s.TxIndexIsLinear(ctx, b3.Hash())
+	direction, err := s.TxIndexIsLinear(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("expected success g -> b3, got %v", err)
 	}
@@ -1928,7 +1928,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// Index to b3
-	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1956,7 +1956,7 @@ func TestIndexFork(t *testing.T) {
 	t.Logf("b3: %v", b3)
 
 	// b3 -> genesis should work with postive direction (cdiff is greater than target)
-	direction, err = s.TxIndexIsLinear(ctx, s.chainParams.GenesisHash)
+	direction, err = s.TxIndexIsLinear(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
 	}
@@ -1965,7 +1965,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// b3 -> b1 should work with positive direction
-	direction, err = s.TxIndexIsLinear(ctx, b1.Hash())
+	direction, err = s.TxIndexIsLinear(ctx, *b1.Hash())
 	if err != nil {
 		t.Fatalf("expected success b3 -> b1, got %v", err)
 	}
@@ -1974,25 +1974,25 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// b3 -> b2a should fail
-	_, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	_, err = s.TxIndexIsLinear(ctx, *b2a.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2a is not linear to b3: %v", err)
 	}
 
 	// b3 -> b2b should fail
-	_, err = s.TxIndexIsLinear(ctx, b2b.Hash())
+	_, err = s.TxIndexIsLinear(ctx, *b2b.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
 
 	// make sure syncing to iself is non linear
-	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("at b3, should have returned nil, got %v", err)
 	}
 
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -2027,7 +2027,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// see if we can move to b2a
-	direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	direction, err = s.TxIndexIsLinear(ctx, *b2a.Hash())
 	if err != nil {
 		t.Fatalf("expected success genesis -> b2a, got %v", err)
 	}
@@ -2035,7 +2035,7 @@ func TestIndexFork(t *testing.T) {
 		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
 	}
 
-	err = s.SyncIndexersToHash(ctx, b2a.Hash())
+	err = s.SyncIndexersToHash(ctx, *b2a.Hash())
 	if err != nil {
 		t.Fatalf("wind to b2a: %v", err)
 	}
@@ -2054,7 +2054,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -2086,7 +2086,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	t.Logf("---------------------------------------- going to b2b")
-	err = s.SyncIndexersToHash(ctx, b2b.Hash())
+	err = s.SyncIndexersToHash(ctx, *b2b.Hash())
 	if err != nil {
 		t.Fatalf("wind to b2b: %v", err)
 	}
@@ -2106,7 +2106,7 @@ func TestIndexFork(t *testing.T) {
 
 	// t.Logf("---------------------------------------- going to b3")
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("xxxx %v", err)
 	}
@@ -2245,7 +2245,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := s.TxIndexIsLinear(ctx, b3.Hash())
+	direction, err := s.TxIndexIsLinear(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("expected success g -> b3, got %v", err)
 	}
@@ -2254,7 +2254,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// Index to b2
-	err = s.SyncIndexersToHash(ctx, b2.Hash())
+	err = s.SyncIndexersToHash(ctx, *b2.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2271,7 +2271,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// Index to b3
-	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2319,7 +2319,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	t.Logf("b3: %v", b3)
 
 	// b3 -> genesis should work with postive direction (cdiff is greater than target)
-	direction, err = s.TxIndexIsLinear(ctx, s.chainParams.GenesisHash)
+	direction, err = s.TxIndexIsLinear(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
 	}
@@ -2328,7 +2328,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// b3 -> b1 should work with positive direction
-	direction, err = s.TxIndexIsLinear(ctx, b1.Hash())
+	direction, err = s.TxIndexIsLinear(ctx, *b1.Hash())
 	if err != nil {
 		t.Fatalf("expected success b3 -> b1, got %v", err)
 	}
@@ -2337,25 +2337,25 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// b3 -> b2a should fail
-	_, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	_, err = s.TxIndexIsLinear(ctx, *b2a.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2a is not linear to b3: %v", err)
 	}
 
 	// b3 -> b2b should fail
-	_, err = s.TxIndexIsLinear(ctx, b2b.Hash())
+	_, err = s.TxIndexIsLinear(ctx, *b2b.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
 
 	// make sure syncing to iself is non linear
-	err = s.SyncIndexersToHash(ctx, b3.Hash())
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("at b3, should have returned nil, got %v", err)
 	}
 
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -2390,7 +2390,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// see if we can move to b2a
-	direction, err = s.TxIndexIsLinear(ctx, b2a.Hash())
+	direction, err = s.TxIndexIsLinear(ctx, *b2a.Hash())
 	if err != nil {
 		t.Fatalf("expected success genesis -> b2a, got %v", err)
 	}
@@ -2398,7 +2398,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
 	}
 
-	err = s.SyncIndexersToHash(ctx, b2a.Hash())
+	err = s.SyncIndexersToHash(ctx, *b2a.Hash())
 	if err != nil {
 		t.Fatalf("wind to b2a: %v", err)
 	}
@@ -2427,7 +2427,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -2459,7 +2459,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	t.Logf("---------------------------------------- going to b2b")
-	err = s.SyncIndexersToHash(ctx, b2b.Hash())
+	err = s.SyncIndexersToHash(ctx, *b2b.Hash())
 	if err != nil {
 		t.Fatalf("wind to b2b: %v", err)
 	}
@@ -2489,7 +2489,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 
 	// t.Logf("---------------------------------------- going to b3")
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("xxxx %v", err)
 	}

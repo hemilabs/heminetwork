@@ -239,7 +239,7 @@ func tbcdb(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		bh, height, err := s.BlockHeaderByHash(ctx, ch)
+		bh, height, err := s.BlockHeaderByHash(ctx, *ch)
 		if err != nil {
 			return fmt.Errorf("block header by hash: %w", err)
 		}
@@ -364,7 +364,7 @@ func tbcdb(pctx context.Context) error {
 			}
 			cfg.MaxCachedTxs = int(mc)
 		}
-		err = s.UtxoIndexer(ctx, eh)
+		err = s.UtxoIndexer(ctx, *eh)
 		if err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
@@ -387,7 +387,7 @@ func tbcdb(pctx context.Context) error {
 			}
 			cfg.MaxCachedTxs = int(mc)
 		}
-		if err = s.TxIndexer(ctx, eh); err != nil {
+		if err = s.TxIndexer(ctx, *eh); err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
 

@@ -457,7 +457,7 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	return nil
 }
 
-func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
@@ -484,7 +484,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 
 	// Insert into cache, roughly 150 byte cost.
 	if l.cfg.blockheaderCacheSize > 0 {
-		l.headerCache.Put(bh)
+		l.headerCache.Put(*bh)
 	}
 
 	return bh, nil
@@ -509,7 +509,7 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 			// all done
 			break
 		}
-		bh, err := l.BlockHeaderByHash(ctx, hash)
+		bh, err := l.BlockHeaderByHash(ctx, *hash)
 		if err != nil {
 			return nil, fmt.Errorf("headers by height: %w", err)
 		}
@@ -858,7 +858,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		}
 
 		// Get full header that has height in it for the block to remove we are checking
-		fullHeader, err := l.BlockHeaderByHash(ctx, &hash)
+		fullHeader, err := l.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, nil,
 				fmt.Errorf("block headers remove: cannot find header with hash %s in database, err: %w",
@@ -923,7 +923,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 	// Ensure that the tip which the caller claims should be canonical after the
 	// removal is a valid block in the database.
-	tipAfterRemovalFromDb, err := l.BlockHeaderByHash(ctx, &tipAfterRemovalHash)
+	tipAfterRemovalFromDb, err := l.BlockHeaderByHash(ctx, tipAfterRemovalHash)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: cannot find tip after removal header with hash %s "+
@@ -1005,7 +1005,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 	// Get parent block from database
 	// XXX verify l. here instead of using the bh transaction to get the hash
-	parentToRemovalSet, err := l.BlockHeaderByHash(ctx, &headersParsed[0].PrevBlock)
+	parentToRemovalSet, err := l.BlockHeaderByHash(ctx, headersParsed[0].PrevBlock)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: cannot find previous header (with hash %s) to lowest header"+
@@ -1150,7 +1150,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 
 	// Obtain current and previous blockheader.
 	wbh := bhs.Headers[0]
-	pbh, err := l.BlockHeaderByHash(ctx, &wbh.PrevBlock)
+	pbh, err := l.BlockHeaderByHash(ctx, wbh.PrevBlock)
 	if err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers insert: %w", err)
@@ -1398,7 +1398,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	log.Tracef("BlockInsert")
 	defer log.Tracef("BlockInsert exit")
 
-	bh, err := l.BlockHeaderByHash(ctx, b.Hash())
+	bh, err := l.BlockHeaderByHash(ctx, *b.Hash())
 	if err != nil {
 		return -1, fmt.Errorf("block header by hash: %w", err)
 	}
@@ -1968,7 +1968,7 @@ func (l *ldb) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader
 	if err != nil {
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
-	return l.BlockHeaderByHash(ctx, ch)
+	return l.BlockHeaderByHash(ctx, *ch)
 }
 
 func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -1990,7 +1990,7 @@ func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, er
 	if err != nil {
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
-	return l.BlockHeaderByHash(ctx, ch)
+	return l.BlockHeaderByHash(ctx, *ch)
 }
 
 func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -2012,7 +2012,7 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 	if err != nil {
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
-	return l.BlockHeaderByHash(ctx, ch)
+	return l.BlockHeaderByHash(ctx, *ch)
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {

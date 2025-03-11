@@ -1659,7 +1659,7 @@ func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
 
 	hash := bh.BlockHash()
 
-	if err := tbcServer.SyncIndexersToHash(ctx, &hash); err != nil {
+	if err := tbcServer.SyncIndexersToHash(ctx, hash); err != nil {
 		t.Fatal(err)
 	}
 }

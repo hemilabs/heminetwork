@@ -117,7 +117,7 @@ func TestMapCache(t *testing.T) {
 		h, bh := newHeader(&prevHash, uint32(i))
 		t.Logf("%v: %v", i, h)
 		headers = append(headers, h)
-		l.Put(bh)
+		l.Put(*bh)
 		prevHash = h
 	}
 
@@ -129,7 +129,7 @@ func TestMapCache(t *testing.T) {
 
 	// retrieve all headers
 	for k := range headers {
-		if _, ok := l.Get(&headers[k]); !ok {
+		if _, ok := l.Get(headers[k]); !ok {
 			t.Fatalf("header not found: %v", headers[k])
 		}
 	}
@@ -145,7 +145,7 @@ func TestMapCache(t *testing.T) {
 		h, bh := newHeader(&prevHash, uint32(i))
 		t.Logf("%v: %v", i, h)
 		headers = append(headers, h)
-		l.Put(bh)
+		l.Put(*bh)
 		prevHash = h
 	}
 
@@ -157,7 +157,7 @@ func TestMapCache(t *testing.T) {
 
 	// Force a random miss
 	hm, _ := newHeader(&chainhash.Hash{}, 0xdeadbeef)
-	_, ok := l.Get(&hm)
+	_, ok := l.Get(hm)
 	if ok {
 		t.Fatal("non cached header found")
 	}
@@ -191,24 +191,20 @@ func TestHC(t *testing.T) {
 	}
 	hs := intHash(0)
 	for range 2 {
-		l.Put(&tbcd.BlockHeader{
-			Hash: hs,
-		})
+		l.Put(tbcd.BlockHeader{Hash: hs})
 	}
 	if len(l.m) > 1 {
 		t.Fatalf("duplicate headers not excluded by hash")
 	}
-	if _, ok := l.Get(&hs); !ok {
+	if _, ok := l.Get(hs); !ok {
 		t.Fatalf("failed to retrieve header present in map")
 	}
 	hs = intHash(1)
-	if _, ok := l.Get(&hs); ok {
+	if _, ok := l.Get(hs); ok {
 		t.Fatalf("invalid header retrieved from Map")
 	}
 	for k := range l.count + 5 {
-		l.Put(&tbcd.BlockHeader{
-			Hash: intHash(k),
-		})
+		l.Put(tbcd.BlockHeader{Hash: intHash(k)})
 	}
 	if len(l.m) > l.count {
 		t.Fatalf("map size exceeded bounds. expected %v, got %v", l.count, len(l.m))
@@ -227,7 +223,7 @@ func TestHC(t *testing.T) {
 	if len(l.m) != 1 {
 		t.Fatalf("expected %d elements to be purged, purged %d", len(storedHashes), l.count-len(l.m))
 	}
-	if _, ok := l.Get(lastHash); !ok {
+	if _, ok := l.Get(*lastHash); !ok {
 		t.Fatalf("incorrect element purged")
 	}
 }

@@ -2074,7 +2074,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		}
 
 		_, _, hash, err := getHeaderHashIndex(i-1, simpleChainHeaders[:], simpleChainHashes[:])
-		header, height, err := tbc.BlockHeaderByHash(ctx, hash)
+		header, height, err := tbc.BlockHeaderByHash(ctx, *hash)
 		if err == nil {
 			t.Errorf("getting header by hash %x should have returned an error but did not", hash[:])
 		}
