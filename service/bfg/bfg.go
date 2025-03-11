@@ -634,9 +634,6 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			height, index)
 		log.Tracef("validating bitcoin tx")
 
-		if index > math.MaxUint32 {
-			return fmt.Errorf("index exceeds uint32 max size conversion: %v", index)
-		}
 		err = bitcoin.ValidateMerkleRoot(txHashEncoded, merkleHashes,
 			uint32(index), merkleRootEncoded)
 		if err != nil {

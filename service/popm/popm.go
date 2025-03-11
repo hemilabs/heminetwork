@@ -13,7 +13,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"net/http"
 	"slices"
@@ -300,10 +299,6 @@ func pickUTXO(utxos []*bfgapi.BitcoinUTXO, amount int64) (*bfgapi.BitcoinUTXO, e
 }
 
 func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.BitcoinUTXO, payToScript []byte, feeAmount int64, minRelayTxFee int64) (*btcwire.MsgTx, error) {
-	if btcHeight > math.MaxUint32 {
-		return nil, fmt.Errorf("invalid btcHeight uint32 %v", btcHeight)
-	}
-
 	btx := btcwire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
