@@ -2090,30 +2090,18 @@ func (s *Server) DatabaseMetadataPut(ctx context.Context, key []byte, value []by
 }
 
 func (s *Server) DatabaseMetadataGet(ctx context.Context, key []byte) ([]byte, error) {
-	if !s.cfg.DatabaseDebug {
-		return nil, ErrNotInDebugMode
-	}
 	return s.db.MetadataGet(ctx, key)
 }
 
 func (s *Server) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
-	if !s.cfg.DatabaseDebug {
-		return nil, ErrNotInDebugMode
-	}
 	return s.db.BlockHeaderByUtxoIndex(ctx)
 }
 
 func (s *Server) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
-	if !s.cfg.DatabaseDebug {
-		return nil, ErrNotInDebugMode
-	}
 	return s.db.BlockHeaderByTxIndex(ctx)
 }
 
 func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
-	if !s.cfg.DatabaseDebug {
-		return nil, ErrNotInDebugMode
-	}
 	return s.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
