@@ -49,7 +49,7 @@ func TestLRUCache(t *testing.T) {
 
 	// retrieve all blocks
 	for k := range blocks {
-		if _, ok := l.Get(&blocks[k]); !ok {
+		if _, ok := l.Get(blocks[k]); !ok {
 			t.Fatalf("block not found: %v", blocks[k])
 		}
 	}
@@ -80,7 +80,7 @@ func TestLRUCache(t *testing.T) {
 		if k >= maxCache {
 			break
 		}
-		if _, ok := l.Get(&blocks[k]); ok {
+		if _, ok := l.Get(blocks[k]); ok {
 			t.Fatalf("block found: %v", blocks[k])
 		}
 	}

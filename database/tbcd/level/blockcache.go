@@ -68,11 +68,11 @@ func (l *lowIQLRU) Put(hash chainhash.Hash, block []byte) {
 	l.c.Size = l.totalSize
 }
 
-func (l *lowIQLRU) Get(k *chainhash.Hash) ([]byte, bool) {
+func (l *lowIQLRU) Get(k chainhash.Hash) ([]byte, bool) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	be, ok := l.m[*k]
+	be, ok := l.m[k]
 	if !ok {
 		l.c.Misses++
 		return nil, false

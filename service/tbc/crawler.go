@@ -364,7 +364,7 @@ func (s *Server) headerAndBlock(ctx context.Context, hash *chainhash.Hash) (*tbc
 	if err != nil {
 		return nil, nil, fmt.Errorf("block header %v: %w", hash, err)
 	}
-	b, err := s.db.BlockByHash(ctx, &bh.Hash)
+	b, err := s.db.BlockByHash(ctx, bh.Hash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("block by hash %v: %w", bh, err)
 	}
@@ -424,7 +424,7 @@ func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire
 	if err != nil {
 		return nil, fmt.Errorf("block by txid: %w", err)
 	}
-	b, err := s.db.BlockByHash(ctx, blockHash)
+	b, err := s.db.BlockByHash(ctx, *blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("block by hash: %w", err)
 	}
@@ -703,7 +703,7 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, &bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -1049,7 +1049,7 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, &bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
@@ -1411,7 +1411,7 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 		}
 
 		// Index block
-		b, err := s.db.BlockByHash(ctx, &bh.Hash)
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
 		if err != nil {
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}

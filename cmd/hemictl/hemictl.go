@@ -296,7 +296,7 @@ func tbcdb(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		b, err := s.BlockByHash(ctx, ch)
+		b, err := s.BlockByHash(ctx, *ch)
 		if err != nil {
 			return fmt.Errorf("block by hash: %w", err)
 		}

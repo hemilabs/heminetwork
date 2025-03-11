@@ -1450,7 +1450,7 @@ func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash *chainh
 	return nil
 }
 
-func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
+func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
@@ -1470,12 +1470,12 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 		eb, err = bDB.Get(hash[:])
 		if err != nil {
 			if errors.Is(err, leveldb.ErrNotFound) {
-				return nil, database.BlockNotFoundError{Hash: *hash}
+				return nil, database.BlockNotFoundError{Hash: hash}
 			}
 			return nil, fmt.Errorf("block get: %w", err)
 		}
 		if l.cfg.blockCacheSize > 0 {
-			l.blockCache.Put(*hash, eb)
+			l.blockCache.Put(hash, eb)
 		}
 	}
 	// if we get here eb MUST exist
@@ -1484,6 +1484,28 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))
 	}
 	return b, nil
+}
+
+func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool, error) {
+	log.Tracef("BlockExistsByHash")
+	defer log.Tracef("BlockExistsByHash exit")
+
+	if l.cfg.blockCacheSize > 0 {
+		// Try cache first
+		if _, ok := l.blockCache.Get(hash); ok {
+			return true, nil
+		}
+	}
+
+	bDB := l.rawPool[level.BlocksDB]
+	ok, err := bDB.Has(hash[:])
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("block exists: %w", err)
+	}
+	return ok, nil
 }
 
 func (l *ldb) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {

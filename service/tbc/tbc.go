@@ -891,7 +891,7 @@ func (s *Server) handlePong(ctx context.Context, p *rawpeer.RawPeer, pong *wire.
 	return nil
 }
 
-func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch *chainhash.Hash) error {
+func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch chainhash.Hash) error {
 	log.Tracef("downloadBlock")
 	defer log.Tracef("downloadBlock exit")
 
@@ -899,7 +899,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch *chai
 	getData.InvList = append(getData.InvList,
 		&wire.InvVect{
 			Type: wire.InvTypeBlock,
-			Hash: *ch,
+			Hash: ch,
 		})
 
 	s.mtx.Lock()
@@ -915,7 +915,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch *chai
 	return err
 }
 
-func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block *chainhash.Hash) error {
+func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block chainhash.Hash) error {
 	log.Tracef("downloadBlockFromRandomPeer")
 	defer log.Tracef("downloadBlockFromRandomPeer exit")
 
@@ -932,7 +932,7 @@ func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block *chainha
 	return nil
 }
 
-func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block *chainhash.Hash, count uint) (*btcutil.Block, error) {
+func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block chainhash.Hash, count uint) (*btcutil.Block, error) {
 	log.Tracef("DownloadBlockFromRandomPeers %v %v", count, block)
 	defer log.Tracef("DownloadBlockFromRandomPeers %v %v exit", count, block)
 
@@ -1111,7 +1111,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 
 			case errors.As(err, &eval):
 				block = eval.Hash
-				err := s.downloadBlockFromRandomPeer(ctx, &block)
+				err := s.downloadBlockFromRandomPeer(ctx, block)
 				if err != nil {
 					log.Errorf("download block random peer: %v", err)
 				} else {
@@ -1170,7 +1170,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			// Already being downloaded.
 			continue
 		}
-		if err := s.downloadBlockFromRandomPeer(ctx, hash); err != nil {
+		if err := s.downloadBlockFromRandomPeer(ctx, *hash); err != nil {
 			// This can happen during startup or when the network
 			// is starved.
 			// XXX: Probably too loud, remove later.
@@ -1698,7 +1698,7 @@ func (s *Server) insertGenesis(ctx context.Context, height uint64, diff *big.Int
 }
 
 // BlockByHash returns a block with the given hash.
-func (s *Server) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
+func (s *Server) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
@@ -1984,7 +1984,7 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	if err != nil {
 		return nil, err
 	}
-	block, err := s.db.BlockByHash(ctx, blockHash)
+	block, err := s.db.BlockByHash(ctx, *blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -2125,7 +2125,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 			panic("fees at height: unsupported fork")
 			// return 0, fmt.Errorf("too many block headers: %v", len(bhs))
 		}
-		b, err := s.db.BlockByHash(ctx, &bhs[0].Hash)
+		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
 			return 0, fmt.Errorf("block by hash: %w", err)
 		}
@@ -2142,26 +2142,12 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 
 // FullBlockAvailable returns whether TBC has the full block
 // corresponding to the specified hash available in its database.
-func (s *Server) FullBlockAvailable(ctx context.Context, hash *chainhash.Hash) (bool, error) {
+func (s *Server) FullBlockAvailable(ctx context.Context, hash chainhash.Hash) (bool, error) {
 	if s.cfg.ExternalHeaderMode {
 		return false, errors.New("cannot call full block available on TBC running in External Header mode")
 	}
 
-	block, err := s.db.BlockByHash(ctx, hash)
-	if err != nil {
-		if errors.Is(err, database.ErrBlockNotFound) {
-			return false, nil // Not found, but not an error to pass upstream
-		} else {
-			return false, err // Another error was encountered which upstream should know about
-		}
-	}
-
-	if block != nil {
-		// Were able to get full block from database
-		return true, nil
-	} else {
-		return false, errors.New("fetching block did not return error but block is nil")
-	}
+	return s.db.BlockExistsByHash(ctx, hash)
 }
 
 // UpstreamStateId fetches the last-stored upstream state ID.  If the last

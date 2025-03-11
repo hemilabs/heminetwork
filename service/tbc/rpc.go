@@ -272,7 +272,7 @@ func (s *Server) handleBlockByHashRequest(ctx context.Context, req *tbcapi.Block
 	log.Tracef("handleBlockByHashRequest")
 	defer log.Tracef("handleBlockByHashRequest exit")
 
-	block, err := s.BlockByHash(ctx, req.Hash)
+	block, err := s.BlockByHash(ctx, *req.Hash)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockByHashResponse{
@@ -295,7 +295,7 @@ func (s *Server) handleBlockByHashRawRequest(ctx context.Context, req *tbcapi.Bl
 	log.Tracef("handleBlockByHashRawRequest")
 	defer log.Tracef("handleBlockByHashRawRequest exit")
 
-	block, err := s.BlockByHash(ctx, req.Hash)
+	block, err := s.BlockByHash(ctx, *req.Hash)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockByHashRawResponse{
@@ -683,7 +683,7 @@ func (s *Server) handleBlockDownloadAsyncRequest(ctx context.Context, req *tbcap
 		}, nil
 	}
 
-	blk, err := s.DownloadBlockFromRandomPeers(ctx, req.Hash, req.Peers)
+	blk, err := s.DownloadBlockFromRandomPeers(ctx, *req.Hash, req.Peers)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
@@ -711,7 +711,7 @@ func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tb
 		}, nil
 	}
 
-	blk, err := s.DownloadBlockFromRandomPeers(ctx, req.Hash, req.Peers)
+	blk, err := s.DownloadBlockFromRandomPeers(ctx, *req.Hash, req.Peers)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
