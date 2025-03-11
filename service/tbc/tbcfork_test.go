@@ -978,6 +978,8 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 		return nil, err
 	}
 
+	time.Sleep(100 * time.Millisecond)
+
 	return blk, nil
 }
 
@@ -2240,7 +2242,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(2000 * time.Millisecond)
+	// time.Sleep(2000 * time.Millisecond)
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
