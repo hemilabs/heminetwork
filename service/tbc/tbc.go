@@ -993,7 +993,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if !canonical {
 		log.Infof("Deleting from blocks missing database: %v %v %v",
 			p, bhX.Height, bhX)
-		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), &bhX.Hash)
+		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
 		if err != nil {
 			return fmt.Errorf("block expired delete missing: %w", err)
 		}
@@ -1932,7 +1932,7 @@ func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId *chainhash
 	return false, nil
 }
 
-func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
+func (s *Server) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputsByTxId")
 	defer log.Tracef("SpentOutputsByTxId exit")
 
@@ -1949,7 +1949,7 @@ func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	return si, nil
 }
 
-func (s *Server) BlockInTxIndex(ctx context.Context, blkid *chainhash.Hash) (bool, error) {
+func (s *Server) BlockInTxIndex(ctx context.Context, blkid chainhash.Hash) (bool, error) {
 	log.Tracef("BlockInTxIndex")
 	defer log.Tracef("BlockInTxIndex exit")
 
@@ -1961,7 +1961,7 @@ func (s *Server) BlockInTxIndex(ctx context.Context, blkid *chainhash.Hash) (boo
 	return s.db.BlockInTxIndex(ctx, blkid)
 }
 
-func (s *Server) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+func (s *Server) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error) {
 	log.Tracef("BlockHashByTxId")
 	defer log.Tracef("BlockHashByTxId exit")
 
@@ -1972,7 +1972,7 @@ func (s *Server) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*ch
 	return s.db.BlockHashByTxId(ctx, txId)
 }
 
-func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
+func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, error) {
 	log.Tracef("TxById")
 	defer log.Tracef("TxById exit")
 
@@ -1989,7 +1989,7 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 		return nil, err
 	}
 	for _, tx := range block.Transactions() {
-		if tx.Hash().IsEqual(txId) {
+		if tx.Hash().IsEqual(&txId) {
 			return tx.MsgTx(), nil
 		}
 	}

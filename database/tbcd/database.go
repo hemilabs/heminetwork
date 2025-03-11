@@ -106,7 +106,7 @@ type Database interface {
 
 	// Block
 	BlocksMissing(ctx context.Context, count int) ([]BlockIdentifier, error)
-	BlockMissingDelete(ctx context.Context, height int64, hash *chainhash.Hash) error
+	BlockMissingDelete(ctx context.Context, height int64, hash chainhash.Hash) error
 	BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error)
 	// BlocksInsert(ctx context.Context, bs []*btcutil.Block) (int64, error)
 	BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Block, error)
@@ -118,11 +118,11 @@ type Database interface {
 	BlockHeaderByTxIndex(ctx context.Context) (*BlockHeader, error)
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput, utxoIndexHash chainhash.Hash) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue, txIndexHash chainhash.Hash) error
-	BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error)
-	SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]SpentInfo, error)
+	BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error)
+	SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]SpentInfo, error)
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
-	BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error)
+	BlockInTxIndex(ctx context.Context, hash chainhash.Hash) (bool, error)
 	ScriptHashByOutpoint(ctx context.Context, op Outpoint) (*ScriptHash, error)
 	ScriptHashesByOutpoint(ctx context.Context, ops []*Outpoint, result func(Outpoint, ScriptHash) error) error
 	UtxosByScriptHash(ctx context.Context, sh ScriptHash, start uint64, count uint64) ([]Utxo, error)

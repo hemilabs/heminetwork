@@ -493,7 +493,7 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	log.Tracef("handleTxByIdRawRequest")
 	defer log.Tracef("handleTxByIdRawRequest exit")
 
-	tx, err := s.TxById(ctx, req.TxID)
+	tx, err := s.TxById(ctx, *req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
@@ -525,7 +525,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	log.Tracef("handleTxByIdRequest")
 	defer log.Tracef("handleTxByIdRequest exit")
 
-	tx, err := s.TxById(ctx, req.TxID)
+	tx, err := s.TxById(ctx, *req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)

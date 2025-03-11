@@ -420,7 +420,7 @@ func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire
 	txIndex := op.TxIndex()
 
 	// Find block hashes
-	blockHash, err := s.db.BlockHashByTxId(ctx, txId)
+	blockHash, err := s.db.BlockHashByTxId(ctx, *txId)
 	if err != nil {
 		return nil, fmt.Errorf("block by txid: %w", err)
 	}

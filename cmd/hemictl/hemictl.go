@@ -401,7 +401,7 @@ func tbcdb(pctx context.Context) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		bh, err := s.BlockHashByTxId(ctx, chtxid)
+		bh, err := s.BlockHashByTxId(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
@@ -417,7 +417,7 @@ func tbcdb(pctx context.Context) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		tx, err := s.TxById(ctx, chtxid)
+		tx, err := s.TxById(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("block by txid: %w", err)
 		}
@@ -433,7 +433,7 @@ func tbcdb(pctx context.Context) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		si, err := s.SpentOutputsByTxId(ctx, chtxid)
+		si, err := s.SpentOutputsByTxId(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("spend outputs by txid: %w", err)
 		}
@@ -452,7 +452,7 @@ func tbcdb(pctx context.Context) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		si, err := s.SpentOutputsByTxId(ctx, chtxid)
+		si, err := s.SpentOutputsByTxId(ctx, *chtxid)
 		if err != nil {
 			return fmt.Errorf("spend outputs by txid: %w", err)
 		}
@@ -469,7 +469,7 @@ func tbcdb(pctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		ok, err := s.BlockInTxIndex(ctx, blkhash)
+		ok, err := s.BlockInTxIndex(ctx, *blkhash)
 		if err != nil {
 			return fmt.Errorf("block in transaction index: %w", err)
 		}

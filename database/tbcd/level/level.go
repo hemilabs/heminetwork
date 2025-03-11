@@ -1435,7 +1435,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	return int64(bh.Height), nil
 }
 
-func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash *chainhash.Hash) error {
+func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash chainhash.Hash) error {
 	log.Tracef("BlockMissingDelete")
 	defer log.Tracef("BlockMissingDelete exit")
 
@@ -1508,7 +1508,7 @@ func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool,
 	return ok, nil
 }
 
-func (l *ldb) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+func (l *ldb) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error) {
 	log.Tracef("BlockHashByTxId")
 	defer log.Tracef("BlockHashByTxId exit")
 
@@ -1540,7 +1540,7 @@ func (l *ldb) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chain
 	}
 }
 
-func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
+func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputByOutpoint")
 	defer log.Tracef("SpentOutputByOutpoint exit")
 
@@ -1580,7 +1580,7 @@ func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]t
 	return si, nil
 }
 
-func (l *ldb) BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error) {
+func (l *ldb) BlockInTxIndex(ctx context.Context, hash chainhash.Hash) (bool, error) {
 	log.Tracef("BlockInTxIndex")
 	defer log.Tracef("BlockInTxIndex exit")
 
