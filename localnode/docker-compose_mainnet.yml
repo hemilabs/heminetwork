@@ -218,7 +218,7 @@ services:
 
   # Hemi op-node
  op-node:
-   image: "ghcr.io/hemilabs/op-node:3a56733@sha256:99f692bd734f8fac8f6f2a531641cfdab11220c2aefa31a25525d916c96668c1"
+   image: "ghcr.io/hemilabs/op-node:84b895e@sha256:df29c59680c33cdda616f67662c9e75bdeea60f79d91937ee0b60bf0d0f48243"
    depends_on:
      geth-l1:
        condition: "service_started"
