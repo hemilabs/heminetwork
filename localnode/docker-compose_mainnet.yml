@@ -152,7 +152,7 @@ services:
 
   # Hemi L2 node
   op-geth-l2:
-    image: "ghcr.io/hemilabs/op-geth:5e559a1@sha256:f1e8266fa21a5d56720fc8b443b630b93cb97f53299fd2f6aac350d79eaefbcb"
+    image: "ghcr.io/hemilabs/op-geth:e525f27@sha256:f48c03532810ec4d9d08be8afa19822c9adcdd2d8dd559467a0d2b34965d5a6d"
     # XXX does geth need to be fully synced
     depends_on:
       geth-l1:
