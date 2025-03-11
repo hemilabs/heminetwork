@@ -1683,7 +1683,7 @@ func (s *Server) insertGenesis(ctx context.Context, height uint64, diff *big.Int
 	// We really should be inserting the block first but block insert
 	// verifies that a block header exists.
 	log.Infof("Inserting genesis block and header: %v", s.chainParams.GenesisHash)
-	err := s.db.BlockHeaderGenesisInsert(ctx, &s.chainParams.GenesisBlock.Header, height, diff)
+	err := s.db.BlockHeaderGenesisInsert(ctx, s.chainParams.GenesisBlock.Header, height, diff)
 	if err != nil {
 		return fmt.Errorf("genesis block header insert: %w", err)
 	}
@@ -2699,7 +2699,7 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 
 		// Getting best header returned ErrNotFound so assume initial
 		// startup
-		err = s.db.BlockHeaderGenesisInsert(ctx, genesis, genesisHeight,
+		err = s.db.BlockHeaderGenesisInsert(ctx, *genesis, genesisHeight,
 			genesisDiff)
 		if err != nil {
 			return fmt.Errorf("genesis block header insert: %w", err)

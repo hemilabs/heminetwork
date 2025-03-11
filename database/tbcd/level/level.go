@@ -586,7 +586,7 @@ func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	return bh
 }
 
-func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader, height uint64, diff *big.Int) error {
+func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader, height uint64, diff *big.Int) error {
 	log.Tracef("BlockHeaderGenesisInsert")
 	defer log.Tracef("BlockHeaderGenesisInsert exit")
 
@@ -648,7 +648,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 	if diff != nil && diff.Cmp(big.NewInt(0)) > 0 {
 		cdiff = diff
 	}
-	ebh := encodeBlockHeader(height, h2b(wbh), cdiff)
+	ebh := encodeBlockHeader(height, h2b(&wbh), cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
