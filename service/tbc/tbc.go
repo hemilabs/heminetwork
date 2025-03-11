@@ -1909,7 +1909,7 @@ func (s *Server) UtxosByScriptHashCount(ctx context.Context, hash tbcd.ScriptHas
 // This function can return false for two reasons:
 //  1. The outpoint was already spent
 //  2. The outpoint never existed
-func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId *chainhash.Hash, index uint32) (bool, error) {
+func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId chainhash.Hash, index uint32) (bool, error) {
 	log.Tracef("ScriptHashAvailableToSpend")
 	defer log.Tracef("ScriptHashAvailableToSpend exit")
 	if s.cfg.ExternalHeaderMode {
@@ -2039,6 +2039,10 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 		return nil, errors.New("cannot call TxBroadcast on TBC running in External Header mode")
 	}
 
+	if tx == nil {
+		return nil, errors.New("tx: nil")
+	}
+
 	s.mtx.Lock()
 	if _, ok := s.broadcast[tx.TxHash()]; ok && !force {
 		s.mtx.Unlock()
@@ -2158,7 +2162,8 @@ func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 	defer log.Tracef("UpstreamStateId exit")
 
 	if !s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call UpstreamStateId on TBC not running in External Header mode")
+		return nil, errors.New("upstream state id: " +
+			"not running in external header mode")
 	}
 
 	usi, err := s.db.MetadataGet(ctx, upstreamStateIdKey)
@@ -2173,12 +2178,13 @@ func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 // SetUpstreamStateId sets a new upstream state ID without making any other
 // state changes to TBC, used when the upstream state is updated without
 // requiring any TBC updates.
-func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]byte) error {
+func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId [32]byte) error {
 	log.Tracef("SetUpstreamStateId")
 	defer log.Tracef("SetUpstreamStateId exit")
 
 	if !s.cfg.ExternalHeaderMode {
-		return errors.New("cannot call SetUpstreamStateId on TBC not running in External Header mode")
+		return errors.New("set upstream state id: " +
+			"not running in external header mode")
 	}
 
 	return s.db.MetadataPut(ctx, upstreamStateIdKey, upstreamStateId[:])

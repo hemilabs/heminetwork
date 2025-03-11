@@ -2029,7 +2029,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	}
 
 	updateStateWithoutModificationsId := [32]byte{0x4C, 0xA1, 0x62, 0xB6}
-	err = tbc.SetUpstreamStateId(ctx, &updateStateWithoutModificationsId)
+	err = tbc.SetUpstreamStateId(ctx, updateStateWithoutModificationsId)
 	if err != nil {
 		t.Errorf("unable to set upstream state id, err: %v", err)
 	}

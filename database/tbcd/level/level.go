@@ -1103,7 +1103,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
-	if len(bhs.Headers) == 0 {
+	if bhs == nil || len(bhs.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("block headers insert: invalid")
 	}
