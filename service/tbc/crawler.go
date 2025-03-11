@@ -788,7 +788,7 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockUtxoUpdate(ctx, -1, utxos, &last.Hash); err != nil {
+		if err = s.db.BlockUtxoUpdate(ctx, -1, utxos, last.Hash); err != nil {
 			return fmt.Errorf("block utxo update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -842,7 +842,7 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockUtxoUpdate(ctx, 1, utxos, &last.Hash); err != nil {
+		if err = s.db.BlockUtxoUpdate(ctx, 1, utxos, last.Hash); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 
@@ -1133,7 +1133,7 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockTxUpdate(ctx, -1, txs, &last.Hash); err != nil {
+		if err = s.db.BlockTxUpdate(ctx, -1, txs, last.Hash); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -1187,7 +1187,7 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockTxUpdate(ctx, 1, txs, &last.Hash); err != nil {
+		if err = s.db.BlockTxUpdate(ctx, 1, txs, last.Hash); err != nil {
 			return fmt.Errorf("block tx update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -1483,7 +1483,7 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockKeystoneUpdate(ctx, -1, kss, &last.Hash); err != nil {
+		if err = s.db.BlockKeystoneUpdate(ctx, -1, kss, last.Hash); err != nil {
 			return fmt.Errorf("block keystone update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -1537,7 +1537,7 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 
 		// Flush to disk
 		start = time.Now()
-		if err = s.db.BlockKeystoneUpdate(ctx, 1, kss, &last.Hash); err != nil {
+		if err = s.db.BlockKeystoneUpdate(ctx, 1, kss, last.Hash); err != nil {
 			return fmt.Errorf("block hemi update: %w", err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
