@@ -1503,7 +1503,7 @@ func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool,
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return false, nil
 		}
-		return false, fmt.Errorf("block exists: %w", err)
+		return false, fmt.Errorf("check block exists: %w", err)
 	}
 	return ok, nil
 }
