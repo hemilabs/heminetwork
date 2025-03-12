@@ -39,6 +39,7 @@ services:
     build:
       dockerfile: "./localnode/postgres.Dockerfile"
       context: "./.."
+    profiles: ["hemi", "full"]
     volumes:
       - psql_data:/var/lib/postgresql/data
     environment:
@@ -108,10 +109,10 @@ services:
       - "--electrum-rpc-addr"
       - "0.0.0.0:50001"
       - "--daemon-rpc-addr"
-      - "bitcoind:8332"
+      - "${BITCOINENDPOINT:-bitcoind:8332}"
       # NOTE: If you expose electrs ports, you may want to ensure that this is changed!
       - "--cookie"
-      - "user:password"
+      - "${BITCOINCREDS:-user:password}"
       - "-vvv"
       - "--timestamp"
       - "--utxos-limit"
@@ -178,7 +179,7 @@ services:
       - ./mainnet-l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
       - tbc_data:/tbcdata
     environment:
-      OP_GETH_L1_RPC: "http://geth-l1:8545"
+      OP_GETH_L1_RPC: "${GETHL1ENDPOINT:-http://geth-l1:8545}"
       OP_GETH_L2_READINESS_RPC: "http://localhost:18546"
     ports:
       - '18546:18546'
@@ -240,9 +241,9 @@ services:
       - "localnode"
     command:
       - "op-node"
-      - "--l1=http://geth-l1:8545"
+      - "--l1=${BITCOINENDPOINT:-http://geth-l1:8545}"
       - "--l1.rpckind=any"
-      - "--l1.beacon=http://prysm:3500"
+      - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
       - "--l2=ws://op-geth-l2:8551"
       - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
       - "--sequencer.enabled=false"
@@ -273,7 +274,7 @@ services:
     networks:
       - "localnode"
     command:
-      - "--execution-endpoint=http://geth-l1:8551"
+      - "--execution-endpoint=${GETHL1ENDPOINT:-http://geth-l1:8551}"
       - "--jwt-secret=/tmp/jwt/jwt.hex"
       - "--checkpoint-sync-url=https://beaconstate.info"
       - "--genesis-beacon-api-url=https://beaconstate.info"

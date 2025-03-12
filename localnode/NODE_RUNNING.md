@@ -134,10 +134,12 @@ To run just the L1 containers, start with this command:
 docker compose -f localnode/docker-compose_mainnet.yml --profile L1 up --build
 ```
 
-To run only the Hemi containers, run:
+To run only the Hemi containers, run set your endpoints in `endpoints.eng` and run:
 ```sh
-docker compose -f localnode/docker-compose_mainnet.yml --profile hemi up --build
+docker compose -f localnode/docker-compose_mainnet.yml --env-file endpoints.env --profile hemi up --build
 ```
+
+and similarly for testnet.
 
 ## Monitoring
 
