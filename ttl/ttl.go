@@ -87,7 +87,7 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 }
 
 // Put inserts the provided key and value into the TTL map. The ttl values
-// designates the duration of the validity of this key value-pair. The expired
+// designates the duration of the validity of this key-value pair. The expired
 // function is called when the duration expires and the remove callback is
 // called when the key is Canceled.
 func (tm *TTL) Put(pctx context.Context, ttl time.Duration, key any, val any, expired func(context.Context, any, any), remove func(context.Context, any, any)) {
