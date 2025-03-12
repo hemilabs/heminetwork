@@ -56,7 +56,7 @@ services:
   # Bitcoind Node
   bitcoind:
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
-    profiles: ["dep", "full"]
+    profiles: ["L1", "full"]
     volumes:
       - bitcoin_data:/bitcoin/.bitcoin
     ports:
@@ -94,7 +94,7 @@ services:
     build:
       context: ./..
       dockerfile: ./localnode/electrs.Dockerfile
-    profiles: ["hemi"]
+    profiles: ["hemi", "full"]
     volumes:
       - ./cookie:/tmp/.cookie
       - electrs_data:/data/electrs
@@ -127,7 +127,7 @@ services:
   # Ethereum L1 node
   geth-l1:
     image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
-    profiles: ["dep", "full"]
+    profiles: ["L1", "full"]
     volumes:
       - geth_data:/tmp/geth
       # change this token value if you expose this service's ports for
@@ -262,7 +262,7 @@ services:
   # Prysm
   prysm:
     image: "gcr.io/prysmaticlabs/prysm/beacon-chain@sha256:ea7d64346cd51cb0a6979779bdfd284a13aedb5642a795637935daacdfe1675d" # stable
-    profiles: ["dep", "full"]
+    profiles: ["L1", "full"]
     volumes:
       - prysm_data:/data
       # change this token value if you expose this service's ports for
