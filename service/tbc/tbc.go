@@ -891,7 +891,7 @@ func (s *Server) handlePong(ctx context.Context, p *rawpeer.RawPeer, pong *wire.
 	return nil
 }
 
-func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch *chainhash.Hash) error {
+func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch chainhash.Hash) error {
 	log.Tracef("downloadBlock")
 	defer log.Tracef("downloadBlock exit")
 
@@ -899,7 +899,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch *chai
 	getData.InvList = append(getData.InvList,
 		&wire.InvVect{
 			Type: wire.InvTypeBlock,
-			Hash: *ch,
+			Hash: ch,
 		})
 
 	s.mtx.Lock()
@@ -915,7 +915,7 @@ func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch *chai
 	return err
 }
 
-func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block *chainhash.Hash) error {
+func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block chainhash.Hash) error {
 	log.Tracef("downloadBlockFromRandomPeer")
 	defer log.Tracef("downloadBlockFromRandomPeer exit")
 
@@ -932,7 +932,7 @@ func (s *Server) downloadBlockFromRandomPeer(ctx context.Context, block *chainha
 	return nil
 }
 
-func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block *chainhash.Hash, count uint) (*btcutil.Block, error) {
+func (s *Server) DownloadBlockFromRandomPeers(ctx context.Context, block chainhash.Hash, count uint) (*btcutil.Block, error) {
 	log.Tracef("DownloadBlockFromRandomPeers %v %v", count, block)
 	defer log.Tracef("DownloadBlockFromRandomPeers %v %v exit", count, block)
 
@@ -982,7 +982,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("new hash: %w", err)
 	}
-	bhX, err := s.db.BlockHeaderByHash(ctx, hash)
+	bhX, err := s.db.BlockHeaderByHash(ctx, *hash)
 	if err != nil {
 		return fmt.Errorf("block header by hash: %w", err)
 	}
@@ -993,7 +993,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if !canonical {
 		log.Infof("Deleting from blocks missing database: %v %v %v",
 			p, bhX.Height, bhX)
-		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), &bhX.Hash)
+		err := s.db.BlockMissingDelete(ctx, int64(bhX.Height), bhX.Hash)
 		if err != nil {
 			return fmt.Errorf("block expired delete missing: %w", err)
 		}
@@ -1111,7 +1111,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 
 			case errors.As(err, &eval):
 				block = eval.Hash
-				err := s.downloadBlockFromRandomPeer(ctx, &block)
+				err := s.downloadBlockFromRandomPeer(ctx, block)
 				if err != nil {
 					log.Errorf("download block random peer: %v", err)
 				} else {
@@ -1133,7 +1133,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 				// Fixup ib array to not ask for block headers
 				// we already have.
 				ib = slices.DeleteFunc(ib, func(h *chainhash.Hash) bool {
-					_, _, err := s.BlockHeaderByHash(ctx, h)
+					_, _, err := s.BlockHeaderByHash(ctx, *h)
 					return err == nil
 				})
 
@@ -1170,7 +1170,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			// Already being downloaded.
 			continue
 		}
-		if err := s.downloadBlockFromRandomPeer(ctx, hash); err != nil {
+		if err := s.downloadBlockFromRandomPeer(ctx, *hash); err != nil {
 			// This can happen during startup or when the network
 			// is starved.
 			// XXX: Probably too loud, remove later.
@@ -1599,7 +1599,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 			// txsFound = true
 		case wire.InvTypeBlock:
 			// Make sure we haven't seen block header yet.
-			_, _, err := s.BlockHeaderByHash(ctx, &v.Hash)
+			_, _, err := s.BlockHeaderByHash(ctx, v.Hash)
 			if err == nil {
 				return nil
 			}
@@ -1683,7 +1683,7 @@ func (s *Server) insertGenesis(ctx context.Context, height uint64, diff *big.Int
 	// We really should be inserting the block first but block insert
 	// verifies that a block header exists.
 	log.Infof("Inserting genesis block and header: %v", s.chainParams.GenesisHash)
-	err := s.db.BlockHeaderGenesisInsert(ctx, &s.chainParams.GenesisBlock.Header, height, diff)
+	err := s.db.BlockHeaderGenesisInsert(ctx, s.chainParams.GenesisBlock.Header, height, diff)
 	if err != nil {
 		return fmt.Errorf("genesis block header insert: %w", err)
 	}
@@ -1698,7 +1698,7 @@ func (s *Server) insertGenesis(ctx context.Context, height uint64, diff *big.Int
 }
 
 // BlockByHash returns a block with the given hash.
-func (s *Server) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
+func (s *Server) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
@@ -1711,7 +1711,7 @@ func (s *Server) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcuti
 
 // XXX should we return a form of tbcd.BlockHeader which contains all info? and
 // note that the return parameters here are reversed from BlockHeaderBest call.
-func (s *Server) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*wire.BlockHeader, uint64, error) {
+func (s *Server) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*wire.BlockHeader, uint64, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
@@ -1786,7 +1786,7 @@ func (s *Server) RawBlockHeaderBest(ctx context.Context) (uint64, api.ByteSlice,
 	return bhb.Height, bhb.Header[:], nil
 }
 
-func (s *Server) DifficultyAtHash(ctx context.Context, hash *chainhash.Hash) (*big.Int, error) {
+func (s *Server) DifficultyAtHash(ctx context.Context, hash chainhash.Hash) (*big.Int, error) {
 	log.Tracef("DifficultyAtHash")
 	defer log.Tracef("DifficultyAtHash exit")
 
@@ -1909,7 +1909,7 @@ func (s *Server) UtxosByScriptHashCount(ctx context.Context, hash tbcd.ScriptHas
 // This function can return false for two reasons:
 //  1. The outpoint was already spent
 //  2. The outpoint never existed
-func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId *chainhash.Hash, index uint32) (bool, error) {
+func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId chainhash.Hash, index uint32) (bool, error) {
 	log.Tracef("ScriptHashAvailableToSpend")
 	defer log.Tracef("ScriptHashAvailableToSpend exit")
 	if s.cfg.ExternalHeaderMode {
@@ -1932,7 +1932,7 @@ func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId *chainhash
 	return false, nil
 }
 
-func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
+func (s *Server) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputsByTxId")
 	defer log.Tracef("SpentOutputsByTxId exit")
 
@@ -1949,7 +1949,7 @@ func (s *Server) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) (
 	return si, nil
 }
 
-func (s *Server) BlockInTxIndex(ctx context.Context, blkid *chainhash.Hash) (bool, error) {
+func (s *Server) BlockInTxIndex(ctx context.Context, blkid chainhash.Hash) (bool, error) {
 	log.Tracef("BlockInTxIndex")
 	defer log.Tracef("BlockInTxIndex exit")
 
@@ -1961,7 +1961,7 @@ func (s *Server) BlockInTxIndex(ctx context.Context, blkid *chainhash.Hash) (boo
 	return s.db.BlockInTxIndex(ctx, blkid)
 }
 
-func (s *Server) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+func (s *Server) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error) {
 	log.Tracef("BlockHashByTxId")
 	defer log.Tracef("BlockHashByTxId exit")
 
@@ -1972,7 +1972,7 @@ func (s *Server) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*ch
 	return s.db.BlockHashByTxId(ctx, txId)
 }
 
-func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx, error) {
+func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, error) {
 	log.Tracef("TxById")
 	defer log.Tracef("TxById exit")
 
@@ -1984,12 +1984,12 @@ func (s *Server) TxById(ctx context.Context, txId *chainhash.Hash) (*wire.MsgTx,
 	if err != nil {
 		return nil, err
 	}
-	block, err := s.db.BlockByHash(ctx, blockHash)
+	block, err := s.db.BlockByHash(ctx, *blockHash)
 	if err != nil {
 		return nil, err
 	}
 	for _, tx := range block.Transactions() {
-		if tx.Hash().IsEqual(txId) {
+		if tx.Hash().IsEqual(&txId) {
 			return tx.MsgTx(), nil
 		}
 	}
@@ -2037,6 +2037,10 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 
 	if s.cfg.ExternalHeaderMode {
 		return nil, errors.New("cannot call TxBroadcast on TBC running in External Header mode")
+	}
+
+	if tx == nil {
+		return nil, errors.New("tx: nil")
 	}
 
 	s.mtx.Lock()
@@ -2125,7 +2129,7 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 			panic("fees at height: unsupported fork")
 			// return 0, fmt.Errorf("too many block headers: %v", len(bhs))
 		}
-		b, err := s.db.BlockByHash(ctx, &bhs[0].Hash)
+		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
 		if err != nil {
 			return 0, fmt.Errorf("block by hash: %w", err)
 		}
@@ -2142,26 +2146,12 @@ func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64,
 
 // FullBlockAvailable returns whether TBC has the full block
 // corresponding to the specified hash available in its database.
-func (s *Server) FullBlockAvailable(ctx context.Context, hash *chainhash.Hash) (bool, error) {
+func (s *Server) FullBlockAvailable(ctx context.Context, hash chainhash.Hash) (bool, error) {
 	if s.cfg.ExternalHeaderMode {
 		return false, errors.New("cannot call full block available on TBC running in External Header mode")
 	}
 
-	block, err := s.db.BlockByHash(ctx, hash)
-	if err != nil {
-		if errors.Is(err, database.ErrBlockNotFound) {
-			return false, nil // Not found, but not an error to pass upstream
-		} else {
-			return false, err // Another error was encountered which upstream should know about
-		}
-	}
-
-	if block != nil {
-		// Were able to get full block from database
-		return true, nil
-	} else {
-		return false, errors.New("fetching block did not return error but block is nil")
-	}
+	return s.db.BlockExistsByHash(ctx, hash)
 }
 
 // UpstreamStateId fetches the last-stored upstream state ID.  If the last
@@ -2172,7 +2162,8 @@ func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 	defer log.Tracef("UpstreamStateId exit")
 
 	if !s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call UpstreamStateId on TBC not running in External Header mode")
+		return nil, errors.New("upstream state id: " +
+			"not running in external header mode")
 	}
 
 	usi, err := s.db.MetadataGet(ctx, upstreamStateIdKey)
@@ -2187,12 +2178,13 @@ func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 // SetUpstreamStateId sets a new upstream state ID without making any other
 // state changes to TBC, used when the upstream state is updated without
 // requiring any TBC updates.
-func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId *[32]byte) error {
+func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId [32]byte) error {
 	log.Tracef("SetUpstreamStateId")
 	defer log.Tracef("SetUpstreamStateId exit")
 
 	if !s.cfg.ExternalHeaderMode {
-		return errors.New("cannot call SetUpstreamStateId on TBC not running in External Header mode")
+		return errors.New("set upstream state id: " +
+			"not running in external header mode")
 	}
 
 	return s.db.MetadataPut(ctx, upstreamStateIdKey, upstreamStateId[:])
@@ -2713,7 +2705,7 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 
 		// Getting best header returned ErrNotFound so assume initial
 		// startup
-		err = s.db.BlockHeaderGenesisInsert(ctx, genesis, genesisHeight,
+		err = s.db.BlockHeaderGenesisInsert(ctx, *genesis, genesisHeight,
 			genesisDiff)
 		if err != nil {
 			return fmt.Errorf("genesis block header insert: %w", err)

@@ -457,7 +457,7 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	return nil
 }
 
-func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
@@ -484,7 +484,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash *chainhash.Hash) (*tbc
 
 	// Insert into cache, roughly 150 byte cost.
 	if l.cfg.blockheaderCacheSize > 0 {
-		l.headerCache.Put(bh)
+		l.headerCache.Put(*bh)
 	}
 
 	return bh, nil
@@ -509,7 +509,7 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 			// all done
 			break
 		}
-		bh, err := l.BlockHeaderByHash(ctx, hash)
+		bh, err := l.BlockHeaderByHash(ctx, *hash)
 		if err != nil {
 			return nil, fmt.Errorf("headers by height: %w", err)
 		}
@@ -586,7 +586,7 @@ func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	return bh
 }
 
-func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeader, height uint64, diff *big.Int) error {
+func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader, height uint64, diff *big.Int) error {
 	log.Tracef("BlockHeaderGenesisInsert")
 	defer log.Tracef("BlockHeaderGenesisInsert exit")
 
@@ -648,7 +648,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh *wire.BlockHeade
 	if diff != nil && diff.Cmp(big.NewInt(0)) > 0 {
 		cdiff = diff
 	}
-	ebh := encodeBlockHeader(height, h2b(wbh), cdiff)
+	ebh := encodeBlockHeader(height, h2b(&wbh), cdiff)
 	bhBatch.Put(bhash[:], ebh[:])
 
 	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
@@ -858,7 +858,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		}
 
 		// Get full header that has height in it for the block to remove we are checking
-		fullHeader, err := l.BlockHeaderByHash(ctx, &hash)
+		fullHeader, err := l.BlockHeaderByHash(ctx, hash)
 		if err != nil {
 			return 0, nil,
 				fmt.Errorf("block headers remove: cannot find header with hash %s in database, err: %w",
@@ -923,7 +923,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 	// Ensure that the tip which the caller claims should be canonical after the
 	// removal is a valid block in the database.
-	tipAfterRemovalFromDb, err := l.BlockHeaderByHash(ctx, &tipAfterRemovalHash)
+	tipAfterRemovalFromDb, err := l.BlockHeaderByHash(ctx, tipAfterRemovalHash)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: cannot find tip after removal header with hash %s "+
@@ -1005,7 +1005,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 	// Get parent block from database
 	// XXX verify l. here instead of using the bh transaction to get the hash
-	parentToRemovalSet, err := l.BlockHeaderByHash(ctx, &headersParsed[0].PrevBlock)
+	parentToRemovalSet, err := l.BlockHeaderByHash(ctx, headersParsed[0].PrevBlock)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: cannot find previous header (with hash %s) to lowest header"+
@@ -1103,7 +1103,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	log.Tracef("BlockHeadersInsert")
 	defer log.Tracef("BlockHeadersInsert exit")
 
-	if len(bhs.Headers) == 0 {
+	if bhs == nil || len(bhs.Headers) == 0 {
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("block headers insert: invalid")
 	}
@@ -1150,7 +1150,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 
 	// Obtain current and previous blockheader.
 	wbh := bhs.Headers[0]
-	pbh, err := l.BlockHeaderByHash(ctx, &wbh.PrevBlock)
+	pbh, err := l.BlockHeaderByHash(ctx, wbh.PrevBlock)
 	if err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers insert: %w", err)
@@ -1398,7 +1398,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	log.Tracef("BlockInsert")
 	defer log.Tracef("BlockInsert exit")
 
-	bh, err := l.BlockHeaderByHash(ctx, b.Hash())
+	bh, err := l.BlockHeaderByHash(ctx, *b.Hash())
 	if err != nil {
 		return -1, fmt.Errorf("block header by hash: %w", err)
 	}
@@ -1435,7 +1435,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	return int64(bh.Height), nil
 }
 
-func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash *chainhash.Hash) error {
+func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash chainhash.Hash) error {
 	log.Tracef("BlockMissingDelete")
 	defer log.Tracef("BlockMissingDelete exit")
 
@@ -1450,7 +1450,7 @@ func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash *chainh
 	return nil
 }
 
-func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.Block, error) {
+func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
@@ -1470,12 +1470,12 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 		eb, err = bDB.Get(hash[:])
 		if err != nil {
 			if errors.Is(err, leveldb.ErrNotFound) {
-				return nil, database.BlockNotFoundError{Hash: *hash}
+				return nil, database.BlockNotFoundError{Hash: hash}
 			}
 			return nil, fmt.Errorf("block get: %w", err)
 		}
 		if l.cfg.blockCacheSize > 0 {
-			l.blockCache.Put(*hash, eb)
+			l.blockCache.Put(hash, eb)
 		}
 	}
 	// if we get here eb MUST exist
@@ -1486,7 +1486,29 @@ func (l *ldb) BlockByHash(ctx context.Context, hash *chainhash.Hash) (*btcutil.B
 	return b, nil
 }
 
-func (l *ldb) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chainhash.Hash, error) {
+func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool, error) {
+	log.Tracef("BlockExistsByHash")
+	defer log.Tracef("BlockExistsByHash exit")
+
+	if l.cfg.blockCacheSize > 0 {
+		// Try cache first
+		if _, ok := l.blockCache.Get(hash); ok {
+			return true, nil
+		}
+	}
+
+	bDB := l.rawPool[level.BlocksDB]
+	ok, err := bDB.Has(hash[:])
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("check block exists: %w", err)
+	}
+	return ok, nil
+}
+
+func (l *ldb) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error) {
 	log.Tracef("BlockHashByTxId")
 	defer log.Tracef("BlockHashByTxId exit")
 
@@ -1518,7 +1540,7 @@ func (l *ldb) BlockHashByTxId(ctx context.Context, txId *chainhash.Hash) (*chain
 	}
 }
 
-func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]tbcd.SpentInfo, error) {
+func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputByOutpoint")
 	defer log.Tracef("SpentOutputByOutpoint exit")
 
@@ -1558,7 +1580,7 @@ func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId *chainhash.Hash) ([]t
 	return si, nil
 }
 
-func (l *ldb) BlockInTxIndex(ctx context.Context, hash *chainhash.Hash) (bool, error) {
+func (l *ldb) BlockInTxIndex(ctx context.Context, hash chainhash.Hash) (bool, error) {
 	log.Tracef("BlockInTxIndex")
 	defer log.Tracef("BlockInTxIndex exit")
 
@@ -1706,7 +1728,7 @@ func (l *ldb) UtxosByScriptHashCount(ctx context.Context, sh tbcd.ScriptHash) (u
 	return x, nil
 }
 
-func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput, utxoIndexHash *chainhash.Hash) error {
+func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput, utxoIndexHash chainhash.Hash) error {
 	log.Tracef("BlockUtxoUpdate")
 	defer log.Tracef("BlockUtxoUpdate exit")
 
@@ -1763,7 +1785,7 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 	return nil
 }
 
-func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxKey]*tbcd.TxValue, txIndexHash *chainhash.Hash) error {
+func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxKey]*tbcd.TxValue, txIndexHash chainhash.Hash) error {
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
 
@@ -1869,7 +1891,7 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	return ks
 }
 
-func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash *chainhash.Hash) error {
+func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
 	log.Tracef("BlockKeystoneUpdate")
 	defer log.Tracef("BlockKeystoneUpdate exit")
 
@@ -1946,7 +1968,7 @@ func (l *ldb) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader
 	if err != nil {
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
-	return l.BlockHeaderByHash(ctx, ch)
+	return l.BlockHeaderByHash(ctx, *ch)
 }
 
 func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -1968,7 +1990,7 @@ func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, er
 	if err != nil {
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
-	return l.BlockHeaderByHash(ctx, ch)
+	return l.BlockHeaderByHash(ctx, *ch)
 }
 
 func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -1990,7 +2012,7 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 	if err != nil {
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
-	return l.BlockHeaderByHash(ctx, ch)
+	return l.BlockHeaderByHash(ctx, *ch)
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {

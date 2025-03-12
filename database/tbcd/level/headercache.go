@@ -26,7 +26,7 @@ type lowIQMap struct {
 	c tbcd.CacheStats
 }
 
-func (l *lowIQMap) Put(v *tbcd.BlockHeader) {
+func (l *lowIQMap) Put(v tbcd.BlockHeader) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
@@ -43,14 +43,14 @@ func (l *lowIQMap) Put(v *tbcd.BlockHeader) {
 		}
 	}
 
-	l.m[v.Hash] = v
+	l.m[v.Hash] = &v
 }
 
-func (l *lowIQMap) Get(k *chainhash.Hash) (*tbcd.BlockHeader, bool) {
+func (l *lowIQMap) Get(k chainhash.Hash) (*tbcd.BlockHeader, bool) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	bh, ok := l.m[*k]
+	bh, ok := l.m[k]
 	if ok {
 		l.c.Hits++
 	} else {

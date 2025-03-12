@@ -644,12 +644,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest")
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
 
-	if req.L2KeystoneAbrevHash == nil {
-		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-			Error: protocol.RequestErrorf("invalid nil abrev hash"),
-		}, nil
-	}
-	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *req.L2KeystoneAbrevHash)
+	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, req.L2KeystoneAbrevHash)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
@@ -672,11 +667,6 @@ func (s *Server) handleBlockDownloadAsyncRequest(ctx context.Context, req *tbcap
 	log.Tracef("handleBlockAsyncDownloadRequest")
 	defer log.Tracef("handleBlockAsyncDownloadRequest exit")
 
-	if req.Hash == nil {
-		return &tbcapi.BlockDownloadAsyncResponse{
-			Error: protocol.RequestErrorf("hash must be provided"),
-		}, nil
-	}
 	if req.Peers <= 0 || req.Peers > 5 {
 		return &tbcapi.BlockDownloadAsyncResponse{
 			Error: protocol.RequestErrorf("invalid peers"),
@@ -700,11 +690,6 @@ func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tb
 	log.Tracef("handleBlockDownloadAsyncRawRequest")
 	defer log.Tracef("handleBlockDownloadAsyncRawRequest exit")
 
-	if req.Hash == nil {
-		return &tbcapi.BlockDownloadAsyncRawResponse{
-			Error: protocol.RequestErrorf("hash must be provided"),
-		}, nil
-	}
 	if req.Peers <= 0 || req.Peers > 5 {
 		return &tbcapi.BlockDownloadAsyncRawResponse{
 			Error: protocol.RequestErrorf("too many peers"),

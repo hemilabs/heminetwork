@@ -323,7 +323,7 @@ func TestKeystoneUpdate(t *testing.T) {
 		},
 	}
 
-	blockhash := &chainhash.Hash{1, 3, 3, 7}
+	blockhash := chainhash.Hash{1, 3, 3, 7}
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -411,7 +411,7 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 		}
 	}()
 
-	blockhash := &chainhash.Hash{0xde, 0xad, 0xbe, 0xef}
+	blockhash := chainhash.Hash{0xde, 0xad, 0xbe, 0xef}
 	blk1Hash := chainhash.Hash{1}
 	k1hash, k1 := newKeystone(&blk1Hash, 1, 2)
 	blk2Hash := chainhash.Hash{1}
@@ -482,7 +482,7 @@ func TestKeystoneDBCache(t *testing.T) {
 		cycles = 1
 	)
 
-	blockhash := &chainhash.Hash{0xba, 0xdc, 0x0f, 0xfe}
+	blockhash := chainhash.Hash{0xba, 0xdc, 0x0f, 0xfe}
 	for i := range cycles {
 		ksm := make(map[chainhash.Hash]tbcd.Keystone, kssNum)
 		for j := range kssNum {

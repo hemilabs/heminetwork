@@ -1054,7 +1054,7 @@ func TestTxByIdRaw(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: txId,
+		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1137,7 +1137,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	txId[0]++
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: txId,
+		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1226,7 +1226,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	txId[len(txId)-1] = 8
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
-		TxID: txId,
+		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1301,7 +1301,7 @@ func TestTxById(t *testing.T) {
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: txId,
+		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1323,7 +1323,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(response.Error.Message)
 	}
 
-	tx, err := tbcServer.TxById(ctx, txId)
+	tx, err := tbcServer.TxById(ctx, *txId)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1380,7 +1380,7 @@ func TestTxByIdInvalid(t *testing.T) {
 	txId[0]++
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: txId,
+		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1470,7 +1470,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	txId[len(txId)-1] = 8
 
 	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
-		TxID: txId,
+		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1535,10 +1535,6 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 
 	testTable := []testTableItem{
 		{
-			name:          "nilL2KeystoneAbrevHash",
-			expectedError: protocol.RequestErrorf("invalid nil abrev hash"),
-		},
-		{
 			name:                "invalidL2KeystoneAbrevHash",
 			l2KeystoneAbrevHash: &invalidL2KeystoneAbrevHash,
 			expectedError:       protocol.RequestErrorf("could not find l2 keystone"),
@@ -1597,12 +1593,12 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 				AbbreviatedKeystone: abrvKss,
 			}
 
-			if err := s.db.BlockKeystoneUpdate(ctx, 1, kssCache, &btcBlockHash); err != nil {
+			if err := s.db.BlockKeystoneUpdate(ctx, 1, kssCache, btcBlockHash); err != nil {
 				t.Fatal(err)
 			}
 
 			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest{
-				L2KeystoneAbrevHash: tti.l2KeystoneAbrevHash,
+				L2KeystoneAbrevHash: *tti.l2KeystoneAbrevHash,
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -1659,7 +1655,7 @@ func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
 
 	hash := bh.BlockHash()
 
-	if err := tbcServer.SyncIndexersToHash(ctx, &hash); err != nil {
+	if err := tbcServer.SyncIndexersToHash(ctx, hash); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -152,7 +152,7 @@ type Block struct {
 
 // BlockByHashRequest requests a [Block] by its hash.
 type BlockByHashRequest struct {
-	Hash *chainhash.Hash `json:"hash"`
+	Hash chainhash.Hash `json:"hash"`
 }
 
 // BlockByHashResponse is the response for [BlockByHashRequest].
@@ -163,7 +163,7 @@ type BlockByHashResponse struct {
 
 // BlockByHashRawRequest requests a raw block by its hash.
 type BlockByHashRawRequest struct {
-	Hash *chainhash.Hash `json:"hash"`
+	Hash chainhash.Hash `json:"hash"`
 }
 
 // BlockByHashRawResponse is the response for [BlockByHashRawRequest].
@@ -238,7 +238,7 @@ type UTXOsByAddressResponse struct {
 }
 
 type TxByIdRawRequest struct {
-	TxID *chainhash.Hash `json:"tx_id"`
+	TxID chainhash.Hash `json:"tx_id"`
 }
 
 type TxByIdRawResponse struct {
@@ -247,7 +247,7 @@ type TxByIdRawResponse struct {
 }
 
 type TxByIdRequest struct {
-	TxID *chainhash.Hash `json:"tx_id"`
+	TxID chainhash.Hash `json:"tx_id"`
 }
 
 type TxByIdResponse struct {
@@ -289,7 +289,7 @@ type BlockInsertRawRequest struct {
 }
 
 type BlockKeystoneByL2KeystoneAbrevHashRequest struct {
-	L2KeystoneAbrevHash *chainhash.Hash `json:"l2_keystones_abrev_hash"`
+	L2KeystoneAbrevHash chainhash.Hash `json:"l2_keystones_abrev_hash"`
 }
 
 type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
@@ -306,8 +306,8 @@ type BlockInsertRawResponse struct {
 // BlockDownloadAsyncResponse returns a block if it exists or attempts to
 // download the block from p2p asynchronously.
 type BlockDownloadAsyncRequest struct {
-	Hash  *chainhash.Hash `json:"hash"`
-	Peers uint            `json:"peers"`
+	Hash  chainhash.Hash `json:"hash"`
+	Peers uint           `json:"peers"`
 }
 
 // BlockDownloadAsyncResponse replies with a block, an error or nothing. When
@@ -319,8 +319,8 @@ type BlockDownloadAsyncResponse struct {
 }
 
 type BlockDownloadAsyncRawRequest struct {
-	Hash  *chainhash.Hash `json:"hash"`
-	Peers uint            `json:"peers"`
+	Hash  chainhash.Hash `json:"hash"`
+	Peers uint           `json:"peers"`
 }
 
 type BlockDownloadAsyncRawResponse struct {
