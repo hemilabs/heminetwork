@@ -217,47 +217,47 @@ services:
       - "/tbcdata"
 
   # Hemi op-node
- op-node:
-   image: "ghcr.io/hemilabs/op-node:84b895e@sha256:df29c59680c33cdda616f67662c9e75bdeea60f79d91937ee0b60bf0d0f48243"
-   depends_on:
-     geth-l1:
-       condition: "service_started"
-     op-geth-l2:
-       condition: "service_healthy"
-     prysm:
-       condition: "service_started"
-   volumes:
-      change this token value if you expose this service's ports for
-      connection from other machines
-     - ./jwt.hex:/tmp/jwt/jwt.hex
-     - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
-     - ./mainnet-rollup.json:/tmp/rollup.json
-   environment:
-     OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
-   ports:
-    - '8547:8547'
-   networks:
-     - "localnode"
-   command:
-     - "op-node"
-     - "--l1=http://geth-l1:8545"
-     - "--l1.rpckind=any"
-     - "--l1.beacon=http://prysm:3500"
-     - "--l2=ws://op-geth-l2:8551"
-     - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
-     - "--sequencer.enabled=false"
-     - "--rollup.config=/tmp/rollup.json"
-     - "--override.ecotone=1725868497"
-     - "--override.canyon=1725868497"
-     - "--override.delta=1725868497"
-     - "--rpc.addr=0.0.0.0"
-     - "--rpc.port=8547"
-     - "--p2p.bootnodes=enr:-J64QACnJ0giPmPXowNCHP-FDleMMbDqYg5nuLABYfJeYbP9OA6_fZtvCsTbAwvlPD8_C6ZSXEk1-XPabDBwD8UTyNCGAZMxdy4tgmlkgnY0gmlwhCINopiHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED22EOmUryrNnFOwq6Ve1Hpw5CMFz_TnhIkVS4Sq8JhkmDdGNwgiMrg3VkcIKjLg,enr:-J64QA20VNMfLMtbSuHYmQH2I-xaqT4-9g7lqO-VHr0fFvtSB7QybJ_7W5fuEjLAa6kh82fGLjRUdZE0hW0pfVBcxP6GAZMxdwfngmlkgnY0gmlwhCJaFfaHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDjt3C-gv87B5rWa5M52WUFGy16mjQvFsC7OgPkqu-rn-DdGNwgiMrg3VkcIKRXQ,enr:-J64QLQyh3lXjQLzfCbfNw0DUb4A0OEcTLmVGexMbK-2jjCtHOIlRnDqLuedQ0orNHt7zmsILELYi4ozg-0bQzc34F-GAZMxdxNogmlkgnY0gmlwhCINq4uHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED1NV9w0EmnMXBNRnDWj6kdqzE6_4HigHopeu3ewQTwouDdGNwgiMrg3VkcIK1Iw,enr:-J64QNPfOEViWkN7U_ul5Zhw_mc5_Hta92eUufrgu6oTqSMzRsqCje-P0vPrOQ9XjVIk4VP7mmFVP6qoTrtkIwvwUV2GAZMxdv4zgmlkgnY0gmlwhCJb2HmHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDYAidV8rzABKrKAL9jwP1aoi3wj-GtuML4FKtUDOgzCGDdGNwgiMrg3VkcILijg,enr:-J64QFalFr9Y4r9v8Svh7XFwerJeLTRnfTixfCy_NZw3OTMVZL_dSAvcZ6JIeK0JAZf6-PU3YknV9m9Jd5V5WlnqHKWGAZMxdxT4gmlkgnY0gmlwhCKNlBOHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaECI1jqAzkQ0JRkwL-UBP2TBUfUdLyTaqAXtey82CTysdCDdGNwgiMrg3VkcILOyg"
-     - "--log.level=trace"
-     - "--syncmode=execution-layer"
-   deploy:
-     restart_policy:
-       condition: "any"
+  op-node:
+    image: "ghcr.io/hemilabs/op-node:84b895e@sha256:df29c59680c33cdda616f67662c9e75bdeea60f79d91937ee0b60bf0d0f48243"
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+      op-geth-l2:
+        condition: "service_healthy"
+      prysm:
+      condition: "service_started"
+    volumes:
+      # change this token value if you expose this service's ports for
+      # connection from other machines
+      - ./jwt.hex:/tmp/jwt/jwt.hex
+      - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
+      - ./mainnet-rollup.json:/tmp/rollup.json
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+    ports:
+      - '8547:8547'
+    networks:
+      - "localnode"
+    command:
+      - "op-node"
+      - "--l1=http://geth-l1:8545"
+      - "--l1.rpckind=any"
+      - "--l1.beacon=http://prysm:3500"
+      - "--l2=ws://op-geth-l2:8551"
+      - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
+      - "--sequencer.enabled=false"
+      - "--rollup.config=/tmp/rollup.json"
+      - "--override.ecotone=1725868497"
+      - "--override.canyon=1725868497"
+      - "--override.delta=1725868497"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--p2p.bootnodes=enr:-J64QACnJ0giPmPXowNCHP-FDleMMbDqYg5nuLABYfJeYbP9OA6_fZtvCsTbAwvlPD8_C6ZSXEk1-XPabDBwD8UTyNCGAZMxdy4tgmlkgnY0gmlwhCINopiHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED22EOmUryrNnFOwq6Ve1Hpw5CMFz_TnhIkVS4Sq8JhkmDdGNwgiMrg3VkcIKjLg,enr:-J64QA20VNMfLMtbSuHYmQH2I-xaqT4-9g7lqO-VHr0fFvtSB7QybJ_7W5fuEjLAa6kh82fGLjRUdZE0hW0pfVBcxP6GAZMxdwfngmlkgnY0gmlwhCJaFfaHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDjt3C-gv87B5rWa5M52WUFGy16mjQvFsC7OgPkqu-rn-DdGNwgiMrg3VkcIKRXQ,enr:-J64QLQyh3lXjQLzfCbfNw0DUb4A0OEcTLmVGexMbK-2jjCtHOIlRnDqLuedQ0orNHt7zmsILELYi4ozg-0bQzc34F-GAZMxdxNogmlkgnY0gmlwhCINq4uHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED1NV9w0EmnMXBNRnDWj6kdqzE6_4HigHopeu3ewQTwouDdGNwgiMrg3VkcIK1Iw,enr:-J64QNPfOEViWkN7U_ul5Zhw_mc5_Hta92eUufrgu6oTqSMzRsqCje-P0vPrOQ9XjVIk4VP7mmFVP6qoTrtkIwvwUV2GAZMxdv4zgmlkgnY0gmlwhCJb2HmHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDYAidV8rzABKrKAL9jwP1aoi3wj-GtuML4FKtUDOgzCGDdGNwgiMrg3VkcILijg,enr:-J64QFalFr9Y4r9v8Svh7XFwerJeLTRnfTixfCy_NZw3OTMVZL_dSAvcZ6JIeK0JAZf6-PU3YknV9m9Jd5V5WlnqHKWGAZMxdxT4gmlkgnY0gmlwhCKNlBOHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaECI1jqAzkQ0JRkwL-UBP2TBUfUdLyTaqAXtey82CTysdCDdGNwgiMrg3VkcILOyg"
+      - "--log.level=trace"
+      - "--syncmode=execution-layer"
+    deploy:
+      restart_policy:
+        condition: "any"
 
   # Prysm
   prysm:
