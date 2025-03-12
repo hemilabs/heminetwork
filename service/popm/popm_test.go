@@ -90,6 +90,7 @@ func TestBTCPrivateKeyFromHex(t *testing.T) {
 
 func TestNewMiner(t *testing.T) {
 	cfg := NewDefaultConfig()
+	cfg.BTCChainName = "testnet3"
 	cfg.BTCPrivateKey = "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641"
 
 	m, err := NewMiner(cfg)
