@@ -23,7 +23,7 @@ import (
 const (
 	daemonName      = "tbcd"
 	defaultLogLevel = daemonName + "=INFO;tbc=INFO;level=INFO"
-	defaultNetwork  = "testnet3" // XXX make this mainnet
+	defaultNetwork  = "mainnet"
 	defaultHome     = "~/." + daemonName
 	bDefaultSize    = "512mb" // ~320 blocks on mainnet
 	bhsDefaultSize  = "2mb"
