@@ -225,7 +225,7 @@ services:
       op-geth-l2:
         condition: "service_healthy"
       prysm:
-      condition: "service_started"
+        condition: "service_started"
     volumes:
       # change this token value if you expose this service's ports for
       # connection from other machines
