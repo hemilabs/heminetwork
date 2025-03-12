@@ -129,7 +129,7 @@ jobs:
   release:
     name: "Release"
     runs-on: "ubuntu-latest"
-    needs: [ "test-go", "npm" ]
+    needs: [ "test-go" ]
     permissions:
       # Required to create GitHub releases.
       contents: write
