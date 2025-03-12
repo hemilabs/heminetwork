@@ -53,7 +53,7 @@ func mockPeerServer(ctx context.Context, id int, listener net.Listener, msgCh ch
 	}
 }
 
-func TestRawpeerReadWrite(t *testing.T) {
+func TestConcurrentReadWrite(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -89,11 +89,14 @@ func TestRawpeerReadWrite(t *testing.T) {
 		panic(err)
 	}
 
-	for k := range 2 {
+	writerNum := 2
+	WriteCount := 100
+
+	fakeCh := chainhash.Hash{}
+	for k := range writerNum {
 		go func() {
-			for range 100 {
-				fakeCh := chainhash.Hash{0xde, 0xad, 0xbe, 0xef}
-				bh := wire.NewBlockHeader(1, &fakeCh, &fakeCh, uint32(k), uint32(k))
+			for range WriteCount {
+				bh := wire.NewBlockHeader(int32(k), &fakeCh, &fakeCh, uint32(k), uint32(k))
 				mva := wire.NewMsgHeaders()
 				mva.AddBlockHeader(bh)
 				if err := p1.Write(0, mva); err != nil {
@@ -103,18 +106,16 @@ func TestRawpeerReadWrite(t *testing.T) {
 		}()
 	}
 
-	receivedCmds := make(map[string]int)
-
 	expectedCmds := map[string]int{
 		wire.CmdPing:    1,
-		wire.CmdHeaders: 200,
+		wire.CmdHeaders: writerNum * WriteCount,
 	}
 
 	for {
 		select {
 		case s := <-msgCh:
 			t.Logf("received response from server: %v", s)
-			receivedCmds[s]++
+			expectedCmds[s]--
 		case <-ctx.Done():
 			if ctx.Err() != nil {
 				t.Fatal(ctx.Err())
@@ -122,8 +123,8 @@ func TestRawpeerReadWrite(t *testing.T) {
 		}
 		remaining := false
 		for k, v := range expectedCmds {
-			if v != receivedCmds[k] {
-				t.Logf("%v %v commands left", v-receivedCmds[k], k)
+			if v != 0 {
+				t.Logf("%v '%v' commands left", v, k)
 				remaining = true
 			}
 		}
