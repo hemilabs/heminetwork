@@ -95,7 +95,7 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		BFGWSURL:          "http://localhost:8383/v1/ws/public",
 		BFGRequestTimeout: DefaultBFGRequestTimeout,
-		BTCChainName:      "testnet3",
+		BTCChainName:      "mainnet",
 	}
 }
 
