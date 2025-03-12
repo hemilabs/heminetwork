@@ -10,6 +10,7 @@ services:
     build:
       dockerfile: "./docker/bfgd/Dockerfile"
       context: "./.."
+    profiles: ["hemi", "full"]
     depends_on:
       bfgd-postgres:
         condition: "service_started"
@@ -55,6 +56,7 @@ services:
   # Bitcoind Node
   bitcoind:
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
+    profiles: ["dep", "full"]
     volumes:
       - bitcoin_data:/bitcoin/.bitcoin
     ports:
@@ -75,6 +77,7 @@ services:
     build:
       dockerfile: "./docker/bssd/Dockerfile"
       context: "./.."
+    profiles: ["hemi", "full"]
     depends_on:
       - "bfgd"
     environment:
@@ -91,8 +94,7 @@ services:
     build:
       context: ./..
       dockerfile: ./localnode/electrs.Dockerfile
-    depends_on:
-      - "bitcoind"
+    profiles: ["hemi"]
     volumes:
       - ./cookie:/tmp/.cookie
       - electrs_data:/data/electrs
@@ -125,6 +127,7 @@ services:
   # Ethereum L1 node
   geth-l1:
     image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
+    profiles: ["dep", "full"]
     volumes:
       - geth_data:/tmp/geth
       # change this token value if you expose this service's ports for
@@ -153,10 +156,8 @@ services:
   # Hemi L2 node
   op-geth-l2:
     image: "ghcr.io/hemilabs/op-geth:e525f27@sha256:f48c03532810ec4d9d08be8afa19822c9adcdd2d8dd559467a0d2b34965d5a6d"
-    # XXX does geth need to be fully synced
+    profiles: ["hemi", "full"]
     depends_on:
-      geth-l1:
-        condition: "service_started"
       op-geth-l2-init:
         condition: "service_completed_successfully"
       op-geth-l2-init-tbc:
@@ -197,6 +198,7 @@ services:
   # Init container for Hemi L2 node
   op-geth-l2-init:
     image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    profiles: ["hemi", "full"]
     volumes:
       - op-geth_data:/tmp/datadir
     command:
@@ -208,6 +210,7 @@ services:
   # Init TBC container for Hemi L2 node
   op-geth-l2-init-tbc:
     image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    profiles: ["hemi", "full"]
     volumes:
       - tbc_data:/tbcdata
     command:
@@ -219,13 +222,10 @@ services:
   # Hemi op-node
   op-node:
     image: "ghcr.io/hemilabs/op-node:84b895e@sha256:df29c59680c33cdda616f67662c9e75bdeea60f79d91937ee0b60bf0d0f48243"
+    profiles: ["hemi", "full"]
     depends_on:
-      geth-l1:
-        condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
-      prysm:
-        condition: "service_started"
     volumes:
       # change this token value if you expose this service's ports for
       # connection from other machines
@@ -262,6 +262,7 @@ services:
   # Prysm
   prysm:
     image: "gcr.io/prysmaticlabs/prysm/beacon-chain@sha256:ea7d64346cd51cb0a6979779bdfd284a13aedb5642a795637935daacdfe1675d" # stable
+    profiles: ["dep", "full"]
     volumes:
       - prysm_data:/data
       # change this token value if you expose this service's ports for

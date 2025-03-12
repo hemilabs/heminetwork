@@ -100,7 +100,7 @@ services' ports to the outside world.** This allows communication between the se
 Run the following to start each of the required daemons as Docker containers:
 
 ```sh
-docker compose -f localnode/docker-compose.yml up --build
+docker compose -f localnode/docker-compose.yml --profile full up --build
 ```
 
 ## Accessing the nodes
@@ -122,7 +122,21 @@ Hemi network will be necessary. This is coming soon.
 
 Run the file:
 ```sh
-docker compose -f localnode/docker-compose_mainnet.yml up --build
+docker compose -f localnode/docker-compose_mainnet.yml --profile full up --build
+```
+
+## Bring your own L1s
+
+Several of the containers (the Bitcoin and Ethereum L1 containers) here can be replaced with nodes or API endpoints of your own.
+
+To run just the L1 containers, start with this command:
+```sh
+docker compose -f localnode/docker-compose_mainnet.yml --profile L1 up --build
+```
+
+To run only the Hemi containers, run:
+```sh
+docker compose -f localnode/docker-compose_mainnet.yml --profile hemi up --build
 ```
 
 ## Monitoring
