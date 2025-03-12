@@ -123,7 +123,7 @@ Run the following to start each of the required daemons as Docker containers:
 
 ```sh
 cd localnode
-docker compose -f docker-compose.yml up --build
+docker compose -f docker-compose.yml --profile full up --build
 ```
 
 ## Accessing the nodes
@@ -145,8 +145,32 @@ Hemi network will be necessary. This is coming soon.
 
 Run the file:
 ```sh
-docker compose -f docker-compose_mainnet.yml up --build
+docker compose -f docker-compose_mainnet.yml --profile full up --build
 ```
+
+## Bring your own L1s
+
+Several of the containers (the Bitcoin and Ethereum L1 containers) here can be replaced with nodes or API endpoints of your own.
+
+To run just the L1 containers, start with this command:
+```sh
+docker compose -f localnode/docker-compose_mainnet.yml --profile L1 up --build
+```
+
+To run only the Hemi containers, add your endpoints to `.env`:
+```sh
+OPSYNCMODE=concensus-layer
+BITCOINENDPOINT=
+BITCOINCREDS=
+GETHL1ENDPOINT=
+PRYSMENDPOINT=
+```
+and run:
+```sh
+docker compose -f localnode/docker-compose_mainnet.yml --profile hemi up --build
+```
+
+and similarly for testnet.
 
 ## Monitoring
 

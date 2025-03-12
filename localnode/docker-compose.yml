@@ -12,6 +12,7 @@ services:
     build:
       dockerfile: "./docker/bfgd/Dockerfile"
       context: "./.."
+    profiles: ["hemi", "full"]
     depends_on:
       bfgd-postgres:
         condition: "service_started"
@@ -41,6 +42,7 @@ services:
     build:
       dockerfile: "./localnode/postgres.Dockerfile"
       context: "./.."
+    profiles: ["hemi", "full"]
     volumes:
       - psql_data:/var
     environment:
@@ -80,6 +82,7 @@ services:
     build:
       dockerfile: "./docker/bssd/Dockerfile"
       context: "./.."
+    profiles: ["hemi", "full"]
     depends_on:
       - "bfgd"
     environment:
@@ -96,8 +99,7 @@ services:
     build:
       context: ./..
       dockerfile: ./localnode/electrs.Dockerfile
-    depends_on:
-      - "bitcoind"
+    profiles: ["hemi", "full"]
     volumes:
       - ./cookie:/tmp/.cookie
       - electrs_data:/data/electrs
@@ -111,13 +113,13 @@ services:
       - "--electrum-rpc-addr"
       - "0.0.0.0:50001"
       - "--daemon-rpc-addr"
-      - "bitcoind:18332"
+      - "${BITCOINENDPOINT:-bitcoind:18332}"
       - "--network"
       - "testnet"
       # NOTE: If you expose electrs ports,
       # you may want to ensure that this is changed!
       - "--cookie"
-      - "user:password"
+      - "${BITCOINCREDS:-user:password}"
       - "-vvv"
       - "--timestamp"
       - "--utxos-limit"
@@ -134,6 +136,7 @@ services:
   geth-l1:
     # yamllint disable-line rule:line-length
     image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
+    profiles: ["L1", "full"]
     volumes:
       - geth_data:/tmp/geth
       # change this token value if you expose this service's ports for
@@ -165,9 +168,8 @@ services:
     image: "ghcr.io/hemilabs/op-geth:e525f27@sha256:f48c03532810ec4d9d08be8afa19822c9adcdd2d8dd559467a0d2b34965d5a6d"
     platform: linux/amd64
     # XXX does geth need to be fully synced
+    profiles: ["hemi", "full"]
     depends_on:
-      geth-l1:
-        condition: "service_started"
       op-geth-l2-init:
         condition: "service_completed_successfully"
       op-geth-l2-init-tbc:
@@ -188,7 +190,7 @@ services:
       - ./l2-config.toml:/tmp/l2-config.toml
       - tbc_data:/tbcdata
     environment:
-      OP_GETH_L1_RPC: "http://geth-l1:8545"
+      OP_GETH_L1_RPC: "${GETHL1ENDPOINT:-http://geth-l1:8545}"
       OP_GETH_L2_READINESS_RPC: "http://localhost:18546"
     ports:
       - '18546:18546'
@@ -209,6 +211,7 @@ services:
   op-geth-l2-init:
     # yamllint disable-line rule:line-length
     image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d"
+    profiles: ["hemi", "full"]
     volumes:
       - op-geth_data:/tmp/datadir
     command:
@@ -221,6 +224,7 @@ services:
   op-geth-l2-init-tbc:
     # yamllint disable-line rule:line-length
     image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d"
+    profiles: ["hemi", "full"]
     volumes:
       - tbc_data:/tbcdata
     command:
@@ -234,13 +238,10 @@ services:
     # yamllint disable-line rule:line-length
     image: "ghcr.io/hemilabs/op-node:ee580dd@sha256:c3c2bcabb0da02e6aca462a2756ef78d8a40e569281de1f4dac9a9eb8fa80359"
     platform: linux/amd64
+    profiles: ["hemi", "full"]
     depends_on:
-      geth-l1:
-        condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
-      prysm:
-        condition: "service_started"
     volumes:
       # change this token value if you expose this service's ports for
       # connection from other machines
@@ -255,9 +256,9 @@ services:
       - "localnode"
     command:
       - "op-node"
-      - "--l1=http://geth-l1:8545"
+      - "--l1=${BITCOINENDPOINT:-http://geth-l1:8545}"
       - "--l1.rpckind=any"
-      - "--l1.beacon=http://prysm:3500"
+      - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
       - "--l2=ws://op-geth-l2:8551"
       - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
       - "--sequencer.enabled=false"
@@ -282,6 +283,7 @@ services:
   prysm:
     # yamllint disable-line rule:line-length
     image: "gcr.io/prysmaticlabs/prysm/beacon-chain@sha256:ea7d64346cd51cb0a6979779bdfd284a13aedb5642a795637935daacdfe1675d"
+    profiles: ["L1", "full"]
     volumes:
       - prysm_data:/data
       # change this token value if you expose this service's ports for
@@ -292,7 +294,7 @@ services:
     networks:
       - "localnode"
     command:
-      - "--execution-endpoint=http://geth-l1:8551"
+      - "--execution-endpoint=${GETHL1ENDPOINT:-http://geth-l1:8551}"
       - "--sepolia"
       - "--jwt-secret=/tmp/jwt/jwt.hex"
       - "--checkpoint-sync-url=https://sepolia.beaconstate.info"
