@@ -32,7 +32,6 @@ linters:
     - "gochecksumtype" # Run exhaustiveness checks on Go "sum types".
     - "gofumpt" # Runs gofumpt.
     - "goheader" # Enforces copyright header.
-    # TODO enable gosec, when bored run 'golangci-lint run -Egosec' to fix these
     - "gosec" # Checks for potential security issues
     - "gosimple" # Checks for ways to simplify code.
     - "gomoddirectives" # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
