@@ -90,14 +90,14 @@ func TestConcurrentReadWrite(t *testing.T) {
 	}
 
 	const (
-		writeNum = 2
-		writeCount = 100	
+		writerNum  = 2
+		writeCount = 100
 	)
 
-	fakeCh := chainhash.Hash{}
+	var fakeCh chainhash.Hash
 	for k := range writerNum {
 		go func() {
-			for range WriteCount {
+			for range writeCount {
 				bh := wire.NewBlockHeader(int32(k), &fakeCh, &fakeCh, uint32(k), uint32(k))
 				mva := wire.NewMsgHeaders()
 				mva.AddBlockHeader(bh)
@@ -110,7 +110,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 	expectedCmds := map[string]int{
 		wire.CmdPing:    1,
-		wire.CmdHeaders: writerNum * WriteCount,
+		wire.CmdHeaders: writerNum * writeCount,
 	}
 
 	for {
