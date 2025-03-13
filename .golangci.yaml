@@ -91,7 +91,7 @@ linters-settings:
   # Checks for potential security issues
   gosec:
     excludes:
-    - G115 # Potential integer overflow when converting between integer types
+      - G115 # Potential integer overflow when converting between integer types
 
   # Enforces copyright header
   goheader: # TODO: Replace goheader, autofix is too buggy.
