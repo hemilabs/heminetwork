@@ -89,8 +89,10 @@ func TestConcurrentReadWrite(t *testing.T) {
 		panic(err)
 	}
 
-	writerNum := 2
-	WriteCount := 100
+	const (
+		writeNum = 2
+		writeCount = 100	
+	)
 
 	fakeCh := chainhash.Hash{}
 	for k := range writerNum {
