@@ -137,7 +137,7 @@ func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address,
 	return urv, nil
 }
 
-func (bs *blockstream) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash *chainhash.Hash) (*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse, error) {
+func (bs *blockstream) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash chainhash.Hash) (*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse, error) {
 	return nil, fmt.Errorf("not supported yet")
 }
 
