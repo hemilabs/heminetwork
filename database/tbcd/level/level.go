@@ -165,7 +165,7 @@ func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
 	}
 }
 
-func New(ctx context.Context, cfg *Config) (*ldb, error) {
+func New(ctx context.Context, cfg *Config) (tbcd.Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 

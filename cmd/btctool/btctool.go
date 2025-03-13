@@ -83,7 +83,7 @@ type peer struct {
 	addrV2        bool
 }
 
-func NewPeer(network wire.BitcoinNet, address string) (*peer, error) {
+func newPeer(network wire.BitcoinNet, address string) (*peer, error) {
 	return &peer{
 		protocolVersion: wire.ProtocolVersion,
 		network:         network,
@@ -279,7 +279,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 		return fmt.Errorf("invalid network: %v", btcNet)
 	}
 
-	p, err := NewPeer(wireNet, "140.238.169.133"+port)
+	p, err := newPeer(wireNet, "140.238.169.133"+port)
 	if err != nil {
 		return fmt.Errorf("new peer: %w", err)
 	}

@@ -46,7 +46,7 @@ func Connect(ctx context.Context, uri string) (*sql.DB, error) {
 	return postgres.Connect(ctx, uri)
 }
 
-func New(ctx context.Context, uri string) (*pgdb, error) {
+func New(ctx context.Context, uri string) (bfgd.Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 
