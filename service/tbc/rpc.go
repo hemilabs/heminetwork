@@ -664,12 +664,12 @@ func (s *Server) handleFeeEstimateRequest(ctx context.Context, req *tbcapi.FeeEs
 	}, nil
 }
 
-func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, hash *chainhash.Hash) (*tbcd.Keystone, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
+func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, hash chainhash.Hash) (*tbcd.Keystone, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
 	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("keystone by abbreviated hash: %w", err)
 	}
-	ksBh, err := s.db.BlockHeaderByHash(ctx, &ks.BlockHash)
+	ksBh, err := s.db.BlockHeaderByHash(ctx, ks.BlockHash)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("block header by hash: %w", err)
 	}
@@ -683,12 +683,6 @@ func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, 
 func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest) (any, error) {
 	log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest")
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
-
-	if req.L2KeystoneAbrevHash == nil {
-		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-			Error: protocol.RequestErrorf("invalid nil abrev hash"),
-		}, nil
-	}
 
 	ks, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, req.L2KeystoneAbrevHash)
 	if err != nil {
