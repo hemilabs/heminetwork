@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -172,11 +172,9 @@ func (c *clientConn) ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, connPingTimeout)
 	defer cancel()
 
-	if err := c.call(ctx, "server.ping", nil, nil); err != nil {
-		return err
-	}
+	err := c.call(ctx, "server.ping", nil, nil)
 
-	return nil
+	return err
 }
 
 // pinger pings each connection on a ticker.

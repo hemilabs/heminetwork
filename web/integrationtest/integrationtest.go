@@ -16,7 +16,7 @@ type Response struct {
 	CurrentTime string
 }
 
-//nolint:gosec // test function
+//nolint:gosec,revive // test function
 func main() {
 	port := ":43111"
 	listen := "localhost" + port

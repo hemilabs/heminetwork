@@ -150,7 +150,8 @@ func (r *RawDB) Insert(key, value []byte) error {
 				log.Errorf("close %v: %v", lastFilename, err)
 			}
 		}()
-		if fi, err := fh.Stat(); err != nil {
+		fi, err := fh.Stat()
+		if err != nil {
 			return err
 		} else if fi.Size()+int64(len(value)) > r.maxSize {
 			last++
@@ -162,31 +163,30 @@ func (r *RawDB) Insert(key, value []byte) error {
 			}
 			tries++
 			continue
-		} else {
-			// Encoded coordinates.
-			c := make([]byte, 4+4+4)
-
-			binary.BigEndian.PutUint32(c[0:4], last)
-			binary.BigEndian.PutUint32(c[4:8], uint32(fi.Size()))
-			binary.BigEndian.PutUint32(c[8:12], uint32(len(value)))
-
-			// Append value to latest file.
-			n, err := fh.Write(value)
-			if err != nil {
-				return err
-			}
-			if n != len(value) {
-				return fmt.Errorf("partial write, data corruption: %v != %v", n, len(value))
-			}
-
-			// Write coordinates
-			err = r.index.Put(key, c, nil)
-			if err != nil {
-				return err
-			}
-
-			return nil
 		}
+		// Encoded coordinates.
+		c := make([]byte, 4+4+4)
+
+		binary.BigEndian.PutUint32(c[0:4], last)
+		binary.BigEndian.PutUint32(c[4:8], uint32(fi.Size()))
+		binary.BigEndian.PutUint32(c[8:12], uint32(len(value)))
+
+		// Append value to latest file.
+		n, err := fh.Write(value)
+		if err != nil {
+			return err
+		}
+		if n != len(value) {
+			return fmt.Errorf("partial write, data corruption: %v != %v", n, len(value))
+		}
+
+		// Write coordinates
+		err = r.index.Put(key, c, nil)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	}
 }
 

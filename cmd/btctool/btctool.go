@@ -51,7 +51,7 @@ func parseBlockFromHex(blk string) (*btcutil.Block, error) {
 	return b, nil
 }
 
-func parseBlock(ctx context.Context, filename string) (*btcutil.Block, error) {
+func parseBlock(_ctx context.Context, filename string) (*btcutil.Block, error) {
 	heb, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (p *peer) read() (wire.Message, error) {
 	return msg, err
 }
 
-func (p *peer) handshake(ctx context.Context) error {
+func (p *peer) handshake(_ctx context.Context) error {
 	// 1. send our version
 	// 2. receive version
 	// 3. send sendaddrv2
@@ -247,7 +247,7 @@ func handleInv(p *peer, msg *wire.MsgInv) {
 	}
 }
 
-func handleBlock(p *peer, msg *wire.MsgBlock) {
+func handleBlock(msg *wire.MsgBlock) {
 	fmt.Printf("handle block: %v txs %v\n", msg.Header.BlockHash(),
 		len(msg.Transactions))
 }
@@ -333,7 +333,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 			go handleInv(p, m)
 
 		case *wire.MsgBlock:
-			go handleBlock(p, m)
+			go handleBlock(m)
 
 		default:
 			fmt.Printf("unhandled message type: %T\n", msg)

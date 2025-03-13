@@ -74,9 +74,9 @@ var (
 	ErrTxAlreadyBroadcast = errors.New("tx already broadcast")
 	ErrTxBroadcastNoPeers = errors.New("can't broadcast tx, no peers")
 
-	// upstreamStateIdKey is used for storing upstream state IDs
+	// upstreamStateIDKey is used for storing upstream state IDs
 	// representing a unique state of an upstream system driving TBC state/
-	upstreamStateIdKey = []byte("upstreamstateid")
+	upstreamStateIDKey = []byte("upstreamstateid")
 
 	mainnetHemiGenesis = &HashHeight{
 		Hash:   *chaincfg.MainNetParams.GenesisHash,
@@ -325,7 +325,7 @@ func (s *Server) invInsert(h chainhash.Hash) bool {
 	return s.invInsertUnlocked(h)
 }
 
-func (s *Server) getHeadersByHashes(ctx context.Context, p *rawpeer.RawPeer, hashes ...*chainhash.Hash) error {
+func (s *Server) getHeadersByHashes(_ctx context.Context, p *rawpeer.RawPeer, hashes ...*chainhash.Hash) error {
 	log.Tracef("getHeadersByHashes %v %v", p, hashes)
 	defer log.Tracef("getHeadersByHashes exit %v %v", p, hashes)
 
@@ -373,7 +373,7 @@ func (s *Server) getHeadersByHeights(ctx context.Context, p *rawpeer.RawPeer, he
 	return nil
 }
 
-func (s *Server) pingExpired(ctx context.Context, key any, value any) {
+func (s *Server) pingExpired(_ctx context.Context, key any, value any) {
 	log.Tracef("pingExpired")
 	defer log.Tracef("pingExpired exit")
 
@@ -546,14 +546,13 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 		// Disconnect for now. We only want more or less synced peers.
 		readError = err
 		return fmt.Errorf("remote peer height below ours")
-	} else {
-		err := s.getHeadersByHeights(ctx, p,
-			bhb.Height, bhb.Height-1000, bhb.Height-1999,
-			lastCheckpointHeight(bhb.Height, s.checkpoints))
-		if err != nil {
-			readError = err
-			return fmt.Errorf("handle peer heights: %w", err)
-		}
+	}
+	err = s.getHeadersByHeights(ctx, p,
+		bhb.Height, bhb.Height-1000, bhb.Height-1999,
+		lastCheckpointHeight(bhb.Height, s.checkpoints))
+	if err != nil {
+		readError = err
+		return fmt.Errorf("handle peer heights: %w", err)
 	}
 
 	// Get p2p information.
@@ -866,7 +865,7 @@ func (s *Server) handleAddrV2(_ context.Context, p *rawpeer.RawPeer, msg *wire.M
 	return nil
 }
 
-func (s *Server) handlePing(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgPing) error {
+func (s *Server) handlePing(_ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgPing) error {
 	log.Tracef("handlePing %v", p)
 	defer log.Tracef("handlePing exit %v", p)
 
@@ -880,7 +879,7 @@ func (s *Server) handlePing(ctx context.Context, p *rawpeer.RawPeer, msg *wire.M
 	return nil
 }
 
-func (s *Server) handlePong(ctx context.Context, p *rawpeer.RawPeer, pong *wire.MsgPong) error {
+func (s *Server) handlePong(_ctx context.Context, p *rawpeer.RawPeer, pong *wire.MsgPong) error {
 	log.Tracef("handlePong %v", p)
 	defer log.Tracef("handlePong exit %v", p)
 
@@ -892,7 +891,7 @@ func (s *Server) handlePong(ctx context.Context, p *rawpeer.RawPeer, pong *wire.
 	return nil
 }
 
-func (s *Server) downloadBlock(ctx context.Context, p *rawpeer.RawPeer, ch chainhash.Hash) error {
+func (s *Server) downloadBlock(_ctx context.Context, p *rawpeer.RawPeer, ch chainhash.Hash) error {
 	log.Tracef("downloadBlock")
 	defer log.Tracef("downloadBlock exit")
 
@@ -1205,7 +1204,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 // corresponding TBC database state transition. Otherwise, an unexpected termination
 // between updating TBC state and recording the updated upstreamCursor could cause
 // state corruption.
-func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, upstreamStateId []byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
+func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, tipAfterRemoval *wire.BlockHeader, upstreamStateID []byte) (tbcd.RemoveType, *tbcd.BlockHeader, error) {
 	if !s.cfg.ExternalHeaderMode {
 		return tbcd.RTInvalid, nil,
 			errors.New("RemoveExternalHeaders called on TBC instance that is not in external header mode")
@@ -1216,7 +1215,7 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 			errors.New("RemoveExternalHeaders called with no headers")
 	}
 
-	if upstreamStateId == nil {
+	if upstreamStateID == nil {
 		return tbcd.RTInvalid, nil,
 			errors.New("upstream state invalid")
 	}
@@ -1247,7 +1246,7 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 				dbnames.MetadataDB)
 		}
 		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
-			{Key: upstreamStateIdKey, Value: upstreamStateId},
+			{Key: upstreamStateIDKey, Value: upstreamStateID},
 		})
 		return nil
 	}
@@ -1265,7 +1264,7 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 
 // AddExternalHeaders XXX if we are passing in upstreamStateId then why does
 // the default live in tbcd?
-func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, upstreamStateId []byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeaders, upstreamStateID []byte) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	if !s.cfg.ExternalHeaderMode {
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("AddExternalHeaders called on TBC instance that is not in external header mode")
@@ -1276,7 +1275,7 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 			errors.New("AddExternalHeaders called with no headers")
 	}
 
-	if upstreamStateId == nil {
+	if upstreamStateID == nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			errors.New("upstream state invalid")
 	}
@@ -1302,7 +1301,7 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 				dbnames.MetadataDB)
 		}
 		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
-			{Key: upstreamStateIdKey, Value: upstreamStateId},
+			{Key: upstreamStateIDKey, Value: upstreamStateID},
 		})
 		return nil
 	}
@@ -1517,10 +1516,9 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	height, err := s.db.BlockInsert(ctx, block) // XXX see if we can use raw here
 	if err != nil {
 		return fmt.Errorf("database block insert %v: %w", bhs, err)
-	} else {
-		log.Infof("Insert block %v at %v txs %v %v", bhs, height,
-			len(msg.Transactions), msg.Header.Timestamp)
 	}
+	log.Infof("Insert block %v at %v txs %v %v", bhs, height,
+		len(msg.Transactions), msg.Header.Timestamp)
 
 	// Reap broadcast messages.
 	txHashes, _ := block.MsgBlock().TxHashes()
@@ -1580,7 +1578,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	return nil
 }
 
-func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgInv, raw []byte) error {
+func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgInv, _raw []byte) error {
 	switch msg.InvList[0].Type {
 	case wire.InvTypeTx:
 	case wire.InvTypeBlock:
@@ -1633,17 +1631,22 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 	return nil
 }
 
-func (s *Server) handleNotFound(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgNotFound, raw []byte) error {
+func (s *Server) handleNotFound(_ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgNotFound, raw []byte) error {
 	// log.Infof("handleNotFound %v", spew.Sdump(msg))
 	// defer log.Infof("handleNotFound exit")
 
 	// // XXX keep here to see if it spams logs
 	// log.Infof("NotFound: %v %v", p, spew.Sdump(msg))
 
+	// avoid linting errors
+	_ = p
+	_ = msg
+	_ = raw
+
 	return nil
 }
 
-func (s *Server) handleGetData(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgGetData, raw []byte) error {
+func (s *Server) handleGetData(_ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgGetData, _raw []byte) error {
 	log.Tracef("handleGetData %v", p)
 	defer log.Tracef("handleGetData %v exit", p)
 
@@ -1913,15 +1916,15 @@ func (s *Server) UtxosByScriptHashCount(ctx context.Context, hash tbcd.ScriptHas
 // This function can return false for two reasons:
 //  1. The outpoint was already spent
 //  2. The outpoint never existed
-func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId chainhash.Hash, index uint32) (bool, error) {
+func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txID chainhash.Hash, index uint32) (bool, error) {
 	log.Tracef("ScriptHashAvailableToSpend")
 	defer log.Tracef("ScriptHashAvailableToSpend exit")
 	if s.cfg.ExternalHeaderMode {
 		return false, errors.New("cannot call script hash available to spend on TBC running in External Header mode")
 	}
 
-	txIdBytes := [32]byte(txId.CloneBytes())
-	op := tbcd.NewOutpoint(txIdBytes, index)
+	txIDBytes := [32]byte(txID.CloneBytes())
+	op := tbcd.NewOutpoint(txIDBytes, index)
 	sh, err := s.db.ScriptHashByOutpoint(ctx, op)
 	if err != nil {
 		return false, err
@@ -1936,16 +1939,16 @@ func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId chainhash.
 	return false, nil
 }
 
-func (s *Server) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tbcd.SpentInfo, error) {
-	log.Tracef("SpentOutputsByTxId")
-	defer log.Tracef("SpentOutputsByTxId exit")
+func (s *Server) SpentOutputsByTxID(ctx context.Context, txID chainhash.Hash) ([]tbcd.SpentInfo, error) {
+	log.Tracef("SpentOutputsByTxID")
+	defer log.Tracef("SpentOutputsByTxID exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call SpentOutputsByTxId on TBC running in External Header mode")
+		return nil, errors.New("cannot call SpentOutputsByTxID on TBC running in External Header mode")
 	}
 
 	// As it is written now it returns all spent outputs per the tx index view.
-	si, err := s.db.SpentOutputsByTxId(ctx, txId)
+	si, err := s.db.SpentOutputsByTxID(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -1965,26 +1968,26 @@ func (s *Server) BlockInTxIndex(ctx context.Context, blkid chainhash.Hash) (bool
 	return s.db.BlockInTxIndex(ctx, blkid)
 }
 
-func (s *Server) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error) {
-	log.Tracef("BlockHashByTxId")
-	defer log.Tracef("BlockHashByTxId exit")
+func (s *Server) BlockHashByTxID(ctx context.Context, txID chainhash.Hash) (*chainhash.Hash, error) {
+	log.Tracef("BlockHashByTxID")
+	defer log.Tracef("BlockHashByTxID exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call BlockHashByTxId on TBC running in External Header mode")
+		return nil, errors.New("cannot call BlockHashByTxID on TBC running in External Header mode")
 	}
 
-	return s.db.BlockHashByTxId(ctx, txId)
+	return s.db.BlockHashByTxID(ctx, txID)
 }
 
-func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, error) {
-	log.Tracef("TxById")
-	defer log.Tracef("TxById exit")
+func (s *Server) TxByID(ctx context.Context, txID chainhash.Hash) (*wire.MsgTx, error) {
+	log.Tracef("TxByID")
+	defer log.Tracef("TxByID exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call TxById on TBC running in External Header mode")
+		return nil, errors.New("cannot call TxByID on TBC running in External Header mode")
 	}
 
-	blockHash, err := s.db.BlockHashByTxId(ctx, txId)
+	blockHash, err := s.db.BlockHashByTxID(ctx, txID)
 	if err != nil {
 		return nil, err
 	}
@@ -1993,7 +1996,7 @@ func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, 
 		return nil, err
 	}
 	for _, tx := range block.Transactions() {
-		if tx.Hash().IsEqual(&txId) {
+		if tx.Hash().IsEqual(&txID) {
 			return tx.MsgTx(), nil
 		}
 	}
@@ -2001,7 +2004,7 @@ func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, 
 	return nil, database.ErrNotFound
 }
 
-func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *rawpeer.RawPeer) error {
+func (s *Server) TxBroadcastAllToPeer(_ctx context.Context, p *rawpeer.RawPeer) error {
 	log.Tracef("TxBroadcastAllToPeer %v", p)
 	defer log.Tracef("TxBroadcastAllToPeer %v exit", p)
 
@@ -2063,7 +2066,7 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 		return nil, fmt.Errorf("invalid vector: %w", err)
 	}
 	var success atomic.Uint64
-	inv := func(ctx context.Context, p *rawpeer.RawPeer) {
+	inv := func(_ctx context.Context, p *rawpeer.RawPeer) {
 		log.Tracef("inv %v", p)
 		defer log.Tracef("inv %v exit", p)
 
@@ -2161,16 +2164,16 @@ func (s *Server) FullBlockAvailable(ctx context.Context, hash chainhash.Hash) (b
 // UpstreamStateId fetches the last-stored upstream state ID.  If the last
 // header insertion/removal did not specify an upstream state ID, this will
 // return the default upstream state ID.
-func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
-	log.Tracef("UpstreamStateId")
-	defer log.Tracef("UpstreamStateId exit")
+func (s *Server) UpstreamStateID(ctx context.Context) (*[32]byte, error) {
+	log.Tracef("UpstreamStateID")
+	defer log.Tracef("UpstreamStateID exit")
 
 	if !s.cfg.ExternalHeaderMode {
 		return nil, errors.New("upstream state id: " +
 			"not running in external header mode")
 	}
 
-	usi, err := s.db.MetadataGet(ctx, upstreamStateIdKey)
+	usi, err := s.db.MetadataGet(ctx, upstreamStateIDKey)
 	if err != nil {
 		return nil, err
 	}
@@ -2182,16 +2185,16 @@ func (s *Server) UpstreamStateId(ctx context.Context) (*[32]byte, error) {
 // SetUpstreamStateId sets a new upstream state ID without making any other
 // state changes to TBC, used when the upstream state is updated without
 // requiring any TBC updates.
-func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId [32]byte) error {
-	log.Tracef("SetUpstreamStateId")
-	defer log.Tracef("SetUpstreamStateId exit")
+func (s *Server) SetUpstreamStateID(ctx context.Context, upstreamStateID [32]byte) error {
+	log.Tracef("SetUpstreamStateID")
+	defer log.Tracef("SetUpstreamStateID exit")
 
 	if !s.cfg.ExternalHeaderMode {
 		return errors.New("set upstream state id: " +
 			"not running in external header mode")
 	}
 
-	return s.db.MetadataPut(ctx, upstreamStateIdKey, upstreamStateId[:])
+	return s.db.MetadataPut(ctx, upstreamStateIDKey, upstreamStateID[:])
 }
 
 type SyncInfo struct {
@@ -2251,8 +2254,8 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 
 	// Find out how many blocks are missing.
 	var (
-		blksMissing bool = true
-		maxMissing  int  = 64
+		blksMissing = true
+		maxMissing  = 64
 	)
 	// expensive check
 	bm, err := s.db.BlocksMissing(ctx, maxMissing)
@@ -2670,7 +2673,7 @@ func (s *Server) Run(pctx context.Context) error {
 	return err
 }
 
-func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte) error {
+func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateID []byte) error {
 	log.Tracef("ExternalHeaderSetup")
 	defer log.Tracef("ExternalHeaderSetup exit")
 
@@ -2702,7 +2705,7 @@ func (s *Server) ExternalHeaderSetup(ctx context.Context, upstreamStateId []byte
 		}
 
 		// Insert default upstreamStateId
-		err := s.db.MetadataPut(ctx, upstreamStateIdKey, upstreamStateId)
+		err := s.db.MetadataPut(ctx, upstreamStateIDKey, upstreamStateID)
 		if err != nil {
 			return fmt.Errorf("default upstream state id insert: %w",
 				err)

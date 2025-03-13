@@ -159,12 +159,12 @@ type BTCNewBlockNotification struct{}
 type L2KeystonesNotification struct{}
 
 type PopTx struct {
-	BtcTxId             api.ByteSlice `json:"btc_tx_id"`
+	BtcTxID             api.ByteSlice `json:"btc_tx_id"`
 	BtcRawTx            api.ByteSlice `json:"btc_raw_tx"`
 	BtcHeaderHash       api.ByteSlice `json:"btc_header_hash"`
 	BtcTxIndex          *uint64       `json:"btc_tx_index"`
 	BtcMerklePath       []string      `json:"btc_merkle_path"`
-	PopTxId             api.ByteSlice `json:"pop_tx_id"`
+	PopTxID             api.ByteSlice `json:"pop_tx_id"`
 	PopMinerPublicKey   api.ByteSlice `json:"pop_miner_public_key"`
 	L2KeystoneAbrevHash api.ByteSlice `json:"l2_keystone_abrev_hash"`
 }

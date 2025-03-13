@@ -244,7 +244,7 @@ func (p *pgdb) BtcBlockReplace(ctx context.Context, btcBlock *bfgd.BtcBlock) (in
 	// the block at a given height is not what we have saved in the database (comparing header+hash)
 	// then we must have had a re-org so we replace
 
-	insertSql := `
+	insertSQL := `
 		INSERT INTO btc_blocks (hash, header, height)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (height) 
@@ -252,7 +252,7 @@ func (p *pgdb) BtcBlockReplace(ctx context.Context, btcBlock *bfgd.BtcBlock) (in
 		WHERE btc_blocks.hash != EXCLUDED.hash OR btc_blocks.header != EXCLUDED.header
 	`
 
-	results, err := p.db.ExecContext(ctx, insertSql, btcBlock.Hash, btcBlock.Header, btcBlock.Height)
+	results, err := p.db.ExecContext(ctx, insertSQL, btcBlock.Hash, btcBlock.Header, btcBlock.Height)
 	if err != nil {
 		return 0, err
 	}
@@ -348,7 +348,7 @@ func (p *pgdb) PopBasisInsertPopMFields(ctx context.Context, pb *bfgd.PopBasis) 
 		)
 		VALUES ($1, $2, $3, $4)
 	`
-	result, err := p.db.ExecContext(ctx, qPopBlockInsert, pb.BtcTxId, pb.BtcRawTx,
+	result, err := p.db.ExecContext(ctx, qPopBlockInsert, pb.BtcTxID, pb.BtcRawTx,
 		pb.L2KeystoneAbrevHash, pb.PopMinerPublicKey)
 	if err != nil {
 		var pgErr *pq.Error
@@ -400,8 +400,8 @@ func (p *pgdb) PopBasisUpdateBTCFields(ctx context.Context, pb *bfgd.PopBasis) (
 		AND btc_tx_index IS NULL
 	`
 
-	result, err := p.db.ExecContext(ctx, q, pb.BtcHeaderHash, string(b), pb.PopTxId,
-		pb.BtcTxIndex, pb.BtcTxId,
+	result, err := p.db.ExecContext(ctx, q, pb.BtcHeaderHash, string(b), pb.PopTxID,
+		pb.BtcTxIndex, pb.BtcTxID,
 	)
 	if err != nil {
 		var pgErr *pq.Error
@@ -447,8 +447,8 @@ func (p *pgdb) PopBasisInsertFull(ctx context.Context, pb *bfgd.PopBasis) error 
 		ON CONFLICT (btc_txid, btc_raw_tx, btc_block_hash, btc_tx_index)
 		DO NOTHING
 	`
-	result, err := p.db.ExecContext(ctx, qPopBlockInsert, pb.BtcTxId, pb.BtcRawTx,
-		pb.BtcHeaderHash, pb.BtcTxIndex, string(b), pb.PopTxId,
+	result, err := p.db.ExecContext(ctx, qPopBlockInsert, pb.BtcTxID, pb.BtcRawTx,
+		pb.BtcHeaderHash, pb.BtcTxIndex, string(b), pb.PopTxID,
 		pb.L2KeystoneAbrevHash, pb.PopMinerPublicKey)
 	if err != nil {
 		var pgErr *pq.Error
@@ -523,12 +523,12 @@ func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte
 
 		err := rows.Scan(
 			&popBasis.ID,
-			&popBasis.BtcTxId,
+			&popBasis.BtcTxID,
 			&popBasis.BtcRawTx,
 			&popBasis.BtcHeaderHash,
 			&popBasis.BtcTxIndex,
 			&btcMerklePathTmp,
-			&popBasis.PopTxId,
+			&popBasis.PopTxID,
 			&popBasis.L2KeystoneAbrevHash,
 			&popBasis.PopMinerPublicKey,
 			&popBasis.CreatedAt,
@@ -712,16 +712,16 @@ func (p *pgdb) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
 	return result, nil
 }
 
-func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txId string) error {
+func (p *pgdb) BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txID string) error {
 	log.Tracef("BtcTransactionBroadcastRequestInsert")
 	defer log.Tracef("BtcTransactionBroadcastRequestInsert exit")
 
-	const insertSql = `
+	const insertSQL = `
 		INSERT INTO btc_transaction_broadcast_request 
 		(tx_id, serialized_tx)
 		VALUES ($1, $2)
 	`
-	_, err := p.db.ExecContext(ctx, insertSql, txId, serializedTx)
+	_, err := p.db.ExecContext(ctx, insertSQL, txID, serializedTx)
 	if err != nil {
 		var pgErr *pq.Error
 		if errors.As(err, &pgErr) && pgErr.Code.Class().Name() == "integrity_constraint_violation" {
@@ -750,7 +750,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 		orderClause = " ORDER BY created_at ASC "
 	}
 
-	querySql := fmt.Sprintf(`
+	querySQL := fmt.Sprintf(`
 		UPDATE btc_transaction_broadcast_request 
 		SET last_broadcast_attempt_at = NOW(), 
 		
@@ -770,7 +770,7 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 	`, onlyNewClause, orderClause)
 
 	var serializedTx []byte
-	err := p.db.QueryRowContext(ctx, querySql).Scan(&serializedTx)
+	err := p.db.QueryRowContext(ctx, querySQL).Scan(&serializedTx)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("could not get next btc_transaction_broadcast_request: %w", err)
@@ -784,16 +784,16 @@ func (p *pgdb) BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNe
 
 // BtcTransactionBroadcastRequestConfirmBroadcast sets a broadcast request to
 // "broadcasted" so it doesn't get attempted again
-func (p *pgdb) BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error {
+func (p *pgdb) BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txID string) error {
 	log.Tracef("BtcTransactionBroadcastRequestConfirmBroadcast")
 	defer log.Tracef("BtcTransactionBroadcastRequestConfirmBroadcast exit")
 
-	const querySql = `
+	const querySQL = `
 		UPDATE btc_transaction_broadcast_request 
 		SET broadcast_at = NOW()
 		WHERE tx_id = $1
 	`
-	_, err := p.db.ExecContext(ctx, querySql, txId)
+	_, err := p.db.ExecContext(ctx, querySQL, txID)
 	if err != nil {
 		return fmt.Errorf("could not confirm broadcast: %w", err)
 	}
@@ -801,15 +801,15 @@ func (p *pgdb) BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Contex
 	return nil
 }
 
-func (p *pgdb) BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error {
+func (p *pgdb) BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txID string, lastErr string) error {
 	log.Tracef("BtcTransactionBroadcastRequestSetLastError")
 	defer log.Tracef("BtcTransactionBroadcastRequestSetLastError exit")
 
-	const querySql = `
+	const querySQL = `
 		UPDATE btc_transaction_broadcast_request 
 		SET last_error = $2 WHERE tx_id = $1
 	`
-	_, err := p.db.ExecContext(ctx, querySql, txId, lastErr)
+	_, err := p.db.ExecContext(ctx, querySQL, txID, lastErr)
 	if err != nil {
 		return fmt.Errorf("could not confirm broadcast: %w", err)
 	}
@@ -821,11 +821,11 @@ func (p *pgdb) BtcTransactionBroadcastRequestTrim(ctx context.Context) error {
 	log.Tracef("BtcTransactionBroadcastRequestSetLastError")
 	defer log.Tracef("BtcTransactionBroadcastRequestSetLastError exit")
 
-	const querySql = `
+	const querySQL = `
 		DELETE FROM btc_transaction_broadcast_request 
 		WHERE created_at < NOW() - INTERVAL '1 hour'
 	`
-	_, err := p.db.ExecContext(ctx, querySql)
+	_, err := p.db.ExecContext(ctx, querySQL)
 	if err != nil {
 		return fmt.Errorf("could not trim broadcast: %w", err)
 	}

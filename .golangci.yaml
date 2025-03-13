@@ -38,8 +38,7 @@ linters:
     - "gosmopolitan" # Report certain i18n/l10n anti-patterns in your Go codebase.
     - "govet" # Runs go vet.
     - "ineffassign" # Detects when assignments to variables are not used.
-    # TODO enable revive, when bored run 'golangci-lint run -Erevive' to fix these
-    # - "revive" # Checks for potential security issues
+    - "revive" # Checks for potential security issues
     - "nilerr" # Finds the code that returns nil even if it checks that the error is not nil.
     - "nolintlint" # Reports ill-formed or insufficient nolint directives.
     - "prealloc" # Finds slice declarations that could potentially be pre-allocated.
@@ -91,6 +90,34 @@ linters-settings:
   gosec:
     excludes:
       - G115 # Potential integer overflow when converting between integer types
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+      - name: if-return
+      - name: increment-decrement
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unreachable-code
+      - name: redefines-builtin-id
+      - name: var-naming
+      - name: unused-parameter
+        arguments:
+          - allowRegex: "^_"
 
   # Enforces copyright header
   goheader: # TODO: Replace goheader, autofix is too buggy.

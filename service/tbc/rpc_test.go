@@ -1043,7 +1043,7 @@ func TestTxByIdRaw(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdRawResponse
+	var response tbcapi.TxByIDRawResponse
 	select {
 	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
@@ -1053,7 +1053,7 @@ func TestTxByIdRaw(t *testing.T) {
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRawRequest{
 		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
@@ -1064,7 +1064,7 @@ func TestTxByIdRaw(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdRawResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDRawResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1125,7 +1125,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdRawResponse
+	var response tbcapi.TxByIDRawResponse
 	select {
 	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
@@ -1136,7 +1136,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	txId[0]++
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRawRequest{
 		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
@@ -1147,7 +1147,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdRawResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDRawResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1214,7 +1214,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdRawResponse
+	var response tbcapi.TxByIDRawResponse
 	select {
 	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
@@ -1225,7 +1225,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	txId[len(txId)-1] = 8
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRawRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRawRequest{
 		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
@@ -1236,7 +1236,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdRawResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDRawResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1295,12 +1295,12 @@ func TestTxById(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 
-	var response tbcapi.TxByIdResponse
+	var response tbcapi.TxByIDResponse
 
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRequest{
 		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
@@ -1311,7 +1311,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1323,7 +1323,7 @@ func TestTxById(t *testing.T) {
 		t.Fatal(response.Error.Message)
 	}
 
-	tx, err := tbcServer.TxById(ctx, *txId)
+	tx, err := tbcServer.TxByID(ctx, *txId)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1368,7 +1368,7 @@ func TestTxByIdInvalid(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdResponse
+	var response tbcapi.TxByIDResponse
 	select {
 	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
@@ -1379,7 +1379,7 @@ func TestTxByIdInvalid(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	txId[0]++
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRequest{
 		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
@@ -1390,7 +1390,7 @@ func TestTxByIdInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 
@@ -1457,7 +1457,7 @@ func TestTxByIdNotFound(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	var response tbcapi.TxByIdResponse
+	var response tbcapi.TxByIDResponse
 	select {
 	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
@@ -1469,7 +1469,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
 	txId[len(txId)-1] = 8
 
-	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIdRequest{
+	if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.TxByIDRequest{
 		TxID: *txId,
 	}); err != nil {
 		t.Fatal(err)
@@ -1480,7 +1480,7 @@ func TestTxByIdNotFound(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if v.Header.Command != tbcapi.CmdTxByIdResponse {
+	if v.Header.Command != tbcapi.CmdTxByIDResponse {
 		t.Fatalf("received unexpected command: %s", v.Header.Command)
 	}
 

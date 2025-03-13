@@ -118,8 +118,8 @@ type Database interface {
 	BlockHeaderByTxIndex(ctx context.Context) (*BlockHeader, error)
 	BlockUtxoUpdate(ctx context.Context, direction int, utxos map[Outpoint]CacheOutput, utxoIndexHash chainhash.Hash) error
 	BlockTxUpdate(ctx context.Context, direction int, txs map[TxKey]*TxValue, txIndexHash chainhash.Hash) error
-	BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainhash.Hash, error)
-	SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]SpentInfo, error)
+	BlockHashByTxID(ctx context.Context, txID chainhash.Hash) (*chainhash.Hash, error)
+	SpentOutputsByTxID(ctx context.Context, txID chainhash.Hash) ([]SpentInfo, error)
 	// ScriptHash returns the sha256 of PkScript for the provided outpoint.
 	BalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 	BlockInTxIndex(ctx context.Context, hash chainhash.Hash) (bool, error)
@@ -200,7 +200,7 @@ type BlockIdentifier struct {
 
 type SpentInfo struct {
 	BlockHash  *chainhash.Hash
-	TxId       *chainhash.Hash
+	TxID       *chainhash.Hash
 	InputIndex uint32
 }
 
@@ -220,11 +220,11 @@ func (o Outpoint) String() string {
 	return fmt.Sprintf("%s:%d", hash, binary.BigEndian.Uint32(o[33:]))
 }
 
-func (o Outpoint) TxId() []byte {
+func (o Outpoint) TxID() []byte {
 	return o[1:33]
 }
 
-func (o Outpoint) TxIdHash() *chainhash.Hash {
+func (o Outpoint) TxIDHash() *chainhash.Hash {
 	h, _ := chainhash.NewHash(o[1:33])
 	return h
 }
@@ -397,7 +397,7 @@ type (
 
 // NewTxSpent returns a TxKey and TxValue that maps a spent transaction to a
 // location in a block.
-func NewTxSpent(blockHash, txId, inPrevHash *chainhash.Hash, inPrevIndex, txInIndex uint32) (txKey TxKey, txValue TxValue) {
+func NewTxSpent(blockHash, txID, inPrevHash *chainhash.Hash, inPrevIndex, txInIndex uint32) (txKey TxKey, txValue TxValue) {
 	// Construct key
 	txKey[0] = 's'
 	copy(txKey[1:33], inPrevHash[:])
@@ -405,27 +405,27 @@ func NewTxSpent(blockHash, txId, inPrevHash *chainhash.Hash, inPrevIndex, txInIn
 	copy(txKey[37:], blockHash[:])
 
 	// Construct value
-	copy(txValue[0:], txId[:])
+	copy(txValue[0:], txID[:])
 	binary.BigEndian.PutUint32(txValue[32:36], txInIndex)
 
 	return txKey, txValue
 }
 
 // NewTxMapping returns a TxKey and TxValue that maps a tx id to a block hash.
-func NewTxMapping(txId, blockHash *chainhash.Hash) (txKey TxKey) {
+func NewTxMapping(txID, blockHash *chainhash.Hash) (txKey TxKey) {
 	// Construct key
 	txKey[0] = 't'
-	copy(txKey[1:33], txId[:])
+	copy(txKey[1:33], txID[:])
 	copy(txKey[33:], blockHash[:])
 
 	return txKey
 }
 
-func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, error) {
+func TxIDBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, error) {
 	if txKey[0] != 't' {
 		return nil, nil, fmt.Errorf("invalid magic 0x%02x", txKey[0])
 	}
-	txId, err := chainhash.NewHash(txKey[1:33])
+	txID, err := chainhash.NewHash(txKey[1:33])
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid tx id: %w", err)
 	}
@@ -433,7 +433,7 @@ func TxIdBlockHashFromTxKey(txKey TxKey) (*chainhash.Hash, *chainhash.Hash, erro
 	if err != nil {
 		return nil, nil, fmt.Errorf("invalid block hash: %w", err)
 	}
-	return txId, blockHash, nil
+	return txID, blockHash, nil
 }
 
 // Cache

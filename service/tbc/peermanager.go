@@ -232,7 +232,7 @@ func (pm *PeerManager) Bad(ctx context.Context, address string) error {
 				// Run outside of mutex
 				select {
 				case <-ctx.Done():
-				case pm.slotsC <- p.Id():
+				case pm.slotsC <- p.ID():
 				}
 			}()
 		}
@@ -321,7 +321,7 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*rawpeer.RawPeer, err
 	}
 }
 
-func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*rawpeer.RawPeer, error) {
+func (pm *PeerManager) randomPeer(_ctx context.Context, slot int) (*rawpeer.RawPeer, error) {
 	pm.mtx.Lock()
 	defer pm.mtx.Unlock()
 
@@ -358,8 +358,8 @@ func (pm *PeerManager) randomPeer(ctx context.Context, slot int) (*rawpeer.RawPe
 }
 
 func (pm *PeerManager) connect(ctx context.Context, p *rawpeer.RawPeer) error {
-	log.Tracef("connect: %v %v", p.Id(), p)
-	defer log.Tracef("connect exit: %v %v", p.Id(), p)
+	log.Tracef("connect: %v %v", p.ID(), p)
+	defer log.Tracef("connect exit: %v %v", p.ID(), p)
 
 	if err := p.Connect(ctx); err != nil {
 		return fmt.Errorf("new peer: %w", err)
@@ -384,7 +384,7 @@ func (pm *PeerManager) connect(ctx context.Context, p *rawpeer.RawPeer) error {
 func (pm *PeerManager) connectSlot(ctx context.Context, p *rawpeer.RawPeer) {
 	if err := pm.connect(ctx, p); err != nil {
 		// log.Errorf("%v", err)
-		pm.slotsC <- p.Id() // give slot back
+		pm.slotsC <- p.ID() // give slot back
 		return
 	}
 }

@@ -887,7 +887,7 @@ func reconsiderBlock(ctx context.Context, t *testing.T, bitcoindContainer testco
 }
 
 func createBitcoind(ctx context.Context, t *testing.T) testcontainers.Container {
-	id, err := randHexId(6)
+	id, err := randHexID(6)
 	if err != nil {
 		t.Fatal("failed to generate random id:", err)
 	}
@@ -1497,7 +1497,7 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 			t.Error(err)
 		}
 
-		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		stateIdRet, err := tbc.UpstreamStateID(ctx)
 		if err != nil {
 			t.Errorf("unable to get upstream state id, err: %v", err)
 		}
@@ -1597,7 +1597,7 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 			t.Error(err)
 		}
 
-		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		stateIdRet, err := tbc.UpstreamStateID(ctx)
 		if err != nil {
 			t.Errorf("unable to get upstream state id, err: %v", err)
 		}
@@ -1855,7 +1855,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Error(err)
 	}
 
-	stateIdRet, err := tbc.UpstreamStateId(ctx)
+	stateIdRet, err := tbc.UpstreamStateID(ctx)
 	if err != nil {
 		t.Errorf("unable to get upstream state id, err: %v", err)
 	}
@@ -1958,7 +1958,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 			t.Errorf("removing headers from %d to %d when tip is %d should not have returned a non-nil post removal tip", start, end, canonicalHeightBefore)
 		}
 
-		stateIdRet, err := tbc.UpstreamStateId(ctx)
+		stateIdRet, err := tbc.UpstreamStateID(ctx)
 		if err != nil {
 			t.Errorf("unable to get upstream state id, err: %v", err)
 		}
@@ -2014,7 +2014,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Errorf("removing headers from %d to %d when tip is %d should have returned a non-nil post removal tip", start, end, canonicalHeightBefore)
 	}
 
-	stateIdRet, err = tbc.UpstreamStateId(ctx)
+	stateIdRet, err = tbc.UpstreamStateID(ctx)
 	if err != nil {
 		t.Errorf("unable to get upstream state id, err: %v", err)
 	}
@@ -2029,12 +2029,12 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	}
 
 	updateStateWithoutModificationsId := [32]byte{0x4C, 0xA1, 0x62, 0xB6}
-	err = tbc.SetUpstreamStateId(ctx, updateStateWithoutModificationsId)
+	err = tbc.SetUpstreamStateID(ctx, updateStateWithoutModificationsId)
 	if err != nil {
 		t.Errorf("unable to set upstream state id, err: %v", err)
 	}
 
-	stateIdRet, err = tbc.UpstreamStateId(ctx)
+	stateIdRet, err = tbc.UpstreamStateID(ctx)
 	if err != nil {
 		t.Errorf("unable to get upstream state id, err: %v", err)
 	}

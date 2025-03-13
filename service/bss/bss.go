@@ -199,7 +199,7 @@ type bssWs struct {
 	wg             sync.WaitGroup
 	addr           string
 	conn           *protocol.WSConn
-	sessionId      string
+	sessionID      string
 	requestContext context.Context
 }
 
@@ -404,13 +404,13 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		requestContext: r.Context(),
 	}
 
-	if bws.sessionId, err = s.newSession(bws); err != nil {
+	if bws.sessionID, err = s.newSession(bws); err != nil {
 		log.Errorf("error occurred creating key: %s", err)
 		return
 	}
 
 	defer func() {
-		s.deleteSession(bws.sessionId)
+		s.deleteSession(bws.sessionID)
 	}()
 
 	bws.wg.Add(1)

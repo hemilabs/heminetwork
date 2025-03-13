@@ -46,15 +46,15 @@ import (
 // XXX this code needs to be a bit smarter when syncing bitcoin. We should
 // return a "not ready" error when that is the case.
 
-type notificationId string
+type notificationID string
 
 const (
 	logLevel = "INFO"
 	appName  = "bfg" // Prometheus
 
-	notifyBtcBlocks     notificationId = "btc_blocks"
-	notifyBtcFinalities notificationId = "btc_finalities"
-	notifyL2Keystones   notificationId = "l2_keystones"
+	notifyBtcBlocks     notificationID = "btc_blocks"
+	notifyBtcFinalities notificationID = "btc_finalities"
+	notifyL2Keystones   notificationID = "l2_keystones"
 )
 
 var (
@@ -530,7 +530,7 @@ func (s *Server) getBtcHeightCache() uint64 {
 	return s.btcHeightCache
 }
 
-func (s *Server) handleBitcoinInfo(ctx context.Context, bir *bfgapi.BitcoinInfoRequest) (any, error) {
+func (s *Server) handleBitcoinInfo(_ctx context.Context, _bir *bfgapi.BitcoinInfoRequest) (any, error) {
 	log.Tracef("handleBitcoinInfo")
 	defer log.Tracef("handleBitcoinInfo exit")
 
@@ -565,7 +565,7 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 	return buResp, nil
 }
 
-var ErrAlreadyProcessed error = fmt.Errorf("Already Processed BTC Block")
+var ErrAlreadyProcessed = fmt.Errorf("already Processed BTC Block")
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
@@ -684,20 +684,20 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 			continue
 		}
 
-		popTxIdFull := []byte{}
-		popTxIdFull = append(popTxIdFull, txHash...)
-		popTxIdFull = append(popTxIdFull, btcHeader[:]...)
-		popTxIdFull = binary.AppendUvarint(popTxIdFull, btcTxIndex) // is this correct?
+		popTxIDFull := []byte{}
+		popTxIDFull = append(popTxIDFull, txHash...)
+		popTxIDFull = append(popTxIDFull, btcHeader[:]...)
+		popTxIDFull = binary.AppendUvarint(popTxIDFull, btcTxIndex) // is this correct?
 
-		popTxId := chainhash.DoubleHashB(popTxIdFull)
-		log.Infof("hashed pop transaction id: %v from %v", popTxId, popTxIdFull)
+		popTxID := chainhash.DoubleHashB(popTxIDFull)
+		log.Infof("hashed pop transaction id: %v from %v", popTxID, popTxIDFull)
 		log.Infof("with merkle hashes %v", merkleHashes)
 
 		popBasis := bfgd.PopBasis{
-			BtcTxId:             txHash,
+			BtcTxID:             txHash,
 			BtcHeaderHash:       btcHeaderHash,
 			BtcTxIndex:          &btcTxIndex,
-			PopTxId:             popTxId,
+			PopTxID:             popTxID,
 			L2KeystoneAbrevHash: tl2.L2Keystone.HashB(),
 			BtcRawTx:            rtx,
 			PopMinerPublicKey:   publicKeyUncompressed,
@@ -833,10 +833,10 @@ type bfgWs struct {
 	wg             sync.WaitGroup
 	addr           string
 	conn           *protocol.WSConn
-	sessionId      string
+	sessionID      string
 	listenerName   string          // "public" or "private"
 	requestContext context.Context // XXX get rid of this
-	notify         map[notificationId]struct{}
+	notify         map[notificationID]struct{}
 	publicKey      []byte
 }
 
@@ -1050,7 +1050,7 @@ func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) 
 	bws := &bfgWs{
 		addr: remoteAddr,
 		conn: protocol.NewWSConn(conn),
-		notify: map[notificationId]struct{}{
+		notify: map[notificationID]struct{}{
 			notifyBtcBlocks:     {},
 			notifyBtcFinalities: {},
 		},
@@ -1058,14 +1058,14 @@ func (s *Server) handleWebsocketPrivate(w http.ResponseWriter, r *http.Request) 
 		requestContext: r.Context(),
 	}
 
-	if bws.sessionId, err = s.newSession(bws); err != nil {
+	if bws.sessionID, err = s.newSession(bws); err != nil {
 		log.Errorf("error occurred creating key: %s", err)
 		return
 	}
 	s.metrics.rpcConnections.WithLabelValues("private").Inc()
 
 	defer func() {
-		s.deleteSession(bws.sessionId)
+		s.deleteSession(bws.sessionID)
 		s.metrics.rpcConnections.WithLabelValues("private").Dec()
 	}()
 
@@ -1116,7 +1116,7 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 		conn:           protocol.NewWSConn(conn),
 		listenerName:   "public",
 		requestContext: r.Context(),
-		notify: map[notificationId]struct{}{
+		notify: map[notificationID]struct{}{
 			notifyL2Keystones: {},
 		},
 	}
@@ -1145,14 +1145,14 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	}
 
 	bws.publicKey = publicKey
-	if bws.sessionId, err = s.newSession(bws); err != nil {
+	if bws.sessionID, err = s.newSession(bws); err != nil {
 		log.Errorf("error occurred creating key: %s", err)
 		return
 	}
 	s.metrics.rpcConnections.WithLabelValues("public").Inc()
 
 	defer func() {
-		s.deleteSession(bws.sessionId)
+		s.deleteSession(bws.sessionID)
 		s.metrics.rpcConnections.WithLabelValues("public").Dec()
 	}()
 
@@ -1169,10 +1169,10 @@ func (s *Server) handleWebsocketPublic(w http.ResponseWriter, r *http.Request) {
 	go s.handleWebsocketPublicRead(r.Context(), bws)
 
 	log.Infof("Authenticated session %s from %s public key %x (%s)",
-		bws.sessionId, remoteAddr, bws.publicKey, userAgent)
+		bws.sessionID, remoteAddr, bws.publicKey, userAgent)
 	bws.wg.Wait()
 	log.Infof("Terminated session %s from %s public key %x (%s)",
-		bws.sessionId, remoteAddr, bws.publicKey, userAgent)
+		bws.sessionID, remoteAddr, bws.publicKey, userAgent)
 }
 
 func (s *Server) handlePingRequest(ctx context.Context, bws *bfgWs, payload any, id string) error {
@@ -1216,12 +1216,12 @@ func (s *Server) handlePopTxsForL2Block(ctx context.Context, ptl2 *bfgapi.PopTxs
 
 	for k := range popTxs {
 		response.PopTxs = append(response.PopTxs, bfgapi.PopTx{
-			BtcTxId:             api.ByteSlice(popTxs[k].BtcTxId),
+			BtcTxID:             api.ByteSlice(popTxs[k].BtcTxID),
 			BtcRawTx:            api.ByteSlice(popTxs[k].BtcRawTx),
 			BtcHeaderHash:       api.ByteSlice(popTxs[k].BtcHeaderHash),
 			BtcTxIndex:          popTxs[k].BtcTxIndex,
 			BtcMerklePath:       popTxs[k].BtcMerklePath,
-			PopTxId:             api.ByteSlice(popTxs[k].PopTxId),
+			PopTxID:             api.ByteSlice(popTxs[k].PopTxID),
 			PopMinerPublicKey:   api.ByteSlice(popTxs[k].PopMinerPublicKey),
 			L2KeystoneAbrevHash: api.ByteSlice(popTxs[k].L2KeystoneAbrevHash),
 		})
@@ -1352,7 +1352,7 @@ func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
 	s.l2keystonesCache = l2Keystones
 }
 
-func (s *Server) handleL2KeystonesRequest(ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
+func (s *Server) handleL2KeystonesRequest(_ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
 	log.Tracef("handleL2KeystonesRequest")
 	defer log.Tracef("handleL2KeystonesRequest exit")
 
@@ -1483,7 +1483,7 @@ func (s *Server) saveL2Keystones(pctx context.Context, l2k []hemi.L2Keystone) {
 	go s.refreshCacheAndNotifiyL2Keystones(pctx)
 }
 
-func (s *Server) handleNewL2Keystones(ctx context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
+func (s *Server) handleNewL2Keystones(_ctx context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
 	log.Tracef("handleNewL2Keystones")
 	defer log.Tracef("handleNewL2Keystones exit")
 
@@ -1521,7 +1521,7 @@ func handle(service string, mux *http.ServeMux, pattern string, handler func(htt
 	log.Infof("handle (%v): %v", service, pattern)
 }
 
-func (s *Server) handleStateUpdates(ctx context.Context, table string, action string, payload, payloadOld interface{}) {
+func (s *Server) handleStateUpdates(ctx context.Context, _table string, _action string, _payload, _payloadOld interface{}) {
 	// get the last known canonical chain height
 	s.mtx.RLock()
 	heightBefore := s.canonicalChainHeight
@@ -1546,7 +1546,7 @@ func (s *Server) handleStateUpdates(ctx context.Context, table string, action st
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleAccessPublicKeys(ctx context.Context, table string, action string, payload, payloadOld interface{}) {
+func (s *Server) handleAccessPublicKeys(_ctx context.Context, _table string, action string, payload, payloadOld interface{}) {
 	log.Tracef("received payloads: %v, %v", payload, payloadOld)
 
 	if action != "DELETE" {
@@ -1580,7 +1580,7 @@ func (s *Server) handleAccessPublicKeys(ctx context.Context, table string, actio
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleL2KeystonesChange(ctx context.Context, table string, action string, payload, payloadOld any) {
+func (s *Server) handleL2KeystonesChange(ctx context.Context, _table string, _action string, _payload, _payloadOld any) {
 	go s.refreshCacheAndNotifiyL2Keystones(ctx)
 }
 
@@ -1898,34 +1898,34 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("parse trusted proxies: %w", err)
 	}
 
-	publicHttpServer := &http.Server{
+	publicHTTPServer := &http.Server{
 		Addr:              s.cfg.PublicListenAddress,
 		Handler:           publicMux,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	publicHttpErrCh := make(chan error)
+	publicHTTPErrCh := make(chan error)
 
-	privateHttpServer := &http.Server{
+	privateHTTPServer := &http.Server{
 		Addr:              s.cfg.PrivateListenAddress,
 		Handler:           privateMux,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	privateHttpErrCh := make(chan error)
+	privateHTTPErrCh := make(chan error)
 
 	go func() {
 		log.Infof("Listening: %v", s.cfg.PrivateListenAddress)
-		privateHttpErrCh <- privateHttpServer.ListenAndServe()
+		privateHTTPErrCh <- privateHTTPServer.ListenAndServe()
 	}()
 
 	go func() {
 		log.Infof("Listening: %v", s.cfg.PublicListenAddress)
-		publicHttpErrCh <- publicHttpServer.ListenAndServe()
+		publicHTTPErrCh <- publicHTTPServer.ListenAndServe()
 	}()
 
 	defer func() {
-		if err := privateHttpServer.Shutdown(ctx); err != nil {
+		if err := privateHTTPServer.Shutdown(ctx); err != nil {
 			log.Errorf("http private Server exit: %v", err)
 			return
 		}
@@ -1933,7 +1933,7 @@ func (s *Server) Run(pctx context.Context) error {
 	}()
 
 	defer func() {
-		if err := publicHttpServer.Shutdown(ctx); err != nil {
+		if err := publicHTTPServer.Shutdown(ctx); err != nil {
 			log.Errorf("http public Server exit: %v", err)
 			return
 		}
@@ -2005,8 +2005,8 @@ func (s *Server) Run(pctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()
-	case err = <-privateHttpErrCh:
-	case err = <-publicHttpErrCh:
+	case err = <-privateHTTPErrCh:
+	case err = <-publicHTTPErrCh:
 	}
 	cancel()
 

@@ -48,7 +48,7 @@ func (s *Server) Run(ctx context.Context) error {
 	pprofMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
 	pprofMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
 
-	pprofHttpServer := &http.Server{
+	pprofHTTPServer := &http.Server{
 		Addr:              s.cfg.ListenAddress,
 		Handler:           pprofMux,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
@@ -58,10 +58,10 @@ func (s *Server) Run(ctx context.Context) error {
 	httpErrCh := make(chan error)
 	go func() {
 		log.Infof("pprof listening: %s", s.cfg.ListenAddress)
-		httpErrCh <- pprofHttpServer.ListenAndServe()
+		httpErrCh <- pprofHTTPServer.ListenAndServe()
 	}()
 	defer func() {
-		if err := pprofHttpServer.Shutdown(ctx); err != nil {
+		if err := pprofHTTPServer.Shutdown(ctx); err != nil {
 			log.Errorf("pprof http server exit: %v", err)
 		}
 	}()
