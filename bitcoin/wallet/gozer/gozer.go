@@ -23,7 +23,7 @@ import (
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
-	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash *chainhash.Hash) (*BlockKeystoneByL2KeystoneAbrevHashResponse, error)
+	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash chainhash.Hash) (*BlockKeystoneByL2KeystoneAbrevHashResponse, error)
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 }
 

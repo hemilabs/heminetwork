@@ -168,7 +168,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), ks)
+	aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), *ks)
 	if err != nil {
 		NotFound(w, "keystone not found: %v", ks)
 		return
