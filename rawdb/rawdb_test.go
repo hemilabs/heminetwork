@@ -6,26 +6,11 @@ package rawdb
 
 import (
 	"bytes"
-	"os"
 	"testing"
 )
 
 func TestRawDB(t *testing.T) {
-	home, err := os.MkdirTemp("", "rawdb")
-	if err != nil {
-		t.Fatal(err)
-	}
-	remove := true
-	defer func() {
-		if !remove {
-			t.Logf("did not remove home: %v", home)
-			return
-		}
-
-		if err := os.RemoveAll(home); err != nil {
-			panic(err)
-		}
-	}()
+	home := t.TempDir()
 	blockSize := int64(4096)
 	rdb, err := New(home, blockSize)
 	if err != nil {
