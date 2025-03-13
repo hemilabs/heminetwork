@@ -278,7 +278,7 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	return tx, cf, df, nil
 }
 
-func (l *ldb) transactionBatchGet(_ctx context.Context, t *leveldb.Transaction, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
+func (l *ldb) transactionBatchGet(_ context.Context, t *leveldb.Transaction, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
 	log.Tracef("transactionBatchGet")
 	defer log.Tracef("transactionBatchGet exit")
 
@@ -301,7 +301,7 @@ func (l *ldb) transactionBatchGet(_ctx context.Context, t *leveldb.Transaction, 
 	return rows, nil
 }
 
-func (l *ldb) Version(_ctx context.Context) (int, error) {
+func (l *ldb) Version(_ context.Context) (int, error) {
 	mdDB := l.pool[level.MetadataDB]
 	value, err := mdDB.Get(versionKey, nil)
 	if err != nil {
@@ -312,7 +312,7 @@ func (l *ldb) Version(_ctx context.Context) (int, error) {
 	return int(dbVersion), nil
 }
 
-func (l *ldb) MetadataDel(_ctx context.Context, key []byte) error {
+func (l *ldb) MetadataDel(_ context.Context, key []byte) error {
 	log.Tracef("MetadataDel")
 	defer log.Tracef("MetadataDel exit")
 
@@ -377,7 +377,7 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
 }
 
-func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(_ctx context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
+func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(_ context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
 	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
@@ -395,7 +395,7 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(_ctx context.Context, abrevhash
 }
 
 // BatchAppend appends rows to batch b.
-func BatchAppend(_ctx context.Context, b *leveldb.Batch, rows []tbcd.Row) {
+func BatchAppend(_ context.Context, b *leveldb.Batch, rows []tbcd.Row) {
 	log.Tracef("BatchAppend")
 	defer log.Tracef("BatchAppend exit")
 
@@ -457,7 +457,7 @@ func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	return nil
 }
 
-func (l *ldb) BlockHeaderByHash(_ctx context.Context, hash chainhash.Hash) (*tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeaderByHash(_ context.Context, hash chainhash.Hash) (*tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeaderByHash")
 	defer log.Tracef("BlockHeaderByHash exit")
 
@@ -521,7 +521,7 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 	return bhs, nil
 }
 
-func (l *ldb) BlockHeaderBest(_ctx context.Context) (*tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeaderBest(_ context.Context) (*tbcd.BlockHeader, error) {
 	log.Tracef("BlockHeaderBest")
 	defer log.Tracef("BlockHeaderBest exit")
 
@@ -586,7 +586,7 @@ func decodeBlockHeader(ebh []byte) *tbcd.BlockHeader {
 	return bh
 }
 
-func (l *ldb) BlockHeaderGenesisInsert(_ctx context.Context, wbh wire.BlockHeader, height uint64, diff *big.Int) error {
+func (l *ldb) BlockHeaderGenesisInsert(_ context.Context, wbh wire.BlockHeader, height uint64, diff *big.Int) error {
 	log.Tracef("BlockHeaderGenesisInsert")
 	defer log.Tracef("BlockHeaderGenesisInsert exit")
 
@@ -1364,7 +1364,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 }
 
 // XXX return hash and height only
-func (l *ldb) BlocksMissing(_ctx context.Context, count int) ([]tbcd.BlockIdentifier, error) {
+func (l *ldb) BlocksMissing(_ context.Context, count int) ([]tbcd.BlockIdentifier, error) {
 	log.Tracef("BlocksMissing")
 	defer log.Tracef("BlocksMissing exit")
 
@@ -1439,7 +1439,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	return int64(bh.Height), nil
 }
 
-func (l *ldb) BlockMissingDelete(_ctx context.Context, height int64, hash chainhash.Hash) error {
+func (l *ldb) BlockMissingDelete(_ context.Context, height int64, hash chainhash.Hash) error {
 	log.Tracef("BlockMissingDelete")
 	defer log.Tracef("BlockMissingDelete exit")
 
@@ -1454,7 +1454,7 @@ func (l *ldb) BlockMissingDelete(_ctx context.Context, height int64, hash chainh
 	return nil
 }
 
-func (l *ldb) BlockByHash(_ctx context.Context, hash chainhash.Hash) (*btcutil.Block, error) {
+func (l *ldb) BlockByHash(_ context.Context, hash chainhash.Hash) (*btcutil.Block, error) {
 	log.Tracef("BlockByHash")
 	defer log.Tracef("BlockByHash exit")
 
@@ -1490,7 +1490,7 @@ func (l *ldb) BlockByHash(_ctx context.Context, hash chainhash.Hash) (*btcutil.B
 	return b, nil
 }
 
-func (l *ldb) BlockExistsByHash(_ctx context.Context, hash chainhash.Hash) (bool, error) {
+func (l *ldb) BlockExistsByHash(_ context.Context, hash chainhash.Hash) (bool, error) {
 	log.Tracef("BlockExistsByHash")
 	defer log.Tracef("BlockExistsByHash exit")
 
@@ -1512,7 +1512,7 @@ func (l *ldb) BlockExistsByHash(_ctx context.Context, hash chainhash.Hash) (bool
 	return ok, nil
 }
 
-func (l *ldb) BlockHashByTxID(_ctx context.Context, txID chainhash.Hash) (*chainhash.Hash, error) {
+func (l *ldb) BlockHashByTxID(_ context.Context, txID chainhash.Hash) (*chainhash.Hash, error) {
 	log.Tracef("BlockHashByTxID")
 	defer log.Tracef("BlockHashByTxID exit")
 
@@ -1544,7 +1544,7 @@ func (l *ldb) BlockHashByTxID(_ctx context.Context, txID chainhash.Hash) (*chain
 	}
 }
 
-func (l *ldb) SpentOutputsByTxID(_ctx context.Context, txID chainhash.Hash) ([]tbcd.SpentInfo, error) {
+func (l *ldb) SpentOutputsByTxID(_ context.Context, txID chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputByTxID")
 	defer log.Tracef("SpentOutputByTxID exit")
 
@@ -1584,7 +1584,7 @@ func (l *ldb) SpentOutputsByTxID(_ctx context.Context, txID chainhash.Hash) ([]t
 	return si, nil
 }
 
-func (l *ldb) BlockInTxIndex(_ctx context.Context, hash chainhash.Hash) (bool, error) {
+func (l *ldb) BlockInTxIndex(_ context.Context, hash chainhash.Hash) (bool, error) {
 	log.Tracef("BlockInTxIndex")
 	defer log.Tracef("BlockInTxIndex exit")
 
@@ -1616,7 +1616,7 @@ func (l *ldb) BlockInTxIndex(_ctx context.Context, hash chainhash.Hash) (bool, e
 	}
 }
 
-func (l *ldb) ScriptHashesByOutpoint(_ctx context.Context, ops []*tbcd.Outpoint, result func(tbcd.Outpoint, tbcd.ScriptHash) error) error {
+func (l *ldb) ScriptHashesByOutpoint(_ context.Context, ops []*tbcd.Outpoint, result func(tbcd.Outpoint, tbcd.ScriptHash) error) error {
 	log.Tracef("ScriptHashesByOutpoint")
 	defer log.Tracef("ScriptHashesByOutpoint exit")
 
@@ -1640,7 +1640,7 @@ func (l *ldb) ScriptHashesByOutpoint(_ctx context.Context, ops []*tbcd.Outpoint,
 	return nil
 }
 
-func (l *ldb) ScriptHashByOutpoint(_ctx context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
+func (l *ldb) ScriptHashByOutpoint(_ context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
 	log.Tracef("ScriptHashByOutpoint")
 	defer log.Tracef("ScriptHashByOutpoint exit")
 
@@ -1654,7 +1654,7 @@ func (l *ldb) ScriptHashByOutpoint(_ctx context.Context, op tbcd.Outpoint) (*tbc
 	return &sh, err
 }
 
-func (l *ldb) BalanceByScriptHash(_ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
+func (l *ldb) BalanceByScriptHash(_ context.Context, sh tbcd.ScriptHash) (uint64, error) {
 	log.Tracef("BalanceByScriptHash")
 	defer log.Tracef("BalanceByScriptHash exit")
 
@@ -1677,7 +1677,7 @@ func (l *ldb) BalanceByScriptHash(_ctx context.Context, sh tbcd.ScriptHash) (uin
 	return balance, nil
 }
 
-func (l *ldb) UtxosByScriptHash(_ctx context.Context, sh tbcd.ScriptHash, start uint64, count uint64) ([]tbcd.Utxo, error) {
+func (l *ldb) UtxosByScriptHash(_ context.Context, sh tbcd.ScriptHash, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	log.Tracef("UtxosByScriptHash")
 	defer log.Tracef("UtxosByScriptHash exit")
 
@@ -1711,7 +1711,7 @@ func (l *ldb) UtxosByScriptHash(_ctx context.Context, sh tbcd.ScriptHash, start 
 	return utxos, nil
 }
 
-func (l *ldb) UtxosByScriptHashCount(_ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
+func (l *ldb) UtxosByScriptHashCount(_ context.Context, sh tbcd.ScriptHash) (uint64, error) {
 	log.Tracef("UtxosByScriptHashCount")
 	defer log.Tracef("UtxosByScriptHashCount exit")
 
@@ -1732,7 +1732,7 @@ func (l *ldb) UtxosByScriptHashCount(_ctx context.Context, sh tbcd.ScriptHash) (
 	return x, nil
 }
 
-func (l *ldb) BlockUtxoUpdate(_ctx context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput, utxoIndexHash chainhash.Hash) error {
+func (l *ldb) BlockUtxoUpdate(_ context.Context, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput, utxoIndexHash chainhash.Hash) error {
 	log.Tracef("BlockUtxoUpdate")
 	defer log.Tracef("BlockUtxoUpdate exit")
 
@@ -1789,7 +1789,7 @@ func (l *ldb) BlockUtxoUpdate(_ctx context.Context, direction int, utxos map[tbc
 	return nil
 }
 
-func (l *ldb) BlockTxUpdate(_ctx context.Context, direction int, txs map[tbcd.TxKey]*tbcd.TxValue, txIndexHash chainhash.Hash) error {
+func (l *ldb) BlockTxUpdate(_ context.Context, direction int, txs map[tbcd.TxKey]*tbcd.TxValue, txIndexHash chainhash.Hash) error {
 	log.Tracef("BlockTxUpdate")
 	defer log.Tracef("BlockTxUpdate exit")
 
@@ -1895,7 +1895,7 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	return ks
 }
 
-func (l *ldb) BlockKeystoneUpdate(_ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
+func (l *ldb) BlockKeystoneUpdate(_ context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
 	log.Tracef("BlockKeystoneUpdate")
 	defer log.Tracef("BlockKeystoneUpdate exit")
 

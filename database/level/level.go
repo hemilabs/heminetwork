@@ -100,14 +100,14 @@ func (l *Database) RawDB() RawPool {
 	return l.rawPool
 }
 
-func (l *Database) RegisterNotification(_ctx context.Context, _n database.NotificationName, _f database.NotificationCallback, _payload any) error {
+func (l *Database) RegisterNotification(_ context.Context, _ database.NotificationName, _ database.NotificationCallback, _ any) error {
 	log.Tracef("RegisterNotification")
 	defer log.Tracef("RegisterNotification exit")
 
 	return errors.New("unsupported")
 }
 
-func (l *Database) UnregisterNotification(_n database.NotificationName) error {
+func (l *Database) UnregisterNotification(_ database.NotificationName) error {
 	log.Tracef("UnregisterNotification")
 	defer log.Tracef("UnregisterNotification exit")
 
@@ -146,7 +146,7 @@ func (l *Database) openRawDB(name string, blockSize int64) error {
 	return nil
 }
 
-func New(_ctx context.Context, home string, _version int) (*Database, error) {
+func New(_ context.Context, home string, _ int) (*Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 

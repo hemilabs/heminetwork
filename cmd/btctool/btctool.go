@@ -51,7 +51,7 @@ func parseBlockFromHex(blk string) (*btcutil.Block, error) {
 	return b, nil
 }
 
-func parseBlock(_ctx context.Context, filename string) (*btcutil.Block, error) {
+func parseBlock(_ context.Context, filename string) (*btcutil.Block, error) {
 	heb, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (p *peer) read() (wire.Message, error) {
 	return msg, err
 }
 
-func (p *peer) handshake(_ctx context.Context) error {
+func (p *peer) handshake(_ context.Context) error {
 	// 1. send our version
 	// 2. receive version
 	// 3. send sendaddrv2

@@ -162,7 +162,7 @@ func (r *RawPeer) Read(timeout time.Duration) (wire.Message, []byte, error) {
 	return msg, buf, err
 }
 
-func (r *RawPeer) handshake(_ctx context.Context, conn net.Conn) error {
+func (r *RawPeer) handshake(_ context.Context, conn net.Conn) error {
 	log.Tracef("handshake %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 	defer log.Tracef("handshake exit %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 

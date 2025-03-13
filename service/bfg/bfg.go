@@ -530,7 +530,7 @@ func (s *Server) getBtcHeightCache() uint64 {
 	return s.btcHeightCache
 }
 
-func (s *Server) handleBitcoinInfo(_ctx context.Context, _bir *bfgapi.BitcoinInfoRequest) (any, error) {
+func (s *Server) handleBitcoinInfo(_ context.Context, _ *bfgapi.BitcoinInfoRequest) (any, error) {
 	log.Tracef("handleBitcoinInfo")
 	defer log.Tracef("handleBitcoinInfo exit")
 
@@ -1352,7 +1352,7 @@ func (s *Server) refreshL2KeystoneCache(ctx context.Context) {
 	s.l2keystonesCache = l2Keystones
 }
 
-func (s *Server) handleL2KeystonesRequest(_ctx context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
+func (s *Server) handleL2KeystonesRequest(_ context.Context, l2kr *bfgapi.L2KeystonesRequest) (any, error) {
 	log.Tracef("handleL2KeystonesRequest")
 	defer log.Tracef("handleL2KeystonesRequest exit")
 
@@ -1483,7 +1483,7 @@ func (s *Server) saveL2Keystones(pctx context.Context, l2k []hemi.L2Keystone) {
 	go s.refreshCacheAndNotifiyL2Keystones(pctx)
 }
 
-func (s *Server) handleNewL2Keystones(_ctx context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
+func (s *Server) handleNewL2Keystones(_ context.Context, nlkr *bfgapi.NewL2KeystonesRequest) (any, error) {
 	log.Tracef("handleNewL2Keystones")
 	defer log.Tracef("handleNewL2Keystones exit")
 
@@ -1521,7 +1521,7 @@ func handle(service string, mux *http.ServeMux, pattern string, handler func(htt
 	log.Infof("handle (%v): %v", service, pattern)
 }
 
-func (s *Server) handleStateUpdates(ctx context.Context, _table string, _action string, _payload, _payloadOld interface{}) {
+func (s *Server) handleStateUpdates(ctx context.Context, _ string, _ string, _, _ interface{}) {
 	// get the last known canonical chain height
 	s.mtx.RLock()
 	heightBefore := s.canonicalChainHeight
@@ -1546,7 +1546,7 @@ func (s *Server) handleStateUpdates(ctx context.Context, _table string, _action 
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleAccessPublicKeys(_ctx context.Context, _table string, action string, payload, payloadOld interface{}) {
+func (s *Server) handleAccessPublicKeys(_ context.Context, _ string, action string, payload, payloadOld interface{}) {
 	log.Tracef("received payloads: %v, %v", payload, payloadOld)
 
 	if action != "DELETE" {
@@ -1580,7 +1580,7 @@ func (s *Server) handleAccessPublicKeys(_ctx context.Context, _table string, act
 	s.mtx.Unlock()
 }
 
-func (s *Server) handleL2KeystonesChange(ctx context.Context, _table string, _action string, _payload, _payloadOld any) {
+func (s *Server) handleL2KeystonesChange(ctx context.Context, _ string, _ string, _, _ any) {
 	go s.refreshCacheAndNotifiyL2Keystones(ctx)
 }
 

@@ -321,7 +321,7 @@ func (pm *PeerManager) RandomConnect(ctx context.Context) (*rawpeer.RawPeer, err
 	}
 }
 
-func (pm *PeerManager) randomPeer(_ctx context.Context, slot int) (*rawpeer.RawPeer, error) {
+func (pm *PeerManager) randomPeer(_ context.Context, slot int) (*rawpeer.RawPeer, error) {
 	pm.mtx.Lock()
 	defer pm.mtx.Unlock()
 
