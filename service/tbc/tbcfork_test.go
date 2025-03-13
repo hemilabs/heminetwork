@@ -1167,7 +1167,7 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-	time.Sleep(500 * time.Millisecond) // XXX
+	time.Sleep(250 * time.Millisecond) // XXX
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1401,7 +1401,7 @@ func TestIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1591,7 +1591,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1837,7 +1837,7 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -2159,7 +2159,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -2239,8 +2239,6 @@ func TestKeystoneIndexFork(t *testing.T) {
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
-
-	time.Sleep(2000 * time.Millisecond)
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 

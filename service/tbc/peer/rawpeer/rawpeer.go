@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -110,8 +110,8 @@ func (r *RawPeer) Id() int {
 
 func (r *RawPeer) Write(timeout time.Duration, msg wire.Message) error {
 	r.mtx.Lock()
+	defer r.mtx.Unlock()
 	conn := r.conn
-	r.mtx.Unlock()
 	if conn == nil {
 		return fmt.Errorf("write: %w", ErrNoConn)
 	}
