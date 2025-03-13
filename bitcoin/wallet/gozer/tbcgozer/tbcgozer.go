@@ -134,7 +134,7 @@ func (t *tbcGozer) UtxosByAddress(ctx context.Context, addr btcutil.Address, sta
 	return buResp.UTXOs, nil
 }
 
-func (t *tbcGozer) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash *chainhash.Hash) (*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse, error) {
+func (t *tbcGozer) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash chainhash.Hash) (*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse, error) {
 	ksr := &tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest{
 		L2KeystoneAbrevHash: hash,
 	}

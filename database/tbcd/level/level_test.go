@@ -355,14 +355,14 @@ func TestKeystoneUpdate(t *testing.T) {
 			}
 
 			for v := range tti.expectedInDB {
-				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, &v)
+				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
 				if err != nil {
 					t.Fatalf("keystone not in db: %v", err)
 				}
 			}
 
 			for k, v := range tti.expectedOutDB {
-				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, &k)
+				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k)
 				if err == nil {
 					t.Fatalf("keystone in db: %v", spew.Sdump(v))
 				} else {
@@ -426,14 +426,14 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 	}
 
 	// Get keystones back out
-	ks1, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k1hash)
+	ks1, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *k1hash)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(k1, *ks1) {
 		t.Fatalf("%v%v", spew.Sdump(k1), spew.Sdump(*ks1))
 	}
-	ks2, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k2hash)
+	ks2, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *k2hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,11 +447,11 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k1hash)
+	_, err = db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *k1hash)
 	if err == nil {
 		t.Fatal("k1 found")
 	}
-	_, err = db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k2hash)
+	_, err = db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *k2hash)
 	if err == nil {
 		t.Fatal("k2 found")
 	}
@@ -497,7 +497,7 @@ func TestKeystoneDBCache(t *testing.T) {
 		}
 
 		for ksHash, ks := range ksm {
-			dks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, &ksHash)
+			dks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, ksHash)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -512,7 +512,7 @@ func TestKeystoneDBCache(t *testing.T) {
 		}
 
 		for ksHash := range ksm {
-			ks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, &ksHash)
+			ks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, ksHash)
 			if err == nil {
 				t.Fatalf("(cycle %v) deleted keystone found %v", i, spew.Sdump(ks))
 			}

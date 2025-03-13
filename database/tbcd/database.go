@@ -129,8 +129,8 @@ type Database interface {
 	UtxosByScriptHashCount(ctx context.Context, sh ScriptHash) (uint64, error)
 
 	// Hemi
-	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone, keystoneIndexHash *chainhash.Hash) error
-	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash *chainhash.Hash) (*Keystone, error)
+	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone, keystoneIndexHash chainhash.Hash) error
+	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*Keystone, error)
 	BlockHeaderByKeystoneIndex(ctx context.Context) (*BlockHeader, error)
 }
 

@@ -381,7 +381,7 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
 }
 
-func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash *chainhash.Hash) (*tbcd.Keystone, error) {
+func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
 	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
