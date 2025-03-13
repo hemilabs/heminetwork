@@ -322,8 +322,12 @@ func (l *ldb) MetadataDel(ctx context.Context, key []byte) error {
 	}
 	defer mdDiscard()
 
-	if ok, err := mdDB.Has(key, nil); err != nil || !ok {
+	ok, err := mdDB.Has(key, nil)
+	if err != nil {
 		return database.NotFoundError(err.Error())
+	}
+	if !ok {
+		return database.NotFoundError("not found")
 	}
 
 	mdBatch := new(leveldb.Batch)

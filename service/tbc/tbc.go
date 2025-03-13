@@ -72,6 +72,7 @@ var (
 
 	ErrTxAlreadyBroadcast = errors.New("tx already broadcast")
 	ErrTxBroadcastNoPeers = errors.New("can't broadcast tx, no peers")
+	ErrNotInDebugMode     = errors.New("debug flag not set")
 
 	// upstreamStateIdKey is used for storing upstream state IDs
 	// representing a unique state of an upstream system driving TBC state/
@@ -111,6 +112,7 @@ type Config struct {
 	MaxCachedKeystones      int
 	MaxCachedTxs            int
 	MempoolEnabled          bool
+	DatabaseDebug           bool
 	Network                 string
 	PeersWanted             int
 	PrometheusListenAddress string
@@ -139,6 +141,7 @@ func NewDefaultConfig() *Config {
 		PeersWanted:          defaultPeersWanted,
 		PrometheusNamespace:  appName,
 		ExternalHeaderMode:   false, // Default anyway, but for readability
+		DatabaseDebug:        false, // Default anyway, but dangerous so be explicit
 	}
 }
 
@@ -1903,6 +1906,13 @@ func (s *Server) UtxosByScriptHashCount(ctx context.Context, hash tbcd.ScriptHas
 	return s.db.UtxosByScriptHashCount(ctx, hash)
 }
 
+func (s *Server) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
+	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
+	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
+
+	return s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, abrevhash)
+}
+
 // ScriptHashAvailableToSpend returns a boolean which indicates whether
 // a specific output (uniquely identified by TxId output index) is
 // available for spending in the UTXO table.
@@ -2083,8 +2093,34 @@ func (s *Server) DatabaseVersion(ctx context.Context) (int, error) {
 	return s.db.Version(ctx)
 }
 
+func (s *Server) DatabaseMetadataDel(ctx context.Context, key []byte) error {
+	if !s.cfg.DatabaseDebug {
+		return ErrNotInDebugMode
+	}
+	return s.db.MetadataDel(ctx, key)
+}
+
+func (s *Server) DatabaseMetadataPut(ctx context.Context, key []byte, value []byte) error {
+	if !s.cfg.DatabaseDebug {
+		return ErrNotInDebugMode
+	}
+	return s.db.MetadataPut(ctx, key, value)
+}
+
 func (s *Server) DatabaseMetadataGet(ctx context.Context, key []byte) ([]byte, error) {
 	return s.db.MetadataGet(ctx, key)
+}
+
+func (s *Server) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	return s.db.BlockHeaderByUtxoIndex(ctx)
+}
+
+func (s *Server) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	return s.db.BlockHeaderByTxIndex(ctx)
+}
+
+func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	return s.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
 func feesFromTransactions(txs []*btcutil.Tx) error {

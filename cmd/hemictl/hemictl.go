@@ -93,36 +93,6 @@ var (
 	callTimeout = 100 * time.Second
 )
 
-// handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
-// be able to use bssapi.Call.
-func handleBSSWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
-	for {
-		if _, _, _, err := bssapi.ReadConn(ctx, conn); err != nil {
-			return
-		}
-	}
-}
-
-// handleBSSWebsocketReadUnauth discards all reads but has to exist in order to
-// be able to use bfgapi.Call.
-func handleBFGWebsocketReadUnauth(ctx context.Context, conn *protocol.Conn) {
-	for {
-		if _, _, _, err := bfgapi.ReadConn(ctx, conn); err != nil {
-			return
-		}
-	}
-}
-
-// handleTBCWebsocketRead discards all reads but has to exist in order to
-// be able to use tbcapi.Call.
-func handleTBCWebsocketRead(ctx context.Context, conn *protocol.Conn) {
-	for {
-		if _, _, _, err := tbcapi.ReadConn(ctx, conn); err != nil {
-			return
-		}
-	}
-}
-
 func bfgdb() error {
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 	defer cancel()
@@ -199,20 +169,81 @@ func parseArgs(args []string) (string, map[string]string, error) {
 	return action, parsed, nil
 }
 
-func tbcdb(pctx context.Context) error {
-	ctx, cancel := context.WithCancel(pctx)
-	defer cancel()
+func tbcdb(pctx context.Context, flags []string) error {
+	flagSet := flag.NewFlagSet("tbcd commands", flag.ExitOnError)
+	var (
+		debugFlag = flagSet.Bool("debug", false, "enable use of actions that"+
+			" require direct database access")
+		helpFlag     = flagSet.Bool("h", false, "displays help information")
+		helpLongFlag = flagSet.Bool("help", false, "displays help information")
+	)
 
-	action, args, err := parseArgs(flag.Args()[1:])
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%v\n", welcome)
+		fmt.Fprintf(os.Stderr, "Usage: %v tbcdb [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
+		fmt.Println("COMMAND OVERVIEW:")
+		fmt.Println("\tThe 'tbcd' command allows you to manipulate the tbcd db.")
+		fmt.Println("")
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help\tDisplay help information")
+		fmt.Println("\t-debug   \tEnable debug mode (required for certain actions)")
+		fmt.Println("")
+		fmt.Println("ACTIONS:")
+		fmt.Println("\tbalancebyscripthash [hash]")
+		fmt.Println("\tblockbyhash [hash]")
+		fmt.Println("\tblockheaderbyhash [hash]")
+		fmt.Println("\tblockheaderbest")
+		fmt.Println("\tblockheadersbyheight [height]")
+		fmt.Println("\tblocksbytxid [hash]")
+		fmt.Println("\tblocksmissing [count]")
+		fmt.Println("\tblockheaderbyutxoindex")
+		fmt.Println("\tblockheaderbytxindex")
+		fmt.Println("\tblockheaderbykeystoneindex")
+		fmt.Println("\tblockkeystonebyl2keystoneabrevhash [abrevhash]")
+		fmt.Println("\tdeletemetadata")
+		fmt.Println("\tdumpmetadata")
+		fmt.Println("\tdumpoutputs <prefix>")
+		fmt.Println("\tmetadataget [key]")
+		fmt.Println("\tmetadatadel [key]")
+		fmt.Println("\tmetadataput [key] [value]")
+		fmt.Println("\tscripthashbyoutpoint [txid] [index]")
+		fmt.Println("\tspentoutputsbytxid <txid>")
+		fmt.Println("\ttxbyid <hash>")
+		fmt.Println("\ttxindex <height> <count> <maxcache>")
+		fmt.Println("\tutxoindex <height> <count> <maxcache>")
+		fmt.Println("\tutxosbyscripthash [hash] <count> <start>")
+		fmt.Println("\tutxosbyscripthashcount [hash]")
+		fmt.Println("\tversion")
+		fmt.Println("")
+		fmt.Println("ARGUMENTS:")
+		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
+		fmt.Fprintf(os.Stderr, "\tExample: '%v tbcdb tblockheadersbyheight height=10'\n", os.Args[0])
+	}
+
+	err := flagSet.Parse(flags)
 	if err != nil {
 		return err
 	}
+
+	if len(flags) < 1 || *helpFlag || *helpLongFlag {
+		flagSet.Usage()
+		return nil
+	}
+
+	action, args, err := parseArgs(flagSet.Args())
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
 
 	level.Welcome = false
 	tbc.Welcome = false
 	cfg := tbc.NewDefaultConfig()
 	cfg.LevelDBHome = leveldbHome
 	cfg.Network = network
+	cfg.DatabaseDebug = *debugFlag
 	cfg.PeersWanted = 0    // disable peer manager
 	cfg.ListenAddress = "" // disable RPC
 	s, err := tbc.NewServer(cfg)
@@ -324,27 +355,6 @@ func tbcdb(pctx context.Context) error {
 			return fmt.Errorf("fees by height: %w", err)
 		}
 		spew.Dump(bh)
-
-	case "help", "h":
-		fmt.Println("tbcd db manipulator commands:")
-		fmt.Println("\tbalancebyscripthash [hash]")
-		fmt.Println("\tblockbyhash [hash]")
-		fmt.Println("\tblockheaderbyhash [hash]")
-		fmt.Println("\tblockheaderbest")
-		fmt.Println("\tblockheadersbyheight [height]")
-		fmt.Println("\tblocksbytxid [hash]")
-		fmt.Println("\tblocksmissing [count]")
-		fmt.Println("\tdeletemetadata")
-		fmt.Println("\tdumpmetadata")
-		fmt.Println("\tdumpoutputs <prefix>")
-		fmt.Println("\thelp")
-		fmt.Println("\tscripthashbyoutpoint [txid] [index]")
-		fmt.Println("\tspentoutputsbytxid <txid>")
-		fmt.Println("\ttxbyid <hash>")
-		fmt.Println("\ttxindex <height> <count> <maxcache>")
-		fmt.Println("\tutxoindex <height> <count> <maxcache>")
-		fmt.Println("\tutxosbyscripthash [hash]")
-		fmt.Println("\tversion")
 
 	case "utxoindex":
 		hash := args["hash"]
@@ -571,6 +581,24 @@ func tbcdb(pctx context.Context) error {
 		}
 		fmt.Printf("utxos: %v total: %v\n", len(utxos), balance)
 
+	case "utxosbyscripthashcount":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+
+		sh, err := tbcd.NewScriptHashFromString(hash)
+		if err != nil {
+			return err
+		}
+
+		count, err := s.UtxosByScriptHashCount(ctx, sh)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("count: %v\n", count)
+
 	// XXX this needs to be hidden behind a debug flug of sorts.
 	// case "dbget":
 	//	dbname := args["dbname"]
@@ -589,16 +617,37 @@ func tbcdb(pctx context.Context) error {
 	//	}
 	//	spew.Dump(value)
 
-	// XXX this needs to be hidden behind a debug flug of sorts.
 	case "metadatadel":
 		key := args["key"]
 		if key == "" {
 			return errors.New("key: must be set")
 		}
 
-		return fmt.Errorf("fixme deletemetadata")
+		err = s.DatabaseMetadataDel(ctx, []byte(key))
+		if err != nil {
+			return err
+		}
 
-	// XXX this needs to be hidden behind a debug flug of sorts.
+		fmt.Printf("key %v: deleted from metadata\n", key)
+
+	case "metadataput":
+		key := args["key"]
+		if key == "" {
+			return errors.New("key: must be set")
+		}
+
+		value := args["value"]
+		if value == "" {
+			return errors.New("value: must be set")
+		}
+
+		err = s.DatabaseMetadataPut(ctx, []byte(key), []byte(value))
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("value (%v) with key (%v) added to metadata\n", value, key)
+
 	case "metadataget":
 		key := args["key"]
 		if key == "" {
@@ -610,6 +659,46 @@ func tbcdb(pctx context.Context) error {
 			return fmt.Errorf("metadata get: %w", err)
 		}
 		spew.Dump(value)
+
+	case "blockheaderbyutxoindex":
+		bh, err := s.BlockHeaderByUtxoIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
+	case "blockheaderbytxindex":
+		bh, err := s.BlockHeaderByTxIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
+	case "blockheaderbykeystoneindex":
+		bh, err := s.BlockHeaderByKeystoneIndex(ctx)
+		if err != nil {
+			return err
+		}
+		spew.Dump(bh)
+
+	case "blockkeystonebyl2keystoneabrevhash":
+		abrevhash := args["abrevhash"]
+		if abrevhash == "" {
+			return errors.New("abrevhash: must be set")
+		}
+
+		ch, err := chainhash.NewHashFromStr(abrevhash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		keystone, err := s.BlockKeystoneByL2KeystoneAbrevHash(ctx, *ch)
+		if err != nil {
+			return err
+		}
+
+		spew.Dump(keystone)
+
 	case "dumpmetadata":
 		return fmt.Errorf("fixme dumpmetadata")
 
@@ -652,10 +741,7 @@ func tbcdb(pctx context.Context) error {
 		fmt.Printf("not yet: %v", action)
 
 	// XXX implement ASAP
-	case "metadataput", "blockheaderbyutxoindex",
-		"blockheaderbytxindex", "utxosbyscripthashcount",
-		"blockkeystonebyl2keystoneabrevhash", "blockheaderbykeystoneindex",
-		"dbdel", "dbget", "dbput" /* these three are syntetic */ :
+	case "dbdel", "dbget", "dbput" /* these three are syntetic */ :
 		fmt.Printf("not yet: %v", action)
 
 	default:
@@ -665,14 +751,20 @@ func tbcdb(pctx context.Context) error {
 	return nil
 }
 
-func p2p() error {
-	action, args, err := parseArgs(flag.Args()[1:])
-	if err != nil {
-		return err
-	}
+func p2p(flags []string) error {
+	flagSet := flag.NewFlagSet("tbcd commands", flag.ExitOnError)
+	var (
+		helpFlag     = flagSet.Bool("h", false, "displays help information")
+		helpLongFlag = flagSet.Bool("help", false, "displays help information")
+	)
 
-	if action == "help" || action == "h" {
-		fmt.Println("p2p actions:")
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%v\n", welcome)
+		fmt.Fprintf(os.Stderr, "Usage: %v p2p [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help\tDisplay help information")
+		fmt.Println("")
+		fmt.Println("ACTIONS:")
 		fmt.Println("\tfeefilter                      - returns advertised fee filter")
 		fmt.Println("\tgetaddr                        - retrieve p2p information")
 		fmt.Println("\tgetblock [hash]                - this is a compounded command, returns a block")
@@ -683,11 +775,26 @@ func p2p() error {
 		fmt.Println("\tping <nonce>                   - ping remote node with a nonce")
 		fmt.Println("\tremote                         - return remote version")
 		fmt.Println("")
-		fmt.Println("All actions support [addr=netaddress] <out=[json|raw|spew]> <net=[mainnet|testnet|testnet3]> <timeout=duration>")
+		fmt.Println("\tAll actions support [addr=netaddress] <out=[json|raw|spew]> <net=[mainnet|testnet|testnet3]> <timeout=duration>")
 		fmt.Println("")
-		fmt.Println("Example: hemictl p2p ping addr=127.0.0.1:18333 nonce=1337 out=json")
+		fmt.Println("ARGUMENTS:")
+		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
+		fmt.Fprintf(os.Stderr, "\tExample: %v p2p ping addr=127.0.0.1:18333 nonce=1337 out=json\n", os.Args[0])
+	}
 
+	err := flagSet.Parse(flags)
+	if err != nil {
+		return err
+	}
+
+	if len(flags) < 1 || *helpFlag || *helpLongFlag {
+		flagSet.Usage()
 		return nil
+	}
+
+	action, args, err := parseArgs(flagSet.Args())
+	if err != nil {
+		return err
 	}
 
 	timeout := 30 * time.Second
@@ -1077,37 +1184,20 @@ func init() {
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "%v\n", welcome)
-	fmt.Fprintf(os.Stderr, "\t%v <command> [payload]\n", os.Args[0])
-	fmt.Fprintf(os.Stderr, "Usage:\n")
-	fmt.Fprintf(os.Stderr, "\tbfgdb database connection\n")
-	fmt.Fprintf(os.Stderr, "\tbss-client long connection to bss\n")
-	fmt.Fprintf(os.Stderr, "\thelp (this help)\n")
-	fmt.Fprintf(os.Stderr, "\thelp-verbose JSON print RPC default request/response\n")
+	fmt.Fprintf(os.Stderr, "Usage: %v [OPTION]... <command> [<args>]\n\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "OPTIONS:\n")
+	fmt.Fprintf(os.Stderr, "\t-h, -help\tDisplay help information (this help)\n\n")
+	fmt.Fprintf(os.Stderr, "COMMANDS:\n")
+	fmt.Fprintf(os.Stderr, "\tapi\t\tuse generic api command\n")
+	fmt.Fprintf(os.Stderr, "\tbfgdb\t\tdatabase connection\n")
+	fmt.Fprintf(os.Stderr, "\tbss-client\tlong connection to bss\n")
 	//nolint:dupword // command help, not sentence.
-	fmt.Fprintf(os.Stderr, "\tp2p p2p commands\n")
-	fmt.Fprintf(os.Stderr, "\ttbcdb datase open (tbcd must not be running)\n")
-	fmt.Fprintf(os.Stderr, "Environment:\n")
+	fmt.Fprintf(os.Stderr, "\tp2p\t\tp2p commands\n")
+	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n\n")
+	fmt.Fprintf(os.Stderr, "ENVIRONMENT:\n")
 	config.Help(os.Stderr, cm)
-	fmt.Fprintf(os.Stderr, "Commands:\n")
-	for _, v := range sortedCommands {
-		if reSkip.MatchString(v) {
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "\t%v [%v]\n", v, allCommands[v])
-	}
-}
-
-func helpVerbose() {
-	fmt.Fprintf(os.Stderr, "%v\n", welcome)
-	fmt.Fprintf(os.Stderr, "\t%v <command> [payload]\n", os.Args[0])
-	fmt.Fprintf(os.Stderr, "Payload request/response/notification:\n")
-	for _, v := range sortedCommands {
-		cmdType := allCommands[v]
-		clone := reflect.New(cmdType).Interface()
-		fmt.Fprintf(os.Stderr, "%v:\n", v)
-		_ = printJSON(os.Stderr, "  ", clone)
-		fmt.Fprintf(os.Stderr, "\n")
-	}
+	fmt.Fprintf(os.Stderr, "\nuse 'hemictl <command> -h' or 'hemictl <command> -help' to"+
+		" display command-specific help information.\n")
 }
 
 func printJSON(where io.Writer, indent string, payload any) error {
@@ -1142,12 +1232,176 @@ func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func
 	os.Exit(2)
 }
 
-func _main() error {
-	if len(os.Args) < 2 {
-		usage()
-		return errors.New("not enough parameters")
+func Jsonify(args []string) (string, error) {
+	formatted := "{"
+	for i, c := range args {
+		if i != 0 {
+			formatted += ","
+		}
+		kv := strings.SplitN(c, "=", 2)
+		if len(kv) != 2 {
+			return formatted, fmt.Errorf("invalid argument format: %v", c)
+		}
+		formatted = fmt.Sprintf("%s\"%s\": %v", formatted, kv[0], kv[1])
+	}
+	formatted += "}"
+
+	return formatted, nil
+}
+
+func parsePayload(cmd string, args []string) (any, error) {
+	cmdType, ok := allCommands[cmd]
+	if !ok {
+		return nil, fmt.Errorf("unknown command: %v", cmd)
 	}
 
+	clone := reflect.New(cmdType).Interface()
+	log.Debugf("%v", spew.Sdump(clone))
+	if len(args) > 1 {
+		err := json.Unmarshal([]byte(args[1]), &clone)
+		if err != nil {
+			b, err := Jsonify(args[1:])
+			if err != nil {
+				return nil, err
+			}
+			log.Infof("parsed arguments as %v", b)
+
+			err = json.Unmarshal([]byte(b), &clone)
+			if err != nil {
+				return nil, fmt.Errorf("invalid payload: %w", err)
+			}
+		}
+	}
+	return clone, nil
+}
+
+// hemictlAPI is a structure used to satisfy the protocol.API interface.
+type hemictlAPI struct {
+	api string
+}
+
+// Commands satisfies the protocol.API interface.
+func (f *hemictlAPI) Commands() map[protocol.Command]reflect.Type {
+	switch f.api {
+	case "tbcapi":
+		return tbcapi.APICommands()
+	case "bfgapi":
+		return bfgapi.APICommands()
+	case "bssapi":
+		return bssapi.APICommands()
+	}
+	return nil
+}
+
+func apiHandler(ctx context.Context, api string, URL string, cmd any) (any, error) {
+	conn, err := protocol.NewConn(URL, &protocol.ConnOptions{
+		ReadLimit: tbcReadLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	tctx, tcancel := context.WithTimeout(ctx, callTimeout)
+	defer tcancel()
+	go func() {
+		for {
+			if _, _, _, err := conn.Read(tctx, &hemictlAPI{api: api}); err != nil {
+				return
+			}
+		}
+	}()
+
+	_, _, payload, err := conn.Call(tctx, &hemictlAPI{api: api}, cmd)
+	if err != nil {
+		return nil, fmt.Errorf("%w", err)
+	}
+
+	return payload, nil
+}
+
+func api(ctx context.Context, args []string) error {
+	flagSet := flag.NewFlagSet("api", flag.ExitOnError)
+	var (
+		helpShort   = flagSet.Bool("h", false, "Display help information")
+		helpLong    = flagSet.Bool("help", false, "Display help information")
+		helpVerbose = flagSet.Bool("help-verbose", false, "Display help information (verbose)")
+	)
+
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%v\n", welcome)
+		fmt.Fprintf(os.Stderr, "Usage: %v api [OPTION]... [API COMMAND] [PAYLOAD]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "COMMAND OVERVIEW:\n")
+		fmt.Println("\tThe 'api' command allows you to use generic api commands.")
+		fmt.Println("")
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help    \t\tDisplay help information")
+		fmt.Println("\t-help-verbose\t\tDisplay help information and JSON print RPC default request/response")
+		fmt.Println("")
+		fmt.Println("API COMMANDS:")
+		if *helpVerbose {
+			for _, v := range sortedCommands {
+				cmdType := allCommands[v]
+				clone := reflect.New(cmdType).Interface()
+				fmt.Fprintf(os.Stderr, "%v:\n", v)
+				_ = printJSON(os.Stderr, "  ", clone)
+				fmt.Fprintf(os.Stderr, "\n")
+			}
+		} else {
+			for _, v := range sortedCommands {
+				if reSkip.MatchString(v) {
+					continue
+				}
+				fmt.Fprintf(os.Stderr, "\t%v [%v]\n", v, allCommands[v])
+			}
+		}
+		fmt.Println("")
+		fmt.Println("PAYLOAD:")
+		fmt.Println("\tThe payload refers to the expected arguments for the given api command.")
+		fmt.Println("\tYou can provide the payload in two formats:")
+		fmt.Println("")
+		fmt.Fprintf(os.Stderr, "\t1. As key-value pairs:\t%v api tbcapi-block-headers-by-height-request height=2850\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "\t2. As a JSON object:\t%v api tbcapi-block-headers-by-height-request '{ \"height\": 2850 }'\n", os.Args[0])
+	}
+
+	err := flagSet.Parse(args)
+	if err != nil {
+		return err
+	}
+
+	if len(args) < 1 || *helpShort || *helpLong || *helpVerbose {
+		flagSet.Usage()
+		return nil
+	}
+
+	cmd := args[0]
+
+	payload, err := parsePayload(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	var response any
+	switch {
+	case strings.HasPrefix(cmd, "bssapi"):
+		response, err = apiHandler(ctx, "bssapi", bssapi.DefaultURL, payload)
+	case strings.HasPrefix(cmd, "bfgapi"):
+		response, err = apiHandler(ctx, "bfgapi", bfgapi.DefaultPrivateURL, payload)
+	case strings.HasPrefix(cmd, "tbcapi"):
+		response, err = apiHandler(ctx, "tbcapi", tbcapi.DefaultURL, payload)
+	default:
+		return fmt.Errorf("can't derive URL from command: %v", cmd)
+	}
+	if err != nil {
+		return err
+	}
+
+	log.Debugf("%v", spew.Sdump(response))
+
+	return printJSON(os.Stdout, "", response)
+}
+
+func _main(args []string) error {
 	if err := config.Parse(cm); err != nil {
 		return err
 	}
@@ -1168,91 +1422,39 @@ func _main() error {
 		log.Infof("hemi received signal: %s", s)
 	})
 
-	cmd := flag.Arg(0) // command provided by user
+	cmd := args[0] // command provided by user
 
-	// Deal with non-generic commands
-	// XXX fix all this shit
 	switch cmd {
+	case "api":
+		return api(ctx, args[1:])
+	case "tbcdb":
+		return tbcdb(ctx, args[1:])
 	case "bfgdb":
 		return bfgdb()
 	case "bss-client":
 		return client("bss")
-	case "help":
-		usage()
-		return nil
-	case "help-verbose":
-		helpVerbose()
-		return nil
 	case "p2p":
-		return p2p()
-	case "tbcdb":
-		return tbcdb(ctx)
-	}
-
-	// Deal with generic commands
-	cmdType, ok := allCommands[cmd]
-	if !ok {
-		return fmt.Errorf("unknown command: %v", cmd)
-	}
-	// Figure out where and what we are calling based on command.
-	var (
-		u           string
-		callHandler func(context.Context, *protocol.Conn)
-		call        func(context.Context, *protocol.Conn, any) (protocol.Command, string, any, error)
-	)
-	switch {
-	case strings.HasPrefix(cmd, "bssapi"):
-		u = bssapi.DefaultURL
-		callHandler = handleBSSWebsocketReadUnauth
-		call = bssapi.Call // XXX yuck
-	case strings.HasPrefix(cmd, "bfgapi"):
-		u = bfgapi.DefaultPrivateURL
-		callHandler = handleBFGWebsocketReadUnauth
-		call = bfgapi.Call // XXX yuck
-	case strings.HasPrefix(cmd, "tbcapi"):
-		u = tbcapi.DefaultURL
-		callHandler = handleTBCWebsocketRead
-		call = tbcapi.Call // XXX yuck?
+		return p2p(args[1:])
 	default:
-		return fmt.Errorf("can't derive URL from command: %v", cmd)
+		return fmt.Errorf("unknown action: %v", cmd)
 	}
-	conn, err := protocol.NewConn(u, &protocol.ConnOptions{
-		ReadLimit: tbcReadLimit,
-	})
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-
-	tctx, tcancel := context.WithTimeout(ctx, callTimeout)
-	defer tcancel()
-	go callHandler(tctx, conn) // Make sure we can use Call
-
-	clone := reflect.New(cmdType).Interface()
-	log.Debugf("%v", spew.Sdump(clone))
-	if flag.Arg(1) != "" {
-		err := json.Unmarshal([]byte(flag.Arg(1)), &clone)
-		if err != nil {
-			return fmt.Errorf("invalid payload: %w", err)
-		}
-	}
-	_, _, payload, err := call(tctx, conn, clone)
-	if err != nil {
-		return fmt.Errorf("%w", err)
-	}
-	log.Debugf("%v", spew.Sdump(payload))
-
-	return printJSON(os.Stdout, "", payload)
 }
 
 func main() {
+	helpFlag := flag.Bool("h", false, "Display help information")
+	helpFlagLong := flag.Bool("help", false, "Display help information")
+	flag.Usage = func() {
+		usage()
+	}
 	flag.Parse()
-	if len(os.Args) < 2 {
+
+	args := flag.Args()
+	if len(args) == 0 || *helpFlag || *helpFlagLong {
 		usage()
 		os.Exit(1)
 	}
 
-	if err := _main(); err != nil {
+	if err := _main(args); err != nil {
 		fmt.Fprintf(os.Stderr, "\n%v: %v\n", daemonName, err)
 		os.Exit(1)
 	}
