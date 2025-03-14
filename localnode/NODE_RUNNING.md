@@ -136,6 +136,11 @@ interactive use/debugging, not production running.
 ./localnode/heminode.sh
 ```
 
+For testnet:
+```sh
+./localnode/heminode.sh testnet
+```
+
 ## Running without Docker
 
 Steps to run the Hemi stack without Docker will be detailed at a later date.
