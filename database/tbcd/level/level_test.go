@@ -13,8 +13,6 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
 
-	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
-
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
@@ -132,7 +130,7 @@ func makeKssMap(kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.H
 	for _, l2Keystone := range kssList {
 		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
-			BlockHash:           btcchainhash.Hash(fillOutBytes(blockHashSeed, 32)),
+			BlockHash:           chainhash.Hash(fillOutBytes(blockHashSeed, 32)),
 			AbbreviatedKeystone: abrvKs,
 		}
 	}
