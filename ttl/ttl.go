@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -31,7 +31,7 @@ type value struct {
 }
 
 // TTL is an opaque structure that stores key/values in an internal map. These
-// values have a time-to-live callback functions associated with them.
+// values have a time-to-live callback function associated with them.
 // Depending on configuration either these values are automatically deleted from
 // the map on expiration.
 type TTL struct {
@@ -87,7 +87,7 @@ func (tm *TTL) ttl(ctx context.Context, key any) {
 }
 
 // Put inserts the provided key and value into the TTL map. The ttl values
-// designates the duration of the validity of this key value pair. The expired
+// designates the duration of the validity of this key-value pair. The expired
 // function is called when the duration expires and the remove callback is
 // called when the key is Canceled.
 func (tm *TTL) Put(pctx context.Context, ttl time.Duration, key any, val any, expired func(context.Context, any, any), remove func(context.Context, any, any)) {
@@ -159,7 +159,7 @@ func (tm *TTL) Delete(key any) (bool, error) {
 	return tm.delete(key)
 }
 
-// Len return the length of the TTL map.
+// Len returns the length of the TTL map.
 func (tm *TTL) Len() int {
 	tm.mtx.Lock()
 	defer tm.mtx.Unlock()
