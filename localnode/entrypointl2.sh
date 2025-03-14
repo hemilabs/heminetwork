@@ -1,11 +1,15 @@
 #!/bin/sh
-# Copyright (c) 2024 Hemi Labs, Inc.
+# Copyright (c) 2024-2025 Hemi Labs, Inc.
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
 set -xe
 
-geth init --datadir /tmp/datadir/geth /tmp/testnet-genesis.json
+if [ -d "/tmp/datadir/geth" ]; then
+  echo "geth data dir exists, skipping genesis."
+else
+	geth init --datadir /tmp/datadir/geth /tmp/testnet-genesis.json
+if
 
 geth \
 	--config=/tmp/l2-config.toml \
@@ -23,7 +27,7 @@ geth \
 	--ws.api=eth,txpool,net \
 	--syncmode=snap \
 	--gcmode=archive \
-	--maxpeers=2 \
+	--maxpeers=100 \
 	--networkid=743111 \
 	--authrpc.vhosts=* \
 	--authrpc.addr=0.0.0.0 \
@@ -35,5 +39,9 @@ geth \
 	--override.ecotone=1715865630 \
 	--override.canyon=1715865630 \
 	--override.cancun=1715865630 \
-	--tbc.initheight=0 \
-	--tbc.leveldbhome=/tbcdata
+	--tbc.leveldbhome=/tbcdata \
+	--override.hvm0=1733930401 \
+    --hvm.headerdatadir=/tbcdata/headers \
+	--tbc.network=testnet3 \
+    --hvm.genesisheader=00c05732cdc3e0d654efe86351f0cbfc6c79325e9f9fa7886a39b552f5c4d90700000000dae4079485e26f1f77425b84a13760038a352d07a0fef92b5188bd04c2999162afca58679121011962b9d0a5 \
+    --hvm.genesisheight=3522419
