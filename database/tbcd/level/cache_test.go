@@ -91,7 +91,7 @@ func TestLRUCache(t *testing.T) {
 		t.Fatal(spew.Sdump(s))
 	}
 
-	t.Logf(spew.Sdump(s))
+	t.Log(spew.Sdump(s))
 }
 
 func newHeader(prevHash *chainhash.Hash, nonce uint32) (chainhash.Hash, *tbcd.BlockHeader) {
@@ -168,7 +168,7 @@ func TestMapCache(t *testing.T) {
 		t.Fatal(spew.Sdump(s))
 	}
 
-	t.Logf(spew.Sdump(s))
+	t.Log(spew.Sdump(s))
 }
 
 func intHash(b int) chainhash.Hash {
