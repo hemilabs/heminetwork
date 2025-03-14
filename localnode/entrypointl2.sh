@@ -9,7 +9,7 @@ if [ -d "/tmp/datadir/geth" ]; then
   echo "geth data dir exists, skipping genesis."
 else
 	geth init --datadir /tmp/datadir/geth /tmp/testnet-genesis.json
-if
+fi
 
 geth \
 	--config=/tmp/l2-config.toml \
