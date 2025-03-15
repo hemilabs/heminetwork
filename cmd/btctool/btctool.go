@@ -6,11 +6,12 @@ package main // XXX wrap in structure
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
-	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
@@ -50,7 +51,7 @@ func parseBlockFromHex(blk string) (*btcutil.Block, error) {
 	return b, nil
 }
 
-func parseBlock(ctx context.Context, filename string) (*btcutil.Block, error) {
+func parseBlock(_ context.Context, filename string) (*btcutil.Block, error) {
 	heb, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
@@ -82,7 +83,7 @@ type peer struct {
 	addrV2        bool
 }
 
-func NewPeer(network wire.BitcoinNet, address string) (*peer, error) {
+func newPeer(network wire.BitcoinNet, address string) (*peer, error) {
 	return &peer{
 		protocolVersion: wire.ProtocolVersion,
 		network:         network,
@@ -132,7 +133,7 @@ func (p *peer) read() (wire.Message, error) {
 	return msg, err
 }
 
-func (p *peer) handshake(ctx context.Context) error {
+func (p *peer) handshake(_ context.Context) error {
 	// 1. send our version
 	// 2. receive version
 	// 3. send sendaddrv2
@@ -141,7 +142,13 @@ func (p *peer) handshake(ctx context.Context) error {
 
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
-	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
+
+	var nonce uint64
+	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
+		return fmt.Errorf("could not generate rand: %w", err)
+	}
+
+	msg := wire.NewMsgVersion(us, them, nonce, 0)
 	err := p.write(msg)
 	if err != nil {
 		return fmt.Errorf("could not write version message: %w", err)
@@ -240,7 +247,7 @@ func handleInv(p *peer, msg *wire.MsgInv) {
 	}
 }
 
-func handleBlock(p *peer, msg *wire.MsgBlock) {
+func handleBlock(msg *wire.MsgBlock) {
 	fmt.Printf("handle block: %v txs %v\n", msg.Header.BlockHash(),
 		len(msg.Transactions))
 }
@@ -272,7 +279,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 		return fmt.Errorf("invalid network: %v", btcNet)
 	}
 
-	p, err := NewPeer(wireNet, "140.238.169.133"+port)
+	p, err := newPeer(wireNet, "140.238.169.133"+port)
 	if err != nil {
 		return fmt.Errorf("new peer: %w", err)
 	}
@@ -326,7 +333,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 			go handleInv(p, m)
 
 		case *wire.MsgBlock:
-			go handleBlock(p, m)
+			go handleBlock(m)
 
 		default:
 			fmt.Printf("unhandled message type: %T\n", msg)

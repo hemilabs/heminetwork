@@ -136,17 +136,17 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdTxByIdRequest:
+		case tbcapi.CmdTxByIDRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.TxByIdRequest)
-				return s.handleTxByIdRequest(ctx, req)
+				req := payload.(*tbcapi.TxByIDRequest)
+				return s.handleTxByIDRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdTxByIdRawRequest:
+		case tbcapi.CmdTxByIDRawRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.TxByIdRawRequest)
-				return s.handleTxByIdRawRequest(ctx, req)
+				req := payload.(*tbcapi.TxByIDRawRequest)
+				return s.handleTxByIDRawRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -469,7 +469,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UT
 
 	responseUtxos := make([]*tbcapi.UTXO, 0, len(utxos))
 	for _, utxo := range utxos {
-		txId, err := chainhash.NewHash(utxo.ScriptHashSlice())
+		txID, err := chainhash.NewHash(utxo.ScriptHashSlice())
 		if err != nil {
 			e := protocol.NewInternalError(err)
 			return &tbcapi.UTXOsByAddressResponse{
@@ -478,7 +478,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UT
 		}
 
 		responseUtxos = append(responseUtxos, &tbcapi.UTXO{
-			TxId:     *txId,
+			TxID:     *txID,
 			Value:    utxo.Value(),
 			OutIndex: utxo.OutputIndex(),
 		})
@@ -489,21 +489,21 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UT
 	}, nil
 }
 
-func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdRawRequest) (any, error) {
-	log.Tracef("handleTxByIdRawRequest")
-	defer log.Tracef("handleTxByIdRawRequest exit")
+func (s *Server) handleTxByIDRawRequest(ctx context.Context, req *tbcapi.TxByIDRawRequest) (any, error) {
+	log.Tracef("handleTxByIDRawRequest")
+	defer log.Tracef("handleTxByIDRawRequest exit")
 
-	tx, err := s.TxById(ctx, req.TxID)
+	tx, err := s.TxByID(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
-			return &tbcapi.TxByIdRawResponse{
+			return &tbcapi.TxByIDRawResponse{
 				Error: responseErr,
 			}, nil
 		}
 
 		responseErr := protocol.NewInternalError(err)
-		return &tbcapi.TxByIdRawResponse{
+		return &tbcapi.TxByIDRawResponse{
 			Error: responseErr.ProtocolError(),
 		}, responseErr
 	}
@@ -511,36 +511,36 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	b, err := tx2Bytes(tx)
 	if err != nil {
 		e := protocol.NewInternalError(err)
-		return &tbcapi.TxByIdRawResponse{
+		return &tbcapi.TxByIDRawResponse{
 			Error: e.ProtocolError(),
 		}, e
 	}
 
-	return &tbcapi.TxByIdRawResponse{
+	return &tbcapi.TxByIDRawResponse{
 		Tx: b,
 	}, nil
 }
 
-func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequest) (any, error) {
-	log.Tracef("handleTxByIdRequest")
-	defer log.Tracef("handleTxByIdRequest exit")
+func (s *Server) handleTxByIDRequest(ctx context.Context, req *tbcapi.TxByIDRequest) (any, error) {
+	log.Tracef("handleTxByIDRequest")
+	defer log.Tracef("handleTxByIDRequest exit")
 
-	tx, err := s.TxById(ctx, req.TxID)
+	tx, err := s.TxByID(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
-			return &tbcapi.TxByIdResponse{
+			return &tbcapi.TxByIDResponse{
 				Error: responseErr,
 			}, nil
 		}
 
 		responseErr := protocol.NewInternalError(err)
-		return &tbcapi.TxByIdResponse{
+		return &tbcapi.TxByIDResponse{
 			Error: responseErr.ProtocolError(),
 		}, responseErr
 	}
 
-	return &tbcapi.TxByIdResponse{
+	return &tbcapi.TxByIDResponse{
 		Tx: wireTxToTBC(tx),
 	}, nil
 }
@@ -764,7 +764,7 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) newSession(ws *tbcWs) (string, error) {
 	for {
 		// Create random hexadecimal string to use as an ID
-		id, err := randHexId(16)
+		id, err := randHexID(16)
 		if err != nil {
 			return "", fmt.Errorf("generate session id: %w", err)
 		}
@@ -793,7 +793,7 @@ func (s *Server) deleteSession(id string) {
 	}
 }
 
-func randHexId(length int) (string, error) {
+func randHexID(length int) (string, error) {
 	b := make([]byte, length)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("read random bytes: %w", err)

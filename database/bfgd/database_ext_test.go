@@ -263,7 +263,7 @@ func TestDatabasePostgres(t *testing.T) {
 	var l2KAH [32]byte
 	copy(l2KAH[:], h)
 	pbHalfIn := bfgd.PopBasis{
-		BtcTxId:             btcTxHash,
+		BtcTxID:             btcTxHash,
 		BtcRawTx:            btcTx[:],
 		BtcHeaderHash:       bb1Hash[:],
 		PopMinerPublicKey:   popMinerPublicKey[:],
@@ -1204,7 +1204,7 @@ func TestPopBasisInsertNilMerklePath(t *testing.T) {
 	}()
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid", 32),
+		BtcTxID:             fillOutBytes("btctxid", 32),
 		BtcRawTx:            fillOutBytes("btcrawtx", 80),
 		PopMinerPublicKey:   []byte("popminerpublickey"),
 		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
@@ -1249,7 +1249,7 @@ func TestPopBasisInsertNotNilMerklePath(t *testing.T) {
 	}()
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid", 32),
+		BtcTxID:             fillOutBytes("btctxid", 32),
 		BtcRawTx:            fillOutBytes("btcrawtx", 80),
 		PopMinerPublicKey:   []byte("popminerpublickey"),
 		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
@@ -1295,7 +1295,7 @@ func TestPopBasisInsertNilMerklePathFromPopM(t *testing.T) {
 	}()
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid", 32),
+		BtcTxID:             fillOutBytes("btctxid", 32),
 		BtcRawTx:            fillOutBytes("btcrawtx", 80),
 		PopMinerPublicKey:   []byte("popminerpublickey"),
 		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
@@ -1353,9 +1353,9 @@ func TestPopBasisUpdateNoneExist(t *testing.T) {
 	var txIndex uint64 = 2
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxID:             fillOutBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
+		PopTxID:             fillOutBytes("poptxid2", 32),
 		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
 		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
 		BtcHeaderHash:       btcBlock.Hash,
@@ -1397,9 +1397,9 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 	var txIndex uint64 = 2
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxID:             fillOutBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
+		PopTxID:             fillOutBytes("poptxid2", 32),
 		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
 		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
 		BtcHeaderHash:       btcBlock.Hash,
@@ -1414,9 +1414,9 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 	var txIndex2 uint64 = 3
 
 	popBasis2 := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxID:             fillOutBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
+		PopTxID:             fillOutBytes("poptxid2", 32),
 		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
 		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
 		BtcHeaderHash:       btcBlock.Hash,
@@ -1508,11 +1508,11 @@ func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
 	}
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxID:             fillOutBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
 		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
 		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
-		PopTxId:             nil,
+		PopTxID:             nil,
 		BtcHeaderHash:       nil,
 		BtcTxIndex:          nil,
 		BtcMerklePath:       nil,
@@ -1526,9 +1526,9 @@ func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
 	var txIndex uint64 = 3
 
 	popBasis2 := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxID:             fillOutBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
+		PopTxID:             fillOutBytes("poptxid2", 32),
 		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
 		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
 		BtcHeaderHash:       btcBlock.Hash,
@@ -2169,7 +2169,7 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 	}
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             btcTxId,
+		BtcTxID:             btcTxId,
 		BtcRawTx:            btcRawTx,
 		BtcHeaderHash:       hash,
 		L2KeystoneAbrevHash: l2KeystoneAbrevHash,

@@ -1056,7 +1056,7 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 				if err != nil {
 					return fmt.Errorf("invalid tx hash: %w", err)
 				}
-				sis, err := s.SpentOutputsByTxId(ctx, *tx)
+				sis, err := s.SpentOutputsByTxID(ctx, *tx)
 				if err != nil {
 					return fmt.Errorf("invalid spend infos: %w", err)
 				}
@@ -1077,11 +1077,11 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 				}
 
 			case 't':
-				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
+				txId, blockHash, err := tbcd.TxIDBlockHashFromTxKey(ktx)
 				if err != nil {
 					return fmt.Errorf("invalid tx key: %w", err)
 				}
-				_, err = s.TxById(ctx, *txId)
+				_, err = s.TxByID(ctx, *txId)
 				if err != nil {
 					return fmt.Errorf("tx by id: %w", err)
 				}
@@ -1490,32 +1490,32 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// make sure genesis tx is in db
-	_, err = s.TxById(ctx, *n.gtx.Hash())
+	_, err = s.TxByID(ctx, *n.gtx.Hash())
 	if err != nil {
 		t.Fatalf("genesis not found: %v", err)
 	}
 	// make sure gensis was not spent
-	_, err = s.SpentOutputsByTxId(ctx, *n.gtx.Hash())
+	_, err = s.SpentOutputsByTxID(ctx, *n.gtx.Hash())
 	if err == nil {
 		t.Fatal("genesis coinbase tx should not be spent")
 	}
 
 	// Spot check tx 1 from b2
 	tx := b2.b.Transactions()[1]
-	txb2, err := s.TxById(ctx, *tx.Hash())
+	txb2, err := s.TxByID(ctx, *tx.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
 		t.Fatal("hash not equal")
 	}
-	si, err := s.SpentOutputsByTxId(ctx, *b1.b.Transactions()[0].Hash())
+	si, err := s.SpentOutputsByTxID(ctx, *b1.b.Transactions()[0].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = si
 	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
-	si, err = s.SpentOutputsByTxId(ctx, *b2.b.Transactions()[1].Hash())
+	si, err = s.SpentOutputsByTxID(ctx, *b2.b.Transactions()[1].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1536,7 +1536,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.TxById(ctx, *n.gtx.Hash())
+	_, err = s.TxByID(ctx, *n.gtx.Hash())
 	if err != nil {
 		t.Fatal("expected genesis")
 	}
@@ -1720,33 +1720,33 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// make sure genesis tx is in db
-	_, err = s.TxById(ctx, *n.gtx.Hash())
+	_, err = s.TxByID(ctx, *n.gtx.Hash())
 	if err != nil {
 		t.Fatalf("genesis not found: %v", err)
 	}
 
 	// make sure gensis was not spent
-	_, err = s.SpentOutputsByTxId(ctx, *n.gtx.Hash())
+	_, err = s.SpentOutputsByTxID(ctx, *n.gtx.Hash())
 	if err == nil {
 		t.Fatal("genesis coinbase tx should not be spent")
 	}
 
 	// Spot check tx 1 from b2
 	tx := b2.b.Transactions()[1]
-	txb2, err := s.TxById(ctx, *tx.Hash())
+	txb2, err := s.TxByID(ctx, *tx.Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !btcutil.NewTx(txb2).Hash().IsEqual(tx.Hash()) {
 		t.Fatal("hash not equal")
 	}
-	si, err := s.SpentOutputsByTxId(ctx, *b1.b.Transactions()[0].Hash())
+	si, err := s.SpentOutputsByTxID(ctx, *b1.b.Transactions()[0].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
 	_ = si
 	// t.Logf("%v: %v", b1.b.Transactions()[0].Hash(), spew.Sdump(si))
-	si, err = s.SpentOutputsByTxId(ctx, *b2.b.Transactions()[1].Hash())
+	si, err = s.SpentOutputsByTxID(ctx, *b2.b.Transactions()[1].Hash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1778,7 +1778,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = s.TxById(ctx, *n.gtx.Hash())
+	_, err = s.TxByID(ctx, *n.gtx.Hash())
 	if err != nil {
 		t.Fatal("expected genesis")
 	}

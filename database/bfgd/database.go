@@ -38,10 +38,10 @@ type Database interface {
 
 	BtcBlockCanonicalHeight(ctx context.Context) (uint64, error)
 
-	BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txId string) error
+	BtcTransactionBroadcastRequestInsert(ctx context.Context, serializedTx []byte, txID string) error
 	BtcTransactionBroadcastRequestGetNext(ctx context.Context, onlyNew bool) ([]byte, error)
-	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
-	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
+	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txID string) error
+	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txID string, lastErr string) error
 	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
 }
 
@@ -96,12 +96,12 @@ type BtcBlock struct {
 
 type PopBasis struct {
 	ID                  uint64 `deep:"-"`
-	BtcTxId             database.ByteArray
+	BtcTxID             database.ByteArray
 	BtcRawTx            database.ByteArray
 	BtcHeaderHash       database.ByteArray
 	BtcTxIndex          *uint64
 	BtcMerklePath       []string
-	PopTxId             database.ByteArray
+	PopTxID             database.ByteArray
 	PopMinerPublicKey   database.ByteArray
 	L2KeystoneAbrevHash database.ByteArray `json:"l2_keystone_abrev_hash"`
 	CreatedAt           database.Timestamp `deep:"-"`

@@ -32,15 +32,13 @@ linters:
     - "gochecksumtype" # Run exhaustiveness checks on Go "sum types".
     - "gofumpt" # Runs gofumpt.
     - "goheader" # Enforces copyright header.
-    # TODO enable gosec, when bored run 'golangci-lint run -Egosec' to fix these
-    # - "gosec" # Checks for potential security issues
+    - "gosec" # Checks for potential security issues
     - "gosimple" # Checks for ways to simplify code.
     - "gomoddirectives" # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
     - "gosmopolitan" # Report certain i18n/l10n anti-patterns in your Go codebase.
     - "govet" # Runs go vet.
     - "ineffassign" # Detects when assignments to variables are not used.
-    # TODO enable revive, when bored run 'golangci-lint run -Erevive' to fix these
-    # - "revive" # Checks for potential security issues
+    - "revive" # Checks for style inconsistencies.
     - "nilerr" # Finds the code that returns nil even if it checks that the error is not nil.
     - "nolintlint" # Reports ill-formed or insufficient nolint directives.
     - "prealloc" # Finds slice declarations that could potentially be pre-allocated.
@@ -87,6 +85,11 @@ linters-settings:
   gomoddirectives:
     replace-allow-list:
       - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
+
+  # Checks for potential security issues.
+  gosec:
+    excludes:
+      - G115 # Potential integer overflow when converting between integer types
 
   # Enforces copyright header
   goheader: # TODO: Replace goheader, autofix is too buggy.

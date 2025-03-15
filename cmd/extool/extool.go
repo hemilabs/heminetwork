@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -76,6 +76,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("Invalid height %q: %v", flag.Arg(2), err)
 		}
+		if height < 0 {
+			log.Fatalf("invalid negative height %v", height)
+		}
+
 		rbh, err := c.RawBlockHeader(ctx, uint64(height))
 		if err != nil {
 			log.Fatalf("Failed to get raw block header: %v", err)
@@ -109,9 +113,15 @@ func main() {
 		if err != nil {
 			log.Fatalf("Invalid height %q: %v", flag.Arg(2), err)
 		}
+		if height < 0 {
+			log.Fatalf("invalid negative height %v", height)
+		}
 		index, err := strconv.Atoi(flag.Arg(3))
 		if err != nil {
 			log.Fatalf("Invalid index %q: %v", flag.Arg(3), err)
+		}
+		if index < 0 {
+			log.Fatalf("invalid negative index %v", height)
 		}
 		txh, merkleHashes, err := c.TransactionAtPosition(ctx, uint64(height), uint64(index))
 		if err != nil {
