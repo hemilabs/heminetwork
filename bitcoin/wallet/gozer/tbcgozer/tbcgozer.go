@@ -240,10 +240,10 @@ func (t *tbcGozer) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Co
 
 	log.Tracef("handleTBCWebsocketRead")
 	defer log.Tracef("handleTBCWebsocketRead exit")
+	pcc := conn.ConnectCount()
 	for {
 		_, _, _, err := tbcapi.ReadConn(ctx, conn)
 		if err != nil {
-
 			// See if we were terminated
 			select {
 			case <-ctx.Done():
@@ -251,7 +251,11 @@ func (t *tbcGozer) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Co
 			case <-time.After(5 * time.Second):
 			}
 
-			log.Infof("Connection with TBC server was lost, reconnecting...")
+			cc := conn.ConnectCount()
+			if pcc == cc {
+				log.Infof("Connection with TBC server was lost, reconnecting...")
+				pcc++
+			}
 			continue
 		}
 	}
@@ -273,7 +277,6 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 
 	err = conn.Connect(ctx)
 	if err != nil {
-		log.Infof("%v", err)
 		return err
 	}
 
@@ -303,7 +306,7 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 func (t *tbcGozer) run(ctx context.Context) {
 	for {
 		if err := t.connectTBC(ctx); err != nil {
-			log.Tracef("connectTBC: %v", err)
+			log.Infof("%v", err)
 		}
 		// See if we were terminated
 		select {
