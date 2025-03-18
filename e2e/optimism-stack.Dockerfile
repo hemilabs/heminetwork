@@ -9,7 +9,7 @@ WORKDIR /git
 ARG OP_GETH_CACHE_BREAK=12F2
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout e525f27e52730a19bdb2fdb9dfb1ffdd1b245d20
+RUN git checkout 339cf6a5a2f9399a37db84cc3f40c9676bcbff84
 
 WORKDIR /git/op-geth
 
@@ -42,7 +42,8 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout 84b895ed3a0b0418324cf82475d3b2c878799bf6
+RUN git checkout 0e70403b3e15d056e187664cf1a591cb1698ebdf
+RUN sed -i 's/predeploys.PoPPointsAddr/predeploys.GovernanceTokenAddr/g' ./op-node/rollup/derive/pop_payout.go
 RUN git submodule update --init --recursive
 RUN pnpm install
 RUN pnpm install:abigen
