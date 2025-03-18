@@ -67,7 +67,7 @@ func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, error
 
 	buResp, ok := res.(*tbcapi.FeeEstimateResponse)
 	if !ok {
-		return nil, fmt.Errorf("not a buResp %T", res)
+		return nil, fmt.Errorf("not a fee estimate response %T", res)
 	}
 
 	if buResp.Error != nil {
@@ -95,7 +95,7 @@ func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.
 
 	buResp, ok := res.(*tbcapi.TxBroadcastResponse)
 	if !ok {
-		return nil, fmt.Errorf("not a buResp %T", res)
+		return nil, fmt.Errorf("not a broadcast response %T", res)
 	}
 
 	if buResp.Error != nil {
@@ -124,7 +124,7 @@ func (t *tbcGozer) UtxosByAddress(ctx context.Context, addr btcutil.Address, sta
 
 	buResp, ok := res.(*tbcapi.UTXOsByAddressResponse)
 	if !ok {
-		return nil, fmt.Errorf("not a buResp %T", res)
+		return nil, fmt.Errorf("not a utxos by address respose %T", res)
 	}
 
 	if buResp.Error != nil {
