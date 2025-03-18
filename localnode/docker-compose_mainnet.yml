@@ -58,11 +58,6 @@ services:
         condition: "service_completed_successfully"
       op-geth-l2-init-tbc:
         condition: "service_completed_successfully"
-    healthcheck:
-      test: ["CMD", "nc", "-vz", "0.0.0.0", "18546"]
-      interval: 5s
-      timeout: 5s
-      retries: 999999
     volumes:
       - ./mainnet-genesis.json:/tmp/genesis.json
       # change this token value if you expose this service's ports for
@@ -120,7 +115,7 @@ services:
       geth-l1:
         condition: "service_started"
       op-geth-l2:
-        condition: "service_healthy"
+        condition: "service_started"
       prysm:
         condition: "service_started"
     volumes:
