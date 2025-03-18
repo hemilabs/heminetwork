@@ -73,7 +73,7 @@ func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, addr
 	prevOuts := map[string][]byte{outpoint.String(): script}
 
 	// Change
-	change := utxo.Value - fee
+	change := utxo.Value - (fee + amount)
 	changeTxOut := wire.NewTxOut(int64(change), script)
 	if !mempool.IsDust(changeTxOut, mempool.DefaultMinRelayTxFee) {
 		tx.AddTxOut(changeTxOut)
