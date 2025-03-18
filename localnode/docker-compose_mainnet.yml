@@ -10,8 +10,6 @@ services:
     build:
       dockerfile: "./docker/bssd/Dockerfile"
       context: "./.."
-    depends_on:
-      - "bfgd"
     environment:
       BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
       BSS_LOG_LEVEL: "INFO"
