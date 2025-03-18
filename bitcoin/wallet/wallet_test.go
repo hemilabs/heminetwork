@@ -41,6 +41,9 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 	}
 	for i := 0; ; i++ {
 		d, err := vm.DisasmPC()
+		if err != nil {
+			return err
+		}
 		if dump {
 			t.Logf("%v: %v", i, d)
 		}
@@ -160,7 +163,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	tx, prevOut, err := TransactionCreate(uint32(time.Now().Unix()),
-		btcutil.Amount(1), btcutil.Amount(feeEstimate.SatsPerByte+0.5), addr, utxos, pkscript)
+		btcutil.Amount(550), btcutil.Amount(feeEstimate.SatsPerByte+0.5), addr, utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,14 +189,14 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("tx: %v", spew.Sdump(popTx))
+	t.Logf("poptx: %v", spew.Sdump(popTx))
 
 	err = executeTX(t, true, popTx.TxOut[0].PkScript, btcutil.NewTx(popTx))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	txID, err := b.BroadcastTx(ctx, popTx)
+	txID, err := b.BroadcastTx(ctx, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
