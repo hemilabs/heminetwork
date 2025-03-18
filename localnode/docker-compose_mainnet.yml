@@ -5,71 +5,6 @@
 name: "hemi-network-stack"
 
 services:
-  # Bitcoin Finality Governor
-  bfgd:
-    build:
-      dockerfile: "./docker/bfgd/Dockerfile"
-      context: "./.."
-    depends_on:
-      bfgd-postgres:
-        condition: "service_started"
-      electrs:
-        condition: "service_healthy"
-    environment:
-      BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
-      ### XXXX Make this variable and set to recent block
-      BFG_BTC_START_HEIGHT: "869309"
-      BFG_EXBTC_ADDRESS: "electrs:50001"
-      BFG_LOG_LEVEL: "INFO"
-      BFG_PUBLIC_ADDRESS: ":8383"
-      BFG_PRIVATE_ADDRESS: ":8080"
-    ports:
-      ### CHANGE HOST PORTS
-      - '8082:8080'
-      - '8385:8383'
-    networks:
-      - "localnode"
-    deploy:
-      restart_policy:
-        condition: "any"
-
-  # Bitcoin Finality Governor PostgreSQL
-  bfgd-postgres:
-    build:
-      dockerfile: "./localnode/postgres.Dockerfile"
-      context: "./.."
-    volumes:
-      - psql_data:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: "bfg"
-      POSTGRES_HOST_AUTH_METHOD: "trust"
-    networks:
-      - "localnode"
-    command:
-      - "postgres"
-      # lower random_page_cost (opposed to default 4.0) to cause planner
-      # to choose index scans vs sequential scans when at fewer rows in a table
-      - "-c"
-      - "random_page_cost=1.0"
-
-  # Bitcoind Node
-  bitcoind:
-    image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
-    volumes:
-      - bitcoin_data:/bitcoin/.bitcoin
-    ports:
-      - '8333:8333'
-    networks:
-      - "localnode"
-    command:
-      - "bitcoind"
-      - "-rpcuser=user"
-      - "-rpcpassword=password"
-      - "-rpcallowip=0.0.0.0/0"
-      - "-rpcbind=0.0.0.0:8332"
-      - "-txindex=1"
-      - "-rpcworkqueue=400"
-
   # Bitcoin Secure Sequencer
   bssd:
     build:
@@ -85,42 +20,6 @@ services:
       - '8081:8081'
     networks:
       - "localnode"
-
-  # Electrs (Bitcoin indexer, used by BFG)
-  electrs:
-    build:
-      context: ./..
-      dockerfile: ./localnode/electrs.Dockerfile
-    depends_on:
-      - "bitcoind"
-    volumes:
-      - ./cookie:/tmp/.cookie
-      - electrs_data:/data/electrs
-    environment:
-      RUST_LOG: debug
-      RUST_BACKTRACE: "full"
-    networks:
-      - "localnode"
-    command:
-      - "electrs_bitcoin/bin/electrs"
-      - "--electrum-rpc-addr"
-      - "0.0.0.0:50001"
-      - "--daemon-rpc-addr"
-      - "bitcoind:8332"
-      # NOTE: If you expose electrs ports, you may want to ensure that this is changed!
-      - "--cookie"
-      - "user:password"
-      - "-vvv"
-      - "--timestamp"
-      - "--utxos-limit"
-      - "50000"
-      - "--electrum-txs-limit"
-      - "50000"
-      - "--jsonrpc-import"
-      - "--db-dir=/data/electrs/blockstream"
-    deploy:
-      restart_policy:
-        condition: "on-failure"
 
   # Ethereum L1 node
   geth-l1:
