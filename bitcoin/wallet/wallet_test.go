@@ -130,11 +130,17 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	feeEstimate, err := gozer.FeeByConfirmations(6, feeEstimates)
+	feeEstimateForPop, err := gozer.FeeByConfirmations(6, feeEstimates)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log(spew.Sdump(feeEstimate))
+	t.Log(spew.Sdump(feeEstimateForPop))
+
+	feeEstimateForTx, err := gozer.FeeByConfirmations(2, feeEstimates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(spew.Sdump(feeEstimateForTx))
 
 	utxos, err := b.UtxosByAddress(ctx, addr, 0, 0)
 	if err != nil {
@@ -163,7 +169,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	tx, prevOut, err := TransactionCreate(uint32(time.Now().Unix()),
-		btcutil.Amount(550), btcutil.Amount(feeEstimate.SatsPerByte+0.5), addr, utxos, pkscript)
+		btcutil.Amount(550), btcutil.Amount(feeEstimateForTx.SatsPerByte), addr, utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +186,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	popTx, prevOut, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
-		btcutil.Amount(feeEstimate.SatsPerByte+0.5), utxos, pkscript)
+		btcutil.Amount(feeEstimateForPop.SatsPerByte+0.5), utxos, pkscript)
 	if err != nil {
 		t.Fatal(err)
 	}
