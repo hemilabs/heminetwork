@@ -310,9 +310,10 @@ type Conn struct {
 	opts      ConnOptions
 	msgID     uint64
 
-	wsc          *websocket.Conn
-	wscReadLock  sync.Mutex
-	wscWriteLock sync.Mutex
+	wsc             *websocket.Conn
+	wscReadLock     sync.Mutex
+	wscWriteLock    sync.Mutex
+	wscConnectCount int
 
 	calls map[string]chan *readResult
 }
@@ -419,8 +420,10 @@ func (ac *Conn) Connect(ctx context.Context) error {
 		return err
 	}
 
-	log.Debugf("Connection established with %v", ac.serverURL)
 	ac.wsc = conn
+	ac.wscConnectCount++
+
+	log.Infof("Connection established with %v", ac.serverURL)
 
 	return nil
 }
@@ -497,6 +500,12 @@ func (ac *Conn) WriteJSON(ctx context.Context, v any) error {
 		return err
 	}
 	return nil
+}
+
+func (ac *Conn) ConnectCount() int {
+	ac.Lock()
+	defer ac.Unlock()
+	return ac.wscConnectCount
 }
 
 // read calls the underlying Read function and returns the command, id and
