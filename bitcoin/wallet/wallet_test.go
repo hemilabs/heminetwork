@@ -197,9 +197,14 @@ func TestIntegration(t *testing.T) {
 	}
 	t.Logf("poptx: %v", spew.Sdump(popTx))
 
-	err = executeTX(t, true, popTx.TxOut[0].PkScript, btcutil.NewTx(popTx))
-	if err != nil {
-		t.Fatal(err)
+	for _, txout := range popTx.TxOut {
+		opCode := txout.PkScript[0]
+		if opCode != txscript.OP_RETURN {
+			err = executeTX(t, true, txout.PkScript, btcutil.NewTx(popTx))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 
 	txID, err := b.BroadcastTx(ctx, tx)
