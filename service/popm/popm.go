@@ -742,7 +742,7 @@ func (m *Miner) handleBFGCallCompletion(parrentCtx context.Context, conn *protoc
 	select {
 	case bc.ch <- payload:
 		log.Tracef("handleBFGCallCompletion returned: %v", spew.Sdump(payload))
-	case <-time.After(DefaultBFGRequestTimeout):
+	case <-time.After(m.requestTimeout):
 		log.Errorf("handleBFGCallCompletion: response time out %v", cmd)
 	}
 }
