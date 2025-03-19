@@ -16,13 +16,39 @@ import (
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
+// UtxoPickerMultiple is a simple utxo picker that returns a random set of utxos from
+// the provided list that combined have a larger value than amount + fee.
+func UtxoPickerMultiple(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) ([]*tbcapi.UTXO, error) {
+	// poor mans random list
+	us := make(map[int]struct{}, len(utxos))
+	for k := range utxos {
+		us[k] = struct{}{}
+	}
+	finalUTXO := make([]*tbcapi.UTXO, 0, len(utxos))
+
+	// find large enough utxo
+	total := amount + fee
+	for k := range us {
+		finalUTXO = append(finalUTXO, utxos[k])
+		total -= utxos[k].Value
+		if total > 0 {
+			continue
+		}
+
+		return finalUTXO, nil
+	}
+
+	return nil, errors.New("no suitable utxos found")
+}
+
 // UtxoPickerSingle is a simple utxo picker that returns a random utxo from the
-// provided list that has a larger value of amount + fee.
+// provided list that has a larger value than amount + fee.
 func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi.UTXO, error) {
 	// poor mans random list
 	us := make(map[int]struct{}, len(utxos))
@@ -50,30 +76,36 @@ func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, addr
 		return nil, nil, err
 	}
 	txOut := wire.NewTxOut(int64(amount), payToScript)
+	if mempool.IsDust(txOut, mempool.DefaultMinRelayTxFee) {
+		return nil, nil, errors.New("amount is dust")
+	}
 
-	// Calculate fee for 1 input and assume there is change
-	txSize := txsizes.EstimateSerializeSize(1, []*wire.TxOut{txOut}, true)
+	// Calculate fee for worst case input number and assume there is change
+	txSize := txsizes.EstimateSerializeSize(len(utxos), []*wire.TxOut{txOut}, true)
 	fee := btcutil.Amount(txSize) * satsPerByte
 
-	// Find utxo that is big enough for entire transaction
-	utxo, err := UtxoPickerSingle(amount, fee, utxos)
+	// Find utxo list that is big enough for entire transaction
+	utxoList, err := UtxoPickerMultiple(amount, fee, utxos)
 	if err != nil {
 		return nil, nil, err
 	}
 
+	// Calculate fee for real input number and assume there is change
+	txSize = txsizes.EstimateSerializeSize(len(utxoList), []*wire.TxOut{txOut}, true)
+	fee = btcutil.Amount(txSize) * satsPerByte
+
 	// Assemble transaction
 	tx := wire.NewMsgTx(2) // Latest supported version
 	tx.LockTime = locktime
-	outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
-	tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
-
-	// Return previous outs to caller so that they can be signed.
-	// This is a bit odd but in a real transaction we have to return all
-	// the scripts (and somehow obtain them). Think about this some more.
-	prevOuts := map[string][]byte{outpoint.String(): script}
+	prevOuts := make(map[string][]byte, len(utxoList))
+	for _, utxo := range utxoList {
+		outpoint := wire.NewOutPoint(&utxo.TxId, utxo.OutIndex)
+		tx.AddTxIn(wire.NewTxIn(outpoint, script, nil))
+		prevOuts[outpoint.String()] = script
+	}
 
 	// Change
-	change := utxo.Value - (fee + amount)
+	change := gozer.BalanceFromUtxos(utxoList) - (fee + amount)
 	changeTxOut := wire.NewTxOut(int64(change), script)
 	if !mempool.IsDust(changeTxOut, mempool.DefaultMinRelayTxFee) {
 		tx.AddTxOut(changeTxOut)
