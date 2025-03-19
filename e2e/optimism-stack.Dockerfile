@@ -43,7 +43,14 @@ WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
 RUN git checkout 0e70403b3e15d056e187664cf1a591cb1698ebdf
+
+# as of now, we have the pop points address hard-coded as the rewards address
+# for pop miners, this should change once we do TGE and mint HEMI
+# we have no way to configure this AFAIK, so just replace the address in the 
+# file so we reward to the GovernanceTokenAddr
+# once this is changed back in optimism, remove this line
 RUN sed -i 's/predeploys.PoPPointsAddr/predeploys.GovernanceTokenAddr/g' ./op-node/rollup/derive/pop_payout.go
+
 RUN git submodule update --init --recursive
 RUN pnpm install
 RUN pnpm install:abigen
