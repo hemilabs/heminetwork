@@ -9,17 +9,24 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 )
 
+type mempoolTx struct {
+	inserted time.Time // When did we see this tx, expire after one week
+	raw      []byte    // Raw transaction
+	inValues []*int64  // txin values, filled in opportunistically
+}
+
 type mempool struct {
 	mtx sync.RWMutex
 
-	txs  map[chainhash.Hash][]byte // when nil, tx has not been downloaded
-	size int                       // total memory used by mempool
+	txs  map[chainhash.Hash]*mempoolTx // when nil, tx has not been downloaded
+	size int                           // total memory used by mempool
 }
 
 func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
@@ -56,7 +63,10 @@ func (m *mempool) txsInsert(ctx context.Context, msg *wire.MsgTx, raw []byte) er
 	defer m.mtx.Unlock()
 
 	if tx := m.txs[msg.TxHash()]; tx == nil {
-		m.txs[msg.TxHash()] = raw
+		m.txs[msg.TxHash()] = &mempoolTx{
+			inserted: time.Now(),
+			raw:      raw,
+		}
 		m.size += len(raw)
 	}
 
@@ -105,7 +115,7 @@ func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
 	l := len(m.txs)
 	for k := range txs {
 		if tx, ok := m.txs[txs[k]]; ok {
-			m.size -= len(tx)
+			m.size -= len(tx.raw)
 			delete(m.txs, txs[k])
 		}
 	}
@@ -134,6 +144,6 @@ func (m *mempool) Dump(ctx context.Context) string {
 
 func mempoolNew() (*mempool, error) {
 	return &mempool{
-		txs: make(map[chainhash.Hash][]byte, wire.MaxInvPerMsg),
+		txs: make(map[chainhash.Hash]*mempoolTx, 10000),
 	}, nil
 }
