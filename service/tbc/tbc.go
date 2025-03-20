@@ -2161,7 +2161,7 @@ func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHea
 }
 
 type fee struct {
-	Bytes    int   // Transaction size
+	VBytes   int   // Transaction size in vBytes
 	InValue  int64 // Transaction in value
 	OutValue int64 // Transaction in value
 }
@@ -2194,7 +2194,7 @@ func (s *Server) feesFromTransactions(ctx context.Context, txs []*btcutil.Tx) ([
 		// log.Infof("size: %v", tx.MsgTx().SerializeSize())
 		// log.Infof("satoshi/byte: %v", float64(iv-ov)/float64(tx.MsgTx().SerializeSize()))
 		fees = append(fees, fee{
-			Bytes:    tx.MsgTx().SerializeSize(),
+			VBytes:   tx.MsgTx().SerializeSize(),
 			InValue:  iv,
 			OutValue: ov,
 		})
@@ -2210,7 +2210,7 @@ func averageFee(fees []fee) float64 {
 
 	var total float64
 	for k := range fees {
-		total += float64(fees[k].InValue-fees[k].OutValue) / float64(fees[k].Bytes)
+		total += float64(fees[k].InValue-fees[k].OutValue) / float64(fees[k].VBytes)
 	}
 	return total / float64(len(fees))
 }
@@ -2298,9 +2298,8 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) error
 		// Create blocks transactions array
 		afm[i] = make([]float64, 0, len(fees))
 		for _, fee := range fees {
-			// XXX use vbytes!!
 			afm[i] = append(afm[i],
-				float64(fee.InValue-fee.OutValue)/float64(fee.Bytes))
+				float64(fee.InValue-fee.OutValue)/float64(fee.VBytes))
 		}
 
 		// go to parent.
