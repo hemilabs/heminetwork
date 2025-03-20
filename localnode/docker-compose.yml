@@ -261,7 +261,7 @@ services:
         6Uiu2HAmMCAptRoWXvC1EvrjFVNuWeN8h6PMGacLtG2U7sWmNTsH"
       - "--p2p.no-discovery"
       - "--log.level=trace"
-      - "--syncmode=execution-layer"
+      - "--syncmode=${OPSYNCMODE:-execution-layer}"
     deploy:
       restart_policy:
         condition: "any"

@@ -254,7 +254,7 @@ services:
       - "--rpc.port=8547"
       - "--p2p.bootnodes=enr:-J64QACnJ0giPmPXowNCHP-FDleMMbDqYg5nuLABYfJeYbP9OA6_fZtvCsTbAwvlPD8_C6ZSXEk1-XPabDBwD8UTyNCGAZMxdy4tgmlkgnY0gmlwhCINopiHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED22EOmUryrNnFOwq6Ve1Hpw5CMFz_TnhIkVS4Sq8JhkmDdGNwgiMrg3VkcIKjLg,enr:-J64QA20VNMfLMtbSuHYmQH2I-xaqT4-9g7lqO-VHr0fFvtSB7QybJ_7W5fuEjLAa6kh82fGLjRUdZE0hW0pfVBcxP6GAZMxdwfngmlkgnY0gmlwhCJaFfaHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDjt3C-gv87B5rWa5M52WUFGy16mjQvFsC7OgPkqu-rn-DdGNwgiMrg3VkcIKRXQ,enr:-J64QLQyh3lXjQLzfCbfNw0DUb4A0OEcTLmVGexMbK-2jjCtHOIlRnDqLuedQ0orNHt7zmsILELYi4ozg-0bQzc34F-GAZMxdxNogmlkgnY0gmlwhCINq4uHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED1NV9w0EmnMXBNRnDWj6kdqzE6_4HigHopeu3ewQTwouDdGNwgiMrg3VkcIK1Iw,enr:-J64QNPfOEViWkN7U_ul5Zhw_mc5_Hta92eUufrgu6oTqSMzRsqCje-P0vPrOQ9XjVIk4VP7mmFVP6qoTrtkIwvwUV2GAZMxdv4zgmlkgnY0gmlwhCJb2HmHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDYAidV8rzABKrKAL9jwP1aoi3wj-GtuML4FKtUDOgzCGDdGNwgiMrg3VkcILijg,enr:-J64QFalFr9Y4r9v8Svh7XFwerJeLTRnfTixfCy_NZw3OTMVZL_dSAvcZ6JIeK0JAZf6-PU3YknV9m9Jd5V5WlnqHKWGAZMxdxT4gmlkgnY0gmlwhCKNlBOHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaECI1jqAzkQ0JRkwL-UBP2TBUfUdLyTaqAXtey82CTysdCDdGNwgiMrg3VkcILOyg"
       - "--log.level=trace"
-      - "--syncmode=execution-layer"
+      - "--syncmode=${OPSYNCMODE:-execution-layer}"
     deploy:
       restart_policy:
         condition: "any"
