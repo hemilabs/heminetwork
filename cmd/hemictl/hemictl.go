@@ -352,30 +352,22 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(b)
 
-	case "feesbyheight":
-		height := args["height"]
-		if height == "" {
-			return errors.New("height: must be set")
+	case "feesbyblockhash":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
 		}
-		h, err := strconv.ParseInt(height, 10, 64)
+		ch, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
-			return fmt.Errorf("parse uint: %w", err)
+			return fmt.Errorf("chainhash: %w", err)
 		}
-		count := args["count"]
-		c, err := strconv.ParseInt(count, 10, 64)
-		if len(count) > 0 && err != nil {
-			return fmt.Errorf("parse uint: %w", err)
-		}
-		if c == 0 {
-			c = 1
-		}
-		bh, err := s.FeesAtHeight(ctx, h, c)
+		err = s.FeesByBlockHash(ctx, *ch)
 		if err != nil {
-			return fmt.Errorf("fees by height: %w", err)
+			return fmt.Errorf("fees by hash: %w", err)
 		}
-		spew.Dump(bh)
+		// spew.Dump(bh)
 
-	case "utxoindex":
+	case "synindexerstohash":
 		hash := args["hash"]
 		if hash == "" {
 			return errors.New("must provide hash")
@@ -393,30 +385,8 @@ func tbcdb(pctx context.Context, flags []string) error {
 			}
 			cfg.MaxCachedTxs = int(mc)
 		}
-		err = s.UtxoIndexer(ctx, *eh)
+		err = s.SyncIndexersToHash(ctx, *eh)
 		if err != nil {
-			return fmt.Errorf("indexer: %w", err)
-		}
-
-	case "txindex":
-		hash := args["hash"]
-		if hash == "" {
-			return errors.New("must provide hash")
-		}
-		eh, err := chainhash.NewHashFromStr(hash)
-		if err != nil {
-			return fmt.Errorf("parse hash: %w", err)
-		}
-
-		maxCache := args["maxcache"]
-		if maxCache != "" {
-			mc, err := strconv.ParseInt(maxCache, 10, 0)
-			if err != nil {
-				return fmt.Errorf("maxCache: %w", err)
-			}
-			cfg.MaxCachedTxs = int(mc)
-		}
-		if err = s.TxIndexer(ctx, *eh); err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
 
