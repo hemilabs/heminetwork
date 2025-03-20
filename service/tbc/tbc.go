@@ -140,7 +140,7 @@ func NewDefaultConfig() *Config {
 		LogLevel:             logLevel,
 		MaxCachedKeystones:   defaultMaxCachedKeystones,
 		MaxCachedTxs:         defaultMaxCachedTxs,
-		MempoolEnabled:       false, // XXX default to false until it is fixed
+		MempoolEnabled:       true,
 		PeersWanted:          defaultPeersWanted,
 		PrometheusNamespace:  appName,
 		ExternalHeaderMode:   false, // Default anyway, but for readability
@@ -163,8 +163,7 @@ type Server struct {
 	blocksInserted int    // blocks inserted since last print
 
 	// mempool
-	//nolint:nolintlint // False positive, commented-out code.
-	// mempool *mempool
+	mempool *mempool
 
 	// broadcast
 	broadcast map[chainhash.Hash]*wire.MsgTx
@@ -211,11 +210,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 
-	if cfg.MempoolEnabled {
-		log.Infof("mempool forced disabled")
-	}
-	cfg.MempoolEnabled = false // XXX
-
 	// Only populate pings and blocks if not in External Header Mode
 	var pings *ttl.TTL
 	var blocks *ttl.TTL
@@ -256,16 +250,16 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.pings = pings
 	}
 
-	// if s.cfg.MempoolEnabled {
-	//	if s.cfg.ExternalHeaderMode {
-	//		// Cannot combine mempool behavior with External Header Mode
-	//		panic("cannot enable mempool on an external-header-only mode TBC instance")
-	//	}
-	//	s.mempool, err = mempoolNew()
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	// }
+	if s.cfg.MempoolEnabled {
+		if s.cfg.ExternalHeaderMode {
+			// Cannot combine mempool behavior with External Header Mode
+			panic("cannot enable mempool on an external-header-only mode TBC instance")
+		}
+		s.mempool, err = mempoolNew()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	wanted := defaultPeersWanted
 	switch cfg.Network {
@@ -423,25 +417,25 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
 }
 
-// func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
-//	log.Tracef("mempoolPeer %v", p)
-//	defer log.Tracef("mempoolPeer %v exit", p)
-//
-//	if !s.cfg.MempoolEnabled {
-//		return
-//	}
-//
-//	// Don't ask for mempool if the other end does not advertise it.
-//	if !p.HasService(wire.SFNodeBloom) {
-//		return
-//	}
-//
-//	err := p.Write(defaultCmdTimeout, wire.NewMsgMemPool())
-//	if err != nil {
-//		log.Debugf("mempool %v: %v", p, err)
-//		return
-//	}
-// }
+func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
+	log.Tracef("mempoolPeer %v", p)
+	defer log.Tracef("mempoolPeer %v exit", p)
+
+	if !s.cfg.MempoolEnabled {
+		return
+	}
+
+	// Don't ask for mempool if the other end does not advertise it.
+	if !p.HasService(wire.SFNodeBloom) {
+		return
+	}
+
+	err := p.Write(defaultCmdTimeout, wire.NewMsgMemPool())
+	if err != nil {
+		log.Debugf("mempool %v: %v", p, err)
+		return
+	}
+}
 
 func (s *Server) headersPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	log.Tracef("headersPeer %v", p)
@@ -476,9 +470,9 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 		}
 
 	case *wire.MsgTx:
-		// if err := s.handleTx(ctx, p, m, raw); err != nil {
-		//	return fmt.Errorf("handle generic transaction: %w", err)
-		// }
+		if err := s.handleTx(ctx, p, m, raw); err != nil {
+			return fmt.Errorf("handle generic transaction: %w", err)
+		}
 
 	case *wire.MsgInv:
 		if err := s.handleInv(ctx, p, m, raw); err != nil {
@@ -583,8 +577,10 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	}
 
 	// If we are caught up start collecting mempool data.
-	if s.cfg.MempoolEnabled && p.HasService(wire.SFNodeBloom) &&
-		s.Synced(ctx).Synced {
+	// if s.cfg.MempoolEnabled && p.HasService(wire.SFNodeBloom) &&
+	//	s.Synced(ctx).Synced {
+	// XXX don't do this until we are synced!
+	if s.cfg.MempoolEnabled && p.HasService(wire.SFNodeBloom) {
 		err := p.Write(defaultCmdTimeout, wire.NewMsgMemPool())
 		if err != nil {
 			readError = err
@@ -817,10 +813,9 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
 		s.prom.blockCache = s.db.BlockCacheStats()
 		s.prom.headerCache = s.db.BlockHeaderCacheStats()
-		s.prom.diskFree, _ = diskFree(s.cfg.LevelDBHome)
-		// if s.cfg.MempoolEnabled {
-		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
-		// }
+		if s.cfg.MempoolEnabled {
+			s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
+		}
 
 		if s.promPollVerbose {
 			s.mtx.RLock()
@@ -1052,36 +1047,32 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	}
 }
 
-// func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
-//	log.Tracef("downloadMissingTx")
-//	defer log.Tracef("downloadMissingTx exit")
-//
-//	if true {
-//		return nil
-//	}
-//
-//	getData, err := s.mempool.getDataConstruct(ctx)
-//	if err != nil {
-//		return fmt.Errorf("download missing tx: %w", err)
-//	}
-//	err = p.Write(defaultCmdTimeout, getData)
-//	if err != nil {
-//		// peer dead, make sure it is reaped
-//		p.Close() // XXX this should not happen here
-//		if !errors.Is(err, net.ErrClosed) &&
-//			!errors.Is(err, os.ErrDeadlineExceeded) {
-//			log.Errorf("download missing tx write: %v %v", p, err)
-//		}
-//	}
-//	return err
-// }
+func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
+	log.Tracef("downloadMissingTx")
+	defer log.Tracef("downloadMissingTx exit")
 
-// func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
-//	log.Tracef("handleTx")
-//	defer log.Tracef("handleTx exit")
-//
-//	return s.mempool.txsInsert(ctx, msg, raw)
-// }
+	getData, err := s.mempool.getDataConstruct(ctx)
+	if err != nil {
+		return fmt.Errorf("download missing tx: %w", err)
+	}
+	err = p.Write(defaultCmdTimeout, getData)
+	if err != nil {
+		// peer dead, make sure it is reaped
+		p.Close() // XXX this should not happen here
+		if !errors.Is(err, net.ErrClosed) &&
+			!errors.Is(err, os.ErrDeadlineExceeded) {
+			log.Errorf("download missing tx write: %v %v", p, err)
+		}
+	}
+	return err
+}
+
+func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
+	log.Tracef("handleTx")
+	defer log.Tracef("handleTx exit")
+
+	return s.mempool.txsInsert(ctx, msg, raw)
+}
 
 func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
@@ -1371,12 +1362,13 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 				log.Debugf("blockheaders caught up at %v: %v",
 					p, bhb.HH())
 			}
-		} // else {
-		// if s.cfg.MempoolEnabled {
-		//	// Start building the mempool.
-		//	s.pm.All(ctx, s.mempoolPeer)
-		// }
-		// }
+		} else {
+			// XXX don't do this during IBD!
+			if s.cfg.MempoolEnabled {
+				// Start building the mempool.
+				s.pm.All(ctx, s.mempoolPeer)
+			}
+		}
 
 		// Always call syncBlocks, it either downloads more blocks or
 		// kicks of indexing.
@@ -1575,9 +1567,9 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 			mempoolSize    int
 			connectedPeers int
 		)
-		// if s.cfg.MempoolEnabled {
-		//	mempoolCount, mempoolSize = s.mempool.stats(ctx)
-		// }
+		if s.cfg.MempoolEnabled {
+			mempoolCount, mempoolSize = s.mempool.stats(ctx)
+		}
 
 		// Grab some peer stats as well
 		connectedPeers, goodPeers, badPeers := s.pm.Stats()
@@ -1614,7 +1606,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 	log.Tracef("handleInv (%v)", p)
 	defer log.Tracef("handleInv exit (%v)", p)
 
-	// var txsFound bool
+	var txsFound bool
 
 	for _, v := range msg.InvList {
 		switch v.Type {
@@ -1623,7 +1615,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 		case wire.InvTypeTx:
 			// handle these later or else we have to insert txs one
 			// at a time while taking a mutex.
-			// txsFound = true
+			txsFound = true
 		case wire.InvTypeBlock:
 			// Make sure we haven't seen block header yet.
 			_, _, err := s.BlockHeaderByHash(ctx, v.Hash)
@@ -1646,12 +1638,14 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 		}
 	}
 
-	// if s.cfg.MempoolEnabled && txsFound {
-	//	if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
-	//		//nolint:errcheck // Error is intentionally ignored.
-	//		go s.downloadMissingTx(ctx, p)
-	//	}
-	// }
+	if s.cfg.MempoolEnabled && txsFound {
+		// XXX we should only do this AFTER we are synced.
+		// XXX allow to run for now while being developed.
+		if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
+			//nolint:errcheck // Error is intentionally ignored.
+			go s.downloadMissingTx(ctx, p)
+		}
+	}
 
 	return nil
 }
@@ -2173,7 +2167,7 @@ func (s *Server) feesFromTransactions(ctx context.Context, txs []*btcutil.Tx) ([
 			// Skip coinbase inputs
 			continue
 		}
-		// log.Infof("Tx: %v", tx.Hash())
+		log.Infof("Tx: %v", tx.Hash())
 		iv := int64(0)
 		for _, txIn := range tx.MsgTx().TxIn {
 			po := txIn.PreviousOutPoint
@@ -2189,10 +2183,10 @@ func (s *Server) feesFromTransactions(ctx context.Context, txs []*btcutil.Tx) ([
 		for _, txOut := range tx.MsgTx().TxOut {
 			ov += txOut.Value
 		}
-		// log.Infof("out value: %v", btcutil.Amount(ov))
-		// log.Infof("fee: %v", btcutil.Amount(iv-ov))
-		// log.Infof("size: %v", tx.MsgTx().SerializeSize())
-		// log.Infof("satoshi/byte: %v", float64(iv-ov)/float64(tx.MsgTx().SerializeSize()))
+		log.Infof("out value: %v", btcutil.Amount(ov))
+		log.Infof("fee: %v", btcutil.Amount(iv-ov))
+		log.Infof("size: %v", tx.MsgTx().SerializeSize())
+		log.Infof("satoshi/byte: %v", float64(iv-ov)/float64(tx.MsgTx().SerializeSize()))
 		fees = append(fees, fee{
 			VBytes:   tx.MsgTx().SerializeSize(),
 			InValue:  iv,
