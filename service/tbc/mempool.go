@@ -7,7 +7,6 @@ package tbc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -46,8 +45,10 @@ func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error
 			Type: wire.InvTypeTx,
 			Hash: k,
 		}); err != nil {
-			// only happens when asking max inventory
-			return nil, fmt.Errorf("construct get data: %w", err)
+			// Only happens when asking max inventory, just bail
+			// and count on the random map walk to eventually catch
+			// up.
+			break
 		}
 	}
 	return getData, nil
