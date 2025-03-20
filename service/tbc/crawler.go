@@ -984,15 +984,15 @@ func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 	return nil
 }
 
-func (s *Server) UtxoIndexer(ctx context.Context, endHash chainhash.Hash) error {
-	log.Tracef("UtxoIndexer")
-	defer log.Tracef("UtxoIndexer exit")
+func (s *Server) utxoIndexer(ctx context.Context, endHash chainhash.Hash) error {
+	log.Tracef("utxoIndexer")
+	defer log.Tracef("utxoIndexer exit")
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("UtxoIndexer indexing not true")
+		panic("utxoIndexer indexing not true")
 	}
 	s.mtx.Unlock()
 	// XXX this is basically duplicate from UtxoIndexIsLinear
@@ -1327,9 +1327,9 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 	return nil
 }
 
-func (s *Server) TxIndexer(ctx context.Context, endHash chainhash.Hash) error {
-	log.Tracef("TxIndexer")
-	defer log.Tracef("TxIndexer exit")
+func (s *Server) txIndexer(ctx context.Context, endHash chainhash.Hash) error {
+	log.Tracef("txIndexer")
+	defer log.Tracef("txIndexer exit")
 
 	// XXX this is basically duplicate from TxIndexIsLinear
 
@@ -1337,7 +1337,7 @@ func (s *Server) TxIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("TxIndexer not true")
+		panic("txIndexer not true")
 	}
 	s.mtx.Unlock()
 
@@ -1675,9 +1675,9 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 	return nil
 }
 
-func (s *Server) KeystoneIndexer(ctx context.Context, endHash chainhash.Hash) error {
-	log.Tracef("KeystoneIndexer")
-	defer log.Tracef("KeystoneIndexer exit")
+func (s *Server) keystoneIndexer(ctx context.Context, endHash chainhash.Hash) error {
+	log.Tracef("keystoneIndexer")
+	defer log.Tracef("keystoneIndexer exit")
 
 	// XXX this is basically duplicate from KeystoneIndexIsLinear
 
@@ -1688,7 +1688,7 @@ func (s *Server) KeystoneIndexer(ctx context.Context, endHash chainhash.Hash) er
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("KeystoneIndexer not true")
+		panic("keystoneIndexer not true")
 	}
 	s.mtx.Unlock()
 
@@ -1856,19 +1856,19 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 
 	log.Debugf("Syncing indexes to: %v", hash)
 
-	// UTXOs
-	if err := s.UtxoIndexer(ctx, hash); err != nil {
+	// utxos
+	if err := s.utxoIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
 	// Transactions index
-	if err := s.TxIndexer(ctx, hash); err != nil {
+	if err := s.txIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
 	// Hemi indexes
 	if s.cfg.HemiIndex {
-		if err := s.KeystoneIndexer(ctx, hash); err != nil {
+		if err := s.keystoneIndexer(ctx, hash); err != nil {
 			return fmt.Errorf("keystone indexer: %w", err)
 		}
 	}
@@ -1906,12 +1906,12 @@ func (s *Server) utxoIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) 
 		log.Infof("Syncing utxo index to: %v from: %v via: %v",
 			bhb.HH(), utxoBH.HH(), cp.HH())
 		// utxoBH is NOT on canonical chain, unwind first
-		if err := s.UtxoIndexer(ctx, cp.Hash); err != nil {
+		if err := s.utxoIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("utxo indexer unwind: %w", err)
 		}
 	}
 	// Index utxo to best block
-	if err := s.UtxoIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.utxoIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
@@ -1939,12 +1939,12 @@ func (s *Server) txIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) er
 		log.Infof("Syncing tx index to: %v from: %v via: %v",
 			bhb.HH(), txBH.HH(), cp.HH())
 		// txBH is NOT on canonical chain, unwind first
-		if err := s.TxIndexer(ctx, cp.Hash); err != nil {
+		if err := s.txIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("tx indexer unwind: %w", err)
 		}
 	}
 	// Transactions index
-	if err := s.TxIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.txIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
@@ -1972,12 +1972,12 @@ func (s *Server) keystoneIndexersToBest(ctx context.Context, bhb *tbcd.BlockHead
 		log.Infof("Syncing keystone index to: %v from: %v via: %v",
 			bhb.HH(), keystoneBH.HH(), cp.HH())
 		// keystoneBH is NOT on canonical chain, unwind first
-		if err := s.KeystoneIndexer(ctx, cp.Hash); err != nil {
+		if err := s.keystoneIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("keystone indexer unwind: %w", err)
 		}
 	}
 	// Index keystones to best block
-	if err := s.KeystoneIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.keystoneIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("keystone indexer: %w", err)
 	}
 

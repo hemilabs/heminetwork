@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -2146,61 +2147,164 @@ func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHea
 	return s.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
-func feesFromTransactions(txs []*btcutil.Tx) error {
-	for idx, tx := range txs {
-		for _, txIn := range tx.MsgTx().TxIn {
-			if idx == 0 {
-				// Skip coinbase inputs
-				continue
-			}
-			_ = txIn
-		}
-		for outIndex, txOut := range tx.MsgTx().TxOut {
-			if txscript.IsUnspendable(txOut.PkScript) {
-				continue
-			}
-			_ = outIndex
-		}
-	}
-
-	return nil
+type fee struct {
+	Bytes    int   // Transaction size
+	InValue  int64 // Transaction in value
+	OutValue int64 // Transaction in value
 }
 
-func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64, error) {
-	log.Tracef("FeesAtHeight")
-	defer log.Tracef("FeesAtHeight exit")
+func (s *Server) feesFromTransactions(ctx context.Context, txs []*btcutil.Tx) ([]fee, error) {
+	fees := make([]fee, 0, len(txs))
+	for _, tx := range txs {
+		if blockchain.IsCoinBase(tx) {
+			// Skip coinbase inputs
+			continue
+		}
+		// log.Infof("Tx: %v", tx.Hash())
+		iv := int64(0)
+		for _, txIn := range tx.MsgTx().TxIn {
+			po := txIn.PreviousOutPoint
+			wtxo, err := s.txOutFromOutPoint(ctx,
+				tbcd.NewOutpoint(po.Hash, po.Index))
+			if err != nil {
+				return nil, err
+			}
+			iv += wtxo.Value
+		}
+		// log.Infof("in value: %v", btcutil.Amount(iv))
+		ov := int64(0)
+		for _, txOut := range tx.MsgTx().TxOut {
+			ov += txOut.Value
+		}
+		// log.Infof("out value: %v", btcutil.Amount(ov))
+		// log.Infof("fee: %v", btcutil.Amount(iv-ov))
+		// log.Infof("size: %v", tx.MsgTx().SerializeSize())
+		// log.Infof("satoshi/byte: %v", float64(iv-ov)/float64(tx.MsgTx().SerializeSize()))
+		fees = append(fees, fee{
+			Bytes:    tx.MsgTx().SerializeSize(),
+			InValue:  iv,
+			OutValue: ov,
+		})
+	}
+
+	return fees, nil
+}
+
+func averageFee(fees []fee) float64 {
+	if len(fees) == 0 {
+		return 0
+	}
+
+	var total float64
+	for k := range fees {
+		total += float64(fees[k].InValue-fees[k].OutValue) / float64(fees[k].Bytes)
+	}
+	return total / float64(len(fees))
+}
+
+// ewma calculates the exponentially weighted moving average.
+func ewma(currentFeeRate float64, ewmaPrevious float64, alpha float64) float64 {
+	return alpha*currentFeeRate + (1-alpha)*ewmaPrevious
+}
+
+// estimateFeeRate estimates the transaction fee rate for different horizons,
+// taking block depth into account.
+func estimateFeeRate(recentBlocksTransactions [][]float64, horizons []int) map[int]float64 {
+	// Initialize EWMA for different horizons
+	ewmaValues := make(map[int]float64)
+	for _, horizon := range horizons {
+		ewmaValues[horizon] = 0
+	}
+
+	// Process recent blocks transactions
+	for blockDepth, block := range recentBlocksTransactions {
+		for _, feeRate := range block {
+			for _, horizon := range horizons {
+				alpha := calculateAlpha(horizon, blockDepth)
+				ewmaValues[horizon] = ewma(feeRate, ewmaValues[horizon], alpha)
+			}
+		}
+	}
+
+	// Combine results for final estimation
+	finalEstimation := make(map[int]float64)
+	for horizon, value := range ewmaValues {
+		finalEstimation[horizon] = math.Round(value)
+	}
+
+	return finalEstimation
+}
+
+// calculateAlpha calculates the smoothing factor based on the horizon and block depth.
+func calculateAlpha(horizon, blockDepth int) float64 {
+	// Base alpha for the most recent transactions
+	baseAlpha := 0.1
+
+	// Decay factor to reduce the influence of older transactions
+	decayFactor := 0.9
+
+	// Adjust the base alpha based on the horizon
+	adjustedBaseAlpha := baseAlpha / float64(horizon+1)
+
+	// Calculate the effective alpha considering the block depth
+	effectiveAlpha := adjustedBaseAlpha * math.Pow(decayFactor, float64(blockDepth))
+
+	// Ensure the effective alpha is within a reasonable range
+	if effectiveAlpha < 0.01 {
+		effectiveAlpha = 0.01
+	}
+
+	return effectiveAlpha
+}
+
+// FeesByBlockHash calculates all fees for the provided block.
+func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) error {
+	log.Tracef("FeesByBlockHash")
+	defer log.Tracef("FeesByBlockHash exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return 0, errors.New("cannot call FeesAtHeight on TBC running in External Header mode")
+		return errors.New("fees by block hash: external header mode")
 	}
 
-	if height-count < 0 {
-		return 0, errors.New("height - count is less than 0")
-	}
-	var fees uint64
-	for i := int64(0); i < count; i++ {
-		log.Infof("%v", uint64(height-i))
-		bhs, err := s.db.BlockHeadersByHeight(ctx, uint64(height-i))
+	horizonDepth := 6
+	// afm := make(map[int]float64, horizon)
+	afm := make([][]float64, horizonDepth)
+	for i := 0; i < horizonDepth; i++ {
+		// Retrieve block
+		b, err := s.db.BlockByHash(ctx, hash)
 		if err != nil {
-			return 0, fmt.Errorf("headers by height: %w", err)
-		}
-		if len(bhs) != 1 {
-			panic("fees at height: unsupported fork")
-			// return 0, fmt.Errorf("too many block headers: %v", len(bhs))
-		}
-		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
-		if err != nil {
-			return 0, fmt.Errorf("block by hash: %w", err)
+			return fmt.Errorf("fees by block hash block: %w", err)
 		}
 
 		// walk block tx'
-		if err = feesFromTransactions(b.Transactions()); err != nil {
-			return 0, fmt.Errorf("fees from transactions %v %v: %w",
-				height, b.Hash(), err)
+		fees, err := s.feesFromTransactions(ctx, b.Transactions())
+		if err != nil {
+			return fmt.Errorf("fees by block from transactions %v: %w", hash, err)
 		}
+
+		// Create blocks transactions array
+		afm[i] = make([]float64, 0, len(fees))
+		for _, fee := range fees {
+			// XXX use vbytes!!
+			afm[i] = append(afm[i],
+				float64(fee.InValue-fee.OutValue)/float64(fee.Bytes))
+		}
+
+		// go to parent.
+		hash = b.MsgBlock().Header.PrevBlock
+	}
+	// spew.Dump(afm)
+
+	horizons := []int{1, 2, 3, 4, 5, 6}
+	estimatedFeeRates := estimateFeeRate(afm, horizons)
+
+	// Print the results
+	for horizon, feeRate := range estimatedFeeRates {
+		log.Infof("Estimated Fee Rate for %d blocks: %.2f sat/vB\n",
+			horizon, feeRate)
 	}
 
-	return fees, errors.New("not yet")
+	return errors.New("not yet")
 }
 
 // FullBlockAvailable returns whether TBC has the full block
