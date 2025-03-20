@@ -729,7 +729,7 @@ func (m *Miner) handleBFGCallCompletion(parrentCtx context.Context, conn *protoc
 
 	log.Tracef("handleBFGCallCompletion: %v", spew.Sdump(bc.msg))
 
-	_, _, payload, err := bfgapi.Call(ctx, conn, bc.msg)
+	cmd, _, payload, err := bfgapi.Call(ctx, conn, bc.msg)
 	if err != nil {
 		log.Debugf("handleBFGCallCompletion %T: %v", bc.msg, err)
 		select {
@@ -742,7 +742,9 @@ func (m *Miner) handleBFGCallCompletion(parrentCtx context.Context, conn *protoc
 	select {
 	case bc.ch <- payload:
 		log.Tracef("handleBFGCallCompletion returned: %v", spew.Sdump(payload))
-	default:
+	case <-time.After(m.requestTimeout):
+		log.Errorf("handleBFGCallCompletion: response time out %v", cmd)
+	case <-ctx.Done():
 	}
 }
 
