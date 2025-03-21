@@ -874,16 +874,16 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("UtxoIndexerUnwind")
-	defer log.Tracef("UtxoIndexerUnwind exit")
+func (s *Server) utxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("utxoIndexerUnwind")
+	defer log.Tracef("utxoIndexerUnwind exit")
 
 	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start and endhas flipped
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("UtxoIndexerUnwind not true")
+		panic("utxoIndexerUnwind not true")
 	}
 	s.mtx.Unlock()
 
@@ -929,15 +929,15 @@ func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 	return nil
 }
 
-func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("UtxoIndexerWind")
-	defer log.Tracef("UtxoIndexerWind exit")
+func (s *Server) utxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("utxoIndexerWind")
+	defer log.Tracef("utxoIndexerWind exit")
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("UtxoIndexerWind not true")
+		panic("utxoIndexerWind not true")
 	}
 	s.mtx.Unlock()
 
@@ -1023,9 +1023,9 @@ func (s *Server) utxoIndexer(ctx context.Context, endHash chainhash.Hash) error 
 	log.Debugf("direction %v", direction)
 	switch direction {
 	case 1:
-		return s.UtxoIndexerWind(ctx, startBH, endBH)
+		return s.utxoIndexerWind(ctx, startBH, endBH)
 	case -1:
-		return s.UtxoIndexerUnwind(ctx, startBH, endBH)
+		return s.utxoIndexerUnwind(ctx, startBH, endBH)
 	case 0:
 		// Because we call UtxoIndexIsLinear we know it's the same block.
 		return nil
@@ -1219,17 +1219,17 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("TxIndexerUnwind")
-	defer log.Tracef("TxIndexerUnwind exit")
+func (s *Server) txIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("txIndexerUnwind")
+	defer log.Tracef("txIndexerUnwind exit")
 
-	// XXX dedup with TxIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with txIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("TxIndexerUnwind indexing not true")
+		panic("txIndexerUnwind indexing not true")
 	}
 	s.mtx.Unlock()
 	// Allocate here so that we don't waste space when not indexing.
@@ -1273,15 +1273,15 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 	return nil
 }
 
-func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("TxIndexerWind")
-	defer log.Tracef("TxIndexerWind exit")
+func (s *Server) txIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("txIndexerWind")
+	defer log.Tracef("txIndexerWind exit")
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("TxIndexerWind not true")
+		panic("txIndexerWind not true")
 	}
 	s.mtx.Unlock()
 
@@ -1364,9 +1364,9 @@ func (s *Server) txIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	}
 	switch direction {
 	case 1:
-		return s.TxIndexerWind(ctx, startBH, endBH)
+		return s.txIndexerWind(ctx, startBH, endBH)
 	case -1:
-		return s.TxIndexerUnwind(ctx, startBH, endBH)
+		return s.txIndexerUnwind(ctx, startBH, endBH)
 	case 0:
 		// Because we call TxIndexIsLinear we know it's the same block.
 		return nil
@@ -1567,17 +1567,17 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("KeystoneIndexerUnwind")
-	defer log.Tracef("KeystoneIndexerUnwind exit")
+func (s *Server) keystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("keystoneIndexerUnwind")
+	defer log.Tracef("keystoneIndexerUnwind exit")
 
-	// XXX dedup with KeystoneIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with keystoneIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("KeystoneIndexerUnwind indexing not true")
+		panic("keystoneIndexerUnwind indexing not true")
 	}
 	s.mtx.Unlock()
 	// Allocate here so that we don't waste space when not indexing.
@@ -1621,15 +1621,15 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 	return nil
 }
 
-func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("KeystoneIndexerWind")
-	defer log.Tracef("KeystoneIndexerWind exit")
+func (s *Server) keystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("keystoneIndexerWind")
+	defer log.Tracef("keystoneIndexerWind exit")
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("KeystoneIndexerWind not true")
+		panic("keystoneIndexerWind not true")
 	}
 	s.mtx.Unlock()
 
@@ -1715,9 +1715,9 @@ func (s *Server) keystoneIndexer(ctx context.Context, endHash chainhash.Hash) er
 	}
 	switch direction {
 	case 1:
-		return s.KeystoneIndexerWind(ctx, startBH, endBH)
+		return s.keystoneIndexerWind(ctx, startBH, endBH)
 	case -1:
-		return s.KeystoneIndexerUnwind(ctx, startBH, endBH)
+		return s.keystoneIndexerUnwind(ctx, startBH, endBH)
 	case 0:
 		// Because we call KeystoneIndexIsLinear we know it's the same block.
 		return nil
