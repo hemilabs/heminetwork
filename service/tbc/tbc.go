@@ -1091,6 +1091,11 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 	if err != nil {
 		// XXX too loud?
 		log.Errorf("invalid transaction %v: %v", msg.TxHash(), err)
+		log.Errorf("current height: %v weight: %v size: %v vsize: %v stripped: %v raw: %v",
+			bhb.Height, blockchain.GetTransactionWeight(utx),
+			btcmempool.GetTxVirtualSize(utx),
+			msg.SerializeSize(), msg.SerializeSizeStripped(), len(raw))
+		log.Errorf("%v", spew.Sdump(msg))
 		return nil
 	}
 
