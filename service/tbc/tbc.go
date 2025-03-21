@@ -476,6 +476,7 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 		}
 
 		// XXX remove
+		log.Infof("%v", s.mempool.Dump(ctx))
 		rf, err := s.mempool.GetRecommendedFees(ctx)
 		if err != nil {
 			log.Errorf("get recommended fees: %v", err)
