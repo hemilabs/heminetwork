@@ -37,6 +37,21 @@ import (
 	"github.com/hemilabs/heminetwork/version"
 )
 
+func parseTxFromHex(txs string) (*btcutil.Tx, error) {
+	rtx, err := hex.DecodeString(strings.Trim(txs, "\n"))
+	if err != nil {
+		return nil, err
+	}
+
+	// decode
+	tx, err := btcutil.NewTxFromBytes(rtx)
+	if err != nil {
+		return nil, err
+	}
+
+	return tx, nil
+}
+
 func parseBlockFromHex(blk string) (*btcutil.Block, error) {
 	eb, err := hex.DecodeString(strings.Trim(blk, "\n"))
 	if err != nil {
@@ -611,6 +626,46 @@ func _main() error {
 		height, err = blockstream.Tip(ctx)
 		if err == nil {
 			fmt.Printf("%v\n", height)
+		}
+
+	case "tx":
+		raw := true
+
+		wireSpew := false
+		wireSet := args["wire"]
+		if wireSet == "1" || strings.ToLower(wireSet) == "true" {
+			wireSpew = true
+		}
+
+		jsonSet := args["json"]
+		if jsonSet == "1" || strings.ToLower(jsonSet) == "true" {
+			raw = false
+			if wireSpew {
+				return errors.New("wire and json may not be both set")
+			}
+		}
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+		var stx string
+		stx, err = blockstream.Tx(ctx, hash, raw)
+		if err == nil {
+			if wireSpew {
+				// eb, err := hex.DecodeString(strings.Trim(b, "\n"))
+				// if err != nil {
+				//	return err
+				// }
+				// fmt.Printf("%v", spew.Sdump(eb))
+
+				tx, err := parseTxFromHex(stx)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%v", spew.Sdump(tx.MsgTx()))
+			} else {
+				fmt.Printf("%v", stx)
+			}
 		}
 
 	case "p2p":
