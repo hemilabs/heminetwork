@@ -97,10 +97,33 @@ services' ports to the outside world.** This allows communication between the se
 
 ## Running with Docker Compose
 
+### Choose node type
+
+Nodes can run in two modes, `archive` or `snap`.  `archive` has all data while `snap` only indexes data coming from ethereum blobs starting at the time sync begins.  Most users will only need `snap` which is must faster and smaller.
+
+To run an `archive` sync, you will need access to an ethereum rpc provider that has blob data (the optional ethereum node in the compose file will NOT work for that).
+
+So possible providers for full blob data can be found at:
+https://docs.arbitrum.io/run-arbitrum-node/l1-ethereum-beacon-chain-rpc-providers
+
+Once you have choosen your network and sync type, run the command:
+```
+cd localnode
+./gen-files.sh NETWORK SYNCMODE
+```
+
+For example, to prepare to run a mainnet snap mode:
+```
+./gen-files.sh mainnet snap
+```
+
+### Run the compose files.
+
 Run the following to start each of the required daemons as Docker containers:
 
 ```sh
-docker compose -f localnode/docker-compose.yml up --build
+cd localnode
+docker compose -f docker-compose.yml up --build
 ```
 
 ## Accessing the nodes
@@ -122,7 +145,7 @@ Hemi network will be necessary. This is coming soon.
 
 Run the file:
 ```sh
-docker compose -f localnode/docker-compose_mainnet.yml up --build
+docker compose -f docker-compose_mainnet.yml up --build
 ```
 
 ## Monitoring
@@ -133,12 +156,12 @@ command in the first pane).  This requires tmux and is primarily for
 interactive use/debugging, not production running.
 
 ```sh
-./localnode/heminode.sh
+./heminode.sh
 ```
 
 For testnet:
 ```sh
-./localnode/heminode.sh testnet
+./heminode.sh testnet
 ```
 
 ## Running without Docker
