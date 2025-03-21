@@ -110,3 +110,18 @@ func BlockBytes(ctx context.Context, hash string) ([]byte, error) {
 	}
 	return b, nil
 }
+
+func Tx(ctx context.Context, hash string, raw bool) (string, error) {
+	suffix := ""
+	if raw {
+		suffix = "/raw"
+	}
+	b, err := httpclient.Request(ctx, "GET", bsURL+"/tx/"+hash+suffix, nil)
+	if err != nil {
+		return "", fmt.Errorf("request: %w", err)
+	}
+	if raw {
+		return hex.EncodeToString(b), nil
+	}
+	return string(b), nil
+}
