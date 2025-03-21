@@ -7,7 +7,6 @@ package tbc
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -474,6 +473,14 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 	case *wire.MsgTx:
 		if err := s.handleTx(ctx, p, m, raw); err != nil {
 			return fmt.Errorf("handle generic transaction: %w", err)
+		}
+
+		// XXX remove
+		rf, err := s.mempool.GetRecommendedFees(ctx)
+		if err != nil {
+			log.Errorf("get recommended fees: %v", err)
+		} else {
+			log.Infof(spew.Sdump(rf))
 		}
 
 	case *wire.MsgInv:
@@ -1087,25 +1094,48 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 
 	// Reject obvious bad tx' here
 	utx := btcutil.NewTx(msg)
-	err = btcmempool.CheckTransactionStandard(utx, int32(bhb.Height), bhb.Timestamp(),
+	err = btcmempool.CheckTransactionStandard(utx, int32(bhb.Height)+1, bhb.Timestamp(),
 		btcmempool.DefaultMinRelayTxFee, MaxTxVersion)
 	if err != nil {
-		// XXX too loud?
-		log.Errorf("invalid transaction %v: %v", msg.TxHash(), err)
-		log.Errorf("current height: %v weight: %v size: %v vsize: %v stripped: %v raw: %v",
-			bhb.Height, blockchain.GetTransactionWeight(utx),
-			btcmempool.GetTxVirtualSize(utx),
-			msg.SerializeSize(), msg.SerializeSizeStripped(), len(raw))
-		log.Errorf("%v", spew.Sdump(msg))
-		log.Errorf("raw: %v", hex.EncodeToString(raw))
-
-		ntx, err := btcutil.NewTxFromBytes(raw)
-		if err != nil {
-			return err // XXX
+		// do allow runes which are rejected, this is a really shitty test though
+		seen := 0
+		for k := range msg.TxOut {
+			// out 0 op_return
+			//     1 witness_v1_taproot
+			//     2 witness_v0_scripthash
+			//     3 witness_v0_scripthash
+			switch k {
+			case 0:
+				if txscript.IsNullData(msg.TxOut[k].PkScript) {
+					seen++
+				}
+			case 1:
+				if txscript.IsPayToTaproot(msg.TxOut[k].PkScript) {
+					seen++
+				}
+			case 2:
+				if txscript.IsPayToWitnessScriptHash(msg.TxOut[k].PkScript) {
+					seen++
+				}
+			case 3:
+				if txscript.IsPayToWitnessScriptHash(msg.TxOut[k].PkScript) {
+					seen++
+				}
+			default:
+				seen = 0 // force failure
+				break
+			}
 		}
-		log.Errorf("%v", spew.Sdump(ntx))
-
-		return nil
+		if seen != 4 {
+			// XXX too loud, remove
+			log.Errorf("invalid transaction %v: %v", msg.TxHash(), err)
+			log.Errorf("current height: %v weight: %v size: %v vsize: %v stripped: %v raw: %v",
+				bhb.Height, blockchain.GetTransactionWeight(utx),
+				btcmempool.GetTxVirtualSize(utx),
+				msg.SerializeSize(), msg.SerializeSizeStripped(), len(raw))
+			log.Errorf("%v", spew.Sdump(msg))
+			return nil
+		}
 	}
 
 	// Create mempool tx

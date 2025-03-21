@@ -56,6 +56,9 @@ func (mp *mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBlo
 	// get mempool transactions
 	mptxs := make([]*mempoolTx, 0, len(mp.txs))
 	for _, mptx := range mp.txs {
+		if mptx == nil {
+			continue
+		}
 		mptxs = append(mptxs, mptx)
 	}
 
@@ -95,7 +98,9 @@ func (mp *mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBlo
 }
 
 func (mp *mempool) GetRecommendedFees(ctx context.Context) (*RecommendedFees, error) {
+	mp.mtx.RLock()
 	pBlocks, err := mp.generateMempoolBlocks(ctx)
+	mp.mtx.RUnlock()
 	if err != nil {
 		return nil, err
 	}
