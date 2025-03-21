@@ -41,6 +41,8 @@ func medianFee(fees []float64) float64 {
 	l := len(fees)
 	if l == 0 {
 		return 0
+	} else if l == 2 {
+		return (fees[0] + fees[1]) / 2
 	} else if l%2 == 0 {
 		return (fees[l/2-1] + fees[l/2+1]) / 2
 	} else {
