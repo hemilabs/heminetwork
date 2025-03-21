@@ -54,11 +54,11 @@ const (
 	CmdUTXOsByAddressRequest  = "tbcapi-utxos-by-address-request"
 	CmdUTXOsByAddressResponse = "tbcapi-utxos-by-address-response"
 
-	CmdTxByIdRawRequest  = "tbcapi-tx-by-id-raw-request"
-	CmdTxByIdRawResponse = "tbcapi-tx-by-id-raw-response"
+	CmdTxByIDRawRequest  = "tbcapi-tx-by-id-raw-request"
+	CmdTxByIDRawResponse = "tbcapi-tx-by-id-raw-response"
 
-	CmdTxByIdRequest  = "tbcapi-tx-by-id-request"
-	CmdTxByIdResponse = "tbcapi-tx-by-id-response"
+	CmdTxByIDRequest  = "tbcapi-tx-by-id-request"
+	CmdTxByIDResponse = "tbcapi-tx-by-id-response"
 
 	CmdTxBroadcastRequest  = "tbcapi-tx-broadcast-request"
 	CmdTxBroadcastResponse = "tbcapi-tx-broadcast-response"
@@ -128,7 +128,7 @@ type Tx struct {
 
 // UTXO represents a Bitcoin unspent transaction output.
 type UTXO struct {
-	TxId     chainhash.Hash `json:"tx_id"`
+	TxID     chainhash.Hash `json:"tx_id"`
 	Value    uint64         `json:"value"`
 	OutIndex uint32         `json:"out_index"`
 }
@@ -237,20 +237,20 @@ type UTXOsByAddressResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type TxByIdRawRequest struct {
+type TxByIDRawRequest struct {
 	TxID chainhash.Hash `json:"tx_id"`
 }
 
-type TxByIdRawResponse struct {
+type TxByIDRawResponse struct {
 	Tx    api.ByteSlice   `json:"tx"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type TxByIdRequest struct {
+type TxByIDRequest struct {
 	TxID chainhash.Hash `json:"tx_id"`
 }
 
-type TxByIdResponse struct {
+type TxByIDResponse struct {
 	Tx    *Tx             `json:"tx"`
 	Error *protocol.Error `json:"error,omitempty"`
 }
@@ -349,10 +349,10 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdUTXOsByAddressRawResponse:                  reflect.TypeOf(UTXOsByAddressRawResponse{}),
 	CmdUTXOsByAddressRequest:                      reflect.TypeOf(UTXOsByAddressRequest{}),
 	CmdUTXOsByAddressResponse:                     reflect.TypeOf(UTXOsByAddressResponse{}),
-	CmdTxByIdRawRequest:                           reflect.TypeOf(TxByIdRawRequest{}),
-	CmdTxByIdRawResponse:                          reflect.TypeOf(TxByIdRawResponse{}),
-	CmdTxByIdRequest:                              reflect.TypeOf(TxByIdRequest{}),
-	CmdTxByIdResponse:                             reflect.TypeOf(TxByIdResponse{}),
+	CmdTxByIDRawRequest:                           reflect.TypeOf(TxByIDRawRequest{}),
+	CmdTxByIDRawResponse:                          reflect.TypeOf(TxByIDRawResponse{}),
+	CmdTxByIDRequest:                              reflect.TypeOf(TxByIDRequest{}),
+	CmdTxByIDResponse:                             reflect.TypeOf(TxByIDResponse{}),
 	CmdTxBroadcastRequest:                         reflect.TypeOf(TxBroadcastRequest{}),
 	CmdTxBroadcastResponse:                        reflect.TypeOf(TxBroadcastResponse{}),
 	CmdTxBroadcastRawRequest:                      reflect.TypeOf(TxBroadcastRawRequest{}),

@@ -406,6 +406,7 @@ func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) e
 			if txscript.IsUnspendable(txOut.PkScript) {
 				continue
 			}
+
 			utxos[tbcd.NewOutpoint(*tx.Hash(), uint32(outIndex))] = tbcd.NewCacheOutput(
 				tbcd.NewScriptHashFromScript(txOut.PkScript),
 				uint64(txOut.Value),
@@ -416,11 +417,11 @@ func processUtxos(txs []*btcutil.Tx, utxos map[tbcd.Outpoint]tbcd.CacheOutput) e
 }
 
 func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire.TxOut, error) {
-	txId := op.TxIdHash()
+	txID := op.TxIDHash()
 	txIndex := op.TxIndex()
 
 	// Find block hashes
-	blockHash, err := s.db.BlockHashByTxId(ctx, *txId)
+	blockHash, err := s.db.BlockHashByTxID(ctx, *txID)
 	if err != nil {
 		return nil, fmt.Errorf("block by txid: %w", err)
 	}
@@ -429,7 +430,7 @@ func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire
 		return nil, fmt.Errorf("block by hash: %w", err)
 	}
 	for _, tx := range b.Transactions() {
-		if !tx.Hash().IsEqual(txId) {
+		if !tx.Hash().IsEqual(txID) {
 			continue
 		}
 		txOuts := tx.MsgTx().TxOut

@@ -10,9 +10,10 @@ package rawpeer
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"net"
 	"sync"
 	"time"
@@ -97,6 +98,7 @@ func NewFromConn(conn net.Conn, network wire.BitcoinNet, protocolVersion uint32,
 		address:         conn.RemoteAddr().String(),
 		protocolVersion: wire.AddrV2Version,
 		network:         network,
+		id:              id,
 	}, nil
 }
 
@@ -104,7 +106,7 @@ func (r *RawPeer) String() string {
 	return r.address
 }
 
-func (r *RawPeer) Id() int {
+func (r *RawPeer) ID() int {
 	return r.id
 }
 
@@ -160,7 +162,7 @@ func (r *RawPeer) Read(timeout time.Duration) (wire.Message, []byte, error) {
 	return msg, buf, err
 }
 
-func (r *RawPeer) handshake(ctx context.Context, conn net.Conn) error {
+func (r *RawPeer) handshake(_ context.Context, conn net.Conn) error {
 	log.Tracef("handshake %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 	defer log.Tracef("handshake exit %v -> %v", conn.LocalAddr(), conn.RemoteAddr())
 
@@ -168,7 +170,13 @@ func (r *RawPeer) handshake(ctx context.Context, conn net.Conn) error {
 	defaultHandshakeTimeout := 2 * time.Second // This is cumulative.
 	us := &wire.NetAddress{Timestamp: time.Now()}
 	them := &wire.NetAddress{Timestamp: time.Now()}
-	msg := wire.NewMsgVersion(us, them, rand.Uint64(), 0)
+
+	var nonce uint64
+	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
+		return fmt.Errorf("could not generate rand: %w", err)
+	}
+
+	msg := wire.NewMsgVersion(us, them, nonce, 0)
 	msg.UserAgent = fmt.Sprintf("/%v:%v/", version.Component, version.String())
 	msg.ProtocolVersion = int32(wire.AddrV2Version)
 	err := writeTimeout(defaultHandshakeTimeout, conn, msg, r.protocolVersion, r.network)

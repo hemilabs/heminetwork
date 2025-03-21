@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"sync/atomic"
+	"time"
 
 	"github.com/juju/loggo"
 )
@@ -47,19 +48,20 @@ func (s *Server) Run(ctx context.Context) error {
 	pprofMux.Handle("/debug/pprof/symbol", http.HandlerFunc(pprof.Symbol))
 	pprofMux.Handle("/debug/pprof/trace", http.HandlerFunc(pprof.Trace))
 
-	pprofHttpServer := &http.Server{
-		Addr:        s.cfg.ListenAddress,
-		Handler:     pprofMux,
-		BaseContext: func(net.Listener) context.Context { return ctx },
+	pprofHTTPServer := &http.Server{
+		Addr:              s.cfg.ListenAddress,
+		Handler:           pprofMux,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	httpErrCh := make(chan error)
 	go func() {
 		log.Infof("pprof listening: %s", s.cfg.ListenAddress)
-		httpErrCh <- pprofHttpServer.ListenAndServe()
+		httpErrCh <- pprofHTTPServer.ListenAndServe()
 	}()
 	defer func() {
-		if err := pprofHttpServer.Shutdown(ctx); err != nil {
+		if err := pprofHTTPServer.Shutdown(ctx); err != nil {
 			log.Errorf("pprof http server exit: %v", err)
 		}
 	}()
