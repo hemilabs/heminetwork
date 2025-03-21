@@ -24,6 +24,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	btcmempool "github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
@@ -1071,7 +1072,45 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 	log.Tracef("handleTx")
 	defer log.Tracef("handleTx exit")
 
-	return s.mempool.txsInsert(ctx, msg, raw)
+	// If we have processed this tx in the past, exit. This is a little
+	// racy but it is worth pre-testing to prevent expensive database
+	// lookups to determine input values.
+	if s.mempool.txProcessed(msg.TxHash()) {
+		return nil
+	}
+
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return err // should not happen so fail
+	}
+
+	// Reject obvious bad tx' here
+	utx := btcutil.NewTx(msg)
+	err = btcmempool.CheckTransactionStandard(utx, int32(bhb.Height), bhb.Timestamp(),
+		btcmempool.DefaultMinRelayTxFee, MaxTxVersion)
+	if err != nil {
+		// XXX too loud?
+		log.Errorf("invalid transaction %v: %v", msg.TxHash(), err)
+		return nil
+	}
+
+	// Create mempool tx
+	inValue, outValue, err := s.valuesFromTransaction(ctx, msg)
+	if err != nil {
+		// XXX we are still indexing or invalid tx
+		// XXX too loud?
+		log.Errorf("cannot obtain values from tx: %v", err)
+		return nil
+	}
+	mptx := &mempoolTx{
+		id:       msg.TxHash(),
+		weight:   blockchain.GetTransactionWeight(utx),
+		size:     btcmempool.GetTxVirtualSize(utx),
+		outValue: outValue,
+		inValue:  inValue,
+		inserted: time.Now(),
+	}
+	return s.mempool.txsInsert(ctx, mptx)
 }
 
 func (s *Server) syncBlocks(ctx context.Context) {
@@ -2158,6 +2197,24 @@ type fee struct {
 	VBytes   int   // Transaction size in vBytes
 	InValue  int64 // Transaction in value
 	OutValue int64 // Transaction in value
+}
+
+func (s *Server) valuesFromTransaction(ctx context.Context, tx *wire.MsgTx) (int64, int64, error) {
+	var iv, ov int64
+	for _, txIn := range tx.TxIn {
+		po := txIn.PreviousOutPoint
+		wtxo, err := s.txOutFromOutPoint(ctx, tbcd.NewOutpoint(po.Hash, po.Index))
+		if err != nil {
+			return 0, 0, err
+		}
+		iv += wtxo.Value
+	}
+
+	for _, txOut := range tx.TxOut {
+		ov += txOut.Value
+	}
+
+	return iv, ov, nil
 }
 
 func (s *Server) feesFromTransactions(ctx context.Context, txs []*btcutil.Tx) ([]fee, error) {

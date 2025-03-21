@@ -15,17 +15,29 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
+func sumTxOuts(utxos []*wire.TxOut) (total int64) {
+	for k := range utxos {
+		total += utxos[k].Value
+	}
+	return
+}
+
+var MaxTxVersion = int32(2) // XXX this should not be a global
+
 type mempoolTx struct {
-	inserted time.Time // When did we see this tx, expire after one week
-	raw      []byte    // Raw transaction
-	inValues []*int64  // txin values, filled in opportunistically
+	id       chainhash.Hash // TxID
+	inserted time.Time      // When did we see this tx, expire after one week
+	weight   int64          // transaction weight
+	size     int64          // transaction virtual size
+	inValue  int64          // total txin value
+	outValue int64          // total txout value
 }
 
 type mempool struct {
 	mtx sync.RWMutex
 
 	txs  map[chainhash.Hash]*mempoolTx // when nil, tx has not been downloaded
-	size int                           // total memory used by mempool
+	size int64                         // total "tx virtual" memory used by mempool
 }
 
 func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
@@ -54,21 +66,23 @@ func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error
 	return getData, nil
 }
 
-func (m *mempool) txsInsert(ctx context.Context, msg *wire.MsgTx, raw []byte) error {
+func (m *mempool) txProcessed(txid chainhash.Hash) bool {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	return m.txs[txid] != nil // return true when tx is not nil
+}
+
+func (m *mempool) txsInsert(ctx context.Context, mptx *mempoolTx) error {
 	log.Tracef("txsInsert")
 	defer log.Tracef("txsInsert exit")
-
-	// XXX Reject obvious bad tx' here
 
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
-	if tx := m.txs[msg.TxHash()]; tx == nil {
-		m.txs[msg.TxHash()] = &mempoolTx{
-			inserted: time.Now(),
-			raw:      raw,
-		}
-		m.size += len(raw)
+	if m.txs[mptx.id] == nil {
+		m.txs[mptx.id] = mptx
+		m.size += mptx.size
 	}
 
 	return nil
@@ -116,7 +130,7 @@ func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
 	l := len(m.txs)
 	for k := range txs {
 		if tx, ok := m.txs[txs[k]]; ok {
-			m.size -= len(tx.raw)
+			m.size -= tx.size
 			delete(m.txs, txs[k])
 		}
 	}
@@ -132,8 +146,8 @@ func (m *mempool) stats(ctx context.Context) (int, int) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	// Approximate size of mempool; map and cap overhead is missing.
-	return len(m.txs), m.size + (len(m.txs) * chainhash.HashSize)
+	// Approximate size of mempool; XXX overhead is missing.
+	return len(m.txs), int(m.size) + (len(m.txs) * chainhash.HashSize)
 }
 
 func (m *mempool) Dump(ctx context.Context) string {
