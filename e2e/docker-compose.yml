@@ -2,10 +2,13 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
+---
+
 version: "3"
 
 services:
   bitcoind:
+    # yamllint disable-line rule:line-length
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
     command:
       - "bitcoind"
@@ -20,11 +23,12 @@ services:
       - "18443:18443"
       - "18444:18444"
     volumes:
-      - { type: "tmpfs", target: "/bitcoin/.bitcoin" }
+      - {type: "tmpfs", target: "/bitcoin/.bitcoin"}
     networks:
       e2e:
 
   bitcoind-initialblocks:
+    # yamllint disable-line rule:line-length
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
     depends_on:
       - "bitcoind"
@@ -36,21 +40,23 @@ services:
       - "-rpcport=18443"
       - "-rpcconnect=bitcoind"
       - "generatetoaddress"
-      - "1000" # need to generate a lot for greater chance to not spend coinbase
+      # need to generate a lot for greater chance to not spend coinbase
+      - "1000"
       - "$BTC_ADDRESS"
     restart: on-failure
     networks:
       e2e:
 
   bitcoind-moreblocks:
+    # yamllint disable-line rule:line-length
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
     deploy:
       restart_policy:
         condition: "any"
     depends_on:
-      bitcoind: 
+      bitcoind:
         condition: "service_started"
-      raft: 
+      raft:
         condition: "service_completed_successfully"
     command:
       - "bitcoin-cli"
@@ -66,6 +72,7 @@ services:
       e2e:
 
   electrs:
+    # yamllint disable-line rule:line-length
     image: blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8
     depends_on:
       - "bitcoind"
@@ -113,7 +120,7 @@ services:
       POSTGRES_DB: "bfg"
       POSTGRES_HOST_AUTH_METHOD: "trust"
     volumes:
-      - { type: "tmpfs", target: "/var" }
+      - {type: "tmpfs", target: "/var"}
     networks:
       e2e:
 
@@ -131,6 +138,7 @@ services:
       - "8080:8080"
       - "8383:8383"
     environment:
+      # yamllint disable-line rule:line-length
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       BFG_BTC_START_HEIGHT: "1"
       BFG_EXBTC_ADDRESS: "electrs:50001"
@@ -170,6 +178,7 @@ services:
       e2e:
 
   geth-l1:
+    # yamllint disable-line rule:line-length
     image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
     ports:
       - "8545:8545"
@@ -201,7 +210,7 @@ services:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
       - "./e2e/jwt.hex:/tmp/jwt.hex:ro"
-      - { type: "tmpfs", target: "/tmp" }
+      - {type: "tmpfs", target: "/tmp"}
     networks:
       e2e:
 
@@ -239,10 +248,10 @@ services:
       - "l2configs:/l2configs"
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
-      - { type: "tmpfs", target: "/tmp" }
+      - {type: "tmpfs", target: "/tmp"}
     networks:
       e2e:
-  
+
   op-geth-l2-2:
     build:
       dockerfile: "optimism-stack.Dockerfile"
@@ -274,7 +283,7 @@ services:
       - "l2configs:/l2configs"
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
-      - { type: "tmpfs", target: "/tmp" }
+      - {type: "tmpfs", target: "/tmp"}
     restart: always
     networks:
       e2e:
@@ -310,7 +319,7 @@ services:
       - "l2configs:/l2configs"
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
-      - { type: "tmpfs", target: "/tmp" }
+      - {type: "tmpfs", target: "/tmp"}
     restart: always
     networks:
       e2e:
@@ -566,7 +575,7 @@ services:
       - "--raft.bootstrap"
       - "--node.rpc=http://op-node:8547"
       - "--execution.rpc=http://op-geth-l2:8546"
-      - "--healthcheck.unsafe-interval=12" 
+      - "--healthcheck.unsafe-interval=12"
       - "--healthcheck.safe-interval=200"
       - "--healthcheck.min-peer-count=1"
       - "--healthcheck.interval=120"
@@ -603,7 +612,7 @@ services:
       - "--raft.storage.dir=/tmp/raft"
       - "--node.rpc=http://op-node-2:8547"
       - "--execution.rpc=http://op-geth-l2-2:8546"
-      - "--healthcheck.unsafe-interval=12" 
+      - "--healthcheck.unsafe-interval=12"
       - "--healthcheck.safe-interval=200"
       - "--healthcheck.min-peer-count=1"
       - "--healthcheck.interval=120"
@@ -625,7 +634,7 @@ services:
         condition: "service_started"
     ports:
       - "127.0.0.1:50051:50051"
-  
+
   op-conductor-3:
     build:
       dockerfile: "optimism-stack.Dockerfile"
@@ -668,8 +677,11 @@ services:
     entrypoint:
       - "bash"
     environment:
+      # yamllint disable-line rule:line-length
       OPNODE_RPCS: 'http://op-node:8547,http://op-node-2:8547,http://op-node-3:8547'
+      # yamllint disable-line rule:line-length
       OPCONDUCTOR_RPCS: 'http://op-conductor:8547,http://op-conductor-2:8547,http://op-conductor-3:8547'
+      # yamllint disable-line rule:line-length
       OPCONDUCTOR_RAFT_VOTERS: 'op-conductor:50050,op-conductor-2:50051,op-conductor-3:50052'
     command:
       - "/tmp/setup-raft.bash"

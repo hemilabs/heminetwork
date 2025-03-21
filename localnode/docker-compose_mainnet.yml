@@ -2,6 +2,8 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
+---
+
 name: "hemi-stack"
 
 services:
@@ -16,6 +18,7 @@ services:
       electrs:
         condition: "service_healthy"
     environment:
+      # yamllint disable-line rule:line-length
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       ### XXXX Make this variable and set to recent block
       BFG_BTC_START_HEIGHT: "869309"
@@ -54,6 +57,7 @@ services:
 
   # Bitcoind Node
   bitcoind:
+    # yamllint disable-line rule:line-length
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
     volumes:
       - bitcoin_data:/bitcoin/.bitcoin
@@ -107,7 +111,8 @@ services:
       - "0.0.0.0:50001"
       - "--daemon-rpc-addr"
       - "bitcoind:8332"
-      # NOTE: If you expose electrs ports, you may want to ensure that this is changed!
+      # NOTE: If you expose electrs ports,
+      # you may want to ensure that this is changed!
       - "--cookie"
       - "user:password"
       - "-vvv"
@@ -124,6 +129,7 @@ services:
 
   # Ethereum L1 node
   geth-l1:
+    # yamllint disable-line rule:line-length
     image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
     volumes:
       - geth_data:/tmp/geth
@@ -152,6 +158,7 @@ services:
 
   # Hemi L2 node
   op-geth-l2:
+    # yamllint disable-line rule:line-length
     image: "ghcr.io/hemilabs/op-geth:e525f27@sha256:f48c03532810ec4d9d08be8afa19822c9adcdd2d8dd559467a0d2b34965d5a6d"
     # XXX does geth need to be fully synced
     depends_on:
@@ -174,7 +181,8 @@ services:
       - ./mainnet-entrypointl2.sh:/tmp/entrypointl2.sh
       - op-geth_data:/tmp/datadir
       - ./mainnet-rollup.json:/tmp/rollup.json
-      - ./mainnet-l2-config.toml:/tmp/l2-config.toml # TODO make a testnet specific one
+      # TODO make a testnet specific one
+      - ./mainnet-l2-config.toml:/tmp/l2-config.toml
       - tbc_data:/tbcdata
     environment:
       OP_GETH_L1_RPC: "http://geth-l1:8545"
@@ -196,28 +204,31 @@ services:
 
   # Init container for Hemi L2 node
   op-geth-l2-init:
-    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    # yamllint disable-line rule:line-length
+    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d"
     volumes:
       - op-geth_data:/tmp/datadir
     command:
       - "chown"
       - "-R"
-      - "65532" # geth user
+      - "65532"  # geth user
       - "/tmp/datadir"
 
   # Init TBC container for Hemi L2 node
   op-geth-l2-init-tbc:
-    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d" # 3.20.3
+    # yamllint disable-line rule:line-length
+    image: "alpine@sha256:beefdbd8a1da6d2915566fde36db9db0b524eb737fc57cd1367effd16dc0d06d"
     volumes:
       - tbc_data:/tbcdata
     command:
       - "chown"
       - "-R"
-      - "65532" # geth user
+      - "65532"  # geth user
       - "/tbcdata"
 
   # Hemi op-node
   op-node:
+    # yamllint disable-line rule:line-length
     image: "ghcr.io/hemilabs/op-node:84b895e@sha256:df29c59680c33cdda616f67662c9e75bdeea60f79d91937ee0b60bf0d0f48243"
     depends_on:
       geth-l1:
@@ -261,7 +272,8 @@ services:
 
   # Prysm
   prysm:
-    image: "gcr.io/prysmaticlabs/prysm/beacon-chain@sha256:ea7d64346cd51cb0a6979779bdfd284a13aedb5642a795637935daacdfe1675d" # stable
+    # yamllint disable-line rule:line-length
+    image: "gcr.io/prysmaticlabs/prysm/beacon-chain@sha256:ea7d64346cd51cb0a6979779bdfd284a13aedb5642a795637935daacdfe1675d"
     volumes:
       - prysm_data:/data
       # change this token value if you expose this service's ports for
