@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -1096,6 +1097,14 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 			btcmempool.GetTxVirtualSize(utx),
 			msg.SerializeSize(), msg.SerializeSizeStripped(), len(raw))
 		log.Errorf("%v", spew.Sdump(msg))
+		log.Errorf("raw: %v", hex.EncodeToString(raw))
+
+		ntx, err := btcutil.NewTxFromBytes(raw)
+		if err != nil {
+			return err // XXX
+		}
+		log.Errorf("%v", spew.Sdump(ntx))
+
 		return nil
 	}
 

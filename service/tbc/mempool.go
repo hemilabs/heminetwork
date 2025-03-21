@@ -54,7 +54,7 @@ func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error
 			continue
 		}
 		if err := getData.AddInvVect(&wire.InvVect{
-			Type: wire.InvTypeTx,
+			Type: wire.InvTypeWitnessTx,
 			Hash: k,
 		}); err != nil {
 			// Only happens when asking max inventory, just bail
@@ -102,7 +102,7 @@ func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 	l := len(m.txs)
 	for _, v := range inv.InvList {
 		switch v.Type {
-		case wire.InvTypeTx:
+		case wire.InvTypeTx, wire.InvTypeWitnessTx:
 			if _, ok := m.txs[v.Hash]; !ok {
 				m.txs[v.Hash] = nil
 			}
