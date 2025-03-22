@@ -481,7 +481,8 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 		if err != nil {
 			log.Errorf("get recommended fees: %v", err)
 		} else {
-			log.Infof(spew.Sdump(rf))
+			//log.Infof(spew.Sdump(rf))
+			_ = rf
 		}
 
 	case *wire.MsgInv:
