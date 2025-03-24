@@ -154,6 +154,11 @@ type Block struct {
 	Txs    []Tx           `json:"txs"`
 }
 
+type FeeEstimate struct {
+	Blocks      uint
+	SatsPerByte float64
+}
+
 // BlockByHashRequest requests a [Block] by its hash.
 type BlockByHashRequest struct {
 	Hash chainhash.Hash `json:"hash"`
@@ -338,8 +343,8 @@ type BlockDownloadAsyncRawResponse struct {
 type FeeEstimateRequest struct{}
 
 type FeeEstimateResponse struct {
-	FeeEstimates *map[uint]float64 `json:"fee_estimate"`
-	Error        *protocol.Error   `json:"error,omitempty"`
+	FeeEstimates []*FeeEstimate  `json:"fee_estimate"`
+	Error        *protocol.Error `json:"error,omitempty"`
 }
 
 var commands = map[protocol.Command]reflect.Type{

@@ -10,7 +10,8 @@ import (
 	"sort"
 
 	"github.com/btcsuite/btcd/blockchain"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
+
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
 
 const (
@@ -98,7 +99,7 @@ func (mp *mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBlo
 	return blks, nil
 }
 
-func (mp *mempool) GetRecommendedFees(ctx context.Context) ([]gozer.FeeEstimate, error) {
+func (mp *mempool) GetRecommendedFees(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
 	mp.mtx.RLock()
 	pBlocks, err := mp.generateMempoolBlocks(ctx)
 	mp.mtx.RUnlock()
@@ -106,9 +107,9 @@ func (mp *mempool) GetRecommendedFees(ctx context.Context) ([]gozer.FeeEstimate,
 		return nil, err
 	}
 
-	recFees := make([]gozer.FeeEstimate, 6)
+	recFees := make([]*tbcapi.FeeEstimate, 6)
 	for k := range 6 {
-		recFees[k] = gozer.FeeEstimate{
+		recFees[k] = &tbcapi.FeeEstimate{
 			Blocks:      uint(k + 1),
 			SatsPerByte: defaultMinFee,
 		}

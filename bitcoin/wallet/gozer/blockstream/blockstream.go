@@ -37,7 +37,7 @@ type blockstream struct {
 
 var _ gozer.Gozer = (*blockstream)(nil)
 
-func (bs *blockstream) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, error) {
+func (bs *blockstream) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
 	u := fmt.Sprintf("%v/fee-estimates", bs.url)
 	feeEstimates, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
@@ -50,9 +50,9 @@ func (bs *blockstream) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, e
 		return nil, err
 	}
 
-	frv := make([]gozer.FeeEstimate, 0, len(fm))
+	frv := make([]*tbcapi.FeeEstimate, 0, len(fm))
 	for k, v := range fm {
-		frv = append(frv, gozer.FeeEstimate{Blocks: k, SatsPerByte: v})
+		frv = append(frv, &tbcapi.FeeEstimate{Blocks: k, SatsPerByte: v})
 	}
 
 	return frv, nil

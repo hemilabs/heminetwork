@@ -37,6 +37,7 @@ func TestTBCGozer(t *testing.T) {
 		MaxCachedTxs:            1000, // XXX
 		Network:                 "localnet",
 		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:18444"},
 		ListenAddress:           "localhost:8881",
 	}
