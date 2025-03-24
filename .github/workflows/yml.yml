@@ -1,0 +1,28 @@
+# Copyright (c) 2025 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
+
+# GitHub Actions workflow to lint, build and test.
+name: "Yaml"
+on:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: "Lint"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Checkout repository"
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: "Install yamllint"
+        run: "sudo apt install yamllint"
+      
+      - name: "Run yamllint"
+        run: "yamllint ./e2e ./localnode -s"
+
