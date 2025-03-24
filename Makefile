@@ -52,12 +52,20 @@ build:
 
 install: $(cmds)
 
+define LICENSE_HEADER
+Copyright (c) {{.year}} {{.author}}
+Use of this source code is governed by the MIT License,
+which can be found in the LICENSE file.
+endef
+export LICENSE_HEADER
+
 lint:
-	# TODO: re-enable autofix with --fix, after removing buggy goheader linter
-	$(shell go env GOPATH)/bin/golangci-lint run ./...
+	$(shell go env GOPATH)/bin/golangci-lint run --fix ./...
+	$(shell go env GOPATH)/bin/golicenser -tmpl="$$LICENSE_HEADER" -author="Hemi Labs, Inc." -year-mode=git-range -fix ./...
 
 lint-deps:
 	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62
+	GOBIN=$(shell go env GOPATH)/bin go install github.com/joshuasing/golicenser/cmd/golicenser@v0.1.0
 
 tidy:
 	go mod tidy

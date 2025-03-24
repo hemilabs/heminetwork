@@ -31,7 +31,6 @@ linters:
     - "gocheckcompilerdirectives" # Checks that go compiler directive comments (//go:) are valid.
     - "gochecksumtype" # Run exhaustiveness checks on Go "sum types".
     - "gofumpt" # Runs gofumpt.
-    - "goheader" # Enforces copyright header.
     # TODO enable gosec, when bored run 'golangci-lint run -Egosec' to fix these
     # - "gosec" # Checks for potential security issues
     - "gosimple" # Checks for ways to simplify code.
@@ -87,18 +86,6 @@ linters-settings:
   gomoddirectives:
     replace-allow-list:
       - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
-
-  # Enforces copyright header
-  goheader: # TODO: Replace goheader, autofix is too buggy.
-    values:
-      const:
-        COMPANY: "Hemi Labs, Inc."
-      regexp:
-        YEAR_RANGE: "(\\d{4}-{{MOD-YEAR}})|({{MOD-YEAR}})"
-    template: |-
-      Copyright (c) {{ YEAR_RANGE }} {{ COMPANY }}
-      Use of this source code is governed by the MIT License,
-      which can be found in the LICENSE file.
 
   # Lints nolint directives.
   nolintlint:
