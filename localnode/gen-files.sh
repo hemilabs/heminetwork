@@ -69,7 +69,7 @@ if [[ $MODE == "snap" ]]; then
 	OPSYNCMODE="execution-layer"
 fi
 if [[ $MODE == "archive" ]]; then
-	SYNCMODE="archive"
+	SYNCMODE="full"
 	OPSYNCMODE="concensus-layer"
 fi
 
