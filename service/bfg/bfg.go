@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -706,13 +707,21 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 		popBases = append(popBases, popBasis)
 	}
 
-	// XXX: these database inserts should be in a transaction, or simply be atomic
-	// but they never have been.  in the future, let's make sure they are with the
-	// next solution
-	// we need to AT LEAST try to insert them here, in case there are network timeouts
-	// with the above and electrs.
+	tx, err := s.db.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
 
-	rowsAffected, err := s.db.BtcBlockReplace(ctx, &btcBlock)
+	defer func() {
+		err := s.db.Rollback(tx)
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Errorf("processBitcoinBlock could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	rowsAffected, err := s.db.BtcBlockReplaceWithTx(ctx, tx, &btcBlock)
 	if err != nil {
 		return fmt.Errorf("error replacing bitcoin block: %w", err)
 	}
@@ -725,7 +734,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	for _, l2Keystone := range l2Keystones {
 		// attempt to insert the abbreviated keystone, this is in case we have
 		// not heard of this keystone from op node yet
-		if err := s.db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone}); err != nil {
+		if err := s.db.L2KeystonesInsertWithTx(ctx, tx, []bfgd.L2Keystone{l2Keystone}); err != nil {
 			// this is not necessarily an error, should it be trace?
 			log.Infof("could not insert l2 keystone: %s", err)
 		}
@@ -733,14 +742,14 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 
 	for _, popBasis := range popBases {
 		// first, try to update a pop_basis row with NULL btc fields
-		rowsAffected, err := s.db.PopBasisUpdateBTCFields(ctx, &popBasis)
+		rowsAffected, err := s.db.PopBasisUpdateBTCFieldsWithTx(ctx, tx, &popBasis)
 		if err != nil {
 			return err
 		}
 
 		// if we didn't find any, then we will attempt an insert
 		if rowsAffected == 0 {
-			err = s.db.PopBasisInsertFull(ctx, &popBasis)
+			err = s.db.PopBasisInsertFullWithTx(ctx, tx, &popBasis)
 
 			// if the insert fails due to a duplicate, this means
 			// that something else has inserted the row before us
@@ -750,6 +759,10 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 				return err
 			}
 		}
+	}
+
+	if err := s.db.Commit(tx); err != nil {
+		return err
 	}
 
 	return nil

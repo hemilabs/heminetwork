@@ -75,28 +75,14 @@ func (p *pgdb) Version(ctx context.Context) (int, error) {
 	return dbVersion, nil
 }
 
-func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) error {
-	log.Tracef("L2KeystonesInsert")
-	defer log.Tracef("L2KeystonesInsert exit")
+func (p *pgdb) L2KeystonesInsertWithTx(ctx context.Context, tx *sql.Tx, l2ks []bfgd.L2Keystone) error {
+	log.Tracef("L2KeystonesInsertWithTx")
+	defer log.Tracef("L2KeystonesInsertWithTx exit")
 
 	if len(l2ks) == 0 {
 		log.Errorf("empty l2 keystones, nothing to do")
 		return nil
 	}
-
-	tx, err := p.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		err := tx.Rollback()
-		if err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Errorf("L2KeystonesInsert could not rollback db tx: %v",
-				err)
-			return
-		}
-	}()
 
 	const qInsertL2Keystone = `
 		INSERT INTO l2_keystones (
@@ -138,8 +124,37 @@ func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) er
 		}
 	}
 
-	err = tx.Commit()
+	return nil
+}
+
+func (p *pgdb) L2KeystonesInsert(ctx context.Context, l2ks []bfgd.L2Keystone) error {
+	log.Tracef("L2KeystonesInsert")
+	defer log.Tracef("L2KeystonesInsert exit")
+
+	if len(l2ks) == 0 {
+		log.Errorf("empty l2 keystones, nothing to do")
+		return nil
+	}
+
+	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
+		return err
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Errorf("L2KeystonesInsert could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	if err := p.L2KeystonesInsertWithTx(ctx, tx, l2ks); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 
@@ -235,9 +250,9 @@ func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32
 	return ks, nil
 }
 
-func (p *pgdb) BtcBlockReplace(ctx context.Context, btcBlock *bfgd.BtcBlock) (int64, error) {
-	log.Tracef("BtcBlockReplace")
-	defer log.Tracef("BtcBlockReplace exit")
+func (p *pgdb) BtcBlockReplaceWithTx(ctx context.Context, tx *sql.Tx, btcBlock *bfgd.BtcBlock) (int64, error) {
+	log.Tracef("BtcBlockReplaceWithTx")
+	defer log.Tracef("BtcBlockReplaceWithTxs exit")
 
 	// since we are now trusting our btc client to construct the canonical chain,
 	// height is now unique to our btc blocks.  if there is a conflict where
@@ -252,13 +267,43 @@ func (p *pgdb) BtcBlockReplace(ctx context.Context, btcBlock *bfgd.BtcBlock) (in
 		WHERE btc_blocks.hash != EXCLUDED.hash OR btc_blocks.header != EXCLUDED.header
 	`
 
-	results, err := p.db.ExecContext(ctx, insertSql, btcBlock.Hash, btcBlock.Header, btcBlock.Height)
+	results, err := tx.ExecContext(ctx, insertSql, btcBlock.Hash, btcBlock.Header, btcBlock.Height)
 	if err != nil {
 		return 0, err
 	}
 
 	rowsAffected, err := results.RowsAffected()
 	if err != nil {
+		return 0, err
+	}
+
+	return rowsAffected, nil
+}
+
+func (p *pgdb) BtcBlockReplace(ctx context.Context, btcBlock *bfgd.BtcBlock) (int64, error) {
+	log.Tracef("BtcBlockReplace")
+	defer log.Tracef("BtcBlockReplace exit")
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Errorf("BtcBlockReplace could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	rowsAffected, err := p.BtcBlockReplaceWithTx(ctx, tx, btcBlock)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 
@@ -373,9 +418,9 @@ func (p *pgdb) PopBasisInsertPopMFields(ctx context.Context, pb *bfgd.PopBasis) 
 	return nil
 }
 
-func (p *pgdb) PopBasisUpdateBTCFields(ctx context.Context, pb *bfgd.PopBasis) (int64, error) {
-	log.Tracef("PopBasisUpdateBTCFields")
-	defer log.Tracef("PopBasisUpdateBTCFields exit")
+func (p *pgdb) PopBasisUpdateBTCFieldsWithTx(ctx context.Context, tx *sql.Tx, pb *bfgd.PopBasis) (int64, error) {
+	log.Tracef("PopBasisUpdateBTCFieldsWithTx")
+	defer log.Tracef("PopBasisUpdateBTCFieldsWithTx exit")
 	b, err := json.Marshal(pb.BtcMerklePath)
 	if err != nil {
 		return 0, err
@@ -400,7 +445,7 @@ func (p *pgdb) PopBasisUpdateBTCFields(ctx context.Context, pb *bfgd.PopBasis) (
 		AND btc_tx_index IS NULL
 	`
 
-	result, err := p.db.ExecContext(ctx, q, pb.BtcHeaderHash, string(b), pb.PopTxId,
+	result, err := tx.ExecContext(ctx, q, pb.BtcHeaderHash, string(b), pb.PopTxId,
 		pb.BtcTxIndex, pb.BtcTxId,
 	)
 	if err != nil {
@@ -424,9 +469,38 @@ func (p *pgdb) PopBasisUpdateBTCFields(ctx context.Context, pb *bfgd.PopBasis) (
 	return rows, nil
 }
 
-func (p *pgdb) PopBasisInsertFull(ctx context.Context, pb *bfgd.PopBasis) error {
-	log.Tracef("PopBasisInsertFull")
-	defer log.Tracef("PopBasisInsertFull exit")
+func (p *pgdb) PopBasisUpdateBTCFields(ctx context.Context, pb *bfgd.PopBasis) (int64, error) {
+	log.Tracef("PopBasisUpdateBTCFields")
+	defer log.Tracef("PopBasisUpdateBTCFields exit")
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Errorf("L2KeystonesInsert could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	rowsAffected, err := p.PopBasisUpdateBTCFieldsWithTx(ctx, tx, pb)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return rowsAffected, nil
+}
+
+func (p *pgdb) PopBasisInsertFullWithTx(ctx context.Context, tx *sql.Tx, pb *bfgd.PopBasis) error {
+	log.Tracef("PopBasisInsertFullWithTx")
+	defer log.Tracef("PopBasisInsertFullWithTx exit")
 
 	b, err := json.Marshal(pb.BtcMerklePath)
 	if err != nil {
@@ -447,7 +521,7 @@ func (p *pgdb) PopBasisInsertFull(ctx context.Context, pb *bfgd.PopBasis) error 
 		ON CONFLICT (btc_txid, btc_raw_tx, btc_block_hash, btc_tx_index)
 		DO NOTHING
 	`
-	result, err := p.db.ExecContext(ctx, qPopBlockInsert, pb.BtcTxId, pb.BtcRawTx,
+	result, err := tx.ExecContext(ctx, qPopBlockInsert, pb.BtcTxId, pb.BtcRawTx,
 		pb.BtcHeaderHash, pb.BtcTxIndex, string(b), pb.PopTxId,
 		pb.L2KeystoneAbrevHash, pb.PopMinerPublicKey)
 	if err != nil {
@@ -470,6 +544,47 @@ func (p *pgdb) PopBasisInsertFull(ctx context.Context, pb *bfgd.PopBasis) error 
 	}
 	if rows < 1 {
 		return fmt.Errorf("insert pop block rows: %v", rows)
+	}
+
+	return nil
+}
+
+func (p *pgdb) BeginTx(ctx context.Context) (*sql.Tx, error) {
+	return p.db.BeginTx(ctx, nil)
+}
+
+func (p *pgdb) Commit(tx *sql.Tx) error {
+	return tx.Commit()
+}
+
+func (p *pgdb) Rollback(tx *sql.Tx) error {
+	return tx.Rollback()
+}
+
+func (p *pgdb) PopBasisInsertFull(ctx context.Context, pb *bfgd.PopBasis) error {
+	log.Tracef("PopBasisInsertFull")
+	defer log.Tracef("PopBasisInsertFull exit")
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Errorf("L2KeystonesInsert could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
+	if err := p.PopBasisInsertFullWithTx(ctx, tx, pb); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 
 	return nil

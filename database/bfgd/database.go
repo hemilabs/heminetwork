@@ -6,6 +6,7 @@ package bfgd
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/hemilabs/heminetwork/database"
 )
@@ -18,20 +19,24 @@ type Database interface {
 
 	// L2 keystone table
 	L2KeystonesInsert(ctx context.Context, l2ks []L2Keystone) error
+	L2KeystonesInsertWithTx(ctx context.Context, tx *sql.Tx, l2ks []L2Keystone) error
 	L2KeystoneByAbrevHash(ctx context.Context, aHash [32]byte) (*L2Keystone, error)
 	L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32) ([]L2Keystone, error)
 
 	// Btc block table
 	BtcBlockInsert(ctx context.Context, bb *BtcBlock) error
 	BtcBlockReplace(ctx context.Context, btcBlock *BtcBlock) (int64, error)
+	BtcBlockReplaceWithTx(ctx context.Context, tx *sql.Tx, btcBlock *BtcBlock) (int64, error)
 	BtcBlockByHash(ctx context.Context, hash [32]byte) (*BtcBlock, error)
 	BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64, error)
 
 	// Pop data
 	PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool, page uint32) ([]PopBasis, error)
 	PopBasisInsertFull(ctx context.Context, pb *PopBasis) error
+	PopBasisInsertFullWithTx(ctx context.Context, tx *sql.Tx, pb *PopBasis) error
 	PopBasisInsertPopMFields(ctx context.Context, pb *PopBasis) error
 	PopBasisUpdateBTCFields(ctx context.Context, pb *PopBasis) (int64, error)
+	PopBasisUpdateBTCFieldsWithTx(ctx context.Context, tx *sql.Tx, pb *PopBasis) (int64, error)
 
 	L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]L2BTCFinality, error)
 	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray) ([]L2BTCFinality, error)
@@ -43,6 +48,10 @@ type Database interface {
 	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
 	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
 	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
+
+	BeginTx(ctx context.Context) (*sql.Tx, error)
+	Commit(tx *sql.Tx) error
+	Rollback(tx *sql.Tx) error
 }
 
 // NotificationName identifies a database notification type.
