@@ -60,7 +60,7 @@ jobs:
           if ! (command -v 'golicenser' >/dev/null); then
             go install github.com/joshuasing/golicenser/cmd/golicenser@v$GOLICENSER_VERSION
           fi
-          echo "$LICENSE_FILE" > license_header.txt
+          echo "$LICENSE_HEADER" > license_header.txt
           golicenser -author="Hemi Labs, Inc." -year-mode=git-range ./...
 
   build:
