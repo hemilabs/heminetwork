@@ -24,7 +24,7 @@ func TestMempoolFees(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for k := range 4 {
+	for k := range 7 {
 		for i := range 1000 {
 			uniqueBytes := make([]byte, 8)
 			binary.BigEndian.PutUint32(uniqueBytes[0:4], uint32(k))
