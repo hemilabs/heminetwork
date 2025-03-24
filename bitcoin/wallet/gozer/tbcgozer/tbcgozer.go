@@ -57,7 +57,7 @@ func (t *tbcGozer) Connected() bool {
 	return t.connected
 }
 
-func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, error) {
+func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
 	bur := &tbcapi.FeeEstimateRequest{}
 
 	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
@@ -74,12 +74,7 @@ func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]gozer.FeeEstimate, error
 		return nil, buResp.Error
 	}
 
-	frv := make([]gozer.FeeEstimate, 0, len(*buResp.FeeEstimates))
-	for k, v := range *buResp.FeeEstimates {
-		frv = append(frv, gozer.FeeEstimate{Blocks: k, SatsPerByte: v})
-	}
-
-	return frv, nil
+	return buResp.FeeEstimates, nil
 }
 
 func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {

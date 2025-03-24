@@ -21,20 +21,15 @@ import (
 // it wanted.
 
 type Gozer interface {
-	FeeEstimates(ctx context.Context) ([]FeeEstimate, error)
+	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
 	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash chainhash.Hash) (*BlockKeystoneByL2KeystoneAbrevHashResponse, error)
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 }
 
-type FeeEstimate struct {
-	Blocks      uint
-	SatsPerByte float64
-}
-
 // FeeByConfirmations picks a suitable fee by matching the exact number of
 // blocks provided by the caller.
-func FeeByConfirmations(blocks uint, feeEstimates []FeeEstimate) (*FeeEstimate, error) {
+func FeeByConfirmations(blocks uint, feeEstimates []*tbcapi.FeeEstimate) (*tbcapi.FeeEstimate, error) {
 	if len(feeEstimates) == 0 {
 		return nil, errors.New("no estimates")
 	}
@@ -42,7 +37,7 @@ func FeeByConfirmations(blocks uint, feeEstimates []FeeEstimate) (*FeeEstimate, 
 	// We should probably add a variance check but for now be exact.
 	for _, v := range feeEstimates {
 		if v.Blocks == blocks {
-			return &v, nil
+			return v, nil
 		}
 	}
 

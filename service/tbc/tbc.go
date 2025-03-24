@@ -475,16 +475,6 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 			return fmt.Errorf("handle generic transaction: %w", err)
 		}
 
-		// XXX remove
-		//log.Infof("%v", s.mempool.Dump(ctx))
-		rf, err := s.mempool.GetRecommendedFees(ctx)
-		if err != nil {
-			log.Errorf("get recommended fees: %v", err)
-		} else {
-			//log.Infof(spew.Sdump(rf))
-			_ = rf
-		}
-
 	case *wire.MsgInv:
 		if err := s.handleInv(ctx, p, m, raw); err != nil {
 			return fmt.Errorf("handle generic inv: %w", err)
@@ -2285,18 +2275,6 @@ func (s *Server) feesFromTransactions(ctx context.Context, txs []*btcutil.Tx) ([
 	}
 
 	return fees, nil
-}
-
-func averageFee(fees []fee) float64 {
-	if len(fees) == 0 {
-		return 0
-	}
-
-	var total float64
-	for k := range fees {
-		total += float64(fees[k].InValue-fees[k].OutValue) / float64(fees[k].VBytes)
-	}
-	return total / float64(len(fees))
 }
 
 // ewma calculates the exponentially weighted moving average.

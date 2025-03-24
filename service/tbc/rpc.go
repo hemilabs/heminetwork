@@ -653,14 +653,13 @@ func (s *Server) handleFeeEstimateRequest(ctx context.Context, req *tbcapi.FeeEs
 	log.Tracef("handleFeeEstimateRequest")
 	defer log.Tracef("handleFeeEstimateRequest exit")
 
-	em := make(map[uint]float64, 10)
-
-	for i := range 10 {
-		em[uint(i+1)] = 5
+	rf, err := s.mempool.GetRecommendedFees(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	return &tbcapi.FeeEstimateResponse{
-		FeeEstimates: &em,
+		FeeEstimates: rf,
 	}, nil
 }
 
