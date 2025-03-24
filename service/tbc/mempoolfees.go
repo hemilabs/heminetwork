@@ -10,13 +10,14 @@ import (
 	"sort"
 
 	"github.com/btcsuite/btcd/blockchain"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 )
 
 const (
 	// Maximum size of a block
 	blockMaxWeight int64 = blockchain.MaxBlockWeight // in weight units
 
-	// If a block has less space than this, it is considered reasonably full
+	// If a block has less space left than this, it is considered full in fee calculation
 	blockFullThreshold int64 = 200000 // in weight units
 )
 
@@ -27,14 +28,6 @@ type mempoolBlock struct {
 	blockSize   int64     // in vbytes
 	medianFee   float64   // median fee of a tx in the block (sats/vbyte)
 	txRates     []float64 // rates of txs in block
-}
-
-type RecommendedFees struct {
-	fastestFee  float64
-	halfHourFee float64
-	hourFee     float64
-	economyFee  float64
-	minimumFee  float64
 }
 
 func (mptx *mempoolTx) Fee() int64 {
@@ -105,7 +98,7 @@ func (mp *mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBlo
 	return blks, nil
 }
 
-func (mp *mempool) GetRecommendedFees(ctx context.Context) (*RecommendedFees, error) {
+func (mp *mempool) GetRecommendedFees(ctx context.Context) ([]gozer.FeeEstimate, error) {
 	mp.mtx.RLock()
 	pBlocks, err := mp.generateMempoolBlocks(ctx)
 	mp.mtx.RUnlock()
@@ -113,42 +106,31 @@ func (mp *mempool) GetRecommendedFees(ctx context.Context) (*RecommendedFees, er
 		return nil, err
 	}
 
-	recFees := RecommendedFees{
-		fastestFee:  defaultMinFee,
-		halfHourFee: defaultMinFee,
-		hourFee:     defaultMinFee,
-		economyFee:  defaultMinFee,
-		minimumFee:  defaultMinFee,
-	}
-
-	l := len(pBlocks)
-	if l < 1 {
-		return &recFees, nil
-	}
-
-	// calculate increasingly more accurate fees depending on how many
-	// txs are in the mempool, and thus how many blocks we can build.
-	firstMedianFee, err := optimizeMedianFee(&pBlocks[0], l > 1, pBlocks[0].medianFee)
-	if err != nil {
-		return nil, err
-	}
-	recFees.fastestFee = math.Max(defaultMinFee, firstMedianFee)
-	if l > 1 {
-		secondMedianFee, err := optimizeMedianFee(&pBlocks[1], l > 2, firstMedianFee)
-		if err != nil {
-			return nil, err
+	recFees := make([]gozer.FeeEstimate, 6)
+	for k := range 6 {
+		recFees[k] = gozer.FeeEstimate{
+			Blocks:      uint(k + 1),
+			SatsPerByte: defaultMinFee,
 		}
-		recFees.halfHourFee = math.Max(defaultMinFee, secondMedianFee)
-		if l > 2 {
-			thirdMedianFee, err := optimizeMedianFee(&pBlocks[2], l > 3, secondMedianFee)
+	}
+
+	var prevMedianFee float64
+	if len(pBlocks) > 0 {
+		prevMedianFee = pBlocks[0].medianFee
+	}
+	for k := range recFees {
+		if len(pBlocks) > k {
+			prevMedianFee, err = optimizeMedianFee(&pBlocks[k], len(pBlocks) > k+1, prevMedianFee)
 			if err != nil {
 				return nil, err
 			}
-			recFees.hourFee = math.Max(defaultMinFee, thirdMedianFee)
-			recFees.economyFee = math.Max(defaultMinFee, math.Min(2*defaultMinFee, thirdMedianFee))
+			recFees[k].SatsPerByte = math.Max(defaultMinFee, prevMedianFee)
+		} else {
+			break
 		}
 	}
-	return &recFees, nil
+
+	return recFees, nil
 }
 
 func optimizeMedianFee(pBlock *mempoolBlock, existsNextBlock bool, previousFee float64) (float64, error) {
@@ -160,14 +142,12 @@ func optimizeMedianFee(pBlock *mempoolBlock, existsNextBlock bool, previousFee f
 		return defaultMinFee, nil
 	}
 
-	// If block has more space left than the threshold, and there
-	// are no more blocks after it, we multiply the fee to
-	// prevent our tx from being left out if higher fee txs come in.
-	// The multiplier is inversely proportional to the
-	// amount of space left in the block.
+	// If block has an acceptable amount of space left
+	// and there aren't any more projected blocks after it,
+	// slowly ramp up the fee toward the median of the block.
 	if pBlock.blockWeight <= blockMaxWeight-blockFullThreshold && !existsNextBlock {
-		mult := (pBlock.blockWeight - blockFullThreshold) / blockFullThreshold
-		return math.Max(math.Round(useFee*float64(mult)), defaultMinFee), nil
+		mult := float64((pBlock.blockWeight - (blockMaxWeight / 2))) / float64(blockMaxWeight/2)
+		return math.Max(useFee*mult, defaultMinFee), nil
 	}
 	return useFee, nil
 }
