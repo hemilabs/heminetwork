@@ -83,7 +83,7 @@ set -xe
 if [ -d \"/tmp/datadir/geth\" ]; then
   echo \"geth data dir exists, skipping genesis.\"
 else
-	geth init --datadir /tmp/datadir/geth /tmp/genesis.json
+	geth init --datadir /tmp/datadir/geth /tmp/$GENESIS
 fi
 
 geth \\
