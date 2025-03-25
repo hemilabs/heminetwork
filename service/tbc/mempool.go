@@ -15,12 +15,13 @@ import (
 	"github.com/davecgh/go-spew/spew"
 )
 
-func sumTxOuts(utxos []*wire.TxOut) (total int64) {
-	for k := range utxos {
-		total += utxos[k].Value
-	}
-	return
-}
+// commented to fix linter
+// func sumTxOuts(utxos []*wire.TxOut) (total int64) {
+// 	for k := range utxos {
+// 		total += utxos[k].Value
+// 	}
+// 	return
+// }
 
 var MaxTxVersion = int32(2) // XXX this should not be a global
 
@@ -116,31 +117,32 @@ func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 	return nil
 }
 
-func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
-	log.Tracef("txsRemove")
-	defer log.Tracef("txsRemove exit")
+// commented to fix linter
+// func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
+// 	log.Tracef("txsRemove")
+// 	defer log.Tracef("txsRemove exit")
 
-	if len(txs) == 0 {
-		return errors.New("no transactions provided")
-	}
+// 	if len(txs) == 0 {
+// 		return errors.New("no transactions provided")
+// 	}
 
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
+// 	m.mtx.Lock()
+// 	defer m.mtx.Unlock()
 
-	l := len(m.txs)
-	for k := range txs {
-		if tx, ok := m.txs[txs[k]]; ok {
-			m.size -= tx.size
-			delete(m.txs, txs[k])
-		}
-	}
+// 	l := len(m.txs)
+// 	for k := range txs {
+// 		if tx, ok := m.txs[txs[k]]; ok {
+// 			m.size -= tx.size
+// 			delete(m.txs, txs[k])
+// 		}
+// 	}
 
-	// if the map length does not change, nothing was deleted.
-	if len(m.txs) != l {
-		return errors.New("remove txs: nothing removed")
-	}
-	return nil
-}
+// 	// if the map length does not change, nothing was deleted.
+// 	if len(m.txs) != l {
+// 		return errors.New("remove txs: nothing removed")
+// 	}
+// 	return nil
+// }
 
 func (m *mempool) stats(ctx context.Context) (int, int) {
 	m.mtx.RLock()
