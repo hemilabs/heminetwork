@@ -27,8 +27,8 @@
   "deposit_contract_address": "0xb6f9579980ae46f61217a99145645341e49e2516",
   "l1_system_config_address": "0xfa73580f4d72294ae9ee3daac36d8bf111b37ce9",
   "protocol_versions_address": "0x0000000000000000000000000000000000000000",
-  "da_challenge_address": "0x0000000000000000000000000000000000000000",
-  "da_challenge_window": 0,
-  "da_resolve_window": 0,
-  "use_plasma": false
+  "chain_op_config": {
+  "eip1559Elasticity": 6,
+  "eip1559Denominator": 50,
+  "eip1559DenominatorCanyon": 250
 }
