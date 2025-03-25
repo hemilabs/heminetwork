@@ -2266,6 +2266,10 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 
 	// Create mempool txs from block txs
 	for _, utx := range b.Transactions() {
+		if blockchain.IsCoinBase(utx) {
+			// Skip coinbase inputs
+			continue
+		}
 		msg := utx.MsgTx()
 		inValue, outValue, err := s.valuesFromTransaction(ctx, msg)
 		if err != nil {
