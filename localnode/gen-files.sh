@@ -36,7 +36,7 @@ BOOTNODES=""
 
 if [[ $NET == "mainnet" ]]; then
 	ENTRYFILE="mainnet-entrypointl2.sh"
-	GENEIS="genesis.json"
+	GENESIS="genesis.json"
 	ID=43111
 	TBCNET="mainnet"
 	OVERRIDES="--override.ecotone=1725868497 \\
@@ -50,7 +50,7 @@ fi
 
 if [[ $NET == "testnet" ]]; then
 	ENTRYFILE="entrypointl2.sh"
-	GENEIS="genesis.json"
+	GENESIS="testnet-genesis.json"
 	ID=743111
 	TBCNET="testnet3"
 	OVERRIDES="--override.ecotone=1715865630 \\
