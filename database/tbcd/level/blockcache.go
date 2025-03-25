@@ -47,7 +47,6 @@ func (l *lowIQLRU) Put(hash chainhash.Hash, block []byte) {
 	if be, ok := l.m[hash]; ok {
 		// update access
 		l.l.MoveToBack(be.element)
-		log.Infof("Put mtb %v", hash)
 		return
 	}
 
@@ -63,7 +62,6 @@ func (l *lowIQLRU) Put(hash chainhash.Hash, block []byte) {
 	}
 
 	// block lookup and lru append
-	log.Infof("Put %v", hash)
 	l.m[hash] = blockElement{element: l.l.PushBack(hash), block: block}
 	l.totalSize += len(block)
 
@@ -74,13 +72,12 @@ func (l *lowIQLRU) Get(hash chainhash.Hash) ([]byte, bool) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	log.Infof("get %v", hash)
 	be, ok := l.m[hash]
 	if !ok {
 		l.c.Misses++
 		return nil, false
 	}
-	panic("got one")
+
 	// update access
 	l.l.MoveToBack(be.element)
 
@@ -93,14 +90,12 @@ func (l *lowIQLRU) Has(hash chainhash.Hash) bool {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	log.Infof("has %v", hash)
 	be, ok := l.m[hash]
 	if !ok {
 		l.c.Misses++
 		return false
 	}
 
-	panic("got has")
 	// update access
 	l.l.MoveToBack(be.element)
 

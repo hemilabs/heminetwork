@@ -1466,9 +1466,6 @@ func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Bl
 	if l.cfg.blockCacheSize > 0 {
 		// Try cache first
 		eb, _ = l.blockCache.Get(hash)
-		if eb != nil {
-			panic("x")
-		}
 	}
 
 	// get from db
