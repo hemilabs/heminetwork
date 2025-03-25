@@ -360,11 +360,11 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
-		err = s.FeesByBlockHash(ctx, *ch)
+		rf, err := s.FeesByBlockHash(ctx, *ch)
 		if err != nil {
 			return fmt.Errorf("fees by hash: %w", err)
 		}
-		// spew.Dump(bh)
+		spew.Dump(rf)
 
 	case "synindexerstohash":
 		hash := args["hash"]

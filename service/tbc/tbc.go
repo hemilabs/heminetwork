@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -1115,7 +1114,6 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 				}
 			default:
 				seen = 0 // force failure
-				break
 			}
 		}
 		if seen != 4 {
@@ -2216,12 +2214,6 @@ func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHea
 	return s.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
-type fee struct {
-	VBytes   int   // Transaction size in vBytes
-	InValue  int64 // Transaction in value
-	OutValue int64 // Transaction in value
-}
-
 func (s *Server) valuesFromTransaction(ctx context.Context, tx *wire.MsgTx) (int64, int64, error) {
 	var iv, ov int64
 	for _, txIn := range tx.TxIn {
@@ -2240,145 +2232,51 @@ func (s *Server) valuesFromTransaction(ctx context.Context, tx *wire.MsgTx) (int
 	return iv, ov, nil
 }
 
-func (s *Server) feesFromTransactions(ctx context.Context, txs []*btcutil.Tx) ([]fee, error) {
-	fees := make([]fee, 0, len(txs))
-	for _, tx := range txs {
-		if blockchain.IsCoinBase(tx) {
-			// Skip coinbase inputs
-			continue
-		}
-		log.Infof("Tx: %v", tx.Hash())
-		iv := int64(0)
-		for _, txIn := range tx.MsgTx().TxIn {
-			po := txIn.PreviousOutPoint
-			wtxo, err := s.txOutFromOutPoint(ctx,
-				tbcd.NewOutpoint(po.Hash, po.Index))
-			if err != nil {
-				return nil, err
-			}
-			iv += wtxo.Value
-		}
-		// log.Infof("in value: %v", btcutil.Amount(iv))
-		ov := int64(0)
-		for _, txOut := range tx.MsgTx().TxOut {
-			ov += txOut.Value
-		}
-		log.Infof("out value: %v", btcutil.Amount(ov))
-		log.Infof("fee: %v", btcutil.Amount(iv-ov))
-		log.Infof("size: %v", tx.MsgTx().SerializeSize())
-		log.Infof("satoshi/byte: %v", float64(iv-ov)/float64(tx.MsgTx().SerializeSize()))
-		fees = append(fees, fee{
-			VBytes:   tx.MsgTx().SerializeSize(),
-			InValue:  iv,
-			OutValue: ov,
-		})
-	}
-
-	return fees, nil
-}
-
-// ewma calculates the exponentially weighted moving average.
-func ewma(currentFeeRate float64, ewmaPrevious float64, alpha float64) float64 {
-	return alpha*currentFeeRate + (1-alpha)*ewmaPrevious
-}
-
-// estimateFeeRate estimates the transaction fee rate for different horizons,
-// taking block depth into account.
-func estimateFeeRate(recentBlocksTransactions [][]float64, horizons []int) map[int]float64 {
-	// Initialize EWMA for different horizons
-	ewmaValues := make(map[int]float64)
-	for _, horizon := range horizons {
-		ewmaValues[horizon] = 0
-	}
-
-	// Process recent blocks transactions
-	for blockDepth, block := range recentBlocksTransactions {
-		for _, feeRate := range block {
-			for _, horizon := range horizons {
-				alpha := calculateAlpha(horizon, blockDepth)
-				ewmaValues[horizon] = ewma(feeRate, ewmaValues[horizon], alpha)
-			}
-		}
-	}
-
-	// Combine results for final estimation
-	finalEstimation := make(map[int]float64)
-	for horizon, value := range ewmaValues {
-		finalEstimation[horizon] = math.Round(value)
-	}
-
-	return finalEstimation
-}
-
-// calculateAlpha calculates the smoothing factor based on the horizon and block depth.
-func calculateAlpha(horizon, blockDepth int) float64 {
-	// Base alpha for the most recent transactions
-	baseAlpha := 0.1
-
-	// Decay factor to reduce the influence of older transactions
-	decayFactor := 0.9
-
-	// Adjust the base alpha based on the horizon
-	adjustedBaseAlpha := baseAlpha / float64(horizon+1)
-
-	// Calculate the effective alpha considering the block depth
-	effectiveAlpha := adjustedBaseAlpha * math.Pow(decayFactor, float64(blockDepth))
-
-	// Ensure the effective alpha is within a reasonable range
-	if effectiveAlpha < 0.01 {
-		effectiveAlpha = 0.01
-	}
-
-	return effectiveAlpha
-}
-
-// FeesByBlockHash calculates all fees for the provided block.
-func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) error {
+// FeesByBlockHash calculates the median fee for the provided block.
+func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbcapi.FeeEstimate, error) {
 	log.Tracef("FeesByBlockHash")
 	defer log.Tracef("FeesByBlockHash exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return errors.New("fees by block hash: external header mode")
+		return nil, errors.New("fees by block hash: external header mode")
 	}
 
-	horizonDepth := 6
-	// afm := make(map[int]float64, horizon)
-	afm := make([][]float64, horizonDepth)
-	for i := 0; i < horizonDepth; i++ {
-		// Retrieve block
-		b, err := s.db.BlockByHash(ctx, hash)
+	b, err := s.db.BlockByHash(ctx, hash)
+	if err != nil {
+		return nil, fmt.Errorf("fees by block hash block: %w", err)
+	}
+
+	mp, err := mempoolNew()
+	if err != nil {
+		return nil, fmt.Errorf("could not create mempool: %w", err)
+	}
+
+	// Create mempool txs from block txs
+	for _, utx := range b.Transactions() {
+		msg := utx.MsgTx()
+		inValue, outValue, err := s.valuesFromTransaction(ctx, msg)
 		if err != nil {
-			return fmt.Errorf("fees by block hash block: %w", err)
+			return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
 		}
-
-		// walk block tx'
-		fees, err := s.feesFromTransactions(ctx, b.Transactions())
-		if err != nil {
-			return fmt.Errorf("fees by block from transactions %v: %w", hash, err)
+		mptx := &mempoolTx{
+			id:       msg.TxHash(),
+			weight:   blockchain.GetTransactionWeight(utx),
+			size:     btcmempool.GetTxVirtualSize(utx),
+			outValue: outValue,
+			inValue:  inValue,
+			inserted: time.Now(),
 		}
-
-		// Create blocks transactions array
-		afm[i] = make([]float64, 0, len(fees))
-		for _, fee := range fees {
-			afm[i] = append(afm[i],
-				float64(fee.InValue-fee.OutValue)/float64(fee.VBytes))
+		if err = mp.txsInsert(ctx, mptx); err != nil {
+			return nil, fmt.Errorf("cannot insert tx in mempool: %w", err)
 		}
-
-		// go to parent.
-		hash = b.MsgBlock().Header.PrevBlock
-	}
-	// spew.Dump(afm)
-
-	horizons := []int{1, 2, 3, 4, 5, 6}
-	estimatedFeeRates := estimateFeeRate(afm, horizons)
-
-	// Print the results
-	for horizon, feeRate := range estimatedFeeRates {
-		log.Infof("Estimated Fee Rate for %d blocks: %.2f sat/vB\n",
-			horizon, feeRate)
 	}
 
-	return errors.New("not yet")
+	rf, err := mp.GetRecommendedFees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not get recommended fees: %w", err)
+	}
+
+	return rf[0], nil
 }
 
 // FullBlockAvailable returns whether TBC has the full block
