@@ -609,7 +609,7 @@ func (s *Server) fixupCacheChannel(ctx context.Context, b *btcutil.Block, utxos 
 			return nil
 		case c <- struct{}{}:
 		default:
-			return fmt.Errorf("shouldn't happen")
+			return errors.New("shouldn't happen")
 		}
 	}
 
