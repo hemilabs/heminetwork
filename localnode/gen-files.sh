@@ -50,7 +50,7 @@ fi
 
 if [[ $NET == "testnet" ]]; then
 	ENTRYFILE="entrypointl2.sh"
-	GENEIS="testnet-genesis.json"
+	GENEIS="genesis.json"
 	ID=743111
 	TBCNET="testnet3"
 	OVERRIDES="--override.ecotone=1715865630 \\
