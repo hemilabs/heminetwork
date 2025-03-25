@@ -190,7 +190,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		welcome = append(welcome, fmt.Sprintf("block cache: %v",
 			humanize.Bytes(uint64(cfg.blockCacheSize))))
 	} else {
-		welcome = append(welcome, "block cache: DISABLED")
+		welcome = append(welcome, "Block cache: DISABLED")
 	}
 	if cfg.blockheaderCacheSize > 0 {
 		l.headerCache, err = lowIQMapSizeNew(cfg.blockheaderCacheSize)
@@ -200,7 +200,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		welcome = append(welcome, fmt.Sprintf("blockheader cache: %v",
 			humanize.Bytes(uint64(cfg.blockheaderCacheSize))))
 	} else {
-		welcome = append(welcome, "blockheader cache: DISABLED")
+		welcome = append(welcome, "Blockheader cache: DISABLED")
 	}
 
 	if Welcome {
@@ -1466,6 +1466,9 @@ func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Bl
 	if l.cfg.blockCacheSize > 0 {
 		// Try cache first
 		eb, _ = l.blockCache.Get(hash)
+		if eb != nil {
+			panic("x")
+		}
 	}
 
 	// get from db
@@ -1496,7 +1499,7 @@ func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool,
 
 	if l.cfg.blockCacheSize > 0 {
 		// Try cache first
-		if _, ok := l.blockCache.Get(hash); ok {
+		if ok := l.blockCache.Has(hash); ok {
 			return true, nil
 		}
 	}

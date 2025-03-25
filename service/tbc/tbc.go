@@ -243,7 +243,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		requestTimeout:  defaultRequestTimeout,
 		broadcast:       make(map[chainhash.Hash]*wire.MsgTx, 16),
 		invBlocks:       make([]*chainhash.Hash, 0, 16),
-		promPollVerbose: false,
+		promPollVerbose: true,
 	}
 
 	// Only set pings and blocks if not in External Header Mode
