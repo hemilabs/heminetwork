@@ -91,7 +91,7 @@ var (
 		Height: 0,
 	}
 
-	fixupStrategy = 2 // Do not touch unless your name is marco
+	fixupStrategy = 3 // Do not touch unless your name is marco
 )
 
 func init() {
@@ -304,6 +304,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.fixupCache = s.fixupCacheSerial
 	case 2:
 		s.fixupCache = s.fixupCacheBatched
+	case 3:
+		s.fixupCache = s.fixupCacheChannel
 	}
 
 	return s, nil
