@@ -68,11 +68,11 @@ func (l *lowIQLRU) Put(hash chainhash.Hash, block []byte) {
 	l.c.Size = l.totalSize
 }
 
-func (l *lowIQLRU) Get(k chainhash.Hash) ([]byte, bool) {
+func (l *lowIQLRU) Get(hash chainhash.Hash) ([]byte, bool) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	be, ok := l.m[k]
+	be, ok := l.m[hash]
 	if !ok {
 		l.c.Misses++
 		return nil, false
@@ -84,6 +84,24 @@ func (l *lowIQLRU) Get(k chainhash.Hash) ([]byte, bool) {
 	l.c.Hits++
 
 	return be.block, true
+}
+
+func (l *lowIQLRU) Has(hash chainhash.Hash) bool {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+
+	be, ok := l.m[hash]
+	if !ok {
+		l.c.Misses++
+		return false
+	}
+
+	// update access
+	l.l.MoveToBack(be.element)
+
+	l.c.Hits++
+
+	return true
 }
 
 func (l *lowIQLRU) Stats() tbcd.CacheStats {

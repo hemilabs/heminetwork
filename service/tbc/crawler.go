@@ -490,8 +490,16 @@ func (s *Server) unprocessUtxos(ctx context.Context, txs []*btcutil.Tx, utxos ma
 	return nil
 }
 
-func (s *Server) fetchOPParallel(ctx context.Context, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
+func (s *Server) fetchOPParallel(ctx context.Context, c chan struct{}, w *sync.WaitGroup, op tbcd.Outpoint, utxos map[tbcd.Outpoint]tbcd.CacheOutput) {
 	defer w.Done()
+	if c != nil {
+		defer func() {
+			select {
+			case <-ctx.Done():
+			case c <- struct{}{}:
+			}
+		}()
+	}
 
 	sh, err := s.db.ScriptHashByOutpoint(ctx, op)
 	if err != nil {
@@ -527,7 +535,7 @@ func (s *Server) fixupCacheParallel(ctx context.Context, b *btcutil.Block, utxos
 
 			// utxo not found, retrieve pkscript from database.
 			w.Add(1)
-			go s.fetchOPParallel(ctx, w, op, utxos)
+			go s.fetchOPParallel(ctx, nil, w, op, utxos)
 		}
 	}
 
@@ -588,6 +596,56 @@ func (s *Server) fixupCacheBatched(ctx context.Context, b *btcutil.Block, utxos 
 		return nil
 	}
 	return s.db.ScriptHashesByOutpoint(ctx, ops, found)
+}
+
+func (s *Server) fixupCacheChannel(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+	// prime slots
+	slots := 128
+	c := make(chan struct{}, slots)
+	defer close(c)
+	for i := 0; i < slots; i++ {
+		select {
+		case <-ctx.Done():
+			return nil
+		case c <- struct{}{}:
+		default:
+			return errors.New("shouldn't happen")
+		}
+	}
+
+	w := new(sync.WaitGroup)
+	for _, tx := range b.Transactions() {
+		for _, txIn := range tx.MsgTx().TxIn {
+			if blockchain.IsCoinBase(tx) {
+				// Skip coinbase inputs
+				break
+			}
+
+			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index)
+			s.mtx.Lock()
+			if _, ok := utxos[op]; ok {
+				s.mtx.Unlock()
+				continue
+			}
+			s.mtx.Unlock()
+
+			// get slot or wait
+			<-c
+
+			// utxo not found, retrieve pkscript from database.
+			w.Add(1)
+			go s.fetchOPParallel(ctx, c, w, op, utxos)
+		}
+	}
+	w.Wait()
+
+	cl := len(c)
+	if cl != slots {
+		return fmt.Errorf("channel not empty: %v", cl)
+	}
+
+	return nil
 }
 
 // indexUtxosInBlocks indexes utxos from the last processed block until the
