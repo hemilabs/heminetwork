@@ -26,7 +26,7 @@ func SetNetwork(network string) error {
 	case "testnet3":
 		bsURL = bsTestnet3URL
 	default:
-		return fmt.Errorf("invalid network: %w", network)
+		return fmt.Errorf("invalid network: %v", network)
 	}
 	return nil
 }
