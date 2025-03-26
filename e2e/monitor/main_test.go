@@ -21,21 +21,21 @@ func TestMonitor(t *testing.T) {
 	// for now
 	time.Sleep(2 * time.Minute)
 
-	// somewhat arbitrary; we should be able to get to 12 pop txs mined in a
+	// somewhat arbitrary; we should be able to get to 24 pop txs mined in a
 	// reasonable amount of time
-	const expectedPopTxs = 12
+	const expectedPopTxs = 24
 	t.Logf("expecting at least %d pop txs mined", expectedPopTxs)
 
-	// the expected balance should be at least 1 BaseHEMI per poptx - 8.  We say
-	// "- 8" because we lag 8 keystones behind a pop payout
-	expectedPayouts := expectedPopTxs - 8
+	// the expected balance should be at least 1 BaseHEMI per poptx - 20.  We say
+	// "- 20" because we lag 20 keystones behind a pop payout
+	expectedPayouts := expectedPopTxs - 20
 	expectedPayoutBalance := big.NewInt(hemi.HEMIBase)
 	expectedPayoutBalance = expectedPayoutBalance.Mul(big.NewInt(int64(expectedPayouts)), expectedPayoutBalance)
 	t.Logf("expecting a HEMI balance of at least %d", expectedPayoutBalance)
 
 	// if we get to 10 minutes without the expected number of pop txs
 	// and HEMI balance, something is wrong, fail the test
-	blockWaitTimeoutTimer := time.NewTimer(10 * time.Minute)
+	blockWaitTimeoutTimer := time.NewTimer(15 * time.Minute)
 
 	for {
 		// poll every 10 seconds until timeout
