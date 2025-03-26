@@ -207,6 +207,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdMempoolInfoRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.MempoolInfoRequest)
+				return s.handleMempoolInfoRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -648,14 +655,40 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 	return &tbcapi.BlockInsertRawResponse{BlockHash: &hash}, nil
 }
 
-// XXX this is hardcoded for testing
-func (s *Server) handleFeeEstimateRequest(ctx context.Context, req *tbcapi.FeeEstimateRequest) (any, error) {
+func (s *Server) handleMempoolInfoRequest(_ context.Context, _ *tbcapi.MempoolInfoRequest) (any, error) {
+	log.Tracef("handleMempoolInfoRequest")
+	defer log.Tracef("handleMempoolInfoRequest exit")
+
+	if !s.cfg.MempoolEnabled {
+		err := errors.New("mempool not enabled")
+		e := protocol.NewInternalError(err)
+		return &tbcapi.MempoolInfoResponse{
+			Error: e.ProtocolError(),
+		}, err
+	}
+
+	return &tbcapi.MempoolInfoResponse{
+		Size:  s.mempool.size,
+		TxNum: uint(len(s.mempool.txs)),
+	}, nil
+}
+
+func (s *Server) handleFeeEstimateRequest(ctx context.Context, _ *tbcapi.FeeEstimateRequest) (any, error) {
 	log.Tracef("handleFeeEstimateRequest")
 	defer log.Tracef("handleFeeEstimateRequest exit")
 
+	if !s.cfg.MempoolEnabled {
+		err := errors.New("mempool not enabled")
+		e := protocol.NewInternalError(err)
+		return &tbcapi.FeeEstimateResponse{
+			Error: e.ProtocolError(),
+		}, err
+	}
+
 	rf, err := s.mempool.GetRecommendedFees(ctx)
 	if err != nil {
-		return nil, err
+		e := protocol.NewInternalError(err)
+		return &tbcapi.FeeEstimateResponse{Error: e.ProtocolError()}, err
 	}
 
 	return &tbcapi.FeeEstimateResponse{
