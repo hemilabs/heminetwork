@@ -160,6 +160,7 @@ services:
   op-geth-l2:
     # yamllint disable-line rule:line-length
     image: "ghcr.io/hemilabs/op-geth:e525f27@sha256:f48c03532810ec4d9d08be8afa19822c9adcdd2d8dd559467a0d2b34965d5a6d"
+    platform: linux/amd64
     # XXX does geth need to be fully synced
     depends_on:
       geth-l1:
@@ -230,6 +231,7 @@ services:
   op-node:
     # yamllint disable-line rule:line-length
     image: "ghcr.io/hemilabs/op-node:84b895e@sha256:df29c59680c33cdda616f67662c9e75bdeea60f79d91937ee0b60bf0d0f48243"
+    platform: linux/amd64
     depends_on:
       geth-l1:
         condition: "service_started"
