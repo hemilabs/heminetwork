@@ -84,6 +84,9 @@ const (
 
 	CmdFeeEstimateRequest  = "tbcapi-fee-estimate-request"
 	CmdFeeEstimateResponse = "tbcapi-fee-estimate-response"
+
+	CmdMempoolInfoRequest  = "tbcapi-mempool-info-request"
+	CmdMempoolInfoResponse = "tbcapi-mempool-info-response"
 )
 
 var (
@@ -347,6 +350,14 @@ type FeeEstimateResponse struct {
 	Error        *protocol.Error `json:"error,omitempty"`
 }
 
+type MempoolInfoRequest struct{}
+
+type MempoolInfoResponse struct {
+	Size  int64           `json:"size"`
+	TxNum uint            `json:"tx_num"`
+	Error *protocol.Error `json:"error,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                                reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                               reflect.TypeOf(PingResponse{}),
@@ -388,6 +399,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockKeystoneByL2KeystoneAbrevHashResponse: reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashResponse{}),
 	CmdFeeEstimateRequest:                         reflect.TypeOf(FeeEstimateRequest{}),
 	CmdFeeEstimateResponse:                        reflect.TypeOf(FeeEstimateResponse{}),
+	CmdMempoolInfoRequest:                         reflect.TypeOf(MempoolInfoRequest{}),
+	CmdMempoolInfoResponse:                        reflect.TypeOf(MempoolInfoResponse{}),
 }
 
 type tbcAPI struct{}
