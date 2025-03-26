@@ -14,10 +14,22 @@ import (
 )
 
 var (
-	bsTestnetURL = "https://blockstream.info/testnet/api" // XXX wrap in structure
-	// bsMainnetURL = "https://blockstream.info/api"         // XXX wrap in structure
-	bsURL = bsTestnetURL // XXX wrap in structure
+	bsTestnet3URL = "https://blockstream.info/testnet/api"
+	bsMainnetURL  = "https://blockstream.info/api"
+	bsURL         = bsTestnet3URL
 )
+
+func SetNetwork(network string) error {
+	switch network {
+	case "mainnet":
+		bsURL = bsMainnetURL
+	case "testnet3":
+		bsURL = bsTestnet3URL
+	default:
+		return fmt.Errorf("invalid network: %w", network)
+	}
+	return nil
+}
 
 type TBlock struct {
 	ID                string `json:"id"`

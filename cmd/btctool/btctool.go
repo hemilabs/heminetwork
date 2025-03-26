@@ -505,14 +505,13 @@ func _main() error {
 		fmt.Fprintf(f, "  tip                                       - retrieve tip height\n")
 	}
 
-	// var (
-	//	endHeight, blockCount int
-	//	downloadDir             string
-	// )
-	// flag.IntVar(&endHeight, "startblock", -1, "Height to start downloading, negative means start at current max height")
-	// flag.IntVar(&blockCount, "count", -1024, "number of blocks to download, negative goes backwards from height")
-	// flag.StringVar(&downloadDir, "downloaddir", "", "Directory to download block header and data to. Leave empty to dump to stdout.")
+	var network string
+	flag.StringVar(&network, "network", "mainnet", "Bitcoin network (mainnet, testnet3).")
 	flag.Parse()
+
+	if err := blockstream.SetNetwork(network); err != nil {
+		return err
+	}
 
 	// XXX make flag
 	if err := loggo.ConfigureLoggers("info"); err != nil {
@@ -613,7 +612,7 @@ func _main() error {
 		}
 
 	case "p2p":
-		err = btcConnect(ctx, "testnet3")
+		err = btcConnect(ctx, network)
 
 	case "parseblock":
 		filename := args["filename"]
