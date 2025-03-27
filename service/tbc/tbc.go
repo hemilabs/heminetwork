@@ -994,7 +994,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	log.Infof("isCanonical: %v %v", p, hash)
 	ts := time.Now()
 	canonical, _ := s.isCanonical(ctx, bhX)
-	log.Infof("isCanonical: %v %v %v took %v", p, hash, canonical, time.Now().Sub(ts))
+	log.Infof("isCanonical: %v %v %v took %v", p, hash, canonical, time.Since(ts))
 	if err != nil {
 		log.Errorf("isCanonical: %v", err) // XXX too loud
 		panic(err)
