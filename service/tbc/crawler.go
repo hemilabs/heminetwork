@@ -117,8 +117,11 @@ func previousCheckpoint(bh *tbcd.BlockHeader, hha []checkpoint) *checkpoint {
 }
 
 func previousCheckpointHeight(height uint64, hha []checkpoint) uint64 {
-	// shouldn't ever hit nit
-	return previousCheckpoint(&tbcd.BlockHeader{Height: height}, hha).height
+	hh := previousCheckpoint(&tbcd.BlockHeader{Height: height}, hha)
+	if hh == nil {
+		return 0
+	}
+	return hh.height
 }
 
 func h2b(wbh *wire.BlockHeader) [80]byte {
