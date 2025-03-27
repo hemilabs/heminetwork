@@ -1,5 +1,6 @@
 run:
   tests: false
+  go: "1.23"
 
 issues:
   # Show all errors
