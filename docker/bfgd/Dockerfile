@@ -21,7 +21,7 @@ WORKDIR /build/
 COPY Makefile .
 COPY go.mod .
 COPY go.sum .
-RUN make deps
+RUN make go-deps
 
 COPY . .
 RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" bfgd
