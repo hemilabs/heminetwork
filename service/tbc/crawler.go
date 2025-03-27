@@ -257,13 +257,6 @@ func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeade
 // isCanonical uses checkpoints to determine if a block is on the canonical
 // chain. This is a expensive call hence it tries to use checkpoints to short
 // circuit the check.
-// XXX add testcases to validate the following geometry. Put a checkpoint on 1
-// and 2 then check all the blocks above it.
-/*
-	        2''
-	        2'- 3'- 4'- 5' - 6'
-	g - 1 - 2 - 3 - 4 - 5
-*/
 func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, error) {
 	var (
 		bhb *tbcd.BlockHeader

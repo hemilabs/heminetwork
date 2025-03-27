@@ -506,6 +506,8 @@ func (b *btcNode) dumpChain(parent *chainhash.Hash) error {
 	}
 }
 
+var reqDifficulty uint32
+
 func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcutil.Address, nextBlockHeight int32, parent *chainhash.Hash, extraNonce uint64, mempool []*btcutil.Tx) (*btcutil.Block, error) {
 	coinbaseScript, err := standardCoinbaseScript(nextBlockHeight, extraNonce)
 	if err != nil {
@@ -518,7 +520,9 @@ func newBlockTemplate(t *testing.T, params *chaincfg.Params, payToAddress btcuti
 	}
 	t.Logf("coinbase tx %v: %v", nextBlockHeight, coinbaseTx.Hash())
 
-	reqDifficulty := uint32(0x1d00ffff) // XXX
+	if reqDifficulty == 0 {
+		reqDifficulty = uint32(0x1d00ffff)
+	}
 
 	var blockTxs []*btcutil.Tx
 	blockTxs = append(blockTxs, coinbaseTx)
@@ -2623,6 +2627,157 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("coinbase signed tx out 0: %v", disasm)
+}
+
+func TestCanonicity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		cancel()
+	}()
+
+	port := GetFreePort()
+	n, err := newFakeNode(t, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+	go func() {
+		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		LevelDBHome:          t.TempDir(),
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          false,
+		Seeds:                   []string{"127.0.0.1:" + port},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	//        / --> b2a - b3a - b4a - b5a - b6a
+	// g - b1 ---->	b2  - b3  - b4  - b5
+	//        \ --> b2b
+
+	// b2 -> b5 has highest cumulative work, so b5 is best
+
+	// best chain
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
+
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mainChainHashes := map[string]*chainhash.Hash{"b1": b1.Hash()}
+
+	// increase difficulty to ensure b1 -> b5 remains canonical
+	reqDifficulty = uint32(0x1d000fff)
+
+	// mine b2 to b5
+	prevHash := b1.Hash()
+	for i := 2; i <= 5; i++ {
+		blk, err := n.MineAndSend(ctx, "b"+strconv.Itoa(i), prevHash, address, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prevHash = blk.Hash()
+		mainChainHashes["b"+strconv.Itoa(i)] = blk.Hash()
+	}
+
+	altChainHashes := make(map[string]*chainhash.Hash, 0)
+	prevHash = b1.Hash()
+
+	// reset difficulty
+	reqDifficulty = 0
+
+	// chain a
+	for i := 2; i <= 6; i++ {
+		blk, err := n.MineAndSend(ctx, "b"+strconv.Itoa(i)+"a", prevHash, address, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prevHash = blk.Hash()
+		altChainHashes["b"+strconv.Itoa(i)+"a"] = blk.Hash()
+	}
+
+	// chain b
+	b2b, err := n.MineAndSend(ctx, "b2b", b1.Hash(), address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	altChainHashes["b2b"] = b2b.Hash()
+
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// set checkpoints to b1 and b2
+	s.checkpoints = []checkpoint{
+		{2, *mainChainHashes["b2"]},
+		{1, *b1.Hash()},
+	}
+
+	// assert b2 -> b5 are canonical
+	for bname, hs := range mainChainHashes {
+		bh, err := s.db.BlockHeaderByHash(ctx, *hs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ic, err := s.isCanonical(ctx, bh)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !ic {
+			t.Fatalf("expected %v to be canonical", bname)
+		}
+		t.Logf("%v is canonical", bname)
+	}
+
+	// assert a and b chain blocks are not canonical
+	for bname, hs := range altChainHashes {
+		bh, err := s.db.BlockHeaderByHash(ctx, *hs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ic, err := s.isCanonical(ctx, bh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ic {
+			t.Fatalf("expected %v to not be canonical", bname)
+		}
+		t.Logf("%v is not canonical", bname)
+	}
 }
 
 // borrowed from btcd
