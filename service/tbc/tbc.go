@@ -173,7 +173,7 @@ type Server struct {
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
-	checkpoints map[chainhash.Hash]uint64
+	checkpoints []checkpoint
 	hemiGenesis *HashHeight
 	pm          *PeerManager
 
@@ -280,7 +280,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
-		s.checkpoints = make(map[chainhash.Hash]uint64)
+		s.checkpoints = []checkpoint{}
 		s.hemiGenesis = localnetHemiGenesis
 		wanted = 1
 
@@ -553,7 +553,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	} else {
 		err := s.getHeadersByHeights(ctx, p,
 			bhb.Height, bhb.Height-1000, bhb.Height-1999,
-			lastCheckpointHeight(bhb.Height, s.checkpoints))
+			previousCheckpointHeight(bhb.Height, s.checkpoints))
 		if err != nil {
 			readError = err
 			return fmt.Errorf("handle peer heights: %w", err)
@@ -991,10 +991,15 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("block header by hash: %w", err)
 	}
-	canonical, err := s.isCanonical(ctx, bhX)
+	log.Infof("isCanonical: %v %v", p, hash)
+	ts := time.Now()
+	canonical, _ := s.isCanonical(ctx, bhX)
+	log.Infof("isCanonical: %v %v %v took %v", p, hash, canonical, time.Now().Sub(ts))
 	if err != nil {
-		return fmt.Errorf("is canonical: %w", err)
+		log.Errorf("isCanonical: %v", err) // XXX too loud
+		panic(err)
 	}
+
 	if !canonical {
 		log.Infof("Deleting from blocks missing database: %v %v %v",
 			p, bhX.Height, bhX)
@@ -2543,6 +2548,17 @@ func (s *Server) Run(pctx context.Context) error {
 			return err
 		}
 	}
+
+	//hash := s2h("00000000b4bc9a4a22ad0e1c6ae73634968bd04eb5ea50737cbaf78039fcc5b1")
+	//bh, err := s.db.BlockHeaderByHash(ctx, hash)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//canonical, err := s.isCanonical(ctx, bh)
+	//if err != nil {
+	//	panic(err)
+	//}
+	//panic(canonical)
 
 	// HTTP server
 	httpErrCh := make(chan error)

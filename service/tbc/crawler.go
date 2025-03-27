@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"sort"
 	"sync"
 	"time"
 
@@ -34,43 +33,51 @@ func s2h(s string) chainhash.Hash {
 	return *h
 }
 
+type checkpoint struct {
+	height uint64
+	hash   chainhash.Hash
+}
+
 var (
 	ErrAlreadyIndexing = errors.New("already indexing")
 
-	testnet3Checkpoints = map[chainhash.Hash]uint64{
-		s2h("0000000000c3410afe8a2bfef56757c8ba675eaa4bb786a2a02d4fc1124bedf2"): 3700000,
-		s2h("0000000000002b9408d001dd42f830e16a9c28ed8daa828523e67e09ea9e0411"): 3600000,
-		s2h("000000000000098faa89ab34c3ec0e6e037698e3e54c8d1bbb9dcfe0054a8e7a"): 3200000,
-		s2h("0000000000001242d96bedebc9f45a2ecdd40d393ca0d725f500fb4977a50582"): 3100000,
-		s2h("0000000000003c46fc60e56b9c2ae202b1efec83fcc7899d21de16757dea40a4"): 3000000,
-		s2h("000000000000001669469c0354b3f341a36b10ab099d1962f7ec4fae528b1f1d"): 2900000,
-		s2h("0000000000000093bcb68c03a9a168ae252572d348a2eaeba2cdf9231d73206f"): 2500000,
-		s2h("000000000000010dd0863ec3d7a0bae17c1957ae1de9cbcdae8e77aad33e3b8c"): 2000000,
-		s2h("000000000000000eda80f8c7e55459e348274292ecd77c662f95e29bedbb4865"): 1900000,
-		s2h("0000000000049a6b07f91975568dc96bb1aec1a24c6bdadb21eb17c9f1b7256f"): 1500000,
-		s2h("0000000000478e259a3eda2fafbeeb0106626f946347955e99278fe6cc848414"): 1000000,
-		s2h("0000000000356f8d8924556e765b7a94aaebc6b5c8685dcfa2b1ee8b41acd89b"): 900000,
-		s2h("000000000001a7c0aaa2630fbb2c0e476aafffc60f82177375b2aaa22209f606"): 500000,
+	// checkpoints MUST be sorted high to low!
+	testnet3Checkpoints = []checkpoint{
+		{3700000, s2h("0000000000c3410afe8a2bfef56757c8ba675eaa4bb786a2a02d4fc1124bedf2")},
+		{3600000, s2h("0000000000002b9408d001dd42f830e16a9c28ed8daa828523e67e09ea9e0411")},
+		{3200000, s2h("000000000000098faa89ab34c3ec0e6e037698e3e54c8d1bbb9dcfe0054a8e7a")},
+		{3100000, s2h("0000000000001242d96bedebc9f45a2ecdd40d393ca0d725f500fb4977a50582")},
+		{3000000, s2h("0000000000003c46fc60e56b9c2ae202b1efec83fcc7899d21de16757dea40a4")},
+		{2900000, s2h("000000000000001669469c0354b3f341a36b10ab099d1962f7ec4fae528b1f1d")},
+		{2500000, s2h("0000000000000093bcb68c03a9a168ae252572d348a2eaeba2cdf9231d73206f")},
+		{2000000, s2h("000000000000010dd0863ec3d7a0bae17c1957ae1de9cbcdae8e77aad33e3b8c")},
+		{1900000, s2h("000000000000000eda80f8c7e55459e348274292ecd77c662f95e29bedbb4865")},
+		{1500000, s2h("0000000000049a6b07f91975568dc96bb1aec1a24c6bdadb21eb17c9f1b7256f")},
+		{1000000, s2h("0000000000478e259a3eda2fafbeeb0106626f946347955e99278fe6cc848414")},
+		{900000, s2h("0000000000356f8d8924556e765b7a94aaebc6b5c8685dcfa2b1ee8b41acd89b")},
+		{500000, s2h("000000000001a7c0aaa2630fbb2c0e476aafffc60f82177375b2aaa22209f606")},
+		{0, s2h("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")},
 	}
 
-	mainnetCheckpoints = map[chainhash.Hash]uint64{
-		s2h("00000000000000000002a0b5db2a7f8d9087464c2586b546be7bce8eb53b8187"): 850000,
-		s2h("00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054"): 800000,
-		s2h("0000000000000000000592a974b1b9f087cb77628bb4a097d5c2c11b3476a58e"): 750000,
-		s2h("0000000000000000000590fc0f3eba193a278534220b2b37e9849e1a770ca959"): 700000,
-		s2h("0000000000000000000060e32d547b6ae2ded52aadbc6310808e4ae42b08cc6a"): 650000,
-		s2h("00000000000000000007316856900e76b4f7a9139cfbfba89842c8d196cd5f91"): 600000,
-		s2h("000000000000000000223b7a2298fb1c6c75fb0efc28a4c56853ff4112ec6bc9"): 550000,
-		s2h("00000000000000000024fb37364cbf81fd49cc2d51c09c75c35433c3a1945d04"): 500000,
-		s2h("0000000000000000014083723ed311a461c648068af8cef8a19dcd620c07a20b"): 450000,
-		s2h("000000000000000004ec466ce4732fe6f1ed1cddc2ed4b328fff5224276e3f6f"): 400000,
-		s2h("0000000000000000053cf64f0400bb38e0c4b3872c38795ddde27acb40a112bb"): 350000,
-		s2h("000000000000000082ccf8f1557c5d40b21edabb18d2d691cfbf87118bac7254"): 300000,
-		s2h("000000000000003887df1f29024b06fc2200b55f8af8f35453d7be294df2d214"): 250000,
-		s2h("000000000000034a7dedef4a161fa058a2d67a173a90155f3a2fe6fc132e0ebf"): 200000,
-		s2h("0000000000000a3290f20e75860d505ce0e948a1d1d846bec7e39015d242884b"): 150000,
-		s2h("000000000003ba27aa200b1cecaad478d2b00432346c3f1f3986da1afd33e506"): 100000,
-		s2h("000000001aeae195809d120b5d66a39c83eb48792e068f8ea1fea19d84a4278a"): 50000,
+	mainnetCheckpoints = []checkpoint{
+		{850000, s2h("00000000000000000002a0b5db2a7f8d9087464c2586b546be7bce8eb53b8187")},
+		{800000, s2h("00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054")},
+		{750000, s2h("0000000000000000000592a974b1b9f087cb77628bb4a097d5c2c11b3476a58e")},
+		{700000, s2h("0000000000000000000590fc0f3eba193a278534220b2b37e9849e1a770ca959")},
+		{650000, s2h("0000000000000000000060e32d547b6ae2ded52aadbc6310808e4ae42b08cc6a")},
+		{600000, s2h("00000000000000000007316856900e76b4f7a9139cfbfba89842c8d196cd5f91")},
+		{550000, s2h("000000000000000000223b7a2298fb1c6c75fb0efc28a4c56853ff4112ec6bc9")},
+		{500000, s2h("00000000000000000024fb37364cbf81fd49cc2d51c09c75c35433c3a1945d04")},
+		{450000, s2h("0000000000000000014083723ed311a461c648068af8cef8a19dcd620c07a20b")},
+		{400000, s2h("000000000000000004ec466ce4732fe6f1ed1cddc2ed4b328fff5224276e3f6f")},
+		{350000, s2h("0000000000000000053cf64f0400bb38e0c4b3872c38795ddde27acb40a112bb")},
+		{300000, s2h("000000000000000082ccf8f1557c5d40b21edabb18d2d691cfbf87118bac7254")},
+		{250000, s2h("000000000000003887df1f29024b06fc2200b55f8af8f35453d7be294df2d214")},
+		{200000, s2h("000000000000034a7dedef4a161fa058a2d67a173a90155f3a2fe6fc132e0ebf")},
+		{150000, s2h("0000000000000a3290f20e75860d505ce0e948a1d1d846bec7e39015d242884b")},
+		{100000, s2h("000000000003ba27aa200b1cecaad478d2b00432346c3f1f3986da1afd33e506")},
+		{50000, s2h("000000001aeae195809d120b5d66a39c83eb48792e068f8ea1fea19d84a4278a")},
+		{0, s2h("000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f")},
 	}
 )
 
@@ -87,21 +94,31 @@ func (e NotLinearError) Is(target error) bool {
 
 var ErrNotLinear = NotLinearError("not linear")
 
-func lastCheckpointHeight(height uint64, hhm map[chainhash.Hash]uint64) uint64 {
-	c := make([]HashHeight, 0, len(hhm))
-	for k, v := range hhm {
-		c = append(c, HashHeight{Height: v, Hash: k})
+func nextCheckpoint(bh *tbcd.BlockHeader, hha []checkpoint) *checkpoint {
+	if len(hha) == 0 {
+		return nil
 	}
-	sort.Slice(c, func(i, j int) bool {
-		return c[i].Height > c[j].Height
-	})
-	for _, hh := range c {
-		if hh.Height > height {
+	for i := len(hha) - 1; i >= 0; i-- {
+		if hha[i].height >= bh.Height {
+			return &hha[i]
+		}
+	}
+	return nil
+}
+
+func previousCheckpoint(bh *tbcd.BlockHeader, hha []checkpoint) *checkpoint {
+	for k := range hha {
+		if hha[k].height > bh.Height {
 			continue
 		}
-		return hh.Height
+		return &hha[k]
 	}
-	return 0
+	return nil
+}
+
+func previousCheckpointHeight(height uint64, hha []checkpoint) uint64 {
+	// shouldn't ever hit nit
+	return previousCheckpoint(&tbcd.BlockHeader{Height: height}, hha).height
 }
 
 func h2b(wbh *wire.BlockHeader) [80]byte {
@@ -235,10 +252,22 @@ func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeade
 }
 
 func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, error) {
-	bhb, err := s.db.BlockHeaderBest(ctx)
+	var (
+		bhb *tbcd.BlockHeader
+		err error
+	)
+	ncp := nextCheckpoint(bh, s.checkpoints)
+	if ncp == nil {
+		// Use best since we do not have a best checkpoint
+		bhb, err = s.db.BlockHeaderBest(ctx)
+	} else {
+		bhb, err = s.db.BlockHeaderByHash(ctx, ncp.hash)
+	}
 	if err != nil {
 		return false, err
 	}
+
+	// Basic shortcircuit
 	if bhb.Height < bh.Height {
 		// We either hit a race or the caller did something wrong.
 		// Either way, it cannot be canonical.
@@ -250,18 +279,20 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		// Self == best
 		return true, nil
 	}
+
+	genesisHash := previousCheckpoint(bh, s.checkpoints).hash // either genesis or a snapshot block
+
 	// Move best block header backwards until we find bh.
+	log.Infof("isCanonical best %v bh %v genesis %v", bhb.HH(), bh.HH(), genesisHash)
 	for {
-		// log.Infof("isCanonical %v @ %v bh %v", bhb.Height, bhb, bh.Height)
-		if height, ok := s.checkpoints[bhb.Hash]; ok && height <= bh.Height {
-			// Did not find bh in path
+		if bhb.Height <= bh.Height {
 			return false, nil
 		}
 		bhb, err = s.db.BlockHeaderByHash(ctx, *bhb.ParentHash())
 		if err != nil {
 			return false, err
 		}
-		if bhb.Hash.IsEqual(s.chainParams.GenesisHash) {
+		if bhb.Hash.IsEqual(&genesisHash) {
 			return false, nil
 		}
 		if bhb.Hash.IsEqual(&bh.Hash) {
@@ -269,6 +300,53 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		}
 	}
 }
+
+//         2''
+//         2'- 3'- 4'- 5' - 6'
+// g - 1 - 2 - 3 - 4 - 5
+//
+//
+
+//func (s *Server) _isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, error) {
+//	bhb, err := s.db.BlockHeaderBest(ctx)
+//	if err != nil {
+//		return false, err
+//	}
+//	if bhb.Height < bh.Height {
+//		// We either hit a race or the caller did something wrong.
+//		// Either way, it cannot be canonical.
+//		log.Debugf("best height less than provided height: %v < %v",
+//			bhb.Height, bh.Height)
+//		return false, nil
+//	}
+//	if bhb.Hash.IsEqual(&bh.Hash) {
+//		// Self == best
+//		return true, nil
+//	}
+//	// Move best block header backwards until we find bh.
+//	log.Infof("isCanonical best %v bh %v", bhb.HH(), bh.HH())
+//	for {
+//		if height, ok := s.checkpoints[bhb.Hash]; ok {
+//			log.Infof("IN MAP isCanonical best %v bh %v", bhb.HH(), bh.HH())
+//			log.Infof("HEIGHT %v <= %v", height, bh.Height)
+//			panic(spew.Sdump(bhb))
+//		}
+//		if height, ok := s.checkpoints[bhb.Hash]; ok && height <= bh.Height {
+//			// Did not find bh in path
+//			return false, nil
+//		}
+//		bhb, err = s.db.BlockHeaderByHash(ctx, *bhb.ParentHash())
+//		if err != nil {
+//			return false, err
+//		}
+//		if bhb.Hash.IsEqual(s.chainParams.GenesisHash) {
+//			return false, nil
+//		}
+//		if bhb.Hash.IsEqual(&bh.Hash) {
+//			return true, nil
+//		}
+//	}
+//}
 
 func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
 	log.Tracef("findCanonicalParent %v", bh)
