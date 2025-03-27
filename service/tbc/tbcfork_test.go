@@ -2629,7 +2629,7 @@ func TestTransactions(t *testing.T) {
 	t.Logf("coinbase signed tx out 0: %v", disasm)
 }
 
-func TestCanonicity(t *testing.T) {
+func TestForkCanonicity(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
@@ -2681,6 +2681,7 @@ func TestCanonicity(t *testing.T) {
 	}()
 	time.Sleep(250 * time.Millisecond)
 
+	//		   		 /--> b3aa
 	//        / --> b2a - b3a - b4a - b5a - b6a
 	// g - b1 ---->	b2  - b3  - b4  - b5
 	//        \ --> b2b
@@ -2696,7 +2697,7 @@ func TestCanonicity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mainChainHashes := map[string]*chainhash.Hash{"b1": b1.Hash()}
+	mainChainHashes := map[string]*chainhash.Hash{"genesis": parent, "b1": b1.Hash()}
 
 	// increase difficulty to ensure b1 -> b5 remains canonical
 	reqDifficulty = uint32(0x1d000fff)
@@ -2735,18 +2736,26 @@ func TestCanonicity(t *testing.T) {
 	}
 	altChainHashes["b2b"] = b2b.Hash()
 
+	//chain aa
+	b3aa, err := n.MineAndSend(ctx, "b3aa", altChainHashes["b2a"], address, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	altChainHashes["b3aa"] = b3aa.Hash()
+
 	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
 
-	// set checkpoints to b1 and b2
+	// set checkpoints to genesis, b2 and b4
 	s.checkpoints = []checkpoint{
+		{4, *mainChainHashes["b4"]},
 		{2, *mainChainHashes["b2"]},
-		{1, *b1.Hash()},
+		{0, *parent},
 	}
 
-	// assert b2 -> b5 are canonical
+	// assert genesis -> b5 are canonical
 	for bname, hs := range mainChainHashes {
 		bh, err := s.db.BlockHeaderByHash(ctx, *hs)
 		if err != nil {
