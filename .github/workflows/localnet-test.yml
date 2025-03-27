@@ -33,7 +33,7 @@ jobs:
           check-latest: true
 
       - name: "Download and verify dependencies"
-        run: make deps
+        run: make go-deps
 
       - name: "build localnet"
         run: docker compose -f ./e2e/docker-compose.yml build
