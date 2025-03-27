@@ -991,6 +991,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("block header by hash: %w", err)
 	}
+	// XXX remove infof, keep for debug for now
 	log.Infof("isCanonical: %v %v", p, hash)
 	ts := time.Now()
 	canonical, _ := s.isCanonical(ctx, bhX)

@@ -254,6 +254,16 @@ func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeade
 	}
 }
 
+// isCanonical uses checkpoints to determine if a block is on the canonical
+// chain. This is a expensive call hence it tries to use checkpoints to short
+// circuit the check.
+// XXX add testcases to validate the following geometry. Put a checkpoint on 1
+// and 2 then check all the blocks above it.
+/*
+	        2''
+	        2'- 3'- 4'- 5' - 6'
+	g - 1 - 2 - 3 - 4 - 5
+*/
 func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, error) {
 	var (
 		bhb *tbcd.BlockHeader
@@ -303,53 +313,6 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		}
 	}
 }
-
-//         2''
-//         2'- 3'- 4'- 5' - 6'
-// g - 1 - 2 - 3 - 4 - 5
-//
-//
-
-//func (s *Server) _isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, error) {
-//	bhb, err := s.db.BlockHeaderBest(ctx)
-//	if err != nil {
-//		return false, err
-//	}
-//	if bhb.Height < bh.Height {
-//		// We either hit a race or the caller did something wrong.
-//		// Either way, it cannot be canonical.
-//		log.Debugf("best height less than provided height: %v < %v",
-//			bhb.Height, bh.Height)
-//		return false, nil
-//	}
-//	if bhb.Hash.IsEqual(&bh.Hash) {
-//		// Self == best
-//		return true, nil
-//	}
-//	// Move best block header backwards until we find bh.
-//	log.Infof("isCanonical best %v bh %v", bhb.HH(), bh.HH())
-//	for {
-//		if height, ok := s.checkpoints[bhb.Hash]; ok {
-//			log.Infof("IN MAP isCanonical best %v bh %v", bhb.HH(), bh.HH())
-//			log.Infof("HEIGHT %v <= %v", height, bh.Height)
-//			panic(spew.Sdump(bhb))
-//		}
-//		if height, ok := s.checkpoints[bhb.Hash]; ok && height <= bh.Height {
-//			// Did not find bh in path
-//			return false, nil
-//		}
-//		bhb, err = s.db.BlockHeaderByHash(ctx, *bhb.ParentHash())
-//		if err != nil {
-//			return false, err
-//		}
-//		if bhb.Hash.IsEqual(s.chainParams.GenesisHash) {
-//			return false, nil
-//		}
-//		if bhb.Hash.IsEqual(&bh.Hash) {
-//			return true, nil
-//		}
-//	}
-//}
 
 func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
 	log.Tracef("findCanonicalParent %v", bh)
