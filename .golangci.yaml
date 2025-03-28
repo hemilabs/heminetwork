@@ -1,24 +1,11 @@
+version: "2"
 run:
   tests: false
   go: "1.23"
 
 issues:
-  # Show all errors
   max-issues-per-linter: 0
   max-same-issues: 0
-
-  # Exclude sources following the Go generated file convention.
-  exclude-generated: "strict"
-
-  # Add exclusions here.
-  exclude-rules:
-    # Licensed under ISC License, with different copyright owners.
-    - path: version/version\.go
-      linters: [ "goheader" ]
-
-    # Licensed under ISC License, 2016-2022 The Decred developers
-    - path: service/tbc/util\.go
-      linters: [ "goheader" ]
 
 linters:
   enable:
@@ -28,19 +15,16 @@ linters:
     - "errcheck" # Checks for unchecked errors.
     - "errorlint" # Verifies errors are properly wrapped.
     - "errname" # Checks that sentinel errors are prefixed with the Err and error types are suffixed with the Error.
-    - "gci" # Enforces package import order, making it deterministic.
     - "gocheckcompilerdirectives" # Checks that go compiler directive comments (//go:) are valid.
     - "gochecksumtype" # Run exhaustiveness checks on Go "sum types".
-    - "gofumpt" # Runs gofumpt.
     # TODO enable gosec, when bored run 'golangci-lint run -Egosec' to fix these
     # - "gosec" # Checks for potential security issues
-    - "gosimple" # Checks for ways to simplify code.
     - "gomoddirectives" # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
     - "gosmopolitan" # Report certain i18n/l10n anti-patterns in your Go codebase.
     - "govet" # Runs go vet.
     - "ineffassign" # Detects when assignments to variables are not used.
     # TODO enable revive, when bored run 'golangci-lint run -Erevive' to fix these
-    # - "revive" # Checks for potential security issues
+    # - "revive" # Miscellaneous linter
     - "nilerr" # Finds the code that returns nil even if it checks that the error is not nil.
     - "nolintlint" # Reports ill-formed or insufficient nolint directives.
     - "prealloc" # Finds slice declarations that could potentially be pre-allocated.
@@ -51,46 +35,59 @@ linters:
     - "rowserrcheck" # Checks whether Rows.Err of rows is checked successfully.
     - "unconvert" # Checks for unnecessary type conversions.
     - "unused" # Checks for unused constants, variables, functions and types.
+  settings:
+    errcheck:
+      exclude-functions:
+        - "loggo.ConfigureLoggers(string)"
+    gocritic:
+      disabled-checks:
+        - "elseif"
+        - "exitAfterDefer"
+        - "ifElseChain"
+        - "singleCaseSwitch"
+    godox: # Finds todo comments; Use: golangci-lint run --enable-only godox
+      keywords:
+        - "XXX"
+        - "TODO"
+        - "FIXME"
+    gomoddirectives:
+      replace-allow-list:
+        - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
+    nolintlint:
+      # Require an explanation after each nolint directive.
+      # Explanation format example: '//nolint:ineffassign // Explanation goes here.'
+      # If this becomes too annoying, disable it.
+      require-explanation: true
+  exclusions:
+    generated: "strict"
+    presets:
+      - "comments"
+      - "common-false-positives"
+      - "legacy"
+      - "std-error-handling"
+    rules:
+      - linters: [ "staticcheck" ]
+        text: "QF1001:" # "could apply De Morgan's law"
+    paths:
+      - "third_party$"
+      - "builtin$"
+      - "examples$"
 
-linters-settings:
-  # Checks for unchecked errors.
-  errcheck:
-    exclude-functions:
-      - "loggo.ConfigureLoggers(string)"
-
-  # Enforces import order in Go source files
-  gci:
-    sections:
-      - "standard"
-      - "default"
-      - "blank"
-      - "dot"
-      - "localmodule"
-    custom-order: true
-
-  gocritic:
-    disabled-checks:
-      - "elseif"
-      - "exitAfterDefer"
-      - "ifElseChain"
-      - "singleCaseSwitch"
-
-  # Detects XXX/TODO/FIXME comments. Useful for finding old todo items.
-  #  Use: golangci-lint run --enable-only godox
-  godox:
-    keywords:
-      - "XXX"
-      - "TODO"
-      - "FIXME"
-
-  # Manages 'replace', 'retract' and 'excludes' directives in go.mod.
-  gomoddirectives:
-    replace-allow-list:
-      - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
-
-  # Lints nolint directives.
-  nolintlint:
-    # Require an explanation after each nolint directive.
-    # Explanation format example: '//nolint:ineffassign // Explanation goes here.'
-    # If this becomes too annoying, disable it.
-    require-explanation: true
+formatters:
+  enable:
+    - "gci" # Enforces package import order, making it deterministic.
+    - "gofumpt" # An extended version of go fmt.
+  settings:
+    gci:
+      sections:
+        - "standard"
+        - "default"
+        - "blank"
+        - "dot"
+        - "localmodule"
+      custom-order: true
+  exclusions:
+    paths:
+      - "third_party$"
+      - "builtin$"
+      - "examples$"

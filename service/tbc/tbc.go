@@ -2286,8 +2286,8 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 
 	// Find out how many blocks are missing.
 	var (
-		blksMissing bool = true
-		maxMissing  int  = 64
+		blksMissing = true
+		maxMissing  = 64
 	)
 	// expensive check
 	bm, err := s.db.BlocksMissing(ctx, maxMissing)

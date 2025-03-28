@@ -565,7 +565,7 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 	return buResp, nil
 }
 
-var ErrAlreadyProcessed error = fmt.Errorf("Already Processed BTC Block")
+var ErrAlreadyProcessed = errors.New("already processed bitcoin block")
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)

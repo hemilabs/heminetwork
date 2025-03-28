@@ -282,7 +282,7 @@ func (ts Timestamp) Value() (driver.Value, error) {
 	if ts.IsZero() {
 		return nil, nil
 	}
-	return ts.Time.Format(time.RFC3339Nano), nil
+	return ts.Format(time.RFC3339Nano), nil
 }
 
 var _ driver.Valuer = (*Timestamp)(nil)
