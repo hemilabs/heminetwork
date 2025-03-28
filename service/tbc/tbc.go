@@ -173,7 +173,7 @@ type Server struct {
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
-	checkpoints map[chainhash.Hash]uint64
+	checkpoints []checkpoint
 	hemiGenesis *HashHeight
 	pm          *PeerManager
 
@@ -280,7 +280,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
-		s.checkpoints = make(map[chainhash.Hash]uint64)
+		s.checkpoints = []checkpoint{}
 		s.hemiGenesis = localnetHemiGenesis
 		wanted = 1
 
@@ -553,7 +553,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	} else {
 		err := s.getHeadersByHeights(ctx, p,
 			bhb.Height, bhb.Height-1000, bhb.Height-1999,
-			lastCheckpointHeight(bhb.Height, s.checkpoints))
+			previousCheckpointHeight(bhb.Height, s.checkpoints))
 		if err != nil {
 			readError = err
 			return fmt.Errorf("handle peer heights: %w", err)
@@ -991,10 +991,11 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("block header by hash: %w", err)
 	}
-	canonical, err := s.isCanonical(ctx, bhX)
+	canonical, _ := s.isCanonical(ctx, bhX)
 	if err != nil {
-		return fmt.Errorf("is canonical: %w", err)
+		return fmt.Errorf("is canonical: %v %w", hash, err)
 	}
+
 	if !canonical {
 		log.Infof("Deleting from blocks missing database: %v %v %v",
 			p, bhX.Height, bhX)
