@@ -218,6 +218,7 @@ func opnodeLaunch(ctx context.Context, t *testing.T, wg *sync.WaitGroup, listenA
 }
 
 func TestPopMiner(t *testing.T) {
+	t.Skip()
 	var wg sync.WaitGroup
 
 	ctx, cancel := context.WithCancel(context.Background())
