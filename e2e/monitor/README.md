@@ -5,7 +5,7 @@ that we want to test against.
 
 ## Prerequisites
 
-* Go 1.23+
+* Go 1.24+
 * `docker` available in your cli
 
 ## Running
