@@ -61,6 +61,7 @@ services:
   bitcoind:
     # yamllint disable-line rule:line-length
     image: "kylemanna/bitcoind@sha256:5d97bbe3c74856818f0b3a1e718eb3968981ab03ce08aaf1c7d528f99aaf30b7"
+    profiles: ["L1", "full"]
     volumes:
       - bitcoin_data:/bitcoin/.bitcoin
     ports:
