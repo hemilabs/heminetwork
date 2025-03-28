@@ -159,7 +159,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 		case <-ctx.Done():
 			err = ctx.Err()
 		case n := <-headersCh:
-			spew.Dump(n) // XXX
+			log.Infof(spew.Sdump(n))
 			continue
 		}
 		return err
