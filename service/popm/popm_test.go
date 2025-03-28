@@ -2,238 +2,123 @@ package popm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"net"
+	"math/big"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/coder/websocket"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/gorilla/websocket"
 	"github.com/juju/loggo"
-
-	"github.com/hemilabs/heminetwork/api/popapi"
-	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/hemi"
 )
 
-type opnode struct{}
+var upgrader = websocket.Upgrader{}
 
-type opnodeWs struct {
-	wg             sync.WaitGroup
-	addr           string
-	conn           *protocol.WSConn
-	requestContext context.Context
+type jsonrpcSubscriptionNotification struct {
+	Version string                `json:"jsonrpc"`
+	Method  string                `json:"method"`
+	Params  subscriptionResultEnc `json:"params"`
 }
 
-func (o *opnode) handlePingRequest(ctx context.Context, ws *opnodeWs, payload any, id string) error {
-	p, ok := payload.(*popapi.PingRequest)
-	if !ok {
-		return fmt.Errorf("invalid payload type: %T", payload)
-	}
-
-	res := &popapi.PingResponse{
-		OriginTimestamp: p.Timestamp,
-		Timestamp:       time.Now().Unix(),
-	}
-
-	if err := popapi.Write(ctx, ws.conn, id, res); err != nil {
-		return fmt.Errorf("handlePingRequest write: %v %w", ws.addr, err)
-	}
-
-	return nil
+type subscriptionResultEnc struct {
+	ID     string `json:"subscription"`
+	Result any    `json:"result"`
 }
 
-func (o *opnode) handleL2KeystoneRequest(ctx context.Context, ws *opnodeWs, payload any, id string) (any, error) {
-	p, ok := payload.(*popapi.L2KeystoneRequest)
-	if !ok {
-		return fmt.Errorf("invalid payload type: %T", payload), nil
-	}
-
-	l2Keystone := hemi.L2Keystone{
-		Version:            1,
-		L1BlockNumber:      11,
-		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-	}
-
-	_ = p
-	res := &popapi.L2KeystoneResponse{
-		L2Keystones: []*hemi.L2Keystone{&l2Keystone},
-	}
-
-	return res, nil
+type jsonrpcMessage struct {
+	Version string          `json:"jsonrpc,omitempty"`
+	ID      int             `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Error   *jsonError      `json:"error,omitempty"`
+	Result  string          `json:"result,omitempty"`
 }
 
-func (o *opnode) handleRequest(ctx context.Context, ws *opnodeWs, id string, cmd protocol.Command, handler func(ctx context.Context) (any, error)) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+type jsonError struct {
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
 
-	res, err := handler(ctx)
+func handleSubscription(w http.ResponseWriter, r *http.Request) {
+	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Errorf("Failed to handle %s request for %s: %v", cmd, ws.addr, err)
-	}
-	if res == nil {
 		return
 	}
-
-	if err = popapi.Write(ctx, ws.conn, id, res); err != nil {
-		log.Errorf("Failed to handle %s request for %s: protocol write failed: %v",
-			cmd, ws.addr, err)
-	}
-}
-
-func (o *opnode) handleWebsocketRead(ctx context.Context, ws *opnodeWs) {
-	defer ws.wg.Done()
-
+	defer c.Close()
 	for {
-		cmd, id, payload, err := popapi.Read(ctx, ws.conn)
+		var msg jsonrpcMessage
+		err := c.ReadJSON(&msg)
 		if err != nil {
-			var ce websocket.CloseError
-			if errors.As(err, &ce) {
-				panic(fmt.Errorf("handleWebsocketRead: %v", err))
-				return
-			}
-			if errors.Is(err, io.EOF) {
-				panic(fmt.Errorf("handleWebsocketRead: EOF"))
-				return
-			}
-
-			log.Errorf("handleWebsocketRead: %v", err)
-			return
+			panic(err)
 		}
 
-		switch cmd {
-		case popapi.CmdPingRequest:
-			err = o.handlePingRequest(ctx, ws, payload, id)
-		case popapi.CmdPingResponse:
-			log.Infof("Received ping response from: %v", ws.addr)
-			continue
-		case popapi.CmdL2KeystoneRequest:
-			handler := func(ctx context.Context) (any, error) {
-				return o.handleL2KeystoneRequest(ctx, ws, payload, "")
-			}
-
-			go o.handleRequest(ctx, ws, id, cmd, handler)
-		default:
-			err = fmt.Errorf("unknown command: %v", cmd)
+		fakeHeader := types.Header{
+			ParentHash:  common.HexToHash("0000H45H"),
+			UncleHash:   common.HexToHash("0000H45H"),
+			Coinbase:    common.HexToAddress("0000H45H"),
+			Root:        common.HexToHash("0000H00H"),
+			TxHash:      common.HexToHash("0000H45H"),
+			ReceiptHash: common.HexToHash("0000H45H"),
+			Difficulty:  big.NewInt(1337),
+			Number:      big.NewInt(1337),
+			GasLimit:    1338,
+			GasUsed:     1338,
+			Time:        1338,
+			Extra:       []byte("Extra data Extra data Extra data  Extra data  Extra data  Extra data  Extra data Extra data"),
+			MixDigest:   common.HexToHash("0x0000H45H"),
+		}
+		encResult := subscriptionResultEnc{
+			ID:     "0x5a395650bce324475634d746a831c227",
+			Result: fakeHeader,
+		}
+		subData := jsonrpcSubscriptionNotification{
+			Version: "2.0",
+			Method:  "eth_subscription",
+			Params:  encResult,
+		}
+		subResp := jsonrpcMessage{
+			Version: "2.0",
+			ID:      1,
+			Result:  "0x5a395650bce324475634d746a831c227",
 		}
 
-		// Command failed
+		err = c.WriteJSON(subResp)
 		if err != nil {
-			log.Errorf("handleWebsocketRead %s %s %s: %v",
-				ws.addr, cmd, id, err)
-			return
+			panic(err)
 		}
-	}
-}
 
-func (o *opnode) handleWebsocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		CompressionMode: websocket.CompressionContextTakeover,
-	})
-	if err != nil {
-		panic(fmt.Errorf("Failed to accept websocket connection for %s: %v",
-			r.RemoteAddr, err))
-	}
-	defer conn.Close(websocket.StatusNormalClosure, "") // Force close connection
-
-	ws := &opnodeWs{
-		addr:           r.RemoteAddr,
-		conn:           protocol.NewWSConn(conn),
-		requestContext: r.Context(),
-	}
-
-	ws.wg.Add(1)
-	go o.handleWebsocketRead(r.Context(), ws)
-
-	// Always ping, required by protocol.
-	ping := &popapi.PingRequest{
-		Timestamp: time.Now().Unix(),
-	}
-
-	if err = popapi.Write(r.Context(), ws.conn, "0", ping); err != nil {
-		log.Errorf("Write ping: %v", err)
-	}
-
-	ws.wg.Add(1)
-	go func() {
-		defer ws.wg.Done()
 		for {
-			select {
-			case <-ws.requestContext.Done():
-				return
-			case <-time.After(time.Second):
-				kssNotif := popapi.L2KeystoneNotfication{}
-				if err := popapi.Write(ws.requestContext, ws.conn, "opnode", kssNotif); err != nil {
-					panic(fmt.Errorf("handleL2KeystoneNotification write: %v %w", ws.addr, err))
-				}
+			time.Sleep(500 * time.Millisecond)
+			c.WriteJSON(subData)
+			if err != nil {
+				panic(err)
 			}
 		}
-	}()
-
-	// Wait for termination
-	ws.wg.Wait()
-
-	log.Infof("Connection terminated from %v", r.RemoteAddr)
-}
-
-func opnodeLaunch(ctx context.Context, t *testing.T, wg *sync.WaitGroup, listenAddress string) {
-	defer wg.Done()
-
-	o := opnode{}
-
-	mux := http.NewServeMux()
-	t.Logf("handle (opnode): %s", popapi.RouteWebsocket)
-	mux.HandleFunc(popapi.RouteWebsocket, o.handleWebsocket)
-
-	httpServer := &http.Server{
-		Addr:        listenAddress,
-		Handler:     mux,
-		BaseContext: func(_ net.Listener) context.Context { return ctx },
-	}
-	httpErrCh := make(chan error)
-	go func() {
-		t.Logf("Listening: %s", listenAddress)
-		httpErrCh <- httpServer.ListenAndServe()
-	}()
-	defer func() {
-		if err := httpServer.Shutdown(ctx); err != nil {
-			panic(fmt.Errorf("http server exit: %v", err))
-		}
-		t.Logf("RPC server shutdown cleanly")
-	}()
-
-	select {
-	case <-ctx.Done():
-		return
-	case err := <-httpErrCh:
-		panic(err)
 	}
 }
 
 func TestPopMiner(t *testing.T) {
-	t.Skip()
 	var wg sync.WaitGroup
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Setup fake op-node
-	wg.Add(1)
-	go func() {
-		opnodeLaunch(ctx, t, &wg, "127.0.0.1:9999")
-	}()
+	// Create test server with the echo handler.
+	opgeth := httptest.NewServer(http.HandlerFunc(handleSubscription))
+	defer opgeth.Close()
 
 	// Setup pop miner
 	cfg := NewDefaultConfig()
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634cb0602599b867332dfec245547baafae40dad247f21564a0de925527f2445a086fd"
-	// cfg.LogLevel = "popm=TRACE"
+	cfg.LogLevel = "popm=TRACE"
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
 	}
@@ -251,15 +136,4 @@ func TestPopMiner(t *testing.T) {
 	}()
 
 	time.Sleep(5 * time.Second)
-}
-
-// fillOutBytes will take a string and return a slice of bytes
-// with values from the string suffixed until a size with bytes '_'
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-
-	return result
 }

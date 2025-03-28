@@ -152,7 +152,6 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer sub.Unsubscribe()
 
 	for {
 		select {
@@ -160,7 +159,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 		case <-ctx.Done():
 			err = ctx.Err()
 		case n := <-headersCh:
-			log.Infof(spew.Sdump(n))
+			log.Infof(spew.Sdump(n)) // XXX
 			continue
 		}
 		return err
