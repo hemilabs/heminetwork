@@ -277,7 +277,7 @@ services:
   # Prysm
   prysm:
     # yamllint disable-line rule:line-length
-    image: "gcr.io/prysmaticlabs/prysm/beacon-chain@sha256:ea7d64346cd51cb0a6979779bdfd284a13aedb5642a795637935daacdfe1675d"
+    image: "docker.io/prysmaticlabs/prysm-beacon-chain:v5.3.2@sha256:7e2ca890f1b3cbeef69723399767dfbba5c6c660e4e230bc0b4dbe778992e364"
     profiles: ["L1", "full"]
     volumes:
       - prysm_data:/data
@@ -290,6 +290,7 @@ services:
       - "localnode"
     command:
       - "--execution-endpoint=${GETHL1ENDPOINT:-http://geth-l1:8551}"
+      - "--mainnet"
       - "--jwt-secret=/tmp/jwt/jwt.hex"
       - "--checkpoint-sync-url=https://beaconstate.info"
       - "--genesis-beacon-api-url=https://beaconstate.info"
@@ -299,7 +300,6 @@ services:
       - "--enable-debug-rpc-endpoints"
       - "--grpc-gateway-host=0.0.0.0"
       - "--enable-experimental-backfill"
-      - "--mainnet"
 
 networks:
   localnode: {}
