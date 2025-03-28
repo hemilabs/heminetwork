@@ -16,11 +16,11 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/api/popapi"
-	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
@@ -37,11 +37,6 @@ const (
 
 var log = loggo.GetLogger("popm")
 
-type opnodeCmd struct {
-	msg any
-	ch  chan any
-}
-
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
 		panic(err)
@@ -52,7 +47,7 @@ type Config struct {
 	Network                 string
 	BitcoinSecret           string
 	LogLevel                string
-	OpnodeURL               string
+	OpgethURL               string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
@@ -62,7 +57,7 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		Network:             "testnet3",
 		PrometheusNamespace: appName,
-		OpnodeURL:           "http://127.0.0.1:9999/v1/ws", // XXX set this using defaults
+		OpgethURL:           "http://127.0.0.1:9999/v1/ws", // XXX set this using defaults
 	}
 }
 
@@ -81,9 +76,9 @@ type Server struct {
 	isRunning      bool
 	promCollectors []prometheus.Collector
 
-	// opnode
-	opnodeWG    sync.WaitGroup
-	opnodeCmdCh chan opnodeCmd
+	// opgeth
+	opgethClient *ethclient.Client // XXX evaluate if ok
+	opgethWG     sync.WaitGroup
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -92,8 +87,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:         cfg,
-		opnodeCmdCh: make(chan opnodeCmd, 10),
+		cfg: cfg,
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -149,177 +143,52 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func (s *Server) callOpnode(pctx context.Context, timeout time.Duration, msg any) (any, error) {
-	// XXX this code does not go here. move to caller
-	log.Tracef("callOpnode %T", msg)
-	defer log.Tracef("callOpnode exit %T", msg)
+func (s *Server) handleOpgethSubscription(ctx context.Context) error {
+	log.Tracef("subscribeOpgeth")
+	defer log.Tracef("subscribeOpgeth exit")
 
-	bc := opnodeCmd{
-		msg: msg,
-		ch:  make(chan any),
-	}
-
-	ctx, cancel := context.WithTimeout(pctx, timeout)
-	defer cancel()
-
-	// attempt to send
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case s.opnodeCmdCh <- bc:
-	default:
-		return nil, errors.New("opnode command queue full")
-	}
-
-	// Wait for response
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case payload := <-bc.ch:
-		if err, ok := payload.(error); ok {
-			return nil, err
-		}
-		return payload, nil
-	}
-
-	// Won't get here
-}
-
-func (s *Server) checkForKeystones(ctx context.Context) error {
-	log.Tracef("Checking for new keystone headers...")
-
-	ghkr := &popapi.L2KeystoneRequest{
-		Count: 3, // XXX this needs to be a bit smarter, do this based on some sort of time calculation. Do keep it simple, we don't need keystones that are older than let's say, 30 minbutes.
-	}
-
-	res, err := s.callOpnode(ctx, defaultRequestTimeout, ghkr)
+	headersCh := make(chan *types.Header, 10)
+	sub, err := s.opgethClient.SubscribeNewHead(context.Background(), headersCh)
 	if err != nil {
 		return err
 	}
+	defer sub.Unsubscribe()
 
-	ghkrResp, ok := res.(*popapi.L2KeystoneResponse)
-	if !ok {
-		return errors.New("not an L2KeystonesResponse")
-	}
-
-	if ghkrResp.Error != nil {
-		return ghkrResp.Error
-	}
-
-	log.Tracef("Got response with %v keystones", len(ghkrResp.L2Keystones))
-
-	return nil
-}
-
-func (s *Server) handleOpnodeWebsocketCall(ctx context.Context, conn *protocol.Conn) {
-	defer s.opnodeWG.Done()
-
-	log.Tracef("handleOpnodeWebsocketCall")
-	defer log.Tracef("handleOpnodeWebsocketCall exit")
 	for {
 		select {
+		case err = <-sub.Err():
 		case <-ctx.Done():
-			return
-		case bc := <-s.opnodeCmdCh:
-			go s.handleOpnodeCallCompletion(ctx, conn, bc)
-		}
-	}
-}
-
-func (s *Server) handleOpnodeWebsocketRead(ctx context.Context, conn *protocol.Conn) error {
-	defer s.opnodeWG.Done()
-
-	log.Tracef("handleOpnodeWebsocketRead")
-	defer log.Tracef("handleOpnodeWebsocketRead exit")
-	for {
-		cmd, rid, payload, err := popapi.ReadConn(ctx, conn)
-		if err != nil {
-
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(5 * time.Second):
-			}
-			log.Infof("Connection to opnode was lost, reconnecting...")
+			err = ctx.Err()
+		case n := <-headersCh:
+			spew.Dump(n) // XXX
 			continue
 		}
-
-		switch cmd {
-		case popapi.CmdPingRequest:
-			p := payload.(*popapi.PingRequest)
-			response := &popapi.PingResponse{
-				OriginTimestamp: p.Timestamp,
-				Timestamp:       time.Now().Unix(),
-			}
-
-			if err := popapi.Write(ctx, conn, rid, response); err != nil {
-				log.Errorf("Failed to write ping response to opnode server: %v", err)
-			}
-		case popapi.CmdL2KeystoneNotification:
-			go func() {
-				if err := s.checkForKeystones(ctx); err != nil {
-					log.Errorf("An error occurred while checking for keystones: %v", err)
-				}
-			}()
-		default:
-			return fmt.Errorf("unknown command: %v", cmd)
-		}
+		return err
 	}
 }
 
-func (s *Server) handleOpnodeCallCompletion(pctx context.Context, conn *protocol.Conn, bc opnodeCmd) {
-	log.Tracef("handleOpnodeCallCompletion")
-	defer log.Tracef("handleOpnodeCallCompletion exit")
-
-	ctx, cancel := context.WithTimeout(pctx, defaultRequestTimeout)
-	defer cancel()
-
-	log.Tracef("handleOpnodeCallCompletion: %v", spew.Sdump(bc.msg))
-
-	_, _, payload, err := popapi.Call(ctx, conn, bc.msg)
-	if err != nil {
-		log.Errorf("handleOpnodeCallCompletion %T: %v", bc.msg, err)
-		select {
-		case bc.ch <- err:
-		default:
-		}
-	}
-	select {
-	case bc.ch <- payload:
-		log.Tracef("handleOpnodeCallCompletion returned: %v", spew.Sdump(payload))
-	default:
-	}
-}
-
-func (s *Server) connectOpnode(pctx context.Context) error {
+func (s *Server) connectOpgeth(pctx context.Context) error {
 	log.Tracef("connectOpnode")
-	defer log.Tracef("connectOpnode exit")
+	defer log.Tracef("connectOpgeth exit")
 
-	conn, err := protocol.NewConn(s.cfg.OpnodeURL, &protocol.ConnOptions{
-		ReadLimit: 1 * (1 << 20), // 1 MiB
-	})
+	var err error
+	s.opgethClient, err = ethclient.Dial(s.cfg.OpgethURL)
 	if err != nil {
 		return err
 	}
+	defer s.opgethClient.Close()
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	err = conn.Connect(ctx)
-	if err != nil {
-		return err
-	}
+	log.Debugf("connected to opgeth: %s", s.cfg.OpgethURL)
 
 	rWSCh := make(chan error)
-	s.opnodeWG.Add(1)
+	s.opgethWG.Add(1)
 	go func() {
-		rWSCh <- s.handleOpnodeWebsocketRead(ctx, conn)
+		s.opgethWG.Done()
+		rWSCh <- s.handleOpgethSubscription(ctx)
 	}()
-
-	s.opnodeWG.Add(1)
-	go s.handleOpnodeWebsocketCall(ctx, conn)
-
-	log.Debugf("connected to opnode: %s", s.cfg.OpnodeURL)
 
 	select {
 	case <-ctx.Done():
@@ -327,24 +196,25 @@ func (s *Server) connectOpnode(pctx context.Context) error {
 	case err = <-rWSCh:
 	}
 	cancel()
+	s.opgethClient.Close()
 
 	// Wait for exit
-	s.opnodeWG.Wait()
+	s.opgethWG.Wait()
 
 	return err
 }
 
-func (s *Server) opnode(ctx context.Context) {
-	log.Tracef("opnode")
-	defer log.Tracef("opnode exit")
+func (s *Server) opgeth(ctx context.Context) {
+	log.Tracef("opgeth")
+	defer log.Tracef("opgeth exit")
 
 	for {
-		log.Tracef("connecting to: %v", s.cfg.OpnodeURL)
-		if err := s.connectOpnode(ctx); err != nil {
+		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
+		if err := s.connectOpgeth(ctx); err != nil {
 			// Do nothing
-			log.Tracef("connectOpnode: %v", err)
+			log.Tracef("connectOpgeth: %v", err)
 		} else {
-			log.Infof("Connected to opnode: %s", s.cfg.OpnodeURL)
+			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
 		}
 		// See if we were terminated
 		select {
@@ -353,7 +223,7 @@ func (s *Server) opnode(ctx context.Context) {
 		case <-time.After(5 * time.Second):
 		}
 
-		log.Debugf("reconnecting to: %v", s.cfg.OpnodeURL)
+		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
 	}
 }
 
@@ -448,7 +318,7 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		s.opnode(ctx)
+		s.opgeth(ctx)
 	}()
 
 	log.Infof("bitcoin address   : %v", s.address)

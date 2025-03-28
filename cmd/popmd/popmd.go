@@ -30,10 +30,10 @@ var (
 
 	cfg = popm.NewDefaultConfig()
 	cm  = config.CfgMap{
-		"POPM_OPNODE_URL": config.Config{
-			Value:        &cfg.OpnodeURL,
+		"POPM_OPGETH_URL": config.Config{
+			Value:        &cfg.OpgethURL,
 			DefaultValue: "localhost:9999",
-			Help:         "URL for opnode",
+			Help:         "URL for opgeth",
 			Print:        config.PrintAll,
 		},
 		"POPM_BITCOIN_NETWORK": config.Config{
