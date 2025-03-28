@@ -71,6 +71,7 @@ func (r *RawDB) Open() error {
 	}
 	r.index, err = leveldb.OpenFile(filepath.Join(r.home, indexDir), &opt.Options{
 		BlockCacheEvictRemoved: true,
+		Compression:            opt.NoCompression,
 	})
 	if err != nil {
 		return fmt.Errorf("mkdir: %w", err)

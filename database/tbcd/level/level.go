@@ -44,7 +44,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 2
+	ldbVersion = 3
 
 	logLevel = "INFO"
 	verbose  = false
@@ -67,8 +67,11 @@ var (
 
 	noStats tbcd.CacheStats
 
-	versionKey = []byte("version")
+	// Metadata keys.
+	versionKey     = []byte("version")
+	CompressionKey = []byte("compression")
 
+	// These keys live in their own respective databases.
 	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
 	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
 	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
@@ -169,7 +172,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 
-	ld, err := level.New(ctx, cfg.Home, ldbVersion)
+	ld, err := level.New(ctx, level.NewDefaultConfig(cfg.Home))
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +211,6 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			log.Infof("%v", welcome[k])
 		}
 	}
-
 	// Upgrade database
 	for {
 		dbVersion, err := l.Version(ctx)
@@ -229,6 +231,9 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		case 1:
 			// Upgrade to v2
 			err = l.v2(ctx)
+		case 2:
+			// Upgrade to v3
+			err = l.v3(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {

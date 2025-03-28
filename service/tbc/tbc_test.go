@@ -182,9 +182,11 @@ func TestDbUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Fatalf("expected version 2, got %v", version)
+	if version != 3 {
+		t.Fatalf("expected version 3, got %v", version)
 	}
+
+	// version 2 checks
 
 	// Copied from level package because this test can't be run there.
 	utxoIndexHashKey := []byte("utxoindexhash")
@@ -229,6 +231,8 @@ func TestDbUpgrade(t *testing.T) {
 	if !keystonebh.Hash.IsEqual(&hash) {
 		t.Fatal("unexpected keystone hash")
 	}
+
+	// version 3 checks
 }
 
 func TestKeystonesInBlock(t *testing.T) {
