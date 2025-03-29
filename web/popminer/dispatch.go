@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"net/http"
 	"runtime/debug"
-	"syscall/js"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -22,6 +21,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
+	"syscall/js"
 
 	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/service/popm"

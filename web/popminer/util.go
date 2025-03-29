@@ -12,9 +12,10 @@ import (
 	"reflect"
 	"runtime/debug"
 	"strings"
-	"syscall/js"
 	"time"
 	"unsafe"
+
+	"syscall/js"
 
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/popm"

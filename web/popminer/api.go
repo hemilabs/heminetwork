@@ -9,6 +9,7 @@ package main
 import (
 	"fmt"
 	"strings"
+
 	"syscall/js"
 
 	"github.com/hemilabs/heminetwork/service/popm"

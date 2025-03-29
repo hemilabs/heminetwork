@@ -13,9 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall/js"
 
 	"github.com/juju/loggo"
+	"syscall/js"
 
 	"github.com/hemilabs/heminetwork/service/popm"
 	versionPkg "github.com/hemilabs/heminetwork/version"

@@ -2736,7 +2736,7 @@ func TestForkCanonicity(t *testing.T) {
 	}
 	altChainHashes["b2b"] = b2b.Hash()
 
-	//chain aa
+	// chain aa
 	b3aa, err := n.MineAndSend(ctx, "b3aa", altChainHashes["b2a"], address, false)
 	if err != nil {
 		t.Fatal(err)
