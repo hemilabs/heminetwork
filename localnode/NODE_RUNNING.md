@@ -160,7 +160,7 @@ docker compose -f localnode/docker-compose_mainnet.yml --profile L1 up --build
 
 To run only the Hemi containers, add your endpoints to `.env`:
 ```sh
-OPSYNCMODE=concensus-layer
+OPSYNCMODE=consensus-layer
 BITCOINENDPOINT=
 BITCOINCREDS=
 GETHL1ENDPOINT=
