@@ -69,6 +69,10 @@ cat /tmp/blockl1.json
     --outfile.l2  \
     /l2configs/genesis.json \
     --outfile.rollup  \
-    /l2configs/rollup.json \
+    /tmp/rollup.json \
     --l1-starting-block \
     /tmp/blockl1.json
+
+# HACK TO REMOVE old fields to make the generated genesis file compatible for 
+# after newer version
+cat /tmp/rollup.json | jq ".genesis.l1.hash = $(cat /tmp/blockl1.json | jq '.hash' )" | jq 'del(.da_resolve_window,.da_challenge_window,.da_challenge_address,.use_plasma)' | jq '. += {"chain_op_config": {"eip1559Elasticity": 6,"eip1559Denominator": 50,"eip1559DenominatorCanyon": 250}}' > /l2configs/rollup.json

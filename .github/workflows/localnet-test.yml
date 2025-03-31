@@ -39,7 +39,7 @@ jobs:
         run: docker compose -f ./e2e/docker-compose.yml build
 
       - name: "run localnet"
-        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d
+        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 300
 
       - name: "get localnet stats"
         working-directory: ./e2e/monitor
