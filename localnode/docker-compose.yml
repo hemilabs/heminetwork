@@ -84,8 +84,6 @@ services:
       dockerfile: "./docker/bssd/Dockerfile"
       context: "./.."
     profiles: ["hemi", "full"]
-    depends_on:
-      - "bfgd"
     environment:
       BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
       BSS_LOG_LEVEL: "INFO"
@@ -166,7 +164,7 @@ services:
   # Hemi L2 node
   op-geth-l2:
     # yamllint disable-line rule:line-length
-    image: "ghcr.io/hemilabs/op-geth:e525f27@sha256:f48c03532810ec4d9d08be8afa19822c9adcdd2d8dd559467a0d2b34965d5a6d"
+    image: "ghcr.io/hemilabs/op-geth:8147886@sha256:95ceee4cdcf7376bf5e2063f960a74d73cce3406e5f6c72f928713fe52508a1c"
     platform: linux/amd64
     # XXX does geth need to be fully synced
     profiles: ["hemi", "full"]
@@ -257,7 +255,7 @@ services:
       - "localnode"
     command:
       - "op-node"
-      - "--l1=${BITCOINENDPOINT:-http://geth-l1:8545}"
+      - "--l1=${GETHL1ENDPOINT:-http://geth-l1:8545}"
       - "--l1.rpckind=any"
       - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
       - "--l2=ws://op-geth-l2:8551"
@@ -269,12 +267,9 @@ services:
       - "--override.delta=1715865630"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
-      - "--p2p.static=/ip4/10.8.112.38/tcp/9003/p2p/16Uiu2HAkuSSGeLtxjZeb7CwCaS\
-        oThqizmjNm47j1vMUWAnchLnEH,/ip4/10.8.112.39/tcp/9003/p2p/16Uiu2HAmKzout\
-        3yxku6An7gAbhbNzp2LJ7Fr3k1NheEKyNxxvEgA,/ip4/10.8.112.40/tcp/9003/p2p/1\
-        6Uiu2HAmMCAptRoWXvC1EvrjFVNuWeN8h6PMGacLtG2U7sWmNTsH"
+      - "--p2p.static=/ip4/34.147.95.117/tcp/9003/p2p/16Uiu2HAmFtpk79F9M1TdC2cnq8c1pJy59yrb5AWeM1qH6d13Fbi2"
       - "--p2p.no-discovery"
-      - "--log.level=trace"
+      - "--log.level=info"
       - "--syncmode=${OPSYNCMODE:-execution-layer}"
     deploy:
       restart_policy:

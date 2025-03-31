@@ -59,7 +59,7 @@ if [[ $NET == "testnet" ]]; then
 	--override.hvm0=1733930401 \\"
 	HVMGENESIS=3522419
 	HVMGENESISHEADER="00c05732cdc3e0d654efe86351f0cbfc6c79325e9f9fa7886a39b552f5c4d90700000000dae4079485e26f1f77425b84a13760038a352d07a0fef92b5188bd04c2999162afca58679121011962b9d0a5"
-	BOOTNODES="--nodiscover"
+	BOOTNODES="--bootnodes=enode://545da2b44f197091c0ca9283c9c1dd5ffc8562a3cd4a37709a7cd83ca725ecacdb4571dacd916a1455e9dd9f2260e5bc5dddf9fd40ba4601a71b401adbaeec21@34.147.95.117:30303"
 fi
 
 SYNCMODE=""
@@ -70,7 +70,7 @@ if [[ $MODE == "snap" ]]; then
 fi
 if [[ $MODE == "archive" ]]; then
 	SYNCMODE="full"
-	OPSYNCMODE="concensus-layer"
+	OPSYNCMODE="consensus-layer"
 fi
 
 ENTRYFILECONTENTS="#!/bin/sh
