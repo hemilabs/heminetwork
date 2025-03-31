@@ -5,10 +5,6 @@
 
 set -xe
 
-if [ -z "${ENTRYPOINT_SKIP_GENESIS}" ]; then
-    sh /tmp/genesisl2.sh
-fi
-
 /bin/geth init --datadir /tmp/datadir /l2configs/genesis.json
 
 BESTBLOCKHASH=$(curl --data-binary '{"jsonrpc": "1.0", "id": "curltest", "method": "getbestblockhash", "params": []}' -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq '.result')
@@ -38,9 +34,9 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --ws.addr=0.0.0.0  \
  --ws.port=28546  \
  --ws.origins="*"  \
- --ws.api=debug,eth,txpool,net,engine  \
+ --http.api=web3,debug,eth,txpool,net,engine,miner \
+ --ws.api=debug,eth,txpool,net,engine,miner \
  --syncmode=full  \
- --gcmode=archive  \
  --nodiscover  \
  --maxpeers=0 \
  --networkid=901 \
@@ -64,4 +60,12 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --hvm.genesisheight=$BLOCKHEIGHT \
  --hvm.enabled \
  --override.hvm0=$HVM_PHASE0_TIMESTAMP \
- --tbc.network=localnet
+ --tbc.network=localnet \
+ --override.isthmus=$HVM_PHASE0_TIMESTAMP \
+ --override.holocene=$HVM_PHASE0_TIMESTAMP \
+ --override.granite=$HVM_PHASE0_TIMESTAMP \
+ --override.fjord=$HVM_PHASE0_TIMESTAMP
+
+# Clayton note: this fixes the mismatched state.scheme, but is it the correct
+# thing to do?
+#  --gcmode=archive  \

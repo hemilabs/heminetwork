@@ -25,21 +25,17 @@ jobs:
       - name: "Checkout repository"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: "Setup Go ${{ matrix.go-version }}"
-        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
-        with:
-          go-version: "${{ matrix.go-version }}"
-          cache: true
-          check-latest: true
-
-      - name: "Download and verify dependencies"
-        run: make go-deps
-
       - name: "build localnet"
         run: docker compose -f ./e2e/docker-compose.yml build
 
+      - name: "remove dangling"
+        run: docker system prune -f
+
       - name: "run localnet"
-        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d
+        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 300
+
+      - name: "remove more dangling"
+        run: docker system prune -f
 
       - name: "get localnet stats"
         working-directory: ./e2e/monitor

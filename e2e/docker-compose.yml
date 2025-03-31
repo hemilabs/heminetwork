@@ -179,7 +179,7 @@ services:
 
   geth-l1:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
+    image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
     ports:
       - "8545:8545"
     working_dir: "/tmp/geth"
@@ -206,10 +206,45 @@ services:
       - "--datadir"
       - "/tmp/geth"
       - "--gpo.percentile=0"
+      - --http.api=web3,debug,eth,txpool,net,engine,miner
+      - --ws.api=debug,eth,txpool,net,engine,miner
     volumes:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
       - "./e2e/jwt.hex:/tmp/jwt.hex:ro"
+      - {type: "tmpfs", target: "/tmp"}
+    networks:
+      e2e:
+
+  op-geth-l2-setup:
+    build:
+      dockerfile: "optimism-stack-legacy.Dockerfile"
+      context: "."
+    depends_on:
+      geth-l1:
+        condition: "service_started"
+      bitcoind:
+        condition: "service_started"
+      bitcoind-initialblocks:
+        condition: "service_completed_successfully"
+    environment:
+      ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
+      HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
+      OP_GETH_L1_RPC: "http://geth-l1:8545"
+    working_dir: "/tmp"
+    command:
+      - "sh"
+      - "/tmp/genesisl2.sh"
+    volumes:
+      - "./e2e/keystore:/tmp/keystore:ro"
+      - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
+      - "./jwt.hex:/tmp/jwt.hex:ro"
+      - "./entrypointl2.sh:/tmp/entrypointl2.sh"
+      - "./genesisl2.sh:/tmp/genesisl2.sh"
+      - "./output:/tmp/output"
+      - "l2configs:/l2configs"
+      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
+      - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - {type: "tmpfs", target: "/tmp"}
     networks:
       e2e:
@@ -224,6 +259,8 @@ services:
       bitcoind:
         condition: "service_started"
       bitcoind-initialblocks:
+        condition: "service_completed_successfully"
+      holocene-deploy:
         condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
@@ -257,8 +294,14 @@ services:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
     depends_on:
-      op-geth-l2:
-        condition: "service_healthy"
+      geth-l1:
+        condition: "service_started"
+      bitcoind:
+        condition: "service_started"
+      bitcoind-initialblocks:
+        condition: "service_completed_successfully"
+      holocene-deploy:
+        condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
       interval: 5s
@@ -267,7 +310,6 @@ services:
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
-      ENTRYPOINT_SKIP_GENESIS: "true"
       HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
     working_dir: "/tmp"
     command:
@@ -293,8 +335,14 @@ services:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
     depends_on:
-      op-geth-l2:
-        condition: "service_healthy"
+      geth-l1:
+        condition: "service_started"
+      bitcoind:
+        condition: "service_started"
+      bitcoind-initialblocks:
+        condition: "service_completed_successfully"
+      holocene-deploy:
+        condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
       interval: 5s
@@ -303,7 +351,6 @@ services:
     environment:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
-      ENTRYPOINT_SKIP_GENESIS: "true"
       HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
     working_dir: "/tmp"
     command:
@@ -372,6 +419,11 @@ services:
       - "--override.ecotone=1725868497"
       - "--override.canyon=1725868497"
       - "--override.delta=1725868497"
+      - "--override.pectrablobschedule=1744238662"
+      - "--override.isthmus=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
     volumes:
       - "l2configs:/l2configs"
@@ -428,6 +480,11 @@ services:
       - "--override.ecotone=1725868497"
       - "--override.canyon=1725868497"
       - "--override.delta=1725868497"
+      - "--override.pectrablobschedule=1744238662"
+      - "--override.isthmus=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
     volumes:
       - "l2configs:/l2configs"
@@ -483,6 +540,11 @@ services:
       - "--override.ecotone=1725868497"
       - "--override.canyon=1725868497"
       - "--override.delta=1725868497"
+      - "--override.pectrablobschedule=1744238662"
+      - "--override.isthmus=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
     volumes:
       - "l2configs:/l2configs"
@@ -694,6 +756,26 @@ services:
     restart: on-failure
     networks:
       e2e:
+  holocene-deploy:
+    depends_on:
+      op-geth-l2-setup:
+        condition: "service_completed_successfully"
+      geth-l1:
+        condition: "service_started"
+    build:
+      dockerfile: "holocene-upgrade.Dockerfile"
+      context: "."
+    command:
+      - "/holocene-upgrade.sh"
+    volumes:
+      - "./holocene-upgrade.sh:/holocene-upgrade.sh"
+      - "./deploy-config.json:/tmp/deploy-config.json"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    environment:
+      HOLOCENE_DEPLOY_CONFIG_PATH: ${PWD}/e2e/deploy-config-holocene.json
+    networks:
+      e2e:
+    
 volumes:
   l2configs:
 
