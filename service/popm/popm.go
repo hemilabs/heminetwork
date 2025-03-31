@@ -159,7 +159,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 		case <-ctx.Done():
 			err = ctx.Err()
 		case n := <-headersCh:
-			log.Infof(spew.Sdump(n)) // XXX
+			log.Tracef("block header received: %v", spew.Sdump(n)) // XXX
 			continue
 		}
 		return err
@@ -185,7 +185,7 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	rWSCh := make(chan error)
 	s.opgethWG.Add(1)
 	go func() {
-		s.opgethWG.Done()
+		defer s.opgethWG.Done()
 		rWSCh <- s.handleOpgethSubscription(ctx)
 	}()
 
