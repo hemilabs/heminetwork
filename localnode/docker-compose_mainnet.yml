@@ -255,7 +255,7 @@ services:
       - "localnode"
     command:
       - "op-node"
-      - "--l1=${BITCOINENDPOINT:-http://geth-l1:8545}"
+      - "--l1=${GETHL1ENDPOINT:-http://geth-l1:8545}"
       - "--l1.rpckind=any"
       - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
       - "--l2=ws://op-geth-l2:8551"
