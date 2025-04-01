@@ -88,6 +88,7 @@ func (l *Database) Close() error {
 			log.Errorf("close %v: %v", k, err)
 			errSeen = errors.Join(errSeen, err)
 		}
+		delete(l.rawPool, k)
 	}
 
 	for k, v := range l.pool {
@@ -96,6 +97,7 @@ func (l *Database) Close() error {
 			log.Errorf("close %v: %v", k, err)
 			errSeen = errors.Join(errSeen, err)
 		}
+		delete(l.pool, k)
 	}
 
 	return errSeen

@@ -25,7 +25,7 @@ var (
 	upgradeVerbose = false
 	batchSize      = 100000
 
-	modeMove = false
+	modeMove = true
 )
 
 func SetMode(move bool) {
@@ -291,16 +291,25 @@ func (l *ldb) v3(ctx context.Context) error {
 		tmpdir := l.cfg.Home + ".v2"
 		// Rename source directory to $HOME.v2
 		log.Infof("Rename source %v -> %v", l.cfg.Home, tmpdir)
+		err = os.Rename(l.cfg.Home, tmpdir)
+		if err != nil {
+			return fmt.Errorf("rename source: %w", err)
+		}
 
 		// Rename destination directory to $HOME
 		log.Infof("Rename destination %v -> %v", dcfg.Home, l.cfg.Home)
+		err = os.Rename(dcfg.Home, l.cfg.Home)
+		if err != nil {
+			return fmt.Errorf("rename destination: %w", err)
+		}
 
 		// Delete $HOME.v2
 		log.Infof("Delete original source %v", tmpdir)
-
-		// Reopen database and replace pools in l
-		log.Infof("Reopen database %v", l.cfg.Home)
+		err = os.RemoveAll(tmpdir)
+		if err != nil {
+			return fmt.Errorf("remove source: %w", err)
+		}
 	}
 
-	return fmt.Errorf("not yet")
+	return nil
 }
