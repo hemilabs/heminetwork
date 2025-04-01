@@ -21,7 +21,7 @@ const (
 	logLevel = "INFO"
 
 	indexDir = "index"
-	dataDir  = "data"
+	DataDir  = "data"
 
 	DefaultMaxFileSize = 256 * 1024 * 1024 // 256MB file max; will never be bigger.
 )
@@ -40,24 +40,37 @@ func init() {
 type RawDB struct {
 	mtx sync.RWMutex
 
-	home string
-
-	maxSize int64
+	cfg *Config
 
 	index *leveldb.DB
 }
 
-func New(home string, maxSize int64) (*RawDB, error) {
+type Config struct {
+	Home    string
+	MaxSize int64
+}
+
+func NewDefaultConfig(home string) *Config {
+	return &Config{
+		Home:    home,
+		MaxSize: DefaultMaxFileSize,
+	}
+}
+
+func New(cfg *Config) (*RawDB, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
 
-	if maxSize < 4096 {
-		return nil, fmt.Errorf("invalid max size: %v", maxSize)
+	if cfg == nil {
+		return nil, errors.New("must provide config")
+	}
+
+	if cfg.MaxSize < 4096 {
+		return nil, fmt.Errorf("invalid max size: %v", cfg.MaxSize)
 	}
 
 	return &RawDB{
-		home:    home,
-		maxSize: maxSize,
+		cfg: cfg,
 	}, nil
 }
 
@@ -65,11 +78,14 @@ func (r *RawDB) Open() error {
 	log.Tracef("Open")
 	defer log.Tracef("Open exit")
 
-	err := os.MkdirAll(filepath.Join(r.home, dataDir), 0o0700)
+	r.mtx.Lock()
+	defer r.mtx.Unlock()
+
+	err := os.MkdirAll(filepath.Join(r.cfg.Home, DataDir), 0o0700)
 	if err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	r.index, err = leveldb.OpenFile(filepath.Join(r.home, indexDir), &opt.Options{
+	r.index, err = leveldb.OpenFile(filepath.Join(r.cfg.Home, indexDir), &opt.Options{
 		BlockCacheEvictRemoved: true,
 		Compression:            opt.NoCompression,
 	})
@@ -91,8 +107,16 @@ func (r *RawDB) Close() error {
 	if err != nil {
 		return err
 	}
+	r.index = nil
 
 	return nil
+}
+
+// DB returns the underlying index database.
+// You should probably not be calling this! It is used for external database
+// upgrades.
+func (r *RawDB) DB() *leveldb.DB {
+	return r.index
 }
 
 func (r *RawDB) Has(key []byte) (bool, error) {
@@ -106,9 +130,9 @@ func (r *RawDB) Insert(key, value []byte) error {
 	log.Tracef("Insert")
 	defer log.Tracef("Insert exit")
 
-	if int64(len(value)) > r.maxSize {
+	if int64(len(value)) > r.cfg.MaxSize {
 		return fmt.Errorf("length exceeds maximum length: %v > %v",
-			len(value), r.maxSize)
+			len(value), r.cfg.MaxSize)
 	}
 
 	// Assert we do not have this key stored yet.
@@ -137,7 +161,8 @@ func (r *RawDB) Insert(key, value []byte) error {
 			}
 		}
 		last := binary.BigEndian.Uint32(lfe)
-		lastFilename := filepath.Join(r.home, dataDir, fmt.Sprintf("%010v", last))
+		lastFilename := filepath.Join(r.cfg.Home, DataDir,
+			fmt.Sprintf("%010v", last))
 
 		// determine if data fits.
 		fh, err := os.OpenFile(lastFilename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -153,7 +178,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 		}()
 		if fi, err := fh.Stat(); err != nil {
 			return err
-		} else if fi.Size()+int64(len(value)) > r.maxSize {
+		} else if fi.Size()+int64(len(value)) > r.cfg.MaxSize {
 			last++
 			lastData := make([]byte, 8)
 			binary.BigEndian.PutUint32(lastData, last)
@@ -202,7 +227,7 @@ func (r *RawDB) Get(key []byte) ([]byte, error) {
 		// Should not happen.
 		return nil, errors.New("invalid coordinates")
 	}
-	filename := filepath.Join(r.home, dataDir, fmt.Sprintf("%010v",
+	filename := filepath.Join(r.cfg.Home, DataDir, fmt.Sprintf("%010v",
 		binary.BigEndian.Uint32(c[0:4])))
 	offset := binary.BigEndian.Uint32(c[4:8])
 	size := binary.BigEndian.Uint32(c[8:12])

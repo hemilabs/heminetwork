@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -27,7 +27,7 @@ func TestRawDB(t *testing.T) {
 		}
 	}()
 	blockSize := int64(4096)
-	rdb, err := New(home, blockSize)
+	rdb, err := New(&Config{Home: home, MaxSize: blockSize})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestRawDB(t *testing.T) {
 	}()
 
 	// Open again and expect locked failure
-	rdb2, err := New(home, blockSize)
+	rdb2, err := New(&Config{Home: home, MaxSize: blockSize})
 	if err != nil {
 		t.Fatal(err)
 	}

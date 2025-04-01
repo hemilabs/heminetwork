@@ -148,7 +148,7 @@ func (l *Database) openRawDB(name string, blockSize int64) error {
 	defer l.mtx.Unlock()
 
 	dir := filepath.Join(l.cfg.Home, name)
-	rdb, err := rawdb.New(dir, blockSize)
+	rdb, err := rawdb.New(&rawdb.Config{Home: dir, MaxSize: blockSize})
 	if err != nil {
 		return fmt.Errorf("rawdb new %v: %w", name, err)
 	}

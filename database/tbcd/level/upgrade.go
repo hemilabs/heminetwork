@@ -8,18 +8,29 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"time"
 
 	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/database/level"
+	"github.com/hemilabs/heminetwork/rawdb"
+
+	cp "github.com/otiai10/copy"
 )
 
 var (
 	upgradeVerbose = false
 	batchSize      = 100000
+
+	modeMove = false
 )
+
+func SetMode(move bool) {
+	modeMove = move
+}
 
 // copyOrMoveTable copies or moves a table record by record from a to b. If
 // move is true the record is deleted from a after being copied to b.
@@ -157,6 +168,9 @@ func (l *ldb) v2(ctx context.Context) error {
 // v3 upgrade the database from v2 to v3.
 // Changes:
 // Move databases from compressed to uncompressed state.
+//
+// Note that modeMove is a test flag only! We should not be copying data in
+// production, only moving data.
 func (l *ldb) v3(ctx context.Context) error {
 	log.Tracef("v3")
 	defer log.Tracef("v3 exit")
@@ -197,16 +211,96 @@ func (l *ldb) v3(ctx context.Context) error {
 
 		a := l.pool[dbs]
 		b := dst.DB()[dbs]
-		n, err := copyOrMoveTable(ctx, false, a, b, dbs, filter)
+		n, err := copyOrMoveTable(ctx, modeMove, a, b, dbs, filter)
 		if err != nil {
 			return fmt.Errorf("move database %v: %w", dbs, err)
 		}
 		log.Infof("Database %v records moved: %v", dbs, n)
 	}
 
-	//// Write new version
-	//v := make([]byte, 8)
-	//binary.BigEndian.PutUint64(v, 3)
-	//return l.MetadataPut(ctx, versionKey, v)
+	// copy rawdb, this is a bit trickier because we want to recreate the
+	// index and copy the raw block data.
+	rkeys := make([]string, 0, len(l.rawPool))
+	for k := range l.rawPool {
+		rkeys = append(rkeys, k)
+	}
+	sort.Strings(rkeys)
+	for _, dbs := range rkeys {
+		// See if we were interrupted
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		log.Infof("Moving raw database: %v", dbs)
+
+		a := l.rawPool[dbs].DB()
+		b := dst.RawDB()[dbs].DB()
+		n, err := copyOrMoveTable(ctx, modeMove, a, b, dbs, filter)
+		if err != nil {
+			return fmt.Errorf("move raw database %v: %w", dbs, err)
+		}
+		log.Infof("Raw database %v records moved: %v", dbs, n)
+
+		srcdir := filepath.Join(l.cfg.Home, dbs, rawdb.DataDir)
+		dstdir := filepath.Join(dcfg.Home, dbs, rawdb.DataDir)
+		if modeMove {
+			// Move raw data, we must recreate the dir because
+			// os.Rename fails otherwise.
+			log.Infof("  Moving raw data: %v -> %v", srcdir, dstdir)
+			err := os.Remove(dstdir)
+			if err != nil {
+				return fmt.Errorf("remove raw data %v: %w", dbs, err)
+			}
+			err = os.Rename(srcdir, dstdir)
+			if err != nil {
+				return fmt.Errorf("move raw data %v: %w", dbs, err)
+			}
+		} else {
+			// Copy raw data
+			log.Infof("  Copying raw data: %v -> %v", srcdir, dstdir)
+			err := cp.Copy(srcdir, dstdir)
+			if err != nil {
+				return fmt.Errorf("copy raw data %v: %w", dbs, err)
+			}
+		}
+
+	}
+
+	// Write version to destination and close the database.
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 3)
+	err = dst.MetadataPut(ctx, versionKey, v)
+	if err != nil {
+		return fmt.Errorf("destination metadata version put: %v", err)
+	}
+	err = dst.Close()
+	if err != nil {
+		return fmt.Errorf("destination close: %v", err)
+	}
+
+	// If we get here and are in copy mode, we can exit.
+	if modeMove {
+		// Close source
+		err = l.Close()
+		if err != nil {
+			return fmt.Errorf("source close: %v", err)
+		}
+
+		tmpdir := l.cfg.Home + ".v2"
+		// Rename source directory to $HOME.v2
+		log.Infof("Rename source %v -> %v", l.cfg.Home, tmpdir)
+
+		// Rename destination directory to $HOME
+		log.Infof("Rename destination %v -> %v", dcfg.Home, l.cfg.Home)
+
+		// Delete $HOME.v2
+		log.Infof("Delete original source %v", tmpdir)
+
+		// Reopen database and replace pools in l
+		log.Infof("Reopen database %v", l.cfg.Home)
+	}
+
 	return fmt.Errorf("not yet")
 }
