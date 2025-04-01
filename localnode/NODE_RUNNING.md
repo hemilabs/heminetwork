@@ -7,22 +7,22 @@ sequencer.*
   <summary>Table of Contents</summary>
 
 <!-- TOC -->
-* [Running the Hemi stack](#running-the-hemi-stack)
+* [Running the Hemi Stack](#running-the-hemi-stack)
   * [Prerequisites](#prerequisites)
-    * [System requirements](#system-requirements)
+    * [System Requirements](#system-requirements)
       * [CPU and RAM](#cpu-and-ram)
-      * [Disk](#disk)
+      * [Disk Space](#disk)
       * [ulimits](#ulimits)
-  * [Setup](#setup)
-    * [Check prerequisites](#check-prerequisites)
-    * [Clone the heminetwork repository](#clone-the-heminetwork-repository)
-    * [Required components](#required-components)
-    * [⚠️ Important Note on Security](#-important-note-on-security)
-  * [Running with Docker Compose](#running-with-docker-compose)
-  * [Accessing the nodes](#accessing-the-nodes)
+  * [Setup and Installation](#setup-and-installation)
+    * [Checking Prerequisites](#checking-prerequisites)
+    * [Cloning the heminetwork Repository](#cloning-the-heminetwork-repository)
+    * [Required Components](#required-components)
+    * [⚠️ Important Note on Security](#important-note-on-security)
+  * [Running Qith Docker Compose](#running-with-docker-compose)
+  * [Accessing the Nodes](#accessing-the-nodes)
   * [Peer-to-Peer (P2P)](#peer-to-peer-p2p)
   * [Mainnet](#mainnet)
-  * [Running without Docker](#running-without-docker)
+  * [Running Without Docker](#running-without-docker)
 <!-- TOC -->
 </details>
 
@@ -34,34 +34,31 @@ possible, but may not be fully supported.
 
 Docker images for each Hemi Network component is published to [Docker Hub](https://hub.docker.com/u/hemilabs).
 
-### System requirements
+### System Requirements
 
 #### CPU and RAM
 
-At least 8 CPU cores and 32GB RAM is required to run the Hemi stack.  This does NOT Include requirements for the L1
-nodes (Bitcoin and Ethereum).
+At least 8 CPU cores and 32GB RAM is required to run the Hemi stack.  This does NOT Include requirements for the L1 nodes (Bitcoin and Ethereum).
 
 #### Disk
 
-At this time (Q1 2025) 4.5TB of disk space is required for mainnet or testnet.  NVMe disk is highly recommended.
-This will of course grow with time.
+At this time (Q1 2025), 4.5TB of disk space is required for mainnet or testnet.  NVMe disk is highly recommended.
+Note: Disk requirements may increase over time. 
 
 #### ulimits
 
-Certain components of the network require a very large number of open files. The startup will attempt to set
-the `ulimits` properly, however it will exit quickly with an error if your system does not allow high enough ulimits.
+Certain components of the network require a very large number of open files. The startup will attempt to set the `ulimits` properly, however it will exit quickly with an error if your system does not allow high enough ulimits.
 
-## Setup
+## Setup and Installation
 
-### Check prerequisites
+### Checking Prerequisites
 
-Check that your system matches the [prerequisites](#prerequisites). Make sure that the following are installed and
-setup:
+Check that your system matches the [prerequisites](#prerequisites). Make sure that the following are installed and setup:
 
 - [Docker](https://docs.docker.com/get-started/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/)
 
-### Clone the heminetwork repository
+### Cloning The heminetwork Repository
 
 To get started, clone this repository:
 
@@ -75,7 +72,7 @@ git clone ssh://git@github.com/hemilabs/heminetwork.git
 cd heminetwork
 ```
 
-### Required components
+### Required Components
 
 The following daemons are needed as part of the Hemi stack. They are all run under Docker Compose:
 
@@ -98,7 +95,7 @@ services' ports to the outside world.** This allows communication between the se
 
 ## Running with Docker Compose
 
-### Choose node type
+### Node Type
 
 Nodes can run in two modes, `archive` or `snap`.  `archive` has all data while `snap` only indexes data coming from ethereum blobs starting at the time sync begins.  Most users will only need `snap` which is must faster and smaller.
 
@@ -127,7 +124,7 @@ cd localnode
 docker compose -f docker-compose.yml --profile full up --build
 ```
 
-## Accessing the nodes
+## Accessing the Nodes
 
 To access the nodes, you can use JSON-RPC or WebSockets exposed on the following ports:
 
@@ -189,6 +186,6 @@ For testnet:
 ./heminode.sh testnet
 ```
 
-## Running without Docker
+## Running Without Docker
 
 Steps to run the Hemi stack without Docker will be detailed at a later date.
