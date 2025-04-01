@@ -18,7 +18,7 @@ sequencer.*
     * [Cloning the heminetwork Repository](#cloning-the-heminetwork-repository)
     * [Required Components](#required-components)
     * [⚠️ Important Note on Security](#important-note-on-security)
-  * [Running Qith Docker Compose](#running-with-docker-compose)
+  * [Running With Docker Compose](#running-with-docker-compose)
   * [Accessing the Nodes](#accessing-the-nodes)
   * [Peer-to-Peer (P2P)](#peer-to-peer-p2p)
   * [Mainnet](#mainnet)
