@@ -44,7 +44,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 2
+	ldbVersion = 3
 
 	logLevel = "INFO"
 	verbose  = false
@@ -67,8 +67,10 @@ var (
 
 	noStats tbcd.CacheStats
 
+	// Metadata keys.
 	versionKey = []byte("version")
 
+	// These keys live in their own respective databases.
 	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
 	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
 	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
@@ -165,11 +167,8 @@ func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
 	}
 }
 
-func New(ctx context.Context, cfg *Config) (*ldb, error) {
-	log.Tracef("New")
-	defer log.Tracef("New exit")
-
-	ld, err := level.New(ctx, cfg.Home, ldbVersion)
+func open(ctx context.Context, cfg *Config) (*ldb, error) {
+	ld, err := level.New(ctx, level.NewDefaultConfig(cfg.Home))
 	if err != nil {
 		return nil, err
 	}
@@ -209,8 +208,21 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		}
 	}
 
+	return l, nil
+}
+
+func New(ctx context.Context, cfg *Config) (*ldb, error) {
+	log.Tracef("New")
+	defer log.Tracef("New exit")
+
+	l, err := open(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("open: %w", err)
+	}
+
 	// Upgrade database
 	for {
+		reopen := false
 		dbVersion, err := l.Version(ctx)
 		if err != nil {
 			if errors.Is(err, leveldb.ErrNotFound) {
@@ -229,6 +241,10 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		case 1:
 			// Upgrade to v2
 			err = l.v2(ctx)
+		case 2:
+			// Upgrade to v3, database is closed in the process.
+			reopen = true
+			err = l.v3(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {
@@ -244,6 +260,16 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		if err != nil {
 			return nil, fmt.Errorf("could not upgrade db from version %v: %w",
 				dbVersion, err)
+		}
+
+		if reopen {
+			// Reopen database and replace pools in l
+			log.Infof("Reopen database %v", l.cfg.Home)
+
+			l, err = open(ctx, cfg)
+			if err != nil {
+				return nil, fmt.Errorf("reopen: %w", err)
+			}
 		}
 	}
 }

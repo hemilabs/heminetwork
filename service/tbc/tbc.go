@@ -79,9 +79,10 @@ var (
 	upstreamStateIdKey = []byte("upstreamstateid")
 
 	mainnetHemiGenesis = &HashHeight{
-		Hash:   *chaincfg.MainNetParams.GenesisHash,
-		Height: 0,
+		Hash:   s2h("000000000000000000001d8132106b63876117569713ef4fe89d5a2f1173c66e"),
+		Height: 859303,
 	}
+
 	testnet3HemiGenesis = &HashHeight{
 		Hash:   s2h("0000000000000014a1717b82329a58e344f1821389d0415601f1b12ebce35881"),
 		Height: 2577400,
