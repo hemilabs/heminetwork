@@ -16,11 +16,14 @@ import (
 	"github.com/hemilabs/heminetwork/database/level"
 )
 
-var batchSize = 100000
+var (
+	upgradeVerbose = false
+	batchSize      = 100000
+)
 
 // copyOrMoveTable copies or moves a table record by record from a to b. If
 // move is true the record is deleted from a after being copied to b.
-func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB) (int, error) {
+func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
 	i := a.NewIterator(nil, nil)
 	defer func() { i.Release() }()
 
@@ -39,6 +42,14 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB) (int, err
 
 		records := 0
 		for records = 0; i.Next() && records < batchSize; records++ {
+			if filter != nil {
+				// skip filtered records
+				k, v := filter[string(i.Key())]
+				if v && dbname == k {
+					log.Infof("  Skip: %v %v", k, v)
+					continue
+				}
+			}
 			// Create batches to speed things up a bit.
 			batchB.Put(i.Key(), i.Value())
 			if move {
@@ -60,7 +71,10 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB) (int, err
 			batchA.Reset()
 		}
 
-		log.Infof("  records moved: %v, %v in %v", records, r, time.Since(start))
+		if upgradeVerbose {
+			log.Infof("  records moved: %v, %v in %v",
+				records, r, time.Since(start))
+		}
 
 		if records == 0 {
 			break
@@ -159,9 +173,15 @@ func (l *ldb) v3(ctx context.Context) error {
 	// copy config and create database destination.
 	dcfg := *l.cfg
 	dcfg.Home = dcfg.Home + ".v3"
+	log.Infof("open upgrade db: %v", dcfg.Home)
 	dst, err := New(ctx, &dcfg)
 	if err != nil {
 		return fmt.Errorf("open destination database: %w", err)
+	}
+
+	// filter is a map of [key] dbname
+	filter := map[string]string{
+		string(versionKey): level.MetadataDB,
 	}
 
 	// copy all databases
@@ -174,9 +194,10 @@ func (l *ldb) v3(ctx context.Context) error {
 		}
 
 		log.Infof("Moving database: %v", dbs)
+
 		a := l.pool[dbs]
 		b := dst.DB()[dbs]
-		n, err := copyOrMoveTable(ctx, false, a, b)
+		n, err := copyOrMoveTable(ctx, false, a, b, dbs, filter)
 		if err != nil {
 			return fmt.Errorf("move database %v: %w", dbs, err)
 		}
