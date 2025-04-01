@@ -46,7 +46,7 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 				// skip filtered records
 				k, v := filter[string(i.Key())]
 				if v && dbname == k {
-					log.Infof("  Skip: %v %v", k, v)
+					log.Infof("  Skip: %v %s", k, i.Key())
 					continue
 				}
 			}
