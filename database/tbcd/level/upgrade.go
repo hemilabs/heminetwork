@@ -13,12 +13,11 @@ import (
 	"sort"
 	"time"
 
+	cp "github.com/otiai10/copy"
 	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/rawdb"
-
-	cp "github.com/otiai10/copy"
 )
 
 var (
@@ -273,11 +272,11 @@ func (l *ldb) v3(ctx context.Context) error {
 	binary.BigEndian.PutUint64(v, 3)
 	err = dst.MetadataPut(ctx, versionKey, v)
 	if err != nil {
-		return fmt.Errorf("destination metadata version put: %v", err)
+		return fmt.Errorf("destination metadata version put: %w", err)
 	}
 	err = dst.Close()
 	if err != nil {
-		return fmt.Errorf("destination close: %v", err)
+		return fmt.Errorf("destination close: %w", err)
 	}
 
 	// If we get here and are in copy mode, we can exit.
@@ -285,7 +284,7 @@ func (l *ldb) v3(ctx context.Context) error {
 		// Close source
 		err = l.Close()
 		if err != nil {
-			return fmt.Errorf("source close: %v", err)
+			return fmt.Errorf("source close: %w", err)
 		}
 
 		tmpdir := l.cfg.Home + ".v2"
@@ -308,6 +307,16 @@ func (l *ldb) v3(ctx context.Context) error {
 		err = os.RemoveAll(tmpdir)
 		if err != nil {
 			return fmt.Errorf("remove source: %w", err)
+		}
+	} else {
+		err = l.MetadataPut(ctx, versionKey, v)
+		if err != nil {
+			return fmt.Errorf("source metadata version put: %w", err)
+		}
+		// Close source
+		err = l.Close()
+		if err != nil {
+			return fmt.Errorf("source close: %w", err)
 		}
 	}
 
