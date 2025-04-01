@@ -2514,14 +2514,6 @@ func (s *Server) Run(pctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
 	}
-	// Warn user about compression if we have the warn flag.
-	_, err = s.db.MetadataGet(ctx, level.CompressionKey)
-	if err == nil {
-		// We upgraded this db and it is ued in mixed mode
-		return fmt.Errorf("mixed mode compression, please resync or "+
-			"delete %v key from metadata to accept the risks.",
-			string(level.CompressionKey))
-	}
 	defer func() {
 		err := s.dbClose()
 		if err != nil {

@@ -68,8 +68,7 @@ var (
 	noStats tbcd.CacheStats
 
 	// Metadata keys.
-	versionKey     = []byte("version")
-	CompressionKey = []byte("compression")
+	versionKey = []byte("version")
 
 	// These keys live in their own respective databases.
 	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
