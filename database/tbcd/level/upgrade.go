@@ -259,6 +259,11 @@ func (l *ldb) v3(ctx context.Context) error {
 		rkeys = append(rkeys, k)
 	}
 	sort.Strings(rkeys)
+	cpOpt := cp.Options{
+		PreserveTimes:     true,
+		PreserveOwner:     true,
+		PermissionControl: cp.PerservePermission,
+	}
 	for _, dbs := range rkeys {
 		// See if we were interrupted
 		select {
@@ -294,7 +299,7 @@ func (l *ldb) v3(ctx context.Context) error {
 		} else {
 			// Copy raw data
 			log.Infof("  Copying raw data: %v -> %v", srcdir, dstdir)
-			err := cp.Copy(srcdir, dstdir)
+			err := cp.Copy(srcdir, dstdir, cpOpt)
 			if err != nil {
 				return fmt.Errorf("copy raw data %v: %w", dbs, err)
 			}
