@@ -20,7 +20,7 @@ sequencer.*
       * [ulimits](#ulimits)
   * [Setup and Installation](#setup-and-installation)
     * [Checking Prerequisites](#checking-prerequisites)
-    * [Cloning The heminetwork Repository](#cloning-the-heminetwork-repository)
+    * [Cloning the heminetwork Repository](#cloning-the-heminetwork-repository)
     * [Hemi Components](#hemi-components)
     * [Docker Profiles](#docker-profiles)
       * [Docker Profile: full](#docker-profile-full)
@@ -85,7 +85,8 @@ their own requirements:
 
 > [!WARNING]
 > Over time, these disk space requirements will grow. The above values represent the current requirements (as of 
-> Q1 2025) with a buffer that should be sufficient for at least an additional year.
+> Q1 2025) with a buffer that should be sufficient for at least an additional year. It is highly recommended to monitor
+> disk usage to prevent the node from running out of disk space.
 
 #### ulimits
 
@@ -102,7 +103,7 @@ following are installed and setup:
 - [Docker](https://docs.docker.com/get-started/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/)
 
-### Cloning The heminetwork Repository
+### Cloning the heminetwork Repository
 
 To get started, clone this repository:
 
