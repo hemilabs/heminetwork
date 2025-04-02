@@ -154,14 +154,27 @@ This profile only runs the minimum components of the Hemi stack required to inte
 
 It supports the primary ways of interacting with the Hemi network (Standard RPC + Consensus RPC), but does not support the Extended Consensus RPC (Bitcoin Finality statistics from BFG/op-node) or Fully Local PoP Mining.
 
-Similarly to the `hemi` profile, a node running the `hemi-min` profile your Hemi node is synchronized from ETH DA data provided by external Ethereum (Execution + Beacon) RPC nodes. However, no Bitcoin finality information is available to external services, and there is no local BFG node to run a Fully Local PoP Miner.
+Similarly to the `hemi` profile, a node running the `hemi-min` profile is synchronized from ETH DA data provided by external Ethereum (Execution + Beacon) RPC nodes. However, no Bitcoin finality information is available to external services, and there is no local BFG node to run a Fully Local PoP Miner.
 
 ![Depiction of Hemi-Min Profile](images/hemi-network-docker-profile-hemi-min-v2.svg)
+
+
+#### Profile: L1
+> [!NOTE]
+> This profile does not run any Hemi stack components, and is only meant to run the L1 ETH+BTC components separately in support of either a `hemi` or `hemi-min` profile run separately.
+
+This profile only runs the Bitcoin and Ethereum L1 components required to support the Hemi stack. It does not directly support any interaction with the Hemi network, but allows a separate Hemi network stack to run trustlessly.
+
+If you want to run multiple Hemi nodes trustlessly, running the L1 components separately helps with scalability by not requiring a 1:1 ratio of Hemi to supporting L1 daemon nodes.
+
+![Depiction of L1 Profile](images/hemi-network-docker-profile-l1-v2.svg)
+
+
 
 ### ⚠️ Important Note on Security
 
 > [!WARNING]
-> **Many of the required credentials are hard-coded in this directory, as the assumption is you are not exposing the
+> **Many of the required credentials are hard-coded, as the assumption is you are not exposing the
 services' ports to the outside world.** This allows communication between the services locally.
 **In setups where you plan to expose the ports, ensure that you change any credential values (e.g. JWT token, cookie).**
 
