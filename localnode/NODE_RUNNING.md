@@ -258,10 +258,12 @@ requiring a 1:1 ratio of Hemi to supporting L1 daemon nodes.
 
 ### ⚠️ Important Note on Security
 
-> [!WARNING]
-> **Many of the required credentials are hard-coded, as the assumption is you are not exposing the
-services' ports to the outside world.** This allows communication between the services locally.
-**In setups where you plan to expose the ports, ensure that you change any credential values (e.g. JWT token, cookie).**
+> [!CAUTION]
+> **Many of the required credentials are hard-coded, as the assumption is you are not exposing the services' ports to
+> the outside world.** This allows communication between the services locally.
+>
+> :warning: **In setups where you plan to expose the ports, ensure that you change any credential values
+> (e.g. JWT token, cookie, passwords).**
 
 ## Running with Docker Compose
 
@@ -275,10 +277,9 @@ occurred.
 
 > [!IMPORTANT]
 > Most users (including dApp developers wishing to run infrastructure to support their dApp) will only need `snap` which
-> is much faster and smaller. However if you are running a service which requires access to historical data (such as a
+> is much faster and smaller. However, if you are running a service which requires access to historical data (such as a
 > blockchain explorer or other data indexer that fetches historical block data and/or performs re-execution of
-> historical
-> transactions) then you will need an `archive` sync.
+> historical transactions) then you will need an `archive` sync.
 
 To run an `archive` sync, you will need access to an ethereum Beacon API RPC provider that has all historical blob
 data (the optional ethereum node in the compose file as part of the `full` or `L1` will NOT work for that, as it will
@@ -344,7 +345,7 @@ To access the nodes, you can use JSON-RPC or WebSockets exposed on the following
 ## Peer-to-Peer (P2P)
 
 > [!TIP]
-> By default, all of the [Docker Profiles](#docker-profiles) should be configured to establish all of the appropriate
+> By default, the [Docker Profiles](#docker-profiles) should be configured to establish the appropriate
 > P2P connections out-of-the-box. However, if you are having issues syncing, propagating transactions, or using certain
 > features this section may be helpful in diagnosing the root cause, as some networking configurations or modifications
 > may prevent various P2P connections from being established correctly.
