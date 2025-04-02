@@ -316,7 +316,7 @@ If you are experiencing any of the below issues, a P2P connection is likely not 
   * `bitcoind` is likely not peered correctly with the Bitcoin P2P Network (so `electrs` is unable to get updated UTXO data)
 
 ## Bring Your Own L1s
-> ![TIP]
+> [!TIP]
 > This section is required if you are running the `hemi` or `hemi-min` (Docker Profiles)(#docker-profiles), as these profiles do not contain self-hosted Bitcoin and Ethereum full nodes, and the Hemi stack requires these to function properly. 
 
 Several of the containers (the Bitcoin and Ethereum L1 containers) that are normally run as part of the `full` profile can be replaced with nodes or API endpoints of your own. These can either be 3rd party RPC endpoints, or RPC endpoints you are hosting yourself separately using the `L1` Docker Profile.
