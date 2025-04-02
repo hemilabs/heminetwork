@@ -34,9 +34,9 @@ func SetMode(move bool) {
 	modeMove = move
 }
 
-// copyOrMoveTable copies or moves a table record by record from a to b. If
+// _copyOrMoveTable copies or moves a table record by record from a to b. If
 // move is true the record is deleted from a after being copied to b.
-func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
+func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
 	i := a.NewIterator(nil, nil)
 	defer func() { i.Release() }()
 
@@ -50,6 +50,7 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 	for {
 		start := time.Now()
 		records := 0
+		skipped := 0
 		for records = 0; i.Next() && records < batchSize; records++ {
 			// See if we were interrupted
 			select {
@@ -63,6 +64,7 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 				k, v := filter[string(i.Key())]
 				if v && dbname == k {
 					log.Infof("  Skip: %v %s", k, i.Key())
+					skipped++
 					continue
 				}
 			}
@@ -81,8 +83,8 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 				break
 			}
 		}
-		r += records
-		recordsCompact += records
+		r += records - skipped
+		recordsCompact += records - skipped
 
 		if err := b.Write(batchB, nil); err != nil {
 			return r, fmt.Errorf("batch write b: %w", err)
@@ -126,6 +128,24 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 		}
 	}
 	return r, i.Error()
+}
+
+// copyOrMoveTable copies or moves a table record by record from a to b. If
+// move is true the record is deleted from a after being copied to b.
+// This function verifies that indeed all records have been moved and will
+// restart the copy/move if it didn't.
+func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
+	var nn int
+	for {
+		n, err := _copyOrMoveTable(ctx, move, a, b, dbname, filter)
+		if err != nil {
+			return n, err
+		}
+		nn += n
+		if n == 0 {
+			return nn, nil
+		}
+	}
 }
 
 func (l *ldb) insertTable(dbname string, key, value []byte) error {
