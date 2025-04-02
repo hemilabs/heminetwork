@@ -1,10 +1,9 @@
 # Running the Hemi stack
 
-This document details how to run the full Hemi stack with P2P nodes and RPC access. *This does NOT run a batcher or
-sequencer.*
+This document details how to run the full Hemi stack with P2P nodes and RPC access. *This does NOT run a batcher or sequencer.*
 
 > [!TIP]
-> If you are interested in running a PoP miner, none of this setup is required unless you want to connect your PoP miner to your own Hemi node infrastructure rather than using the public BFG endpoint.
+> This setup is only for users looking to run a full node on the Hemi network, and is not required to use a wallet (Metamask, Rabby, etc.) to interact with dApps on Hemi or run a PoP Miner.
 
 
 <details>
@@ -96,6 +95,8 @@ The following daemons comprise the Hemi stack. They are all run under Docker Com
 8. bfgd
 9. postgres (used by bfgd)
 
+![Depiction of Hemi Network Stack](images/hemi-network-components-v2.svg)
+
 
 ### Docker Profiles
 
@@ -112,6 +113,7 @@ The following table provides details on which components are run locally as part
 | hemi     | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x:                | :x:                | :white_check_mark: | :x:                |
 | hemi-min | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x:                | :x:                | :x:                | :x:                | :x:                |
 | L1       | :x:                | :x:                | :x:                | :x:                | :white_check_mark: | :white_check_mark: | :x:                | :white_check_mark: |
+
 
 > [!TIP]
 > The "L1" profile does not run any Hemi-specific infrastructure; it is provided to allow users to run the L1 components separately from the Hemi components.
