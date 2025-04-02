@@ -11,6 +11,7 @@ This document details how to run the full Hemi stack with P2P nodes and RPC acce
 
 <!-- TOC -->
 * [Running the Hemi Stack](#running-the-hemi-stack)
+  * [Quickstart Summary](#quickstart-summary)
   * [Prerequisites](#prerequisites)
     * [System Requirements](#system-requirements)
       * [CPU, RAM, and Disk](#cpu-ram-and-disk)
@@ -19,11 +20,23 @@ This document details how to run the full Hemi stack with P2P nodes and RPC acce
     * [Checking Prerequisites](#checking-prerequisites)
     * [Cloning the heminetwork Repository](#cloning-the-heminetwork-repository)
     * [Hemi Components](#hemi-components)
+    * [Docker Profiles](#docker-profiles)
+      * [Docker Profile: full](#docker-profile-full)
+      * [Docker Profile: hemi](#docker-profile-hemi)
+      * [Docker Profile: hemi-min](#docker-profile-hemi-min)
+      * [Docker Profile: L1](#docker-profile-l1)
     * [⚠️ Important Note on Security](#important-note-on-security)
   * [Running With Docker Compose](#running-with-docker-compose)
+    * [Node Synchronization Type](#node-synchronization-type)
+    * [Generating Files](#generating-files)
+    * [Run The Compose Files](#run-the-compose-files)
+      * [For Testnet](#for-testnet)
+      * [For Mainnet](#for-mainnet)
   * [Accessing the Nodes](#accessing-the-nodes)
   * [Peer-to-Peer (P2P)](#peer-to-peer-p2p)
-  * [Mainnet](#mainnet)
+    * [Behavior of Incorrectly Peered Components](#behavior-of-incorrectly-peered-components)
+  * [Bring Your Own L1s](#bring-your-own-l1s)
+  * [Monitoring](#monitoring)
   * [Running Without Docker](#running-without-docker)
 <!-- TOC -->
 </details>
@@ -281,7 +294,7 @@ Several components of the Hemi stack peer with different P2P networks:
 
 Different functionality may not work if any of these P2P network connections are not established correctly.
 
-### Behavior of Incorrectly Peered Components:
+### Behavior of Incorrectly Peered Components
 If you are experiencing any of the below issues, a P2P connection is likely not established correctly. This could be due to a configuration issue (such as the configured bootstrap nodes), or a networking issue such as a firewall blocking certain types of outgoing traffic.
 
 * Issue: `op-geth` / `op-node` are frequently 10+ blocks behind tip
@@ -302,7 +315,7 @@ If you are experiencing any of the below issues, a P2P connection is likely not 
 * Issue: A PoP Miner connecting to `BFG` is getting keystones, but is not able to send Bitcoin transactions
   * `bitcoind` is likely not peered correctly with the Bitcoin P2P Network (so `electrs` is unable to get updated UTXO data)
 
-## Bring your own L1s
+## Bring Your Own L1s
 > ![TIP]
 > This section is required if you are running the `hemi` or `hemi-min` (Docker Profiles)(#docker-profiles), as these profiles do not contain self-hosted Bitcoin and Ethereum full nodes, and the Hemi stack requires these to function properly. 
 
