@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
+	"github.com/mitchellh/go-homedir"
 	cp "github.com/otiai10/copy"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -241,8 +242,12 @@ func (l *ldb) v3(ctx context.Context) error {
 	sort.Strings(keys)
 
 	// copy config and create database destination.
+	var err error
 	dcfg := *l.cfg
-	dcfg.Home = dcfg.Home + ".v3"
+	dcfg.Home, err = homedir.Expand(dcfg.Home + ".v3")
+	if err != nil {
+		return fmt.Errorf("destination expand: %w", err)
+	}
 	log.Infof("open upgrade db: %v", dcfg.Home)
 	dst, err := New(ctx, &dcfg)
 	if err != nil {
@@ -305,13 +310,19 @@ func (l *ldb) v3(ctx context.Context) error {
 		}
 		log.Infof("Raw database %v records moved: %v", dbs, n)
 
-		srcdir := filepath.Join(l.cfg.Home, dbs, rawdb.DataDir)
-		dstdir := filepath.Join(dcfg.Home, dbs, rawdb.DataDir)
+		srcdir, err := homedir.Expand(filepath.Join(l.cfg.Home, dbs, rawdb.DataDir))
+		if err != nil {
+			return fmt.Errorf("expand source dir: %v", err)
+		}
+		dstdir, err := homedir.Expand(filepath.Join(dcfg.Home, dbs, rawdb.DataDir))
+		if err != nil {
+			return fmt.Errorf("expand destination dir: %v", err)
+		}
 		if modeMove {
 			// Move raw data, we must recreate the dir because
 			// os.Rename fails otherwise.
+			// XXX this needs to be redone, too error prone durig restarts.
 			log.Infof("  Moving raw data: %v -> %v", srcdir, dstdir)
-			return fmt.Errorf("rework this to be restartable")
 			err := os.Remove(dstdir)
 			if err != nil {
 				return fmt.Errorf("remove raw data %v: %w", dbs, err)
@@ -351,17 +362,21 @@ func (l *ldb) v3(ctx context.Context) error {
 			return fmt.Errorf("source close: %w", err)
 		}
 
-		tmpdir := l.cfg.Home + ".v2"
+		home, err := homedir.Expand(l.cfg.Home)
+		if err != nil {
+			return fmt.Errorf("expand home dir: %v", err)
+		}
+		tmpdir := home + ".v2"
 		// Rename source directory to $HOME.v2
-		log.Infof("Rename source %v -> %v", l.cfg.Home, tmpdir)
-		err = os.Rename(l.cfg.Home, tmpdir)
+		log.Infof("Rename source %v -> %v", home, tmpdir)
+		err = os.Rename(home, tmpdir)
 		if err != nil {
 			return fmt.Errorf("rename source: %w", err)
 		}
 
 		// Rename destination directory to $HOME
-		log.Infof("Rename destination %v -> %v", dcfg.Home, l.cfg.Home)
-		err = os.Rename(dcfg.Home, l.cfg.Home)
+		log.Infof("Rename destination %v -> %v", dcfg.Home, home)
+		err = os.Rename(dcfg.Home, home)
 		if err != nil {
 			return fmt.Errorf("rename destination: %w", err)
 		}
