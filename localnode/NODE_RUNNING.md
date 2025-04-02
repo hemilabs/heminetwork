@@ -276,17 +276,17 @@ to performing full L1 derivation and storing historical information after the po
 occurred.
 
 > [!IMPORTANT]
-> Most users (including dApp developers wishing to run infrastructure to support their dApp) will only need `snap` which
-> is much faster and smaller. However, if you are running a service which requires access to historical data (such as a
-> blockchain explorer or other data indexer that fetches historical block data and/or performs re-execution of
-> historical transactions) then you will need an `archive` sync.
+> Most users (including dApp developers wishing to run infrastructure to support their dApp) will only need a `snap`
+> sync, which is much faster and smaller. However, if you are running a service which requires access to historical data
+> (such as a blockchain explorer or other data indexer that fetches historical block data and/or performs re-execution
+> of historical transactions), you will need an `archive` sync.
 
-To run an `archive` sync, you will need access to an ethereum Beacon API RPC provider that has all historical blob
-data (the optional ethereum node in the compose file as part of the `full` or `L1` will NOT work for that, as it will
-not be able to synchronize pruned historical blob data from Ethereum P2P). Hemi uses EIP-4844 blobs for data
-availability, and so performing a full sync from scratch requires access to an Ethereum node which has retained all of
-these historical blobs. By default, Etherem Consensus-Layer nodes (like Prysm) prune blobs after 4096 Ethereum epochs (
-49152 ETH blocks, or ~18.2 days).
+To run an `archive` sync, you will need access to an Ethereum Beacon API RPC provider that has all historical blob
+data (the optional Ethereum node in the compose file as part of the `full` or `L1` **will NOT work**, as it will not be
+able to synchronize pruned historical blob data from Ethereum P2P). Hemi uses EIP-4844 blobs for data availability, and
+so performing a full sync from scratch requires access to an Ethereum node which has retained all of these historical
+blobs. By default, Etherem Consensus-Layer nodes (like Prysm) prune blobs after 4096 Ethereum epochs (49152 ETH blocks,
+or ~18.2 days).
 
 Additionally, a fully-synced Hemi node that is offline for longer than the blob pruning period (~18.2 days) will either
 have to be `snap` synced again, or will have to be connected to an Ethereum node that has historical blobs available.
@@ -296,7 +296,7 @@ https://docs.arbitrum.io/run-arbitrum-node/l1-ethereum-beacon-chain-rpc-provider
 
 ### Generating Files
 
-Once you have choosen your network and sync type, run the command:
+Once you have chosen your network and sync type, run the command:
 
 ```
 cd localnode
