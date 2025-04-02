@@ -84,7 +84,7 @@ their own requirements:
 | L1       | 6         | 24GB   | 3TB                     |
 
 > [!WARNING]
-> Over time, these disk space requirements will grow. The above values represent the current requirements (as of 
+> Over time, these disk space requirements will grow. The above values represent the current requirements (as of
 > Q1 2025) with a buffer that should be sufficient for at least an additional year. It is highly recommended to monitor
 > disk usage to prevent the node from running out of disk space.
 
@@ -112,7 +112,9 @@ To get started, clone the `hemilabs/heminetwork` repository:
 git clone https://github.com/hemilabs/heminetwork.git
 cd heminetwork
 ```
+
 Or to use SSH:
+
 ```sh
 # Clone with SSH
 git clone ssh://git@github.com/hemilabs/heminetwork.git
@@ -161,7 +163,6 @@ The following table provides details on which components are run locally as part
 > The "L1" profile does not run any Hemi-specific infrastructure; it is provided to allow users to run the L1 components
 > separately from the Hemi components.
 
-
 Different node configurations support different Hemi use cases:
 
 | Profile  | Standard RPC<br>(Wallets, most dApps, etc.) | Consensus RPC<br>(State Roots, Sync Status, etc.) | Extended Consensus RPC<br>(BTC Finality) | Fully Local PoP Mining | Trustless ETH Derivation                               | Trustless BTC Indexing                                 |
@@ -173,30 +174,31 @@ Different node configurations support different Hemi use cases:
 
 > [!TIP]
 > The `full` profile supports all features, operates entirely trustlessly, and does not pair with another profile.
+>
 > The `hemi` and `hemi-min` profiles can be run either with external trusted RPC endpoints for L1 (BTC+ETH) data, or can
-> be paired with an `L1` profile. Running the `hemi` profile paired with an `L1` profile provides the same features and
+> be paired with an `L1` profile.
+> 
+> Running the `hemi` profile paired with an `L1` profile provides the same features and
 > trust model as a `full` profile. Running the `hemi-min` profile paired with an `L1` profile provides the same _trust
 model_ as a `full` profile, but does not provide the Extended Consensus RPC (BTC Finality data available from `op-node`
 > or `BFG`) or support fully local PoP mining (connecting a PoP miner to a self-hosted BFG instance).
 
 > [!NOTE]
-> Technically, all node configurations which include `op-geth` and provide Standard RPC functionality include a Bitcoin
-> full node as part of the `TBC` instance embedded inside `op-geth`, which is required to correctly process hVM state
-> transitions that involve smart contract calls to hVM precompiles that fetch indexed Bitcoin data. This is essential to
-> ensure the trustless computation of hVM state transitions calculated by `op-geth` nodes (post-snap-sync, if used)
-> regardless of the supporting network stack. This `TBC` full BTC node is separate from the _optional_ `bitcoind` BTC
-> full
-> node that electrs connects to with the `full` or `hemi` profiles, which provides an external independent view of
-> Bitcoin
-> for calculating Bitcoin finality information for external consumers requesting this information over the `op-node`
-> and/or `BFG` RPC endpoints, and facilitates PoP miner interactions with the Bitcoin network. Both of the `TBC`
-> and `bitcoind` BTC nodes peer directly with the Bitcoin network and operate entirely independently. Advanced users
-> with
-> a synced `bitcoind` instance can configure the startup configuration of `op-geth` to pass-through instructions to
-> direct
-> the embedded `TBC` node to directly peer with the `bitcoind` node, which can help speed up the initial Bitcoin P2P
-> sync
-> that `TBC` performs (especially on slow connections) if desired.
+> All node configurations which include `op-geth` and provide Standard RPC functionality include a Bitcoin full node as
+> part of the `TBC` instance embedded inside `op-geth`, which is required to correctly process hVM state transitions
+> that involve smart contract calls to hVM precompiles that fetch indexed Bitcoin data. This is essential to ensure the
+> trustless computation of hVM state transitions calculated by `op-geth` nodes (post-snap-sync, if used) regardless of
+> the supporting network stack.
+> 
+> The `TBC` full BTC node within `op-geth` is separate from the _optional_ `bitcoind` BTC full node that is used by
+> electrs in the `full` or `hemi` profiles, which provides an external independent view of Bitcoin for calculating
+> Bitcoin finality information for external consumers requesting this information over the `op-node` and/or `BFG` RPC
+> endpoints, and facilitates PoP miner interactions with the Bitcoin network. Both of the `TBC` and `bitcoind` BTC nodes
+> peer directly with the Bitcoin network and operate entirely independently.
+>
+> Advanced users with a synced `bitcoind` instance can configure the startup configuration of `op-geth` to pass-through
+> instructions to direct the embedded `TBC` node to directly peer with the `bitcoind` node, which can help speed up the
+> initial Bitcoin P2P sync that `TBC` performs (especially on slow connections) if desired.
 
 #### Docker Profile: full
 
