@@ -144,6 +144,8 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 		nn += n
 		if n == 0 {
 			return nn, nil
+		} else {
+			log.Infof("Restart database copy: %v", dbname)
 		}
 	}
 }
