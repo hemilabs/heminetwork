@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -640,10 +641,20 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if value == "" {
 			return errors.New("value: must be set")
 		}
-
-		err = s.DatabaseMetadataPut(ctx, []byte(key), []byte(value))
-		if err != nil {
-			return err
+		if strings.HasPrefix(value, "0x") {
+			v, err := hex.DecodeString(value[2:])
+			if err != nil {
+				return fmt.Errorf("value decode: %w", err)
+			}
+			err = s.DatabaseMetadataPut(ctx, []byte(key), v)
+			if err != nil {
+				return err
+			}
+		} else {
+			err = s.DatabaseMetadataPut(ctx, []byte(key), []byte(value))
+			if err != nil {
+				return err
+			}
 		}
 
 		fmt.Printf("value (%v) with key (%v) added to metadata\n", value, key)
