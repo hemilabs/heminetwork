@@ -4,21 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
+	"github.com/hemilabs/heminetwork/api/popapi"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/juju/loggo"
 )
-
-var upgrader = websocket.Upgrader{}
 
 type jsonrpcSubscriptionNotification struct {
 	Version string                `json:"jsonrpc"`
@@ -37,7 +33,7 @@ type jsonrpcMessage struct {
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Error   *jsonError      `json:"error,omitempty"`
-	Result  string          `json:"result,omitempty"`
+	Result  any             `json:"result,omitempty"`
 }
 
 type jsonError struct {
@@ -46,63 +42,149 @@ type jsonError struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
-func handleSubscription(w http.ResponseWriter, r *http.Request) {
-	c, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
+type handler struct {
+	handleFunc func(w http.ResponseWriter, r *http.Request) error
+	errCh      chan error
+}
+
+func (f handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if err := f.handleFunc(w, r); err != nil {
+		f.errCh <- err
 	}
-	defer c.Close()
-	for {
-		var msg jsonrpcMessage
-		err := c.ReadJSON(&msg)
+}
+
+func fillOutBytes(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, '_')
+	}
+
+	return result
+}
+
+func mockOpgeth(ctx context.Context, t *testing.T) (*httptest.Server, chan string, chan error) {
+
+	msgCh := make(chan string, 10)
+	errCh := make(chan error)
+
+	hf := func(w http.ResponseWriter, r *http.Request) error {
+
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			InsecureSkipVerify: true,
+		})
 		if err != nil {
-			panic(err)
+			return err
 		}
 
-		fakeHeader := types.Header{
-			ParentHash:  common.HexToHash("0000H45H"),
-			UncleHash:   common.HexToHash("0000H45H"),
-			Coinbase:    common.HexToAddress("0000H45H"),
-			Root:        common.HexToHash("0000H00H"),
-			TxHash:      common.HexToHash("0000H45H"),
-			ReceiptHash: common.HexToHash("0000H45H"),
-			Difficulty:  big.NewInt(1337),
-			Number:      big.NewInt(1337),
-			GasLimit:    1338,
-			GasUsed:     1338,
-			Time:        1338,
-			Extra: []byte("Extra data Extra data Extra data  Extra data" +
-				"Extra data  Extra data  Extra data Extra data"),
-			MixDigest: common.HexToHash("0x0000H45H"),
-		}
-		encResult := subscriptionResultEnc{
-			ID:     "0x5a395650bce324475634d746a831c227",
-			Result: fakeHeader,
-		}
-		subData := jsonrpcSubscriptionNotification{
-			Version: "2.0",
-			Method:  "eth_subscription",
-			Params:  encResult,
-		}
-		subResp := jsonrpcMessage{
-			Version: "2.0",
-			ID:      1,
-			Result:  "0x5a395650bce324475634d746a831c227",
-		}
-
-		err = c.WriteJSON(subResp)
-		if err != nil {
-			panic(err)
-		}
+		defer func() {
+			if err := c.Close(websocket.StatusNormalClosure, ""); err != nil {
+				t.Logf("error closing websocket: %s", err)
+			}
+		}()
 
 		for {
-			time.Sleep(500 * time.Millisecond)
-			c.WriteJSON(subData)
+
+			var msg jsonrpcMessage
+			_, br, err := c.Read(ctx)
 			if err != nil {
-				panic(err)
+				return err
 			}
+			err = json.Unmarshal(br, &msg)
+			if err != nil {
+				return err
+			}
+
+			t.Logf("command is %s", msg.Method)
+
+			go func() {
+				select {
+				case <-ctx.Done():
+					err = ctx.Err()
+					return
+				case msgCh <- msg.Method:
+				}
+			}()
+
+			switch msg.Method {
+			case "kss_subscribe":
+				subResp := jsonrpcMessage{
+					Version: "2.0",
+					ID:      1,
+					Result:  "0x5a395650bce324475634d746a831c227",
+				}
+
+				p, err := json.Marshal(subResp)
+				if err != nil {
+					return err
+				}
+
+				err = c.Write(ctx, websocket.MessageText, p)
+				if err != nil {
+					return err
+				}
+
+				encResult := subscriptionResultEnc{
+					ID:     "0x5a395650bce324475634d746a831c227",
+					Result: "New Keystone Available",
+				}
+				subNotif := jsonrpcSubscriptionNotification{
+					Version: "2.0",
+					Method:  "eth_subscription",
+					Params:  encResult,
+				}
+
+				go func() {
+					p, err := json.Marshal(subNotif)
+					if err != nil {
+						panic(err)
+					}
+					for range 5 {
+						t.Log("Sending new keystone notification")
+						err = c.Write(ctx, websocket.MessageText, p)
+						if err != nil {
+							panic(err)
+						}
+					}
+				}()
+			case "keystone_request":
+				l2Keystone := hemi.L2Keystone{
+					Version:            1,
+					L1BlockNumber:      11,
+					L2BlockNumber:      22,
+					ParentEPHash:       fillOutBytes("parentephash", 32),
+					PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
+					StateRoot:          fillOutBytes("stateroot", 32),
+					EPHash:             fillOutBytes("ephash", 32),
+				}
+				kssResp := popapi.L2KeystoneResponse{
+					L2Keystones: []*hemi.L2Keystone{&l2Keystone},
+				}
+				subResp := jsonrpcMessage{
+					Version: "2.0",
+					ID:      msg.ID,
+					Result:  kssResp,
+				}
+
+				p, err := json.Marshal(subResp)
+				if err != nil {
+					return err
+				}
+
+				err = c.Write(ctx, websocket.MessageText, p)
+				if err != nil {
+					return err
+				}
+			default:
+				t.Errorf("unsupported message %v", msg.Method)
+			}
+
 		}
 	}
+
+	h := handler{handleFunc: hf, errCh: errCh}
+
+	opgeth := httptest.NewServer(h)
+	return opgeth, msgCh, errCh
 }
 
 func TestPopMiner(t *testing.T) {
@@ -111,15 +193,15 @@ func TestPopMiner(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Create test server with the echo handler.
-	opgeth := httptest.NewServer(http.HandlerFunc(handleSubscription))
+	// Create test server with the request handler.
+	opgeth, msgCh, errCh := mockOpgeth(ctx, t)
 	defer opgeth.Close()
 
 	// Setup pop miner
 	cfg := NewDefaultConfig()
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c" +
 		"b0602599b867332dfec245547baafae40dad247f21564a0de925527f2445a086fd"
-	cfg.LogLevel = "popm=TRACE"
+	//cfg.LogLevel = "popm=TRACE"
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -137,5 +219,30 @@ func TestPopMiner(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(5 * time.Second)
+	expectedMsg := map[string]int{
+		"kss_subscribe":    1,
+		"keystone_request": 5,
+	}
+
+	for {
+		select {
+		case err = <-errCh:
+			t.Fatal(err)
+		case n := <-msgCh:
+			expectedMsg[n]--
+			finished := true
+			for msg, k := range expectedMsg {
+				if k > 0 {
+					t.Logf("Still missing %v messages of type %s", k, msg)
+					finished = false
+				}
+			}
+			if finished {
+				t.Log("Received all expected messages")
+				return
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+	}
 }
