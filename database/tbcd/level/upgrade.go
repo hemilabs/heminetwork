@@ -13,8 +13,10 @@ import (
 	"sort"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	cp "github.com/otiai10/copy"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/rawdb"
@@ -23,6 +25,7 @@ import (
 var (
 	upgradeVerbose = false
 	batchSize      = 100000
+	chunkSize      = 1_000_000_000 // 1GB
 
 	modeMove = true
 )
@@ -37,21 +40,24 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 	i := a.NewIterator(nil, nil)
 	defer func() { i.Release() }()
 
-	r := 0
+	r := 0              // total records written
+	totalSize := 0      // total size written
+	totalWriteSize := 0 // total size written in chuks
+
 	batchA := leveldb.MakeBatch(batchSize) // delete batch
 	batchB := leveldb.MakeBatch(batchSize) // copy batch
 	for {
-		// See if we were interrupted
-		select {
-		case <-ctx.Done():
-			return r, ctx.Err()
-		default:
-		}
-
 		start := time.Now()
-
+		progress := time.Now()
 		records := 0
-		for records = 0; i.Next() && records < batchSize; records++ {
+		for records = 0; i.Next() && records < batchSize && totalWriteSize <= chunkSize; records++ {
+			// See if we were interrupted
+			select {
+			case <-ctx.Done():
+				return r, ctx.Err()
+			default:
+			}
+
 			if filter != nil {
 				// skip filtered records
 				k, v := filter[string(i.Key())]
@@ -65,6 +71,17 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			if move {
 				batchA.Delete(i.Key())
 			}
+
+			// update stats
+			size := len(i.Key()) + len(i.Value())
+			totalWriteSize += size
+			totalSize += size
+
+			if time.Since(progress) > 5*time.Second {
+				log.Infof("  records processed: %v %v",
+					records, humanize.Bytes(uint64(totalWriteSize)))
+				progress = time.Now()
+			}
 		}
 		r += records
 
@@ -72,6 +89,13 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			return r, fmt.Errorf("batch write b: %w", err)
 		}
 		batchB.Reset()
+
+		if records == 0 || upgradeVerbose || time.Since(start) > 5*time.Second {
+			log.Infof("  records moved: %v, %v (%v/%v) in %v",
+				records, r, humanize.Bytes(uint64(totalWriteSize)),
+				humanize.Bytes(uint64(totalSize)),
+				time.Since(start))
+		}
 
 		if move {
 			// Delete destination records
@@ -81,9 +105,20 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			batchA.Reset()
 		}
 
-		if upgradeVerbose {
-			log.Infof("  records moved: %v, %v in %v",
-				records, r, time.Since(start))
+		if totalSize > chunkSize {
+			if move {
+				// Compact db to free space on disk
+				ct := time.Now()
+				log.Infof("  compacting %v: %v", dbname,
+					humanize.Bytes(uint64(totalWriteSize)))
+				err := a.CompactRange(util.Range{Start: nil, Limit: nil})
+				if err != nil {
+					return r, fmt.Errorf("compaction: %w", err)
+				}
+				log.Infof("  compacting complete %v: %v", dbname,
+					time.Since(ct))
+			}
+			totalWriteSize = 0
 		}
 
 		if records == 0 {
