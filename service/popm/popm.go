@@ -149,7 +149,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	// headersCh := make(chan *types.Header, 10)
 	headersCh := make(chan string, 10)
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh)
-	//sub, err := s.opgethClient.SubscribeNewHead(context.Background(), headersCh)
+	// sub, err := s.opgethClient.SubscribeNewHead(context.Background(), headersCh)
 	if err != nil {
 		return err
 	}
