@@ -136,7 +136,7 @@ It supports all ways of interacting with the Hemi network (Standard RPC + Extend
 
 With this mode, your Hemi node is synchronized entirely from ETH DA data trustlessly synchronized from the Ethereum network, Bitcoin finality information is calculated based on BTC data trustlessly synchronized from the Bitcoin network, and PoP miners connecting to the BFG endpoint are interfacing with the Bitcoin network (fetching UTXOs and sending transactions) completely trustlessly.
 
-![Depiction of Full Profile](images/hemi-network-docker-profile-full-v2.png)
+![Depiction of Full Profile](images/hemi-network-docker-profile-full-v2.svg)
 
 
 #### Profile: hemi
@@ -146,7 +146,7 @@ It supports all ways of interacting with the Hemi network (Standard RPC + Extend
 
 However, your Hemi node is synchronized from ETH DA data provided by external Ethereum (Execution + Beacon) RPC nodes, Bitcoin finality information is calculated based on BTC data provided by an external Bitcoin RPC node, and PoP miners connecting to the BFG endpoint are also interfacing with the Bitcoin network (fetching UTXOs and sending transactions) through this external Bitcoin RPC node.
 
-![Depiction of Hemi Profile](images/hemi-network-docker-profile-hemi-v2.png)
+![Depiction of Hemi Profile](images/hemi-network-docker-profile-hemi-v2.svg)
 
 
 #### Profile: hemi-min
@@ -156,7 +156,7 @@ It supports the primary ways of interacting with the Hemi network (Standard RPC 
 
 Similarly to the `hemi` profile, a node running the `hemi-min` profile your Hemi node is synchronized from ETH DA data provided by external Ethereum (Execution + Beacon) RPC nodes. However, no Bitcoin finality information is available to external services, and there is no local BFG node to run a Fully Local PoP Miner.
 
-![Depiction of Hemi-Min Profile](images/hemi-network-docker-profile-hemi-min-v2.png)
+![Depiction of Hemi-Min Profile](images/hemi-network-docker-profile-hemi-min-v2.svg)
 
 ### ⚠️ Important Note on Security
 
