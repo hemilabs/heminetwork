@@ -1,12 +1,14 @@
 #!/bin/sh
+# Copyright (c) 2024-2025 Hemi Labs, Inc.
+# Use of this source code is governed by the MIT License,
+# which can be found in the LICENSE file.
 
-# Windows to monitor a fully hemi stack running with the provided compose
+# tmux windows to monitor a full Hemi stack running with the provided compose
 NAME=hemi
 
-if [[ "$1" != "" ]]; then
+NETWORK="hemi"
+if [ "$1" != "" ]; then
     NETWORK="hemi-$1"
-else
-	NETWORK="hemi"
 fi
 
 tmux start-server
