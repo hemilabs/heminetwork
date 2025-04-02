@@ -105,14 +105,16 @@ following are installed and setup:
 
 ### Cloning the heminetwork Repository
 
-To get started, clone this repository:
+To get started, clone the `hemilabs/heminetwork` repository:
 
 ```sh
 # Clone with HTTP
 git clone https://github.com/hemilabs/heminetwork.git
 cd heminetwork
-
-# OR Clone with SSH
+```
+Or to use SSH:
+```sh
+# Clone with SSH
 git clone ssh://git@github.com/hemilabs/heminetwork.git
 cd heminetwork
 ```
