@@ -2,7 +2,7 @@
 
 This document details how to run the full Hemi stack with P2P nodes and RPC access. *This does NOT run a batcher or sequencer.*
 
-> [!TIP]
+> [!NOTE]
 > This setup is only for users looking to run a full node on the Hemi network, and is not required to use a wallet (Metamask, Rabby, etc.) to interact with dApps on Hemi or run a PoP Miner.
 
 
@@ -49,7 +49,8 @@ You can choose to run several different configurations (implemented as [Docker P
 | hemi-min   | 2         | 12GB   | 2TB                     |
 | L1         | 6         | 24GB   | 3TB                     |
 
-Do note that over time disk space requirements will grow. The above values represent the current requirements (as of Q1 2025) with a buffer that should be sufficient for at least an additional year.
+> [!NOTE]
+>  Over time, these disk space requirements will grow. The above values represent the current requirements (as of Q1 2025) with a buffer that should be sufficient for at least an additional year.
 
 #### ulimits
 
@@ -100,7 +101,7 @@ The following daemons comprise the Hemi stack. They are all run under Docker Com
 
 ### Docker Profiles
 
-There are four different docker profiles you can choose from, depending on your use case.
+There are four different docker profiles you can choose from, depending on your use case and trust tolerance.
 
 > [!TIP]
 > This docker profile setting is independent from the [Node Synchronization Type](#node-synchronization-type) which determines how the `op-geth` instance performs it's one-time **initial** sync regardless of the stack setup. Any of the profiles that include an op-geth instance can be configured with either of the initial synchronization types.
@@ -128,8 +129,14 @@ Different node configurations support different Hemi use cases:
 | hemi-min | :white_check_mark:                          | :white_check_mark:                                | :x:                                      | :x:                    | :x:                      | :x:                    |
 | L1       | :x:                                         | :x:                                               | :x:                                      | :x:                    | :white_check_mark: <br>(for paired hemi/hemi-min stack) | :white_check_mark: <br> (for paired hemi/hemi-min stack) |
 
+> [!TIP]
+> The `full` profile supports all features, operates entirely trustlessly, and does not pair with another profile. The `hemi` and `hemi-min` profiles can be run either with external trusted RPC endpoints for L1 (BTC+ETH) data, or can be paired with an `L1` profile. Running the `hemi` profile paired with an `L1` profile provides the same features and trust model as a `full` profile. Running the `hemi-min` profile paired with an `L1` profile provides the same _trust model_ as a `full` profile, but does not provide the Extended Consensus RPC (BTC Finality data available from `op-node` or `BFG`) or support fully local PoP mining (connecting a PoP miner to a self-hosted BFG instance).
 
-#### Profile: full
+> [!NOTE]
+> Technically, all node configurations which include `op-geth` and provide Standard RPC functionality include a Bitcoin full node as part of the `TBC` instance embedded inside `op-geth`, which is required to correctly process hVM state transitions that involve smart contract calls to hVM precompiles that fetch indexed Bitcoin data. This is essential to ensure the trustless computation of hVM state transitions calculated by `op-geth` nodes (post-snap-sync, if used) regardless of the supporting network stack. This `TBC` full BTC node is separate from the _optional_ `bitcoind` BTC full node that electrs connects to with the `full` or `hemi` profiles, which provides an external independent view of Bitcoin for calculating Bitcoin finality information for external consumers requesting this information over the `op-node` and/or `BFG` RPC endpoints, and facilitates PoP miner interactions with the Bitcoin network. Both of the `TBC` and `bitcoind` BTC nodes peer directly with the Bitcoin network and operate entirely independently. Advanced users with a synced `bitcoind` instance can configure the startup configuration of `op-geth` to pass-through instructions to direct the embedded `TBC` node to directly peer with the `bitcoind` node, which can help speed up the initial Bitcoin P2P sync that `TBC` performs (especially on slow connections) if desired.
+
+
+#### Docker Profile: full
 This profile includes everything: full Bitcoin and Ethereum (L1) nodes, as well as a full Hemi node.
 
 It supports all ways of interacting with the Hemi network (Standard RPC + Extended Consensus RPC, Fully Local PoP Mining).
@@ -139,7 +146,7 @@ With this mode, your Hemi node is synchronized entirely from ETH DA data trustle
 ![Depiction of Full Profile](images/hemi-network-docker-profile-full-v2.svg)
 
 
-#### Profile: hemi
+#### Docker Profile: hemi
 This profile runs all components of the Hemi stack, but relies on external Bitcoin and Ethereum RPC endpoints.
 
 It supports all ways of interacting with the Hemi network (Standard RPC + Extended Consensus RPC, Fully Local PoP Mining).
@@ -149,7 +156,7 @@ However, your Hemi node is synchronized from ETH DA data provided by external Et
 ![Depiction of Hemi Profile](images/hemi-network-docker-profile-hemi-v2.svg)
 
 
-#### Profile: hemi-min
+#### Docker Profile: hemi-min
 This profile only runs the minimum components of the Hemi stack required to interact with dApps on the Hemi network, and relies on external Bitcoin and Ethereum RPC endpoints.
 
 It supports the primary ways of interacting with the Hemi network (Standard RPC + Consensus RPC), but does not support the Extended Consensus RPC (Bitcoin Finality statistics from BFG/op-node) or Fully Local PoP Mining.
@@ -159,7 +166,7 @@ Similarly to the `hemi` profile, a node running the `hemi-min` profile is synchr
 ![Depiction of Hemi-Min Profile](images/hemi-network-docker-profile-hemi-min-v2.svg)
 
 
-#### Profile: L1
+#### Docker Profile: L1
 > [!NOTE]
 > This profile does not run any Hemi stack components, and is only meant to run the L1 ETH+BTC components separately in support of either a `hemi` or `hemi-min` profile run separately.
 
@@ -182,13 +189,16 @@ services' ports to the outside world.** This allows communication between the se
 
 ### Node Synchronization Type
 
-Nodes can perform initial synchronization in two modes, `archive` or `snap`.  `archive` rederives the entire Hemi chain from L1 data and stores historical information while `snap` only indexes data coming from ethereum blobs starting at the time sync begins.  Most users will only need `snap` which is must faster and smaller. After performing an initial `snap` sync, a node will switch to performing full L1 derivation and storing historical information after the point in the chain where the `snap` sync occurred.
+Nodes can perform initial synchronization in two modes, `archive` or `snap`.  `archive` rederives the entire Hemi chain from L1 data and stores historical information while `snap` synchronizes Hemi state trie and hVM BTC state data based on the network state at the time the `snap` sync is performed. After performing an initial `snap` sync, a node will switch to performing full L1 derivation and storing historical information after the point in the chain where the `snap` sync occurred.
 
-To run an `archive` sync, you will need access to an ethereum Beacon API rpc provider that has all historical blob data (the optional ethereum node in the compose file will NOT work for that). Hemi uses EIP-4844 blobs for data availability, and so performing a full sync from scratch requires access to an Ethereum node which has retained all of these historical blobs. By default, Etherem Consensus-Layer nodes (like Prysm) prune blobs after 4096 Ethereum epochs (49152 ETH blocks, or ~18.2 days).
+> [!IMPORTANT]
+> Most users (including dApp developers wishing to run infrastructure to support their dApp) will only need `snap` which is much faster and smaller. However if you are running a service which requires access to historical data (such as a blockchain explorer or other data indexer that fetches historical block data and/or performs re-execution of historical transactions) then you will need an `archive` sync.
+
+To run an `archive` sync, you will need access to an ethereum Beacon API RPC provider that has all historical blob data (the optional ethereum node in the compose file as part of the `full` or `L1` will NOT work for that, as it will not be able to synchronize pruned historical blob data from Ethereum P2P). Hemi uses EIP-4844 blobs for data availability, and so performing a full sync from scratch requires access to an Ethereum node which has retained all of these historical blobs. By default, Etherem Consensus-Layer nodes (like Prysm) prune blobs after 4096 Ethereum epochs (49152 ETH blocks, or ~18.2 days).
 
 Additionally, a fully-synced Hemi node that is offline for longer than the blob pruning period (~18.2 days) will either have to be `snap` synced again, or will have to be connected to an Ethereum node that has historical blobs available.
 
-Possible providers for full blob data can be found at:
+Possible providers for full blob data to perform an `archive` sync can be found at:
 https://docs.arbitrum.io/run-arbitrum-node/l1-ethereum-beacon-chain-rpc-providers
 
 Once you have choosen your network and sync type, run the command:
@@ -197,18 +207,30 @@ cd localnode
 ./gen-files.sh NETWORK SYNCMODE
 ```
 
-For example, to prepare to run a mainnet snap mode:
+For example, to prepare to run a mainnet node with an initial `snap` sync:
 ```
 ./gen-files.sh mainnet snap
 ```
 
-### Run the compose files.
+### Run The Compose Files
+> [!TIP]
+> The below examples use the `full` [Docker Profile](#docker-profiles), if you wish to run another profile then replace `full` in the below commands with your selected profile (`hemi`, `hemi-min`, or `L1`)
+
+
+#### For Testnet
 
 Run the following to start each of the required daemons as Docker containers:
 
 ```sh
 cd localnode
 docker compose -f docker-compose.yml --profile full up --build
+```
+
+#### For Mainnet
+
+Run the file:
+```sh
+docker compose -f docker-compose_mainnet.yml --profile full up --build
 ```
 
 ## Accessing the Nodes
@@ -222,20 +244,51 @@ To access the nodes, you can use JSON-RPC or WebSockets exposed on the following
 | op-geth WebSocket RPC | `28546` |
 
 ## Peer-to-Peer (P2P)
+> [!TIP]
+> By default, all of the [Docker Profiles](#docker-profiles) should be configured to establish all of the appropriate P2P connections out-of-the-box. However, if you are having issues syncing, propagating transactions, or using certain features this section may be helpful in diagnosing the root cause, as some networking configurations or modifications may prevent various P2P connections from being established correctly.
 
-The current version gets data from the Ethereum network. For fastest access to blocks, direct P2P connections to the
-Hemi network will be necessary. This is coming soon.
+Several components of the Hemi stack peer with different P2P networks:
+* [Ethereum] `prysm` peers with the Ethereum Consensus-Layer P2P Network
+  * For syncing ETH beacon blocks for Hemi chain derivation from DA
+* [Ethereum] `geth` peers with the Ethereum Execution-Layer P2P Network
+  * For propagating ETH transactions
+    * _not technically required for Hemi node operation_
+* [Bitcoin] `bitcoind` peers with the Bitcoin P2P Network
+  * To sync Bitcoin blocks for electrs in support of BFG functionality (BTC finality + PoP Mining)
+* [Hemi] `op-node` peers with the Hemi Consensus-Layer (libp2p) P2P Network
+  * For syncing optimistic blocks prior to derivation from blob/DA publication to Ethereum
+* [Hemi] `op-geth` peers with the Hemi Execution-Layer P2P Network
+  * For propagating Hemi transactions prior to confirmation
+  * For back-channeling Bitcoin data unavailable over Bitcoin P2P (ex: non-canonical BTC blocks that pivot over a 2+ BTC block reorg)
+* [Hemi] `op-geth` (via embedded `TBC`) peers with the Bitcoin P2P Network
+  * For synchronizing Bitcoin block data needed to progress `TBC`'s determinstic Bitcoin view for hVM precompile calls
 
-## Mainnet
+Different functionality may not work if any of these P2P network connections are not established correctly.
 
-Run the file:
-```sh
-docker compose -f docker-compose_mainnet.yml --profile full up --build
-```
+### Behavior of Incorrectly Peered Components:
+If you are experiencing any of the below issues, a P2P connection is likely not established correctly. This could be due to a configuration issue (such as the configured bootstrap nodes), or a networking issue such as a firewall blocking certain types of outgoing traffic.
+
+* Issue: `op-geth` / `op-node` are frequently 10+ blocks behind tip
+  * `op-node` is likely not peered correctly with the Hemi Consensus-Layer P2P Network, and your Hemi stack is only progressing when new batches are published to Ethereum
+* Issue: `op-geth` is unable to progress, _and_ is printing logs about an hVM state transition calculation failing
+  * The `TBC` node is likely not peered correctly with the Bitcoin P2P network
+    * If `TBC` is missing BTC data, `op-geth` will try to back-channel the required BTC data over it's P2P connection with the Hemi Execution-Layer P2P Network, so it's likely that `op-geth` is also not peered correctly
+* Issue: `op-geth` / `op-node` are staying in sync, but transactions sent to `op-geth` RPC are not getting propagated (not confirmed _and_ not shown on block explorers)
+  * `op-geth` is likely not peered correctly with the Hemi Execution-Layer P2P Network
+* Issue: `op-geth` / `op-node` are staying in sync, but the safe/finalized tip is more than 2-3 hours old
+  * `prysm` is likely not peered correctly with the Ethereum Consensus-Layer P2P Network, and `op-node` is only processing optimistic blocks without the ability to re-derive them from Ethereum DA publications
+* Issue: `op-node` / `BFG` are not reporting updated Bitcoin finalization data (ex: always showing -9 even for blocks that are more than a few hours old)
+  * `bitcoind` is likely not peered correctly with the Bitcoin P2P network
+* Issue: A PoP Miner connected to `BFG` is not getting any new keystones
+  * `op-node` is likely not peered correctly with the Hemi Consensus-Layer P2P Network, _and_ `prysm` is likely not peered correctly with the Ethereum Consensus-Layer P2P Network
+* Issue: A PoP Miner connected to `BFG` is getting delayed keystones
+  * `op-node` is likely not peered correctly with the Hemi Consensus-Layer P2P Network (should also see `op -geth` and `op-node` consistently behind the tip)
+* Issue: A PoP Miner connecting to `BFG` is getting keystones, but is not able to send Bitcoin transactions
+  * `bitcoind` is likely not peered correctly with the Bitcoin P2P Network (so `electrs` is unable to get updated UTXO data)
 
 ## Bring your own L1s
 
-Several of the containers (the Bitcoin and Ethereum L1 containers) here can be replaced with nodes or API endpoints of your own.
+Several of the containers (the Bitcoin and Ethereum L1 containers) here can be replaced with nodes or API endpoints of your own, or you can run the [Docker Profiles](#docker-profiles) for the Hemi nodes (`hemi` or `hemi-min` profiles) separately from the L1 nodes (`L1` profile) and configure the `hemi`/`hemi-min` stack to connect to the separately-running `L1` stack.
 
 To run just the L1 containers, start with this command:
 ```sh
@@ -250,12 +303,16 @@ BITCOINCREDS=
 GETHL1ENDPOINT=
 PRYSMENDPOINT=
 ```
-and run:
+and run (replace `hemi` with `hemi-min` if you want to run the minimal Hemi stack):
 ```sh
 docker compose -f localnode/docker-compose_mainnet.yml --profile hemi up --build
 ```
 
-and similarly for testnet.
+and similarly for testnet (`docker-compose.yml` rather than `docker-compose_mainnet.yml`).
+
+> [!TIP]
+> If you are running the `hemi-min` stack, you do not need to provide a `BITCOINENDPOINT` or `BITCOINCREDS`, as the `hemi-min` stack does not run `BFG` or `electrs` which require a `bitcoind` RPC connection.
+
 
 ## Monitoring
 
