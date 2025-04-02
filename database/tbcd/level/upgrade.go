@@ -23,8 +23,8 @@ import (
 )
 
 var (
-	upgradeVerbose = false
-	batchSize      = 100000
+	upgradeVerbose = true
+	batchSize      = 1_000_000     // move one million records per batch
 	chunkSize      = 1_000_000_000 // 1GB
 
 	modeMove = true
@@ -43,14 +43,14 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 	r := 0              // total records written
 	totalSize := 0      // total size written
 	totalWriteSize := 0 // total size written in chuks
+	recordsCompact := 0 // total records since last compaction
 
 	batchA := leveldb.MakeBatch(batchSize) // delete batch
 	batchB := leveldb.MakeBatch(batchSize) // copy batch
 	for {
 		start := time.Now()
-		progress := time.Now()
 		records := 0
-		for records = 0; i.Next() && records < batchSize && totalWriteSize <= chunkSize; records++ {
+		for records = 0; i.Next() && records < batchSize; records++ {
 			// See if we were interrupted
 			select {
 			case <-ctx.Done():
@@ -77,23 +77,21 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			totalWriteSize += size
 			totalSize += size
 
-			if time.Since(progress) > 5*time.Second {
-				log.Infof("  records processed: %v %v",
-					records, humanize.Bytes(uint64(totalWriteSize)))
-				progress = time.Now()
+			if totalWriteSize > chunkSize {
+				break
 			}
 		}
 		r += records
+		recordsCompact += records
 
 		if err := b.Write(batchB, nil); err != nil {
 			return r, fmt.Errorf("batch write b: %w", err)
 		}
 		batchB.Reset()
 
-		if records == 0 || upgradeVerbose || time.Since(start) > 5*time.Second {
-			log.Infof("  records moved: %v, %v (%v/%v) in %v",
-				records, r, humanize.Bytes(uint64(totalWriteSize)),
-				humanize.Bytes(uint64(totalSize)),
+		if upgradeVerbose {
+			log.Infof("  Records moved: %v %v took %v",
+				r, humanize.Bytes(uint64(totalSize)),
 				time.Since(start))
 		}
 
@@ -105,18 +103,20 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			batchA.Reset()
 		}
 
-		if totalSize > chunkSize {
+		// Compact once we wrote chunkSize data or on exit.
+		if totalWriteSize > chunkSize || records == 0 {
 			if move {
 				// Compact db to free space on disk
 				ct := time.Now()
-				log.Infof("  compacting %v: %v", dbname,
+				log.Infof("  Compacting %v: records %v %v",
+					dbname, recordsCompact,
 					humanize.Bytes(uint64(totalWriteSize)))
 				err := a.CompactRange(util.Range{Start: nil, Limit: nil})
 				if err != nil {
 					return r, fmt.Errorf("compaction: %w", err)
 				}
-				log.Infof("  compacting complete %v: %v", dbname,
-					time.Since(ct))
+				log.Infof("  Compacting took %v", time.Since(ct))
+				recordsCompact = 0
 			}
 			totalWriteSize = 0
 		}
