@@ -36,14 +36,16 @@ Docker images for each Hemi Network component is published to [Docker Hub](https
 
 ### System Requirements
 
-#### CPU and RAM
+#### CPU, RAM, and Disk
 
-At least 8 CPU cores and 32GB RAM is required to run the Hemi stack.  This does NOT Include requirements for the L1 nodes (Bitcoin and Ethereum).
+You can choose to run several different configurations (implemented as docker profiles, see below), each with their own requirements:
+| Profile    | CPU Cores | Memory | Disk (NVMe Recommended) |
+| ---------- | --------- | ------ | ----------------------- |
+| Full       | 8         | 40GB   | 5TB                     |
+| Hemi       | 2         | 16GB   | 2TB                     |
+| L1         | 6         | 24GB   | 3TB                     |
 
-#### Disk
-
-At this time (Q1 2025), 4.5TB of disk space is required for mainnet or testnet.  NVMe disk is highly recommended.
-Note: Disk requirements may increase over time. 
+Do note that over time disk space requirements will grow. The above values represent the current requirements (as of Q1 2025) with a buffer that should be sufficient for an additional year.
 
 #### ulimits
 
