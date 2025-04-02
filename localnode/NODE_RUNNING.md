@@ -29,6 +29,7 @@ sequencer.*
 <!-- TOC -->
 </details>
 
+
 ## Prerequisites
 
 This guide assumes you are running [Docker](https://docs.docker.com/get-started/get-docker/)
@@ -41,7 +42,7 @@ Docker images for each Hemi Network component is published to [Docker Hub](https
 
 #### CPU, RAM, and Disk
 
-You can choose to run several different configurations (implemented as docker profiles, see below), each with their own requirements:
+You can choose to run several different configurations (implemented as [Docker Profiles](#docker-profiles)), each with their own requirements:
 | Profile    | CPU Cores | Memory | Disk (NVMe Recommended) |
 | ---------- | --------- | ------ | ----------------------- |
 | full       | 8         | 40GB   | 6TB                     |
@@ -80,7 +81,10 @@ cd heminetwork
 
 ### Hemi Components
 
-The following daemons are needed as part of the Hemi stack (which ones you need to run yourself depend on which docker profile you use). They are all run under Docker Compose:
+> [!TIP]
+> You do not have to run all of the daemons, depending on your use-case. See the [Docker Profiles](#docker-profiles) section to determine which configuration is appropriate for your use-case(s) and trust tolerance. 
+
+The following daemons comprise the Hemi stack. They are all run under Docker Compose:
 
 1. bitcoind
 2. electrs
@@ -92,7 +96,8 @@ The following daemons are needed as part of the Hemi stack (which ones you need 
 8. bfgd
 9. postgres (used by bfgd)
 
-### Docker Profiles (Node Configurations)
+
+### Docker Profiles
 
 There are four different docker profiles you can choose from, depending on your use case.
 
@@ -121,14 +126,35 @@ Different node configurations support different Hemi use cases:
 | hemi-min | :white_check_mark:                          | :white_check_mark:                                | :x:                                      | :x:                    | :x:                      | :x:                    |
 | L1       | :x:                                         | :x:                                               | :x:                                      | :x:                    | :white_check_mark: <br>(for paired hemi/hemi-min stack) | :white_check_mark: <br> (for paired hemi/hemi-min stack) |
 
-#### Profile: Full
+
+#### Profile: full
 This profile includes everything: full Bitcoin and Ethereum (L1) nodes, as well as a full Hemi node.
+
+It supports all ways of interacting with the Hemi network (Standard RPC + Extended Consensus RPC, Fully Local PoP Mining).
 
 With this mode, your Hemi node is synchronized entirely from ETH DA data trustlessly synchronized from the Ethereum network, Bitcoin finality information is calculated based on BTC data trustlessly synchronized from the Bitcoin network, and PoP miners connecting to the BFG endpoint are interfacing with the Bitcoin network (fetching UTXOs and sending transactions) completely trustlessly.
 
-![Depiction of Hemi Full Node Profile](images/hemi-network-docker-profile-full-v1.jpg)
+![Depiction of Full Profile](images/hemi-network-docker-profile-full-v2.png)
 
 
+#### Profile: hemi
+This profile runs all components of the Hemi stack, but relies on external Bitcoin and Ethereum RPC endpoints.
+
+It supports all ways of interacting with the Hemi network (Standard RPC + Extended Consensus RPC, Fully Local PoP Mining).
+
+However, your Hemi node is synchronized from ETH DA data provided by external Ethereum (Execution + Beacon) RPC nodes, Bitcoin finality information is calculated based on BTC data provided by an external Bitcoin RPC node, and PoP miners connecting to the BFG endpoint are also interfacing with the Bitcoin network (fetching UTXOs and sending transactions) through this external Bitcoin RPC node.
+
+![Depiction of Hemi Profile](images/hemi-network-docker-profile-hemi-v2.png)
+
+
+#### Profile: hemi-min
+This profile only runs the minimum components of the Hemi stack required to interact with dApps on the Hemi network, and relies on external Bitcoin and Ethereum RPC endpoints.
+
+It supports the primary ways of interacting with the Hemi network (Standard RPC + Consensus RPC), but does not support the Extended Consensus RPC (Bitcoin Finality statistics from BFG/op-node) or Fully Local PoP Mining.
+
+Similarly to the `hemi` profile, a node running the `hemi-min` profile your Hemi node is synchronized from ETH DA data provided by external Ethereum (Execution + Beacon) RPC nodes. However, no Bitcoin finality information is available to external services, and there is no local BFG node to run a Fully Local PoP Miner.
+
+![Depiction of Hemi-Min Profile](images/hemi-network-docker-profile-hemi-min-v2.png)
 
 ### ⚠️ Important Note on Security
 
