@@ -91,8 +91,8 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 
 		if upgradeVerbose {
 			log.Infof("  Records moved: %v %v took %v",
-				r, humanize.Bytes(uint64(totalSize)),
-				time.Since(start))
+				humanize.Comma(int64(r)),
+				humanize.Bytes(uint64(totalSize)), time.Since(start))
 		}
 
 		if move {
@@ -109,7 +109,7 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 				// Compact db to free space on disk
 				ct := time.Now()
 				log.Infof("  Compacting %v: records %v %v",
-					dbname, recordsCompact,
+					dbname, humanize.Comma(int64(recordsCompact)),
 					humanize.Bytes(uint64(totalWriteSize)))
 				err := a.CompactRange(util.Range{Start: nil, Limit: nil})
 				if err != nil {
@@ -249,7 +249,8 @@ func (l *ldb) v3(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("move database %v: %w", dbs, err)
 		}
-		log.Infof("Database %v records moved: %v", dbs, n)
+		log.Infof("Database %v records moved: %v",
+			dbs, humanize.Comma(int64(n)))
 	}
 
 	// copy rawdb, this is a bit trickier because we want to recreate the
