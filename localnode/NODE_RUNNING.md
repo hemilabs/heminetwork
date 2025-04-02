@@ -287,21 +287,23 @@ If you are experiencing any of the below issues, a P2P connection is likely not 
   * `bitcoind` is likely not peered correctly with the Bitcoin P2P Network (so `electrs` is unable to get updated UTXO data)
 
 ## Bring your own L1s
+> ![TIP]
+> This section is required if you are running the `hemi` or `hemi-min` (Docker Profiles)(#docker-profiles), as these profiles do not contain self-hosted Bitcoin and Ethereum full nodes, and the Hemi stack requires these to function properly. 
 
-Several of the containers (the Bitcoin and Ethereum L1 containers) here can be replaced with nodes or API endpoints of your own, or you can run the [Docker Profiles](#docker-profiles) for the Hemi nodes (`hemi` or `hemi-min` profiles) separately from the L1 nodes (`L1` profile) and configure the `hemi`/`hemi-min` stack to connect to the separately-running `L1` stack.
+Several of the containers (the Bitcoin and Ethereum L1 containers) that are normally run as part of the `full` profile can be replaced with nodes or API endpoints of your own. These can either be 3rd party RPC endpoints, or RPC endpoints you are hosting yourself separately using the `L1` Docker Profile.
 
 To run just the L1 containers, start with this command:
 ```sh
 docker compose -f localnode/docker-compose_mainnet.yml --profile L1 up --build
 ```
 
-To run only the Hemi containers, add your endpoints to `.env`:
+To run only the Hemi containers (either `hemi` or `hemi-min` Docker Profiles), add your endpoints to `.env`:
 ```sh
 OPSYNCMODE=consensus-layer
-BITCOINENDPOINT=
-BITCOINCREDS=
-GETHL1ENDPOINT=
-PRYSMENDPOINT=
+BITCOINENDPOINT=<BitcoinRPC>
+BITCOINCREDS=<BitcoinRPCCreds>
+GETHL1ENDPOINT=<EthereumExecutionRPCEndpoint>
+PRYSMENDPOINT=<EthereumBeaconRPCEndpoint>
 ```
 and run (replace `hemi` with `hemi-min` if you want to run the minimal Hemi stack):
 ```sh
