@@ -31,7 +31,7 @@ sequencer.*
   * [Running with Docker Compose](#running-with-docker-compose)
     * [Node Synchronization Type](#node-synchronization-type)
     * [Generating Files](#generating-files)
-    * [Run The Compose Files](#run-the-compose-files)
+    * [Run with Docker Compose](#run-with-docker-compose)
       * [For Testnet](#for-testnet)
       * [For Mainnet](#for-mainnet)
   * [Accessing the Nodes](#accessing-the-nodes)
@@ -309,7 +309,7 @@ For example, to prepare to run a mainnet node with an initial `snap` sync:
 ./gen-files.sh mainnet snap
 ```
 
-### Run The Compose Files
+### Run with Docker Compose
 
 > [!TIP]
 > The below examples use the `full` [Docker Profile](#docker-profiles), if you wish to run another profile then
