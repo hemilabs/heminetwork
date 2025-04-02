@@ -3,6 +3,10 @@
 This document details how to run the full Hemi stack with P2P nodes and RPC access. *This does NOT run a batcher or
 sequencer.*
 
+> [!TIP]
+> If you are interested in running a PoP miner, none of this setup is required unless you want to connect your PoP miner to your own Hemi node infrastructure rather than using the public BFG endpoint.
+
+
 <details>
   <summary>Table of Contents</summary>
 
@@ -10,13 +14,12 @@ sequencer.*
 * [Running the Hemi Stack](#running-the-hemi-stack)
   * [Prerequisites](#prerequisites)
     * [System Requirements](#system-requirements)
-      * [CPU and RAM](#cpu-and-ram)
-      * [Disk Space](#disk)
+      * [CPU, RAM, and Disk](#cpu-ram-and-disk)
       * [ulimits](#ulimits)
   * [Setup and Installation](#setup-and-installation)
     * [Checking Prerequisites](#checking-prerequisites)
     * [Cloning the heminetwork Repository](#cloning-the-heminetwork-repository)
-    * [Required Components](#required-components)
+    * [Hemi Components](#hemi-components)
     * [⚠️ Important Note on Security](#important-note-on-security)
   * [Running With Docker Compose](#running-with-docker-compose)
   * [Accessing the Nodes](#accessing-the-nodes)
@@ -41,11 +44,12 @@ Docker images for each Hemi Network component is published to [Docker Hub](https
 You can choose to run several different configurations (implemented as docker profiles, see below), each with their own requirements:
 | Profile    | CPU Cores | Memory | Disk (NVMe Recommended) |
 | ---------- | --------- | ------ | ----------------------- |
-| Full       | 8         | 40GB   | 5TB                     |
-| Hemi       | 2         | 16GB   | 2TB                     |
+| full       | 8         | 40GB   | 6TB                     |
+| hemi       | 2         | 16GB   | 3TB                     |
+| hemi-min   | 2         | 12GB   | 2TB                     |
 | L1         | 6         | 24GB   | 3TB                     |
 
-Do note that over time disk space requirements will grow. The above values represent the current requirements (as of Q1 2025) with a buffer that should be sufficient for an additional year.
+Do note that over time disk space requirements will grow. The above values represent the current requirements (as of Q1 2025) with a buffer that should be sufficient for at least an additional year.
 
 #### ulimits
 
@@ -55,7 +59,7 @@ Certain components of the network require a very large number of open files. The
 
 ### Checking Prerequisites
 
-Check that your system matches the [prerequisites](#prerequisites). Make sure that the following are installed and setup:
+Check that your system matches the [prerequisites](#prerequisites) for the profile you want to run. Make sure that the following are installed and setup:
 
 - [Docker](https://docs.docker.com/get-started/get-docker/)
 - [Docker Compose](https://docs.docker.com/compose/)
@@ -74,9 +78,9 @@ git clone ssh://git@github.com/hemilabs/heminetwork.git
 cd heminetwork
 ```
 
-### Required Components
+### Hemi Components
 
-The following daemons are needed as part of the Hemi stack. They are all run under Docker Compose:
+The following daemons are needed as part of the Hemi stack (which ones you need to run yourself depend on which docker profile you use). They are all run under Docker Compose:
 
 1. bitcoind
 2. electrs
@@ -88,22 +92,62 @@ The following daemons are needed as part of the Hemi stack. They are all run und
 8. bfgd
 9. postgres (used by bfgd)
 
+### Docker Profiles (Node Configurations)
+
+There are four different docker profiles you can choose from, depending on your use case.
+
+> [!TIP]
+> This docker profile setting is independent from the [Node Synchronization Type](#node-synchronization-type) which determines how the `op-geth` instance performs it's one-time **initial** sync regardless of the stack setup. Any of the profiles that include an op-geth instance can be configured with either of the initial synchronization types.
+
+The following table provides details on which components are run locally as part of each profile:
+
+| Profile  | [HEMI]<br> op-geth | [HEMI]<br> op-node | [HEMI]<br> bssd    | [HEMI]<br> bfgd    | [ETH]<br> prysm    | [ETH]<br> geth     | [BTC]<br> electrs  | [BTC]<br> bitcoind |
+| -------- | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ |
+| full     | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
+| hemi     | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x:                | :x:                | :white_check_mark: | :x:                |
+| hemi-min | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x:                | :x:                | :x:                | :x:                | :x:                |
+| L1       | :x:                | :x:                | :x:                | :x:                | :white_check_mark: | :white_check_mark: | :x:                | :white_check_mark: |
+
+> [!TIP]
+> The "L1" profile does not run any Hemi-specific infrastructure; it is provided to allow users to run the L1 components separately from the Hemi components.
+
+
+Different node configurations support different Hemi use cases:
+
+| Profile  | Standard RPC<br>(Wallets, most dApps, etc.) | Consensus RPC<br>(State Roots, Sync Status, etc.) | Extended Consensus RPC<br>(BTC Finality) | Fully Local PoP Mining | Trustless ETH Derivation | Trustless BTC Indexing |
+| -------- | ------------------------------------------- | ------------------------------------------------- | ---------------------------------------- | ---------------------- | ------------------------ | ---------------------- |
+| full     | :white_check_mark:                          | :white_check_mark:                                | :white_check_mark:                       | :white_check_mark:     | :white_check_mark:       | :white_check_mark:     |
+| hemi     | :white_check_mark:                          | :white_check_mark:                                | :white_check_mark:                       | :white_check_mark:     | :x:                      | :x:                    |
+| hemi-min | :white_check_mark:                          | :white_check_mark:                                | :x:                                      | :x:                    | :x:                      | :x:                    |
+| L1       | :x:                                         | :x:                                               | :x:                                      | :x:                    | :white_check_mark: <br>(for paired hemi/hemi-min stack) | :white_check_mark: <br> (for paired hemi/hemi-min stack) |
+
+#### Profile: Full
+This profile includes everything: full Bitcoin and Ethereum (L1) nodes, as well as a full Hemi node.
+
+With this mode, your Hemi node is synchronized entirely from ETH DA data trustlessly synchronized from the Ethereum network, Bitcoin finality information is calculated based on BTC data trustlessly synchronized from the Bitcoin network, and PoP miners connecting to the BFG endpoint are interfacing with the Bitcoin network (fetching UTXOs and sending transactions) completely trustlessly.
+
+![Depiction of Hemi Full Node Profile](images/hemi-network-docker-profile-full-v1.jpg)
+
+
+
 ### ⚠️ Important Note on Security
 
-**Many of the required credentials are hard-coded in this directory, as the assumption is you are not exposing the
+> [!WARNING]
+> **Many of the required credentials are hard-coded in this directory, as the assumption is you are not exposing the
 services' ports to the outside world.** This allows communication between the services locally.
-
 **In setups where you plan to expose the ports, ensure that you change any credential values (e.g. JWT token, cookie).**
 
 ## Running with Docker Compose
 
-### Node Type
+### Node Synchronization Type
 
-Nodes can run in two modes, `archive` or `snap`.  `archive` has all data while `snap` only indexes data coming from ethereum blobs starting at the time sync begins.  Most users will only need `snap` which is must faster and smaller.
+Nodes can perform initial synchronization in two modes, `archive` or `snap`.  `archive` rederives the entire Hemi chain from L1 data and stores historical information while `snap` only indexes data coming from ethereum blobs starting at the time sync begins.  Most users will only need `snap` which is must faster and smaller. After performing an initial `snap` sync, a node will switch to performing full L1 derivation and storing historical information after the point in the chain where the `snap` sync occurred.
 
-To run an `archive` sync, you will need access to an ethereum rpc provider that has blob data (the optional ethereum node in the compose file will NOT work for that).
+To run an `archive` sync, you will need access to an ethereum Beacon API rpc provider that has all historical blob data (the optional ethereum node in the compose file will NOT work for that). Hemi uses EIP-4844 blobs for data availability, and so performing a full sync from scratch requires access to an Ethereum node which has retained all of these historical blobs. By default, Etherem Consensus-Layer nodes (like Prysm) prune blobs after 4096 Ethereum epochs (49152 ETH blocks, or ~18.2 days).
 
-So possible providers for full blob data can be found at:
+Additionally, a fully-synced Hemi node that is offline for longer than the blob pruning period (~18.2 days) will either have to be `snap` synced again, or will have to be connected to an Ethereum node that has historical blobs available.
+
+Possible providers for full blob data can be found at:
 https://docs.arbitrum.io/run-arbitrum-node/l1-ethereum-beacon-chain-rpc-providers
 
 Once you have choosen your network and sync type, run the command:
