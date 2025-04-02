@@ -15,12 +15,11 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/hemilabs/heminetwork/api/popapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
@@ -147,8 +146,10 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("subscribeOpgeth")
 	defer log.Tracef("subscribeOpgeth exit")
 
-	headersCh := make(chan *types.Header, 10)
-	sub, err := s.opgethClient.SubscribeNewHead(context.Background(), headersCh)
+	// headersCh := make(chan *types.Header, 10)
+	headersCh := make(chan string, 10)
+	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh)
+	//sub, err := s.opgethClient.SubscribeNewHead(context.Background(), headersCh)
 	if err != nil {
 		return err
 	}
@@ -159,7 +160,13 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 		case <-ctx.Done():
 			err = ctx.Err()
 		case n := <-headersCh:
-			log.Tracef("block header received: %v", spew.Sdump(n)) // XXX
+			log.Tracef("kss notification received: %s", n)
+			result := popapi.L2KeystoneResponse{}
+			log.Tracef("Sending Keystone Request")
+			if err := s.opgethClient.Client().Call(&result, "keystone_request", 3); err != nil {
+				return err
+			}
+			log.Tracef("Received keystone")
 			continue
 		}
 		return err
@@ -167,7 +174,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 }
 
 func (s *Server) connectOpgeth(pctx context.Context) error {
-	log.Tracef("connectOpnode")
+	log.Tracef("connectOpgeth")
 	defer log.Tracef("connectOpgeth exit")
 
 	var err error
