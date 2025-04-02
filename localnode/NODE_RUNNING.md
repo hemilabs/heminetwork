@@ -29,6 +29,20 @@ This document details how to run the full Hemi stack with P2P nodes and RPC acce
 </details>
 
 
+## Quickstart Summary
+
+1. Decide on which Hemi components you want to run based off of the [Docker profiles](#docker-profiles).
+2. Ensure you have the required [prerequisites](#prerequisites) installed and your system matches the system requirements for your chosen Docker profile
+3. [Clone the Hemi Network repository](#cloning-the-heminetwork-repository)
+4. If you are running the `hemi` or `hemi-min` profile, [configure](#bring-your-own-l1s) your `.env` file with the L1 RPC endpoints to use
+5. Determine which [Node Synchronization Type](#node-synchronization-type) suits your needs
+6. [Generate](#generating-files) the config/startup files based on your network (`mainnet` or `testnet`) and your chosen synchronization type
+7. [Run the compose files](#run-the-compose-files) with your chosen Docker profile to start up all the relevant daemons
+8. Wait for everything to sync, which can take several days depending on your Docker Profile and synchronization type.
+9. [Connect to your nodes](#accessing-the-nodes)
+10. [Use the monitoring script](#monitoring) for additional visibility into the status of your nodes
+
+
 ## Prerequisites
 
 This guide assumes you are running [Docker](https://docs.docker.com/get-started/get-docker/)
@@ -200,6 +214,8 @@ Additionally, a fully-synced Hemi node that is offline for longer than the blob 
 
 Possible providers for full blob data to perform an `archive` sync can be found at:
 https://docs.arbitrum.io/run-arbitrum-node/l1-ethereum-beacon-chain-rpc-providers
+
+### Generating Files
 
 Once you have choosen your network and sync type, run the command:
 ```
