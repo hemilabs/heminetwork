@@ -122,7 +122,7 @@ cd heminetwork
 ### Hemi Components
 
 > [!TIP]
-> You do not have to run all of the daemons, depending on your use-case. See the [Docker Profiles](#docker-profiles)
+> You do not have to run all network daemons, depending on your use-case. See the [Docker Profiles](#docker-profiles)
 > section to determine which configuration is appropriate for your use-case(s) and trust tolerance.
 
 The following daemons comprise the Hemi stack. They are all run under Docker Compose:
@@ -144,10 +144,9 @@ The following daemons comprise the Hemi stack. They are all run under Docker Com
 There are four different docker profiles you can choose from, depending on your use case and trust tolerance.
 
 > [!TIP]
-> This docker profile setting is independent from the [Node Synchronization Type](#node-synchronization-type) which
-> determines how the `op-geth` instance performs it's one-time **initial** sync regardless of the stack setup. Any of
-> the
-> profiles that include an op-geth instance can be configured with either of the initial synchronization types.
+> The Docker profile setting is independent of the [Node Synchronization Type](#node-synchronization-type), which
+> determines how the `op-geth` instance performs its one-time **initial** sync regardless of the stack setup. Any of
+> the profiles that include an op-geth instance can be configured to use either of the initial synchronization types.
 
 The following table provides details on which components are run locally as part of each profile:
 
@@ -165,12 +164,12 @@ The following table provides details on which components are run locally as part
 
 Different node configurations support different Hemi use cases:
 
-| Profile  | Standard RPC<br>(Wallets, most dApps, etc.) | Consensus RPC<br>(State Roots, Sync Status, etc.) | Extended Consensus RPC<br>(BTC Finality) | Fully Local PoP Mining | Trustless ETH Derivation                                | Trustless BTC Indexing                                   |
-|----------|---------------------------------------------|---------------------------------------------------|------------------------------------------|------------------------|---------------------------------------------------------|----------------------------------------------------------|
-| full     | :white_check_mark:                          | :white_check_mark:                                | :white_check_mark:                       | :white_check_mark:     | :white_check_mark:                                      | :white_check_mark:                                       |
-| hemi     | :white_check_mark:                          | :white_check_mark:                                | :white_check_mark:                       | :white_check_mark:     | :x:                                                     | :x:                                                      |
-| hemi-min | :white_check_mark:                          | :white_check_mark:                                | :x:                                      | :x:                    | :x:                                                     | :x:                                                      |
-| L1       | :x:                                         | :x:                                               | :x:                                      | :x:                    | :white_check_mark: <br>(for paired hemi/hemi-min stack) | :white_check_mark: <br> (for paired hemi/hemi-min stack) |
+| Profile  | Standard RPC<br>(Wallets, most dApps, etc.) | Consensus RPC<br>(State Roots, Sync Status, etc.) | Extended Consensus RPC<br>(BTC Finality) | Fully Local PoP Mining | Trustless ETH Derivation                               | Trustless BTC Indexing                                 |
+|----------|---------------------------------------------|---------------------------------------------------|------------------------------------------|------------------------|--------------------------------------------------------|--------------------------------------------------------|
+| full     | :white_check_mark:                          | :white_check_mark:                                | :white_check_mark:                       | :white_check_mark:     | :white_check_mark:                                     | :white_check_mark:                                     |
+| hemi     | :white_check_mark:                          | :white_check_mark:                                | :white_check_mark:                       | :white_check_mark:     | :x:                                                    | :x:                                                    |
+| hemi-min | :white_check_mark:                          | :white_check_mark:                                | :x:                                      | :x:                    | :x:                                                    | :x:                                                    |
+| L1       | :x:                                         | :x:                                               | :x:                                      | :x:                    | :white_check_mark:<br>(for paired hemi/hemi-min stack) | :white_check_mark:<br>(for paired hemi/hemi-min stack) |
 
 > [!TIP]
 > The `full` profile supports all features, operates entirely trustlessly, and does not pair with another profile.
