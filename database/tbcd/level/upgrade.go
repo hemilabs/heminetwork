@@ -312,11 +312,11 @@ func (l *ldb) v3(ctx context.Context) error {
 
 		srcdir, err := homedir.Expand(filepath.Join(l.cfg.Home, dbs, rawdb.DataDir))
 		if err != nil {
-			return fmt.Errorf("expand source dir: %v", err)
+			return fmt.Errorf("expand source dir: %w", err)
 		}
 		dstdir, err := homedir.Expand(filepath.Join(dcfg.Home, dbs, rawdb.DataDir))
 		if err != nil {
-			return fmt.Errorf("expand destination dir: %v", err)
+			return fmt.Errorf("expand destination dir: %w", err)
 		}
 		if modeMove {
 			// Move raw data, we must recreate the dir because
@@ -364,7 +364,7 @@ func (l *ldb) v3(ctx context.Context) error {
 
 		home, err := homedir.Expand(l.cfg.Home)
 		if err != nil {
-			return fmt.Errorf("expand home dir: %v", err)
+			return fmt.Errorf("expand home dir: %w", err)
 		}
 		tmpdir := home + ".v2"
 		// Rename source directory to $HOME.v2
