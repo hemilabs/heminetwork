@@ -288,6 +288,7 @@ func (l *ldb) v3(ctx context.Context) error {
 			// Move raw data, we must recreate the dir because
 			// os.Rename fails otherwise.
 			log.Infof("  Moving raw data: %v -> %v", srcdir, dstdir)
+			return fmt.Errorf("rework this to be restartable")
 			err := os.Remove(dstdir)
 			if err != nil {
 				return fmt.Errorf("remove raw data %v: %w", dbs, err)
