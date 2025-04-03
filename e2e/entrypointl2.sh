@@ -40,7 +40,6 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --ws.origins="*"  \
  --ws.api=debug,eth,txpool,net,engine  \
  --syncmode=full  \
- --gcmode=archive  \
  --nodiscover  \
  --maxpeers=0 \
  --networkid=901 \
@@ -65,3 +64,7 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --hvm.enabled \
  --override.hvm0=$HVM_PHASE0_TIMESTAMP \
  --tbc.network=localnet
+
+# Clayton note: this fixes the mismatched state.scheme, but is it the correct
+# thing to do?
+#  --gcmode=archive  \
