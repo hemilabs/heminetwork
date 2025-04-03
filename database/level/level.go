@@ -29,7 +29,6 @@ const (
 	MetadataDB      = "metadata"
 	KeystonesDB     = "keystones"
 	HeightHashDB    = "heighthash"
-	PeersDB         = "peers"
 	OutputsDB       = "outputs"
 	TransactionsDB  = "transactions"
 
@@ -216,10 +215,6 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	err = l.openDB(HeightHashDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", HeightHashDB, err)
-	}
-	err = l.openDB(PeersDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
 	}
 	err = l.openDB(OutputsDB)
 	if err != nil {

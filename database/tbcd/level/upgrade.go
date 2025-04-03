@@ -268,6 +268,11 @@ func (l *ldb) v3(ctx context.Context) error {
 		default:
 		}
 
+		// peers database is unused, just drop it.
+		if dbs == "peers" {
+			continue
+		}
+
 		log.Infof("Moving database: %v", dbs)
 
 		a := l.pool[dbs]
