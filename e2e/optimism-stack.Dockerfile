@@ -11,11 +11,7 @@ RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
 RUN git checkout e2ac05c371d38a9f69410cbe48e6080df13db6c4
 
-WORKDIR /git/op-geth
-
-RUN make
-
-RUN go build -o /tmp ./...
+RUN go run build/ci.go install -static ./cmd/geth
 
 FROM golang:1.22.6-bookworm@sha256:f020456572fc292e9627b3fb435c6de5dfb8020fbcef1fd7b65dd092c0ac56bb AS build_2
 
@@ -39,6 +35,8 @@ RUN npm install -g pnpm
 
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
+COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
+
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
