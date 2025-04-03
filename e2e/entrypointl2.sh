@@ -64,4 +64,5 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --hvm.genesisheight=$BLOCKHEIGHT \
  --hvm.enabled \
  --override.hvm0=$HVM_PHASE0_TIMESTAMP \
- --tbc.network=localnet
+ --tbc.network=localnet \
+ --state.scheme=path # Clayton note: double-check this
