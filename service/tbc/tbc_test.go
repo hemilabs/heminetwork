@@ -142,6 +142,8 @@ func TestDbUpgradePipeline(t *testing.T) {
 		cancel()
 	}()
 
+	t.Log("Upgrading with move")
+
 	// Upgrade database to v3 with move
 	cfg := level.NewConfig(filepath.Join(home, network), "0mb", "0mb")
 	dbTemp, err := level.New(ctx, cfg)
@@ -182,7 +184,9 @@ func TestDbUpgradePipeline(t *testing.T) {
 	// Set mode to copy
 	level.SetMode(false)
 
-	// Upgrade database to v3 with move which
+	t.Log("Upgrading with copy")
+
+	// Upgrade database to v3 with copy which
 	// creates a testnet3.v3 folder
 	dbv2, err := level.New(ctx, cfg)
 	if err != nil {
@@ -195,6 +199,8 @@ func TestDbUpgradePipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	t.Log("Comparing DBs")
 
 	// Compare all databases
 	for _, dbs := range keys {
