@@ -52,7 +52,7 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 		start := time.Now()
 		records := 0
 		skipped := 0
-		for records = 0; i.Next() && records < batchSize; records++ {
+		for records = 0; i.Next(); records++ {
 			// See if we were interrupted
 			select {
 			case <-ctx.Done():
@@ -80,7 +80,7 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 			totalWriteSize += size
 			totalSize += size
 
-			if totalWriteSize > chunkSize {
+			if totalWriteSize > chunkSize || records >= batchSize {
 				break
 			}
 		}

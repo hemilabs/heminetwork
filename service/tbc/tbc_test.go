@@ -208,27 +208,37 @@ func TestDbUpgradePipeline(t *testing.T) {
 		b := dbMove.DB()[dbs]
 		c := dbCopy.DB()[dbs]
 
+		t.Logf("Comparing original records against dbmove (%v)", dbs)
 		records, err := cmpDB(a, b)
 		if err != nil {
-			t.Fatalf("found diff in %v: %v", dbs, err)
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
 		}
 
-		_, err = cmpDB(b, a)
+		t.Logf("Comparing dbmove records against original (%v)", dbs)
+		records, err = cmpDB(b, a)
 		if err != nil {
-			t.Fatalf("found diff in %v: %v", dbs, err)
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
 		}
 
-		_, err = cmpDB(a, c)
+		t.Logf("Comparing original records against dbcopy (%v)", dbs)
+		records, err = cmpDB(a, c)
 		if err != nil {
-			t.Fatalf("found diff in %v: %v", dbs, err)
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
 		}
 
-		_, err = cmpDB(c, a)
+		t.Logf("Comparing dbcopy records against original (%v)", dbs)
+		records, err = cmpDB(c, a)
 		if err != nil {
-			t.Fatalf("found diff in %v: %v", dbs, err)
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
 		}
-
-		t.Logf("Found no diff in %v records of %v", records, dbs)
 	}
 }
 
