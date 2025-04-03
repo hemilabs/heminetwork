@@ -51,15 +51,15 @@ sequencer.*
 2. Ensure you have the required [prerequisites](#prerequisites) installed and your system matches the system
    requirements for your chosen Docker profile.
 3. [Clone the Hemi Network repository](#cloning-the-heminetwork-repository).
-4. If you are running the `hemi` or `hemi-min` profile, [configure](#bring-your-own-l1s) your `.env` file with the L1
-   RPC endpoints to use
-5. Determine which [Node Synchronization Type](#node-synchronization-type) suits your needs.
-6. [Generate](#generating-files) the config/startup files based on your network (`mainnet` or `testnet`) and your chosen
+4. Determine which [Node Synchronization Type](#node-synchronization-type) suits your needs.
+5. [Generate](#generating-files) the config/startup files based on your network (`mainnet` or `testnet`) and your chosen
    synchronization type
-7. [Run the compose files](#run-the-compose-files) with your chosen Docker profile to start up all the relevant daemons.
-8. Wait for everything to sync, which can take several days depending on your Docker Profile and synchronization type.
-9. [Connect to your nodes](#accessing-the-nodes).
-10. [Use the monitoring script](#monitoring) for additional visibility into the status of your nodes.
+6. If you are running the `hemi` or `hemi-min` profile, [configure](#bring-your-own-l1s) your `.env` file with the L1
+   RPC endpoints to use
+8. [Run the compose files](#run-with-docker-compose) with your chosen Docker profile to start up all the relevant daemons.
+9. Wait for everything to sync, which can take several days depending on your Docker Profile and synchronization type.
+10. [Connect to your nodes](#accessing-the-nodes) using the RPC endpoints.
+11. [Use the monitoring script](#monitoring) for additional visibility into the status of your nodes.
 
 ## Prerequisites
 
@@ -306,6 +306,7 @@ cd localnode
 For example, to prepare to run a mainnet node with an initial `snap` sync:
 
 ```
+cd localnode
 ./gen-files.sh mainnet snap
 ```
 
@@ -329,6 +330,7 @@ docker compose -f docker-compose.yml --profile full up --build
 Run the file:
 
 ```sh
+cd localnode
 docker compose -f docker-compose_mainnet.yml --profile full up --build
 ```
 
