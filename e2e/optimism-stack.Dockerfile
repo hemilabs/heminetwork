@@ -9,7 +9,7 @@ WORKDIR /git
 ARG OP_GETH_CACHE_BREAK=12F2
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout 2de5bf59a919697f46d0ded4356d80f4febe37fb
+RUN git checkout e2ac05c371d38a9f69410cbe48e6080df13db6c4
 
 WORKDIR /git/op-geth
 
@@ -42,7 +42,7 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout b6b484a133f860e9fe6ff1e0b348d98ba1da9e7c
+RUN git checkout 0e70403b3e15d056e187664cf1a591cb1698ebdf
 
 # as of now, we have the pop points address hard-coded as the rewards address
 # for pop miners, this should change once we do TGE and mint HEMI
