@@ -37,6 +37,22 @@ type blockstream struct {
 
 var _ gozer.Gozer = (*blockstream)(nil)
 
+func (bs *blockstream) BtcHeight(ctx context.Context) (uint64, error) {
+	u := fmt.Sprintf("%v/blocks/tip/height", bs.url)
+	rawHeight, err := httpclient.Request(ctx, "GET", u, nil)
+	if err != nil {
+		return 0, fmt.Errorf("request: %w", err)
+	}
+
+	var height uint64
+	err = json.Unmarshal(rawHeight, &height)
+	if err != nil {
+		return 0, err
+	}
+
+	return height, nil
+}
+
 func (bs *blockstream) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
 	u := fmt.Sprintf("%v/fee-estimates", bs.url)
 	feeEstimates, err := httpclient.Request(ctx, "GET", u, nil)
