@@ -45,6 +45,10 @@ func mockHttpServer() *httptest.Server {
 			response := []byte(`{"1":1.0,"2":1.0,"3":1.0,"4":1.0,"5":1.0,"6":1.0}`)
 			w.WriteHeader(http.StatusOK)
 			w.Write(response)
+		case r.URL.Path == "/blocks/tip/height":
+			response := []byte(`1000`)
+			w.WriteHeader(http.StatusOK)
+			w.Write(response)
 		default:
 			http.NotFound(w, r)
 		}
@@ -86,4 +90,10 @@ func TestBlockstreamGozer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("balance %v: %v", testAddr, gozer.BalanceFromUtxos(utxos))
+
+	height, err := b.BtcHeight(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("BTC tip height: %v", height)
 }
