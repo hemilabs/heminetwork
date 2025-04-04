@@ -57,6 +57,26 @@ func (t *tbcGozer) Connected() bool {
 	return t.connected
 }
 
+func (t *tbcGozer) BtcHeight(ctx context.Context) (uint64, error) {
+	bur := &tbcapi.BlockHeaderBestRequest{}
+
+	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
+	if err != nil {
+		return 0, err
+	}
+
+	buResp, ok := res.(*tbcapi.BlockHeaderBestResponse)
+	if !ok {
+		return 0, fmt.Errorf("not a fee estimate response %T", res)
+	}
+
+	if buResp.Error != nil {
+		return 0, buResp.Error
+	}
+
+	return buResp.Height, nil
+}
+
 func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
 	bur := &tbcapi.FeeEstimateRequest{}
 

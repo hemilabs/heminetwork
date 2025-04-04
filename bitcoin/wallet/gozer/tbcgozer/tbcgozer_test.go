@@ -78,4 +78,10 @@ func TestTBCGozer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("balance %v: %v", testAddr, gozer.BalanceFromUtxos(utxos))
+
+	height, err := b.BtcHeight(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("BTC tip height: %v", height)
 }
