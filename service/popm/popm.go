@@ -20,7 +20,14 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/heminetwork/api/popapi"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul/memory"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
@@ -50,6 +57,8 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
+	GozerType               string
+	TBCURL                  string
 }
 
 func NewDefaultConfig() *Config {
@@ -57,6 +66,8 @@ func NewDefaultConfig() *Config {
 		Network:             "testnet3",
 		PrometheusNamespace: appName,
 		OpgethURL:           "http://127.0.0.1:9999/v1/ws", // XXX set this using defaults
+		GozerType:           "TBC",
+		TBCURL:              tbcgozer.DefaultURL,
 	}
 }
 
@@ -78,6 +89,11 @@ type Server struct {
 	// opgeth
 	opgethClient *ethclient.Client // XXX evaluate if ok
 	opgethWG     sync.WaitGroup
+
+	// wallet
+	gozer gozer.Gozer
+	mz    zuul.Zuul
+	vc    *vinzclortho.VinzClortho
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -101,15 +117,16 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg.BitcoinSecret == "" {
 		return nil, errors.New("no bitcoin secret provided")
 	}
-	vc, err := vinzclortho.VinzClorthoNew(s.params)
+	var err error
+	s.vc, err = vinzclortho.VinzClorthoNew(s.params)
 	if err != nil {
 		return nil, err
 	}
-	err = vc.Unlock(cfg.BitcoinSecret)
+	err = s.vc.Unlock(cfg.BitcoinSecret)
 	if err != nil {
 		return nil, err
 	}
-	ek, err := vc.DeriveHD(defaultPopAccount, defaultPopChild)
+	ek, err := s.vc.DeriveHD(defaultPopAccount, defaultPopChild)
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +134,22 @@ func NewServer(cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	s.mz, err = memory.MemoryNew(s.params)
+	if err != nil {
+		return nil, err
+	}
+	err = s.mz.Put(&zuul.NamedKey{
+		Name:       "private",
+		Account:    defaultPopAccount,
+		Child:      defaultPopChild,
+		HD:         true,
+		PrivateKey: ek,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	return s, nil
 }
 
@@ -142,6 +175,82 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+// XXX broadcasting should be in a different function
+func (s *Server) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
+	log.Infof("Mining an L2 keystone at height %d...", ks.L2BlockNumber)
+
+	// go m.dispatchEvent(EventTypeMineKeystone, EventMineKeystone{Keystone: ks})
+
+	btcHeight, err := s.gozer.BtcHeight(ctx)
+	if err != nil {
+		return fmt.Errorf("get Bitcoin height: %w", err)
+	}
+
+	payToScript, err := vinzclortho.ScriptFromPubKeyHash(s.address)
+	if err != nil {
+		return fmt.Errorf("get pay to address script: %w", err)
+	}
+	if len(payToScript) != 25 {
+		return fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
+	}
+	scriptHash := vinzclortho.ScriptHashFromScript(payToScript)
+
+	// Estimate BTC fees.
+	feeEstimates, err := s.gozer.FeeEstimates(ctx)
+	if err != nil {
+		return fmt.Errorf("get fee estimates: %w", err)
+	}
+	feeAmount, err := gozer.FeeByConfirmations(6, feeEstimates)
+	if err != nil {
+		return fmt.Errorf("get fee by confirmations: %w", err)
+	}
+
+	// Retrieve available UTXOs for the miner.
+	utxos, err := s.gozer.UtxosByAddress(ctx, s.address, 0, 0)
+	if err != nil {
+		return fmt.Errorf("retrieve available Bitcoin UTXOs: %w", err)
+	}
+	log.Tracef("Looking for UTXOs for script hash %v", scriptHash)
+
+	log.Debugf("Miner has %d available UTXOs for script hash %v at Bitcoin height %d",
+		len(utxos), scriptHash, btcHeight)
+
+	// Build transaction.
+	popTx, prevOut, err := wallet.PoPTransactionCreate(ks, uint32(btcHeight),
+		btcutil.Amount(feeAmount.SatsPerByte), utxos, payToScript)
+	if err != nil {
+		return fmt.Errorf("create Bitcoin transaction: %w", err)
+	}
+
+	// Sign input.
+	err = wallet.TransactionSign(&chaincfg.TestNet3Params, s.mz, popTx, prevOut)
+	if err != nil {
+		return fmt.Errorf("sign Bitcoin transaction: %w", err)
+	}
+
+	// broadcast tx
+	log.Tracef("Broadcasting Bitcoin transaction %x", popTx)
+	log.Infof("Broadcasting PoP transaction to Bitcoin %s...",
+		s.params.Name)
+
+	txHash, err := s.gozer.BroadcastTx(ctx, popTx)
+	if err != nil {
+		return fmt.Errorf("broadcast PoP transaction: %w", err)
+	}
+
+	log.Infof(
+		"Successfully broadcast PoP transaction to Bitcoin %s with TX hash %v",
+		s.params.Name, txHash,
+	)
+
+	// go s.dispatchEvent(EventTypeTransactionBroadcast,
+	// EventTransactionBroadcast{Keystone: ks, TxHash: txHash.String()})
+
+	return nil
+}
+
+// XXX Test ONLY. Subscription and dealing
+// with keystones needs to be properly done.
 func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("subscribeOpgeth")
 	defer log.Tracef("subscribeOpgeth exit")
@@ -166,7 +275,13 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 			if err := s.opgethClient.Client().Call(&result, "keystone_request", 3); err != nil {
 				return err
 			}
-			log.Tracef("Received keystone")
+			for _, ks := range result.L2Keystones {
+				log.Tracef("Received keystone at height %v", ks.L2BlockNumber)
+				err = s.mineKeystone(ctx, ks)
+				if err != nil {
+					log.Errorf("Failed to mine keystone: %v", err)
+				}
+			}
 			continue
 		}
 		return err
@@ -321,6 +436,23 @@ func (s *Server) Run(pctx context.Context) error {
 		}()
 	}
 
+	// XXX this should be in New() but tbcgozer requires context
+	var err error
+	switch strings.ToLower(s.cfg.GozerType) {
+	case "tbc":
+		s.gozer, err = tbcgozer.TBCGozerNew(ctx, s.cfg.TBCURL)
+		if err != nil {
+			log.Errorf("TBC gozer creation failed: %v", err)
+		}
+	case "blockstream":
+		s.gozer, err = blockstream.BlockstreamNew(s.params)
+		if err != nil {
+			log.Errorf("Blockstream gozer creation failed: %v", err)
+		}
+	default:
+		return fmt.Errorf("unknown gozer type %v", s.cfg.GozerType)
+	}
+
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -331,7 +463,7 @@ func (s *Server) Run(pctx context.Context) error {
 	log.Infof("bitcoin public key: %v", s.public)
 
 	<-ctx.Done()
-	err := ctx.Err()
+	err = ctx.Err()
 
 	log.Infof("pop miner shutting down")
 
