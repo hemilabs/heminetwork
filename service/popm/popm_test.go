@@ -2,6 +2,7 @@ package popm
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -53,13 +54,9 @@ func (f handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-
-	return result
+func digest256(x []byte) []byte {
+	xx := sha256.Sum256(x)
+	return xx[:]
 }
 
 func mockOpgeth(ctx context.Context, t *testing.T) (*httptest.Server, chan string, chan error) {
@@ -138,7 +135,7 @@ func mockOpgeth(ctx context.Context, t *testing.T) (*httptest.Server, chan strin
 					if err != nil {
 						panic(err)
 					}
-					for range 5 {
+					for range 3 {
 						t.Log("Sending new keystone notification")
 						err = c.Write(ctx, websocket.MessageText, p)
 						if err != nil {
@@ -149,12 +146,12 @@ func mockOpgeth(ctx context.Context, t *testing.T) (*httptest.Server, chan strin
 			case "keystone_request":
 				l2Keystone := hemi.L2Keystone{
 					Version:            1,
-					L1BlockNumber:      11,
-					L2BlockNumber:      22,
-					ParentEPHash:       fillOutBytes("parentephash", 32),
-					PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-					StateRoot:          fillOutBytes("stateroot", 32),
-					EPHash:             fillOutBytes("ephash", 32),
+					L1BlockNumber:      0xbadc0ffe,
+					L2BlockNumber:      0xdeadbeef,
+					ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
+					PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
+					StateRoot:          digest256([]byte("Hello, world!")),
+					EPHash:             digest256([]byte{0xaa, 0x55}),
 				}
 				kssResp := popapi.L2KeystoneResponse{
 					L2Keystones: []*hemi.L2Keystone{&l2Keystone},
@@ -199,13 +196,16 @@ func TestPopMiner(t *testing.T) {
 
 	// Setup pop miner
 	cfg := NewDefaultConfig()
+	cfg.GozerType = "blockstream"
+	// This address doesn't have funds so mining will fail
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c" +
 		"b0602599b867332dfec245547baafae40dad247f21564a0de925527f2445a086fd"
-	//cfg.LogLevel = "popm=TRACE"
+	// cfg.LogLevel = "popm=TRACE"
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
 	}
+
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +221,7 @@ func TestPopMiner(t *testing.T) {
 
 	expectedMsg := map[string]int{
 		"kss_subscribe":    1,
-		"keystone_request": 5,
+		"keystone_request": 3,
 	}
 
 	for {
