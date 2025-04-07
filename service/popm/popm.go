@@ -438,11 +438,14 @@ func (s *Server) mine(ctx context.Context) {
 	}
 }
 
-// XXX Test ONLY. Subscription and dealing
-// with keystones needs to be properly done.
+// XXX Test ONLY. Subscription should be handled
+// in a smarter way.
 func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("subscribeOpgeth")
-	defer log.Tracef("subscribeOpgeth exit")
+	defer func() {
+		log.Tracef("subscribeOpgeth exit")
+		s.opgethWG.Done()
+	}()
 
 	// headersCh := make(chan *types.Header, 10)
 	headersCh := make(chan string, 10)
@@ -490,7 +493,6 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	rWSCh := make(chan error)
 	s.opgethWG.Add(1)
 	go func() {
-		defer s.opgethWG.Done()
 		rWSCh <- s.handleOpgethSubscription(ctx)
 	}()
 
