@@ -67,6 +67,12 @@ var (
 			Help:         "address and port popm prometheus listens on",
 			Print:        config.PrintAll,
 		},
+		"POPM_REMINE_THRESHOLD": config.Config{
+			Value:        &cfg.RetryMineThreshold,
+			DefaultValue: uint(0),
+			Help:         "the number of L2 Keystones behind the latest seen that we are willing to remine, this is handy for re-orgs",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
