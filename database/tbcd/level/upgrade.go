@@ -5,6 +5,7 @@
 package level
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -50,6 +51,7 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 	batchB := leveldb.MakeBatch(batchSize) // copy batch
 	for {
 		start := time.Now()
+		cr := util.Range{Start: nil, Limit: nil}
 		records := 0
 		skipped := 0
 		for records = 0; i.Next(); records++ {
@@ -60,23 +62,30 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 			default:
 			}
 
+			key := bytes.Clone(i.Key())
+			val := bytes.Clone(i.Value())
 			if filter != nil {
 				// skip filtered records
-				k, v := filter[string(i.Key())]
+				k, v := filter[string(key)]
 				if v && dbname == k {
-					log.Infof("  Skip: %v %s", k, i.Key())
+					log.Infof("  Skip: %v %s", k, key)
 					skipped++
 					continue
 				}
 			}
 			// Create batches to speed things up a bit.
-			batchB.Put(i.Key(), i.Value())
+			batchB.Put(key, val)
 			if move {
-				batchA.Delete(i.Key())
+				batchA.Delete(key)
+				if records == 0 {
+					cr.Start = key
+				} else {
+					cr.Limit = key
+				}
 			}
 
 			// update stats
-			size := len(i.Key()) + len(i.Value())
+			size := len(key) + len(val)
 			totalWriteSize += size
 			totalSize += size
 
@@ -114,7 +123,7 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 				log.Infof("  Compacting %v: records %v %v",
 					dbname, humanize.Comma(int64(recordsCompact)),
 					humanize.Bytes(uint64(totalWriteSize)))
-				err := a.CompactRange(util.Range{Start: nil, Limit: nil})
+				err := a.CompactRange(cr)
 				if err != nil {
 					return r, fmt.Errorf("compaction: %w", err)
 				}

@@ -35,6 +35,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
@@ -168,6 +170,76 @@ func parseArgs(args []string) (string, map[string]string, error) {
 	}
 
 	return action, parsed, nil
+}
+
+func directLevel(pctx context.Context, flags []string) error {
+	flagSet := flag.NewFlagSet("level commands", flag.ExitOnError)
+	var (
+		helpFlag     = flagSet.Bool("h", false, "displays help information")
+		helpLongFlag = flagSet.Bool("help", false, "displays help information")
+	)
+
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%v\n", welcome)
+		fmt.Fprintf(os.Stderr, "Usage: %v tbcdb [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
+		fmt.Println("COMMAND OVERVIEW:")
+	}
+
+	err := flagSet.Parse(flags)
+	if err != nil {
+		return err
+	}
+
+	if len(flags) < 1 || *helpFlag || *helpLongFlag {
+		flagSet.Usage()
+		return nil
+	}
+
+	action, args, err := parseArgs(flagSet.Args())
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
+	_ = ctx
+	_ = args
+
+	// commands
+	switch action {
+	case "open":
+		dbDir := args["db"]
+		if dbDir == "" {
+			return errors.New("db: must be set")
+		}
+		ldb, err := leveldb.OpenFile(dbDir, &opt.Options{ErrorIfMissing: true})
+		if err != nil {
+			return fmt.Errorf("leveldb open: %w", err)
+		}
+		err = ldb.Close()
+		if err != nil {
+			return fmt.Errorf("leveldb close: %w", err)
+		}
+
+	case "recover":
+		dbDir := args["db"]
+		if dbDir == "" {
+			return errors.New("db: must be set")
+		}
+		ldb, err := leveldb.RecoverFile(dbDir, &opt.Options{ErrorIfMissing: true})
+		if err != nil {
+			return fmt.Errorf("leveldb recover: %w", err)
+		}
+		err = ldb.Close()
+		if err != nil {
+			return fmt.Errorf("leveldb close: %w", err)
+		}
+	default:
+		return fmt.Errorf("invalid action: %v", action)
+	}
+
+	return nil
 }
 
 func tbcdb(pctx context.Context, flags []string) error {
@@ -1438,6 +1510,8 @@ func _main(args []string) error {
 	switch cmd {
 	case "api":
 		return api(ctx, args[1:])
+	case "level":
+		return directLevel(ctx, args[1:])
 	case "tbcdb":
 		return tbcdb(ctx, args[1:])
 	case "bfgdb":
