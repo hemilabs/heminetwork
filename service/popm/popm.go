@@ -5,9 +5,12 @@
 package popm
 
 import (
+	"cmp"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -39,9 +42,14 @@ const (
 	defaultPopAccount     = 1337
 	defaultPopChild       = 0
 	defaultRequestTimeout = 3 * time.Second
+
+	l2KeystonesMaxSize = 10
 )
 
-var log = loggo.GetLogger("popm")
+var (
+	log                    = loggo.GetLogger("popm")
+	l2KeystoneRetryTimeout = 15 * time.Second
+)
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -59,6 +67,7 @@ type Config struct {
 	PprofListenAddress      string
 	GozerType               string
 	TBCURL                  string
+	RetryMineThreshold      uint
 }
 
 func NewDefaultConfig() *Config {
@@ -69,6 +78,11 @@ func NewDefaultConfig() *Config {
 		GozerType:           "TBC",
 		TBCURL:              tbcgozer.DefaultURL,
 	}
+}
+
+type L2KeystoneProcessingContainer struct {
+	l2Keystone         hemi.L2Keystone
+	requiresProcessing bool
 }
 
 type Server struct {
@@ -94,6 +108,11 @@ type Server struct {
 	gozer gozer.Gozer
 	mz    zuul.Zuul
 	vc    *vinzclortho.VinzClortho
+
+	// mining
+	lastKeystone *hemi.L2Keystone
+	l2Keystones  map[string]L2KeystoneProcessingContainer
+	mineNowCh    chan struct{}
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -102,7 +121,9 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg: cfg,
+		cfg:         cfg,
+		l2Keystones: make(map[string]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
+		mineNowCh:   make(chan struct{}, 1),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -175,6 +196,131 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+func sortL2KeystonesByL2BlockNumberAsc(a, b *hemi.L2Keystone) int {
+	return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
+}
+
+func (s *Server) processReceivedKeystones(ctx context.Context, l2Keystones []*hemi.L2Keystone) {
+	slices.SortFunc(l2Keystones, sortL2KeystonesByL2BlockNumberAsc)
+
+	for _, kh := range l2Keystones {
+		if ctx.Err() != nil {
+			return
+		}
+
+		var lastL2BlockNumber uint32
+		if s.lastKeystone != nil {
+			lastL2BlockNumber = s.lastKeystone.L2BlockNumber
+			log.Debugf(
+				"Checking keystone received with height %d against last keystone %d",
+				kh.L2BlockNumber, lastL2BlockNumber,
+			)
+		}
+
+		if s.lastKeystone == nil || kh.L2BlockNumber > s.lastKeystone.L2BlockNumber {
+			log.Debugf("Received new keystone with block height %d", kh.L2BlockNumber)
+			s.lastKeystone = kh
+			s.queueKeystoneForMining(kh)
+			continue
+		}
+
+		if s.cfg.RetryMineThreshold > 0 {
+			retryThreshold := uint32(s.cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod
+			if (lastL2BlockNumber - kh.L2BlockNumber) <= retryThreshold {
+				log.Debugf(
+					"Received keystone old keystone with block height %d, within threshold %d",
+					kh.L2BlockNumber, retryThreshold,
+				)
+				s.queueKeystoneForMining(kh)
+				continue
+			}
+		}
+
+		log.Debugf(
+			"Refusing to mine keystone with block height %d, highest received: %d",
+			kh.L2BlockNumber, lastL2BlockNumber,
+		)
+	}
+}
+
+func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
+	serialized := hemi.L2KeystoneAbbreviate(val).Serialize()
+	key := hex.EncodeToString(serialized[:])
+
+	toInsert := L2KeystoneProcessingContainer{
+		l2Keystone:         val,
+		requiresProcessing: true,
+	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	// keystone already exists, no-op
+	if _, ok := s.l2Keystones[key]; ok {
+		return
+	}
+
+	if len(s.l2Keystones) < l2KeystonesMaxSize {
+		s.l2Keystones[key] = toInsert
+		return
+	}
+
+	var smallestL2BlockNumber uint32
+	var smallestKey string
+
+	for k, v := range s.l2Keystones {
+		if smallestL2BlockNumber == 0 || v.l2Keystone.L2BlockNumber < smallestL2BlockNumber {
+			smallestL2BlockNumber = v.l2Keystone.L2BlockNumber
+			smallestKey = k
+		}
+	}
+
+	// do not insert an L2Keystone that is older than all of the ones already
+	// added
+	if val.L2BlockNumber < smallestL2BlockNumber {
+		return
+	}
+
+	delete(s.l2Keystones, smallestKey)
+
+	s.l2Keystones[key] = toInsert
+}
+
+func (s *Server) queueKeystoneForMining(keystone *hemi.L2Keystone) {
+	s.AddL2Keystone(*keystone)
+	select {
+	case s.mineNowCh <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Server) l2KeystonesForProcessing() []hemi.L2Keystone {
+	copies := make([]hemi.L2Keystone, 0)
+
+	s.mtx.Lock()
+
+	for i, v := range s.l2Keystones {
+		// if we're currently processing, or we've already processed the keystone
+		// then don't process
+		if !v.requiresProcessing {
+			continue
+		}
+
+		// since we're about to process, mark this as false so others don't
+		// process the same
+		v.requiresProcessing = false
+		s.l2Keystones[i] = v
+		copies = append(copies, v.l2Keystone)
+	}
+	s.mtx.Unlock()
+
+	slices.SortFunc(copies, func(a, b hemi.L2Keystone) int {
+		return int(b.L2BlockNumber) - int(a.L2BlockNumber)
+	})
+
+	return copies
+}
+
 // XXX broadcasting should be in a different function
 func (s *Server) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	log.Infof("Mining an L2 keystone at height %d...", ks.L2BlockNumber)
@@ -228,7 +374,7 @@ func (s *Server) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 		return fmt.Errorf("sign Bitcoin transaction: %w", err)
 	}
 
-	// broadcast tx
+	// Broadcast tx.
 	log.Tracef("Broadcasting Bitcoin transaction %x", popTx)
 	log.Infof("Broadcasting PoP transaction to Bitcoin %s...",
 		s.params.Name)
@@ -247,6 +393,49 @@ func (s *Server) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	// EventTransactionBroadcast{Keystone: ks, TxHash: txHash.String()})
 
 	return nil
+}
+
+func (s *Server) mineKnownKeystones(ctx context.Context) {
+	copies := s.l2KeystonesForProcessing()
+
+	for _, e := range copies {
+		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
+		key := hex.EncodeToString(serialized[:])
+
+		log.Debugf("Received keystone for mining with height %v...", e.L2BlockNumber)
+
+		err := s.mineKeystone(ctx, &e)
+		if err != nil {
+			log.Errorf("Failed to mine keystone with height %d: %v",
+				e.L2BlockNumber, err)
+		}
+
+		s.mtx.Lock()
+
+		if v, ok := s.l2Keystones[key]; ok {
+			// if there is an error, mark keystone as "requires processing" so
+			// potentially gets retried, otherwise set this to false to
+			// nothing tries to process it
+			v.requiresProcessing = err != nil
+			s.l2Keystones[key] = v
+		}
+
+		s.mtx.Unlock()
+	}
+}
+
+func (s *Server) mine(ctx context.Context) {
+	defer s.wg.Done()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.mineNowCh:
+			s.mineKnownKeystones(ctx)
+		case <-time.After(l2KeystoneRetryTimeout):
+			s.mineKnownKeystones(ctx)
+		}
+	}
 }
 
 // XXX Test ONLY. Subscription and dealing
@@ -275,13 +464,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 			if err := s.opgethClient.Client().Call(&result, "keystone_request", 3); err != nil {
 				return err
 			}
-			for _, ks := range result.L2Keystones {
-				log.Tracef("Received keystone at height %v", ks.L2BlockNumber)
-				err = s.mineKeystone(ctx, ks)
-				if err != nil {
-					log.Errorf("Failed to mine keystone: %v", err)
-				}
-			}
+			s.processReceivedKeystones(ctx, result.L2Keystones)
 			continue
 		}
 		return err
@@ -458,6 +641,9 @@ func (s *Server) Run(pctx context.Context) error {
 		defer s.wg.Done()
 		s.opgeth(ctx)
 	}()
+
+	s.wg.Add(1)
+	go s.mine(ctx)
 
 	log.Infof("bitcoin address   : %v", s.address)
 	log.Infof("bitcoin public key: %v", s.public)
