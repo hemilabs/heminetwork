@@ -200,7 +200,7 @@ func TestPopMiner(t *testing.T) {
 	// This address doesn't have funds so mining will fail
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c" +
 		"b0602599b867332dfec245547baafae40dad247f21564a0de925527f2445a086fd"
-	// cfg.LogLevel = "popm=TRACE"
+	cfg.LogLevel = "popm=TRACE"
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
