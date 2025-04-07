@@ -195,11 +195,11 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func sortL2KeystonesByL2BlockNumberAsc(a, b *hemi.L2Keystone) int {
+func sortL2KeystonesByL2BlockNumberAsc(a, b hemi.L2Keystone) int {
 	return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
 }
 
-func (s *Server) processReceivedKeystones(ctx context.Context, l2Keystones []*hemi.L2Keystone) {
+func (s *Server) processReceivedKeystones(ctx context.Context, l2Keystones []hemi.L2Keystone) {
 	slices.SortFunc(l2Keystones, sortL2KeystonesByL2BlockNumberAsc)
 
 	for _, kh := range l2Keystones {
@@ -218,8 +218,8 @@ func (s *Server) processReceivedKeystones(ctx context.Context, l2Keystones []*he
 
 		if s.lastKeystone == nil || kh.L2BlockNumber > s.lastKeystone.L2BlockNumber {
 			log.Debugf("Received new keystone with block height %d", kh.L2BlockNumber)
-			s.lastKeystone = kh
-			s.queueKeystoneForMining(kh)
+			s.lastKeystone = &kh
+			s.queueKeystoneForMining(&kh)
 			continue
 		}
 
@@ -230,7 +230,7 @@ func (s *Server) processReceivedKeystones(ctx context.Context, l2Keystones []*he
 					"Received keystone old keystone with block height %d, within threshold %d",
 					kh.L2BlockNumber, retryThreshold,
 				)
-				s.queueKeystoneForMining(kh)
+				s.queueKeystoneForMining(&kh)
 				continue
 			}
 		}
