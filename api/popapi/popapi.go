@@ -46,8 +46,8 @@ type L2KeystoneRequest struct {
 }
 
 type L2KeystoneResponse struct {
-	L2Keystones []*hemi.L2Keystone `json:"keystones"`
-	Error       *protocol.Error    `json:"error,omitempty"`
+	L2Keystones []hemi.L2Keystone `json:"keystones"`
+	Error       *protocol.Error   `json:"error,omitempty"`
 }
 
 var commands = map[protocol.Command]reflect.Type{
