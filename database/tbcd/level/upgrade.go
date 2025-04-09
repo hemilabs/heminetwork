@@ -169,7 +169,10 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 			log.Infof("  Compacting %v: records %v %v",
 				dbname, humanize.Comma(int64(cmr.Records)),
 				humanize.Bytes(uint64(cmr.Size)))
-			err := a.CompactRange(cmr.Range)
+			err := a.CompactRange(util.Range{
+				Start: nil,
+				Limit: cmr.Range.Limit,
+			})
 			if err != nil {
 				return 0, fmt.Errorf("compaction: %w", err)
 			}
@@ -194,8 +197,40 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 // This function verifies that indeed all records have been moved and will
 // restart the copy/move if it didn't.
 func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
-	// XXX verify source table is empty on move
-	return _copyOrMoveTable(ctx, move, a, b, dbname, filter)
+	verb := "move"
+	if !move {
+		verb = "copy"
+	}
+	n, err := _copyOrMoveTable(ctx, move, a, b, dbname, filter)
+	if err != nil {
+		return n, fmt.Errorf("%v tabel: %w", verb, err)
+	}
+	log.Infof("Database %v records processed: %v", dbname, n)
+
+	// Diagnostic to ensure db is actually fully copied
+	if move {
+		i := a.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
+		defer func() { i.Release() }()
+		var skipped, records int
+		for records = 0; i.Next(); records++ {
+			key := i.Key()
+			if filter != nil {
+				// skip filtered records
+				k, v := filter[string(key)]
+				if v && dbname == k {
+					skipped++
+					continue
+				}
+			}
+		}
+		if records-skipped != 0 {
+			return 0, fmt.Errorf("database not empty %v: %v",
+				dbname, records-skipped)
+		}
+		return 0, i.Error()
+	}
+
+	return n, nil
 }
 
 func (l *ldb) insertTable(dbname string, key, value []byte) error {
