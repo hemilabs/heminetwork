@@ -144,6 +144,9 @@ func TestDbUpgradePipeline(t *testing.T) {
 
 	t.Log("Upgrading with move")
 
+	// We are setting the batchSize to exercise restarts.
+	level.SetBatchSize(3)
+
 	// Upgrade database to v3 with move
 	cfg := level.NewConfig(filepath.Join(home, network), "0mb", "0mb")
 	dbTemp, err := level.New(ctx, cfg)

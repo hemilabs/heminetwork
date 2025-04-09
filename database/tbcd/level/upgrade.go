@@ -36,108 +36,154 @@ func SetMode(move bool) {
 	modeMove = move
 }
 
-// _copyOrMoveTable copies or moves a table record by record from a to b. If
-// move is true the record is deleted from a after being copied to b.
-func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
-	i := a.NewIterator(nil, nil)
+func SetBatchSize(size int) {
+	batchSize = size
+}
+
+type CMResult struct {
+	Records int        // Number of records
+	Skipped int        // Number of records skipped
+	Size    int        // Total amount of data
+	Range   util.Range // Start and Limit of operation
+}
+
+//func dumpDB(ctx context.Context, a *leveldb.DB) error {
+//	i := a.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
+//	defer func() { i.Release() }()
+//
+//	for records := 0; i.Next(); records++ {
+//		log.Infof("%04v: %x", records, i.Key())
+//	}
+//	return i.Error()
+//}
+
+func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string, first []byte) (*CMResult, error) {
+	skipOne := false
+	if !move && first != nil {
+		// When copying skip one record since incoming first is the
+		// last compacted record and thus we will loop forever.
+		skipOne = true
+	}
+	i := a.NewIterator(&util.Range{Start: first, Limit: nil}, nil)
 	defer func() { i.Release() }()
 
-	r := 0              // total records written
-	totalSize := 0      // total size written
-	totalWriteSize := 0 // total size written in chuks
-	recordsCompact := 0 // total records since last compaction
+	// skip first record record during copy to preven infinite loops.
+	var cmr CMResult
+	if skipOne {
+		if !i.Next() {
+			return &cmr, i.Error()
+		}
+	}
+
+	start := time.Now()
 
 	batchA := leveldb.MakeBatch(batchSize) // delete batch
 	batchB := leveldb.MakeBatch(batchSize) // copy batch
-	for {
-		start := time.Now()
-		cr := util.Range{Start: nil, Limit: nil}
-		records := 0
-		skipped := 0
-		for records = 0; i.Next(); records++ {
-			// See if we were interrupted
-			select {
-			case <-ctx.Done():
-				return r, ctx.Err()
-			default:
-			}
 
-			key := bytes.Clone(i.Key())
-			val := bytes.Clone(i.Value())
-			if filter != nil {
-				// skip filtered records
-				k, v := filter[string(key)]
-				if v && dbname == k {
-					log.Infof("  Skip: %v %s", k, key)
-					skipped++
-					continue
-				}
-			}
-			// Create batches to speed things up a bit.
-			batchB.Put(key, val)
-			if move {
-				batchA.Delete(key)
-				if records == 0 {
-					cr.Start = key
-				} else {
-					cr.Limit = key
-				}
-			}
-
-			// update stats
-			size := len(key) + len(val)
-			totalWriteSize += size
-			totalSize += size
-
-			if totalWriteSize > chunkSize || records >= batchSize {
-				break
-			}
-		}
-		r += records - skipped
-		recordsCompact += records - skipped
-
-		if err := b.Write(batchB, nil); err != nil {
-			return r, fmt.Errorf("batch write b: %w", err)
-		}
-		batchB.Reset()
-
-		if upgradeVerbose {
-			log.Infof("  Records moved: %v %v took %v",
-				humanize.Comma(int64(r)),
-				humanize.Bytes(uint64(totalSize)), time.Since(start))
+	var records int
+	for records = 0; i.Next(); records++ {
+		// See if we were interrupted
+		select {
+		case <-ctx.Done():
+			return &cmr, ctx.Err()
+		default:
 		}
 
+		key := bytes.Clone(i.Key())
+		val := bytes.Clone(i.Value())
+		if filter != nil {
+			// skip filtered records
+			k, v := filter[string(key)]
+			if v && dbname == k {
+				log.Infof("  Skip: %v %s", k, key)
+				cmr.Skipped++
+				continue
+			}
+		}
+		// Create batches to speed things up a bit.
+		batchB.Put(key, val)
 		if move {
-			// Delete destination records
-			if err := a.Write(batchA, nil); err != nil {
-				return r, fmt.Errorf("batch write a: %w", err)
-			}
-			batchA.Reset()
+			batchA.Delete(key)
 		}
 
-		// Compact once we wrote chunkSize data or on exit.
-		if totalWriteSize > chunkSize || records == 0 {
-			if move {
-				// Compact db to free space on disk
-				ct := time.Now()
-				log.Infof("  Compacting %v: records %v %v",
-					dbname, humanize.Comma(int64(recordsCompact)),
-					humanize.Bytes(uint64(totalWriteSize)))
-				err := a.CompactRange(cr)
-				if err != nil {
-					return r, fmt.Errorf("compaction: %w", err)
-				}
-				log.Infof("  Compacting took %v", time.Since(ct))
-				recordsCompact = 0
-			}
-			totalWriteSize = 0
-		}
-
+		// Always keep track of range
 		if records == 0 {
+			cmr.Range.Start = key
+		} else {
+			cmr.Range.Limit = key
+		}
+
+		// update stats
+		cmr.Size += len(key) + len(val)
+
+		if cmr.Size > chunkSize || records >= batchSize {
 			break
 		}
 	}
-	return r, i.Error()
+	cmr.Records += records - cmr.Skipped
+
+	if err := b.Write(batchB, nil); err != nil {
+		return &cmr, fmt.Errorf("batch write b: %w", err)
+	}
+	batchB.Reset() // Help gc
+
+	if move {
+		// Delete destination records
+		if err := a.Write(batchA, nil); err != nil {
+			return &cmr, fmt.Errorf("batch write a: %w", err)
+		}
+		batchA.Reset() // Help gc
+	}
+
+	if upgradeVerbose {
+		verb := "moved"
+		if !move {
+			verb = "copy"
+		}
+		log.Infof("  Records %v: %v %v took %v",
+			verb,
+			humanize.Comma(int64(cmr.Records)),
+			humanize.Bytes(uint64(cmr.Size)), time.Since(start))
+	}
+
+	return &cmr, i.Error()
+}
+
+func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
+	var first []byte
+	total := 0
+	for {
+		cmr, err := copyOrMoveChunk(ctx, move, a, b, dbname, filter, first)
+		if err != nil {
+			return 0, fmt.Errorf("chunk: %w", err)
+		}
+		total += cmr.Records
+
+		// Compact once we wrote chunkSize data or on exit.
+		if move {
+			// Compact db to free space on disk
+			ct := time.Now()
+			log.Infof("  Compacting %v: records %v %v",
+				dbname, humanize.Comma(int64(cmr.Records)),
+				humanize.Bytes(uint64(cmr.Size)))
+			err := a.CompactRange(cmr.Range)
+			if err != nil {
+				return 0, fmt.Errorf("compaction: %w", err)
+			}
+			log.Infof("  Compacting took %v", time.Since(ct))
+		}
+
+		// This is a bit of a shitty terminator but what happens during
+		// copy is that when the database has exactly one record Limit
+		// is NOT set.
+		if cmr.Records == 0 || cmr.Range.Limit == nil {
+			break
+		}
+
+		first = cmr.Range.Limit
+	}
+
+	return total, nil
 }
 
 // copyOrMoveTable copies or moves a table record by record from a to b. If
@@ -145,19 +191,8 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 // This function verifies that indeed all records have been moved and will
 // restart the copy/move if it didn't.
 func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
-	var nn int
-	for {
-		n, err := _copyOrMoveTable(ctx, move, a, b, dbname, filter)
-		if err != nil {
-			return n, err
-		}
-		nn += n
-		if n == 0 || !move {
-			return nn, nil
-		} else {
-			log.Infof("Restart database copy: %v", dbname)
-		}
-	}
+	// XXX verify source table is empty on move
+	return _copyOrMoveTable(ctx, move, a, b, dbname, filter)
 }
 
 func (l *ldb) insertTable(dbname string, key, value []byte) error {
