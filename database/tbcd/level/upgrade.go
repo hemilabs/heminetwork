@@ -70,7 +70,7 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 
 	start = time.Now() // reset timer for move/copy
 
-	// skip first record record during copy to preven infinite loops.
+	// Skip first record during copy to prevent infinite loops.
 	var cmr CMResult
 	if skipOne {
 		if !i.Next() {
@@ -205,7 +205,6 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 	if err != nil {
 		return n, fmt.Errorf("%v tabel: %w", verb, err)
 	}
-	log.Infof("Database %v records processed: %v", dbname, n)
 
 	// Diagnostic to ensure db is actually fully copied
 	if move {
