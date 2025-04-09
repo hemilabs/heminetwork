@@ -22,7 +22,7 @@ const semverAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 // GoReleaser for releases.
 var (
 	Major = "1"
-	Minor = "0"
+	Minor = "1"
 	Patch = "0"
 )
 
