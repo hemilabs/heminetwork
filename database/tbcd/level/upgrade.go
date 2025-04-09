@@ -64,8 +64,13 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 		// last compacted record and thus we will loop forever.
 		skipOne = true
 	}
+	start := time.Now()
+	log.Infof("Creating iterator")
 	i := a.NewIterator(&util.Range{Start: first, Limit: nil}, nil)
 	defer func() { i.Release() }()
+	log.Infof("Creating iterator took: %v", time.Since(start))
+
+	start = time.Now() // reset timer for move/copy
 
 	// skip first record record during copy to preven infinite loops.
 	var cmr CMResult
@@ -74,8 +79,6 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			return &cmr, i.Error()
 		}
 	}
-
-	start := time.Now()
 
 	batchA := leveldb.MakeBatch(batchSize) // delete batch
 	batchB := leveldb.MakeBatch(batchSize) // copy batch
