@@ -26,7 +26,7 @@ import (
 
 var (
 	upgradeVerbose = true
-	batchSize      = 25_000_000    // move twentyfive million records per batch
+	batchSize      = 10_000_000    // move ten million records per batch
 	chunkSize      = 1_000_000_000 // 1GB
 
 	modeMove = true
