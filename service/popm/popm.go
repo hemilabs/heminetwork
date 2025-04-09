@@ -383,7 +383,7 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	}
 
 	// Build transaction.
-	btx, err := createTx(ks, btcHeight, utxo, payToScript, feeAmount, 10000)
+	btx, err := createTx(ks, btcHeight, utxo, payToScript, feeAmount, 1000)
 	if err != nil {
 		return fmt.Errorf("create Bitcoin transaction: %w", err)
 	}
