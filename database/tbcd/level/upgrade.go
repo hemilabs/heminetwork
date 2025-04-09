@@ -81,6 +81,7 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 	batchA := leveldb.MakeBatch(batchSize) // delete batch
 	batchB := leveldb.MakeBatch(batchSize) // copy batch
 
+	firstKey := true
 	var records int
 	for records = 0; i.Next(); records++ {
 		// See if we were interrupted
@@ -108,8 +109,9 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 		}
 
 		// Always keep track of range
-		if records == 0 {
+		if firstKey {
 			cmr.Range.Start = key
+			firstKey = false
 		} else {
 			cmr.Range.Limit = key
 		}
