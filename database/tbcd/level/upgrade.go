@@ -5,7 +5,6 @@
 package level
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -26,7 +25,7 @@ import (
 
 var (
 	upgradeVerbose = true
-	batchSize      = 10_000_000    // move ten million records per batch
+	batchSize      = 1_000_000     // move one million records per batch
 	chunkSize      = 1_000_000_000 // 1GB
 
 	modeMove = true
@@ -65,10 +64,9 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 		skipOne = true
 	}
 	start := time.Now()
-	log.Infof("Creating iterator")
 	i := a.NewIterator(&util.Range{Start: first, Limit: nil}, nil)
 	defer func() { i.Release() }()
-	log.Infof("Creating iterator took: %v", time.Since(start))
+	log.Infof("   Creating iterator took: %v", time.Since(start))
 
 	start = time.Now() // reset timer for move/copy
 
@@ -92,13 +90,13 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 		default:
 		}
 
-		key := bytes.Clone(i.Key())
-		val := bytes.Clone(i.Value())
+		key := i.Key()
+		val := i.Value()
 		if filter != nil {
 			// skip filtered records
 			k, v := filter[string(key)]
 			if v && dbname == k {
-				log.Infof("  Skip: %v %s", k, key)
+				log.Infof("   Skip: %v %s", k, key) // XX adjust space if it goes one line lower
 				cmr.Skipped++
 				continue
 			}
