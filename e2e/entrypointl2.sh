@@ -60,7 +60,8 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --hvm.genesisheight=$BLOCKHEIGHT \
  --hvm.enabled \
  --override.hvm0=$HVM_PHASE0_TIMESTAMP \
- --tbc.network=localnet
+ --tbc.network=localnet \
+ --override.isthmus=1744407464
 
 # Clayton note: this fixes the mismatched state.scheme, but is it the correct
 # thing to do?
