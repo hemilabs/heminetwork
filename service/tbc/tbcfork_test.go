@@ -22,15 +22,11 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
-	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
 	"github.com/phayes/freeport"
 
@@ -483,7 +479,9 @@ func (b *btcNode) handleMsg(ctx context.Context, p *rawpeer.RawPeer, msg wire.Me
 
 func (b *btcNode) SendBlockheader(ctx context.Context, bh wire.BlockHeader) error {
 	msg := wire.NewMsgHeaders()
-	msg.AddBlockHeader(&bh)
+	if err := msg.AddBlockHeader(&bh); err != nil {
+		return fmt.Errorf("add block header: %w", err)
+	}
 	return b.p.Write(defaultCmdTimeout, msg)
 }
 
@@ -600,44 +598,44 @@ func random(count int) []byte {
 	return b
 }
 
-type addressToKey struct {
-	key        *btcec.PrivateKey
-	compressed bool
-}
+// type addressToKey struct {
+// 	key        *btcec.PrivateKey
+// 	compressed bool
+// }
 
-func mkGetKey(keys map[string]addressToKey) txscript.KeyDB {
-	if keys == nil {
-		return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
-			bool, error,
-		) {
-			return nil, false, errors.New("nope")
-		})
-	}
-	return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
-		bool, error,
-	) {
-		a2k, ok := keys[addr.EncodeAddress()]
-		if !ok {
-			return nil, false, errors.New("nope")
-		}
-		return a2k.key, a2k.compressed, nil
-	})
-}
-
-func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
-	if scripts == nil {
-		return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
-			return nil, errors.New("nope")
-		})
-	}
-	return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
-		script, ok := scripts[addr.EncodeAddress()]
-		if !ok {
-			return nil, errors.New("nope")
-		}
-		return script, nil
-	})
-}
+// func mkGetKey(keys map[string]addressToKey) txscript.KeyDB {
+// 	if keys == nil {
+// 		return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
+// 			bool, error,
+// 		) {
+// 			return nil, false, errors.New("nope")
+// 		})
+// 	}
+// 	return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
+// 		bool, error,
+// 	) {
+// 		a2k, ok := keys[addr.EncodeAddress()]
+// 		if !ok {
+// 			return nil, false, errors.New("nope")
+// 		}
+// 		return a2k.key, a2k.compressed, nil
+// 	})
+// }
+//
+// func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
+// 	if scripts == nil {
+// 		return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
+// 			return nil, errors.New("nope")
+// 		})
+// 	}
+// 	return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
+// 		script, ok := scripts[addr.EncodeAddress()]
+// 		if !ok {
+// 			return nil, errors.New("nope")
+// 		}
+// 		return script, nil
+// 	})
+// }
 
 func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) error {
 	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
@@ -651,6 +649,9 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 	}
 	for i := 0; ; i++ {
 		d, err := vm.DisasmPC()
+		if err != nil {
+			return err
+		}
 		if dump {
 			t.Logf("%v: %v", i, d)
 		}
@@ -678,7 +679,7 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 }
 
 func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte, recipient *secp256k1.PublicKey, inTx *btcutil.Tx, idx uint32) (*btcutil.Tx, error) {
-	btx := &btcwire.MsgTx{
+	btx := &wire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
 	}
@@ -692,24 +693,24 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 		return nil, err
 	}
 
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	privateKey := secp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 	publicKey := privateKey.PubKey() // just send it back to the miner
 	var btcAddress *btcutil.AddressPubKey
 	if recipient == nil {
 		pubKeyBytes := publicKey.SerializeCompressed()
-		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		pubKeyBytes := recipient.SerializeCompressed()
-		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
+	payToScript, err := txscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
 	if err != nil {
 		return nil, err
 	}
@@ -719,7 +720,7 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 	}
 
 	var (
-		outPoint     btcwire.OutPoint
+		outPoint     wire.OutPoint
 		changeAmount int64
 		PkScript     []byte
 	)
@@ -729,9 +730,9 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 	changeAmount = inTx.MsgTx().TxOut[idx].Value // spend entire tx
 	PkScript = inTx.MsgTx().TxOut[idx].PkScript  // Lift PkScript from utxo we are spending
 
-	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
-	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
-	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
+	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
+	btx.TxOut = []*wire.TxOut{wire.NewTxOut(changeAmount, payToScript)}
+	btx.TxOut = append(btx.TxOut, wire.NewTxOut(0, popTxOpReturn))
 	err = bitcoin.SignTx(btx, PkScript, privateKey, publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("sign Bitcoin transaction: %w", err)
@@ -771,6 +772,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		}
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
+		//nolint: ineffassign, staticcheck // test
 		mempool = []*btcutil.Tx{tx}
 
 		// spend above tx in same block
@@ -791,7 +793,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 	blk := newBlock(b.params, name, bt)
 	_, err = b.insertBlock(blk)
 	if err != nil {
-		return nil, fmt.Errorf("insert block at height %v: %v",
+		return nil, fmt.Errorf("insert block at height %v: %w",
 			nextBlockHeight, err)
 	}
 	// XXX this really sucks, we should get rid of height as a best indicator
@@ -924,7 +926,7 @@ func (b *btcNode) mineKss(name string, from *chainhash.Hash, payToAddress btcuti
 	blk := newBlock(b.params, name, bt)
 	_, err = b.insertBlock(blk)
 	if err != nil {
-		return nil, fmt.Errorf("insert block at height %v: %v",
+		return nil, fmt.Errorf("insert block at height %v: %w",
 			nextBlockHeight, err)
 	}
 	// XXX this really sucks, we should get rid of height as a best indicator
@@ -1025,20 +1027,20 @@ func (b *btcNode) Stop() error {
 	return b.listener.Close()
 }
 
-func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
-	key, err := btcec.NewPrivateKey()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	pk := key.PubKey().SerializeUncompressed()
-	// address, err := btcutil.NewAddressPubKey(pk, params)
-	address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), params)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return key, key.PubKey(), address, nil
-}
+// func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
+// 	key, err := btcec.NewPrivateKey()
+// 	if err != nil {
+// 		return nil, err
+// 	}
+//
+// 	pk := key.PubKey().SerializeUncompressed()
+// 	// address, err := btcutil.NewAddressPubKey(pk, params)
+// 	address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), params)
+// 	if err != nil {
+// 		return nil, err
+// 	}
+// 	return key, key.PubKey(), address, nil
+// }
 
 func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
 	for _, b := range blocks {
@@ -1076,7 +1078,7 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					t.Logf("tx hash: %v", tx)
 					t.Logf("ktx: %v", spew.Sdump(ktx))
 					t.Logf("vtx: %v", spew.Sdump(vtx))
-					t.Logf(spew.Sdump(sis))
+					t.Log(spew.Sdump(sis))
 					return errors.New("block mismatch")
 				}
 
