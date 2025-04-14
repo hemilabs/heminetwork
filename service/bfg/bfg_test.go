@@ -48,8 +48,8 @@ func checkBitcoinFinality(bf *BitcoinFinality) error {
 
 	// Verify transaction to block header.
 	merkleHashes := make([][]byte, len(bf.BTCMerkleHashes))
-	for _, merkleHash := range bf.BTCMerkleHashes {
-		merkleHashes = append(merkleHashes, merkleHash)
+	for i, merkleHash := range bf.BTCMerkleHashes {
+		merkleHashes[i] = merkleHash
 	}
 	if err := bitcoin.CheckMerkleChain(btcTxHash, bf.BTCTransactionIndex, merkleHashes, btcHeader.MerkleRoot[:]); err != nil {
 		return fmt.Errorf("verify merkle path for transaction: %w", err)
