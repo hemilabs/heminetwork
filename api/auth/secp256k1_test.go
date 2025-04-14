@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -169,6 +169,9 @@ func TestProtocolHandshake(t *testing.T) {
 	err = bssapi.Write(ctx, conn, "ping-id", bssapi.PingRequest{
 		Timestamp: time.Now().Unix(),
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, _, payload, err := bssapi.Read(ctx, conn)
 	if err != nil {
 		t.Fatal(err)

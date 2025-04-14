@@ -1,6 +1,6 @@
 version: "2"
 run:
-  tests: false
+  tests: true
   go: "1.23"
 
 issues:
@@ -73,10 +73,24 @@ linters:
       - "legacy"
       - "std-error-handling"
     rules:
+      # Avoid applying De Morgan's law automatically.
       - linters: [ "staticcheck" ]
         text: "QF1001:" # "could apply De Morgan's law"
+
+      # Avoid automatically merging conditional assignments into var declarations.
       - linters: [ "staticcheck" ]
         text: "QF1007:" # "could merge conditional assignment into var declaration"
+
+      # Ignore "response body must be closed" when calling websocket.Dial.
+      # Response body closure is handled by the websocket library.
+      - linters: [ "bodyclose" ]
+        text: "response body must be closed"
+        source: "websocket\\.Dial"
+
+      # Ignore not checking return value of c.CloseNow (websocket) in tests.
+      - path: "(.+)_test\\.go"
+        linters: [ "errcheck" ]
+        text: "Error return value of `c.CloseNow` is not checked"
     paths:
       - "third_party$"
       - "builtin$"

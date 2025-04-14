@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -47,7 +47,7 @@ func checkBitcoinFinality(bf *BitcoinFinality) error {
 	btcTxHash := btcchainhash.DoubleHashB(bf.BTCRawTransaction)
 
 	// Verify transaction to block header.
-	var merkleHashes [][]byte
+	merkleHashes := make([][]byte, len(bf.BTCMerkleHashes))
 	for _, merkleHash := range bf.BTCMerkleHashes {
 		merkleHashes = append(merkleHashes, merkleHash)
 	}
