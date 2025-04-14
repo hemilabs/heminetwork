@@ -1282,7 +1282,7 @@ func TestFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	hasBlocks := false
+	var hasBlocks bool
 	for !hasBlocks {
 		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
 		if err != nil {
@@ -1484,7 +1484,7 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	hasBlocks := false
+	var hasBlocks bool
 	for !hasBlocks {
 		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
 		if err != nil {
@@ -1687,7 +1687,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	hasBlocks := false
+	var hasBlocks bool
 	for !hasBlocks {
 		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
 		if err != nil {
@@ -1964,7 +1964,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	hasBlocks := false
+	var hasBlocks bool
 	for !hasBlocks {
 		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
 		if err != nil {
@@ -2298,7 +2298,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	hasBlocks := false
+	var hasBlocks bool
 	for !hasBlocks {
 		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
 		if err != nil {
@@ -2812,7 +2812,7 @@ func TestForkCanonicity(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	hasBlocks := false
+	var hasBlocks bool
 	for !hasBlocks {
 		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
 		if err != nil {
