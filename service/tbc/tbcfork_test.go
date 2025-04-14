@@ -1124,8 +1124,20 @@ func GetFreePort() string {
 	return strconv.Itoa(port)
 }
 
+func (s *Server) hasAllBlocks(ctx context.Context, m map[int32][]*block) (bool, error) {
+	for _, k := range m {
+		for _, blk := range k {
+			_, err := s.db.BlockByHash(ctx, *blk.Hash())
+			if err != nil {
+				return false, err
+			}
+		}
+	}
+	return true, nil
+}
+
 func TestFork(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -1268,6 +1280,17 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Wait for tbc to insert all blocks
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
 	t.Logf("b11a: %v", b11a.Hash())
 	t.Logf("b11b: %v", b11b.Hash())
 	b11s := n.Best()
@@ -1382,7 +1405,7 @@ func TestWork(t *testing.T) {
 }
 
 func TestIndexNoFork(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -1458,6 +1481,16 @@ func TestIndexNoFork(t *testing.T) {
 	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
@@ -1560,7 +1593,7 @@ func TestIndexNoFork(t *testing.T) {
 }
 
 func TestKeystoneIndexNoFork(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -1651,6 +1684,16 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
@@ -1820,7 +1863,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 }
 
 func TestIndexFork(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -1918,6 +1961,16 @@ func TestIndexFork(t *testing.T) {
 	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
@@ -2129,7 +2182,7 @@ func TestIndexFork(t *testing.T) {
 }
 
 func TestKeystoneIndexFork(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -2242,6 +2295,16 @@ func TestKeystoneIndexFork(t *testing.T) {
 	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
@@ -2630,7 +2693,7 @@ func TestTransactions(t *testing.T) {
 }
 
 func TestForkCanonicity(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -2746,6 +2809,16 @@ func TestForkCanonicity(t *testing.T) {
 	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 
 	// set checkpoints to genesis, b2 and b4
