@@ -19,9 +19,11 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
@@ -61,6 +63,7 @@ type Config struct {
 	PprofListenAddress      string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
+	OpgethURL               string
 }
 
 func NewDefaultConfig() *Config {
@@ -70,6 +73,7 @@ func NewDefaultConfig() *Config {
 		LogLevel:            logLevel,
 		Network:             "mainnet",
 		PrometheusNamespace: appName,
+		OpgethURL:           "http://127.0.0.1:9999/v1/ws", // XXX set this using defaults
 	}
 }
 
@@ -84,6 +88,9 @@ type Server struct {
 	g gozer.Gozer
 
 	server *http.ServeMux
+
+	// opgeth
+	opgethClient *ethclient.Client // XXX evaluate if ok
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -148,6 +155,30 @@ func NotFound(w http.ResponseWriter, format string, args ...any) {
 	http.Error(w, string(je), http.StatusNotFound)
 }
 
+func calculateFinality(btcTipHeight uint32, pubHeight uint32, pubHeaderHash chainhash.Hash) (*bfgapi.L2BTCFinality, error) {
+	if pubHeight > btcTipHeight {
+		return nil, fmt.Errorf("effective height greater than btc height (%d > %d)", pubHeight, btcTipHeight)
+	}
+
+	log.Infof("%v, %v", btcTipHeight, pubHeight)
+
+	fin := int64(-9)
+	if pubHeight > 0 {
+		fin = int64(btcTipHeight) - int64(pubHeight) - 9 + 1
+	}
+
+	// set a reasonable upper bound so we can safely convert to int32
+	if fin > 100 {
+		fin = 100
+	}
+
+	return &bfgapi.L2BTCFinality{
+		BTCPubHeight:     int64(pubHeight),
+		BTCPubHeaderHash: api.ByteSlice(pubHeaderHash[:]),
+		BTCFinality:      int32(fin),
+	}, nil
+}
+
 func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleKeystoneFinality: %v", r.RemoteAddr)
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
@@ -168,17 +199,44 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), *ks)
+	resp := bfgapi.L2KeystoneValidityResponse{}
+
+	err = s.opgethClient.Client().Call(&resp, "kss_getKeystone", keystone)
 	if err != nil {
-		NotFound(w, "keystone not found: %v", ks)
+		log.Errorf("error calling opgeth: %v", err)
+		fmt.Fprintf(w, "internal BFG error")
 		return
 	}
 
-	if err := json.NewEncoder(w).Encode(aks); err != nil {
-		log.Errorf("encode: %v", err)
+	if resp.Error != nil {
+		BadRequestF(w, "invalid keystone: %v", resp.Error)
+		return
 	}
 
-	s.cmdsProcessed.Inc()
+	for _, kss := range resp.L2KeystonesHashes {
+		// XXX might need a different call which takes
+		// into account the fork resolution algorithm
+		aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), kss)
+		if err != nil {
+			log.Errorf("keystone not found: %v", ks)
+			continue
+		}
+
+		fin, err := calculateFinality(uint32(aks.BtcTipBlockHeight), uint32(aks.L2KeystoneBlockHeight), aks.L2KeystoneBlockHash)
+		if err != nil {
+			log.Errorf("calculate finality: %v", err)
+			continue
+		}
+
+		if err := json.NewEncoder(w).Encode(fin); err != nil {
+			log.Errorf("encode: %v", err)
+		}
+
+		s.cmdsProcessed.Inc()
+		return
+	}
+
+	NotFound(w, "keystone not found: %v", ks)
 }
 
 func (s *Server) running() bool {
@@ -201,6 +259,51 @@ func (s *Server) promRunning() float64 {
 		return 1
 	}
 	return 0
+}
+
+func (s *Server) connectOpgeth(pctx context.Context) error {
+	log.Tracef("connectOpgeth")
+	defer log.Tracef("connectOpgeth exit")
+
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
+	var err error
+	s.opgethClient, err = ethclient.DialContext(ctx, s.cfg.OpgethURL)
+	if err != nil {
+		return err
+	}
+	defer s.opgethClient.Close()
+
+	log.Debugf("connected to opgeth: %s", s.cfg.OpgethURL)
+
+	<-ctx.Done()
+	err = ctx.Err()
+
+	return err
+}
+
+func (s *Server) opgeth(ctx context.Context) {
+	log.Tracef("opgeth")
+	defer log.Tracef("opgeth exit")
+
+	for {
+		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
+		if err := s.connectOpgeth(ctx); err != nil {
+			// Do nothing
+			log.Tracef("connectOpgeth: %v", err)
+		} else {
+			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
+		}
+		// See if we were terminated
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+
+		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
+	}
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -353,6 +456,12 @@ func (s *Server) Run(pctx context.Context) error {
 			}
 		}()
 	}
+
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.opgeth(ctx)
+	}()
 
 	// Welcome user.
 
