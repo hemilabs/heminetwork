@@ -72,8 +72,8 @@ func TestPopMiner(t *testing.T) {
 
 	// Setup pop miner
 	cfg := NewDefaultConfig()
-	cfg.GozerType = "tbc"
-	cfg.TBCURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	cfg.LogLevel = "popm=TRACE"

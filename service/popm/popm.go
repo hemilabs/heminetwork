@@ -44,6 +44,9 @@ const (
 	defaultRequestTimeout = 3 * time.Second
 
 	l2KeystonesMaxSize = 10
+
+	bitcoinSourceBlockstream = "blockstream"
+	bitcoinSourceTBC         = "tbc"
 )
 
 var (
@@ -65,8 +68,8 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
-	GozerType               string
-	TBCURL                  string
+	BitcoinSource           string
+	BitcoinURL              string
 	RetryMineThreshold      uint
 }
 
@@ -75,8 +78,8 @@ func NewDefaultConfig() *Config {
 		Network:             "testnet3",
 		PrometheusNamespace: appName,
 		OpgethURL:           "http://127.0.0.1:9999/v1/ws", // XXX set this using defaults
-		GozerType:           "TBC",
-		TBCURL:              tbcgozer.DefaultURL,
+		BitcoinSource:       bitcoinSourceTBC,
+		BitcoinURL:          tbcgozer.DefaultURL,
 	}
 }
 
@@ -478,15 +481,15 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	log.Tracef("connectOpgeth")
 	defer log.Tracef("connectOpgeth exit")
 
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
 	var err error
-	s.opgethClient, err = ethclient.Dial(s.cfg.OpgethURL)
+	s.opgethClient, err = ethclient.DialContext(ctx, s.cfg.OpgethURL)
 	if err != nil {
 		return err
 	}
 	defer s.opgethClient.Close()
-
-	ctx, cancel := context.WithCancel(pctx)
-	defer cancel()
 
 	log.Debugf("connected to opgeth: %s", s.cfg.OpgethURL)
 
@@ -623,19 +626,21 @@ func (s *Server) Run(pctx context.Context) error {
 
 	// XXX this should be in New() but tbcgozer requires context
 	var err error
-	switch strings.ToLower(s.cfg.GozerType) {
-	case "tbc":
-		s.gozer, err = tbcgozer.TBCGozerNew(ctx, s.cfg.TBCURL)
+	switch s.cfg.BitcoinSource {
+	case bitcoinSourceTBC:
+		s.gozer, err = tbcgozer.TBCGozerNew(ctx, s.cfg.BitcoinURL)
 		if err != nil {
-			log.Errorf("TBC gozer creation failed: %v", err)
+			return fmt.Errorf("could not setup %v tbc: %w",
+				s.cfg.Network, err)
 		}
-	case "blockstream":
+	case bitcoinSourceBlockstream:
 		s.gozer, err = blockstream.BlockstreamNew(s.params)
 		if err != nil {
-			log.Errorf("Blockstream gozer creation failed: %v", err)
+			return fmt.Errorf("could not setup %v blockstream: %w",
+				s.cfg.Network, err)
 		}
 	default:
-		return fmt.Errorf("unknown gozer type %v", s.cfg.GozerType)
+		return fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
 	}
 
 	s.wg.Add(1)
