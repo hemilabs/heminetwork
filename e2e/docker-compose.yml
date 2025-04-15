@@ -775,10 +775,8 @@ services:
       HOLOCENE_DEPLOY_CONFIG_PATH: ${PWD}/e2e/deploy-config-holocene.json
     networks:
       e2e:
-    
 volumes:
   l2configs:
-
 networks:
   e2e:
     ipam:
