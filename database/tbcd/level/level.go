@@ -20,6 +20,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
+	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
@@ -133,9 +134,10 @@ type Config struct {
 	BlockheaderCacheSize string // size of block header cache
 	blockCacheSize       int    // parsed size of block cache
 	blockheaderCacheSize int    // parsed size of block header cache
+	network              string // network hint
 }
 
-func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
+func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS, network string) *Config {
 	if blockheaderCacheSizeS == "" {
 		blockheaderCacheSizeS = "0"
 	}
@@ -157,6 +159,10 @@ func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
 	if blockCacheSize > math.MaxInt64 {
 		panic("invalid blockCacheSize")
 	}
+	home, err = homedir.Expand(home)
+	if err != nil {
+		panic(err)
+	}
 
 	return &Config{
 		Home:                 home, // require user to set home.
@@ -164,6 +170,7 @@ func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
 		blockCacheSize:       int(blockCacheSize),
 		BlockheaderCacheSize: blockheaderCacheSizeS,
 		blockheaderCacheSize: int(blockheaderCacheSize),
+		network:              network,
 	}
 }
 
@@ -265,7 +272,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		if reopen {
 			// Reopen database and replace pools in l
 			log.Infof("Reopen database %v", l.cfg.Home)
-
+			panic(spew.Sdump(cfg))
 			l, err = open(ctx, cfg)
 			if err != nil {
 				return nil, fmt.Errorf("reopen: %w", err)

@@ -18,6 +18,7 @@ import (
 	cp "github.com/otiai10/copy"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+	"golang.org/x/sys/unix"
 
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/rawdb"
@@ -27,8 +28,11 @@ var (
 	upgradeVerbose = true
 	batchSize      = 1_000_000     // move one million records per batch
 	chunkSize      = 1_000_000_000 // 1GB
+	gib            = uint64(1024 * 1024 * 1024)
 
 	modeMove = true
+
+	modeFast = true // try to run fast when enough disk space is availale
 )
 
 func SetMode(move bool) {
@@ -55,6 +59,14 @@ type CMResult struct {
 //	}
 //	return i.Error()
 //}
+
+func diskfree(path string) (uint64, error) {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(path, &stat); err != nil {
+		return 0, fmt.Errorf("statfs: %w", err)
+	}
+	return uint64(stat.Bsize) * stat.Bfree, nil
+}
 
 func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string, first []byte) (*CMResult, error) {
 	skipOne := false
@@ -169,8 +181,12 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 			log.Infof("  Compacting %v: records %v %v",
 				dbname, humanize.Comma(int64(cmr.Records)),
 				humanize.Bytes(uint64(cmr.Size)))
+			start := cmr.Range.Start
+			if !modeFast {
+				start = nil
+			}
 			err := a.CompactRange(util.Range{
-				Start: nil,
+				Start: start,
 				Limit: cmr.Range.Limit,
 			})
 			if err != nil {
@@ -314,7 +330,46 @@ func (l *ldb) v3(ctx context.Context) error {
 	defer log.Tracef("v3 exit")
 
 	log.Infof("Upgrading database from v2 to v3")
-	// example code on how to move databases
+
+	// First let's make sure we have enough disk space to process this.
+	var stat unix.Statfs_t
+	if err := unix.Statfs(l.cfg.Home, &stat); err != nil {
+		return fmt.Errorf("statfs: %w", err)
+	}
+	var need uint64
+	switch l.cfg.network {
+	case "testnet3":
+		need = 100 * gib // 100GB
+	case "mainnet":
+		need = 350 * gib // 350GB
+	case "special":
+		need = 10 * 1024 * 1024 // 10MB
+	default:
+		log.Infof("disk space check not performed")
+	}
+	if need != 0 {
+		got, err := diskfree(l.cfg.Home)
+		if err != nil {
+			return fmt.Errorf("diskfree: %w", err)
+		}
+		// require at least 10G free
+		required := 10 * gib
+		if got < required {
+			return fmt.Errorf("not enough disk space available for upgrade: %v",
+				humanize.IBytes(got))
+		}
+		log.Infof("need %v got %v", humanize.IBytes(need), humanize.IBytes(got))
+		if need > got {
+			modeFast = false
+			log.Infof("Using slow mode to upgrade database. Upgrade "+
+				"needs %v for fast mode", humanize.IBytes(need))
+			log.Infof("Press ctrl-c TWICE within 30 seconds to abort upgrade!")
+			time.Sleep(30 * time.Second)
+		} else {
+			log.Infof("Fast mode upgrade: %v available", humanize.IBytes(got))
+		}
+	}
+
 	// sort database names
 	keys := make([]string, 0, len(l.pool))
 	for k := range l.pool {

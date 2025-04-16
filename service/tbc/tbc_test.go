@@ -148,7 +148,7 @@ func TestDbUpgradePipeline(t *testing.T) {
 	level.SetBatchSize(3)
 
 	// Upgrade database to v3 with move
-	cfg := level.NewConfig(filepath.Join(home, network), "0mb", "0mb")
+	cfg := level.NewConfig(filepath.Join(home, network), "0mb", "0mb", "special")
 	dbTemp, err := level.New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +173,7 @@ func TestDbUpgradePipeline(t *testing.T) {
 	}
 
 	// Open move DB
-	cfgMove := level.NewConfig(filepath.Join(home, network+".move"), "0mb", "0mb")
+	cfgMove := level.NewConfig(filepath.Join(home, network+".move"), "0mb", "0mb", "special")
 	dbMove, err := level.New(ctx, cfgMove)
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +197,7 @@ func TestDbUpgradePipeline(t *testing.T) {
 	}
 
 	// Open copy DB
-	cfgCopy := level.NewConfig(filepath.Join(home, network+".v3"), "0mb", "0mb")
+	cfgCopy := level.NewConfig(filepath.Join(home, network+".v3"), "0mb", "0mb", "sepcia;")
 	dbCopy, err := level.New(ctx, cfgCopy)
 	if err != nil {
 		t.Fatal(err)

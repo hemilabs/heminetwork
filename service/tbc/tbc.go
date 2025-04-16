@@ -29,8 +29,10 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
+	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/syndtr/goleveldb/leveldb"
+	"golang.org/x/sys/unix"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -194,6 +196,7 @@ type Server struct {
 		mempoolCount, mempoolSize int
 		blockCache                tbcd.CacheStats
 		headerCache               tbcd.CacheStats
+		diskFree                  uint64
 	} // periodically updated by promPoll
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
@@ -784,6 +787,20 @@ func (s *Server) promHeaderCacheItems() float64 {
 	return deucalion.IntToFloat(s.prom.headerCache.Items)
 }
 
+func (s *Server) promDiskFree() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.Uint64ToFloat(s.prom.diskFree)
+}
+
+func diskfree(path string) (uint64, error) {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(path, &stat); err != nil {
+		return 0, fmt.Errorf("statfs: %w", err)
+	}
+	return uint64(stat.Bsize) * stat.Bfree, nil
+}
+
 func (s *Server) promPoll(ctx context.Context) error {
 	for {
 		select {
@@ -796,6 +813,7 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
 		s.prom.blockCache = s.db.BlockCacheStats()
 		s.prom.headerCache = s.db.BlockHeaderCacheStats()
+		s.prom.diskFree, _ = diskfree(s.cfg.LevelDBHome)
 		//if s.cfg.MempoolEnabled {
 		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
 		//}
@@ -2356,7 +2374,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	// Open db.
 	var err error
 	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network),
-		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
+		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize, s.cfg.Network)
 	s.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return err
@@ -2486,6 +2504,11 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "block_cache_items",
 				Help:      "Number of cached blocks",
 			}, s.promBlockCacheItems),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "disk_free",
+				Help:      "Disk free",
+			}, s.promDiskFree),
 		}
 		if s.cfg.HemiIndex {
 			s.promCollectors = append(s.promCollectors,
@@ -2507,10 +2530,16 @@ func (s *Server) Run(pctx context.Context) error {
 		return errors.New("run called but External Header mode is enabled")
 	}
 
+	var err error
+	s.cfg.LevelDBHome, err = homedir.Expand(s.cfg.LevelDBHome)
+	if err != nil {
+		return fmt.Errorf("expand: %w", err)
+	}
+
 	// Rely on dbOpen failing if the database is already open.
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
-	err := s.dbOpen(ctx)
+	err = s.dbOpen(ctx)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
 	}
@@ -2520,6 +2549,20 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Errorf("db close: %v", err)
 		}
 	}()
+
+	// Warn user about disk space
+	df, err := diskfree(s.cfg.LevelDBHome)
+	if err != nil {
+		return fmt.Errorf("df: %w", err)
+	}
+	if df != 0 {
+		blockPerday := uint64(24 * time.Hour / s.chainParams.TargetTimePerBlock)
+		blockSize := uint64(2 * 1024 * 1024) // 2MB, a bit over but that's ok
+		sizePerday := blockSize * blockPerday
+		aproxAvailable := df / sizePerday
+		log.Infof("Free disk space %v: %v approximate days till full: %v",
+			s.cfg.LevelDBHome, humanize.IBytes(df), aproxAvailable)
+	}
 
 	if !s.testAndSetRunning(true) {
 		return errors.New("tbc already running")
