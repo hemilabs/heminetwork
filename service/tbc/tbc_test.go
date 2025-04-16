@@ -21,13 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/juju/loggo"
-	"github.com/syndtr/goleveldb/leveldb"
-
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/database/tbcd/level"
-	"github.com/hemilabs/heminetwork/hemi/pop"
-
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -37,13 +30,18 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
+	"github.com/juju/loggo"
 	"github.com/phayes/freeport"
+	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 const (
