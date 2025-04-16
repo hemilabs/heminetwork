@@ -276,7 +276,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
-
 	}
 
 	// XXX this is not right. NewServer should always return. The call to
@@ -551,7 +550,6 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 		return &bfgapi.BitcoinUTXOsResponse{
 			Error: e.ProtocolError(),
 		}, e
-
 	}
 	buResp := bfgapi.BitcoinUTXOsResponse{}
 	for _, utxo := range utxos {
@@ -1882,7 +1880,6 @@ func (s *Server) Run(pctx context.Context) error {
 				if err := s.db.BtcTransactionBroadcastRequestTrim(ctx); err != nil {
 					log.Errorf("error trimming old requests: %v", err)
 				}
-
 			}
 		}
 	}()

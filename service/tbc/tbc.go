@@ -814,7 +814,6 @@ func (s *Server) promPoll(ctx context.Context) error {
 				s.prom.blockCache.Items)
 			s.mtx.RUnlock()
 		}
-
 	}
 }
 
@@ -1159,7 +1158,6 @@ func (s *Server) syncBlocks(ctx context.Context) {
 					}
 				}
 				s.pm.All(ctx, hp)
-
 			} else {
 				log.Debugf("handle all")
 				s.pm.All(ctx, s.headersPeer)
