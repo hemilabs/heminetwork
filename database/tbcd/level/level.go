@@ -272,7 +272,6 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		if reopen {
 			// Reopen database and replace pools in l
 			log.Infof("Reopen database %v", l.cfg.Home)
-			panic(spew.Sdump(cfg))
 			l, err = open(ctx, cfg)
 			if err != nil {
 				return nil, fmt.Errorf("reopen: %w", err)
