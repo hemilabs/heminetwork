@@ -51,6 +51,8 @@ func TestBFG(t *testing.T) {
 	msgCh := make(chan string, 10)
 	errCh := make(chan error)
 
+	const keystoneCount = 10
+
 	// Create opgeth test server with the request handler.
 	opgeth := mockOpgeth(ctx, t, msgCh, errCh)
 	defer opgeth.Close()
@@ -82,30 +84,33 @@ func TestBFG(t *testing.T) {
 
 	// messages we expect to receive
 	expectedMsg := map[string]int{
-		"kss_getKeystone": 1,
-		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: 1,
+		"kss_getKeystone": keystoneCount,
+		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: keystoneCount,
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	// send finality requests to bfg
+	go func() {
+		for range keystoneCount {
+			kssHash := "99f3e3b9f72805f6992550ed870905cd45c832d78caa990b099b4c5873d06c59"
+			resp, err := http.Get("http://" + bfgCfg.ListenAddress + "/v1/keystonefinality/" + kssHash)
+			if err != nil {
+				panic(err)
+			}
 
-	kssHash := "99f3e3b9f72805f6992550ed870905cd45c832d78caa990b099b4c5873d06c59"
-	resp, err := http.Get("http://" + bfgCfg.ListenAddress + "/v1/keystonefinality/" + kssHash)
-	if err != nil {
-		t.Fatal(err)
-	}
+			fin := bfgapi.L2BTCFinality{}
 
-	fin := bfgapi.L2BTCFinality{}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				panic(err)
+			}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
+			if err = json.Unmarshal(body, &fin); err != nil {
+				panic(err)
+			}
 
-	if err = json.Unmarshal(body, &fin); err != nil {
-		t.Fatal(err)
-	}
-
-	t.Logf("response: %v", spew.Sdump(fin))
+			t.Logf("response: %v", spew.Sdump(fin))
+		}
+	}()
 
 	// receive messages and errors from opgeth and tbc
 	for {
@@ -251,55 +256,56 @@ func mockOpgeth(ctx context.Context, t *testing.T, msgCh chan string, errCh chan
 
 		t.Logf("mockOpgeth: connection from %v", r.RemoteAddr)
 
-		var msg jsonrpcMessage
-		_, br, err := c.Read(ctx)
-		if err != nil {
-			return err
-		}
-		err = json.Unmarshal(br, &msg)
-		if err != nil {
-			return err
-		}
+		for {
 
-		t.Logf("mockOpgeth: command is %s", msg.Method)
-
-		go func() {
-			select {
-			case <-ctx.Done():
-				err = ctx.Err()
-				return
-			case msgCh <- msg.Method:
+			var msg jsonrpcMessage
+			_, br, err := c.Read(ctx)
+			if err != nil {
+				return err
 			}
-		}()
-
-		switch msg.Method {
-		case "kss_getKeystone":
-			kssResp := bfgapi.L2KeystoneValidityResponse{
-				L2KeystonesHashes: []chainhash.Hash{
-					{0x0a, 0x0a}, {0x0b, 0x0b},
-				},
-			}
-			subResp := jsonrpcMessage{
-				Version: "2.0",
-				ID:      msg.ID,
-				Result:  kssResp,
-			}
-
-			p, err := json.Marshal(subResp)
+			err = json.Unmarshal(br, &msg)
 			if err != nil {
 				return err
 			}
 
-			err = c.Write(ctx, websocket.MessageText, p)
-			if err != nil {
-				return err
+			t.Logf("mockOpgeth: command is %s", msg.Method)
+
+			go func() {
+				select {
+				case <-ctx.Done():
+					err = ctx.Err()
+					return
+				case msgCh <- msg.Method:
+				}
+			}()
+
+			switch msg.Method {
+			case "kss_getKeystone":
+				kssResp := bfgapi.L2KeystoneValidityResponse{
+					L2KeystonesHashes: []chainhash.Hash{
+						{0x0a, 0x0a}, {0x0b, 0x0b},
+					},
+				}
+				subResp := jsonrpcMessage{
+					Version: "2.0",
+					ID:      msg.ID,
+					Result:  kssResp,
+				}
+
+				p, err := json.Marshal(subResp)
+				if err != nil {
+					return err
+				}
+
+				err = c.Write(ctx, websocket.MessageText, p)
+				if err != nil {
+					return err
+				}
+
+			default:
+				t.Errorf("unsupported message %v", msg.Method)
 			}
-
-		default:
-			t.Errorf("unsupported message %v", msg.Method)
 		}
-
-		return nil
 	}
 
 	h := handler{handleFunc: hf, errCh: errCh, name: "mockOpgeth"}
