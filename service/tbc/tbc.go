@@ -129,8 +129,6 @@ type Config struct {
 	EffectiveGenesisBlock   *wire.BlockHeader // The header to use as the first block in TBC's consensus view
 	GenesisHeightOffset     uint64            // The height of the effective genesis block
 	GenesisDifficultyOffset big.Int           // The cumulative difficulty of the effective genesis block
-
-	nonInteractive bool // Set to true to disable user interaction
 }
 
 func NewDefaultConfig() *Config {
@@ -291,7 +289,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.chainParams = &chaincfg.TestNet3Params
 		s.checkpoints = testnet3Checkpoints
 		s.hemiGenesis = testnet3HemiGenesis
-		s.cfg.nonInteractive = true
 
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
@@ -2378,6 +2375,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	switch s.cfg.Network {
 	case "testnet3":
 	case "mainnet":
+	case "upgradetest":
 	case networkLocalnet: // XXX why is this here?, this breaks the filepath.Join
 	default:
 		return fmt.Errorf("unsupported network: %v", s.cfg.Network)

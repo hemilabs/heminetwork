@@ -151,7 +151,7 @@ func TestDbUpgradePipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.SetNoninteractive(true)
+
 	dbTemp, err := level.New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -164,24 +164,25 @@ func TestDbUpgradePipeline(t *testing.T) {
 	}
 	sort.Strings(keys)
 
+	// Close temporary DB
+	if err = dbTemp.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	// Rename database $HOME to $HOME.move
 	err = os.Rename(cfg.Home, cfg.Home+".move")
 	if err != nil {
 		t.Fatal(fmt.Errorf("rename destination: %w", err))
 	}
 
-	// Close temporary DB
-	if err = dbTemp.Close(); err != nil {
-		t.Fatal(err)
-	}
-
 	// Open move DB
-	// XXX antonio fix this please
-	panic("fixme antonio")
 	cfgMove, err := level.NewConfig(network, home, "0mb", "0mb")
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	cfgMove.Home = cfgMove.Home + ".move"
+
 	dbMove, err := level.New(ctx, cfgMove)
 	if err != nil {
 		t.Fatal(err)
@@ -205,12 +206,13 @@ func TestDbUpgradePipeline(t *testing.T) {
 	}
 
 	// Open copy DB
-	// XXX antonio fix this please
-	panic("fixme antonio")
 	cfgCopy, err := level.NewConfig(network, home, "0mb", "0mb")
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	cfgCopy.Home = cfgCopy.Home + ".v3"
+
 	dbCopy, err := level.New(ctx, cfgCopy)
 	if err != nil {
 		t.Fatal(err)
@@ -301,7 +303,7 @@ func TestDbUpgrade(t *testing.T) {
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		MaxCachedKeystones:      1000, // XXX
-		Network:                 "testnet3",
+		Network:                 "upgradetest",
 		PrometheusListenAddress: "",
 		ListenAddress:           "",
 		PeersWanted:             0,
