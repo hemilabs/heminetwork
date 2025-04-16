@@ -319,7 +319,7 @@ func (l *ldb) v2(ctx context.Context) error {
 	return l.MetadataPut(ctx, versionKey, v)
 }
 
-// v3 upgrade the database from v2 to v3.
+// v3 upgrades the database from v2 to v3.
 // Changes:
 // Move databases from compressed to uncompressed state.
 //
