@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
@@ -130,6 +129,8 @@ type Config struct {
 	EffectiveGenesisBlock   *wire.BlockHeader // The header to use as the first block in TBC's consensus view
 	GenesisHeightOffset     uint64            // The height of the effective genesis block
 	GenesisDifficultyOffset big.Int           // The cumulative difficulty of the effective genesis block
+
+	nonInteractive bool // Set to true to disable user interaction
 }
 
 func NewDefaultConfig() *Config {
@@ -280,6 +281,17 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.chainParams = &chaincfg.TestNet3Params
 		s.checkpoints = testnet3Checkpoints
 		s.hemiGenesis = testnet3HemiGenesis
+
+	case "upgradetest":
+		// Special mode to verify database upgrades. This pretends to
+		// be testnet3 however we must hint to the database layer that
+		// we do not want user interaction. You probably should not
+		// touch this.
+		s.wireNet = wire.TestNet3
+		s.chainParams = &chaincfg.TestNet3Params
+		s.checkpoints = testnet3Checkpoints
+		s.hemiGenesis = testnet3HemiGenesis
+		s.cfg.nonInteractive = true
 
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
@@ -2372,9 +2384,11 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	// Open db.
-	var err error
-	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network),
-		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize, s.cfg.Network)
+	cfg, err := level.NewConfig(s.cfg.Network, s.cfg.LevelDBHome,
+		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
+	if err != nil {
+		return err
+	}
 	s.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return err

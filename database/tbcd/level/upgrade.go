@@ -337,15 +337,15 @@ func (l *ldb) v3(ctx context.Context) error {
 		return fmt.Errorf("statfs: %w", err)
 	}
 	var need uint64
-	switch l.cfg.network {
+	switch l.cfg.Network {
 	case "testnet3":
 		need = 100 * gib // 100GB
 	case "mainnet":
 		need = 350 * gib // 350GB
-	case "special":
+	case "localnet":
 		need = 10 * 1024 * 1024 // 10MB
 	default:
-		log.Infof("disk space check not performed")
+		return fmt.Errorf("invalid network: %v", l.cfg.Network)
 	}
 	if need != 0 {
 		got, err := diskfree(l.cfg.Home)
@@ -358,15 +358,22 @@ func (l *ldb) v3(ctx context.Context) error {
 			return fmt.Errorf("not enough disk space available for upgrade: %v",
 				humanize.IBytes(got))
 		}
-		log.Infof("need %v got %v", humanize.IBytes(need), humanize.IBytes(got))
+		log.Debugf("need %v got %v", humanize.IBytes(need), humanize.IBytes(got))
 		if need > got {
 			modeFast = false
 			log.Infof("Using slow mode to upgrade database. Upgrade "+
 				"needs %v for fast mode", humanize.IBytes(need))
-			log.Infof("Press ctrl-c TWICE within 30 seconds to abort upgrade!")
-			time.Sleep(30 * time.Second)
 		} else {
 			log.Infof("Fast mode upgrade: %v available", humanize.IBytes(got))
+		}
+	}
+
+	if !l.cfg.nonInteractive {
+		log.Infof("This operation will take a long time. " +
+			"Press ctrl-c within 30 seconds to abort upgrade!")
+		select {
+		case <-ctx.Done():
+		case <-time.Tick(30 * time.Second):
 		}
 	}
 

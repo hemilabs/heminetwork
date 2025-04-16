@@ -14,7 +14,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -129,7 +128,7 @@ func countKeystones(b *btcutil.Block) int {
 
 func TestDbUpgradePipeline(t *testing.T) {
 	home := t.TempDir()
-	network := "testnet3"
+	network := "upgradetest"
 	t.Logf("temp: %v", home)
 
 	err := extract("testdata/testdatabase.tar.gz", home)
@@ -148,7 +147,11 @@ func TestDbUpgradePipeline(t *testing.T) {
 	level.SetBatchSize(3)
 
 	// Upgrade database to v3 with move
-	cfg := level.NewConfig(filepath.Join(home, network), "0mb", "0mb", "special")
+	cfg, err := level.NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SetNoninteractive(true)
 	dbTemp, err := level.New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -173,7 +176,12 @@ func TestDbUpgradePipeline(t *testing.T) {
 	}
 
 	// Open move DB
-	cfgMove := level.NewConfig(filepath.Join(home, network+".move"), "0mb", "0mb", "special")
+	// XXX antonio fix this please
+	panic("fixme antonio")
+	cfgMove, err := level.NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
 	dbMove, err := level.New(ctx, cfgMove)
 	if err != nil {
 		t.Fatal(err)
@@ -197,7 +205,12 @@ func TestDbUpgradePipeline(t *testing.T) {
 	}
 
 	// Open copy DB
-	cfgCopy := level.NewConfig(filepath.Join(home, network+".v3"), "0mb", "0mb", "sepcia;")
+	// XXX antonio fix this please
+	panic("fixme antonio")
+	cfgCopy, err := level.NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
 	dbCopy, err := level.New(ctx, cfgCopy)
 	if err != nil {
 		t.Fatal(err)

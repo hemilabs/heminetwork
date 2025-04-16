@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"path/filepath"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -129,24 +130,29 @@ func headerHash(header []byte) *chainhash.Hash {
 }
 
 type Config struct {
-	Home                 string // home directory
 	BlockCacheSize       string // size of block cache
 	BlockheaderCacheSize string // size of block header cache
+	Home                 string // home directory
+	Network              string // network e.g. "testnet3", "mainnet" etc
 	blockCacheSize       int    // parsed size of block cache
 	blockheaderCacheSize int    // parsed size of block header cache
-	network              string // network hint
+	nonInteractive       bool   // Set to true to prevent user interaction
 }
 
-func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS, network string) *Config {
+func (cfg *Config) SetNoninteractive(x bool) {
+	cfg.nonInteractive = x
+}
+
+func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
 	if blockheaderCacheSizeS == "" {
 		blockheaderCacheSizeS = "0"
 	}
 	blockheaderCacheSize, err := humanize.ParseBytes(blockheaderCacheSizeS)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("blockheader cache size: %w", err)
 	}
 	if blockheaderCacheSize > math.MaxInt64 {
-		panic("invalid blockheaderCacheSize")
+		return nil, errors.New("blockheader cache size")
 	}
 
 	if blockCacheSizeS == "" {
@@ -154,24 +160,39 @@ func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS, network string) *Co
 	}
 	blockCacheSize, err := humanize.ParseBytes(blockCacheSizeS)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("block cache size: %w", err)
 	}
 	if blockCacheSize > math.MaxInt64 {
-		panic("invalid blockCacheSize")
+		return nil, errors.New("block cache size")
 	}
-	home, err = homedir.Expand(home)
+	if home == "" {
+		return nil, errors.New("home not set")
+	}
+	var nonInteractive bool
+	switch network {
+	case "testnet3":
+	case "mainnet":
+	case "localnet":
+	case "upgradetest":
+		network = "testnet3"
+		nonInteractive = true
+	default:
+		return nil, fmt.Errorf("invalid network: %v", network)
+	}
+	homedir, err := homedir.Expand(filepath.Join(home, network))
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("homedir: %w", err)
 	}
 
 	return &Config{
-		Home:                 home, // require user to set home.
+		Home:                 homedir,
+		Network:              network,
 		BlockCacheSize:       blockCacheSizeS,
 		blockCacheSize:       int(blockCacheSize),
 		BlockheaderCacheSize: blockheaderCacheSizeS,
 		blockheaderCacheSize: int(blockheaderCacheSize),
-		network:              network,
-	}
+		nonInteractive:       nonInteractive,
+	}, nil
 }
 
 func open(ctx context.Context, cfg *Config) (*ldb, error) {

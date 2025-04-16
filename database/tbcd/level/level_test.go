@@ -29,7 +29,10 @@ func TestMD(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	cfg := NewConfig(home, "128kb", "1m", "")
+	cfg, err := NewConfig("testnet3", home, "128kb", "1m")
+	if err != nil {
+		t.Fatal(err)
+	}
 	db, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -331,7 +334,10 @@ func TestKeystoneUpdate(t *testing.T) {
 			home := t.TempDir()
 			t.Logf("temp: %v", home)
 
-			cfg := NewConfig(home, "", "", "")
+			cfg, err := NewConfig("testnet3", home, "", "")
+			if err != nil {
+				t.Fatal(err)
+			}
 			db, err := New(ctx, cfg)
 			if err != nil {
 				t.Fatal(err)
@@ -401,7 +407,10 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	cfg := NewConfig(home, "", "", "")
+	cfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	db, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -466,7 +475,10 @@ func TestKeystoneDBCache(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	cfg := NewConfig(home, "", "", "")
+	cfg, err := NewConfig("upgradetest", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	db, err := New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
