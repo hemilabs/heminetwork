@@ -316,7 +316,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 	genesisHash := previousCheckpoint(bh, s.checkpoints).hash // either genesis or a snapshot block
 
 	// Move best block header backwards until we find bh.
-	log.Infof("isCanonical best %v bh %v genesis %v", bhb.HH(), bh.HH(), genesisHash)
+	log.Debugf("isCanonical best %v bh %v genesis %v", bhb.HH(), bh.HH(), genesisHash)
 	for {
 		if bhb.Height <= bh.Height {
 			return false, nil
