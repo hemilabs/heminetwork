@@ -19,6 +19,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -90,12 +91,13 @@ type Server struct {
 	server *http.ServeMux
 
 	// opgeth
-	opgethClient *ethclient.Client // XXX evaluate if ok
+	opgethClient *ethclient.Client
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
 	promPollVerbose bool // set to true to print stats during poll
 	isRunning       bool
+	connected       bool // connected to opgeth
 	cmdsProcessed   prometheus.Counter
 }
 
@@ -114,6 +116,12 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	return s, nil
+}
+
+func (s *Server) Connected() bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return s.connected
 }
 
 func random(n int) []byte {
@@ -153,6 +161,32 @@ func NotFound(w http.ResponseWriter, format string, args ...any) {
 	}
 	log.Tracef("not found: %v trace %v error %v", e.Timestamp, e.Trace, e.Error)
 	http.Error(w, string(je), http.StatusNotFound)
+}
+
+func (s *Server) callOpgeth(ctx context.Context, msg string, args ...any) (any, error) {
+	log.Tracef("callOpgeth %T", msg)
+	defer log.Tracef("callOpgeth exit %T", msg)
+
+	if !s.Connected() {
+		return nil, errors.New("not connected to opgeth")
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+		switch msg {
+		case "kss_getKeystone":
+			resp := bfgapi.L2KeystoneValidityResponse{}
+			err := s.opgethClient.Client().Call(&resp, msg, args)
+			if err != nil {
+				return nil, fmt.Errorf("error calling opgeth: %v", err)
+			}
+			return &resp, nil
+		default:
+			return nil, fmt.Errorf("unknown opgeth command: %v", msg)
+		}
+	}
 }
 
 func calculateFinality(btcTipHeight uint32, pubHeight uint32, pubHeaderHash chainhash.Hash) (*bfgapi.L2BTCFinality, error) {
@@ -199,11 +233,16 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	resp := bfgapi.L2KeystoneValidityResponse{}
-
-	err = s.opgethClient.Client().Call(&resp, "kss_getKeystone", keystone)
+	rp, err := s.callOpgeth(r.Context(), "kss_getKeystone", keystone)
 	if err != nil {
 		log.Errorf("error calling opgeth: %v", err)
+		fmt.Fprintf(w, "internal BFG error")
+		return
+	}
+
+	resp, ok := rp.(*bfgapi.L2KeystoneValidityResponse)
+	if !ok {
+		log.Errorf("invalid opgeth response format: %v", spew.Sdump(rp))
 		fmt.Fprintf(w, "internal BFG error")
 		return
 	}
@@ -218,18 +257,18 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// into account the fork resolution algorithm
 		aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), kss)
 		if err != nil {
-			log.Errorf("keystone not found: %v", ks)
+			log.Tracef("keystone not found: %v", ks)
 			continue
 		}
 
 		fin, err := calculateFinality(uint32(aks.BtcTipBlockHeight), uint32(aks.L2KeystoneBlockHeight), aks.L2KeystoneBlockHash)
 		if err != nil {
-			log.Errorf("calculate finality: %v", err)
+			log.Tracef("calculate finality: %v", err)
 			continue
 		}
 
 		if err := json.NewEncoder(w).Encode(fin); err != nil {
-			log.Errorf("encode: %v", err)
+			log.Tracef("encode: %v", err)
 		}
 
 		s.cmdsProcessed.Inc()
@@ -274,6 +313,15 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 		return err
 	}
 	defer s.opgethClient.Close()
+
+	s.mtx.Lock()
+	s.connected = true
+	s.mtx.Unlock()
+	defer func() {
+		s.mtx.Lock()
+		s.connected = false
+		s.mtx.Unlock()
+	}()
 
 	log.Debugf("connected to opgeth: %s", s.cfg.OpgethURL)
 
