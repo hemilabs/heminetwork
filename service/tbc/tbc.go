@@ -2562,12 +2562,12 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("df: %w", err)
 	}
 	if df != 0 {
-		blockPerday := uint64(24 * time.Hour / s.chainParams.TargetTimePerBlock)
+		blockPerDay := uint64(24 * time.Hour / s.chainParams.TargetTimePerBlock)
 		blockSize := uint64(2 * 1024 * 1024) // 2MB, a bit over but that's ok
-		sizePerday := blockSize * blockPerday
-		aproxAvailable := df / sizePerday
+		sizePerDay := blockSize * blockPerDay
+		approxAvailable := df / sizePerDay
 		log.Infof("Free disk space %v: %v approximate days till full: %v",
-			s.cfg.LevelDBHome, humanize.IBytes(df), aproxAvailable)
+			s.cfg.LevelDBHome, humanize.IBytes(df), approxAvailable)
 	}
 
 	if !s.testAndSetRunning(true) {
