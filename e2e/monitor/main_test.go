@@ -8,10 +8,19 @@ import (
 	"encoding/json"
 	"math/big"
 	"testing"
+	"context"
+	"crypto/ecdsa"
 	"time"
+
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/hemilabs/heminetwork/hemi"
 )
+
+const localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 
 // Test_Monitor is a small, bare-bones test to dump the state of localnet
 // after 5 minutes and check that it has progressed at least to a certain
@@ -76,4 +85,107 @@ func TestMonitor(t *testing.T) {
 		// success; we passed the test
 		break
 	}
+}
+
+func TestL1L2Comms(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30 * time.Second)
+	defer cancel()
+
+	l1Address := deployL1TestToken(t, ctx)
+	t.Logf("the l1 address is %s", l1Address.Hex())
+
+	// l2Address := deployL2TestToken(t, ctx, l1Address)
+	// t.Logf("the l2 address is %s", l2Address.Hex())
+}
+
+func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
+	client, err := ethclient.Dial("http://localhost:8545")
+    if err != nil {
+        t.Fatalf("could not dial eth l1 %s", err)
+    }
+
+	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	publicKey := privateKey.Public()
+    publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+    if !ok {
+        t.Fatal("error casting public key to ECDSA")
+    }
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+    nonce, err := client.PendingNonceAt(ctx, fromAddress)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	gasPrice, err := client.SuggestGasPrice(ctx)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	auth := bind.NewKeyedTransactor(privateKey)
+    auth.Nonce = big.NewInt(int64(nonce))
+    auth.Value = big.NewInt(0)     // in wei
+    auth.GasLimit = uint64(300000) // in units
+    auth.GasPrice = gasPrice
+
+    address, tx, _, err := DeployTesttoken(auth, client)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    t.Log(address.Hex())
+    t.Log(tx.Hash().Hex())
+
+	return address
+}
+
+func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Address) common.Address {
+	client, err := ethclient.Dial("http://localhost:8546")
+    if err != nil {
+        t.Fatalf("could not dial eth l1 %s", err)
+    }
+
+	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	publicKey := privateKey.Public()
+    publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+    if !ok {
+        t.Fatal("error casting public key to ECDSA")
+    }
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+    nonce, err := client.PendingNonceAt(ctx, fromAddress)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	gasPrice, err := client.SuggestGasPrice(ctx)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	auth := bind.NewKeyedTransactor(privateKey)
+    auth.Nonce = big.NewInt(int64(nonce))
+    auth.Value = big.NewInt(0)     // in wei
+    auth.GasLimit = uint64(300000) // in units
+    auth.GasPrice = gasPrice
+
+    address, tx, _, err := DeployOptimismMintableERC20(auth, client, common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F")), l1Address, "TestToken", "$TT", 1)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    t.Log(address.Hex())
+    t.Log(tx.Hash().Hex())
+
+	return address
 }

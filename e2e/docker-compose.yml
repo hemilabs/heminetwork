@@ -286,6 +286,8 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - {type: "tmpfs", target: "/tmp"}
+    ports:
+      - 8546:8546
     networks:
       e2e:
 
