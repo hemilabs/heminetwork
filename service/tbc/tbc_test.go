@@ -615,7 +615,6 @@ func TestForksWithGen(t *testing.T) {
 				earliestB := ""
 
 				for i := 0; i < 3; i++ {
-
 					// invalidate B and reconsider A to grow chain A
 					if earliestB != "" {
 						invalidateBlock(ctx, t, bitcoindContainer, earliestB)

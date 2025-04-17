@@ -58,10 +58,9 @@ func TestMD(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	qr := make([][]byte, x+1)
+	qr := make([][]byte, 0, x+1)
 	for i := 0; i <= x; i++ {
-		y := byte(i)
-		qr[i] = []byte{y}
+		qr = append(qr, []byte{byte(i)})
 	}
 	rrows, err := db.MetadataBatchGet(ctx, true, qr)
 	if err != nil {

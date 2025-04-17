@@ -3605,7 +3605,6 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 
 				return
 			}
-
 		}
 	}()
 
