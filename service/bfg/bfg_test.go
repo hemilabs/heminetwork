@@ -19,7 +19,6 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -66,6 +65,7 @@ func TestBFG(t *testing.T) {
 	bfgCfg.BitcoinSource = "tbc"
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
+	// bfgCfg.LogLevel = "bfg=Trace;"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestBFG(t *testing.T) {
 	// messages we expect to receive
 	expectedMsg := map[string]int{
 		"kss_getKeystone": keystoneCount,
-		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: keystoneCount,
+		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: keystoneCount * 2,
 	}
 
 	// send finality requests to bfg
@@ -107,8 +107,6 @@ func TestBFG(t *testing.T) {
 			if err = json.Unmarshal(body, &fin); err != nil {
 				panic(err)
 			}
-
-			t.Logf("response: %v", spew.Sdump(fin))
 		}
 	}()
 
@@ -127,6 +125,7 @@ func TestBFG(t *testing.T) {
 				}
 			}
 			if finished {
+				cancel()
 				t.Log("Received all expected messages")
 				return
 			}
@@ -180,7 +179,7 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 		t.Logf("mockTBC: connection from %v", r.RemoteAddr)
 
 		for {
-			cmd, id, _, err := tbcapi.Read(ctx, wsConn)
+			cmd, id, payload, err := tbcapi.Read(ctx, wsConn)
 			if err != nil {
 				var ce websocket.CloseError
 				if errors.As(err, &ce) {
@@ -207,23 +206,35 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 			var resp any
 			switch cmd {
 			case tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest:
-				l2Keystone := hemi.L2Keystone{
-					Version:            1,
-					L1BlockNumber:      0xbadc0ffe,
-					L2BlockNumber:      0xd3adb33f,
-					ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
-					PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
-					StateRoot:          digest256([]byte("Hello, world!")),
-					EPHash:             digest256([]byte{0xaa, 0x55}),
-				}
-				resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-					L2KeystoneAbrev:       hemi.L2KeystoneAbbreviate(l2Keystone),
-					L2KeystoneBlockHash:   &chainhash.Hash{0x0a, 0x0a},
-					L2KeystoneBlockHeight: uint(10),
-					BtcTipBlockHash:       &chainhash.Hash{0x0b, 0x0b},
-					BtcTipBlockHeight:     uint(22),
+				pl, ok := payload.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest)
+				if !ok {
+					return fmt.Errorf("unexpected payload format: %v", payload)
 				}
 
+				expectedHash := chainhash.Hash{0x0b, 0x0b}
+
+				if pl.L2KeystoneAbrevHash != expectedHash {
+					resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+						Error: protocol.Errorf("no clue who this is"),
+					}
+				} else {
+					l2Keystone := hemi.L2Keystone{
+						Version:            1,
+						L1BlockNumber:      0xbadc0ffe,
+						L2BlockNumber:      0xd3adb33f,
+						ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
+						PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
+						StateRoot:          digest256([]byte("Hello, world!")),
+						EPHash:             digest256([]byte{0xaa, 0x55}),
+					}
+					resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+						L2KeystoneAbrev:       hemi.L2KeystoneAbbreviate(l2Keystone),
+						L2KeystoneBlockHash:   &chainhash.Hash{0x0b, 0x0b},
+						L2KeystoneBlockHeight: uint(10),
+						BtcTipBlockHash:       &chainhash.Hash{0x0c, 0x0c},
+						BtcTipBlockHeight:     uint(22),
+					}
+				}
 			default:
 				return fmt.Errorf("unknown command: %v", cmd)
 			}
@@ -283,7 +294,7 @@ func mockOpgeth(ctx context.Context, t *testing.T, msgCh chan string, errCh chan
 			case "kss_getKeystone":
 				kssResp := bfgapi.L2KeystoneValidityResponse{
 					L2KeystonesHashes: []chainhash.Hash{
-						{0x0a, 0x0a}, {0x0b, 0x0b},
+						{0x0a, 0x0a}, {0x0b, 0x0b}, {0x0c, 0x0c},
 					},
 				}
 				subResp := jsonrpcMessage{
