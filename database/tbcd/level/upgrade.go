@@ -16,9 +16,9 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/mitchellh/go-homedir"
 	cp "github.com/otiai10/copy"
+	"github.com/shirou/gopsutil/disk"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
-	"golang.org/x/sys/unix"
 
 	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/rawdb"
@@ -61,11 +61,11 @@ type CMResult struct {
 //}
 
 func diskfree(path string) (uint64, error) {
-	var stat unix.Statfs_t
-	if err := unix.Statfs(path, &stat); err != nil {
-		return 0, fmt.Errorf("statfs: %w", err)
+	du, err := disk.Usage(path)
+	if err != nil {
+		return 0, fmt.Errorf("usage: %w", err)
 	}
-	return uint64(stat.Bsize) * stat.Bfree, nil
+	return du.Free, nil
 }
 
 func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string, first []byte) (*CMResult, error) {
@@ -332,10 +332,6 @@ func (l *ldb) v3(ctx context.Context) error {
 	log.Infof("Upgrading database from v2 to v3")
 
 	// First let's make sure we have enough disk space to process this.
-	var stat unix.Statfs_t
-	if err := unix.Statfs(l.cfg.Home, &stat); err != nil {
-		return fmt.Errorf("statfs: %w", err)
-	}
 	var need uint64
 	switch l.cfg.Network {
 	case "testnet3":

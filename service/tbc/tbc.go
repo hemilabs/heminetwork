@@ -30,8 +30,8 @@ import (
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/syndtr/goleveldb/leveldb"
-	"golang.org/x/sys/unix"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -797,11 +797,11 @@ func (s *Server) promDiskFree() float64 {
 }
 
 func diskfree(path string) (uint64, error) {
-	var stat unix.Statfs_t
-	if err := unix.Statfs(path, &stat); err != nil {
-		return 0, fmt.Errorf("statfs: %w", err)
+	du, err := disk.Usage(path)
+	if err != nil {
+		return 0, fmt.Errorf("usage: %w", err)
 	}
-	return uint64(stat.Bsize) * stat.Bfree, nil
+	return du.Free, nil
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
