@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -136,7 +136,6 @@ func TestPeer(t *testing.T) {
 				panic(fmt.Sprintf("nonce not found: %v", nonce))
 			}
 		}(uint64(i))
-
 	}
 	wg.Wait()
 	pongs.Range(func(k, v any) bool {

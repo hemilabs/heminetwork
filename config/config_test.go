@@ -1,11 +1,10 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
 package config
 
 import (
-	"os"
 	"testing"
 )
 
@@ -62,14 +61,10 @@ func TestConfigTypesRequired(t *testing.T) {
 	for k, v := range cmr {
 		switch v.DefaultValue.(type) {
 		case string:
-			if err := os.Setenv(k, "ENVSTRING"); err != nil {
-				t.Fatal(err)
-			}
+			t.Setenv(k, "ENVSTRING")
 
 		case int32, uint64:
-			if err := os.Setenv(k, "31337"); err != nil {
-				t.Fatal(err)
-			}
+			t.Setenv(k, "31337")
 		}
 		v.Required = true
 		cmr[k] = v

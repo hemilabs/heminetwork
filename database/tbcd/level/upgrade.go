@@ -483,7 +483,6 @@ func (l *ldb) v3(ctx context.Context) error {
 				return fmt.Errorf("copy raw data %v: %w", dbs, err)
 			}
 		}
-
 	}
 
 	// Write version to destination and close the database.
