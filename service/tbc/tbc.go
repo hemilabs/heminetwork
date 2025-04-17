@@ -255,7 +255,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.pings = pings
 	}
 
-	//if s.cfg.MempoolEnabled {
+	// if s.cfg.MempoolEnabled {
 	//	if s.cfg.ExternalHeaderMode {
 	//		// Cannot combine mempool behavior with External Header Mode
 	//		panic("cannot enable mempool on an external-header-only mode TBC instance")
@@ -264,7 +264,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	//	if err != nil {
 	//		return nil, err
 	//	}
-	//}
+	// }
 
 	wanted := defaultPeersWanted
 	switch cfg.Network {
@@ -422,7 +422,7 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
 }
 
-//func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
+// func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
 //	log.Tracef("mempoolPeer %v", p)
 //	defer log.Tracef("mempoolPeer %v exit", p)
 //
@@ -440,7 +440,7 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 //		log.Debugf("mempool %v: %v", p, err)
 //		return
 //	}
-//}
+// }
 
 func (s *Server) headersPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	log.Tracef("headersPeer %v", p)
@@ -475,9 +475,9 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 		}
 
 	case *wire.MsgTx:
-		//if err := s.handleTx(ctx, p, m, raw); err != nil {
+		// if err := s.handleTx(ctx, p, m, raw); err != nil {
 		//	return fmt.Errorf("handle generic transaction: %w", err)
-		//}
+		// }
 
 	case *wire.MsgInv:
 		if err := s.handleInv(ctx, p, m, raw); err != nil {
@@ -796,7 +796,7 @@ func (s *Server) promDiskFree() float64 {
 	return deucalion.Uint64ToFloat(s.prom.diskFree)
 }
 
-func diskfree(path string) (uint64, error) {
+func diskFree(path string) (uint64, error) {
 	du, err := disk.Usage(path)
 	if err != nil {
 		return 0, fmt.Errorf("usage: %w", err)
@@ -816,10 +816,10 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
 		s.prom.blockCache = s.db.BlockCacheStats()
 		s.prom.headerCache = s.db.BlockHeaderCacheStats()
-		s.prom.diskFree, _ = diskfree(s.cfg.LevelDBHome)
-		//if s.cfg.MempoolEnabled {
+		s.prom.diskFree, _ = diskFree(s.cfg.LevelDBHome)
+		// if s.cfg.MempoolEnabled {
 		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
-		//}
+		// }
 
 		if s.promPollVerbose {
 			s.mtx.RLock()
@@ -1052,7 +1052,7 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	}
 }
 
-//func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
+// func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
 //	log.Tracef("downloadMissingTx")
 //	defer log.Tracef("downloadMissingTx exit")
 //
@@ -1074,14 +1074,14 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 //		}
 //	}
 //	return err
-//}
+// }
 
-//func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
+// func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
 //	log.Tracef("handleTx")
 //	defer log.Tracef("handleTx exit")
 //
 //	return s.mempool.txsInsert(ctx, msg, raw)
-//}
+// }
 
 func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
@@ -1373,11 +1373,11 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 					p, bhb.HH())
 			}
 		} // else {
-		//if s.cfg.MempoolEnabled {
+		// if s.cfg.MempoolEnabled {
 		//	// Start building the mempool.
 		//	s.pm.All(ctx, s.mempoolPeer)
-		//}
-		//}
+		// }
+		// }
 
 		// Always call syncBlocks, it either downloads more blocks or
 		// kicks of indexing.
@@ -1558,9 +1558,9 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	s.mtx.Unlock()
 
 	// Reap txs from mempool, no need to log error.
-	//if s.cfg.MempoolEnabled {
+	// if s.cfg.MempoolEnabled {
 	//	_ = s.mempool.txsRemove(ctx, txHashes)
-	//}
+	// }
 
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
 
@@ -1576,9 +1576,9 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 			mempoolSize    int
 			connectedPeers int
 		)
-		//if s.cfg.MempoolEnabled {
+		// if s.cfg.MempoolEnabled {
 		//	mempoolCount, mempoolSize = s.mempool.stats(ctx)
-		//}
+		// }
 
 		// Grab some peer stats as well
 		connectedPeers, goodPeers, badPeers := s.pm.Stats()
@@ -1647,12 +1647,12 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 		}
 	}
 
-	//if s.cfg.MempoolEnabled && txsFound {
+	// if s.cfg.MempoolEnabled && txsFound {
 	//	if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
 	//		//nolint:errcheck // Error is intentionally ignored.
 	//		go s.downloadMissingTx(ctx, p)
 	//	}
-	//}
+	// }
 
 	return nil
 }
@@ -2557,7 +2557,7 @@ func (s *Server) Run(pctx context.Context) error {
 	}()
 
 	// Warn user about disk space
-	df, err := diskfree(s.cfg.LevelDBHome)
+	df, err := diskFree(s.cfg.LevelDBHome)
 	if err != nil {
 		return fmt.Errorf("df: %w", err)
 	}

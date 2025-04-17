@@ -50,7 +50,7 @@ type CMResult struct {
 	Range   util.Range // Start and Limit of operation
 }
 
-//func dumpDB(ctx context.Context, a *leveldb.DB) error {
+// func dumpDB(ctx context.Context, a *leveldb.DB) error {
 //	i := a.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
 //	defer func() { i.Release() }()
 //
@@ -58,9 +58,9 @@ type CMResult struct {
 //		log.Infof("%04v: %x", records, i.Key())
 //	}
 //	return i.Error()
-//}
+// }
 
-func diskfree(path string) (uint64, error) {
+func diskFree(path string) (uint64, error) {
 	du, err := disk.Usage(path)
 	if err != nil {
 		return 0, fmt.Errorf("usage: %w", err)
@@ -344,9 +344,9 @@ func (l *ldb) v3(ctx context.Context) error {
 		return fmt.Errorf("invalid network: %v", l.cfg.Network)
 	}
 	if need != 0 {
-		got, err := diskfree(l.cfg.Home)
+		got, err := diskFree(l.cfg.Home)
 		if err != nil {
-			return fmt.Errorf("diskfree: %w", err)
+			return fmt.Errorf("diskFree: %w", err)
 		}
 		// require at least 10G free
 		required := 10 * gib
