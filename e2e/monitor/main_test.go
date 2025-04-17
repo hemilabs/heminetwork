@@ -16,6 +16,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -94,6 +95,23 @@ func TestL1L2Comms(t *testing.T) {
 	l1Address := deployL1TestToken(t, ctx)
 	t.Logf("the l1 address is %s", l1Address.Hex())
 
+	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	publicKey := privateKey.Public()
+    publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+    if !ok {
+        t.Fatal("error casting public key to ECDSA")
+    }
+
+	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	bridgeEthL1ToL2(t, ctx, fromAddress)
+
+	// time.Sleep(20 * time.Second)
+
 	// l2Address := deployL2TestToken(t, ctx, l1Address)
 	// t.Logf("the l2 address is %s", l2Address.Hex())
 }
@@ -142,6 +160,41 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
     t.Log(tx.Hash().Hex())
 
 	return address
+}
+
+func bridgeEthL1ToL2(t *testing.T, ctx context.Context, receiverAddress common.Address) {
+	client, err := ethclient.Dial("http://localhost:8545")
+    if err != nil {
+        t.Fatalf("could not dial eth l1 %s", err)
+    }
+
+	bridge, err := NewL1StandardBridge(common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F")), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := bridge.L1StandardBridgeTransactor.BridgeETHTo(&bind.TransactOpts{
+		From: receiverAddress,
+		Value: big.NewInt(20000),
+		GasLimit: 30000,
+		Signer: func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
+			privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
+			if err != nil {
+				return nil, err
+			}
+			signedTx, err := types.SignTx(tx, types.NewCancunSigner(big.NewInt(1337)), privateKey)
+			if err != nil {
+				return nil, err
+			}
+
+			return signedTx, nil
+		},
+	}, receiverAddress,0, []byte{} )
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("tx for bridge eth L1 -> L2: %s", tx.Hash().Hex())
 }
 
 func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Address) common.Address {
