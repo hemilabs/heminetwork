@@ -250,7 +250,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 
 	// Upgrade database
 	for {
-		reopen := false
+		var reopen bool
 		dbVersion, err := l.Version(ctx)
 		if err != nil {
 			if errors.Is(err, leveldb.ErrNotFound) {
