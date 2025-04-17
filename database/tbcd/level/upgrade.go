@@ -219,7 +219,7 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 	}
 	n, err := _copyOrMoveTable(ctx, move, a, b, dbname, filter)
 	if err != nil {
-		return n, fmt.Errorf("%v tabel: %w", verb, err)
+		return n, fmt.Errorf("%v table: %w", verb, err)
 	}
 
 	// Diagnostic to ensure db is actually fully copied
@@ -502,7 +502,9 @@ func (l *ldb) v3(ctx context.Context) error {
 		return fmt.Errorf("destination close: %w", err)
 	}
 
-	// If we get here and are in copy mode, we can exit.
+	// If we get here and are in copy mode, change metadata
+	// version key of original db to v3, preventing an infinite loop.
+	// Technically it's still in v2, but copy mode is test only so it's OK.
 	if modeMove {
 		// Close source
 		err = l.Close()

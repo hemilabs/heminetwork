@@ -181,8 +181,20 @@ func directLevel(pctx context.Context, flags []string) error {
 
 	flagSet.Usage = func() {
 		fmt.Fprintf(os.Stderr, "%v\n", welcome)
-		fmt.Fprintf(os.Stderr, "Usage: %v tbcdb [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %v level [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
 		fmt.Println("COMMAND OVERVIEW:")
+		fmt.Println("\tThe 'level' command allows you to manipulate a level db directly.")
+		fmt.Println("")
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help\tDisplay help information")
+		fmt.Println("")
+		fmt.Println("ACTIONS:")
+		fmt.Println("\topen [db]")
+		fmt.Println("\trecover [db]")
+		fmt.Println("")
+		fmt.Println("ARGUMENTS:")
+		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
+		fmt.Fprintf(os.Stderr, "\tExample: '%v level open db=path/to/file'\n", os.Args[0])
 	}
 
 	err := flagSet.Parse(flags)
@@ -1276,7 +1288,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client\tlong connection to bss\n")
 	//nolint:dupword // command help, not sentence.
 	fmt.Fprintf(os.Stderr, "\tp2p\t\tp2p commands\n")
-	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n\n")
+	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n")
+	fmt.Fprintf(os.Stderr, "\tlevel\t\tdb manipulation\n\n")
 	fmt.Fprintf(os.Stderr, "ENVIRONMENT:\n")
 	config.Help(os.Stderr, cm)
 	fmt.Fprintf(os.Stderr, "\nuse 'hemictl <command> -h' or 'hemictl <command> -help' to"+
