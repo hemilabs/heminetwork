@@ -26,7 +26,7 @@ import (
 
 var (
 	upgradeVerbose = true
-	batchSize      = 1_000_000     // move one million records per batch
+	batchSize      = 1_000_000          // move one million records per batch
 	chunkSize      = 1024 * 1024 * 1024 // 1 GiB
 	gib            = uint64(1024 * 1024 * 1024)
 
