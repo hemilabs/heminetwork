@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Hemi Labs, Inc.
+# Copyright (c) 2024-2025 Hemi Labs, Inc.
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
@@ -9,31 +9,17 @@ WORKDIR /git
 ARG OP_GETH_CACHE_BREAK=12F2
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout 2de5bf59a919697f46d0ded4356d80f4febe37fb
+RUN git checkout 211fc204d86b64721abfecf825f850d0b9ae208e
 
-WORKDIR /git/op-geth
+RUN go run build/ci.go install -static ./cmd/geth
 
-RUN make
-
-RUN go build -o /tmp ./...
-
-FROM golang:1.22.6-bookworm@sha256:f020456572fc292e9627b3fb435c6de5dfb8020fbcef1fd7b65dd092c0ac56bb AS build_2
+FROM golang:1.24.2-bookworm@sha256:00eccd446e023d3cd9566c25a6e6a02b90db3e1e0bbe26a48fc29cd96e800901 AS build_2
 
 # store the latest geth here, build with go 1.23
-COPY --from=build_1 /tmp/geth /bin/geth
+COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
 
 RUN apt-get update
-
-RUN apt-get install -y jq nodejs npm
-
-
-RUN curl -L https://foundry.paradigm.xyz | bash
-
-RUN . /root/.bashrc
-
-ENV PATH="${PATH}:/root/.foundry/bin"
-
-RUN foundryup
+RUN apt-get install -y jq nodejs npm netcat-openbsd
 
 RUN npm install -g pnpm
 
@@ -42,7 +28,20 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout 0e70403b3e15d056e187664cf1a591cb1698ebdf
+RUN git checkout 789fca1eaf83ed5a4cca2ba8c3fb433d33c65c70
+
+WORKDIR /git/optimism
+RUN go mod tidy
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="${PATH}:/root/.cargo/bin"
+
+WORKDIR /git
+RUN git clone https://github.com/casey/just
+WORKDIR /git/just
+RUN cargo install just
+
+WORKDIR /git/optimism
 
 # as of now, we have the pop points address hard-coded as the rewards address
 # for pop miners, this should change once we do TGE and mint HEMI
@@ -51,27 +50,16 @@ RUN git checkout 0e70403b3e15d056e187664cf1a591cb1698ebdf
 # once this is changed back in optimism, remove this line
 RUN sed -i 's/predeploys.PoPPointsAddr/predeploys.GovernanceTokenAddr/g' ./op-node/rollup/derive/pop_payout.go
 
-RUN git submodule update --init --recursive
-RUN pnpm install
-RUN pnpm install:abigen
-WORKDIR /git/optimism/packages/contracts-bedrock
-RUN sed -e '/build_info/d' -i ./foundry.toml
-WORKDIR /git/optimism
-RUN go mod tidy
-WORKDIR /git/optimism/op-bindings
-RUN go mod tidy
-WORKDIR /git/optimism
-RUN make op-bindings op-node op-batcher op-proposer
-RUN make -C ./op-conductor op-conductor
+WORKDIR /git/optimism/op-node
+RUN just op-node
 
-RUN pnpm build
+WORKDIR /git/optimism/op-batcher
+RUN just op-batcher
 
-WORKDIR /git/optimism/packages/contracts-bedrock
-RUN forge install
-RUN forge build
+WORKDIR /git/optimism/op-proposer
+RUN just op-proposer
+
+WORKDIR /git/optimism/op-conductor
+RUN just op-conductor
 
 WORKDIR /git/optimism
-
-RUN make devnet-allocs
-
-RUN apt-get install -y netcat-openbsd
