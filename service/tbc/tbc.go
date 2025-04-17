@@ -13,7 +13,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"sync"
@@ -29,7 +28,9 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
+	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/api"
@@ -79,9 +80,10 @@ var (
 	upstreamStateIdKey = []byte("upstreamstateid")
 
 	mainnetHemiGenesis = &HashHeight{
-		Hash:   *chaincfg.MainNetParams.GenesisHash,
-		Height: 0,
+		Hash:   s2h("000000000000000000001d8132106b63876117569713ef4fe89d5a2f1173c66e"),
+		Height: 859303,
 	}
+
 	testnet3HemiGenesis = &HashHeight{
 		Hash:   s2h("0000000000000014a1717b82329a58e344f1821389d0415601f1b12ebce35881"),
 		Height: 2577400,
@@ -193,6 +195,7 @@ type Server struct {
 		mempoolCount, mempoolSize int
 		blockCache                tbcd.CacheStats
 		headerCache               tbcd.CacheStats
+		diskFree                  uint64
 	} // periodically updated by promPoll
 	isRunning     bool
 	cmdsProcessed prometheus.Counter
@@ -252,7 +255,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.pings = pings
 	}
 
-	//if s.cfg.MempoolEnabled {
+	// if s.cfg.MempoolEnabled {
 	//	if s.cfg.ExternalHeaderMode {
 	//		// Cannot combine mempool behavior with External Header Mode
 	//		panic("cannot enable mempool on an external-header-only mode TBC instance")
@@ -261,7 +264,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	//	if err != nil {
 	//		return nil, err
 	//	}
-	//}
+	// }
 
 	wanted := defaultPeersWanted
 	switch cfg.Network {
@@ -271,7 +274,11 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.checkpoints = mainnetCheckpoints
 		s.hemiGenesis = mainnetHemiGenesis
 
-	case "testnet3":
+	case "testnet3", "upgradetest":
+		// upgradetest is a special mode to verify database upgrades.
+		// It pretends to be testnet3, however it hints to the database
+		// layer that we do not want user interaction.
+		// You probably should not touch this.
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
 		s.checkpoints = testnet3Checkpoints
@@ -415,7 +422,7 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
 }
 
-//func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
+// func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
 //	log.Tracef("mempoolPeer %v", p)
 //	defer log.Tracef("mempoolPeer %v exit", p)
 //
@@ -433,7 +440,7 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 //		log.Debugf("mempool %v: %v", p, err)
 //		return
 //	}
-//}
+// }
 
 func (s *Server) headersPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	log.Tracef("headersPeer %v", p)
@@ -468,9 +475,9 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 		}
 
 	case *wire.MsgTx:
-		//if err := s.handleTx(ctx, p, m, raw); err != nil {
+		// if err := s.handleTx(ctx, p, m, raw); err != nil {
 		//	return fmt.Errorf("handle generic transaction: %w", err)
-		//}
+		// }
 
 	case *wire.MsgInv:
 		if err := s.handleInv(ctx, p, m, raw); err != nil {
@@ -783,6 +790,20 @@ func (s *Server) promHeaderCacheItems() float64 {
 	return deucalion.IntToFloat(s.prom.headerCache.Items)
 }
 
+func (s *Server) promDiskFree() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.Uint64ToFloat(s.prom.diskFree)
+}
+
+func diskFree(path string) (uint64, error) {
+	du, err := disk.Usage(path)
+	if err != nil {
+		return 0, fmt.Errorf("usage: %w", err)
+	}
+	return du.Free, nil
+}
+
 func (s *Server) promPoll(ctx context.Context) error {
 	for {
 		select {
@@ -795,9 +816,10 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
 		s.prom.blockCache = s.db.BlockCacheStats()
 		s.prom.headerCache = s.db.BlockHeaderCacheStats()
-		//if s.cfg.MempoolEnabled {
+		s.prom.diskFree, _ = diskFree(s.cfg.LevelDBHome)
+		// if s.cfg.MempoolEnabled {
 		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
-		//}
+		// }
 
 		if s.promPollVerbose {
 			s.mtx.RLock()
@@ -1030,7 +1052,7 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	}
 }
 
-//func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
+// func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
 //	log.Tracef("downloadMissingTx")
 //	defer log.Tracef("downloadMissingTx exit")
 //
@@ -1052,14 +1074,14 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 //		}
 //	}
 //	return err
-//}
+// }
 
-//func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
+// func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
 //	log.Tracef("handleTx")
 //	defer log.Tracef("handleTx exit")
 //
 //	return s.mempool.txsInsert(ctx, msg, raw)
-//}
+// }
 
 func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
@@ -1351,11 +1373,11 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 					p, bhb.HH())
 			}
 		} // else {
-		//if s.cfg.MempoolEnabled {
+		// if s.cfg.MempoolEnabled {
 		//	// Start building the mempool.
 		//	s.pm.All(ctx, s.mempoolPeer)
-		//}
-		//}
+		// }
+		// }
 
 		// Always call syncBlocks, it either downloads more blocks or
 		// kicks of indexing.
@@ -1536,9 +1558,9 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	s.mtx.Unlock()
 
 	// Reap txs from mempool, no need to log error.
-	//if s.cfg.MempoolEnabled {
+	// if s.cfg.MempoolEnabled {
 	//	_ = s.mempool.txsRemove(ctx, txHashes)
-	//}
+	// }
 
 	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
 
@@ -1554,9 +1576,9 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 			mempoolSize    int
 			connectedPeers int
 		)
-		//if s.cfg.MempoolEnabled {
+		// if s.cfg.MempoolEnabled {
 		//	mempoolCount, mempoolSize = s.mempool.stats(ctx)
-		//}
+		// }
 
 		// Grab some peer stats as well
 		connectedPeers, goodPeers, badPeers := s.pm.Stats()
@@ -1625,12 +1647,12 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 		}
 	}
 
-	//if s.cfg.MempoolEnabled && txsFound {
+	// if s.cfg.MempoolEnabled && txsFound {
 	//	if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
 	//		//nolint:errcheck // Error is intentionally ignored.
 	//		go s.downloadMissingTx(ctx, p)
 	//	}
-	//}
+	// }
 
 	return nil
 }
@@ -2347,15 +2369,18 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	switch s.cfg.Network {
 	case "testnet3":
 	case "mainnet":
+	case "upgradetest":
 	case networkLocalnet: // XXX why is this here?, this breaks the filepath.Join
 	default:
 		return fmt.Errorf("unsupported network: %v", s.cfg.Network)
 	}
 
 	// Open db.
-	var err error
-	cfg := level.NewConfig(filepath.Join(s.cfg.LevelDBHome, s.cfg.Network),
+	cfg, err := level.NewConfig(s.cfg.Network, s.cfg.LevelDBHome,
 		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
+	if err != nil {
+		return err
+	}
 	s.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return err
@@ -2485,6 +2510,11 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "block_cache_items",
 				Help:      "Number of cached blocks",
 			}, s.promBlockCacheItems),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "disk_free",
+				Help:      "Disk free",
+			}, s.promDiskFree),
 		}
 		if s.cfg.HemiIndex {
 			s.promCollectors = append(s.promCollectors,
@@ -2506,10 +2536,16 @@ func (s *Server) Run(pctx context.Context) error {
 		return errors.New("run called but External Header mode is enabled")
 	}
 
+	var err error
+	s.cfg.LevelDBHome, err = homedir.Expand(s.cfg.LevelDBHome)
+	if err != nil {
+		return fmt.Errorf("expand: %w", err)
+	}
+
 	// Rely on dbOpen failing if the database is already open.
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
-	err := s.dbOpen(ctx)
+	err = s.dbOpen(ctx)
 	if err != nil {
 		return fmt.Errorf("open level database: %w", err)
 	}
@@ -2519,6 +2555,20 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Errorf("db close: %v", err)
 		}
 	}()
+
+	// Warn user about disk space
+	df, err := diskFree(s.cfg.LevelDBHome)
+	if err != nil {
+		return fmt.Errorf("df: %w", err)
+	}
+	if df != 0 {
+		blockPerDay := uint64(24 * time.Hour / s.chainParams.TargetTimePerBlock)
+		blockSize := uint64(2 * 1024 * 1024) // 2MB, a bit over but that's ok
+		sizePerDay := blockSize * blockPerDay
+		approxAvailable := df / sizePerDay
+		log.Infof("Free disk space %v: %v approximate days till full: %v",
+			s.cfg.LevelDBHome, humanize.IBytes(df), approxAvailable)
+	}
 
 	if !s.testAndSetRunning(true) {
 		return errors.New("tbc already running")

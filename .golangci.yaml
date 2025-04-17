@@ -68,6 +68,8 @@ linters:
     rules:
       - linters: [ "staticcheck" ]
         text: "QF1001:" # "could apply De Morgan's law"
+      - linters: [ "staticcheck" ]
+        text: "QF1007:" # "could merge conditional assignment into var declaration"
     paths:
       - "third_party$"
       - "builtin$"

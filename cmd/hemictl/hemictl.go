@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -34,6 +35,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/bssapi"
@@ -167,6 +170,88 @@ func parseArgs(args []string) (string, map[string]string, error) {
 	}
 
 	return action, parsed, nil
+}
+
+func directLevel(pctx context.Context, flags []string) error {
+	flagSet := flag.NewFlagSet("level commands", flag.ExitOnError)
+	var (
+		helpFlag     = flagSet.Bool("h", false, "displays help information")
+		helpLongFlag = flagSet.Bool("help", false, "displays help information")
+	)
+
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%v\n", welcome)
+		fmt.Fprintf(os.Stderr, "Usage: %v level [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
+		fmt.Println("COMMAND OVERVIEW:")
+		fmt.Println("\tThe 'level' command allows you to manipulate a level db directly.")
+		fmt.Println("")
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help\tDisplay help information")
+		fmt.Println("")
+		fmt.Println("ACTIONS:")
+		fmt.Println("\topen [db]")
+		fmt.Println("\trecover [db]")
+		fmt.Println("")
+		fmt.Println("ARGUMENTS:")
+		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
+		fmt.Fprintf(os.Stderr, "\tExample: '%v level open db=path/to/file'\n", os.Args[0])
+	}
+
+	err := flagSet.Parse(flags)
+	if err != nil {
+		return err
+	}
+
+	if len(flags) < 1 || *helpFlag || *helpLongFlag {
+		flagSet.Usage()
+		return nil
+	}
+
+	action, args, err := parseArgs(flagSet.Args())
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
+	_ = ctx
+	_ = args
+
+	// commands
+	switch action {
+	case "open":
+		dbDir := args["db"]
+		if dbDir == "" {
+			return errors.New("db: must be set")
+		}
+		ldb, err := leveldb.OpenFile(dbDir, &opt.Options{ErrorIfMissing: true})
+		if err != nil {
+			return fmt.Errorf("leveldb open: %w", err)
+		}
+		err = ldb.Close()
+		if err != nil {
+			return fmt.Errorf("leveldb close: %w", err)
+		}
+
+	case "recover":
+		dbDir := args["db"]
+		if dbDir == "" {
+			return errors.New("db: must be set")
+		}
+		ldb, err := leveldb.RecoverFile(dbDir, &opt.Options{ErrorIfMissing: true})
+		if err != nil {
+			return fmt.Errorf("leveldb recover: %w", err)
+		}
+		err = ldb.Close()
+		if err != nil {
+			return fmt.Errorf("leveldb close: %w", err)
+		}
+	default:
+		return fmt.Errorf("invalid action: %v", action)
+	}
+
+	return nil
 }
 
 func tbcdb(pctx context.Context, flags []string) error {
@@ -640,10 +725,20 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if value == "" {
 			return errors.New("value: must be set")
 		}
-
-		err = s.DatabaseMetadataPut(ctx, []byte(key), []byte(value))
-		if err != nil {
-			return err
+		if strings.HasPrefix(value, "0x") {
+			v, err := hex.DecodeString(value[2:])
+			if err != nil {
+				return fmt.Errorf("value decode: %w", err)
+			}
+			err = s.DatabaseMetadataPut(ctx, []byte(key), v)
+			if err != nil {
+				return err
+			}
+		} else {
+			err = s.DatabaseMetadataPut(ctx, []byte(key), []byte(value))
+			if err != nil {
+				return err
+			}
 		}
 
 		fmt.Printf("value (%v) with key (%v) added to metadata\n", value, key)
@@ -1193,7 +1288,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tbss-client\tlong connection to bss\n")
 	//nolint:dupword // command help, not sentence.
 	fmt.Fprintf(os.Stderr, "\tp2p\t\tp2p commands\n")
-	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n\n")
+	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n")
+	fmt.Fprintf(os.Stderr, "\tlevel\t\tdb manipulation\n\n")
 	fmt.Fprintf(os.Stderr, "ENVIRONMENT:\n")
 	config.Help(os.Stderr, cm)
 	fmt.Fprintf(os.Stderr, "\nuse 'hemictl <command> -h' or 'hemictl <command> -help' to"+
@@ -1427,6 +1523,8 @@ func _main(args []string) error {
 	switch cmd {
 	case "api":
 		return api(ctx, args[1:])
+	case "level":
+		return directLevel(ctx, args[1:])
 	case "tbcdb":
 		return tbcdb(ctx, args[1:])
 	case "bfgdb":

@@ -29,7 +29,6 @@ const (
 	MetadataDB      = "metadata"
 	KeystonesDB     = "keystones"
 	HeightHashDB    = "heighthash"
-	PeersDB         = "peers"
 	OutputsDB       = "outputs"
 	TransactionsDB  = "transactions"
 
@@ -53,7 +52,22 @@ type Database struct {
 	pool    Pool    // database pool
 	rawPool RawPool // raw database pool
 
-	home string // leveldb toplevel database directory
+	cfg *Config
+}
+
+type Config struct {
+	Home    string
+	Options opt.Options
+}
+
+func NewDefaultConfig(home string) *Config {
+	return &Config{
+		Home: home, // leveldb toplevel database directory
+		Options: opt.Options{
+			BlockCacheEvictRemoved: true, // Do yourself a favor and leave this one alone
+			Compression:            opt.NoCompression,
+		},
+	}
 }
 
 var _ database.Database = (*Database)(nil)
@@ -73,6 +87,7 @@ func (l *Database) Close() error {
 			log.Errorf("close %v: %v", k, err)
 			errSeen = errors.Join(errSeen, err)
 		}
+		delete(l.rawPool, k)
 	}
 
 	for k, v := range l.pool {
@@ -81,6 +96,7 @@ func (l *Database) Close() error {
 			log.Errorf("close %v: %v", k, err)
 			errSeen = errors.Join(errSeen, err)
 		}
+		delete(l.pool, k)
 	}
 
 	return errSeen
@@ -114,12 +130,12 @@ func (l *Database) UnregisterNotification(n database.NotificationName) error {
 	return errors.New("unsupported")
 }
 
-func (l *Database) openDB(name string, options *opt.Options) error {
+func (l *Database) openDB(name string) error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	bhs := filepath.Join(l.home, name)
-	bhsDB, err := leveldb.OpenFile(bhs, options)
+	bhs := filepath.Join(l.cfg.Home, name)
+	bhsDB, err := leveldb.OpenFile(bhs, &l.cfg.Options)
 	if err != nil {
 		return fmt.Errorf("leveldb open %v: %w", name, err)
 	}
@@ -132,8 +148,8 @@ func (l *Database) openRawDB(name string, blockSize int64) error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	dir := filepath.Join(l.home, name)
-	rdb, err := rawdb.New(dir, blockSize)
+	dir := filepath.Join(l.cfg.Home, name)
+	rdb, err := rawdb.New(&rawdb.Config{Home: dir, MaxSize: blockSize})
 	if err != nil {
 		return fmt.Errorf("rawdb new %v: %w", name, err)
 	}
@@ -146,14 +162,18 @@ func (l *Database) openRawDB(name string, blockSize int64) error {
 	return nil
 }
 
-func New(ctx context.Context, home string, version int) (*Database, error) {
+func New(ctx context.Context, cfg *Config) (*Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
+
+	if cfg == nil {
+		return nil, errors.New("must provide database config")
+	}
 
 	// Care must be taken to not shadow err and l in this function. The
 	// defer will overwrite those if an unwind condition occurs.
 
-	h, err := homedir.Expand(home)
+	h, err := homedir.Expand(cfg.Home)
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
 	}
@@ -161,9 +181,10 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mkdir: %w", err)
 	}
+	cfg.Home = h
 
 	l := &Database{
-		home:    h,
+		cfg:     cfg,
 		pool:    make(Pool),
 		rawPool: make(RawPool),
 	}
@@ -182,37 +203,32 @@ func New(ctx context.Context, home string, version int) (*Database, error) {
 		}
 	}()
 
-	defaultOptions := &opt.Options{BlockCacheEvictRemoved: true}
-
-	err = l.openDB(BlockHeadersDB, defaultOptions)
+	// Open all databases
+	err = l.openDB(BlockHeadersDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", BlockHeadersDB, err)
 	}
-	err = l.openDB(BlocksMissingDB, defaultOptions)
+	err = l.openDB(BlocksMissingDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", BlocksMissingDB, err)
 	}
-	err = l.openDB(HeightHashDB, defaultOptions)
+	err = l.openDB(HeightHashDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", HeightHashDB, err)
 	}
-	err = l.openDB(PeersDB, defaultOptions)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", PeersDB, err)
-	}
-	err = l.openDB(OutputsDB, defaultOptions)
+	err = l.openDB(OutputsDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", OutputsDB, err)
 	}
-	err = l.openDB(TransactionsDB, defaultOptions)
+	err = l.openDB(TransactionsDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", TransactionsDB, err)
 	}
-	err = l.openDB(KeystonesDB, defaultOptions)
+	err = l.openDB(KeystonesDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
 	}
-	err = l.openDB(MetadataDB, defaultOptions)
+	err = l.openDB(MetadataDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", MetadataDB, err)
 	}

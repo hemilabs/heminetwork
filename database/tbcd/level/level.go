@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"path/filepath"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -20,6 +21,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
+	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
@@ -44,7 +46,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 2
+	ldbVersion = 3
 
 	logLevel = "INFO"
 	verbose  = false
@@ -67,8 +69,10 @@ var (
 
 	noStats tbcd.CacheStats
 
+	// Metadata keys.
 	versionKey = []byte("version")
 
+	// These keys live in their own respective databases.
 	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
 	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
 	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
@@ -126,23 +130,29 @@ func headerHash(header []byte) *chainhash.Hash {
 }
 
 type Config struct {
-	Home                 string // home directory
 	BlockCacheSize       string // size of block cache
 	BlockheaderCacheSize string // size of block header cache
+	Home                 string // home directory
+	Network              string // network e.g. "testnet3", "mainnet" etc
 	blockCacheSize       int    // parsed size of block cache
 	blockheaderCacheSize int    // parsed size of block header cache
+	nonInteractive       bool   // Set to true to prevent user interaction
 }
 
-func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
+func (cfg *Config) SetNoninteractive(x bool) {
+	cfg.nonInteractive = x
+}
+
+func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
 	if blockheaderCacheSizeS == "" {
 		blockheaderCacheSizeS = "0"
 	}
 	blockheaderCacheSize, err := humanize.ParseBytes(blockheaderCacheSizeS)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("blockheader cache size: %w", err)
 	}
 	if blockheaderCacheSize > math.MaxInt64 {
-		panic("invalid blockheaderCacheSize")
+		return nil, errors.New("blockheader cache size")
 	}
 
 	if blockCacheSizeS == "" {
@@ -150,26 +160,43 @@ func NewConfig(home, blockheaderCacheSizeS, blockCacheSizeS string) *Config {
 	}
 	blockCacheSize, err := humanize.ParseBytes(blockCacheSizeS)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("block cache size: %w", err)
 	}
 	if blockCacheSize > math.MaxInt64 {
-		panic("invalid blockCacheSize")
+		return nil, errors.New("block cache size")
+	}
+	if home == "" {
+		return nil, errors.New("home not set")
+	}
+	var nonInteractive bool
+	switch network {
+	case "testnet3":
+	case "mainnet":
+	case "localnet":
+	case "upgradetest":
+		network = "testnet3"
+		nonInteractive = true
+	default:
+		return nil, fmt.Errorf("invalid network: %v", network)
+	}
+	homedir, err := homedir.Expand(filepath.Join(home, network))
+	if err != nil {
+		return nil, fmt.Errorf("homedir: %w", err)
 	}
 
 	return &Config{
-		Home:                 home, // require user to set home.
+		Home:                 homedir,
+		Network:              network,
 		BlockCacheSize:       blockCacheSizeS,
 		blockCacheSize:       int(blockCacheSize),
 		BlockheaderCacheSize: blockheaderCacheSizeS,
 		blockheaderCacheSize: int(blockheaderCacheSize),
-	}
+		nonInteractive:       nonInteractive,
+	}, nil
 }
 
-func New(ctx context.Context, cfg *Config) (*ldb, error) {
-	log.Tracef("New")
-	defer log.Tracef("New exit")
-
-	ld, err := level.New(ctx, cfg.Home, ldbVersion)
+func open(ctx context.Context, cfg *Config) (*ldb, error) {
+	ld, err := level.New(ctx, level.NewDefaultConfig(cfg.Home))
 	if err != nil {
 		return nil, err
 	}
@@ -209,8 +236,21 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		}
 	}
 
+	return l, nil
+}
+
+func New(ctx context.Context, cfg *Config) (*ldb, error) {
+	log.Tracef("New")
+	defer log.Tracef("New exit")
+
+	l, err := open(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("open: %w", err)
+	}
+
 	// Upgrade database
 	for {
+		var reopen bool
 		dbVersion, err := l.Version(ctx)
 		if err != nil {
 			if errors.Is(err, leveldb.ErrNotFound) {
@@ -229,6 +269,10 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		case 1:
 			// Upgrade to v2
 			err = l.v2(ctx)
+		case 2:
+			// Upgrade to v3, database is closed in the process.
+			reopen = true
+			err = l.v3(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {
@@ -244,6 +288,15 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		if err != nil {
 			return nil, fmt.Errorf("could not upgrade db from version %v: %w",
 				dbVersion, err)
+		}
+
+		if reopen {
+			// Reopen database and replace pools in l
+			log.Infof("Reopen database %v", l.cfg.Home)
+			l, err = open(ctx, cfg)
+			if err != nil {
+				return nil, fmt.Errorf("reopen: %w", err)
+			}
 		}
 	}
 }
