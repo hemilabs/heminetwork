@@ -1269,7 +1269,6 @@ func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
-
 	}
 	return nil
 }
@@ -1323,7 +1322,6 @@ func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
-
 	}
 
 	return nil
@@ -1619,7 +1617,6 @@ func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
-
 	}
 	return nil
 }
@@ -1673,7 +1670,6 @@ func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 		if endHash.IsEqual(&last.Hash) {
 			break
 		}
-
 	}
 
 	return nil

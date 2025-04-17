@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -89,7 +89,6 @@ func _main() error {
 			fmt.Printf("private key: %x\n", privKey.Serialize())
 			fmt.Printf("public key : %x\n", privKey.PubKey().SerializeCompressed())
 			fmt.Printf("pubkey hash:  %v\n", hash)
-
 		}
 
 	default:
