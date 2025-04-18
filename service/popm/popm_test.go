@@ -242,7 +242,6 @@ func TestProcessReceivedKeystonesSameL2BlockNumber(t *testing.T) {
 		if diff := deep.Equal(miner.l2Keystones[key].l2Keystone, v); len(diff) > 0 {
 			t.Fatalf("unexpected diff: %s", diff)
 		}
-
 	}
 }
 
@@ -1315,7 +1314,6 @@ func createMockBFG(ctx context.Context, t *testing.T, publicKeys []string, keyst
 
 		log.Tracef("successful handshake with public key: %s", publicKeyEncoded)
 		if len(publicKeys) > 0 {
-
 			found := false
 			for _, v := range publicKeys {
 				if publicKeyEncoded == v {

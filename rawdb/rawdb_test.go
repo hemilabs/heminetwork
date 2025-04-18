@@ -11,10 +11,7 @@ import (
 )
 
 func TestRawDB(t *testing.T) {
-	home, err := os.MkdirTemp("", "rawdb")
-	if err != nil {
-		t.Fatal(err)
-	}
+	home := t.TempDir()
 	remove := true
 	defer func() {
 		if !remove {

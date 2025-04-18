@@ -15,12 +15,9 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
-	btctxscript "github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
@@ -784,7 +781,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			// we generated 4 blocks to this address previously, therefore
 			// there should be 4 utxos
 			expectedCount := 4 - tti.start
-			if tti.limit < uint64(expectedCount) {
+			if tti.limit < expectedCount {
 				expectedCount = tti.limit
 			}
 
@@ -996,7 +993,7 @@ func TestUtxosByAddress(t *testing.T) {
 			// we generated 4 blocks to this address previously, therefore
 			// there should be 4 utxos
 			expectedCount := 4 - tti.start
-			if tti.limit < uint64(expectedCount) {
+			if tti.limit < expectedCount {
 				expectedCount = tti.limit
 			}
 
@@ -1521,7 +1518,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 
 	t.Log(spew.Sdump(popTxOpReturn))
 
-	btcBlockHash := btcchainhash.Hash(fillOutBytes("blockhash", 32))
+	btcBlockHash := chainhash.Hash(fillOutBytes("blockhash", 32))
 
 	invalidL2KeystoneAbrevHash := chainhash.Hash(fillOutBytes("123", 32))
 
@@ -1669,7 +1666,7 @@ func fillOutBytes(prefix string, size int) []byte {
 }
 
 func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx := &btcwire.MsgTx{
+	btx := &wire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
 	}
@@ -1686,12 +1683,12 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 	publicKey := privateKey.PubKey()
 	pubKeyBytes := publicKey.SerializeCompressed()
-	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
+	payToScript, err := txscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1700,17 +1697,17 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
-	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
-	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
+	outPoint := wire.OutPoint{Hash: chainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
+	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
 
 	changeAmount := int64(100)
-	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
+	btx.TxOut = []*wire.TxOut{wire.NewTxOut(changeAmount, payToScript)}
 
-	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
+	btx.TxOut = append(btx.TxOut, wire.NewTxOut(0, popTxOpReturn))
 
 	sig := dcrecdsa.Sign(privateKey, []byte{})
-	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
-	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
+	sigBytes := append(sig.Serialize(), byte(txscript.SigHashAll))
+	sigScript, err := txscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
 	if err != nil {
 		t.Fatal(err)
 	}

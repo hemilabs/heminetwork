@@ -17,7 +17,7 @@ import (
 )
 
 func newBlock(prevHash *chainhash.Hash, nonce uint32) (chainhash.Hash, *btcutil.Block, []byte) {
-	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
+	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, nonce)
 	b := wire.NewMsgBlock(bh)
 	ub := btcutil.NewBlock(b)
 	r, err := ub.Bytes()
@@ -99,7 +99,7 @@ func TestLRUCache(t *testing.T) {
 }
 
 func newHeader(prevHash *chainhash.Hash, nonce uint32) (chainhash.Hash, *tbcd.BlockHeader) {
-	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, uint32(nonce))
+	bh := wire.NewBlockHeader(0, prevHash, &chainhash.Hash{}, 0, nonce)
 	return bh.BlockHash(), &tbcd.BlockHeader{
 		Hash:       bh.BlockHash(),
 		Height:     uint64(nonce),

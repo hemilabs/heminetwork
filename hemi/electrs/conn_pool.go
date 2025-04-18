@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -148,7 +148,7 @@ func (p *connPool) freeConn(conn *clientConn) {
 
 // size returns the number of connections in the pool.
 //
-//nolint:unused // False positive, used in tests.
+
 func (p *connPool) size() int {
 	p.poolMx.Lock()
 	defer p.poolMx.Unlock()
