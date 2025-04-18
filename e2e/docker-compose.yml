@@ -208,6 +208,7 @@ services:
       - "--gpo.percentile=0"
       - --http.api=web3,debug,eth,txpool,net,engine,miner
       - --ws.api=debug,eth,txpool,net,engine,miner
+      - --verbosity=5
     volumes:
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
@@ -286,8 +287,6 @@ services:
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - {type: "tmpfs", target: "/tmp"}
-    ports:
-      - 8546:8546
     networks:
       e2e:
 
@@ -370,6 +369,8 @@ services:
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - {type: "tmpfs", target: "/tmp"}
     restart: always
+    ports:
+      - 8546:8546
     networks:
       e2e:
 

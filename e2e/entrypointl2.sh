@@ -64,7 +64,8 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --override.isthmus=$HVM_PHASE0_TIMESTAMP \
  --override.holocene=$HVM_PHASE0_TIMESTAMP \
  --override.granite=$HVM_PHASE0_TIMESTAMP \
- --override.fjord=$HVM_PHASE0_TIMESTAMP
+ --override.fjord=$HVM_PHASE0_TIMESTAMP \
+ --verbosity=5
 
 # Clayton note: this fixes the mismatched state.scheme, but is it the correct
 # thing to do?
