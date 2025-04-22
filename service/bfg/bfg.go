@@ -201,8 +201,6 @@ func calculateFinality(btcTipHeight uint32, pubHeight uint32, pubHeaderHash chai
 		return nil, fmt.Errorf("effective height greater than btc height (%d > %d)", pubHeight, btcTipHeight)
 	}
 
-	log.Infof("%v, %v", btcTipHeight, pubHeight)
-
 	fin := int64(-9)
 	if pubHeight > 0 {
 		fin = int64(btcTipHeight) - int64(pubHeight) - 9 + 1

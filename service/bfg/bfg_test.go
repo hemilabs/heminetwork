@@ -25,6 +25,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/juju/loggo"
+	"github.com/phayes/freeport"
 )
 
 // Opgeth RPC Messages structs
@@ -42,6 +43,14 @@ type jsonError struct {
 	Code    int         `json:"code"`
 	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
+}
+
+func createAddress() string {
+	port, err := freeport.GetFreePort()
+	if err != nil {
+		panic(fmt.Errorf("find free port: %w", err))
+	}
+	return fmt.Sprintf("localhost:%d", port)
 }
 
 func TestBFG(t *testing.T) {
@@ -66,6 +75,7 @@ func TestBFG(t *testing.T) {
 	bfgCfg.BitcoinSource = "tbc"
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
+	bfgCfg.ListenAddress = createAddress()
 	//bfgCfg.LogLevel = "bfg=Trace;"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
@@ -87,6 +97,10 @@ func TestBFG(t *testing.T) {
 	expectedMsg := map[string]int{
 		"kss_getKeystone": keystoneCount,
 		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: keystoneCount * 2,
+	}
+
+	for !s.Connected() {
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// send finality requests to bfg
@@ -130,7 +144,6 @@ func TestBFG(t *testing.T) {
 				}
 			}
 			if finished {
-				cancel()
 				t.Log("Received all expected messages")
 				return
 			}
