@@ -149,39 +149,52 @@ func (t *tbcGozer) UtxosByAddress(ctx context.Context, addr btcutil.Address, sta
 	return buResp.UTXOs, nil
 }
 
-func (t *tbcGozer) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash chainhash.Hash) (*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse, error) {
-	ksr := &tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest{
-		L2KeystoneAbrevHash: hash,
+// XXX Make this a batch call at the tbc layer rather than making a call per hash
+func (t *tbcGozer) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hashes []chainhash.Hash) []*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse {
+	responses := make([]*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse, 0, len(hashes))
+	for _, h := range hashes {
+		ksr := &tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest{
+			L2KeystoneAbrevHash: h,
+		}
+
+		res, err := t.callTBC(ctx, defaultRequestTimeout, ksr)
+		if err != nil {
+			r := &gozer.BlockKeystoneByL2KeystoneAbrevHashResponse{Error: protocol.Errorf("%v", err)}
+			responses = append(responses, r)
+			continue
+		}
+
+		bksr, ok := res.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse)
+		if !ok {
+			r := &gozer.BlockKeystoneByL2KeystoneAbrevHashResponse{Error: protocol.Errorf("not a keystone response %T", res)}
+			responses = append(responses, r)
+			continue
+		}
+		if bksr.Error != nil {
+			r := &gozer.BlockKeystoneByL2KeystoneAbrevHashResponse{Error: bksr.Error}
+			responses = append(responses, r)
+			continue
+		}
+		r := &gozer.BlockKeystoneByL2KeystoneAbrevHashResponse{
+			L2KeystoneAbrev: gozer.L2KeystoneAbrev{
+				Version:            uint(bksr.L2KeystoneAbrev.Version),
+				L1BlockNumber:      uint(bksr.L2KeystoneAbrev.L1BlockNumber),
+				L2BlockNumber:      uint(bksr.L2KeystoneAbrev.L2BlockNumber),
+				ParentEPHash:       bksr.L2KeystoneAbrev.ParentEPHash[:],
+				PrevKeystoneEPHash: bksr.L2KeystoneAbrev.PrevKeystoneEPHash[:],
+				StateRoot:          bksr.L2KeystoneAbrev.StateRoot[:],
+				EPHash:             bksr.L2KeystoneAbrev.EPHash[:],
+			},
+			L2KeystoneBlockHash:   *bksr.L2KeystoneBlockHash,
+			L2KeystoneBlockHeight: bksr.L2KeystoneBlockHeight,
+			BtcTipBlockHash:       *bksr.BtcTipBlockHash,
+			BtcTipBlockHeight:     bksr.BtcTipBlockHeight,
+		}
+
+		responses = append(responses, r)
 	}
 
-	res, err := t.callTBC(ctx, defaultRequestTimeout, ksr)
-	if err != nil {
-		return nil, err
-	}
-
-	bksr, ok := res.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a keystone response %T", res)
-	}
-	if bksr.Error != nil {
-		return nil, bksr.Error
-	}
-
-	return &gozer.BlockKeystoneByL2KeystoneAbrevHashResponse{
-		L2KeystoneAbrev: gozer.L2KeystoneAbrev{
-			Version:            uint(bksr.L2KeystoneAbrev.Version),
-			L1BlockNumber:      uint(bksr.L2KeystoneAbrev.L1BlockNumber),
-			L2BlockNumber:      uint(bksr.L2KeystoneAbrev.L2BlockNumber),
-			ParentEPHash:       bksr.L2KeystoneAbrev.ParentEPHash[:],
-			PrevKeystoneEPHash: bksr.L2KeystoneAbrev.PrevKeystoneEPHash[:],
-			StateRoot:          bksr.L2KeystoneAbrev.StateRoot[:],
-			EPHash:             bksr.L2KeystoneAbrev.EPHash[:],
-		},
-		L2KeystoneBlockHash:   *bksr.L2KeystoneBlockHash,
-		L2KeystoneBlockHeight: bksr.L2KeystoneBlockHeight,
-		BtcTipBlockHash:       *bksr.BtcTipBlockHash,
-		BtcTipBlockHeight:     bksr.BtcTipBlockHeight,
-	}, nil
+	return responses
 }
 
 func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {

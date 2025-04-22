@@ -13,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 
 	"github.com/hemilabs/heminetwork/api"
+	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 )
 
@@ -23,7 +24,7 @@ import (
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
-	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash chainhash.Hash) (*BlockKeystoneByL2KeystoneAbrevHashResponse, error)
+	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hashes []chainhash.Hash) []*BlockKeystoneByL2KeystoneAbrevHashResponse
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 	BtcHeight(ctx context.Context) (uint64, error)
 }
@@ -76,4 +77,5 @@ type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
 	L2KeystoneBlockHeight uint            `json:"l2_keystone_block_height"`
 	BtcTipBlockHash       chainhash.Hash  `json:"btc_tip_block_hash"`
 	BtcTipBlockHeight     uint            `json:"btc_tip_block_height"`
+	Error                 *protocol.Error `json:"error,omitempty"`
 }
