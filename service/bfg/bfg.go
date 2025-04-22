@@ -29,6 +29,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
@@ -163,9 +164,9 @@ func NotFound(w http.ResponseWriter, format string, args ...any) {
 	http.Error(w, string(je), http.StatusNotFound)
 }
 
-func (s *Server) callOpgeth(ctx context.Context, msg string, args ...any) (any, error) {
-	log.Tracef("callOpgeth %T", msg)
-	defer log.Tracef("callOpgeth exit %T", msg)
+func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
+	log.Tracef("callOpgeth %v", request)
+	defer log.Tracef("callOpgeth exit %v", request)
 
 	if !s.Connected() {
 		return nil, errors.New("not connected to opgeth")
@@ -175,16 +176,22 @@ func (s *Server) callOpgeth(ctx context.Context, msg string, args ...any) (any, 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	default:
-		switch msg {
-		case "kss_getKeystone":
+		switch cmd := request.(type) {
+		case bfgapi.L2KeystoneValidityRequest:
 			resp := bfgapi.L2KeystoneValidityResponse{}
-			err := s.opgethClient.Client().Call(&resp, msg, args)
+
+			// Check if N count within bounds
+			if cmd.KeystoneCount > 1000 || cmd.KeystoneCount < -1000 {
+				return nil, fmt.Errorf("invalid keystone count: %v", cmd.KeystoneCount)
+			}
+
+			err := s.opgethClient.Client().Call(&resp, "kss_getKeystone", cmd.L2KeystoneHash, cmd.L2KeystoneHash)
 			if err != nil {
-				return nil, fmt.Errorf("error calling opgeth: %v", err)
+				return nil, fmt.Errorf("error calling opgeth: %w", err)
 			}
 			return &resp, nil
 		default:
-			return nil, fmt.Errorf("unknown opgeth command: %v", msg)
+			return nil, fmt.Errorf("unknown opgeth command: %T", request)
 		}
 	}
 }
@@ -218,25 +225,26 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
 
 	keystone := r.PathValue("hash")
-	if keystone == "" {
-		fmt.Fprintf(w, "this is the last keystone")
-		return
-	}
-
 	if len(keystone) != chainhash.MaxHashStringSize {
 		BadRequestF(w, "invalid keystone length")
 		return
 	}
-	ks, err := chainhash.NewHashFromStr(keystone)
+	hash, err := chainhash.NewHashFromStr(keystone)
 	if err != nil {
 		BadRequestF(w, "invalid keystone: %v", err)
 		return
 	}
 
-	rp, err := s.callOpgeth(r.Context(), "kss_getKeystone", keystone)
+	req := bfgapi.L2KeystoneValidityRequest{
+		L2KeystoneHash: *hash,
+		KeystoneCount:  1000,
+	}
+
+	// Call op-geth to retrieve keystone and descendants.
+	rp, err := s.callOpgeth(r.Context(), req)
 	if err != nil {
 		log.Errorf("error calling opgeth: %v", err)
-		fmt.Fprintf(w, "internal BFG error")
+		BadRequestF(w, "internal BFG error")
 		return
 	}
 
@@ -247,35 +255,54 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// If we receive an error, it's because op-geth
+	// doesn't know about this keystone.
 	if resp.Error != nil {
-		BadRequestF(w, "invalid keystone: %v", resp.Error)
+		NotFound(w, "unknown keystone: %v", resp.Error)
 		return
 	}
 
-	for _, kss := range resp.L2KeystonesHashes {
-		// XXX might need a different call which takes
-		// into account the fork resolution algorithm
-		aks, err := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), kss)
-		if err != nil {
-			log.Tracef("keystone not found: %v", ks)
+	// Generate abrev hashes from received keystones
+	abrevKeystones := make([]chainhash.Hash, 0, len(resp.L2Keystones))
+	for _, kss := range resp.L2Keystones {
+		ak := hemi.L2KeystoneAbbreviate(kss).Hash()
+		abrevKeystones = append(abrevKeystones, *ak)
+	}
+
+	// Batch call TBC for the keystones abrev hashes
+	aks := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), abrevKeystones)
+
+	// Finality value if keystone is unpublished to BTC
+	fin := &bfgapi.L2BTCFinality{
+		BTCPubHeight:     int64(-1),
+		BTCPubHeaderHash: nil,
+		BTCFinality:      int32(-9),
+	}
+
+	// Cycle through each response and replace finality value
+	// for the best finality value of its descendants or itself
+	for _, bk := range aks {
+		if bk.Error != nil {
+			log.Tracef("keystone not found: %v", bk.Error)
 			continue
 		}
 
-		fin, err := calculateFinality(uint32(aks.BtcTipBlockHeight), uint32(aks.L2KeystoneBlockHeight), aks.L2KeystoneBlockHash)
+		altFin, err := calculateFinality(uint32(bk.BtcTipBlockHeight), uint32(bk.L2KeystoneBlockHeight), bk.L2KeystoneBlockHash)
 		if err != nil {
 			log.Tracef("calculate finality: %v", err)
 			continue
 		}
 
-		if err := json.NewEncoder(w).Encode(fin); err != nil {
-			log.Tracef("encode: %v", err)
+		if altFin.BTCFinality > fin.BTCFinality {
+			fin = altFin
 		}
-
-		s.cmdsProcessed.Inc()
-		return
 	}
 
-	NotFound(w, "keystone not found: %v", ks)
+	if err := json.NewEncoder(w).Encode(fin); err != nil {
+		log.Tracef("encode: %v", err)
+	}
+
+	s.cmdsProcessed.Inc()
 }
 
 func (s *Server) running() bool {

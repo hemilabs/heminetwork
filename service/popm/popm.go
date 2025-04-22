@@ -623,7 +623,6 @@ func (s *Server) Run(pctx context.Context) error {
 		}()
 	}
 
-	// XXX this should be in New() but tbcgozer requires context
 	var err error
 	switch s.cfg.BitcoinSource {
 	case bitcoinSourceTBC:

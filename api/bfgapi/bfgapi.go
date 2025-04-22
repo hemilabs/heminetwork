@@ -26,9 +26,14 @@ var (
 	RouteKeystoneFinality = "GET /" + APIVersionRoute + "/" + "keystonefinality/{hash...}"
 )
 
+type L2KeystoneValidityRequest struct {
+	L2KeystoneHash chainhash.Hash `json:"hash"`
+	KeystoneCount  int32          `json:"count"`
+}
+
 type L2KeystoneValidityResponse struct {
-	L2KeystonesHashes []chainhash.Hash `json:"keystones"`
-	Error             *protocol.Error  `json:"error,omitempty"`
+	L2Keystones []hemi.L2Keystone `json:"keystones"`
+	Error       *protocol.Error   `json:"error,omitempty"`
 }
 
 type L2BTCFinality struct {
