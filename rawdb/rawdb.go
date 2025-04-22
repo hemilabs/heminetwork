@@ -43,6 +43,7 @@ type RawDB struct {
 	cfg *Config
 
 	index *leveldb.DB
+	open  bool
 }
 
 type Config struct {
@@ -81,6 +82,10 @@ func (r *RawDB) Open() error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
+	if r.open {
+		return errors.New("already open")
+	}
+
 	err := os.MkdirAll(filepath.Join(r.cfg.Home, DataDir), 0o0700)
 	if err != nil {
 		return fmt.Errorf("mkdir: %w", err)
@@ -92,6 +97,7 @@ func (r *RawDB) Open() error {
 	if err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
+	r.open = true
 
 	return nil
 }
@@ -107,7 +113,10 @@ func (r *RawDB) Close() error {
 	if err != nil {
 		return err
 	}
-	r.index = nil
+	r.open = false
+
+	// Don't set r.index to nil since that races during shutdown. Just let
+	// the commands error out with ErrClose.
 
 	return nil
 }
