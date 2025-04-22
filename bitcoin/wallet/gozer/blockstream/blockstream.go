@@ -21,6 +21,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 
+	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/cmd/btctool/httpclient"
@@ -153,8 +154,8 @@ func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address,
 	return urv, nil
 }
 
-func (bs *blockstream) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hash chainhash.Hash) (*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse, error) {
-	return nil, fmt.Errorf("not supported yet")
+func (bs *blockstream) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hashes []chainhash.Hash) []*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse {
+	return []*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse{{Error: protocol.Errorf("not supported yet")}}
 }
 
 func BlockstreamNew(params *chaincfg.Params) (gozer.Gozer, error) {
