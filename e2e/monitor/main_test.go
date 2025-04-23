@@ -29,7 +29,7 @@ const localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a
 func TestMonitor(t *testing.T) {
 	// let localnet start, there are smarter ways to do this but this will work
 	// for now
-	time.Sleep(2 * time.Minute)
+	waitForSomeBlocks()
 
 	// somewhat arbitrary; we should be able to get to 24 pop txs mined in a
 	// reasonable amount of time
@@ -110,12 +110,14 @@ func TestL1L2Comms(t *testing.T) {
 
 	bridgeEthL1ToL2(t, ctx, fromAddress)
 
-	time.Sleep(3 * time.Second)
+	waitForSomeBlocks()
 
 	l2Address := deployL2TestToken(t, ctx, l1Address)
 	t.Logf("the l2 address is %s", l2Address.Hex())
 
 	bridgeERC20FromL1ToL2(t, ctx, l1Address, l2Address, fromAddress)
+
+	bridgeERC20FromL2ToL1(t, ctx, l1Address, l2Address, fromAddress)
 }
 
 func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
@@ -161,7 +163,7 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
         t.Fatal(err)
     }
 
-    time.Sleep(10 * time.Second)
+    waitForSomeBlocks()
 
 	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
 	if err != nil {
@@ -210,7 +212,7 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
 		t.Fatal(err)
 	}
 
-	time.Sleep(5 * time.Second)
+	waitForSomeBlocks()
 
 	receipt, err = client.TransactionReceipt(ctx, tx.Hash())
 	if err != nil {
@@ -272,7 +274,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, receiverAddress common.A
 
 	t.Logf("tx for bridge eth L1 -> L2: %s", tx.Hash().Hex())
 
-	time.Sleep(10 * time.Second)
+	waitForSomeBlocks()
 
 	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
 	if err != nil {
@@ -285,7 +287,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, receiverAddress common.A
 
 	t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
 
-	time.Sleep(5 * time.Second)
+	waitForSomeBlocks()
 }
 
 func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Address) common.Address {
@@ -333,7 +335,7 @@ func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Addre
 
 	t.Logf("optimism mintable deployment tx %s", tx.Hash())
 
-	time.Sleep(5 * time.Second)
+	waitForSomeBlocks()
 
 	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
 	if err != nil {
@@ -410,7 +412,7 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, localTokenAddress 
 	}
 	t.Logf("tx to increase allowance: %s", tx.Hash().Hex())
 
-	time.Sleep(5 * time.Second)
+	waitForSomeBlocks()
 
 
 	receipt, err := l2Client.TransactionReceipt(ctx, tx.Hash())
@@ -449,7 +451,7 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, localTokenAddress 
 
 	t.Logf("tx for bridge erc20 L1 -> L2: %s", tx.Hash().Hex())
 
-		time.Sleep(10 * time.Second)
+		waitForSomeBlocks()
 	
 		receipt, err = client.TransactionReceipt(ctx, tx.Hash())
 		if err != nil {
@@ -463,7 +465,9 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, localTokenAddress 
 
 	t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
 
-	time.Sleep(5 * time.Second)
+	waitForSomeBlocks()
+
+	// Clayton: also check balance of ERC20 on l1
 
 	balance, err := optimismMintableErc2.OptimismMintableERC20Caller.BalanceOf(nil, receiverAddress)
 	if err != nil {
@@ -471,4 +475,82 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, localTokenAddress 
 	}
 
 	t.Logf("the l2 erc20 balance is %d", balance)
+}
+
+func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.Address, l2Address common.Address, receiverAddress common.Address) {
+	client, err := ethclient.Dial("http://localhost:8545")
+	if err != nil {
+		t.Fatal(err)
+	}
+	
+	l2Client, err := ethclient.Dial("http://localhost:8546")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	bridge, err := NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gasPrice, err := l2Client.SuggestGasPrice(ctx)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	nonce, err := l2Client.PendingNonceAt(ctx, receiverAddress)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(901))
+	if err != nil {
+		t.Fatal(err)
+	}
+    auth.Nonce = big.NewInt(int64(nonce))
+    auth.Value = big.NewInt(0)     // in wei
+    auth.GasLimit = uint64(3000000) // in units
+    auth.GasFeeCap = gasPrice
+
+	tx, err := bridge.L2StandardBridgeTransactor.BridgeERC20To(auth, l2Address, l1Address, receiverAddress, big.NewInt(50),0, []byte{} )
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("tx for bridge erc20 L2 -> L1: %s", tx.Hash().Hex())
+
+		waitForSomeBlocks()
+	
+		receipt, err := l2Client.TransactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Fatal(err)
+		}
+	
+		if receipt.Status == types.ReceiptStatusFailed {
+			t.Fatalf("receipt status is %d, gas used %d (failed), logs: %v",receipt.Status, receipt.GasUsed , receipt.Logs)
+		}
+
+
+	t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
+
+	testToken, err := NewTesttoken(l1Address, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	balance, err := testToken.BalanceOf(nil, receiverAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("the balance is %d", balance)
+}
+
+func waitForSomeBlocks() {
+	time.Sleep(12 * time.Second)
 }
