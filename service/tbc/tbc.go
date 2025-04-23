@@ -2536,8 +2536,7 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	healthy := s.isHealthy(ctx)
-	return healthy, s.synced(ctx), nil
+	return s.isHealthy(ctx), s.synced(ctx), nil
 }
 
 func (s *Server) Run(pctx context.Context) error {
