@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -33,7 +33,7 @@ func (m *Miner) handlePrometheus(ctx context.Context) error {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		if err := d.Run(ctx, cs); !errors.Is(err, context.Canceled) {
+		if err := d.Run(ctx, cs, nil); !errors.Is(err, context.Canceled) {
 			log.Errorf("prometheus terminated with error: %v", err)
 			return
 		}

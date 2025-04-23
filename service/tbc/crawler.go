@@ -163,9 +163,9 @@ func h2b(wbh *wire.BlockHeader) [80]byte {
 }
 
 type HashHeight struct {
-	Hash      chainhash.Hash
-	Height    uint64
-	Timestamp int64 // optional
+	Hash      chainhash.Hash `json:"hash"`
+	Height    uint64         `json:"height"`
+	Timestamp int64          `json:"timestamp"` // optional
 }
 
 func (h HashHeight) String() string {
