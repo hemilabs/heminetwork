@@ -2149,9 +2149,6 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 				header[k] = lastHash[k-4]
 			}
 		}
-
-		//nolint: ineffassign // unknown reason as to why this is set.
-		lastHash = hash
 	}
 
 	t.Logf(

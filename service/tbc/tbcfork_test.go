@@ -772,7 +772,6 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		}
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
 			tx.MsgTx().TxIn[0].PreviousOutPoint)
-		//nolint: ineffassign, staticcheck // test
 		mempool = []*btcutil.Tx{tx}
 
 		// spend above tx in same block
@@ -782,7 +781,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		}
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
 			tx2.MsgTx().TxIn[0].PreviousOutPoint)
-		mempool = []*btcutil.Tx{tx, tx2}
+		mempool = append(mempool, tx2)
 	}
 
 	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextBlockHeight,
