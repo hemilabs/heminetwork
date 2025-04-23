@@ -20,12 +20,13 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/juju/loggo"
+	"github.com/phayes/freeport"
+
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/juju/loggo"
-	"github.com/phayes/freeport"
 )
 
 // Opgeth RPC Messages structs
@@ -76,7 +77,7 @@ func TestBFG(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
 	bfgCfg.ListenAddress = createAddress()
-	//bfgCfg.LogLevel = "bfg=Trace;"
+	// bfgCfg.LogLevel = "bfg=Trace;"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -151,7 +152,6 @@ func TestBFG(t *testing.T) {
 			t.Fatal(ctx.Err())
 		}
 	}
-
 }
 
 type handler struct {
@@ -172,7 +172,6 @@ func digest256(x []byte) []byte {
 }
 
 func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan error) *httptest.Server {
-
 	hf := func(w http.ResponseWriter, r *http.Request) error {
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			CompressionMode: websocket.CompressionContextTakeover,
@@ -272,9 +271,7 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 }
 
 func mockOpgeth(ctx context.Context, t *testing.T, msgCh chan string, errCh chan error) *httptest.Server {
-
 	hf := func(w http.ResponseWriter, r *http.Request) error {
-
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			InsecureSkipVerify: true,
 		})

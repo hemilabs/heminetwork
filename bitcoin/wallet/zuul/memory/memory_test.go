@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package memory
 
 import (
@@ -9,6 +13,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-test/deep"
+
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
 )
@@ -21,7 +26,6 @@ type keyInfo struct {
 }
 
 func keyInfoFromXprevs(xprevs []string) ([]keyInfo, error) {
-
 	keyInfoList := make([]keyInfo, 0)
 
 	for _, xp := range xprevs {
@@ -63,7 +67,6 @@ func keyInfoFromXprevs(xprevs []string) ([]keyInfo, error) {
 }
 
 func TestMemoryZuul(t *testing.T) {
-
 	xprivList := []string{
 		"xprv9s21ZrQH143K3ScRXhao5KSyozmph3B3Bop8C1iqnyCgXSpUDE8oYDsz2hDp897fwwqdsTFYKNQVg5jn5nLH2QkZWeF9MZeMwkbkN8uAafy",
 		"xprv9s21ZrQH143K2pxg5xps4opEVnydz9MexEvEQMGCdVpaYyVxMsfSLHwh4QRgxZQTh6TkdhZvi1339vKUoDZz5XinoqKxrVKhmrjVMdAnChT",
@@ -97,14 +100,18 @@ func TestMemoryZuul(t *testing.T) {
 		},
 		{
 			name: "testInsertDup",
-			cmds: []kiCmd{{cmd: "put", privKeys: xprivList},
-				{cmd: "put", privKeys: xprivList, fail: true}},
+			cmds: []kiCmd{
+				{cmd: "put", privKeys: xprivList},
+				{cmd: "put", privKeys: xprivList, fail: true},
+			},
 			expectedIn: xprivList,
 		},
 		{
 			name: "testPurge",
-			cmds: []kiCmd{{cmd: "put", privKeys: xprivList},
-				{cmd: "purge", privKeys: xprivList}},
+			cmds: []kiCmd{
+				{cmd: "put", privKeys: xprivList},
+				{cmd: "purge", privKeys: xprivList},
+			},
 			expectedOut: xprivList,
 		},
 		{
@@ -120,8 +127,10 @@ func TestMemoryZuul(t *testing.T) {
 		},
 		{
 			name: "testMixedPurge",
-			cmds: []kiCmd{{cmd: "put", privKeys: xprivList},
-				{cmd: "purge", privKeys: xprivList[:2]}},
+			cmds: []kiCmd{
+				{cmd: "put", privKeys: xprivList},
+				{cmd: "purge", privKeys: xprivList[:2]},
+			},
 			expectedOut: xprivList[:2],
 			expectedIn:  xprivList[2:],
 		},
@@ -129,7 +138,6 @@ func TestMemoryZuul(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-
 			m, err := MemoryNew(&chaincfg.TestNet3Params)
 			if err != nil {
 				t.Fatal(err)
@@ -202,7 +210,6 @@ func TestMemoryZuul(t *testing.T) {
 				}
 				if diff := deep.Equal(ki.priv, priv); len(diff) > 0 {
 					t.Fatalf("unexpected error diff: %s", diff)
-
 				}
 			}
 
