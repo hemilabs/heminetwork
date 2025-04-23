@@ -139,11 +139,10 @@ func (d *Deucalion) health(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	c := make(chan struct{})
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	go func() {
-		defer func() { c <- struct{}{} }()
+		defer cancel()
 		healthy, data, err := d.healthCB(ctx)
 		if err != nil {
 			log.Errorf("health callback: %v", err)
@@ -156,7 +155,7 @@ func (d *Deucalion) health(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 		if data != nil {
-			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			if err := json.NewEncoder(w).Encode(data); err != nil {
 				log.Errorf("health encode: %v", err)
 				return
@@ -164,10 +163,10 @@ func (d *Deucalion) health(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	select {
-	case <-ctx.Done():
-		w.WriteHeader(http.StatusRequestTimeout)
-	case <-c:
+	<-ctx.Done()
+	if !errors.Is(ctx.Err(), context.Canceled) {
+		// Health check timed out.
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 }
 
