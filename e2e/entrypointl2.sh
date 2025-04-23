@@ -42,13 +42,13 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --networkid=901 \
  --authrpc.vhosts="*"  \
  --rpc.allow-unprotected-txs \
+ --allow-insecure-unlock \
  --datadir \
  /tmp/datadir \
  --authrpc.vhosts="*" \
  --authrpc.addr=0.0.0.0 \
  --authrpc.port=8551 \
  --authrpc.jwtsecret=/tmp/jwt.hex \
- --gpo.maxprice=1 \
  --tbc.network=localnet \
  --tbc.seeds='bitcoind:18444' \
  --override.ecotone=1725868497 \
@@ -65,8 +65,9 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --override.holocene=$HVM_PHASE0_TIMESTAMP \
  --override.granite=$HVM_PHASE0_TIMESTAMP \
  --override.fjord=$HVM_PHASE0_TIMESTAMP \
- --verbosity=5
-
-# Clayton note: this fixes the mismatched state.scheme, but is it the correct
+ --verbosity=5 \
+ --unlock='78697c88847dfbbb40523e42c1f2e28a13a170be' \
+ --rpc.enabledeprecatedpersonal
+ # Clayton note: this fixes the mismatched state.scheme, but is it the correct
 # thing to do?
 #  --gcmode=archive  \
