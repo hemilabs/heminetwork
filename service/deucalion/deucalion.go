@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -6,8 +6,8 @@
 //
 // The deucalion package provides an automatic Prometheus server that will
 // start automatically when the PROMETHEUS_ADDRESS environment variable is set.
-// To use the deucalion package only for the automatic metrics server, you may
-// import it as:
+// To use the deucalion package only for the automatic metrics and health
+// server, you may import it as:
 //
 //	import _ "github.com/hemilabs/heminetwork/service/deucalion"
 //
@@ -23,13 +23,14 @@
 //	    ListenAddress: PrometheusListenAddress,
 //	})
 //
-//	_ = d.Run(ctx, []prometheus.Collector{})
+//	_ = d.Run(ctx, []prometheus.Collector{}, healthCB)
 package deucalion
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -86,7 +87,10 @@ func init() {
 		panic(fmt.Errorf("create server: %w", err))
 	}
 	go func() {
-		if err = d.Run(ctx, nil); !errors.Is(err, context.Canceled) {
+		health := func(context.Context) (bool, io.Reader, error) {
+			return true, nil, nil
+		}
+		if err := d.Run(ctx, nil, health); !errors.Is(err, context.Canceled) {
 			log.Errorf("Deucalion server terminated with error: %v", err)
 		}
 	}()
@@ -109,6 +113,8 @@ type Deucalion struct {
 	wg        sync.WaitGroup
 	isRunning bool
 	cfg       *Config
+
+	healthCB func(context.Context) (bool, io.Reader, error)
 }
 
 func New(cfg *Config) (*Deucalion, error) {
@@ -128,6 +134,30 @@ func handle(service string, mux *http.ServeMux, pattern string, handler func(htt
 	log.Infof("handle (%v): %v", service, pattern)
 }
 
+func (d *Deucalion) health(w http.ResponseWriter, r *http.Request) {
+	log.Tracef("health")
+	defer log.Tracef("health exit")
+
+	healthy, reader, err := d.healthCB(r.Context())
+	if err != nil {
+		log.Errorf("health callback: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError),
+			http.StatusInternalServerError)
+		return
+	}
+
+	if !healthy {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+	if reader != nil {
+		n, err := io.Copy(w, reader)
+		if err != nil {
+			log.Errorf("writing %v: %v", n, err)
+			return
+		}
+	}
+}
+
 func (d *Deucalion) Running() bool {
 	d.mtx.RLock()
 	defer d.mtx.RUnlock()
@@ -142,7 +172,7 @@ func (d *Deucalion) testAndSetRunning(b bool) bool {
 	return old != d.isRunning
 }
 
-func (d *Deucalion) Run(ctx context.Context, cs []prometheus.Collector) error {
+func (d *Deucalion) Run(ctx context.Context, cs []prometheus.Collector, healthCB func(context.Context) (bool, io.Reader, error)) error {
 	if !d.testAndSetRunning(true) {
 		return errors.New("already running")
 	}
@@ -170,6 +200,11 @@ func (d *Deucalion) Run(ctx context.Context, cs []prometheus.Collector) error {
 	prometheusMux := http.NewServeMux()
 	handle("prometheus", prometheusMux, "/metrics", promhttp.HandlerFor(reg,
 		promhttp.HandlerOpts{Registry: reg}).ServeHTTP)
+	// Add health route if the callback is set
+	if healthCB != nil {
+		d.healthCB = healthCB
+		handle("prometheus", prometheusMux, "/health", d.health)
+	}
 	httpPrometheusServer := &http.Server{
 		Addr:        d.cfg.ListenAddress,
 		Handler:     prometheusMux,

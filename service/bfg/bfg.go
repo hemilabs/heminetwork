@@ -1981,7 +1981,7 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, cs); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, cs, nil); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}

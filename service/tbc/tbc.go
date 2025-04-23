@@ -7,8 +7,10 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -2250,13 +2252,14 @@ func (s *Server) SetUpstreamStateId(ctx context.Context, upstreamStateId [32]byt
 }
 
 type SyncInfo struct {
-	AtLeastMissing int  // Blocks missing 0-63 is counted, >=64 returns -1
-	Synced         bool // True when all indexing is caught up
+	Synced bool `json:"synced"` // True when all indexing is caught up
 
-	BlockHeader HashHeight
-	Keystone    HashHeight
-	Tx          HashHeight
-	Utxo        HashHeight
+	AtLeastMissing int `json:"at_least_missing"` // Blocks missing 0-63 is counted, >=64 returns -1
+
+	BlockHeader HashHeight `json:"blockheader_index_height"`
+	Keystone    HashHeight `json:"keystone_index_height"`
+	Tx          HashHeight `json:"tx_index_height"`
+	Utxo        HashHeight `json:"utxo_index_height"`
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2526,6 +2529,24 @@ func (s *Server) Collectors() []prometheus.Collector {
 	return s.promCollectors
 }
 
+func (s *Server) isHealthy(_ context.Context) bool {
+	connected, _, _ := s.pm.Stats()
+	return connected > 0
+}
+
+func (s *Server) health(ctx context.Context) (bool, io.Reader, error) {
+	log.Tracef("health")
+	defer log.Tracef("health exit")
+
+	si := s.synced(ctx)
+	j, err := json.Marshal(si)
+	if err != nil {
+		return false, nil, fmt.Errorf("health marshal: %w", err)
+	}
+	healthy := s.isHealthy(ctx)
+	return healthy, bytes.NewReader(j), nil
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
@@ -2648,7 +2669,7 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, s.Collectors()); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
