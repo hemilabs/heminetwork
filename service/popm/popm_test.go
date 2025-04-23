@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package popm
 
 import (
@@ -18,11 +22,12 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
 	"github.com/go-test/deep"
+	"github.com/juju/loggo"
+
 	"github.com/hemilabs/heminetwork/api/popapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/juju/loggo"
 )
 
 // Opgeth RPC Messages structs
@@ -688,7 +693,6 @@ func digest256(x []byte) []byte {
 }
 
 func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan error) *httptest.Server {
-
 	hf := func(w http.ResponseWriter, r *http.Request) error {
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			CompressionMode: websocket.CompressionContextTakeover,
@@ -747,9 +751,11 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 			case tbcapi.CmdUTXOsByAddressRequest:
 				resp = &tbcapi.UTXOsByAddressResponse{
 					UTXOs: []*tbcapi.UTXO{
-						{TxId: chainhash.Hash{},
+						{
+							TxId:     chainhash.Hash{},
 							Value:    1000000,
-							OutIndex: 1},
+							OutIndex: 1,
+						},
 					},
 				}
 
@@ -790,9 +796,7 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 }
 
 func mockOpgeth(ctx context.Context, t *testing.T, kssCount int, msgCh chan string, errCh chan error) *httptest.Server {
-
 	hf := func(w http.ResponseWriter, r *http.Request) error {
-
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			InsecureSkipVerify: true,
 		})
@@ -858,7 +862,6 @@ func mockOpgeth(ctx context.Context, t *testing.T, kssCount int, msgCh chan stri
 				t.Log("Sending new keystone notification")
 				err = c.Write(ctx, websocket.MessageText, p)
 				if err != nil {
-
 					return err
 				}
 
