@@ -34,6 +34,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -138,23 +139,36 @@ func (d *Deucalion) health(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	healthy, reader, err := d.healthCB(r.Context())
-	if err != nil {
-		log.Errorf("health callback: %v", err)
-		http.Error(w, http.StatusText(http.StatusInternalServerError),
-			http.StatusInternalServerError)
-		return
-	}
-
-	if !healthy {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}
-	if reader != nil {
-		n, err := io.Copy(w, reader)
+	c := make(chan struct{})
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	go func() {
+		defer func() { c <- struct{}{} }()
+		healthy, reader, err := d.healthCB(ctx)
 		if err != nil {
-			log.Errorf("writing %v: %v", n, err)
+			log.Errorf("health callback: %v", err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError),
+				http.StatusInternalServerError)
 			return
 		}
+
+		if !healthy {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		if reader != nil {
+			w.Header().Set("Content-Type", "application/json")
+			n, err := io.Copy(w, reader)
+			if err != nil {
+				log.Errorf("writing %v: %v", n, err)
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		w.WriteHeader(http.StatusRequestTimeout)
+	case <-c:
 	}
 }
 
