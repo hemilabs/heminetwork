@@ -1734,6 +1734,7 @@ func TestBtcTransactionBroadcastRequestInsert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 
 	result := BtcTransactionBroadcastRequest{}
 	count := 0
@@ -1744,6 +1745,9 @@ func TestBtcTransactionBroadcastRequestInsert(t *testing.T) {
 			t.Fatal(err)
 		}
 		count++
+	}
+	if rows.Err() != nil {
+		t.Fatalf("rows: %v", err)
 	}
 
 	if count != 1 {
@@ -2145,8 +2149,6 @@ func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count i
 				header[k] = lastHash[k-4]
 			}
 		}
-
-		lastHash = hash
 	}
 
 	t.Logf(

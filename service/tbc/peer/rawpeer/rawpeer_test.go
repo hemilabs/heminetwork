@@ -100,7 +100,9 @@ func TestConcurrentReadWrite(t *testing.T) {
 			for range writeCount {
 				bh := wire.NewBlockHeader(int32(k), &fakeCh, &fakeCh, uint32(k), uint32(k))
 				mva := wire.NewMsgHeaders()
-				mva.AddBlockHeader(bh)
+				if err := mva.AddBlockHeader(bh); err != nil {
+					panic(err)
+				}
 				if err := p1.Write(0, mva); err != nil {
 					panic(err)
 				}

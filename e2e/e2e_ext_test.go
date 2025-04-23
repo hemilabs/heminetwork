@@ -35,11 +35,9 @@ import (
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -90,13 +88,13 @@ type bfgWs bssWs // XXX: use protocol.WSConn directly
 
 // Setup some private keys and authenticators
 var (
-	privateKey *dcrsecp256k1.PrivateKey
+	privateKey *secp256k1.PrivateKey
 	authClient *auth.Secp256k1Auth
 )
 
 func init() {
 	var err error
-	privateKey, err = dcrsecp256k1.GeneratePrivateKey()
+	privateKey, err = secp256k1.GeneratePrivateKey()
 	if err != nil {
 		panic(err)
 	}
@@ -131,7 +129,7 @@ func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
 	select {
 	case <-doneCh:
 	case <-ctx.Done():
-		return fmt.Errorf("timed out trying to reach WS server in tests, last error: %s", err)
+		return fmt.Errorf("timed out trying to reach WS server in tests, last error: %w", err)
 	}
 
 	return nil
@@ -343,9 +341,9 @@ func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAdd
 	return createBfgServerGeneric(ctx, t, pgUri, electrsAddr, btcStartHeight, "")
 }
 
-func createBfgServerConnectedToAnother(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string, string) {
-	return createBfgServerGeneric(ctx, t, pgUri, electrsAddr, btcStartHeight, otherBfgUrl)
-}
+// func createBfgServerConnectedToAnother(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string)
+// 	return createBfgServerGeneric(ctx, t, pgUri, electrsAddr, btcStartHeight, otherBfgUrl)
+// }
 
 func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
 	bssListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
@@ -658,7 +656,7 @@ func bfgdL2KeystoneToHemiL2Keystone(l2KeystoneSavedDB *bfgd.L2Keystone) *hemi.L2
 }
 
 func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx := &btcwire.MsgTx{
+	btx := &wire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
 	}
@@ -672,7 +670,7 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 		t.Fatal(err)
 	}
 
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	privateKey := secp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 	publicKey := privateKey.PubKey()
 	pubKeyBytes := publicKey.SerializeCompressed()
 	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
@@ -689,13 +687,13 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
-	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
-	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
+	outPoint := wire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
+	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
 
 	changeAmount := int64(100)
-	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
+	btx.TxOut = []*wire.TxOut{wire.NewTxOut(changeAmount, payToScript)}
 
-	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
+	btx.TxOut = append(btx.TxOut, wire.NewTxOut(0, popTxOpReturn))
 
 	sig := dcrecdsa.Sign(privateKey, []byte{})
 	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
@@ -747,7 +745,7 @@ func TestBFGPublicDisabled(t *testing.T) {
 }
 
 // TestNewL2Keystone sends an L2Keystone, via websocket, to BSS which proxies
-// it to BFG.  This test then ensures that that L2Keystone was saved in the db
+// it to BFG.  This test then ensures that L2Keystone was saved in the db
 // 1. Create a new L2Keystone
 // 2. Send aforementioned L2Keystone to BSS via websocket
 // 3. Query database to ensure that the L2Keystone was saved
@@ -1463,7 +1461,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 
 	defer c.CloseNow()
 
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	privateKey := secp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 
 	authClient, err := auth.NewSecp256k1AuthClient(privateKey)
 	if err != nil {
@@ -1587,7 +1585,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	privateKey := secp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 
 	authClient, err := auth.NewSecp256k1AuthClient(privateKey)
 	if err != nil {
@@ -1892,7 +1890,7 @@ loop:
 
 	btcHeaderHash := btcchainhash.DoubleHashB(btcHeader)
 
-	privateKey := dcrsecp256k1.PrivKeyFromBytes([]byte{1, 2, 3})
+	privateKey := secp256k1.PrivKeyFromBytes([]byte{1, 2, 3})
 	publicKey := privateKey.PubKey()
 	publicKeyUncompressed := publicKey.SerializeUncompressed()
 
@@ -2006,7 +2004,7 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 
 	defer c.CloseNow()
 
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	privateKey := secp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 
 	authClient, err := auth.NewSecp256k1AuthClient(privateKey)
 	if err != nil {
@@ -2130,14 +2128,14 @@ func TestPopPayouts(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	privateKey := dcrsecp256k1.PrivKeyFromBytes([]byte{9, 8, 7})
+	privateKey := secp256k1.PrivKeyFromBytes([]byte{9, 8, 7})
 	publicKey := privateKey.PubKey()
 	publicKeyUncompressed := publicKey.SerializeUncompressed()
 	minerHash := crypto.Keccak256(publicKeyUncompressed[1:])
 	minerHash = minerHash[len(minerHash)-20:]
 	minerAddress := common.BytesToAddress(minerHash)
 
-	privateKey = dcrsecp256k1.PrivKeyFromBytes([]byte{1, 2, 3})
+	privateKey = secp256k1.PrivKeyFromBytes([]byte{1, 2, 3})
 	publicKey = privateKey.PubKey()
 	otherPublicKeyUncompressed := publicKey.SerializeUncompressed()
 	minerHash = crypto.Keccak256(otherPublicKeyUncompressed[1:])
@@ -2376,7 +2374,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	addresses := []string{}
 
 	for range 151 {
-		privateKey, err := dcrsecp256k1.GeneratePrivateKeyFromRand(rand.Reader)
+		privateKey, err := secp256k1.GeneratePrivateKeyFromRand(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -3607,7 +3605,6 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 
 				return
 			}
-
 		}
 	}()
 

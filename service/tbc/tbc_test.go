@@ -615,7 +615,6 @@ func TestForksWithGen(t *testing.T) {
 				earliestB := ""
 
 				for i := 0; i < 3; i++ {
-
 					// invalidate B and reconsider A to grow chain A
 					if earliestB != "" {
 						invalidateBlock(ctx, t, bitcoindContainer, earliestB)
@@ -1241,7 +1240,7 @@ func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
 	select {
 	case <-doneCh:
 	case <-ctx.Done():
-		return fmt.Errorf("timed out trying to reach WS server in tests, last error: %s", err)
+		return fmt.Errorf("timed out trying to reach WS server in tests, last error: %w", err)
 	}
 
 	return nil
@@ -1422,7 +1421,10 @@ func createTbcServerExternalHeaderMode(ctx context.Context, t *testing.T) *Serve
 		t.Fatal(err)
 	}
 
-	tbcServer.ExternalHeaderSetup(ctx, defaultUpstreamStateId[:])
+	err = tbcServer.ExternalHeaderSetup(ctx, defaultUpstreamStateId[:])
+	if err != nil {
+		t.Fatalf("external header setup: %v", err)
+	}
 	return tbcServer
 }
 
@@ -2081,6 +2083,10 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		// Subtract 1 from start and end because the ranges refer to block heights,
 		// but the defined simple chain headers/hashes start at block #1
 		_, msgHeaders, _, err := getHeaderHashesRange(start-1, end-1, simpleChainHeaders[:], simpleChainHashes[:])
+		if err != nil {
+			t.Errorf("getHeaderHashesRange: %v", err)
+		}
+
 		rawWouldBeCanonical, _, _, err := getRegtestGenesisHeaderAndHash()
 		if err != nil {
 			t.Error(err)
@@ -2146,6 +2152,10 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	start := 3
 	end := 9
 	_, msgHeaders, _, err = getHeaderHashesRange(start-1, end-1, simpleChainHeaders[:], simpleChainHashes[:])
+	if err != nil {
+		t.Errorf("getHeaderHashesRange: %v", err)
+	}
+
 	rawShouldBeCanonical, _, shouldBeCanonicalHash, err := getHeaderHashIndex(start-2, simpleChainHeaders[:], simpleChainHashes[:])
 	if err != nil {
 		t.Error(err)
@@ -2229,6 +2239,10 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		}
 
 		_, _, hash, err := getHeaderHashIndex(i-1, simpleChainHeaders[:], simpleChainHashes[:])
+		if err != nil {
+			t.Errorf("getHeaderHashIndex: %v", err)
+		}
+
 		header, height, err := tbc.BlockHeaderByHash(ctx, *hash)
 		if err == nil {
 			t.Errorf("getting header by hash %x should have returned an error but did not", hash[:])
