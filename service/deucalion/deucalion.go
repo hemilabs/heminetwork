@@ -28,9 +28,9 @@ package deucalion
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -88,7 +88,7 @@ func init() {
 		panic(fmt.Errorf("create server: %w", err))
 	}
 	go func() {
-		health := func(context.Context) (bool, io.Reader, error) {
+		health := func(context.Context) (bool, any, error) {
 			return true, nil, nil
 		}
 		if err := d.Run(ctx, nil, health); !errors.Is(err, context.Canceled) {
@@ -115,7 +115,7 @@ type Deucalion struct {
 	isRunning bool
 	cfg       *Config
 
-	healthCB func(context.Context) (bool, io.Reader, error)
+	healthCB func(context.Context) (bool, any, error)
 }
 
 func New(cfg *Config) (*Deucalion, error) {
@@ -144,7 +144,7 @@ func (d *Deucalion) health(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	go func() {
 		defer func() { c <- struct{}{} }()
-		healthy, reader, err := d.healthCB(ctx)
+		healthy, data, err := d.healthCB(ctx)
 		if err != nil {
 			log.Errorf("health callback: %v", err)
 			http.Error(w, http.StatusText(http.StatusInternalServerError),
@@ -155,11 +155,10 @@ func (d *Deucalion) health(w http.ResponseWriter, r *http.Request) {
 		if !healthy {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		if reader != nil {
+		if data != nil {
 			w.Header().Set("Content-Type", "application/json")
-			n, err := io.Copy(w, reader)
-			if err != nil {
-				log.Errorf("writing %v: %v", n, err)
+			if err := json.NewEncoder(w).Encode(data); err != nil {
+				log.Errorf("health encode: %v", err)
 				return
 			}
 		}
@@ -186,7 +185,7 @@ func (d *Deucalion) testAndSetRunning(b bool) bool {
 	return old != d.isRunning
 }
 
-func (d *Deucalion) Run(ctx context.Context, cs []prometheus.Collector, healthCB func(context.Context) (bool, io.Reader, error)) error {
+func (d *Deucalion) Run(ctx context.Context, cs []prometheus.Collector, healthCB func(context.Context) (bool, any, error)) error {
 	if !d.testAndSetRunning(true) {
 		return errors.New("already running")
 	}

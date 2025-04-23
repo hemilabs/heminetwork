@@ -7,10 +7,8 @@ package tbc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -2534,17 +2532,12 @@ func (s *Server) isHealthy(_ context.Context) bool {
 	return connected > 0
 }
 
-func (s *Server) health(ctx context.Context) (bool, io.Reader, error) {
+func (s *Server) health(ctx context.Context) (bool, any, error) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	si := s.synced(ctx)
-	j, err := json.Marshal(si)
-	if err != nil {
-		return false, nil, fmt.Errorf("health marshal: %w", err)
-	}
 	healthy := s.isHealthy(ctx)
-	return healthy, bytes.NewReader(j), nil
+	return healthy, s.synced(ctx), nil
 }
 
 func (s *Server) Run(pctx context.Context) error {
