@@ -226,13 +226,15 @@ func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keys
 
 		if s.lastKeystone == nil || kh.L2BlockNumber > s.lastKeystone.L2BlockNumber {
 			s.lastKeystone = &kh
-			s.queueKeystoneForMining(ctx, &kh)
+			s.addL2Keystone(kh)
+			s.processMiningQueue(ctx)
 			continue
 		}
 
 		if s.cfg.RetryMineThreshold > 0 {
 			if (lastL2BlockNumber - kh.L2BlockNumber) <= s.retryThreshold {
-				s.queueKeystoneForMining(ctx, &kh)
+				s.addL2Keystone(kh)
+				s.processMiningQueue(ctx)
 				continue
 			}
 		}
@@ -240,16 +242,15 @@ func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keys
 	}
 }
 
-func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
-	ksHash := hemi.L2KeystoneAbbreviate(val).Hash()
-
-	toInsert := L2KeystoneProcessingContainer{
-		l2Keystone:         val,
+func (s *Server) addL2Keystone(ks hemi.L2Keystone) {
+	kspc := L2KeystoneProcessingContainer{
+		l2Keystone:         ks,
 		requiresProcessing: true,
 	}
-
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
+
+	ksHash := hemi.L2KeystoneAbbreviate(ks).Hash()
 
 	// keystone already exists, no-op
 	if _, ok := s.l2Keystones[*ksHash]; ok {
@@ -257,7 +258,8 @@ func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
 	}
 
 	if len(s.l2Keystones) < l2KeystonesMaxSize {
-		s.l2Keystones[*ksHash] = toInsert
+		// Insert key stone
+		s.l2Keystones[*ksHash] = kspc
 		return
 	}
 
@@ -275,17 +277,18 @@ func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
 
 	// Do not insert an L2Keystone that is older than all of the ones
 	// already added.
-	if val.L2BlockNumber < l2Min {
+	if ks.L2BlockNumber < l2Min {
 		return
 	}
 
 	// Evict oldest
 	delete(s.l2Keystones, keyMin)
-	s.l2Keystones[*ksHash] = toInsert
+
+	// Insert key stone
+	s.l2Keystones[*ksHash] = kspc
 }
 
-func (s *Server) queueKeystoneForMining(ctx context.Context, keystone *hemi.L2Keystone) {
-	s.AddL2Keystone(*keystone)
+func (s *Server) processMiningQueue(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 		return
@@ -394,25 +397,26 @@ func (s *Server) broadcastKeystone(pctx context.Context, popTx *wire.MsgTx) erro
 	return nil
 }
 
+func (s *Server) createAndBroadcastKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
+	popTx, err := s.createKeystoneTx(ctx, ks)
+	if err != nil {
+		return err
+	}
+	return s.broadcastKeystone(ctx, popTx)
+}
+
 func (s *Server) mineKnownKeystones(ctx context.Context) {
 	copies := s.l2KeystonesForProcessing()
 
 	for _, e := range copies {
-		// XXX determine if we need to process this before going through the loop
-		ksHash := hemi.L2KeystoneAbbreviate(e).Hash()
-
 		log.Debugf("mine keystone height %v", e.L2BlockNumber)
 
-		// XXX this is not mine this is mine and braodcast
-		popTx, err := s.createKeystoneTx(ctx, &e)
-		if err != nil {
-			log.Errorf("mine keystone:  %d: %v", e.L2BlockNumber, err)
-		} else {
-			err = s.broadcastKeystone(ctx, popTx)
-			if err != nil {
-				log.Errorf("mine keystone:  %d: %v", e.L2BlockNumber, err)
-			}
-		}
+		// This is a little hard to read but there is a reason why we
+		// recreated the pop tx. We may be waiting on change or funding
+		// of the wallet, or a broadcast failed. Thus always recreate
+		// the transaction and try to brodcast it.
+		err := s.createAndBroadcastKeystone(ctx, &e)
+		ksHash := hemi.L2KeystoneAbbreviate(e).Hash()
 
 		s.mtx.Lock()
 		if v, ok := s.l2Keystones[*ksHash]; ok {
