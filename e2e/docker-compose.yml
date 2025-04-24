@@ -366,12 +366,12 @@ services:
       - "--poll-interval=1s"
       - "--sub-safety-margin=1"
       - "--num-confirmations=1"
-      - "--safe-abort-nonce-too-low-count=3"
-      - "--resubmission-timeout=30s"
+      - "--safe-abort-nonce-too-low-count=1"
+      - "--resubmission-timeout=15s"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8548"
       - "--rpc.enable-admin"
-      - "--max-channel-duration=1"
+      - "--max-channel-duration=5"
       - "--max-pending-tx=1"
       - "--l1-eth-rpc=http://geth-l1:8545"
       - "--private-key=${ADMIN_PRIVATE_KEY}"
@@ -409,6 +409,9 @@ services:
       - "--private-key=${ADMIN_PRIVATE_KEY}"
       - "--l1-eth-rpc=http://geth-l1:8545"
       - "--rollup-rpc=http://op-node:8547"
+      - "--allow-non-finalized"
+      - "--resubmission-timeout=15s"
+      - "--safe-abort-nonce-too-low-count=1"
     networks:
       e2e:
 

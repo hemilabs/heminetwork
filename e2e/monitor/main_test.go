@@ -17,11 +17,24 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/davecgh/go-spew/spew"
 
 	"github.com/hemilabs/heminetwork/hemi"
+
+	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
+	"github.com/ethereum-optimism/optimism/op-node/bindings"
+	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
+	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
+	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
+	"github.com/ethereum-optimism/optimism/op-node/withdrawals"
+	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 )
 
 const localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
+
+var (
+	l1StandardBridge = common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F"))
+)
 
 // Test_Monitor is a small, bare-bones test to dump the state of localnet
 // after 5 minutes and check that it has progressed at least to a certain
@@ -29,7 +42,7 @@ const localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a
 func TestMonitor(t *testing.T) {
 	// let localnet start, there are smarter ways to do this but this will work
 	// for now
-	waitForSomeBlocks()
+	time.Sleep(2 * time.Minute)
 
 	// somewhat arbitrary; we should be able to get to 24 pop txs mined in a
 	// reasonable amount of time
@@ -92,36 +105,12 @@ func TestL1L2Comms(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5 * time.Minute)
 	defer cancel()
 
-	l1Address := deployL1TestToken(t, ctx)
-	t.Logf("the l1 address is %s", l1Address.Hex())
-
-	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
+	l1Client, err := ethclient.Dial("http://localhost:8545")
     if err != nil {
-        t.Fatal(err)
+        t.Fatalf("could not dial eth l1 %s", err)
     }
 
-	publicKey := privateKey.Public()
-    publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
-    if !ok {
-        t.Fatal("error casting public key to ECDSA")
-    }
-
-	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
-
-	bridgeEthL1ToL2(t, ctx, fromAddress)
-
-	waitForSomeBlocks()
-
-	l2Address := deployL2TestToken(t, ctx, l1Address)
-	t.Logf("the l2 address is %s", l2Address.Hex())
-
-	bridgeERC20FromL1ToL2(t, ctx, l1Address, l2Address, fromAddress)
-
-	bridgeERC20FromL2ToL1(t, ctx, l1Address, l2Address, fromAddress)
-}
-
-func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
-	client, err := ethclient.Dial("http://localhost:8545")
+	l2Client, err := ethclient.Dial("http://localhost:8546")
     if err != nil {
         t.Fatalf("could not dial eth l1 %s", err)
     }
@@ -131,6 +120,21 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
         t.Fatal(err)
     }
 
+	l1Address := deployL1TestToken(t, ctx, l1Client, privateKey)
+	
+	t.Logf("the l1 address is %s", l1Address.Hex())
+
+	bridgeEthL1ToL2(t, ctx, l1Client, l2Client, privateKey)
+
+	l2Address := deployL2TestToken(t, ctx, l1Address, l2Client, privateKey)
+	t.Logf("the l2 address is %s", l2Address.Hex())
+
+	bridgeERC20FromL1ToL2(t, ctx, l1Address, l2Address, privateKey, l1Client, l2Client)
+
+	bridgeERC20FromL2ToL1(t, ctx, l1Address, l2Address, privateKey, l1Client, l2Client)
+}
+
+func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Client, privateKey *ecdsa.PrivateKey) common.Address {
 	publicKey := privateKey.Public()
     publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
     if !ok {
@@ -139,12 +143,12 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
 
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-    nonce, err := client.PendingNonceAt(ctx, fromAddress)
+    nonce, err := l1Client.PendingNonceAt(ctx, fromAddress)
     if err != nil {
         t.Fatal(err)
     }
 
-	gasPrice, err := client.SuggestGasPrice(ctx)
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
     if err != nil {
         t.Fatal(err)
     }
@@ -158,23 +162,18 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
     auth.GasLimit = uint64(3000000) // in units
     auth.GasPrice = gasPrice
 
-    address, tx, _, err := DeployTesttoken(auth, client)
+    address, tx, _, err := DeployTesttoken(auth, l1Client)
     if err != nil {
         t.Fatal(err)
     }
 
-    waitForSomeBlocks()
-
-	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
+    receipt := waitForTxReceipt(t, ctx, l1Client, tx)
 
 	if receipt.Status == types.ReceiptStatusFailed {
 		t.Fatal("tx failed")
 	}
 
-	testToken, err := NewTesttoken(address, client)
+	testToken, err := NewTesttoken(address, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,14 +183,16 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
 		t.Fatal(err)
 	}
 
-	t.Logf("the balance is %d", balance)
+	if balance.String() != "1000000000000000000000000" {
+		t.Fatalf("unexpected balance: %s", balance.String())
+	}
 
-	nonce, err = client.PendingNonceAt(ctx, fromAddress)
+	nonce, err = l1Client.PendingNonceAt(ctx, fromAddress)
     if err != nil {
         t.Fatal(err)
     }
 
-	gasPrice, err = client.SuggestGasPrice(ctx)
+	gasPrice, err = l1Client.SuggestGasPrice(ctx)
     if err != nil {
         t.Fatal(err)
     }
@@ -205,19 +206,13 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
     auth.Value = big.NewInt(0)     // in wei
     auth.GasLimit = uint64(3000000) // in units
     auth.GasPrice = gasPrice
-	auth.Nonce = big.NewInt(int64(nonce))
 
-	tx, err = testToken.Approve(auth, common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F")), big.NewInt(100))
+	tx, err = testToken.Approve(auth, l1StandardBridge, big.NewInt(100))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	waitForSomeBlocks()
-
-	receipt, err = client.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
+	receipt = waitForTxReceipt(t, ctx, l1Client, tx)
 
 	if receipt.Status == types.ReceiptStatusFailed {
 		t.Fatal("tx failed")
@@ -228,58 +223,48 @@ func deployL1TestToken(t *testing.T, ctx context.Context) common.Address {
 	return address
 }
 
-func bridgeEthL1ToL2(t *testing.T, ctx context.Context, receiverAddress common.Address) {
-	client, err := ethclient.Dial("http://localhost:8545")
-    if err != nil {
-        t.Fatalf("could not dial eth l1 %s", err)
+func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Client, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+	publicKey := privateKey.Public()
+    publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+    if !ok {
+        t.Fatal("error casting public key to ECDSA")
     }
 
-	bridge, err := NewL1StandardBridge(common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F")), client)
+	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+	
+	bridge, err := NewL1StandardBridge(l1StandardBridge, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	gasPrice, err := client.SuggestGasPrice(ctx)
+	gasPrice, err := l1Client.SuggestGasPrice(ctx)
     if err != nil {
         t.Fatal(err)
     }
 
-	nonce, err := client.PendingNonceAt(ctx, receiverAddress)
+	nonce, err := l1Client.PendingNonceAt(ctx, receiverAddress)
     if err != nil {
         t.Fatal(err)
     }
 
-	tx, err := bridge.L1StandardBridgeTransactor.BridgeETHTo(&bind.TransactOpts{
-		From: receiverAddress,
-		Value: big.NewInt(9000000000000000000),
-		GasLimit: 30000000,
-		GasPrice: gasPrice, 
-		Nonce: big.NewInt(int64(nonce)), 
-		Signer: func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
-			privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
-			if err != nil {
-				return nil, err
-			}
-			signedTx, err := types.SignTx(tx, types.NewCancunSigner(big.NewInt(1337)), privateKey)
-			if err != nil {
-				return nil, err
-			}
+	auth , err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(1337))
+	if err != nil {
+		t.Fatal(err)
+	}
+    auth.Nonce = big.NewInt(int64(nonce))
+    auth.Value = big.NewInt(0)     // in wei
+    auth.GasLimit = uint64(2000000) // in units
+	auth.GasFeeCap = gasPrice
+	auth.Value = big.NewInt(9000000000000000000)
 
-			return signedTx, nil
-		},
-	}, receiverAddress,0, []byte{} )
+	tx, err := bridge.L1StandardBridgeTransactor.BridgeETHTo(auth, receiverAddress,0, []byte{} )
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Logf("tx for bridge eth L1 -> L2: %s", tx.Hash().Hex())
 
-	waitForSomeBlocks()
-
-	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
+	receipt := waitForTxReceipt(t, ctx, l1Client, tx)
 
 	if receipt.Status == types.ReceiptStatusFailed {
 		t.Fatalf("receipt status is %d (failed), logs: %v",types.ReceiptStatusFailed , receipt.Logs)
@@ -287,20 +272,18 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, receiverAddress common.A
 
 	t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
 
-	waitForSomeBlocks()
+	balance, err := l2Client.BalanceAt(ctx, receiverAddress, nil)
+	if err != nil {
+		t.Fatal("err")
+	}
+
+	// check that we have at least the sent balance in HemiEth
+	if balance.Cmp(auth.Value) != 1 {
+		t.Fatalf("unexpected balance: %s", balance)
+	}
 }
 
-func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Address) common.Address {
-	client, err := ethclient.Dial("http://localhost:8546")
-    if err != nil {
-        t.Fatalf("could not dial eth l1 %s", err)
-    }
-
-	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
-    if err != nil {
-        t.Fatal(err)
-    }
-
+func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Address, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) common.Address {
 	publicKey := privateKey.Public()
     publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
     if !ok {
@@ -309,12 +292,12 @@ func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Addre
 
 	fromAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-    nonce, err := client.PendingNonceAt(ctx, fromAddress)
+    nonce, err := l2Client.PendingNonceAt(ctx, fromAddress)
     if err != nil {
         t.Fatal(err)
     }
 
-	gasPrice, err := client.SuggestGasPrice(ctx)
+	gasPrice, err := l2Client.SuggestGasPrice(ctx)
     if err != nil {
         t.Fatal(err)
     }
@@ -328,19 +311,14 @@ func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Addre
     auth.GasLimit = uint64(2000000) // in units
 	auth.GasFeeCap = gasPrice
 
-    address, tx, _, err := DeployOptimismMintableERC20(auth, client, common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l1Address, "TestToken", "$TT", 1)
+    address, tx, _, err := DeployOptimismMintableERC20(auth, l2Client, common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l1Address, "TestToken", "$TT", 1)
     if err != nil {
         t.Fatal(err)
     }
 
 	t.Logf("optimism mintable deployment tx %s", tx.Hash())
 
-	waitForSomeBlocks()
-
-	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
+	receipt := waitForTxReceipt(t, ctx, l2Client, tx)
 
 	if receipt.Status == types.ReceiptStatusFailed {
 		t.Fatalf("transaction failed: %v", receipt.Logs)
@@ -352,28 +330,21 @@ func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Addre
 	return address
 }
 
-func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, localTokenAddress common.Address, remoteTokenAddress common.Address, receiverAddress common.Address) {
-	client, err := ethclient.Dial("http://localhost:8545")
-    if err != nil {
-        t.Fatalf("could not dial eth l1 %s", err)
+func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.Address, l2Address common.Address, privateKey *ecdsa.PrivateKey, l1Client *ethclient.Client, l2Client *ethclient.Client) {
+	publicKey := privateKey.Public()
+    publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+    if !ok {
+        t.Fatal("error casting public key to ECDSA")
     }
 
-	l2Client, err := ethclient.Dial("http://localhost:8546")
+	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	bridge, err := NewL1StandardBridge(l1StandardBridge, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
-    if err != nil {
-        t.Fatal(err)
-    }
-
-	bridge, err := NewL1StandardBridge(common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F")), client)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	optimismMintableErc2, err := NewOptimismMintableERC20(remoteTokenAddress, l2Client)
+	optimismMintableErc2, err := NewOptimismMintableERC20(l2Address, l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,54 +359,39 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, localTokenAddress 
         t.Fatal(err)
     }
 
-	tx, err := optimismMintableErc2.OptimismMintableERC20Transactor.IncreaseAllowance(&bind.TransactOpts{
-		From: receiverAddress,
-		Value: big.NewInt(0),
-		GasLimit: 10000000,
-		GasPrice: gasPrice, 
-		Nonce: big.NewInt(int64(nonce)), 
-		Signer: func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
-			privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
-			if err != nil {
-				return nil, err
-			}
-			signedTx, err := types.SignTx(tx, types.NewCancunSigner(big.NewInt(901)), privateKey)
-			if err != nil {
-				return nil, err
-			}
+	auth , err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(901))
+	if err != nil {
+		t.Fatal(err)
+	}
+    auth.Nonce = big.NewInt(int64(nonce))
+    auth.Value = big.NewInt(0)     // in wei
+    auth.GasLimit = uint64(3000000) // in units
+	auth.GasFeeCap = gasPrice
 
-			return signedTx, nil
-		},
-	}, common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F")), big.NewInt(10000))
+	tx, err := optimismMintableErc2.OptimismMintableERC20Transactor.IncreaseAllowance(auth, l1StandardBridge, big.NewInt(10000))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("tx to increase allowance: %s", tx.Hash().Hex())
 
-	waitForSomeBlocks()
-
-
-	receipt, err := l2Client.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
-		t.Fatal(err)
-	}
+	receipt := waitForTxReceipt(t, ctx, l2Client, tx)
 
 	if receipt.Status == types.ReceiptStatusFailed {
 		t.Fatalf("receipt status is %d (failed), logs: %v",types.ReceiptStatusFailed , receipt.Logs)
 	}
 
 
-	gasPrice, err = client.SuggestGasPrice(ctx)
+	gasPrice, err = l1Client.SuggestGasPrice(ctx)
     if err != nil {
         t.Fatal(err)
     }
 
-	nonce, err = client.PendingNonceAt(ctx, receiverAddress)
+	nonce, err = l1Client.PendingNonceAt(ctx, receiverAddress)
     if err != nil {
         t.Fatal(err)
     }
 
-	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(1337))
+	auth, err = bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(1337))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,19 +400,14 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, localTokenAddress 
     auth.GasLimit = uint64(3000000) // in units
     auth.GasFeeCap = gasPrice
 
-	tx, err = bridge.L1StandardBridgeTransactor.BridgeERC20To(auth, localTokenAddress, remoteTokenAddress, receiverAddress, big.NewInt(100),0, []byte{} )
+	tx, err = bridge.L1StandardBridgeTransactor.BridgeERC20To(auth, l1Address, l2Address, receiverAddress, big.NewInt(100),0, []byte{} )
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Logf("tx for bridge erc20 L1 -> L2: %s", tx.Hash().Hex())
 
-		waitForSomeBlocks()
-	
-		receipt, err = client.TransactionReceipt(ctx, tx.Hash())
-		if err != nil {
-			t.Fatal(err)
-		}
+		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
 	
 		if receipt.Status == types.ReceiptStatusFailed {
 			t.Fatalf("receipt status is %d, gas used %d (failed), logs: %v",receipt.Status, receipt.GasUsed , receipt.Logs)
@@ -465,33 +416,40 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, localTokenAddress 
 
 	t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
 
-	waitForSomeBlocks()
-
-	// Clayton: also check balance of ERC20 on l1
-
 	balance, err := optimismMintableErc2.OptimismMintableERC20Caller.BalanceOf(nil, receiverAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Logf("the l2 erc20 balance is %d", balance)
+
+	if balance.String() != "100" {
+		t.Fatalf("unexpected balance: %s", balance)
+	}
+
+	testToken, err := NewTesttoken(l1Address, l1Client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	balance, err = testToken.BalanceOf(nil, receiverAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if balance.String() != "999999999999999999999900" {
+		t.Fatalf("unexpected balance: %s", balance)
+	}
 }
 
-func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.Address, l2Address common.Address, receiverAddress common.Address) {
-	client, err := ethclient.Dial("http://localhost:8545")
-	if err != nil {
-		t.Fatal(err)
-	}
-	
-	l2Client, err := ethclient.Dial("http://localhost:8546")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
-    if err != nil {
-        t.Fatal(err)
+func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.Address, l2Address common.Address, privateKey *ecdsa.PrivateKey, l1Client *ethclient.Client, l2Client *ethclient.Client) {
+	publicKey := privateKey.Public()
+    publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+    if !ok {
+        t.Fatal("error casting public key to ECDSA")
     }
+
+	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
 	bridge, err := NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
 	if err != nil {
@@ -524,21 +482,148 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 	t.Logf("tx for bridge erc20 L2 -> L1: %s", tx.Hash().Hex())
 
-		waitForSomeBlocks()
-	
-		receipt, err := l2Client.TransactionReceipt(ctx, tx.Hash())
-		if err != nil {
-			t.Fatal(err)
-		}
+		receipt := waitForTxReceipt(t, ctx, l2Client, tx)
 	
 		if receipt.Status == types.ReceiptStatusFailed {
 			t.Fatalf("receipt status is %d, gas used %d (failed), logs: %v",receipt.Status, receipt.GasUsed , receipt.Logs)
 		}
 
 
-	t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
+	t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d, nonce %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status, tx.Nonce())
 
-	testToken, err := NewTesttoken(l1Address, client)
+		ooproxy := common.Address(common.FromHex("e67575204500AA637a013Db8fF9610940CACf9E6"))
+		blockNumber, err := wait.ForOutputRootPublished(ctx, l1Client, ooproxy, receipt.BlockNumber)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+
+	receiptCl := l2Client
+	proofCl := gethclient.New(receiptCl.Client())
+
+	header, err := receiptCl.HeaderByNumber(ctx, big.NewInt(int64(blockNumber)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	oracle, err := bindings.NewL2OutputOracleCaller(ooproxy, l1Client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	optimismPortalProxy := common.Address(common.FromHex("4859725d8f2f49aE689512eE5F150FdcB76cd72c"))
+
+	params, err := withdrawals.ProveWithdrawalParameters(ctx, proofCl, receiptCl, tx.Hash(), header, oracle)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	portal, err := bindings.NewOptimismPortal(optimismPortalProxy, l1Client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nonce, err = l1Client.PendingNonceAt(ctx, receiverAddress)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	gasPrice, err = l1Client.SuggestGasPrice(ctx)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	opts, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(1337))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts.Nonce = big.NewInt(int64(nonce))
+	opts.GasLimit = 9000000
+	opts.GasFeeCap = gasPrice
+	opts.Value = big.NewInt(0)
+
+	t.Logf("going to prove withdrawal transaction")
+
+	t.Logf("the withdraw params: %s", spew.Sdump(params))
+
+	// Prove withdrawal
+	tx, err = portal.ProveWithdrawalTransaction(
+		opts,
+		bindings.TypesWithdrawalTransaction{
+			Nonce:    params.Nonce,
+			Sender:   params.Sender,
+			Target:   params.Target,
+			Value:    params.Value,
+			GasLimit: params.GasLimit,
+			Data:     params.Data,
+		},
+		params.L2OutputIndex,
+		params.OutputRootProof,
+		params.WithdrawalProof,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("prove withdrawal tx is %s", tx.Hash())
+
+	receipt = waitForTxReceipt(t, ctx, l1Client, tx)
+
+	if receipt.Status == types.ReceiptStatusFailed {
+		t.Fatal("tx failed")
+	}
+
+	t.Logf("waiting for the finalization period")
+	if err := wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err != nil {
+		t.Fatal(err)
+	}
+
+	nonce, err = l1Client.PendingNonceAt(ctx, receiverAddress)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	gasPrice, err = l1Client.SuggestGasPrice(ctx)
+    if err != nil {
+        t.Fatal(err)
+    }
+
+	opts, err = bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(1337))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts.Nonce = big.NewInt(int64(nonce))
+	opts.GasLimit = 9000000
+	opts.GasFeeCap = gasPrice
+	opts.Value = big.NewInt(0)
+
+	t.Logf("going to finalize the transaction through the portal")
+
+	wd := crossdomain.Withdrawal{
+		Nonce:    params.Nonce,
+		Sender:   &params.Sender,
+		Target:   &params.Target,
+		Value:    params.Value,
+		GasLimit: params.GasLimit,
+		Data:     params.Data,
+	}
+
+	tx, err = portal.FinalizeWithdrawalTransaction(opts, wd.WithdrawalTransaction())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("the finalization tx is %s", tx.Hash())
+
+	receipt = waitForTxReceipt(t, ctx, l1Client, tx)
+
+	if receipt.Status == types.ReceiptStatusFailed {
+		t.Fatal("tx failed")
+	}
+
+	testToken, err := NewTesttoken(l1Address, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,9 +633,20 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		t.Fatal(err)
 	}
 
-	t.Logf("the balance is %d", balance)
+	if balance.String() != "999999999999999999999950" {
+		t.Fatalf("unexpected balance: %d", balance)
+	}
 }
 
-func waitForSomeBlocks() {
-	time.Sleep(12 * time.Second)
+func waitForTxReceipt(t *testing.T, ctx context.Context, client *ethclient.Client, tx *types.Transaction) *types.Receipt {
+	t.Logf("will wait for receipt of tx %s", tx.Hash())
+	for {
+		time.Sleep(5 * time.Second)
+		receipt, err := client.TransactionReceipt(ctx, tx.Hash())
+		if err != nil {
+			t.Logf("error getting tx receipt, will retry: %s", err)
+		} else {
+			return receipt
+		}
+	}
 }
