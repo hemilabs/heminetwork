@@ -117,7 +117,6 @@ type Server struct {
 	retryThreshold uint32
 	lastKeystone   *hemi.L2Keystone
 	l2Keystones    map[chainhash.Hash]L2KeystoneProcessingContainer
-	mineNowCh      chan struct{}
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -128,7 +127,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		l2Keystones:    make(map[chainhash.Hash]L2KeystoneProcessingContainer, l2KeystonesLen),
-		mineNowCh:      make(chan struct{}, 1),
 		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
 	}
 
@@ -202,7 +200,7 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keystone) {
+func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keystone) bool {
 	log.Tracef("processKeystones")
 	defer log.Tracef("processKeystones exit")
 
@@ -212,11 +210,11 @@ func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keys
 		return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
 	})
 
-	process := func() {}
+	var work bool
 	for _, kh := range l2Keystones {
 		select {
 		case <-ctx.Done():
-			return
+			return false
 		default:
 		}
 
@@ -232,21 +230,19 @@ func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keys
 			kh.L2BlockNumber > s.lastKeystone.L2BlockNumber {
 			s.lastKeystone = &kh
 			s.addL2Keystone(kh)
-			process = func() { s.processMiningQueue(ctx) }
-			// process = func() { s.mineKnownKeystones(ctx) }
+			work = true
 			continue
 		}
 
 		// Potentially mine keystones that
 		if lastL2BlockNumber-kh.L2BlockNumber <= s.retryThreshold {
 			s.addL2Keystone(kh)
-			process = func() { s.processMiningQueue(ctx) }
-			// process = func() { s.mineKnownKeystones(ctx) }
+			work = true
 			continue
 		}
 	}
 
-	process()
+	return work
 }
 
 func (s *Server) addL2Keystone(ks hemi.L2Keystone) {
@@ -295,15 +291,6 @@ func (s *Server) addL2Keystone(ks hemi.L2Keystone) {
 	s.l2Keystones[*ksHash] = kspc
 }
 
-func (s *Server) processMiningQueue(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		return
-	case s.mineNowCh <- struct{}{}:
-	default:
-	}
-}
-
 func (s *Server) l2KeystonesForProcessing() []hemi.L2Keystone {
 	copies := make([]hemi.L2Keystone, 0)
 
@@ -337,6 +324,10 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 
 	log.Infof("Mine L2 keystone height %v", ks.L2BlockNumber)
 
+	if s.gozer == nil {
+		// XXX happens during test
+		return nil, fmt.Errorf("fuck off")
+	}
 	btcHeight, err := s.gozer.BtcHeight(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bitcoin height: %w", err)
@@ -443,8 +434,6 @@ func (s *Server) mine(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-s.mineNowCh:
-			s.mineKnownKeystones(ctx)
 		case <-time.After(l2KeystoneRetryTimeout):
 			s.mineKnownKeystones(ctx)
 		}
@@ -482,7 +471,9 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 				return err
 			}
 			if kresp.L2Keystones != nil && len(kresp.L2Keystones) > 0 {
-				s.processKeystones(ctx, kresp.L2Keystones)
+				if s.processKeystones(ctx, kresp.L2Keystones) {
+					s.mineKnownKeystones(ctx)
+				}
 			}
 		}
 	}
