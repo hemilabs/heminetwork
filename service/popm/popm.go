@@ -219,6 +219,7 @@ func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keys
 		default:
 		}
 
+		// s.lastKeystone does not race because it only touched here.
 		var lastL2BlockNumber uint32
 		if s.lastKeystone != nil {
 			lastL2BlockNumber = s.lastKeystone.L2BlockNumber
