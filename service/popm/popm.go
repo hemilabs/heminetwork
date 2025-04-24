@@ -409,8 +409,8 @@ func (s *Server) mineKnownKeystones(ctx context.Context) {
 	for _, e := range copies {
 		log.Debugf("mine keystone height %v", e.L2BlockNumber)
 
-		// This is a little hard to read but there is a reason why we
-		// recreated the pop tx. We may be waiting on change or funding
+		// This is a little hard to read but there is a reason to
+		// recreate the pop tx. We may be waiting on change or funding
 		// of the wallet, or a broadcast failed. Thus always recreate
 		// the transaction and try to brodcast it.
 		err := s.createAndBroadcastKeystone(ctx, &e)
@@ -425,18 +425,6 @@ func (s *Server) mineKnownKeystones(ctx context.Context) {
 			s.l2Keystones[*ksHash] = v
 		}
 		s.mtx.Unlock()
-	}
-}
-
-func (s *Server) mine(ctx context.Context) {
-	defer s.wg.Done()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.After(l2KeystoneRetryTimeout):
-			s.mineKnownKeystones(ctx)
-		}
 	}
 }
 
@@ -470,7 +458,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			if kresp.L2Keystones != nil && len(kresp.L2Keystones) > 0 {
+			if len(kresp.L2Keystones) > 0 {
 				if s.processKeystones(ctx, kresp.L2Keystones) {
 					s.mineKnownKeystones(ctx)
 				}
@@ -653,8 +641,19 @@ func (s *Server) Run(pctx context.Context) error {
 		s.opgeth(ctx)
 	}()
 
+	// Retry mining periodically
 	s.wg.Add(1)
-	go s.mine(ctx)
+	go func() {
+		defer s.wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(l2KeystoneRetryTimeout):
+				s.mineKnownKeystones(ctx)
+			}
+		}
+	}()
 
 	log.Infof("bitcoin address   : %v", s.address)
 	log.Infof("bitcoin public key: %v", s.public)
