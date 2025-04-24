@@ -40,9 +40,10 @@ const (
 	logLevel = "INFO"
 	appName  = "popm"
 
-	defaultPopAccount     = 1337
-	defaultPopChild       = 0
-	defaultRequestTimeout = 3 * time.Second
+	defaultPopAccount           = 1337
+	defaultPopChild             = 0
+	defaultBitcoinConfirmations = 6
+	defaultOpgethURL            = "http://127.0.0.1:9999/v1/ws"
 
 	l2KeystonesLen = 10
 
@@ -62,25 +63,29 @@ func init() {
 }
 
 type Config struct {
-	Network                 string
+	BitcoinConfirmations    uint
 	BitcoinSecret           string
-	LogLevel                string
-	OpgethURL               string
-	PrometheusListenAddress string
-	PrometheusNamespace     string
-	PprofListenAddress      string
 	BitcoinSource           string
 	BitcoinURL              string
+	LogLevel                string
+	Network                 string
+	OpgethURL               string
+	PprofListenAddress      string
+	PrometheusListenAddress string
+	PrometheusNamespace     string
 	RetryMineThreshold      uint
+
+	confirmations uint // cooked BitcoinConfirmations
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Network:             "testnet3",
-		PrometheusNamespace: appName,
-		OpgethURL:           "http://127.0.0.1:9999/v1/ws", // XXX set this using defaults
-		BitcoinSource:       bitcoinSourceTBC,
-		BitcoinURL:          tbcgozer.DefaultURL,
+		Network:              "testnet3",
+		PrometheusNamespace:  appName,
+		OpgethURL:            defaultOpgethURL,
+		BitcoinConfirmations: defaultBitcoinConfirmations,
+		BitcoinSource:        bitcoinSourceTBC,
+		BitcoinURL:           tbcgozer.DefaultURL,
 	}
 }
 
@@ -105,7 +110,7 @@ type Server struct {
 	promCollectors []prometheus.Collector
 
 	// opgeth
-	opgethClient *ethclient.Client // XXX evaluate if ok
+	opgethClient *ethclient.Client
 	opgethWG     sync.WaitGroup
 
 	// wallet
@@ -123,6 +128,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
+	cfg.confirmations = cfg.BitcoinConfirmations
 
 	s := &Server{
 		cfg:            cfg,
@@ -324,10 +330,6 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 
 	log.Infof("Mine L2 keystone height %v", ks.L2BlockNumber)
 
-	if s.gozer == nil {
-		// XXX happens during test
-		return nil, fmt.Errorf("fuck off")
-	}
 	btcHeight, err := s.gozer.BtcHeight(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bitcoin height: %w", err)
@@ -348,7 +350,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 	if err != nil {
 		return nil, fmt.Errorf("fee estimates: %w", err)
 	}
-	feeAmount, err := gozer.FeeByConfirmations(6, feeEstimates) // XXX make 6 config
+	feeAmount, err := gozer.FeeByConfirmations(s.cfg.confirmations, feeEstimates)
 	if err != nil {
 		return nil, fmt.Errorf("fee by confirmations: %w", err)
 	}
@@ -428,8 +430,6 @@ func (s *Server) mineKnownKeystones(ctx context.Context) {
 	}
 }
 
-// XXX Test ONLY. Subscription should be handled
-// in a smarter way.
 func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("subscribeOpgeth")
 	defer func() {
@@ -437,7 +437,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 		s.opgethWG.Done()
 	}()
 
-	headersCh := make(chan string, l2KeystonesLen) // XXX is l2KeystonesLen right
+	headersCh := make(chan string, 10) // PNOOMA 10 notifications
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh)
 	if err != nil {
 		return err
