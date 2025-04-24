@@ -7,7 +7,6 @@ package popm
 import (
 	"cmp"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -18,6 +17,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
@@ -116,7 +116,7 @@ type Server struct {
 	// mining
 	retryThreshold uint32
 	lastKeystone   *hemi.L2Keystone
-	l2Keystones    map[string]L2KeystoneProcessingContainer
+	l2Keystones    map[chainhash.Hash]L2KeystoneProcessingContainer
 	mineNowCh      chan struct{}
 }
 
@@ -127,7 +127,7 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	s := &Server{
 		cfg:            cfg,
-		l2Keystones:    make(map[string]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
+		l2Keystones:    make(map[chainhash.Hash]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
 		mineNowCh:      make(chan struct{}, 1),
 		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
 	}
@@ -241,8 +241,7 @@ func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keys
 }
 
 func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
-	serialized := hemi.L2KeystoneAbbreviate(val).Serialize()
-	key := hex.EncodeToString(serialized[:])
+	ksHash := hemi.L2KeystoneAbbreviate(val).Hash()
 
 	toInsert := L2KeystoneProcessingContainer{
 		l2Keystone:         val,
@@ -253,19 +252,19 @@ func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
 	defer s.mtx.Unlock()
 
 	// keystone already exists, no-op
-	if _, ok := s.l2Keystones[key]; ok {
+	if _, ok := s.l2Keystones[*ksHash]; ok {
 		return
 	}
 
 	if len(s.l2Keystones) < l2KeystonesMaxSize {
-		s.l2Keystones[key] = toInsert
+		s.l2Keystones[*ksHash] = toInsert
 		return
 	}
 
 	// Find oldest keystone.
 	var (
 		l2Min  uint32
-		keyMin string
+		keyMin chainhash.Hash
 	)
 	for k, v := range s.l2Keystones {
 		if l2Min == 0 || v.l2Keystone.L2BlockNumber < l2Min {
@@ -282,7 +281,7 @@ func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
 
 	// Evict oldest
 	delete(s.l2Keystones, keyMin)
-	s.l2Keystones[key] = toInsert
+	s.l2Keystones[*ksHash] = toInsert
 }
 
 func (s *Server) queueKeystoneForMining(ctx context.Context, keystone *hemi.L2Keystone) {
@@ -399,9 +398,8 @@ func (s *Server) mineKnownKeystones(ctx context.Context) {
 	copies := s.l2KeystonesForProcessing()
 
 	for _, e := range copies {
-		// XXX are we doing this all the time?
-		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
-		key := hex.EncodeToString(serialized[:])
+		// XXX determine if we need to process this before going through the loop
+		ksHash := hemi.L2KeystoneAbbreviate(e).Hash()
 
 		log.Debugf("mine keystone height %v", e.L2BlockNumber)
 
@@ -417,12 +415,12 @@ func (s *Server) mineKnownKeystones(ctx context.Context) {
 		}
 
 		s.mtx.Lock()
-		if v, ok := s.l2Keystones[key]; ok {
+		if v, ok := s.l2Keystones[*ksHash]; ok {
 			// if there is an error, mark keystone as "requires
 			// processing" so potentially gets retried, otherwise
 			// set this to false to nothing tries to process it
 			v.requiresProcessing = err != nil
-			s.l2Keystones[key] = v
+			s.l2Keystones[*ksHash] = v
 		}
 		s.mtx.Unlock()
 	}

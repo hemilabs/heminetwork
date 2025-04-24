@@ -7,7 +7,6 @@ package popm
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,7 +167,7 @@ func TestProcessReceivedKeystones(t *testing.T) {
 	}
 
 	miner := Server{
-		l2Keystones: make(map[string]L2KeystoneProcessingContainer),
+		l2Keystones: make(map[chainhash.Hash]L2KeystoneProcessingContainer),
 	}
 
 	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
@@ -231,7 +230,7 @@ func TestProcessReceivedKeystonesSameL2BlockNumber(t *testing.T) {
 	}
 
 	miner := Server{
-		l2Keystones: make(map[string]L2KeystoneProcessingContainer),
+		l2Keystones: make(map[chainhash.Hash]L2KeystoneProcessingContainer),
 		cfg:         NewDefaultConfig(),
 	}
 	miner.cfg.RetryMineThreshold = 1
@@ -241,9 +240,8 @@ func TestProcessReceivedKeystonesSameL2BlockNumber(t *testing.T) {
 	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
 
 	for _, v := range append(firstBatchOfL2Keystones, secondBatchOfL2Keystones...) {
-		serialized := hemi.L2KeystoneAbbreviate(v).Serialize()
-		key := hex.EncodeToString(serialized[:])
-		if diff := deep.Equal(miner.l2Keystones[key].l2Keystone, v); len(diff) > 0 {
+		ksHash := hemi.L2KeystoneAbbreviate(v).Hash()
+		if diff := deep.Equal(miner.l2Keystones[*ksHash].l2Keystone, v); len(diff) > 0 {
 			t.Fatalf("unexpected diff: %s", diff)
 		}
 
@@ -288,7 +286,7 @@ func TestProcessReceivedKeystonesOverThreshold(t *testing.T) {
 	}
 
 	miner := Server{
-		l2Keystones: make(map[string]L2KeystoneProcessingContainer),
+		l2Keystones: make(map[chainhash.Hash]L2KeystoneProcessingContainer),
 		cfg:         NewDefaultConfig(),
 	}
 	miner.cfg.RetryMineThreshold = 1
@@ -297,17 +295,15 @@ func TestProcessReceivedKeystonesOverThreshold(t *testing.T) {
 	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
 
 	for _, v := range firstBatchOfL2Keystones {
-		serialized := hemi.L2KeystoneAbbreviate(v).Serialize()
-		key := hex.EncodeToString(serialized[:])
-		if diff := deep.Equal(miner.l2Keystones[key].l2Keystone, v); len(diff) > 0 {
+		ksHash := hemi.L2KeystoneAbbreviate(v).Hash()
+		if diff := deep.Equal(miner.l2Keystones[*ksHash].l2Keystone, v); len(diff) > 0 {
 			t.Fatalf("unexpected diff: %s", diff)
 		}
 	}
 
 	for _, v := range secondBatchOfL2Keystones {
-		serialized := hemi.L2KeystoneAbbreviate(v).Serialize()
-		key := hex.EncodeToString(serialized[:])
-		if _, ok := miner.l2Keystones[key]; ok {
+		ksHash := hemi.L2KeystoneAbbreviate(v).Hash()
+		if _, ok := miner.l2Keystones[*ksHash]; ok {
 			t.Fatalf("should not have queued keystone")
 		}
 	}
@@ -422,12 +418,11 @@ func TestProcessReceivedOnlyOnceWithError(t *testing.T) {
 	processedKeystonesFirstTime := 0
 	for _, c := range miner.l2KeystonesForProcessing() {
 		processedKeystonesFirstTime++
-		serialized := hemi.L2KeystoneAbbreviate(c).Serialize()
-		key := hex.EncodeToString(serialized[:])
+		ksHash := hemi.L2KeystoneAbbreviate(c).Hash()
 		miner.mtx.Lock()
-		if v, ok := miner.l2Keystones[key]; ok {
+		if v, ok := miner.l2Keystones[*ksHash]; ok {
 			v.requiresProcessing = true
-			miner.l2Keystones[key] = v
+			miner.l2Keystones[*ksHash] = v
 		}
 		miner.mtx.Unlock()
 	}
