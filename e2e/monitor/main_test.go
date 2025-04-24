@@ -278,7 +278,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 	}
 
 	// check that we have at least the sent balance in HemiEth
-	if balance.Cmp(auth.Value) != 1 {
+	if balance.Cmp(auth.Value) < 0 {
 		t.Fatalf("unexpected balance: %s", balance)
 	}
 }
