@@ -18,6 +18,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -84,7 +85,8 @@ func NewDefaultConfig() *Config {
 }
 
 type L2KeystoneProcessingContainer struct {
-	l2Keystone         hemi.L2Keystone
+	l2Keystone hemi.L2Keystone
+	// transaction        *wire.MsgTx
 	requiresProcessing bool
 }
 
@@ -112,9 +114,10 @@ type Server struct {
 	vc    *vinzclortho.VinzClortho
 
 	// mining
-	lastKeystone *hemi.L2Keystone
-	l2Keystones  map[string]L2KeystoneProcessingContainer
-	mineNowCh    chan struct{}
+	retryThreshold uint32
+	lastKeystone   *hemi.L2Keystone
+	l2Keystones    map[string]L2KeystoneProcessingContainer
+	mineNowCh      chan struct{}
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -123,9 +126,10 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:         cfg,
-		l2Keystones: make(map[string]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
-		mineNowCh:   make(chan struct{}, 1),
+		cfg:            cfg,
+		l2Keystones:    make(map[string]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
+		mineNowCh:      make(chan struct{}, 1),
+		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -198,50 +202,41 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func sortL2KeystonesByL2BlockNumberAsc(a, b hemi.L2Keystone) int {
-	return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
-}
+func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keystone) {
+	log.Tracef("processKeystones")
+	defer log.Tracef("processKeystones exit")
 
-func (s *Server) processReceivedKeystones(ctx context.Context, l2Keystones []hemi.L2Keystone) {
-	slices.SortFunc(l2Keystones, sortL2KeystonesByL2BlockNumberAsc)
+	// Sort L2 keystones by block number. This is ok because opgeth ensures
+	// block number order. XXX max please confirm
+	slices.SortFunc(l2Keystones, func(a, b hemi.L2Keystone) int {
+		return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
+	})
 
 	for _, kh := range l2Keystones {
-		if ctx.Err() != nil {
+		select {
+		case <-ctx.Done():
 			return
+		default:
 		}
 
 		var lastL2BlockNumber uint32
 		if s.lastKeystone != nil {
 			lastL2BlockNumber = s.lastKeystone.L2BlockNumber
-			log.Debugf(
-				"Checking keystone received with height %d against last keystone %d",
-				kh.L2BlockNumber, lastL2BlockNumber,
-			)
 		}
 
 		if s.lastKeystone == nil || kh.L2BlockNumber > s.lastKeystone.L2BlockNumber {
-			log.Debugf("Received new keystone with block height %d", kh.L2BlockNumber)
 			s.lastKeystone = &kh
-			s.queueKeystoneForMining(&kh)
+			s.queueKeystoneForMining(ctx, &kh)
 			continue
 		}
 
 		if s.cfg.RetryMineThreshold > 0 {
-			retryThreshold := uint32(s.cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod
-			if (lastL2BlockNumber - kh.L2BlockNumber) <= retryThreshold {
-				log.Debugf(
-					"Received keystone old keystone with block height %d, within threshold %d",
-					kh.L2BlockNumber, retryThreshold,
-				)
-				s.queueKeystoneForMining(&kh)
+			if (lastL2BlockNumber - kh.L2BlockNumber) <= s.retryThreshold {
+				s.queueKeystoneForMining(ctx, &kh)
 				continue
 			}
 		}
 
-		log.Debugf(
-			"Refusing to mine keystone with block height %d, highest received: %d",
-			kh.L2BlockNumber, lastL2BlockNumber,
-		)
 	}
 }
 
@@ -267,30 +262,32 @@ func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
 		return
 	}
 
-	var smallestL2BlockNumber uint32
-	var smallestKey string
+	var l2Min uint32
+	var keyMin string
 
 	for k, v := range s.l2Keystones {
-		if smallestL2BlockNumber == 0 || v.l2Keystone.L2BlockNumber < smallestL2BlockNumber {
-			smallestL2BlockNumber = v.l2Keystone.L2BlockNumber
-			smallestKey = k
+		if l2Min == 0 || v.l2Keystone.L2BlockNumber < l2Min {
+			l2Min = v.l2Keystone.L2BlockNumber
+			keyMin = k
 		}
 	}
 
-	// do not insert an L2Keystone that is older than all of the ones already
-	// added
-	if val.L2BlockNumber < smallestL2BlockNumber {
+	// do not insert an L2Keystone that is older than all of the ones
+	// already added
+	if val.L2BlockNumber < l2Min {
 		return
 	}
 
-	delete(s.l2Keystones, smallestKey)
+	delete(s.l2Keystones, keyMin)
 
 	s.l2Keystones[key] = toInsert
 }
 
-func (s *Server) queueKeystoneForMining(keystone *hemi.L2Keystone) {
+func (s *Server) queueKeystoneForMining(ctx context.Context, keystone *hemi.L2Keystone) {
 	s.AddL2Keystone(*keystone)
 	select {
+	case <-ctx.Done():
+		return
 	case s.mineNowCh <- struct{}{}:
 	default:
 	}
@@ -302,14 +299,14 @@ func (s *Server) l2KeystonesForProcessing() []hemi.L2Keystone {
 	s.mtx.Lock()
 
 	for i, v := range s.l2Keystones {
-		// if we're currently processing, or we've already processed the keystone
-		// then don't process
+		// if we're currently processing, or we've already processed
+		// the keystone then don't process
 		if !v.requiresProcessing {
 			continue
 		}
 
-		// since we're about to process, mark this as false so others don't
-		// process the same
+		// since we're about to process, mark this as false so others
+		// don't process the same
 		v.requiresProcessing = false
 		s.l2Keystones[i] = v
 		copies = append(copies, v.l2Keystone)
@@ -323,76 +320,75 @@ func (s *Server) l2KeystonesForProcessing() []hemi.L2Keystone {
 	return copies
 }
 
-// XXX broadcasting should be in a different function
-func (s *Server) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
-	log.Infof("Mining an L2 keystone at height %d...", ks.L2BlockNumber)
+func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wire.MsgTx, error) {
+	log.Tracef("createKeystoneTx")
+	defer log.Tracef("createKeystoneTx exit")
 
-	// go m.dispatchEvent(EventTypeMineKeystone, EventMineKeystone{Keystone: ks})
+	log.Infof("Mine L2 keystone height %v", ks.L2BlockNumber)
 
 	btcHeight, err := s.gozer.BtcHeight(ctx)
 	if err != nil {
-		return fmt.Errorf("get Bitcoin height: %w", err)
+		return nil, fmt.Errorf("bitcoin height: %w", err)
 	}
 
 	payToScript, err := vinzclortho.ScriptFromPubKeyHash(s.address)
 	if err != nil {
-		return fmt.Errorf("get pay to address script: %w", err)
+		return nil, fmt.Errorf("get pay to address script: %w", err)
 	}
 	if len(payToScript) != 25 {
-		return fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
+		return nil, fmt.Errorf("invalid pay to public key script lenght (%d != 25)",
+			len(payToScript))
 	}
 	scriptHash := vinzclortho.ScriptHashFromScript(payToScript)
 
 	// Estimate BTC fees.
 	feeEstimates, err := s.gozer.FeeEstimates(ctx)
 	if err != nil {
-		return fmt.Errorf("get fee estimates: %w", err)
+		return nil, fmt.Errorf("fee estimates: %w", err)
 	}
-	feeAmount, err := gozer.FeeByConfirmations(6, feeEstimates)
+	feeAmount, err := gozer.FeeByConfirmations(6, feeEstimates) // XXX make 6 config
 	if err != nil {
-		return fmt.Errorf("get fee by confirmations: %w", err)
+		return nil, fmt.Errorf("fee by confirmations: %w", err)
 	}
 
 	// Retrieve available UTXOs for the miner.
 	utxos, err := s.gozer.UtxosByAddress(ctx, s.address, 0, 0)
 	if err != nil {
-		return fmt.Errorf("retrieve available Bitcoin UTXOs: %w", err)
+		return nil, fmt.Errorf("utxos by address: %w", err)
 	}
-	log.Tracef("Looking for UTXOs for script hash %v", scriptHash)
-
-	log.Debugf("Miner has %d available UTXOs for script hash %v at Bitcoin height %d",
+	log.Debugf("utxos %d, script hash %v height %d",
 		len(utxos), scriptHash, btcHeight)
 
 	// Build transaction.
 	popTx, prevOut, err := wallet.PoPTransactionCreate(ks, uint32(btcHeight),
 		btcutil.Amount(feeAmount.SatsPerByte), utxos, payToScript)
 	if err != nil {
-		return fmt.Errorf("create Bitcoin transaction: %w", err)
+		return nil, fmt.Errorf("create transaction: %w", err)
 	}
 
-	// Sign input.
-	err = wallet.TransactionSign(&chaincfg.TestNet3Params, s.mz, popTx, prevOut)
+	// Sign transaction.
+	err = wallet.TransactionSign(s.params, s.mz, popTx, prevOut)
 	if err != nil {
-		return fmt.Errorf("sign Bitcoin transaction: %w", err)
+		return nil, fmt.Errorf("sign transaction: %w", err)
 	}
 
-	// Broadcast tx.
-	log.Tracef("Broadcasting Bitcoin transaction %x", popTx)
-	log.Infof("Broadcasting PoP transaction to Bitcoin %s...",
-		s.params.Name)
+	return popTx, nil
+}
+
+func (s *Server) broadcastKeystone(pctx context.Context, popTx *wire.MsgTx) error {
+	log.Tracef("mineKeystone")
+	defer log.Tracef("mineKeystone exit")
+
+	log.Infof("Broadcast PoP tx %s %x", s.params.Name, popTx)
+
+	ctx, cancel := context.WithTimeout(pctx, 5*time.Second)
+	defer cancel()
 
 	txHash, err := s.gozer.BroadcastTx(ctx, popTx)
 	if err != nil {
 		return fmt.Errorf("broadcast PoP transaction: %w", err)
 	}
-
-	log.Infof(
-		"Successfully broadcast PoP transaction to Bitcoin %s with TX hash %v",
-		s.params.Name, txHash,
-	)
-
-	// go s.dispatchEvent(EventTypeTransactionBroadcast,
-	// EventTransactionBroadcast{Keystone: ks, TxHash: txHash.String()})
+	log.Infof("Broadcast PoP tx %s %v", s.params.Name, txHash)
 
 	return nil
 }
@@ -401,27 +397,31 @@ func (s *Server) mineKnownKeystones(ctx context.Context) {
 	copies := s.l2KeystonesForProcessing()
 
 	for _, e := range copies {
+		// XXX are we doing this all the time?
 		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
 		key := hex.EncodeToString(serialized[:])
 
-		log.Debugf("Received keystone for mining with height %v...", e.L2BlockNumber)
+		log.Debugf("mine keystone height %v", e.L2BlockNumber)
 
-		err := s.mineKeystone(ctx, &e)
+		// XXX this is not mine this is mine and braodcast
+		popTx, err := s.createKeystoneTx(ctx, &e)
 		if err != nil {
-			log.Errorf("Failed to mine keystone with height %d: %v",
-				e.L2BlockNumber, err)
+			log.Errorf("mine keystone:  %d: %v", e.L2BlockNumber, err)
+		} else {
+			err = s.broadcastKeystone(ctx, popTx)
+			if err != nil {
+				log.Errorf("mine keystone:  %d: %v", e.L2BlockNumber, err)
+			}
 		}
 
 		s.mtx.Lock()
-
 		if v, ok := s.l2Keystones[key]; ok {
-			// if there is an error, mark keystone as "requires processing" so
-			// potentially gets retried, otherwise set this to false to
-			// nothing tries to process it
+			// if there is an error, mark keystone as "requires
+			// processing" so potentially gets retried, otherwise
+			// set this to false to nothing tries to process it
 			v.requiresProcessing = err != nil
 			s.l2Keystones[key] = v
 		}
-
 		s.mtx.Unlock()
 	}
 }
@@ -449,30 +449,32 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 		s.opgethWG.Done()
 	}()
 
-	// headersCh := make(chan *types.Header, 10)
-	headersCh := make(chan string, 10)
+	headersCh := make(chan string, 1024) // XXX PNOOMA, figure this out
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh)
-	// sub, err := s.opgethClient.SubscribeNewHead(context.Background(), headersCh)
 	if err != nil {
 		return err
 	}
 
+	numKeystones := 10 // XXX PNOOMA
 	for {
 		select {
-		case err = <-sub.Err():
+		case err := <-sub.Err():
+			return err
 		case <-ctx.Done():
-			err = ctx.Err()
+			return ctx.Err()
+
 		case n := <-headersCh:
 			log.Tracef("kss notification received: %s", n)
-			result := popapi.L2KeystoneResponse{}
-			log.Tracef("Sending Keystone Request")
-			if err := s.opgethClient.Client().Call(&result, "keystone_request", 3); err != nil {
+			var kresp popapi.L2KeystoneResponse
+			err := s.opgethClient.Client().Call(&kresp, "keystone_request",
+				numKeystones)
+			if err != nil {
 				return err
 			}
-			s.processReceivedKeystones(ctx, result.L2Keystones)
-			continue
+			if len(kresp.L2Keystones) > 0 {
+				s.processKeystones(ctx, kresp.L2Keystones)
+			}
 		}
-		return err
 	}
 }
 
@@ -480,11 +482,12 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	log.Tracef("connectOpgeth")
 	defer log.Tracef("connectOpgeth exit")
 
-	ctx, cancel := context.WithCancel(pctx)
-	defer cancel()
+	// Allow the connection to timeout.
+	connCtx, connCancel := context.WithTimeout(pctx, 5*time.Second)
+	defer connCancel()
 
 	var err error
-	s.opgethClient, err = ethclient.DialContext(ctx, s.cfg.OpgethURL)
+	s.opgethClient, err = ethclient.DialContext(connCtx, s.cfg.OpgethURL)
 	if err != nil {
 		return err
 	}
@@ -492,24 +495,26 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 
 	log.Debugf("connected to opgeth: %s", s.cfg.OpgethURL)
 
-	rWSCh := make(chan error)
+	// Create a context to exit function.
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
 	s.opgethWG.Add(1)
 	go func() {
-		rWSCh <- s.handleOpgethSubscription(ctx)
+		err := s.handleOpgethSubscription(ctx)
+		if err != nil {
+			log.Errorf("opgeth connection: %v", err)
+		}
+		cancel()
 	}()
 
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-	case err = <-rWSCh:
-	}
-	cancel()
+	<-ctx.Done()
 	s.opgethClient.Close()
 
 	// Wait for exit
 	s.opgethWG.Wait()
 
-	return err
+	return ctx.Err()
 }
 
 func (s *Server) opgeth(ctx context.Context) {

@@ -171,7 +171,7 @@ func TestProcessReceivedKeystones(t *testing.T) {
 		l2Keystones: make(map[string]L2KeystoneProcessingContainer),
 	}
 
-	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
+	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
 	diff := deep.Equal(*miner.lastKeystone, hemi.L2Keystone{
 		L2BlockNumber: 3,
 		EPHash:        []byte{3},
@@ -181,7 +181,7 @@ func TestProcessReceivedKeystones(t *testing.T) {
 		t.Fatalf("unexpected diff: %v", diff)
 	}
 
-	miner.processReceivedKeystones(context.Background(), secondBatchOfL2Keystones)
+	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
 	diff = deep.Equal(*miner.lastKeystone, hemi.L2Keystone{
 		L2BlockNumber: 6,
 		EPHash:        []byte{6},
@@ -236,8 +236,8 @@ func TestProcessReceivedKeystonesSameL2BlockNumber(t *testing.T) {
 	}
 	miner.cfg.RetryMineThreshold = 1
 
-	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
-	miner.processReceivedKeystones(context.Background(), secondBatchOfL2Keystones)
+	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
+	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
 
 	for _, v := range append(firstBatchOfL2Keystones, secondBatchOfL2Keystones...) {
 		serialized := hemi.L2KeystoneAbbreviate(v).Serialize()
@@ -292,8 +292,8 @@ func TestProcessReceivedKeystonesOverThreshold(t *testing.T) {
 	}
 	miner.cfg.RetryMineThreshold = 1
 
-	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
-	miner.processReceivedKeystones(context.Background(), secondBatchOfL2Keystones)
+	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
+	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
 
 	for _, v := range firstBatchOfL2Keystones {
 		serialized := hemi.L2KeystoneAbbreviate(v).Serialize()
@@ -338,7 +338,7 @@ func TestProcessReceivedInAscOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	miner.processReceivedKeystones(context.Background(), firstBatchOfL2Keystones)
+	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
 	receivedKeystones := miner.l2KeystonesForProcessing()
 
 	slices.Reverse(receivedKeystones)
@@ -372,7 +372,7 @@ func TestProcessReceivedOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	miner.processReceivedKeystones(context.Background(), keystones)
+	miner.processKeystones(context.Background(), keystones)
 
 	processedKeystonesFirstTime := 0
 	for range miner.l2KeystonesForProcessing() {
@@ -416,7 +416,7 @@ func TestProcessReceivedOnlyOnceWithError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	miner.processReceivedKeystones(context.Background(), keystones)
+	miner.processKeystones(context.Background(), keystones)
 
 	processedKeystonesFirstTime := 0
 	for _, c := range miner.l2KeystonesForProcessing() {
@@ -478,7 +478,7 @@ func TestProcessReceivedNoDuplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	miner.processReceivedKeystones(context.Background(), keystones)
+	miner.processKeystones(context.Background(), keystones)
 	receivedKeystones := miner.l2KeystonesForProcessing()
 
 	slices.Reverse(keystones)
@@ -557,7 +557,7 @@ func TestProcessReceivedInAscOrderOverride(t *testing.T) {
 	}
 
 	for _, keystone := range keystones {
-		miner.processReceivedKeystones(context.Background(), []hemi.L2Keystone{keystone})
+		miner.processKeystones(context.Background(), []hemi.L2Keystone{keystone})
 	}
 
 	receivedKeystones := miner.l2KeystonesForProcessing()
@@ -584,7 +584,7 @@ func TestProcessAllKeystonesIfAble(t *testing.T) {
 			L2BlockNumber: i,
 			EPHash:        []byte{byte(i)},
 		}
-		miner.processReceivedKeystones(context.Background(), []hemi.L2Keystone{keystone})
+		miner.processKeystones(context.Background(), []hemi.L2Keystone{keystone})
 		for _, c := range miner.l2KeystonesForProcessing() {
 			diff := deep.Equal(c, keystone)
 			if len(diff) != 0 {
@@ -654,11 +654,11 @@ func TestProcessReceivedInAscOrderNoInsertIfTooOld(t *testing.T) {
 	}
 
 	for _, keystone := range keystones {
-		miner.processReceivedKeystones(context.Background(), []hemi.L2Keystone{keystone})
+		miner.processKeystones(context.Background(), []hemi.L2Keystone{keystone})
 	}
 
 	// this one should be dropped
-	miner.processReceivedKeystones(context.Background(), []hemi.L2Keystone{
+	miner.processKeystones(context.Background(), []hemi.L2Keystone{
 		{
 			L2BlockNumber: 1,
 			EPHash:        []byte{1},
