@@ -235,6 +235,7 @@ func TestProcessReceivedKeystonesSameL2BlockNumber(t *testing.T) {
 		cfg:         NewDefaultConfig(),
 	}
 	miner.cfg.RetryMineThreshold = 1
+	miner.retryThreshold = hemi.KeystoneHeaderPeriod
 
 	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
 	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
