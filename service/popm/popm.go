@@ -262,9 +262,11 @@ func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
 		return
 	}
 
-	var l2Min uint32
-	var keyMin string
-
+	// Find oldest keystone.
+	var (
+		l2Min  uint32
+		keyMin string
+	)
 	for k, v := range s.l2Keystones {
 		if l2Min == 0 || v.l2Keystone.L2BlockNumber < l2Min {
 			l2Min = v.l2Keystone.L2BlockNumber
@@ -272,14 +274,14 @@ func (s *Server) AddL2Keystone(val hemi.L2Keystone) {
 		}
 	}
 
-	// do not insert an L2Keystone that is older than all of the ones
-	// already added
+	// Do not insert an L2Keystone that is older than all of the ones
+	// already added.
 	if val.L2BlockNumber < l2Min {
 		return
 	}
 
+	// Evict oldest
 	delete(s.l2Keystones, keyMin)
-
 	s.l2Keystones[key] = toInsert
 }
 
