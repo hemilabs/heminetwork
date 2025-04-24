@@ -256,6 +256,7 @@ func (s *Server) addL2Keystone(ks hemi.L2Keystone) {
 		l2Keystone:         ks,
 		requiresProcessing: true,
 	}
+
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
@@ -301,7 +302,6 @@ func (s *Server) l2KeystonesForProcessing() []hemi.L2Keystone {
 	copies := make([]hemi.L2Keystone, 0)
 
 	s.mtx.Lock()
-
 	for i, v := range s.l2Keystones {
 		// if we're currently processing, or we've already processed
 		// the keystone then don't process
