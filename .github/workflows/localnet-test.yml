@@ -32,7 +32,7 @@ jobs:
         run: docker system prune -f
 
       - name: "run localnet"
-        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 300
+        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up
 
       - name: "remove more dangling"
         run: docker system prune -f
