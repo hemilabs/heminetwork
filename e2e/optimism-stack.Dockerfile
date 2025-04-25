@@ -26,9 +26,10 @@ RUN npm install -g pnpm
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
+RUN echo blahhhhhhh
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout 789fca1eaf83ed5a4cca2ba8c3fb433d33c65c70
+RUN git checkout 7bdea42157d118ce32cd5fe516348f3256fffc54
 
 WORKDIR /git/optimism
 RUN go mod tidy

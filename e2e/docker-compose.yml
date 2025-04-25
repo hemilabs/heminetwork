@@ -294,9 +294,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-    deploy:
-      restart_policy:
-        condition: "any"
     depends_on:
       geth-l1:
         condition: "service_started"
