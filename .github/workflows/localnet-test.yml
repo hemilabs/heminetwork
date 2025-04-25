@@ -41,3 +41,7 @@ jobs:
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
         run: go test -timeout 30m -v ./...
+      
+      - name: "dump logs"
+        if: "always()"
+        run: docker compose -f ./e2e/docker-compose.yml logs
