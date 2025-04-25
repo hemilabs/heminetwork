@@ -6,7 +6,7 @@ toolchain go1.24.1
 
 replace github.com/hemilabs/heminetwork => ../../
 
-replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250425142747-a9ec6b1d7564
+replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250425165032-fc4ab9e57a7a
 
 replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250423005627-59242a8f35fc
 
