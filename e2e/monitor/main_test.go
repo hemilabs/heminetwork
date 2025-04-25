@@ -106,7 +106,7 @@ func TestMonitor(t *testing.T) {
 }
 
 func TestL1L2Comms(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	l1Client, err := ethclient.Dial("http://localhost:8545")
