@@ -37,6 +37,7 @@ const (
 
 var (
 	l1StandardBridge = common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F"))
+	abort            = retries - 1
 )
 
 // Test_Monitor is a small, bare-bones test to dump the state of localnet
@@ -176,7 +177,7 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 
 		receipt := waitForTxReceipt(t, ctx, l1Client, tx)
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
@@ -232,7 +233,7 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
 
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
@@ -295,7 +296,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 		receipt := waitForTxReceipt(t, ctx, l1Client, tx)
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
@@ -360,7 +361,7 @@ func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Addre
 
 		receipt := waitForTxReceipt(t, ctx, l2Client, tx)
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
@@ -423,7 +424,7 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 
 		receipt := waitForTxReceipt(t, ctx, l2Client, tx)
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
@@ -465,7 +466,7 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 
 		receipt := waitForTxReceipt(t, ctx, l1Client, tx)
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
@@ -550,7 +551,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 		receipt = waitForTxReceipt(t, ctx, l2Client, tx)
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
@@ -644,7 +645,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
@@ -702,7 +703,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
 		if receipt == nil {
-			if i == 9 {
+			if i == abort {
 				t.Fatal("retries exceeded")
 			}
 			continue
