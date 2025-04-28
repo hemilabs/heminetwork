@@ -25,6 +25,7 @@ import (
 
 	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
 	"github.com/ethereum-optimism/optimism/op-node/bindings"
+	e2ebindings "github.com/ethereum-optimism/optimism/op-e2e/bindings"
 	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	client "github.com/btcsuite/btcd/rpcclient"
@@ -32,6 +33,8 @@ import (
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
 	"github.com/ethereum-optimism/optimism/op-node/withdrawals"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
+
+	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 )
 
 const (
@@ -198,7 +201,7 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 	auth.GasLimit = uint64(3000000) // in units
 	auth.GasPrice = gasPrice
 
-	_, tx, l2ReadBalances, err := DeployL2ReadBalances(auth, l2Client)
+	_, tx, l2ReadBalances, err := mybindings.DeployL2ReadBalances(auth, l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +274,7 @@ func hvmBtcBalance(t *testing.T, ctx context.Context, l2Client *ethclient.Client
 	auth.GasLimit = uint64(3000000) // in units
 	auth.GasPrice = gasPrice
 
-	_, tx, l2ReadBalances, err := DeployL2ReadBalances(auth, l2Client)
+	_, tx, l2ReadBalances, err := mybindings.DeployL2ReadBalances(auth, l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +323,7 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 		auth.GasLimit = uint64(3000000) // in units
 		auth.GasPrice = gasPrice
 
-		address, tx, _, err = DeployTesttoken(auth, l1Client)
+		address, tx, _, err = mybindings.DeployTesttoken(auth, l1Client)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -340,7 +343,7 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 		break
 	}
 
-	testToken, err := NewTesttoken(address, l1Client)
+	testToken, err := mybindings.NewTesttoken(address, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,7 +412,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := NewL1StandardBridge(l1StandardBridge, l1Client)
+	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +483,7 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
+	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -732,7 +735,7 @@ func deployL2TestToken(t *testing.T, ctx context.Context, l1Address common.Addre
 		auth.GasLimit = uint64(2000000) // in units
 		auth.GasFeeCap = gasPrice
 
-		address, tx, _, err = DeployOptimismMintableERC20(auth, l2Client, common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l1Address, "TestToken", "$TT", 1)
+		address, tx, _, err = e2ebindings.DeployOptimismMintableERC20(auth, l2Client, common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l1Address, "TestToken", "$TT", 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -766,12 +769,12 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := NewL1StandardBridge(l1StandardBridge, l1Client)
+	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	optimismMintableErc2, err := NewOptimismMintableERC20(l2Address, l2Client)
+	optimismMintableErc2, err := e2ebindings.NewOptimismMintableERC20(l2Address, l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -869,7 +872,7 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 			t.Fatalf("unexpected balance: %s", balance)
 		}
 
-		testToken, err := NewTesttoken(l1Address, l1Client)
+		testToken, err := mybindings.NewTesttoken(l1Address, l1Client)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -895,7 +898,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
+	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1101,7 +1104,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 	}
 
-	testToken, err := NewTesttoken(l1Address, l1Client)
+	testToken, err := mybindings.NewTesttoken(l1Address, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
