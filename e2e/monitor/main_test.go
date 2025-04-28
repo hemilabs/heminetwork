@@ -699,7 +699,10 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 	mod := big.NewInt(0)
 	mod.Mod(balance, big.NewInt(97))
 
-	if mod.Cmp(big.NewInt(0)) != 0 {
+	// the balance must be greater than zero and divisible by 97.  we
+	// send 97 eth from l1 to l2.  if you run this test more than once on the 
+	// same network, it will send 97 multiple times
+	if balance.Cmp(big.NewInt(0)) != 1 || mod.Cmp(big.NewInt(0)) != 0 {
 		t.Fatalf("unexpected balance: %d", balance)
 	}
 }
