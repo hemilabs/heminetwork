@@ -26,18 +26,18 @@ import (
 	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
 	"github.com/ethereum-optimism/optimism/op-node/bindings"
 	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
 	"github.com/ethereum-optimism/optimism/op-node/withdrawals"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
-	client "github.com/btcsuite/btcd/rpcclient"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
 const (
 	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 	retries            = 10
-	btcAddress = "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG"
+	btcAddress         = "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG"
 )
 
 var (
@@ -180,67 +180,66 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
 	nonce, err := l2Client.PendingNonceAt(ctx, receiverAddress)
-		if err != nil {
-			t.Fatal(err)
-		}
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		gasPrice, err := l2Client.SuggestGasPrice(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+	gasPrice, err := l2Client.SuggestGasPrice(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(901))
-		if err != nil {
-			t.Fatal(err)
-		}
-		auth.Nonce = big.NewInt(int64(nonce))
-		auth.Value = big.NewInt(0)      // in wei
-		auth.GasLimit = uint64(3000000) // in units
-		auth.GasPrice = gasPrice
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(901))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = big.NewInt(0)      // in wei
+	auth.GasLimit = uint64(3000000) // in units
+	auth.GasPrice = gasPrice
 
-		_, tx, l2ReadBalances, err := DeployL2ReadBalances(auth, l2Client)
-		if err != nil {
-			t.Fatal(err)
-		}
+	_, tx, l2ReadBalances, err := DeployL2ReadBalances(auth, l2Client)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		waitForTxReceipt(t, ctx, l2Client, tx)
+	waitForTxReceipt(t, ctx, l2Client, tx)
 
-		res, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
-		if err != nil {
-			t.Fatal(err)
-		}
+	res, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		config := client.ConnConfig{
-			User:         "user",
-			Pass:         "password",
-			Host:         "localhost:18443",
-			DisableTLS:   true,
-			HTTPPostMode: true,
-		}
-		c, err := client.New(&config, nil)
-		if err != nil {
-			t.Fatalf("could not create new client from config %v: %v", config, err)
-		}
+	config := client.ConnConfig{
+		User:         "user",
+		Pass:         "password",
+		Host:         "localhost:18443",
+		DisableTLS:   true,
+		HTTPPostMode: true,
+	}
+	c, err := client.New(&config, nil)
+	if err != nil {
+		t.Fatalf("could not create new client from config %v: %v", config, err)
+	}
 
-		hashB := res[4:32+4]
-		slices.Reverse(hashB)
-		hash := chainhash.Hash(hashB)
+	hashB := res[4 : 32+4]
+	slices.Reverse(hashB)
+	hash := chainhash.Hash(hashB)
 
+	block, err := c.GetBlockVerbose(&hash)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		block, err := c.GetBlockVerbose(&hash)
-		if err != nil {
-			t.Fatal(err)
-		}
+	bestBlockHeight, err := c.GetBlockCount()
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		bestBlockHeight, err := c.GetBlockCount()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		diff := bestBlockHeight - block.Height
-		if diff > 4 || diff < 2 {
-			t.Fatalf("invalid diff: %d", diff)
-		}
+	diff := bestBlockHeight - block.Height
+	if diff > 4 || diff < 2 {
+		t.Fatalf("invalid diff: %d", diff)
+	}
 }
 
 func hvmBtcBalance(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
@@ -254,39 +253,39 @@ func hvmBtcBalance(t *testing.T, ctx context.Context, l2Client *ethclient.Client
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
 	nonce, err := l2Client.PendingNonceAt(ctx, receiverAddress)
-		if err != nil {
-			t.Fatal(err)
-		}
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		gasPrice, err := l2Client.SuggestGasPrice(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
+	gasPrice, err := l2Client.SuggestGasPrice(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(901))
-		if err != nil {
-			t.Fatal(err)
-		}
-		auth.Nonce = big.NewInt(int64(nonce))
-		auth.Value = big.NewInt(0)      // in wei
-		auth.GasLimit = uint64(3000000) // in units
-		auth.GasPrice = gasPrice
+	auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(901))
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = big.NewInt(0)      // in wei
+	auth.GasLimit = uint64(3000000) // in units
+	auth.GasPrice = gasPrice
 
-		_, tx, l2ReadBalances, err := DeployL2ReadBalances(auth, l2Client)
-		if err != nil {
-			t.Fatal(err)
-		}
+	_, tx, l2ReadBalances, err := DeployL2ReadBalances(auth, l2Client)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		waitForTxReceipt(t, ctx, l2Client, tx)
+	waitForTxReceipt(t, ctx, l2Client, tx)
 
-		balance, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinAddressBalance(nil, "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG")
-		if err != nil {
-			t.Fatal(err)
-		}
+	balance, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinAddressBalance(nil, "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-		if balance.Cmp(big.NewInt(0)) <= 0 {
-			t.Fatalf("balance too small: %d", balance)
-		}
+	if balance.Cmp(big.NewInt(0)) <= 0 {
+		t.Fatalf("balance too small: %d", balance)
+	}
 }
 
 func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Client, privateKey *ecdsa.PrivateKey) common.Address {
@@ -486,7 +485,7 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		t.Fatal(err)
 	}
 
-otherReceiverAddress := common.Address(common.FromHex("06f0f8ee8119b2a0b7a95ba267231be783d8d2ab"))
+	otherReceiverAddress := common.Address(common.FromHex("06f0f8ee8119b2a0b7a95ba267231be783d8d2ab"))
 
 	var receipt *types.Receipt
 	var tx *types.Transaction
@@ -506,7 +505,7 @@ otherReceiverAddress := common.Address(common.FromHex("06f0f8ee8119b2a0b7a95ba26
 			t.Fatal(err)
 		}
 		auth.Nonce = big.NewInt(int64(nonce))
-		auth.Value = big.NewInt(97)      // in wei
+		auth.Value = big.NewInt(97)     // in wei
 		auth.GasLimit = uint64(3000000) // in units
 		auth.GasFeeCap = gasPrice
 
