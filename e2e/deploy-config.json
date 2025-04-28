@@ -11,7 +11,7 @@
     "cliqueSignerAddress": "0x78697c88847dfbbb40523e42c1f2e28a13a170be",
     "l1UseClique": true,
     "l1StartingBlockTag": "0x0",
-    "l2OutputOracleSubmissionInterval": 120,
+    "l2OutputOracleSubmissionInterval": 60,
     "l2OutputOracleStartingTimestamp": 0,
     "l2OutputOracleStartingBlockNumber": 0,
     "l2OutputOracleProposer": "0x78697c88847dfbbb40523e42c1f2e28a13a170be",
