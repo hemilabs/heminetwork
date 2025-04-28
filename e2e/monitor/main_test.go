@@ -34,6 +34,7 @@ import (
 const (
 	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 	retries            = 10
+	btcAddress = "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG"
 )
 
 var (
@@ -139,6 +140,8 @@ func TestL1L2Comms(t *testing.T) {
 	bridgeERC20FromL2ToL1(t, ctx, l1Address, l2Address, privateKey, l1Client, l2Client)
 
 	bridgeEthL2ToL1(t, ctx, l1Client, l2Client, privateKey)
+
+	hvmTipNearBtcTip(t, ctx, l2Client, privateKey)
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
@@ -160,6 +163,45 @@ func TestOperatorFeeVaultIsPresent(t *testing.T) {
 	if hex.EncodeToString(code) != operatorFeeVaultCode {
 		t.Fatalf("OperatorFeeVaultCode mismatch")
 	}
+}
+
+func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+
+	publicKey := privateKey.Public()
+	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatal("error casting public key to ECDSA")
+	}
+
+	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
+
+	nonce, err := l2Client.PendingNonceAt(ctx, receiverAddress)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		gasPrice, err := l2Client.SuggestGasPrice(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		auth, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(901))
+		if err != nil {
+			t.Fatal(err)
+		}
+		auth.Nonce = big.NewInt(int64(nonce))
+		auth.Value = big.NewInt(0)      // in wei
+		auth.GasLimit = uint64(3000000) // in units
+		auth.GasPrice = gasPrice
+
+		_, _, _, err = DeployL2ReadBalances(auth, l2Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err != nil {
+			t.Fatal(err)
+		}
 }
 
 func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Client, privateKey *ecdsa.PrivateKey) common.Address {
