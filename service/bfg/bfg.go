@@ -40,6 +40,8 @@ const (
 
 	bitcoinSourceBlockstream = "blockstream"
 	bitcoinSourceTBC         = "tbc"
+
+	bitcoinFinality = int64(-9) // 10 blocks
 )
 
 var log = loggo.GetLogger(appName)
@@ -198,25 +200,22 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 	}
 }
 
-func calculateFinality(btcTipHeight uint32, pubHeight uint32, pubHeaderHash chainhash.Hash) (*bfgapi.L2BTCFinality, error) {
-	if pubHeight > btcTipHeight {
-		return nil, fmt.Errorf("effective height greater than btc height (%d > %d)", pubHeight, btcTipHeight)
+func calculateFinality(bestHeight uint, publishedHeight uint, hash chainhash.Hash) (*bfgapi.L2BitcoinFinality, error) {
+	if publishedHeight > bestHeight {
+		return nil, fmt.Errorf("effective height greater than best height (%d > %d)",
+			publishedHeight, bestHeight)
 	}
 
-	fin := int64(-9)
-	if pubHeight > 0 {
-		fin = int64(btcTipHeight) - int64(pubHeight) - 9 + 1
+	fin := bitcoinFinality
+	if publishedHeight > 0 {
+		fin = int64(bestHeight-publishedHeight) + bitcoinFinality + 1
+		fin = min(fin, 10) // Anything greater than 0 is final
 	}
 
-	// set a reasonable upper bound so we can safely convert to int32
-	if fin > 100 {
-		fin = 100
-	}
-
-	return &bfgapi.L2BTCFinality{
-		BTCPubHeight:     int64(pubHeight),
-		BTCPubHeaderHash: api.ByteSlice(pubHeaderHash[:]),
-		BTCFinality:      int32(fin),
+	return &bfgapi.L2BitcoinFinality{
+		BlockHeight: publishedHeight,
+		BlockHash:   api.ByteSlice(hash[:]),
+		Finality:    fin,
 	}, nil
 }
 
@@ -244,19 +243,19 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	rp, err := s.callOpgeth(r.Context(), req)
 	if err != nil {
 		log.Errorf("error calling opgeth: %v", err)
-		BadRequestF(w, "internal BFG error")
+		BadRequestF(w, "internal error")
 		return
 	}
 
 	resp, ok := rp.(*bfgapi.L2KeystoneValidityResponse)
 	if !ok {
 		log.Errorf("invalid opgeth response format: %v", spew.Sdump(rp))
-		fmt.Fprintf(w, "internal BFG error")
+		BadRequestF(w, "internal error")
 		return
 	}
 
-	// If we receive an error, it's because op-geth
-	// doesn't know about this keystone.
+	// If we receive an error, it's because op-geth doesn't know about this
+	// keystone.
 	if resp.Error != nil {
 		NotFound(w, "unknown keystone: %v", resp.Error)
 		return
@@ -273,27 +272,27 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	aks := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), abrevKeystones)
 
 	// Finality value if keystone is unpublished to BTC
-	fin := &bfgapi.L2BTCFinality{
-		BTCPubHeight:     int64(-1),
-		BTCPubHeaderHash: nil,
-		BTCFinality:      int32(-9),
+	fin := &bfgapi.L2BitcoinFinality{
+		BlockHeight: 0,
+		BlockHash:   nil,
+		Finality:    bitcoinFinality,
 	}
 
-	// Cycle through each response and replace finality value
-	// for the best finality value of its descendants or itself
+	// Cycle through each response and replace finality value for the best
+	// finality value of its descendants or itself
 	for _, bk := range aks {
 		if bk.Error != nil {
 			log.Tracef("keystone not found: %v", bk.Error)
 			continue
 		}
 
-		altFin, err := calculateFinality(uint32(bk.BtcTipBlockHeight), uint32(bk.L2KeystoneBlockHeight), bk.L2KeystoneBlockHash)
+		altFin, err := calculateFinality(bk.BtcTipBlockHeight,
+			bk.L2KeystoneBlockHeight, bk.L2KeystoneBlockHash)
 		if err != nil {
 			log.Tracef("calculate finality: %v", err)
 			continue
 		}
-
-		if altFin.BTCFinality > fin.BTCFinality {
+		if altFin.Finality > fin.Finality {
 			fin = altFin
 		}
 	}
