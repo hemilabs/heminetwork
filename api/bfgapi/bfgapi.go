@@ -36,9 +36,9 @@ type L2KeystoneValidityResponse struct {
 	Error       *protocol.Error   `json:"error,omitempty"`
 }
 
-type L2BTCFinality struct {
-	L2Keystone       hemi.L2Keystone `json:"l2_keystone"`
-	BTCPubHeight     int64           `json:"btc_pub_height"`
-	BTCPubHeaderHash api.ByteSlice   `json:"btc_pub_header_hash"`
-	BTCFinality      int32           `json:"btc_finality"`
+type L2BitcoinFinality struct {
+	L2Keystone  hemi.L2Keystone `json:"l2_keystone"`
+	BlockHash   api.ByteSlice   `json:"block_hash"`
+	BlockHeight uint            `json:"block_height"`
+	Finality    int64           `json:"finality"`
 }
