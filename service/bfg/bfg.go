@@ -182,10 +182,12 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 
 			// Check if N count within bounds
 			if cmd.KeystoneCount > 1000 || cmd.KeystoneCount < -1000 {
-				return nil, fmt.Errorf("invalid keystone count: %v", cmd.KeystoneCount)
+				return nil, fmt.Errorf("invalid keystone count: %v",
+					cmd.KeystoneCount)
 			}
 
-			err := s.opgethClient.Client().Call(&resp, "kss_getKeystone", cmd.L2KeystoneHash, cmd.L2KeystoneHash)
+			err := s.opgethClient.Client().Call(&resp, "kss_getKeystone",
+				cmd.L2KeystoneHash, cmd.L2KeystoneHash)
 			if err != nil {
 				return nil, fmt.Errorf("error calling opgeth: %w", err)
 			}
