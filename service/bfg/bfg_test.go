@@ -108,12 +108,13 @@ func TestBFG(t *testing.T) {
 	go func() {
 		for range keystoneCount {
 			kssHash := "99f3e3b9f72805f6992550ed870905cd45c832d78caa990b099b4c5873d06c59"
-			resp, err := http.Get("http://" + bfgCfg.ListenAddress + "/v1/keystonefinality/" + kssHash)
+			resp, err := http.Get("http://" + bfgCfg.ListenAddress +
+				"/v1/keystonefinality/" + kssHash)
 			if err != nil {
 				panic(err)
 			}
 
-			fin := bfgapi.L2BTCFinality{}
+			fin := bfgapi.L2BitcoinFinality{}
 
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
@@ -124,8 +125,9 @@ func TestBFG(t *testing.T) {
 				panic(err)
 			}
 
-			if fin.BTCFinality != 4 {
-				panic(fmt.Errorf("unexpected finality result: %v", spew.Sdump(fin)))
+			if fin.Finality != 4 {
+				panic(fmt.Errorf("unexpected finality result: %v",
+					spew.Sdump(fin)))
 			}
 		}
 	}()
