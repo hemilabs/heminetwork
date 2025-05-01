@@ -258,9 +258,12 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 
 	// Generate abrev hashes from received keystones
 	abrevKeystones := make([]chainhash.Hash, 0, len(resp.L2Keystones))
+	km := make(map[chainhash.Hash]hemi.L2Keystone, len(resp.L2Keystones))
 	for _, kss := range resp.L2Keystones {
-		ak := hemi.L2KeystoneAbbreviate(kss).Hash()
-		abrevKeystones = append(abrevKeystones, *ak)
+		khash := hemi.L2KeystoneAbbreviate(kss).Hash()
+		abrevKeystones = append(abrevKeystones, *khash)
+		// use state root for lookup,confirm with max
+		km[chainhash.HashH(kss.StateRoot)] = kss
 	}
 
 	// Batch call TBC for the keystones abrev hashes
@@ -288,6 +291,13 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			log.Tracef("calculate finality: %v", err)
 			continue
+		}
+		if ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]; ok {
+			altFin.L2Keystone = ks
+		} else {
+			log.Errorf("cannot find stateroot: %v", spew.Sdump(bk))
+			BadRequestF(w, "internal error")
+			return
 		}
 		if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
 			fin = altFin
