@@ -15,7 +15,9 @@ import (
 )
 
 const (
-	APIVersion = 1
+	APIVersion = 2
+
+	BitcoinSuperFinality = 10
 )
 
 var (
@@ -26,9 +28,10 @@ var (
 	RouteKeystoneFinality = "GET /" + APIVersionRoute + "/" + "keystonefinality/{hash...}"
 )
 
+// XXX this is opgeth, please move this antonio
 type L2KeystoneValidityRequest struct {
 	L2KeystoneHash chainhash.Hash `json:"hash"`
-	KeystoneCount  int32          `json:"count"`
+	KeystoneCount  int32          `json:"count"` // this should uint
 }
 
 type L2KeystoneValidityResponse struct {
@@ -36,9 +39,12 @@ type L2KeystoneValidityResponse struct {
 	Error       *protocol.Error   `json:"error,omitempty"`
 }
 
-type L2BitcoinFinality struct {
-	L2Keystone  hemi.L2Keystone `json:"l2_keystone"`
-	BlockHash   api.ByteSlice   `json:"block_hash"`
-	BlockHeight uint            `json:"block_height"`
-	Finality    int64           `json:"finality"`
+// L2KeystoneBitcoinFinalityResponse is a response to an HTTP get on
+// RouteKeystoneFinality.
+type L2KeystoneBitcoinFinalityResponse struct {
+	L2Keystone             hemi.L2Keystone `json:"l2_keystone"`
+	BlockHash              api.ByteSlice   `json:"block_hash"`
+	BlockHeight            uint            `json:"block_height"`
+	EffectiveConfirmations uint            `json:"effective_confirmations"`
+	SuperFinality          *bool           `json:"super_finality,omitempty"`
 }

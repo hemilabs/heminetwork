@@ -40,8 +40,6 @@ const (
 
 	bitcoinSourceBlockstream = "blockstream"
 	bitcoinSourceTBC         = "tbc"
-
-	bitcoinFinality = int64(-9) // 10 blocks
 )
 
 var log = loggo.GetLogger(appName)
@@ -200,22 +198,19 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 	}
 }
 
-func calculateFinality(bestHeight uint, publishedHeight uint, hash chainhash.Hash) (*bfgapi.L2BitcoinFinality, error) {
+func calculateFinality(bestHeight uint, publishedHeight uint, hash chainhash.Hash) (*bfgapi.L2KeystoneBitcoinFinalityResponse, error) {
 	if publishedHeight > bestHeight {
-		return nil, fmt.Errorf("effective height greater than best height (%d > %d)",
+		return nil, fmt.Errorf("invalid published height: %v best height %v",
 			publishedHeight, bestHeight)
 	}
 
-	fin := bitcoinFinality
-	if publishedHeight > 0 {
-		fin = int64(bestHeight-publishedHeight) + bitcoinFinality + 1
-		fin = min(fin, 10) // Anything greater than 0 is final
-	}
-
-	return &bfgapi.L2BitcoinFinality{
-		BlockHeight: publishedHeight,
-		BlockHash:   api.ByteSlice(hash[:]),
-		Finality:    fin,
+	confirmations := bestHeight - publishedHeight
+	superFinality := confirmations >= bfgapi.BitcoinSuperFinality
+	return &bfgapi.L2KeystoneBitcoinFinalityResponse{
+		BlockHeight:            publishedHeight,
+		BlockHash:              api.ByteSlice(hash[:]),
+		EffectiveConfirmations: confirmations,
+		SuperFinality:          &superFinality,
 	}, nil
 }
 
@@ -272,10 +267,12 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	aks := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), abrevKeystones)
 
 	// Finality value if keystone is unpublished to BTC
-	fin := &bfgapi.L2BitcoinFinality{
-		BlockHeight: 0,
-		BlockHash:   nil,
-		Finality:    bitcoinFinality,
+	var superFinality bool
+	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{
+		BlockHeight:            0,
+		BlockHash:              nil,
+		EffectiveConfirmations: 0,
+		SuperFinality:          &superFinality,
 	}
 
 	// Cycle through each response and replace finality value for the best
@@ -292,7 +289,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			log.Tracef("calculate finality: %v", err)
 			continue
 		}
-		if altFin.Finality > fin.Finality {
+		if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
 			fin = altFin
 		}
 	}
