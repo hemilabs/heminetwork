@@ -41,7 +41,7 @@ const (
 	bitcoinSourceBlockstream = "blockstream"
 	bitcoinSourceTBC         = "tbc"
 
-	defaultKeystoneCount = 100
+	defaultKeystoneCount = 10
 
 	defaultOpgethURL = "http://127.0.0.1:9999/v1/ws"
 	defaultNetwork   = "mainnet"
@@ -186,7 +186,7 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 			resp := bfgapi.L2KeystoneValidityResponse{}
 
 			// Check if N count within bounds
-			if cmd.KeystoneCount > 1000 || cmd.KeystoneCount < -1000 {
+			if cmd.KeystoneCount > 1000 {
 				return nil, fmt.Errorf("invalid keystone count: %v",
 					cmd.KeystoneCount)
 			}
@@ -219,34 +219,40 @@ func calculateFinality(bestHeight uint, publishedHeight uint, hash chainhash.Has
 	}, nil
 }
 
+func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Hash, keystones uint) (*bfgapi.L2KeystoneValidityResponse, error) {
+	log.Tracef("opgethL2KeystoneValidity: %v", hash)
+	defer log.Tracef("opgethL2KeystoneValidity exit: %v", hash)
+
+	// Call op-geth to retrieve keystone and descendants.
+	rp, err := s.callOpgeth(ctx, bfgapi.L2KeystoneValidityRequest{
+		L2KeystoneHash: hash,
+		KeystoneCount:  keystones,
+	})
+	if err != nil {
+		return nil, err
+	}
+	resp, ok := rp.(*bfgapi.L2KeystoneValidityResponse)
+	if !ok {
+		return nil, fmt.Errorf("invalid response type: %T", rp)
+	}
+	return resp, nil
+}
+
 func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleKeystoneFinality: %v", r.RemoteAddr)
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
 
-	keystone := r.PathValue("hash")
-	if len(keystone) != chainhash.MaxHashStringSize {
+	// validate input.
+	hash, err := chainhash.NewHashFromStr(r.PathValue("hash"))
+	if err != nil {
 		BadRequestF(w, "invalid keystone length")
 		return
 	}
-	hash, err := chainhash.NewHashFromStr(keystone)
-	if err != nil {
-		BadRequestF(w, "invalid keystone: %v", err)
-		return
-	}
 
-	// Call op-geth to retrieve keystone and descendants.
-	rp, err := s.callOpgeth(r.Context(), bfgapi.L2KeystoneValidityRequest{
-		L2KeystoneHash: *hash,
-		KeystoneCount:  defaultKeystoneCount,
-	})
+	// Call opgeth to retrieve keystones
+	resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
 	if err != nil {
-		log.Errorf("error calling opgeth: %v", err)
-		BadRequestF(w, "internal error")
-		return
-	}
-	resp, ok := rp.(*bfgapi.L2KeystoneValidityResponse)
-	if !ok {
-		log.Errorf("invalid opgeth response format: %v", spew.Sdump(rp))
+		log.Errorf("opgeth: %v", err)
 		BadRequestF(w, "internal error")
 		return
 	}
@@ -281,12 +287,13 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		altFin, err := calculateFinality(bk.BtcTipBlockHeight,
 			bk.L2KeystoneBlockHeight, bk.L2KeystoneBlockHash)
 		if err != nil {
-			log.Tracef("calculate finality: %v", err)
+			log.Errorf("calculate finality: %v", err)
 			continue
 		}
 		if ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]; ok {
 			altFin.L2Keystone = ks
 		} else {
+			// This really shouldn't happen
 			log.Errorf("cannot find stateroot: %v", spew.Sdump(bk))
 			BadRequestF(w, "internal error")
 			return
@@ -297,7 +304,8 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if err := json.NewEncoder(w).Encode(fin); err != nil {
-		log.Tracef("encode: %v", err)
+		log.Errorf("encode: %v", err)
+		return
 	}
 
 	s.cmdsProcessed.Inc()

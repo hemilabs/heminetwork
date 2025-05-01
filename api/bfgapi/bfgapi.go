@@ -30,8 +30,8 @@ var (
 
 // XXX this is opgeth, please move this antonio
 type L2KeystoneValidityRequest struct {
-	L2KeystoneHash chainhash.Hash `json:"hash"`
-	KeystoneCount  int32          `json:"count"` // this should uint
+	L2KeystoneHash chainhash.Hash `json:"l2_keystone_hash"`
+	KeystoneCount  uint           `json:"keystone_count"`
 }
 
 type L2KeystoneValidityResponse struct {
