@@ -229,57 +229,43 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	req := bfgapi.L2KeystoneValidityRequest{
-		L2KeystoneHash: *hash,
-		KeystoneCount:  1000,
-	}
-
 	// Call op-geth to retrieve keystone and descendants.
-	rp, err := s.callOpgeth(r.Context(), req)
+	rp, err := s.callOpgeth(r.Context(), bfgapi.L2KeystoneValidityRequest{
+		L2KeystoneHash: *hash,
+		KeystoneCount:  1000, // XXX make this a constant somewhere
+	})
 	if err != nil {
 		log.Errorf("error calling opgeth: %v", err)
 		BadRequestF(w, "internal error")
 		return
 	}
-
 	resp, ok := rp.(*bfgapi.L2KeystoneValidityResponse)
 	if !ok {
 		log.Errorf("invalid opgeth response format: %v", spew.Sdump(rp))
 		BadRequestF(w, "internal error")
 		return
 	}
-
-	// If we receive an error, it's because op-geth doesn't know about this
-	// keystone.
 	if resp.Error != nil {
 		NotFound(w, "unknown keystone: %v", resp.Error)
 		return
 	}
 
-	// Generate abrev hashes from received keystones
+	// Generate abbreviated hashes from received keystones
 	abrevKeystones := make([]chainhash.Hash, 0, len(resp.L2Keystones))
 	km := make(map[chainhash.Hash]hemi.L2Keystone, len(resp.L2Keystones))
 	for _, kss := range resp.L2Keystones {
 		khash := hemi.L2KeystoneAbbreviate(kss).Hash()
 		abrevKeystones = append(abrevKeystones, *khash)
-		// use state root for lookup,confirm with max
+		// XXX use state root for lookup, confirm with max
 		km[chainhash.HashH(kss.StateRoot)] = kss
 	}
 
-	// Batch call TBC for the keystones abrev hashes
+	// Get abbreviated keystones from gozer
 	aks := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), abrevKeystones)
-
-	// Finality value if keystone is unpublished to BTC
-	var superFinality bool
-	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{
-		BlockHeight:            0,
-		BlockHash:              nil,
-		EffectiveConfirmations: 0,
-		SuperFinality:          &superFinality,
-	}
 
 	// Cycle through each response and replace finality value for the best
 	// finality value of its descendants or itself
+	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
 	for _, bk := range aks {
 		if bk.Error != nil {
 			log.Tracef("keystone not found: %v", bk.Error)
