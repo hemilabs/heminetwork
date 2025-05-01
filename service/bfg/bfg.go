@@ -40,6 +40,11 @@ const (
 
 	bitcoinSourceBlockstream = "blockstream"
 	bitcoinSourceTBC         = "tbc"
+
+	defaultKeystoneCount = 100
+
+	defaultOpgethURL = "http://127.0.0.1:9999/v1/ws"
+	defaultNetwork   = "mainnet"
 )
 
 var log = loggo.GetLogger(appName)
@@ -73,9 +78,9 @@ func NewDefaultConfig() *Config {
 		BitcoinSource:       bitcoinSourceBlockstream,
 		ListenAddress:       bfgapi.DefaultListenAddress,
 		LogLevel:            logLevel,
-		Network:             "mainnet",
+		Network:             defaultNetwork,
 		PrometheusNamespace: appName,
-		OpgethURL:           "http://127.0.0.1:9999/v1/ws", // XXX set this using defaults
+		OpgethURL:           defaultOpgethURL,
 	}
 }
 
@@ -98,7 +103,7 @@ type Server struct {
 	promCollectors  []prometheus.Collector
 	promPollVerbose bool // set to true to print stats during poll
 	isRunning       bool
-	connected       bool // connected to opgeth
+	connected       bool // connected to opgeth XXX is this comment correct?
 	cmdsProcessed   prometheus.Counter
 }
 
@@ -232,7 +237,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	// Call op-geth to retrieve keystone and descendants.
 	rp, err := s.callOpgeth(r.Context(), bfgapi.L2KeystoneValidityRequest{
 		L2KeystoneHash: *hash,
-		KeystoneCount:  1000, // XXX make this a constant somewhere
+		KeystoneCount:  defaultKeystoneCount,
 	})
 	if err != nil {
 		log.Errorf("error calling opgeth: %v", err)
@@ -256,7 +261,8 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	for _, kss := range resp.L2Keystones {
 		khash := hemi.L2KeystoneAbbreviate(kss).Hash()
 		abrevKeystones = append(abrevKeystones, *khash)
-		// XXX use state root for lookup, confirm with max
+
+		// Use state root for lookup, this is unique.
 		km[chainhash.HashH(kss.StateRoot)] = kss
 	}
 
