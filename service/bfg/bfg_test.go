@@ -129,7 +129,6 @@ func TestBFG(t *testing.T) {
 				panic(fmt.Errorf("unexpected finality result: %v",
 					spew.Sdump(fin)))
 			}
-			panic(spew.Sdump(fin)) // XXX antonio i think this test is broken when i look at BlockHeight: (uint) 10, and EffectiveConfirmations: (uint) 12,
 		}
 	}()
 
