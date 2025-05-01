@@ -108,27 +108,28 @@ func TestBFG(t *testing.T) {
 	go func() {
 		for range keystoneCount {
 			kssHash := "99f3e3b9f72805f6992550ed870905cd45c832d78caa990b099b4c5873d06c59"
-			resp, err := http.Get("http://" + bfgCfg.ListenAddress +
-				"/v1/keystonefinality/" + kssHash)
+			u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
+				bfgCfg.ListenAddress, bfgapi.APIVersion, kssHash)
+			resp, err := http.Get(u)
 			if err != nil {
 				panic(err)
 			}
 
-			fin := bfgapi.L2BitcoinFinality{}
-
+			fin := bfgapi.L2KeystoneBitcoinFinalityResponse{}
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				panic(err)
 			}
+			// XXX add http status code test
 
 			if err = json.Unmarshal(body, &fin); err != nil {
 				panic(err)
 			}
-
-			if fin.Finality != 4 {
+			if !*fin.SuperFinality {
 				panic(fmt.Errorf("unexpected finality result: %v",
 					spew.Sdump(fin)))
 			}
+			panic(spew.Sdump(fin)) // XXX antonio i think this test is broken when i look at BlockHeight: (uint) 10, and EffectiveConfirmations: (uint) 12,
 		}
 	}()
 
