@@ -448,14 +448,14 @@ func (s *Server) Run(pctx context.Context) error {
 	switch s.cfg.BitcoinSource {
 	case bitcoinSourceBlockstream:
 		var err error
-		s.g, err = blockstream.BlockstreamNew(s.params)
+		s.g, err = blockstream.Run(s.params)
 		if err != nil {
 			return fmt.Errorf("could not setup %v blockstream: %w",
 				s.cfg.Network, err)
 		}
 	case bitcoinSourceTBC:
 		var err error
-		s.g, err = tbcgozer.TBCGozerNew(ctx, s.cfg.BitcoinURL)
+		s.g, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL)
 		if err != nil {
 			return fmt.Errorf("could not setup %v tbc: %w",
 				s.cfg.Network, err)
