@@ -121,7 +121,7 @@ func TestIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	b, err := blockstream.BlockstreamNew(&chaincfg.TestNet3Params)
+	b, err := blockstream.Run(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
