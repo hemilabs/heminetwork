@@ -285,7 +285,7 @@ To run an `archive` sync, you will need access to an Ethereum Beacon API RPC pro
 data (the optional Ethereum node in the compose file as part of the `full` or `L1` **will NOT work**, as it will not be
 able to synchronize pruned historical blob data from Ethereum P2P). Hemi uses EIP-4844 blobs for data availability, and
 so performing a full sync from scratch requires access to an Ethereum node which has retained all of these historical
-blobs. By default, Etherem Consensus-Layer nodes (like Prysm) prune blobs after 4096 Ethereum epochs (49152 ETH blocks,
+blobs. By default, Ethereum Consensus-Layer nodes (like Prysm) prune blobs after 4096 Ethereum epochs (49152 ETH blocks,
 or ~18.2 days).
 
 Additionally, a fully-synced Hemi node that is offline for longer than the blob pruning period (~18.2 days) will either
