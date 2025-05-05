@@ -208,10 +208,13 @@ func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keys
 	defer log.Tracef("processKeystones exit")
 
 	// Sort L2 keystones by block number. This is ok because opgeth ensures
-	// block number order. XXX max please confirm
+	// block number order.
 	slices.SortFunc(l2Keystones, func(a, b hemi.L2Keystone) int {
 		return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
 	})
+
+	// This is where we determine when, or if to mine a keystone. This is
+	// deliberately suboptimal and left up to individual users to modify.
 
 	var work bool
 	for _, kh := range l2Keystones {
