@@ -158,7 +158,7 @@ func (bs *blockstream) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, h
 	return []*gozer.BlockKeystoneByL2KeystoneAbrevHashResponse{{Error: protocol.Errorf("not supported yet")}}
 }
 
-func BlockstreamNew(params *chaincfg.Params) (gozer.Gozer, error) {
+func Run(params *chaincfg.Params) (gozer.Gozer, error) {
 	bs := &blockstream{}
 	switch params {
 	case &chaincfg.MainNetParams:

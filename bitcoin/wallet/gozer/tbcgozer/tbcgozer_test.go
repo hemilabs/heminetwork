@@ -59,7 +59,7 @@ func TestTBCGozer(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	b, err := TBCGozerNew(ctx, "http://localhost:8881/v1/ws")
+	b, err := Run(ctx, "http://localhost:8881/v1/ws")
 	if err != nil {
 		t.Fatal(err)
 	}
