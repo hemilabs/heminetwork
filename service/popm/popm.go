@@ -74,8 +74,6 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	RetryMineThreshold      uint
-
-	confirmations uint // cooked BitcoinConfirmations
 }
 
 func NewDefaultConfig() *Config {
@@ -128,7 +126,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
-	cfg.confirmations = cfg.BitcoinConfirmations
 
 	s := &Server{
 		cfg:            cfg,
@@ -240,7 +237,10 @@ func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keys
 			continue
 		}
 
-		// Potentially mine keystones that
+		// Potentially mine keystones that are still within the retry
+		// threshold depth.
+		// XXX is this right? it theoretically can be negative.
+		// XXX if we keep this can't we just use s.lastKeystone.L2BlockNumber?
 		if lastL2BlockNumber-kh.L2BlockNumber <= s.retryThreshold {
 			s.addL2Keystone(kh)
 			work = true
@@ -350,7 +350,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 	if err != nil {
 		return nil, fmt.Errorf("fee estimates: %w", err)
 	}
-	feeAmount, err := gozer.FeeByConfirmations(s.cfg.confirmations, feeEstimates)
+	feeAmount, err := gozer.FeeByConfirmations(s.cfg.BitcoinConfirmations, feeEstimates)
 	if err != nil {
 		return nil, fmt.Errorf("fee by confirmations: %w", err)
 	}
