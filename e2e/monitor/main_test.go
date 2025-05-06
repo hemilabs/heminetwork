@@ -14,27 +14,25 @@ import (
 	"testing"
 	"time"
 
+	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
+	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
+	e2ebindings "github.com/ethereum-optimism/optimism/op-e2e/bindings"
+	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
+	"github.com/ethereum-optimism/optimism/op-node/bindings"
+	"github.com/ethereum-optimism/optimism/op-node/withdrawals"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-
-	"github.com/hemilabs/heminetwork/hemi"
-
-	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
-	e2ebindings "github.com/ethereum-optimism/optimism/op-e2e/bindings"
-	"github.com/ethereum-optimism/optimism/op-node/bindings"
-	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	client "github.com/btcsuite/btcd/rpcclient"
-	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
-	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
-	"github.com/ethereum-optimism/optimism/op-node/withdrawals"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 
 	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 const (
@@ -173,7 +171,6 @@ func TestOperatorFeeVaultIsPresent(t *testing.T) {
 }
 
 func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
-
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
@@ -246,7 +243,6 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 }
 
 func hvmBtcBalance(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
-
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
