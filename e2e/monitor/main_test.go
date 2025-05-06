@@ -24,8 +24,8 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 
 	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
-	"github.com/ethereum-optimism/optimism/op-node/bindings"
 	e2ebindings "github.com/ethereum-optimism/optimism/op-e2e/bindings"
+	"github.com/ethereum-optimism/optimism/op-node/bindings"
 	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	client "github.com/btcsuite/btcd/rpcclient"
@@ -700,7 +700,7 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 	mod.Mod(balance, big.NewInt(97))
 
 	// the balance must be greater than zero and divisible by 97.  we
-	// send 97 eth from l1 to l2.  if you run this test more than once on the 
+	// send 97 eth from l1 to l2.  if you run this test more than once on the
 	// same network, it will send 97 multiple times
 	if balance.Cmp(big.NewInt(0)) != 1 || mod.Cmp(big.NewInt(0)) != 0 {
 		t.Fatalf("unexpected balance: %d", balance)
