@@ -9,7 +9,7 @@ WORKDIR /git
 ARG OP_GETH_CACHE_BREAK=12F2
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout 59242a8f35fc76869a49c9c09fe98383a72d0046
+RUN git checkout 6d67258fbf906f96b9c7cceae0f4267a5cd73585
 
 RUN go run build/ci.go install -static ./cmd/geth
 
@@ -26,7 +26,6 @@ RUN npm install -g pnpm
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
-RUN echo blahhhhhhh
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
 RUN git checkout a9ec6b1d75645930999854b0a1b84dc62d86a893
