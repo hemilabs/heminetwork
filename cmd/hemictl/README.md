@@ -23,7 +23,7 @@ hemictl <daemon> <action> [json parameters]
 
 #### Basic Ping Command
 ```bash
-hemictl bss ping '{"timestamp":1}'
+hemictl bss ping '{\"timestamp\":1}'
 ```
 
 Response:
@@ -66,7 +66,7 @@ Response:
 
 #### Custom Database Connection
 ```bash
-LOGLEVEL=INFO PGURI="user=username password=secretpassword database=bfgdb" hemictl bfgdb version
+LOGLEVEL=INFO PGURI="postgresql://username:secretpassword@host:port/bfgdb" version
 ```
 
 ### Error Handling
