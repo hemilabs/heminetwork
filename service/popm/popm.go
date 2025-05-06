@@ -462,10 +462,7 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 
 func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("handleOpgethSubscription")
-	defer func() {
-		log.Tracef("handleOpgethSubscription exit")
-		s.opgethWG.Done()
-	}()
+	defer log.Tracef("handleOpgethSubscription exit")
 
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
@@ -527,10 +524,11 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 
 	s.opgethWG.Add(1)
 	go func() {
-		// opgethWG.Done is called in s.handleOpgethSubscription
+		defer s.opgethWG.Done()
+
 		err := s.handleOpgethSubscription(ctx)
 		if err != nil {
-			log.Errorf("subsription: %v", err)
+			log.Errorf("subscription: %v", err)
 		}
 		cancel()
 	}()
