@@ -59,10 +59,10 @@ func TestPopMiner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer cancel()
 
-	msgCh := make(chan string, 10)
+	msgCh := make(chan string, 12)
 	errCh := make(chan error)
 
-	const keystoneRequestCount = 10
+	const keystoneRequestCount = 12
 
 	// Create opgeth test server with the request handler.
 	opgeth := mockOpgeth(ctx, t, keystoneRequestCount, msgCh, errCh)
@@ -888,17 +888,24 @@ func mockOpgeth(ctx context.Context, t *testing.T, kssRequestCount int, msgCh ch
 
 				kssList := make([]hemi.L2Keystone, count[0])
 
+				// XXX Antonio this needs to return proper unique keystones
+				prevKeystone := &hemi.L2Keystone{
+					Version:       1,
+					L1BlockNumber: 0xbadc0ffe,
+				}
 				for ci := range count[0] {
+					x := uint8(ci)
 					l2Keystone := hemi.L2Keystone{
 						Version:            1,
-						L1BlockNumber:      0xbadc0ffe,
+						L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
 						L2BlockNumber:      uint32(i*1000) + uint32(ci)*25,
-						ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
-						PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
-						StateRoot:          digest256([]byte("Hello, world!")),
-						EPHash:             digest256([]byte{0xaa, 0x55}),
+						ParentEPHash:       digest256([]byte{x}),
+						PrevKeystoneEPHash: digest256([]byte{x, x}),
+						StateRoot:          digest256([]byte{x, x, x}),
+						EPHash:             digest256([]byte{x, x, x, x}),
 					}
 					kssList[ci] = l2Keystone
+					prevKeystone = &l2Keystone
 				}
 
 				kssResp := eth.L2KeystoneLatestResponse{
