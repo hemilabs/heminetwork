@@ -20,6 +20,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -182,8 +183,8 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 		return nil, ctx.Err()
 	default:
 		switch cmd := request.(type) {
-		case bfgapi.L2KeystoneValidityRequest:
-			resp := bfgapi.L2KeystoneValidityResponse{}
+		case eth.L2KeystoneValidityRequest:
+			resp := eth.L2KeystoneValidityResponse{}
 
 			// Check if N count within bounds
 			if cmd.KeystoneCount > 1000 {
@@ -219,19 +220,19 @@ func calculateFinality(bestHeight uint, publishedHeight uint, hash chainhash.Has
 	}, nil
 }
 
-func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Hash, keystones uint) (*bfgapi.L2KeystoneValidityResponse, error) {
+func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Hash, keystones uint) (*eth.L2KeystoneValidityResponse, error) {
 	log.Tracef("opgethL2KeystoneValidity: %v", hash)
 	defer log.Tracef("opgethL2KeystoneValidity exit: %v", hash)
 
 	// Call op-geth to retrieve keystone and descendants.
-	rp, err := s.callOpgeth(ctx, bfgapi.L2KeystoneValidityRequest{
+	rp, err := s.callOpgeth(ctx, eth.L2KeystoneValidityRequest{
 		L2KeystoneHash: hash,
 		KeystoneCount:  keystones,
 	})
 	if err != nil {
 		return nil, err
 	}
-	resp, ok := rp.(*bfgapi.L2KeystoneValidityResponse)
+	resp, ok := rp.(*eth.L2KeystoneValidityResponse)
 	if !ok {
 		return nil, fmt.Errorf("invalid response type: %T", rp)
 	}

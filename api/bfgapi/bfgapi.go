@@ -7,10 +7,7 @@ package bfgapi
 import (
 	"fmt"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
-
 	"github.com/hemilabs/heminetwork/api"
-	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/hemi"
 )
 
@@ -27,17 +24,6 @@ var (
 
 	RouteKeystoneFinality = "GET /" + APIVersionRoute + "/" + "keystonefinality/{hash...}"
 )
-
-// XXX this is opgeth, please move this antonio
-type L2KeystoneValidityRequest struct {
-	L2KeystoneHash chainhash.Hash `json:"l2_keystone_hash"`
-	KeystoneCount  uint           `json:"keystone_count"`
-}
-
-type L2KeystoneValidityResponse struct {
-	L2Keystones []hemi.L2Keystone `json:"keystones"`
-	Error       *protocol.Error   `json:"error,omitempty"`
-}
 
 // L2KeystoneBitcoinFinalityResponse is a response to an HTTP get on
 // RouteKeystoneFinality.
