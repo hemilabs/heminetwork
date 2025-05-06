@@ -19,11 +19,11 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/api/popapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
@@ -441,7 +441,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	}()
 
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
-	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh)
+	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
 	if err != nil {
 		return err
 	}
@@ -455,8 +455,8 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 		case n := <-headersCh:
 			log.Tracef("kss notification received: %s", n)
-			var kresp popapi.L2KeystoneResponse
-			err := s.opgethClient.Client().Call(&kresp, "keystone_request",
+			var kresp eth.L2KeystoneLatestResponse
+			err := s.opgethClient.Client().Call(&kresp, "kss_getLatestKeystones",
 				l2KeystonesLen)
 			if err != nil {
 				return err
