@@ -11,7 +11,6 @@ import (
 	"reflect"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/hemi"
 )
 
 const (
@@ -21,9 +20,6 @@ const (
 	CmdPingResponse = "popapi-ping-response"
 
 	CmdL2KeystoneNotification = "popapi-notification"
-
-	CmdL2KeystoneRequest  = "popapi-l2keystone-request"
-	CmdL2KeystoneResponse = "popapi-l2keystone-response"
 )
 
 var (
@@ -41,22 +37,11 @@ type (
 
 type L2KeystoneNotfication struct{}
 
-type L2KeystoneRequest struct {
-	Count uint32 `json:"count"`
-}
-
-type L2KeystoneResponse struct {
-	L2Keystones []hemi.L2Keystone `json:"keystones"`
-	Error       *protocol.Error   `json:"error,omitempty"`
-}
-
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:  reflect.TypeOf(PingRequest{}),
 	CmdPingResponse: reflect.TypeOf(PingResponse{}),
 
 	CmdL2KeystoneNotification: reflect.TypeOf(L2KeystoneNotfication{}),
-	CmdL2KeystoneRequest:      reflect.TypeOf(L2KeystoneRequest{}),
-	CmdL2KeystoneResponse:     reflect.TypeOf(L2KeystoneResponse{}),
 }
 
 type popAPI struct{}
