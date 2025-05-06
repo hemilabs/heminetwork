@@ -20,10 +20,10 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
+	"github.com/ethereum/go-ethereum/eth"
 	"github.com/go-test/deep"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/api/popapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
@@ -102,7 +102,7 @@ func TestPopMiner(t *testing.T) {
 	// messages we expect to receive
 	expectedMsg := map[string]int{
 		"kss_subscribe":                  1,
-		"keystone_request":               keystoneCount,
+		"kss_getLatestKeystones":         keystoneCount,
 		tbcapi.CmdUTXOsByAddressRequest:  keystoneCount,
 		tbcapi.CmdFeeEstimateRequest:     keystoneCount,
 		tbcapi.CmdTxBroadcastRequest:     keystoneCount,
@@ -880,7 +880,7 @@ func mockOpgeth(ctx context.Context, t *testing.T, kssCount int, msgCh chan stri
 						}
 					}
 				}()
-			case "keystone_request":
+			case "kss_getLatestKeystones":
 				l2Keystone := hemi.L2Keystone{
 					Version:            1,
 					L1BlockNumber:      0xbadc0ffe,
@@ -890,7 +890,7 @@ func mockOpgeth(ctx context.Context, t *testing.T, kssCount int, msgCh chan stri
 					StateRoot:          digest256([]byte("Hello, world!")),
 					EPHash:             digest256([]byte{0xaa, 0x55}),
 				}
-				kssResp := popapi.L2KeystoneResponse{
+				kssResp := eth.L2KeystoneLatestResponse{
 					L2Keystones: []hemi.L2Keystone{l2Keystone},
 				}
 				subResp := jsonrpcMessage{

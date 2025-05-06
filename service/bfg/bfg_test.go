@@ -20,6 +20,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ethereum/go-ethereum/eth"
 	"github.com/juju/loggo"
 	"github.com/phayes/freeport"
 
@@ -310,7 +311,7 @@ func mockOpgeth(ctx context.Context, t *testing.T, msgCh chan string, errCh chan
 
 			switch msg.Method {
 			case "kss_getKeystone":
-				kssResp := bfgapi.L2KeystoneValidityResponse{
+				kssResp := eth.L2KeystoneValidityResponse{
 					L2Keystones: []hemi.L2Keystone{
 						{
 							Version:            1,

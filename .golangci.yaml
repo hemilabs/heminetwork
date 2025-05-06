@@ -59,6 +59,7 @@ linters:
     gomoddirectives:
       replace-allow-list:
         - "github.com/coder/websocket" # Currently uses our fork with a bug fix.
+        - "github.com/ethereum/go-ethereum" # Hemi fork of op-geth with hemi API 
     nolintlint:
       # Require an explanation after each nolint directive.
       # Explanation format example: '//nolint:ineffassign // Explanation goes here.'

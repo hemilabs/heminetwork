@@ -1085,7 +1085,7 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					t.Logf("tx hash: %v", tx)
 					t.Logf("ktx: %v", spew.Sdump(ktx))
 					t.Logf("vtx: %v", spew.Sdump(vtx))
-					t.Log(spew.Sdump(sis))
+					t.Logf("%s", spew.Sdump(sis))
 					return errors.New("block mismatch")
 				}
 
