@@ -15,7 +15,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/eth"
@@ -86,11 +85,11 @@ func NewDefaultConfig() *Config {
 	}
 }
 
-type L2KeystoneProcessingContainer struct {
-	l2Keystone hemi.L2Keystone
-	// transaction        *wire.MsgTx
-	requiresProcessing bool
-}
+//type L2KeystoneProcessingContainer struct {
+//	l2Keystone hemi.L2Keystone
+//	// transaction        *wire.MsgTx
+//	requiresProcessing bool
+//}
 
 type Server struct {
 	mtx sync.RWMutex
@@ -117,8 +116,8 @@ type Server struct {
 
 	// mining
 	retryThreshold uint32
-	lastKeystone   *hemi.L2Keystone
-	l2Keystones    map[chainhash.Hash]L2KeystoneProcessingContainer
+	// lastKeystone   *hemi.L2Keystone
+	// l2Keystones    map[chainhash.Hash]L2KeystoneProcessingContainer
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -127,8 +126,8 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:            cfg,
-		l2Keystones:    make(map[chainhash.Hash]L2KeystoneProcessingContainer, defaultL2KeystonesCount),
+		cfg: cfg,
+		// l2Keystones:    make(map[chainhash.Hash]L2KeystoneProcessingContainer, defaultL2KeystonesCount),
 		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
 	}
 
