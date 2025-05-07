@@ -6,7 +6,6 @@ package bfg
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/phayes/freeport"
@@ -41,7 +39,7 @@ func TestBFG(t *testing.T) {
 
 	const keystoneCount = 10
 
-	kssMap, kssList := makeSharedKeystones(30)
+	kssMap, kssList := testutil.MakeSharedKeystones(30)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
@@ -143,38 +141,4 @@ func TestBFG(t *testing.T) {
 			return
 		}
 	}
-}
-
-func makeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
-	kssList := make([]hemi.L2Keystone, n)
-	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
-
-	prevKeystone := &hemi.L2Keystone{
-		Version:       1,
-		L1BlockNumber: 0xbadc0ffe,
-	}
-	for ci := range n {
-		x := uint8(ci)
-		l2Keystone := hemi.L2Keystone{
-			Version:            1,
-			L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
-			L2BlockNumber:      uint32(ci+1) * 25,
-			ParentEPHash:       digest256([]byte{x}),
-			PrevKeystoneEPHash: digest256([]byte{x, x}),
-			StateRoot:          digest256([]byte{x, x, x}),
-			EPHash:             digest256([]byte{x, x, x, x}),
-		}
-
-		abrevKss := hemi.L2KeystoneAbbreviate(l2Keystone)
-		kssMap[*abrevKss.Hash()] = abrevKss
-		kssList[ci] = l2Keystone
-		prevKeystone = &l2Keystone
-	}
-
-	return kssMap, kssList
-}
-
-func digest256(x []byte) []byte {
-	xx := sha256.Sum256(x)
-	return xx[:]
 }
