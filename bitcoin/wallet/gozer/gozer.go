@@ -6,6 +6,7 @@ package gozer
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -65,6 +66,18 @@ type L2KeystoneAbrev struct {
 	PrevKeystoneEPHash api.ByteSlice `json:"prev_keystone_ep_hash"`
 	StateRoot          api.ByteSlice `json:"state_root"`
 	EPHash             api.ByteSlice `json:"ep_hash"`
+}
+
+func (a *L2KeystoneAbrev) Serialize() [72]byte {
+	var r [72]byte
+	r[0] = uint8(a.Version)
+	binary.BigEndian.PutUint32(r[1:5], uint32(a.L1BlockNumber))
+	binary.BigEndian.PutUint32(r[5:9], uint32(a.L2BlockNumber))
+	copy(r[9:], a.ParentEPHash[:])
+	copy(r[20:], a.PrevKeystoneEPHash[:])
+	copy(r[32:], a.StateRoot[:])
+	copy(r[64:], a.EPHash[:])
+	return r
 }
 
 // BlockKeystoneByL2KeystoneAbrevHashResponse JSON response to keystone

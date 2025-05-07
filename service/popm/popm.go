@@ -468,7 +468,19 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 
 	resps := s.gozer.BlockKeystoneByL2KeystoneAbrevHash(ctx, hashes)
 
-	log.Infof("BlockKeystoneByL2KeystoneAbrevHash: %v", spew.Sdump(resps))
+	log.Infof("BlockKeystoneByL2KeystoneAbrevHash:")
+	for _, r := range resps {
+		spew.Dump(r.L2KeystoneAbrev.Serialize())
+	}
+
+	msg, err := s.createKeystoneTx(ctx, &kr.L2Keystones[0])
+	if err != nil {
+		panic(err)
+	}
+
+	if err := s.broadcastKeystone(ctx, msg); err != nil {
+		panic(err)
+	}
 
 	return nil
 }
