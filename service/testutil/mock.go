@@ -3,6 +3,7 @@ package testutil
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -20,36 +21,47 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
-	kssList := make([]hemi.L2Keystone, n)
+	kssList := make([]hemi.L2Keystone, 0, n)
 	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
 	prevKeystone := &hemi.L2Keystone{
-		Version:       1,
-		L1BlockNumber: 0xbadc0ffe,
-		EPHash:        digest256([]byte{0xde, 0xad, 0xbe, 0xef}),
+		Version:            1,
+		L1BlockNumber:      10000,
+		L2BlockNumber:      25,
+		PrevKeystoneEPHash: digest256([]byte{0}),
+		EPHash:             fillOutBytes("eph0", 32),
 	}
 	for ci := range n {
-		x := uint8(ci)
 		l2Keystone := hemi.L2Keystone{
 			Version:            1,
 			L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
 			L2BlockNumber:      uint32(ci+1) * 25,
-			ParentEPHash:       digest256([]byte{x}),
+			ParentEPHash:       fillOutBytes("parenteph", 32),
 			PrevKeystoneEPHash: prevKeystone.EPHash,
-			StateRoot:          digest256([]byte{x, x, x}),
-			EPHash:             digest256([]byte{x, x, x, x}),
+			StateRoot:          fillOutBytes(fmt.Sprintf("stateroot%d", ci+1), 32),
+			EPHash:             fillOutBytes(fmt.Sprintf("eph%d", ci+1), 32),
 		}
 
 		abrevKss := hemi.L2KeystoneAbbreviate(l2Keystone)
 		kssMap[*abrevKss.Hash()] = abrevKss
-		kssList[ci] = l2Keystone
+		kssList = append(kssList, l2Keystone)
 		prevKeystone = &l2Keystone
 	}
 
 	return kssMap, kssList
+}
+
+func fillOutBytes(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, '_')
+	}
+
+	return result
 }
 
 func digest256(x []byte) []byte {
@@ -220,7 +232,31 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 				},
 			}
 		case tbcapi.CmdTxBroadcastRequest:
-			resp = tbcapi.TxBroadcastResponse{TxID: &chainhash.Hash{0x0a}}
+			pl, ok := payload.(*tbcapi.TxBroadcastRequest)
+			if !ok {
+				return fmt.Errorf("unexpected payload format: %v", payload)
+			}
+
+			ph := make([]byte, 32)
+			_, err := rand.Read(ph)
+			if err != nil {
+				panic(err)
+			}
+
+			ch, err := chainhash.NewHash(ph)
+			if err != nil {
+				panic(ch)
+			}
+			resp = tbcapi.TxBroadcastResponse{TxID: ch}
+
+			for _, txOut := range pl.Tx.TxOut {
+				aPoPTx, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
+				if err != nil {
+					continue
+				}
+				f.keystones[*aPoPTx.L2Keystone.Hash()] = aPoPTx.L2Keystone
+				break
+			}
 		case tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest:
 			pl, ok := payload.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest)
 			if !ok {
@@ -233,11 +269,19 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 					Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHash),
 				}
 			} else {
+				ch, err := chainhash.NewHash(fillOutBytes(fmt.Sprintf("l1blockhash-%d", kss.L1BlockNumber), 32))
+				if err != nil {
+					panic(err)
+				}
+				tch, err := chainhash.NewHash(fillOutBytes(fmt.Sprintf("l1blockhash-%d", f.btcTip), 32))
+				if err != nil {
+					panic(err)
+				}
 				resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
 					L2KeystoneAbrev:       kss,
-					L2KeystoneBlockHash:   &chainhash.Hash{0x0b, 0x0b},
+					L2KeystoneBlockHash:   ch,
 					L2KeystoneBlockHeight: uint(kss.L1BlockNumber),
-					BtcTipBlockHash:       &chainhash.Hash{0x0c, 0x0c},
+					BtcTipBlockHash:       tch,
 					BtcTipBlockHeight:     f.btcTip,
 				}
 			}
