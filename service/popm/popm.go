@@ -86,11 +86,14 @@ func NewDefaultConfig() *Config {
 	}
 }
 
-//type L2KeystoneProcessingContainer struct {
-//	l2Keystone hemi.L2Keystone
-//	// transaction        *wire.MsgTx
-//	requiresProcessing bool
-//}
+type keystone struct {
+	// comes from opgeth
+	keystone *hemi.L2Keystone
+	hash     *chainhash.Hash
+
+	// comes from gozer
+	abbreviated *gozer.BlockKeystoneByL2KeystoneAbrevHashResponse
+}
 
 type Server struct {
 	mtx sync.RWMutex
@@ -117,8 +120,7 @@ type Server struct {
 
 	// mining
 	retryThreshold uint32
-	// lastKeystone   *hemi.L2Keystone
-	// l2Keystones    map[chainhash.Hash]L2KeystoneProcessingContainer
+	keystones      map[chainhash.Hash]*keystone
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -127,8 +129,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg: cfg,
-		// l2Keystones:    make(map[chainhash.Hash]L2KeystoneProcessingContainer, defaultL2KeystonesCount),
+		cfg:            cfg,
 		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
 	}
 
@@ -201,130 +202,6 @@ func (s *Server) promRunning() float64 {
 	}
 	return 0
 }
-
-//func (s *Server) processKeystones(ctx context.Context, l2Keystones []hemi.L2Keystone) bool {
-//	log.Tracef("processKeystones")
-//	defer log.Tracef("processKeystones exit")
-//
-//	// Sort L2 keystones by block number. This is ok because opgeth ensures
-//	// block number order.
-//	slices.SortFunc(l2Keystones, func(a, b hemi.L2Keystone) int {
-//		return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
-//	})
-//
-//	// This is where we determine when, or if to mine a keystone. This is
-//	// deliberately suboptimal and left up to individual users to modify.
-//
-//	var work bool
-//	for _, kh := range l2Keystones {
-//		select {
-//		case <-ctx.Done():
-//			return false
-//		default:
-//		}
-//
-//		// s.lastKeystone does not race because it only touched here.
-//		var lastL2BlockNumber uint32
-//		if s.lastKeystone != nil {
-//			lastL2BlockNumber = s.lastKeystone.L2BlockNumber
-//		}
-//
-//		// if s.lastKeystone does not exist we add it; if the incoming
-//		// keystone is more recent we replace lastKeystone.
-//		if s.lastKeystone == nil ||
-//			kh.L2BlockNumber > s.lastKeystone.L2BlockNumber {
-//			s.lastKeystone = &kh
-//			s.addL2Keystone(kh)
-//			work = true
-//			continue
-//		}
-//
-//		// Potentially mine keystones that are still within the retry
-//		// threshold depth.
-//		// XXX is this right? it theoretically can be negative.
-//		// XXX if we keep this can't we just use s.lastKeystone.L2BlockNumber?
-//		if lastL2BlockNumber-kh.L2BlockNumber <= s.retryThreshold {
-//			s.addL2Keystone(kh)
-//			work = true
-//			continue
-//		}
-//	}
-//
-//	return work
-//}
-//
-//func (s *Server) addL2Keystone(ks hemi.L2Keystone) {
-//	kspc := L2KeystoneProcessingContainer{
-//		l2Keystone:         ks,
-//		requiresProcessing: true,
-//	}
-//
-//	s.mtx.Lock()
-//	defer s.mtx.Unlock()
-//
-//	ksHash := hemi.L2KeystoneAbbreviate(ks).Hash()
-//
-//	// keystone already exists, no-op
-//	if _, ok := s.l2Keystones[*ksHash]; ok {
-//		return
-//	}
-//
-//	if len(s.l2Keystones) < l2KeystonesLen {
-//		// Insert key stone
-//		s.l2Keystones[*ksHash] = kspc
-//		return
-//	}
-//
-//	// Find oldest keystone.
-//	var (
-//		l2Min  uint32
-//		keyMin chainhash.Hash
-//	)
-//	for k, v := range s.l2Keystones {
-//		if l2Min == 0 || v.l2Keystone.L2BlockNumber < l2Min {
-//			l2Min = v.l2Keystone.L2BlockNumber
-//			keyMin = k
-//		}
-//	}
-//
-//	// Do not insert an L2Keystone that is older than all of the ones
-//	// already added.
-//	if ks.L2BlockNumber < l2Min {
-//		return
-//	}
-//
-//	// Evict oldest
-//	delete(s.l2Keystones, keyMin)
-//
-//	// Insert key stone
-//	s.l2Keystones[*ksHash] = kspc
-//}
-//
-//func (s *Server) l2KeystonesForProcessing() []hemi.L2Keystone {
-//	copies := make([]hemi.L2Keystone, 0)
-//
-//	s.mtx.Lock()
-//	for i, v := range s.l2Keystones {
-//		// if we're currently processing, or we've already processed
-//		// the keystone then don't process
-//		if !v.requiresProcessing {
-//			continue
-//		}
-//
-//		// since we're about to process, mark this as false so others
-//		// don't process the same
-//		v.requiresProcessing = false
-//		s.l2Keystones[i] = v
-//		copies = append(copies, v.l2Keystone)
-//	}
-//	s.mtx.Unlock()
-//
-//	slices.SortFunc(copies, func(a, b hemi.L2Keystone) int {
-//		return int(b.L2BlockNumber) - int(a.L2BlockNumber)
-//	})
-//
-//	return copies
-//}
 
 func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wire.MsgTx, error) {
 	log.Tracef("createKeystoneTx")
@@ -407,31 +284,6 @@ func (s *Server) createAndBroadcastKeystone(ctx context.Context, ks *hemi.L2Keys
 	return s.broadcastKeystone(ctx, popTx)
 }
 
-//func (s *Server) mineKnownKeystones(ctx context.Context) {
-//	copies := s.l2KeystonesForProcessing()
-//
-//	for _, e := range copies {
-//		log.Debugf("mine keystone height %v", e.L2BlockNumber)
-//
-//		// This is a little hard to read but there is a reason to
-//		// recreate the pop tx. We may be waiting on change or funding
-//		// of the wallet, or a broadcast failed. Thus always recreate
-//		// the transaction and try to brodcast it.
-//		err := s.createAndBroadcastKeystone(ctx, &e)
-//		ksHash := hemi.L2KeystoneAbbreviate(e).Hash()
-//
-//		s.mtx.Lock()
-//		if v, ok := s.l2Keystones[*ksHash]; ok {
-//			// if there is an error, mark keystone as "requires
-//			// processing" so potentially gets retried, otherwise
-//			// set this to false to nothing tries to process it
-//			v.requiresProcessing = err != nil
-//			s.l2Keystones[*ksHash] = v
-//		}
-//		s.mtx.Unlock()
-//	}
-//}
-
 func (s *Server) latestKeystones(ctx context.Context, count int) (*eth.L2KeystoneLatestResponse, error) {
 	log.Tracef("latestKeystones")
 	defer log.Tracef("latestKeystones exit")
@@ -451,6 +303,13 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 	log.Tracef("hydrateKeystones")
 	defer log.Tracef("hydrateKeystones exit")
 
+	s.mtx.Lock()
+	if s.keystones != nil {
+		s.mtx.Unlock()
+		return fmt.Errorf("already hydrated")
+	}
+	s.mtx.Unlock()
+
 	kr, err := s.latestKeystones(ctx, defaultL2KeystonesCount)
 	if err != nil {
 		return fmt.Errorf("hydrate: %w", err)
@@ -458,18 +317,9 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 
 	log.Debugf("hydrateKeystones: %v", spew.Sdump(kr))
 
-	type keystone struct {
-		// comes from opgeth
-		keystone *hemi.L2Keystone
-		hash     *chainhash.Hash
-
-		// comes from gozer
-		abbreviated *gozer.BlockKeystoneByL2KeystoneAbrevHashResponse
-	}
-
 	// Cross check with gozer to see what needs to be mined
-	keystones := make(map[chainhash.Hash]*keystone, defaultL2KeystonesCount)
 	aksHashes := make([]chainhash.Hash, 0, len(kr.L2Keystones))
+	keystones := make(map[chainhash.Hash]*keystone, defaultL2KeystonesCount)
 	for k := range kr.L2Keystones {
 		h := hemi.L2KeystoneAbbreviate(kr.L2Keystones[k]).Hash()
 
@@ -484,6 +334,10 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 	}
 
 	gks := s.gozer.BlockKeystoneByL2KeystoneAbrevHash(ctx, aksHashes)
+	if len(gks) != len(aksHashes) {
+		// Shouldn't happen
+		panic(fmt.Sprintf("len diagnostic %v != %v", len(gks), len(aksHashes)))
+	}
 	log.Debugf("BlockKeystoneByL2KeystoneAbrevHash: %v", spew.Sdump(gks))
 	for k := range gks {
 		// Fixup keystone cache based on gozer response, note that gks
@@ -502,6 +356,14 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 	}
 
 	log.Infof("=== %v", spew.Sdump(keystones))
+
+	// A bit silly to check twice but it doesn't hurt to be really sure.
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if s.keystones != nil {
+		return fmt.Errorf("hydration race")
+	}
+	s.keystones = keystones
 
 	return nil
 }
@@ -526,17 +388,6 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 		case n := <-headersCh:
 			log.Tracef("kss notification received: %s", n)
-			//var kresp eth.L2KeystoneLatestResponse
-			//err := s.opgethClient.Client().Call(&kresp, "kss_getLatestKeystones",
-			//	l2KeystonesLen)
-			//if err != nil {
-			//	return err
-			//}
-			//if len(kresp.L2Keystones) > 0 {
-			//	if s.processKeystones(ctx, kresp.L2Keystones) {
-			//		s.mineKnownKeystones(ctx)
-			//	}
-			//}
 		}
 	}
 }
