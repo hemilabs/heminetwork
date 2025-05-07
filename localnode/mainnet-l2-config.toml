@@ -31,7 +31,7 @@ RollupHaltOnIncompatibleProtocolVersion = ""
 
 [Eth.Miner]
 GasCeil = 30000000
-GasPrice = 1000000000
+GasPrice = 10
 Recommit = 2000000000
 RollupComputePendingBlock = false
 
