@@ -164,7 +164,7 @@ services:
   # Hemi L2 node
   op-geth-l2:
     # yamllint disable-line rule:line-length
-    image: "ghcr.io/hemilabs/op-geth:d5c3c17@sha256:93407c0eed4c693c7831587f3c678f5806a7c20364a27a5928672298e1597ad3"
+    image: "ghcr.io/hemilabs/op-geth:73c4e4d@sha256:0a9f147659ca6d247db2566c03a3129c946e85ee31009e3de879a89b9b8e7123"
     platform: linux/amd64
     # XXX does geth need to be fully synced
     profiles: ["hemi", "hemi-min", "full"]
@@ -235,7 +235,7 @@ services:
   # Hemi op-node
   op-node:
     # yamllint disable-line rule:line-length
-    image: "ghcr.io/hemilabs/op-node:9dc3004@sha256:fbbed98c8d9f8b1de1eb426b84b38c5df4fe2e04e9c757f4734dc1009d253b3e"
+    image: "ghcr.io/hemilabs/op-node:3222d8f@sha256:271081305a4454a20da8aab09b7b8fda460d2317f0ecaad34da0eac3ced69215"
     platform: linux/amd64
     profiles: ["hemi", "hemi-min", "full"]
     depends_on:
@@ -255,6 +255,7 @@ services:
       - "localnode"
     command:
       - "op-node"
+      - "--ignore-missing-pectra-blob-schedule"
       - "--l1=${GETHL1ENDPOINT:-http://geth-l1:8545}"
       - "--l1.rpckind=any"
       - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"

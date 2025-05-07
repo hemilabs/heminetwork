@@ -30,11 +30,9 @@ RollupDisableTxPoolAdmission = false
 RollupHaltOnIncompatibleProtocolVersion = ""
 
 [Eth.Miner]
-GasFloor = 0
 GasCeil = 30000000
-GasPrice = 1000000000
+GasPrice = 10
 Recommit = 2000000000
-NewPayloadTimeout = 2000000000
 RollupComputePendingBlock = false
 
 [Eth.TxPool]

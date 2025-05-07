@@ -24,13 +24,13 @@
     "baseFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
     "l1FeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
     "sequencerFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
-    "baseFeeVaultWithdrawalNetwork": "remote",
-    "l1FeeVaultWithdrawalNetwork": "remote",
+    "baseFeeVaultWithdrawalNetwork": "0",
+    "l1FeeVaultWithdrawalNetwork": "0",
     "sequencerFeeVaultWithdrawalNetwork": 0,
     "proxyAdminOwner": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
     "finalSystemOwner": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
     "superchainConfigGuardian": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
-    "finalizationPeriodSeconds": 4,
+    "finalizationPeriodSeconds": 2,
     "fundDevAccounts": true,
     "l2GenesisBlockBaseFeePerGas": "0x1",
     "gasPriceOracleOverhead": 2100,
@@ -70,5 +70,7 @@
     "daChallengeWindow": 160,
     "daResolveWindow": 160,
     "daBondSize": 1000000,
-    "daResolverRefundPercentage": 0
+    "daResolverRefundPercentage": 0,
+    "faultGameMaxClockDuration": 10800,
+    "faultGameClockExtension": 10800
 }

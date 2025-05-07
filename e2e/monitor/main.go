@@ -323,7 +323,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		first := runJs(firstBatcherTxBlockJs, "l1", "geth.ipc", "1")
 		last := runJs(lastBatcherTxBlockJs, "l1", "geth.ipc", "1")
 		count := runJs(batcherPublicationCountJs, "l1", "geth.ipc", "1")
-		popMinerBalance := runJs(popMinerBalanceJs, "l2", "datadir/geth.ipc", "2-1")
+		popMinerBalance := runJs(popMinerBalanceJs, "l2", "datadir/geth.ipc", "1")
 
 		mtx.Lock()
 		s.firstBatcherPublicationHash = first
