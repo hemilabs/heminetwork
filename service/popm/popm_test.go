@@ -6,16 +6,13 @@ package popm
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/testutil"
 )
 
@@ -23,7 +20,7 @@ func TestPopMiner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer cancel()
 
-	kssMap, kssList := makeSharedKeystones(40)
+	kssMap, kssList := testutil.MakeSharedKeystones(40)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
@@ -96,38 +93,4 @@ func TestPopMiner(t *testing.T) {
 			return
 		}
 	}
-}
-
-func makeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
-	kssList := make([]hemi.L2Keystone, n)
-	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
-
-	prevKeystone := &hemi.L2Keystone{
-		Version:       1,
-		L1BlockNumber: 0xbadc0ffe,
-	}
-	for ci := range n {
-		x := uint8(ci)
-		l2Keystone := hemi.L2Keystone{
-			Version:            1,
-			L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
-			L2BlockNumber:      uint32(ci+1) * 25,
-			ParentEPHash:       digest256([]byte{x}),
-			PrevKeystoneEPHash: digest256([]byte{x, x}),
-			StateRoot:          digest256([]byte{x, x, x}),
-			EPHash:             digest256([]byte{x, x, x, x}),
-		}
-
-		abrevKss := hemi.L2KeystoneAbbreviate(l2Keystone)
-		kssMap[*abrevKss.Hash()] = abrevKss
-		kssList[ci] = l2Keystone
-		prevKeystone = &l2Keystone
-	}
-
-	return kssMap, kssList
-}
-
-func digest256(x []byte) []byte {
-	xx := sha256.Sum256(x)
-	return xx[:]
 }
