@@ -192,8 +192,8 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 					cmd.KeystoneCount)
 			}
 
-			err := s.opgethClient.Client().Call(&resp, "kss_getKeystone",
-				cmd.L2KeystoneHash, cmd.L2KeystoneHash)
+			err := s.opgethClient.Client().CallContext(ctx, &resp, "kss_getKeystone",
+				cmd.L2KeystoneHash, cmd.KeystoneCount)
 			if err != nil {
 				return nil, fmt.Errorf("error calling opgeth: %w", err)
 			}
@@ -291,6 +291,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			log.Errorf("calculate finality: %v", err)
 			continue
 		}
+
 		if ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]; ok {
 			altFin.L2Keystone = ks
 		} else {
