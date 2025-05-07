@@ -255,6 +255,7 @@ services:
       - "localnode"
     command:
       - "op-node"
+      - "--ignore-missing-pectra-blob-schedule"
       - "--l1=${GETHL1ENDPOINT:-http://geth-l1:8545}"
       - "--l1.rpckind=any"
       - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
