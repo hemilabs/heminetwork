@@ -7,29 +7,21 @@ package wallet
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
-	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul/memory"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/service/testutil"
 )
 
 func digest256(x []byte) []byte {
@@ -130,10 +122,8 @@ func TestIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	connCh := make(chan any)
-
 	// Create tbc test server with the request handler.
-	mtbc := mockTBC(ctx, t, connCh)
+	_, _, mtbc := testutil.NewMockTBC(ctx, nil, 0)
 	defer mtbc.Close()
 
 	tg, err := tbcgozer.Run(ctx, mtbc.URL)
@@ -142,12 +132,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// Wait for connection to TBC
-	select {
-	case <-connCh:
-		time.Sleep(10 * time.Millisecond)
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
+	time.Sleep(50 * time.Millisecond)
 
 	feeEstimates, err := tg.FeeEstimates(ctx)
 	if err != nil {
@@ -236,105 +221,4 @@ func TestIntegration(t *testing.T) {
 	}
 
 	t.Logf("txID: %v", txID)
-}
-
-type handler struct {
-	handleFunc func(w http.ResponseWriter, r *http.Request) error
-}
-
-func (f handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := f.handleFunc(w, r); err != nil {
-		panic(err)
-	}
-}
-
-func mockTBC(ctx context.Context, t *testing.T, connCh chan any) *httptest.Server {
-	hf := func(w http.ResponseWriter, r *http.Request) error {
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			CompressionMode: websocket.CompressionContextTakeover,
-		})
-		if err != nil {
-			return fmt.Errorf("Failed to accept websocket connection for %s: %w",
-				r.RemoteAddr, err)
-		}
-		defer conn.Close(websocket.StatusNormalClosure, "") // Force close connection
-
-		// Always ping, required by protocol.
-		ping := &tbcapi.PingRequest{
-			Timestamp: time.Now().Unix(),
-		}
-
-		wsConn := protocol.NewWSConn(conn)
-
-		if err = tbcapi.Write(r.Context(), wsConn, "0", ping); err != nil {
-			return fmt.Errorf("Write ping: %w", err)
-		}
-
-		t.Logf("mockTBC: connection from %v", r.RemoteAddr)
-
-		connCh <- r.RemoteAddr
-
-		for {
-			cmd, id, _, err := tbcapi.Read(ctx, wsConn)
-			if err != nil {
-				var ce websocket.CloseError
-				if errors.As(err, &ce) {
-					return fmt.Errorf("handleWebsocketRead: %w", err)
-				}
-				if errors.Is(err, io.EOF) {
-					return fmt.Errorf("handleWebsocketRead: EOF")
-				}
-
-				return fmt.Errorf("handleWebsocketRead: %w", err)
-			}
-
-			t.Logf("mockTBC: command is %v", cmd)
-
-			var resp any
-			switch cmd {
-			case tbcapi.CmdUTXOsByAddressRequest:
-				resp = &tbcapi.UTXOsByAddressResponse{
-					UTXOs: []*tbcapi.UTXO{
-						{
-							TxId:     chainhash.Hash{},
-							Value:    1000000,
-							OutIndex: 1,
-						},
-					},
-				}
-
-			case tbcapi.CmdTxBroadcastRequest:
-				resp = tbcapi.TxBroadcastResponse{TxID: &chainhash.Hash{0x0a}}
-
-			case tbcapi.CmdFeeEstimateRequest:
-				resp = tbcapi.FeeEstimateResponse{
-					FeeEstimates: []*tbcapi.FeeEstimate{
-						{Blocks: 1, SatsPerByte: 1},
-						{Blocks: 2, SatsPerByte: 1},
-						{Blocks: 3, SatsPerByte: 1},
-						{Blocks: 4, SatsPerByte: 1},
-						{Blocks: 5, SatsPerByte: 1},
-						{Blocks: 6, SatsPerByte: 1},
-						{Blocks: 7, SatsPerByte: 1},
-						{Blocks: 8, SatsPerByte: 1},
-						{Blocks: 9, SatsPerByte: 1},
-						{Blocks: 10, SatsPerByte: 1},
-					},
-				}
-
-			default:
-				return fmt.Errorf("unknown command: %v", cmd)
-			}
-
-			if err = tbcapi.Write(ctx, wsConn, id, resp); err != nil {
-				return fmt.Errorf("Failed to handle %s request: %w",
-					cmd, err)
-			}
-		}
-	}
-
-	h := handler{handleFunc: hf}
-
-	tbc := httptest.NewServer(h)
-	return tbc
 }
