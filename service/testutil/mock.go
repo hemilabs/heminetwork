@@ -32,18 +32,19 @@ func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hem
 		Version:            1,
 		L1BlockNumber:      10000,
 		L2BlockNumber:      25,
-		PrevKeystoneEPHash: digest256([]byte{0}),
-		EPHash:             fillOutBytes("eph0", 32),
+		PrevKeystoneEPHash: digest256([]byte{0, 0}),
+		EPHash:             digest256([]byte{0}),
 	}
 	for ci := range n {
+		x := uint8(ci + 1)
 		l2Keystone := hemi.L2Keystone{
 			Version:            1,
 			L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
 			L2BlockNumber:      uint32(ci+1) * 25,
-			ParentEPHash:       fillOutBytes("parenteph", 32),
+			ParentEPHash:       digest256([]byte{x, x}),
 			PrevKeystoneEPHash: prevKeystone.EPHash,
-			StateRoot:          fillOutBytes(fmt.Sprintf("stateroot%d", ci+1), 32),
-			EPHash:             fillOutBytes(fmt.Sprintf("eph%d", ci+1), 32),
+			StateRoot:          digest256([]byte{x, x, x}),
+			EPHash:             digest256([]byte{x}),
 		}
 
 		abrevKss := hemi.L2KeystoneAbbreviate(l2Keystone)
@@ -58,7 +59,7 @@ func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hem
 func fillOutBytes(prefix string, size int) []byte {
 	result := []byte(prefix)
 	for len(result) < size {
-		result = append(result, '_')
+		result = append(result, 0)
 	}
 
 	return result
@@ -269,11 +270,11 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 					Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHash),
 				}
 			} else {
-				ch, err := chainhash.NewHash(fillOutBytes(fmt.Sprintf("l1blockhash-%d", kss.L1BlockNumber), 32))
+				ch, err := chainhash.NewHash(digest256([]byte{byte(kss.L1BlockNumber)}))
 				if err != nil {
 					panic(err)
 				}
-				tch, err := chainhash.NewHash(fillOutBytes(fmt.Sprintf("l1blockhash-%d", f.btcTip), 32))
+				tch, err := chainhash.NewHash(digest256([]byte{byte(f.btcTip)}))
 				if err != nil {
 					panic(err)
 				}
