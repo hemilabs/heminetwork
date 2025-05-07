@@ -457,6 +457,20 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 
 	log.Infof("hydrateKeystones: %v", spew.Sdump(kr))
 
+	// XXX Marco uncomment this and run test to see mocktbc working
+
+	// hashes := make([]chainhash.Hash, len(kr.L2Keystones))
+	// for i, kss := range kr.L2Keystones {
+	// 	h := hemi.L2KeystoneAbbreviate(kss).Hash()
+	// 	hashes[i] = *h
+	// }
+
+	// hashes = append(hashes, chainhash.Hash{0x0b})
+
+	// resps := s.gozer.BlockKeystoneByL2KeystoneAbrevHash(ctx, hashes)
+
+	// log.Infof("BlockKeystoneByL2KeystoneAbrevHash: %v", spew.Sdump(resps))
+
 	return nil
 }
 

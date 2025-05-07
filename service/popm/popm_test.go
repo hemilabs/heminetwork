@@ -62,14 +62,15 @@ func TestPopMiner(t *testing.T) {
 	msgCh := make(chan string, 12)
 	errCh := make(chan error)
 
-	const keystoneRequestCount = 12
+	kssMap, kssList := makeSharedKeystones(40)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
-	opgeth := mockOpgeth(ctx, t, keystoneRequestCount, msgCh, errCh)
+	opgeth := mockOpgeth(ctx, t, kssList, msgCh, errCh)
 	defer opgeth.Close()
 
 	// Create tbc test server with the request handler.
-	mtbc := mockTBC(ctx, t, msgCh, errCh)
+	mtbc := mockTBC(ctx, t, kssMap, btcTip, msgCh, errCh)
 	defer mtbc.Close()
 
 	// Setup pop miner
@@ -101,6 +102,7 @@ func TestPopMiner(t *testing.T) {
 	expectedMsg := map[string]int{
 		"kss_subscribe":          1,
 		"kss_getLatestKeystones": 1,
+		// tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: 2,
 		// tbcapi.CmdUTXOsByAddressRequest:  keystoneRequestCount,
 		// tbcapi.CmdFeeEstimateRequest:     keystoneRequestCount,
 		// tbcapi.CmdTxBroadcastRequest:     keystoneRequestCount,
@@ -131,543 +133,34 @@ func TestPopMiner(t *testing.T) {
 	}
 }
 
-// // TestProcessReceivedKeystones ensures that we store the latest keystone
-// // correctly as well as data stored in slices within the struct
-// func TestProcessReceivedKeystones(t *testing.T) {
-// 	firstBatchOfL2Keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 1,
-// 			EPHash:        []byte{1},
-// 		},
-// 	}
+func makeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
+	kssList := make([]hemi.L2Keystone, n)
+	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
-// 	secondBatchOfL2Keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 6,
-// 			EPHash:        []byte{6},
-// 		},
-// 		{
-// 			L2BlockNumber: 5,
-// 			EPHash:        []byte{5},
-// 		},
-// 		{
-// 			L2BlockNumber: 4,
-// 			EPHash:        []byte{4},
-// 		},
-// 	}
+	prevKeystone := &hemi.L2Keystone{
+		Version:       1,
+		L1BlockNumber: 0xbadc0ffe,
+	}
+	for ci := range n {
+		x := uint8(ci)
+		l2Keystone := hemi.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
+			L2BlockNumber:      uint32(ci+1) * 25,
+			ParentEPHash:       digest256([]byte{x}),
+			PrevKeystoneEPHash: digest256([]byte{x, x}),
+			StateRoot:          digest256([]byte{x, x, x}),
+			EPHash:             digest256([]byte{x, x, x, x}),
+		}
 
-// 	miner := Server{
-// 		l2Keystones: make(map[chainhash.Hash]L2KeystoneProcessingContainer),
-// 	}
+		abrevKss := hemi.L2KeystoneAbbreviate(l2Keystone)
+		kssMap[*abrevKss.Hash()] = abrevKss
+		kssList[ci] = l2Keystone
+		prevKeystone = &l2Keystone
+	}
 
-// 	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
-// 	diff := deep.Equal(*miner.lastKeystone, hemi.L2Keystone{
-// 		L2BlockNumber: 3,
-// 		EPHash:        []byte{3},
-// 	})
-
-// 	if len(diff) != 0 {
-// 		t.Fatalf("unexpected diff: %v", diff)
-// 	}
-
-// 	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
-// 	diff = deep.Equal(*miner.lastKeystone, hemi.L2Keystone{
-// 		L2BlockNumber: 6,
-// 		EPHash:        []byte{6},
-// 	})
-
-// 	if len(diff) != 0 {
-// 		t.Fatalf("unexpected diff: %v", diff)
-// 	}
-// }
-
-// // TestProcessReceivedKeystonesSameL2BlockNumber ensures that we process
-// // an l2 keystone with the same l2 block number that we saw before if it
-// // has changed and less than threshold
-// func TestProcessReceivedKeystonesSameL2BlockNumber(t *testing.T) {
-// 	firstBatchOfL2Keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 1,
-// 			EPHash:        []byte{1},
-// 		},
-// 		{
-// 			L2BlockNumber: 6,
-// 			EPHash:        []byte{6},
-// 		},
-// 		{
-// 			L2BlockNumber: 5,
-// 			EPHash:        []byte{5},
-// 		},
-// 		{
-// 			L2BlockNumber: 4,
-// 			EPHash:        []byte{4},
-// 		},
-// 	}
-
-// 	secondBatchOfL2Keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{44},
-// 		},
-// 	}
-
-// 	miner := Server{
-// 		l2Keystones: make(map[chainhash.Hash]L2KeystoneProcessingContainer),
-// 		cfg:         NewDefaultConfig(),
-// 	}
-// 	miner.cfg.RetryMineThreshold = 1
-// 	miner.retryThreshold = hemi.KeystoneHeaderPeriod
-
-// 	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
-// 	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
-
-// 	for _, v := range append(firstBatchOfL2Keystones, secondBatchOfL2Keystones...) {
-// 		ksHash := hemi.L2KeystoneAbbreviate(v).Hash()
-// 		if diff := deep.Equal(miner.l2Keystones[*ksHash].l2Keystone, v); len(diff) > 0 {
-// 			t.Fatalf("unexpected diff: %s", diff)
-// 		}
-
-// 	}
-// }
-
-// // TestProcessReceivedKeystonesOverThreshold tests that we don't re-queue
-// // an l2 keystone that is beyond threshold config
-// func TestProcessReceivedKeystonesOverThreshold(t *testing.T) {
-// 	firstBatchOfL2Keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 300,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 301,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 302,
-// 			EPHash:        []byte{1},
-// 		},
-// 		{
-// 			L2BlockNumber: 306,
-// 			EPHash:        []byte{6},
-// 		},
-// 		{
-// 			L2BlockNumber: 320,
-// 			EPHash:        []byte{5},
-// 		},
-// 		{
-// 			L2BlockNumber: 310,
-// 			EPHash:        []byte{4},
-// 		},
-// 	}
-
-// 	secondBatchOfL2Keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{44},
-// 		},
-// 	}
-
-// 	miner := Server{
-// 		l2Keystones: make(map[chainhash.Hash]L2KeystoneProcessingContainer),
-// 		cfg:         NewDefaultConfig(),
-// 	}
-// 	miner.cfg.RetryMineThreshold = 1
-
-// 	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
-// 	miner.processKeystones(context.Background(), secondBatchOfL2Keystones)
-
-// 	for _, v := range firstBatchOfL2Keystones {
-// 		ksHash := hemi.L2KeystoneAbbreviate(v).Hash()
-// 		if diff := deep.Equal(miner.l2Keystones[*ksHash].l2Keystone, v); len(diff) > 0 {
-// 			t.Fatalf("unexpected diff: %s", diff)
-// 		}
-// 	}
-
-// 	for _, v := range secondBatchOfL2Keystones {
-// 		ksHash := hemi.L2KeystoneAbbreviate(v).Hash()
-// 		if _, ok := miner.l2Keystones[*ksHash]; ok {
-// 			t.Fatalf("should not have queued keystone")
-// 		}
-// 	}
-// }
-
-// // TestProcessReceivedInAscOrder ensures that we sort and process the latest
-// // N (3) L2Keystones in ascending order to handle the oldest first
-// func TestProcessReceivedInAscOrder(t *testing.T) {
-// 	firstBatchOfL2Keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 1,
-// 			EPHash:        []byte{1},
-// 		},
-// 	}
-
-// 	miner, err := NewServer(&Config{
-// 		BitcoinSecret: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
-// 		Network:       "testnet3",
-// 	})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	miner.processKeystones(context.Background(), firstBatchOfL2Keystones)
-// 	receivedKeystones := miner.l2KeystonesForProcessing()
-
-// 	slices.Reverse(receivedKeystones)
-// 	diff := deep.Equal(firstBatchOfL2Keystones, receivedKeystones)
-// 	if len(diff) != 0 {
-// 		t.Fatalf("received unexpected diff: %s", diff)
-// 	}
-// }
-
-// // TestProcessReceivedOnlyOnce ensures that we only process keystones once if
-// // no error
-// func TestProcessReceivedOnlyOnce(t *testing.T) {
-// 	keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 1,
-// 			EPHash:        []byte{1},
-// 		},
-// 	}
-// 	miner, err := NewServer(&Config{
-// 		BitcoinSecret: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
-// 		Network:       "testnet3",
-// 	})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	miner.processKeystones(context.Background(), keystones)
-
-// 	processedKeystonesFirstTime := 0
-// 	for range miner.l2KeystonesForProcessing() {
-// 		processedKeystonesFirstTime++
-// 	}
-// 	if processedKeystonesFirstTime != 3 {
-// 		t.Fatalf("should have processed 3 keystones, processed %d", processedKeystonesFirstTime)
-// 	}
-
-// 	processedKeystonesSecondTime := 0
-// 	for range miner.l2KeystonesForProcessing() {
-// 		processedKeystonesSecondTime++
-// 	}
-
-// 	if processedKeystonesSecondTime != 0 {
-// 		t.Fatal("should have only processed the keystones once")
-// 	}
-// }
-
-// // TestProcessReceivedUntilError ensures that we retry until no error
-// func TestProcessReceivedOnlyOnceWithError(t *testing.T) {
-// 	keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 1,
-// 			EPHash:        []byte{1},
-// 		},
-// 	}
-
-// 	miner, err := NewServer(&Config{
-// 		BitcoinSecret: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
-// 		Network:       "testnet3",
-// 	})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	miner.processKeystones(context.Background(), keystones)
-
-// 	processedKeystonesFirstTime := 0
-// 	for _, c := range miner.l2KeystonesForProcessing() {
-// 		processedKeystonesFirstTime++
-// 		ksHash := hemi.L2KeystoneAbbreviate(c).Hash()
-// 		miner.mtx.Lock()
-// 		if v, ok := miner.l2Keystones[*ksHash]; ok {
-// 			v.requiresProcessing = true
-// 			miner.l2Keystones[*ksHash] = v
-// 		}
-// 		miner.mtx.Unlock()
-// 	}
-// 	if processedKeystonesFirstTime != 3 {
-// 		t.Fatalf("should have processed 3 keystones, processed %d", processedKeystonesFirstTime)
-// 	}
-
-// 	processedKeystonesSecondTime := 0
-// 	for range miner.l2KeystonesForProcessing() {
-// 		processedKeystonesSecondTime++
-// 	}
-
-// 	if processedKeystonesSecondTime != 3 {
-// 		t.Fatalf("should have processed 3 keystones, processed %d", processedKeystonesSecondTime)
-// 	}
-
-// 	processedKeystonesThirdTime := 0
-// 	for range miner.l2KeystonesForProcessing() {
-// 		processedKeystonesThirdTime++
-// 	}
-
-// 	if processedKeystonesThirdTime != 0 {
-// 		t.Fatal("keystones should have already been processed")
-// 	}
-// }
-
-// // TestProcessReceivedNoDuplicates ensures that we don't queue a duplicate
-// func TestProcessReceivedNoDuplicates(t *testing.T) {
-// 	keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 	}
-
-// 	miner, err := NewServer(&Config{
-// 		BitcoinSecret: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
-// 		Network:       "testnet3",
-// 	})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	miner.processKeystones(context.Background(), keystones)
-// 	receivedKeystones := miner.l2KeystonesForProcessing()
-
-// 	slices.Reverse(keystones)
-
-// 	diff := deep.Equal([]hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 	}, receivedKeystones)
-// 	if len(diff) != 0 {
-// 		t.Fatalf("received unexpected diff: %s", diff)
-// 	}
-// }
-
-// // TestProcessReceivedInAscOrder ensures that if we queue more than 10 keystones
-// // for mining, that we override the oldest
-// func TestProcessReceivedInAscOrderOverride(t *testing.T) {
-// 	keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 1,
-// 			EPHash:        []byte{1},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 4,
-// 			EPHash:        []byte{4},
-// 		},
-// 		{
-// 			L2BlockNumber: 5,
-// 			EPHash:        []byte{5},
-// 		},
-// 		{
-// 			L2BlockNumber: 6,
-// 			EPHash:        []byte{6},
-// 		},
-// 		{
-// 			L2BlockNumber: 7,
-// 			EPHash:        []byte{7},
-// 		},
-// 		{
-// 			L2BlockNumber: 8,
-// 			EPHash:        []byte{8},
-// 		},
-// 		{
-// 			L2BlockNumber: 9,
-// 			EPHash:        []byte{9},
-// 		},
-// 		{
-// 			L2BlockNumber: 10,
-// 			EPHash:        []byte{10},
-// 		},
-// 		{
-// 			L2BlockNumber: 11,
-// 			EPHash:        []byte{11},
-// 		},
-// 	}
-
-// 	miner, err := NewServer(&Config{
-// 		BitcoinSecret: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
-// 		Network:       "testnet3",
-// 	})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	for _, keystone := range keystones {
-// 		miner.processKeystones(context.Background(), []hemi.L2Keystone{keystone})
-// 	}
-
-// 	receivedKeystones := miner.l2KeystonesForProcessing()
-
-// 	slices.Reverse(keystones)
-
-// 	diff := deep.Equal(keystones[:10], receivedKeystones)
-// 	if len(diff) != 0 {
-// 		t.Fatalf("received unexpected diff: %s", diff)
-// 	}
-// }
-
-// func TestProcessAllKeystonesIfAble(t *testing.T) {
-// 	miner, err := NewServer(&Config{
-// 		BitcoinSecret: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
-// 		Network:       "testnet3",
-// 	})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	for i := uint32(1); i < 1000; i++ {
-// 		keystone := hemi.L2Keystone{
-// 			L2BlockNumber: i,
-// 			EPHash:        []byte{byte(i)},
-// 		}
-// 		miner.processKeystones(context.Background(), []hemi.L2Keystone{keystone})
-// 		for _, c := range miner.l2KeystonesForProcessing() {
-// 			diff := deep.Equal(c, keystone)
-// 			if len(diff) != 0 {
-// 				t.Fatalf("unexpected diff: %s", diff)
-// 			}
-// 		}
-// 	}
-// }
-
-// // TestProcessReceivedInAscOrderNoInsertIfTooOld ensures that if the queue
-// // is full, and we try to insert a keystone that is older than every other
-// // keystone, we don't insert it
-// func TestProcessReceivedInAscOrderNoInsertIfTooOld(t *testing.T) {
-// 	keystones := []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 1,
-// 			EPHash:        []byte{1},
-// 		},
-// 		{
-// 			L2BlockNumber: 2,
-// 			EPHash:        []byte{2},
-// 		},
-// 		{
-// 			L2BlockNumber: 3,
-// 			EPHash:        []byte{3},
-// 		},
-// 		{
-// 			L2BlockNumber: 4,
-// 			EPHash:        []byte{4},
-// 		},
-// 		{
-// 			L2BlockNumber: 5,
-// 			EPHash:        []byte{5},
-// 		},
-// 		{
-// 			L2BlockNumber: 6,
-// 			EPHash:        []byte{6},
-// 		},
-// 		{
-// 			L2BlockNumber: 7,
-// 			EPHash:        []byte{7},
-// 		},
-// 		{
-// 			L2BlockNumber: 8,
-// 			EPHash:        []byte{8},
-// 		},
-// 		{
-// 			L2BlockNumber: 9,
-// 			EPHash:        []byte{9},
-// 		},
-// 		{
-// 			L2BlockNumber: 10,
-// 			EPHash:        []byte{10},
-// 		},
-// 		{
-// 			L2BlockNumber: 11,
-// 			EPHash:        []byte{11},
-// 		},
-// 	}
-
-// 	miner, err := NewServer(&Config{
-// 		BitcoinSecret: "ebaaedce6af48a03bbfd25e8cd0364140ebaaedce6af48a03bbfd25e8cd03641",
-// 		Network:       "testnet3",
-// 	})
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	for _, keystone := range keystones {
-// 		miner.processKeystones(context.Background(), []hemi.L2Keystone{keystone})
-// 	}
-
-// 	// this one should be dropped
-// 	miner.processKeystones(context.Background(), []hemi.L2Keystone{
-// 		{
-// 			L2BlockNumber: 1,
-// 			EPHash:        []byte{1},
-// 		},
-// 	})
-
-// 	receivedKeystones := miner.l2KeystonesForProcessing()
-
-// 	slices.Reverse(keystones)
-
-// 	diff := deep.Equal(keystones[:10], receivedKeystones)
-// 	if len(diff) != 0 {
-// 		t.Fatalf("received unexpected diff: %s", diff)
-// 	}
-// }
+	return kssMap, kssList
+}
 
 type handler struct {
 	handleFunc func(w http.ResponseWriter, r *http.Request) error
@@ -686,7 +179,7 @@ func digest256(x []byte) []byte {
 	return xx[:]
 }
 
-func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan error) *httptest.Server {
+func mockTBC(ctx context.Context, t *testing.T, kssMap map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip uint, msgCh chan string, errCh chan error) *httptest.Server {
 	hf := func(w http.ResponseWriter, r *http.Request) error {
 		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			CompressionMode: websocket.CompressionContextTakeover,
@@ -711,7 +204,7 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 		t.Logf("mockTBC: connection from %v", r.RemoteAddr)
 
 		for {
-			cmd, id, _, err := tbcapi.Read(ctx, wsConn)
+			cmd, id, payload, err := tbcapi.Read(ctx, wsConn)
 			if err != nil {
 				var ce websocket.CloseError
 				if errors.As(err, &ce) {
@@ -752,10 +245,28 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 						},
 					},
 				}
-
 			case tbcapi.CmdTxBroadcastRequest:
 				resp = tbcapi.TxBroadcastResponse{TxID: &chainhash.Hash{0x0a}}
+			case tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest:
+				pl, ok := payload.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest)
+				if !ok {
+					return fmt.Errorf("unexpected payload format: %v", payload)
+				}
 
+				kss, ok := kssMap[pl.L2KeystoneAbrevHash]
+				if !ok {
+					resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+						Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHash),
+					}
+				} else {
+					resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+						L2KeystoneAbrev:       kss,
+						L2KeystoneBlockHash:   &chainhash.Hash{0x0b, 0x0b},
+						L2KeystoneBlockHeight: uint(kss.L1BlockNumber),
+						BtcTipBlockHash:       &chainhash.Hash{0x0c, 0x0c},
+						BtcTipBlockHeight:     btcTip,
+					}
+				}
 			case tbcapi.CmdFeeEstimateRequest:
 				resp = tbcapi.FeeEstimateResponse{
 					FeeEstimates: []*tbcapi.FeeEstimate{
@@ -771,7 +282,6 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 						{Blocks: 10, SatsPerByte: 1},
 					},
 				}
-
 			default:
 				return fmt.Errorf("unknown command: %v", cmd)
 			}
@@ -789,7 +299,8 @@ func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan er
 	return tbc
 }
 
-func mockOpgeth(ctx context.Context, t *testing.T, kssRequestCount int, msgCh chan string, errCh chan error) *httptest.Server {
+func mockOpgeth(ctx context.Context, t *testing.T, kssList []hemi.L2Keystone, msgCh chan string, errCh chan error) *httptest.Server {
+
 	hf := func(w http.ResponseWriter, r *http.Request) error {
 		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 			InsecureSkipVerify: true,
@@ -802,7 +313,8 @@ func mockOpgeth(ctx context.Context, t *testing.T, kssRequestCount int, msgCh ch
 
 		t.Logf("mockOpgeth: connection from %v", r.RemoteAddr)
 
-		for i := 0; i <= kssRequestCount; i++ {
+		var lastKeystone int
+		for {
 
 			var msg jsonrpcMessage
 			_, br, err := c.Read(ctx)
@@ -879,38 +391,17 @@ func mockOpgeth(ctx context.Context, t *testing.T, kssRequestCount int, msgCh ch
 					}
 				}()
 			case "kss_getLatestKeystones":
-
-				var count []uint
+				var count []int
 				err = json.Unmarshal(msg.Params, &count)
 				if err != nil {
 					panic(err)
 				}
 
-				kssList := make([]hemi.L2Keystone, count[0])
-
-				// XXX Antonio this needs to return proper unique keystones
-				prevKeystone := &hemi.L2Keystone{
-					Version:       1,
-					L1BlockNumber: 0xbadc0ffe,
-				}
-				for ci := range count[0] {
-					x := uint8(ci)
-					l2Keystone := hemi.L2Keystone{
-						Version:            1,
-						L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
-						L2BlockNumber:      uint32(i*1000) + uint32(ci)*25,
-						ParentEPHash:       digest256([]byte{x}),
-						PrevKeystoneEPHash: digest256([]byte{x, x}),
-						StateRoot:          digest256([]byte{x, x, x}),
-						EPHash:             digest256([]byte{x, x, x, x}),
-					}
-					kssList[ci] = l2Keystone
-					prevKeystone = &l2Keystone
-				}
-
 				kssResp := eth.L2KeystoneLatestResponse{
-					L2Keystones: kssList,
+					L2Keystones: kssList[lastKeystone : lastKeystone+count[0]],
 				}
+				lastKeystone += count[0]
+
 				subResp := jsonrpcMessage{
 					Version: "2.0",
 					ID:      msg.ID,
@@ -926,13 +417,10 @@ func mockOpgeth(ctx context.Context, t *testing.T, kssRequestCount int, msgCh ch
 				if err != nil {
 					return err
 				}
-
 			default:
 				t.Errorf("unsupported message %v", msg.Method)
 			}
-
 		}
-		return nil
 	}
 
 	h := handler{handleFunc: hf, errCh: errCh, name: "mockOpgeth"}
