@@ -458,29 +458,50 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 
 	log.Debugf("hydrateKeystones: %v", spew.Sdump(kr))
 
-	hashes := make([]chainhash.Hash, 0, len(kr.L2Keystones))
-	for _, kss := range kr.L2Keystones {
-		h := hemi.L2KeystoneAbbreviate(kss).Hash()
-		hashes = append(hashes, *h)
+	type keystone struct {
+		// comes from opgeth
+		keystone *hemi.L2Keystone
+		hash     *chainhash.Hash
+
+		// comes from gozer
+		abbreviated *gozer.BlockKeystoneByL2KeystoneAbrevHashResponse
 	}
 
-	hashes = append(hashes, chainhash.Hash{0x0b})
+	// Cross check with gozer to see what needs to be mined
+	keystones := make(map[chainhash.Hash]*keystone, defaultL2KeystonesCount)
+	aksHashes := make([]chainhash.Hash, 0, len(kr.L2Keystones))
+	for k := range kr.L2Keystones {
+		h := hemi.L2KeystoneAbbreviate(kr.L2Keystones[k]).Hash()
 
-	resps := s.gozer.BlockKeystoneByL2KeystoneAbrevHash(ctx, hashes)
+		// fill out hashes array for gozer
+		aksHashes = append(aksHashes, *h)
 
-	log.Infof("BlockKeystoneByL2KeystoneAbrevHash:")
-	for _, r := range resps {
-		spew.Dump(r.L2KeystoneAbrev.Serialize())
+		// while looping fill out keystones state cache
+		keystones[*h] = &keystone{
+			keystone: &kr.L2Keystones[k],
+			hash:     h,
+		}
 	}
 
-	msg, err := s.createKeystoneTx(ctx, &kr.L2Keystones[0])
-	if err != nil {
-		panic(err)
+	gks := s.gozer.BlockKeystoneByL2KeystoneAbrevHash(ctx, aksHashes)
+	log.Debugf("BlockKeystoneByL2KeystoneAbrevHash: %v", spew.Sdump(gks))
+	for k := range gks {
+		// Fixup keystone cache based on gozer response, note that gks
+		// or is identical to aks order thus we can use the hash array
+		// for identification in the keystone cache map.
+		ks, ok := keystones[aksHashes[k]]
+		if !ok {
+			// Not found in keystones cache map so Error must be !nil
+			if gks[k].Error == nil {
+				panic("hash not found " + aksHashes[k].String())
+			}
+		}
+		// Always add the entry to cache and rely on Error being !nil
+		// to retry later.
+		ks.abbreviated = gks[k]
 	}
 
-	if err := s.broadcastKeystone(ctx, msg); err != nil {
-		panic(err)
-	}
+	log.Infof("=== %v", spew.Sdump(keystones))
 
 	return nil
 }
