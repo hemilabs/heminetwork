@@ -372,7 +372,7 @@ func (ac *Conn) Connect(ctx context.Context) error {
 	connectCtx, cancel := context.WithTimeout(ctx, WSConnectTimeout)
 	defer cancel()
 
-	// XXX Dial does not return a parasable error. This is an issue in the
+	// XXX Dial does not return a parsable error. This is an issue in the
 	// package.
 	// Note that we cannot have DialOptions on a WASM websocket
 	log.Tracef("Connect: dialing %v", ac.serverURL)
