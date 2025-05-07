@@ -51,6 +51,11 @@
       - any-glob-to-any-file:
           - "web/packages/pop-miner/**"
 
+# Local node
+'area: localnode':
+  - changed-files:
+      - any-glob-to-any-file: "localnode/**"
+
 # Makefiles
 'area: make':
   - changed-files:
