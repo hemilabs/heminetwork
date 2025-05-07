@@ -12,40 +12,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/coder/websocket"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ethereum/go-ethereum/eth"
 	"github.com/juju/loggo"
 	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/service/testutil"
 )
-
-// Opgeth RPC Messages structs
-
-type jsonrpcMessage struct {
-	Version string          `json:"jsonrpc,omitempty"`
-	ID      int             `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Error   *jsonError      `json:"error,omitempty"`
-	Result  any             `json:"result,omitempty"`
-}
-
-type jsonError struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
-}
 
 func createAddress() string {
 	port, err := freeport.GetFreePort()
@@ -59,17 +39,17 @@ func TestBFG(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer cancel()
 
-	msgCh := make(chan string, 10)
-	errCh := make(chan error)
-
 	const keystoneCount = 10
 
+	kssMap, kssList := makeSharedKeystones(30)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
 	// Create opgeth test server with the request handler.
-	opgeth := mockOpgeth(ctx, t, msgCh, errCh)
+	opMsg, opErr, opgeth := testutil.NewMockOpGeth(ctx, kssList)
 	defer opgeth.Close()
 
 	// Create tbc test server with the request handler.
-	mtbc := mockTBC(ctx, t, msgCh, errCh)
+	tbcMsg, tbcErr, mtbc := testutil.NewMockTBC(ctx, kssMap, btcTip)
 	defer mtbc.Close()
 
 	bfgCfg := NewDefaultConfig()
@@ -98,7 +78,7 @@ func TestBFG(t *testing.T) {
 	// messages we expect to receive
 	expectedMsg := map[string]int{
 		"kss_getKeystone": keystoneCount,
-		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: keystoneCount * 2,
+		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: defaultKeystoneCount * keystoneCount,
 	}
 
 	for !s.Connected() {
@@ -107,8 +87,8 @@ func TestBFG(t *testing.T) {
 
 	// send finality requests to bfg
 	go func() {
-		for range keystoneCount {
-			kssHash := "99f3e3b9f72805f6992550ed870905cd45c832d78caa990b099b4c5873d06c59"
+		for i := range keystoneCount {
+			kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
 			u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
 				bfgCfg.ListenAddress, bfgapi.APIVersion, kssHash)
 			resp, err := http.Get(u)
@@ -116,16 +96,20 @@ func TestBFG(t *testing.T) {
 				panic(err)
 			}
 
+			if resp.StatusCode != 200 {
+				panic(fmt.Sprintf("unexpected status code: %v", resp.StatusCode))
+			}
+
 			fin := bfgapi.L2KeystoneBitcoinFinalityResponse{}
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
 				panic(err)
 			}
-			// XXX add http status code test
 
 			if err = json.Unmarshal(body, &fin); err != nil {
 				panic(err)
 			}
+
 			if !*fin.SuperFinality {
 				panic(fmt.Errorf("unexpected finality result: %v",
 					spew.Sdump(fin)))
@@ -136,227 +120,61 @@ func TestBFG(t *testing.T) {
 	// receive messages and errors from opgeth and tbc
 	for {
 		select {
-		case err = <-errCh:
+		case err = <-opErr:
 			t.Fatal(err)
-		case n := <-msgCh:
+		case err = <-tbcErr:
+			t.Fatal(err)
+		case n := <-opMsg:
 			expectedMsg[n]--
-			finished := true
-			for msg, k := range expectedMsg {
-				if k > 0 {
-					t.Logf("Still missing %v messages of type %s", k, msg)
-					finished = false
-				}
-			}
-			if finished {
-				t.Log("Received all expected messages")
-				return
-			}
+		case n := <-tbcMsg:
+			expectedMsg[n]--
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
+		}
+		finished := true
+		for msg, k := range expectedMsg {
+			if k > 0 {
+				t.Logf("Still missing %v messages of type %s", k, msg)
+				finished = false
+			}
+		}
+		if finished {
+			t.Log("Received all expected messages")
+			return
 		}
 	}
 }
 
-type handler struct {
-	handleFunc func(w http.ResponseWriter, r *http.Request) error
-	errCh      chan error
-	name       string
-}
+func makeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
+	kssList := make([]hemi.L2Keystone, n)
+	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
-func (f handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := f.handleFunc(w, r); err != nil {
-		f.errCh <- fmt.Errorf("%s error: %w", f.name, err)
+	prevKeystone := &hemi.L2Keystone{
+		Version:       1,
+		L1BlockNumber: 0xbadc0ffe,
 	}
+	for ci := range n {
+		x := uint8(ci)
+		l2Keystone := hemi.L2Keystone{
+			Version:            1,
+			L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
+			L2BlockNumber:      uint32(ci+1) * 25,
+			ParentEPHash:       digest256([]byte{x}),
+			PrevKeystoneEPHash: digest256([]byte{x, x}),
+			StateRoot:          digest256([]byte{x, x, x}),
+			EPHash:             digest256([]byte{x, x, x, x}),
+		}
+
+		abrevKss := hemi.L2KeystoneAbbreviate(l2Keystone)
+		kssMap[*abrevKss.Hash()] = abrevKss
+		kssList[ci] = l2Keystone
+		prevKeystone = &l2Keystone
+	}
+
+	return kssMap, kssList
 }
 
 func digest256(x []byte) []byte {
 	xx := sha256.Sum256(x)
 	return xx[:]
-}
-
-func mockTBC(ctx context.Context, t *testing.T, msgCh chan string, errCh chan error) *httptest.Server {
-	hf := func(w http.ResponseWriter, r *http.Request) error {
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			CompressionMode: websocket.CompressionContextTakeover,
-		})
-		if err != nil {
-			return fmt.Errorf("Failed to accept websocket connection for %s: %w",
-				r.RemoteAddr, err)
-		}
-		defer conn.Close(websocket.StatusNormalClosure, "") // Force close connection
-
-		// Always ping, required by protocol.
-		ping := &tbcapi.PingRequest{
-			Timestamp: time.Now().Unix(),
-		}
-
-		wsConn := protocol.NewWSConn(conn)
-
-		if err = tbcapi.Write(r.Context(), wsConn, "0", ping); err != nil {
-			return fmt.Errorf("Write ping: %w", err)
-		}
-
-		t.Logf("mockTBC: connection from %v", r.RemoteAddr)
-
-		for {
-			cmd, id, payload, err := tbcapi.Read(ctx, wsConn)
-			if err != nil {
-				var ce websocket.CloseError
-				if errors.As(err, &ce) {
-					return fmt.Errorf("handleWebsocketRead: %w", err)
-				}
-				if errors.Is(err, io.EOF) {
-					return fmt.Errorf("handleWebsocketRead: EOF")
-				}
-
-				return fmt.Errorf("handleWebsocketRead: %w", err)
-			}
-
-			t.Logf("mockTBC: command is %v", cmd)
-
-			go func() {
-				select {
-				case <-ctx.Done():
-					err = ctx.Err()
-					return
-				case msgCh <- string(cmd):
-				}
-			}()
-
-			var resp any
-			switch cmd {
-			case tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest:
-				pl, ok := payload.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest)
-				if !ok {
-					return fmt.Errorf("unexpected payload format: %v", payload)
-				}
-
-				expectedKeystone := hemi.L2Keystone{
-					Version:            1,
-					L1BlockNumber:      0xbadc0ffe,
-					L2BlockNumber:      0xd3adb33f,
-					ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
-					PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
-					StateRoot:          digest256([]byte("Hello, world!")),
-					EPHash:             digest256([]byte{0xaa, 0x55}),
-				}
-
-				expectedAbrev := hemi.L2KeystoneAbbreviate(expectedKeystone)
-
-				if pl.L2KeystoneAbrevHash != *expectedAbrev.Hash() {
-					resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-						Error: protocol.Errorf("no clue who this is"),
-					}
-				} else {
-					resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-						L2KeystoneAbrev:       expectedAbrev,
-						L2KeystoneBlockHash:   &chainhash.Hash{0x0b, 0x0b},
-						L2KeystoneBlockHeight: uint(10),
-						BtcTipBlockHash:       &chainhash.Hash{0x0c, 0x0c},
-						BtcTipBlockHeight:     uint(22),
-					}
-				}
-			default:
-				return fmt.Errorf("unknown command: %v", cmd)
-			}
-
-			if err = tbcapi.Write(ctx, wsConn, id, resp); err != nil {
-				return fmt.Errorf("Failed to handle %s request: %w",
-					cmd, err)
-			}
-		}
-	}
-
-	h := handler{handleFunc: hf, errCh: errCh, name: "mockTBC"}
-
-	tbc := httptest.NewServer(h)
-	return tbc
-}
-
-func mockOpgeth(ctx context.Context, t *testing.T, msgCh chan string, errCh chan error) *httptest.Server {
-	hf := func(w http.ResponseWriter, r *http.Request) error {
-		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true,
-		})
-		if err != nil {
-			return err
-		}
-
-		defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
-
-		t.Logf("mockOpgeth: connection from %v", r.RemoteAddr)
-
-		for {
-
-			var msg jsonrpcMessage
-			_, br, err := c.Read(ctx)
-			if err != nil {
-				return err
-			}
-			err = json.Unmarshal(br, &msg)
-			if err != nil {
-				return err
-			}
-
-			t.Logf("mockOpgeth: command is %s", msg.Method)
-
-			go func() {
-				select {
-				case <-ctx.Done():
-					err = ctx.Err()
-					return
-				case msgCh <- msg.Method:
-				}
-			}()
-
-			switch msg.Method {
-			case "kss_getKeystone":
-				kssResp := eth.L2KeystoneValidityResponse{
-					L2Keystones: []hemi.L2Keystone{
-						{
-							Version:            1,
-							L1BlockNumber:      0xbadc0ffe,
-							L2BlockNumber:      0xd3adb33f,
-							ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
-							PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
-							StateRoot:          digest256([]byte("Hello, world!")),
-							EPHash:             digest256([]byte{0xaa, 0x55}),
-						},
-						{
-							Version:            1,
-							L1BlockNumber:      0xbadc0ffe,
-							L2BlockNumber:      0xd3adb33f,
-							ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
-							PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
-							StateRoot:          digest256([]byte("Goodbye, world!")),
-							EPHash:             digest256([]byte{0xaa, 0x55}),
-						},
-					},
-				}
-				subResp := jsonrpcMessage{
-					Version: "2.0",
-					ID:      msg.ID,
-					Result:  kssResp,
-				}
-
-				p, err := json.Marshal(subResp)
-				if err != nil {
-					return err
-				}
-
-				err = c.Write(ctx, websocket.MessageText, p)
-				if err != nil {
-					return err
-				}
-
-			default:
-				t.Errorf("unsupported message %v", msg.Method)
-			}
-		}
-	}
-
-	h := handler{handleFunc: hf, errCh: errCh, name: "mockOpgeth"}
-
-	opgeth := httptest.NewServer(h)
-	return opgeth
 }
