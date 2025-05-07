@@ -24,6 +24,8 @@ import (
 	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
+var defaultNtfnDuration = 1 * time.Second
+
 func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
 	kssList := make([]hemi.L2Keystone, 0, n)
 	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
@@ -390,7 +392,7 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 					select {
 					case <-f.pctx.Done():
 						return
-					case <-time.After(50 * time.Millisecond):
+					case <-time.After(defaultNtfnDuration):
 						fmt.Println("Sending new keystone notification")
 						err = c.Write(f.pctx, websocket.MessageText, p)
 						if err != nil {
