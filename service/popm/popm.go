@@ -299,23 +299,17 @@ func (s *Server) latestKeystones(ctx context.Context, count int) (*eth.L2Keyston
 	return &kr, nil
 }
 
-func (s *Server) hydrateKeystones(ctx context.Context) error {
-	log.Tracef("hydrateKeystones")
-	defer log.Tracef("hydrateKeystones exit")
-
-	s.mtx.Lock()
-	if s.keystones != nil {
-		s.mtx.Unlock()
-		return fmt.Errorf("already hydrated")
-	}
-	s.mtx.Unlock()
+// reconcileKeystones generates a keystones map
+func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*keystone, error) {
+	log.Tracef("reconcileKeystones")
+	defer log.Tracef("reconciletKeystones exit")
 
 	kr, err := s.latestKeystones(ctx, defaultL2KeystonesCount)
 	if err != nil {
-		return fmt.Errorf("hydrate: %w", err)
+		return nil, fmt.Errorf("reconcile: %w", err)
 	}
 
-	log.Debugf("hydrateKeystones: %v", spew.Sdump(kr))
+	log.Debugf("reconcileKeystones: %v", spew.Sdump(kr))
 
 	// Cross check with gozer to see what needs to be mined
 	aksHashes := make([]chainhash.Hash, 0, len(kr.L2Keystones))
@@ -355,15 +349,27 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 		ks.abbreviated = gks[k]
 	}
 
-	log.Infof("=== %v", spew.Sdump(keystones))
+	return keystones, nil
+}
 
-	// A bit silly to check twice but it doesn't hurt to be really sure.
+// hydrateKeystones should be called once at start of day. It will build the
+// keystone state cache.
+func (s *Server) hydrateKeystones(ctx context.Context) error {
+	log.Tracef("hydrateKeystones")
+	defer log.Tracef("hydrateKeystones exit")
+
+	keystones, err := s.reconcileKeystones(ctx)
+	if err != nil {
+		return fmt.Errorf("reconcile: %w", err)
+	}
+
 	s.mtx.Lock()
-	defer s.mtx.Unlock()
 	if s.keystones != nil {
-		return fmt.Errorf("hydration race")
+		s.mtx.Unlock()
+		return fmt.Errorf("already hydrated")
 	}
 	s.keystones = keystones
+	s.mtx.Unlock()
 
 	return nil
 }
@@ -388,6 +394,33 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 		case n := <-headersCh:
 			log.Tracef("kss notification received: %s", n)
+
+			nks, err := reconcileKeystones(ctx)
+			if err != nil {
+				// This only happens on non-recoverable errors
+				// so it is ok to exit.
+				return fmt.Errorf("keystone notification: %w")
+			}
+
+			// See if keystones were mined on bitcoin
+			s.mtx.Lock()
+			for hash, nk := range nks {
+				if nk.abbreviated.Error != nil {
+					// not mined yet
+					continue
+				}
+				// See if it was already marked as mined
+				if oks, ok := s.keystones[hash]; ok {
+					if oks.abbreviated.Error != nil {
+						// Not mined thus mark mined
+						oks.abbreviated.Error = nil
+						continue
+					}
+				} else {
+					// Not found, add
+				}
+			}
+			s.mtx.Unlock()
 		}
 	}
 }
