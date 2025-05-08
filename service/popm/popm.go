@@ -86,6 +86,16 @@ func NewDefaultConfig() *Config {
 	}
 }
 
+type keystoneState int
+
+const (
+	keystoneStateInvalid   keystoneState = 0
+	keystoneStateNew                     = 1
+	keystoneStateBroadcast               = 2
+	keystoneStateError                   = 3
+	keystoneStateMined                   = 4
+)
+
 type keystone struct {
 	// comes from opgeth
 	keystone *hemi.L2Keystone
@@ -93,6 +103,10 @@ type keystone struct {
 
 	// comes from gozer
 	abbreviated *gozer.BlockKeystoneByL2KeystoneAbrevHashResponse
+
+	// internal state                  /-----> 4
+	state keystoneState // 0 -> 1 -> 2 -> 3 -> 4
+	//                               2 <---/
 }
 
 type Server struct {
@@ -343,6 +357,14 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 			if gks[k].Error == nil {
 				panic("hash not found " + aksHashes[k].String())
 			}
+			ks.state = keystoneStateNew
+		} else {
+			// found, set state based on Error
+			if gks[k].Error == nil {
+				ks.state = keystoneStateMined
+			} else {
+				ks.state = keystoneStateNew
+			}
 		}
 		// Always add the entry to cache and rely on Error being !nil
 		// to retry later.
@@ -378,8 +400,11 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("handleOpgethSubscription")
 	defer log.Tracef("handleOpgethSubscription exit")
 
+	log.Infof("handleOpgethSubscription")
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
+	log.Infof("=================handleOpgethSubscription")
+	panic("deosnt get here uncless canceled antonio")
 	if err != nil {
 		return err
 	}
@@ -394,31 +419,20 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 		case n := <-headersCh:
 			log.Tracef("kss notification received: %s", n)
+			panic("x")
 
-			nks, err := reconcileKeystones(ctx)
+			nkss, err := s.reconcileKeystones(ctx)
 			if err != nil {
 				// This only happens on non-recoverable errors
 				// so it is ok to exit.
-				return fmt.Errorf("keystone notification: %w")
+				return fmt.Errorf("keystone notification: %w", err)
 			}
 
-			// See if keystones were mined on bitcoin
+			// See if there are state changes
 			s.mtx.Lock()
-			for hash, nk := range nks {
-				if nk.abbreviated.Error != nil {
-					// not mined yet
-					continue
-				}
-				// See if it was already marked as mined
-				if oks, ok := s.keystones[hash]; ok {
-					if oks.abbreviated.Error != nil {
-						// Not mined thus mark mined
-						oks.abbreviated.Error = nil
-						continue
-					}
-				} else {
-					// Not found, add
-				}
+			for k, nks := range nkss {
+				log.Infof("%v", nks.hash)
+				_ = k
 			}
 			s.mtx.Unlock()
 		}
