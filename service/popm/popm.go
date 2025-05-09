@@ -403,8 +403,6 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Infof("handleOpgethSubscription")
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
-	log.Infof("=================handleOpgethSubscription")
-	panic("deosnt get here uncless canceled antonio")
 	if err != nil {
 		return err
 	}
