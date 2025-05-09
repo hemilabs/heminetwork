@@ -353,7 +353,7 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 		case "kss_subscribe":
 			subResp := jsonrpcMessage{
 				Version: "2.0",
-				ID:      1,
+				ID:      msg.ID,
 				Result:  "0x5a395650bce324475634d746a831c227",
 			}
 
