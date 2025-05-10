@@ -780,10 +780,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 
 			// we generated 4 blocks to this address previously, therefore
 			// there should be 4 utxos
-			expectedCount := 4 - tti.start
-			if tti.limit < expectedCount {
-				expectedCount = tti.limit
-			}
+			expectedCount := min(tti.limit, 4-tti.start)
 
 			if !tti.doNotGenerate && len(response.UTXOs) != int(expectedCount) {
 				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.UTXOs))
@@ -992,10 +989,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 			// we generated 4 blocks to this address previously, therefore
 			// there should be 4 utxos
-			expectedCount := 4 - tti.start
-			if tti.limit < expectedCount {
-				expectedCount = tti.limit
-			}
+			expectedCount := min(tti.limit, 4-tti.start)
 
 			if !tti.doNotGenerate && len(response.UTXOs) != int(expectedCount) {
 				t.Fatalf("should have %d utxos, received: %d", expectedCount, len(response.UTXOs))
