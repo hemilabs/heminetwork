@@ -721,20 +721,6 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	}()
 
-	// Retry mining periodically
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(l2KeystoneRetryTimeout):
-				s.mine(ctx)
-			}
-		}
-	}()
-
 	log.Infof("bitcoin address   : %v", s.address)
 	log.Infof("bitcoin public key: %v", s.public)
 
