@@ -11,9 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/testutil"
 )
 
@@ -111,8 +113,10 @@ func TestTickingPopMiner(t *testing.T) {
 	opMsg, opErr, opgeth := testutil.NewMockOpGeth(ctx, kssList)
 	defer opgeth.Close()
 
+	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
+
 	// Create tbc test server with the request handler.
-	tbcMsg, tbcErr, mtbc := testutil.NewMockTBC(ctx, nil, btcTip)
+	tbcMsg, tbcErr, mtbc := testutil.NewMockTBC(ctx, emptyMap, btcTip)
 	defer mtbc.Close()
 
 	// Setup pop miner
