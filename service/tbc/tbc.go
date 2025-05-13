@@ -63,6 +63,8 @@ const (
 	defaultCmdTimeout          = 7 * time.Second
 	defaultPingTimeout         = 9 * time.Second
 	defaultBlockPendingTimeout = 13 * time.Second
+
+	defaultMempoolAge = 2 * 7 * 24 * time.Hour // two weeks
 )
 
 var (
@@ -577,10 +579,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	}
 
 	// If we are caught up start collecting mempool data.
-	// if s.cfg.MempoolEnabled && p.HasService(wire.SFNodeBloom) &&
-	//	s.Synced(ctx).Synced {
-	// XXX don't do this until we are synced!
-	if s.cfg.MempoolEnabled && p.HasService(wire.SFNodeBloom) {
+	if s.cfg.MempoolEnabled && p.HasService(wire.SFNodeBloom) && s.Synced(ctx).Synced {
 		err := p.Write(defaultCmdTimeout, wire.NewMsgMemPool())
 		if err != nil {
 			readError = err
@@ -1070,6 +1069,7 @@ func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) erro
 func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
 	log.Tracef("handleTx")
 	defer log.Tracef("handleTx exit")
+	panic("xxX")
 
 	// If we have processed this tx in the past, exit. This is a little
 	// racy but it is worth pre-testing to prevent expensive database
@@ -1135,7 +1135,7 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 		size:     btcmempool.GetTxVirtualSize(utx),
 		outValue: outValue,
 		inValue:  inValue,
-		inserted: time.Now(),
+		expires:  time.Now().Add(defaultMempoolAge),
 	}
 	return s.mempool.txsInsert(ctx, mptx)
 }
@@ -1429,8 +1429,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 					p, bhb.HH())
 			}
 		} else {
-			// XXX don't do this during IBD!
-			if s.cfg.MempoolEnabled {
+			if s.cfg.MempoolEnabled && s.Synced(ctx).Synced {
 				// Start building the mempool.
 				s.pm.All(ctx, s.mempoolPeer)
 			}
@@ -1614,19 +1613,27 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	}
 	s.mtx.Unlock()
 
-	// Reap txs from mempool, no need to log error.
-	// if s.cfg.MempoolEnabled {
-	//	_ = s.mempool.txsRemove(ctx, txHashes)
-	// }
+	// Reap txs from mempool for blocks that aew within defaultMempoolAge.
+	blocktime := block.MsgBlock().Header.Timestamp
+	now := time.Now()
+	mempoolAge := now.Add(-defaultMempoolAge)
+	if blocktime.After(mempoolAge) && s.cfg.MempoolEnabled {
+		err := s.mempool.txsRemove(ctx, txHashes)
+		if err != nil {
+			// XXX make debug or trace
+			log.Infof("mempool reap: %v", err)
+			panic(err)
+		}
+	}
 
-	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
+	log.Debugf("inserted block at height %d, parent hash %s",
+		height, block.MsgBlock().Header.PrevBlock)
 
 	s.mtx.Lock()
 	// Stats
 	s.blocksSize += uint64(len(raw))
 	s.blocksInserted++
 
-	now := time.Now()
 	if now.After(s.printTime) {
 		var (
 			mempoolCount   int
@@ -1704,9 +1711,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 		}
 	}
 
-	if s.cfg.MempoolEnabled && txsFound {
-		// XXX we should only do this AFTER we are synced.
-		// XXX allow to run for now while being developed.
+	if s.cfg.MempoolEnabled && txsFound && s.Synced(ctx).Synced {
 		if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
 			//nolint:errcheck // Error is intentionally ignored.
 			go s.downloadMissingTx(ctx, p)
@@ -2261,7 +2266,7 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 			size:     btcmempool.GetTxVirtualSize(utx),
 			outValue: outValue,
 			inValue:  inValue,
-			inserted: time.Now(),
+			expires:  time.Now().Add(defaultMempoolAge),
 		}
 		if err = mp.txsInsert(ctx, mptx); err != nil {
 			return nil, fmt.Errorf("cannot insert tx in mempool: %w", err)

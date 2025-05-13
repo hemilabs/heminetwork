@@ -27,7 +27,7 @@ var MaxTxVersion = int32(2) // XXX this should not be a global
 
 type mempoolTx struct {
 	id       chainhash.Hash // TxID
-	inserted time.Time      // When did we see this tx, expire after one week
+	expires  time.Time      // When mempool tx expires
 	weight   int64          // transaction weight
 	size     int64          // transaction virtual size
 	inValue  int64          // total txin value
@@ -37,8 +37,9 @@ type mempoolTx struct {
 type mempool struct {
 	mtx sync.RWMutex
 
-	txs  map[chainhash.Hash]*mempoolTx // when nil, tx has not been downloaded
-	size int64                         // total "tx virtual" memory used by mempool
+	reaping bool                          // set when reaping the mempool
+	txs     map[chainhash.Hash]*mempoolTx // when nil, tx has not been downloaded
+	size    int64                         // total "tx virtual" memory used by mempool
 }
 
 func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
@@ -118,31 +119,53 @@ func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 }
 
 // commented to fix linter
-// func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
-// 	log.Tracef("txsRemove")
-// 	defer log.Tracef("txsRemove exit")
+func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
+	log.Tracef("txsRemove")
+	defer log.Tracef("txsRemove exit")
 
-// 	if len(txs) == 0 {
-// 		return errors.New("no transactions provided")
-// 	}
+	if len(txs) == 0 {
+		return errors.New("no transactions provided")
+	}
 
-// 	m.mtx.Lock()
-// 	defer m.mtx.Unlock()
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
 
-// 	l := len(m.txs)
-// 	for k := range txs {
-// 		if tx, ok := m.txs[txs[k]]; ok {
-// 			m.size -= tx.size
-// 			delete(m.txs, txs[k])
-// 		}
-// 	}
+	l := len(m.txs)
+	for k := range txs {
+		if tx, ok := m.txs[txs[k]]; ok {
+			m.size -= tx.size
+			delete(m.txs, txs[k])
+		}
+	}
 
-// 	// if the map length does not change, nothing was deleted.
-// 	if len(m.txs) != l {
-// 		return errors.New("remove txs: nothing removed")
-// 	}
-// 	return nil
-// }
+	// Reap expired tx'
+	go m.reap()
+
+	// if the map length does not change, nothing was deleted.
+	if len(m.txs) != l {
+		return errors.New("remove txs: nothing removed")
+	}
+	return nil
+}
+
+func (m *mempool) reap() {
+	log.Tracef("reap")
+	defer log.Tracef("reap exit")
+
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
+	if m.reaping {
+		return
+	}
+	m.reaping = true
+	for _, tx := range m.txs {
+		if tx.expires.After(time.Now()) {
+			m.size -= tx.size
+			delete(m.txs, tx.id)
+		}
+	}
+	m.reaping = false
+}
 
 func (m *mempool) stats(ctx context.Context) (int, int) {
 	m.mtx.RLock()
