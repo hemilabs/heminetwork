@@ -579,7 +579,7 @@ func (s *Server) mine(ctx context.Context) error {
 			// Do nothing, wait for mined.
 		case keystoneStateMined:
 			// Remove if older than max age
-			if ks.firstSeen.Add(4 * time.Hour).After(time.Now()) {
+			if ks.firstSeen.Add(l2KeystoneMaxAge).After(time.Now()) {
 				delete(s.keystones, *ks.hash)
 			}
 		}
