@@ -17,6 +17,10 @@ import (
 	"github.com/hemilabs/heminetwork/service/testutil"
 )
 
+// XXX antonio, please add a test case where opgeth/gozer aren't connected to
+// make sure we don't deadlock or something else silly when network blips
+// occur.
+
 func TestPopMiner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer cancel()
