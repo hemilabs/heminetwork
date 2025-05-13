@@ -19,6 +19,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
@@ -106,7 +107,7 @@ type keystone struct {
 	// comes from gozer
 	abbreviated *gozer.BlockKeystoneByL2KeystoneAbrevHashResponse
 
-	firstSeen *time.Time // Used to age out of cache
+	expires *time.Time // Used to age out of cache
 
 	// internal state                  /-----> 4
 	state keystoneState // 0 -> 1 -> 2 -> 3 -> 4
@@ -124,8 +125,8 @@ func sortKeystones(mks map[chainhash.Hash]*keystone) []*keystone {
 	return keystones
 }
 
-func timestamp() *time.Time {
-	t := time.Now()
+func timestamp(d time.Duration) *time.Time {
+	t := time.Now().Add(d)
 	return &t
 }
 
@@ -386,9 +387,9 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 				ks.state = keystoneStateMined
 			} else {
 				ks.state = keystoneStateNew
-				ks.firstSeen = timestamp()
 			}
 		}
+		ks.expires = timestamp(l2KeystoneMaxAge)
 		// Always add the entry to cache and rely on Error being !nil
 		// to retry later.
 		ks.abbreviated = gks[k]
@@ -561,11 +562,11 @@ func (s *Server) mine(ctx context.Context) error {
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	sks := sortKeystones(s.keystones)
+	// sks := sortKeystones(s.keystones)
 
 	// log.Infof("mine: %v", spew.Sdump(sks))
 	// This is crappy to do all in the mutex but let's make sure it works first.
-	for _, ks := range sks {
+	for _, ks := range s.keystones {
 		switch ks.state {
 		case keystoneStateNew, keystoneStateError:
 			err := s.createAndBroadcastKeystone(ctx, ks.keystone)
@@ -579,7 +580,10 @@ func (s *Server) mine(ctx context.Context) error {
 			// Do nothing, wait for mined.
 		case keystoneStateMined:
 			// Remove if older than max age
-			if ks.firstSeen.Add(l2KeystoneMaxAge).After(time.Now()) {
+			if ks.expires == nil {
+				panic(spew.Sdump(ks))
+			}
+			if ks.expires.After(time.Now()) {
 				delete(s.keystones, *ks.hash)
 			}
 		}
