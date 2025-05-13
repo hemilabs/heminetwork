@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package testutil
 
 import (
@@ -56,15 +60,6 @@ func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hem
 	}
 
 	return kssMap, kssList
-}
-
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, 0)
-	}
-
-	return result
 }
 
 func digest256(x []byte) []byte {
