@@ -19,7 +19,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
@@ -580,9 +579,6 @@ func (s *Server) mine(ctx context.Context) error {
 			// Do nothing, wait for mined.
 		case keystoneStateMined:
 			// Remove if older than max age
-			if ks.expires == nil {
-				panic(spew.Sdump(ks))
-			}
 			if ks.expires.After(time.Now()) {
 				delete(s.keystones, *ks.hash)
 			}
