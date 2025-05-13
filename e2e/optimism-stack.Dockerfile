@@ -9,7 +9,7 @@ WORKDIR /git
 ARG OP_GETH_CACHE_BREAK=12F2
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout b0d955db8f2704dba50aed7efb99155530a75ccd
+RUN git checkout 9c44c2bf5e13eb2b018b681861352d70b7bac47b
 
 RUN go run build/ci.go install -static ./cmd/geth
 
@@ -28,7 +28,7 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout 3222d8f13b208231a5180487350b486c9ceb5ab9
+RUN git checkout fa7795184af106a0df91f06e6ebb6d791b953536
 
 WORKDIR /git/optimism
 RUN go mod tidy
