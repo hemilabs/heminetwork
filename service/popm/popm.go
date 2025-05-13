@@ -5,9 +5,11 @@
 package popm
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,7 +19,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
@@ -53,6 +54,7 @@ const (
 var (
 	log                    = loggo.GetLogger("popm")
 	l2KeystoneRetryTimeout = 15 * time.Second
+	l2KeystoneMaxAge       = 4 * time.Hour
 )
 
 func init() {
@@ -99,14 +101,32 @@ const (
 type keystone struct {
 	// comes from opgeth
 	keystone *hemi.L2Keystone
-	hash     *chainhash.Hash
+	hash     *chainhash.Hash // map key
 
 	// comes from gozer
 	abbreviated *gozer.BlockKeystoneByL2KeystoneAbrevHashResponse
 
+	firstSeen *time.Time // Used to age out of cache
+
 	// internal state                  /-----> 4
 	state keystoneState // 0 -> 1 -> 2 -> 3 -> 4
 	//                               2 <---/
+}
+
+func sortKeystones(mks map[chainhash.Hash]*keystone) []*keystone {
+	keystones := make([]*keystone, 0, len(mks))
+	for _, v := range mks {
+		keystones = append(keystones, v)
+	}
+	slices.SortFunc(keystones, func(a, b *keystone) int {
+		return cmp.Compare(a.keystone.L2BlockNumber, b.keystone.L2BlockNumber)
+	})
+	return keystones
+}
+
+func timestamp() *time.Time {
+	t := time.Now()
+	return &t
 }
 
 type Server struct {
@@ -135,6 +155,7 @@ type Server struct {
 	// mining
 	retryThreshold uint32
 	keystones      map[chainhash.Hash]*keystone
+	workC          chan struct{}
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -145,6 +166,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
+		workC:          make(chan struct{}, 2),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -323,7 +345,7 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 		return nil, fmt.Errorf("reconcile: %w", err)
 	}
 
-	log.Debugf("reconcileKeystones: %v", spew.Sdump(kr))
+	// log.Debugf("reconcileKeystones: %v", spew.Sdump(kr))
 
 	// Cross check with gozer to see what needs to be mined
 	aksHashes := make([]chainhash.Hash, 0, len(kr.L2Keystones))
@@ -346,7 +368,7 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 		// Shouldn't happen
 		panic(fmt.Sprintf("len diagnostic %v != %v", len(gks), len(aksHashes)))
 	}
-	log.Debugf("BlockKeystoneByL2KeystoneAbrevHash: %v", spew.Sdump(gks))
+	// log.Debugf("BlockKeystoneByL2KeystoneAbrevHash: %v", spew.Sdump(gks))
 	for k := range gks {
 		// Fixup keystone cache based on gozer response, note that gks
 		// or is identical to aks order thus we can use the hash array
@@ -364,6 +386,7 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 				ks.state = keystoneStateMined
 			} else {
 				ks.state = keystoneStateNew
+				ks.firstSeen = timestamp()
 			}
 		}
 		// Always add the entry to cache and rely on Error being !nil
@@ -408,7 +431,6 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	}
 
 	for {
-		// XXX do we need a timer here to just poll?
 		select {
 		case err := <-sub.Err():
 			return err
@@ -417,7 +439,6 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 		case n := <-headersCh:
 			log.Tracef("kss notification received: %s", n)
-			panic("x")
 
 			nkss, err := s.reconcileKeystones(ctx)
 			if err != nil {
@@ -427,12 +448,39 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 			}
 
 			// See if there are state changes
+			var work bool
 			s.mtx.Lock()
-			for k, nks := range nkss {
-				log.Infof("%v", nks.hash)
-				_ = k
+			for _, nks := range nkss {
+				cks, ok := s.keystones[*nks.hash]
+				if ok {
+					switch nks.state {
+					case keystoneStateNew:
+						// Already in cache
+						log.Infof("IN CACHE %v: %v %v", nks.hash, nks.state, nks.keystone.L2BlockNumber)
+						continue
+					case keystoneStateMined:
+						// Move to mined state
+						log.Infof("MINED %v: %v %v", nks.hash, nks.state, nks.keystone.L2BlockNumber)
+						cks.state = keystoneStateMined
+					}
+				} else {
+					// Insert new keystone in cache
+					log.Infof("NEW %v: %v %v", nks.hash, nks.state, nks.keystone.L2BlockNumber)
+					s.keystones[*nks.hash] = nks
+				}
+				work = true
 			}
 			s.mtx.Unlock()
+
+			// Signal miner to get to work
+			if work {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case s.workC <- struct{}{}:
+				default:
+				}
+			}
 		}
 	}
 }
@@ -505,6 +553,39 @@ func (s *Server) opgeth(ctx context.Context) {
 
 		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
 	}
+}
+
+func (s *Server) mine(ctx context.Context) error {
+	log.Tracef("mine")
+	defer log.Tracef("mine exit")
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	sks := sortKeystones(s.keystones)
+
+	// log.Infof("mine: %v", spew.Sdump(sks))
+	// This is crappy to do all in the mutex but let's make sure it works first.
+	for _, ks := range sks {
+		switch ks.state {
+		case keystoneStateNew, keystoneStateError:
+			err := s.createAndBroadcastKeystone(ctx, ks.keystone)
+			if err != nil {
+				log.Errorf("new keystone: %v", err)
+				ks.state = keystoneStateError
+			} else {
+				ks.state = keystoneStateBroadcast
+			}
+		case keystoneStateBroadcast:
+			// Do nothing, wait for mined.
+		case keystoneStateMined:
+			// Remove if older than max age
+			if ks.firstSeen.Add(4 * time.Hour).After(time.Now()) {
+				delete(s.keystones, *ks.hash)
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
@@ -619,6 +700,27 @@ func (s *Server) Run(pctx context.Context) error {
 		s.opgeth(ctx)
 	}()
 
+	// Mining
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		t := time.NewTimer(l2KeystoneRetryTimeout)
+		for {
+			t.Reset(l2KeystoneRetryTimeout)
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.workC:
+			case <-t.C:
+			}
+
+			err := s.mine(ctx)
+			if err != nil {
+				log.Errorf("mine: %v", err)
+			}
+		}
+	}()
+
 	// Retry mining periodically
 	s.wg.Add(1)
 	go func() {
@@ -628,8 +730,7 @@ func (s *Server) Run(pctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-time.After(l2KeystoneRetryTimeout):
-				panic("x")
-				// s.mineKnownKeystones(ctx)
+				s.mine(ctx)
 			}
 		}
 	}()
