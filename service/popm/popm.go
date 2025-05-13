@@ -5,11 +5,9 @@
 package popm
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -92,10 +90,10 @@ type keystoneState int
 
 const (
 	keystoneStateInvalid   keystoneState = 0
-	keystoneStateNew                     = 1
-	keystoneStateBroadcast               = 2
-	keystoneStateError                   = 3
-	keystoneStateMined                   = 4
+	keystoneStateNew       keystoneState = 1
+	keystoneStateBroadcast keystoneState = 2
+	keystoneStateError     keystoneState = 3
+	keystoneStateMined     keystoneState = 4
 )
 
 type keystone struct {
@@ -113,16 +111,16 @@ type keystone struct {
 	//                               2 <---/
 }
 
-func sortKeystones(mks map[chainhash.Hash]*keystone) []*keystone {
-	keystones := make([]*keystone, 0, len(mks))
-	for _, v := range mks {
-		keystones = append(keystones, v)
-	}
-	slices.SortFunc(keystones, func(a, b *keystone) int {
-		return cmp.Compare(a.keystone.L2BlockNumber, b.keystone.L2BlockNumber)
-	})
-	return keystones
-}
+// func sortKeystones(mks map[chainhash.Hash]*keystone) []*keystone {
+// 	keystones := make([]*keystone, 0, len(mks))
+// 	for _, v := range mks {
+// 		keystones = append(keystones, v)
+// 	}
+// 	slices.SortFunc(keystones, func(a, b *keystone) int {
+// 		return cmp.Compare(a.keystone.L2BlockNumber, b.keystone.L2BlockNumber)
+// 	})
+// 	return keystones
+// }
 
 func timestamp(d time.Duration) *time.Time {
 	t := time.Now().Add(d)
