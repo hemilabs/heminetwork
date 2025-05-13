@@ -456,16 +456,19 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 					switch nks.state {
 					case keystoneStateNew:
 						// Already in cache
-						log.Infof("IN CACHE %v: %v %v", nks.hash, nks.state, nks.keystone.L2BlockNumber)
+						log.Tracef("skip %v: %v %v", nks.hash,
+							nks.state, nks.keystone.L2BlockNumber)
 						continue
 					case keystoneStateMined:
 						// Move to mined state
-						log.Infof("MINED %v: %v %v", nks.hash, nks.state, nks.keystone.L2BlockNumber)
+						log.Tracef("mined %v: %v %v", nks.hash,
+							nks.state, nks.keystone.L2BlockNumber)
 						cks.state = keystoneStateMined
 					}
 				} else {
 					// Insert new keystone in cache
-					log.Infof("NEW %v: %v %v", nks.hash, nks.state, nks.keystone.L2BlockNumber)
+					log.Tracef("insert %v: %v %v", nks.hash, nks.state,
+						nks.keystone.L2BlockNumber)
 					s.keystones[*nks.hash] = nks
 				}
 				work = true
