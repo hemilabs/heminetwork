@@ -170,7 +170,7 @@ func (m *mempool) reap() {
 			continue
 		}
 		if time.Now().After(tx.expires) {
-			log.Infof("tx expired %v", tx.id) // XXX debug?
+			log.Debugf("tx expired %v", tx.id)
 			m.size -= tx.size
 			delete(m.txs, tx.id)
 		}
