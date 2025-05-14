@@ -1049,7 +1049,10 @@ func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) erro
 func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
 	log.Tracef("handleTx")
 	defer log.Tracef("handleTx exit")
-	panic("xxX")
+
+	if !(s.cfg.MempoolEnabled && s.Synced(ctx).Synced) {
+		return nil
+	}
 
 	// If we have processed this tx in the past, exit. This is a little
 	// racy but it is worth pre-testing to prevent expensive database
@@ -1586,7 +1589,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	blocktime := block.MsgBlock().Header.Timestamp
 	now := time.Now()
 	mempoolAge := now.Add(-defaultMempoolAge)
-	if blocktime.After(mempoolAge) && s.cfg.MempoolEnabled {
+	if blocktime.After(mempoolAge) && s.cfg.MempoolEnabled && s.Synced(ctx).Synced {
 		err := s.mempool.txsRemove(ctx, txHashes)
 		if err != nil {
 			// XXX make debug or trace
