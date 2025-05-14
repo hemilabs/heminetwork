@@ -1121,21 +1121,9 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 		}
 	}
 
-	// Create mempool tx
-	inValue, outValue, err := s.valuesFromTransaction(ctx, msg)
+	mptx, err := s.mempoolTxNew(ctx, utx)
 	if err != nil {
-		// XXX we are still indexing or invalid tx
-		// XXX too loud?
-		log.Errorf("cannot obtain values from tx: %v", err)
-		return nil
-	}
-	mptx := &mempoolTx{
-		id:       msg.TxHash(),
-		weight:   blockchain.GetTransactionWeight(utx),
-		size:     btcmempool.GetTxVirtualSize(utx),
-		outValue: outValue,
-		inValue:  inValue,
-		expires:  time.Now().Add(defaultMempoolAge),
+		return fmt.Errorf("new mempool tx: %w", err)
 	}
 	return s.mempool.txsInsert(ctx, mptx)
 }
@@ -2230,6 +2218,22 @@ func (s *Server) valuesFromTransaction(ctx context.Context, tx *wire.MsgTx) (int
 	return iv, ov, nil
 }
 
+func (s *Server) mempoolTxNew(ctx context.Context, utx *btcutil.Tx) (*mempoolTx, error) {
+	// Create mempool tx
+	inValue, outValue, err := s.valuesFromTransaction(ctx, utx.MsgTx())
+	if err != nil {
+		return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
+	}
+	return &mempoolTx{
+		id:       utx.MsgTx().TxHash(),
+		weight:   blockchain.GetTransactionWeight(utx),
+		size:     btcmempool.GetTxVirtualSize(utx),
+		outValue: outValue,
+		inValue:  inValue,
+		expires:  time.Now().Add(defaultMempoolAge),
+	}, nil
+}
+
 // FeesByBlockHash calculates the median fee for the provided block.
 func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbcapi.FeeEstimate, error) {
 	log.Tracef("FeesByBlockHash")
@@ -2255,18 +2259,9 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 			// Skip coinbase inputs
 			continue
 		}
-		msg := utx.MsgTx()
-		inValue, outValue, err := s.valuesFromTransaction(ctx, msg)
+		mptx, err := s.mempoolTxNew(ctx, utx)
 		if err != nil {
-			return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
-		}
-		mptx := &mempoolTx{
-			id:       msg.TxHash(),
-			weight:   blockchain.GetTransactionWeight(utx),
-			size:     btcmempool.GetTxVirtualSize(utx),
-			outValue: outValue,
-			inValue:  inValue,
-			expires:  time.Now().Add(defaultMempoolAge),
+			return nil, fmt.Errorf("new mempool tx: %w", err)
 		}
 		if err = mp.txsInsert(ctx, mptx); err != nil {
 			return nil, fmt.Errorf("cannot insert tx in mempool: %w", err)
