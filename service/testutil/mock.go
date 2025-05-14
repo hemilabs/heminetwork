@@ -21,6 +21,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
 	"github.com/ethereum/go-ethereum/eth"
+	gorweb "github.com/gorilla/websocket"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -28,7 +29,7 @@ import (
 	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
-var defaultNtfnDuration = 250 * time.Millisecond
+var DefaultNtfnDuration = 250 * time.Millisecond
 
 func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
 	kssList := make([]hemi.L2Keystone, 0, n)
@@ -120,10 +121,7 @@ type OpGethMockHandler struct {
 	keystones []hemi.L2Keystone
 }
 
-func NewMockTBC(pctx context.Context, keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip uint) (chan string, chan error, *httptest.Server) {
-	errCh := make(chan error, 10)
-	msgCh := make(chan string, 10)
-
+func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip uint) *httptest.Server {
 	th := TBCMockHandler{
 		mockHandler: mockHandler{
 			errCh: errCh,
@@ -137,13 +135,10 @@ func NewMockTBC(pctx context.Context, keystones map[chainhash.Hash]*hemi.L2Keyst
 	th.handleFunc = th.mockTBCHandleFunc
 
 	tbc := httptest.NewServer(th)
-	return msgCh, errCh, tbc
+	return tbc
 }
 
-func NewMockOpGeth(pctx context.Context, keystones []hemi.L2Keystone) (chan string, chan error, *httptest.Server) {
-	errCh := make(chan error, 10)
-	msgCh := make(chan string, 10)
-
+func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, keystones []hemi.L2Keystone) *httptest.Server {
 	// Sort keystones in ascending order
 	slices.SortFunc(keystones, func(a, b hemi.L2Keystone) int {
 		return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
@@ -160,8 +155,8 @@ func NewMockOpGeth(pctx context.Context, keystones []hemi.L2Keystone) (chan stri
 	}
 	th.handleFunc = th.mockOpGethHandleFunc
 
-	tbc := httptest.NewServer(th)
-	return msgCh, errCh, tbc
+	op := httptest.NewServer(th)
+	return op
 }
 
 func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request) error {
@@ -310,14 +305,16 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 }
 
 func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.Request) error {
-	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
-	})
-	if err != nil {
-		return err
+	var upgrader = gorweb.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
 	}
-
-	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		return fmt.Errorf("failed to accept websocket connection for %s: %w",
+			r.RemoteAddr, err)
+	}
+	defer conn.Close() // Force close connection
 
 	// fmt.Printf("mockOpgeth: connection from %v\n", r.RemoteAddr)
 
@@ -325,12 +322,7 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 	for {
 
 		var msg jsonrpcMessage
-		_, br, err := c.Read(f.pctx)
-		if err != nil {
-			return err
-		}
-		err = json.Unmarshal(br, &msg)
-		if err != nil {
+		if err := conn.ReadJSON(&msg); err != nil {
 			return err
 		}
 
@@ -345,22 +337,13 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 			}
 		}()
 
+		var subResp jsonrpcMessage
 		switch msg.Method {
 		case "kss_subscribe":
-			subResp := jsonrpcMessage{
+			subResp = jsonrpcMessage{
 				Version: "2.0",
 				ID:      msg.ID,
 				Result:  "0x5a395650bce324475634d746a831c227",
-			}
-
-			p, err := json.Marshal(subResp)
-			if err != nil {
-				return err
-			}
-
-			err = c.Write(f.pctx, websocket.MessageText, p)
-			if err != nil {
-				return err
 			}
 
 			encResult := subscriptionResultEnc{
@@ -373,24 +356,15 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 				Params:  encResult,
 			}
 
-			err = c.Write(f.pctx, websocket.MessageText, p)
-			if err != nil {
-				return err
-			}
-
+			// send new keystone notifications periodically
 			go func() {
-				p, err := json.Marshal(subNotif)
-				if err != nil {
-					panic(err)
-				}
 				for {
 					select {
 					case <-f.pctx.Done():
 						return
-					case <-time.After(defaultNtfnDuration):
+					case <-time.After(DefaultNtfnDuration):
 						fmt.Println("Sending new keystone notification")
-						err = c.Write(f.pctx, websocket.MessageText, p)
-						if err != nil {
+						if err = conn.WriteJSON(subNotif); err != nil {
 							fmt.Println(err.Error())
 							return
 						}
@@ -404,25 +378,13 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 			if err != nil {
 				panic(err)
 			}
-
 			kssResp := eth.L2KeystoneLatestResponse{
-				L2Keystones: getNLatestKeystones(count[0], f.keystones[:min(keystoneCounter+count[0], len(f.keystones))]),
+				L2Keystones: lastKeystones(count[0], f.keystones[:min(keystoneCounter+count[0], len(f.keystones))]),
 			}
-
-			subResp := jsonrpcMessage{
+			subResp = jsonrpcMessage{
 				Version: "2.0",
 				ID:      msg.ID,
 				Result:  kssResp,
-			}
-
-			p, err := json.Marshal(subResp)
-			if err != nil {
-				return err
-			}
-
-			err = c.Write(f.pctx, websocket.MessageText, p)
-			if err != nil {
-				return err
 			}
 		case "kss_getKeystone":
 			var params []any
@@ -464,29 +426,21 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 				}
 			}
 
-			subResp := jsonrpcMessage{
+			subResp = jsonrpcMessage{
 				Version: "2.0",
 				ID:      msg.ID,
 				Result:  kssResp,
 			}
 
-			p, err := json.Marshal(subResp)
-			if err != nil {
-				return err
-			}
-
-			err = c.Write(f.pctx, websocket.MessageText, p)
-			if err != nil {
-				return err
-			}
-
 		default:
 			return fmt.Errorf("unsupported message %v", msg.Method)
 		}
-
+		if err = conn.WriteJSON(subResp); err != nil {
+			return err
+		}
 	}
 }
 
-func getNLatestKeystones(n int, keystones []hemi.L2Keystone) []hemi.L2Keystone {
+func lastKeystones(n int, keystones []hemi.L2Keystone) []hemi.L2Keystone {
 	return keystones[max(0, len(keystones)-n):]
 }
