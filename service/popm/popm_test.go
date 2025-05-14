@@ -32,12 +32,15 @@ func TestPopMiner(t *testing.T) {
 	kssMap, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
 	// Create opgeth test server with the request handler.
-	opMsg, opErr, opgeth := testutil.NewMockOpGeth(ctx, kssList)
+	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Close()
 
 	// Create tbc test server with the request handler.
-	tbcMsg, tbcErr, mtbc := testutil.NewMockTBC(ctx, kssMap, btcTip)
+	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip)
 	defer mtbc.Close()
 
 	// Setup pop miner
@@ -69,58 +72,35 @@ func TestPopMiner(t *testing.T) {
 	expectedMsg := map[string]int{
 		"kss_subscribe":          1,
 		"kss_getLatestKeystones": 1,
-		// tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: 2,
-		// tbcapi.CmdUTXOsByAddressRequest:  keystoneRequestCount,
-		// tbcapi.CmdFeeEstimateRequest:     keystoneRequestCount,
-		// tbcapi.CmdTxBroadcastRequest:     keystoneRequestCount,
-		// tbcapi.CmdBlockHeaderBestRequest: keystoneRequestCount,
 	}
 
 	// receive messages and errors from opgeth and tbc
-	for {
-		select {
-		case err = <-opErr:
-			t.Fatal(err)
-		case err = <-tbcErr:
-			t.Fatal(err)
-		case n := <-opMsg:
-			expectedMsg[n]--
-		case n := <-tbcMsg:
-			expectedMsg[n]--
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		}
-		finished := true
-		for msg, k := range expectedMsg {
-			if k > 0 {
-				t.Logf("Still missing %v messages of type %s", k, msg)
-				finished = false
-			}
-		}
-		if finished {
-			t.Log("Received all expected messages")
-			return
-		}
+	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestTickingPopMiner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	l2KeystoneMaxAge = 7 * time.Second
+	l2KeystoneMaxAge = testutil.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
 	// Create opgeth test server with the request handler.
-	opMsg, opErr, opgeth := testutil.NewMockOpGeth(ctx, kssList)
+	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Close()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
 	// Create tbc test server with the request handler.
-	tbcMsg, tbcErr, mtbc := testutil.NewMockTBC(ctx, emptyMap, btcTip)
+	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip)
 	defer mtbc.Close()
 
 	// Setup pop miner
@@ -156,43 +136,50 @@ func TestTickingPopMiner(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
+	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mtbc.Close()
+	opgeth.Close()
+
+	if len(s.keystones) != wantedKeystones {
+		t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
+	}
+	for _, k := range s.keystones {
+		if _, ok := emptyMap[*k.hash]; !ok {
+			t.Fatalf("missing keystone: %v", k.hash)
+		}
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err = s.mine(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.keystones) == wantedKeystones {
+		t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
+	}
+	t.Log("Received all expected messages")
+}
+
+func messageListener(ctx context.Context, expected map[string]int, errCh chan error, msgCh chan string) error {
 	for {
 		select {
-		case err = <-opErr:
-			t.Fatal(err)
-		case err = <-tbcErr:
-			t.Fatal(err)
-		case n := <-opMsg:
-			expectedMsg[n]--
-		case n := <-tbcMsg:
-			expectedMsg[n]--
+		case err := <-errCh:
+			return err
+		case n := <-msgCh:
+			expected[n]--
 		case <-ctx.Done():
-			t.Fatal(ctx.Err())
+			return ctx.Err()
 		}
 		finished := true
-		for msg, k := range expectedMsg {
+		for _, k := range expected {
 			if k > 0 {
-				t.Logf("Still missing %v messages of type %s", k, msg)
 				finished = false
 			}
 		}
 		if finished {
-			if len(s.keystones) != wantedKeystones {
-				t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
-			}
-			for _, k := range s.keystones {
-				if _, ok := emptyMap[*k.hash]; !ok {
-					t.Fatalf("missing keystone: %v", k.hash)
-				}
-			}
-			if err = s.mine(ctx); err != nil {
-				t.Fatal(err)
-			}
-			if len(s.keystones) == wantedKeystones {
-				t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
-			}
-			t.Log("Received all expected messages")
-			return
+			return nil
 		}
 	}
 }
