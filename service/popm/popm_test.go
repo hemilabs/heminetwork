@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/testutil"
 )
@@ -23,11 +23,13 @@ import (
 // make sure we don't deadlock or something else silly when network blips
 // occur.
 
+const wantedKeystones = 40
+
 func TestPopMiner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
 	defer cancel()
 
-	kssMap, kssList := testutil.MakeSharedKeystones(40)
+	kssMap, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
@@ -103,10 +105,12 @@ func TestPopMiner(t *testing.T) {
 }
 
 func TestTickingPopMiner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 
-	_, kssList := testutil.MakeSharedKeystones(40)
+	l2KeystoneMaxAge = 7 * time.Second
+
+	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
@@ -145,30 +149,50 @@ func TestTickingPopMiner(t *testing.T) {
 	}()
 
 	// messages we expect to receive
-	//expectedMsg := map[string]int{
-	//	"kss_subscribe":          1,
-	//	"kss_getLatestKeystones": 1,
-	//	// tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: 2,
-	//	// tbcapi.CmdUTXOsByAddressRequest:  keystoneRequestCount,
-	//	// tbcapi.CmdFeeEstimateRequest:     keystoneRequestCount,
-	//	// tbcapi.CmdTxBroadcastRequest:     keystoneRequestCount,
-	//	// tbcapi.CmdBlockHeaderBestRequest: keystoneRequestCount,
-	//}
+	expectedMsg := map[string]int{
+		"kss_subscribe":              1,
+		"kss_getLatestKeystones":     1,
+		tbcapi.CmdTxBroadcastRequest: wantedKeystones,
+	}
 
 	// receive messages and errors from opgeth and tbc
 	for {
 		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
 		case err = <-opErr:
 			t.Fatal(err)
 		case err = <-tbcErr:
 			t.Fatal(err)
-
 		case n := <-opMsg:
-			log.Infof("opMsg: %v", spew.Sdump(n))
+			expectedMsg[n]--
 		case n := <-tbcMsg:
-			log.Infof("tbcMsg: %v", spew.Sdump(n))
+			expectedMsg[n]--
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		finished := true
+		for msg, k := range expectedMsg {
+			if k > 0 {
+				t.Logf("Still missing %v messages of type %s", k, msg)
+				finished = false
+			}
+		}
+		if finished {
+			if len(s.keystones) != wantedKeystones {
+				t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
+			}
+			for _, k := range s.keystones {
+				if _, ok := emptyMap[*k.hash]; !ok {
+					t.Fatalf("missing keystone: %v", k.hash)
+				}
+			}
+			if err = s.mine(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if len(s.keystones) == wantedKeystones {
+				t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
+			}
+			t.Log("Received all expected messages")
+			return
 		}
 	}
 }
