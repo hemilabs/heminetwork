@@ -23,6 +23,9 @@ import (
 // 	return
 // }
 
+// XXX antonio please add tests for reaping. We need to test
+// adding/removing/autoreaping tx's from the mempool.
+
 var MaxTxVersion = int32(2) // XXX this should not be a global
 
 type mempoolTx struct {
