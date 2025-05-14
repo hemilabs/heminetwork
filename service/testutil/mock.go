@@ -28,7 +28,7 @@ import (
 	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
-var defaultNtfnDuration = 1 * time.Second
+var defaultNtfnDuration = 250 * time.Millisecond
 
 func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
 	kssList := make([]hemi.L2Keystone, 0, n)
@@ -185,7 +185,7 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 		return fmt.Errorf("write ping: %w", err)
 	}
 
-	fmt.Printf("mockTBC: connection from %v\n", r.RemoteAddr)
+	// fmt.Printf("mockTBC: connection from %v\n", r.RemoteAddr)
 
 	for {
 		cmd, id, payload, err := tbcapi.Read(f.pctx, wsConn)
@@ -201,7 +201,7 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 			return fmt.Errorf("handleWebsocketRead: %w", err)
 		}
 
-		fmt.Printf("mockTBC: command is %v\n", cmd)
+		// fmt.Printf("mockTBC: command is %v\n", cmd)
 
 		go func() {
 			select {
@@ -319,9 +319,10 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 
 	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
 
-	fmt.Printf("mockOpgeth: connection from %v\n", r.RemoteAddr)
+	// fmt.Printf("mockOpgeth: connection from %v\n", r.RemoteAddr)
 
-	for i := 1; ; i++ {
+	var keystoneCounter int
+	for {
 
 		var msg jsonrpcMessage
 		_, br, err := c.Read(f.pctx)
@@ -333,7 +334,7 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 			return err
 		}
 
-		fmt.Printf("mockOpgeth: command is %s\n", msg.Method)
+		// fmt.Printf("mockOpgeth: command is %s\n", msg.Method)
 
 		go func() {
 			select {
@@ -372,7 +373,6 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 				Params:  encResult,
 			}
 
-			fmt.Println("Sending new keystone notification")
 			err = c.Write(f.pctx, websocket.MessageText, p)
 			if err != nil {
 				return err
@@ -394,6 +394,7 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 							fmt.Println(err.Error())
 							return
 						}
+						keystoneCounter++
 					}
 				}
 			}()
@@ -405,7 +406,7 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 			}
 
 			kssResp := eth.L2KeystoneLatestResponse{
-				L2Keystones: f.keystones[i : i+count[0]],
+				L2Keystones: getNLatestKeystones(count[0], f.keystones[:min(keystoneCounter+count[0], len(f.keystones))]),
 			}
 
 			subResp := jsonrpcMessage{
@@ -484,4 +485,8 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 		}
 
 	}
+}
+
+func getNLatestKeystones(n int, keystones []hemi.L2Keystone) []hemi.L2Keystone {
+	return keystones[max(0, len(keystones)-n):]
 }
