@@ -39,15 +39,18 @@ func TestBFG(t *testing.T) {
 
 	const keystoneCount = 10
 
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
 	kssMap, kssList := testutil.MakeSharedKeystones(30)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
-	opMsg, opErr, opgeth := testutil.NewMockOpGeth(ctx, kssList)
+	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Close()
 
 	// Create tbc test server with the request handler.
-	tbcMsg, tbcErr, mtbc := testutil.NewMockTBC(ctx, kssMap, btcTip)
+	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip)
 	defer mtbc.Close()
 
 	bfgCfg := NewDefaultConfig()
@@ -118,13 +121,9 @@ func TestBFG(t *testing.T) {
 	// receive messages and errors from opgeth and tbc
 	for {
 		select {
-		case err = <-opErr:
+		case err = <-errCh:
 			t.Fatal(err)
-		case err = <-tbcErr:
-			t.Fatal(err)
-		case n := <-opMsg:
-			expectedMsg[n]--
-		case n := <-tbcMsg:
+		case n := <-msgCh:
 			expectedMsg[n]--
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())

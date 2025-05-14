@@ -305,7 +305,7 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 }
 
 func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.Request) error {
-	var upgrader = gorweb.Upgrader{
+	upgrader := gorweb.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
 	}

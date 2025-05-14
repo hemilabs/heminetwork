@@ -122,8 +122,11 @@ func TestIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
 	// Create tbc test server with the request handler.
-	_, _, mtbc := testutil.NewMockTBC(ctx, nil, 0)
+	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, nil, 0)
 	defer mtbc.Close()
 
 	tg, err := tbcgozer.Run(ctx, mtbc.URL)
@@ -177,7 +180,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	tx, prevOut, err := TransactionCreate(uint32(time.Now().Unix()),
-		btcutil.Amount(550), btcutil.Amount(feeEstimateForTx.SatsPerByte), addr, utxos, pkscript)
+		btcutil.Amount(550), btcutil.Amount(feeEstimateForTx.SatsPerByte), addr, utxos, pkscript, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +197,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	popTx, prevOut, err := PoPTransactionCreate(keystone, uint32(time.Now().Unix()),
-		btcutil.Amount(feeEstimateForPop.SatsPerByte+0.5), utxos, pkscript)
+		btcutil.Amount(feeEstimateForPop.SatsPerByte+0.5), utxos, pkscript, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
