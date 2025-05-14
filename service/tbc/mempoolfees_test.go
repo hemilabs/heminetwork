@@ -36,7 +36,7 @@ func TestMempoolFees(t *testing.T) {
 			}
 			mptx := mempoolTx{
 				id:       *ch,
-				inserted: time.Now(),
+				expires:  time.Now().Add(1 * time.Minute),
 				weight:   3000,
 				size:     1000,
 				inValue:  int64(3000 + k*500),
