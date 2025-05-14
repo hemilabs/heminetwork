@@ -64,8 +64,9 @@ func TestMempoolReaping(t *testing.T) {
 	}
 
 	const (
-		txNum  = 1000
-		rounds = 5
+		txNum    = 1000
+		rounds   = 5
+		totalTxs = txNum * rounds
 	)
 	expire := time.Now().Add(50 * time.Millisecond)
 
@@ -88,18 +89,19 @@ func TestMempoolReaping(t *testing.T) {
 	}
 
 	size, _ := mp.stats(ctx)
-	if size != txNum*rounds {
-		t.Fatalf("mempool has %v txs, expected %v", size, txNum*rounds)
+	if size != totalTxs {
+		t.Fatalf("mempool has %v txs, expected %v", size, totalTxs)
 	}
 
 	for k := range rounds {
 		time.Sleep(time.Until(expire.Add(time.Duration(k) * time.Second)))
+
 		mp.reap()
 
 		size, _ = mp.stats(ctx)
-		if size != (txNum*rounds)-((k+1)*txNum) {
+		if size != totalTxs-((k+1)*txNum) {
 			t.Fatalf("mempool has %v txs, expected %v", size, 0)
 		}
-		t.Logf("%v txs purged at %v", (txNum*rounds)-size, time.Since(expire).Seconds())
+		t.Logf("%v txs reaped at %v, %v txs left", txNum, time.Since(expire).Seconds(), size)
 	}
 }
