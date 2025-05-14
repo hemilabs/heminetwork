@@ -10,6 +10,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -22,14 +23,30 @@ import (
 	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
-// UtxoPickerMultiple is a simple utxo picker that returns a random set of utxos from
-// the provided list that combined have a larger value than amount + fee.
-func UtxoPickerMultiple(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) ([]*tbcapi.UTXO, error) {
+func filterUtxos(utxos []*tbcapi.UTXO, filter []chainhash.Hash) map[int]struct{} {
+	// Filter map
+	f := make(map[chainhash.Hash]struct{}, len(filter))
+	for _, v := range filter {
+		f[v] = struct{}{}
+	}
+
 	// poor mans random list
 	us := make(map[int]struct{}, len(utxos))
-	for k := range utxos {
-		us[k] = struct{}{}
+	for k, v := range utxos {
+		if _, ok := f[v.TxId]; ok {
+			continue
+		}
+		us[k] = struct{}{} // Store index
 	}
+
+	return us
+}
+
+// UtxoPickerMultiple is a simple utxo picker that returns a random set of utxos from
+// the provided list that combined have a larger value than amount + fee.
+func UtxoPickerMultiple(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO, filter []chainhash.Hash) ([]*tbcapi.UTXO, error) {
+	us := filterUtxos(utxos, filter)
+
 	finalUTXO := make([]*tbcapi.UTXO, 0, len(utxos))
 
 	// find large enough utxo
@@ -49,12 +66,8 @@ func UtxoPickerMultiple(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) ([]*tb
 
 // UtxoPickerSingle is a simple utxo picker that returns a random utxo from the
 // provided list that has a larger value than amount + fee.
-func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi.UTXO, error) {
-	// poor mans random list
-	us := make(map[int]struct{}, len(utxos))
-	for k := range utxos {
-		us[k] = struct{}{}
-	}
+func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO, filter []chainhash.Hash) (*tbcapi.UTXO, error) {
+	us := filterUtxos(utxos, filter)
 
 	// find large enough utxo
 	total := amount + fee
@@ -69,7 +82,7 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 	return nil, errors.New("no suitable utxo found")
 }
 
-func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte, filter []chainhash.Hash) (*wire.MsgTx, map[string][]byte, error) {
 	// Create TxOut
 	payToScript, err := txscript.PayToAddrScript(address)
 	if err != nil {
@@ -85,7 +98,7 @@ func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, addr
 	fee := btcutil.Amount(txSize) * satsPerByte
 
 	// Find utxo list that is big enough for entire transaction
-	utxoList, err := UtxoPickerMultiple(amount, fee, utxos)
+	utxoList, err := UtxoPickerMultiple(amount, fee, utxos, filter)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -116,7 +129,7 @@ func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, addr
 	return tx, prevOuts, nil
 }
 
-func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte btcutil.Amount, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte btcutil.Amount, utxos []*tbcapi.UTXO, script []byte, filter []chainhash.Hash) (*wire.MsgTx, map[string][]byte, error) {
 	// Create OP_RETURN
 	aks := hemi.L2KeystoneAbbreviate(*l2keystone)
 	popTx := pop.TransactionL2{L2Keystone: aks}
@@ -131,7 +144,7 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 	fee := btcutil.Amount(txSize) * satsPerByte
 
 	// Find utxo that is big enough for entire transaction
-	utxo, err := UtxoPickerSingle(0, fee, utxos) // no amount, just fees
+	utxo, err := UtxoPickerSingle(0, fee, utxos, filter) // no amount, just fees
 	if err != nil {
 		return nil, nil, err
 	}
