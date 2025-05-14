@@ -179,6 +179,90 @@ func TestMempoolReaping(t *testing.T) {
 	}
 }
 
+func TestMempoolRemove(t *testing.T) {
+	type testTableItem struct {
+		name       string
+		txIDs      []string
+		toRemove   []string
+		expectedIn []string
+	}
+
+	testTable := []testTableItem{
+		{
+			name:     "TestRemoveAll",
+			txIDs:    []string{"a", "b", "c", "d", "e"},
+			toRemove: []string{"a", "b", "c", "d", "e"},
+		},
+		{
+			name:       "TestRemoveNone",
+			txIDs:      []string{"a", "b", "c", "d", "e"},
+			expectedIn: []string{"a", "b", "c", "d", "e"},
+		},
+		{
+			name:       "TestRemoveHalf",
+			txIDs:      []string{"a", "b", "c", "d", "e"},
+			toRemove:   []string{"a", "b", "c"},
+			expectedIn: []string{"d", "e"},
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+
+			mp, err := mempoolNew()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			for _, id := range tti.txIDs {
+				ch, err := chainhash.NewHash(fillOutBytes(id, 32))
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				mptx := mempoolTx{
+					id:      *ch,
+					expires: time.Now().Add(1 * time.Hour),
+				}
+				mp.txsInsert(ctx, &mptx)
+			}
+
+			remTxs := make([]chainhash.Hash, 0, len(tti.toRemove))
+			for _, id := range tti.toRemove {
+				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				if err != nil {
+					panic(err)
+				}
+				remTxs = append(remTxs, *hash)
+			}
+
+			mp.txsRemove(ctx, remTxs)
+
+			for _, id := range tti.toRemove {
+				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				if err != nil {
+					panic(err)
+				}
+				if _, ok := mp.txs[*hash]; ok {
+					t.Fatalf("expected %v to be removed", id)
+				}
+			}
+
+			for _, id := range tti.expectedIn {
+				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				if err != nil {
+					panic(err)
+				}
+				if _, ok := mp.txs[*hash]; !ok {
+					t.Fatalf("expected %v be in mempool", id)
+				}
+			}
+		})
+	}
+}
+
 func createTxs(count int, expiration time.Time, increase time.Duration) []mempoolTx {
 	txs := make([]mempoolTx, 0, count)
 	for i := range count {
