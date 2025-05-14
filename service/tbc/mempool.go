@@ -119,22 +119,27 @@ func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 }
 
 // commented to fix linter
-func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
+func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) {
 	log.Tracef("txsRemove")
 	defer log.Tracef("txsRemove exit")
 
 	if len(txs) == 0 {
-		return errors.New("no transactions provided")
+		return
 	}
 
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
-	l := len(m.txs)
+	var reaped int
 	for k := range txs {
 		if tx, ok := m.txs[txs[k]]; ok {
-			m.size -= tx.size
+			// tx can be nil if it hasn't been downloaded yet.
+			if tx != nil {
+				m.size -= tx.size
+			}
+			log.Tracef("remove %v", txs[k])
 			delete(m.txs, txs[k])
+			reaped++
 		}
 	}
 
@@ -142,10 +147,9 @@ func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) error {
 	go m.reap()
 
 	// if the map length does not change, nothing was deleted.
-	if len(m.txs) != l {
-		return errors.New("remove txs: nothing removed")
+	if reaped != 0 {
+		log.Infof("Mempool removed txs: %v", reaped)
 	}
-	return nil
 }
 
 func (m *mempool) reap() {
@@ -159,7 +163,11 @@ func (m *mempool) reap() {
 	}
 	m.reaping = true
 	for _, tx := range m.txs {
-		if tx.expires.After(time.Now()) {
+		if tx == nil {
+			continue
+		}
+		if time.Now().After(tx.expires) {
+			log.Infof("tx expired %v", tx.id) // XXX debug?
 			m.size -= tx.size
 			delete(m.txs, tx.id)
 		}
