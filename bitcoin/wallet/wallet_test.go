@@ -12,9 +12,11 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/davecgh/go-spew/spew"
 
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
@@ -224,4 +226,165 @@ func TestIntegration(t *testing.T) {
 	}
 
 	t.Logf("txID: %v", txID)
+}
+
+func TestUTXOFilter(t *testing.T) {
+	const utxoValue = btcutil.Amount(1000)
+
+	type testTableItem struct {
+		name     string
+		single   bool
+		amount   btcutil.Amount
+		utxoIDs  []string
+		filter   []string
+		expected []string
+	}
+
+	testTable := []testTableItem{
+		{
+			name:     "TestSingleNoFilter",
+			single:   true,
+			amount:   utxoValue,
+			utxoIDs:  []string{"a"},
+			filter:   nil,
+			expected: []string{"a"},
+		},
+		{
+			name:     "TestMultipleNoFilter",
+			single:   false,
+			amount:   utxoValue * 2,
+			utxoIDs:  []string{"a", "b"},
+			filter:   nil,
+			expected: []string{"a", "b"},
+		},
+		{
+			name:     "TestSingleFilterAll",
+			single:   true,
+			amount:   utxoValue,
+			utxoIDs:  []string{"a", "b"},
+			filter:   []string{"a", "b"},
+			expected: nil,
+		},
+		{
+			name:     "TestMultipleFilterAll",
+			single:   false,
+			amount:   utxoValue,
+			utxoIDs:  []string{"a", "b"},
+			filter:   []string{"a", "b"},
+			expected: nil,
+		},
+		{
+			name:     "TestSingleMixedFilter",
+			single:   true,
+			amount:   utxoValue,
+			utxoIDs:  []string{"a", "b", "c"},
+			filter:   []string{"a", "c"},
+			expected: []string{"b"},
+		},
+		{
+			name:     "TestMultipleMixedFilter",
+			single:   false,
+			amount:   utxoValue * 2,
+			utxoIDs:  []string{"a", "b", "c", "d"},
+			filter:   []string{"a", "c"},
+			expected: []string{"b", "d"},
+		},
+		{
+			name:     "TestSingleFailure",
+			single:   true,
+			amount:   utxoValue * 2,
+			utxoIDs:  []string{"a", "b", "c"},
+			filter:   []string{"a", "c"},
+			expected: nil,
+		},
+		{
+			name:     "TestMultipleMixedFilter",
+			single:   false,
+			amount:   utxoValue * 2,
+			utxoIDs:  []string{"a", "b", "c"},
+			filter:   []string{"a", "c"},
+			expected: nil,
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			utxos := make([]*tbcapi.UTXO, 0, len(tti.utxoIDs))
+			for _, id := range tti.utxoIDs {
+				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				if err != nil {
+					panic(err)
+				}
+				utxos = append(utxos, &tbcapi.UTXO{TxId: *hash, Value: utxoValue})
+			}
+
+			filter := make([]chainhash.Hash, 0, len(tti.filter))
+			for _, id := range tti.filter {
+				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				if err != nil {
+					panic(err)
+				}
+				filter = append(filter, *hash)
+			}
+
+			var result []*tbcapi.UTXO
+			var err error
+			if tti.single {
+				u, err := UtxoPickerSingle(tti.amount, 0, utxos, filter)
+				if err != nil {
+					if len(tti.expected) == 0 {
+						return
+					} else {
+						t.Fatal("expected error")
+					}
+				}
+				result = []*tbcapi.UTXO{u}
+			} else {
+				result, err = UtxoPickerMultiple(tti.amount, 0, utxos, filter)
+				if err != nil {
+					if tti.expected == nil {
+						return
+					} else {
+						t.Fatal("expected error")
+					}
+				}
+			}
+
+			if len(tti.expected) != len(result) {
+				t.Fatalf("got %x utxos, expected %v", len(tti.expected), len(result))
+			}
+
+			for _, id := range tti.expected {
+				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				if err != nil {
+					panic(err)
+				}
+
+				if !utxoByHash(*hash, result) {
+					t.Fatalf("expected utxo %v to be in results", hash)
+				}
+			}
+		})
+	}
+}
+
+// fillOutBytes will take a string and return a slice of bytes
+// with values from the string suffixed until a size with bytes '_'
+func fillOutBytes(prefix string, size int) []byte {
+	result := []byte(prefix)
+	for len(result) < size {
+		result = append(result, '_')
+	}
+
+	return result
+}
+
+func utxoByHash(hash chainhash.Hash, utxos []*tbcapi.UTXO) bool {
+	for _, utxo := range utxos {
+		if utxo.TxId == hash {
+			return true
+		}
+	}
+
+	return false
 }
