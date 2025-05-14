@@ -298,7 +298,7 @@ func TestUTXOFilter(t *testing.T) {
 			expected: nil,
 		},
 		{
-			name:     "TestMultipleMixedFilter",
+			name:     "TestMultipleFailure",
 			single:   false,
 			amount:   utxoValue * 2,
 			utxoIDs:  []string{"a", "b", "c"},
