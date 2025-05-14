@@ -1604,17 +1604,14 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	}
 	s.mtx.Unlock()
 
-	// Reap txs from mempool for blocks that aew within defaultMempoolAge.
+	// Reap txs from mempool for blocks that are within defaultMempoolAge.
+	// Sync flag is always false here so don't check it, just remove tx's
+	// from mempool.
 	blocktime := block.MsgBlock().Header.Timestamp
 	now := time.Now()
 	mempoolAge := now.Add(-defaultMempoolAge)
-	if blocktime.After(mempoolAge) && s.cfg.MempoolEnabled && s.Synced(ctx).Synced {
-		err := s.mempool.txsRemove(ctx, txHashes)
-		if err != nil {
-			// XXX make debug or trace
-			log.Infof("mempool reap: %v", err)
-			panic(err)
-		}
+	if blocktime.After(mempoolAge) && s.cfg.MempoolEnabled {
+		s.mempool.txsRemove(ctx, txHashes)
 	}
 
 	log.Debugf("inserted block at height %d, parent hash %s",
