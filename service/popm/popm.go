@@ -277,8 +277,9 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 		len(utxos), scriptHash, btcHeight)
 
 	// Build transaction.
+	// XXX EXCLUDE MEMPOOL TX! replace last nil with filter
 	popTx, prevOut, err := wallet.PoPTransactionCreate(ks, uint32(btcHeight),
-		btcutil.Amount(feeAmount.SatsPerByte), utxos, payToScript)
+		btcutil.Amount(feeAmount.SatsPerByte), utxos, payToScript, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction: %w", err)
 	}
