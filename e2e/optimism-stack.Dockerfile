@@ -9,7 +9,7 @@ WORKDIR /git
 ARG OP_GETH_CACHE_BREAK=12F2
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout 9c44c2bf5e13eb2b018b681861352d70b7bac47b
+RUN git checkout 93cf6d89d5a2412eb2605429b07bbc088ab851c2
 
 RUN go run build/ci.go install -static ./cmd/geth
 
