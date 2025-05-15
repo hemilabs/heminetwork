@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -2213,27 +2214,32 @@ func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHea
 	return s.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
-func (s *Server) valuesFromTransaction(ctx context.Context, tx *wire.MsgTx) (int64, int64, error) {
+func (s *Server) parseTx(ctx context.Context, tx *wire.MsgTx) (int64, int64, []mempoolUtxo, error) {
 	var iv, ov int64
 	for _, txIn := range tx.TxIn {
 		po := txIn.PreviousOutPoint
 		wtxo, err := s.txOutFromOutPoint(ctx, tbcd.NewOutpoint(po.Hash, po.Index))
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, nil, err
 		}
 		iv += wtxo.Value
 	}
 
-	for _, txOut := range tx.TxOut {
+	utxos := make([]mempoolUtxo, 0, len(tx.TxOut))
+	for i, txOut := range tx.TxOut {
 		ov += txOut.Value
+		utxos = append(utxos, mempoolUtxo{
+			scriptHash: sha256.Sum256(txOut.PkScript),
+			index:      uint32(i),
+		})
 	}
 
-	return iv, ov, nil
+	return iv, ov, utxos, nil
 }
 
 func (s *Server) mempoolTxNew(ctx context.Context, utx *btcutil.Tx) (*mempoolTx, error) {
 	// Create mempool tx
-	inValue, outValue, err := s.valuesFromTransaction(ctx, utx.MsgTx())
+	inValue, outValue, utxos, err := s.parseTx(ctx, utx.MsgTx())
 	if err != nil {
 		return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
 	}
@@ -2244,6 +2250,7 @@ func (s *Server) mempoolTxNew(ctx context.Context, utx *btcutil.Tx) (*mempoolTx,
 		outValue: outValue,
 		inValue:  inValue,
 		expires:  time.Now().Add(defaultMempoolAge),
+		utxos:    utxos,
 	}, nil
 }
 
