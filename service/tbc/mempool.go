@@ -6,6 +6,8 @@ package tbc
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"time"
@@ -28,6 +30,18 @@ import (
 
 var MaxTxVersion = int32(2) // XXX this should not be a global
 
+type mempoolUtxo struct {
+	scriptHash [sha256.Size]byte // sha256(pkscript)
+	index      uint32            // index within transaction
+}
+
+func (mu *mempoolUtxo) ID() [sha256.Size]byte {
+	var id [4 + sha256.Size]byte
+	binary.BigEndian.PutUint32(id[0:4], mu.index)
+	copy(id[4:], mu.scriptHash[:])
+	return sha256.Sum256(id[:])
+}
+
 type mempoolTx struct {
 	id       chainhash.Hash // TxID
 	expires  time.Time      // When mempool tx expires
@@ -35,6 +49,7 @@ type mempoolTx struct {
 	size     int64          // transaction virtual size
 	inValue  int64          // total txin value
 	outValue int64          // total txout value
+	utxos    []mempoolUtxo  // utxos in transaction
 }
 
 type mempool struct {
