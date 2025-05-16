@@ -77,7 +77,7 @@ func TestTBCGozer(t *testing.T) {
 	}
 	t.Log(spew.Sdump(feeEstimate))
 
-	utxos, err := b.UtxosByAddress(ctx, testAddr, 0, 0)
+	utxos, err := b.UtxosByAddress(ctx, true, testAddr, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

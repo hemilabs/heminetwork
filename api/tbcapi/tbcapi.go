@@ -231,9 +231,10 @@ type BalanceByAddressResponse struct {
 }
 
 type UTXOsByAddressRawRequest struct {
-	Address string `json:"address"`
-	Start   uint   `json:"start"`
-	Count   uint   `json:"count"`
+	FilterMempool bool   `json:"filter_mempool"`
+	Address       string `json:"address"`
+	Start         uint   `json:"start"`
+	Count         uint   `json:"count"`
 }
 
 type UTXOsByAddressRawResponse struct {
@@ -242,9 +243,10 @@ type UTXOsByAddressRawResponse struct {
 }
 
 type UTXOsByAddressRequest struct {
-	Address string `json:"address"`
-	Start   uint   `json:"start"`
-	Count   uint   `json:"count"`
+	FilterMempool bool   `json:"filter_mempool"`
+	Address       string `json:"address"`
+	Start         uint   `json:"start"`
+	Count         uint   `json:"count"`
 }
 
 type UTXOsByAddressResponse struct {
