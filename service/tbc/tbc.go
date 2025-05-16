@@ -7,7 +7,6 @@ package tbc
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -1948,7 +1947,7 @@ func (s *Server) BalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash) 
 	return balance, nil
 }
 
-func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
+func (s *Server) UtxosByAddress(ctx context.Context, filterMempool bool, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	log.Tracef("UtxosByAddress")
 	defer log.Tracef("UtxosByAddress exit")
 
@@ -1969,6 +1968,9 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 		start, count)
 	if err != nil {
 		return nil, err
+	}
+	if filterMempool {
+		return s.mempool.filterUtxos(ctx, utxos)
 	}
 	return utxos, nil
 }
@@ -2214,8 +2216,9 @@ func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHea
 	return s.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
-func (s *Server) parseTx(ctx context.Context, tx *wire.MsgTx) (int64, int64, []mempoolUtxo, error) {
+func (s *Server) parseTx(ctx context.Context, tx *wire.MsgTx) (int64, int64, map[wire.OutPoint]struct{}, error) {
 	var iv, ov int64
+	txins := make(map[wire.OutPoint]struct{}, len(tx.TxIn))
 	for _, txIn := range tx.TxIn {
 		po := txIn.PreviousOutPoint
 		wtxo, err := s.txOutFromOutPoint(ctx, tbcd.NewOutpoint(po.Hash, po.Index))
@@ -2223,23 +2226,20 @@ func (s *Server) parseTx(ctx context.Context, tx *wire.MsgTx) (int64, int64, []m
 			return 0, 0, nil, err
 		}
 		iv += wtxo.Value
+
+		txins[po] = struct{}{}
 	}
 
-	utxos := make([]mempoolUtxo, 0, len(tx.TxOut))
-	for i, txOut := range tx.TxOut {
+	for _, txOut := range tx.TxOut {
 		ov += txOut.Value
-		utxos = append(utxos, mempoolUtxo{
-			scriptHash: sha256.Sum256(txOut.PkScript),
-			index:      uint32(i),
-		})
 	}
 
-	return iv, ov, utxos, nil
+	return iv, ov, txins, nil
 }
 
 func (s *Server) mempoolTxNew(ctx context.Context, utx *btcutil.Tx) (*mempoolTx, error) {
 	// Create mempool tx
-	inValue, outValue, utxos, err := s.parseTx(ctx, utx.MsgTx())
+	inValue, outValue, txins, err := s.parseTx(ctx, utx.MsgTx())
 	if err != nil {
 		return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
 	}
@@ -2250,7 +2250,7 @@ func (s *Server) mempoolTxNew(ctx context.Context, utx *btcutil.Tx) (*mempoolTx,
 		outValue: outValue,
 		inValue:  inValue,
 		expires:  time.Now().Add(defaultMempoolAge),
-		utxos:    utxos,
+		txins:    txins,
 	}, nil
 }
 

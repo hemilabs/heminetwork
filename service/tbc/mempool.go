@@ -6,8 +6,6 @@ package tbc
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"sync"
 	"time"
@@ -15,6 +13,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 // commented to fix linter
@@ -30,26 +30,14 @@ import (
 
 var MaxTxVersion = int32(2) // XXX this should not be a global
 
-type mempoolUtxo struct {
-	scriptHash [sha256.Size]byte // sha256(pkscript)
-	index      uint32            // index within transaction
-}
-
-func (mu *mempoolUtxo) ID() [sha256.Size]byte {
-	var id [4 + sha256.Size]byte
-	binary.BigEndian.PutUint32(id[0:4], mu.index)
-	copy(id[4:], mu.scriptHash[:])
-	return sha256.Sum256(id[:])
-}
-
 type mempoolTx struct {
-	id       chainhash.Hash // TxID
-	expires  time.Time      // When mempool tx expires
-	weight   int64          // transaction weight
-	size     int64          // transaction virtual size
-	inValue  int64          // total txin value
-	outValue int64          // total txout value
-	utxos    []mempoolUtxo  // utxos in transaction
+	id       chainhash.Hash             // TxID
+	expires  time.Time                  // When mempool tx expires
+	weight   int64                      // transaction weight
+	size     int64                      // transaction virtual size
+	inValue  int64                      // total txin value
+	outValue int64                      // total txout value
+	txins    map[wire.OutPoint]struct{} // txins in transaction
 }
 
 type mempool struct {
@@ -58,6 +46,31 @@ type mempool struct {
 	reaping bool                          // set when reaping the mempool
 	txs     map[chainhash.Hash]*mempoolTx // when nil, tx has not been downloaded
 	size    int64                         // total "tx virtual" memory used by mempool
+}
+
+func (m *mempool) filterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
+	log.Tracef("filterUtxos")
+	defer log.Tracef("filterUtxos exit")
+
+	filtered := make([]tbcd.Utxo, 0, len(utxos))
+
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	// XXX this may be too slow and we may need a map, but let's try it first.
+	for k := range utxos {
+		opp := wire.NewOutPoint(utxos[k].ChainHash(), utxos[k].OutputIndex())
+		op := *opp
+		for _, tx := range m.txs {
+			if _, ok := tx.txins[op]; ok {
+				// found! filter it out
+				goto skip
+			}
+		}
+		filtered = append(filtered, utxos[k])
+	skip:
+	}
+	return filtered, nil
 }
 
 func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
