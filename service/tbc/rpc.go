@@ -440,7 +440,7 @@ func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi
 	log.Tracef("handleUtxosByAddressRawRequest")
 	defer log.Tracef("handleUtxosByAddressRawRequest exit")
 
-	utxos, err := s.UtxosByAddress(ctx, req.Address, uint64(req.Start), uint64(req.Count))
+	utxos, err := s.UtxosByAddress(ctx, req.FilterMempool, req.Address, uint64(req.Start), uint64(req.Count))
 	if err != nil {
 		if errors.Is(err, level.ErrIterator) {
 			e := protocol.NewInternalError(err)
@@ -468,7 +468,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UT
 	log.Tracef("handleUtxosByAddressRequest")
 	defer log.Tracef("handleUtxosByAddressRequest exit")
 
-	utxos, err := s.UtxosByAddress(ctx, req.Address, uint64(req.Start), uint64(req.Count))
+	utxos, err := s.UtxosByAddress(ctx, req.FilterMempool, req.Address, uint64(req.Start), uint64(req.Count))
 	if err != nil {
 		if errors.Is(err, level.ErrIterator) {
 			e := protocol.NewInternalError(err)
