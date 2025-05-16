@@ -814,7 +814,7 @@ func wireBlockToTBC(block *wire.MsgBlock) *tbcapi.Block {
 	}
 }
 
-// wireBlockHeadersToBTC converts []*wire.BlockHeader to []*tbcapi.BlockHeader.
+// wireBlockHeadersToTBC converts []*wire.BlockHeader to []*tbcapi.BlockHeader.
 func wireBlockHeadersToTBC(bhs []*wire.BlockHeader) []*tbcapi.BlockHeader {
 	blockHeaders := make([]*tbcapi.BlockHeader, len(bhs))
 	for i, bh := range bhs {
