@@ -115,13 +115,14 @@ func (bs *blockstream) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainh
 	return txidHash, nil
 }
 
-func (bs *blockstream) UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
+func (bs *blockstream) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
 	u := fmt.Sprintf("%v/address/%v/utxo", bs.url, addr)
 	utxos, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
 		return nil, fmt.Errorf("request: %w", err)
 	}
 
+	// XXX figure out if we need to set ot do something with filterMempool here
 	type statusJSON struct {
 		Confirmed   bool           `json:"confirmed"`
 		BlockHeight uint64         `json:"block_height"`

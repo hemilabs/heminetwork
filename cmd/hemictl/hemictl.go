@@ -279,6 +279,44 @@ func tbcdb(pctx context.Context, flags []string) error {
 
 	// commands
 	switch action {
+	// utility
+	case "scripthashfromaddress":
+		address := args["address"]
+		network := args["network"]
+		if address == "" {
+			return errors.New("hash or address: must be set")
+		}
+		if network == "" {
+			network = "mainnet"
+		}
+
+		var (
+			sh tbcd.ScriptHash
+			a  btcutil.Address
+		)
+		switch network {
+		case "testnet3":
+			a, err = btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			if err != nil {
+				return err
+			}
+		case "mainnet":
+			a, err = btcutil.DecodeAddress(address, &chaincfg.MainNetParams)
+			if err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("invalid network: %v", network)
+		}
+		h, err := txscript.PayToAddrScript(a)
+		if err != nil {
+			return err
+		}
+		sh = tbcd.NewScriptHashFromScript(h)
+		fmt.Printf("script     : %x\n", h)
+		fmt.Printf("script hash: %v\n", sh)
+
+	// actual commands
 	case "blockheaderbyhash":
 		hash := args["hash"]
 		if hash == "" {

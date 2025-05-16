@@ -120,16 +120,17 @@ func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.
 	return buResp.TxID, nil
 }
 
-func (t *tbcGozer) UtxosByAddress(ctx context.Context, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
+func (t *tbcGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
 	maxCount := uint(1000)
 	if count > maxCount {
 		return nil, fmt.Errorf("count must not exceed %v", maxCount)
 	}
 
 	bur := &tbcapi.UTXOsByAddressRequest{
-		Address: addr.String(),
-		Start:   start,
-		Count:   count,
+		FilterMempool: filterMempool,
+		Address:       addr.String(),
+		Start:         start,
+		Count:         count,
 	}
 
 	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)

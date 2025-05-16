@@ -269,7 +269,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 	}
 
 	// Retrieve available UTXOs for the miner.
-	utxos, err := s.gozer.UtxosByAddress(ctx, s.address, 0, 0)
+	utxos, err := s.gozer.UtxosByAddress(ctx, true, s.address, 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("utxos by address: %w", err)
 	}
@@ -277,9 +277,8 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 		len(utxos), scriptHash, btcHeight)
 
 	// Build transaction.
-	// XXX EXCLUDE MEMPOOL TX! replace last nil with filter
 	popTx, prevOut, err := wallet.PoPTransactionCreate(ks, uint32(btcHeight),
-		btcutil.Amount(feeAmount.SatsPerByte), utxos, payToScript, nil)
+		btcutil.Amount(feeAmount.SatsPerByte), utxos, payToScript)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction: %w", err)
 	}
