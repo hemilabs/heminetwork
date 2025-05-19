@@ -184,8 +184,8 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0 h1:YBftPWNWd4WwGqtY2yeZL2ef8rH
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.16.0/go.mod h1:YN5jB8ie0yfIUg6VvR9Kz84aCaG7AsGZnLjhHbUqwPg=
 github.com/hashicorp/go-bexpr v0.1.10 h1:9kuI5PFotCboP3dkDYFr/wi0gg0QVbSNz5oFRpxn4uE=
 github.com/hashicorp/go-bexpr v0.1.10/go.mod h1:oxlubA2vC/gFVfX1A6JGp7ls7uCDlfJn732ehYYg+g0=
-github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250506101829-3d49f6bd490b h1:YfbeL/+nQkg161QqkJilVlwqe+dGaMNBmmwNZp6dUyE=
-github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250506101829-3d49f6bd490b/go.mod h1:udk314OCHf9SxNeJwpK3Htn/EDkf3Zv8yU1Z4yl/AuI=
+github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250519131150-527d6976903b h1:01vLWqAKHZyb3NaSABcv7SHkMYgSZ4rh426lusI6MQ4=
+github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250519131150-527d6976903b/go.mod h1:nVaRd/HHAqdd1oBX/VS+mIZwMIP9TPtHY8TLvKai7LU=
 github.com/hemilabs/websocket v0.0.0-20240813101919-bf33653e9aa5 h1:rNJaauce7ZAC5tv7NaiwDtF6afSVeTvWejhFuK5gY6I=
 github.com/hemilabs/websocket v0.0.0-20240813101919-bf33653e9aa5/go.mod h1:LNVeNrXQZfe5qhS9ALED3uA+l5pPqvwXg3CKoDBB2gs=
 github.com/holiman/billy v0.0.0-20230718173358-1c7e68d277a7 h1:3JQNjnMRil1yD0IfZKHF9GxxWKDJGj8I0IqOUol//sw=
