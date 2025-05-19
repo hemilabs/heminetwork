@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/go-test/deep"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
 func TestMempoolFees(t *testing.T) {
@@ -260,6 +263,58 @@ func TestMempoolRemove(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMempoolFiltering(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mp, err := mempoolNew()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		txNum       = 10
+		numToFilter = 5
+	)
+	utxos := make([]tbcd.Utxo, 0, txNum)
+
+	for i := range txNum {
+		uniqueBytes := make([]byte, 32)
+		binary.BigEndian.PutUint32(uniqueBytes[0:32], uint32(i))
+		ch, err := chainhash.NewHash(uniqueBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		utxo := tbcd.NewUtxo([32]byte(uniqueBytes), 1000, 0)
+		utxos = append(utxos, utxo)
+
+		if len(utxos) > numToFilter {
+			opp := wire.NewOutPoint(ch, 0)
+			mptx := mempoolTx{
+				id:      *ch,
+				expires: time.Now().Add(1 * time.Hour),
+				txins:   map[wire.OutPoint]struct{}{*opp: struct{}{}},
+			}
+			mp.txsInsert(ctx, &mptx)
+		}
+	}
+
+	filtered, err := mp.filterUtxos(ctx, utxos)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(filtered) != txNum-numToFilter {
+		t.Fatalf("expected %d utxos filtered, got %d", numToFilter, len(utxos)-len(filtered))
+	}
+
+	for k, f := range filtered {
+		if diff := deep.Equal(f, utxos[k]); len(diff) > 0 {
+			t.Fatalf("unexpected diff %s", diff)
+		}
 	}
 }
 
