@@ -5,11 +5,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"io"
 	"math/big"
+	"net/http"
 	"slices"
 	"testing"
 	"time"
@@ -19,6 +23,7 @@ import (
 	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
+
 	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
 	e2ebindings "github.com/ethereum-optimism/optimism/op-e2e/bindings"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
@@ -30,7 +35,9 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 
+	"github.com/go-test/deep"
 	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -106,47 +113,77 @@ func TestMonitor(t *testing.T) {
 			continue
 		}
 
+		if jo.TipHash != jo.TipHashNonSequencing {
+			t.Logf("tip mismatch: %s != %s", jo.TipHash, jo.TipHashNonSequencing)
+			continue
+		}
+
 		// success; we passed the test
 		break
 	}
 }
 
 func TestL1L2Comms(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
-	defer cancel()
+	for _, sequencing := range []bool{true, false} {
+		var name string
+		if sequencing {
+			name = "testing sequencing client"
+		} else {
+			name = "testing non-sequencing client"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer cancel()
 
-	l1Client, err := ethclient.Dial("http://localhost:8545")
-	if err != nil {
-		t.Fatalf("could not dial eth l1 %s", err)
+			l1Client, err := ethclient.Dial("http://localhost:8545")
+			if err != nil {
+				t.Fatalf("could not dial eth l1 %s", err)
+			}
+
+			l2Client, err := ethclient.Dial("http://localhost:8546")
+			if err != nil {
+				t.Fatalf("could not dial eth l1 %s", err)
+			}
+
+			l2ClientNonSequencing, err := ethclient.Dial("http://localhost:18546")
+			if err != nil {
+				t.Fatalf("could not dial eth l1 %s", err)
+			}
+
+			privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			l2ClientToUse := l2Client
+			if !sequencing {
+				l2ClientToUse = l2ClientNonSequencing
+			}
+
+			l1Address := deployL1TestToken(t, ctx, l1Client, privateKey)
+
+			t.Logf("the l1 address is %s", l1Address.Hex())
+
+			bridgeEthL1ToL2(t, ctx, l1Client, l2ClientToUse, privateKey)
+
+			l2Address := deployL2TestToken(t, ctx, l1Address, l2ClientToUse, privateKey)
+			t.Logf("the l2 address is %s", l2Address.Hex())
+
+			bridgeERC20FromL1ToL2(t, ctx, l1Address, l2Address, privateKey, l1Client, l2ClientToUse)
+
+			bridgeERC20FromL2ToL1(t, ctx, l1Address, l2Address, privateKey, l1Client, l2ClientToUse)
+
+			bridgeEthL2ToL1(t, ctx, l1Client, l2ClientToUse, privateKey)
+
+			hvmTipNearBtcTip(t, ctx, l2Client, l2ClientNonSequencing, privateKey)
+			hvmBtcBalance(t, ctx, l2ClientToUse, privateKey)
+
+			opNodeSequencingEndpoint := "http://localhost:8547"
+			opNodeNonSequencingEndpoint := "http://localhost:18547"
+			assertOutputRootsAreTheSame(t, ctx, l2ClientToUse, opNodeSequencingEndpoint, opNodeNonSequencingEndpoint)
+			assertSafeAndFinalBlocksAreProgressing(t, ctx, l2ClientToUse)
+		})
 	}
-
-	l2Client, err := ethclient.Dial("http://localhost:8546")
-	if err != nil {
-		t.Fatalf("could not dial eth l1 %s", err)
-	}
-
-	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	l1Address := deployL1TestToken(t, ctx, l1Client, privateKey)
-
-	t.Logf("the l1 address is %s", l1Address.Hex())
-
-	bridgeEthL1ToL2(t, ctx, l1Client, l2Client, privateKey)
-
-	l2Address := deployL2TestToken(t, ctx, l1Address, l2Client, privateKey)
-	t.Logf("the l2 address is %s", l2Address.Hex())
-
-	bridgeERC20FromL1ToL2(t, ctx, l1Address, l2Address, privateKey, l1Client, l2Client)
-
-	bridgeERC20FromL2ToL1(t, ctx, l1Address, l2Address, privateKey, l1Client, l2Client)
-
-	bridgeEthL2ToL1(t, ctx, l1Client, l2Client, privateKey)
-
-	hvmTipNearBtcTip(t, ctx, l2Client, privateKey)
-	hvmBtcBalance(t, ctx, l2Client, privateKey)
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
@@ -170,7 +207,7 @@ func TestOperatorFeeVaultIsPresent(t *testing.T) {
 	}
 }
 
-func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, l2ClientNonSequencing *ethclient.Client, privateKey *ecdsa.PrivateKey) {
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
@@ -198,7 +235,7 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 	auth.GasLimit = uint64(3000000) // in units
 	auth.GasPrice = gasPrice
 
-	_, tx, l2ReadBalances, err := mybindings.DeployL2ReadBalances(auth, l2Client)
+	contractAddress, tx, l2ReadBalances, err := mybindings.DeployL2ReadBalances(auth, l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +245,20 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 	res, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	l2ReadBalancesNonSequencing, err := mybindings.NewL2ReadBalances(contractAddress, l2ClientNonSequencing)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resNonSequencing, err := l2ReadBalancesNonSequencing.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(res, resNonSequencing) {
+		t.Fatalf("bitcoin header mismatch between sequencer and non-sequencer: %x != %x", res, resNonSequencing)
 	}
 
 	config := client.ConnConfig{
@@ -1120,7 +1171,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 func waitForTxReceipt(t *testing.T, ctx context.Context, client *ethclient.Client, tx *types.Transaction) *types.Receipt {
 	t.Logf("will wait for receipt of tx %s", tx.Hash())
-	time.Sleep(5 * time.Second)
+	time.Sleep(10 * time.Second)
 	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
 	if err != nil {
 		t.Logf("error getting tx receipt, will retry: %s", err)
@@ -1130,5 +1181,264 @@ func waitForTxReceipt(t *testing.T, ctx context.Context, client *ethclient.Clien
 	}
 }
 
+func assertSafeAndFinalBlocksAreProgressing(t *testing.T, ctx context.Context, l2Client *ethclient.Client) {
+	block, err := l2Client.BlockByNumber(ctx, big.NewInt(int64(rpc.SafeBlockNumber)))
+	if err != nil {
+		t.Fatalf("error getting safe block: %s", err)
+	}
+
+	if block.NumberU64() <= 0 {
+		t.Fatalf("safe block number should be greater than 0, received %d", block.NumberU64())
+	}
+
+	block, err = l2Client.BlockByNumber(ctx, big.NewInt(int64(rpc.FinalizedBlockNumber)))
+	if err != nil {
+		t.Fatalf("error getting finalized block: %s", err)
+	}
+
+	if block.NumberU64() <= 0 {
+		t.Fatalf("finalized block number should be greater than 0, received %d", block.NumberU64())
+	}
+}
+
+func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *ethclient.Client, opNodeSequencingEndpoint string, opNodeNonSequencingEndpoint string) {
+	bigTip, err := l2Client.HeaderByNumber(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("error getting l2 tip: %s", err)
+	}
+
+	tip := bigTip.Number.Uint64()
+
+	tip -= 5
+
+	t.Logf("checking output roots from tip %d", tip)
+
+	type outputAtBlock struct {
+		ID      int      `json:"id"`
+		Method  string   `json:"method"`
+		Params  []string `json:"params"`
+		JsonRpc string   `json:"jsonrpc"`
+	}
+
+	for tip != 0 {
+		hexTip := fmt.Sprintf("%#x", tip)
+		requestBody := outputAtBlock{
+			ID:      1,
+			Method:  "optimism_outputAtBlock",
+			Params:  []string{hexTip},
+			JsonRpc: "2.0",
+		}
+
+		jsonbody, err := json.Marshal(requestBody)
+		if err != nil {
+			t.Fatalf("error marshalling request body: %s", err)
+		}
+
+		t.Logf("sending request json body: %s", string(jsonbody))
+
+		client := &http.Client{}
+
+		const retries = 5
+		timeout := 1000 * time.Millisecond
+
+		for i := 1; i <= retries; i++ {
+			res, err := client.Post(opNodeSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
+			if err != nil {
+				t.Fatalf("error making request to sequencer endpoint: %s", err)
+			}
+
+			res2, err := client.Post(opNodeNonSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
+			if err != nil {
+				t.Fatalf("error making request to sequencer endpoint: %s", err)
+			}
+
+			resBody, err := io.ReadAll(res.Body)
+			if err != nil {
+				t.Fatalf("error reading response body from sequencer: %s", err)
+			}
+
+			resBody2, err := io.ReadAll(res2.Body)
+			if err != nil {
+				t.Fatalf("error reading response body from non-sequencer: %s", err)
+			}
+
+			res.Body.Close()
+			res2.Body.Close()
+
+			t.Logf("will parse reponses\n%s\n%s", string(resBody), string(resBody2))
+
+			assertResultNotError := func(body *outputAtBlockResponse) error {
+				if body.Error != nil {
+					return fmt.Errorf("error in response body: %v", body)
+				}
+
+				return nil
+			}
+
+			var outputAtBlockResponseOne outputAtBlockResponse
+			var outputAtBlockResponseTwo outputAtBlockResponse
+
+			if err := json.Unmarshal(resBody, &outputAtBlockResponseOne); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := json.Unmarshal(resBody2, &outputAtBlockResponseTwo); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := assertResultNotError(&outputAtBlockResponseOne); err != nil {
+				if i == retries {
+					t.Fatalf("error in response: %v", outputAtBlockResponseOne.Error)
+				} else {
+					continue
+				}
+			}
+
+			if err := assertResultNotError(&outputAtBlockResponseTwo); err != nil {
+				if i == retries {
+					t.Fatalf("error in response: %v", outputAtBlockResponseTwo.Error)
+				} else {
+					continue
+				}
+			}
+
+			assertResultNotError(&outputAtBlockResponseOne)
+			assertResultNotError(&outputAtBlockResponseTwo)
+
+			if diff := deep.Equal(outputAtBlockResponseOne, outputAtBlockResponseTwo); len(diff) > 0 {
+				if i == retries {
+					t.Fatalf("output roots are not the same: %s", diff)
+				}
+			} else {
+				break
+			}
+			time.Sleep(timeout)
+		}
+
+		tip--
+	}
+}
+
 // put here for readability
 const operatorFeeVaultCode = "60806040526004361061005e5760003560e01c80635c60da1b116100435780635c60da1b146100be5780638f283970146100f8578063f851a440146101185761006d565b80633659cfe6146100755780634f1ef286146100955761006d565b3661006d5761006b61012d565b005b61006b61012d565b34801561008157600080fd5b5061006b6100903660046106dd565b610224565b6100a86100a33660046106f8565b610296565b6040516100b5919061077b565b60405180910390f35b3480156100ca57600080fd5b506100d3610419565b60405173ffffffffffffffffffffffffffffffffffffffff90911681526020016100b5565b34801561010457600080fd5b5061006b6101133660046106dd565b6104b0565b34801561012457600080fd5b506100d3610517565b60006101577f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc5490565b905073ffffffffffffffffffffffffffffffffffffffff8116610201576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152602560248201527f50726f78793a20696d706c656d656e746174696f6e206e6f7420696e6974696160448201527f6c697a656400000000000000000000000000000000000000000000000000000060648201526084015b60405180910390fd5b3660008037600080366000845af43d6000803e8061021e573d6000fd5b503d6000f35b7fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d61035473ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff16148061027d575033155b1561028e5761028b816105a3565b50565b61028b61012d565b60606102c07fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d61035490565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614806102f7575033155b1561040a57610305846105a3565b6000808573ffffffffffffffffffffffffffffffffffffffff16858560405161032f9291906107ee565b600060405180830381855af49150503d806000811461036a576040519150601f19603f3d011682016040523d82523d6000602084013e61036f565b606091505b509150915081610401576040517f08c379a000000000000000000000000000000000000000000000000000000000815260206004820152603960248201527f50726f78793a2064656c656761746563616c6c20746f206e657720696d706c6560448201527f6d656e746174696f6e20636f6e7472616374206661696c65640000000000000060648201526084016101f8565b91506104129050565b61041261012d565b9392505050565b60006104437fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d61035490565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff16148061047a575033155b156104a557507f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc5490565b6104ad61012d565b90565b7fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d61035473ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161480610509575033155b1561028e5761028b8161060c565b60006105417fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d61035490565b73ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff161480610578575033155b156104a557507fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d61035490565b7f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc81815560405173ffffffffffffffffffffffffffffffffffffffff8316907fbc7cd75a20ee27fd9adebab32041f755214dbc6bffa90cc0225b39da2e5c2d3b90600090a25050565b60006106367fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d61035490565b7fb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d61038381556040805173ffffffffffffffffffffffffffffffffffffffff80851682528616602082015292935090917f7e644d79422f17c01e4894b5f4f588d331ebfa28653d42ae832dc59e38c9798f910160405180910390a1505050565b803573ffffffffffffffffffffffffffffffffffffffff811681146106d857600080fd5b919050565b6000602082840312156106ef57600080fd5b610412826106b4565b60008060006040848603121561070d57600080fd5b610716846106b4565b9250602084013567ffffffffffffffff8082111561073357600080fd5b818601915086601f83011261074757600080fd5b81358181111561075657600080fd5b87602082850101111561076857600080fd5b6020830194508093505050509250925092565b600060208083528351808285015260005b818110156107a85785810183015185820160400152820161078c565b818111156107ba576000604083870101525b50601f017fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe016929092016040019392505050565b818382376000910190815291905056fea164736f6c634300080f000a"
+
+type outputAtBlockResponse struct {
+	Jsonrpc string       `json:"jsonrpc"`
+	ID      int          `json:"id"`
+	Error   *interface{} `json:"error,omitempty"`
+	Result  struct {
+		Version    string `json:"version"`
+		OutputRoot string `json:"outputRoot"`
+		BlockRef   struct {
+			Hash       string `json:"hash"`
+			Number     int    `json:"number"`
+			ParentHash string `json:"parentHash"`
+			Timestamp  int    `json:"timestamp"`
+			L1Origin   struct {
+				Hash   string `json:"hash"`
+				Number int    `json:"number"`
+			} `json:"l1origin"`
+			SequenceNumber int `json:"sequenceNumber"`
+		} `json:"blockRef"`
+		WithdrawalStorageRoot string `json:"withdrawalStorageRoot"`
+		StateRoot             string `json:"stateRoot"`
+		// SyncStatus            struct {
+		// 	CurrentL1 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 	} `json:"current_l1"`
+		// 	CurrentL1Finalized struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 	} `json:"current_l1_finalized"`
+		// 	HeadL1 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 	} `json:"head_l1"`
+		// 	SafeL1 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 	} `json:"safe_l1"`
+		// 	FinalizedL1 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 	} `json:"finalized_l1"`
+		// 	UnsafeL2 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 		L1Origin   struct {
+		// 			Hash   string `json:"hash"`
+		// 			Number int    `json:"number"`
+		// 		} `json:"l1origin"`
+		// 		SequenceNumber int `json:"sequenceNumber"`
+		// 	} `json:"unsafe_l2"`
+		// 	SafeL2 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 		L1Origin   struct {
+		// 			Hash   string `json:"hash"`
+		// 			Number int    `json:"number"`
+		// 		} `json:"l1origin"`
+		// 		SequenceNumber int `json:"sequenceNumber"`
+		// 	} `json:"safe_l2"`
+		// 	FinalizedL2 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 		L1Origin   struct {
+		// 			Hash   string `json:"hash"`
+		// 			Number int    `json:"number"`
+		// 		} `json:"l1origin"`
+		// 		SequenceNumber int `json:"sequenceNumber"`
+		// 	} `json:"finalized_l2"`
+		// 	PendingSafeL2 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 		L1Origin   struct {
+		// 			Hash   string `json:"hash"`
+		// 			Number int    `json:"number"`
+		// 		} `json:"l1origin"`
+		// 		SequenceNumber int `json:"sequenceNumber"`
+		// 	} `json:"pending_safe_l2"`
+		// 	CrossUnsafeL2 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 		L1Origin   struct {
+		// 			Hash   string `json:"hash"`
+		// 			Number int    `json:"number"`
+		// 		} `json:"l1origin"`
+		// 		SequenceNumber int `json:"sequenceNumber"`
+		// 	} `json:"cross_unsafe_l2"`
+		// 	LocalSafeL2 struct {
+		// 		Hash       string `json:"hash"`
+		// 		Number     int    `json:"number"`
+		// 		ParentHash string `json:"parentHash"`
+		// 		Timestamp  int    `json:"timestamp"`
+		// 		L1Origin   struct {
+		// 			Hash   string `json:"hash"`
+		// 			Number int    `json:"number"`
+		// 		} `json:"l1origin"`
+		// 		SequenceNumber int `json:"sequenceNumber"`
+		// 	} `json:"local_safe_l2"`
+		// } `json:"syncStatus"`
+	} `json:"result"`
+}
