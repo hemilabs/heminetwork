@@ -1969,7 +1969,10 @@ func (s *Server) UtxosByAddress(ctx context.Context, filterMempool bool, encoded
 	if err != nil {
 		return nil, err
 	}
-	if filterMempool {
+
+	// XXX should we return an error if filterMempool
+	// is true and mempoolEnabled is false?
+	if filterMempool && s.cfg.MempoolEnabled {
 		return s.mempool.filterUtxos(ctx, utxos)
 	}
 	return utxos, nil
