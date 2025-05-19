@@ -1244,7 +1244,7 @@ func TestFork(t *testing.T) {
 				t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
 			}
 			t.Logf("balance %v", spew.Sdump(balance))
-			utxos, err := s.UtxosByAddress(ctx, false, address.String(), 0, 100)
+			utxos, err := s.UtxosByAddress(ctx, true, address.String(), 0, 100)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1528,7 +1528,7 @@ func TestIndexNoFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v (%v): %v", address, key.name, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1653,7 +1653,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		MempoolEnabled:          false,
+		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -1748,7 +1748,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v (%v): %v", address, key.name, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1907,7 +1907,7 @@ func TestIndexFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		MempoolEnabled:          false,
+		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -2011,7 +2011,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2073,7 +2073,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2112,7 +2112,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2144,7 +2144,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2163,7 +2163,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2182,7 +2182,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2241,7 +2241,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		MempoolEnabled:          false,
+		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -2362,7 +2362,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2444,7 +2444,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2493,7 +2493,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2525,7 +2525,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2544,7 +2544,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2573,7 +2573,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2743,7 +2743,7 @@ func TestForkCanonicity(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		MempoolEnabled:          false,
+		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
