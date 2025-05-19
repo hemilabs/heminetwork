@@ -5,7 +5,7 @@
 
 set -xe
 
-/bin/geth init --datadir /tmp/datadir /l2configs/genesis.json
+/bin/geth init --datadir /tmp/datadir --state.scheme hash /l2configs/genesis.json 
 
 BESTBLOCKHASH=$(curl --data-binary '{"jsonrpc": "1.0", "id": "curltest", "method": "getbestblockhash", "params": []}' -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq '.result')
 
@@ -18,6 +18,25 @@ BLOCKHEIGHT=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \
 BLOCKHEADER=$(curl --data-binary "{\"jsonrpc\": \"1.0\", \"id\": \"curltest\", \"method\": \"getblockheader\", \"params\": [$BESTBLOCKHASH, false]}" -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq -r '.result')
 
 echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
+
+filecontents=$(cat << EOF
+[Node.P2P]
+MaxPeers = 50
+NoDiscovery = false
+DiscoveryV5 = true
+StaticNodes = [
+'enode://a121ecb08858c9e681f0414d079953ec233ffd667acaf66abebad310df3dd4a025a89fe25c3b79a148083cd93c639108cb5b0193a591ee20bd362a7258a3e8d1@192.169.199.8:30303'
+]
+TrustedNodes = [
+'enode://a121ecb08858c9e681f0414d079953ec233ffd667acaf66abebad310df3dd4a025a89fe25c3b79a148083cd93c639108cb5b0193a591ee20bd362a7258a3e8d1@192.169.199.8:30303'
+]
+EOF
+)
+
+
+echo "will use toml file contents: $filecontents"
+
+echo $filecontents > ./config.toml
 
 /bin/geth \
  --keystore \
@@ -38,7 +57,7 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --ws.api=debug,eth,txpool,net,engine,miner \
  --syncmode=full  \
  --nodiscover  \
- --maxpeers=0 \
+ --maxpeers=50 \
  --networkid=901 \
  --authrpc.vhosts="*"  \
  --rpc.allow-unprotected-txs \
@@ -67,7 +86,11 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --override.fjord=$HVM_PHASE0_TIMESTAMP \
  --verbosity=5 \
  --unlock='78697c88847dfbbb40523e42c1f2e28a13a170be' \
- --rpc.enabledeprecatedpersonal
+ --rpc.enabledeprecatedpersonal \
+ --gcmode=archive \
+ --state.scheme=hash \
+ --config=./config.toml \
+ --verbosity=5
  # Clayton note: this fixes the mismatched state.scheme, but is it the correct
 # thing to do?
 #  --gcmode=archive  \
