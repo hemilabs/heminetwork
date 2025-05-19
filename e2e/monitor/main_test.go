@@ -106,6 +106,11 @@ func TestMonitor(t *testing.T) {
 			continue
 		}
 
+		if jo.TipHash != jo.TipHashNonSequencing {
+			t.Logf("tip mismatch: %s != %s", jo.TipHash, jo.TipHashNonSequencing)
+			continue
+		}
+
 		// success; we passed the test
 		break
 	}
