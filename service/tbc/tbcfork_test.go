@@ -1236,7 +1236,7 @@ func TestFork(t *testing.T) {
 				t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
 			}
 			t.Logf("balance %v", spew.Sdump(balance))
-			utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
+			utxos, err := s.UtxosByAddress(ctx, false, address.String(), 0, 100)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1520,7 +1520,7 @@ func TestIndexNoFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v (%v): %v", address, key.name, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1740,7 +1740,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v (%v): %v", address, key.name, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2003,7 +2003,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2065,7 +2065,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2104,7 +2104,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2136,7 +2136,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2155,7 +2155,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2174,7 +2174,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2354,7 +2354,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2436,7 +2436,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2485,7 +2485,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2517,7 +2517,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2536,7 +2536,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2565,7 +2565,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, false, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}

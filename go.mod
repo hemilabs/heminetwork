@@ -154,4 +154,4 @@ require (
 	rsc.io/tmplfunc v0.0.3 // indirect
 )
 
-replace github.com/ethereum/go-ethereum v1.14.8 => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250506101829-3d49f6bd490b
+replace github.com/ethereum/go-ethereum v1.14.8 => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250519131150-527d6976903b
