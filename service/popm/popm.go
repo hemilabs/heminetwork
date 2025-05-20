@@ -111,17 +111,6 @@ type keystone struct {
 	//                               2 <---/
 }
 
-// func sortKeystones(mks map[chainhash.Hash]*keystone) []*keystone {
-// 	keystones := make([]*keystone, 0, len(mks))
-// 	for _, v := range mks {
-// 		keystones = append(keystones, v)
-// 	}
-// 	slices.SortFunc(keystones, func(a, b *keystone) int {
-// 		return cmp.Compare(a.keystone.L2BlockNumber, b.keystone.L2BlockNumber)
-// 	})
-// 	return keystones
-// }
-
 func timestamp(d time.Duration) *time.Time {
 	t := time.Now().Add(d)
 	return &t
