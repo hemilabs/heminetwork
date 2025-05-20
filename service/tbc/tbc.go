@@ -257,7 +257,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			// Cannot combine mempool behavior with External Header Mode
 			panic("cannot enable mempool on an external-header-only mode TBC instance")
 		}
-		s.mempool, err = mempoolNew()
+		s.mempool, err = MempoolNew()
 		if err != nil {
 			return nil, err
 		}
@@ -1128,7 +1128,7 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 	if err != nil {
 		return fmt.Errorf("new mempool tx: %w", err)
 	}
-	return s.mempool.txsInsert(ctx, mptx)
+	return s.mempool.TxsInsert(ctx, mptx)
 }
 
 func (s *Server) syncBlocks(ctx context.Context) {
@@ -1960,7 +1960,7 @@ func (s *Server) UtxosByAddress(ctx context.Context, filterMempool bool, encoded
 	// XXX should we return an error if filterMempool
 	// is true and mempoolEnabled is false?
 	if filterMempool && s.cfg.MempoolEnabled {
-		return s.mempool.filterUtxos(ctx, utxos)
+		return s.mempool.FilterUtxos(ctx, utxos)
 	}
 	return utxos, nil
 }
@@ -2258,7 +2258,7 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 		return nil, fmt.Errorf("fees by block hash block: %w", err)
 	}
 
-	mp, err := mempoolNew()
+	mp, err := MempoolNew()
 	if err != nil {
 		return nil, fmt.Errorf("could not create mempool: %w", err)
 	}
@@ -2273,7 +2273,7 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 		if err != nil {
 			return nil, fmt.Errorf("new mempool tx: %w", err)
 		}
-		if err = mp.txsInsert(ctx, mptx); err != nil {
+		if err = mp.TxsInsert(ctx, mptx); err != nil {
 			return nil, fmt.Errorf("cannot insert tx in mempool: %w", err)
 		}
 	}
