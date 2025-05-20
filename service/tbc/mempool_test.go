@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"testing"
 	"time"
 
@@ -314,6 +315,51 @@ func TestMempoolFiltering(t *testing.T) {
 	for k, f := range filtered {
 		if diff := deep.Equal(f, utxos[k]); len(diff) > 0 {
 			t.Fatalf("unexpected diff %s", diff)
+		}
+	}
+}
+
+func BenchmarkMempoolFilter(b *testing.B) {
+	for _, mempoolTxNum := range []int{1, 10, 100, 1000, 10000} {
+		for _, txInNum := range []int{1, 10, 100} {
+			mp, err := mempoolNew()
+			if err != nil {
+				b.Fatal(err)
+			}
+			utxos := make([]tbcd.Utxo, 0, txInNum*mempoolTxNum)
+			for k := range mempoolTxNum {
+				idBytes := make([]byte, 32)
+				binary.BigEndian.PutUint32(idBytes[0:32], uint32(k))
+				txId, err := chainhash.NewHash(idBytes)
+				if err != nil {
+					b.Fatal(err)
+				}
+				mptx := mempoolTx{
+					id:      *txId,
+					expires: time.Now().Add(10 * time.Hour),
+					txins:   make(map[wire.OutPoint]struct{}),
+				}
+				for i := range txInNum {
+					uniqueBytes := make([]byte, 32)
+					binary.BigEndian.PutUint32(uniqueBytes[0:15], uint32(i))
+					binary.BigEndian.PutUint32(uniqueBytes[16:32], uint32(k))
+
+					utxo := tbcd.NewUtxo([32]byte(uniqueBytes), 1000, uint32(i))
+					utxos = append(utxos, utxo)
+
+					opp := wire.NewOutPoint(utxo.ChainHash(), utxo.OutputIndex())
+					mptx.txins[*opp] = struct{}{}
+				}
+				mp.txsInsert(b.Context(), &mptx)
+			}
+			b.Run(fmt.Sprintf("benchmark %d mempoolTxs with %d txins", mempoolTxNum, txInNum), func(b *testing.B) {
+				for b.Loop() {
+					_, err = mp.filterUtxos(b.Context(), utxos)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
 		}
 	}
 }
