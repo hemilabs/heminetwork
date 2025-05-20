@@ -135,6 +135,18 @@ var (
 			Help:         "disable public connections",
 			Print:        config.PrintAll,
 		},
+		"BFG_BASELINE_L2_BLOCK_HEIGHT": config.Config{
+			Value:        &cfg.BaselineL2BlockHeight,
+			DefaultValue: int64(0),
+			Help:         "the block height at which to safely count up from when cutting off invalid keystones for finality",
+			Print:        config.PrintAll,
+		},
+		"BFG_BASELINE_L2_BLOCK_TIMESTAMP": config.Config{
+			Value:        &cfg.BaselineL2BlockTimestamp,
+			DefaultValue: int64(0),
+			Help:         "the timestamp of the baseline l2 block",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
