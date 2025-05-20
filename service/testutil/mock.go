@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,15 +19,19 @@ import (
 	"slices"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/ethereum/go-ethereum/eth"
 	gorweb "github.com/gorilla/websocket"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/service/tbc"
 )
 
 var DefaultNtfnDuration = 250 * time.Millisecond
@@ -114,6 +119,7 @@ type TBCMockHandler struct {
 	mockHandler
 	keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev
 	btcTip    uint
+	utxoNum   uint
 }
 
 type OpGethMockHandler struct {
@@ -121,7 +127,7 @@ type OpGethMockHandler struct {
 	keystones []hemi.L2Keystone
 }
 
-func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip uint) *httptest.Server {
+func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip, utxoNum uint) *httptest.Server {
 	th := TBCMockHandler{
 		mockHandler: mockHandler{
 			errCh: errCh,
@@ -131,6 +137,7 @@ func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keyst
 		},
 		keystones: keystones,
 		btcTip:    btcTip,
+		utxoNum:   utxoNum,
 	}
 	th.handleFunc = th.mockTBCHandleFunc
 
@@ -180,7 +187,20 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 		return fmt.Errorf("write ping: %w", err)
 	}
 
-	// fmt.Printf("mockTBC: connection from %v\n", r.RemoteAddr)
+	// create utxos
+	utxos := make([]tbcd.Utxo, 0, f.utxoNum)
+	for k := range f.utxoNum {
+		uniqueBytes := make([]byte, 32)
+		binary.BigEndian.PutUint32(uniqueBytes[0:32], uint32(k))
+		utxo := tbcd.NewUtxo([32]byte(uniqueBytes), 10000, 0)
+		utxos = append(utxos, utxo)
+	}
+
+	// create mempool
+	mp, err := tbc.MempoolNew()
+	if err != nil {
+		return fmt.Errorf("create mempool: %w", err)
+	}
 
 	for {
 		cmd, id, payload, err := tbcapi.Read(f.pctx, wsConn)
@@ -215,14 +235,21 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 				BlockHeader: nil,
 			}
 		case tbcapi.CmdUTXOsByAddressRequest:
+			filtered, err := mp.FilterUtxos(f.pctx, utxos)
+			if err != nil {
+				return fmt.Errorf("filter utxos: %w", err)
+			}
+
+			respUtxos := make([]*tbcapi.UTXO, 0)
+			for _, utxo := range filtered {
+				respUtxos = append(respUtxos, &tbcapi.UTXO{
+					TxId:     *utxo.ChainHash(),
+					Value:    btcutil.Amount(utxo.Value()),
+					OutIndex: utxo.OutputIndex(),
+				})
+			}
 			resp = &tbcapi.UTXOsByAddressResponse{
-				UTXOs: []*tbcapi.UTXO{
-					{
-						TxId:     chainhash.Hash{},
-						Value:    1000000,
-						OutIndex: 1,
-					},
-				},
+				UTXOs: respUtxos,
 			}
 		case tbcapi.CmdTxBroadcastRequest:
 			pl, ok := payload.(*tbcapi.TxBroadcastRequest)
@@ -249,6 +276,13 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 				}
 				f.keystones[*aPoPTx.L2Keystone.Hash()] = aPoPTx.L2Keystone
 				break
+			}
+
+			opp := pl.Tx.TxIn[0].PreviousOutPoint
+			mptx := tbc.NewMempoolTx(*ch, map[wire.OutPoint]struct{}{opp: {}})
+			err = mp.TxsInsert(f.pctx, &mptx)
+			if err != nil {
+				return fmt.Errorf("mempool tx inser: %w", err)
 			}
 		case tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest:
 			pl, ok := payload.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest)
