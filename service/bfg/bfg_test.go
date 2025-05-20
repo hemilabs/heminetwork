@@ -50,7 +50,7 @@ func TestBFG(t *testing.T) {
 	defer opgeth.Close()
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip)
+	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 10)
 	defer mtbc.Close()
 
 	bfgCfg := NewDefaultConfig()
