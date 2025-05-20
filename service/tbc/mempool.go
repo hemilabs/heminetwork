@@ -54,13 +54,15 @@ func (m *mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	// XXX this may be too slow and we may need a map, but let's try it first.
+	// This may be too slow and we may need a merged map because it is more
+	// likely to never find the utxo than it is to find it. That said, the
+	// setup and teardown would me much more expensive despite this code
+	// being called infrequently.
 	for k := range utxos {
 		opp := wire.NewOutPoint(utxos[k].ChainHash(), utxos[k].OutputIndex())
 		op := *opp
 		for _, tx := range m.txs {
-			// XXX I added this check, but you might
-			// want to handle it differently (ALCT)
+			// Skip tx that aren't fully in the mempool yet.
 			if tx == nil {
 				continue
 			}
@@ -212,7 +214,7 @@ func (m *mempool) stats(ctx context.Context) (int, int) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	// Approximate size of mempool; XXX overhead is missing.
+	// Approximate size of mempool; overhead is missing.
 	return len(m.txs), int(m.size) + (len(m.txs) * chainhash.HashSize)
 }
 
