@@ -17,14 +17,6 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
-// commented to fix linter
-// func sumTxOuts(utxos []*wire.TxOut) (total int64) {
-// 	for k := range utxos {
-// 		total += utxos[k].Value
-// 	}
-// 	return
-// }
-
 var MaxTxVersion = int32(2) // XXX this should not be a global
 
 type mempoolTx struct {
