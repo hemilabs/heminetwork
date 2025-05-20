@@ -128,7 +128,7 @@ func TestIntegration(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, nil, 0)
+	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, nil, 0, 10)
 	defer mtbc.Close()
 
 	tg, err := tbcgozer.Run(ctx, mtbc.URL)
