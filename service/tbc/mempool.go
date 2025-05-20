@@ -25,9 +25,6 @@ import (
 // 	return
 // }
 
-// XXX antonio please add tests for reaping. We need to test
-// adding/removing/autoreaping tx's from the mempool.
-
 var MaxTxVersion = int32(2) // XXX this should not be a global
 
 type mempoolTx struct {
@@ -48,7 +45,7 @@ type mempool struct {
 	size    int64                         // total "tx virtual" memory used by mempool
 }
 
-func (m *mempool) filterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
+func (m *mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
 	log.Tracef("filterUtxos")
 	defer log.Tracef("filterUtxos exit")
 
@@ -62,6 +59,11 @@ func (m *mempool) filterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 		opp := wire.NewOutPoint(utxos[k].ChainHash(), utxos[k].OutputIndex())
 		op := *opp
 		for _, tx := range m.txs {
+			// XXX I added this check, but you might
+			// want to handle it differently (ALCT)
+			if tx == nil {
+				continue
+			}
 			if _, ok := tx.txins[op]; ok {
 				// found! filter it out
 				goto skip
@@ -106,7 +108,7 @@ func (m *mempool) txProcessed(txid chainhash.Hash) bool {
 	return m.txs[txid] != nil // return true when tx is not nil
 }
 
-func (m *mempool) txsInsert(ctx context.Context, mptx *mempoolTx) error {
+func (m *mempool) TxsInsert(ctx context.Context, mptx *mempoolTx) error {
 	log.Tracef("txsInsert")
 	defer log.Tracef("txsInsert exit")
 
@@ -214,6 +216,10 @@ func (m *mempool) stats(ctx context.Context) (int, int) {
 	return len(m.txs), int(m.size) + (len(m.txs) * chainhash.HashSize)
 }
 
+func NewMempoolTx(id chainhash.Hash, txins map[wire.OutPoint]struct{}) mempoolTx {
+	return mempoolTx{id: id, txins: txins}
+}
+
 func (m *mempool) Dump(ctx context.Context) string {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
@@ -221,7 +227,7 @@ func (m *mempool) Dump(ctx context.Context) string {
 	return spew.Sdump(m.txs)
 }
 
-func mempoolNew() (*mempool, error) {
+func MempoolNew() (*mempool, error) {
 	return &mempool{
 		txs: make(map[chainhash.Hash]*mempoolTx, 10000),
 	}, nil
