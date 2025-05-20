@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
+
 	"github.com/hemilabs/heminetwork/database/tbcd"
 )
 
@@ -297,7 +299,7 @@ func TestMempoolFiltering(t *testing.T) {
 			mptx := mempoolTx{
 				id:      *ch,
 				expires: time.Now().Add(1 * time.Hour),
-				txins:   map[wire.OutPoint]struct{}{*opp: struct{}{}},
+				txins:   map[wire.OutPoint]struct{}{*opp: {}},
 			}
 			mp.txsInsert(ctx, &mptx)
 		}
@@ -321,24 +323,27 @@ func TestMempoolFiltering(t *testing.T) {
 
 func BenchmarkMempoolFilter(b *testing.B) {
 	for _, mempoolTxNum := range []int{1, 10, 100, 1000, 10000} {
-		for _, txInNum := range []int{1, 10, 100} {
+		for _, txInNum := range []int{1, 10, 100, 1000, 10000} {
 			mp, err := mempoolNew()
 			if err != nil {
 				b.Fatal(err)
 			}
 			utxos := make([]tbcd.Utxo, 0, txInNum*mempoolTxNum)
+			// Create new mempoolTx
 			for k := range mempoolTxNum {
-				idBytes := make([]byte, 32)
-				binary.BigEndian.PutUint32(idBytes[0:32], uint32(k))
-				txId, err := chainhash.NewHash(idBytes)
+				txIdBytes := make([]byte, 32)
+				binary.BigEndian.PutUint32(txIdBytes[0:32], uint32(k))
+				txId, err := chainhash.NewHash(txIdBytes)
 				if err != nil {
 					b.Fatal(err)
 				}
+
 				mptx := mempoolTx{
 					id:      *txId,
 					expires: time.Now().Add(10 * time.Hour),
 					txins:   make(map[wire.OutPoint]struct{}),
 				}
+				// Create utxo and add it to the mempoolTx
 				for i := range txInNum {
 					uniqueBytes := make([]byte, 32)
 					binary.BigEndian.PutUint32(uniqueBytes[0:15], uint32(i))
@@ -352,9 +357,16 @@ func BenchmarkMempoolFilter(b *testing.B) {
 				}
 				mp.txsInsert(b.Context(), &mptx)
 			}
+
+			// Shuffle created utxos
+			rand.Shuffle(len(utxos), func(i, j int) { utxos[i], utxos[j] = utxos[j], utxos[i] })
+
+			// Pick up to 1000 random utxos
+			toFilter := utxos[0:min(1000, len(utxos))]
+
 			b.Run(fmt.Sprintf("benchmark %d mempoolTxs with %d txins", mempoolTxNum, txInNum), func(b *testing.B) {
 				for b.Loop() {
-					_, err = mp.filterUtxos(b.Context(), utxos)
+					_, err = mp.filterUtxos(b.Context(), toFilter)
 					if err != nil {
 						b.Fatal(err)
 					}
