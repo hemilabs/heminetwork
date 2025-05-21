@@ -1604,7 +1604,7 @@ func TestPublications(t *testing.T) {
 				l2BlockNumber++
 			}
 
-			bfs, err := db.L2BTCFinalityMostRecent(ctx, 100)
+			bfs, err := db.L2BTCFinalityMostRecent(ctx, 100, 999999999)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1645,6 +1645,7 @@ func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
+		999999999999,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1661,6 +1662,43 @@ func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 
 	if finalities[0].BTCPubHeight != 8988 {
 		t.Fatalf("incorrect height %d", finalities[0].BTCPubHeight)
+	}
+}
+
+func TestL2BtcFinalitiesByL2KeystoneWithCutoff(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	createBtcBlocksAtStartingHeight(ctx, t, db, 2, true, 8987, []byte{}, 646464)
+
+	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
+		ctx,
+		[]database.ByteArray{l2Keystones[0].Hash, l2Keystones[1].Hash},
+		int64(l2Keystones[1].L2BlockNumber),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(finalities) != 1 {
+		t.Fatalf("received unexpected number of finalities: %d", len(finalities))
+	}
+
+	diff := deep.Equal(l2Keystones[1], finalities[0].L2Keystone)
+	if len(diff) > 0 {
+		t.Fatalf("unexpected diff %s", diff)
 	}
 }
 
@@ -1687,6 +1725,7 @@ func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
+		99999999999,
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -2574,7 +2574,7 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 
 	time.Sleep(5 * time.Second)
 
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100, 9999999999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2641,7 +2641,7 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100, 9999999999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2739,7 +2739,7 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100, 9999999999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2854,7 +2854,7 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 		}
 	}
 
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100, 9999999999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2919,7 +2919,7 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100)
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100, 9999999999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3000,7 +3000,7 @@ func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
 	createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
 	// get the btc block's finality, this is the only one that
 	// we care about in this test
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1)
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1, 9999999999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3103,7 +3103,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 	createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
 	// get the btc block's finality, this is the only one that
 	// we care about in this test
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1)
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1, 9999999999)
 	if err != nil {
 		t.Fatal(err)
 	}

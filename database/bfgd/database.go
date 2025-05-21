@@ -38,8 +38,8 @@ type Database interface {
 	PopBasisUpdateBTCFields(ctx context.Context, pb *PopBasis) (int64, error)
 	PopBasisUpdateBTCFieldsWithTx(ctx context.Context, tx *sql.Tx, pb *PopBasis) (int64, error)
 
-	L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]L2BTCFinality, error)
-	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray) ([]L2BTCFinality, error)
+	L2BTCFinalityMostRecent(ctx context.Context, limit uint32, ignoreAfterL2Block int64) ([]L2BTCFinality, error)
+	L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray, ignoreAfterL2Block int64) ([]L2BTCFinality, error)
 
 	BtcBlockCanonicalHeight(ctx context.Context) (uint64, error)
 

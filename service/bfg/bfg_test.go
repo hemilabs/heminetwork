@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"testing"
+	"time"
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 	btcwire "github.com/btcsuite/btcd/wire"
@@ -718,5 +719,29 @@ func TestErrorIfNotPrivKeyConnectingToBFG(t *testing.T) {
 
 	if !errors.Is(err, ErrBTCPrivateKeyMissing) {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestIgnoringL2Blocks(t *testing.T) {
+	bfgServer, err := NewServer(&Config{
+		BaselineL2BlockHeight:    1000,
+		BaselineL2BlockTimestamp: 777,
+		RequestLimit:             1,
+		RequestTimeout:           4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// repeat code of algorithm
+
+	// in 10 minutes, what is the expected l2 block given the baseline block and l2 block time
+	expectedDelay := (time.Now().Add(10 * time.Minute).Unix()) - 777
+	expectedDelayInblocks := expectedDelay / hemi.L2BlockTimeSeconds
+	expected := 1000 + expectedDelayInblocks
+
+	ignoreL2BlocksAfter := bfgServer.l2KeystoneIgnoreAfter()
+	if ignoreL2BlocksAfter != expected {
+		t.Fatalf("unexpected delay: %d != %d", ignoreL2BlocksAfter, expected)
 	}
 }

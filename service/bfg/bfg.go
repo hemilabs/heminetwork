@@ -104,24 +104,26 @@ type bfgCmd struct {
 }
 
 type Config struct {
-	BTCStartHeight          uint64
-	EXBTCAddress            string
-	EXBTCInitialConns       int
-	EXBTCMaxConns           int
-	PrivateListenAddress    string
-	PublicListenAddress     string
-	LogLevel                string
-	PgURI                   string
-	PrometheusListenAddress string
-	PrometheusNamespace     string
-	PprofListenAddress      string
-	RequestLimit            int
-	RequestTimeout          int // in seconds
-	RemoteIPHeaders         []string
-	TrustedProxies          []string
-	BFGURL                  string
-	BTCPrivateKey           string
-	DisablePublicConns      bool
+	BTCStartHeight           uint64
+	EXBTCAddress             string
+	EXBTCInitialConns        int
+	EXBTCMaxConns            int
+	PrivateListenAddress     string
+	PublicListenAddress      string
+	LogLevel                 string
+	PgURI                    string
+	PrometheusListenAddress  string
+	PrometheusNamespace      string
+	PprofListenAddress       string
+	RequestLimit             int
+	RequestTimeout           int // in seconds
+	RemoteIPHeaders          []string
+	TrustedProxies           []string
+	BFGURL                   string
+	BTCPrivateKey            string
+	DisablePublicConns       bool
+	BaselineL2BlockHeight    int64
+	BaselineL2BlockTimestamp int64
 }
 
 type Server struct {
@@ -1244,7 +1246,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 	log.Tracef("handleBtcFinalityByRecentKeystonesRequest")
 	defer log.Tracef("handleBtcFinalityByRecentKeystonesRequest exit")
 
-	finalities, err := s.db.L2BTCFinalityMostRecent(ctx, bfrk.NumRecentKeystones)
+	finalities, err := s.db.L2BTCFinalityMostRecent(ctx, bfrk.NumRecentKeystones, s.l2KeystoneIgnoreAfter())
 	if err != nil {
 		e := protocol.NewInternalErrorf("error getting finality: %w", err)
 		return &bfgapi.BTCFinalityByRecentKeystonesResponse{
@@ -1287,6 +1289,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	finalities, err := s.db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		l2KeystoneAbrevHashes,
+		s.l2KeystoneIgnoreAfter(),
 	)
 	if err != nil {
 		e := protocol.NewInternalErrorf("l2 keystones: %w", err)
@@ -1472,6 +1475,30 @@ func (s *Server) refreshCacheAndNotifiyL2Keystones(pctx context.Context) {
 
 	s.refreshL2KeystoneCache(ctx)
 	go s.handleL2KeystonesNotification()
+}
+
+// to prevent against keystones being mined too far in the future, determine
+// a cutoff time 10 minutes in the future.  calculate the l2 block height at
+// that time, don't include keystones higher than that
+func (s *Server) l2KeystoneIgnoreAfter() int64 {
+	log.Tracef("refreshL2KeystoneIgnoreAfter")
+	defer log.Tracef("refreshL2KeystoneIgnoreAfter exit")
+
+	// set cut off 10 minutes in the future
+	// calculate the number of expected blocks between then and our baseline
+	// block
+
+	cutoff := time.Now().Add(10 * time.Minute).Unix()
+	expectedTimeElapsedInBlocks := (cutoff - s.cfg.BaselineL2BlockTimestamp) / hemi.L2BlockTimeSeconds
+	expectedHighestBlock := s.cfg.BaselineL2BlockHeight + expectedTimeElapsedInBlocks
+
+	log.Tracef("the time is cut off at %d, we expected %d to be the highest block", cutoff, expectedHighestBlock)
+
+	if (expectedHighestBlock) < 0 {
+		panic(fmt.Sprintf("expectedHighestBlock is negative: %d", expectedHighestBlock))
+	}
+
+	return expectedHighestBlock
 }
 
 func (s *Server) saveL2Keystones(pctx context.Context, l2k []hemi.L2Keystone) {
@@ -1787,6 +1814,14 @@ func (s *Server) BtcBlockCanonicalHeight(ctx context.Context) (uint64, error) {
 func (s *Server) Run(pctx context.Context) error {
 	log.Tracef("Run")
 	defer log.Tracef("Run exit")
+
+	if s.cfg.BaselineL2BlockHeight == 0 {
+		log.Warningf("baseline l2 block height is 0")
+	}
+
+	if s.cfg.BaselineL2BlockTimestamp == 0 {
+		log.Warningf("baseline l2 block timestamp is 0")
+	}
 
 	if !s.testAndSetRunning(true) {
 		return errors.New("bfg already running")
