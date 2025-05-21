@@ -87,6 +87,9 @@ const (
 
 	CmdMempoolInfoRequest  = "tbcapi-mempool-info-request"
 	CmdMempoolInfoResponse = "tbcapi-mempool-info-response"
+
+	CmdPopTxsForL2BlockRequest  = "tbcapi-pop-txs-for-l2-block-request"
+	CmdPopTxsForL2BlockResponse = "tbcapi-pop-txs-for-l2-block-response"
 )
 
 var (
@@ -160,6 +163,17 @@ type Block struct {
 type FeeEstimate struct {
 	Blocks      uint
 	SatsPerByte float64
+}
+
+type PopTx struct {
+	BtcTxId             api.ByteSlice `json:"btc_tx_id"`
+	BtcRawTx            api.ByteSlice `json:"btc_raw_tx"`
+	BtcHeaderHash       api.ByteSlice `json:"btc_header_hash"`
+	BtcTxIndex          *uint64       `json:"btc_tx_index"`
+	BtcMerklePath       []string      `json:"btc_merkle_path"`
+	PopTxId             api.ByteSlice `json:"pop_tx_id"`
+	PopMinerPublicKey   api.ByteSlice `json:"pop_miner_public_key"`
+	L2KeystoneAbrevHash api.ByteSlice `json:"l2_keystone_abrev_hash"`
 }
 
 // BlockByHashRequest requests a [Block] by its hash.
@@ -360,6 +374,16 @@ type MempoolInfoResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
+type PopTxsForL2BlockRequest struct {
+	L2Block api.ByteSlice `json:"l2_block"`
+	Page    uint32        `json:"page,omitempty"`
+}
+
+type PopTxsForL2BlockResponse struct {
+	PopTxs []PopTx         `json:"pop_txs"`
+	Error  *protocol.Error `json:"error,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                                reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                               reflect.TypeOf(PingResponse{}),
@@ -403,6 +427,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdFeeEstimateResponse:                        reflect.TypeOf(FeeEstimateResponse{}),
 	CmdMempoolInfoRequest:                         reflect.TypeOf(MempoolInfoRequest{}),
 	CmdMempoolInfoResponse:                        reflect.TypeOf(MempoolInfoResponse{}),
+	CmdPopTxsForL2BlockRequest:                    reflect.TypeOf(PopTxsForL2BlockRequest{}),
+	CmdPopTxsForL2BlockResponse:                   reflect.TypeOf(PopTxsForL2BlockResponse{}),
 }
 
 type tbcAPI struct{}

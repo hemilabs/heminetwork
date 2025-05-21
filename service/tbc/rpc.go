@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -29,6 +30,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
 func tx2Bytes(tx *wire.MsgTx) ([]byte, error) {
@@ -211,6 +213,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.MempoolInfoRequest)
 				return s.handleMempoolInfoRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdPopTxsForL2BlockRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.PopTxsForL2BlockRequest)
+				return s.handlePopTxsForL2Block(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -558,6 +567,99 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	return &tbcapi.TxByIdResponse{
 		Tx: wireTxToTBC(tx),
 	}, nil
+}
+
+func (s *Server) handlePopTxsForL2Block(ctx context.Context, req *tbcapi.PopTxsForL2BlockRequest) (any, error) {
+	log.Tracef("handlePopTxsForL2Block")
+	defer log.Tracef("handlePopTxsForL2Block exit")
+
+	hash := hemi.HashSerializedL2KeystoneAbrev(req.L2Block)
+
+	ptx, err := s.popTxByL2KeystoneAbrevHash(ctx, *hash)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.PopTxsForL2BlockResponse{Error: e.ProtocolError()}, e
+	}
+
+	return &tbcapi.PopTxsForL2BlockResponse{PopTxs: []tbcapi.PopTx{ptx}}, nil
+}
+
+func (s *Server) popTxByL2KeystoneAbrevHash(ctx context.Context, hash chainhash.Hash) (tbcapi.PopTx, error) {
+	ptx := tbcapi.PopTx{}
+
+	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
+	if err != nil {
+		panic(err)
+	}
+	ksBlk, err := s.db.BlockByHash(ctx, ks.BlockHash)
+	if err != nil {
+		panic(err)
+	}
+
+	tx, err := popTxFromBlock(hash, ksBlk)
+	if err != nil {
+		return ptx, err
+	}
+
+	var hbuff bytes.Buffer
+	if err := ksBlk.MsgBlock().Header.Serialize(&hbuff); err != nil {
+		return ptx, err
+	}
+	rbh := hbuff.Bytes()
+	btcHeaderHash := chainhash.DoubleHashB(rbh[:])
+
+	merkle := ksBlk.MsgBlock().Header.MerkleRoot
+	merkleRootEncoded := hex.EncodeToString(merkle[:])
+	merklePath := []string{merkleRootEncoded} // is this correct?
+
+	var buf bytes.Buffer
+	if err := tx.MsgTx().Serialize(&buf); err != nil {
+		return ptx, err
+	}
+	rawTx := buf.Bytes()
+
+	txHash := tx.MsgTx().TxHash()
+	btcTxId := txHash[:]
+	btcTxIndex := uint64(tx.Index())
+
+	popTxIdFull := []byte{}
+	popTxIdFull = append(popTxIdFull, txHash[:]...)
+	popTxIdFull = append(popTxIdFull, rbh...)
+	popTxId := binary.AppendUvarint(popTxIdFull, btcTxIndex) // is this correct?
+
+	publicKeyUncompressed, err := pop.ParsePublicKeyFromSignatureScript(tx.MsgTx().TxIn[0].SignatureScript)
+	if err != nil {
+		return ptx, err
+	}
+
+	ptx = tbcapi.PopTx{
+		BtcTxId:             btcTxId,
+		BtcRawTx:            rawTx,
+		BtcHeaderHash:       btcHeaderHash,
+		BtcTxIndex:          &btcTxIndex,
+		BtcMerklePath:       merklePath,
+		PopTxId:             popTxId,
+		PopMinerPublicKey:   publicKeyUncompressed,
+		L2KeystoneAbrevHash: hash[:],
+	}
+
+	return ptx, nil
+}
+
+func popTxFromBlock(hash chainhash.Hash, block *btcutil.Block) (*btcutil.Tx, error) {
+	ksTxs := block.Transactions()
+	for _, tx := range ksTxs {
+		for _, txOut := range tx.MsgTx().TxOut {
+			aPoPTx, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
+			if err != nil {
+				continue
+			}
+			if aPoPTx.L2Keystone.Hash().IsEqual(&hash) {
+				return tx, nil
+			}
+		}
+	}
+	return nil, errors.New("no tx found in block for keystone hash")
 }
 
 func (s *Server) handleTxBroadcastRequest(ctx context.Context, req *tbcapi.TxBroadcastRequest) (any, error) {
