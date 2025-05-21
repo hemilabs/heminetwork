@@ -1492,7 +1492,7 @@ func (s *Server) l2KeystoneIgnoreAfter() int64 {
 	expectedTimeElapsedInBlocks := (cutoff - s.cfg.BaselineL2BlockTimestamp) / hemi.L2BlockTimeSeconds
 	expectedHighestBlock := s.cfg.BaselineL2BlockHeight + expectedTimeElapsedInBlocks
 
-	log.Tracef("the time is cutt off at %d, we expected %d to be the highest block", cutoff, expectedHighestBlock)
+	log.Tracef("the time is cut off at %d, we expected %d to be the highest block", cutoff, expectedHighestBlock)
 
 	if (expectedHighestBlock) < 0 {
 		panic(fmt.Sprintf("expectedHighestBlock is negative: %d", expectedHighestBlock))
