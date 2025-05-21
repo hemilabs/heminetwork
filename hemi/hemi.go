@@ -19,6 +19,7 @@ const (
 	HeaderVersion1       = 1
 	HeaderSize           = 73 // XXX rename
 	KeystoneHeaderPeriod = 25 // XXX debate and set
+	L2BlockTimeSeconds   = 12
 
 	OldHeaderSize = 65
 

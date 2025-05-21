@@ -672,7 +672,7 @@ func (p *pgdb) PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte
 
 // L2BTCFinalityMostRecent gets the most recent L2BtcFinalities sorted
 // descending by l2_block_number
-func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfgd.L2BTCFinality, error) {
+func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32, ignoreAfterL2Block int64) ([]bfgd.L2BTCFinality, error) {
 	if limit > 100 {
 		return nil, fmt.Errorf(
 			"limit cannot be greater than 100, received %d",
@@ -690,7 +690,7 @@ func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfg
 		hashes = append(hashes, l.Hash)
 	}
 
-	finalities, err := p.L2BTCFinalityByL2KeystoneAbrevHash(ctx, hashes)
+	finalities, err := p.L2BTCFinalityByL2KeystoneAbrevHash(ctx, hashes, ignoreAfterL2Block)
 	if err != nil {
 		return nil, err
 	}
@@ -700,7 +700,7 @@ func (p *pgdb) L2BTCFinalityMostRecent(ctx context.Context, limit uint32) ([]bfg
 
 // L2BTCFinalityByL2KeystoneAbrevHash queries for finalities by L2KeystoneAbrevHash
 // and returns them descending by l2_block_number
-func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray) ([]bfgd.L2BTCFinality, error) {
+func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2KeystoneAbrevHashes []database.ByteArray, ignoreAfterL2Block int64) ([]bfgd.L2BTCFinality, error) {
 	log.Tracef("L2BTCFinalityByL2KeystoneAbrevHash")
 	defer log.Tracef("L2BTCFinalityByL2KeystoneAbrevHash exit")
 
@@ -748,6 +748,8 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			COALESCE((SELECT height FROM btc_blocks ORDER BY height DESC LIMIT 1),0)
 			
 			FROM l2_keystones_lowest_btc_block
+
+			WHERE l2_block_number <= $2
 			
 			ORDER BY l2_keystones_lowest_btc_block.l2_block_number DESC
 		`
@@ -774,7 +776,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		l2KeystoneAbrevHashesStr = append(l2KeystoneAbrevHashesStr, []byte(l))
 	}
 
-	rows, err := p.db.QueryContext(ctx, sql, pq.Array(l2KeystoneAbrevHashesStr))
+	rows, err := p.db.QueryContext(ctx, sql, pq.Array(l2KeystoneAbrevHashesStr), ignoreAfterL2Block)
 	if err != nil {
 		return nil, err
 	}

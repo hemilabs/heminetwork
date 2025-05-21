@@ -122,6 +122,8 @@ type Config struct {
 	BFGURL                  string
 	BTCPrivateKey           string
 	DisablePublicConns      bool
+	BaselineBlockHeight     int64
+	BaselineBlockTimestamp  int64
 }
 
 type Server struct {
@@ -1244,7 +1246,7 @@ func (s *Server) handleBtcFinalityByRecentKeystonesRequest(ctx context.Context, 
 	log.Tracef("handleBtcFinalityByRecentKeystonesRequest")
 	defer log.Tracef("handleBtcFinalityByRecentKeystonesRequest exit")
 
-	finalities, err := s.db.L2BTCFinalityMostRecent(ctx, bfrk.NumRecentKeystones)
+	finalities, err := s.db.L2BTCFinalityMostRecent(ctx, bfrk.NumRecentKeystones, s.l2KeystoneIgnoreAfter())
 	if err != nil {
 		e := protocol.NewInternalErrorf("error getting finality: %w", err)
 		return &bfgapi.BTCFinalityByRecentKeystonesResponse{
@@ -1287,6 +1289,7 @@ func (s *Server) handleBtcFinalityByKeystonesRequest(ctx context.Context, bfkr *
 	finalities, err := s.db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		l2KeystoneAbrevHashes,
+		s.l2KeystoneIgnoreAfter(),
 	)
 	if err != nil {
 		e := protocol.NewInternalErrorf("l2 keystones: %w", err)
@@ -1472,6 +1475,23 @@ func (s *Server) refreshCacheAndNotifiyL2Keystones(pctx context.Context) {
 
 	s.refreshL2KeystoneCache(ctx)
 	go s.handleL2KeystonesNotification()
+}
+
+func (s *Server) l2KeystoneIgnoreAfter() int64 {
+	log.Tracef("refreshL2KeystoneIgnoreAfter")
+	defer log.Tracef("refreshL2KeystoneIgnoreAfter exit")
+
+	cutoff := time.Now().Add(10 * time.Minute).Unix()
+	expectedTimeElapsedInBlocks := (cutoff - s.cfg.BaselineBlockTimestamp) / hemi.L2BlockTimeSeconds
+	expectedHighestBlock := s.cfg.BaselineBlockHeight + expectedTimeElapsedInBlocks
+
+	log.Tracef("the time is currently %d, we expected %d to be the highest block", cutoff, expectedHighestBlock)
+
+	if (expectedHighestBlock) < 0 {
+		panic(fmt.Sprintf("expectedHighestBlock is negative: %d", expectedHighestBlock))
+	}
+
+	return expectedHighestBlock
 }
 
 func (s *Server) saveL2Keystones(pctx context.Context, l2k []hemi.L2Keystone) {

@@ -1604,7 +1604,7 @@ func TestPublications(t *testing.T) {
 				l2BlockNumber++
 			}
 
-			bfs, err := db.L2BTCFinalityMostRecent(ctx, 100)
+			bfs, err := db.L2BTCFinalityMostRecent(ctx, 100, 999999999)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1645,6 +1645,7 @@ func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
+		999999999999,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1687,6 +1688,7 @@ func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
 	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
 		ctx,
 		[]database.ByteArray{firstKeystone.Hash},
+		99999999999
 	)
 	if err != nil {
 		t.Fatal(err)
