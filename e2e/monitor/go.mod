@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork/e2e/monitor
 
 go 1.23
 
-toolchain go1.24.1
+toolchain go1.24.3
 
 replace github.com/hemilabs/heminetwork => ../../
 
@@ -51,7 +51,7 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ebitengine/purego v0.8.2 // indirect
+	github.com/ebitengine/purego v0.8.3 // indirect
 	github.com/ethereum-optimism/go-ethereum-hdwallet v0.1.3 // indirect
 	github.com/ethereum/c-kzg-4844 v1.0.0 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
