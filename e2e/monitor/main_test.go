@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"slices"
+	"bytes"
 	"testing"
 	"time"
 
@@ -130,6 +131,11 @@ func TestL1L2Comms(t *testing.T) {
 		t.Fatalf("could not dial eth l1 %s", err)
 	}
 
+	l2ClientNonSequencing, err := ethclient.Dial("http://localhost:18546")
+	if err != nil {
+		t.Fatalf("could not dial eth l1 %s", err)
+	}
+
 	privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +156,7 @@ func TestL1L2Comms(t *testing.T) {
 
 	bridgeEthL2ToL1(t, ctx, l1Client, l2Client, privateKey)
 
-	hvmTipNearBtcTip(t, ctx, l2Client, privateKey)
+	hvmTipNearBtcTip(t, ctx, l2Client, l2ClientNonSequencing, privateKey)
 	hvmBtcBalance(t, ctx, l2Client, privateKey)
 }
 
@@ -175,7 +181,7 @@ func TestOperatorFeeVaultIsPresent(t *testing.T) {
 	}
 }
 
-func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, l2ClientNonSequencing *ethclient.Client,  privateKey *ecdsa.PrivateKey) {
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
@@ -203,7 +209,7 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 	auth.GasLimit = uint64(3000000) // in units
 	auth.GasPrice = gasPrice
 
-	_, tx, l2ReadBalances, err := mybindings.DeployL2ReadBalances(auth, l2Client)
+	contractAddress, tx, l2ReadBalances, err := mybindings.DeployL2ReadBalances(auth, l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,6 +219,20 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 	res, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	l2ReadBalancesNonSequencing, err := mybindings.NewL2ReadBalances(contractAddress, l2ClientNonSequencing)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resNonSequencing, err := l2ReadBalancesNonSequencing.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(res, resNonSequencing) {
+		t.Fatalf("bitcoin header mismatch between sequencer and non-sequencer: %x != %x", res, resNonSequencing)
 	}
 
 	config := client.ConnConfig{

@@ -424,6 +424,8 @@ services:
       - {type: "tmpfs", target: "/tmp"}
     networks:
       e2e:
+    ports:
+      - "18546:8546"
 
   op-batcher:
     build:
