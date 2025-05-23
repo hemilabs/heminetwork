@@ -799,7 +799,7 @@ func TestProcessReceivedNoDuplicates(t *testing.T) {
 	}
 }
 
-// TestProcessReceivedInAscOrder ensures that if we queue more than 10 keystones
+// TestProcessReceivedInAscOrderOverride ensures that if we queue more than 10 keystones
 // for mining, that we override the oldest
 func TestProcessReceivedInAscOrderOverride(t *testing.T) {
 	keystones := []hemi.L2Keystone{
