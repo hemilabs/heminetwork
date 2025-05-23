@@ -767,7 +767,9 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 						AND pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
 					)
 				) btc_blocks ON TRUE
-				WHERE l2_block_number >= $1 LIMIT 1
+				WHERE 
+				l2_block_number >= $1 
+				AND l2_block_number <= $2
 			), 0)
 		`
 
@@ -810,7 +812,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 
 		var effectiveHeight uint32
 
-		if err := p.db.QueryRow(effectiveHeightSql, l2BtcFinality.L2Keystone.L2BlockNumber).Scan(&effectiveHeight); err != nil {
+		if err := p.db.QueryRow(effectiveHeightSql, l2BtcFinality.L2Keystone.L2BlockNumber, ignoreAfterL2Block).Scan(&effectiveHeight); err != nil {
 			return nil, fmt.Errorf("error querying for rows: %w", err)
 		}
 

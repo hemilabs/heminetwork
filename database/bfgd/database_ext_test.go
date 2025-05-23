@@ -1700,6 +1700,55 @@ func TestL2BtcFinalitiesByL2KeystoneWithCutoff(t *testing.T) {
 	if len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
 	}
+
+	if finalities[0].EffectiveHeight != 8987 {
+		t.Fatalf("incorrect effective height %d", finalities[0].EffectiveHeight)
+	}
+}
+
+func TestL2BtcFinalitiesByL2KeystoneWithCutoffReverseMining(t *testing.T) {
+
+	// if a newer keystone gets mined before gets mined before an older
+	// one, take that into account with effective height
+
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	createBtcBlocksAtStartingHeightReverseMining(ctx, t, db, 2, true, 8987, []byte{}, 646464)
+
+	l2Keystones, err := db.L2KeystonesMostRecentN(ctx, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	finalities, err := db.L2BTCFinalityByL2KeystoneAbrevHash(
+		ctx,
+		[]database.ByteArray{l2Keystones[0].Hash, l2Keystones[1].Hash},
+		int64(l2Keystones[1].L2BlockNumber),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(finalities) != 1 {
+		t.Fatalf("received unexpected number of finalities: %d", len(finalities))
+	}
+
+	diff := deep.Equal(l2Keystones[1], finalities[0].L2Keystone)
+	if len(diff) > 0 {
+		t.Fatalf("unexpected diff %s", diff)
+	}
+
+	if finalities[0].EffectiveHeight != 8988 {
+		t.Fatalf("incorrect effective height %d", finalities[0].EffectiveHeight)
+	}
 }
 
 func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
@@ -2264,6 +2313,29 @@ func createBtcBlocksAtStaticHeight(ctx context.Context, t *testing.T, db bfgd.Da
 			l2BlockNumber,
 		)
 		blocks = append(blocks, btcBlock)
+		lastHash = btcBlock.Hash
+	}
+
+	return blocks
+}
+
+func createBtcBlocksAtStartingHeightReverseMining(ctx context.Context, t *testing.T, db bfgd.Database, count int, chain bool, height int, lastHash []byte, l2BlockNumber uint32) []bfgd.BtcBlock {
+	blocks := []bfgd.BtcBlock{}
+
+	for range count {
+		btcBlock := createBtcBlock(
+			ctx,
+			t,
+			db,
+			count,
+			chain,
+			height,
+			lastHash,
+			l2BlockNumber,
+		)
+		blocks = append(blocks, btcBlock)
+		height++
+		l2BlockNumber--
 		lastHash = btcBlock.Hash
 	}
 
