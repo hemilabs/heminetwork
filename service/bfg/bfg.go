@@ -140,8 +140,6 @@ type Server struct {
 	remoteIPHeaders []string
 	trustedProxies  []*net.IPNet
 
-	btcHeight uint64
-
 	server       *http.ServeMux
 	publicServer *http.ServeMux
 
