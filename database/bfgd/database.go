@@ -48,6 +48,7 @@ type Database interface {
 	BtcTransactionBroadcastRequestConfirmBroadcast(ctx context.Context, txId string) error
 	BtcTransactionBroadcastRequestSetLastError(ctx context.Context, txId string, lastErr string) error
 	BtcTransactionBroadcastRequestTrim(ctx context.Context) error
+	BtcBlocksTrimLowerThan(ctx context.Context, height uint64) (int64, error)
 
 	BeginTx(ctx context.Context) (*sql.Tx, error)
 	Commit(tx *sql.Tx) error

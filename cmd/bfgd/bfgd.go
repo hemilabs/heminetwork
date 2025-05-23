@@ -49,13 +49,6 @@ var (
 			Help:         "electrs max connections",
 			Print:        config.PrintAll,
 		},
-		"BFG_BTC_START_HEIGHT": config.Config{
-			Value:        &cfg.BTCStartHeight,
-			DefaultValue: uint64(0),
-			Help:         "bitcoin start height that serves as genesis",
-			Print:        config.PrintAll,
-			Required:     true,
-		},
 		"BFG_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
@@ -145,6 +138,12 @@ var (
 			Value:        &cfg.BaselineL2BlockTimestamp,
 			DefaultValue: int64(0),
 			Help:         "the timestamp of the baseline l2 block",
+			Print:        config.PrintAll,
+		},
+		"BFG_BTC_WINDOW_FROM_TIP": config.Config{
+			Value:        &cfg.BTCWindowFromTip,
+			DefaultValue: uint64(1000),
+			Help:         "how many blocks from tip to track",
 			Print:        config.PrintAll,
 		},
 	}

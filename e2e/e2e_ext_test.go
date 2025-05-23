@@ -282,7 +282,7 @@ func nextPort(ctx context.Context, t *testing.T) int {
 	}
 }
 
-func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string, publicDisabled bool) (*bfg.Server, string, string, string) {
+func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, otherBfgUrl string, publicDisabled bool) (*bfg.Server, string, string, string) {
 	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
@@ -291,7 +291,6 @@ func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, 
 		PublicListenAddress:  bfgPublicListenAddress,
 		PgURI:                pgUri,
 		EXBTCAddress:         electrsAddr,
-		BTCStartHeight:       btcStartHeight,
 		RequestLimit:         bfgapi.DefaultRequestLimit,
 		RequestTimeout:       bfgapi.DefaultRequestTimeout,
 		BFGURL:               otherBfgUrl,
@@ -333,17 +332,13 @@ func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, 
 	return bfgServer, bfgPrivateListenAddress, bfgWsPrivateUrl, bfgWsPublicUrl
 }
 
-func createBfgServerGeneric(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string, string) {
-	return createBfgServerWithAccess(ctx, t, pgUri, electrsAddr, btcStartHeight, otherBfgUrl, false)
+func createBfgServerGeneric(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, otherBfgUrl string) (*bfg.Server, string, string, string) {
+	return createBfgServerWithAccess(ctx, t, pgUri, electrsAddr, otherBfgUrl, false)
 }
 
-func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64) (*bfg.Server, string, string, string) {
-	return createBfgServerGeneric(ctx, t, pgUri, electrsAddr, btcStartHeight, "")
+func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAddr string) (*bfg.Server, string, string, string) {
+	return createBfgServerGeneric(ctx, t, pgUri, electrsAddr, "")
 }
-
-// func createBfgServerConnectedToAnother(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string)
-// 	return createBfgServerGeneric(ctx, t, pgUri, electrsAddr, btcStartHeight, otherBfgUrl)
-// }
 
 func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
 	bssListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
@@ -722,7 +717,7 @@ func TestBFGPublicDisabled(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, _, bfgPublicWsUrl := createBfgServerWithAccess(ctx, t, pgUri, "", 1, "", true)
+	_, _, _, bfgPublicWsUrl := createBfgServerWithAccess(ctx, t, pgUri, "", "", true)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -760,7 +755,7 @@ func TestNewL2Keystone(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
@@ -845,7 +840,7 @@ func TestL2Keystone(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "")
 
 	keystoneOneHash := fillOutBytes("somehashone", 32)
 	keystoneTwoHash := fillOutBytes("somehashtwo", 32)
@@ -958,7 +953,7 @@ func TestPublicPing(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -1003,7 +998,7 @@ func TestBitcoinBalance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -1172,7 +1167,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 				}
 			}
 
-			_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+			_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 			c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 			if err != nil {
@@ -1264,7 +1259,7 @@ func TestBitcoinInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -1348,7 +1343,7 @@ func TestBitcoinUTXOs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -1440,7 +1435,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	minerPrivateKeyBytes := []byte{1, 2, 3, 4, 5, 6, 7, 199}
 
@@ -1570,7 +1565,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	minerPrivateKeyBytes := []byte{1, 2, 3, 4, 5, 6, 7, 199}
 
@@ -1733,7 +1728,7 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	expectedBtcBlockHeader, err := hex.DecodeString(strings.Replace(mockEncodedBlockHeader, "\"", "", 2))
 	if err != nil {
@@ -1850,7 +1845,7 @@ func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	// 3
 	// wait a max of 10 seconds (with a resolution of 1 second) for the
@@ -1995,7 +1990,7 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -2248,7 +2243,7 @@ func TestPopPayouts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
@@ -2401,7 +2396,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		}
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
@@ -2528,7 +2523,7 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
@@ -2617,7 +2612,7 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
@@ -2715,7 +2710,7 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 999)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
@@ -2812,7 +2807,7 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
 	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
@@ -2897,7 +2892,7 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
 	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
@@ -2993,7 +2988,7 @@ func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	height := 1
 	l2BlockNumber := uint32(1)
@@ -3096,7 +3091,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "")
 
 	height := 1
 	l2BlockNumber := uint32(1)
@@ -3224,7 +3219,7 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	// 1
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -3294,7 +3289,7 @@ func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	// 1
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -3336,7 +3331,7 @@ func TestNotifyOnL2KeystonesBFGClients(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "")
 
 	c, _, err := websocket.Dial(ctx, bfgPublicWsUrl, nil)
 	if err != nil {
@@ -3405,8 +3400,8 @@ func TestNotifyOnL2KeystonesBFGClientsViaOtherBFG(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
-	_, _, _, otherBfgPublicWsUrl := createBfgServerGeneric(ctx, t, otherPgUri, "", 1, bfgPublicWsUrl)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "")
+	_, _, _, otherBfgPublicWsUrl := createBfgServerGeneric(ctx, t, otherPgUri, "", bfgPublicWsUrl)
 
 	c, _, err := websocket.Dial(ctx, otherBfgPublicWsUrl, nil)
 	if err != nil {
@@ -3481,8 +3476,8 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
-	_, _, _, otherBfgPublicWsUrl := createBfgServerGeneric(ctx, t, otherPgUri, "", 1, bfgPublicWsUrl)
+	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "")
+	_, _, _, otherBfgPublicWsUrl := createBfgServerGeneric(ctx, t, otherPgUri, "", bfgPublicWsUrl)
 
 	c, _, err := websocket.Dial(ctx, otherBfgPublicWsUrl, nil)
 	if err != nil {
@@ -3649,7 +3644,7 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr)
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	// 1
@@ -3719,7 +3714,7 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr)
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	// 1
@@ -3784,7 +3779,7 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr)
 
 	wg := sync.WaitGroup{}
 
@@ -3855,7 +3850,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
+	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr)
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	wg := sync.WaitGroup{}

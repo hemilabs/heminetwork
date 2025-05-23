@@ -381,6 +381,28 @@ func (p *pgdb) BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64,
 	return height, nil
 }
 
+func (p *pgdb) BtcBlocksTrimLowerThan(ctx context.Context, height uint64) (int64, error) {
+	log.Tracef("BtcBlocksTrimLowerThan")
+	defer log.Tracef("BtcBlocksTrimLowerThan exit")
+
+	const q = `
+		DELETE FROM btc_blocks
+		WHERE height < $1
+	`
+
+	result, err := p.db.ExecContext(ctx, q, height)
+	if err != nil {
+		return 0, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+
+	return rowsAffected, nil
+}
+
 func (p *pgdb) PopBasisInsertPopMFields(ctx context.Context, pb *bfgd.PopBasis) error {
 	log.Tracef("PopBasisInsertPopMFields")
 	defer log.Tracef("PopBasisInsertPopMFields exit")
@@ -759,17 +781,25 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 	// keystone.  this is the "effective height"
 	effectiveHeightSql := `
 			SELECT COALESCE((
-				SELECT MIN(btc_blocks.height) FROM l2_keystones
-				LEFT JOIN LATERAL (
-					SELECT MIN(btc_blocks.height) AS height FROM btc_blocks
-					WHERE EXISTS (
-						SELECT * FROM pop_basis WHERE btc_block_hash = btc_blocks.hash
-						AND pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
+				-- give me the minimum height btc block
+				SELECT MIN(btc_blocks.height) AS height FROM btc_blocks
+				WHERE EXISTS (
+						-- where there exists some pop basis <--> l2 keystone
+						SELECT * FROM pop_basis 
+						INNER JOIN l2_keystones 
+						ON pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
+
+						-- for that btc block
+						WHERE btc_block_hash = btc_blocks.hash
+
+						-- and the l2 block number is greater than or
+						-- equal to the one we're querying for
+						AND l2_block_number >= $1 
+
+						-- and the l2 block number is less than or equal to the
+						-- "ignore after" block
+						AND l2_block_number <= $2
 					)
-				) btc_blocks ON TRUE
-				WHERE 
-				l2_block_number >= $1 
-				AND l2_block_number <= $2
 			), 0)
 		`
 

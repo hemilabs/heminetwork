@@ -80,6 +80,7 @@ func NewDefaultConfig() *Config {
 		RequestLimit:         bfgapi.DefaultRequestLimit,
 		RequestTimeout:       bfgapi.DefaultRequestTimeout,
 		BFGURL:               "",
+		BTCWindowFromTip:     1000,
 	}
 }
 
@@ -104,7 +105,6 @@ type bfgCmd struct {
 }
 
 type Config struct {
-	BTCStartHeight           uint64
 	EXBTCAddress             string
 	EXBTCInitialConns        int
 	EXBTCMaxConns            int
@@ -124,6 +124,7 @@ type Config struct {
 	DisablePublicConns       bool
 	BaselineL2BlockHeight    int64
 	BaselineL2BlockTimestamp int64
+	BTCWindowFromTip         uint64
 }
 
 type Server struct {
@@ -258,7 +259,6 @@ func NewServer(cfg *Config) (*Server, error) {
 	s := &Server{
 		cfg:            cfg,
 		requestLimiter: make(chan bool, cfg.RequestLimit),
-		btcHeight:      cfg.BTCStartHeight,
 		server:         http.NewServeMux(),
 		publicServer:   http.NewServeMux(),
 		metrics:        newMetrics(cfg),
@@ -811,6 +811,16 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 			// after we have done the initial walk with no errors,
 			// in the future we only walk back until a block that we've seen
 			initialWalk = false
+
+			log.Tracef("will trim blocks lower than %d", btcHeight-s.cfg.BTCWindowFromTip)
+
+			rowsAffected, err := s.db.BtcBlocksTrimLowerThan(ctx, btcHeight-s.cfg.BTCWindowFromTip)
+			if err != nil {
+				log.Errorf("could not trim blocks: %s", err)
+				continue
+			}
+
+			log.Tracef("trimmed %d blocks from db", rowsAffected)
 		}
 	}
 }
@@ -819,8 +829,10 @@ func (s *Server) walkChain(ctx context.Context, tip uint64, exitFast bool) error
 	log.Tracef("walkChain")
 	defer log.Tracef("walkChain exit")
 
-	log.Tracef("starting to walk chain; tip=%d, s.cfg.BTCStartHeight=%d, exitFast=%b", tip, s.cfg.BTCStartHeight, exitFast)
-	for tip >= s.cfg.BTCStartHeight {
+	windowStart := tip - s.cfg.BTCWindowFromTip
+
+	log.Tracef("starting to walk chain; tip=%d, windowStart=%d, exitFast=%b", tip, windowStart, exitFast)
+	for tip >= windowStart {
 		log.Tracef("walkChain progress; processing block at height %d", tip)
 		err := s.processBitcoinBlock(ctx, tip)
 		if errors.Is(err, ErrAlreadyProcessed) {
