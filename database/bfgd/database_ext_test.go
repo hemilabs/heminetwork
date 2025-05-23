@@ -1707,7 +1707,7 @@ func TestL2BtcFinalitiesByL2KeystoneWithCutoff(t *testing.T) {
 }
 
 func TestL2BtcFinalitiesByL2KeystoneWithCutoffReverseMining(t *testing.T) {
-	// if a newer keystone gets mined before gets mined before an older
+	// if a newer keystone gets mined before an older
 	// one, take that into account with effective height
 
 	ctx, cancel := defaultTestContext()
