@@ -22,6 +22,7 @@ type Database interface {
 	L2KeystonesInsertWithTx(ctx context.Context, tx *sql.Tx, l2ks []L2Keystone) error
 	L2KeystoneByAbrevHash(ctx context.Context, aHash [32]byte) (*L2Keystone, error)
 	L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32) ([]L2Keystone, error)
+	L2KeystonesUpdateEffectiveHeight(ctx context.Context, ignoreAfter int64) error
 
 	// Btc block table
 	BtcBlockInsert(ctx context.Context, bb *BtcBlock) error

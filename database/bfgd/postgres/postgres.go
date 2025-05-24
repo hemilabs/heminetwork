@@ -261,24 +261,26 @@ func (p *pgdb) L2KeystonesUpdateEffectiveHeight(ctx context.Context, ignoreAfter
 			return fmt.Errorf("could not get l2 keystones: %w", err)
 		}
 
+		page++
+
 		if len(l2Keystones) == 0 {
 			log.Tracef("no more l2 keystones to process, exiting")
 			break
 		}
 
 		for _, l2Keystone := range l2Keystones {
-			sql := `
-				SELECT MAX(effective_height) FROM l2_keystones
-				WHERE l2_block_number > $1
-			`
+			// sql := `
+			// 	SELECT COALESCE(MIN(effective_height),0) FROM l2_keystones
+			// 	WHERE l2_block_number > $1
+			// `
 
-			row := p.db.QueryRowContext(ctx, sql)
+			// row := p.db.QueryRowContext(ctx, sql, l2Keystone.L2BlockNumber)
 
 			var effectiveHeight uint32
 
-			if err := row.Scan(&effectiveHeight); err != nil {
-				return fmt.Errorf("could not scan effective height: %w", err)
-			}
+			// if err := row.Scan(&effectiveHeight); err != nil {
+			// 	return fmt.Errorf("could not scan effective height: %w", err)
+			// }
 
 			if effectiveHeight == 0 {
 				sql := `
@@ -298,7 +300,7 @@ func (p *pgdb) L2KeystonesUpdateEffectiveHeight(ctx context.Context, ignoreAfter
 				}
 			}
 
-			sql = `
+			sql := `
 				UPDATE l2_keystones SET effective_height = $1
 				WHERE l2_keystone_abrev_hash = $2
 			`
@@ -307,6 +309,8 @@ func (p *pgdb) L2KeystonesUpdateEffectiveHeight(ctx context.Context, ignoreAfter
 			if err != nil {
 				return fmt.Errorf("could not set effective height: %w", err)
 			}
+
+			log.Tracef("determined effective height to be %d for l2 keystone %s:%d", effectiveHeight, l2Keystone.Hash, l2Keystone.L2BlockNumber)
 
 		}
 
@@ -784,6 +788,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.state_root,
 			l2_keystones.ep_hash,
 			l2_keystones.version,
+			l2_keystones.effective_height,
 			btc_blocks_tmp.hash AS btc_block_hash,
 			btc_blocks_tmp.height AS btc_block_height
 			FROM l2_keystones LEFT JOIN LATERAL (
@@ -810,6 +815,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones_lowest_btc_block.state_root,
 			l2_keystones_lowest_btc_block.ep_hash,
 			l2_keystones_lowest_btc_block.version,
+			l2_keystones_lowest_btc_block.effective_height,
 			COALESCE((SELECT height FROM btc_blocks ORDER BY height DESC LIMIT 1),0)
 			
 			FROM l2_keystones_lowest_btc_block
@@ -817,25 +823,6 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			WHERE l2_block_number <= $2
 			
 			ORDER BY l2_keystones_lowest_btc_block.l2_block_number DESC
-		`
-
-	// for all keystones greater than or equal to the one we're querying for,
-	// find the lowest btc block that contains a pop basis that is for that
-	// keystone.  this is the "effective height"
-	effectiveHeightSql := `
-			SELECT COALESCE((
-				SELECT MIN(btc_blocks.height) FROM l2_keystones
-				LEFT JOIN LATERAL (
-					SELECT MIN(btc_blocks.height) AS height FROM btc_blocks
-					WHERE EXISTS (
-						SELECT * FROM pop_basis WHERE btc_block_hash = btc_blocks.hash
-						AND pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
-					)
-				) btc_blocks ON TRUE
-				WHERE 
-				l2_block_number >= $1 
-				AND l2_block_number <= $2
-			), 0)
 		`
 
 	l2KeystoneAbrevHashesStr := [][]byte{}
@@ -865,6 +852,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			&l2BtcFinality.L2Keystone.StateRoot,
 			&l2BtcFinality.L2Keystone.EPHash,
 			&l2BtcFinality.L2Keystone.Version,
+			&l2BtcFinality.EffectiveHeight,
 			&l2BtcFinality.BTCTipHeight,
 		)
 		if err != nil {
@@ -874,14 +862,6 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		if l2BtcFinality.BTCPubHeaderHash == nil {
 			l2BtcFinality.BTCPubHeight = -1
 		}
-
-		var effectiveHeight uint32
-
-		if err := p.db.QueryRow(effectiveHeightSql, l2BtcFinality.L2Keystone.L2BlockNumber, ignoreAfterL2Block).Scan(&effectiveHeight); err != nil {
-			return nil, fmt.Errorf("error querying for rows: %w", err)
-		}
-
-		l2BtcFinality.EffectiveHeight = effectiveHeight
 
 		finalities = append(finalities, l2BtcFinality)
 	}

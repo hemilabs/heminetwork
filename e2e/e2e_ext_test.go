@@ -3139,7 +3139,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 		conn: protocol.NewWSConn(c),
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	err = bfgapi.Write(ctx, bws.conn, "someid", finalityRequest)
 	if err != nil {
@@ -3179,6 +3179,8 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	t.Logf("checking finality for block number %d", l2Keystones[0].L2BlockNumber)
 
 	diff := deep.Equal(expectedApiResponse, finalityResponse)
 	if len(diff) > 0 {
