@@ -2196,6 +2196,30 @@ func TestBtcTransactionBroadcastRequestTrim(t *testing.T) {
 	}
 }
 
+func TestTrimBlocksLowerThan(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	db, sdb, cleanup := createTestDB(ctx, t)
+	defer func() {
+		db.Close()
+		sdb.Close()
+		cleanup()
+	}()
+
+	createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, 100, []byte{}, 646464)
+	block2 := createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, 101, []byte{}, 646465)
+
+	count, err := db.BtcBlocksTrimLowerThan(ctx, block2[0].Height)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if count != 1 {
+		t.Fatalf("incorrect number of blocks trimmed %d", count)
+	}
+}
+
 func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count int, chain bool, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {
 	header := make([]byte, 80)
 	hash := make([]byte, 32)

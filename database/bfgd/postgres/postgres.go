@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 17
+	bfgdVersion = 18
 
 	logLevel = "INFO"
 	verbose  = false
@@ -248,6 +248,71 @@ func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32
 	}
 
 	return ks, nil
+}
+
+func (p *pgdb) L2KeystonesUpdateEffectiveHeight(ctx context.Context, ignoreAfterBlock int64) error {
+	log.Tracef("L2KeystonesUpdateEffectiveHeight")
+	defer log.Tracef("L2KeystonesUpdateEffectiveHeight exit")
+
+	page := 0
+	for {
+		l2Keystones, err := p.L2KeystonesMostRecentN(ctx, 100, uint32(page))
+		if err != nil {
+			return fmt.Errorf("could not get l2 keystones: %w", err)
+		}
+
+		if len(l2Keystones) == 0 {
+			log.Tracef("no more l2 keystones to process, exiting")
+			break
+		}
+
+		for _, l2Keystone := range l2Keystones {
+			sql := `
+				SELECT MAX(effective_height) FROM l2_keystones
+				WHERE l2_block_number > $1
+			`
+
+			row := p.db.QueryRowContext(ctx, sql)
+
+			var effectiveHeight uint32
+
+			if err := row.Scan(&effectiveHeight); err != nil {
+				return fmt.Errorf("could not scan effective height: %w", err)
+			}
+
+			if effectiveHeight == 0 {
+				sql := `
+					SELECT COALESCE(MIN(btc_blocks.height), 0) FROM btc_blocks
+					WHERE EXISTS (
+						SELECT * FROM pop_basis
+						INNER JOIN l2_keystones ON pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
+						WHERE l2_keystones.l2_keystone_abrev_hash = $1
+						AND pop_basis.btc_block_hash = btc_blocks.hash
+					)
+					`
+
+				row := p.db.QueryRowContext(ctx, sql, l2Keystone.Hash[:])
+
+				if err := row.Scan(&effectiveHeight); err != nil {
+					return fmt.Errorf("could not scan effective height: %w", err)
+				}
+			}
+
+			sql = `
+				UPDATE l2_keystones SET effective_height = $1
+				WHERE l2_keystone_abrev_hash = $2
+			`
+
+			_, err = p.db.ExecContext(ctx, sql, effectiveHeight, l2Keystone.Hash[:])
+			if err != nil {
+				return fmt.Errorf("could not set effective height: %w", err)
+			}
+
+		}
+
+	}
+
+	return nil
 }
 
 func (p *pgdb) BtcBlockReplaceWithTx(ctx context.Context, tx *sql.Tx, btcBlock *bfgd.BtcBlock) (int64, error) {
