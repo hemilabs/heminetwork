@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	bfgdVersion = 17
+	bfgdVersion = 18
 
 	logLevel = "INFO"
 	verbose  = false
@@ -381,6 +381,61 @@ func (p *pgdb) BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64,
 	return height, nil
 }
 
+func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, tx *sql.Tx, btcBlockHash [32]byte, btcBlockHeight uint64) error {
+	log.Tracef("BtcBlockUpdateKeystones")
+	defer log.Tracef("BtcBlockUpdateKeystones exit")
+
+	q := `
+		SELECT DISTINCT(l2_block_number) FROM pop_basis
+		INNER JOIN l2_keystones ON pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
+		WHERE btc_block_hash = $1
+	`
+
+	rows, err := tx.QueryContext(ctx, q, btcBlockHash[:])
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("query btc block keystones: %w", err)
+	}
+
+	if rows.Err() != nil {
+		return fmt.Errorf("query btc block keystones: %w", rows.Err())
+	}
+
+	defer rows.Close()
+
+	l2BlockNumbers := []uint32{}
+
+	for rows.Next() {
+		var l2BlockNumber uint32
+		if err := rows.Scan(&l2BlockNumber); err != nil {
+			return fmt.Errorf("scan btc block keystones: %w", err)
+		}
+
+		l2BlockNumbers = append(l2BlockNumbers, l2BlockNumber)
+
+	}
+
+	rows.Close()
+
+	for _, l2BlockNumber := range l2BlockNumbers {
+		u := `
+		UPDATE l2_keystones
+		SET lowest_btc_block_height = $1
+		WHERE l2_block_number <= $2
+		AND (
+			lowest_btc_block_height = 0 
+			OR lowest_btc_block_height > $1
+		)
+	`
+
+		_, err = tx.ExecContext(ctx, u, btcBlockHeight, l2BlockNumber)
+		if err != nil {
+			return fmt.Errorf("update l2 keystone lowest btc block height: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func (p *pgdb) PopBasisInsertPopMFields(ctx context.Context, pb *bfgd.PopBasis) error {
 	log.Tracef("PopBasisInsertPopMFields")
 	defer log.Tracef("PopBasisInsertPopMFields exit")
@@ -719,6 +774,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.state_root,
 			l2_keystones.ep_hash,
 			l2_keystones.version,
+			l2_keystones.lowest_btc_block_height AS effective_height,
 			btc_blocks_tmp.hash AS btc_block_hash,
 			btc_blocks_tmp.height AS btc_block_height
 			FROM l2_keystones LEFT JOIN LATERAL (
@@ -745,6 +801,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones_lowest_btc_block.state_root,
 			l2_keystones_lowest_btc_block.ep_hash,
 			l2_keystones_lowest_btc_block.version,
+			l2_keystones_lowest_btc_block.effective_height,
 			COALESCE((SELECT height FROM btc_blocks ORDER BY height DESC LIMIT 1),0)
 			
 			FROM l2_keystones_lowest_btc_block
@@ -752,25 +809,6 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			WHERE l2_block_number <= $2
 			
 			ORDER BY l2_keystones_lowest_btc_block.l2_block_number DESC
-		`
-
-	// for all keystones greater than or equal to the one we're querying for,
-	// find the lowest btc block that contains a pop basis that is for that
-	// keystone.  this is the "effective height"
-	effectiveHeightSql := `
-			SELECT COALESCE((
-				SELECT MIN(btc_blocks.height) FROM l2_keystones
-				LEFT JOIN LATERAL (
-					SELECT MIN(btc_blocks.height) AS height FROM btc_blocks
-					WHERE EXISTS (
-						SELECT * FROM pop_basis WHERE btc_block_hash = btc_blocks.hash
-						AND pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
-					)
-				) btc_blocks ON TRUE
-				WHERE 
-				l2_block_number >= $1 
-				AND l2_block_number <= $2
-			), 0)
 		`
 
 	l2KeystoneAbrevHashesStr := [][]byte{}
@@ -800,6 +838,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			&l2BtcFinality.L2Keystone.StateRoot,
 			&l2BtcFinality.L2Keystone.EPHash,
 			&l2BtcFinality.L2Keystone.Version,
+			&l2BtcFinality.EffectiveHeight,
 			&l2BtcFinality.BTCTipHeight,
 		)
 		if err != nil {
@@ -809,14 +848,6 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 		if l2BtcFinality.BTCPubHeaderHash == nil {
 			l2BtcFinality.BTCPubHeight = -1
 		}
-
-		var effectiveHeight uint32
-
-		if err := p.db.QueryRow(effectiveHeightSql, l2BtcFinality.L2Keystone.L2BlockNumber, ignoreAfterL2Block).Scan(&effectiveHeight); err != nil {
-			return nil, fmt.Errorf("error querying for rows: %w", err)
-		}
-
-		l2BtcFinality.EffectiveHeight = effectiveHeight
 
 		finalities = append(finalities, l2BtcFinality)
 	}
