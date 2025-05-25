@@ -250,75 +250,6 @@ func (p *pgdb) L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32
 	return ks, nil
 }
 
-func (p *pgdb) L2KeystonesUpdateEffectiveHeight(ctx context.Context, ignoreAfterBlock int64) error {
-	log.Tracef("L2KeystonesUpdateEffectiveHeight")
-	defer log.Tracef("L2KeystonesUpdateEffectiveHeight exit")
-
-	page := 0
-	for {
-		l2Keystones, err := p.L2KeystonesMostRecentN(ctx, 100, uint32(page))
-		if err != nil {
-			return fmt.Errorf("could not get l2 keystones: %w", err)
-		}
-
-		page++
-
-		if len(l2Keystones) == 0 {
-			log.Tracef("no more l2 keystones to process, exiting")
-			break
-		}
-
-		for _, l2Keystone := range l2Keystones {
-			// sql := `
-			// 	SELECT COALESCE(MIN(effective_height),0) FROM l2_keystones
-			// 	WHERE l2_block_number > $1
-			// `
-
-			// row := p.db.QueryRowContext(ctx, sql, l2Keystone.L2BlockNumber)
-
-			var effectiveHeight uint32
-
-			// if err := row.Scan(&effectiveHeight); err != nil {
-			// 	return fmt.Errorf("could not scan effective height: %w", err)
-			// }
-
-			if effectiveHeight == 0 {
-				sql := `
-					SELECT COALESCE(MIN(btc_blocks.height), 0) FROM btc_blocks
-					WHERE EXISTS (
-						SELECT * FROM pop_basis
-						INNER JOIN l2_keystones ON pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
-						WHERE l2_keystones.l2_keystone_abrev_hash = $1
-						AND pop_basis.btc_block_hash = btc_blocks.hash
-					)
-					`
-
-				row := p.db.QueryRowContext(ctx, sql, l2Keystone.Hash[:])
-
-				if err := row.Scan(&effectiveHeight); err != nil {
-					return fmt.Errorf("could not scan effective height: %w", err)
-				}
-			}
-
-			sql := `
-				UPDATE l2_keystones SET effective_height = $1
-				WHERE l2_keystone_abrev_hash = $2
-			`
-
-			_, err = p.db.ExecContext(ctx, sql, effectiveHeight, l2Keystone.Hash[:])
-			if err != nil {
-				return fmt.Errorf("could not set effective height: %w", err)
-			}
-
-			log.Tracef("determined effective height to be %d for l2 keystone %s:%d", effectiveHeight, l2Keystone.Hash, l2Keystone.L2BlockNumber)
-
-		}
-
-	}
-
-	return nil
-}
-
 func (p *pgdb) BtcBlockReplaceWithTx(ctx context.Context, tx *sql.Tx, btcBlock *bfgd.BtcBlock) (int64, error) {
 	log.Tracef("BtcBlockReplaceWithTx")
 	defer log.Tracef("BtcBlockReplaceWithTxs exit")
@@ -448,6 +379,51 @@ func (p *pgdb) BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64,
 		return 0, err
 	}
 	return height, nil
+}
+
+func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, tx *sql.Tx, btcBlockHash [32]byte, btcBlockHeight uint64) error {
+	log.Tracef("BtcBlockUpdateKeystones")
+	defer log.Tracef("BtcBlockUpdateKeystones exit")
+
+	q := `
+		SELECT UNIQUE(l2_keystone_abrev_hash) FROM pop_basis
+		WHERE btc_block_hash = $1
+	`
+
+	rows, err := tx.QueryContext(ctx, q, btcBlockHash[:])
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("query btc block keystones: %w", err)
+	}
+
+	if rows.Err() != nil {
+		return fmt.Errorf("query btc block keystones: %w", rows.Err())
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var l2KeystoneAbrevHash [32]byte
+		if err := rows.Scan(&l2KeystoneAbrevHash); err != nil {
+			return fmt.Errorf("scan btc block keystones: %w", err)
+		}
+
+		u := `
+			UPDATE l2_keystones
+			SET lowest_btc_block_height = $1
+			WHERE l2_keystone_abrev_hash = $2
+			AND (
+				lowest_btc_block_height = 0 
+				OR lowest_btc_block_height > $1
+			)
+		`
+
+		_, err = tx.ExecContext(ctx, u, btcBlockHeight, l2KeystoneAbrevHash[:])
+		if err != nil {
+			return fmt.Errorf("update l2 keystone lowest btc block height: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (p *pgdb) PopBasisInsertPopMFields(ctx context.Context, pb *bfgd.PopBasis) error {

@@ -6,7 +6,7 @@ BEGIN;
 
 UPDATE version SET version = 18;
 
-ALTER TABLE l2_keystones ADD COLUMN effective_height INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE l2_keystones ADD COLUMN lowest_btc_block_height INT NOT NULL DEFAULT 0;
 
 COMMIT;
 

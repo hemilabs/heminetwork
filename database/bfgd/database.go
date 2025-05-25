@@ -22,7 +22,6 @@ type Database interface {
 	L2KeystonesInsertWithTx(ctx context.Context, tx *sql.Tx, l2ks []L2Keystone) error
 	L2KeystoneByAbrevHash(ctx context.Context, aHash [32]byte) (*L2Keystone, error)
 	L2KeystonesMostRecentN(ctx context.Context, n uint32, page uint32) ([]L2Keystone, error)
-	L2KeystonesUpdateEffectiveHeight(ctx context.Context, ignoreAfter int64) error
 
 	// Btc block table
 	BtcBlockInsert(ctx context.Context, bb *BtcBlock) error
@@ -30,6 +29,7 @@ type Database interface {
 	BtcBlockReplaceWithTx(ctx context.Context, tx *sql.Tx, btcBlock *BtcBlock) (int64, error)
 	BtcBlockByHash(ctx context.Context, hash [32]byte) (*BtcBlock, error)
 	BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64, error)
+	BtcBlockUpdateKeystones(ctx context.Context, tx *sql.Tx, btcBlockHash [32]byte, btcBlockHeight uint64) error
 
 	// Pop data
 	PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool, page uint32) ([]PopBasis, error)

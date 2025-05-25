@@ -172,8 +172,6 @@ type Server struct {
 	bfgCmdCh chan bfgCmd // commands to send to bfg
 
 	btcPrivateKey *secp256k1.PrivateKey
-
-	effectiveHeightUpdaterCh chan struct{}
 }
 
 // metrics stores prometheus metrics.
@@ -258,17 +256,16 @@ func NewServer(cfg *Config) (*Server, error) {
 		)
 	}
 	s := &Server{
-		cfg:                      cfg,
-		requestLimiter:           make(chan bool, cfg.RequestLimit),
-		btcHeight:                cfg.BTCStartHeight,
-		server:                   http.NewServeMux(),
-		publicServer:             http.NewServeMux(),
-		metrics:                  newMetrics(cfg),
-		sessions:                 make(map[string]*bfgWs),
-		holdoffTimeout:           6 * time.Second,
-		bfgCallTimeout:           20 * time.Second,
-		bfgCmdCh:                 make(chan bfgCmd),
-		effectiveHeightUpdaterCh: make(chan struct{}),
+		cfg:            cfg,
+		requestLimiter: make(chan bool, cfg.RequestLimit),
+		btcHeight:      cfg.BTCStartHeight,
+		server:         http.NewServeMux(),
+		publicServer:   http.NewServeMux(),
+		metrics:        newMetrics(cfg),
+		sessions:       make(map[string]*bfgWs),
+		holdoffTimeout: 6 * time.Second,
+		bfgCallTimeout: 20 * time.Second,
+		bfgCmdCh:       make(chan bfgCmd),
 	}
 	for range cfg.RequestLimit {
 		s.requestLimiter <- true
@@ -762,6 +759,11 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 				return err
 			}
 		}
+	}
+
+	if err := s.db.BtcBlockUpdateKeystones(ctx, tx, [32]byte(btcBlock.Hash), btcBlock.Height); err != nil {
+		return fmt.Errorf("error updating keystones for block %s: %w",
+			btcBlock.Hash, err)
 	}
 
 	if err := s.db.Commit(tx); err != nil {
@@ -1580,23 +1582,6 @@ func (s *Server) handleStateUpdates(ctx context.Context, table string, action st
 	s.mtx.Lock()
 	s.canonicalChainHeight = heightAfter
 	s.mtx.Unlock()
-
-	go func() {
-		s.effectiveHeightUpdaterCh <- struct{}{}
-	}()
-}
-
-func (s *Server) effectiveHeightUpdater(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-s.effectiveHeightUpdaterCh:
-			if err := s.db.L2KeystonesUpdateEffectiveHeight(ctx, s.l2KeystoneIgnoreAfter()); err != nil {
-				log.Errorf("could not update effective height for l2 keystones: %v", err)
-			}
-		}
-	}
 }
 
 func (s *Server) handleAccessPublicKeys(ctx context.Context, table string, action string, payload, payloadOld interface{}) {
@@ -1938,8 +1923,6 @@ func (s *Server) Run(pctx context.Context) error {
 			}
 		}
 	}()
-
-	go s.effectiveHeightUpdater(ctx)
 
 	// Setup websockets and HTTP routes
 	privateMux := s.server

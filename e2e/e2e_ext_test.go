@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	mathrand "math/rand/v2"
 	"net"
@@ -37,6 +38,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/ethereum/go-ethereum/common"
@@ -2919,7 +2921,7 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	// first and second btcBlocks
-	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100, 9999999999)
+	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 100, math.MaxInt64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2975,6 +2977,8 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	t.Logf("comparing %v ?= %v", spew.Sdump(expectedApiResponse), spew.Sdump(finalityResponse))
 
 	diff := deep.Equal(expectedApiResponse, finalityResponse)
 	if len(diff) > 0 {

@@ -50,6 +50,8 @@ func L2BTCFinalityFromBfgd(l2BtcFinality *bfgd.L2BTCFinality, currentBTCHeight u
 		return nil, fmt.Errorf("effective height greater than btc height (%d > %d)", effectiveHeight, currentBTCHeight)
 	}
 
+	fmt.Printf("L2BTCFinalityFromBfgd: l2BlockNumber: %d, effectiveHeight=%d, currentBTCHeight=%d\n", l2BtcFinality.L2Keystone.L2BlockNumber, effectiveHeight, currentBTCHeight)
+
 	fin := int64(-9)
 	if effectiveHeight > 0 {
 		fin = int64(currentBTCHeight) - int64(effectiveHeight) - 9 + 1
