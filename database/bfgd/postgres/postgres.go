@@ -386,7 +386,8 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, tx *sql.Tx, btcBlock
 	defer log.Tracef("BtcBlockUpdateKeystones exit")
 
 	q := `
-		SELECT UNIQUE(l2_keystone_abrev_hash) FROM pop_basis
+		SELECT DISTINCT(l2_block_number) FROM pop_basis
+		INNER JOIN l2_keystones ON pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
 		WHERE btc_block_hash = $1
 	`
 
@@ -401,23 +402,32 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, tx *sql.Tx, btcBlock
 
 	defer rows.Close()
 
+	l2BlockNumbers := []uint32{}
+
 	for rows.Next() {
-		var l2KeystoneAbrevHash [32]byte
-		if err := rows.Scan(&l2KeystoneAbrevHash); err != nil {
+		var l2BlockNumber uint32
+		if err := rows.Scan(&l2BlockNumber); err != nil {
 			return fmt.Errorf("scan btc block keystones: %w", err)
 		}
 
-		u := `
-			UPDATE l2_keystones
-			SET lowest_btc_block_height = $1
-			WHERE l2_keystone_abrev_hash = $2
-			AND (
-				lowest_btc_block_height = 0 
-				OR lowest_btc_block_height > $1
-			)
-		`
+		l2BlockNumbers = append(l2BlockNumbers, l2BlockNumber)
 
-		_, err = tx.ExecContext(ctx, u, btcBlockHeight, l2KeystoneAbrevHash[:])
+	}
+
+	rows.Close()
+
+	for _, l2BlockNumber := range l2BlockNumbers {
+		u := `
+		UPDATE l2_keystones
+		SET lowest_btc_block_height = $1
+		WHERE l2_block_number <= $2
+		AND (
+			lowest_btc_block_height = 0 
+			OR lowest_btc_block_height > $1
+		)
+	`
+
+		_, err = tx.ExecContext(ctx, u, btcBlockHeight, l2BlockNumber)
 		if err != nil {
 			return fmt.Errorf("update l2 keystone lowest btc block height: %w", err)
 		}
@@ -764,7 +774,7 @@ func (p *pgdb) L2BTCFinalityByL2KeystoneAbrevHash(ctx context.Context, l2Keyston
 			l2_keystones.state_root,
 			l2_keystones.ep_hash,
 			l2_keystones.version,
-			l2_keystones.effective_height,
+			l2_keystones.lowest_btc_block_height AS effective_height,
 			btc_blocks_tmp.hash AS btc_block_hash,
 			btc_blocks_tmp.height AS btc_block_height
 			FROM l2_keystones LEFT JOIN LATERAL (

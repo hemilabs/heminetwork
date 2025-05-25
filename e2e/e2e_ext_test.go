@@ -2535,8 +2535,12 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	b2 := createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)        // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	b3 := createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3) // finality should be 1000 - 1000 - 9 + 1 = -8
+	updateFinalityForBtcBlock(t, ctx, db, &btcBlock, uint32(btcBlock.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b2, uint32(b2.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b3, uint32(b3.Height))
+
 	expectedFinalitiesDesc := []int32{-8, -8, -6}
 
 	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
@@ -2608,6 +2612,25 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 	}
 }
 
+func updateFinalityForBtcBlock(t *testing.T, ctx context.Context, db bfgd.Database, block *bfgd.BtcBlock, height uint32) {
+	tx, err := db.BeginTx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		err := db.Rollback(tx)
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			t.Fatalf("processBitcoinBlock could not rollback db tx: %v",
+				err)
+		}
+	}()
+
+	if err := db.BtcBlockUpdateKeystones(ctx, tx, [32]byte(block.Hash), uint64(height)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {
@@ -2624,8 +2647,12 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	b2 := createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)        // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	b3 := createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3) // finality should be 1000 - 1000 - 9 + 1 = -8
+
+	updateFinalityForBtcBlock(t, ctx, db, &btcBlock, uint32(btcBlock.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b2, uint32(b2.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b3, uint32(b3.Height))
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
@@ -2722,8 +2749,12 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
 	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	b2 := createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)        // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	b3 := createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3) // finality should be 1000 - 1000 - 9 + 1 = -8
+	updateFinalityForBtcBlock(t, ctx, db, &btcBlock, uint32(btcBlock.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b2, uint32(b2.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b3, uint32(b3.Height))
+
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
@@ -2817,8 +2848,12 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
 
 	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	b2 := createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)        // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	b3 := createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3) // finality should be 1000 - 1000 - 9 + 1 = -8
+	updateFinalityForBtcBlock(t, ctx, db, &btcBlock, uint32(btcBlock.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b2, uint32(b2.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b3, uint32(b3.Height))
+
 	expectedFinalitiesDesc := []int32{-8, -8, -6}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -2902,8 +2937,11 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
 
 	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	b2 := createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)        // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	b3 := createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3) // finality should be 1000 - 1000 - 9 + 1 = -8
+	updateFinalityForBtcBlock(t, ctx, db, &btcBlock, uint32(btcBlock.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b2, uint32(b2.Height))
+	updateFinalityForBtcBlock(t, ctx, db, &b3, uint32(b3.Height))
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -2996,12 +3034,14 @@ func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
 
 	ctx, cancel := defaultTestContext()
 	defer cancel()
-
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
 
 	height := 1
 	l2BlockNumber := uint32(1)
-	createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+	block := createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+
+	updateFinalityForBtcBlock(t, ctx, db, &block, uint32(height))
+
 	// get the btc block's finality, this is the only one that
 	// we care about in this test
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1, 9999999999)
@@ -3026,7 +3066,8 @@ func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
 	for height < 300 {
 		height++
 		l2BlockNumber++
-		createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+		block := createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+		updateFinalityForBtcBlock(t, ctx, db, &block, uint32(height))
 	}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -3104,7 +3145,8 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 
 	height := 1
 	l2BlockNumber := uint32(1)
-	createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+	block := createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+	updateFinalityForBtcBlock(t, ctx, db, &block, uint32(height))
 	// get the btc block's finality, this is the only one that
 	// we care about in this test
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1, 9999999999)
@@ -3128,7 +3170,8 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 	for height < 100+8 {
 		height++
 		l2BlockNumber++
-		createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+		block := createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+		updateFinalityForBtcBlock(t, ctx, db, &block, uint32(height))
 	}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)

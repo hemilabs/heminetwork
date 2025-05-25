@@ -826,7 +826,7 @@ func (s *Server) walkChain(ctx context.Context, tip uint64, exitFast bool) error
 
 	log.Tracef("starting to walk chain; tip=%d, s.cfg.BTCStartHeight=%d, exitFast=%b", tip, s.cfg.BTCStartHeight, exitFast)
 	for tip >= s.cfg.BTCStartHeight {
-		log.Tracef("walkChain progress; processing block at height %d", tip)
+		log.Infof("walkChain progress; processing block at height %d", tip)
 		err := s.processBitcoinBlock(ctx, tip)
 		if errors.Is(err, ErrAlreadyProcessed) {
 			log.Tracef("block known at height %d", tip)
