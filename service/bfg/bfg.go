@@ -572,6 +572,8 @@ func (s *Server) updateKeystonesForBtcBlock(ctx context.Context, btcHeaderHash [
 		return fmt.Errorf("error updating keystones for block %s: %w",
 			btcHeaderHash, err)
 	}
+
+	return nil
 }
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
