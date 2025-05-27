@@ -425,7 +425,6 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 	rows.Close()
 
 	for _, l2BlockNumber := range l2BlockNumbers {
-
 		// set the effective height for all keystones occuring at this l2 block
 		// or before to this btc block height if this is the lowest btc block number
 		u := `
