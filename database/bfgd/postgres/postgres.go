@@ -429,7 +429,8 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 		// or before to this btc block height if this is the lowest btc block number
 		u := `
 			UPDATE l2_keystones
-			SET lowest_btc_block_effective_height = $1
+			SET lowest_btc_block_effective_height = $1,
+			updated_at = NOW()
 			WHERE l2_block_number <= $2
 			AND (
 				lowest_btc_block_effective_height = 0 
@@ -442,13 +443,15 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 			return fmt.Errorf("update l2 keystone lowest btc block height: %w", err)
 		}
 	}
+
 	for _, l2KeystoneAbrevHash := range l2BlockHashes {
 		// set the lowest btc block hash for this keystone equal to this block
 		// if it's null or this block is lower than or equal (in case of a re-org)
 		// the one that is set
 		u := `
 			UPDATE l2_keystones
-			SET lowest_btc_block_hash = $1
+			SET lowest_btc_block_hash = $1,
+			updated_at = NOW()
 			WHERE l2_keystone_abrev_hash = $2
 			AND (
 				lowest_btc_block_hash IS NULL
