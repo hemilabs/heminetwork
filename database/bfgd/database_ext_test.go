@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	mathrand "math/rand/v2"
 	"net/url"
 	"os"
@@ -2357,7 +2358,7 @@ func updateFinalityForBtcBlock(t *testing.T, ctx context.Context, db bfgd.Databa
 		block.Hash = fillOutBytes(fmt.Sprintf("%d", height), 32)
 	}
 
-	if err := db.BtcBlockUpdateKeystones(ctx, [32]byte(block.Hash), uint64(height)); err != nil {
+	if err := db.BtcBlockUpdateKeystones(ctx, [32]byte(block.Hash), uint64(height), math.MaxInt64); err != nil {
 		t.Fatal(err)
 	}
 }

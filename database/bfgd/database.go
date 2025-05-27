@@ -29,7 +29,7 @@ type Database interface {
 	BtcBlockReplaceWithTx(ctx context.Context, tx *sql.Tx, btcBlock *BtcBlock) (int64, error)
 	BtcBlockByHash(ctx context.Context, hash [32]byte) (*BtcBlock, error)
 	BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64, error)
-	BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byte, btcBlockHeight uint64) error
+	BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byte, btcBlockHeight uint64, ignoreAfter int64) error
 
 	// Pop data
 	PopBasisByL2KeystoneAbrevHash(ctx context.Context, aHash [32]byte, excludeUnconfirmed bool, page uint32) ([]PopBasis, error)

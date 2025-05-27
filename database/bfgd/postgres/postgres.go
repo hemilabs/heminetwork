@@ -381,7 +381,7 @@ func (p *pgdb) BtcBlockHeightByHash(ctx context.Context, hash [32]byte) (uint64,
 	return height, nil
 }
 
-func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byte, btcBlockHeight uint64) error {
+func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byte, btcBlockHeight uint64, ignoreAfter int64) error {
 	log.Tracef("BtcBlockUpdateKeystones")
 	defer log.Tracef("BtcBlockUpdateKeystones exit")
 
@@ -392,9 +392,10 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 		SELECT DISTINCT(l2_block_number) FROM pop_basis
 		INNER JOIN l2_keystones ON pop_basis.l2_keystone_abrev_hash = l2_keystones.l2_keystone_abrev_hash
 		WHERE btc_block_hash = $1
+		AND l2_block_number < $2
 	`
 
-	rows, err := p.db.QueryContext(ctx, q, btcBlockHash[:])
+	rows, err := p.db.QueryContext(ctx, q, btcBlockHash[:], ignoreAfter)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("query btc block keystones: %w", err)
 	}
