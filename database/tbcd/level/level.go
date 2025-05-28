@@ -1550,6 +1550,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Bl
 		}
 	}
 	// if we get here eb MUST exist
+	// XXX should we set block height? despite being an expensive lookup?
 	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))

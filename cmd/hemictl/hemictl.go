@@ -39,6 +39,7 @@ import (
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/service/tbc/peer"
 	"github.com/hemilabs/heminetwork/version"
@@ -765,31 +766,28 @@ func tbcdb(pctx context.Context, flags []string) error {
 
 		spew.Dump(keystone)
 
-	case "keystonetxsbyl2keystoneabrevhash":
-		abrevhash := args["abrevhash"]
-		if abrevhash == "" {
-			return errors.New("abrevhash: must be set")
+	case "keystonesbyblockhash":
+		blockhash := args["blockhash"]
+		if blockhash == "" {
+			return errors.New("blockhash: must be set")
 		}
-		ch, err := chainhash.NewHashFromStr(abrevhash)
+		ch, err := chainhash.NewHashFromStr(blockhash)
 		if err != nil {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		depth := args["depth"]
-		d := uint64(3)
-		if depth != "" {
-			d, err = strconv.ParseUint(depth, 10, 64)
-			if err != nil {
-				return fmt.Errorf("depth: %w", err)
-			}
-		}
-
-		ktxs, err := s.KeystoneTxsByL2KeystoneAbrevHash(ctx, *ch, uint(d))
+		block, err := s.BlockByHash(ctx, *ch)
 		if err != nil {
 			return err
 		}
-
-		spew.Dump(ktxs)
+		keystones := tbc.BlockKeystones(block)
+		for k, keystone := range keystones {
+			aPoPTx, err := pop.ParseTransactionL2FromOpReturn(keystone.RawTx)
+			if err != nil {
+				return fmt.Errorf("tx %v:, %w", k, err)
+			}
+			fmt.Printf("keystone hash %2v: %v\n", k, aPoPTx.L2Keystone.Hash())
+		}
 
 	case "dumpmetadata":
 		return fmt.Errorf("fixme dumpmetadata")
