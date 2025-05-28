@@ -867,12 +867,12 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("Write ping: %v", err)
 	}
 
-	log.Infof("Connection from %v", r.RemoteAddr)
+	log.Infof("RPC connection from %v", r.RemoteAddr)
 
 	// Wait for termination
 	ws.wg.Wait()
 
-	log.Infof("Connection terminated from %v", r.RemoteAddr)
+	log.Infof("RPC connection terminated from %v", r.RemoteAddr)
 }
 
 func (s *Server) newSession(ws *tbcWs) (string, error) {

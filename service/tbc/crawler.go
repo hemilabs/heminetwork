@@ -20,6 +20,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/dustin/go-humanize"
 
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi/pop"
@@ -178,6 +179,33 @@ func HashHeightFromBlockHeader(bh *tbcd.BlockHeader) *HashHeight {
 		Height:    bh.Height,
 		Timestamp: bh.Timestamp().Unix(),
 	}
+}
+
+func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
+	blockHash := block.Hash()
+	height := uint(block.Height())
+	ktxs := make([]tbcapi.KeystoneTx, 0, 16)
+	for _, tx := range block.Transactions() {
+		if blockchain.IsCoinBase(tx) {
+			// Skip coinbase inputs
+			continue
+		}
+
+		for txIndex, txOut := range tx.MsgTx().TxOut {
+			_, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
+			if err != nil {
+				continue
+			}
+			ktxs = append(ktxs, tbcapi.KeystoneTx{
+				BlockHash:   *blockHash,
+				TxIndex:     uint(txIndex),
+				BlockHeight: height,
+				RawTx:       txOut.PkScript,
+			})
+		}
+	}
+
+	return ktxs
 }
 
 // UtxoIndexHash returns the last hash that has been UTxO indexed.
