@@ -828,8 +828,10 @@ func (s *Server) keystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2Key
 func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest) (any, error) {
 	t := time.Now()
 	log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest")
-	defer log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest exit took %v",
-		time.Since(t))
+	defer func() {
+		log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest exit took %v",
+			time.Since(t))
+	}()
 
 	maxDepth := uint(3)
 	if req.Depth > maxDepth {
