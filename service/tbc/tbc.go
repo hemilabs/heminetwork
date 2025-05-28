@@ -284,7 +284,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
-		s.checkpoints = []checkpoint{}
+		s.checkpoints = localnetCheckpoints
 		s.hemiGenesis = localnetHemiGenesis
 		wanted = 1
 
