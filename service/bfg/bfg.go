@@ -567,6 +567,15 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 
 var ErrAlreadyProcessed = errors.New("already processed bitcoin block")
 
+func (s *Server) updateKeystonesForBtcBlock(ctx context.Context, btcHeaderHash []byte, btcHeight uint64, ignoreAfter int64) error {
+	if err := s.db.BtcBlockUpdateKeystones(ctx, [32]byte(btcHeaderHash), btcHeight, ignoreAfter); err != nil {
+		return fmt.Errorf("error updating keystones for block %s: %w",
+			btcHeaderHash, err)
+	}
+
+	return nil
+}
+
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
@@ -585,6 +594,15 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	btcHeaderHash := chainhash.DoubleHashB(rbh[:])
 	btcHeight := height
 	btcHeader := rbh
+
+	defer func() {
+		// unconditionally update l2 keystones found in a btc block after
+		// we're done processing that block.  this is a cheap operation and should
+		// always be kept up with the latest in the database
+		if err := s.updateKeystonesForBtcBlock(ctx, btcHeaderHash, btcHeight, s.l2KeystoneIgnoreAfter()); err != nil {
+			log.Errorf("update keystones for btc block: %w", err)
+		}
+	}()
 
 	btcBlockTmpChk, err := s.db.BtcBlockByHash(ctx, [32]byte(btcHeaderHash))
 	if err != nil && !errors.Is(err, database.ErrNotFound) {

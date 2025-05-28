@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	mathrand "math/rand/v2"
 	"net/url"
 	"os"
@@ -1579,7 +1580,7 @@ func TestPublications(t *testing.T) {
 		{
 			name:            "height in order unconfirmed",
 			heightPattern:   []int{1, 2, -1, 4}, // use -1 to indicate unconfirmed
-			expectedHeights: []int{4, -1, 2, 1},
+			expectedHeights: []int{-1, 4, 2, 1},
 		},
 	}
 
@@ -1599,7 +1600,15 @@ func TestPublications(t *testing.T) {
 
 			lastHash := []byte{}
 			for _, height := range tti.heightPattern {
-				onChainBlocksTmp := createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, height, lastHash, l2BlockNumber)
+				// if the block is unconfirmed, ensure we use a high
+				// l2 block number so it doesn't inherit the effective
+				// height of a confirmed one
+				l2BlockNumberTmp := l2BlockNumber
+				if height == -1 {
+					l2BlockNumberTmp += 100000
+				}
+
+				onChainBlocksTmp := createBtcBlocksAtStaticHeight(ctx, t, db, 1, true, height, lastHash, l2BlockNumberTmp)
 				lastHash = onChainBlocksTmp[0].Hash
 				l2BlockNumber++
 			}
@@ -2312,6 +2321,7 @@ func createBtcBlocksAtStaticHeight(ctx context.Context, t *testing.T, db bfgd.Da
 			l2BlockNumber,
 		)
 		blocks = append(blocks, btcBlock)
+		updateFinalityForBtcBlock(t, ctx, db, &btcBlock, uint32(btcBlock.Height))
 		lastHash = btcBlock.Hash
 	}
 
@@ -2332,6 +2342,7 @@ func createBtcBlocksAtStartingHeightReverseMining(ctx context.Context, t *testin
 			lastHash,
 			l2BlockNumber,
 		)
+		updateFinalityForBtcBlock(t, ctx, db, &btcBlock, uint32(btcBlock.Height))
 		blocks = append(blocks, btcBlock)
 		height++
 		l2BlockNumber--
@@ -2339,6 +2350,17 @@ func createBtcBlocksAtStartingHeightReverseMining(ctx context.Context, t *testin
 	}
 
 	return blocks
+}
+
+func updateFinalityForBtcBlock(t *testing.T, ctx context.Context, db bfgd.Database, block *bfgd.BtcBlock, height uint32) {
+	// some tests don't care about a btc block hash, fill it out here so it doesn't error
+	if len(block.Hash) == 0 {
+		block.Hash = fillOutBytes(fmt.Sprintf("%d", height), 32)
+	}
+
+	if err := db.BtcBlockUpdateKeystones(ctx, [32]byte(block.Hash), uint64(height), math.MaxInt64); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func createBtcBlocksAtStartingHeight(ctx context.Context, t *testing.T, db bfgd.Database, count int, chain bool, height int, lastHash []byte, l2BlockNumber uint32) []bfgd.BtcBlock {
@@ -2356,6 +2378,7 @@ func createBtcBlocksAtStartingHeight(ctx context.Context, t *testing.T, db bfgd.
 			l2BlockNumber,
 		)
 		blocks = append(blocks, btcBlock)
+		updateFinalityForBtcBlock(t, ctx, db, &btcBlock, uint32(btcBlock.Height))
 		height++
 		l2BlockNumber++
 		lastHash = btcBlock.Hash
