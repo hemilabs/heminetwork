@@ -344,6 +344,8 @@ services:
     networks:
       e2e:
         ipv4_address: 192.169.199.7
+    ports:
+      - "8547:8547"
 
   op-node-non-sequencing:
     build:
@@ -390,6 +392,8 @@ services:
       - "./jwt.hex:/tmp/jwt.hex"
     networks:
       e2e:
+    ports:
+      - "18547:8547"
 
   op-geth-l2-non-sequencing:
     build:
