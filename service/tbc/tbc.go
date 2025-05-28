@@ -2009,6 +2009,19 @@ func (s *Server) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevha
 	return s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, abrevhash)
 }
 
+func (s *Server) KeystoneTxsByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash, depth uint) ([]tbcapi.KeystoneTx, error) {
+	log.Tracef("KeystoneTxsByL2KeystoneAbrevHash")
+	defer log.Tracef("KeystoneTxsByL2KeystoneAbrevHash exit")
+
+	first, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, abrevhash)
+	if err != nil {
+		return nil, err
+	}
+	_ = first
+
+	return nil, errors.New("noy yet")
+}
+
 // ScriptHashAvailableToSpend returns a boolean which indicates whether
 // a specific output (uniquely identified by TxId output index) is
 // available for spending in the UTXO table.

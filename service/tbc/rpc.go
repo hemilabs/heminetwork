@@ -200,6 +200,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdKeystoneTxsByL2KeystoneAbrevHashRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest)
+				return s.handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		case tbcapi.CmdFeeEstimateRequest:
 			handler := func(ctx context.Context) (any, error) {
 				req := payload.(*tbcapi.FeeEstimateRequest)
@@ -781,6 +788,36 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 		L2KeystoneBlockHeight: uint(ksBh.Height),
 		BtcTipBlockHash:       &bhb.Hash,
 		BtcTipBlockHeight:     uint(bhb.Height),
+	}, nil
+}
+
+func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest) (any, error) {
+	log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest")
+	defer log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest exit")
+
+	ks, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, req.L2KeystoneAbrevHash)
+	if err != nil {
+		// XXX add error not found type
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
+				Error: protocol.RequestErrorf("%v", err),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+	_ = ks
+	_ = ksBh
+	_ = bhb
+
+	return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
+		// L2KeystoneAbrev:       hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
+		// L2KeystoneBlockHash:   &ksBh.Hash,
+		// L2KeystoneBlockHeight: uint(ksBh.Height),
+		// BtcTipBlockHash:       &bhb.Hash,
+		// BtcTipBlockHeight:     uint(bhb.Height),
 	}, nil
 }
 
