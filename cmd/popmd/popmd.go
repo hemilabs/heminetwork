@@ -73,6 +73,12 @@ var (
 			Help:         "the number of L2 Keystones behind the latest seen that we are willing to remine, this is handy for re-orgs",
 			Print:        config.PrintAll,
 		},
+		"POPM_BITCOIN_URL": config.Config{
+			Value:        &cfg.BitcoinURL,
+			DefaultValue: "",
+			Help:         "the bitcoin url to connect to; it's either a tbc or blockstream url",
+			Print:        config.PrintAll,
+		},
 	}
 )
 

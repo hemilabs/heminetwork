@@ -161,6 +161,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.params = &chaincfg.MainNetParams
 	case "testnet", "testnet3":
 		s.params = &chaincfg.TestNet3Params
+	case "localnet":
+		s.params = &chaincfg.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown bitcoin network %v", cfg.Network)
 	}
@@ -409,18 +411,26 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("handleOpgethSubscription")
 	defer log.Tracef("handleOpgethSubscription exit")
-
+	log.Infof("will poll until subscriptions are fixed")
+	
 	log.Infof("handleOpgethSubscription")
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
-	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
-	if err != nil {
-		return err
-	}
+
+	go func() {
+		log.Infof("starting backup timer")
+		for {
+			select {
+			case <- ctx.Done():
+				return
+			case <- time.After(5 * time.Second):
+				log.Infof("sending backup timer notification to headersCh")
+				headersCh <- "keystone backup timer"
+			}
+		}
+	}()
 
 	for {
 		select {
-		case err := <-sub.Err():
-			return err
 		case <-ctx.Done():
 			return ctx.Err()
 
