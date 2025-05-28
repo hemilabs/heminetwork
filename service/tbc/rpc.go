@@ -795,7 +795,11 @@ func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Conte
 	log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest")
 	defer log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest exit")
 
-	ks, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, req.L2KeystoneAbrevHash)
+	if req.Depth > 3 {
+		panic("depth")
+	}
+
+	_, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, req.L2KeystoneAbrevHash)
 	if err != nil {
 		// XXX add error not found type
 		if errors.Is(err, database.ErrNotFound) {
@@ -808,17 +812,29 @@ func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Conte
 			Error: e.ProtocolError(),
 		}, e
 	}
-	_ = ks
-	_ = ksBh
-	_ = bhb
 
-	return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
-		// L2KeystoneAbrev:       hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
-		// L2KeystoneBlockHash:   &ksBh.Hash,
-		// L2KeystoneBlockHeight: uint(ksBh.Height),
-		// BtcTipBlockHash:       &bhb.Hash,
-		// BtcTipBlockHeight:     uint(bhb.Height),
-	}, nil
+	// Fake out hash height and use best block as end condition.
+	hh := &HashHeight{
+		Hash:   ksBh.Hash,
+		Height: ksBh.Height,
+	}
+	ktxs := make([]tbcapi.KeystoneTx, 0, 16*req.Depth)
+	for i := uint(0); i < req.Depth; i++ {
+		// Retrieve first block
+		block, err := s.db.BlockByHash(ctx, hh.Hash)
+		if err != nil {
+			panic(err)
+		}
+		ktxs = append(ktxs, BlockKeystones(block)...)
+
+		// next canonical block
+		hh, err = s.nextCanonicalBlockheader(ctx, &bhb.Hash, hh)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{KeystoneTxs: ktxs}, nil
 }
 
 // handleBlockDownloadAsyncRequest handles tbcapi.BlockDownloadAsyncRequest.
