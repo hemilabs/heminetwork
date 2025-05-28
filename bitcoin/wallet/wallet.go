@@ -20,7 +20,10 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/juju/loggo"
 )
+
+var log = loggo.GetLogger("wallet")
 
 // UtxoPickerMultiple is a simple utxo picker that returns a random set of utxos from
 // the provided list that combined have a larger value than amount + fee.
@@ -48,6 +51,8 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 	// find large enough utxo
 	total := amount + fee
 	for k := range utxos {
+		log.Infof("checking utxo value (%d) against total (%d)", utxos[k].Value, total)
+
 		if utxos[k].Value < total {
 			continue
 		}

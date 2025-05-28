@@ -107,6 +107,10 @@ var (
 		{50000, s2h("000000001aeae195809d120b5d66a39c83eb48792e068f8ea1fea19d84a4278a")},
 		{0, s2h("000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f")},
 	}
+
+	localnetCheckpoints = []checkpoint{
+		{0, s2h("0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206")}, 
+	}
 )
 
 type NotLinearError string
