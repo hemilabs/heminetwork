@@ -82,6 +82,9 @@ const (
 	CmdBlockKeystoneByL2KeystoneAbrevHashRequest  = "tbcapi-l2-keystone-abrev-by-abrev-hash-request"
 	CmdBlockKeystoneByL2KeystoneAbrevHashResponse = "tbcapi-l2-keystone-abrev-by-abrev-hash-response"
 
+	CmdKeystoneTxsByL2KeystoneAbrevHashRequest  = "tbcapi-l2-keystone-txs-by-abrev-hash-request"
+	CmdKeystoneTxsByL2KeystoneAbrevHashResponse = "tbcapi-l2-keystone-txs-by-abrev-hash-response"
+
 	CmdFeeEstimateRequest  = "tbcapi-fee-estimate-request"
 	CmdFeeEstimateResponse = "tbcapi-fee-estimate-response"
 
@@ -306,7 +309,7 @@ type BlockInsertRawRequest struct {
 }
 
 type BlockKeystoneByL2KeystoneAbrevHashRequest struct {
-	L2KeystoneAbrevHash chainhash.Hash `json:"l2_keystones_abrev_hash"`
+	L2KeystoneAbrevHash chainhash.Hash `json:"l2_keystone_abrev_hash"`
 }
 
 type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
@@ -316,6 +319,26 @@ type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
 	BtcTipBlockHash       *chainhash.Hash       `json:"btc_tip_block_hash"`
 	BtcTipBlockHeight     uint                  `json:"btc_tip_block_height"`
 	Error                 *protocol.Error       `json:"error,omitempty"`
+}
+
+// KeystoneTxsByL2KeystoneAbrevHashRequest retrieve raw keystone tx's starting
+// from L2KeystoneAbrevHash for up to Depth blocks. Depth cannot be negative
+// since the hash is guaranteed to be the first occurrence.
+type KeystoneTxsByL2KeystoneAbrevHashRequest struct {
+	L2KeystoneAbrevHash chainhash.Hash `json:"l2_keystone_abrev_hash"`
+	Depth               uint           `json:"depth"`
+}
+
+type KeystoneTx struct {
+	BlockHash   chainhash.Hash `json:"block_hash"`
+	TxIndex     uint           `json:"tx_index"`
+	BlockHeight uint           `json:"block_height"`
+	RawTx       api.ByteSlice  `json:"raw_tx"` // Keystone Tx
+}
+
+type KeystoneTxsByL2KeystoneAbrevHashResponse struct {
+	KeystoneTxs []KeystoneTx    `json:"keystone_txs"`
+	Error       *protocol.Error `json:"error,omitempty"`
 }
 
 type KeystonesByHeightRequest struct {
@@ -413,6 +436,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockDownloadAsyncRawResponse:              reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
 	CmdBlockKeystoneByL2KeystoneAbrevHashRequest:  reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashRequest{}),
 	CmdBlockKeystoneByL2KeystoneAbrevHashResponse: reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashResponse{}),
+	CmdKeystoneTxsByL2KeystoneAbrevHashRequest:    reflect.TypeOf(KeystoneTxsByL2KeystoneAbrevHashRequest{}),
+	CmdKeystoneTxsByL2KeystoneAbrevHashResponse:   reflect.TypeOf(KeystoneTxsByL2KeystoneAbrevHashResponse{}),
 	CmdFeeEstimateRequest:                         reflect.TypeOf(FeeEstimateRequest{}),
 	CmdFeeEstimateResponse:                        reflect.TypeOf(FeeEstimateResponse{}),
 	CmdMempoolInfoRequest:                         reflect.TypeOf(MempoolInfoRequest{}),
