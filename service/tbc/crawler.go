@@ -185,13 +185,13 @@ func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
 	blockHash := block.Hash()
 	height := uint(block.Height())
 	ktxs := make([]tbcapi.KeystoneTx, 0, 16)
-	for _, tx := range block.Transactions() {
+	for txIndex, tx := range block.Transactions() {
 		if blockchain.IsCoinBase(tx) {
 			// Skip coinbase inputs
 			continue
 		}
 
-		for txIndex, txOut := range tx.MsgTx().TxOut {
+		for _, txOut := range tx.MsgTx().TxOut {
 			_, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
 			if err != nil {
 				continue
