@@ -30,6 +30,10 @@ var (
 		"seed.testnet.bitcoin.sprovoost.nl:18333",
 		"testnet-seed.bluematt.me:18333",
 	}
+	testnet4Seeds = []string{
+		"seed.testnet4.bitcoin.sprovoost.nl:48333",
+		"seed.testnet4.wiz.biz:48333",
+	}
 	mainnetSeeds = []string{
 		"seed.bitcoin.sipa.be:8333",
 		"dnsseed.bluematt.me:8333",
@@ -76,6 +80,8 @@ func NewPeerManager(net wire.BitcoinNet, seeds []string, want int) (*PeerManager
 		dnsSeeds = mainnetSeeds
 	case wire.TestNet3:
 		dnsSeeds = testnet3Seeds
+	case wire.TestNet4:
+		dnsSeeds = testnet4Seeds
 	case wire.TestNet:
 	default:
 		return nil, fmt.Errorf("invalid network: %v", net)
