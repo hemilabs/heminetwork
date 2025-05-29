@@ -443,6 +443,8 @@ func (s *Server) Run(pctx context.Context) error {
 		s.params = &chaincfg.MainNetParams
 	case "testnet3":
 		s.params = &chaincfg.TestNet3Params
+	case "testnet4":
+		s.params = &chaincfg.TestNet4Params
 	default:
 		return fmt.Errorf("invalid network: %v", s.cfg.Network)
 	}

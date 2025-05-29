@@ -58,7 +58,7 @@ var (
 		"BFG_NETWORK": config.Config{
 			Value:        &cfg.Network,
 			DefaultValue: "mainnet",
-			Help:         "network bfg is working on (mainnet/testnet3)",
+			Help:         "network bfg is working on (mainnet|testnet3|testnet4)",
 			Print:        config.PrintAll,
 		},
 		"BFG_PPROF_ADDRESS": config.Config{

@@ -77,7 +77,7 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Network:              "testnet3",
+		Network:              "mainnet",
 		PrometheusNamespace:  appName,
 		OpgethURL:            defaultOpgethURL,
 		BitcoinConfirmations: defaultBitcoinConfirmations,
@@ -162,6 +162,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.params = &chaincfg.MainNetParams
 	case "testnet", "testnet3":
 		s.params = &chaincfg.TestNet3Params
+	case "testnet4":
+		s.params = &chaincfg.TestNet4Params
 	case "localnet":
 		s.params = &chaincfg.RegressionNetParams
 	default:

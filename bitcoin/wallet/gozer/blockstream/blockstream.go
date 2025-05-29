@@ -167,6 +167,7 @@ func Run(params *chaincfg.Params) (gozer.Gozer, error) {
 	case &chaincfg.TestNet3Params:
 		bs.url = bsTestne3tURL
 	default:
+		// XXX blockstream doe snot currenlty support testnet4
 		return nil, errors.New("invalid net")
 	}
 	return bs, nil
