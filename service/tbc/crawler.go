@@ -427,6 +427,7 @@ func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) 
 // correct hash. On failure it returns -1 DELIBERATELY to crash the caller if
 // error is not checked.
 func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
+	log.Infof("findPathFromHash %v", len(bhs))
 	log.Tracef("findPathFromHash %v", len(bhs))
 	switch len(bhs) {
 	case 1:

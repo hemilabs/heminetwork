@@ -271,6 +271,7 @@ func btcConnect(ctx context.Context, btcNet string) error {
 
 	mainnetPort := "8333"
 	testnetPort := "18333"
+	testnet4Port := "48333"
 	var (
 		port        string
 		wireNet     wire.BitcoinNet
@@ -285,6 +286,10 @@ func btcConnect(ctx context.Context, btcNet string) error {
 		port = testnetPort
 		wireNet = wire.TestNet3
 		chainParams = &chaincfg.TestNet3Params
+	case "testnet4":
+		port = testnet4Port
+		wireNet = wire.TestNet4
+		chainParams = &chaincfg.TestNet4Params
 	default:
 		return fmt.Errorf("invalid network: %v", btcNet)
 	}
@@ -523,7 +528,7 @@ func _main() error {
 	}
 
 	var network string
-	flag.StringVar(&network, "network", "mainnet", "Bitcoin network (mainnet, testnet3).")
+	flag.StringVar(&network, "network", "mainnet", "Bitcoin network (mainnet, testnet3, testnet4).")
 	flag.Parse()
 
 	if err := blockstream.SetNetwork(network); err != nil {

@@ -17,6 +17,7 @@ endpoint.**
 **As of June 2025:**
 
 - **`testnet3`** requires approximately 400 GiB of disk space.
+- **`testnet4`** requires approximately 10 GiB of disk space.
 - **`mainnet`** requires over 1000 GiB of disk space.
 
 ---
@@ -93,7 +94,7 @@ To see a full list of runtime settings, execute `tbcd` with the **`--help`** fla
 #         TBC_LEVELDB_HOME      : data directory for leveldb (default: ~/.tbcd)
 #         TBC_LOG_LEVEL         : loglevel for various packages; INFO, DEBUG and TRACE (default: tbcd=INFO;tbc=INFO;level=INFO)
 #         TBC_MAX_CACHED_TXS    : maximum cached utxos and/or txs during indexing (default: 1000000)
-#         TBC_NETWORK           : bitcoin network; mainnet or testnet3 (default: testnet3)
+#         TBC_NETWORK           : bitcoin network; mainnet or testnet3 (default: mainnet)
 #         TBC_PROMETHEUS_ADDRESS: address and port tbcd prometheus listens on
 ```
 

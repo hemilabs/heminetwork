@@ -348,7 +348,7 @@ func (l *ldb) v3(ctx context.Context) error {
 	// First let's make sure we have enough disk space to process this.
 	var need uint64
 	switch l.cfg.Network {
-	case "testnet3":
+	case "testnet3", "testnet4":
 		need = 100 * gib // 100GB
 	case "mainnet":
 		need = 350 * gib // 350GB
