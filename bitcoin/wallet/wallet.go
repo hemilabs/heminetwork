@@ -14,13 +14,13 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
+	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/juju/loggo"
 )
 
 var log = loggo.GetLogger("wallet")
