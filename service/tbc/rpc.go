@@ -791,7 +791,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	}, nil
 }
 
-func (s *Server) keystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest) (any, error) {
+func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest) (*tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse, error) {
 	log.Tracef("keystoneTxs")
 	defer log.Tracef("keystoneTxs exit")
 
@@ -841,7 +841,7 @@ func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Conte
 		}, nil
 	}
 
-	ktxsr, err := s.keystoneTxs(ctx, req)
+	ktxsr, err := s.KeystoneTxs(ctx, req)
 	if err != nil {
 		// XXX add error not found type
 		if errors.Is(err, database.ErrNotFound) {

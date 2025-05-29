@@ -416,21 +416,16 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Infof("handleOpgethSubscription")
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
 
-	go func() {
-		log.Infof("starting backup timer")
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(5 * time.Second):
-				log.Infof("sending backup timer notification to headersCh")
-				headersCh <- "keystone backup timer"
-			}
-		}
-	}()
+	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
+	if err != nil {
+		return err
+	}
 
 	for {
 		select {
+		case err := <-sub.Err():
+			return err
+
 		case <-ctx.Done():
 			return ctx.Err()
 
