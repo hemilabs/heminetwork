@@ -412,7 +412,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("handleOpgethSubscription")
 	defer log.Tracef("handleOpgethSubscription exit")
 	log.Infof("will poll until subscriptions are fixed")
-	
+
 	log.Infof("handleOpgethSubscription")
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
 
@@ -420,9 +420,9 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 		log.Infof("starting backup timer")
 		for {
 			select {
-			case <- ctx.Done():
+			case <-ctx.Done():
 				return
-			case <- time.After(5 * time.Second):
+			case <-time.After(5 * time.Second):
 				log.Infof("sending backup timer notification to headersCh")
 				headersCh <- "keystone backup timer"
 			}
