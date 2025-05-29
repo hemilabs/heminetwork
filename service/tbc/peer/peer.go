@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -782,6 +782,8 @@ func New(network wire.BitcoinNet, id int, address string) (*Peer, error) {
 		cp.chainParams = &chaincfg.MainNetParams
 	case wire.TestNet3:
 		cp.chainParams = &chaincfg.TestNet3Params
+	case wire.TestNet4:
+		cp.chainParams = &chaincfg.TestNet4Params
 	case wire.TestNet:
 		cp.chainParams = &chaincfg.RegressionNetParams
 	default:

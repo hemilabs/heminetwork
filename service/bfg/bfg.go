@@ -609,6 +609,8 @@ func (s *Server) Run(pctx context.Context) error {
 		s.params = &chaincfg.TestNet3Params
 	case "localnet":
 		s.params = &chaincfg.RegressionNetParams
+	case "testnet4":
+		s.params = &chaincfg.TestNet4Params
 	default:
 		return fmt.Errorf("invalid network: %v", s.cfg.Network)
 	}

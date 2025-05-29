@@ -8,7 +8,7 @@ toolchain go1.24.5
 replace github.com/coder/websocket v1.8.12 => github.com/hemilabs/websocket v0.0.0-20240813101919-bf33653e9aa5
 
 require (
-	github.com/btcsuite/btcd v0.24.2
+	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
 	github.com/btcsuite/btcd/btcec/v2 v2.3.5
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0

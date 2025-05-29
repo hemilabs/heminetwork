@@ -104,7 +104,7 @@ var (
 		"TBC_NETWORK": config.Config{
 			Value:        &cfg.Network,
 			DefaultValue: defaultNetwork,
-			Help:         "bitcoin network; mainnet or testnet3",
+			Help:         "bitcoin network; mainnet, testnet3 or testnet4",
 			Print:        config.PrintAll,
 		},
 		"TBC_PEERS_WANTED": config.Config{

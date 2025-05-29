@@ -30,7 +30,7 @@ var (
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "%v\n", welcome)
-	fmt.Fprintf(os.Stderr, "\t%v [-net mainnet|testnet3] [-json] <-secp256k1>\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "\t%v [-net mainnet|testnet3|testnet4] [-json] <-secp256k1>\n", os.Args[0])
 	flag.PrintDefaults()
 }
 
@@ -44,6 +44,8 @@ func _main() error {
 	switch *net {
 	case "testnet3", "testnet":
 		btcChainParams = &btcchaincfg.TestNet3Params
+	case "testnet4":
+		btcChainParams = &btcchaincfg.TestNet4Params
 	case "mainnet":
 		btcChainParams = &btcchaincfg.MainNetParams
 	default:
