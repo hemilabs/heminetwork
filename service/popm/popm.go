@@ -102,7 +102,7 @@ type keystone struct {
 	hash     *chainhash.Hash // map key
 
 	// comes from gozer
-	abbreviated *gozer.BlockKeystoneByL2KeystoneAbrevHashResponse
+	abbreviated *gozer.L2KeystoneBlockInfo
 
 	expires *time.Time // Used to age out of cache
 
@@ -352,26 +352,26 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 		}
 	}
 
-	gks := s.gozer.BlockKeystoneByL2KeystoneAbrevHash(ctx, aksHashes)
-	if len(gks) != len(aksHashes) {
+	gks := s.gozer.BlockByL2AbrevHash(ctx, aksHashes)
+	if len(gks.L2KeystoneBlocks) != len(aksHashes) {
 		// Shouldn't happen
-		panic(fmt.Sprintf("len diagnostic %v != %v", len(gks), len(aksHashes)))
+		panic(fmt.Sprintf("len diagnostic %v != %v", len(gks.L2KeystoneBlocks), len(aksHashes)))
 	}
 	// log.Debugf("BlockKeystoneByL2KeystoneAbrevHash: %v", spew.Sdump(gks))
-	for k := range gks {
+	for k := range gks.L2KeystoneBlocks {
 		// Fixup keystone cache based on gozer response, note that gks
 		// or is identical to aks order thus we can use the hash array
 		// for identification in the keystone cache map.
 		ks, ok := keystones[aksHashes[k]]
 		if !ok {
 			// Not found in keystones cache map so Error must be !nil
-			if gks[k].Error == nil {
+			if gks.L2KeystoneBlocks[k].Error == nil {
 				panic("hash not found " + aksHashes[k].String())
 			}
 			ks.state = keystoneStateNew
 		} else {
 			// found, set state based on Error
-			if gks[k].Error == nil {
+			if gks.L2KeystoneBlocks[k].Error == nil {
 				ks.state = keystoneStateMined
 			} else {
 				ks.state = keystoneStateNew
@@ -380,7 +380,7 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 		ks.expires = timestamp(l2KeystoneMaxAge)
 		// Always add the entry to cache and rely on Error being !nil
 		// to retry later.
-		ks.abbreviated = gks[k]
+		ks.abbreviated = &gks.L2KeystoneBlocks[k]
 	}
 
 	return keystones, nil

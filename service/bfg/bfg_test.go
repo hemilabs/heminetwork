@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,7 +54,7 @@ func TestBFG(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
 	bfgCfg.ListenAddress = createAddress()
-	// bfgCfg.LogLevel = "bfg=Trace;"
+	bfgCfg.LogLevel = "bfg=Trace;"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -72,15 +73,17 @@ func TestBFG(t *testing.T) {
 
 	// messages we expect to receive
 	expectedMsg := map[string]int{
-		"kss_getKeystone": wantedKeystones,
-		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: defaultKeystoneCount * wantedKeystones,
+		"kss_getKeystone":                   wantedKeystones,
+		tbcapi.CmdBlockByL2AbrevHashRequest: wantedKeystones,
 	}
 
 	for !s.Connected() {
 		time.Sleep(10 * time.Millisecond)
 	}
 
+	var wg sync.WaitGroup
 	// send finality requests to bfg
+	wg.Add(1)
 	go func() {
 		for i := range wantedKeystones {
 			kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
@@ -110,12 +113,15 @@ func TestBFG(t *testing.T) {
 					spew.Sdump(fin)))
 			}
 		}
+		wg.Done()
 	}()
 
 	// receive messages and errors from opgeth and tbc
 	if err = messageListener(ctx, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
+
+	wg.Wait()
 }
 
 func TestFullMockIntegration(t *testing.T) {
@@ -163,8 +169,8 @@ func TestFullMockIntegration(t *testing.T) {
 
 	// messages we expect to receive
 	expectedMsg := map[string]int{
-		"kss_getKeystone": wantedKeystones,
-		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: defaultKeystoneCount * wantedKeystones,
+		"kss_getKeystone":                   wantedKeystones,
+		tbcapi.CmdBlockByL2AbrevHashRequest: wantedKeystones,
 	}
 
 	for !s.Connected() {
@@ -219,8 +225,8 @@ func TestFullMockIntegration(t *testing.T) {
 
 	// wait until we ask for the finality value of all keystones
 	expectedMsg = map[string]int{
-		"kss_getKeystone": wantedKeystones,
-		tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest: defaultKeystoneCount * wantedKeystones,
+		"kss_getKeystone":                   wantedKeystones,
+		tbcapi.CmdBlockByL2AbrevHashRequest: wantedKeystones,
 	}
 
 	// send finality requests to bfg, which should return super finality
