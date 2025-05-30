@@ -776,7 +776,10 @@ func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2Key
 		// next canonical block
 		hh, err = s.nextCanonicalBlockheader(ctx, &bhb.Hash, hh)
 		if err != nil {
-			return nil, fmt.Errorf("next block: %w", err)
+			// if we can't get the next canonical block, we should still
+			// return keytones that we have found
+			log.Errorf("next block: %w", err)
+			break
 		}
 	}
 
