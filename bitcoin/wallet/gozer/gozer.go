@@ -25,7 +25,7 @@ import (
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
-	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, hashes []chainhash.Hash) []*BlockKeystoneByL2KeystoneAbrevHashResponse
+	BlockByL2AbrevHash(ctx context.Context, hashes []chainhash.Hash) *BlockByL2AbrevHashResponse
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 	BtcHeight(ctx context.Context) (uint64, error)
 }
@@ -80,15 +80,20 @@ func (a *L2KeystoneAbrev) Serialize() [72]byte {
 	return r
 }
 
-// BlockKeystoneByL2KeystoneAbrevHashResponse JSON response to keystone
-// finality route. Note that if the keystone exists that, by definition, the
-// keystone lives on the canonical chain. This is why we can return the best
-// tip height and hash.
-type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
+type L2KeystoneBlockInfo struct {
 	L2KeystoneAbrev       L2KeystoneAbrev `json:"l2_keystone_abrev"`
 	L2KeystoneBlockHash   chainhash.Hash  `json:"l2_keystone_block_hash"`
 	L2KeystoneBlockHeight uint            `json:"l2_keystone_block_height"`
-	BtcTipBlockHash       chainhash.Hash  `json:"btc_tip_block_hash"`
-	BtcTipBlockHeight     uint            `json:"btc_tip_block_height"`
 	Error                 *protocol.Error `json:"error,omitempty"`
+}
+
+// BlockByL2AbrevHashResponse JSON response to keystone
+// finality route. Note that if the keystone exists that, by definition, the
+// keystone lives on the canonical chain. This is why we can return the best
+// tip height and hash.
+type BlockByL2AbrevHashResponse struct {
+	L2KeystoneBlocks  []L2KeystoneBlockInfo `json:"l2_keystone_blocks"`
+	BtcTipBlockHash   chainhash.Hash        `json:"btc_tip_block_hash"`
+	BtcTipBlockHeight uint                  `json:"btc_tip_block_height"`
+	Error             *protocol.Error       `json:"error,omitempty"`
 }
