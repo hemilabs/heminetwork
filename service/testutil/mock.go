@@ -284,34 +284,41 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 			if err != nil {
 				return fmt.Errorf("mempool tx inser: %w", err)
 			}
-		case tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest:
-			pl, ok := payload.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest)
+		case tbcapi.CmdBlockByL2AbrevHashRequest:
+			pl, ok := payload.(*tbcapi.BlockByL2AbrevHashRequest)
 			if !ok {
 				return fmt.Errorf("unexpected payload format: %v", payload)
 			}
 
-			kss, ok := f.keystones[pl.L2KeystoneAbrevHash]
-			if !ok {
-				resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-					Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHash),
-				}
-			} else {
-				ch, err := chainhash.NewHash(digest256([]byte{byte(kss.L1BlockNumber)}))
-				if err != nil {
-					panic(err)
-				}
-				tch, err := chainhash.NewHash(digest256([]byte{byte(f.btcTip)}))
-				if err != nil {
-					panic(err)
-				}
-				resp = &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-					L2KeystoneAbrev:       kss,
-					L2KeystoneBlockHash:   ch,
-					L2KeystoneBlockHeight: uint(kss.L1BlockNumber),
-					BtcTipBlockHash:       tch,
-					BtcTipBlockHeight:     f.btcTip,
+			blkInfos := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(pl.L2KeystoneAbrevHashes))
+			for _, hash := range pl.L2KeystoneAbrevHashes {
+				kss, ok := f.keystones[hash]
+				if !ok {
+					blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
+						Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHashes),
+					})
+				} else {
+					ch, err := chainhash.NewHash(digest256([]byte{byte(kss.L1BlockNumber)}))
+					if err != nil {
+						panic(err)
+					}
+					blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
+						L2KeystoneAbrev:       kss,
+						L2KeystoneBlockHash:   ch,
+						L2KeystoneBlockHeight: uint(kss.L1BlockNumber),
+					})
 				}
 			}
+			tch, err := chainhash.NewHash(digest256([]byte{byte(f.btcTip)}))
+			if err != nil {
+				panic(err)
+			}
+			resp = &tbcapi.BlockByL2AbrevHashResponse{
+				L2KeystoneBlocks:  blkInfos,
+				BtcTipBlockHash:   tch,
+				BtcTipBlockHeight: f.btcTip,
+			}
+
 		case tbcapi.CmdFeeEstimateRequest:
 			resp = tbcapi.FeeEstimateResponse{
 				FeeEstimates: []*tbcapi.FeeEstimate{

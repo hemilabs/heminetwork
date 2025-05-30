@@ -193,9 +193,9 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest:
+		case tbcapi.CmdBlockByL2AbrevHashRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest)
+				req := payload.(*tbcapi.BlockByL2AbrevHashRequest)
 				return s.handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx, req)
 			}
 
@@ -726,68 +726,45 @@ func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, 
 	return ks, ksBh, bhb, nil
 }
 
-func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi.KeystonesByHeightRequest) (any, error) {
-	log.Tracef("handleKeystonesByHeightRequest")
-	defer log.Tracef("handleKeystonesByHeightRequest exit")
-
-	bhb, err := s.db.BlockHeaderBest(ctx)
-	if err != nil {
-		e := protocol.NewInternalError(err)
-		return &tbcapi.KeystonesByHeightResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
-	kssList, err := s.KeystonesByHeight(ctx, req.Height, req.Depth)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.KeystonesByHeightResponse{
-				BTCTipHeight: bhb.Height,
-				Error:        protocol.RequestErrorf("could not find keystones in range"),
-			}, nil
-		}
-		e := protocol.NewInternalError(err)
-		return &tbcapi.KeystonesByHeightResponse{
-			BTCTipHeight: bhb.Height,
-			Error:        e.ProtocolError(),
-		}, e
-	}
-
-	aks := make([]*hemi.L2KeystoneAbrev, len(kssList))
-	for i, k := range kssList {
-		aks[i] = hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(k.AbbreviatedKeystone))
-	}
-
-	return &tbcapi.KeystonesByHeightResponse{
-		L2KeystoneAbrevs: aks,
-		BTCTipHeight:     bhb.Height,
-	}, nil
-}
-
-func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest) (any, error) {
+func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockByL2AbrevHashRequest) (any, error) {
 	log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest")
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
 
-	ks, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, req.L2KeystoneAbrevHash)
-	if err != nil {
-		// XXX add error not found type
-		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-				Error: protocol.RequestErrorf("%v", err),
-			}, nil
+	if len(req.L2KeystoneAbrevHashes) < 1 {
+		return &tbcapi.BlockByL2AbrevHashResponse{
+			Error: protocol.RequestError(errors.New("no l2 hashes provided")),
+		}, nil
+	}
+	var btcTip *tbcd.BlockHeader
+	blkInfos := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(req.L2KeystoneAbrevHashes))
+	for _, hash := range req.L2KeystoneAbrevHashes {
+		ks, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, hash)
+		if err != nil {
+			// XXX add error not found type
+			if errors.Is(err, database.ErrNotFound) {
+				blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
+					Error: protocol.RequestErrorf("%v", err),
+				})
+				continue
+			}
+			e := protocol.NewInternalError(err)
+			return &tbcapi.BlockByL2AbrevHashResponse{
+				Error: e.ProtocolError(),
+			}, e
 		}
-		e := protocol.NewInternalError(err)
-		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-			Error: e.ProtocolError(),
-		}, e
+		blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
+			L2KeystoneAbrev: hemi.L2KeystoneAbrevDeserialize(
+				hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
+			L2KeystoneBlockHash:   &ksBh.Hash,
+			L2KeystoneBlockHeight: uint(ksBh.Height),
+		})
+		btcTip = bhb
 	}
 
-	return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-		L2KeystoneAbrev:       hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
-		L2KeystoneBlockHash:   &ksBh.Hash,
-		L2KeystoneBlockHeight: uint(ksBh.Height),
-		BtcTipBlockHash:       &bhb.Hash,
-		BtcTipBlockHeight:     uint(bhb.Height),
+	return &tbcapi.BlockByL2AbrevHashResponse{
+		L2KeystoneBlocks:  blkInfos,
+		BtcTipBlockHash:   &btcTip.Hash,
+		BtcTipBlockHeight: uint(btcTip.Height),
 	}, nil
 }
 
