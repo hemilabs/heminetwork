@@ -11,7 +11,11 @@ import (
 	"encoding/json"
 	"math/big"
 	"slices"
+	"bytes"
 	"testing"
+	"net/http"
+	"io"
+	"fmt"
 	"time"
 
 	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
@@ -33,6 +37,7 @@ import (
 
 	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/go-test/deep"
 )
 
 const (
@@ -106,6 +111,11 @@ func TestMonitor(t *testing.T) {
 			continue
 		}
 
+		if jo.TipHash != jo.TipHashNonSequencing {
+			t.Logf("tip mismatch: %s != %s", jo.TipHash, jo.TipHashNonSequencing)
+			continue
+		}
+
 		// success; we passed the test
 		break
 	}
@@ -121,6 +131,11 @@ func TestL1L2Comms(t *testing.T) {
 	}
 
 	l2Client, err := ethclient.Dial("http://localhost:8546")
+	if err != nil {
+		t.Fatalf("could not dial eth l1 %s", err)
+	}
+
+	l2ClientNonSequencing, err := ethclient.Dial("http://localhost:18546")
 	if err != nil {
 		t.Fatalf("could not dial eth l1 %s", err)
 	}
@@ -145,8 +160,12 @@ func TestL1L2Comms(t *testing.T) {
 
 	bridgeEthL2ToL1(t, ctx, l1Client, l2Client, privateKey)
 
-	hvmTipNearBtcTip(t, ctx, l2Client, privateKey)
+	hvmTipNearBtcTip(t, ctx, l2Client, l2ClientNonSequencing, privateKey)
 	hvmBtcBalance(t, ctx, l2Client, privateKey)
+
+	opNodeSequencingEndpoint := "http://localhost:8547"
+	opNodeNonSequencingEndpoint := "http://localhost:18547"
+	assertOutputRootsAreTheSame(t, ctx, l2Client, opNodeSequencingEndpoint, opNodeNonSequencingEndpoint)
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
@@ -170,7 +189,7 @@ func TestOperatorFeeVaultIsPresent(t *testing.T) {
 	}
 }
 
-func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Client, l2ClientNonSequencing *ethclient.Client,  privateKey *ecdsa.PrivateKey) {
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
@@ -198,7 +217,7 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 	auth.GasLimit = uint64(3000000) // in units
 	auth.GasPrice = gasPrice
 
-	_, tx, l2ReadBalances, err := mybindings.DeployL2ReadBalances(auth, l2Client)
+	contractAddress, tx, l2ReadBalances, err := mybindings.DeployL2ReadBalances(auth, l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +227,20 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 	res, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+
+	l2ReadBalancesNonSequencing, err := mybindings.NewL2ReadBalances(contractAddress, l2ClientNonSequencing)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resNonSequencing, err := l2ReadBalancesNonSequencing.L2ReadBalancesCaller.GetBitcoinLastHeader(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(res, resNonSequencing) {
+		t.Fatalf("bitcoin header mismatch between sequencer and non-sequencer: %x != %x", res, resNonSequencing)
 	}
 
 	config := client.ConnConfig{
@@ -1127,6 +1160,97 @@ func waitForTxReceipt(t *testing.T, ctx context.Context, client *ethclient.Clien
 		return nil
 	} else {
 		return receipt
+	}
+}
+
+func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *ethclient.Client, opNodeSequencingEndpoint string, opNodeNonSequencingEndpoint string) {
+	bigTip, err := l2Client.HeaderByNumber(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("error getting l2 tip: %s", err)
+	}
+
+	tip := bigTip.Number.Uint64()
+
+	t.Logf("checking output roots from tip %d", tip)
+
+	type outputAtBlock struct {
+		ID int `json:"id"`
+		Method string `json:"method"`
+		Params []string `json:"params"`
+		JsonRpc string `json:"jsonrpc"`
+	}
+
+	for tip != 0 {
+		hexTip := fmt.Sprintf("%#x", tip)
+		requestBody := outputAtBlock{
+			ID: 	1,
+			Method: "optimism_outputAtBlock",
+			Params: []string{hexTip},
+			JsonRpc: "2.0",
+		} 
+
+		jsonbody, err := json.Marshal(requestBody)
+		if err != nil {
+			t.Fatalf("error marshalling request body: %s", err)
+		}
+
+		t.Logf("sending request json body: %s", string(jsonbody))
+
+		client := &http.Client{}
+		res, err := client.Post(opNodeSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
+		if err != nil {
+			t.Fatalf("error making request to sequencer endpoint: %s", err)
+		}
+
+		res2, err := client.Post(opNodeNonSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
+		if err != nil {
+			t.Fatalf("error making request to sequencer endpoint: %s", err)
+		}
+
+		resBody, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatalf("error reading response body from sequencer: %s", err)
+		}
+
+		resBody2, err := io.ReadAll(res2.Body)
+		if err != nil {	
+			t.Fatalf("error reading response body from non-sequencer: %s", err)
+		}
+
+		 assertResultNotError := func (body []byte) {
+			type result struct {
+				Error  *interface{} `json:"error,omitempty"`
+			} 
+			
+			t.Logf("will parse body: %s", string(body))
+
+			var res result 
+
+			err := json.Unmarshal(body, &res)
+			if err != nil {
+				t.Fatalf("error unmarshalling response body: %s", err)
+			}
+
+			if res.Error != nil {
+				t.Fatalf("error in response body: %x", res.Error)
+			}	
+		}
+
+		assertResultNotError(resBody)
+		assertResultNotError(resBody2)
+
+		t.Logf("comparing output roots %s ?= %s", string(resBody), string(resBody2))
+
+		if diff := deep.Equal(string(resBody), string(resBody2)); len(diff)> 0{
+			t.Fatalf("output roots are not the same: %s", diff)
+		}
+
+		res.Body.Close()
+		res2.Body.Close()
+
+
+
+		tip-- 
 	}
 }
 
