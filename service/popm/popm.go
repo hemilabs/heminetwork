@@ -260,11 +260,11 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 	}
 
 	// Retrieve available UTXOs for the miner.
-	utxos, err := s.gozer.UtxosByAddress(ctx, true, s.address, 0, 0)
+	utxos, err := s.gozer.UtxosByAddress(ctx, true, s.address, 0, 100)
 	if err != nil {
 		return nil, fmt.Errorf("utxos by address: %w", err)
 	}
-	log.Debugf("utxos %d, script hash %v height %d",
+	log.Infof("utxos %d, script hash %v height %d",
 		len(utxos), scriptHash, btcHeight)
 
 	// Build transaction.
@@ -419,16 +419,33 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Infof("handleOpgethSubscription")
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
 
+	// Clayton note: this is unreliable, even when setting kss in the websocket
+	// api in op-geth.  so we need the retry timeout to check for keystones
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
 	if err != nil {
-		return err
+		log.Errorf("could not setup subscription: %s, will poll instead", err)
 	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(l2KeystoneRetryTimeout):
+				headersCh <- "timeout"
+			}
+		}
+	}()
 
 	for {
-		select {
-		case err := <-sub.Err():
-			return err
+		if sub != nil {
+			select {
+			case err := <-sub.Err():
+				return err
+			default:
+			}
+		}
 
+		select {
 		case <-ctx.Done():
 			return ctx.Err()
 
