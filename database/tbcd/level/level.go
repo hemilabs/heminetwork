@@ -8,11 +8,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
-	"encoding/hex"
 	"slices"
 
 	"github.com/btcsuite/btcd/blockchain"

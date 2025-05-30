@@ -46,14 +46,16 @@ func UtxoPickerMultiple(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) ([]*tb
 	return nil, errors.New("no suitable utxos found")
 }
 
-var uniqueUtxo map[string]bool
-var uniqueUtxoMtx sync.Mutex
+var (
+	uniqueUtxo    map[string]bool
+	uniqueUtxoMtx sync.Mutex
+)
 
 // UtxoPickerSingle is a simple utxo picker that returns a random utxo from the
 // provided list that has a larger value than amount + fee.
 func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi.UTXO, error) {
 	uniqueUtxoMtx.Lock()
-	defer uniqueUtxoMtx.Unlock() 
+	defer uniqueUtxoMtx.Unlock()
 
 	if uniqueUtxo == nil {
 		uniqueUtxo = make(map[string]bool)

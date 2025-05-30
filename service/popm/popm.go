@@ -436,9 +436,9 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	for {
 		if sub != nil {
 			select {
-				case err := <-sub.Err():
-					return err
-				default:
+			case err := <-sub.Err():
+				return err
+			default:
 			}
 		}
 
