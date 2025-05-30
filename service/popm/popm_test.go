@@ -46,10 +46,10 @@ func TestPopMiner(t *testing.T) {
 	// Setup pop miner
 	cfg := NewDefaultConfig()
 	cfg.BitcoinSource = "tbc"
-	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
-	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
-	cfg.LogLevel = "popm=TRACE"
+	// cfg.LogLevel = "popm=TRACE"
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -106,10 +106,10 @@ func TestTickingPopMiner(t *testing.T) {
 	// Setup pop miner
 	cfg := NewDefaultConfig()
 	cfg.BitcoinSource = "tbc"
-	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
-	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
-	cfg.LogLevel = "popm=TRACE"
+	// cfg.LogLevel = "popm=TRACE"
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -141,19 +141,19 @@ func TestTickingPopMiner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	mtbc.Close()
-	opgeth.Close()
+	cancel()
 
 	if len(s.keystones) != wantedKeystones {
 		t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
 	}
 	for _, k := range s.keystones {
-		if _, ok := emptyMap[*k.hash]; !ok {
+		if _, ok := mtbc.GetKeystones()[*k.hash]; !ok {
 			t.Fatalf("missing keystone: %v", k.hash)
 		}
 	}
+
 	time.Sleep(500 * time.Millisecond)
-	if err = s.mine(ctx); err != nil {
+	if err = s.mine(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.keystones) == wantedKeystones {
@@ -187,8 +187,8 @@ func TestPopmFilterUtxos(t *testing.T) {
 	// Setup pop miner
 	cfg := NewDefaultConfig()
 	cfg.BitcoinSource = "tbc"
-	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
-	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	cfg.LogLevel = "popm=TRACE"
 

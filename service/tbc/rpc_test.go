@@ -1568,7 +1568,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 				conn: protocol.NewWSConn(c),
 			}
 
-			var response tbcapi.BlockByL2AbrevHashResponse
+			var response tbcapi.BlocksByL2AbrevHashesResponse
 			select {
 			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
@@ -1596,7 +1596,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlockByL2AbrevHashRequest{
+			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlocksByL2AbrevHashesRequest{
 				L2KeystoneAbrevHashes: []btcchainhash.Hash{*tti.l2KeystoneAbrevHash},
 			}); err != nil {
 				t.Fatal(err)
@@ -1607,7 +1607,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if v.Header.Command != tbcapi.CmdBlockByL2AbrevHashResponse {
+			if v.Header.Command != tbcapi.CmdBlocksByL2AbrevHashesResponse {
 				t.Fatalf("received unexpected command: %s", v.Header.Command)
 			}
 
