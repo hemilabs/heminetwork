@@ -185,7 +185,7 @@ func HashHeightFromBlockHeader(bh *tbcd.BlockHeader) *HashHeight {
 	}
 }
 
-func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
+func BlockKeystones(block *btcutil.Block, l2KeystoneAbrevHash []byte) []tbcapi.KeystoneTx {
 	blockHash := block.Hash()
 	height := uint(block.Height())
 	ktxs := make([]tbcapi.KeystoneTx, 0, 16)
@@ -196,8 +196,12 @@ func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
 		}
 
 		for _, txOut := range tx.MsgTx().TxOut {
-			_, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
+			tl2, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
 			if err != nil {
+				continue
+			}
+
+			if l2KeystoneAbrevHash != nil && !bytes.Equal(l2KeystoneAbrevHash, tl2.L2KeystoneAbrev.Hash() ) {
 				continue
 			}
 

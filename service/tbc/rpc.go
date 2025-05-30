@@ -769,7 +769,7 @@ func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2Key
 			return nil, fmt.Errorf("block by hash: %w", err)
 		}
 		block.SetHeight(int32(hh.Height))
-		ktxs = append(ktxs, BlockKeystones(block)...)
+		ktxs = append(ktxs, BlockKeystones(block, req.L2KeystoneAbrevHash)...)
 
 		log.Infof("found %d poptxs", len(ktxs))
 
