@@ -386,6 +386,8 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
+	log.Infof("checking the database for keystone with abrev hash %s", abrevhash.String())
+
 	kssDB := l.pool[level.KeystonesDB]
 	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
 	if err != nil {
