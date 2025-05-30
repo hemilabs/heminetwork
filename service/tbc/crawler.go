@@ -201,10 +201,9 @@ func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
 				continue
 			}
 
-			rawTx := []byte{}
-			buf := bytes.NewBuffer(rawTx)
+			var rawTx bytes.Buffer
 
-			if err := tx.MsgTx().Serialize(buf); err != nil {
+			if err := tx.MsgTx().Serialize(&rawTx); err != nil {
 				// we should always be able to serialize
 				panic(fmt.Sprintf("could not serialize MsgTx: %s", err))
 			}
@@ -213,7 +212,7 @@ func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
 				BlockHash:   *blockHash,
 				TxIndex:     uint(txIndex),
 				BlockHeight: height,
-				RawTx:       rawTx,
+				RawTx:       rawTx.Bytes(),
 			})
 		}
 	}
