@@ -79,8 +79,8 @@ const (
 	CmdBlockDownloadAsyncRawRequest  = "tbcapi-block-download-async-raw-request"
 	CmdBlockDownloadAsyncRawResponse = "tbcapi-block-download-async-raw-response"
 
-	CmdBlockKeystoneByL2KeystoneAbrevHashRequest  = "tbcapi-l2-keystone-abrev-by-abrev-hash-request"
-	CmdBlockKeystoneByL2KeystoneAbrevHashResponse = "tbcapi-l2-keystone-abrev-by-abrev-hash-response"
+	CmdBlockByL2AbrevHashRequest  = "tbcapi-block-by-l2-abrev-hash-request"
+	CmdBlockByL2AbrevHashResponse = "tbcapi-block-by-l2-abrev-hash-response"
 
 	CmdKeystoneTxsByL2KeystoneAbrevHashRequest  = "tbcapi-l2-keystone-txs-by-abrev-hash-request"
 	CmdKeystoneTxsByL2KeystoneAbrevHashResponse = "tbcapi-l2-keystone-txs-by-abrev-hash-response"
@@ -161,6 +161,13 @@ type Block struct {
 	Hash   chainhash.Hash `json:"hash"`
 	Header BlockHeader    `json:"header"`
 	Txs    []Tx           `json:"txs"`
+}
+
+type L2KeystoneBlockInfo struct {
+	L2KeystoneAbrev       *hemi.L2KeystoneAbrev `json:"l2_keystone_abrev"`
+	L2KeystoneBlockHash   *chainhash.Hash       `json:"l2_keystone_block_hash"`
+	L2KeystoneBlockHeight uint                  `json:"l2_keystone_block_height"`
+	Error                 *protocol.Error       `json:"error,omitempty"`
 }
 
 type FeeEstimate struct {
@@ -308,17 +315,15 @@ type BlockInsertRawRequest struct {
 	Block api.ByteSlice `json:"block"`
 }
 
-type BlockKeystoneByL2KeystoneAbrevHashRequest struct {
-	L2KeystoneAbrevHash chainhash.Hash `json:"l2_keystone_abrev_hash"`
+type BlockByL2AbrevHashRequest struct {
+	L2KeystoneAbrevHashes []chainhash.Hash `json:"l2_keystone_abrev_hashes"`
 }
 
-type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
-	L2KeystoneAbrev       *hemi.L2KeystoneAbrev `json:"l2_keystone_abrev"`
-	L2KeystoneBlockHash   *chainhash.Hash       `json:"l2_keystone_block_hash"`
-	L2KeystoneBlockHeight uint                  `json:"l2_keystone_block_height"`
-	BtcTipBlockHash       *chainhash.Hash       `json:"btc_tip_block_hash"`
-	BtcTipBlockHeight     uint                  `json:"btc_tip_block_height"`
-	Error                 *protocol.Error       `json:"error,omitempty"`
+type BlockByL2AbrevHashResponse struct {
+	L2KeystoneBlocks  []*L2KeystoneBlockInfo `json:"l2_keystone_blocks"`
+	BtcTipBlockHash   *chainhash.Hash        `json:"btc_tip_block_hash"`
+	BtcTipBlockHeight uint                   `json:"btc_tip_block_height"`
+	Error             *protocol.Error        `json:"error,omitempty"`
 }
 
 // KeystoneTxsByL2KeystoneAbrevHashRequest retrieve raw keystone tx's starting
@@ -398,52 +403,52 @@ type MempoolInfoResponse struct {
 }
 
 var commands = map[protocol.Command]reflect.Type{
-	CmdPingRequest:                                reflect.TypeOf(PingRequest{}),
-	CmdPingResponse:                               reflect.TypeOf(PingResponse{}),
-	CmdBlockByHashRequest:                         reflect.TypeOf(BlockByHashRequest{}),
-	CmdBlockByHashResponse:                        reflect.TypeOf(BlockByHashResponse{}),
-	CmdBlockByHashRawRequest:                      reflect.TypeOf(BlockByHashRawRequest{}),
-	CmdBlockByHashRawResponse:                     reflect.TypeOf(BlockByHashRawResponse{}),
-	CmdBlockHeadersByHeightRawRequest:             reflect.TypeOf(BlockHeadersByHeightRawRequest{}),
-	CmdBlockHeadersByHeightRawResponse:            reflect.TypeOf(BlockHeadersByHeightRawResponse{}),
-	CmdBlockHeadersByHeightRequest:                reflect.TypeOf(BlockHeadersByHeightRequest{}),
-	CmdBlockHeadersByHeightResponse:               reflect.TypeOf(BlockHeadersByHeightResponse{}),
-	CmdBlockHeaderBestRawRequest:                  reflect.TypeOf(BlockHeaderBestRawRequest{}),
-	CmdBlockHeaderBestRawResponse:                 reflect.TypeOf(BlockHeaderBestRawResponse{}),
-	CmdBlockHeaderBestRequest:                     reflect.TypeOf(BlockHeaderBestRequest{}),
-	CmdBlockHeaderBestResponse:                    reflect.TypeOf(BlockHeaderBestResponse{}),
-	CmdBalanceByAddressRequest:                    reflect.TypeOf(BalanceByAddressRequest{}),
-	CmdBalanceByAddressResponse:                   reflect.TypeOf(BalanceByAddressResponse{}),
-	CmdUTXOsByAddressRawRequest:                   reflect.TypeOf(UTXOsByAddressRawRequest{}),
-	CmdUTXOsByAddressRawResponse:                  reflect.TypeOf(UTXOsByAddressRawResponse{}),
-	CmdUTXOsByAddressRequest:                      reflect.TypeOf(UTXOsByAddressRequest{}),
-	CmdUTXOsByAddressResponse:                     reflect.TypeOf(UTXOsByAddressResponse{}),
-	CmdTxByIdRawRequest:                           reflect.TypeOf(TxByIdRawRequest{}),
-	CmdTxByIdRawResponse:                          reflect.TypeOf(TxByIdRawResponse{}),
-	CmdTxByIdRequest:                              reflect.TypeOf(TxByIdRequest{}),
-	CmdTxByIdResponse:                             reflect.TypeOf(TxByIdResponse{}),
-	CmdTxBroadcastRequest:                         reflect.TypeOf(TxBroadcastRequest{}),
-	CmdTxBroadcastResponse:                        reflect.TypeOf(TxBroadcastResponse{}),
-	CmdTxBroadcastRawRequest:                      reflect.TypeOf(TxBroadcastRawRequest{}),
-	CmdTxBroadcastRawResponse:                     reflect.TypeOf(TxBroadcastRawResponse{}),
-	CmdBlockInsertRequest:                         reflect.TypeOf(BlockInsertRequest{}),
-	CmdBlockInsertResponse:                        reflect.TypeOf(BlockInsertResponse{}),
-	CmdBlockInsertRawRequest:                      reflect.TypeOf(BlockInsertRawRequest{}),
-	CmdBlockInsertRawResponse:                     reflect.TypeOf(BlockInsertRawResponse{}),
-	CmdBlockDownloadAsyncRequest:                  reflect.TypeOf(BlockDownloadAsyncRequest{}),
-	CmdBlockDownloadAsyncResponse:                 reflect.TypeOf(BlockDownloadAsyncResponse{}),
-	CmdBlockDownloadAsyncRawRequest:               reflect.TypeOf(BlockDownloadAsyncRawRequest{}),
-	CmdBlockDownloadAsyncRawResponse:              reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
-	CmdBlockKeystoneByL2KeystoneAbrevHashRequest:  reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashRequest{}),
-	CmdBlockKeystoneByL2KeystoneAbrevHashResponse: reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashResponse{}),
-	CmdKeystoneTxsByL2KeystoneAbrevHashRequest:    reflect.TypeOf(KeystoneTxsByL2KeystoneAbrevHashRequest{}),
-	CmdKeystoneTxsByL2KeystoneAbrevHashResponse:   reflect.TypeOf(KeystoneTxsByL2KeystoneAbrevHashResponse{}),
-	CmdFeeEstimateRequest:                         reflect.TypeOf(FeeEstimateRequest{}),
-	CmdFeeEstimateResponse:                        reflect.TypeOf(FeeEstimateResponse{}),
-	CmdMempoolInfoRequest:                         reflect.TypeOf(MempoolInfoRequest{}),
-	CmdMempoolInfoResponse:                        reflect.TypeOf(MempoolInfoResponse{}),
-	CmdKeystonesByHeightRequest:                   reflect.TypeOf(KeystonesByHeightRequest{}),
-	CmdKeystonesByHeightResponse:                  reflect.TypeOf(KeystonesByHeightResponse{}),
+	CmdPingRequest:                              reflect.TypeOf(PingRequest{}),
+	CmdPingResponse:                             reflect.TypeOf(PingResponse{}),
+	CmdBlockByHashRequest:                       reflect.TypeOf(BlockByHashRequest{}),
+	CmdBlockByHashResponse:                      reflect.TypeOf(BlockByHashResponse{}),
+	CmdBlockByHashRawRequest:                    reflect.TypeOf(BlockByHashRawRequest{}),
+	CmdBlockByHashRawResponse:                   reflect.TypeOf(BlockByHashRawResponse{}),
+	CmdBlockHeadersByHeightRawRequest:           reflect.TypeOf(BlockHeadersByHeightRawRequest{}),
+	CmdBlockHeadersByHeightRawResponse:          reflect.TypeOf(BlockHeadersByHeightRawResponse{}),
+	CmdBlockHeadersByHeightRequest:              reflect.TypeOf(BlockHeadersByHeightRequest{}),
+	CmdBlockHeadersByHeightResponse:             reflect.TypeOf(BlockHeadersByHeightResponse{}),
+	CmdBlockHeaderBestRawRequest:                reflect.TypeOf(BlockHeaderBestRawRequest{}),
+	CmdBlockHeaderBestRawResponse:               reflect.TypeOf(BlockHeaderBestRawResponse{}),
+	CmdBlockHeaderBestRequest:                   reflect.TypeOf(BlockHeaderBestRequest{}),
+	CmdBlockHeaderBestResponse:                  reflect.TypeOf(BlockHeaderBestResponse{}),
+	CmdBalanceByAddressRequest:                  reflect.TypeOf(BalanceByAddressRequest{}),
+	CmdBalanceByAddressResponse:                 reflect.TypeOf(BalanceByAddressResponse{}),
+	CmdUTXOsByAddressRawRequest:                 reflect.TypeOf(UTXOsByAddressRawRequest{}),
+	CmdUTXOsByAddressRawResponse:                reflect.TypeOf(UTXOsByAddressRawResponse{}),
+	CmdUTXOsByAddressRequest:                    reflect.TypeOf(UTXOsByAddressRequest{}),
+	CmdUTXOsByAddressResponse:                   reflect.TypeOf(UTXOsByAddressResponse{}),
+	CmdTxByIdRawRequest:                         reflect.TypeOf(TxByIdRawRequest{}),
+	CmdTxByIdRawResponse:                        reflect.TypeOf(TxByIdRawResponse{}),
+	CmdTxByIdRequest:                            reflect.TypeOf(TxByIdRequest{}),
+	CmdTxByIdResponse:                           reflect.TypeOf(TxByIdResponse{}),
+	CmdTxBroadcastRequest:                       reflect.TypeOf(TxBroadcastRequest{}),
+	CmdTxBroadcastResponse:                      reflect.TypeOf(TxBroadcastResponse{}),
+	CmdTxBroadcastRawRequest:                    reflect.TypeOf(TxBroadcastRawRequest{}),
+	CmdTxBroadcastRawResponse:                   reflect.TypeOf(TxBroadcastRawResponse{}),
+	CmdBlockInsertRequest:                       reflect.TypeOf(BlockInsertRequest{}),
+	CmdBlockInsertResponse:                      reflect.TypeOf(BlockInsertResponse{}),
+	CmdBlockInsertRawRequest:                    reflect.TypeOf(BlockInsertRawRequest{}),
+	CmdBlockInsertRawResponse:                   reflect.TypeOf(BlockInsertRawResponse{}),
+	CmdBlockDownloadAsyncRequest:                reflect.TypeOf(BlockDownloadAsyncRequest{}),
+	CmdBlockDownloadAsyncResponse:               reflect.TypeOf(BlockDownloadAsyncResponse{}),
+	CmdBlockDownloadAsyncRawRequest:             reflect.TypeOf(BlockDownloadAsyncRawRequest{}),
+	CmdBlockDownloadAsyncRawResponse:            reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
+	CmdBlockByL2AbrevHashRequest:                reflect.TypeOf(BlockByL2AbrevHashRequest{}),
+	CmdBlockByL2AbrevHashResponse:               reflect.TypeOf(BlockByL2AbrevHashResponse{}),
+	CmdKeystoneTxsByL2KeystoneAbrevHashRequest:  reflect.TypeOf(KeystoneTxsByL2KeystoneAbrevHashRequest{}),
+	CmdKeystoneTxsByL2KeystoneAbrevHashResponse: reflect.TypeOf(KeystoneTxsByL2KeystoneAbrevHashResponse{}),
+	CmdFeeEstimateRequest:                       reflect.TypeOf(FeeEstimateRequest{}),
+	CmdFeeEstimateResponse:                      reflect.TypeOf(FeeEstimateResponse{}),
+	CmdMempoolInfoRequest:                       reflect.TypeOf(MempoolInfoRequest{}),
+	CmdMempoolInfoResponse:                      reflect.TypeOf(MempoolInfoResponse{}),
+	CmdKeystonesByHeightRequest:                 reflect.TypeOf(KeystonesByHeightRequest{}),
+	CmdKeystonesByHeightResponse:                reflect.TypeOf(KeystonesByHeightResponse{}),
 }
 
 type tbcAPI struct{}

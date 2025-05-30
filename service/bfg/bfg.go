@@ -274,18 +274,22 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get abbreviated keystones from gozer
-	aks := s.g.BlockKeystoneByL2KeystoneAbrevHash(r.Context(), abrevKeystones)
+	aks := s.g.BlockByL2AbrevHash(r.Context(), abrevKeystones)
+	if aks.Error != nil {
+		BadRequestF(w, "internal error")
+		return
+	}
 
 	// Cycle through each response and replace finality value for the best
 	// finality value of its descendants or itself
 	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
-	for _, bk := range aks {
+	for _, bk := range aks.L2KeystoneBlocks {
 		if bk.Error != nil {
 			log.Tracef("keystone not found: %v", bk.Error)
 			continue
 		}
 
-		altFin, err := calculateFinality(bk.BtcTipBlockHeight,
+		altFin, err := calculateFinality(aks.BtcTipBlockHeight,
 			bk.L2KeystoneBlockHeight, bk.L2KeystoneBlockHash)
 		if err != nil {
 			log.Errorf("calculate finality: %v", err)
