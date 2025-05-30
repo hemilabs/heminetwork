@@ -155,8 +155,8 @@ func (bs *blockstream) UtxosByAddress(ctx context.Context, filterMempool bool, a
 	return urv, nil
 }
 
-func (bs *blockstream) BlockByL2AbrevHash(ctx context.Context, hashes []chainhash.Hash) *gozer.BlockByL2AbrevHashResponse {
-	return &gozer.BlockByL2AbrevHashResponse{
+func (bs *blockstream) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *gozer.BlocksByL2AbrevHashesResponse {
+	return &gozer.BlocksByL2AbrevHashesResponse{
 		Error: protocol.Errorf("not supported yet"),
 	}
 }

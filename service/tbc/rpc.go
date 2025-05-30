@@ -193,9 +193,9 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockByL2AbrevHashRequest:
+		case tbcapi.CmdBlocksByL2AbrevHashesRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockByL2AbrevHashRequest)
+				req := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
 				return s.handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx, req)
 			}
 
@@ -765,12 +765,12 @@ func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi
 	}, nil
 }
 
-func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockByL2AbrevHashRequest) (any, error) {
+func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlocksByL2AbrevHashesRequest) (any, error) {
 	log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest")
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
 
 	if len(req.L2KeystoneAbrevHashes) < 1 {
-		return &tbcapi.BlockByL2AbrevHashResponse{
+		return &tbcapi.BlocksByL2AbrevHashesResponse{
 			Error: protocol.RequestError(errors.New("no l2 hashes provided")),
 		}, nil
 	}
@@ -787,7 +787,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 				continue
 			}
 			e := protocol.NewInternalError(err)
-			return &tbcapi.BlockByL2AbrevHashResponse{
+			return &tbcapi.BlocksByL2AbrevHashesResponse{
 				Error: e.ProtocolError(),
 			}, e
 		}
@@ -800,7 +800,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 		btcTip = bhb
 	}
 
-	return &tbcapi.BlockByL2AbrevHashResponse{
+	return &tbcapi.BlocksByL2AbrevHashesResponse{
 		L2KeystoneBlocks:  blkInfos,
 		BtcTipBlockHash:   &btcTip.Hash,
 		BtcTipBlockHeight: uint(btcTip.Height),

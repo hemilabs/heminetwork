@@ -25,7 +25,7 @@ import (
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
-	BlockByL2AbrevHash(ctx context.Context, hashes []chainhash.Hash) *BlockByL2AbrevHashResponse
+	BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *BlocksByL2AbrevHashesResponse
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 	BtcHeight(ctx context.Context) (uint64, error)
 }
@@ -80,6 +80,38 @@ func (a *L2KeystoneAbrev) Serialize() [72]byte {
 	return r
 }
 
+func TBC2Gozer(req *tbcapi.BlocksByL2AbrevHashesResponse) *BlocksByL2AbrevHashesResponse {
+	blkInfos := make([]L2KeystoneBlockInfo, 0, len(req.L2KeystoneBlocks))
+	for _, info := range req.L2KeystoneBlocks {
+		var gi L2KeystoneBlockInfo
+		if info.Error != nil {
+			gi.Error = info.Error
+		} else {
+			gi = L2KeystoneBlockInfo{
+				L2KeystoneAbrev: L2KeystoneAbrev{
+					Version:            uint(info.L2KeystoneAbrev.Version),
+					L1BlockNumber:      uint(info.L2KeystoneAbrev.L1BlockNumber),
+					L2BlockNumber:      uint(info.L2KeystoneAbrev.L2BlockNumber),
+					ParentEPHash:       info.L2KeystoneAbrev.ParentEPHash[:],
+					PrevKeystoneEPHash: info.L2KeystoneAbrev.PrevKeystoneEPHash[:],
+					StateRoot:          info.L2KeystoneAbrev.StateRoot[:],
+					EPHash:             info.L2KeystoneAbrev.EPHash[:],
+				},
+				L2KeystoneBlockHash:   *info.L2KeystoneBlockHash,
+				L2KeystoneBlockHeight: info.L2KeystoneBlockHeight,
+			}
+		}
+		blkInfos = append(blkInfos, gi)
+	}
+	r := &BlocksByL2AbrevHashesResponse{
+		L2KeystoneBlocks:  blkInfos,
+		BtcTipBlockHash:   *req.BtcTipBlockHash,
+		BtcTipBlockHeight: req.BtcTipBlockHeight,
+	}
+
+	return r
+}
+
 type L2KeystoneBlockInfo struct {
 	L2KeystoneAbrev       L2KeystoneAbrev `json:"l2_keystone_abrev"`
 	L2KeystoneBlockHash   chainhash.Hash  `json:"l2_keystone_block_hash"`
@@ -87,11 +119,11 @@ type L2KeystoneBlockInfo struct {
 	Error                 *protocol.Error `json:"error,omitempty"`
 }
 
-// BlockByL2AbrevHashResponse JSON response to keystone
+// BlocksByL2AbrevHashesResponse JSON response to keystone
 // finality route. Note that if the keystone exists that, by definition, the
 // keystone lives on the canonical chain. This is why we can return the best
 // tip height and hash.
-type BlockByL2AbrevHashResponse struct {
+type BlocksByL2AbrevHashesResponse struct {
 	L2KeystoneBlocks  []L2KeystoneBlockInfo `json:"l2_keystone_blocks"`
 	BtcTipBlockHash   chainhash.Hash        `json:"btc_tip_block_hash"`
 	BtcTipBlockHeight uint                  `json:"btc_tip_block_height"`
