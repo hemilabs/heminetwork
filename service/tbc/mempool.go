@@ -37,6 +37,25 @@ type mempool struct {
 	size    int64                         // total "tx virtual" memory used by mempool
 }
 
+// inMempool looks for a utxo inside the mempool transaction inputs to see if
+// it is in the process of being spend.
+// Must be called with mutex held.
+func (m *mempool) inMempool(utxo tbcd.Utxo) bool {
+	opp := wire.NewOutPoint(utxo.ChainHash(), utxo.OutputIndex())
+	op := *opp
+	for _, tx := range m.txs {
+		// Skip tx that aren't fully in the mempool yet.
+		if tx == nil {
+			continue
+		}
+		if _, ok := tx.txins[op]; ok {
+			// Found in txins.
+			return true
+		}
+	}
+	return false
+}
+
 func (m *mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
 	log.Tracef("filterUtxos")
 	defer log.Tracef("filterUtxos exit")
@@ -51,20 +70,9 @@ func (m *mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 	// setup and teardown would me much more expensive despite this code
 	// being called infrequently.
 	for k := range utxos {
-		opp := wire.NewOutPoint(utxos[k].ChainHash(), utxos[k].OutputIndex())
-		op := *opp
-		for _, tx := range m.txs {
-			// Skip tx that aren't fully in the mempool yet.
-			if tx == nil {
-				continue
-			}
-			if _, ok := tx.txins[op]; !ok {
-				// Not found, return it
-				filtered = append(filtered, utxos[k])
-				continue
-			}
-			// Found, thus we can move on to the next utxo.
-			break
+		if !m.inMempool(utxos[k]) {
+			// Not found in mempool inputs.
+			filtered = append(filtered, utxos[k])
 		}
 	}
 	return filtered, nil
