@@ -13,6 +13,7 @@ import (
 	"math"
 	"math/big"
 	"encoding/hex"
+	"slices"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -388,8 +389,13 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 
 	log.Infof("checking the database for keystone with abrev hash %s, clone bytes value %s", abrevhash.String(), hex.EncodeToString(abrevhash.CloneBytes()))
 
+	abrevHashB := abrevhash.CloneBytes()
+	slices.Reverse(abrevHashB)
+
+	log.Infof("reversed abrev hash, will query for %s", hex.EncodeToString(abrevHashB))
+
 	kssDB := l.pool[level.KeystonesDB]
-	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
+	eks, err := kssDB.Get(abrevHashB, nil)
 	if err != nil {
 		log.Errorf("error found getting keystone: %s", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
