@@ -58,13 +58,14 @@ func (m *mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 			if tx == nil {
 				continue
 			}
-			if _, ok := tx.txins[op]; ok {
-				// found! filter it out
-				goto skip
+			if _, ok := tx.txins[op]; !ok {
+				// Not found, return it
+				filtered = append(filtered, utxos[k])
+				continue
 			}
+			// Found, thus we can move on to the next utxo.
+			break
 		}
-		filtered = append(filtered, utxos[k])
-	skip:
 	}
 	return filtered, nil
 }
