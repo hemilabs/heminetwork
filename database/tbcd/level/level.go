@@ -400,6 +400,10 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 
 	for it.Next() {
 		log.Infof("existing keystone key %s", hex.EncodeToString(it.Key()))
+		if bytes.Equal(it.Key(), abrevHashB) {
+			log.Infof("found match!")
+			break
+		}
 	}
 
 	eks, err := kssDB.Get(abrevHashB, nil)
