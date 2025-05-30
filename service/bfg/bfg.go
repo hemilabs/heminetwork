@@ -274,7 +274,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Get abbreviated keystones from gozer
-	aks := s.g.BlockByL2AbrevHash(r.Context(), abrevKeystones)
+	aks := s.g.BlocksByL2AbrevHashes(r.Context(), abrevKeystones)
 	if aks.Error != nil {
 		BadRequestF(w, "internal error")
 		return
