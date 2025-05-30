@@ -64,7 +64,7 @@ sequencer.*
 ## Prerequisites
 
 This guide assumes you are running [Docker](https://docs.docker.com/get-started/get-docker/)
-and [Docker Compose](https://docs.docker.com/compose/) on Ubuntu 24.04 (the latest LTS). Running on other setups is
+and [Docker Compose](https://docs.docker.com/compose/) on Ubuntu 22.04 (the latest LTS). Running on other setups is
 possible, but may not be fully supported.
 
 Docker images for each Hemi Network component is published to [Docker Hub](https://hub.docker.com/u/hemilabs).
