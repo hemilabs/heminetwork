@@ -395,6 +395,13 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	log.Infof("reversed abrev hash, will query for %s", hex.EncodeToString(abrevHashB))
 
 	kssDB := l.pool[level.KeystonesDB]
+
+	it := kssDB.NewIterator(nil, nil)
+
+	for it.Next() {
+		log.Infof("existing keystone key %s", hex.EncodeToString(it.Key()))
+	}
+
 	eks, err := kssDB.Get(abrevHashB, nil)
 	if err != nil {
 		log.Errorf("error found getting keystone: %s", err)
