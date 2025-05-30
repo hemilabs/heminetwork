@@ -201,7 +201,7 @@ func BlockKeystones(block *btcutil.Block, l2KeystoneAbrevHash []byte) []tbcapi.K
 				continue
 			}
 
-			if l2KeystoneAbrevHash != nil && !bytes.Equal(l2KeystoneAbrevHash, tl2.L2Keystone.Hash() ) {
+			if l2KeystoneAbrevHash != nil && !bytes.Equal(l2KeystoneAbrevHash, tl2.L2Keystone.Hash().CloneBytes() ) {
 				continue
 			}
 
