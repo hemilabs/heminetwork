@@ -12,11 +12,9 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
@@ -131,7 +129,7 @@ func TestIntegration(t *testing.T) {
 	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, nil, 0, 10)
 	defer mtbc.Close()
 
-	tg, err := tbcgozer.Run(ctx, mtbc.URL)
+	tg, err := tbcgozer.Run(ctx, mtbc.URL())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,24 +366,3 @@ func TestIntegration(t *testing.T) {
 //		})
 //	}
 //}
-
-// fillOutBytes will take a string and return a slice of bytes
-// with values from the string suffixed until a size with bytes '_'
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-
-	return result
-}
-
-func utxoByHash(hash chainhash.Hash, utxos []*tbcapi.UTXO) bool {
-	for _, utxo := range utxos {
-		if utxo.TxId == hash {
-			return true
-		}
-	}
-
-	return false
-}

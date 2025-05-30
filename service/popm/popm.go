@@ -352,7 +352,7 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 		}
 	}
 
-	gks := s.gozer.BlockByL2AbrevHash(ctx, aksHashes)
+	gks := s.gozer.BlocksByL2AbrevHashes(ctx, aksHashes)
 	if len(gks.L2KeystoneBlocks) != len(aksHashes) {
 		// Shouldn't happen
 		panic(fmt.Sprintf("len diagnostic %v != %v", len(gks.L2KeystoneBlocks), len(aksHashes)))
