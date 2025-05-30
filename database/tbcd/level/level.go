@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"math"
 	"math/big"
-	"slices"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -390,7 +389,6 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	log.Infof("checking the database for keystone with abrev hash %s, clone bytes value %s", abrevhash.String(), hex.EncodeToString(abrevhash.CloneBytes()))
 
 	abrevHashB := abrevhash.CloneBytes()
-	slices.Reverse(abrevHashB)
 
 	log.Infof("reversed abrev hash, will query for %s", hex.EncodeToString(abrevHashB))
 
