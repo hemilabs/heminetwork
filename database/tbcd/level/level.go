@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -438,9 +439,16 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
+	log.Tracef("checking the database for keystone with abrev hash %s, clone bytes value %s", abrevhash.String(), hex.EncodeToString(abrevhash.CloneBytes()))
+
+	abrevHashB := abrevhash.CloneBytes()
+
+	log.Tracef("reversed abrev hash, will query for %s", hex.EncodeToString(abrevHashB))
+
 	kssDB := l.pool[level.KeystonesDB]
-	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
+	eks, err := kssDB.Get(abrevHashB, nil)
 	if err != nil {
+		log.Errorf("error found getting keystone: %s", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
 		}
@@ -1984,6 +1992,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 			if !has {
 				// Only store unknown keystones
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
+				log.Tracef("storing found keystone: hash=%s", hex.EncodeToString(k[:]))
 			}
 		}
 

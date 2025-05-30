@@ -7,6 +7,8 @@ package wallet
 import (
 	"errors"
 	"fmt"
+	"sync"
+	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -45,18 +47,44 @@ func UtxoPickerMultiple(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) ([]*tb
 	return nil, errors.New("no suitable utxos found")
 }
 
+// Clayton note: there is a better way to do this, I am sure.  This map
+// works to ensure that we don't re-use a utxo
+var (
+	uniqueUtxo    map[string]time.Time
+	uniqueUtxoMtx sync.Mutex
+)
+
 // UtxoPickerSingle is a simple utxo picker that returns a random utxo from the
 // provided list that has a larger value than amount + fee.
 func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi.UTXO, error) {
+	uniqueUtxoMtx.Lock()
+	defer func() {
+		for k := range uniqueUtxo {
+			dur := time.Now().Sub(uniqueUtxo[k])
+			if dur > 10*time.Minute {
+				// hacky way to clear a used utxo
+				delete(uniqueUtxo, k)
+			}
+		}
+		uniqueUtxoMtx.Unlock()
+	}()
+
+	if uniqueUtxo == nil {
+		uniqueUtxo = make(map[string]time.Time)
+	}
+
 	// find large enough utxo
 	total := amount + fee
 	for k := range utxos {
-		log.Infof("checking utxo value (%d) against total (%d)", utxos[k].Value, total)
+		log.Tracef("checking utxo value (%d) against total (%d)", utxos[k].Value, total)
 
-		if utxos[k].Value < total {
+		_, ok := uniqueUtxo[utxos[k].TxId.String()]
+
+		if utxos[k].Value < total || ok {
 			continue
 		}
 
+		uniqueUtxo[utxos[k].TxId.String()] = time.Now()
 		return utxos[k], nil
 	}
 

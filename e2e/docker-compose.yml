@@ -19,6 +19,8 @@ services:
       - "-rpcbind=0.0.0.0:18443"
       - "-txindex=1"
       - "-rpcworkqueue=400"
+      - "-printtoconsole"
+      - "-debug=1"
     ports:
       - "18443:18443"
       - "18444:18444"

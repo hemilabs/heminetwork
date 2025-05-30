@@ -750,7 +750,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return err
 		}
-		keystones := tbc.BlockKeystones(block)
+		keystones := tbc.BlockKeystones(block, nil)
 		for k, keystone := range keystones {
 			aPoPTx, err := pop.ParseTransactionL2FromOpReturn(keystone.RawTx)
 			if err != nil {
