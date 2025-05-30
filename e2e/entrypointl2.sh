@@ -35,7 +35,7 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --ws.port=28546  \
  --ws.origins="*"  \
  --http.api=web3,debug,eth,txpool,net,engine,miner,kss \
- --ws.api=debug,eth,txpool,net,engine,miner \
+ --ws.api=debug,eth,txpool,net,engine,miner,kss \
  --syncmode=full  \
  --nodiscover  \
  --maxpeers=0 \
@@ -65,7 +65,6 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --override.holocene=$HVM_PHASE0_TIMESTAMP \
  --override.granite=$HVM_PHASE0_TIMESTAMP \
  --override.fjord=$HVM_PHASE0_TIMESTAMP \
- --verbosity=5 \
  --unlock='78697c88847dfbbb40523e42c1f2e28a13a170be' \
  --rpc.enabledeprecatedpersonal
  # Clayton note: this fixes the mismatched state.scheme, but is it the correct

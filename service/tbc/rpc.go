@@ -796,12 +796,15 @@ func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2Key
 			return nil, fmt.Errorf("block by hash: %w", err)
 		}
 		block.SetHeight(int32(hh.Height))
-		ktxs = append(ktxs, BlockKeystones(block)...)
+		ktxs = append(ktxs, BlockKeystones(block, req.L2KeystoneAbrevHash.CloneBytes())...)
 
 		// next canonical block
 		hh, err = s.nextCanonicalBlockheader(ctx, &bhb.Hash, hh)
 		if err != nil {
-			return nil, fmt.Errorf("next block: %w", err)
+			// if we can't get the next canonical block, we should still
+			// return keytones that we have found
+			log.Errorf("next block: %w", err)
+			break
 		}
 	}
 
