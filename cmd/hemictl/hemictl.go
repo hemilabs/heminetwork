@@ -836,7 +836,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Printf("not yet: %v", action)
 
 	// XXX implement ASAP
-	case "dbdel", "dbget", "dbput" /* these three are syntetic */ :
+	case "dbdel", "dbget", "dbput" /* these three are synthetic */ :
 		fmt.Printf("not yet: %v", action)
 
 	default:

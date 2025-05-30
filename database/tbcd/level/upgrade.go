@@ -32,7 +32,7 @@ var (
 
 	modeMove = true
 
-	modeFast = true // try to run fast when enough disk space is availale
+	modeFast = true // try to run fast when enough disk space is available
 )
 
 func SetMode(move bool) {
