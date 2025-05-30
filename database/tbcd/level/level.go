@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"encoding/hex"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -1931,6 +1932,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 			if !has {
 				// Only store unknown keystones
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
+				log.Infof("storing found keystone: hash=%s", hex.EncodeToString(k[:]))
 			}
 		}
 

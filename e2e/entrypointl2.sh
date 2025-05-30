@@ -35,7 +35,7 @@ echo "setting hvm genesis to $BLOCKHEADER:$BLOCKHEIGHT"
  --ws.port=28546  \
  --ws.origins="*"  \
  --http.api=web3,debug,eth,txpool,net,engine,miner,kss \
- --ws.api=debug,eth,txpool,net,engine,miner \
+ --ws.api=debug,eth,txpool,net,engine,miner,kss \
  --syncmode=full  \
  --nodiscover  \
  --maxpeers=0 \

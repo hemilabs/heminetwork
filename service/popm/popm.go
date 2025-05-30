@@ -261,11 +261,11 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 	}
 
 	// Retrieve available UTXOs for the miner.
-	utxos, err := s.gozer.UtxosByAddress(ctx, true, s.address, 0, 0)
+	utxos, err := s.gozer.UtxosByAddress(ctx, true, s.address, 0, 100)
 	if err != nil {
 		return nil, fmt.Errorf("utxos by address: %w", err)
 	}
-	log.Debugf("utxos %d, script hash %v height %d",
+	log.Infof("utxos %d, script hash %v height %d",
 		len(utxos), scriptHash, btcHeight)
 
 	// Build transaction.
@@ -419,14 +419,30 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
 	if err != nil {
-		return err
+		log.Errorf("could not setup subscription: %s, will poll instead", err)
 	}
 
-	for {
-		select {
-		case err := <-sub.Err():
-			return err
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(l2KeystoneRetryTimeout):
+				headersCh <- "timeout"
+			}
+		}
+	}()
 
+	for {
+		if sub != nil {
+			select {
+				case err := <-sub.Err():
+					return err
+				default:
+			}
+		}
+
+		select {
 		case <-ctx.Done():
 			return ctx.Err()
 
@@ -700,7 +716,7 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		t := time.NewTimer(l2KeystoneRetryTimeout)
+		t := time.NewTicker(l2KeystoneRetryTimeout)
 		for {
 			t.Reset(l2KeystoneRetryTimeout)
 			select {

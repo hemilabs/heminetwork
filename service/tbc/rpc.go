@@ -762,6 +762,7 @@ func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2Key
 	}
 	ktxs := make([]tbcapi.KeystoneTx, 0, 16*req.Depth)
 	for i := uint(0); i < req.Depth; i++ {
+		log.Infof("checking block %d from tip for poptxs", i)
 		// Retrieve first block
 		block, err := s.db.BlockByHash(ctx, hh.Hash)
 		if err != nil {
@@ -769,6 +770,8 @@ func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2Key
 		}
 		block.SetHeight(int32(hh.Height))
 		ktxs = append(ktxs, BlockKeystones(block)...)
+
+		log.Infof("found %d poptxs", len(ktxs))
 
 		// next canonical block
 		hh, err = s.nextCanonicalBlockheader(ctx, &bhb.Hash, hh)

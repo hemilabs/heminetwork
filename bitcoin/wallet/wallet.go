@@ -7,6 +7,7 @@ package wallet
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -45,18 +46,29 @@ func UtxoPickerMultiple(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) ([]*tb
 	return nil, errors.New("no suitable utxos found")
 }
 
+var uniqueUtxo map[string]bool
+var uniqueUtxoMtx sync.Mutex
+
 // UtxoPickerSingle is a simple utxo picker that returns a random utxo from the
 // provided list that has a larger value than amount + fee.
 func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi.UTXO, error) {
+	uniqueUtxoMtx.Lock()
+	defer uniqueUtxoMtx.Unlock() 
+
+	if uniqueUtxo == nil {
+		uniqueUtxo = make(map[string]bool)
+	}
+
 	// find large enough utxo
 	total := amount + fee
 	for k := range utxos {
 		log.Infof("checking utxo value (%d) against total (%d)", utxos[k].Value, total)
 
-		if utxos[k].Value < total {
+		if utxos[k].Value < total || uniqueUtxo[utxos[k].TxId.String()] {
 			continue
 		}
 
+		uniqueUtxo[utxos[k].TxId.String()] = true
 		return utxos[k], nil
 	}
 
