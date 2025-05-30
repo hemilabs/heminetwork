@@ -99,8 +99,11 @@ var (
 	APIVersionRoute = fmt.Sprintf("v%d", APIVersion)
 	RouteWebsocket  = fmt.Sprintf("/%s/ws", APIVersionRoute)
 
-	DefaultListen = "localhost:8082"
-	DefaultURL    = fmt.Sprintf("ws://%s/%s", DefaultListen, RouteWebsocket)
+	// Clayton note: for some reason changing this wasn't being respected
+	// via the environment variable
+	DefaultListen = "0.0.0.0:8082"
+
+	DefaultURL = fmt.Sprintf("ws://%s/%s", DefaultListen, RouteWebsocket)
 )
 
 type (
