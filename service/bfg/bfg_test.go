@@ -51,8 +51,8 @@ func TestBFG(t *testing.T) {
 	bfgCfg := NewDefaultConfig()
 	bfgCfg.Network = "testnet3"
 	bfgCfg.BitcoinSource = "tbc"
-	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
-	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
+	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
 	bfgCfg.LogLevel = "bfg=Trace;"
 
@@ -73,8 +73,8 @@ func TestBFG(t *testing.T) {
 
 	// messages we expect to receive
 	expectedMsg := map[string]int{
-		"kss_getKeystone":                   wantedKeystones,
-		tbcapi.CmdBlockByL2AbrevHashRequest: wantedKeystones,
+		"kss_getKeystone":                      wantedKeystones,
+		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
 	}
 
 	for !s.Connected() {
@@ -85,6 +85,7 @@ func TestBFG(t *testing.T) {
 	// send finality requests to bfg
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for i := range wantedKeystones {
 			kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
 			u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
@@ -113,7 +114,6 @@ func TestBFG(t *testing.T) {
 					spew.Sdump(fin)))
 			}
 		}
-		wg.Done()
 	}()
 
 	// receive messages and errors from opgeth and tbc
@@ -147,8 +147,8 @@ func TestFullMockIntegration(t *testing.T) {
 	bfgCfg := NewDefaultConfig()
 	bfgCfg.Network = "testnet3"
 	bfgCfg.BitcoinSource = "tbc"
-	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
-	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
+	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
 	// bfgCfg.LogLevel = "bfg=Trace;"
 
@@ -169,8 +169,8 @@ func TestFullMockIntegration(t *testing.T) {
 
 	// messages we expect to receive
 	expectedMsg := map[string]int{
-		"kss_getKeystone":                   wantedKeystones,
-		tbcapi.CmdBlockByL2AbrevHashRequest: wantedKeystones,
+		"kss_getKeystone":                      wantedKeystones,
+		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
 	}
 
 	for !s.Connected() {
@@ -188,10 +188,10 @@ func TestFullMockIntegration(t *testing.T) {
 	// Setup pop miner
 	popCfg := popm.NewDefaultConfig()
 	popCfg.BitcoinSource = "tbc"
-	popCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL, "http")
-	popCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL, "http")
+	popCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	popCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	popCfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
-	popCfg.LogLevel = "popm=TRACE"
+	// popCfg.LogLevel = "popm=TRACE"
 
 	if err := loggo.ConfigureLoggers(popCfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -225,8 +225,8 @@ func TestFullMockIntegration(t *testing.T) {
 
 	// wait until we ask for the finality value of all keystones
 	expectedMsg = map[string]int{
-		"kss_getKeystone":                   wantedKeystones,
-		tbcapi.CmdBlockByL2AbrevHashRequest: wantedKeystones,
+		"kss_getKeystone":                      wantedKeystones,
+		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
 	}
 
 	// send finality requests to bfg, which should return super finality

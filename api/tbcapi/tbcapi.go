@@ -79,8 +79,8 @@ const (
 	CmdBlockDownloadAsyncRawRequest  = "tbcapi-block-download-async-raw-request"
 	CmdBlockDownloadAsyncRawResponse = "tbcapi-block-download-async-raw-response"
 
-	CmdBlockByL2AbrevHashRequest  = "tbcapi-block-by-l2-abrev-hash-request"
-	CmdBlockByL2AbrevHashResponse = "tbcapi-block-by-l2-abrev-hash-response"
+	CmdBlocksByL2AbrevHashesRequest  = "tbcapi-block-by-l2-abrev-hash-request"
+	CmdBlocksByL2AbrevHashesResponse = "tbcapi-block-by-l2-abrev-hash-response"
 
 	CmdKeystoneTxsByL2KeystoneAbrevHashRequest  = "tbcapi-l2-keystone-txs-by-abrev-hash-request"
 	CmdKeystoneTxsByL2KeystoneAbrevHashResponse = "tbcapi-l2-keystone-txs-by-abrev-hash-response"
@@ -315,11 +315,11 @@ type BlockInsertRawRequest struct {
 	Block api.ByteSlice `json:"block"`
 }
 
-type BlockByL2AbrevHashRequest struct {
+type BlocksByL2AbrevHashesRequest struct {
 	L2KeystoneAbrevHashes []chainhash.Hash `json:"l2_keystone_abrev_hashes"`
 }
 
-type BlockByL2AbrevHashResponse struct {
+type BlocksByL2AbrevHashesResponse struct {
 	L2KeystoneBlocks  []*L2KeystoneBlockInfo `json:"l2_keystone_blocks"`
 	BtcTipBlockHash   *chainhash.Hash        `json:"btc_tip_block_hash"`
 	BtcTipBlockHeight uint                   `json:"btc_tip_block_height"`
@@ -439,8 +439,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockDownloadAsyncResponse:               reflect.TypeOf(BlockDownloadAsyncResponse{}),
 	CmdBlockDownloadAsyncRawRequest:             reflect.TypeOf(BlockDownloadAsyncRawRequest{}),
 	CmdBlockDownloadAsyncRawResponse:            reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
-	CmdBlockByL2AbrevHashRequest:                reflect.TypeOf(BlockByL2AbrevHashRequest{}),
-	CmdBlockByL2AbrevHashResponse:               reflect.TypeOf(BlockByL2AbrevHashResponse{}),
+	CmdBlocksByL2AbrevHashesRequest:             reflect.TypeOf(BlocksByL2AbrevHashesRequest{}),
+	CmdBlocksByL2AbrevHashesResponse:            reflect.TypeOf(BlocksByL2AbrevHashesResponse{}),
 	CmdKeystoneTxsByL2KeystoneAbrevHashRequest:  reflect.TypeOf(KeystoneTxsByL2KeystoneAbrevHashRequest{}),
 	CmdKeystoneTxsByL2KeystoneAbrevHashResponse: reflect.TypeOf(KeystoneTxsByL2KeystoneAbrevHashResponse{}),
 	CmdFeeEstimateRequest:                       reflect.TypeOf(FeeEstimateRequest{}),

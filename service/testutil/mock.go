@@ -14,9 +14,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -24,7 +26,6 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/ethereum/go-ethereum/eth"
-	gorweb "github.com/gorilla/websocket"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -107,6 +108,8 @@ type mockHandler struct {
 	msgCh      chan string
 	name       string
 	pctx       context.Context
+	conns      []*websocket.Conn
+	server     *httptest.Server
 }
 
 func (f mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -115,11 +118,39 @@ func (f mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (f mockHandler) CloseConnections() error {
+	for _, c := range f.conns {
+		err := c.CloseNow()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f mockHandler) Close() error {
+	f.server.Close()
+	return f.CloseConnections()
+}
+
+func (f mockHandler) URL() string {
+	return f.server.URL
+}
+
 type TBCMockHandler struct {
 	mockHandler
 	keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev
 	btcTip    uint
 	utxoNum   uint
+	kssMtx    sync.RWMutex
+}
+
+func (f *TBCMockHandler) GetKeystones() map[chainhash.Hash]*hemi.L2KeystoneAbrev {
+	f.kssMtx.RLock()
+	cpy := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
+	maps.Copy(cpy, f.keystones)
+	f.kssMtx.RUnlock()
+	return cpy
 }
 
 type OpGethMockHandler struct {
@@ -127,13 +158,14 @@ type OpGethMockHandler struct {
 	keystones []hemi.L2Keystone
 }
 
-func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip, utxoNum uint) *httptest.Server {
+func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keystones map[chainhash.Hash]*hemi.L2KeystoneAbrev, btcTip, utxoNum uint) *TBCMockHandler {
 	th := TBCMockHandler{
 		mockHandler: mockHandler{
 			errCh: errCh,
 			msgCh: msgCh,
 			name:  "mockTBC",
 			pctx:  pctx,
+			conns: make([]*websocket.Conn, 0),
 		},
 		keystones: keystones,
 		btcTip:    btcTip,
@@ -141,11 +173,11 @@ func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keyst
 	}
 	th.handleFunc = th.mockTBCHandleFunc
 
-	tbc := httptest.NewServer(th)
-	return tbc
+	th.server = httptest.NewServer(&th)
+	return &th
 }
 
-func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, keystones []hemi.L2Keystone) *httptest.Server {
+func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, keystones []hemi.L2Keystone) *OpGethMockHandler {
 	// Sort keystones in ascending order
 	slices.SortFunc(keystones, func(a, b hemi.L2Keystone) int {
 		return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
@@ -157,16 +189,17 @@ func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, ke
 			msgCh: msgCh,
 			name:  "mockOpGeth",
 			pctx:  pctx,
+			conns: make([]*websocket.Conn, 0),
 		},
 		keystones: keystones,
 	}
 	th.handleFunc = th.mockOpGethHandleFunc
 
-	op := httptest.NewServer(th)
-	return op
+	th.server = httptest.NewServer(&th)
+	return &th
 }
 
-func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request) error {
+func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request) error {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionContextTakeover,
 	})
@@ -221,7 +254,6 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 		go func() {
 			select {
 			case <-f.pctx.Done():
-				err = f.pctx.Err()
 				return
 			case f.msgCh <- string(cmd):
 			}
@@ -274,7 +306,9 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 				if err != nil {
 					continue
 				}
+				f.kssMtx.Lock()
 				f.keystones[*aPoPTx.L2Keystone.Hash()] = aPoPTx.L2Keystone
+				f.kssMtx.Unlock()
 				break
 			}
 
@@ -284,15 +318,17 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 			if err != nil {
 				return fmt.Errorf("mempool tx inser: %w", err)
 			}
-		case tbcapi.CmdBlockByL2AbrevHashRequest:
-			pl, ok := payload.(*tbcapi.BlockByL2AbrevHashRequest)
+		case tbcapi.CmdBlocksByL2AbrevHashesRequest:
+			pl, ok := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
 			if !ok {
 				return fmt.Errorf("unexpected payload format: %v", payload)
 			}
 
 			blkInfos := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(pl.L2KeystoneAbrevHashes))
 			for _, hash := range pl.L2KeystoneAbrevHashes {
+				f.kssMtx.RLock()
 				kss, ok := f.keystones[hash]
+				f.kssMtx.RUnlock()
 				if !ok {
 					blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
 						Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHashes),
@@ -313,7 +349,7 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 			if err != nil {
 				panic(err)
 			}
-			resp = &tbcapi.BlockByL2AbrevHashResponse{
+			resp = &tbcapi.BlocksByL2AbrevHashesResponse{
 				L2KeystoneBlocks:  blkInfos,
 				BtcTipBlockHash:   tch,
 				BtcTipBlockHeight: f.btcTip,
@@ -345,25 +381,26 @@ func (f TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.Request) error {
-	upgrader := gorweb.Upgrader{
-		ReadBufferSize:  1024,
-		WriteBufferSize: 1024,
-	}
-	conn, err := upgrader.Upgrade(w, r, nil)
+func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.Request) error {
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to accept websocket connection for %s: %w",
-			r.RemoteAddr, err)
+		return err
 	}
-	defer conn.Close() // Force close connection
-
-	// fmt.Printf("mockOpgeth: connection from %v\n", r.RemoteAddr)
+	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
 
 	var keystoneCounter int
+	var kssMtx sync.RWMutex
 	for {
 
 		var msg jsonrpcMessage
-		if err := conn.ReadJSON(&msg); err != nil {
+		_, br, err := c.Read(f.pctx)
+		if err != nil {
+			return err
+		}
+		err = json.Unmarshal(br, &msg)
+		if err != nil {
 			return err
 		}
 
@@ -397,6 +434,11 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 				Params:  encResult,
 			}
 
+			p, err := json.Marshal(subNotif)
+			if err != nil {
+				panic(err)
+			}
+
 			// send new keystone notifications periodically
 			go func() {
 				for {
@@ -405,11 +447,14 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 						return
 					case <-time.After(DefaultNtfnDuration):
 						fmt.Println("Sending new keystone notification")
-						if err = conn.WriteJSON(subNotif); err != nil {
+						err = c.Write(f.pctx, websocket.MessageText, p)
+						if err != nil {
 							fmt.Println(err.Error())
 							return
 						}
+						kssMtx.Lock()
 						keystoneCounter++
+						kssMtx.Unlock()
 					}
 				}
 			}()
@@ -419,9 +464,11 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 			if err != nil {
 				panic(err)
 			}
+			kssMtx.RLock()
 			kssResp := eth.L2KeystoneLatestResponse{
 				L2Keystones: lastKeystones(count[0], f.keystones[:min(keystoneCounter+count[0], len(f.keystones))]),
 			}
+			kssMtx.RUnlock()
 			subResp = jsonrpcMessage{
 				Version: "2.0",
 				ID:      msg.ID,
@@ -476,7 +523,13 @@ func (f OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.R
 		default:
 			return fmt.Errorf("unsupported message %v", msg.Method)
 		}
-		if err = conn.WriteJSON(subResp); err != nil {
+		p, err := json.Marshal(subResp)
+		if err != nil {
+			return err
+		}
+
+		err = c.Write(f.pctx, websocket.MessageText, p)
+		if err != nil {
 			return err
 		}
 	}
