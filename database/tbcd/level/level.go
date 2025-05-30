@@ -391,12 +391,14 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	kssDB := l.pool[level.KeystonesDB]
 	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
 	if err != nil {
+		log.Errorf("error found getting keystone: %s", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
 		}
 		return nil, fmt.Errorf("l2 keystone get: %w", err)
 	}
 
+	log.Infof("found keystone")
 	ks := decodeKeystone(eks)
 	return &ks, nil
 }
