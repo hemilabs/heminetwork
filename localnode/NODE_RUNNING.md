@@ -177,7 +177,7 @@ Different node configurations support different Hemi use cases:
 >
 > The `hemi` and `hemi-min` profiles can be run either with external trusted RPC endpoints for L1 (BTC+ETH) data, or can
 > be paired with an `L1` profile.
-> 
+>
 > Running the `hemi` profile paired with an `L1` profile provides the same features and
 > trust model as a `full` profile. Running the `hemi-min` profile paired with an `L1` profile provides the same _trust
 model_ as a `full` profile, but does not provide the Extended Consensus RPC (BTC Finality data available from `op-node`
@@ -189,7 +189,7 @@ model_ as a `full` profile, but does not provide the Extended Consensus RPC (BTC
 > that involve smart contract calls to hVM precompiles that fetch indexed Bitcoin data. This is essential to ensure the
 > trustless computation of hVM state transitions calculated by `op-geth` nodes (post-snap-sync, if used) regardless of
 > the supporting network stack.
-> 
+>
 > The `TBC` full BTC node within `op-geth` is separate from the _optional_ `bitcoind` BTC full node that is used by
 > electrs in the `full` or `hemi` profiles, which provides an external independent view of Bitcoin for calculating
 > Bitcoin finality information for external consumers requesting this information over the `op-node` and/or `BFG` RPC
@@ -300,14 +300,14 @@ Once you have chosen your network and sync type, run the command:
 
 ```
 cd localnode
-./gen-files.sh NETWORK SYNCMODE
+./gen-files.sh NETWORK SYNCMODE PROFILE
 ```
 
-For example, to prepare to run a mainnet node with an initial `snap` sync:
+For example, to prepare to run a mainnet node with an initial `snap` sync and the `hemi-min` profile:
 
 ```
 cd localnode
-./gen-files.sh mainnet snap
+./gen-files.sh mainnet snap hemi-min
 ```
 
 ### Run with Docker Compose
@@ -451,12 +451,6 @@ production running.
 
 ```sh
 ./heminode.sh
-```
-
-For testnet:
-
-```sh
-./heminode.sh testnet
 ```
 
 ## Running Without Docker

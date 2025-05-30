@@ -5,13 +5,14 @@
 
 set -e
 
-if [ $# != 2 ]; then
-	echo "usage: ./gen-files.sh <network> <sync-mode>"
+if [ $# != 3 ]; then
+	echo "usage: ./gen-files.sh <network> <sync-mode> <profile>"
 	exit 1
 fi
 
 NET=$1
 MODE=$2
+PROFILE=$3
 
 if [ "$NET" != "mainnet" ] && [ "$NET" != "testnet" ]; then
 	echo "Network must be 'mainnet' or 'testnet'"
@@ -23,7 +24,13 @@ if [ "$MODE" != "snap" ] && [ "$MODE" != "archive" ]; then
 	exit 1
 fi
 
-echo "Setup for $NET (sync mode: $MODE)"
+if [ "$PROFILE" != "full" ] && [ "$PROFILE" != "hemi" ] && [ "$PROFILE" != "hemi-min" ] && [ "$PROFILE" != "L1" ]; then
+	echo "Profile must be 'full', 'hemi', 'hemi-min', or 'L1'"
+	exit 1
+fi
+
+
+echo "Setup for $NET (sync mode: $MODE, profile: $PROFILE))"
 
 ENTRYFILE=""
 GENESIS=""
@@ -123,4 +130,6 @@ geth \\
 	$BOOTNODES
 EOF
 
-echo "OPSYNCMODE=$OPSYNCMODE" > .env
+echo "NET=$NET" > .env
+echo "PROFILE=$PROFILE" >> .env
+echo "OPSYNCMODE=$OPSYNCMODE" >> .env
