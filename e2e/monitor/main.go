@@ -141,6 +141,10 @@ func monitorBitcoinBlocksCreated(ctx context.Context, s *state, mtx *sync.Mutex)
 			panic(fmt.Sprintf("could not create new client from config %v: %v", config, err))
 		}
 
+		if ctx.Err() != nil {
+			return 
+		}
+
 		count, err := c.GetBlockCount()
 		if err != nil {
 			panic(fmt.Sprintf("could not get block count: %v", err))
@@ -174,6 +178,10 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			panic(fmt.Sprintf("could not create new client with config %v: %v", config, err))
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
+
 		tips, err := c.GetChainTips()
 		if err != nil {
 			panic(fmt.Sprintf("could not get chain tips: %v", err))
@@ -187,6 +195,10 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		hash, err := chainhash.NewHashFromStr(tips[0].Hash)
 		if err != nil {
 			panic(fmt.Sprintf("could not get hash from string %s: %v", tips[0].Hash, err))
+		}
+
+		if ctx.Err() != nil {
+			return
 		}
 
 		block, err := c.GetBlock(hash)
@@ -208,6 +220,10 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			}
 
 			hash = &block.Header.PrevBlock
+			if ctx.Err() != nil {
+				return
+			}
+
 			block, err = c.GetBlock(hash)
 			if err != nil {
 				break
