@@ -267,6 +267,10 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		return fmt.Errorf("write ping: %w", err)
 	}
 
+	f.mtx.Lock()
+	f.conns = append(f.conns, conn)
+	f.mtx.Unlock()
+
 	log.Infof("%v: new connection to %v", f.name, r.RemoteAddr)
 
 	// create utxos
@@ -439,16 +443,20 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 	}
 	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
 
+	f.mtx.Lock()
+	f.conns = append(f.conns, c)
+	f.mtx.Unlock()
+
 	log.Infof("%v: new connection to %v", f.name, r.RemoteAddr)
 
 	var keystoneCounter int
 	var kssMtx sync.RWMutex
 	for {
-
 		var msg jsonrpcMessage
 		_, br, err := c.Read(f.pctx)
 		if err != nil {
-			return err
+			log.Errorf("%v", err)
+			return nil
 		}
 		err = json.Unmarshal(br, &msg)
 		if err != nil {
@@ -497,10 +505,13 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 					case <-f.pctx.Done():
 						return
 					case <-time.After(DefaultNtfnDuration):
+						if !f.Running() {
+							return
+						}
 						log.Tracef("%v: Sending new keystone notification", f.name)
 						err = c.Write(f.pctx, websocket.MessageText, p)
 						if err != nil {
-							fmt.Println(err.Error())
+							log.Errorf("%v: notification sender: %w", f.name, err.Error())
 							return
 						}
 						kssMtx.Lock()
