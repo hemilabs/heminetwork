@@ -60,7 +60,7 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 	uniqueUtxoMtx.Lock()
 	defer func() {
 		for k := range uniqueUtxo {
-			dur := time.Now().Sub(uniqueUtxo[k])
+			dur := time.Since(uniqueUtxo[k])
 			if dur > 10*time.Minute {
 				// hacky way to clear a used utxo
 				delete(uniqueUtxo, k)
