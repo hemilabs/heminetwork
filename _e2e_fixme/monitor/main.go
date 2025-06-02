@@ -208,6 +208,12 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			}
 
 			hash = &block.Header.PrevBlock
+
+			// possibly done
+			if ctx.Err() {
+				return
+			}
+			
 			block, err = c.GetBlock(hash)
 			if err != nil {
 				break
