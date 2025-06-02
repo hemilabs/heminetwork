@@ -209,12 +209,14 @@ func BlockKeystonesByHash(block *btcutil.Block, hash *chainhash.Hash) []tbcapi.K
 				continue
 			}
 
+			// XXX it is a travesty that we have to reserialize
+			// this tx. We should add a change to btcutil.Tx to
+			// return the internal rawBytes.
 			var rawTx bytes.Buffer
 			if err := tx.MsgTx().Serialize(&rawTx); err != nil {
-				// we should always be able to serialize
-				panic(fmt.Sprintf("could not serialize MsgTx: %s", err))
+				// We should always be able to serialize.
+				panic(fmt.Sprintf("serialize tx: %s", err))
 			}
-
 			ktxs = append(ktxs, tbcapi.KeystoneTx{
 				BlockHash:   *blockHash,
 				TxIndex:     uint(txIndex),
