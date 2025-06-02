@@ -185,7 +185,10 @@ func HashHeightFromBlockHeader(bh *tbcd.BlockHeader) *HashHeight {
 	}
 }
 
-func BlockKeystones(block *btcutil.Block, l2KeystoneAbrevHash []byte) []tbcapi.KeystoneTx {
+// BlockKeystonesByHash returns all keystones within a block. If hash is not
+// nil then it returns *only* the keystone transactions where the L2
+// abbreviated hash is equal to the provided hash.
+func BlockKeystonesByHash(block *btcutil.Block, hash *chainhash.Hash) []tbcapi.KeystoneTx {
 	blockHash := block.Hash()
 	height := uint(block.Height())
 	ktxs := make([]tbcapi.KeystoneTx, 0, 16)
@@ -201,14 +204,12 @@ func BlockKeystones(block *btcutil.Block, l2KeystoneAbrevHash []byte) []tbcapi.K
 				continue
 			}
 
-			// Clayton note: if we're not filtering or we're filtering by a specific
-			// l2 keystone and this is not that one, continue
-			if l2KeystoneAbrevHash != nil && !bytes.Equal(l2KeystoneAbrevHash, tl2.L2Keystone.Hash().CloneBytes()) {
+			// Filter non matching keystones.
+			if hash != nil && !hash.IsEqual(tl2.L2Keystone.Hash()) {
 				continue
 			}
 
 			var rawTx bytes.Buffer
-
 			if err := tx.MsgTx().Serialize(&rawTx); err != nil {
 				// we should always be able to serialize
 				panic(fmt.Sprintf("could not serialize MsgTx: %s", err))
@@ -224,6 +225,10 @@ func BlockKeystones(block *btcutil.Block, l2KeystoneAbrevHash []byte) []tbcapi.K
 	}
 
 	return ktxs
+}
+
+func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
+	return BlockKeystonesByHash(block, nil)
 }
 
 // UtxoIndexHash returns the last hash that has been UTxO indexed.

@@ -774,7 +774,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	}, nil
 }
 
-func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest) (*tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse, error) {
+func (s *Server) KeystoneTxsByHash(ctx context.Context, req *tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest) (*tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse, error) {
 	log.Tracef("keystoneTxs")
 	defer log.Tracef("keystoneTxs exit")
 
@@ -803,7 +803,7 @@ func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2Key
 			return nil, fmt.Errorf("block by hash: %w", err)
 		}
 		block.SetHeight(int32(hh.Height))
-		ktxs = append(ktxs, BlockKeystones(block, req.L2KeystoneAbrevHash.CloneBytes())...)
+		ktxs = append(ktxs, BlockKeystonesByHash(block, &req.L2KeystoneAbrevHash)...)
 
 		// next canonical block
 		hh, err = s.nextCanonicalBlockheader(ctx, &bhb.Hash, hh)
@@ -834,7 +834,7 @@ func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Conte
 		}, nil
 	}
 
-	ktxsr, err := s.KeystoneTxs(ctx, req)
+	ktxsr, err := s.KeystoneTxsByHash(ctx, req)
 	if err != nil {
 		// XXX add error not found type
 		if errors.Is(err, database.ErrNotFound) {
