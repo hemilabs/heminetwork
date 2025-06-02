@@ -1128,7 +1128,7 @@ func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Msg
 	if err != nil {
 		return fmt.Errorf("new mempool tx: %w", err)
 	}
-	return s.mempool.TxsInsert(ctx, mptx)
+	return s.mempool.TxInsert(ctx, mptx)
 }
 
 func (s *Server) syncBlocks(ctx context.Context) {
@@ -2182,6 +2182,17 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 		return nil, ErrTxBroadcastNoPeers
 	}
 
+	if s.cfg.MempoolEnabled {
+		// Add Tx to our own mempool instead of waiting for it to come
+		// over p2p.
+		mptx, err := s.mempoolTxNew(ctx, btcutil.NewTx(tx))
+		if err != nil {
+			log.Errorf("mempool tx: %w", err)
+		} else if err := s.mempool.TxInsert(ctx, mptx); err != nil {
+			log.Errorf("broacast mempool tx: %w", err)
+		}
+	}
+
 	return &txHash, nil
 }
 
@@ -2286,7 +2297,7 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 		if err != nil {
 			return nil, fmt.Errorf("new mempool tx: %w", err)
 		}
-		if err = mp.TxsInsert(ctx, mptx); err != nil {
+		if err = mp.TxInsert(ctx, mptx); err != nil {
 			return nil, fmt.Errorf("cannot insert tx in mempool: %w", err)
 		}
 	}
