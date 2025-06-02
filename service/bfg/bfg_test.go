@@ -42,11 +42,11 @@ func TestBFG(t *testing.T) {
 
 	// Create opgeth test server with the request handler.
 	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
-	defer opgeth.Close()
+	defer opgeth.Shutdown()
 
 	// Create tbc test server with the request handler.
 	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 10)
-	defer mtbc.Close()
+	defer mtbc.Shutdown()
 
 	bfgCfg := NewDefaultConfig()
 	bfgCfg.Network = "testnet3"
@@ -82,38 +82,11 @@ func TestBFG(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	// send finality requests to bfg
+	// send finality requests to bfg, which should return super finality
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := range wantedKeystones {
-			kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
-			u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
-				bfgCfg.ListenAddress, bfgapi.APIVersion, kssHash)
-			resp, err := http.Get(u)
-			if err != nil {
-				panic(err)
-			}
-
-			if resp.StatusCode != 200 {
-				panic(fmt.Sprintf("unexpected status code: %v", resp.StatusCode))
-			}
-
-			fin := bfgapi.L2KeystoneBitcoinFinalityResponse{}
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				panic(err)
-			}
-
-			if err = json.Unmarshal(body, &fin); err != nil {
-				panic(err)
-			}
-
-			if !*fin.SuperFinality {
-				panic(fmt.Errorf("unexpected finality result: %v",
-					spew.Sdump(fin)))
-			}
-		}
+		sendFinalityRequests(kssList, bfgCfg.ListenAddress, 9, 10000)
 	}()
 
 	// receive messages and errors from opgeth and tbc
@@ -136,13 +109,13 @@ func TestFullMockIntegration(t *testing.T) {
 
 	// Create opgeth test server with the request handler.
 	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
-	defer opgeth.Close()
+	defer opgeth.Shutdown()
 
 	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev)
 
 	// Create tbc test server with the request handler.
 	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 20)
-	defer mtbc.Close()
+	defer mtbc.Shutdown()
 
 	bfgCfg := NewDefaultConfig()
 	bfgCfg.Network = "testnet3"
@@ -229,13 +202,20 @@ func TestFullMockIntegration(t *testing.T) {
 		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
 	}
 
+	var wg sync.WaitGroup
 	// send finality requests to bfg, which should return super finality
-	go sendFinalityRequests(kssList, bfgCfg.ListenAddress, 9, 10000)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sendFinalityRequests(kssList, bfgCfg.ListenAddress, 9, 10000)
+	}()
 
 	// receive messages and errors from opgeth and tbc
 	if err = messageListener(ctx, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
+
+	wg.Wait()
 }
 
 func sendFinalityRequests(kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
