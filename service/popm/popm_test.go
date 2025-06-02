@@ -37,11 +37,11 @@ func TestPopMiner(t *testing.T) {
 
 	// Create opgeth test server with the request handler.
 	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
-	defer opgeth.Close()
+	defer opgeth.Shutdown()
 
 	// Create tbc test server with the request handler.
 	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 100)
-	defer mtbc.Close()
+	defer mtbc.Shutdown()
 
 	// Setup pop miner
 	cfg := NewDefaultConfig()
@@ -95,13 +95,13 @@ func TestTickingPopMiner(t *testing.T) {
 
 	// Create opgeth test server with the request handler.
 	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
-	defer opgeth.Close()
+	defer opgeth.Shutdown()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
 	// Create tbc test server with the request handler.
 	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
-	defer mtbc.Close()
+	defer mtbc.Shutdown()
 
 	// Setup pop miner
 	cfg := NewDefaultConfig()
@@ -176,13 +176,13 @@ func TestPopmFilterUtxos(t *testing.T) {
 
 	// Create opgeth test server with the request handler.
 	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
-	defer opgeth.Close()
+	defer opgeth.Shutdown()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
 	// Create tbc test server with the request handler.
 	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, defaultL2KeystonesCount-1)
-	defer mtbc.Close()
+	defer mtbc.Shutdown()
 
 	// Setup pop miner
 	cfg := NewDefaultConfig()
