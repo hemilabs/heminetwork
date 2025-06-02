@@ -703,20 +703,16 @@ func (s *Server) handleFeeEstimateRequest(ctx context.Context, _ *tbcapi.FeeEsti
 	}, nil
 }
 
-func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, hash chainhash.Hash) (*tbcd.Keystone, *tbcd.BlockHeader, *tbcd.BlockHeader, error) {
+func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, hash chainhash.Hash) (*tbcd.Keystone, *tbcd.BlockHeader, error) {
 	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("keystone by abbreviated hash: %w", err)
+		return nil, nil, fmt.Errorf("keystone by abbreviated hash: %w", err)
 	}
 	ksBh, err := s.db.BlockHeaderByHash(ctx, ks.BlockHash)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("block header by hash: %w", err)
+		return nil, nil, fmt.Errorf("block header by hash: %w", err)
 	}
-	bhb, err := s.db.BlockHeaderBest(ctx)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("block header best: %w", err)
-	}
-	return ks, ksBh, bhb, nil
+	return ks, ksBh, nil
 }
 
 func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlocksByL2AbrevHashesRequest) (any, error) {
@@ -730,13 +726,23 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 		}, e
 	}
 
-	blkInfos := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(req.L2KeystoneAbrevHashes))
+	// Obtain best block first, if new block headers arrive the rest of the
+	// call remains idenpotent.
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlocksByL2AbrevHashesResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	blks := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(req.L2KeystoneAbrevHashes))
 	for _, hash := range req.L2KeystoneAbrevHashes {
-		ks, ksBh, _, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, hash)
+		ks, ksBh, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, hash)
 		if err != nil {
 			// XXX add error not found type
 			if errors.Is(err, database.ErrNotFound) {
-				blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
+				blks = append(blks, &tbcapi.L2KeystoneBlockInfo{
 					Error: protocol.RequestErrorf("%v", err),
 				})
 				continue
@@ -747,25 +753,17 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 			}, e
 		}
 		abrevKss := hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)
-		blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
+		blks = append(blks, &tbcapi.L2KeystoneBlockInfo{
 			L2KeystoneAbrev:       hemi.L2KeystoneAbrevDeserialize(abrevKss),
 			L2KeystoneBlockHash:   &ksBh.Hash,
 			L2KeystoneBlockHeight: uint(ksBh.Height),
 		})
 	}
 
-	btcTip, err := s.db.BlockHeaderBest(ctx)
-	if err != nil {
-		e := protocol.NewInternalError(err)
-		return &tbcapi.BlocksByL2AbrevHashesResponse{
-			Error: e.ProtocolError(),
-		}, e
-	}
-
 	return &tbcapi.BlocksByL2AbrevHashesResponse{
-		L2KeystoneBlocks:  blkInfos,
-		BtcTipBlockHash:   &btcTip.Hash,
-		BtcTipBlockHeight: uint(btcTip.Height),
+		L2KeystoneBlocks:  blks,
+		BtcTipBlockHash:   &bhb.Hash,
+		BtcTipBlockHeight: uint(bhb.Height),
 	}, nil
 }
 
@@ -773,7 +771,14 @@ func (s *Server) KeystoneTxs(ctx context.Context, req *tbcapi.KeystoneTxsByL2Key
 	log.Tracef("keystoneTxs")
 	defer log.Tracef("keystoneTxs exit")
 
-	_, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, req.L2KeystoneAbrevHash)
+	// Obtain best block first, we are going to use this as the path for
+	// nextCanonicalBlockheader thus making the call logically idempotent.
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("best blockheader: %w", err)
+	}
+	_, ksBh, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx,
+		req.L2KeystoneAbrevHash)
 	if err != nil {
 		return nil, fmt.Errorf("keystone by hash: %w", err)
 	}
