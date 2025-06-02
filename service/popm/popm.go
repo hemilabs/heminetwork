@@ -53,6 +53,7 @@ var (
 	log                    = loggo.GetLogger("popm")
 	l2KeystonePollTimeout  = 13 * time.Second
 	l2KeystoneRetryTimeout = 15 * time.Second
+	opgethReconnectTimeout = 5 * time.Second
 	l2KeystoneMaxAge       = 4 * time.Hour
 )
 
@@ -404,7 +405,8 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 	s.mtx.Lock()
 	if s.keystones != nil {
 		s.mtx.Unlock()
-		return fmt.Errorf("already hydrated")
+		log.Tracef("already hydrated")
+		return nil
 	}
 	s.keystones = keystones
 	s.mtx.Unlock()
@@ -540,7 +542,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
 			// Do nothing
-			log.Tracef("connectOpgeth: %v", err)
+			log.Errorf("connectOpgeth: %v", err)
 		} else {
 			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
 		}
@@ -548,7 +550,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.After(opgethReconnectTimeout):
 		}
 
 		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
