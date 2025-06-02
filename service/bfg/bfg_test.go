@@ -123,7 +123,7 @@ func TestFullMockIntegration(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
-	// bfgCfg.LogLevel = "bfg=Trace;"
+	bfgCfg.LogLevel = "bfg=Info; mock=Trace"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
 		t.Fatal(err)

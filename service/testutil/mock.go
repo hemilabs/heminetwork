@@ -26,6 +26,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/ethereum/go-ethereum/eth"
+	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
@@ -35,7 +36,18 @@ import (
 	"github.com/hemilabs/heminetwork/service/tbc"
 )
 
-var DefaultNtfnDuration = 250 * time.Millisecond
+const logLevel = "INFO"
+
+var (
+	log                 = loggo.GetLogger("mock")
+	DefaultNtfnDuration = 250 * time.Millisecond
+)
+
+func init() {
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
+}
 
 func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
 	kssList := make([]hemi.L2Keystone, 0, n)
@@ -122,6 +134,7 @@ func (f *mockHandler) Running() bool {
 
 func (f *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !f.Running() {
+		log.Infof("%v: %v connection to closed server", f.name, r.RemoteAddr)
 		http.Error(w, string("mock server closed"), http.StatusServiceUnavailable)
 		return
 	}
@@ -132,6 +145,7 @@ func (f *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Force close all websocket connection to the test server
 func (f *mockHandler) CloseConnections() error {
+	log.Infof("%v: websocket connections closed", f.name)
 	for _, c := range f.conns {
 		err := c.CloseNow()
 		if err != nil {
@@ -146,6 +160,7 @@ func (f *mockHandler) Start() {
 	f.mtx.Lock()
 	defer f.mtx.Unlock()
 	f.isRunning = true
+	log.Tracef("%v: server started", f.name)
 }
 
 // Stop the test server from accept incoming websocket connection
@@ -153,12 +168,14 @@ func (f *mockHandler) Stop() {
 	f.mtx.Lock()
 	defer f.mtx.Unlock()
 	f.isRunning = false
+	log.Tracef("%v: server stopped", f.name)
 }
 
 // Fully shutdown the test server
 func (f *mockHandler) Shutdown() error {
-	f.server.Close()
+	log.Tracef("%v: server shutting down", f.name)
 	f.Stop()
+	f.server.Close()
 	return f.CloseConnections()
 }
 
@@ -250,6 +267,8 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		return fmt.Errorf("write ping: %w", err)
 	}
 
+	log.Infof("%v: new connection to %v", f.name, r.RemoteAddr)
+
 	// create utxos
 	utxos := make([]tbcd.Utxo, 0, f.utxoNum)
 	for k := range f.utxoNum {
@@ -279,7 +298,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 			return fmt.Errorf("handleWebsocketRead: %w", err)
 		}
 
-		// fmt.Printf("mockTBC: command is %v\n", cmd)
+		log.Tracef("%v: command is %v", f.name, cmd)
 
 		go func() {
 			select {
@@ -420,6 +439,8 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 	}
 	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
 
+	log.Infof("%v: new connection to %v", f.name, r.RemoteAddr)
+
 	var keystoneCounter int
 	var kssMtx sync.RWMutex
 	for {
@@ -434,7 +455,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 			return err
 		}
 
-		// fmt.Printf("mockOpgeth: command is %s\n", msg.Method)
+		log.Tracef("%v: command is %v", f.name, msg.Method)
 
 		go func() {
 			select {
@@ -476,7 +497,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 					case <-f.pctx.Done():
 						return
 					case <-time.After(DefaultNtfnDuration):
-						fmt.Println("Sending new keystone notification")
+						log.Tracef("%v: Sending new keystone notification", f.name)
 						err = c.Write(f.pctx, websocket.MessageText, p)
 						if err != nil {
 							fmt.Println(err.Error())
