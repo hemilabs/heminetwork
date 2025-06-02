@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Hemi Labs, Inc.
+# Copyright (c) 2024-2025 Hemi Labs, Inc.
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
@@ -31,8 +31,14 @@ jobs:
       - name: "remove dangling"
         run: docker system prune -f
 
+      - name: "remove dangling"
+        run: docker system prune -f
+
       - name: "run localnet"
-        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up # (put back before merge) -d --wait-timeout 600
+        run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
+
+      - name: "remove more dangling"
+        run: docker system prune -f
 
       - name: "get localnet stats"
         working-directory: ./e2e/monitor
