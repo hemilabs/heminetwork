@@ -111,9 +111,9 @@ func (m *mempool) txProcessed(txid chainhash.Hash) bool {
 	return m.txs[txid] != nil // return true when tx is not nil
 }
 
-func (m *mempool) TxsInsert(ctx context.Context, mptx *mempoolTx) error {
-	log.Tracef("txsInsert")
-	defer log.Tracef("txsInsert exit")
+func (m *mempool) TxInsert(ctx context.Context, mptx *mempoolTx) error {
+	log.Tracef("txInsert")
+	defer log.Tracef("txInsert exit")
 
 	m.mtx.Lock()
 	defer m.mtx.Unlock()

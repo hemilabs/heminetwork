@@ -344,7 +344,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 
 			opp := pl.Tx.TxIn[0].PreviousOutPoint
 			mptx := tbc.NewMempoolTx(*ch, map[wire.OutPoint]struct{}{opp: {}})
-			err = mp.TxsInsert(f.pctx, &mptx)
+			err = mp.TxInsert(f.pctx, &mptx)
 			if err != nil {
 				return fmt.Errorf("mempool tx inser: %w", err)
 			}

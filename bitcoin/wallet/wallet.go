@@ -7,8 +7,6 @@ package wallet
 import (
 	"errors"
 	"fmt"
-	"sync"
-	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -16,7 +14,6 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
-	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
@@ -24,8 +21,6 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 )
-
-var log = loggo.GetLogger("wallet")
 
 // UtxoPickerMultiple is a simple utxo picker that returns a random set of utxos from
 // the provided list that combined have a larger value than amount + fee.
@@ -47,44 +42,15 @@ func UtxoPickerMultiple(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) ([]*tb
 	return nil, errors.New("no suitable utxos found")
 }
 
-// Clayton note: there is a better way to do this, I am sure.  This map
-// works to ensure that we don't re-use a utxo
-var (
-	uniqueUtxo    map[string]time.Time
-	uniqueUtxoMtx sync.Mutex
-)
-
 // UtxoPickerSingle is a simple utxo picker that returns a random utxo from the
 // provided list that has a larger value than amount + fee.
 func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi.UTXO, error) {
-	uniqueUtxoMtx.Lock()
-	defer func() {
-		for k := range uniqueUtxo {
-			dur := time.Since(uniqueUtxo[k])
-			if dur > 10*time.Minute {
-				// hacky way to clear a used utxo
-				delete(uniqueUtxo, k)
-			}
-		}
-		uniqueUtxoMtx.Unlock()
-	}()
-
-	if uniqueUtxo == nil {
-		uniqueUtxo = make(map[string]time.Time)
-	}
-
 	// find large enough utxo
 	total := amount + fee
 	for k := range utxos {
-		log.Tracef("checking utxo value (%d) against total (%d)", utxos[k].Value, total)
-
-		_, ok := uniqueUtxo[utxos[k].TxId.String()]
-
-		if utxos[k].Value < total || ok {
+		if utxos[k].Value < total {
 			continue
 		}
-
-		uniqueUtxo[utxos[k].TxId.String()] = time.Now()
 		return utxos[k], nil
 	}
 
