@@ -236,6 +236,83 @@ func TestPopmFilterUtxos(t *testing.T) {
 	t.Fatal("expected not enough utxos after filter")
 }
 
+func TestDisconnectedOpgeth(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	l2KeystoneMaxAge = testutil.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
+	opgethReconnectTimeout = 500 * time.Millisecond
+
+	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	// Create opgeth test server with the request handler.
+	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	defer opgeth.Shutdown()
+
+	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
+
+	// Create tbc test server with the request handler.
+	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
+	defer mtbc.Shutdown()
+
+	// Setup pop miner
+	cfg := NewDefaultConfig()
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
+	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
+
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create pop miner
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Start pop miner
+	go func() {
+		if err := s.Run(ctx); !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// messages we expect to receive
+	expectedMsg := map[string]int{
+		"kss_subscribe":          1,
+		"kss_getLatestKeystones": 1,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// close current popm connection to opgeth
+	opgeth.CloseConnections()
+
+	// messages we expect to receive
+	expectedMsg = map[string]int{
+		"kss_getLatestKeystones":     1,
+		"kss_subscribe":              1,
+		tbcapi.CmdTxBroadcastRequest: 1,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func messageListener(ctx context.Context, expected map[string]int, errCh chan error, msgCh chan string) error {
 	for {
 		select {

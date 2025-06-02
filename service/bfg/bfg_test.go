@@ -54,7 +54,7 @@ func TestBFG(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
-	bfgCfg.LogLevel = "bfg=Trace;"
+	// bfgCfg.LogLevel = "bfg=Info; mock:Trace"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestFullMockIntegration(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
-	bfgCfg.LogLevel = "bfg=Info; mock=Trace"
+	// bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -165,10 +165,6 @@ func TestFullMockIntegration(t *testing.T) {
 	popCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	popCfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	// popCfg.LogLevel = "popm=TRACE"
-
-	if err := loggo.ConfigureLoggers(popCfg.LogLevel); err != nil {
-		t.Fatal(err)
-	}
 
 	// Create pop miner
 	popm, err := popm.NewServer(popCfg)
