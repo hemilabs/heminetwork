@@ -119,7 +119,7 @@ services:
       POPM_BITCOIN_SECRET: "${POPM_BTC_PRIVATE_KEY}"
       POPM_BFG_URL: "http://bfgd:8383/v1/ws/public"
       POPM_LOG_LEVEL: "INFO"
-      POPM_OPGETH_URL: "http://op-geth-l2:8546"
+      POPM_OPGETH_URL: "ws://op-geth-l2:28546"
       POPM_REMINE_THRESHOLD: "1"
       POPM_BITCOIN_URL: "ws://tbcd:8082/v1/ws"
       POPM_BITCOIN_NETWORK: "localnet"
