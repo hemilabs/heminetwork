@@ -731,14 +731,15 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
 
 	if len(req.L2KeystoneAbrevHashes) < 1 {
+		e := protocol.RequestError(errors.New("no l2 hashes provided"))
 		return &tbcapi.BlocksByL2AbrevHashesResponse{
-			Error: protocol.RequestError(errors.New("no l2 hashes provided")),
-		}, nil
+			Error: e,
+		}, e
 	}
-	var btcTip *tbcd.BlockHeader
+
 	blkInfos := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(req.L2KeystoneAbrevHashes))
 	for _, hash := range req.L2KeystoneAbrevHashes {
-		ks, ksBh, bhb, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, hash)
+		ks, ksBh, _, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, hash)
 		if err != nil {
 			// XXX add error not found type
 			if errors.Is(err, database.ErrNotFound) {
@@ -752,13 +753,20 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 				Error: e.ProtocolError(),
 			}, e
 		}
+		abrevKss := hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)
 		blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
-			L2KeystoneAbrev: hemi.L2KeystoneAbrevDeserialize(
-				hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
+			L2KeystoneAbrev:       hemi.L2KeystoneAbrevDeserialize(abrevKss),
 			L2KeystoneBlockHash:   &ksBh.Hash,
 			L2KeystoneBlockHeight: uint(ksBh.Height),
 		})
-		btcTip = bhb
+	}
+
+	btcTip, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.BlocksByL2AbrevHashesResponse{
+			Error: e.ProtocolError(),
+		}, e
 	}
 
 	return &tbcapi.BlocksByL2AbrevHashesResponse{
