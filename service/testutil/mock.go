@@ -110,15 +110,28 @@ type mockHandler struct {
 	pctx       context.Context
 	conns      []*websocket.Conn
 	server     *httptest.Server
+	mtx        sync.RWMutex
+	isRunning  bool
 }
 
-func (f mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *mockHandler) Running() bool {
+	f.mtx.RLock()
+	defer f.mtx.RUnlock()
+	return f.isRunning
+}
+
+func (f *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !f.Running() {
+		http.Error(w, string("mock server closed"), http.StatusServiceUnavailable)
+		return
+	}
 	if err := f.handleFunc(w, r); err != nil {
 		f.errCh <- fmt.Errorf("%s error: %w", f.name, err)
 	}
 }
 
-func (f mockHandler) CloseConnections() error {
+// Force close all websocket connection to the test server
+func (f *mockHandler) CloseConnections() error {
 	for _, c := range f.conns {
 		err := c.CloseNow()
 		if err != nil {
@@ -128,12 +141,29 @@ func (f mockHandler) CloseConnections() error {
 	return nil
 }
 
-func (f mockHandler) Close() error {
+// Allow the test server to accept incoming websocket connection
+func (f *mockHandler) Start() {
+	f.mtx.Lock()
+	defer f.mtx.Unlock()
+	f.isRunning = true
+}
+
+// Stop the test server from accept incoming websocket connection
+func (f *mockHandler) Stop() {
+	f.mtx.Lock()
+	defer f.mtx.Unlock()
+	f.isRunning = false
+}
+
+// Fully shutdown the test server
+func (f *mockHandler) Shutdown() error {
 	f.server.Close()
+	f.Stop()
 	return f.CloseConnections()
 }
 
-func (f mockHandler) URL() string {
+// Retrieve the URL from the test server
+func (f *mockHandler) URL() string {
 	return f.server.URL
 }
 
@@ -172,8 +202,8 @@ func NewMockTBC(pctx context.Context, errCh chan error, msgCh chan string, keyst
 		utxoNum:   utxoNum,
 	}
 	th.handleFunc = th.mockTBCHandleFunc
-
 	th.server = httptest.NewServer(&th)
+	th.Start()
 	return &th
 }
 
@@ -194,8 +224,8 @@ func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, ke
 		keystones: keystones,
 	}
 	th.handleFunc = th.mockOpGethHandleFunc
-
 	th.server = httptest.NewServer(&th)
+	th.Start()
 	return &th
 }
 
