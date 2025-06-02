@@ -727,7 +727,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	}
 
 	// Obtain best block first, if new block headers arrive the rest of the
-	// call remains idenpotent.
+	// call remains idempotent.
 	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
 		e := protocol.NewInternalError(err)
