@@ -47,7 +47,7 @@ import (
 )
 
 const (
-	logLevel = "TRACE"
+	logLevel = "INFO"
 	appName  = "tbc"
 
 	defaultPeersWanted   = 64
