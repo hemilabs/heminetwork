@@ -51,6 +51,7 @@ const (
 
 var (
 	log                    = loggo.GetLogger("popm")
+	l2KeystonePollTimeout  = 13 * time.Second
 	l2KeystoneRetryTimeout = 15 * time.Second
 	l2KeystoneMaxAge       = 4 * time.Hour
 )
@@ -414,87 +415,71 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("handleOpgethSubscription")
 	defer log.Tracef("handleOpgethSubscription exit")
-	log.Infof("will poll until subscriptions are fixed")
 
-	log.Infof("handleOpgethSubscription")
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
-
-	// Clayton note: this is unreliable, even when setting kss in the websocket
-	// api in op-geth.  so we need the retry timeout to check for keystones
 	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
 	if err != nil {
-		log.Errorf("could not setup subscription: %s, will poll instead", err)
+		return fmt.Errorf("keystone subscription: %w", err)
 	}
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(l2KeystoneRetryTimeout):
-				headersCh <- "timeout"
-			}
-		}
-	}()
 
+	// Note that notifications can be unreliable so additionally we rely on
+	// a timeout to poll keystones.
+	t := time.NewTimer(l2KeystonePollTimeout)
 	for {
-		if sub != nil {
-			select {
-			case err := <-sub.Err():
-				return err
-			default:
-			}
-		}
-
+		t.Reset(l2KeystonePollTimeout)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case err := <-sub.Err():
+			return err
+		case <-headersCh:
+			log.Tracef("keystone notification")
+		case <-t.C:
+			log.Tracef("keystone poll")
+		}
 
-		case n := <-headersCh:
-			log.Tracef("kss notification received: %s", n)
+		nkss, err := s.reconcileKeystones(ctx)
+		if err != nil {
+			// This only happens on non-recoverable errors so it is
+			// ok to exit.
+			return fmt.Errorf("keystone notification: %w", err)
+		}
 
-			nkss, err := s.reconcileKeystones(ctx)
-			if err != nil {
-				// This only happens on non-recoverable errors
-				// so it is ok to exit.
-				return fmt.Errorf("keystone notification: %w", err)
-			}
-
-			// See if there are state changes
-			var work bool
-			s.mtx.Lock()
-			for _, nks := range nkss {
-				cks, ok := s.keystones[*nks.hash]
-				if ok {
-					switch nks.state {
-					case keystoneStateNew:
-						// Already in cache
-						log.Tracef("skip %v: %v %v", nks.hash,
-							nks.state, nks.keystone.L2BlockNumber)
-						continue
-					case keystoneStateMined:
-						// Move to mined state
-						log.Tracef("mined %v: %v %v", nks.hash,
-							nks.state, nks.keystone.L2BlockNumber)
-						cks.state = keystoneStateMined
-					}
-				} else {
-					// Insert new keystone in cache
-					log.Tracef("insert %v: %v %v", nks.hash, nks.state,
-						nks.keystone.L2BlockNumber)
-					s.keystones[*nks.hash] = nks
+		// See if there are state changes
+		var work bool
+		s.mtx.Lock()
+		for _, nks := range nkss {
+			cks, ok := s.keystones[*nks.hash]
+			if ok {
+				switch nks.state {
+				case keystoneStateNew:
+					// Already in cache
+					log.Tracef("skip %v: %v %v", nks.hash,
+						nks.state, nks.keystone.L2BlockNumber)
+					continue
+				case keystoneStateMined:
+					// Move to mined state
+					log.Tracef("mined %v: %v %v", nks.hash,
+						nks.state, nks.keystone.L2BlockNumber)
+					cks.state = keystoneStateMined
 				}
-				work = true
+			} else {
+				// Insert new keystone in cache
+				log.Tracef("insert %v: %v %v", nks.hash, nks.state,
+					nks.keystone.L2BlockNumber)
+				s.keystones[*nks.hash] = nks
 			}
-			s.mtx.Unlock()
+			work = true
+		}
+		s.mtx.Unlock()
 
-			// Signal miner to get to work
-			if work {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case s.workC <- struct{}{}:
-				default:
-				}
+		// Signal miner to get to work
+		if work {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case s.workC <- struct{}{}:
+			default:
 			}
 		}
 	}
