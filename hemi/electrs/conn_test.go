@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phayes/freeport"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func TestClientConn(t *testing.T) {
@@ -202,7 +202,8 @@ type mockServer struct {
 }
 
 func createMockServer(t *testing.T) *mockServer {
-	addr := createAddress()
+	port := testutil.GetFreePort()
+	addr := fmt.Sprintf("localhost:%s", port)
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -321,14 +322,6 @@ func (s *mockServer) handleConnection(t *testing.T, conn net.Conn) {
 			}
 		}
 	}
-}
-
-func createAddress() string {
-	port, err := freeport.GetFreePort()
-	if err != nil {
-		panic(fmt.Errorf("find free port: %w", err))
-	}
-	return fmt.Sprintf("localhost:%d", port)
 }
 
 func mustNewJSONRPCRequest(id uint64, method string, params any) *JSONRPCRequest {

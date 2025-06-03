@@ -28,13 +28,13 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 type block struct {
@@ -203,10 +203,10 @@ func (b *btcNode) newKeystone(name string) *chainhash.Hash {
 		Version:            1,
 		L1BlockNumber:      2,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes(name+"parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes(name+"prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes(name+"stateroot", 32),
-		EPHash:             fillOutBytes(name+"ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes(name+"parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes(name+"prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes(name+"stateroot", 32),
+		EPHash:             testutil.FillOutBytes(name+"ephash", 32),
 	}
 
 	b.keystones[name] = &l2Keystone
@@ -1117,14 +1117,6 @@ func errorIsOneOf(err error, errs []error) bool {
 	return false
 }
 
-func GetFreePort() string {
-	port, err := freeport.GetFreePort()
-	if err != nil {
-		panic(err)
-	}
-	return strconv.Itoa(port)
-}
-
 func (s *Server) hasAllBlocks(ctx context.Context, m map[int32][]*block) (bool, error) {
 	for _, k := range m {
 		for _, blk := range k {
@@ -1143,7 +1135,7 @@ func TestFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1411,7 +1403,7 @@ func TestIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1599,7 +1591,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1869,7 +1861,7 @@ func TestIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -2188,7 +2180,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -2699,7 +2691,7 @@ func TestForkCanonicity(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)

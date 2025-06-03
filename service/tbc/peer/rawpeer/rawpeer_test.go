@@ -9,22 +9,14 @@ import (
 	"errors"
 	"io"
 	"net"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/phayes/freeport"
-)
 
-func GetFreePort() string {
-	port, err := freeport.GetFreePort()
-	if err != nil {
-		panic(err)
-	}
-	return strconv.Itoa(port)
-}
+	"github.com/hemilabs/heminetwork/testutil"
+)
 
 func mockPeerServer(ctx context.Context, id int, listener net.Listener, msgCh chan string) error {
 	conn, err := listener.Accept()
@@ -59,7 +51,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 	msgCh := make(chan string)
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
