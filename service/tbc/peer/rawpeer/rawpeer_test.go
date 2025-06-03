@@ -51,7 +51,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 	msgCh := make(chan string)
 
-	port := testutil.GetFreePort()
+	port := testutil.FreePort()
 
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {

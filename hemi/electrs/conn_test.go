@@ -202,7 +202,7 @@ type mockServer struct {
 }
 
 func createMockServer(t *testing.T) *mockServer {
-	port := testutil.GetFreePort()
+	port := testutil.FreePort()
 	addr := fmt.Sprintf("localhost:%s", port)
 
 	ln, err := net.Listen("tcp", addr)

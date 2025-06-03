@@ -20,14 +20,14 @@ func TestKeystoneEncodeDecode(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("v1parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("v1prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("v1stateroot", 32),
-		EPHash:             testutil.FillOutBytes("v1ephash", 32),
+		ParentEPHash:       testutil.FillBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("v1prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("v1stateroot", 32),
+		EPHash:             testutil.FillBytes("v1ephash", 32),
 	}
 	abrvKs := hemi.L2KeystoneAbbreviate(hks).Serialize()
 	ks := tbcd.Keystone{
-		BlockHash:           btcchainhash.Hash(testutil.FillOutBytes("blockhash", 32)),
+		BlockHash:           btcchainhash.Hash(testutil.FillBytes("blockhash", 32)),
 		AbbreviatedKeystone: abrvKs,
 	}
 	eks := encodeKeystone(ks)

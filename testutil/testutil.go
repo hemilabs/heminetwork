@@ -23,8 +23,8 @@ func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hem
 		Version:            1,
 		L1BlockNumber:      10000,
 		L2BlockNumber:      25,
-		PrevKeystoneEPHash: Digest256([]byte{0, 0}),
-		EPHash:             Digest256([]byte{0}),
+		PrevKeystoneEPHash: SHA256([]byte{0, 0}),
+		EPHash:             SHA256([]byte{0}),
 	}
 	for ci := range n {
 		x := uint8(ci + 1)
@@ -32,10 +32,10 @@ func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hem
 			Version:            1,
 			L1BlockNumber:      prevKeystone.L1BlockNumber + 1,
 			L2BlockNumber:      uint32(ci+1) * 25,
-			ParentEPHash:       Digest256([]byte{x, x}),
+			ParentEPHash:       SHA256([]byte{x, x}),
 			PrevKeystoneEPHash: prevKeystone.EPHash,
-			StateRoot:          Digest256([]byte{x, x, x}),
-			EPHash:             Digest256([]byte{x}),
+			StateRoot:          SHA256([]byte{x, x, x}),
+			EPHash:             SHA256([]byte{x}),
 		}
 
 		abrevKss := hemi.L2KeystoneAbbreviate(l2Keystone)
@@ -47,35 +47,39 @@ func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hem
 	return kssMap, kssList
 }
 
-func Digest256(x []byte) []byte {
+func SHA256(x []byte) []byte {
 	xx := sha256.Sum256(x)
 	return xx[:]
 }
 
-// FillOutBytes will take a string and return a slice of bytes
-// with values from the string suffixed until a size with bytes '_'
-func FillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
+// FillBytes returns a byte slice with the prefix, followed by n underscores.
+func FillBytes(prefix string, n int) []byte {
+	if n < 0 {
+		n = 0
 	}
 
+	result := make([]byte, len(prefix)+n)
+	copy(result, prefix)
+	for i := len(prefix); i < len(result); i++ {
+		result[i] = '_'
+	}
 	return result
 }
 
-// FillOutBytesWith0s will take a string and return a slice of bytes
-// with values from the string suffixed until a size with bytes '0'
-func FillOutBytesWith0s(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, 0)
+// FillBytesZero returns a byte slice with the prefix, followed by n empty bytes.
+func FillBytesZero(prefix string, n int) []byte {
+	if n < 0 {
+		n = 0
 	}
 
+	result := make([]byte, len(prefix)+n)
+	copy(result, prefix)
 	return result
 }
 
-// GetFreePort finds a port that is currently free.
-func GetFreePort() string {
+// FreePort finds a port that is currently free.
+// TODO: remove use of freeport library.
+func FreePort() string {
 	port, err := freeport.GetFreePort()
 	if err != nil {
 		panic(err)

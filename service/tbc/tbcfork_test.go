@@ -203,10 +203,10 @@ func (b *btcNode) newKeystone(name string) *chainhash.Hash {
 		Version:            1,
 		L1BlockNumber:      2,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes(name+"parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes(name+"prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes(name+"stateroot", 32),
-		EPHash:             testutil.FillOutBytes(name+"ephash", 32),
+		ParentEPHash:       testutil.FillBytes(name+"parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes(name+"prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes(name+"stateroot", 32),
+		EPHash:             testutil.FillBytes(name+"ephash", 32),
 	}
 
 	b.keystones[name] = &l2Keystone
@@ -1135,7 +1135,7 @@ func TestFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.GetFreePort()
+	port := testutil.FreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1403,7 +1403,7 @@ func TestIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.GetFreePort()
+	port := testutil.FreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1591,7 +1591,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.GetFreePort()
+	port := testutil.FreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1861,7 +1861,7 @@ func TestIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.GetFreePort()
+	port := testutil.FreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -2180,7 +2180,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.GetFreePort()
+	port := testutil.FreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -2691,7 +2691,7 @@ func TestForkCanonicity(t *testing.T) {
 		cancel()
 	}()
 
-	port := testutil.GetFreePort()
+	port := testutil.FreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)

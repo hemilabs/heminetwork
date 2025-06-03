@@ -1502,10 +1502,10 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	popTx := pop.TransactionL2{
@@ -1519,9 +1519,9 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 
 	t.Log(spew.Sdump(popTxOpReturn))
 
-	btcBlockHash := chainhash.Hash(testutil.FillOutBytes("blockhash", 32))
+	btcBlockHash := chainhash.Hash(testutil.FillBytes("blockhash", 32))
 
-	invalidL2KeystoneAbrevHash := chainhash.Hash(testutil.FillOutBytes("123", 32))
+	invalidL2KeystoneAbrevHash := chainhash.Hash(testutil.FillBytes("123", 32))
 
 	type testTableItem struct {
 		name                    string
@@ -1690,7 +1690,7 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
-	outPoint := wire.OutPoint{Hash: chainhash.Hash(testutil.FillOutBytes("hash", 32)), Index: 0}
+	outPoint := wire.OutPoint{Hash: chainhash.Hash(testutil.FillBytes("hash", 32)), Index: 0}
 	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
 
 	changeAmount := int64(100)

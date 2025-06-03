@@ -260,8 +260,8 @@ func createTestDB(ctx context.Context, t *testing.T) (bfgd.Database, string, *sq
 }
 
 func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string, publicDisabled bool) (*bfg.Server, string, string, string) {
-	bfgPrivateListenAddress := fmt.Sprintf(":%v", testutil.GetFreePort())
-	bfgPublicListenAddress := fmt.Sprintf(":%v", testutil.GetFreePort())
+	bfgPrivateListenAddress := fmt.Sprintf(":%v", testutil.FreePort())
+	bfgPublicListenAddress := fmt.Sprintf(":%v", testutil.FreePort())
 
 	cfg := &bfg.Config{
 		PrivateListenAddress: bfgPrivateListenAddress,
@@ -323,7 +323,7 @@ func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAdd
 // }
 
 func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
-	bssListenAddress := fmt.Sprintf(":%v", testutil.GetFreePort())
+	bssListenAddress := fmt.Sprintf(":%v", testutil.FreePort())
 
 	bssServer, err := bss.NewServer(&bss.Config{
 		BFGURL:        bfgWsurl,
@@ -359,7 +359,7 @@ func reverseAndEncodeEncodedHash(encodedHash string) string {
 }
 
 func createMockElectrsServer(ctx context.Context, t *testing.T, l2Keystone *hemi.L2Keystone, btx []byte) (string, func()) {
-	addr := fmt.Sprintf("localhost:%v", testutil.GetFreePort())
+	addr := fmt.Sprintf("localhost:%v", testutil.FreePort())
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -642,7 +642,7 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
-	outPoint := wire.OutPoint{Hash: btcchainhash.Hash(testutil.FillOutBytes("hash", 32)), Index: 0}
+	outPoint := wire.OutPoint{Hash: btcchainhash.Hash(testutil.FillBytes("hash", 32)), Index: 0}
 	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
 
 	changeAmount := int64(100)
@@ -732,10 +732,10 @@ func TestNewL2Keystone(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	l2KeystoneRequest := bssapi.L2KeystoneRequest{
@@ -802,8 +802,8 @@ func TestL2Keystone(t *testing.T) {
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
 
-	keystoneOneHash := testutil.FillOutBytes("somehashone", 32)
-	keystoneTwoHash := testutil.FillOutBytes("somehashtwo", 32)
+	keystoneOneHash := testutil.FillBytes("somehashone", 32)
+	keystoneTwoHash := testutil.FillBytes("somehashtwo", 32)
 
 	// 1
 	keystoneOne := bfgd.L2Keystone{
@@ -811,10 +811,10 @@ func TestL2Keystone(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
-		StateRoot:          testutil.FillOutBytes("staterootone", 32),
-		EPHash:             testutil.FillOutBytes("ephashone", 32),
+		ParentEPHash:       testutil.FillBytes("parentephashone", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephashone", 32),
+		StateRoot:          testutil.FillBytes("staterootone", 32),
+		EPHash:             testutil.FillBytes("ephashone", 32),
 	}
 
 	keystoneTwo := bfgd.L2Keystone{
@@ -822,10 +822,10 @@ func TestL2Keystone(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      33,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephashtwo", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashtwo", 32),
-		StateRoot:          testutil.FillOutBytes("stateroottwo", 32),
-		EPHash:             testutil.FillOutBytes("ephashtwo", 32),
+		ParentEPHash:       testutil.FillBytes("parentephashtwo", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephashtwo", 32),
+		StateRoot:          testutil.FillBytes("stateroottwo", 32),
+		EPHash:             testutil.FillBytes("ephashtwo", 32),
 	}
 
 	// 2
@@ -943,10 +943,10 @@ func TestBitcoinBalance(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -1011,10 +1011,10 @@ func TestBFGPublicErrorCases(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -1111,10 +1111,10 @@ func TestBFGPublicErrorCases(t *testing.T) {
 					Version:            1,
 					L1BlockNumber:      5,
 					L2BlockNumber:      44,
-					ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-					PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-					StateRoot:          testutil.FillOutBytes("stateroot", 32),
-					EPHash:             testutil.FillOutBytes("ephash", 32),
+					ParentEPHash:       testutil.FillBytes("parentephash", 32),
+					PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+					StateRoot:          testutil.FillBytes("stateroot", 32),
+					EPHash:             testutil.FillBytes("ephash", 32),
 				}
 
 				btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -1204,10 +1204,10 @@ func TestBitcoinInfo(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -1288,10 +1288,10 @@ func TestBitcoinUTXOs(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -1379,10 +1379,10 @@ func TestBitcoinBroadcast(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	// 1
@@ -1470,10 +1470,10 @@ func TestBitcoinBroadcast(t *testing.T) {
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       testutil.FillOutBytesWith0s("parentephas", 32),
-			PrevKeystoneEPHash: testutil.FillOutBytesWith0s("prevkeystone", 32),
-			StateRoot:          testutil.FillOutBytes("stateroot", 32),
-			EPHash:             testutil.FillOutBytesWith0s("ephash______", 32),
+			ParentEPHash:       testutil.FillBytesZero("parentephas", 32),
+			PrevKeystoneEPHash: testutil.FillBytesZero("prevkeystone", 32),
+			StateRoot:          testutil.FillBytes("stateroot", 32),
+			EPHash:             testutil.FillBytesZero("ephash______", 32),
 			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
@@ -1509,10 +1509,10 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	// 1
@@ -1672,10 +1672,10 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 800, &l2Keystone, minerPrivateKeyBytes)
@@ -1755,10 +1755,10 @@ loop:
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       testutil.FillOutBytesWith0s("parentephas", 32),
-			PrevKeystoneEPHash: testutil.FillOutBytesWith0s("prevkeystone", 32),
-			StateRoot:          testutil.FillOutBytes("stateroot", 32),
-			EPHash:             testutil.FillOutBytesWith0s("ephash______", 32),
+			ParentEPHash:       testutil.FillBytesZero("parentephas", 32),
+			PrevKeystoneEPHash: testutil.FillBytesZero("prevkeystone", 32),
+			StateRoot:          testutil.FillBytes("stateroot", 32),
+			EPHash:             testutil.FillBytesZero("ephash______", 32),
 			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
@@ -1788,10 +1788,10 @@ func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	// 1
@@ -1894,10 +1894,10 @@ loop:
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       testutil.FillOutBytesWith0s("parentephas", 32),
-			PrevKeystoneEPHash: testutil.FillOutBytesWith0s("prevkeystone", 32),
-			StateRoot:          testutil.FillOutBytes("stateroot", 32),
-			EPHash:             testutil.FillOutBytesWith0s("ephash______", 32),
+			ParentEPHash:       testutil.FillBytesZero("parentephas", 32),
+			PrevKeystoneEPHash: testutil.FillBytesZero("prevkeystone", 32),
+			StateRoot:          testutil.FillBytes("stateroot", 32),
+			EPHash:             testutil.FillBytesZero("ephash______", 32),
 			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
@@ -1929,10 +1929,10 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	// 1
@@ -2101,27 +2101,27 @@ func TestPopPayouts(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	differentL2Keystone := hemi.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      13,
 		L2BlockNumber:      23,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
-	btcHeaderHash := testutil.FillOutBytes("btcheaderhash", 32)
+	btcHeaderHash := testutil.FillBytes("btcheaderhash", 32)
 
 	btcBlock := bfgd.BtcBlock{
 		Hash:   btcHeaderHash,
-		Header: testutil.FillOutBytes("btcheader", 80),
+		Header: testutil.FillBytes("btcheader", 80),
 		Height: 99,
 	}
 
@@ -2138,9 +2138,9 @@ func TestPopPayouts(t *testing.T) {
 	var txIndex uint64 = 1
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             testutil.FillOutBytes("btctxid1", 32),
+		BtcTxId:             testutil.FillBytes("btctxid1", 32),
 		BtcRawTx:            []byte("btcrawtx1"),
-		PopTxId:             testutil.FillOutBytes("poptxid1", 32),
+		PopTxId:             testutil.FillBytes("poptxid1", 32),
 		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
@@ -2155,9 +2155,9 @@ func TestPopPayouts(t *testing.T) {
 	txIndex = 2
 
 	popBasis = bfgd.PopBasis{
-		BtcTxId:             testutil.FillOutBytes("btctxid2", 32),
+		BtcTxId:             testutil.FillBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             testutil.FillOutBytes("poptxid2", 32),
+		PopTxId:             testutil.FillBytes("poptxid2", 32),
 		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   otherPublicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
@@ -2172,9 +2172,9 @@ func TestPopPayouts(t *testing.T) {
 	txIndex = 3
 
 	popBasis = bfgd.PopBasis{
-		BtcTxId:             testutil.FillOutBytes("btctxid3", 32),
+		BtcTxId:             testutil.FillBytes("btctxid3", 32),
 		BtcRawTx:            []byte("btcrawtx3"),
-		PopTxId:             testutil.FillOutBytes("poptxid3", 32),
+		PopTxId:             testutil.FillBytes("poptxid3", 32),
 		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
@@ -2189,9 +2189,9 @@ func TestPopPayouts(t *testing.T) {
 	txIndex = 4
 
 	popBasis = bfgd.PopBasis{
-		BtcTxId:             testutil.FillOutBytes("btctxid4", 32),
+		BtcTxId:             testutil.FillBytes("btctxid4", 32),
 		BtcRawTx:            []byte("btcrawtx4"),
-		PopTxId:             testutil.FillOutBytes("poptxid4", 32),
+		PopTxId:             testutil.FillBytes("poptxid4", 32),
 		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(differentL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
@@ -2304,17 +2304,17 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
-	btcHeaderHash := testutil.FillOutBytes("btcheaderhash", 32)
+	btcHeaderHash := testutil.FillBytes("btcheaderhash", 32)
 
 	btcBlock := bfgd.BtcBlock{
 		Hash:   btcHeaderHash,
-		Header: testutil.FillOutBytes("btcheader", 80),
+		Header: testutil.FillBytes("btcheader", 80),
 		Height: 99,
 	}
 
@@ -2342,9 +2342,9 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 
 		txIndex++
 		popBasis := bfgd.PopBasis{
-			BtcTxId:             testutil.FillOutBytes("btctxid1", 32),
+			BtcTxId:             testutil.FillBytes("btctxid1", 32),
 			BtcRawTx:            []byte("btcrawtx1"),
-			PopTxId:             testutil.FillOutBytes("poptxid1", 32),
+			PopTxId:             testutil.FillBytes("poptxid1", 32),
 			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcHeaderHash:       btcHeaderHash,
@@ -2568,7 +2568,7 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 func updateFinalityForBtcBlock(t *testing.T, ctx context.Context, db bfgd.Database, block *bfgd.BtcBlock, height uint32) {
 	// some tests don't care about a btc block hash, fill it out here so it doesn't error
 	if len(block.Hash) == 0 {
-		block.Hash = testutil.FillOutBytes(fmt.Sprintf("%d", height), 32)
+		block.Hash = testutil.FillBytes(fmt.Sprintf("%d", height), 32)
 	}
 
 	if err := db.BtcBlockUpdateKeystones(ctx, [32]byte(block.Hash), uint64(height), math.MaxInt64); err != nil {
@@ -3200,10 +3200,10 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -3270,10 +3270,10 @@ func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -3346,14 +3346,14 @@ func TestNotifyOnL2KeystonesBFGClients(t *testing.T) {
 	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	l2Keystone := bfgd.L2Keystone{
-		Hash:               testutil.FillOutBytes("somehashone", 32),
+		Hash:               testutil.FillBytes("somehashone", 32),
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
-		StateRoot:          testutil.FillOutBytes("staterootone", 32),
-		EPHash:             testutil.FillOutBytes("ephashone", 32),
+		ParentEPHash:       testutil.FillBytes("parentephashone", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephashone", 32),
+		StateRoot:          testutil.FillBytes("staterootone", 32),
+		EPHash:             testutil.FillBytes("ephashone", 32),
 	}
 
 	if err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{
@@ -3416,14 +3416,14 @@ func TestNotifyOnL2KeystonesBFGClientsViaOtherBFG(t *testing.T) {
 	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	l2Keystone := bfgd.L2Keystone{
-		Hash:               testutil.FillOutBytes("somehashone", 32),
+		Hash:               testutil.FillBytes("somehashone", 32),
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
-		StateRoot:          testutil.FillOutBytes("staterootone", 32),
-		EPHash:             testutil.FillOutBytes("ephashone", 32),
+		ParentEPHash:       testutil.FillBytes("parentephashone", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephashone", 32),
+		StateRoot:          testutil.FillBytes("staterootone", 32),
+		EPHash:             testutil.FillBytes("ephashone", 32),
 	}
 
 	// insert the l2 keystone into the first bfg server's postgres,
@@ -3493,34 +3493,34 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 
 	l2Keystones := []bfgd.L2Keystone{
 		{
-			Hash:               testutil.FillOutBytes("somehash22", 32),
+			Hash:               testutil.FillBytes("somehash22", 32),
 			Version:            1,
 			L1BlockNumber:      11,
 			L2BlockNumber:      22,
-			ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
-			PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
-			StateRoot:          testutil.FillOutBytes("staterootone", 32),
-			EPHash:             testutil.FillOutBytes("ephashone", 32),
+			ParentEPHash:       testutil.FillBytes("parentephashone", 32),
+			PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephashone", 32),
+			StateRoot:          testutil.FillBytes("staterootone", 32),
+			EPHash:             testutil.FillBytes("ephashone", 32),
 		},
 		{
-			Hash:               testutil.FillOutBytes("somehash23", 32),
+			Hash:               testutil.FillBytes("somehash23", 32),
 			Version:            1,
 			L1BlockNumber:      11,
 			L2BlockNumber:      23,
-			ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
-			PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
-			StateRoot:          testutil.FillOutBytes("staterootone", 32),
-			EPHash:             testutil.FillOutBytes("ephashone", 32),
+			ParentEPHash:       testutil.FillBytes("parentephashone", 32),
+			PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephashone", 32),
+			StateRoot:          testutil.FillBytes("staterootone", 32),
+			EPHash:             testutil.FillBytes("ephashone", 32),
 		},
 		{
-			Hash:               testutil.FillOutBytes("somehash24", 32),
+			Hash:               testutil.FillBytes("somehash24", 32),
 			Version:            1,
 			L1BlockNumber:      11,
 			L2BlockNumber:      24,
-			ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
-			PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
-			StateRoot:          testutil.FillOutBytes("staterootone", 32),
-			EPHash:             testutil.FillOutBytes("ephashone", 32),
+			ParentEPHash:       testutil.FillBytes("parentephashone", 32),
+			PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephashone", 32),
+			StateRoot:          testutil.FillBytes("staterootone", 32),
+			EPHash:             testutil.FillBytes("ephashone", 32),
 		},
 	}
 
@@ -3625,10 +3625,10 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -3695,10 +3695,10 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -3760,10 +3760,10 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -3831,10 +3831,10 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          testutil.FillOutBytes("stateroot", 32),
-		EPHash:             testutil.FillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
