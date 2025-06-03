@@ -197,6 +197,7 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 			if err != nil {
 				return nil, fmt.Errorf("error calling opgeth: %w", err)
 			}
+
 			return &resp, nil
 		default:
 			return nil, fmt.Errorf("unknown opgeth command: %T", request)
@@ -232,6 +233,7 @@ func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Ha
 	if err != nil {
 		return nil, err
 	}
+
 	resp, ok := rp.(*eth.L2KeystoneValidityResponse)
 	if !ok {
 		return nil, fmt.Errorf("invalid response type: %T", rp)
@@ -446,6 +448,8 @@ func (s *Server) Run(pctx context.Context) error {
 		s.params = &chaincfg.MainNetParams
 	case "testnet3":
 		s.params = &chaincfg.TestNet3Params
+	case "localnet":
+		s.params = &chaincfg.RegressionNetParams
 	default:
 		return fmt.Errorf("invalid network: %v", s.cfg.Network)
 	}
