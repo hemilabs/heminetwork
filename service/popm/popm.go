@@ -392,7 +392,10 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 }
 
 // hydrateKeystones should be called once at start of day. It will build the
-// keystone state cache.
+// keystone state cache. It returns an error if the cache is already hydrated.
+// This is to prevent invalid successive calls to a function that may only be
+// called once per connection. The caller should assert that the cache is empty
+// prior to calling.
 func (s *Server) hydrateKeystones(ctx context.Context) error {
 	log.Tracef("hydrateKeystones")
 	defer log.Tracef("hydrateKeystones exit")
@@ -405,8 +408,7 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 	s.mtx.Lock()
 	if s.keystones != nil {
 		s.mtx.Unlock()
-		log.Tracef("already hydrated")
-		return nil
+		return errors.New("already hydrated")
 	}
 	s.keystones = keystones
 	s.mtx.Unlock()
@@ -523,6 +525,11 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 			log.Errorf("subscription: %v", err)
 		}
 		cancel()
+
+		// Purge keystones on the way out.
+		s.mtx.Lock()
+		s.keystones = nil
+		s.mtx.Unlock()
 	}()
 
 	<-ctx.Done()
@@ -541,8 +548,8 @@ func (s *Server) opgeth(ctx context.Context) {
 	for {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
-			// Do nothing
-			log.Errorf("connectOpgeth: %v", err)
+			// Do nothing, this is too loud so make it Tracef.
+			log.Tracef("connectOpgeth: %v", err)
 		} else {
 			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
 		}
