@@ -14,7 +14,7 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 )
 
-// MakeSharedKeystones a matching map and slice of N keystones
+// MakeSharedKeystones creates a matching map and slice of N keystones.
 func MakeSharedKeystones(n int) (map[chainhash.Hash]*hemi.L2KeystoneAbrev, []hemi.L2Keystone) {
 	kssList := make([]hemi.L2Keystone, 0, n)
 	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
