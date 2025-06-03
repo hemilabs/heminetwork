@@ -29,7 +29,6 @@ func keyInfoFromXprevs(xprevs []string) ([]keyInfo, error) {
 	keyInfoList := make([]keyInfo, 0)
 
 	for _, xp := range xprevs {
-
 		ek, err := hdkeychain.NewKeyFromString(xp)
 		if err != nil {
 			return nil, err
@@ -192,7 +191,6 @@ func TestMemoryZuul(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, ki := range expectedIn {
-
 				nk, err := m.Get(*ki.addr)
 				if err != nil {
 					t.Fatal(err)
@@ -219,7 +217,6 @@ func TestMemoryZuul(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, ki := range expectedOut {
-
 				_, err = m.Get(*ki.addr)
 				if err == nil || !errors.Is(err, zuul.ErrKeyDoesntExist) {
 					t.Fatalf("expected '%v' error, got '%v'", zuul.ErrKeyDoesntExist, err)
@@ -228,7 +225,6 @@ func TestMemoryZuul(t *testing.T) {
 				if err == nil || !errors.Is(err, zuul.ErrKeyDoesntExist) {
 					t.Fatalf("expected '%v' error, got '%v'", zuul.ErrKeyDoesntExist, err)
 				}
-
 			}
 		})
 	}

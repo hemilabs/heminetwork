@@ -27,7 +27,7 @@ func TestTBCGozer(t *testing.T) {
 		t.Fatalf("Failed to decode address: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Connect tbc service

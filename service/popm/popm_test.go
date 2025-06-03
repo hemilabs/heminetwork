@@ -26,7 +26,7 @@ import (
 const wantedKeystones = 40
 
 func TestPopMiner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 
 	kssMap, kssList := testutil.MakeSharedKeystones(wantedKeystones)
@@ -82,7 +82,7 @@ func TestPopMiner(t *testing.T) {
 }
 
 func TestTickingPopMiner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	l2KeystoneMaxAge = testutil.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
@@ -163,7 +163,7 @@ func TestTickingPopMiner(t *testing.T) {
 }
 
 func TestPopmFilterUtxos(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	l2KeystoneMaxAge = testutil.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
@@ -237,7 +237,7 @@ func TestPopmFilterUtxos(t *testing.T) {
 }
 
 func TestDisconnectedOpgeth(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	l2KeystoneMaxAge = testutil.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
@@ -297,7 +297,9 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// close current popm connection to opgeth
-	opgeth.CloseConnections()
+	if err = opgeth.CloseConnections(); err != nil {
+		t.Fatal(err)
+	}
 
 	// messages we expect to receive
 	expectedMsg = map[string]int{

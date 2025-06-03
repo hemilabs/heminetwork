@@ -31,7 +31,7 @@ import (
 const wantedKeystones = 10
 
 func TestBFG(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)
@@ -86,7 +86,7 @@ func TestBFG(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		sendFinalityRequests(kssList, bfgCfg.ListenAddress, 9, 10000)
+		sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
 	}()
 
 	// receive messages and errors from opgeth and tbc
@@ -98,7 +98,7 @@ func TestBFG(t *testing.T) {
 }
 
 func TestFullMockIntegration(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)
@@ -151,7 +151,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// send finality requests to bfg, which should not return super finality
-	go sendFinalityRequests(kssList, bfgCfg.ListenAddress, 0, 0)
+	go sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 0, 0)
 
 	// receive messages and errors from opgeth and tbc
 	if err = messageListener(ctx, expectedMsg, errCh, msgCh); err != nil {
@@ -203,7 +203,7 @@ func TestFullMockIntegration(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		sendFinalityRequests(kssList, bfgCfg.ListenAddress, 9, 10000)
+		sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
 	}()
 
 	// receive messages and errors from opgeth and tbc
@@ -214,23 +214,34 @@ func TestFullMockIntegration(t *testing.T) {
 	wg.Wait()
 }
 
-func sendFinalityRequests(kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
+func sendFinalityRequests(ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
+	client := &http.Client{}
 	for i := range wantedKeystones {
 		kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
 		u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
 			url, bfgapi.APIVersion, kssHash)
-		resp, err := http.Get(u)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			panic(err)
 		}
 
-		if resp.StatusCode != 200 {
+		resp, err := client.Do(req)
+		if err != nil {
+			panic(err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
 			panic(fmt.Sprintf("unexpected status code: %v", resp.StatusCode))
 		}
 
 		fin := bfgapi.L2KeystoneBitcoinFinalityResponse{}
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
+			panic(err)
+		}
+
+		if err = resp.Body.Close(); err != nil {
 			panic(err)
 		}
 

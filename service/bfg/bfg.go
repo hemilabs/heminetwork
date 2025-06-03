@@ -425,7 +425,6 @@ func (s *Server) promPoll(ctx context.Context) error {
 			log.Infof("FIXME PROMETHEUS POLL")
 			s.mtx.RUnlock()
 		}
-
 	}
 }
 
@@ -525,7 +524,7 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, s.Collectors()); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, s.Collectors(), nil); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
