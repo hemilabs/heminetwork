@@ -135,7 +135,7 @@ func applySQLFiles(ctx context.Context, t *testing.T, sdb *sql.DB, path string) 
 }
 
 func TestDatabaseTestData(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
 	defer func() {
@@ -153,7 +153,7 @@ func TestDatabaseTestData(t *testing.T) {
 }
 
 func TestDatabasePostgres(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
 	defer func() {
@@ -307,7 +307,7 @@ func (b *btcBlocksNtfn) handleBtcBlocksNotification(pctx context.Context, table 
 }
 
 func TestBtcBlockReplaceNotIfSameBlock(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -352,7 +352,7 @@ func TestBtcBlockReplaceNotIfSameBlock(t *testing.T) {
 }
 
 func TestBtcBlockReplaceIfDifferentBlocks(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -400,7 +400,7 @@ func TestBtcBlockReplaceIfDifferentBlocks(t *testing.T) {
 }
 
 func TestBtcBlockNoReplaceIfDifferentBlocksAtDifferentHeights(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -462,7 +462,7 @@ func TestBtcBlockNoReplaceIfDifferentBlocksAtDifferentHeights(t *testing.T) {
 }
 
 func TestDatabaseNotification(t *testing.T) {
-	pctx := context.Background()
+	pctx := t.Context()
 
 	db, sdb, cleanup := createTestDB(pctx, t)
 	defer func() {
@@ -502,8 +502,8 @@ func TestDatabaseNotification(t *testing.T) {
 	}
 }
 
-func defaultTestContext() (context.Context, func()) {
-	return context.WithTimeout(context.Background(), 300*time.Second)
+func defaultTestContext(t *testing.T) (context.Context, func()) {
+	return context.WithTimeout(t.Context(), 300*time.Second)
 }
 
 // fillOutBytes will take a string and return a slice of bytes
@@ -518,7 +518,7 @@ func fillOutBytes(prefix string, size int) []byte {
 }
 
 func TestL2KeystoneInsertSuccess(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -565,7 +565,7 @@ func TestL2KeystoneInsertSuccess(t *testing.T) {
 }
 
 func TestL2KeystoneInsertMultipleSuccess(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -633,7 +633,7 @@ func TestL2KeystoneInsertMultipleSuccess(t *testing.T) {
 }
 
 func TestL2KeystoneInsertIgnoreDuplicates(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -706,7 +706,7 @@ func TestL2KeystoneInsertIgnoreDuplicates(t *testing.T) {
 }
 
 func TestL2KeystoneInsertInvalidHashLength(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -743,7 +743,7 @@ func TestL2KeystoneInsertInvalidHashLength(t *testing.T) {
 }
 
 func TestL2KeystoneInsertInvalidEPHashLength(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -780,7 +780,7 @@ func TestL2KeystoneInsertInvalidEPHashLength(t *testing.T) {
 }
 
 func TestL2KeystoneInsertInvalidStateRootLength(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -817,7 +817,7 @@ func TestL2KeystoneInsertInvalidStateRootLength(t *testing.T) {
 }
 
 func TestL2KeystoneInsertInvalidPrevKeystoneEPHashLength(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -854,7 +854,7 @@ func TestL2KeystoneInsertInvalidPrevKeystoneEPHashLength(t *testing.T) {
 }
 
 func TestL2KeystoneInsertInvalidParentEPHashLength(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -891,7 +891,7 @@ func TestL2KeystoneInsertInvalidParentEPHashLength(t *testing.T) {
 }
 
 func TestL2KeystoneByAbrevHashNotFound(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -908,7 +908,7 @@ func TestL2KeystoneByAbrevHashNotFound(t *testing.T) {
 }
 
 func TestL2KeystoneByAbrevHashFound(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -946,7 +946,7 @@ func TestL2KeystoneByAbrevHashFound(t *testing.T) {
 }
 
 func TestL2KeystoneInsertMostRecentNMoreThanSaved(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -999,7 +999,7 @@ func TestL2KeystoneInsertMostRecentNMoreThanSaved(t *testing.T) {
 }
 
 func TestL2KeystoneInsertMostRecentNFewerThanSaved(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1051,7 +1051,7 @@ func TestL2KeystoneInsertMostRecentNFewerThanSaved(t *testing.T) {
 }
 
 func TestL2KeystoneInsertMostRecentNLimit100(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1098,7 +1098,7 @@ func TestL2KeystoneInsertMostRecentNLimit100(t *testing.T) {
 }
 
 func TestL2KeystoneInsertMultipleAtomicFailure(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1146,7 +1146,7 @@ func TestL2KeystoneInsertMultipleAtomicFailure(t *testing.T) {
 }
 
 func TestL2KeystoneInsertDuplicateOK(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1194,7 +1194,7 @@ func TestL2KeystoneInsertDuplicateOK(t *testing.T) {
 }
 
 func TestPopBasisInsertNilMerklePath(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1239,7 +1239,7 @@ func TestPopBasisInsertNilMerklePath(t *testing.T) {
 }
 
 func TestPopBasisInsertNotNilMerklePath(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1285,7 +1285,7 @@ func TestPopBasisInsertNotNilMerklePath(t *testing.T) {
 }
 
 func TestPopBasisInsertNilMerklePathFromPopM(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1330,7 +1330,7 @@ func TestPopBasisInsertNilMerklePathFromPopM(t *testing.T) {
 }
 
 func TestPopBasisUpdateNoneExist(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1374,7 +1374,7 @@ func TestPopBasisUpdateNoneExist(t *testing.T) {
 }
 
 func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1487,7 +1487,7 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 }
 
 func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1586,7 +1586,7 @@ func TestPublications(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := defaultTestContext()
+			ctx, cancel := defaultTestContext(t)
 			defer cancel()
 
 			db, sdb, cleanup := createTestDB(ctx, t)
@@ -1632,7 +1632,7 @@ func TestPublications(t *testing.T) {
 }
 
 func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1675,7 +1675,7 @@ func TestL2BtcFinalitiesByL2Keystone(t *testing.T) {
 }
 
 func TestL2BtcFinalitiesByL2KeystoneWithCutoff(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1719,7 +1719,7 @@ func TestL2BtcFinalitiesByL2KeystoneWithCutoffReverseMining(t *testing.T) {
 	// if a newer keystone gets mined before an older
 	// one, take that into account with effective height
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1760,7 +1760,7 @@ func TestL2BtcFinalitiesByL2KeystoneWithCutoffReverseMining(t *testing.T) {
 }
 
 func TestL2BtcFinalitiesByL2KeystoneNotPublishedHeight(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1808,7 +1808,7 @@ type BtcTransactionBroadcastRequest struct {
 }
 
 func TestBtcTransactionBroadcastRequestInsert(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1861,7 +1861,7 @@ func TestBtcTransactionBroadcastRequestInsert(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestGetNext(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1890,7 +1890,7 @@ func TestBtcTransactionBroadcastRequestGetNext(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestGetNextMultiple(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1945,7 +1945,7 @@ func TestBtcTransactionBroadcastRequestGetNextMultiple(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestGetNextBefore10Minutes(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -1985,7 +1985,7 @@ func TestBtcTransactionBroadcastRequestGetNextBefore10Minutes(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestGetNextRetry(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -2028,7 +2028,7 @@ func TestBtcTransactionBroadcastRequestGetNextRetry(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestGetNextAfter2Hours(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -2062,7 +2062,7 @@ func TestBtcTransactionBroadcastRequestGetNextAfter2Hours(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestGetNextAlreadyBroadcast(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -2096,7 +2096,7 @@ func TestBtcTransactionBroadcastRequestGetNextAlreadyBroadcast(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -2130,7 +2130,7 @@ func TestBtcTransactionBroadcastRequestConfirmBroadcast(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)
@@ -2168,7 +2168,7 @@ func TestBtcTransactionBroadcastRequestTrimTooNew(t *testing.T) {
 }
 
 func TestBtcTransactionBroadcastRequestTrim(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	db, sdb, cleanup := createTestDB(ctx, t)

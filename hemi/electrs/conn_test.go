@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -23,7 +23,7 @@ import (
 )
 
 func TestClientConn(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	server := createMockServer(t)
@@ -94,7 +94,7 @@ func TestWriteRequest(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			if err := writeRequest(context.Background(), &buf, tt.req); err != nil {
+			if err := writeRequest(t.Context(), &buf, tt.req); err != nil {
 				t.Errorf("writeRequest() err = %v", err)
 			}
 
@@ -143,7 +143,7 @@ func TestReadResponse(t *testing.T) {
 			buf := bytes.NewBuffer(b)
 			_ = buf.WriteByte('\n')
 
-			res, err := readResponse(context.Background(), buf, tt.reqID)
+			res, err := readResponse(t.Context(), buf, tt.reqID)
 			switch {
 			case (err != nil) != tt.wantErr:
 				t.Errorf("readResponse() err = %v, want err %v",
@@ -177,7 +177,7 @@ func TestClose(t *testing.T) {
 	c := newClientConn(conn, nil, nil)
 
 	// Ping the server.
-	if err := c.ping(context.Background()); err != nil {
+	if err := c.ping(t.Context()); err != nil {
 		t.Errorf("failed to ping server: %v", err)
 	}
 

@@ -23,7 +23,7 @@ import (
 )
 
 func TestMD(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	home := t.TempDir()
@@ -204,7 +204,7 @@ func TestKssEncoding(t *testing.T) {
 }
 
 func TestKeystoneUpdate(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	kssList := []hemi.L2Keystone{
@@ -400,7 +400,7 @@ func newKeystone(blockhash *chainhash.Hash, l1, l2 uint32) (*chainhash.Hash, tbc
 }
 
 func TestKeystoneDBWindUnwind(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	home := t.TempDir()
@@ -468,7 +468,7 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 }
 
 func TestKeystoneDBCache(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.TODO())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	home := t.TempDir()

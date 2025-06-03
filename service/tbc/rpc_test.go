@@ -74,7 +74,7 @@ func slice2Header(header []byte) (*wire.BlockHeader, error) {
 func TestBlockHeadersByHeightRaw(t *testing.T) {
 	skipIfNoDocker(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
@@ -144,7 +144,7 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 func TestBlockHeadersByHeight(t *testing.T) {
 	skipIfNoDocker(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
@@ -208,7 +208,7 @@ func TestBlockHeadersByHeight(t *testing.T) {
 func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 	skipIfNoDocker(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
@@ -266,7 +266,7 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 func TestBlockHeaderBestRaw(t *testing.T) {
 	skipIfNoDocker(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 50, "")
@@ -334,7 +334,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 func TestBtcBlockHeaderBest(t *testing.T) {
 	skipIfNoDocker(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 100, "")
@@ -477,7 +477,7 @@ func TestBalanceByAddress(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 			defer cancel()
 
 			initialBlocks := 0
@@ -699,7 +699,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 			defer cancel()
 
 			var bitcoindContainer testcontainers.Container
@@ -911,7 +911,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 			defer cancel()
 
 			var bitcoindContainer testcontainers.Container
@@ -1008,7 +1008,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 func TestTxByIdRaw(t *testing.T) {
 	skipIfNoDocker(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
@@ -1091,7 +1091,7 @@ func TestTxByIdRaw(t *testing.T) {
 
 func TestTxByIdRawInvalid(t *testing.T) {
 	skipIfNoDocker(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
 		privateKey,
@@ -1165,7 +1165,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 
 func TestTxByIdRawNotFound(t *testing.T) {
 	skipIfNoDocker(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 0, "")
 	defer func() {
@@ -1254,7 +1254,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 
 func TestTxById(t *testing.T) {
 	skipIfNoDocker(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
@@ -1334,7 +1334,7 @@ func TestTxById(t *testing.T) {
 
 func TestTxByIdInvalid(t *testing.T) {
 	skipIfNoDocker(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 	_, _, address, err := bitcoin.KeysAndAddressFromHexString(
 		privateKey,
@@ -1408,7 +1408,7 @@ func TestTxByIdInvalid(t *testing.T) {
 
 func TestTxByIdNotFound(t *testing.T) {
 	skipIfNoDocker(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 	bitcoindContainer, mappedPeerPort := createBitcoindWithInitialBlocks(ctx, t, 0, "")
 	defer func() {
@@ -1546,7 +1546,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 			defer cancel()
 			port, err := nat.NewPort("tcp", "9999")
 			if err != nil {

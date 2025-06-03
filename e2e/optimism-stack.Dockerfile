@@ -2,7 +2,7 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-FROM golang:1.23.4-bookworm@sha256:ef30001eeadd12890c7737c26f3be5b3a8479ccdcdc553b999c84879875a27ce AS build_1
+FROM golang:1.24.3-bookworm@sha256:29d97266c1d341b7424e2f5085440b74654ae0b61ecdba206bc12d6264844e21 AS build_1
 
 WORKDIR /git
 
@@ -13,7 +13,7 @@ RUN git checkout e79d9922c9acaa5c46597b1ffe0259597aa9499d
 
 RUN go run build/ci.go install -static ./cmd/geth
 
-FROM golang:1.24.2-bookworm@sha256:00eccd446e023d3cd9566c25a6e6a02b90db3e1e0bbe26a48fc29cd96e800901 AS build_2
+FROM golang:1.24.3-bookworm@sha256:29d97266c1d341b7424e2f5085440b74654ae0b61ecdba206bc12d6264844e21 AS build_2
 
 # store the latest geth here, build with go 1.23
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
