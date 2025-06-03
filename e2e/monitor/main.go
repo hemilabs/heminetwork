@@ -142,7 +142,7 @@ func monitorBitcoinBlocksCreated(ctx context.Context, s *state, mtx *sync.Mutex)
 		}
 
 		if ctx.Err() != nil {
-			return 
+			return
 		}
 
 		count, err := c.GetBlockCount()
