@@ -38,7 +38,7 @@ import (
 const (
 	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 	retries            = 10
-	btcAddress         = "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG"
+	btcAddress         = "mv5gj33YaFviPFDmkkUpb31C4uxoB4ZZ5D"
 )
 
 var (
@@ -277,7 +277,7 @@ func hvmBtcBalance(t *testing.T, ctx context.Context, l2Client *ethclient.Client
 
 	waitForTxReceipt(t, ctx, l2Client, tx)
 
-	balance, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinAddressBalance(nil, "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG")
+	balance, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinAddressBalance(nil, btcAddress)
 	if err != nil {
 		t.Fatal(err)
 	}

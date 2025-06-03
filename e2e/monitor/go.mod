@@ -1,14 +1,14 @@
 module github.com/hemilabs/heminetwork/e2e/monitor
 
-go 1.23
+go 1.24.2
 
 toolchain go1.24.3
 
 replace github.com/hemilabs/heminetwork => ../../
 
-replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250425175530-97b573b6339a
+replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250528162153-94b9f49ebe16
 
-replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250423005627-59242a8f35fc
+replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250528153428-6f8b8c7f469f
 
 require (
 	github.com/btcsuite/btcd v0.24.2
@@ -17,7 +17,7 @@ require (
 	github.com/ethereum-optimism/optimism v0.0.0-00010101000000-000000000000
 	github.com/ethereum/go-ethereum v1.15.9
 	github.com/gosuri/uilive v0.0.4
-	github.com/hemilabs/heminetwork v1.0.0
+	github.com/hemilabs/heminetwork v1.1.1-0.20250528115641-6941c7f47b6d
 	github.com/jedib0t/go-pretty/v6 v6.5.8
 )
 
@@ -26,6 +26,7 @@ require (
 	github.com/DataDog/zstd v1.5.6-0.20230824185856-869dae002e5e // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
+	github.com/aead/siphash v1.0.1 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.20.0 // indirect
@@ -51,7 +52,7 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/ebitengine/purego v0.8.3 // indirect
+	github.com/ebitengine/purego v0.8.2 // indirect
 	github.com/ethereum-optimism/go-ethereum-hdwallet v0.1.3 // indirect
 	github.com/ethereum/c-kzg-4844 v1.0.0 // indirect
 	github.com/ethereum/go-verkle v0.2.2 // indirect
@@ -68,12 +69,13 @@ require (
 	github.com/hashicorp/go-bexpr v0.1.11 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
-	github.com/holiman/billy v0.0.0-20240216141850-2abb0c79d3c4 // indirect
+	github.com/holiman/billy v0.0.0-20250108194907-5352da567d3e // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/juju/loggo v1.0.0 // indirect
+	github.com/kkdai/bstream v0.0.0-20161212061736-f391b8402d23 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
