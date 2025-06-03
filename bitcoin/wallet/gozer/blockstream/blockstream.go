@@ -84,8 +84,14 @@ func (bs *blockstream) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainh
 	}
 	hexTx := hex.EncodeToString(buf.Bytes())
 
-	resp, err := http.Post(u, "text/plain",
+	client := &http.Client{}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u,
 		strings.NewReader(hexTx))
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
