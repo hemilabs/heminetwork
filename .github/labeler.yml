@@ -45,12 +45,6 @@
       - any-glob-to-any-file:
           - "cmd/hemictl/**"
 
-# @hemilabs/pop-miner NPM package
-'area: @hemilabs/pop-miner':
-  - changed-files:
-      - any-glob-to-any-file:
-          - "web/packages/pop-miner/**"
-
 # Local node
 'area: localnode':
   - changed-files:
@@ -60,12 +54,6 @@
 'area: make':
   - changed-files:
       - any-glob-to-any-file: "**/Makefile"
-
-# WebAssembly PoP Miner
-'area: popm/wasm':
-  - changed-files:
-      - any-glob-to-any-file:
-          - "web/popminer/**"
 
 # PoP Miner
 'area: popm':

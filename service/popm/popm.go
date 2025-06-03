@@ -30,6 +30,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/heminetwork/api/auth"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
@@ -37,6 +38,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
 	"github.com/hemilabs/heminetwork/version"
 )
@@ -136,9 +138,6 @@ type Miner struct {
 	mineNowCh chan struct{}
 
 	l2Keystones map[string]L2KeystoneProcessingContainer
-
-	eventHandlersMtx sync.RWMutex
-	eventHandlers    []EventHandler
 }
 
 func NewMiner(cfg *Config) (*Miner, error) {
@@ -345,8 +344,6 @@ func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.Bitcoi
 func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 	log.Infof("Mining an L2 keystone at height %d...", ks.L2BlockNumber)
 
-	go m.dispatchEvent(EventTypeMineKeystone, EventMineKeystone{Keystone: ks})
-
 	btcHeight, err := m.bitcoinHeight(ctx)
 	if err != nil {
 		return fmt.Errorf("get Bitcoin height: %w", err)
@@ -418,9 +415,6 @@ func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
 		"Successfully broadcast PoP transaction to Bitcoin %s with TX hash %v",
 		m.btcChainParams.Name, txHash,
 	)
-
-	go m.dispatchEvent(EventTypeTransactionBroadcast,
-		EventTransactionBroadcast{Keystone: ks, TxHash: txHash.String()})
 
 	return nil
 }
@@ -1030,4 +1024,31 @@ func (m *Miner) l2KeystonesForProcessing() []hemi.L2Keystone {
 	})
 
 	return copies
+}
+
+func (m *Miner) handlePrometheus(ctx context.Context) error {
+	d, err := deucalion.New(&deucalion.Config{
+		ListenAddress: m.cfg.PrometheusListenAddress,
+	})
+	if err != nil {
+		return fmt.Errorf("create server: %w", err)
+	}
+	cs := []prometheus.Collector{
+		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+			Subsystem: promSubsystem,
+			Name:      "running",
+			Help:      "Is pop miner service running.",
+		}, m.promRunning),
+	}
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		if err := d.Run(ctx, cs, nil); !errors.Is(err, context.Canceled) {
+			log.Errorf("prometheus terminated with error: %v", err)
+			return
+		}
+		log.Infof("prometheus clean shutdown")
+	}()
+
+	return nil
 }
