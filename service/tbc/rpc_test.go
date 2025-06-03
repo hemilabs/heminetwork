@@ -1598,7 +1598,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 			}
 
 			if err := tbcapi.Write(ctx, tws.conn, "someid", tbcapi.BlocksByL2AbrevHashesRequest{
-				L2KeystoneAbrevHashes: []btcchainhash.Hash{*tti.l2KeystoneAbrevHash},
+				L2KeystoneAbrevHashes: []chainhash.Hash{*tti.l2KeystoneAbrevHash},
 			}); err != nil {
 				t.Fatal(err)
 			}

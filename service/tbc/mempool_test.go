@@ -22,7 +22,7 @@ import (
 )
 
 func TestMempoolFees(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
 	mp, err := MempoolNew()
@@ -48,7 +48,9 @@ func TestMempoolFees(t *testing.T) {
 				inValue:  int64(3000 + k*500),
 				outValue: 1000,
 			}
-			mp.TxInsert(ctx, &mptx)
+			if err = mp.TxInsert(ctx, &mptx); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -61,7 +63,7 @@ func TestMempoolFees(t *testing.T) {
 }
 
 func TestMempoolMassReaping(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	mp, err := MempoolNew()
@@ -90,7 +92,9 @@ func TestMempoolMassReaping(t *testing.T) {
 				id:      *ch,
 				expires: expire.Add(time.Duration(k) * time.Second),
 			}
-			mp.TxInsert(ctx, &mptx)
+			if err = mp.TxInsert(ctx, &mptx); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -146,7 +150,7 @@ func TestMempoolReaping(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 			defer cancel()
 
 			mp, err := MempoolNew()
@@ -159,7 +163,9 @@ func TestMempoolReaping(t *testing.T) {
 
 			txsToInsert := createTxs(tti.txNum, curTime, tti.txExpireOffset)
 			for _, tx := range txsToInsert {
-				mp.TxInsert(ctx, &tx)
+				if err = mp.TxInsert(ctx, &tx); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			size, _ := mp.stats(ctx)
@@ -214,7 +220,7 @@ func TestMempoolRemove(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 			defer cancel()
 
 			mp, err := MempoolNew()
@@ -232,7 +238,9 @@ func TestMempoolRemove(t *testing.T) {
 					id:      *ch,
 					expires: time.Now().Add(1 * time.Hour),
 				}
-				mp.TxInsert(ctx, &mptx)
+				if err = mp.TxInsert(ctx, &mptx); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			remTxs := make([]chainhash.Hash, 0, len(tti.toRemove))
@@ -270,7 +278,7 @@ func TestMempoolRemove(t *testing.T) {
 }
 
 func TestMempoolFiltering(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
 	mp, err := MempoolNew()
@@ -301,7 +309,9 @@ func TestMempoolFiltering(t *testing.T) {
 				expires: time.Now().Add(1 * time.Hour),
 				txins:   map[wire.OutPoint]struct{}{*opp: {}},
 			}
-			mp.TxInsert(ctx, &mptx)
+			if err = mp.TxInsert(ctx, &mptx); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
@@ -355,7 +365,9 @@ func BenchmarkMempoolFilter(b *testing.B) {
 					opp := wire.NewOutPoint(utxo.ChainHash(), utxo.OutputIndex())
 					mptx.txins[*opp] = struct{}{}
 				}
-				mp.TxInsert(b.Context(), &mptx)
+				if err = mp.TxInsert(b.Context(), &mptx); err != nil {
+					b.Fatal(err)
+				}
 			}
 
 			// Shuffle created utxos

@@ -425,7 +425,6 @@ func (s *Server) promPoll(ctx context.Context) error {
 			log.Infof("FIXME PROMETHEUS POLL")
 			s.mtx.RUnlock()
 		}
-
 	}
 }
 

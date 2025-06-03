@@ -44,15 +44,21 @@ func mockHttpServer() *httptest.Server {
 				break
 			}
 			w.WriteHeader(http.StatusOK)
-			w.Write(resp)
+			if _, err = w.Write(resp); err != nil {
+				panic(err)
+			}
 		case r.URL.Path == "/fee-estimates":
 			response := []byte(`{"1":1.0,"2":1.0,"3":1.0,"4":1.0,"5":1.0,"6":1.0}`)
 			w.WriteHeader(http.StatusOK)
-			w.Write(response)
+			if _, err := w.Write(response); err != nil {
+				panic(err)
+			}
 		case r.URL.Path == "/blocks/tip/height":
 			response := []byte(`1000`)
 			w.WriteHeader(http.StatusOK)
-			w.Write(response)
+			if _, err := w.Write(response); err != nil {
+				panic(err)
+			}
 		default:
 			http.NotFound(w, r)
 		}
@@ -68,7 +74,7 @@ func TestBlockstreamGozer(t *testing.T) {
 		t.Fatalf("Failed to decode address: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	// use mock http server rather than blockstream api
