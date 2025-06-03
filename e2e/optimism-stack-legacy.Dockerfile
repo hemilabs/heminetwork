@@ -1,8 +1,8 @@
-# Copyright (c) 2024 Hemi Labs, Inc.
+# Copyright (c) 2024-2025 Hemi Labs, Inc.
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-FROM golang:1.23.4-bookworm@sha256:ef30001eeadd12890c7737c26f3be5b3a8479ccdcdc553b999c84879875a27ce AS build_1
+FROM golang:1.24.3-bookworm@sha256:29d97266c1d341b7424e2f5085440b74654ae0b61ecdba206bc12d6264844e21 AS build_1
 
 WORKDIR /git
 
@@ -17,7 +17,7 @@ RUN make
 
 RUN go build -o /tmp ./...
 
-FROM golang:1.22.6-bookworm@sha256:f020456572fc292e9627b3fb435c6de5dfb8020fbcef1fd7b65dd092c0ac56bb AS build_2
+FROM golang:1.24.3-bookworm@sha256:29d97266c1d341b7424e2f5085440b74654ae0b61ecdba206bc12d6264844e21AS build_2
 
 # store the latest geth here, build with go 1.23
 COPY --from=build_1 /tmp/geth /bin/geth

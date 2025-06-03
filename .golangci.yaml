@@ -1,7 +1,6 @@
 version: "2"
 run:
   tests: true
-  go: "1.23"
 
 issues:
   max-issues-per-linter: 0

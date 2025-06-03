@@ -134,7 +134,7 @@ func TestDbUpgradePipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -285,7 +285,7 @@ func TestDbUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -461,7 +461,7 @@ func TestKeystonesInBlock(t *testing.T) {
 func TestServerBlockHeadersBest(t *testing.T) {
 	skipIfNoDocker(t)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	blocks := uint64(100)
@@ -948,7 +948,7 @@ func TestForksWithGen(t *testing.T) {
 
 	for _, tt := range testTable {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 			defer cancel()
 
 			// generate 200 to btcAddress
@@ -1217,7 +1217,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 }
 
 func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	defer cancel()
 
 	t.Logf("connecting to %s", url)
@@ -1596,7 +1596,7 @@ func getHeaderHashesRange(start int, end int, headerStrs []string, hashStrs []st
 // This test also tests to make sure upstreamStateIds are stored correctly.
 // XXX TODO: Refactor this to use convenience methods
 func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	tbc := createTbcServerExternalHeaderMode(ctx, t)
@@ -1797,7 +1797,7 @@ func TestExternalHeaderModeSimpleSingleBlockChunks(t *testing.T) {
 // at a time until only genesis remains.
 // XXX TODO: Refactor this to use convenience methods
 func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	tbc := createTbcServerExternalHeaderMode(ctx, t)
@@ -1990,7 +1990,7 @@ func TestExternalHeaderModeSimpleThreeBlockChunks(t *testing.T) {
 // Finally, this test adds blocks [3-8] again and ensures block 8
 // is correctly set as the canonical tip.
 func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	// XXX all t.Error in here should be t.Fatal. There is no point in

@@ -1138,7 +1138,7 @@ func (s *Server) hasAllBlocks(ctx context.Context, m map[int32][]*block) (bool, 
 }
 
 func TestFork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -1406,7 +1406,7 @@ func TestWork(t *testing.T) {
 }
 
 func TestIndexNoFork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -1594,7 +1594,7 @@ func TestIndexNoFork(t *testing.T) {
 }
 
 func TestKeystoneIndexNoFork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -1864,7 +1864,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 }
 
 func TestIndexFork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -2183,7 +2183,7 @@ func TestIndexFork(t *testing.T) {
 }
 
 func TestKeystoneIndexFork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -2694,7 +2694,7 @@ func TestTransactions(t *testing.T) {
 }
 
 func TestForkCanonicity(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
 	defer func() {
 		cancel()
 	}()

@@ -108,7 +108,7 @@ func init() {
 }
 
 func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	defer cancel()
 
 	t.Logf("connecting to %s", url)
@@ -606,8 +606,8 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 	}
 }
 
-func defaultTestContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 30*time.Second)
+func defaultTestContext(t *testing.T) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(t.Context(), 30*time.Second)
 }
 
 // assertPing is a short helper method to assert reading a ping after connecting
@@ -714,14 +714,14 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 }
 
 func TestBFGPublicDisabled(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, _, bfgPublicWsUrl := createBfgServerWithAccess(ctx, t, pgUri, "", 1, "", true)
@@ -752,14 +752,14 @@ func TestBFGPublicDisabled(t *testing.T) {
 // 2. Send aforementioned L2Keystone to BSS via websocket
 // 3. Query database to ensure that the L2Keystone was saved
 func TestNewL2Keystone(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
@@ -837,14 +837,14 @@ func TestNewL2Keystone(t *testing.T) {
 // 3. Query BFG via http json rpc for latest keystones
 // 4. Assert that the saved keystones are returned ordered by L2BlockNumber desc
 func TestL2Keystone(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
@@ -950,14 +950,14 @@ func TestL2Keystone(t *testing.T) {
 }
 
 func TestPublicPing(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
@@ -976,14 +976,14 @@ func TestPublicPing(t *testing.T) {
 }
 
 func TestBitcoinBalance(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -1140,14 +1140,14 @@ func TestBFGPublicErrorCases(t *testing.T) {
 			if tti.skip {
 				t.Skip()
 			}
-			db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+			db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 			defer func() {
 				db.Close()
 				sdb.Close()
 				cleanup()
 			}()
 
-			ctx, cancel := defaultTestContext()
+			ctx, cancel := defaultTestContext(t)
 			defer cancel()
 
 			electrsAddr := ""
@@ -1237,14 +1237,14 @@ func TestBFGPublicErrorCases(t *testing.T) {
 }
 
 func TestBitcoinInfo(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -1321,14 +1321,14 @@ func TestBitcoinInfo(t *testing.T) {
 }
 
 func TestBitcoinUTXOs(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -1412,14 +1412,14 @@ func TestBitcoinUTXOs(t *testing.T) {
 // 2. call BitcoinBroadcast RPC on BFG
 // 3. ensure that a pop_basis was inserted with the expected values
 func TestBitcoinBroadcast(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -1542,14 +1542,14 @@ func TestBitcoinBroadcast(t *testing.T) {
 // 5 assert error received
 func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	t.Skip()
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -1705,14 +1705,14 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 // 2 ensure that btc_block is inserted with correct values.  this is checked on
 // an internal timer, so give this a timeout
 func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -1821,14 +1821,14 @@ loop:
 // 3 query database for newly created pop_basis, this happens on a timer
 // 4 ensure pop_basis was inserted and filled out with correct fields
 func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -1962,14 +1962,14 @@ loop:
 // 4 wait for full pop_basis to be in database
 // 5 assert the pop_basis fields are correct
 func TestBitcoinBroadcastThenUpdate(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -2120,14 +2120,14 @@ loop:
 // 2 query for the pop payouts by calling BSS.popPayouts
 // 3 ensure the correct values
 func TestPopPayouts(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	privateKey := secp256k1.PrivKeyFromBytes([]byte{9, 8, 7})
@@ -2337,14 +2337,14 @@ func TestPopPayouts(t *testing.T) {
 }
 
 func TestPopPayoutsMultiplePages(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	includedL2Keystone := hemi.L2Keystone{
@@ -2520,14 +2520,14 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 }
 
 func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
@@ -2624,14 +2624,14 @@ func updateFinalityForBtcBlock(t *testing.T, ctx context.Context, db bfgd.Databa
 }
 
 func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
@@ -2726,14 +2726,14 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 999)
@@ -2827,14 +2827,14 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 }
 
 func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
@@ -2916,14 +2916,14 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
@@ -3017,14 +3017,14 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
 
@@ -3123,14 +3123,14 @@ func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
@@ -3233,14 +3233,14 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 // 1. connect client
 // 2. wait for notification
 func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -3303,14 +3303,14 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 // 1. connect client
 // 2. wait for notification
 func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -3367,14 +3367,14 @@ func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
 }
 
 func TestNotifyOnL2KeystonesBFGClients(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
@@ -3429,21 +3429,21 @@ func TestNotifyOnL2KeystonesBFGClients(t *testing.T) {
 }
 
 func TestNotifyOnL2KeystonesBFGClientsViaOtherBFG(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	otherDb, otherPgUri, otherSdb, otherCleanup := createTestDB(context.Background(), t)
+	otherDb, otherPgUri, otherSdb, otherCleanup := createTestDB(t.Context(), t)
 	defer func() {
 		otherDb.Close()
 		otherSdb.Close()
 		otherCleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
@@ -3505,21 +3505,21 @@ func TestNotifyOnL2KeystonesBFGClientsViaOtherBFG(t *testing.T) {
 func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 	t.Parallel()
 
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	otherDb, otherPgUri, otherSdb, otherCleanup := createTestDB(context.Background(), t)
+	otherDb, otherPgUri, otherSdb, otherCleanup := createTestDB(t.Context(), t)
 	defer func() {
 		otherDb.Close()
 		otherSdb.Close()
 		otherCleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
@@ -3658,14 +3658,14 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 // 1. connect client
 // 2. wait for notification
 func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -3728,14 +3728,14 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 // 1. connect client
 // 2. wait for notification
 func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -3793,14 +3793,14 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 }
 
 func TestNotifyMultipleBFGClients(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{
@@ -3864,14 +3864,14 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 }
 
 func TestNotifyMultipleBSSClients(t *testing.T) {
-	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
+	db, pgUri, sdb, cleanup := createTestDB(t.Context(), t)
 	defer func() {
 		db.Close()
 		sdb.Close()
 		cleanup()
 	}()
 
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	l2Keystone := hemi.L2Keystone{

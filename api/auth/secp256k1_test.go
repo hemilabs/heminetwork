@@ -5,7 +5,6 @@
 package auth
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
@@ -101,7 +100,7 @@ func server(t *testing.T, want *int64) *httptest.Server {
 			t.Fatal(err)
 		}
 		t.Logf("server handshake starting")
-		ctx := context.TODO()
+		ctx := t.Context()
 		err = serverAuth.HandshakeServer(ctx, pconn)
 		if err != nil {
 			t.Fatalf("Failed to handshake connection for %v: %v",
@@ -157,7 +156,7 @@ func TestProtocolHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.TODO()
+	ctx := t.Context()
 	t.Logf("connect %v", clientURI)
 	err = conn.Connect(ctx)
 	if err != nil {
