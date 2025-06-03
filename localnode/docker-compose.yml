@@ -277,11 +277,11 @@ services:
       - "--p2p.ban.threshold=-10000000000"
       - "--log.level=info"
       - "--syncmode=${OPSYNCMODE:-execution-layer}"
-      - "--override.pectrablobschedule=1748955601"
-      - "--override.isthmus=1748955601"
-      - "--override.holocene=1748955601"
-      - "--override.granite=1748955601"
-      - "--override.fjord=1748955601"
+      - "--override.pectrablobschedule=1748963425"
+      - "--override.isthmus=1748963425"
+      - "--override.holocene=1748963425"
+      - "--override.granite=1748963425"
+      - "--override.fjord=1748963425"
     deploy:
       restart_policy:
         condition: "any"

@@ -64,10 +64,10 @@ testnet)
 	--override.canyon=1715865630 \\
 	--override.cancun=1715865630 \\
 	--override.hvm0=1733930401 \\
- 	--override.isthmus=1748955601 \\
- 	--override.holocene=1748955601 \\
- 	--override.granite=1748955601 \\
- 	--override.fjord=1748955601 \\"
+ 	--override.isthmus=1748963425 \\
+ 	--override.holocene=1748963425 \\
+ 	--override.granite=1748963425 \\
+ 	--override.fjord=1748963425 \\"
 	HVMGENESIS=3522419
 	HVMGENESISHEADER="00c05732cdc3e0d654efe86351f0cbfc6c79325e9f9fa7886a39b552f5c4d90700000000dae4079485e26f1f77425b84a13760038a352d07a0fef92b5188bd04c2999162afca58679121011962b9d0a5"
 	BOOTNODES="--bootnodes=enode://545da2b44f197091c0ca9283c9c1dd5ffc8562a3cd4a37709a7cd83ca725ecacdb4571dacd916a1455e9dd9f2260e5bc5dddf9fd40ba4601a71b401adbaeec21@34.147.95.117:30303"
