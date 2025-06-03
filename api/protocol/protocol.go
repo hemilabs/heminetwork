@@ -374,9 +374,10 @@ func (ac *Conn) Connect(ctx context.Context) error {
 
 	// XXX Dial does not return a parsable error. This is an issue in the
 	// package.
-	// Note that we cannot have DialOptions on a WASM websocket
 	log.Tracef("Connect: dialing %v", ac.serverURL)
-	conn, _, err := websocket.Dial(connectCtx, ac.serverURL, newDialOptions(ac.opts))
+	conn, _, err := websocket.Dial(connectCtx, ac.serverURL, &websocket.DialOptions{
+		HTTPHeader: ac.opts.Headers,
+	})
 	if err != nil {
 		return fmt.Errorf("dial server: %w", err)
 	}
