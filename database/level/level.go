@@ -116,7 +116,7 @@ func (l *Database) RawDB() RawPool {
 	return l.rawPool
 }
 
-func (l *Database) openDB(name string, options *opt.Options) error {
+func (l *Database) openDB(name string) error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 

@@ -278,7 +278,7 @@ package e2e_test
 // 	}
 // }
 
-// func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string, publicDisabled bool) (*bfg.Server, string, string, string) {
+// func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string, publicDisabled bool) (*bfg.Server, string, string)
 // 	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 // 	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
 
@@ -329,11 +329,11 @@ package e2e_test
 // 	return bfgServer, bfgPrivateListenAddress, bfgWsPrivateUrl, bfgWsPublicUrl
 // }
 
-// func createBfgServerGeneric(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string, string) {
+// func createBfgServerGeneric(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string)
 // 	return createBfgServerWithAccess(ctx, t, pgUri, electrsAddr, btcStartHeight, otherBfgUrl, false)
 // }
 
-// func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64) (*bfg.Server, string, string, string) {
+// func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64) (*bfg.Server, string, string)
 // 	return createBfgServerGeneric(ctx, t, pgUri, electrsAddr, btcStartHeight, "")
 // }
 

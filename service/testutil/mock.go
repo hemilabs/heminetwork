@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -172,11 +173,16 @@ func (f *mockHandler) Stop() {
 }
 
 // Fully shutdown the test server
-func (f *mockHandler) Shutdown() error {
+func (f *mockHandler) Shutdown() {
 	log.Tracef("%v: server shutting down", f.name)
 	f.Stop()
 	f.server.Close()
-	return f.CloseConnections()
+	if err := f.CloseConnections(); err != nil {
+		if !errors.Is(err, net.ErrClosed) {
+			// should never happen
+			panic(err)
+		}
+	}
 }
 
 // Retrieve the URL from the test server
