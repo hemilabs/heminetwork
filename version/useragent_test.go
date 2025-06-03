@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -42,17 +42,17 @@ func TestCreateUserAgent(t *testing.T) {
 		},
 		{
 			name:     "empty comments with one test comment",
-			product:  "bssd",
+			product:  "popmd",
 			version:  "1.0.0",
 			comments: []string{"", "test", ""},
-			want:     "bssd/1.0.0 (test)",
+			want:     "popmd/1.0.0 (test)",
 		},
 		{
 			name:     "whitespace comments with one test comment",
-			product:  "bssd",
+			product:  "popmd",
 			version:  "1.0.0",
 			comments: []string{" ", "test", " "},
-			want:     "bssd/1.0.0 (test)",
+			want:     "popmd/1.0.0 (test)",
 		},
 		{
 			name:     "realistic",

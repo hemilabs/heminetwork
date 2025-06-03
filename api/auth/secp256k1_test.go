@@ -18,7 +18,7 @@ import (
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 
-	"github.com/hemilabs/heminetwork/api/bssapi"
+	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 )
 
@@ -111,19 +111,19 @@ func server(t *testing.T, want *int64) *httptest.Server {
 			serverAuth.RemotePublicKey().SerializeCompressed())
 
 		// Handshake complete, do required protocol ping
-		err = bssapi.Write(ctx, pconn, "requiredpingid", &bssapi.PingRequest{})
+		err = bfgapi.Write(ctx, pconn, "requiredpingid", &bfgapi.PingRequest{})
 		if err != nil {
 			t.Fatalf("write required ping: %v", err)
 		}
 
 		// Do a ping pong now
-		_, _, payload, err := bssapi.Read(ctx, pconn)
+		_, _, payload, err := bfgapi.Read(ctx, pconn)
 		if err != nil {
 			t.Fatalf("read ping: %v", err)
 		}
 		t.Logf("server responding to ping %v", spew.Sdump(payload))
-		*want = payload.(*bssapi.PingRequest).Timestamp
-		err = bssapi.Write(ctx, pconn, "pingid", &bssapi.PingResponse{
+		*want = payload.(*bfgapi.PingRequest).Timestamp
+		err = bfgapi.Write(ctx, pconn, "pingid", &bfgapi.PingResponse{
 			Timestamp: *want,
 		})
 		if err != nil {
@@ -166,18 +166,18 @@ func TestProtocolHandshake(t *testing.T) {
 	t.Logf("connected %v", clientURI)
 
 	t.Logf("client writing ping")
-	err = bssapi.Write(ctx, conn, "ping-id", bssapi.PingRequest{
+	err = bfgapi.Write(ctx, conn, "ping-id", bfgapi.PingRequest{
 		Timestamp: time.Now().Unix(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, payload, err := bssapi.Read(ctx, conn)
+	_, _, payload, err := bfgapi.Read(ctx, conn)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Logf("client read ping %v", spew.Sdump(payload))
-	got := payload.(*bssapi.PingResponse).Timestamp
+	got := payload.(*bfgapi.PingResponse).Timestamp
 	if want != got {
 		t.Fatalf("unexpected ping response want %v got %v", want, got)
 	}

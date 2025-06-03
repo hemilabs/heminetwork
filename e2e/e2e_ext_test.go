@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/big"
 	mathrand "math/rand/v2"
 	"net"
 	"net/url"
@@ -41,24 +40,19 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/go-test/deep"
 	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/auth"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/database/bfgd"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
-	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/electrs"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/bfg"
-	"github.com/hemilabs/heminetwork/service/bss"
 )
 
 const (
@@ -82,11 +76,9 @@ var mockMerkleHashes = []string{
 
 var minerPrivateKeyBytes = []byte{1, 2, 3, 4, 5, 6, 7, 199} // XXX make this a real hardcoded key
 
-type bssWs struct { // XXX: use protocol.WSConn directly
-	conn *protocol.WSConn
+type bfgWs struct {
+	conn *protocol.WSConn // XXX: use protocol.WSConn directly
 }
-
-type bfgWs bssWs // XXX: use protocol.WSConn directly
 
 // Setup some private keys and authenticators
 var (
@@ -346,33 +338,6 @@ func createBfgServer(ctx context.Context, t *testing.T, pgUri string, electrsAdd
 // func createBfgServerConnectedToAnother(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string) (*bfg.Server, string, string)
 // 	return createBfgServerGeneric(ctx, t, pgUri, electrsAddr, btcStartHeight, otherBfgUrl)
 // }
-
-func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
-	bssListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
-
-	bssServer, err := bss.NewServer(&bss.Config{
-		BFGURL:        bfgWsurl,
-		ListenAddress: bssListenAddress,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	go func() {
-		err := bssServer.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			panic(err)
-		}
-	}()
-
-	bssWsurl := fmt.Sprintf("http://localhost%s%s", bssListenAddress, bssapi.RouteWebsocket)
-	err = EnsureCanConnect(t, bssWsurl, 5*time.Second)
-	if err != nil {
-		t.Fatalf("could not connect to %s: %s", bssWsurl, err.Error())
-	}
-
-	return bssServer, bssListenAddress, bssWsurl
-}
 
 func reverseAndEncodeEncodedHash(encodedHash string) string {
 	rev, err := hex.DecodeString(encodedHash)
@@ -746,7 +711,7 @@ func TestBFGPublicDisabled(t *testing.T) {
 	}
 }
 
-// TestNewL2Keystone sends an L2Keystone, via websocket, to BSS which proxies
+/*// TestNewL2Keystone sends an L2Keystone, via websocket, to BSS which proxies
 // it to BFG.  This test then ensures that L2Keystone was saved in the db
 // 1. Create a new L2Keystone
 // 2. Send aforementioned L2Keystone to BSS via websocket
@@ -764,15 +729,13 @@ func TestNewL2Keystone(t *testing.T) {
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1)
 
-	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
-
-	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
+	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	// 1
 	l2Keystone := hemi.L2Keystone{
@@ -828,7 +791,7 @@ func TestNewL2Keystone(t *testing.T) {
 	if len(diff) != 0 {
 		t.Fatalf("unexpected diff %s", diff)
 	}
-}
+}*/
 
 // TestL2Keystone tests getting the latest L2Keystones from the db
 // and ensuring the are ordered by L2BlockNumber
@@ -2111,7 +2074,7 @@ loop:
 	}
 }
 
-// TestPopPayouts ensures that when querying for pop payouts by L2Keystone,
+/*// TestPopPayouts ensures that when querying for pop payouts by L2Keystone,
 // we can filter out pop payouts not in that keystone and we can reduce
 // multiple pop txs by the same miner to a single pop payout
 // 1 create all of the pop txs via the pop_basis table, there will be (4) total,
@@ -2334,9 +2297,9 @@ func TestPopPayouts(t *testing.T) {
 	if len(diff) != 0 {
 		t.Fatalf("unexpected diff %s", diff)
 	}
-}
+}*/
 
-func TestPopPayoutsMultiplePages(t *testing.T) {
+/*func TestPopPayoutsMultiplePages(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {
 		db.Close()
@@ -2517,9 +2480,9 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	if diff := deep.Equal(addresses, receivedAddresses); len(diff) != 0 {
 		t.Fatalf("unexpected diff %v", diff)
 	}
-}
+}*/
 
-func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
+/*func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {
 		db.Close()
@@ -2610,7 +2573,7 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 	if len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
 	}
-}
+}*/
 
 func updateFinalityForBtcBlock(t *testing.T, ctx context.Context, db bfgd.Database, block *bfgd.BtcBlock, height uint32) {
 	// some tests don't care about a btc block hash, fill it out here so it doesn't error
@@ -2623,7 +2586,7 @@ func updateFinalityForBtcBlock(t *testing.T, ctx context.Context, db bfgd.Databa
 	}
 }
 
-func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
+/*func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {
 		db.Close()
@@ -2824,7 +2787,7 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 	if len(diff) > 0 {
 		t.Fatalf("unexpected diff %s", diff)
 	}
-}
+}*/
 
 func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
@@ -3652,7 +3615,7 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 	wg.Wait()
 }
 
-// TestNotifyOnNewBtcBlockBSSClients tests that upon getting a new btc block,
+/*// TestNotifyOnNewBtcBlockBSSClients tests that upon getting a new btc block,
 // in this case from (mock) electrs, that a new btc notification
 // will be sent to all clients connected to BSS
 // 1. connect client
@@ -3720,9 +3683,9 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 	if !found {
 		t.Fatalf("never received expected command: %s", bssapi.CmdBTCNewBlockNotification)
 	}
-}
+}*/
 
-// TestNotifyOnNewBtcFinalityBSSClients tests that upon getting a new btc block,
+/*// TestNotifyOnNewBtcFinalityBSSClients tests that upon getting a new btc block,
 // in this case from (mock) electrs, that a new finality notification
 // will be sent to all clients connected to BSS
 // 1. connect client
@@ -3790,7 +3753,7 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 	if !found {
 		t.Fatalf("never received expected command: %s", bssapi.CmdBTCFinalityNotification)
 	}
-}
+}*/
 
 func TestNotifyMultipleBFGClients(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
@@ -3863,7 +3826,7 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 	wg.Wait()
 }
 
-func TestNotifyMultipleBSSClients(t *testing.T) {
+/*func TestNotifyMultipleBSSClients(t *testing.T) {
 	db, pgUri, sdb, cleanup := createTestDB(context.Background(), t)
 	defer func() {
 		db.Close()
@@ -3933,7 +3896,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 	}
 
 	wg.Wait()
-}
+}*/
 
 func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count int, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {
 	header := make([]byte, 80)

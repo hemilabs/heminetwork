@@ -12,15 +12,6 @@
           - "docker/bfgd/**"
           - "service/bfg/**"
 
-# Bitcoin Secure Sequencer (BSS)
-'area: bss':
-  - changed-files:
-      - any-glob-to-any-file:
-          - "api/bssapi/**"
-          - "cmd/bssd/**"
-          - "docker/bssd/**"
-          - "service/bss/**"
-
 # GitHub Actions workflows (CI)
 'area: ci':
   - changed-files:

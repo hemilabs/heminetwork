@@ -62,7 +62,7 @@ var (
 		},
 		"PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.ListenAddress,
-			DefaultValue: "", // bssapi.DefaultPrometheusListen,
+			DefaultValue: "",
 			Help:         "address and port automatic prometheus listens on",
 			Print:        config.PrintAll,
 		},

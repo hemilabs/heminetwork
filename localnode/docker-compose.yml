@@ -80,21 +80,6 @@ services:
       - "-txindex=1"
       - "-rpcworkqueue=400"
 
-  # Bitcoin Secure Sequencer
-  bssd:
-    build:
-      dockerfile: "./docker/bssd/Dockerfile"
-      context: "./.."
-    profiles: ["hemi", "hemi-min", "full"]
-    environment:
-      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
-      BSS_LOG_LEVEL: "INFO"
-      BSS_ADDRESS: ":8081"
-    ports:
-      - '8081:8081'
-    networks:
-      - "localnode"
-
   # Electrs (Bitcoin indexer, used by BFG)
   electrs:
     build:
@@ -249,8 +234,6 @@ services:
       - ./jwt.hex:/tmp/jwt/jwt.hex
       - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
       - ./rollup.json:/tmp/rollup.json
-    environment:
-      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     ports:
       - '8547:8547'
     networks:

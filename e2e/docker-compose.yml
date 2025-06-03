@@ -146,21 +146,6 @@ services:
     networks:
       e2e:
 
-  bssd:
-    build:
-      dockerfile: "./docker/bssd/Dockerfile"
-      context: "./.."
-    depends_on:
-      - "bfgd"
-    ports:
-      - "8081:8081"
-    environment:
-      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
-      BSS_LOG_LEVEL: "INFO"
-      BSS_ADDRESS: ":8081"
-    networks:
-      e2e:
-
   popmd:
     build:
       dockerfile: "./docker/popmd/Dockerfile"
@@ -299,12 +284,8 @@ services:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
-      bssd:
-        condition: "service_started"
     healthcheck:
       start_period: 180s
-    environment:
-      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
       - "op-node/bin/op-node"
       - "--l2=ws://op-geth-l2:8551"

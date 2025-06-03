@@ -9,7 +9,7 @@ hemictl <daemon> <action> [json parameters]
 
 ### Components
 
-- `daemon`: Determines the default URI `hemictl` connects to (e.g., `bss` connects to `ws://localhost:8081/v1/ws`)
+- `daemon`: Determines the default URI `hemictl` connects to.
 - `action`: Specifies which command will be called (e.g., `ping`)
 - `parameters`: JSON encoded parameters for the `action` (e.g., `{"timestamp":1}`)
 

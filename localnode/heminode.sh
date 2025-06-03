@@ -61,7 +61,6 @@ if [ "$?" -eq 1 ] ; then
 		i=$((i+1))
 	fi
 	if [ "$PROFILE" == "hemi" ] || [ "$PROFILE" == "hemi-min" ] || [ "$PROFILE" == "full" ]; then
-		tmux send-keys -t $NAME:$i.0 "while true; do docker logs -f $NETWORK-stack-bssd-1; echo 'NOT UP!!'; sleep 30; done" C-m
 		tmux send-keys -t $NAME:$i.1 "while true; do docker logs -f $NETWORK-stack-op-node-1; echo 'NOT UP!!'; sleep 30; done" C-m
 		tmux send-keys -t $NAME:$i.2 "while true; do docker logs -f $NETWORK-stack-op-geth-l2-1; echo 'NOT UP!!'; sleep 30; done" C-m
 		i=$((i+1))
@@ -72,4 +71,3 @@ fi
 tmux set-option -t $NAME set-titles on
 tmux set-option -t $NAME set-titles-string "#S"
 tmux attach-session -d -t $NAME
-

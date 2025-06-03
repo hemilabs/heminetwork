@@ -135,9 +135,8 @@ The following daemons comprise the Hemi stack. They are all run under Docker Com
 4. prysm
 5. op-geth
 6. op-node
-7. bssd
-8. bfgd
-9. postgres (used by bfgd)
+7. bfgd
+8. postgres (used by bfgd)
 
 ![Depiction of Hemi Network Stack](images/hemi-network-components-v2.svg)
 
@@ -152,12 +151,12 @@ There are four different docker profiles you can choose from, depending on your 
 
 The following table provides details on which components are run locally as part of each profile:
 
-| Profile  | [HEMI]<br> op-geth | [HEMI]<br> op-node | [HEMI]<br> bssd    | [HEMI]<br> bfgd    | [ETH]<br> prysm    | [ETH]<br> geth     | [BTC]<br> electrs  | [BTC]<br> bitcoind |
-|----------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
-| full     | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
-| hemi     | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x:                | :x:                | :white_check_mark: | :x:                |
-| hemi-min | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x:                | :x:                | :x:                | :x:                | :x:                |
-| L1       | :x:                | :x:                | :x:                | :x:                | :white_check_mark: | :white_check_mark: | :x:                | :white_check_mark: |
+| Profile  | [HEMI]<br> op-geth | [HEMI]<br> op-node | [HEMI]<br> bfgd    | [ETH]<br> prysm    | [ETH]<br> geth     | [BTC]<br> electrs  | [BTC]<br> bitcoind |
+|----------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|--------------------|
+| full     | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: | :white_check_mark: |
+| hemi     | :white_check_mark: | :white_check_mark: | :white_check_mark: | :x:                | :x:                | :white_check_mark: | :x:                |
+| hemi-min | :white_check_mark: | :white_check_mark: | :x:                | :x:                | :x:                | :x:                | :x:                |
+| L1       | :x:                | :x:                | :x:                | :white_check_mark: | :white_check_mark: | :x:                | :white_check_mark: |
 
 > [!TIP]
 > The "L1" profile does not run any Hemi-specific infrastructure; it is provided to allow users to run the L1 components
