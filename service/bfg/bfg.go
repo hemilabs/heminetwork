@@ -285,6 +285,12 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	// Cycle through each response and replace finality value for the best
 	// finality value of its descendants or itself
 	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
+
+	// shouldn't this always be one if we get here? since we query by the hash?
+	if len(resp.L2Keystones) > 0 {
+		fin.L2Keystone = resp.L2Keystones[0]
+	}
+
 	for _, bk := range aks.L2KeystoneBlocks {
 		if bk.Error != nil {
 			log.Tracef("keystone not found: %v", bk.Error)

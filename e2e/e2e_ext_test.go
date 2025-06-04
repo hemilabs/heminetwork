@@ -457,7 +457,9 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s := httptest.NewServer(http.HandlerFunc(newMockOpgeth(ctx, t, []hemi.L2Keystone{})))
+	s := httptest.NewServer(http.HandlerFunc(newMockOpgeth(ctx, t, []hemi.L2Keystone{
+		*keystoneOne,
+	})))
 	defer s.Close()
 
 	opgethWsurl := "ws" + strings.TrimPrefix(s.URL, "http")
@@ -471,7 +473,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if resp.StatusCode != http.StatusNotFound {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected %d, received %d", http.StatusNotFound, resp.StatusCode)
 	}
 
@@ -481,6 +483,49 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	}
 
 	t.Logf("received body in response: %s", body)
+
+	expectedConfirmations := []int{
+		0,
+	}
+
+	for i, k := range []hemi.L2Keystone{
+		*keystoneOne,
+	} {
+		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
+
+		resp, err := http.Get(bfgUrlTmp)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var finalityResponse bfgapi.L2KeystoneBitcoinFinalityResponse
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("received body in response: %s", body)
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected status code %d", resp.StatusCode)
+		}
+
+		if err := json.Unmarshal(body, &finalityResponse); err != nil {
+			t.Fatal(err)
+		}
+
+		if diff := deep.Equal(finalityResponse.L2Keystone, k); len(diff) > 0 {
+			t.Fatalf("unexpected diff: %s", diff)
+		}
+
+		if finalityResponse.EffectiveConfirmations != uint(expectedConfirmations[i]) {
+			t.Fatalf("unexpected effective confirmations. btc height %d, effective confirmations %d", finalityResponse.BlockHeight, finalityResponse.EffectiveConfirmations)
+		}
+
+		if finalityResponse.EffectiveConfirmations >= 10 && !*finalityResponse.SuperFinality {
+			t.Fatalf("super finality should have been reached with effective confirmations of %d", finalityResponse.EffectiveConfirmations)
+		}
+	}
 }
 
 func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
