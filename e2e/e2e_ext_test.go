@@ -31,6 +31,7 @@ import (
 	"github.com/go-test/deep"
 	gwebsocket "github.com/gorilla/websocket"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
+	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi"
@@ -423,6 +424,128 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 
 }
 
+func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if err := os.RemoveAll(levelDbHome); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	cfg, err := level.NewConfig("localnet", levelDbHome, "0", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keystoneOne := randomL2Keystone()
+
+	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{})
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s := httptest.NewServer(http.HandlerFunc(newMockOpgeth(ctx, t, []hemi.L2Keystone{})))
+	defer s.Close()
+
+	opgethWsurl := "ws" + strings.TrimPrefix(s.URL, "http")
+
+	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+
+	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
+
+	resp, err := http.Get(bfgUrlTmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected %d, received %d", http.StatusNotFound, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("received body in response: %s", body)
+}
+
+func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if err := os.RemoveAll(levelDbHome); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	cfg, err := level.NewConfig("localnet", levelDbHome, "0", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keystoneOne := randomL2Keystone()
+
+	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
+		8: tbcd.Keystone{
+			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneOne).Serialize(),
+		},
+	})
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s := httptest.NewServer(http.HandlerFunc(newMockOpgeth(ctx, t, []hemi.L2Keystone{})))
+	defer s.Close()
+
+	opgethWsurl := "ws" + strings.TrimPrefix(s.URL, "http")
+
+	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+
+	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
+
+	resp, err := http.Get(bfgUrlTmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected %d, received %d", http.StatusNotFound, resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("received body in response: %s", body)
+}
+
 func newMockOpgeth(ctx context.Context, t *testing.T, keystones []hemi.L2Keystone) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var upgrader = gwebsocket.Upgrader{}
@@ -486,14 +609,22 @@ func newMockOpgeth(ctx context.Context, t *testing.T, keystones []hemi.L2Keyston
 				}
 			}
 
-			if l2KeystoneValidityResponse == nil {
-				t.Fatalf("could not match hash: %s", hex.EncodeToString(hash))
-			}
+			var fullResponseMessage keystoneVadlidityResponse
 
-			fullResponseMessage := keystoneVadlidityResponse{
-				Jsonrpc: l2KeystoneValidityRequest.Jsonrpc,
-				ID:      l2KeystoneValidityRequest.ID,
-				Result:  *l2KeystoneValidityResponse,
+			if l2KeystoneValidityResponse == nil {
+				fullResponseMessage = keystoneVadlidityResponse{
+					Jsonrpc: l2KeystoneValidityRequest.Jsonrpc,
+					ID:      l2KeystoneValidityRequest.ID,
+					Result: eth.L2KeystoneValidityResponse{
+						Error: protocol.Errorf("not found"),
+					},
+				}
+			} else {
+				fullResponseMessage = keystoneVadlidityResponse{
+					Jsonrpc: l2KeystoneValidityRequest.Jsonrpc,
+					ID:      l2KeystoneValidityRequest.ID,
+					Result:  *l2KeystoneValidityResponse,
+				}
 			}
 
 			responseMessage, err = json.Marshal(&fullResponseMessage)
