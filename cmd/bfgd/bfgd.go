@@ -73,6 +73,12 @@ var (
 			Help:         "address and port bfgd prometheus listens on",
 			Print:        config.PrintAll,
 		},
+		"BFG_OPGETH_URL": config.Config{
+			Value:        &cfg.OpgethURL,
+			DefaultValue: bfg.NewDefaultConfig().OpgethURL,
+			Help:         "the websocket url to connect to op-geth at",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
