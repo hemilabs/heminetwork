@@ -183,8 +183,8 @@ func fillOutBytes(prefix string, size int) []byte {
 	return result
 }
 
-func randomL2Keystone() *hemi.L2Keystone {
-	return &hemi.L2Keystone{
+func randomL2Keystone(l2BlockNumber *int) *hemi.L2Keystone {
+	k := &hemi.L2Keystone{
 		Version:            uint8(1),
 		L1BlockNumber:      rand.Uint32(),
 		L2BlockNumber:      rand.Uint32(),
@@ -193,6 +193,12 @@ func randomL2Keystone() *hemi.L2Keystone {
 		StateRoot:          fillOutBytes("", 32),
 		EPHash:             fillOutBytes("", 32),
 	}
+
+	if l2BlockNumber != nil {
+		k.L2BlockNumber = *&k.L2BlockNumber
+	}
+
+	return k
 }
 
 func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Database, height uint64, keystones map[uint64]tbcd.Keystone) {
@@ -251,7 +257,7 @@ func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Databas
 	}
 }
 
-func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
+func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
@@ -276,9 +282,10 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	keystoneOne := randomL2Keystone()
-	keystoneTwo := randomL2Keystone()
-	keystoneThree := randomL2Keystone()
+	l2BlockNumber := 1
+	keystoneOne := randomL2Keystone(&l2BlockNumber)
+	l2BlockNumber++
+	keystoneTwo := randomL2Keystone(&l2BlockNumber)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
 		8: tbcd.Keystone{
@@ -286,9 +293,6 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 		},
 		1: tbcd.Keystone{
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneTwo).Serialize(),
-		},
-		2: tbcd.Keystone{
-			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneThree).Serialize(),
 		},
 	})
 
@@ -299,7 +303,6 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(newMockOpgeth(ctx, t, []hemi.L2Keystone{
 		*keystoneOne,
 		*keystoneTwo,
-		*keystoneThree,
 	})))
 	defer s.Close()
 
@@ -308,15 +311,13 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
 
 	expectedConfirmations := []int{
-		4,
 		11,
-		10,
+		11,
 	}
 
 	for i, k := range []hemi.L2Keystone{
 		*keystoneOne,
 		*keystoneTwo,
-		*keystoneThree,
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
 
@@ -353,6 +354,113 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 			t.Fatalf("super finality should have been reached with effective confirmations of %d", finalityResponse.EffectiveConfirmations)
 		}
 	}
+}
+
+func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
+	ctx, cancel := defaultTestContext()
+	defer cancel()
+
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		if err := os.RemoveAll(levelDbHome); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	cfg, err := level.NewConfig("localnet", levelDbHome, "0", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	l2BlockNumber := 1
+	keystoneOne := randomL2Keystone(&l2BlockNumber)
+	l2BlockNumber++
+	keystoneTwo := randomL2Keystone(&l2BlockNumber)
+	l2BlockNumber++
+	keystoneThree := randomL2Keystone(&l2BlockNumber)
+
+	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
+		1: tbcd.Keystone{
+			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneOne).Serialize(),
+		},
+		2: tbcd.Keystone{
+			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneTwo).Serialize(),
+		},
+		3: tbcd.Keystone{
+			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneThree).Serialize(),
+		},
+	})
+
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s := httptest.NewServer(http.HandlerFunc(newMockOpgeth(ctx, t, []hemi.L2Keystone{
+		*keystoneOne,
+		*keystoneTwo,
+		*keystoneThree,
+	})))
+	defer s.Close()
+
+	opgethWsurl := "ws" + strings.TrimPrefix(s.URL, "http")
+
+	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+
+	expectedConfirmations := []int{
+		11,
+		10,
+		9,
+	}
+
+	for i, k := range []hemi.L2Keystone{
+		*keystoneOne,
+		*keystoneTwo,
+		*keystoneThree,
+	} {
+		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
+
+		resp, err := http.Get(bfgUrlTmp)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var finalityResponse bfgapi.L2KeystoneBitcoinFinalityResponse
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("received body in response: %s", body)
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected status code %d", resp.StatusCode)
+		}
+
+		if err := json.Unmarshal(body, &finalityResponse); err != nil {
+			t.Fatal(err)
+		}
+
+		if diff := deep.Equal(finalityResponse.L2Keystone, k); len(diff) > 0 {
+			t.Fatalf("unexpected diff: %s", diff)
+		}
+
+		if finalityResponse.EffectiveConfirmations != uint(expectedConfirmations[i]) {
+			t.Fatalf("unexpected effective confirmations. btc height %d, effective confirmations %d, expected %d", finalityResponse.BlockHeight, finalityResponse.EffectiveConfirmations, expectedConfirmations[i])
+		}
+
+		if finalityResponse.EffectiveConfirmations >= 10 && !*finalityResponse.SuperFinality {
+			t.Fatalf("super finality should have been reached with effective confirmations of %d", finalityResponse.EffectiveConfirmations)
+		}
+	}
 
 }
 
@@ -381,7 +489,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	keystoneOne := randomL2Keystone()
+	keystoneOne := randomL2Keystone(nil)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{})
 
@@ -485,7 +593,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	keystoneOne := randomL2Keystone()
+	keystoneOne := randomL2Keystone(nil)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
 		8: tbcd.Keystone{
