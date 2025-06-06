@@ -270,6 +270,7 @@ services:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
       HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
+      # yamllint disable-line rule:line-length
       GETH_NODEKEYHEX: "76e3e48b25c512e1036069538041df813b759fc67d4756b80ace2586b123e913"
     working_dir: "/tmp"
     command:
