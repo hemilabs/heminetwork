@@ -1238,81 +1238,63 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 
 		client := &http.Client{}
 
-		const retries = 5
-		timeout := 1000 * time.Millisecond
+		res, err := client.Post(opNodeSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
+		if err != nil {
+			t.Fatalf("error making request to sequencer endpoint: %s", err)
+		}
 
-		for i := 1; i <= retries; i++ {
-			res, err := client.Post(opNodeSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
-			if err != nil {
-				t.Fatalf("error making request to sequencer endpoint: %s", err)
+		res2, err := client.Post(opNodeNonSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
+		if err != nil {
+			t.Fatalf("error making request to sequencer endpoint: %s", err)
+		}
+
+		resBody, err := io.ReadAll(res.Body)
+		if err != nil {
+			t.Fatalf("error reading response body from sequencer: %s", err)
+		}
+
+		resBody2, err := io.ReadAll(res2.Body)
+		if err != nil {
+			t.Fatalf("error reading response body from non-sequencer: %s", err)
+		}
+
+		res.Body.Close()
+		res2.Body.Close()
+
+		t.Logf("will parse reponses\n%s\n%s", string(resBody), string(resBody2))
+
+		assertResultNotError := func(body *outputAtBlockResponse) error {
+			if body.Error != nil {
+				return fmt.Errorf("error in response body: %v", body)
 			}
 
-			res2, err := client.Post(opNodeNonSequencingEndpoint, "application/json", bytes.NewBuffer(jsonbody))
-			if err != nil {
-				t.Fatalf("error making request to sequencer endpoint: %s", err)
-			}
+			return nil
+		}
 
-			resBody, err := io.ReadAll(res.Body)
-			if err != nil {
-				t.Fatalf("error reading response body from sequencer: %s", err)
-			}
+		var outputAtBlockResponseOne outputAtBlockResponse
+		var outputAtBlockResponseTwo outputAtBlockResponse
 
-			resBody2, err := io.ReadAll(res2.Body)
-			if err != nil {
-				t.Fatalf("error reading response body from non-sequencer: %s", err)
-			}
+		if err := json.Unmarshal(resBody, &outputAtBlockResponseOne); err != nil {
+			t.Fatal(err)
+		}
 
-			res.Body.Close()
-			res2.Body.Close()
+		if err := json.Unmarshal(resBody2, &outputAtBlockResponseTwo); err != nil {
+			t.Fatal(err)
+		}
 
-			t.Logf("will parse reponses\n%s\n%s", string(resBody), string(resBody2))
+		if err := assertResultNotError(&outputAtBlockResponseOne); err != nil {
+				t.Fatalf("error in response: %v", outputAtBlockResponseOne.Error)
+		}
 
-			assertResultNotError := func(body *outputAtBlockResponse) error {
-				if body.Error != nil {
-					return fmt.Errorf("error in response body: %v", body)
-				}
+		if err := assertResultNotError(&outputAtBlockResponseTwo); err != nil {
+				t.Fatalf("error in response: %v", outputAtBlockResponseTwo.Error)
+		}
 
-				return nil
-			}
+		assertResultNotError(&outputAtBlockResponseOne)
+		assertResultNotError(&outputAtBlockResponseTwo)
 
-			var outputAtBlockResponseOne outputAtBlockResponse
-			var outputAtBlockResponseTwo outputAtBlockResponse
-
-			if err := json.Unmarshal(resBody, &outputAtBlockResponseOne); err != nil {
-				t.Fatal(err)
-			}
-
-			if err := json.Unmarshal(resBody2, &outputAtBlockResponseTwo); err != nil {
-				t.Fatal(err)
-			}
-
-			if err := assertResultNotError(&outputAtBlockResponseOne); err != nil {
-				if i == retries {
-					t.Fatalf("error in response: %v", outputAtBlockResponseOne.Error)
-				} else {
-					continue
-				}
-			}
-
-			if err := assertResultNotError(&outputAtBlockResponseTwo); err != nil {
-				if i == retries {
-					t.Fatalf("error in response: %v", outputAtBlockResponseTwo.Error)
-				} else {
-					continue
-				}
-			}
-
-			assertResultNotError(&outputAtBlockResponseOne)
-			assertResultNotError(&outputAtBlockResponseTwo)
-
-			if diff := deep.Equal(outputAtBlockResponseOne, outputAtBlockResponseTwo); len(diff) > 0 {
-				if i == retries {
-					t.Fatalf("output roots are not the same: %s", diff)
-				}
-			} else {
-				break
-			}
-			time.Sleep(timeout)
+		if diff := deep.Equal(outputAtBlockResponseOne, outputAtBlockResponseTwo); len(diff) > 0 {
+				t.Fatalf("output roots are not the same: %s", diff)
 		}
 
 		tip--
