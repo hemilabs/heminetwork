@@ -34,6 +34,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func bytes2Tx(b []byte) (*wire.MsgTx, error) {
@@ -1501,10 +1502,10 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
 	}
 
 	popTx := pop.TransactionL2{
@@ -1518,9 +1519,9 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 
 	t.Log(spew.Sdump(popTxOpReturn))
 
-	btcBlockHash := chainhash.Hash(fillOutBytes("blockhash", 32))
+	btcBlockHash := chainhash.Hash(testutil.FillBytes("blockhash", 32))
 
-	invalidL2KeystoneAbrevHash := chainhash.Hash(fillOutBytes("123", 32))
+	invalidL2KeystoneAbrevHash := chainhash.Hash(testutil.FillBytes("123", 32))
 
 	type testTableItem struct {
 		name                    string
@@ -1657,14 +1658,6 @@ func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
 	}
 }
 
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-	return result
-}
-
 func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
 	btx := &wire.MsgTx{
 		Version:  2,
@@ -1697,7 +1690,7 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
 	}
 
-	outPoint := wire.OutPoint{Hash: chainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
+	outPoint := wire.OutPoint{Hash: chainhash.Hash(testutil.FillBytes("hash", 32)), Index: 0}
 	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
 
 	changeAmount := int64(100)

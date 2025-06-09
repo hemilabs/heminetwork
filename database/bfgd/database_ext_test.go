@@ -30,6 +30,7 @@ import (
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/bfgd"
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 const testDBPrefix = "bfgdtestdb"
@@ -318,8 +319,8 @@ func TestBtcBlockReplaceNotIfSameBlock(t *testing.T) {
 	}()
 
 	btcBlock := bfgd.BtcBlock{
-		Hash:   fillOutBytes("MyHaSh", 32),
-		Header: fillOutBytes("myHeAdEr", 80),
+		Hash:   testutil.FillBytes("MyHaSh", 32),
+		Header: testutil.FillBytes("myHeAdEr", 80),
 		Height: 1,
 	}
 
@@ -363,8 +364,8 @@ func TestBtcBlockReplaceIfDifferentBlocks(t *testing.T) {
 	}()
 
 	btcBlock := bfgd.BtcBlock{
-		Hash:   fillOutBytes("MyHaSh", 32),
-		Header: fillOutBytes("myHeAdEr", 80),
+		Hash:   testutil.FillBytes("MyHaSh", 32),
+		Header: testutil.FillBytes("myHeAdEr", 80),
 		Height: 1,
 	}
 
@@ -377,8 +378,8 @@ func TestBtcBlockReplaceIfDifferentBlocks(t *testing.T) {
 		t.Fatalf("unexpected rows affected: %d", rowsAffected)
 	}
 
-	btcBlock.Hash = fillOutBytes("differenthash", 32)
-	btcBlock.Header = fillOutBytes("differentheader", 80)
+	btcBlock.Hash = testutil.FillBytes("differenthash", 32)
+	btcBlock.Header = testutil.FillBytes("differentheader", 80)
 
 	rowsAffected, err = db.BtcBlockReplace(ctx, &btcBlock)
 	if err != nil {
@@ -411,8 +412,8 @@ func TestBtcBlockNoReplaceIfDifferentBlocksAtDifferentHeights(t *testing.T) {
 	}()
 
 	btcBlock := bfgd.BtcBlock{
-		Hash:   fillOutBytes("MyHaSh", 32),
-		Header: fillOutBytes("myHeAdEr", 80),
+		Hash:   testutil.FillBytes("MyHaSh", 32),
+		Header: testutil.FillBytes("myHeAdEr", 80),
 		Height: 1,
 	}
 
@@ -425,8 +426,8 @@ func TestBtcBlockNoReplaceIfDifferentBlocksAtDifferentHeights(t *testing.T) {
 		t.Fatalf("unexpected rows affected: %d", rowsAffected)
 	}
 
-	btcBlock.Hash = fillOutBytes("differenthash", 32)
-	btcBlock.Header = fillOutBytes("differentheader", 80)
+	btcBlock.Hash = testutil.FillBytes("differenthash", 32)
+	btcBlock.Header = testutil.FillBytes("differentheader", 80)
 	btcBlock.Height = 7
 
 	rowsAffected, err = db.BtcBlockReplace(ctx, &btcBlock)
@@ -438,14 +439,14 @@ func TestBtcBlockNoReplaceIfDifferentBlocksAtDifferentHeights(t *testing.T) {
 		t.Fatalf("unexpected rows affected: %d", rowsAffected)
 	}
 
-	result, err := db.BtcBlockByHash(ctx, [32]byte(fillOutBytes("MyHaSh", 32)))
+	result, err := db.BtcBlockByHash(ctx, [32]byte(testutil.FillBytes("MyHaSh", 32)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if diff := deep.Equal(result, &bfgd.BtcBlock{
-		Hash:   fillOutBytes("MyHaSh", 32),
-		Header: fillOutBytes("myHeAdEr", 80),
+		Hash:   testutil.FillBytes("MyHaSh", 32),
+		Header: testutil.FillBytes("myHeAdEr", 80),
 		Height: 1,
 	}); len(diff) > 0 {
 		t.Fatalf("unexpected diff: %s", diff)
@@ -472,8 +473,8 @@ func TestDatabaseNotification(t *testing.T) {
 	}()
 
 	btcBlock := &bfgd.BtcBlock{
-		Hash:   fillOutBytes("MyHaSh", 32),
-		Header: fillOutBytes("myHeAdEr", 80),
+		Hash:   testutil.FillBytes("MyHaSh", 32),
+		Header: testutil.FillBytes("myHeAdEr", 80),
 		Height: 1,
 	}
 	// Register notification
@@ -506,17 +507,6 @@ func defaultTestContext(t *testing.T) (context.Context, func()) {
 	return context.WithTimeout(t.Context(), 300*time.Second)
 }
 
-// fillOutBytes will take a string and return a slice of bytes
-// with values from the string suffixed until a size with bytes '_'
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-
-	return result
-}
-
 func TestL2KeystoneInsertSuccess(t *testing.T) {
 	ctx, cancel := defaultTestContext(t)
 	defer cancel()
@@ -532,11 +522,11 @@ func TestL2KeystoneInsertSuccess(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
@@ -579,22 +569,22 @@ func TestL2KeystoneInsertMultipleSuccess(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	otherL2Keystone := bfgd.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhashz", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhashz", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
@@ -647,22 +637,22 @@ func TestL2KeystoneInsertIgnoreDuplicates(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	otherL2Keystone := bfgd.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhashz", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhashz", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
@@ -720,11 +710,11 @@ func TestL2KeystoneInsertInvalidHashLength(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 31),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 31),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
@@ -757,11 +747,11 @@ func TestL2KeystoneInsertInvalidEPHashLength(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 31),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 31),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
@@ -794,11 +784,11 @@ func TestL2KeystoneInsertInvalidStateRootLength(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 31),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 31),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
@@ -831,11 +821,11 @@ func TestL2KeystoneInsertInvalidPrevKeystoneEPHashLength(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 31),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 31),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
@@ -868,11 +858,11 @@ func TestL2KeystoneInsertInvalidParentEPHashLength(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 31),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 31),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
@@ -901,7 +891,7 @@ func TestL2KeystoneByAbrevHashNotFound(t *testing.T) {
 		cleanup()
 	}()
 
-	_, err := db.L2KeystoneByAbrevHash(ctx, [32]byte(fillOutBytes("doesnotexist", 32)))
+	_, err := db.L2KeystoneByAbrevHash(ctx, [32]byte(testutil.FillBytes("doesnotexist", 32)))
 	if err == nil || errors.Is(err, database.NotFoundError("")) == false {
 		t.Fatalf("unexpected error %s", err)
 	}
@@ -922,11 +912,11 @@ func TestL2KeystoneByAbrevHashFound(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone})
@@ -960,22 +950,22 @@ func TestL2KeystoneInsertMostRecentNMoreThanSaved(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	otherL2Keystone := bfgd.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      23,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhashz", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhashz", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
@@ -1013,22 +1003,22 @@ func TestL2KeystoneInsertMostRecentNFewerThanSaved(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	otherL2Keystone := bfgd.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      23,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhashz", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhashz", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
@@ -1072,11 +1062,11 @@ func TestL2KeystoneInsertMostRecentNLimit100(t *testing.T) {
 			Version:            1,
 			L1BlockNumber:      11,
 			L2BlockNumber:      l2BlockNumber,
-			ParentEPHash:       fillOutBytes("parentephash", 32),
-			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-			StateRoot:          fillOutBytes("stateroot", 32),
-			EPHash:             fillOutBytes("ephash", 32),
-			Hash:               fillOutBytes(fmt.Sprintf("mockhash%d", l2BlockNumber), 32),
+			ParentEPHash:       testutil.FillBytes("parentephash", 32),
+			PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+			StateRoot:          testutil.FillBytes("stateroot", 32),
+			EPHash:             testutil.FillBytes("ephash", 32),
+			Hash:               testutil.FillBytes(fmt.Sprintf("mockhash%d", l2BlockNumber), 32),
 		}
 
 		toInsert = append(toInsert, l2Keystone)
@@ -1112,22 +1102,22 @@ func TestL2KeystoneInsertMultipleAtomicFailure(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 31), // this will fail, the insert should thus fail
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 31), // this will fail, the insert should thus fail
 	}
 
 	otherL2Keystone := bfgd.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhashz", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhashz", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
@@ -1160,22 +1150,22 @@ func TestL2KeystoneInsertDuplicateOK(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	otherL2Keystone := bfgd.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
-		Hash:               fillOutBytes("mockhash", 32),
+		ParentEPHash:       testutil.FillBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("stateroot", 32),
+		EPHash:             testutil.FillBytes("ephash", 32),
+		Hash:               testutil.FillBytes("mockhash", 32),
 	}
 
 	err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{l2Keystone, otherL2Keystone})
@@ -1205,10 +1195,10 @@ func TestPopBasisInsertNilMerklePath(t *testing.T) {
 	}()
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid", 32),
-		BtcRawTx:            fillOutBytes("btcrawtx", 80),
+		BtcTxId:             testutil.FillBytes("btctxid", 32),
+		BtcRawTx:            testutil.FillBytes("btcrawtx", 80),
 		PopMinerPublicKey:   []byte("popminerpublickey"),
-		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
+		L2KeystoneAbrevHash: testutil.FillBytes("l2keystoneabrevhash", 32),
 	}
 
 	err := db.PopBasisInsertFull(ctx, &popBasis)
@@ -1218,7 +1208,7 @@ func TestPopBasisInsertNilMerklePath(t *testing.T) {
 
 	popBasesSaved, err := db.PopBasisByL2KeystoneAbrevHash(
 		ctx,
-		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
+		[32]byte(testutil.FillBytes("l2keystoneabrevhash", 32)),
 		false,
 		0,
 	)
@@ -1250,10 +1240,10 @@ func TestPopBasisInsertNotNilMerklePath(t *testing.T) {
 	}()
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid", 32),
-		BtcRawTx:            fillOutBytes("btcrawtx", 80),
+		BtcTxId:             testutil.FillBytes("btctxid", 32),
+		BtcRawTx:            testutil.FillBytes("btcrawtx", 80),
 		PopMinerPublicKey:   []byte("popminerpublickey"),
-		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
+		L2KeystoneAbrevHash: testutil.FillBytes("l2keystoneabrevhash", 32),
 		BtcMerklePath:       []string{"one", "two"},
 	}
 
@@ -1264,7 +1254,7 @@ func TestPopBasisInsertNotNilMerklePath(t *testing.T) {
 
 	popBasesSaved, err := db.PopBasisByL2KeystoneAbrevHash(
 		ctx,
-		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
+		[32]byte(testutil.FillBytes("l2keystoneabrevhash", 32)),
 		false,
 		0,
 	)
@@ -1296,10 +1286,10 @@ func TestPopBasisInsertNilMerklePathFromPopM(t *testing.T) {
 	}()
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid", 32),
-		BtcRawTx:            fillOutBytes("btcrawtx", 80),
+		BtcTxId:             testutil.FillBytes("btctxid", 32),
+		BtcRawTx:            testutil.FillBytes("btcrawtx", 80),
 		PopMinerPublicKey:   []byte("popminerpublickey"),
-		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
+		L2KeystoneAbrevHash: testutil.FillBytes("l2keystoneabrevhash", 32),
 	}
 
 	err := db.PopBasisInsertPopMFields(ctx, &popBasis)
@@ -1309,7 +1299,7 @@ func TestPopBasisInsertNilMerklePathFromPopM(t *testing.T) {
 
 	popBasesSaved, err := db.PopBasisByL2KeystoneAbrevHash(
 		ctx,
-		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
+		[32]byte(testutil.FillBytes("l2keystoneabrevhash", 32)),
 		false,
 		0,
 	)
@@ -1341,8 +1331,8 @@ func TestPopBasisUpdateNoneExist(t *testing.T) {
 	}()
 
 	btcBlock := bfgd.BtcBlock{
-		Hash:   fillOutBytes("myhash", 32),
-		Header: fillOutBytes("myheader", 80),
+		Hash:   testutil.FillBytes("myhash", 32),
+		Header: testutil.FillBytes("myheader", 80),
 		Height: 1,
 	}
 
@@ -1354,11 +1344,11 @@ func TestPopBasisUpdateNoneExist(t *testing.T) {
 	var txIndex uint64 = 2
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxId:             testutil.FillBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
-		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
-		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
+		PopTxId:             testutil.FillBytes("poptxid2", 32),
+		L2KeystoneAbrevHash: testutil.FillBytes("l2keystoneabrevhash", 32),
+		PopMinerPublicKey:   testutil.FillBytes("popminerpublickey", 32),
 		BtcHeaderHash:       btcBlock.Hash,
 		BtcTxIndex:          &txIndex,
 	}
@@ -1385,8 +1375,8 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 	}()
 
 	btcBlock := bfgd.BtcBlock{
-		Hash:   fillOutBytes("myhash", 32),
-		Header: fillOutBytes("myheader", 80),
+		Hash:   testutil.FillBytes("myhash", 32),
+		Header: testutil.FillBytes("myheader", 80),
 		Height: 1,
 	}
 
@@ -1398,11 +1388,11 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 	var txIndex uint64 = 2
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxId:             testutil.FillBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
-		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
-		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
+		PopTxId:             testutil.FillBytes("poptxid2", 32),
+		L2KeystoneAbrevHash: testutil.FillBytes("l2keystoneabrevhash", 32),
+		PopMinerPublicKey:   testutil.FillBytes("popminerpublickey", 32),
 		BtcHeaderHash:       btcBlock.Hash,
 		BtcTxIndex:          &txIndex,
 	}
@@ -1415,11 +1405,11 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 	var txIndex2 uint64 = 3
 
 	popBasis2 := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxId:             testutil.FillBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
-		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
-		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
+		PopTxId:             testutil.FillBytes("poptxid2", 32),
+		L2KeystoneAbrevHash: testutil.FillBytes("l2keystoneabrevhash", 32),
+		PopMinerPublicKey:   testutil.FillBytes("popminerpublickey", 32),
 		BtcHeaderHash:       btcBlock.Hash,
 		BtcTxIndex:          &txIndex2,
 	}
@@ -1435,7 +1425,7 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 
 	popBases, err := db.PopBasisByL2KeystoneAbrevHash(
 		ctx,
-		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
+		[32]byte(testutil.FillBytes("l2keystoneabrevhash", 32)),
 		false,
 		0,
 	)
@@ -1458,7 +1448,7 @@ func TestPopBasisUpdateOneExistsWithNonNullBTCFields(t *testing.T) {
 
 	popBases, err = db.PopBasisByL2KeystoneAbrevHash(
 		ctx,
-		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
+		[32]byte(testutil.FillBytes("l2keystoneabrevhash", 32)),
 		false,
 		0,
 	)
@@ -1498,8 +1488,8 @@ func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
 	}()
 
 	btcBlock := bfgd.BtcBlock{
-		Hash:   fillOutBytes("myhash", 32),
-		Header: fillOutBytes("myheader", 80),
+		Hash:   testutil.FillBytes("myhash", 32),
+		Header: testutil.FillBytes("myheader", 80),
 		Height: 1,
 	}
 
@@ -1509,10 +1499,10 @@ func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
 	}
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxId:             testutil.FillBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
-		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
+		L2KeystoneAbrevHash: testutil.FillBytes("l2keystoneabrevhash", 32),
+		PopMinerPublicKey:   testutil.FillBytes("popminerpublickey", 32),
 		PopTxId:             nil,
 		BtcHeaderHash:       nil,
 		BtcTxIndex:          nil,
@@ -1527,11 +1517,11 @@ func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
 	var txIndex uint64 = 3
 
 	popBasis2 := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxId:             testutil.FillBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
-		L2KeystoneAbrevHash: fillOutBytes("l2keystoneabrevhash", 32),
-		PopMinerPublicKey:   fillOutBytes("popminerpublickey", 32),
+		PopTxId:             testutil.FillBytes("poptxid2", 32),
+		L2KeystoneAbrevHash: testutil.FillBytes("l2keystoneabrevhash", 32),
+		PopMinerPublicKey:   testutil.FillBytes("popminerpublickey", 32),
 		BtcHeaderHash:       btcBlock.Hash,
 		BtcTxIndex:          &txIndex,
 	}
@@ -1547,7 +1537,7 @@ func TestPopBasisUpdateOneExistsWithNullBTCFields(t *testing.T) {
 
 	popBases, err := db.PopBasisByL2KeystoneAbrevHash(
 		ctx,
-		[32]byte(fillOutBytes("l2keystoneabrevhash", 32)),
+		[32]byte(testutil.FillBytes("l2keystoneabrevhash", 32)),
 		false,
 		0,
 	)
@@ -2355,7 +2345,7 @@ func createBtcBlocksAtStartingHeightReverseMining(ctx context.Context, t *testin
 func updateFinalityForBtcBlock(t *testing.T, ctx context.Context, db bfgd.Database, block *bfgd.BtcBlock, height uint32) {
 	// some tests don't care about a btc block hash, fill it out here so it doesn't error
 	if len(block.Hash) == 0 {
-		block.Hash = fillOutBytes(fmt.Sprintf("%d", height), 32)
+		block.Hash = testutil.FillBytes(fmt.Sprintf("%d", height), 32)
 	}
 
 	if err := db.BtcBlockUpdateKeystones(ctx, [32]byte(block.Hash), uint64(height), math.MaxInt64); err != nil {
