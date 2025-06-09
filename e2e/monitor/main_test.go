@@ -588,7 +588,15 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	t.Logf("assuming L2OutputOracle is at %s", ooproxy)
 
-	blockNumber, err := wait.ForOutputRootPublished(ctx, l1Client, ooproxy, receipt.BlockNumber)
+	var blockNumber uint64
+
+	for range 5 {
+		blockNumber, err = wait.ForOutputRootPublished(ctx, l1Client, ooproxy, receipt.BlockNumber)
+		if err == nil {
+			break
+		}
+	}
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,8 +686,14 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		break
 	}
 
-	t.Logf("waiting for the finalization period")
-	if err := wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err != nil {
+	for range 5 {
+		t.Logf("waiting for the finalization period")
+		if err := wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err == nil {
+			break
+		}
+	}
+
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1004,7 +1018,14 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 	t.Logf("assuming L2OutputOracle is at %s", ooproxy)
 
-	blockNumber, err := wait.ForOutputRootPublished(ctx, l1Client, ooproxy, receipt.BlockNumber)
+	var blockNumber uint64
+
+	for range 5 {
+		blockNumber, err = wait.ForOutputRootPublished(ctx, l1Client, ooproxy, receipt.BlockNumber)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1094,8 +1115,14 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		break
 	}
 
-	t.Logf("waiting for the finalization period")
-	if err := wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err != nil {
+	for range 5 {
+		t.Logf("waiting for the finalization period")
+		if err = wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err == nil {
+			break
+		}
+	}
+
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -1283,18 +1310,18 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 		}
 
 		if err := assertResultNotError(&outputAtBlockResponseOne); err != nil {
-				t.Fatalf("error in response: %v", outputAtBlockResponseOne.Error)
+			t.Fatalf("error in response: %v", outputAtBlockResponseOne.Error)
 		}
 
 		if err := assertResultNotError(&outputAtBlockResponseTwo); err != nil {
-				t.Fatalf("error in response: %v", outputAtBlockResponseTwo.Error)
+			t.Fatalf("error in response: %v", outputAtBlockResponseTwo.Error)
 		}
 
 		assertResultNotError(&outputAtBlockResponseOne)
 		assertResultNotError(&outputAtBlockResponseTwo)
 
 		if diff := deep.Equal(outputAtBlockResponseOne, outputAtBlockResponseTwo); len(diff) > 0 {
-				t.Fatalf("output roots are not the same: %s", diff)
+			t.Fatalf("output roots are not the same: %s", diff)
 		}
 
 		tip--
