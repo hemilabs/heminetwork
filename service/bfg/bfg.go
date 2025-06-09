@@ -587,7 +587,7 @@ func (s *Server) updateKeystonesForBtcBlock(ctx context.Context, btcHeaderHash [
 		}
 	}
 
-	return nil
+	return lastErr
 }
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
