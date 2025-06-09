@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package testutil
 
 import (
@@ -38,6 +42,12 @@ func TestFillBytes(t *testing.T) {
 			prefix: "test",
 			n:      15,
 			want:   []byte("test___________"),
+		},
+		{
+			name:   "prefix longer than n",
+			prefix: "test",
+			n:      3,
+			want:   []byte("tes"),
 		},
 	}
 	for _, tt := range tests {
@@ -91,6 +101,12 @@ func TestFillBytesZero(t *testing.T) {
 				0x74, 0x65, 0x73, 0x74, 0x00, 0x00, 0x00, 0x00,
 				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 			},
+		},
+		{
+			name:   "prefix longer than n",
+			prefix: "test",
+			n:      3,
+			want:   []byte("tes"),
 		},
 	}
 	for _, tt := range tests {
