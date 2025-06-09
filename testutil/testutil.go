@@ -52,13 +52,17 @@ func SHA256(x []byte) []byte {
 	return xx[:]
 }
 
-// FillBytes returns a byte slice with the prefix, followed by n underscores.
+// FillBytes returns a byte slice with a length of n, containing the prefix and
+// remaining bytes filled with underscores.
 func FillBytes(prefix string, n int) []byte {
 	if n < 0 {
 		n = 0
 	}
+	if len(prefix) > n {
+		prefix = prefix[:n]
+	}
 
-	result := make([]byte, len(prefix)+n)
+	result := make([]byte, n)
 	copy(result, prefix)
 	for i := len(prefix); i < len(result); i++ {
 		result[i] = '_'
@@ -66,13 +70,16 @@ func FillBytes(prefix string, n int) []byte {
 	return result
 }
 
-// FillBytesZero returns a byte slice with the prefix, followed by n empty bytes.
+// FillBytesZero returns a byte slice of length n containing only the prefix.
 func FillBytesZero(prefix string, n int) []byte {
 	if n < 0 {
 		n = 0
 	}
+	if len(prefix) > n {
+		prefix = prefix[:n]
+	}
 
-	result := make([]byte, len(prefix)+n)
+	result := make([]byte, n)
 	copy(result, prefix)
 	return result
 }
