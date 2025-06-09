@@ -250,63 +250,87 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Call opgeth to retrieve keystones
-	resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
-	if err != nil {
-		log.Errorf("opgeth: %v", err)
-		BadRequestF(w, "internal error")
-		return
-	}
-	if resp.Error != nil {
-		NotFound(w, "unknown keystone: %v", resp.Error)
-		return
-	}
-
-	// Generate abbreviated hashes from received keystones
-	abrevKeystones := make([]chainhash.Hash, 0, len(resp.L2Keystones))
-	km := make(map[chainhash.Hash]hemi.L2Keystone, len(resp.L2Keystones))
-	for _, kss := range resp.L2Keystones {
-		khash := hemi.L2KeystoneAbbreviate(kss).Hash()
-		abrevKeystones = append(abrevKeystones, *khash)
-
-		// Use state root for lookup, this is unique.
-		km[chainhash.HashH(kss.StateRoot)] = kss
-	}
-
-	// Get abbreviated keystones from gozer
-	aks := s.g.BlocksByL2AbrevHashes(r.Context(), abrevKeystones)
-	if aks.Error != nil {
-		BadRequestF(w, "internal error")
-		return
-	}
-
-	// Cycle through each response and replace finality value for the best
-	// finality value of its descendants or itself
 	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
-	for _, bk := range aks.L2KeystoneBlocks {
-		if bk.Error != nil {
-			log.Tracef("keystone not found: %v", bk.Error)
-			continue
-		}
-
-		altFin, err := calculateFinality(aks.BtcTipBlockHeight,
-			bk.L2KeystoneBlockHeight, bk.L2KeystoneBlockHash)
+	for {
+		// Call opgeth to retrieve keystones
+		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
 		if err != nil {
-			log.Errorf("calculate finality: %v", err)
-			continue
-		}
-
-		if ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]; ok {
-			altFin.L2Keystone = ks
-		} else {
-			// This really shouldn't happen
-			log.Errorf("cannot find stateroot: %v", spew.Sdump(bk))
+			log.Errorf("opgeth: %v", err)
 			BadRequestF(w, "internal error")
 			return
 		}
-		if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
-			fin = altFin
+		if resp.Error != nil {
+			NotFound(w, "unknown keystone: %v", resp.Error)
+			return
 		}
+
+		// Generate abbreviated hashes from received keystones
+		abrevKeystones := make([]chainhash.Hash, 0, len(resp.L2Keystones))
+		km := make(map[chainhash.Hash]hemi.L2Keystone, len(resp.L2Keystones))
+		for _, kss := range resp.L2Keystones {
+			khash := hemi.L2KeystoneAbbreviate(kss).Hash()
+			abrevKeystones = append(abrevKeystones, *khash)
+
+			// Use state root for lookup, this is unique.
+			km[chainhash.HashH(kss.StateRoot)] = kss
+		}
+
+		// Get abbreviated keystones from gozer
+		aks := s.g.BlocksByL2AbrevHashes(r.Context(), abrevKeystones)
+		if aks.Error != nil {
+			BadRequestF(w, "internal error")
+			return
+		}
+
+		var hh *chainhash.Hash
+
+		// Cycle through each response and replace finality value for the best
+		// finality value of its descendants or itself
+		for _, bk := range aks.L2KeystoneBlocks {
+			if bk.Error != nil {
+				log.Tracef("keystone not found: %v", bk.Error)
+				continue
+			}
+
+			altFin, err := calculateFinality(aks.BtcTipBlockHeight,
+				bk.L2KeystoneBlockHeight, bk.L2KeystoneBlockHash)
+			if err != nil {
+				log.Errorf("calculate finality: %v", err)
+				continue
+			}
+
+			if ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]; ok {
+				altFin.L2Keystone = ks
+				// If this keystone has a higher l2 number, store it the
+				// abrev hash for future descendant queries to op-geth.
+				// The height check is a sanity check in case the keystones
+				// are not ordered.
+				if fin == nil || ks.L2BlockNumber > fin.L2Keystone.L2BlockNumber {
+					hh = hemi.L2KeystoneAbbreviate(ks).Hash()
+				}
+			} else {
+				// This really shouldn't happen
+				log.Errorf("cannot find stateroot: %v", spew.Sdump(bk))
+				BadRequestF(w, "internal error")
+				return
+			}
+			if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
+				fin = altFin
+			}
+		}
+
+		// TODO: update to "ultra finality" either here or
+		// on the opgeth side.
+		//
+		// If the last used hash for descendant queries is the
+		// highest hash, then we can assume there are no more
+		// descendants and we can return the current best finality.
+		// If keystone or descendant has superfinality then
+		// we no longer have to keep iterating.
+		if hh == nil || hash.IsEqual(hh) || *fin.SuperFinality {
+			break
+		}
+		hash = hh
 	}
 
 	if err := json.NewEncoder(w).Encode(fin); err != nil {
