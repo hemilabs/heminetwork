@@ -385,6 +385,20 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 	log.Tracef("BtcBlockUpdateKeystones")
 	defer log.Tracef("BtcBlockUpdateKeystones exit")
 
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		err := tx.Rollback()
+		if err != nil && !errors.Is(err, sql.ErrTxDone) {
+			log.Errorf("processBitcoinBlock could not rollback db tx: %v",
+				err)
+			return
+		}
+	}()
+
 	// give me all distinct l2 block numbers mined to this btc block
 	// note that this is not paginated, so we may have many results but
 	// we should be able to handle it
@@ -395,7 +409,7 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 		AND l2_block_number < $2
 	`
 
-	rows, err := p.db.QueryContext(ctx, q, btcBlockHash[:], ignoreAfter)
+	rows, err := tx.QueryContext(ctx, q, btcBlockHash[:], ignoreAfter)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("query btc block keystones: %w", err)
 	}
@@ -438,7 +452,7 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 			)
 		`
 
-		_, err = p.db.ExecContext(ctx, u, btcBlockHeight, l2BlockNumber)
+		_, err = tx.ExecContext(ctx, u, btcBlockHeight, l2BlockNumber)
 		if err != nil {
 			return fmt.Errorf("update l2 keystone lowest btc block height: %w", err)
 		}
@@ -465,10 +479,14 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 			)
 		`
 
-		_, err = p.db.ExecContext(ctx, u, btcBlockHash[:], l2KeystoneAbrevHash)
+		_, err = tx.ExecContext(ctx, u, btcBlockHash[:], l2KeystoneAbrevHash)
 		if err != nil {
 			return fmt.Errorf("update l2 keystone lowest btc block height: %w", err)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
 	}
 
 	return nil

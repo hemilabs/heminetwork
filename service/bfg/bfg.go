@@ -568,9 +568,23 @@ func (s *Server) handleBitcoinUTXOs(ctx context.Context, bur *bfgapi.BitcoinUTXO
 var ErrAlreadyProcessed = errors.New("already processed bitcoin block")
 
 func (s *Server) updateKeystonesForBtcBlock(ctx context.Context, btcHeaderHash []byte, btcHeight uint64, ignoreAfter int64) error {
-	if err := s.db.BtcBlockUpdateKeystones(ctx, [32]byte(btcHeaderHash), btcHeight, ignoreAfter); err != nil {
-		return fmt.Errorf("error updating keystones for block %s: %w",
-			btcHeaderHash, err)
+	const retries = 5
+
+	var lastErr error
+
+	// retry up to "retries" times.  there is a chance that, since many bfgs
+	// could be updating this at the same time, we may hit a deadlock waiting
+	// for resources.  according to postgres docs these are ok and should be
+	// retried.  so just retry on any error.  if the error is not resolved
+	// within the retries, return that error
+	for range retries {
+		if err := s.db.BtcBlockUpdateKeystones(ctx, [32]byte(btcHeaderHash), btcHeight, ignoreAfter); err != nil {
+			lastErr = fmt.Errorf("error updating keystones for block %s: %w",
+				btcHeaderHash, err)
+		} else {
+			lastErr = nil
+			break
+		}
 	}
 
 	return nil
