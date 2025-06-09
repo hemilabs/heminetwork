@@ -1288,8 +1288,6 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 		res.Body.Close()
 		res2.Body.Close()
 
-		t.Logf("will parse reponses\n%s\n%s", string(resBody), string(resBody2))
-
 		assertResultNotError := func(body *outputAtBlockResponse) error {
 			if body.Error != nil {
 				return fmt.Errorf("error in response body: %v", body)
