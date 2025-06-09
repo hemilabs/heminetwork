@@ -393,7 +393,7 @@ func (p *pgdb) BtcBlockUpdateKeystones(ctx context.Context, btcBlockHash [32]byt
 	defer func() {
 		err := tx.Rollback()
 		if err != nil && !errors.Is(err, sql.ErrTxDone) {
-			log.Errorf("processBitcoinBlock could not rollback db tx: %v",
+			log.Errorf("BtcBlockUpdateKeystones could not rollback db tx: %v",
 				err)
 			return
 		}
