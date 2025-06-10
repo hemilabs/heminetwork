@@ -56,7 +56,7 @@ const (
 	heighthashSize         = 8 + 1 + chainhash.HashSize
 	blockheaderSize        = 120
 	keystoneSize           = chainhash.HashSize + hemi.L2KeystoneAbrevSize
-	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize
+	keystoneHeightHashSize = 1 + 8 + chainhash.HashSize
 )
 
 type IteratorError error
@@ -1971,8 +1971,8 @@ func encodeKeystoneHeightHash(height uint64, hash chainhash.Hash) (e [keystoneHe
 	var h [8]byte
 	binary.BigEndian.PutUint64(h[:], height)
 	e[0] = 'h'
-	copy(e[1:8+1], h[:])
-	copy(e[8+1:], hash[:])
+	copy(e[1:9], h[:])
+	copy(e[9:9+32], hash[:])
 	return
 }
 
