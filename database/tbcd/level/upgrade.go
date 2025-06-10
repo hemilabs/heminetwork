@@ -364,14 +364,14 @@ func (l *ldb) v3(ctx context.Context) error {
 		}
 	}
 
-	if !l.cfg.nonInteractive {
-		log.Infof("This operation will take a long time. " +
-			"Press ctrl-c within 30 seconds to abort upgrade!")
-		select {
-		case <-ctx.Done():
-		case <-time.Tick(30 * time.Second):
-		}
-	}
+	//if !l.cfg.nonInteractive {
+	//	log.Infof("This operation will take a long time. " +
+	//		"Press ctrl-c within 30 seconds to abort upgrade!")
+	//	select {
+	//	case <-ctx.Done():
+	//	case <-time.Tick(30 * time.Second):
+	//	}
+	//}
 
 	// sort database names
 	keys := make([]string, 0, len(l.pool))
@@ -383,6 +383,7 @@ func (l *ldb) v3(ctx context.Context) error {
 	// copy config and create database destination.
 	var err error
 	dcfg := *l.cfg
+	dcfg.upgradeOpen = true // prevent re-entrant upgrades
 	dcfg.Home, err = homedir.Expand(dcfg.Home + ".v3")
 	if err != nil {
 		return fmt.Errorf("destination expand: %w", err)
@@ -545,4 +546,37 @@ func (l *ldb) v3(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// v4 upgrade the database from v3 to v4.
+// Changes:
+// Add heighthash (L2 height - Keystone Hash) to keystone database.
+func (l *ldb) v4(ctx context.Context) error {
+	log.Tracef("v4")
+	defer log.Tracef("v4 exit")
+
+	log.Infof("Upgrading database from v3 to v4")
+
+	// Index all keystones to M[height][hash] format.
+	ksdb := l.pool[level.KeystonesDB]
+	i := ksdb.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
+	defer func() { i.Release() }()
+	var records int
+	for records = 0; i.Next(); records++ {
+		key := i.Key()
+		log.Infof("%x", key)
+	}
+	if i.Error() != nil {
+		return fmt.Errorf("keystones iterator: %w", i.Error())
+	}
+	log.Infof("keystones indexed: %v", records)
+
+	log.Infof("version upgrade not written")
+	panic("stop")
+	return nil
+
+	// Write new version
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 4)
+	return l.MetadataPut(ctx, versionKey, v)
 }

@@ -137,10 +137,15 @@ type Config struct {
 	blockCacheSize       int    // parsed size of block cache
 	blockheaderCacheSize int    // parsed size of block header cache
 	nonInteractive       bool   // Set to true to prevent user interaction
+	upgradeOpen          bool   // Set to true when doing an open during upgrade
 }
 
 func (cfg *Config) SetNoninteractive(x bool) {
 	cfg.nonInteractive = x
+}
+
+func (cfg *Config) SetUpgradeOpen(x bool) {
+	cfg.upgradeOpen = x
 }
 
 func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
@@ -265,6 +270,13 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 				return nil, err
 			}
 		}
+
+		// Skip upgrades to prevent re-entrancy.
+		if cfg.upgradeOpen {
+			return l, nil
+		}
+
+		log.Infof("BVERSION %v", dbVersion)
 		switch dbVersion {
 		case 1:
 			// Upgrade to v2
@@ -273,6 +285,9 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			// Upgrade to v3, database is closed in the process.
 			reopen = true
 			err = l.v3(ctx)
+		case 3:
+			// Upgrade to v4
+			err = l.v4(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {
