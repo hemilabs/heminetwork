@@ -21,7 +21,6 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/database/level"
-	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/rawdb"
 )
 
@@ -559,6 +558,7 @@ func (l *ldb) v4(ctx context.Context) error {
 	log.Infof("Upgrading database from v3 to v4")
 
 	// Index all keystones to M[height][hash] format.
+	bhs := l.pool[level.BlockHeadersDB]
 	ksdb := l.pool[level.KeystonesDB]
 	i := ksdb.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
 	defer func() { i.Release() }()
@@ -566,11 +566,13 @@ func (l *ldb) v4(ctx context.Context) error {
 	for records = 0; i.Next(); records++ {
 		key := i.Key()
 		value := i.Value()
-		ks, err := hemi.NewL2KeystoneAbrevFromBytes(value)
+		ks := decodeKeystone(value)
+		ebh, err := bhs.Get(ks.BlockHash[:], nil)
 		if err != nil {
-			return fmt.Errorf("invalid keystone: %v", err)
+			return fmt.Errorf("blockheader: %w", err)
 		}
-		log.Infof("%x: %v", key, ks.L2BlockNumber)
+		bh := decodeBlockHeader(ebh)
+		log.Infof("%x: %v", key, bh.Height)
 	}
 	if i.Error() != nil {
 		return fmt.Errorf("keystones iterator: %w", i.Error())
