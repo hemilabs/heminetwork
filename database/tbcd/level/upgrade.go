@@ -568,7 +568,12 @@ func (l *ldb) v4(ctx context.Context) error {
 	var records int
 	for records = 0; i.Next(); records++ {
 		key := i.Key()
-		log.Infof("%x", key)
+		value := i.Value()
+		ks, err := hemi.NewL2KeystoneAbrevFromBytes(value)
+		if err != nil {
+			return fmt.Errorf("invalid keystone: %v", err)
+		}
+		log.Infof("%x: %v", key, ks.L2BlockNumber)
 	}
 	if i.Error() != nil {
 		return fmt.Errorf("keystones iterator: %w", i.Error())
