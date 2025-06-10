@@ -277,6 +277,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			return l, nil
 		}
 
+		log.Infof("BVERSION %v", dbVersion)
 		switch dbVersion {
 		case 1:
 			// Upgrade to v2

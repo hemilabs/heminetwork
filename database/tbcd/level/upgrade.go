@@ -561,52 +561,23 @@ func (l *ldb) v4(ctx context.Context) error {
 
 	log.Infof("Upgrading database from v3 to v4")
 
-	// Index all keystones to H[height][hash] format.
-	bhs := l.pool[level.BlockHeadersDB]
+	// Index all keystones to M[height][hash] format.
 	ksdb := l.pool[level.KeystonesDB]
 	i := ksdb.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
 	defer func() { i.Release() }()
 	var records int
 	for records = 0; i.Next(); records++ {
 		key := i.Key()
-		value := i.Value()
-		if len(value) != keystoneSize {
-			if len(value) == keystoneSizeV3 {
-				// Keystone without height encoded.
-				var u [keystoneSize]byte
-				copy(u[4:], value[:])
-				value = u[:]
-			} else {
-				// Not a keystone.
-				continue
-			}
-		}
-		ks := decodeKeystone(value)
-		ebh, err := bhs.Get(ks.BlockHash[:], nil)
-		if err != nil {
-			return fmt.Errorf("blockheader: %w", err)
-		}
-		bh := decodeBlockHeader(ebh)
-		ksHash, err := chainhash.NewHash(key)
-		if err != nil {
-			return fmt.Errorf("hash: %w", err)
-		}
-		ehh := encodeKeystoneHeightHash(uint32(bh.Height), *ksHash)
-		err = ksdb.Put(ehh[:], nil, nil)
-		if err != nil {
-			return fmt.Errorf("put: %w", err)
-		}
-		ks.BlockHeight = uint32(bh.Height)
-		nv := encodeKeystone(ks)
-		err = ksdb.Put(key[:], nv[:], nil)
-		if err != nil {
-			return fmt.Errorf("put: %w", err)
-		}
+		log.Infof("%x", key)
 	}
 	if i.Error() != nil {
 		return fmt.Errorf("keystones iterator: %w", i.Error())
 	}
-	log.Infof("records handled: %v", records)
+	log.Infof("keystones indexed: %v", records)
+
+	log.Infof("version upgrade not written")
+	panic("stop")
+	return nil
 
 	// Write new version
 	v := make([]byte, 8)
