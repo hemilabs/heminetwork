@@ -1967,12 +1967,12 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	return ks
 }
 
-func encodeKeystoneHeightHash(height uint64, ks tbcd.Keystone) (e [keystoneHeightHashSize]byte) {
+func encodeKeystoneHeightHash(height uint64, hash chainhash.Hash) (e [keystoneHeightHashSize]byte) {
 	var h [8]byte
 	binary.BigEndian.PutUint64(h[:], height)
 	e[0] = 'h'
 	copy(e[1:8+1], h[:])
-	copy(e[8+1:], ks.BlockHash[:])
+	copy(e[8+1:], hash[:])
 	return
 }
 

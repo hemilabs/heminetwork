@@ -568,6 +568,10 @@ func (l *ldb) v4(ctx context.Context) error {
 	var records int
 	for records = 0; i.Next(); records++ {
 		key := i.Key()
+		ksHash, err := chainhash.NewHash(key)
+		if err != nil {
+			return fmt.Errorf("hash: %w", err)
+		}
 		value := i.Value()
 		if len(value) != keystoneSize {
 			// Index value, not a keystone
@@ -579,8 +583,8 @@ func (l *ldb) v4(ctx context.Context) error {
 			return fmt.Errorf("blockheader: %w", err)
 		}
 		bh := decodeBlockHeader(ebh)
-		ehh := encodeKeystoneHeightHash(bh.Height, ks)
-		log.Infof("%x: %v -> %x", key, bh.Height, ehh)
+		ehh := encodeKeystoneHeightHash(bh.Height, *ksHash)
+		log.Infof("%x: %x -> %x", key, bh.Height, ehh)
 	}
 	if i.Error() != nil {
 		return fmt.Errorf("keystones iterator: %w", i.Error())
