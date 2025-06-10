@@ -1976,6 +1976,22 @@ func encodeKeystoneHeightHash(height uint64, hash chainhash.Hash) (e [keystoneHe
 	return
 }
 
+func decodeKeystoneHeightHash(v []byte) (height uint64, hash chainhash.Hash) {
+	if len(v) != keystoneHeightHashSize {
+		panic(fmt.Sprintf("invalid length: %v", len(v)))
+	}
+	if v[0] != 'h' {
+		panic("not a keystone height hash index")
+	}
+	height = binary.BigEndian.Uint64(v[1 : 1+8])
+	h := &hash
+	err := h.SetBytes(v[9:])
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
 func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
 	log.Tracef("BlockKeystoneUpdate")
 	defer log.Tracef("BlockKeystoneUpdate exit")
