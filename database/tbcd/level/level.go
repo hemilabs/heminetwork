@@ -277,7 +277,6 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			return l, nil
 		}
 
-		log.Infof("BVERSION %v", dbVersion)
 		switch dbVersion {
 		case 1:
 			// Upgrade to v2
@@ -1967,6 +1966,7 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	return ks
 }
 
+// XXX antonio add test
 func encodeKeystoneHeightHash(height uint64, hash chainhash.Hash) (e [keystoneHeightHashSize]byte) {
 	var h [8]byte
 	binary.BigEndian.PutUint64(h[:], height)
@@ -1976,10 +1976,10 @@ func encodeKeystoneHeightHash(height uint64, hash chainhash.Hash) (e [keystoneHe
 	return
 }
 
+// XXX antonio add test
 func decodeKeystoneHeightHash(v []byte) (height uint64, hash chainhash.Hash) {
 	if len(v) != keystoneHeightHashSize {
 		panic(spew.Sdump(v))
-		panic(fmt.Sprintf("invalid length: %v", len(v)))
 	}
 	if v[0] != 'h' {
 		panic("not a keystone height hash index")
@@ -1991,6 +1991,15 @@ func decodeKeystoneHeightHash(v []byte) (height uint64, hash chainhash.Hash) {
 		panic(err)
 	}
 	return
+}
+
+func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64) ([]tbcd.Keystone, error) {
+	log.Tracef("KeystonesByHeight")
+	defer log.Tracef("KeystonesByHeight exit")
+
+	_, _ = decodeKeystoneHeightHash(nil)
+
+	return nil, errors.New("not yet")
 }
 
 func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
@@ -2020,16 +2029,28 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// Only delete keystone if it is in the
 				// previously found block.
 				if ks.BlockHash.IsEqual(&v.BlockHash) {
+					bh, err := l.BlockHeaderByHash(ctx, v.BlockHash)
+					if err != nil {
+						return fmt.Errorf("blockheader: %w", err)
+					}
+
 					kssBatch.Delete(k[:])
-					kssBatch.Delete(encodeKeystoneHeightHashSlice(v.BlockHeight, k))
+					ehh := encodeKeystoneHeightHash(bh.Height, k)
+					kssBatch.Put(ehh[:], nil) // XXX antonio add test
 				}
 			}
 		case 1:
 			has, _ := kssTx.Has(k[:], nil)
 			if !has {
+				bh, err := l.BlockHeaderByHash(ctx, v.BlockHash)
+				if err != nil {
+					return fmt.Errorf("blockheader: %w", err)
+				}
+
 				// Only store unknown keystones and indexes
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
-				kssBatch.Put(encodeKeystoneHeightHashSlice(v.BlockHeight, k), nil)
+				ehh := encodeKeystoneHeightHash(bh.Height, k)
+				kssBatch.Put(ehh[:], nil) // XXX antonio add test
 			}
 		}
 
