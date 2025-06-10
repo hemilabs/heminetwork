@@ -590,7 +590,7 @@ func (s *Server) updateKeystonesForBtcBlock(ctx context.Context, btcHeaderHash [
 	return lastErr
 }
 
-func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
+func (s *Server) processBitcoinBlock(ctx context.Context, height uint64, startingHeight uint64) error {
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
 	netCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -609,14 +609,20 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
 	btcHeight := height
 	btcHeader := rbh
 
-	defer func() {
-		// unconditionally update l2 keystones found in a btc block after
-		// we're done processing that block.  this is a cheap operation and should
-		// always be kept up with the latest in the database
-		if err := s.updateKeystonesForBtcBlock(ctx, btcHeaderHash, btcHeight, s.l2KeystoneIgnoreAfter()); err != nil {
-			log.Errorf("update keystones for btc block: %w", err)
-		}
-	}()
+	// we don't need to determine effective height for keystones that are
+	// published more than 100 blocks from the tip
+	// lower keystones will up updated automatically and 100 is the max
+	const maxFinality = 100
+	if startingHeight-height <= maxFinality {
+		defer func() {
+			// unconditionally update l2 keystones found in a btc block after
+			// we're done processing that block.  this is a cheap operation and should
+			// always be kept up with the latest in the database
+			if err := s.updateKeystonesForBtcBlock(ctx, btcHeaderHash, btcHeight, s.l2KeystoneIgnoreAfter()); err != nil {
+				log.Errorf("update keystones for btc block: %w", err)
+			}
+		}()
+	}
 
 	btcBlockTmpChk, err := s.db.BtcBlockByHash(ctx, [32]byte(btcHeaderHash))
 	if err != nil && !errors.Is(err, database.ErrNotFound) {
@@ -851,10 +857,12 @@ func (s *Server) walkChain(ctx context.Context, tip uint64, exitFast bool) error
 	log.Tracef("walkChain")
 	defer log.Tracef("walkChain exit")
 
+	startingTip := tip
+
 	log.Tracef("starting to walk chain; tip=%d, s.cfg.BTCStartHeight=%d, exitFast=%b", tip, s.cfg.BTCStartHeight, exitFast)
 	for tip >= s.cfg.BTCStartHeight {
 		log.Tracef("walkChain progress; processing block at height %d", tip)
-		err := s.processBitcoinBlock(ctx, tip)
+		err := s.processBitcoinBlock(ctx, tip, startingTip)
 		if errors.Is(err, ErrAlreadyProcessed) {
 			log.Tracef("block known at height %d", tip)
 
