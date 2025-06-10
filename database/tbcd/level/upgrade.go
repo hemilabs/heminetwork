@@ -552,6 +552,7 @@ func (l *ldb) v3(ctx context.Context) error {
 // v4 upgrade the database from v3 to v4.
 // Changes:
 // Add heighthash (L2 height - Keystone Hash) to keystone database.
+// XXX antonio add test
 func (l *ldb) v4(ctx context.Context) error {
 	log.Tracef("v4")
 	defer log.Tracef("v4 exit")
@@ -591,10 +592,6 @@ func (l *ldb) v4(ctx context.Context) error {
 		return fmt.Errorf("keystones iterator: %w", i.Error())
 	}
 	log.Infof("records handled: %v", records)
-
-	log.Infof("version upgrade not written")
-	panic("stop")
-	return nil
 
 	// Write new version
 	v := make([]byte, 8)
