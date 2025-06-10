@@ -582,21 +582,15 @@ func (l *ldb) v4(ctx context.Context) error {
 			return fmt.Errorf("hash: %w", err)
 		}
 		ehh := encodeKeystoneHeightHash(bh.Height, *ksHash)
-		x, y := decodeKeystoneHeightHash(ebh)
-		log.Infof("%x: %x -> %x", key, bh.Height, ehh)
-		_ = x
-		_ = y
-		if x != bh.Height {
-			panic("height")
-		}
-		if !y.IsEqual(ksHash) {
-			panic("hash")
+		err = ksdb.Put(ehh[:], nil, nil)
+		if err != nil {
+			return fmt.Errorf("put: %w", err)
 		}
 	}
 	if i.Error() != nil {
 		return fmt.Errorf("keystones iterator: %w", i.Error())
 	}
-	log.Infof("keystones indexed: %v", records)
+	log.Infof("records handled: %v", records)
 
 	log.Infof("version upgrade not written")
 	panic("stop")
