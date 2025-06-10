@@ -842,6 +842,10 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 
 			s.updateBtcHeightCache(btcHeight)
 
+			// on first, spin up a goroutine that will walk the chain
+			// back to the "starting height"
+			// on each following, only walk the chain until the first block
+			// that we have already seen
 			if initialWalk {
 				go func() {
 					for {
