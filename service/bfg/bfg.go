@@ -612,8 +612,7 @@ func (s *Server) processBitcoinBlock(ctx context.Context, height uint64, startin
 	// we don't need to determine effective height for keystones that are
 	// published more than 100 blocks from the tip
 	// lower keystones will up updated automatically and 100 is the max
-	const maxFinality = 100
-	if startingHeight-height <= maxFinality {
+	if startingHeight-height <= hemi.MaxFinality {
 		defer func() {
 			// unconditionally update l2 keystones found in a btc block after
 			// we're done processing that block.  this is a cheap operation and should

@@ -45,6 +45,8 @@ type L2BTCFinality struct {
 	BTCFinality      int32         `json:"btc_finality"`
 }
 
+const MaxFinality = 100
+
 func L2BTCFinalityFromBfgd(l2BtcFinality *bfgd.L2BTCFinality, currentBTCHeight uint32, effectiveHeight uint32) (*L2BTCFinality, error) {
 	if effectiveHeight > currentBTCHeight {
 		return nil, fmt.Errorf("effective height greater than btc height (%d > %d)", effectiveHeight, currentBTCHeight)
@@ -56,8 +58,8 @@ func L2BTCFinalityFromBfgd(l2BtcFinality *bfgd.L2BTCFinality, currentBTCHeight u
 	}
 
 	// set a reasonable upper bound so we can safely convert to int32
-	if fin > 100 {
-		fin = 100
+	if fin > MaxFinality {
+		fin = MaxFinality
 	}
 
 	return &L2BTCFinality{
