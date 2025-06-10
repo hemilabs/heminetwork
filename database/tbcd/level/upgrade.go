@@ -569,13 +569,18 @@ func (l *ldb) v4(ctx context.Context) error {
 	for records = 0; i.Next(); records++ {
 		key := i.Key()
 		value := i.Value()
+		if len(value) != keystoneSize {
+			// Index value, not a keystone
+			continue
+		}
 		ks := decodeKeystone(value)
 		ebh, err := bhs.Get(ks.BlockHash[:], nil)
 		if err != nil {
 			return fmt.Errorf("blockheader: %w", err)
 		}
 		bh := decodeBlockHeader(ebh)
-		log.Infof("%x: %v", key, bh.Height)
+		ehh := encodeKeystoneHeightHash(bh.Height, ks)
+		log.Infof("%x: %v -> %x", key, bh.Height, ehh)
 	}
 	if i.Error() != nil {
 		return fmt.Errorf("keystones iterator: %w", i.Error())

@@ -55,8 +55,8 @@ const (
 
 	heighthashSize         = 8 + 1 + chainhash.HashSize
 	blockheaderSize        = 120
-	keystoneSize           = 4 + chainhash.HashSize + hemi.L2KeystoneAbrevSize
-	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize // h uint32(height) block_hash
+	keystoneSize           = chainhash.HashSize + hemi.L2KeystoneAbrevSize
+	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize
 )
 
 type IteratorError error
@@ -1967,97 +1967,13 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	return ks
 }
 
-func encodeKeystoneHeightHash(height uint32, hash chainhash.Hash) (e [keystoneHeightHashSize]byte) {
-	var h [4]byte
-	binary.BigEndian.PutUint32(h[:], height)
+func encodeKeystoneHeightHash(height uint64, ks tbcd.Keystone) (e [keystoneHeightHashSize]byte) {
+	var h [8]byte
+	binary.BigEndian.PutUint64(h[:], height)
 	e[0] = 'h'
-	copy(e[1:1+4], h[:])
-	copy(e[5:5+32], hash[:])
+	copy(e[1:8+1], h[:])
+	copy(e[8+1:], ks.BlockHash[:])
 	return
-}
-
-func encodeKeystoneHeightHashSlice(height uint32, hash chainhash.Hash) []byte {
-	e := encodeKeystoneHeightHash(height, hash)
-	return e[:]
-}
-
-func decodeKeystoneHeightHash(v []byte) (uint32, chainhash.Hash) {
-	if len(v) != keystoneHeightHashSize {
-		panic(fmt.Errorf("invalid height hash size: %x", v))
-	}
-	if v[0] != 'h' {
-		panic(fmt.Errorf("not a keystone height hash index: %x", v))
-	}
-	var hash chainhash.Hash
-	if err := hash.SetBytes(v[5:]); err != nil {
-		panic(err)
-	}
-	return binary.BigEndian.Uint32(v[1 : 1+4]), hash
-}
-
-func keystoneHeightRange(height int64, depth int64) *util.Range {
-	// Casting is a bit awkward here but I am not sure if we can make this
-	// look better somehow.
-	start := height + 1
-	end := start + depth
-	if depth < 0 {
-		start = height + depth
-		end = height
-	}
-	return &util.Range{
-		Start: encodeKeystoneHeightHashSlice(uint32(start), chainhash.Hash{}),
-		Limit: encodeKeystoneHeightHashSlice(uint32(end), chainhash.Hash{}),
-	}
-}
-
-// Searches for the first occurance of keystones within the given
-// height + range, excluding the height itself.
-func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]tbcd.Keystone, error) {
-	log.Tracef("KeystonesByHeight")
-	defer log.Tracef("KeystonesByHeight exit")
-
-	d := int64(depth)
-	if d == 0 {
-		return nil, errors.New("depth must not be 0")
-	}
-	start := int64(height)
-	end := start + d
-	if depth > 0 {
-		end += 1
-	}
-	if end > math.MaxUint32 {
-		return nil, errors.New("the overflow that matters")
-	}
-	if end <= 0 {
-		return nil, errors.New("underflow")
-	}
-
-	kssDB := l.pool[level.KeystonesDB]
-	i := kssDB.NewIterator(keystoneHeightRange(start, d), nil)
-	defer i.Release()
-
-	kssList := make([]tbcd.Keystone, 0, 16)
-	for i.Next() {
-		_, hash := decodeKeystoneHeightHash(i.Key())
-		eks, err := kssDB.Get(hash[:], nil)
-		if err != nil {
-			// mismatch between heighthash and hash indexes
-			panic(fmt.Errorf("data corruption: %w", err))
-		}
-		deks := decodeKeystone(eks)
-		kssList = append(kssList, deks)
-	}
-	if i.Error() != nil {
-		return nil, fmt.Errorf("keystones iterator: %w", i.Error())
-	}
-
-	if len(kssList) == 0 {
-		return nil, database.NotFoundError(fmt.Sprintf("no first occurrence "+
-			"keystones range: %v < %v",
-			min(start+1, end), max(start, end)-1))
-	}
-
-	return kssList, nil
 }
 
 func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
