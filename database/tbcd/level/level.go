@@ -1978,6 +1978,7 @@ func encodeKeystoneHeightHash(height uint64, hash chainhash.Hash) (e [keystoneHe
 
 func decodeKeystoneHeightHash(v []byte) (height uint64, hash chainhash.Hash) {
 	if len(v) != keystoneHeightHashSize {
+		panic(spew.Sdump(v))
 		panic(fmt.Sprintf("invalid length: %v", len(v)))
 	}
 	if v[0] != 'h' {
