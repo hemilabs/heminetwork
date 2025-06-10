@@ -53,9 +53,10 @@ const (
 
 	bhsCanonicalTipKey = "canonicaltip"
 
-	heighthashSize  = 8 + 1 + chainhash.HashSize
-	blockheaderSize = 120
-	keystoneSize    = chainhash.HashSize + hemi.L2KeystoneAbrevSize
+	heighthashSize         = 8 + 1 + chainhash.HashSize
+	blockheaderSize        = 120
+	keystoneSize           = chainhash.HashSize + hemi.L2KeystoneAbrevSize
+	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize
 )
 
 type IteratorError error
@@ -1961,6 +1962,15 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	// copy the values to prevent slicing reentrancy problems.
 	copy(ks.AbbreviatedKeystone[:], eks[32:])
 	return ks
+}
+
+func encodeKeystoneHeightHash(height uint64, ks tbcd.Keystone) (e [keystoneHeightHashSize]byte) {
+	var h [8]byte
+	binary.BigEndian.PutUint64(h[:], height)
+	e[0] = 'h'
+	copy(e[1:8+1], h[:])
+	copy(e[8+1:], ks.BlockHash[:])
+	return
 }
 
 func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
