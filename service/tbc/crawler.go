@@ -1533,12 +1533,6 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 			return 0, last, err
 		}
 
-		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
-		if err != nil {
-			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-
 		err = processKeystones(b, -1, kss)
 		if err != nil {
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
