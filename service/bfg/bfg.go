@@ -843,9 +843,13 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 			s.updateBtcHeightCache(btcHeight)
 
 			// on first, spin up a goroutine that will walk the chain
-			// back to the "starting height"
+			// back to the "starting height".  we do this in a goroutine
+			// so that it can run concurrently with handling new blocks.
 			// on each following, only walk the chain until the first block
 			// that we have already seen
+			// note: processBitcoinBlock uses a mutex to make sure that no
+			// two blocks at the same height are being processed at the same time,
+			// avoiding RMW race conditions
 			if initialWalk {
 				go func() {
 					for {
