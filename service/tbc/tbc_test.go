@@ -335,8 +335,8 @@ func TestDbUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 {
-		t.Fatalf("expected version 3, got %v", version)
+	if version != 4 {
+		t.Fatalf("expected version 4, got %v", version)
 	}
 
 	// version 2 checks
