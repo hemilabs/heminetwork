@@ -132,6 +132,7 @@ func makeKssMap(kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.H
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 			BlockHash:           chainhash.Hash(testutil.FillBytes(blockHashSeed, 32)),
 			AbbreviatedKeystone: abrvKs,
+			BlockHeight:         5,
 		}
 	}
 	return kssMap
@@ -356,9 +357,14 @@ func TestKeystoneUpdate(t *testing.T) {
 			}
 
 			for v := range tti.expectedInDB {
-				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
+				ks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
 				if err != nil {
 					t.Fatalf("keystone not in db: %v", err)
+				}
+
+				// check to see if height hash index was stored
+				if ks.BlockHeight != 5 {
+					t.Fatal("expected height == 0, heigh hash index not stored")
 				}
 			}
 
