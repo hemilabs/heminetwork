@@ -474,10 +474,10 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 		// limit[2] = 0xff
 		// limit[3] = 0xff
 		// limit[4] = 0xff
-		spew.Dump(start)
-		if true {
-			panic(spew.Sdump(limit))
-		}
+		//spew.Dump(start)
+		//if true {
+		//	panic(spew.Sdump(limit))
+		//}
 		r := &util.Range{Start: start[:], Limit: limit[:]}
 		i := kssDB.NewIterator(r, nil)
 		if !i.First() {
