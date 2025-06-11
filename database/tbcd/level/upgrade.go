@@ -582,7 +582,7 @@ func (l *ldb) v4(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("hash: %w", err)
 		}
-		ehh := encodeKeystoneHeightHash(bh.Height, *ksHash)
+		ehh := encodeKeystoneHeightHash(uint32(bh.Height), *ksHash)
 		err = ksdb.Put(ehh[:], nil, nil)
 		if err != nil {
 			return fmt.Errorf("put: %w", err)
