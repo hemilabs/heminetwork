@@ -137,7 +137,7 @@ type Database interface {
 
 type Keystone struct {
 	BlockHash           chainhash.Hash                 // Block that contains abbreviated keystone
-	BlockHeight         uint32                         // Block height
+	BlockHeight         uint64                         // Block height
 	AbbreviatedKeystone [hemi.L2KeystoneAbrevSize]byte // Abbreviated keystone
 }
 

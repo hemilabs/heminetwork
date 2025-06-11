@@ -1411,7 +1411,7 @@ func processKeystones(block *btcutil.Block, direction int, kssCache map[chainhas
 			abvKss := aPoPTx.L2Keystone.Serialize()
 			kssCache[*aPoPTx.L2Keystone.Hash()] = tbcd.Keystone{
 				BlockHash:           blockHash,
-				BlockHeight:         uint32(blockHeight),
+				BlockHeight:         blockHeight,
 				AbbreviatedKeystone: abvKss,
 			}
 		}
@@ -1531,6 +1531,12 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
 		if err != nil {
 			return 0, last, err
+		}
+
+		// Index block
+		b, err := s.db.BlockByHash(ctx, bh.Hash)
+		if err != nil {
+			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
 
 		err = processKeystones(b, -1, kss)
