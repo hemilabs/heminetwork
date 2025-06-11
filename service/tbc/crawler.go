@@ -432,6 +432,7 @@ func (s *Server) headerAndBlock(ctx context.Context, hash chainhash.Hash) (*tbcd
 	if err != nil {
 		return nil, nil, fmt.Errorf("block by hash %v: %w", bh, err)
 	}
+	b.SetHeight(int32(bh.Height))
 
 	return bh, b, nil
 }
@@ -1375,7 +1376,14 @@ func (s *Server) TxIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	return fmt.Errorf("invalid direction: %v", direction)
 }
 
-func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, direction int, kssCache map[chainhash.Hash]tbcd.Keystone) error {
+func processKeystones(block *btcutil.Block, direction int, kssCache map[chainhash.Hash]tbcd.Keystone) error {
+	if block.Height() == btcutil.BlockHeightUnknown {
+		panic("diagnostic: block height not set")
+	}
+
+	blockHash := *block.Hash()
+	blockHeight := uint64(block.Height())
+	txs := block.Transactions()
 	for _, tx := range txs {
 		if blockchain.IsCoinBase(tx) {
 			// Skip coinbase inputs
@@ -1402,7 +1410,8 @@ func processKeystones(blockHash *chainhash.Hash, txs []*btcutil.Tx, direction in
 
 			abvKss := aPoPTx.L2Keystone.Serialize()
 			kssCache[*aPoPTx.L2Keystone.Hash()] = tbcd.Keystone{
-				BlockHash:           *blockHash,
+				BlockHash:           blockHash,
+				BlockHeight:         blockHeight,
 				AbbreviatedKeystone: abvKss,
 			}
 		}
@@ -1451,7 +1460,7 @@ func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.
 		}
 
 		// Index block
-		err = processKeystones(b.Hash(), b.Transactions(), 1, kss)
+		err = processKeystones(b, 1, kss)
 		if err != nil {
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
 		}
@@ -1530,7 +1539,7 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
 		}
 
-		err = processKeystones(b.Hash(), b.Transactions(), -1, kss)
+		err = processKeystones(b, -1, kss)
 		if err != nil {
 			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
 		}

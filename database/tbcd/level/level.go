@@ -56,7 +56,7 @@ const (
 	heighthashSize         = 8 + 1 + chainhash.HashSize
 	blockheaderSize        = 120
 	keystoneSize           = chainhash.HashSize + hemi.L2KeystoneAbrevSize
-	keystoneHeightHashSize = 1 + 8 + chainhash.HashSize
+	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize // h uint32(height) block_hash
 )
 
 type IteratorError error
@@ -1964,26 +1964,31 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 }
 
 // XXX antonio add test
-func encodeKeystoneHeightHash(height uint64, hash chainhash.Hash) (e [keystoneHeightHashSize]byte) {
-	var h [8]byte
-	binary.BigEndian.PutUint64(h[:], height)
+func encodeKeystoneHeightHash(height uint32, hash chainhash.Hash) (e [keystoneHeightHashSize]byte) {
+	var h [4]byte
+	binary.BigEndian.PutUint32(h[:], height)
 	e[0] = 'h'
-	copy(e[1:9], h[:])
-	copy(e[9:9+32], hash[:])
+	copy(e[1:1+4], h[:])
+	copy(e[5:5+32], hash[:])
 	return
 }
 
+func encodeKeystoneHeightHashSlice(height uint32, hash chainhash.Hash) []byte {
+	e := encodeKeystoneHeightHash(height, hash)
+	return e[:]
+}
+
 // XXX antonio add test
-func decodeKeystoneHeightHash(v []byte) (height uint64, hash chainhash.Hash) {
+func decodeKeystoneHeightHash(v []byte) (height uint32, hash chainhash.Hash) {
 	if len(v) != keystoneHeightHashSize {
 		panic(spew.Sdump(v))
 	}
 	if v[0] != 'h' {
 		panic("not a keystone height hash index")
 	}
-	height = binary.BigEndian.Uint64(v[1 : 1+8])
+	height = binary.BigEndian.Uint32(v[1 : 1+4])
 	h := &hash
-	err := h.SetBytes(v[9:])
+	err := h.SetBytes(v[5:])
 	if err != nil {
 		panic(err)
 	}
@@ -2007,6 +2012,10 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 		return fmt.Errorf("invalid direction: %v", direction)
 	}
 
+	// XXX we should either store the height along with tbcd.Keystone or
+	// look it up in the index. We should not be downloading the
+	// blockheader for height alone here.
+
 	// keystones
 	kssTx, kssCommit, kssDiscard, err := l.startTransaction(level.KeystonesDB)
 	if err != nil {
@@ -2026,28 +2035,16 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// Only delete keystone if it is in the
 				// previously found block.
 				if ks.BlockHash.IsEqual(&v.BlockHash) {
-					bh, err := l.BlockHeaderByHash(ctx, v.BlockHash)
-					if err != nil {
-						return fmt.Errorf("blockheader: %w", err)
-					}
-
 					kssBatch.Delete(k[:])
-					ehh := encodeKeystoneHeightHash(bh.Height, k)
-					kssBatch.Put(ehh[:], nil) // XXX antonio add test
+					kssBatch.Put(encodeKeystoneHeightHashSlice(uint32(v.BlockHeight), k), nil) // XXX antonio add test
 				}
 			}
 		case 1:
 			has, _ := kssTx.Has(k[:], nil)
 			if !has {
-				bh, err := l.BlockHeaderByHash(ctx, v.BlockHash)
-				if err != nil {
-					return fmt.Errorf("blockheader: %w", err)
-				}
-
 				// Only store unknown keystones and indexes
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
-				ehh := encodeKeystoneHeightHash(bh.Height, k)
-				kssBatch.Put(ehh[:], nil) // XXX antonio add test
+				kssBatch.Put(encodeKeystoneHeightHashSlice(uint32(v.BlockHeight), k), nil) // XXX antonio add test
 			}
 		}
 
