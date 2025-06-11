@@ -461,18 +461,43 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 		}
 		return nil, fmt.Errorf("l2 keystone: %w", err)
 	}
-	// We could use a seek interator here to look up the height however
-	// let's use the potential block header cache instead.
 	ks := decodeKeystone(eks)
-	bh, err := l.BlockHeaderByHash(ctx, ks.BlockHash)
-	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			// This is probably data corruption.
+
+	// XXX antonio, look here
+	if true {
+		var start, limit [keystoneHeightHashSize]byte
+		start[0] = 'h'
+		copy(start[5:], abrevhash[:])
+		copy(limit[:], start[:])
+		limit[0] = start[0] + 1
+		// limit[1] = 0xff
+		// limit[2] = 0xff
+		// limit[3] = 0xff
+		// limit[4] = 0xff
+		spew.Dump(start)
+		if true {
+			panic(spew.Sdump(limit))
+		}
+		r := &util.Range{Start: start[:], Limit: limit[:]}
+		i := kssDB.NewIterator(r, nil)
+		if !i.First() {
 			return nil, database.NotFoundError(fmt.Sprintf("block header not found: %v", ks.BlockHash))
 		}
-		return nil, fmt.Errorf("block header: %w", err)
+		height, _ := decodeKeystoneHeightHash(i.Key())
+		ks.BlockHeight = uint64(height)
+	} else {
+		// We could use a seek interator here to look up the height however
+		// let's use the potential block header cache instead.
+		bh, err := l.BlockHeaderByHash(ctx, ks.BlockHash)
+		if err != nil {
+			if errors.Is(err, leveldb.ErrNotFound) {
+				// This is probably data corruption.
+				return nil, database.NotFoundError(fmt.Sprintf("block header not found: %v", ks.BlockHash))
+			}
+			return nil, fmt.Errorf("block header: %w", err)
+		}
+		ks.BlockHeight = bh.Height
 	}
-	ks.BlockHeight = bh.Height
 	return &ks, nil
 }
 
