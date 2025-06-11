@@ -454,7 +454,7 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
 	kssDB := l.pool[level.KeystonesDB]
-	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
+	eks, err := kssDB.Get(abrevhash[:], nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
@@ -463,41 +463,18 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	}
 	ks := decodeKeystone(eks)
 
-	// XXX antonio, look here
-	if true {
-		var start, limit [keystoneHeightHashSize]byte
-		start[0] = 'h'
-		copy(start[5:], abrevhash[:])
-		copy(limit[:], start[:])
-		limit[0] = start[0] + 1
-		// limit[1] = 0xff
-		// limit[2] = 0xff
-		// limit[3] = 0xff
-		// limit[4] = 0xff
-		//spew.Dump(start)
-		//if true {
-		//	panic(spew.Sdump(limit))
-		//}
-		r := &util.Range{Start: start[:], Limit: limit[:]}
-		i := kssDB.NewIterator(r, nil)
-		if !i.First() {
-			return nil, database.NotFoundError(fmt.Sprintf("block header not found: %v", ks.BlockHash))
-		}
-		height, _ := decodeKeystoneHeightHash(i.Key())
-		ks.BlockHeight = uint64(height)
-	} else {
-		// We could use a seek interator here to look up the height however
-		// let's use the potential block header cache instead.
-		bh, err := l.BlockHeaderByHash(ctx, ks.BlockHash)
-		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
-				// This is probably data corruption.
-				return nil, database.NotFoundError(fmt.Sprintf("block header not found: %v", ks.BlockHash))
-			}
-			return nil, fmt.Errorf("block header: %w", err)
-		}
-		ks.BlockHeight = bh.Height
+	// Recreate height from index.
+	i := kssDB.NewIterator(keystoneHeightHashRange(abrevhash), nil)
+	defer func() { i.Release() }()
+	if !i.First() {
+		return nil, database.NotFoundError(fmt.Sprintf("block header not found: %v", ks.BlockHash))
 	}
+	if i.Error() != nil {
+		return nil, fmt.Errorf("range: %w", i.Error())
+	}
+	height, _ := decodeKeystoneHeightHash(i.Key())
+	ks.BlockHeight = uint64(height)
+
 	return &ks, nil
 }
 
@@ -2026,6 +2003,12 @@ func decodeKeystoneHeightHash(v []byte) (height uint32, hash chainhash.Hash) {
 		panic(err)
 	}
 	return
+}
+
+func keystoneHeightHashRange(hash chainhash.Hash) *util.Range {
+	limit := encodeKeystoneHeightHashSlice(0, hash)
+	limit[0]++
+	return &util.Range{Start: encodeKeystoneHeightHashSlice(0, hash), Limit: limit}
 }
 
 func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64) ([]tbcd.Keystone, error) {
