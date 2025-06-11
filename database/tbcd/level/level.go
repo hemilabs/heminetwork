@@ -2015,13 +2015,37 @@ func keystoneHeightHashRange(hash chainhash.Hash) *util.Range {
 	return &util.Range{Start: encodeKeystoneHeightHashSlice(0, hash), Limit: limit}
 }
 
-func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64) ([]tbcd.Keystone, error) {
+func keystoneHeightRange(height uint32) *util.Range {
+	limit := encodeKeystoneHeightHashSlice(height+1, chainhash.Hash{})
+	return &util.Range{Start: encodeKeystoneHeightHashSlice(height, chainhash.Hash{}), Limit: limit}
+}
+
+func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32) ([]tbcd.Keystone, error) {
 	log.Tracef("KeystonesByHeight")
 	defer log.Tracef("KeystonesByHeight exit")
 
-	_, _ = decodeKeystoneHeightHash(nil)
+	kssList := make([]tbcd.Keystone, 0)
 
-	return nil, errors.New("not yet")
+	kssDB := l.pool[level.KeystonesDB]
+	i := kssDB.NewIterator(keystoneHeightRange(height), nil)
+	defer func() { i.Release() }()
+
+	for i.Next() {
+		_, hash := decodeKeystoneHeightHash(i.Key())
+		eks, err := kssDB.Get(hash.CloneBytes(), nil)
+		if err != nil {
+			// mismatch between heighthash and hash indexes
+			panic(err)
+		}
+		deks := decodeKeystone(eks)
+		deks.BlockHeight = uint64(height)
+		kssList = append(kssList, deks)
+	}
+	if len(kssList) == 0 {
+		return nil, database.NotFoundError(fmt.Sprintf("no keystones @ height %v", height))
+	}
+
+	return kssList, i.Error()
 }
 
 func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
@@ -2052,7 +2076,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// previously found block.
 				if ks.BlockHash.IsEqual(&v.BlockHash) {
 					kssBatch.Delete(k[:])
-					kssBatch.Put(encodeKeystoneHeightHashSlice(uint32(v.BlockHeight), k), nil) // XXX antonio add test
+					kssBatch.Delete(encodeKeystoneHeightHashSlice(uint32(v.BlockHeight), k))
 				}
 			}
 		case 1:
@@ -2060,7 +2084,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 			if !has {
 				// Only store unknown keystones and indexes
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
-				kssBatch.Put(encodeKeystoneHeightHashSlice(uint32(v.BlockHeight), k), nil) // XXX antonio add test
+				kssBatch.Put(encodeKeystoneHeightHashSlice(uint32(v.BlockHeight), k), nil)
 			}
 		}
 

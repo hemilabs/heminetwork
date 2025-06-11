@@ -126,14 +126,14 @@ func TestMD(t *testing.T) {
 	}
 }
 
-func makeKssMap(from uint32, kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
+func makeKssMap(from uint64, kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
 	kssMap := make(map[chainhash.Hash]tbcd.Keystone)
 	for i, l2Keystone := range kssList {
 		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 			BlockHash:           chainhash.Hash(testutil.FillBytes(blockHashSeed, 32)),
 			AbbreviatedKeystone: abrvKs,
-			BlockHeight:         5,
+			BlockHeight:         from + uint64(i),
 		}
 	}
 	return kssMap
@@ -474,15 +474,23 @@ func TestKeystoneUpdate(t *testing.T) {
 				}
 			}
 
-			for v := range tti.expectedInDB {
-				ks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
+			for v, ks := range tti.expectedInDB {
+				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
 				if err != nil {
 					t.Fatalf("keystone not in db: %v", err)
 				}
 
-				// check to see if height hash index was stored
-				if ks.BlockHeight != 5 {
-					t.Fatal("expected height == 0, heigh hash index not stored")
+				kssList, err := db.KeystonesByHeight(ctx, uint32(ks.BlockHeight))
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if len(kssList) != 1 {
+					t.Fatalf("unexpected number of keystons: %d", len(kssList))
+				}
+
+				if diff := deep.Equal(ks, kssList[0]); len(diff) > 0 {
+					t.Fatalf("unexpected keystone diff: %s", diff)
 				}
 			}
 
@@ -495,7 +503,8 @@ func TestKeystoneUpdate(t *testing.T) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
 					}
 				}
-				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
+
+				kssList, err := db.KeystonesByHeight(ctx, uint32(ks.BlockHeight))
 				if err != nil {
 					if !errors.Is(err, database.ErrNotFound) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
@@ -676,14 +685,14 @@ func TestHeightHashEncoding(t *testing.T) {
 	hash := *hemi.L2KeystoneAbbreviate(hks).Hash()
 
 	// encode keystone and height
-	e := encodeKeystoneHeightHash(hks.L2BlockNumber, hash)
+	e := encodeKeystoneHeightHash(hks.L1BlockNumber, hash)
 
 	if e[0] != 'h' {
 		t.Fatal("not a height hash index")
 	}
 
 	var h [4]byte
-	binary.BigEndian.PutUint32(h[:], hks.L2BlockNumber)
+	binary.BigEndian.PutUint32(h[:], hks.L1BlockNumber)
 
 	// test encoded height
 	if !bytes.Equal(e[1:1+4], h[:]) {
@@ -704,8 +713,8 @@ func TestHeightHashEncoding(t *testing.T) {
 	uheight, uhash := decodeKeystoneHeightHash(e[:])
 
 	// test decoded height
-	if uheight != hks.L2BlockNumber {
-		t.Fatalf("decoded height != kss height (%d != %d)", uheight, hks.L2BlockNumber)
+	if uheight != hks.L1BlockNumber {
+		t.Fatalf("decoded height != kss height (%d != %d)", uheight, hks.L1BlockNumber)
 	}
 
 	// test decoded hash
