@@ -125,14 +125,14 @@ func TestMD(t *testing.T) {
 	}
 }
 
-func makeKssMap(kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
+func makeKssMap(from uint64, kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
 	kssMap := make(map[chainhash.Hash]tbcd.Keystone)
-	for _, l2Keystone := range kssList {
+	for i, l2Keystone := range kssList {
 		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 			BlockHash:           chainhash.Hash(testutil.FillBytes(blockHashSeed, 32)),
 			AbbreviatedKeystone: abrvKs,
-			BlockHeight:         5,
+			BlockHeight:         from + uint64(i),
 		}
 	}
 	return kssMap
@@ -170,7 +170,7 @@ func TestKssEncoding(t *testing.T) {
 	}
 	altAbrevKeystone := hemi.L2KeystoneAbbreviate(altKeystone).Serialize()
 
-	kssMap := makeKssMap(keystones, "blockhash")
+	kssMap := makeKssMap(0, keystones, "blockhash")
 	for _, ks := range kssMap {
 		encodedKs := encodeKeystoneToSlice(ks)
 		decodedKs := decodeKeystone(encodedKs)
@@ -182,7 +182,7 @@ func TestKssEncoding(t *testing.T) {
 			t.Fatalf("abrv Ks diff: %s", diff)
 		}
 	}
-	diffKssMap := makeKssMap(keystones, "diffblockhash")
+	diffKssMap := makeKssMap(0, keystones, "diffblockhash")
 	for key, ks := range diffKssMap {
 		dks := kssMap[key]
 		encodedKs := encodeKeystoneToSlice(dks)
@@ -255,19 +255,19 @@ func TestKeystoneUpdate(t *testing.T) {
 		{
 			name:          "invalidDirection",
 			direction:     []int{0},
-			expectedOutDB: makeKssMap(kssList[:], "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList[:], "blockhash"),
 			expectedError: fmt.Errorf("invalid direction: %v", 0),
 		},
 		{
 			name:          "nilMap",
 			direction:     []int{-1, 1},
-			expectedOutDB: makeKssMap(kssList, "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:          "emptyMap",
 			direction:     []int{-1, 1},
-			kssMap:        makeKssMap(nil, "blockhash"),
-			expectedOutDB: makeKssMap(kssList, "blockhash"),
+			kssMap:        makeKssMap(5, nil, "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList, "blockhash"),
 		},
 
 		{
@@ -275,50 +275,50 @@ func TestKeystoneUpdate(t *testing.T) {
 			direction:      []int{1},
 			expectedError:  nil,
 			preInsertValid: true,
-			kssMap:         makeKssMap(kssList[:2], "blockhash"),
-			expectedInDB:   makeKssMap(kssList[:2], "blockhash"),
-			expectedOutDB:  makeKssMap(kssList[2:], "blockhash"),
+			kssMap:         makeKssMap(5, kssList[:2], "blockhash"),
+			expectedInDB:   makeKssMap(5, kssList[:2], "blockhash"),
+			expectedOutDB:  makeKssMap(5, kssList[2:], "blockhash"),
 		},
 
 		{
 			name:          "invalidRemove",
 			direction:     []int{-1},
-			kssMap:        makeKssMap(kssList[2:], "blockhash"),
-			expectedOutDB: makeKssMap(kssList, "blockhash"),
+			kssMap:        makeKssMap(5, kssList[2:], "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:          "validInsert",
 			direction:     []int{1},
-			kssMap:        makeKssMap(kssList[:2], "blockhash"),
-			expectedInDB:  makeKssMap(kssList[:2], "blockhash"),
-			expectedOutDB: makeKssMap(kssList[2:], "blockhash"),
+			kssMap:        makeKssMap(5, kssList[:2], "blockhash"),
+			expectedInDB:  makeKssMap(5, kssList[:2], "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList[2:], "blockhash"),
 		},
 		{
 			name:          "validRemove",
 			direction:     []int{1, -1},
-			kssMap:        makeKssMap(kssList[2:], "blockhash"),
-			expectedOutDB: makeKssMap(kssList, "blockhash"),
+			kssMap:        makeKssMap(5, kssList[2:], "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:           "mixedRemove",
 			direction:      []int{-1},
 			preInsertValid: true,
-			kssMap:         makeKssMap(kssList, "blockhash"),
-			expectedOutDB:  makeKssMap(kssList, "blockhash"),
+			kssMap:         makeKssMap(5, kssList, "blockhash"),
+			expectedOutDB:  makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:           "mixedInsert",
 			direction:      []int{1},
 			preInsertValid: true,
-			kssMap:         makeKssMap(kssList, "blockhash"),
-			expectedInDB:   makeKssMap(kssList, "blockhash"),
+			kssMap:         makeKssMap(5, kssList, "blockhash"),
+			expectedInDB:   makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:           "invalidBlockhashRemove",
 			direction:      []int{-1},
 			preInsertValid: true,
-			kssMap:         makeKssMap(kssList, "fakeblockhash"),
-			expectedInDB:   makeKssMap(kssList[:2], "blockhash"),
+			kssMap:         makeKssMap(5, kssList, "fakeblockhash"),
+			expectedInDB:   makeKssMap(5, kssList[:2], "blockhash"),
 		},
 	}
 
@@ -344,7 +344,7 @@ func TestKeystoneUpdate(t *testing.T) {
 			}()
 
 			if tti.preInsertValid {
-				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(kssList[:2], "blockhash"), blockhash); err != nil {
+				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(5, kssList[:2], "blockhash"), blockhash); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -356,25 +356,46 @@ func TestKeystoneUpdate(t *testing.T) {
 				}
 			}
 
-			for v := range tti.expectedInDB {
-				ks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
+			for v, ks := range tti.expectedInDB {
+				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
 				if err != nil {
 					t.Fatalf("keystone not in db: %v", err)
 				}
 
-				// check to see if height hash index was stored
-				if ks.BlockHeight != 5 {
-					t.Fatal("expected height == 0, heigh hash index not stored")
+				kssList, err := db.KeystonesByHeight(ctx, uint32(ks.BlockHeight))
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if len(kssList) != 1 {
+					t.Fatalf("unexpected number of keystons: %d", len(kssList))
+				}
+
+				if diff := deep.Equal(ks, kssList[0]); len(diff) > 0 {
+					t.Fatalf("unexpected keystone diff: %s", diff)
 				}
 			}
 
-			for k, v := range tti.expectedOutDB {
-				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k)
+			for v, ks := range tti.expectedOutDB {
+				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
 				if err == nil {
-					t.Fatalf("keystone in db: %v", spew.Sdump(v))
+					t.Fatalf("keystone in db: %v", spew.Sdump(ks))
 				} else {
 					if !errors.Is(err, database.ErrNotFound) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+					}
+				}
+
+				kssList, err := db.KeystonesByHeight(ctx, uint32(ks.BlockHeight))
+				if err != nil {
+					if !errors.Is(err, database.ErrNotFound) {
+						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+					}
+				}
+
+				for _, k := range kssList {
+					if diff := deep.Equal(ks, k); len(diff) == 0 {
+						t.Fatalf("keystone in heighthash db: %v", spew.Sdump(ks))
 					}
 				}
 			}
@@ -546,14 +567,14 @@ func TestHeightHashEncoding(t *testing.T) {
 	hash := *hemi.L2KeystoneAbbreviate(hks).Hash()
 
 	// encode keystone and height
-	e := encodeKeystoneHeightHash(hks.L2BlockNumber, hash)
+	e := encodeKeystoneHeightHash(hks.L1BlockNumber, hash)
 
 	if e[0] != 'h' {
 		t.Fatal("not a height hash index")
 	}
 
 	var h [4]byte
-	binary.BigEndian.PutUint32(h[:], hks.L2BlockNumber)
+	binary.BigEndian.PutUint32(h[:], hks.L1BlockNumber)
 
 	// test encoded height
 	if !bytes.Equal(e[1:1+4], h[:]) {
@@ -574,8 +595,8 @@ func TestHeightHashEncoding(t *testing.T) {
 	uheight, uhash := decodeKeystoneHeightHash(e[:])
 
 	// test decoded height
-	if uheight != hks.L2BlockNumber {
-		t.Fatalf("decoded height != kss height (%d != %d)", uheight, hks.L2BlockNumber)
+	if uheight != hks.L1BlockNumber {
+		t.Fatalf("decoded height != kss height (%d != %d)", uheight, hks.L1BlockNumber)
 	}
 
 	// test decoded hash
