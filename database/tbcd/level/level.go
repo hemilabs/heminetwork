@@ -1977,7 +1977,6 @@ func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
 	return ks
 }
 
-// XXX antonio add test
 func encodeKeystoneHeightHash(height uint32, hash chainhash.Hash) (e [keystoneHeightHashSize]byte) {
 	var h [4]byte
 	binary.BigEndian.PutUint32(h[:], height)
@@ -1992,7 +1991,6 @@ func encodeKeystoneHeightHashSlice(height uint32, hash chainhash.Hash) []byte {
 	return e[:]
 }
 
-// XXX antonio add test
 func decodeKeystoneHeightHash(v []byte) (height uint32, hash chainhash.Hash) {
 	if len(v) != keystoneHeightHashSize {
 		panic(spew.Sdump(v))

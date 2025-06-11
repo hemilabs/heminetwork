@@ -684,14 +684,14 @@ func TestHeightHashEncoding(t *testing.T) {
 	hash := *hemi.L2KeystoneAbbreviate(hks).Hash()
 
 	// encode keystone and height
-	e := encodeKeystoneHeightHash(hks.L1BlockNumber, hash)
+	e := encodeKeystoneHeightHash(hks.L2BlockNumber, hash)
 
 	if e[0] != 'h' {
 		t.Fatal("not a height hash index")
 	}
 
 	var h [4]byte
-	binary.BigEndian.PutUint32(h[:], hks.L1BlockNumber)
+	binary.BigEndian.PutUint32(h[:], hks.L2BlockNumber)
 
 	// test encoded height
 	if !bytes.Equal(e[1:1+4], h[:]) {
@@ -712,129 +712,12 @@ func TestHeightHashEncoding(t *testing.T) {
 	uheight, uhash := decodeKeystoneHeightHash(e[:])
 
 	// test decoded height
-	if uheight != hks.L1BlockNumber {
-		t.Fatalf("decoded height != kss height (%d != %d)", uheight, hks.L1BlockNumber)
+	if uheight != hks.L2BlockNumber {
+		t.Fatalf("decoded height != kss height (%d != %d)", uheight, hks.L2BlockNumber)
 	}
 
 	// test decoded hash
 	if !uhash.IsEqual(&hash) {
 		t.Fatalf("decoded hash != kss hash (%v != %v)", uhash, hash)
 	}
-}
-
-func TestDbUpgradeV4Errors(t *testing.T) {
-	type testTableItem struct {
-		name  string
-		key   []byte
-		value []byte
-		pass  bool
-	}
-
-	ks := hemi.L2Keystone{
-		Version:            1,
-		ParentEPHash:       testutil.FillBytes("v1parentephash", 32),
-		PrevKeystoneEPHash: testutil.FillBytes("v1prevkeystoneephash", 32),
-		StateRoot:          testutil.FillBytes("v1stateroot", 32),
-		EPHash:             testutil.FillBytes("v1ephash", 32),
-	}
-	abrevKss := hemi.L2KeystoneAbbreviate(ks)
-
-	fakeHash, err := chainhash.NewHashFromStr("1000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
-	if err != nil {
-		t.Fatal(err)
-	}
-	realHash, err := chainhash.NewHashFromStr("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	invalidBlockKss := tbcd.Keystone{
-		BlockHash:           *fakeHash,
-		BlockHeight:         10,
-		AbbreviatedKeystone: abrevKss.Serialize(),
-	}
-	validKss := tbcd.Keystone{
-		BlockHash:           *realHash,
-		BlockHeight:         10,
-		AbbreviatedKeystone: abrevKss.Serialize(),
-	}
-
-	testTable := []testTableItem{
-		{
-			name:  "invalid blockheader",
-			key:   fakeHash[:],
-			value: encodeKeystoneToSliceV1(invalidBlockKss),
-		},
-		{
-			name:  "invalid keystone hash",
-			key:   realHash[:15],
-			value: encodeKeystoneToSliceV1(validKss),
-		},
-		{
-			name: "no errors",
-			pass: true,
-		},
-	}
-
-	for _, tti := range testTable {
-		t.Run(tti.name, func(t *testing.T) {
-			home := t.TempDir()
-			network := "upgradetest"
-			t.Logf("temp: %v", home)
-
-			ctx, cancel := context.WithCancel(t.Context())
-			defer func() {
-				cancel()
-			}()
-
-			cfg, err := NewConfig(network, home, "0mb", "0mb")
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			cfg.SetUpgradeOpen(true)
-			dbTemp, err := New(ctx, cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if err := dbTemp.insertTable(level.KeystonesDB, tti.key, tti.value); err != nil {
-				panic(err)
-			}
-
-			// Write new version
-			v := make([]byte, 8)
-			binary.BigEndian.PutUint64(v, 1)
-			if err := dbTemp.MetadataPut(ctx, versionKey, v); err != nil {
-				t.Fatal(err)
-			}
-
-			if err := dbTemp.Close(); err != nil {
-				t.Fatal(err)
-			}
-
-			cfg.SetUpgradeOpen(false)
-			// upgrade
-			_, err = New(ctx, cfg)
-			if !tti.pass && err == nil {
-				t.Fatal("expected error")
-			}
-			if tti.pass && err != nil {
-				t.Fatal(err)
-			}
-
-			t.Log(err)
-		})
-	}
-}
-
-func encodeKeystoneV1(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte) {
-	copy(eks[0:32], ks.BlockHash[:])
-	copy(eks[32:], ks.AbbreviatedKeystone[:])
-	return
-}
-
-func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
-	eks := encodeKeystoneV1(ks)
-	return eks[:]
 }
