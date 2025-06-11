@@ -2015,10 +2015,6 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 		return fmt.Errorf("invalid direction: %v", direction)
 	}
 
-	// XXX we should either store the height along with tbcd.Keystone or
-	// look it up in the index. We should not be downloading the
-	// blockheader for height alone here.
-
 	// keystones
 	kssTx, kssCommit, kssDiscard, err := l.startTransaction(level.KeystonesDB)
 	if err != nil {
