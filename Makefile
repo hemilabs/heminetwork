@@ -67,6 +67,7 @@ lint:
 lint-deps:
 	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1
 	GOBIN=$(shell go env GOPATH)/bin go install github.com/joshuasing/golicenser/cmd/golicenser@v0.3
+	GOBIN=$(shell go env GOPATH)/bin go install mvdan.cc/gofumpt@v0.8.0
 
 tidy:
 	go mod tidy
