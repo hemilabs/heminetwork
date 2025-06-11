@@ -407,18 +407,20 @@ func TestKeystonesInBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	b1.SetHeight(3802508)
 	b2, err := btcutil.NewBlockFromBytes(rb2)
 	if err != nil {
 		t.Fatal(err)
 	}
+	b2.SetHeight(3802509)
 
 	// Run through processKeystones
 	kssCache1 := make(map[chainhash.Hash]tbcd.Keystone, 10000)
-	err = processKeystones(b1.Hash(), b1.Transactions(), 1, kssCache1)
+	err = processKeystones(b1, 1, kssCache1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = processKeystones(b2.Hash(), b2.Transactions(), 1, kssCache1)
+	err = processKeystones(b2, 1, kssCache1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,11 +446,11 @@ func TestKeystonesInBlock(t *testing.T) {
 
 	// Pretend unwind
 	kssCache2 := make(map[chainhash.Hash]tbcd.Keystone, 10000)
-	err = processKeystones(b2.Hash(), b2.Transactions(), -1, kssCache2)
+	err = processKeystones(b2, -1, kssCache2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = processKeystones(b1.Hash(), b1.Transactions(), -1, kssCache2)
+	err = processKeystones(b1, -1, kssCache2)
 	if err != nil {
 		t.Fatal(err)
 	}
