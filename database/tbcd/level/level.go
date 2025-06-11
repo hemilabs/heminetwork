@@ -467,7 +467,7 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	i := kssDB.NewIterator(keystoneHeightHashRange(abrevhash), nil)
 	defer func() { i.Release() }()
 	if !i.First() {
-		return nil, database.NotFoundError(fmt.Sprintf("block header not found: %v", ks.BlockHash))
+		return nil, database.NotFoundError(fmt.Sprintf("height not found: %v", ks.BlockHash))
 	}
 	if i.Error() != nil {
 		return nil, fmt.Errorf("range: %w", i.Error())
