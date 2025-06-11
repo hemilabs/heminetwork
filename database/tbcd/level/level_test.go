@@ -7,6 +7,7 @@ package level
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"maps"
@@ -523,5 +524,56 @@ func TestKeystoneDBCache(t *testing.T) {
 				t.Fatalf("(cycle %v) deleted keystone found %v", i, spew.Sdump(ks))
 			}
 		}
+	}
+}
+
+func TestHeightHashEncoding(t *testing.T) {
+	hks := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      1000,
+		L2BlockNumber:      100,
+		ParentEPHash:       testutil.FillBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("v1prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("v1stateroot", 32),
+		EPHash:             testutil.FillBytes("v1ephash", 32),
+	}
+	hash := *hemi.L2KeystoneAbbreviate(hks).Hash()
+
+	// encode keystone and height
+	e := encodeKeystoneHeightHash(hks.L2BlockNumber, hash)
+
+	if e[0] != 'h' {
+		t.Fatal("not a height hash index")
+	}
+
+	var h [4]byte
+	binary.BigEndian.PutUint32(h[:], hks.L2BlockNumber)
+
+	// test encoded height
+	if !bytes.Equal(e[1:1+4], h[:]) {
+		t.Fatalf("encoded height != kss height (%v != %v)", e[1:1+4], h)
+	}
+
+	ehash, err := chainhash.NewHash(e[5 : 5+32])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// test encoded hash
+	if !ehash.IsEqual(&hash) {
+		t.Fatalf("encoded hash != kss hash (%v != %v)", ehash, hash)
+	}
+
+	// decode index
+	uheight, uhash := decodeKeystoneHeightHash(e[:])
+
+	// test decoded height
+	if uheight != hks.L2BlockNumber {
+		t.Fatalf("decoded height != kss height (%d != %d)", uheight, hks.L2BlockNumber)
+	}
+
+	// test decoded hash
+	if !uhash.IsEqual(&hash) {
+		t.Fatalf("decoded hash != kss hash (%v != %v)", uhash, hash)
 	}
 }
