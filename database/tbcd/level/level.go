@@ -459,10 +459,20 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
 		}
-		return nil, fmt.Errorf("l2 keystone get: %w", err)
+		return nil, fmt.Errorf("l2 keystone: %w", err)
 	}
-
+	// We could use a seek interator here to look up the height however
+	// let's use the potential block header cache instead.
 	ks := decodeKeystone(eks)
+	bh, err := l.BlockHeaderByHash(ctx, ks.BlockHash)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			// This is probably data corruption.
+			return nil, database.NotFoundError(fmt.Sprintf("block header not found: %v", ks.BlockHash))
+		}
+		return nil, fmt.Errorf("block header: %w", err)
+	}
+	ks.BlockHeight = bh.Height
 	return &ks, nil
 }
 
