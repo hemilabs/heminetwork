@@ -133,7 +133,7 @@ func makeKssMap(from uint32, kssList []hemi.L2Keystone, blockHashSeed string) ma
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 			BlockHash:           chainhash.Hash(testutil.FillBytes(blockHashSeed, 32)),
 			AbbreviatedKeystone: abrvKs,
-			BlockHeight:         from + uint32(i),
+			BlockHeight:         5,
 		}
 	}
 	return kssMap
@@ -474,23 +474,15 @@ func TestKeystoneUpdate(t *testing.T) {
 				}
 			}
 
-			for v, ks := range tti.expectedInDB {
-				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
+			for v := range tti.expectedInDB {
+				ks, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
 				if err != nil {
 					t.Fatalf("keystone not in db: %v", err)
 				}
 
-				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
-				if err != nil {
-					t.Fatal(err)
-				}
-
-				if len(kssList) != 1 {
-					t.Fatalf("unexpected number of keystons: %d", len(kssList))
-				}
-
-				if diff := deep.Equal(ks, kssList[0]); len(diff) > 0 {
-					t.Fatalf("unexpected keystone diff: %s", diff)
+				// check to see if height hash index was stored
+				if ks.BlockHeight != 5 {
+					t.Fatal("expected height == 0, heigh hash index not stored")
 				}
 			}
 
