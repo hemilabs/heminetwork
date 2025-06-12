@@ -674,9 +674,10 @@ func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi
 		}, e
 	}
 
-	aks := make([]*hemi.L2KeystoneAbrev, len(kssList))
-	for i, k := range kssList {
-		aks[i] = hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(k.AbbreviatedKeystone))
+	aks := make([]*hemi.L2KeystoneAbrev, 0, len(kssList))
+	for _, k := range kssList {
+		aks = append(aks,
+			hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(k.AbbreviatedKeystone)))
 	}
 
 	return &tbcapi.KeystonesByHeightResponse{
