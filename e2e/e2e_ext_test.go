@@ -263,7 +263,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I want to use this one
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,13 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
 
-		resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
+		client := http.Client{}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp, err := client.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -365,7 +371,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I want to use this one
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +440,13 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
 
-		resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
+		client := http.Client{}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp, err := client.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -475,7 +487,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I want to use this one
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +528,13 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 
 	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
-	resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
+	client := http.Client{}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +561,13 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
 
-		resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
+		client := http.Client{}
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp, err := client.Do(request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -584,7 +608,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I want to use this one
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +651,13 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 
 	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
-	resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
+	client := http.Client{}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
