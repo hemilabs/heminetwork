@@ -362,7 +362,7 @@ func TestKeystoneUpdate(t *testing.T) {
 					t.Fatalf("keystone not in db: %v", err)
 				}
 
-				kssList, err := db.KeystonesByHeight(ctx, uint32(ks.BlockHeight))
+				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -386,7 +386,7 @@ func TestKeystoneUpdate(t *testing.T) {
 					}
 				}
 
-				kssList, err := db.KeystonesByHeight(ctx, uint32(ks.BlockHeight))
+				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight)
 				if err != nil {
 					if !errors.Is(err, database.ErrNotFound) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
