@@ -2032,7 +2032,7 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32) ([]tbcd.Keys
 
 	for i.Next() {
 		_, hash := decodeKeystoneHeightHash(i.Key())
-		eks, err := kssDB.Get(hash.CloneBytes(), nil)
+		eks, err := kssDB.Get(hash[:], nil)
 		if err != nil {
 			// mismatch between heighthash and hash indexes
 			panic(err)
