@@ -19,6 +19,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -30,7 +31,6 @@ import (
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/go-test/deep"
 	gwebsocket "github.com/gorilla/websocket"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
@@ -82,7 +82,16 @@ func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error
 	return nil
 }
 
+// since we don't use httptest when running bfg, we have to start in this port
+// range.  use the mutex to make it safe
+var (
+	somePort    = 3000
+	somePortMtx = sync.Mutex{}
+)
+
 func nextPort(ctx context.Context, t *testing.T) int {
+	somePortMtx.Lock()
+	defer somePortMtx.Unlock()
 	for {
 		select {
 		case <-ctx.Done():
@@ -90,10 +99,8 @@ func nextPort(ctx context.Context, t *testing.T) int {
 		default:
 		}
 
-		port, err := freeport.GetFreePort()
-		if err != nil {
-			t.Fatal(err)
-		}
+		port := somePort
+		somePort++
 
 		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)), 1*time.Second); err != nil {
 			if errors.Is(err, syscall.ECONNREFUSED) {
