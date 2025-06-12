@@ -94,10 +94,11 @@ func (m *Mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error
 		if v != nil {
 			continue
 		}
-		if err := getData.AddInvVect(&wire.InvVect{
+		err := getData.AddInvVect(&wire.InvVect{
 			Type: wire.InvTypeWitnessTx,
 			Hash: k,
-		}); err != nil {
+		})
+		if err != nil {
 			// Only happens when asking max inventory, just bail
 			// and count on the random map walk to eventually catch
 			// up.
@@ -157,7 +158,6 @@ func (m *Mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 	return nil
 }
 
-// commented to fix linter
 func (m *Mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) {
 	log.Tracef("txsRemove")
 	defer log.Tracef("txsRemove exit")
@@ -182,7 +182,7 @@ func (m *Mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) {
 		}
 	}
 
-	// Reap expired tx'
+	// Reap expired tx
 	go m.reap()
 
 	// if the map length does not change, nothing was deleted.

@@ -11,7 +11,7 @@ endpoint.**
 | Requirement   | Specification    |
 |---------------|------------------|
 | **CPU Cores** | 4 minimum        |
-| **RAM**       | 12 GiB minimum    |
+| **RAM**       | 12 GiB minimum   |
 | **Disk**      | NVMe recommended |
 
 **As of January 2025:**
