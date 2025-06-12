@@ -311,6 +311,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	opgethWsurl := "ws" + strings.TrimPrefix(s.URL, "http")
 
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	time.Sleep(2 * time.Second)
 
 	expectedConfirmations := []int{
 		11,
@@ -418,6 +419,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	opgethWsurl := "ws" + strings.TrimPrefix(s.URL, "http")
 
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	time.Sleep(2 * time.Second)
 
 	expectedConfirmations := []int{
 		11,
@@ -619,6 +621,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	opgethWsurl := "ws" + strings.TrimPrefix(s.URL, "http")
 
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	time.Sleep(2 * time.Second)
 
 	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
