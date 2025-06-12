@@ -762,7 +762,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return errors.New("height: must be set")
 		}
 
-		h, err := strconv.ParseUint(height, 10, 32)
+		h, err := strconv.ParseUint(height, 10, 64)
 		if err != nil {
 			return fmt.Errorf("parse height: %w", err)
 		}
@@ -777,7 +777,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("parse depth: %w", err)
 		}
 
-		kssList, err := s.KeystonesByHeight(ctx, uint32(h), int(d))
+		kssList, err := s.KeystonesByHeight(ctx, h, int(d))
 		if err != nil {
 			return fmt.Errorf("retrieve keystones: %w", err)
 		}
