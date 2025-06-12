@@ -2027,14 +2027,17 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64) ([]tbcd.Keys
 	defer func() { i.Release() }()
 
 	for i.Next() {
-		_, hash := decodeKeystoneHeightHash(i.Key())
+		h, hash := decodeKeystoneHeightHash(i.Key())
+		if uint64(h) != height {
+			break
+		}
 		eks, err := kssDB.Get(hash[:], nil)
 		if err != nil {
 			// mismatch between heighthash and hash indexes
 			panic(fmt.Sprintf("data corruption: %v", err))
 		}
 		deks := decodeKeystone(eks)
-		deks.BlockHeight = height
+		deks.BlockHeight = uint64(h)
 		kssList = append(kssList, deks)
 	}
 	if len(kssList) == 0 {
