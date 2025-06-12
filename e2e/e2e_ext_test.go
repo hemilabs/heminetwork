@@ -19,6 +19,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/go-test/deep"
 	gwebsocket "github.com/gorilla/websocket"
+
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -38,7 +40,6 @@ import (
 	"github.com/hemilabs/heminetwork/service/bfg"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/testutil"
-	"github.com/phayes/freeport"
 )
 
 func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
@@ -81,7 +82,16 @@ func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error
 	return nil
 }
 
+// since we don't use httptest when running bfg, we have to start in this port
+// range.  use the mutex to make it safe
+var (
+	somePort    = 3000
+	somePortMtx = sync.Mutex{}
+)
+
 func nextPort(ctx context.Context, t *testing.T) int {
+	somePortMtx.Lock()
+	defer somePortMtx.Unlock()
 	for {
 		select {
 		case <-ctx.Done():
@@ -89,10 +99,8 @@ func nextPort(ctx context.Context, t *testing.T) int {
 		default:
 		}
 
-		port, err := freeport.GetFreePort()
-		if err != nil {
-			t.Fatal(err)
-		}
+		port := somePort
+		somePort++
 
 		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)), 1*time.Second); err != nil {
 			if errors.Is(err, syscall.ECONNREFUSED) {
@@ -192,7 +200,6 @@ func randomL2Keystone(l2BlockNumber *int) *hemi.L2Keystone {
 }
 
 func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Database, height uint64, keystones map[uint64]tbcd.Keystone) {
-
 	var prevHeader *wire.BlockHeader
 
 	for h := range height {
@@ -280,10 +287,10 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	keystoneTwo := randomL2Keystone(&l2BlockNumber)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
-		8: tbcd.Keystone{
+		8: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneOne).Serialize(),
 		},
-		1: tbcd.Keystone{
+		1: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneTwo).Serialize(),
 		},
 	})
@@ -381,13 +388,13 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	keystoneThree := randomL2Keystone(&l2BlockNumber)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
-		1: tbcd.Keystone{
+		1: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneOne).Serialize(),
 		},
-		2: tbcd.Keystone{
+		2: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneTwo).Serialize(),
 		},
-		3: tbcd.Keystone{
+		3: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneThree).Serialize(),
 		},
 	})
@@ -453,7 +460,6 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 			t.Fatalf("super finality should have been reached with effective confirmations of %d", finalityResponse.EffectiveConfirmations)
 		}
 	}
-
 }
 
 func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
@@ -588,7 +594,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	keystoneOne := randomL2Keystone(nil)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
-		8: tbcd.Keystone{
+		8: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneOne).Serialize(),
 		},
 	})
@@ -625,7 +631,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 
 func newMockOpgeth(ctx context.Context, t *testing.T, keystones []hemi.L2Keystone) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var upgrader = gwebsocket.Upgrader{}
+		upgrader := gwebsocket.Upgrader{}
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
