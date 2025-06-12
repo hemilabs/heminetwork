@@ -473,7 +473,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(rf)
 
-	case "synindexerstohash":
+	case "syncindexerstohash":
 		hash := args["hash"]
 		if hash == "" {
 			return errors.New("must provide hash")
