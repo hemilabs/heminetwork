@@ -193,7 +193,7 @@ func randomL2Keystone(l2BlockNumber *int) *hemi.L2Keystone {
 	}
 
 	if l2BlockNumber != nil {
-		k.L2BlockNumber = L2BlockNumber
+		k.L2BlockNumber = uint32(*l2BlockNumber)
 	}
 
 	return k
