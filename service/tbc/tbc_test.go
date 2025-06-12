@@ -22,6 +22,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/juju/loggo"
 
@@ -219,12 +220,50 @@ func TestBlockBuild(t *testing.T) {
 
 	s.SyncIndexersToHash(ctx, blkFinal)
 
+	const (
+		blockNum    = 7
+		kssPerBlock = 5
+	)
+
+	ks := hemi.L2Keystone{
+		Version:            1,
+		ParentEPHash:       fillOutBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: fillOutBytes("v1prevkeystoneephash", 32),
+		StateRoot:          fillOutBytes("v1stateroot", 32),
+		EPHash:             fillOutBytes("v1ephash", 32),
+	}
+	l2Block := 25
+	kssMap := make(map[chainhash.Hash]tbcd.Keystone, 0)
+	for i := range blockNum {
+		ks.L1BlockNumber = uint32(i + 1)
+		for range kssPerBlock {
+			ks.L2BlockNumber = uint32(l2Block)
+			abrvKs := hemi.L2KeystoneAbbreviate(ks).Serialize()
+			kssMap[*hemi.L2KeystoneAbbreviate(ks).Hash()] = tbcd.Keystone{
+				BlockHash:           chainhash.Hash(fillOutBytes("blockhash", 32)),
+				AbbreviatedKeystone: abrvKs,
+			}
+			l2Block += 25
+		}
+	}
+
+	if err := s.db.BlockKeystoneUpdate(ctx, 1, kssMap); err != nil {
+		t.Fatal(err)
+	}
+
 	val, err := s.db.MetadataGet(ctx, KeystoneIndexHashKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("%v", spew.Sdump(val))
 
+	spew.Dump(val)
+
+	for h := range kssMap {
+		_, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, h)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestKeystonesInBlock(t *testing.T) {
