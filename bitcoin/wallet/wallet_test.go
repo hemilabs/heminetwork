@@ -21,7 +21,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul/memory"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/service/testutil"
+	"github.com/hemilabs/heminetwork/testutil/mock"
 )
 
 func digest256(x []byte) []byte {
@@ -126,7 +126,7 @@ func TestIntegration(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, nil, 0, 10)
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, nil, 0, 10)
 	defer mtbc.Shutdown()
 
 	tg, err := tbcgozer.Run(ctx, mtbc.URL())
@@ -160,15 +160,15 @@ func TestIntegration(t *testing.T) {
 	}
 	t.Logf("balance %v: %v", addr, gozer.BalanceFromUtxos(utxos))
 
-	//// pick utxo
-	//amount := btcutil.Amount(1000000) // 0.01000000 BTC
-	//fee := btcutil.Amount(50000)      // 0.00050000 BTC
-	//total := amount + fee             // 0.01050000 BTC
-	//utxo, err := UtxoPickerSingle(amount, fee, utxos)
-	//if err != nil {
+	// // pick utxo
+	// amount := btcutil.Amount(1000000) // 0.01000000 BTC
+	// fee := btcutil.Amount(50000)      // 0.00050000 BTC
+	// total := amount + fee             // 0.01050000 BTC
+	// utxo, err := UtxoPickerSingle(amount, fee, utxos)
+	// if err != nil {
 	//	t.Fatal(err)
-	//}
-	//t.Logf("utxo: %v > %v", btcutil.Amount(utxo.Value), total)
+	// }
+	// t.Logf("utxo: %v > %v", btcutil.Amount(utxo.Value), total)
 
 	keystone := &hemi.L2Keystone{
 		Version:            1,
@@ -227,7 +227,7 @@ func TestIntegration(t *testing.T) {
 	t.Logf("txID: %v", txID)
 }
 
-//func TestUTXOFilter(t *testing.T) {
+// func TestUTXOFilter(t *testing.T) {
 //	const utxoValue = btcutil.Amount(1000)
 //
 //	type testTableItem struct {
@@ -365,4 +365,4 @@ func TestIntegration(t *testing.T) {
 //			}
 //		})
 //	}
-//}
+// }

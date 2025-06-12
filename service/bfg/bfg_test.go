@@ -25,7 +25,8 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/popm"
-	"github.com/hemilabs/heminetwork/service/testutil"
+	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/testutil/mock"
 )
 
 const wantedKeystones = 10
@@ -41,11 +42,11 @@ func TestBFG(t *testing.T) {
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
-	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Shutdown()
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 10)
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 10)
 	defer mtbc.Shutdown()
 
 	bfgCfg := NewDefaultConfig()
@@ -121,11 +122,11 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 	kssMap[*hemi.L2KeystoneAbbreviate(lastKss).Hash()] = hemi.L2KeystoneAbbreviate(lastKss)
 
 	// Create opgeth test server with the request handler.
-	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Shutdown()
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 10)
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 10)
 	defer mtbc.Shutdown()
 
 	bfgCfg := NewDefaultConfig()
@@ -188,13 +189,13 @@ func TestFullMockIntegration(t *testing.T) {
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
-	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Shutdown()
 
 	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev)
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 20)
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 20)
 	defer mtbc.Shutdown()
 
 	bfgCfg := NewDefaultConfig()
