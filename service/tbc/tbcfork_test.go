@@ -27,6 +27,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/go-test/deep"
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/bitcoin"
@@ -1715,6 +1716,20 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
 	}
 
+	// check if keystone stored using heighthash index
+	hk, err := s.db.KeystonesByHeight(ctx, uint64(b2.Height()), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
+	}
+
 	// Index to b3
 	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
@@ -1749,6 +1764,20 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
 	}
 
+	// check if keystone stored using heighthash index
+	hk, err = s.db.KeystonesByHeight(ctx, uint64(b2.Height()), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
+	}
+
 	// check if kss2 in db
 	rv, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss2Hash)
 	if err != nil {
@@ -1757,6 +1786,20 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	// check if kss2 stored with correct block hash
 	if !rv.BlockHash.IsEqual(b3.Hash()) {
 		t.Fatalf("wrong blockhash for stored keystone: %v", kss2Hash)
+	}
+
+	// check if keystone stored using heighthash index
+	hk, err = s.db.KeystonesByHeight(ctx, uint64(b3.Height()), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 3, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
 	}
 
 	// make sure genesis tx is in db
@@ -1814,6 +1857,20 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
 	}
 
+	// check if keystone stored using heighthash index
+	hk, err = s.db.KeystonesByHeight(ctx, uint64(b2.Height()), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
+	}
+
 	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatal(err)
@@ -1852,6 +1909,12 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected fail in db query for keystone: %v", abrvKss)
 		}
+	}
+
+	// check if no keystones in heighthash index
+	_, err = s.db.KeystonesByHeight(ctx, 5, -4)
+	if err == nil {
+		t.Fatalf("expected fail in db query for keystones at height 5 and below")
 	}
 }
 
