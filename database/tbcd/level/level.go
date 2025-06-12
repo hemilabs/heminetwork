@@ -2016,14 +2016,14 @@ func keystoneHeightRange(height uint32) *util.Range {
 	return &util.Range{Start: encodeKeystoneHeightHashSlice(height, chainhash.Hash{}), Limit: limit}
 }
 
-func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32) ([]tbcd.Keystone, error) {
+func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64) ([]tbcd.Keystone, error) {
 	log.Tracef("KeystonesByHeight")
 	defer log.Tracef("KeystonesByHeight exit")
 
-	kssList := make([]tbcd.Keystone, 0)
+	kssList := make([]tbcd.Keystone, 0, 16)
 
 	kssDB := l.pool[level.KeystonesDB]
-	i := kssDB.NewIterator(keystoneHeightRange(height), nil)
+	i := kssDB.NewIterator(keystoneHeightRange(uint32(height)), nil)
 	defer func() { i.Release() }()
 
 	for i.Next() {
@@ -2031,14 +2031,15 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32) ([]tbcd.Keys
 		eks, err := kssDB.Get(hash[:], nil)
 		if err != nil {
 			// mismatch between heighthash and hash indexes
-			panic(err)
+			panic(fmt.Sprintf("data corruption: %v", err))
 		}
 		deks := decodeKeystone(eks)
-		deks.BlockHeight = uint64(height)
+		deks.BlockHeight = height
 		kssList = append(kssList, deks)
 	}
 	if len(kssList) == 0 {
-		return nil, database.NotFoundError(fmt.Sprintf("no keystones @ height %v", height))
+		return nil, database.NotFoundError(fmt.Sprintf("no keystones: height %v",
+			height))
 	}
 
 	return kssList, i.Error()
