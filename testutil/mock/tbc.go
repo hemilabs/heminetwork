@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/coder/websocket"
 
@@ -153,7 +154,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				}
 				respUtxos = append(respUtxos, &tbcapi.UTXO{
 					TxId:     *txHash,
-					Value:    utxo.Value(),
+					Value:    btcutil.Amount(float64(utxo.Value())),
 					OutIndex: utxo.OutputIndex(),
 				})
 			}
