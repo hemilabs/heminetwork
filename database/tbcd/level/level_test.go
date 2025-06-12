@@ -202,6 +202,9 @@ func TestKeystoneUpdate(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
+	// XXX antonio test forward and backwards depth as well, and ensure
+	// that you test 0, over and underflow.
+
 	kssList := []hemi.L2Keystone{
 		{
 			Version:            1,
@@ -362,7 +365,7 @@ func TestKeystoneUpdate(t *testing.T) {
 					t.Fatalf("keystone not in db: %v", err)
 				}
 
-				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight)
+				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight, 1)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -385,8 +388,7 @@ func TestKeystoneUpdate(t *testing.T) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
 					}
 				}
-
-				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight)
+				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight, 1)
 				if err != nil {
 					if !errors.Is(err, database.ErrNotFound) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
