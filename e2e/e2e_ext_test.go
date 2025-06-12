@@ -193,7 +193,7 @@ func randomL2Keystone(l2BlockNumber *int) *hemi.L2Keystone {
 	}
 
 	if l2BlockNumber != nil {
-		k.L2BlockNumber = k.L2BlockNumber
+		k.L2BlockNumber = L2BlockNumber
 	}
 
 	return k
@@ -263,7 +263,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I want to use this one
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
 
-		resp, err := http.Get(bfgUrlTmp)
+		resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -365,7 +365,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I want to use this one
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -434,7 +434,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
 
-		resp, err := http.Get(bfgUrlTmp)
+		resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -475,7 +475,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I want to use this one
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,10 +516,12 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 
 	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
-	resp, err := http.Get(bfgUrlTmp)
+	resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected %d, received %d", http.StatusNotFound, resp.StatusCode)
@@ -541,7 +543,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
 
-		resp, err := http.Get(bfgUrlTmp)
+		resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -582,7 +584,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I want to use this one
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,7 +627,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 
 	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
-	resp, err := http.Get(bfgUrlTmp)
+	resp, err := http.Get(bfgUrlTmp) //nolint:all // this is fine
 	if err != nil {
 		t.Fatal(err)
 	}
