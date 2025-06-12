@@ -193,7 +193,7 @@ func randomL2Keystone(l2BlockNumber *int) *hemi.L2Keystone {
 	}
 
 	if l2BlockNumber != nil {
-		k.L2BlockNumber = *&k.L2BlockNumber
+		k.L2BlockNumber = k.L2BlockNumber
 	}
 
 	return k
@@ -215,7 +215,9 @@ func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Databas
 
 		msgHeaders := wire.NewMsgHeaders()
 
-		msgHeaders.AddBlockHeader(&wireHeader)
+		if err := msgHeaders.AddBlockHeader(&wireHeader); err != nil {
+			t.Fatal(err)
+		}
 
 		wireBlock := wire.MsgBlock{
 			Header: wireHeader,
@@ -242,9 +244,11 @@ func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Databas
 
 		if l2Keystone, ok := keystones[h]; ok {
 			l2Keystone.BlockHash = *block.Hash()
-			db.BlockKeystoneUpdate(ctx, 1, map[chainhash.Hash]tbcd.Keystone{
+			if err := db.BlockKeystoneUpdate(ctx, 1, map[chainhash.Hash]tbcd.Keystone{
 				*hemi.L2KeystoneAbrevDeserialize(l2Keystone.AbbreviatedKeystone).Hash(): l2Keystone,
-			}, *block.Hash())
+			}, *block.Hash()); err != nil {
+				t.Fatal(err)
+			}
 			t.Logf("inserted keystone %s at btc height %d", hemi.L2KeystoneAbrevDeserialize(l2Keystone.AbbreviatedKeystone).Hash(), block.Height())
 		}
 
@@ -259,7 +263,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*")
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,6 +328,8 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		defer resp.Body.Close()
+
 		var finalityResponse bfgapi.L2KeystoneBitcoinFinalityResponse
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -358,7 +364,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*")
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -431,6 +437,8 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		defer resp.Body.Close()
+
 		var finalityResponse bfgapi.L2KeystoneBitcoinFinalityResponse
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -465,7 +473,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*")
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,6 +510,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	opgethWsurl := "ws" + strings.TrimPrefix(s.URL, "http")
 
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	time.Sleep(2 * time.Second)
 
 	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
@@ -534,6 +543,8 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		defer resp.Body.Close()
 
 		var finalityResponse bfgapi.L2KeystoneBitcoinFinalityResponse
 		body, err := io.ReadAll(resp.Body)
@@ -569,7 +580,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
-	levelDbHome, err := os.MkdirTemp("", "tbc-random-*")
+	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,6 +626,8 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected %d, received %d", http.StatusNotFound, resp.StatusCode)
