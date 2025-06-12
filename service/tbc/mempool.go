@@ -19,7 +19,7 @@ import (
 
 var MaxTxVersion = int32(2) // XXX this should not be a global
 
-type mempoolTx struct {
+type MempoolTx struct {
 	id       chainhash.Hash             // TxID
 	expires  time.Time                  // When mempool tx expires
 	weight   int64                      // transaction weight
@@ -29,18 +29,28 @@ type mempoolTx struct {
 	txins    map[wire.OutPoint]struct{} // txins in transaction
 }
 
-type mempool struct {
+func NewMempoolTx(id chainhash.Hash, txins map[wire.OutPoint]struct{}) MempoolTx {
+	return MempoolTx{id: id, txins: txins}
+}
+
+type Mempool struct {
 	mtx sync.RWMutex
 
 	reaping bool                          // set when reaping the mempool
-	txs     map[chainhash.Hash]*mempoolTx // when nil, tx has not been downloaded
+	txs     map[chainhash.Hash]*MempoolTx // when nil, tx has not been downloaded
 	size    int64                         // total "tx virtual" memory used by mempool
+}
+
+func NewMempool() (*Mempool, error) {
+	return &Mempool{
+		txs: make(map[chainhash.Hash]*MempoolTx, 10000),
+	}, nil
 }
 
 // inMempool looks for a utxo inside the mempool transaction inputs to see if
 // it is in the process of being spend.
 // Must be called with mutex held.
-func (m *mempool) inMempool(utxo tbcd.Utxo) bool {
+func (m *Mempool) inMempool(utxo tbcd.Utxo) bool {
 	opp := wire.NewOutPoint(utxo.ChainHash(), utxo.OutputIndex())
 	op := *opp
 	for _, tx := range m.txs {
@@ -56,7 +66,7 @@ func (m *mempool) inMempool(utxo tbcd.Utxo) bool {
 	return false
 }
 
-func (m *mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
+func (m *Mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Utxo, error) {
 	log.Tracef("filterUtxos")
 	defer log.Tracef("filterUtxos exit")
 
@@ -65,9 +75,9 @@ func (m *mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
-	// This may be too slow and we may need a merged map because it is more
+	// This may be too slow, and we may need a merged map because it is more
 	// likely to never find the utxo than it is to find it. That said, the
-	// setup and teardown would me much more expensive despite this code
+	// setup and teardown would be much more expensive despite this code
 	// being called infrequently.
 	for k := range utxos {
 		if !m.inMempool(utxos[k]) {
@@ -78,7 +88,7 @@ func (m *mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 	return filtered, nil
 }
 
-func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
+func (m *Mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
 	log.Tracef("getDataConstruct")
 	defer log.Tracef("getDataConstruct exit")
 
@@ -104,14 +114,14 @@ func (m *mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error
 	return getData, nil
 }
 
-func (m *mempool) txProcessed(txid chainhash.Hash) bool {
+func (m *Mempool) txProcessed(txid chainhash.Hash) bool {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
 	return m.txs[txid] != nil // return true when tx is not nil
 }
 
-func (m *mempool) TxInsert(ctx context.Context, mptx *mempoolTx) error {
+func (m *Mempool) TxInsert(ctx context.Context, mptx *MempoolTx) error {
 	log.Tracef("txInsert")
 	defer log.Tracef("txInsert exit")
 
@@ -126,7 +136,7 @@ func (m *mempool) TxInsert(ctx context.Context, mptx *mempoolTx) error {
 	return nil
 }
 
-func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
+func (m *Mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 	log.Tracef("invTxsInsert")
 	defer log.Tracef("invTxsInsert exit")
 
@@ -155,7 +165,7 @@ func (m *mempool) invTxsInsert(ctx context.Context, inv *wire.MsgInv) error {
 }
 
 // commented to fix linter
-func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) {
+func (m *Mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) {
 	log.Tracef("txsRemove")
 	defer log.Tracef("txsRemove exit")
 
@@ -188,7 +198,7 @@ func (m *mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) {
 	}
 }
 
-func (m *mempool) reap() {
+func (m *Mempool) reap() {
 	log.Tracef("reap")
 	defer log.Tracef("reap exit")
 
@@ -211,7 +221,7 @@ func (m *mempool) reap() {
 	m.reaping = false
 }
 
-func (m *mempool) stats(ctx context.Context) (int, int) {
+func (m *Mempool) stats(ctx context.Context) (int, int) {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -219,19 +229,9 @@ func (m *mempool) stats(ctx context.Context) (int, int) {
 	return len(m.txs), int(m.size) + (len(m.txs) * chainhash.HashSize)
 }
 
-func NewMempoolTx(id chainhash.Hash, txins map[wire.OutPoint]struct{}) mempoolTx {
-	return mempoolTx{id: id, txins: txins}
-}
-
-func (m *mempool) Dump(ctx context.Context) string {
+func (m *Mempool) Dump(ctx context.Context) string {
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
 	return spew.Sdump(m.txs)
-}
-
-func MempoolNew() (*mempool, error) {
-	return &mempool{
-		txs: make(map[chainhash.Hash]*mempoolTx, 10000),
-	}, nil
 }

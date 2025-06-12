@@ -31,11 +31,11 @@ type mempoolBlock struct {
 	txRates     []float64 // rates of txs in block
 }
 
-func (mptx *mempoolTx) Fee() int64 {
+func (mptx *MempoolTx) Fee() int64 {
 	return mptx.inValue - mptx.outValue
 }
 
-func (mptx *mempoolTx) FeeRate() float64 {
+func (mptx *MempoolTx) FeeRate() float64 {
 	return float64(mptx.Fee()) / float64(mptx.weight)
 }
 
@@ -50,14 +50,14 @@ func medianFee(fees []float64) float64 {
 	}
 }
 
-func (mp *mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBlock, err error) {
-	if len(mp.txs) == 0 {
+func (m *Mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBlock, err error) {
+	if len(m.txs) == 0 {
 		return blks, nil
 	}
 
 	// get mempool transactions
-	mptxs := make([]*mempoolTx, 0, len(mp.txs))
-	for _, mptx := range mp.txs {
+	mptxs := make([]*MempoolTx, 0, len(m.txs))
+	for _, mptx := range m.txs {
 		if mptx == nil {
 			continue
 		}
@@ -99,10 +99,10 @@ func (mp *mempool) generateMempoolBlocks(ctx context.Context) (blks []mempoolBlo
 	return blks, nil
 }
 
-func (mp *mempool) GetRecommendedFees(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
-	mp.mtx.RLock()
-	pBlocks, err := mp.generateMempoolBlocks(ctx)
-	mp.mtx.RUnlock()
+func (m *Mempool) GetRecommendedFees(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
+	m.mtx.RLock()
+	pBlocks, err := m.generateMempoolBlocks(ctx)
+	m.mtx.RUnlock()
 	if err != nil {
 		return nil, err
 	}
