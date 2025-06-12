@@ -1479,7 +1479,7 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure tbc dowloads blocks
+	// make sure tbc downloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1682,7 +1682,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure tbc dowloads blocks
+	// make sure tbc downloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1959,7 +1959,7 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure tbc dowloads blocks
+	// make sure tbc downloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -2013,7 +2013,7 @@ func TestIndexFork(t *testing.T) {
 	// Verify linear indexing. Current TxIndex is sitting at b3
 	t.Logf("b3: %v", b3)
 
-	// b3 -> genesis should work with postive direction (cdiff is greater than target)
+	// b3 -> genesis should work with positive direction (cdiff is greater than target)
 	direction, err = s.TxIndexIsLinear(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
@@ -2293,7 +2293,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure tbc dowloads blocks
+	// make sure tbc downloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -2384,7 +2384,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	// Verify linear indexing. Current TxIndex is sitting at b3
 	t.Logf("b3: %v", b3)
 
-	// b3 -> genesis should work with postive direction (cdiff is greater than target)
+	// b3 -> genesis should work with positive direction (cdiff is greater than target)
 	direction, err = s.TxIndexIsLinear(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
@@ -2813,7 +2813,7 @@ func TestForkCanonicity(t *testing.T) {
 	}
 	altChainHashes["b3aa"] = b3aa.Hash()
 
-	// make sure tbc dowloads blocks
+	// make sure tbc downloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}

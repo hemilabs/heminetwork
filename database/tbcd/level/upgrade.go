@@ -465,7 +465,7 @@ func (l *ldb) v3(ctx context.Context) error {
 		if modeMove {
 			// Move raw data, we must recreate the dir because
 			// os.Rename fails otherwise.
-			// XXX this needs to be redone, too error prone durig restarts.
+			// XXX this needs to be redone, too error prone during restarts.
 			log.Infof("  Moving raw data: %v -> %v", srcdir, dstdir)
 			err := os.Remove(dstdir)
 			if err != nil {
