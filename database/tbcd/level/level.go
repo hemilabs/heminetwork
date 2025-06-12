@@ -2015,26 +2015,42 @@ func keystoneHeightHashRange(hash chainhash.Hash) *util.Range {
 	return &util.Range{Start: encodeKeystoneHeightHashSlice(0, hash), Limit: limit}
 }
 
-func keystoneHeightRange(height uint32) *util.Range {
-	limit := encodeKeystoneHeightHashSlice(height+1, chainhash.Hash{})
-	return &util.Range{Start: encodeKeystoneHeightHashSlice(height, chainhash.Hash{}), Limit: limit}
+func keystoneHeightRange(height uint32, depth int) *util.Range {
+	// Casting is a bit awkward here but I am not sure if we can make this
+	// look better somehow.
+	start := int64(height)
+	end := int64(height) + int64(depth)
+	if depth < 0 {
+		start = int64(height) + int64(depth)
+		end = int64(height)
+	}
+	return &util.Range{
+		Start: encodeKeystoneHeightHashSlice(uint32(start), chainhash.Hash{}),
+		Limit: encodeKeystoneHeightHashSlice(uint32(end), chainhash.Hash{}),
+	}
 }
 
-func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64) ([]tbcd.Keystone, error) {
+func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64, depth int) ([]tbcd.Keystone, error) {
 	log.Tracef("KeystonesByHeight")
 	defer log.Tracef("KeystonesByHeight exit")
 
-	kssList := make([]tbcd.Keystone, 0, 16)
+	if depth == 0 {
+		return nil, errors.New("depth must not be 0")
+	}
+	if int64(height)+int64(depth) <= 0 {
+		return nil, errors.New("undeflow")
+	}
+	if int64(height)+int64(depth) > math.MaxUint32 {
+		return nil, errors.New("overflow")
+	}
 
 	kssDB := l.pool[level.KeystonesDB]
-	i := kssDB.NewIterator(keystoneHeightRange(uint32(height)), nil)
+	i := kssDB.NewIterator(keystoneHeightRange(uint32(height), depth), nil)
 	defer func() { i.Release() }()
 
+	kssList := make([]tbcd.Keystone, 0, 16)
 	for i.Next() {
 		h, hash := decodeKeystoneHeightHash(i.Key())
-		if uint64(h) != height {
-			break
-		}
 		eks, err := kssDB.Get(hash[:], nil)
 		if err != nil {
 			// mismatch between heighthash and hash indexes
