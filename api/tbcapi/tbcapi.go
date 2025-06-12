@@ -80,6 +80,9 @@ const (
 
 	CmdBlockKeystoneByL2KeystoneAbrevHashRequest  = "tbcapi-l2-keystone-abrev-by-abrev-hash-request"
 	CmdBlockKeystoneByL2KeystoneAbrevHashResponse = "tbcapi-l2-keystone-abrev-by-abrev-hash-response"
+
+	CmdKeystonesByHeightRequest  = "tbcapi-keystones-by-height-request"
+	CmdKeystonesByHeightResponse = "tbcapi-keystones-by-height-response"
 )
 
 var (
@@ -298,6 +301,17 @@ type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
 	Error           *protocol.Error       `json:"error,omitempty"`
 }
 
+type KeystonesByHeightRequest struct {
+	Height uint64 `json:"height"`
+	Depth  int    `json:"depth"`
+}
+
+type KeystonesByHeightResponse struct {
+	L2KeystoneAbrevs []*hemi.L2KeystoneAbrev `json:"l2_keystone_abrevs"`
+	BTCTipHeight     uint64                  `json:"btc_tip_height"`
+	Error            *protocol.Error         `json:"error,omitempty"`
+}
+
 type BlockInsertRawResponse struct {
 	BlockHash *chainhash.Hash `json:"block_hash"`
 	Error     *protocol.Error `json:"error,omitempty"`
@@ -367,6 +381,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdBlockDownloadAsyncRawResponse:              reflect.TypeOf(BlockDownloadAsyncRawResponse{}),
 	CmdBlockKeystoneByL2KeystoneAbrevHashRequest:  reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashRequest{}),
 	CmdBlockKeystoneByL2KeystoneAbrevHashResponse: reflect.TypeOf(BlockKeystoneByL2KeystoneAbrevHashResponse{}),
+	CmdKeystonesByHeightRequest:                   reflect.TypeOf(KeystonesByHeightRequest{}),
+	CmdKeystonesByHeightResponse:                  reflect.TypeOf(KeystonesByHeightResponse{}),
 }
 
 type tbcAPI struct{}
