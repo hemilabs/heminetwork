@@ -198,12 +198,126 @@ func TestKssEncoding(t *testing.T) {
 	}
 }
 
-func TestKeystoneUpdate(t *testing.T) {
+func TestHeightHashIndexing(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	// XXX antonio test forward and backwards depth as well, and ensure
-	// that you test 0, over and underflow.
+	const (
+		blockNum    = 100
+		kssPerBlock = 5
+	)
+
+	ks := hemi.L2Keystone{
+		Version:            1,
+		ParentEPHash:       testutil.FillBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("v1prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("v1stateroot", 32),
+		EPHash:             testutil.FillBytes("v1ephash", 32),
+	}
+	l2Block := 25
+	kssMap := make(map[chainhash.Hash]tbcd.Keystone, 0)
+	for i := range blockNum {
+		ks.L1BlockNumber = uint32(i + 1)
+		for range kssPerBlock {
+			ks.L2BlockNumber = uint32(l2Block)
+			abrvKs := hemi.L2KeystoneAbbreviate(ks).Serialize()
+			kssMap[*hemi.L2KeystoneAbbreviate(ks).Hash()] = tbcd.Keystone{
+				BlockHash:           chainhash.Hash(testutil.FillBytes("blockhash", 32)),
+				AbbreviatedKeystone: abrvKs,
+				BlockHeight:         uint64(i + 1),
+			}
+			l2Block += 25
+		}
+	}
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	cfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	blockhash := chainhash.Hash{1, 3, 3, 7}
+	if err := db.BlockKeystoneUpdate(ctx, 1, kssMap, blockhash); err != nil {
+		t.Fatal(err)
+	}
+
+	// check each keystone individually
+	for hash, ks := range kssMap {
+		ksr, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
+		if err != nil {
+			t.Fatalf("keystone not in db: %v", err)
+		}
+
+		if diff := deep.Equal(*ksr, ks); len(diff) > 0 {
+			t.Fatalf("unexpected keystone diff: %s", diff)
+		}
+	}
+
+	// check each height
+	for n := range blockNum {
+		kssList, err := db.KeystonesByHeight(ctx, uint64(n+1), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(kssList) != kssPerBlock {
+			t.Fatalf("unexpected number of keystones: %d", len(kssList))
+		}
+
+		for _, k := range kssList {
+			if k.BlockHeight != uint64(n+1) {
+				t.Fatalf("keystone height mismatch %v, expected %v", k.BlockHeight, n+1)
+			}
+		}
+	}
+
+	// check all heights with positive depth
+	kssList, err := db.KeystonesByHeight(ctx, 1, blockNum)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(kssList) != kssPerBlock*blockNum {
+		t.Fatalf("unexpected number of keystones: %d", len(kssList))
+	}
+
+	// check all heights with negative depth
+	kssList, err = db.KeystonesByHeight(ctx, blockNum, -blockNum+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(kssList) != kssPerBlock*blockNum {
+		t.Fatalf("unexpected number of keystones: %d", len(kssList))
+	}
+
+	// expected errors
+	_, err = db.KeystonesByHeight(ctx, 1, 0)
+	if err == nil {
+		t.Fatalf("expected 'depth must not be 0' error")
+	}
+
+	_, err = db.KeystonesByHeight(ctx, 1, -2)
+	if err == nil {
+		t.Fatalf("expected 'underflow' error")
+	}
+}
+
+func TestKeystoneUpdate(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 
 	kssList := []hemi.L2Keystone{
 		{
