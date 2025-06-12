@@ -264,6 +264,13 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		// TODO: Clayton added this because there is a case where a keystone
+		// is valid but not published to the btc chain yet so we should return
+		// an unpublished finality for that
+		if len(resp.L2Keystones) > 0 {
+			fin.L2Keystone = resp.L2Keystones[0]
+		}
+
 		// Generate abbreviated hashes from received keystones
 		abrevKeystones := make([]chainhash.Hash, 0, len(resp.L2Keystones))
 		km := make(map[chainhash.Hash]hemi.L2Keystone, len(resp.L2Keystones))
@@ -470,6 +477,8 @@ func (s *Server) Run(pctx context.Context) error {
 		s.params = &chaincfg.MainNetParams
 	case "testnet3":
 		s.params = &chaincfg.TestNet3Params
+	case "localnet":
+		s.params = &chaincfg.RegressionNetParams
 	default:
 		return fmt.Errorf("invalid network: %v", s.cfg.Network)
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/go-test/deep"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func TestMempoolFees(t *testing.T) {
@@ -229,7 +230,7 @@ func TestMempoolRemove(t *testing.T) {
 			}
 
 			for _, id := range tti.txIDs {
-				ch, err := chainhash.NewHash(fillOutBytes(id, 32))
+				ch, err := chainhash.NewHash(testutil.FillBytes(id, 32))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -245,7 +246,7 @@ func TestMempoolRemove(t *testing.T) {
 
 			remTxs := make([]chainhash.Hash, 0, len(tti.toRemove))
 			for _, id := range tti.toRemove {
-				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				hash, err := chainhash.NewHash(testutil.FillBytes(id, 32))
 				if err != nil {
 					panic(err)
 				}
@@ -255,7 +256,7 @@ func TestMempoolRemove(t *testing.T) {
 			mp.txsRemove(ctx, remTxs)
 
 			for _, id := range tti.toRemove {
-				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				hash, err := chainhash.NewHash(testutil.FillBytes(id, 32))
 				if err != nil {
 					panic(err)
 				}
@@ -265,7 +266,7 @@ func TestMempoolRemove(t *testing.T) {
 			}
 
 			for _, id := range tti.expectedIn {
-				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
+				hash, err := chainhash.NewHash(testutil.FillBytes(id, 32))
 				if err != nil {
 					panic(err)
 				}
