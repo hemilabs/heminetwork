@@ -132,6 +132,8 @@ type Database interface {
 	BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]Keystone, keystoneIndexHash chainhash.Hash) error
 	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*Keystone, error)
 	BlockHeaderByKeystoneIndex(ctx context.Context) (*BlockHeader, error)
+	// XXX antonio add KeystonesByHeight to hemictl
+	KeystonesByHeight(ctx context.Context, height uint64, depth int) ([]Keystone, error)
 }
 
 type Keystone struct {
