@@ -221,7 +221,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 			found := -1
 			for ki, kss := range f.keystones {
-				if *abrevHash == *hemi.L2KeystoneAbbreviate(kss).Hash() {
+				if hemi.L2KeystoneAbbreviate(kss).Hash().IsEqual(abrevHash) {
 					found = ki
 				}
 			}
