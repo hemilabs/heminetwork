@@ -1717,7 +1717,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err := s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err := s.db.KeystonesByHeight(ctx, uint64(b2.Height()), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1765,7 +1765,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err = s.db.KeystonesByHeight(ctx, uint64(b2.Height()), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1789,7 +1789,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b3.Height()-1), 1)
+	hk, err = s.db.KeystonesByHeight(ctx, uint64(b3.Height()), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1858,7 +1858,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err = s.db.KeystonesByHeight(ctx, uint64(b2.Height()), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1912,7 +1912,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if no keystones in heighthash index
-	_, err = s.db.KeystonesByHeight(ctx, 6, -5)
+	_, err = s.db.KeystonesByHeight(ctx, 5, -4)
 	if err == nil {
 		t.Fatalf("expected fail in db query for keystones at height 5 and below")
 	}

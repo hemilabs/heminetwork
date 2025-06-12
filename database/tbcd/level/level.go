@@ -465,8 +465,22 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 
 	// Recreate height from index.
 	i := kssDB.NewIterator(keystoneHeightHashRange(abrevhash), nil)
-	defer func() { i.Release() }()
-	if !i.First() {
+	defer func() {
+		i.Release()
+	}()
+
+	// seek for index with expected hash but increasing height
+	nextKey := encodeKeystoneHeightHash(0, abrevhash)
+	for j := 1; i.Seek(nextKey[:]); j++ {
+		// check if retrieved key indeed has the expected hash
+		if bytes.Equal(i.Key(), nextKey[:]) {
+			break
+		}
+		nextKey = encodeKeystoneHeightHash(uint32(j), abrevhash)
+	}
+
+	// check if we reached the end and didn't find a matching key
+	if !bytes.Equal(i.Key(), nextKey[:]) {
 		return nil, database.NotFoundError(fmt.Sprintf("height not found: %v", ks.BlockHash))
 	}
 	if i.Error() != nil {
