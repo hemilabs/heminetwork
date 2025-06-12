@@ -264,11 +264,16 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		// TODO: Clayton added this because there is a case where a keystone
-		// is valid but not published to the btc chain yet so we should return
-		// an unpublished finality for that
+		// from Clayton: the finality must only ever be for the l2keystone
+		// that we're querying for, it may inherit effective height from another
+		// but is still the keystone being queried for
 		if len(resp.L2Keystones) > 0 {
-			fin.L2Keystone = resp.L2Keystones[0]
+			for i, k := range resp.L2Keystones {
+				if hemi.L2KeystoneAbbreviate(k).Hash().IsEqual(hash) {
+					fin.L2Keystone = resp.L2Keystones[i]
+					log.Infof("responding with keystone %s", spew.Sdump(k))
+				}
+			}
 		}
 
 		// Generate abbreviated hashes from received keystones
@@ -307,7 +312,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			}
 
 			if ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]; ok {
-				altFin.L2Keystone = ks
+				altFin.L2Keystone = fin.L2Keystone
 				// If this keystone has a higher l2 number, store it the
 				// abrev hash for future descendant queries to op-geth.
 				// The height check is a sanity check in case the keystones
