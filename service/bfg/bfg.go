@@ -312,7 +312,9 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			}
 
 			if ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]; ok {
-				altFin.L2Keystone = fin.L2Keystone
+				if fin != nil {
+					altFin.L2Keystone = fin.L2Keystone
+				}
 				// If this keystone has a higher l2 number, store it the
 				// abrev hash for future descendant queries to op-geth.
 				// The height check is a sanity check in case the keystones
