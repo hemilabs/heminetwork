@@ -7,6 +7,7 @@ package tbc
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -48,7 +49,7 @@ func NewMempool() (*Mempool, error) {
 }
 
 // inMempool looks for a utxo inside the mempool transaction inputs to see if
-// it is in the process of being spend.
+// it is in the process of being spent.
 // Must be called with mutex held.
 func (m *Mempool) inMempool(utxo tbcd.Utxo) bool {
 	opp := wire.NewOutPoint(utxo.ChainHash(), utxo.OutputIndex())
@@ -70,8 +71,6 @@ func (m *Mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 	log.Tracef("filterUtxos")
 	defer log.Tracef("filterUtxos exit")
 
-	filtered := make([]tbcd.Utxo, 0, len(utxos))
-
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 
@@ -79,13 +78,7 @@ func (m *Mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 	// likely to never find the utxo than it is to find it. That said, the
 	// setup and teardown would be much more expensive despite this code
 	// being called infrequently.
-	for k := range utxos {
-		if !m.inMempool(utxos[k]) {
-			// Not found in mempool inputs.
-			filtered = append(filtered, utxos[k])
-		}
-	}
-	return filtered, nil
+	return slices.DeleteFunc(utxos[:], m.inMempool), nil
 }
 
 func (m *Mempool) getDataConstruct(ctx context.Context) (*wire.MsgGetData, error) {
