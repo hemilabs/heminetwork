@@ -30,6 +30,8 @@ import (
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/go-test/deep"
 	gwebsocket "github.com/gorilla/websocket"
+	"github.com/phayes/freeport"
+
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -38,11 +40,10 @@ import (
 	"github.com/hemilabs/heminetwork/service/bfg"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/testutil"
-	"github.com/phayes/freeport"
 )
 
 func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	defer cancel()
 
 	t.Logf("connecting to %s", url)
@@ -192,7 +193,6 @@ func randomL2Keystone(l2BlockNumber *int) *hemi.L2Keystone {
 }
 
 func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Database, height uint64, keystones map[uint64]tbcd.Keystone) {
-
 	var prevHeader *wire.BlockHeader
 
 	for h := range height {
@@ -234,7 +234,6 @@ func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Databas
 		}
 
 		if l2Keystone, ok := keystones[h]; ok {
-
 			l2Keystone.BlockHash = *block.Hash()
 			db.BlockKeystoneUpdate(ctx, 1, map[chainhash.Hash]tbcd.Keystone{
 				*hemi.L2KeystoneAbrevDeserialize(l2Keystone.AbbreviatedKeystone).Hash(): l2Keystone,
@@ -280,10 +279,10 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	keystoneTwo := randomL2Keystone(&l2BlockNumber)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
-		8: tbcd.Keystone{
+		8: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneOne).Serialize(),
 		},
-		1: tbcd.Keystone{
+		1: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneTwo).Serialize(),
 		},
 	})
@@ -381,13 +380,13 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	keystoneThree := randomL2Keystone(&l2BlockNumber)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
-		1: tbcd.Keystone{
+		1: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneOne).Serialize(),
 		},
-		2: tbcd.Keystone{
+		2: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneTwo).Serialize(),
 		},
-		3: tbcd.Keystone{
+		3: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneThree).Serialize(),
 		},
 	})
@@ -453,7 +452,6 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 			t.Fatalf("super finality should have been reached with effective confirmations of %d", finalityResponse.EffectiveConfirmations)
 		}
 	}
-
 }
 
 func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
@@ -588,7 +586,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	keystoneOne := randomL2Keystone(nil)
 
 	createChainWithKeystones(ctx, t, db, 13, map[uint64]tbcd.Keystone{
-		8: tbcd.Keystone{
+		8: {
 			AbbreviatedKeystone: hemi.L2KeystoneAbbreviate(*keystoneOne).Serialize(),
 		},
 	})
@@ -625,7 +623,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 
 func newMockOpgeth(ctx context.Context, t *testing.T, keystones []hemi.L2Keystone) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		var upgrader = gwebsocket.Upgrader{}
+		upgrader := gwebsocket.Upgrader{}
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return

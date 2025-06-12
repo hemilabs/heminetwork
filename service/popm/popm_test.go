@@ -16,7 +16,8 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/service/testutil"
+	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/testutil/mock"
 )
 
 // XXX antonio, please add a test case where opgeth/gozer aren't connected to
@@ -36,11 +37,11 @@ func TestPopMiner(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create opgeth test server with the request handler.
-	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Shutdown()
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 100)
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 100)
 	defer mtbc.Shutdown()
 
 	// Setup pop miner
@@ -85,7 +86,7 @@ func TestTickingPopMiner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	l2KeystoneMaxAge = testutil.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
+	l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
@@ -94,13 +95,13 @@ func TestTickingPopMiner(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create opgeth test server with the request handler.
-	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Shutdown()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
 	defer mtbc.Shutdown()
 
 	// Setup pop miner
@@ -166,7 +167,7 @@ func TestPopmFilterUtxos(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	l2KeystoneMaxAge = testutil.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
+	l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
@@ -175,13 +176,13 @@ func TestPopmFilterUtxos(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create opgeth test server with the request handler.
-	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Shutdown()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, defaultL2KeystonesCount-1)
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, defaultL2KeystonesCount-1)
 	defer mtbc.Shutdown()
 
 	// Setup pop miner
@@ -240,7 +241,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	l2KeystoneMaxAge = testutil.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
+	l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
 	opgethReconnectTimeout = 500 * time.Millisecond
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
@@ -250,13 +251,13 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create opgeth test server with the request handler.
-	opgeth := testutil.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Shutdown()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
 
 	// Create tbc test server with the request handler.
-	mtbc := testutil.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, emptyMap, btcTip, 100)
 	defer mtbc.Shutdown()
 
 	// Setup pop miner
