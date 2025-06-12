@@ -2036,7 +2036,7 @@ func keystoneHeightRange(height uint32, depth int) *util.Range {
 	end := int64(height) + int64(depth)
 	if depth < 0 {
 		start = int64(height) + int64(depth)
-		end = int64(height)
+		end = int64(height) + 1
 	}
 	return &util.Range{
 		Start: encodeKeystoneHeightHashSlice(uint32(start), chainhash.Hash{}),

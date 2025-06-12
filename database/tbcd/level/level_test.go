@@ -225,7 +225,7 @@ func TestHeightHashIndexing(t *testing.T) {
 			kssMap[*hemi.L2KeystoneAbbreviate(ks).Hash()] = tbcd.Keystone{
 				BlockHash:           chainhash.Hash(testutil.FillBytes("blockhash", 32)),
 				AbbreviatedKeystone: abrvKs,
-				BlockHeight:         uint32(i + 1),
+				BlockHeight:         uint64(i + 1),
 			}
 			l2Block += 25
 		}
@@ -268,7 +268,7 @@ func TestHeightHashIndexing(t *testing.T) {
 
 	// check each height
 	for n := range blockNum {
-		kssList, err := db.KeystonesByHeight(ctx, uint32(n), 1)
+		kssList, err := db.KeystonesByHeight(ctx, uint64(n+1), 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -278,14 +278,14 @@ func TestHeightHashIndexing(t *testing.T) {
 		}
 
 		for _, k := range kssList {
-			if k.BlockHeight != uint32(n+1) {
+			if k.BlockHeight != uint64(n+1) {
 				t.Fatalf("keystone height mismatch %v, expected %v", k.BlockHeight, n+1)
 			}
 		}
 	}
 
 	// check all heights with positive depth
-	kssList, err := db.KeystonesByHeight(ctx, 0, blockNum)
+	kssList, err := db.KeystonesByHeight(ctx, 1, blockNum)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestHeightHashIndexing(t *testing.T) {
 	}
 
 	// check all heights with negative depth
-	kssList, err = db.KeystonesByHeight(ctx, blockNum+1, -blockNum)
+	kssList, err = db.KeystonesByHeight(ctx, blockNum, -blockNum+1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,9 +319,6 @@ func TestHeightHashIndexing(t *testing.T) {
 func TestKeystoneUpdate(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-
-	// XXX antonio test forward and backwards depth as well, and ensure
-	// that you test 0, over and underflow.
 
 	kssList := []hemi.L2Keystone{
 		{
