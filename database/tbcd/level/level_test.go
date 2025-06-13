@@ -11,14 +11,19 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"reflect"
+	"sort"
 	"testing"
+	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
+	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/testutil"
@@ -313,6 +318,317 @@ func TestHeightHashIndexing(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected 'underflow' error")
 	}
+}
+
+func TestUpgradeFull(t *testing.T) {
+	home := t.TempDir()
+	network := "upgradetest"
+	t.Logf("temp: %v", home)
+
+	err := testutil.Extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	cfg, err := NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.SetUpgradeOpen(true)
+
+	dbTemp, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const (
+		blockNum    = 7
+		kssPerBlock = 5
+	)
+
+	// populate v1 db with various keystones
+	ks := hemi.L2Keystone{
+		Version:            1,
+		ParentEPHash:       testutil.FillBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("v1prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("v1stateroot", 32),
+		EPHash:             testutil.FillBytes("v1ephash", 32),
+	}
+	l2Block := 25
+	kssMap := make(map[chainhash.Hash]tbcd.Keystone, 0)
+	for i := range blockNum {
+		bh, err := dbTemp.BlockHeadersByHeight(ctx, uint64(i+1))
+		if err != nil {
+			panic(err)
+		}
+		blkHash := bh[0].Hash
+		ks.L1BlockNumber = uint32(i + 1)
+		for range kssPerBlock {
+			ks.L2BlockNumber = uint32(l2Block)
+			abrvKs := hemi.L2KeystoneAbbreviate(ks).Serialize()
+			kssMap[*hemi.L2KeystoneAbbreviate(ks).Hash()] = tbcd.Keystone{
+				BlockHash:           blkHash,
+				AbbreviatedKeystone: abrvKs,
+				BlockHeight:         uint32(i + 1),
+			}
+			l2Block += 25
+		}
+
+		if err := dbTemp.v1BlockKeystoneUpdate(kssMap, blkHash); err != nil {
+			panic(err)
+		}
+	}
+
+	if err := dbTemp.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg.SetUpgradeOpen(false)
+
+	// begin upgrades
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.BlockHeadersByHeight(ctx, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pull version from DB
+	version, err := db.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 4 {
+		t.Fatalf("expected version 4, got %v", version)
+	}
+
+	// version 2 checks
+
+	// Copied from level package because this test can't be run there.
+	utxoIndexHashKey := []byte("utxoindexhash")
+	txIndexHashKey := []byte("txindexhash")
+	keystoneIndexHashKey := []byte("keystoneindexhash")
+	// Make sure db no longer has index keys
+	_, err = db.MetadataGet(ctx, utxoIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving utxo index hash")
+	}
+	_, err = db.MetadataGet(ctx, txIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving tx index hash")
+	}
+	_, err = db.MetadataGet(ctx, keystoneIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving keystone index hash")
+	}
+
+	// Make sure we get the expected indexkeys from db
+	hash, err := chainhash.NewHashFromStr("0000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
+	if err != nil {
+		panic(err)
+	}
+	utxobh, err := db.BlockHeaderByUtxoIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utxobh.Hash.IsEqual(hash) {
+		t.Fatal("unexpected utxo hash")
+	}
+
+	txbh, err := db.BlockHeaderByTxIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !txbh.Hash.IsEqual(hash) {
+		t.Fatal("unexpected tx hash")
+	}
+
+	keystonebh, err := db.BlockHeaderByKeystoneIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !keystonebh.Hash.IsEqual(hash) {
+		t.Fatal("unexpected keystone hash")
+	}
+
+	aks, err := db.KeystonesByHeight(ctx, 10, -9)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for h, k := range kssMap {
+		var found bool
+		for _, ak := range aks {
+			if diff := deep.Equal(ak, k); len(diff) > 0 {
+				continue
+			}
+			found = true
+		}
+		if !found {
+			t.Fatalf("missing keystone: %v", h)
+		}
+	}
+}
+
+func TestDbUpgradePipeline(t *testing.T) {
+	home := t.TempDir()
+	network := "upgradetest"
+	t.Logf("temp: %v", home)
+
+	err := testutil.Extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	t.Log("Upgrading with move")
+
+	// We are setting the batchSize to exercise restarts.
+	SetBatchSize(3)
+
+	// Upgrade database to v3 with move
+	cfg, err := NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dbTemp, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get all db keys
+	keys := make([]string, 0, len(dbTemp.DB()))
+	for k := range dbTemp.DB() {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Close temporary DB
+	if err = dbTemp.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rename database $HOME to $HOME.move
+	err = os.Rename(cfg.Home, cfg.Home+".move")
+	if err != nil {
+		t.Fatal(fmt.Errorf("rename destination: %w", err))
+	}
+
+	// Open move DB
+	cfgMove, err := NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfgMove.Home = cfgMove.Home + ".move"
+
+	dbMove, err := New(ctx, cfgMove)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = testutil.Extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set mode to copy
+	SetMode(false)
+
+	t.Log("Upgrading with copy")
+
+	// Upgrade database to v3 with copy which
+	// creates a testnet3.v3 folder
+	dbv2, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Open copy DB
+	cfgCopy, err := NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfgCopy.Home = cfgCopy.Home + ".v3"
+
+	dbCopy, err := New(ctx, cfgCopy)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("Comparing DBs")
+
+	// Compare all databases
+	for _, dbs := range keys {
+		a := dbv2.DB()[dbs]
+		b := dbMove.DB()[dbs]
+		c := dbCopy.DB()[dbs]
+
+		t.Logf("Comparing original records against dbmove (%v)", dbs)
+		records, err := cmpDB(a, b)
+		if err != nil {
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
+		}
+
+		t.Logf("Comparing dbmove records against original (%v)", dbs)
+		records, err = cmpDB(b, a)
+		if err != nil {
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
+		}
+
+		t.Logf("Comparing original records against dbcopy (%v)", dbs)
+		records, err = cmpDB(a, c)
+		if err != nil {
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
+		}
+
+		t.Logf("Comparing dbcopy records against original (%v)", dbs)
+		records, err = cmpDB(c, a)
+		if err != nil {
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
+		}
+	}
+}
+
+func cmpDB(a, b *leveldb.DB) (int, error) {
+	i := a.NewIterator(nil, nil)
+	defer func() { i.Release() }()
+
+	records := 0
+	for records = 0; i.Next(); records++ {
+		v, err := b.Get(i.Key(), nil)
+		if err != nil {
+			return records, err
+		}
+
+		if diff := deep.Equal(i.Value(), v); len(diff) > 0 {
+			return records, fmt.Errorf("unexpected diff: %v", diff)
+		}
+	}
+	return records, nil
 }
 
 func TestKeystoneUpdate(t *testing.T) {
@@ -719,4 +1035,51 @@ func TestHeightHashEncoding(t *testing.T) {
 	if !uhash.IsEqual(&hash) {
 		t.Fatalf("decoded hash != kss hash (%v != %v)", uhash, hash)
 	}
+}
+
+func (l *ldb) v1BlockKeystoneUpdate(keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
+	log.Tracef("BlockKeystoneUpdate")
+	defer log.Tracef("BlockKeystoneUpdate exit")
+
+	// keystones
+	kssTx, kssCommit, kssDiscard, err := l.startTransaction(level.KeystonesDB)
+	if err != nil {
+		return fmt.Errorf("keystones open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	kssBatch := new(leveldb.Batch)
+	for k, v := range keystones {
+		has, _ := kssTx.Has(k[:], nil)
+		if !has {
+			// Only store unknown keystones
+			kssBatch.Put(k[:], encodeKeystoneToSliceV1(v))
+		}
+	}
+
+	// Store index
+	kssBatch.Put(keystoneIndexHashKey, keystoneIndexHash[:])
+
+	// Write keystones batch
+	if err = kssTx.Write(kssBatch, nil); err != nil {
+		return fmt.Errorf("keystones insert: %w", err)
+	}
+
+	// keystones commit
+	if err = kssCommit(); err != nil {
+		return fmt.Errorf("keystones commit: %w", err)
+	}
+
+	return nil
+}
+
+func encodeKeystoneV1(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte) {
+	copy(eks[0:32], ks.BlockHash[:])
+	copy(eks[32:], ks.AbbreviatedKeystone[:])
+	return
+}
+
+func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
+	eks := encodeKeystoneV1(ks)
+	return eks[:]
 }
