@@ -55,7 +55,7 @@ const (
 
 	heighthashSize         = 8 + 1 + chainhash.HashSize
 	blockheaderSize        = 120
-	keystoneSize           = chainhash.HashSize + hemi.L2KeystoneAbrevSize
+	keystoneSize           = 4 + chainhash.HashSize + hemi.L2KeystoneAbrevSize
 	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize // h uint32(height) block_hash
 )
 
@@ -462,33 +462,6 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 		return nil, fmt.Errorf("l2 keystone: %w", err)
 	}
 	ks := decodeKeystone(eks)
-
-	// Recreate height from index.
-	i := kssDB.NewIterator(keystoneHeightHashRange(abrevhash), nil)
-	defer func() {
-		i.Release()
-	}()
-
-	// seek for index with expected hash but increasing height
-	nextKey := encodeKeystoneHeightHash(0, abrevhash)
-	for j := 1; i.Seek(nextKey[:]); j++ {
-		// check if retrieved key indeed has the expected hash
-		if bytes.Equal(i.Key(), nextKey[:]) {
-			break
-		}
-		nextKey = encodeKeystoneHeightHash(uint32(j), abrevhash)
-	}
-
-	// check if we reached the end and didn't find a matching key
-	if !bytes.Equal(i.Key(), nextKey[:]) {
-		return nil, database.NotFoundError(fmt.Sprintf("height not found: %v", ks.BlockHash))
-	}
-	if i.Error() != nil {
-		return nil, fmt.Errorf("range: %w", i.Error())
-	}
-	height, _ := decodeKeystoneHeightHash(i.Key())
-	ks.BlockHeight = uint64(height)
-
 	return &ks, nil
 }
 
@@ -2023,12 +1996,6 @@ func decodeKeystoneHeightHash(v []byte) (height uint32, hash chainhash.Hash) {
 	return
 }
 
-func keystoneHeightHashRange(hash chainhash.Hash) *util.Range {
-	limit := encodeKeystoneHeightHashSlice(0, hash)
-	limit[0]++
-	return &util.Range{Start: encodeKeystoneHeightHashSlice(0, hash), Limit: limit}
-}
-
 func keystoneHeightRange(height uint32, depth int) *util.Range {
 	// Casting is a bit awkward here but I am not sure if we can make this
 	// look better somehow.
@@ -2044,15 +2011,12 @@ func keystoneHeightRange(height uint32, depth int) *util.Range {
 	}
 }
 
-func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64, depth int) ([]tbcd.Keystone, error) {
+func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]tbcd.Keystone, error) {
 	log.Tracef("KeystonesByHeight")
 	defer log.Tracef("KeystonesByHeight exit")
 
 	if depth == 0 {
 		return nil, errors.New("depth must not be 0")
-	}
-	if height > math.MaxUint32 {
-		return nil, errors.New("overflow for codeql")
 	}
 	if int64(height)+int64(depth) > math.MaxUint32 {
 		return nil, errors.New("the overflow that matters")
@@ -2062,19 +2026,18 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64, depth int) (
 	}
 
 	kssDB := l.pool[level.KeystonesDB]
-	i := kssDB.NewIterator(keystoneHeightRange(uint32(height), depth), nil)
+	i := kssDB.NewIterator(keystoneHeightRange(height, depth), nil)
 	defer func() { i.Release() }()
 
 	kssList := make([]tbcd.Keystone, 0, 16)
 	for i.Next() {
-		h, hash := decodeKeystoneHeightHash(i.Key())
+		_, hash := decodeKeystoneHeightHash(i.Key())
 		eks, err := kssDB.Get(hash[:], nil)
 		if err != nil {
 			// mismatch between heighthash and hash indexes
 			panic(fmt.Sprintf("data corruption: %v", err))
 		}
 		deks := decodeKeystone(eks)
-		deks.BlockHeight = uint64(h)
 		kssList = append(kssList, deks)
 	}
 	if len(kssList) == 0 {
@@ -2113,7 +2076,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// previously found block.
 				if ks.BlockHash.IsEqual(&v.BlockHash) {
 					kssBatch.Delete(k[:])
-					kssBatch.Delete(encodeKeystoneHeightHashSlice(uint32(v.BlockHeight), k))
+					kssBatch.Delete(encodeKeystoneHeightHashSlice(v.BlockHeight, k))
 				}
 			}
 		case 1:
@@ -2121,7 +2084,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 			if !has {
 				// Only store unknown keystones and indexes
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
-				kssBatch.Put(encodeKeystoneHeightHashSlice(uint32(v.BlockHeight), k), nil)
+				kssBatch.Put(encodeKeystoneHeightHashSlice(v.BlockHeight, k), nil)
 			}
 		}
 
