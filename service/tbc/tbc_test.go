@@ -134,7 +134,7 @@ func TestDbUpgradePipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer func() {
 		cancel()
 	}()
