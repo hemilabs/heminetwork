@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -32,8 +33,24 @@ import (
 	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
 	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/version"
 )
+
+func parseTxFromHex(txs string) (*btcutil.Tx, error) {
+	rtx, err := hex.DecodeString(strings.Trim(txs, "\n"))
+	if err != nil {
+		return nil, err
+	}
+
+	// decode
+	tx, err := btcutil.NewTxFromBytes(rtx)
+	if err != nil {
+		return nil, err
+	}
+
+	return tx, nil
+}
 
 func parseBlockFromHex(blk string) (*btcutil.Block, error) {
 	eb, err := hex.DecodeString(strings.Trim(blk, "\n"))
@@ -611,6 +628,46 @@ func _main() error {
 			fmt.Printf("%v\n", height)
 		}
 
+	case "tx":
+		raw := true
+
+		wireSpew := false
+		wireSet := args["wire"]
+		if wireSet == "1" || strings.ToLower(wireSet) == "true" {
+			wireSpew = true
+		}
+
+		jsonSet := args["json"]
+		if jsonSet == "1" || strings.ToLower(jsonSet) == "true" {
+			raw = false
+			if wireSpew {
+				return errors.New("wire and json may not be both set")
+			}
+		}
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
+		}
+		var stx string
+		stx, err = blockstream.Tx(ctx, hash, raw)
+		if err == nil {
+			if wireSpew {
+				// eb, err := hex.DecodeString(strings.Trim(b, "\n"))
+				// if err != nil {
+				//	return err
+				// }
+				// fmt.Printf("%v", spew.Sdump(eb))
+
+				tx, err := parseTxFromHex(stx)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("%v", spew.Sdump(tx.MsgTx()))
+			} else {
+				fmt.Printf("%v", stx)
+			}
+		}
+
 	case "p2p":
 		err = btcConnect(ctx, network)
 
@@ -679,6 +736,35 @@ func _main() error {
 			endHeight = int(e)
 		}
 		err = StoreBlockHeaders(ctx, endHeight, blockCount, downloadDir)
+
+	case "dumpkeystones":
+		filename := args["filename"]
+		if filename == "" {
+			return errors.New("filename: must be set")
+		}
+		var block *btcutil.Block
+		block, err = parseBlock(ctx, filename)
+		if err != nil {
+			return err
+		}
+
+		// parse keystones
+		for _, tx := range block.Transactions() {
+			if blockchain.IsCoinBase(tx) {
+				// Skip coinbase inputs
+				continue
+			}
+
+			for _, txOut := range tx.MsgTx().TxOut {
+				aPoPTx, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
+				if err != nil {
+					// log.Tracef("error parsing tx l2: %s", err)
+					continue
+				}
+				fmt.Printf("%v\n", aPoPTx.L2Keystone.Hash())
+			}
+		}
+
 	default:
 		return fmt.Errorf("invalid action: %v", os.Args[1])
 	}

@@ -2,18 +2,20 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-FROM golang:1.24.4-bookworm@sha256:c83619bb18b0207412fffdaf310f57ee3dd02f586ac7a5b44b9c36a29a9d5122 AS build_1
+FROM golang:1.24.2-bookworm@sha256:00eccd446e023d3cd9566c25a6e6a02b90db3e1e0bbe26a48fc29cd96e800901 AS build_1
 
 WORKDIR /git
 
-ARG OP_GETH_CACHE_BREAK=12F2
+ARG OP_GETH_CACHE_BREAK=12F2asdfasdfdasdfsdfasdfsd
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout e79d9922c9acaa5c46597b1ffe0259597aa9499d
+ARG OP_GETH_CACHE_BREAK=asdfsadasddddfsdfgsadsfsfdadfsasdf
+RUN git fetch origin
+RUN git checkout 5aa881d50bc1feaa02f9807ad6fd85cbba46ad06
 
 RUN go run build/ci.go install -static ./cmd/geth
 
-FROM golang:1.24.4-bookworm@sha256:c83619bb18b0207412fffdaf310f57ee3dd02f586ac7a5b44b9c36a29a9d5122 AS build_2
+FROM golang:1.24.2-bookworm@sha256:00eccd446e023d3cd9566c25a6e6a02b90db3e1e0bbe26a48fc29cd96e800901 AS build_2
 
 # store the latest geth here, build with go 1.23
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
@@ -28,7 +30,9 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout bde08fd3e335c235455b4cee6a6f8dbf88446201
+RUN echo adslkfjasdfasdfafdsf
+RUN git fetch origin
+RUN git checkout 45b0b23c3bd102da5985d6a47badfc70c3dfd819
 
 WORKDIR /git/optimism
 RUN go mod tidy

@@ -11,13 +11,13 @@ endpoint.**
 | Requirement   | Specification    |
 |---------------|------------------|
 | **CPU Cores** | 4 minimum        |
-| **RAM**       | 8 GiB minimum    |
+| **RAM**       | 12 GiB minimum    |
 | **Disk**      | NVMe recommended |
 
-**As of April 18, 2024:**
+**As of January 2025:**
 
-- **`testnet3`** requires approximately 40 GiB of disk space.
-- **`mainnet`** requires over 300 GiB of disk space. <!-- XXX: add exact number here -->
+- **`testnet3`** requires approximately 400 GiB of disk space.
+- **`mainnet`** requires over 1000 GiB of disk space.
 
 ---
 
