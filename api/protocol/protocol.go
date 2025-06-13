@@ -230,8 +230,6 @@ func RequestErrorf(msg string, args ...any) *Error {
 	}
 }
 
-// XXX we need a not found error as well. These errors should be revisited.
-
 // InternalError represents an internal application error.
 //
 // Internal errors are errors that occurred within the application and are not
@@ -419,6 +417,7 @@ func (ac *Conn) Connect(ctx context.Context) error {
 		return err
 	}
 
+	log.Debugf("Connection established with %v", ac.serverURL)
 	ac.wsc = conn
 
 	return nil

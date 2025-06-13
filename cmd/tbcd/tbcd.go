@@ -35,6 +35,12 @@ var (
 
 	cfg = tbc.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"TBC_ADDRESS": config.Config{
+			Value:        &cfg.ListenAddress,
+			DefaultValue: tbcapi.DefaultListen,
+			Help:         "address port to listen on",
+			Print:        config.PrintAll,
+		},
 		"TBC_AUTO_INDEX": config.Config{
 			Value:        &cfg.AutoIndex,
 			DefaultValue: true,
