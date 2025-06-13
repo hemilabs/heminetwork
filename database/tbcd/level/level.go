@@ -2051,11 +2051,14 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint64, depth int) (
 	if depth == 0 {
 		return nil, errors.New("depth must not be 0")
 	}
-	if int64(height)+int64(depth) <= 0 {
-		return nil, errors.New("undeflow")
+	if height > math.MaxUint32 {
+		return nil, errors.New("overflow for codeql")
 	}
 	if int64(height)+int64(depth) > math.MaxUint32 {
-		return nil, errors.New("overflow")
+		return nil, errors.New("the overflow that matters")
+	}
+	if int64(height)+int64(depth) <= 0 {
+		return nil, errors.New("underflow")
 	}
 
 	kssDB := l.pool[level.KeystonesDB]
