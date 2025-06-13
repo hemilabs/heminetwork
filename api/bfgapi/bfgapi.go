@@ -22,7 +22,7 @@ var (
 	DefaultListenAddress    = "localhost:8080"
 	DefaultPrometheusListen = "localhost:2112"
 
-	RouteKeystoneFinality = "GET /" + APIVersionRoute + "/" + "keystonefinality/{hash...}"
+	RouteKeystoneFinality = "GET /" + APIVersionRoute + "/keystonefinality/{hash...}"
 )
 
 // L2KeystoneBitcoinFinalityResponse is a response to an HTTP get on
