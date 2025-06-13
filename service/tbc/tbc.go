@@ -1736,7 +1736,7 @@ func (s *Server) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil
 }
 
 // KeystonesByHeight returns any keystones found at a given height and up to a depth.
-func (s *Server) KeystonesByHeight(ctx context.Context, height uint64, depth int) ([]tbcd.Keystone, error) {
+func (s *Server) KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]tbcd.Keystone, error) {
 	log.Tracef("KeystonesByHeight")
 	defer log.Tracef("KeystonesByHeight exit")
 

@@ -302,7 +302,7 @@ type BlockKeystoneByL2KeystoneAbrevHashResponse struct {
 }
 
 type KeystonesByHeightRequest struct {
-	Height uint64 `json:"height"`
+	Height uint32 `json:"height"`
 	Depth  int    `json:"depth"`
 }
 

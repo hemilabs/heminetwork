@@ -125,14 +125,14 @@ func TestMD(t *testing.T) {
 	}
 }
 
-func makeKssMap(from uint64, kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
+func makeKssMap(from uint32, kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
 	kssMap := make(map[chainhash.Hash]tbcd.Keystone)
 	for i, l2Keystone := range kssList {
 		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 			BlockHash:           chainhash.Hash(testutil.FillBytes(blockHashSeed, 32)),
 			AbbreviatedKeystone: abrvKs,
-			BlockHeight:         from + uint64(i),
+			BlockHeight:         from + uint32(i),
 		}
 	}
 	return kssMap
@@ -224,7 +224,7 @@ func TestHeightHashIndexing(t *testing.T) {
 			kssMap[*hemi.L2KeystoneAbbreviate(ks).Hash()] = tbcd.Keystone{
 				BlockHash:           chainhash.Hash(testutil.FillBytes("blockhash", 32)),
 				AbbreviatedKeystone: abrvKs,
-				BlockHeight:         uint64(i + 1),
+				BlockHeight:         uint32(i + 1),
 			}
 			l2Block += 25
 		}
@@ -267,7 +267,7 @@ func TestHeightHashIndexing(t *testing.T) {
 
 	// check each height
 	for n := range blockNum {
-		kssList, err := db.KeystonesByHeight(ctx, uint64(n+1), 1)
+		kssList, err := db.KeystonesByHeight(ctx, uint32(n+1), 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -277,7 +277,7 @@ func TestHeightHashIndexing(t *testing.T) {
 		}
 
 		for _, k := range kssList {
-			if k.BlockHeight != uint64(n+1) {
+			if k.BlockHeight != uint32(n+1) {
 				t.Fatalf("keystone height mismatch %v, expected %v", k.BlockHeight, n+1)
 			}
 		}
