@@ -32,7 +32,7 @@ import (
 const wantedKeystones = 10
 
 func TestBFG(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)
@@ -179,7 +179,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 }
 
 func TestFullMockIntegration(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)

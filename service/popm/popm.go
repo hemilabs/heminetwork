@@ -52,9 +52,7 @@ const (
 var (
 	log                    = loggo.GetLogger("popm")
 	l2KeystonePollTimeout  = 13 * time.Second
-	l2KeystoneRetryTimeout = 15 * time.Second
-	opgethReconnectTimeout = 5 * time.Second
-	l2KeystoneMaxAge       = 4 * time.Hour
+	l2KeystoneRetryTimeout = 5 * time.Second
 )
 
 func init() {
@@ -142,9 +140,11 @@ type Server struct {
 	vc    *vinzclortho.VinzClortho
 
 	// mining
-	retryThreshold uint32
-	keystones      map[chainhash.Hash]*keystone
-	workC          chan struct{}
+	retryThreshold         uint32
+	keystones              map[chainhash.Hash]*keystone
+	workC                  chan struct{}
+	opgethReconnectTimeout time.Duration
+	l2KeystoneMaxAge       time.Duration
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -153,9 +153,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:            cfg,
-		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
-		workC:          make(chan struct{}, 2),
+		cfg:                    cfg,
+		retryThreshold:         uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
+		workC:                  make(chan struct{}, 2),
+		opgethReconnectTimeout: 5 * time.Second,
+		l2KeystoneMaxAge:       4 * time.Hour,
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -382,7 +384,10 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 				ks.state = keystoneStateNew
 			}
 		}
-		ks.expires = timestamp(l2KeystoneMaxAge)
+
+		s.mtx.Lock()
+		ks.expires = timestamp(s.l2KeystoneMaxAge)
+		s.mtx.Unlock()
 		// Always add the entry to cache and rely on Error being !nil
 		// to retry later.
 		ks.abbreviated = &gks.L2KeystoneBlocks[k]
@@ -410,6 +415,7 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 		s.mtx.Unlock()
 		return errors.New("already hydrated")
 	}
+	log.Infof("setting keystones hydrating to %d", len(keystones))
 	s.keystones = keystones
 	s.mtx.Unlock()
 
@@ -545,6 +551,10 @@ func (s *Server) opgeth(ctx context.Context) {
 	log.Tracef("opgeth")
 	defer log.Tracef("opgeth exit")
 
+	s.mtx.Lock()
+	opgethReconnectTimeoutTmp := s.opgethReconnectTimeout
+	s.mtx.Unlock()
+
 	for {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
@@ -557,7 +567,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(opgethReconnectTimeout):
+		case <-time.After(opgethReconnectTimeoutTmp):
 		}
 
 		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
