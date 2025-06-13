@@ -20,7 +20,6 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/dustin/go-humanize"
 
-	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi/pop"
@@ -107,10 +106,6 @@ var (
 		{50000, s2h("000000001aeae195809d120b5d66a39c83eb48792e068f8ea1fea19d84a4278a")},
 		{0, s2h("000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f")},
 	}
-
-	localnetCheckpoints = []checkpoint{
-		{0, s2h("0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206")},
-	}
 )
 
 type NotLinearError string
@@ -183,54 +178,6 @@ func HashHeightFromBlockHeader(bh *tbcd.BlockHeader) *HashHeight {
 		Height:    bh.Height,
 		Timestamp: bh.Timestamp().Unix(),
 	}
-}
-
-// BlockKeystonesByHash returns all keystones within a block. If hash is not
-// nil then it returns *only* the keystone transactions where the L2
-// abbreviated hash is equal to the provided hash.
-func BlockKeystonesByHash(block *btcutil.Block, hash *chainhash.Hash) []tbcapi.KeystoneTx {
-	blockHash := block.Hash()
-	height := uint(block.Height())
-	ktxs := make([]tbcapi.KeystoneTx, 0, 16)
-	for txIndex, tx := range block.Transactions() {
-		if blockchain.IsCoinBase(tx) {
-			// Skip coinbase inputs
-			continue
-		}
-
-		for _, txOut := range tx.MsgTx().TxOut {
-			tl2, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
-			if err != nil {
-				continue
-			}
-
-			// Filter non matching keystones.
-			if hash != nil && !hash.IsEqual(tl2.L2Keystone.Hash()) {
-				continue
-			}
-
-			// XXX it is a travesty that we have to reserialize
-			// this tx. We should add a change to btcutil.Tx to
-			// return the internal rawBytes.
-			var rawTx bytes.Buffer
-			if err := tx.MsgTx().Serialize(&rawTx); err != nil {
-				// We should always be able to serialize.
-				panic(fmt.Sprintf("serialize tx: %s", err))
-			}
-			ktxs = append(ktxs, tbcapi.KeystoneTx{
-				BlockHash:   *blockHash,
-				TxIndex:     uint(txIndex),
-				BlockHeight: height,
-				RawTx:       rawTx.Bytes(),
-			})
-		}
-	}
-
-	return ktxs
-}
-
-func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
-	return BlockKeystonesByHash(block, nil)
 }
 
 // UtxoIndexHash returns the last hash that has been UTxO indexed.
@@ -927,16 +874,16 @@ func (s *Server) unindexUtxosInBlocks(ctx context.Context, endHash *chainhash.Ha
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) utxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("utxoIndexerUnwind")
-	defer log.Tracef("utxoIndexerUnwind exit")
+func (s *Server) UtxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("UtxoIndexerUnwind")
+	defer log.Tracef("UtxoIndexerUnwind exit")
 
 	// XXX dedup with TxIndexedWind; it's basically the same code but with the direction, start and endhas flipped
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("utxoIndexerUnwind not true")
+		panic("UtxoIndexerUnwind not true")
 	}
 	s.mtx.Unlock()
 
@@ -982,15 +929,15 @@ func (s *Server) utxoIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Blo
 	return nil
 }
 
-func (s *Server) utxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("utxoIndexerWind")
-	defer log.Tracef("utxoIndexerWind exit")
+func (s *Server) UtxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("UtxoIndexerWind")
+	defer log.Tracef("UtxoIndexerWind exit")
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("utxoIndexerWind not true")
+		panic("UtxoIndexerWind not true")
 	}
 	s.mtx.Unlock()
 
@@ -1037,15 +984,15 @@ func (s *Server) utxoIndexerWind(ctx context.Context, startBH, endBH *tbcd.Block
 	return nil
 }
 
-func (s *Server) utxoIndexer(ctx context.Context, endHash chainhash.Hash) error {
-	log.Tracef("utxoIndexer")
-	defer log.Tracef("utxoIndexer exit")
+func (s *Server) UtxoIndexer(ctx context.Context, endHash chainhash.Hash) error {
+	log.Tracef("UtxoIndexer")
+	defer log.Tracef("UtxoIndexer exit")
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("utxoIndexer indexing not true")
+		panic("UtxoIndexer indexing not true")
 	}
 	s.mtx.Unlock()
 	// XXX this is basically duplicate from UtxoIndexIsLinear
@@ -1076,9 +1023,9 @@ func (s *Server) utxoIndexer(ctx context.Context, endHash chainhash.Hash) error 
 	log.Debugf("direction %v", direction)
 	switch direction {
 	case 1:
-		return s.utxoIndexerWind(ctx, startBH, endBH)
+		return s.UtxoIndexerWind(ctx, startBH, endBH)
 	case -1:
-		return s.utxoIndexerUnwind(ctx, startBH, endBH)
+		return s.UtxoIndexerUnwind(ctx, startBH, endBH)
 	case 0:
 		// Because we call UtxoIndexIsLinear we know it's the same block.
 		return nil
@@ -1272,17 +1219,17 @@ func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) txIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("txIndexerUnwind")
-	defer log.Tracef("txIndexerUnwind exit")
+func (s *Server) TxIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("TxIndexerUnwind")
+	defer log.Tracef("TxIndexerUnwind exit")
 
-	// XXX dedup with txIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with TxIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("txIndexerUnwind indexing not true")
+		panic("TxIndexerUnwind indexing not true")
 	}
 	s.mtx.Unlock()
 	// Allocate here so that we don't waste space when not indexing.
@@ -1326,15 +1273,15 @@ func (s *Server) txIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Block
 	return nil
 }
 
-func (s *Server) txIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("txIndexerWind")
-	defer log.Tracef("txIndexerWind exit")
+func (s *Server) TxIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("TxIndexerWind")
+	defer log.Tracef("TxIndexerWind exit")
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("txIndexerWind not true")
+		panic("TxIndexerWind not true")
 	}
 	s.mtx.Unlock()
 
@@ -1380,9 +1327,9 @@ func (s *Server) txIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 	return nil
 }
 
-func (s *Server) txIndexer(ctx context.Context, endHash chainhash.Hash) error {
-	log.Tracef("txIndexer")
-	defer log.Tracef("txIndexer exit")
+func (s *Server) TxIndexer(ctx context.Context, endHash chainhash.Hash) error {
+	log.Tracef("TxIndexer")
+	defer log.Tracef("TxIndexer exit")
 
 	// XXX this is basically duplicate from TxIndexIsLinear
 
@@ -1390,7 +1337,7 @@ func (s *Server) txIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("txIndexer not true")
+		panic("TxIndexer not true")
 	}
 	s.mtx.Unlock()
 
@@ -1417,9 +1364,9 @@ func (s *Server) txIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	}
 	switch direction {
 	case 1:
-		return s.txIndexerWind(ctx, startBH, endBH)
+		return s.TxIndexerWind(ctx, startBH, endBH)
 	case -1:
-		return s.txIndexerUnwind(ctx, startBH, endBH)
+		return s.TxIndexerUnwind(ctx, startBH, endBH)
 	case 0:
 		// Because we call TxIndexIsLinear we know it's the same block.
 		return nil
@@ -1620,17 +1567,17 @@ func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhas
 	return blocksProcessed, last, nil
 }
 
-func (s *Server) keystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("keystoneIndexerUnwind")
-	defer log.Tracef("keystoneIndexerUnwind exit")
+func (s *Server) KeystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("KeystoneIndexerUnwind")
+	defer log.Tracef("KeystoneIndexerUnwind exit")
 
-	// XXX dedup with keystoneIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with KeystoneIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("keystoneIndexerUnwind indexing not true")
+		panic("KeystoneIndexerUnwind indexing not true")
 	}
 	s.mtx.Unlock()
 	// Allocate here so that we don't waste space when not indexing.
@@ -1674,15 +1621,15 @@ func (s *Server) keystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd
 	return nil
 }
 
-func (s *Server) keystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("keystoneIndexerWind")
-	defer log.Tracef("keystoneIndexerWind exit")
+func (s *Server) KeystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("KeystoneIndexerWind")
+	defer log.Tracef("KeystoneIndexerWind exit")
 
 	s.mtx.Lock()
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("keystoneIndexerWind not true")
+		panic("KeystoneIndexerWind not true")
 	}
 	s.mtx.Unlock()
 
@@ -1728,9 +1675,9 @@ func (s *Server) keystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.B
 	return nil
 }
 
-func (s *Server) keystoneIndexer(ctx context.Context, endHash chainhash.Hash) error {
-	log.Tracef("keystoneIndexer")
-	defer log.Tracef("keystoneIndexer exit")
+func (s *Server) KeystoneIndexer(ctx context.Context, endHash chainhash.Hash) error {
+	log.Tracef("KeystoneIndexer")
+	defer log.Tracef("KeystoneIndexer exit")
 
 	// XXX this is basically duplicate from KeystoneIndexIsLinear
 
@@ -1741,7 +1688,7 @@ func (s *Server) keystoneIndexer(ctx context.Context, endHash chainhash.Hash) er
 	if !s.indexing {
 		// XXX this prob should be an error but pusnish bad callers for now
 		s.mtx.Unlock()
-		panic("keystoneIndexer not true")
+		panic("KeystoneIndexer not true")
 	}
 	s.mtx.Unlock()
 
@@ -1768,9 +1715,9 @@ func (s *Server) keystoneIndexer(ctx context.Context, endHash chainhash.Hash) er
 	}
 	switch direction {
 	case 1:
-		return s.keystoneIndexerWind(ctx, startBH, endBH)
+		return s.KeystoneIndexerWind(ctx, startBH, endBH)
 	case -1:
-		return s.keystoneIndexerUnwind(ctx, startBH, endBH)
+		return s.KeystoneIndexerUnwind(ctx, startBH, endBH)
 	case 0:
 		// Because we call KeystoneIndexIsLinear we know it's the same block.
 		return nil
@@ -1909,19 +1856,19 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 
 	log.Debugf("Syncing indexes to: %v", hash)
 
-	// utxos
-	if err := s.utxoIndexer(ctx, hash); err != nil {
+	// UTXOs
+	if err := s.UtxoIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
 	// Transactions index
-	if err := s.txIndexer(ctx, hash); err != nil {
+	if err := s.TxIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
 	// Hemi indexes
 	if s.cfg.HemiIndex {
-		if err := s.keystoneIndexer(ctx, hash); err != nil {
+		if err := s.KeystoneIndexer(ctx, hash); err != nil {
 			return fmt.Errorf("keystone indexer: %w", err)
 		}
 	}
@@ -1959,12 +1906,12 @@ func (s *Server) utxoIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) 
 		log.Infof("Syncing utxo index to: %v from: %v via: %v",
 			bhb.HH(), utxoBH.HH(), cp.HH())
 		// utxoBH is NOT on canonical chain, unwind first
-		if err := s.utxoIndexer(ctx, cp.Hash); err != nil {
+		if err := s.UtxoIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("utxo indexer unwind: %w", err)
 		}
 	}
 	// Index utxo to best block
-	if err := s.utxoIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.UtxoIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
@@ -1992,12 +1939,12 @@ func (s *Server) txIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) er
 		log.Infof("Syncing tx index to: %v from: %v via: %v",
 			bhb.HH(), txBH.HH(), cp.HH())
 		// txBH is NOT on canonical chain, unwind first
-		if err := s.txIndexer(ctx, cp.Hash); err != nil {
+		if err := s.TxIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("tx indexer unwind: %w", err)
 		}
 	}
 	// Transactions index
-	if err := s.txIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.TxIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
@@ -2025,12 +1972,12 @@ func (s *Server) keystoneIndexersToBest(ctx context.Context, bhb *tbcd.BlockHead
 		log.Infof("Syncing keystone index to: %v from: %v via: %v",
 			bhb.HH(), keystoneBH.HH(), cp.HH())
 		// keystoneBH is NOT on canonical chain, unwind first
-		if err := s.keystoneIndexer(ctx, cp.Hash); err != nil {
+		if err := s.KeystoneIndexer(ctx, cp.Hash); err != nil {
 			return fmt.Errorf("keystone indexer unwind: %w", err)
 		}
 	}
 	// Index keystones to best block
-	if err := s.keystoneIndexer(ctx, bhb.Hash); err != nil {
+	if err := s.KeystoneIndexer(ctx, bhb.Hash); err != nil {
 		return fmt.Errorf("keystone indexer: %w", err)
 	}
 

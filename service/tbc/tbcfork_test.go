@@ -23,7 +23,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	btcmempool "github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
@@ -313,13 +312,6 @@ func (b *btcNode) newSignedTxFromTx(name string, inTx *btcutil.Tx, amount btcuti
 		return nil, err
 	}
 	if err := vm.Execute(); err != nil {
-		return nil, err
-	}
-
-	// Verify it would make it into the mempool
-	err = btcmempool.CheckTransactionStandard(btcutil.NewTx(redeemTx), 0,
-		time.Now(), btcmempool.DefaultMinRelayTxFee, 2)
-	if err != nil {
 		return nil, err
 	}
 
@@ -1085,7 +1077,7 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					t.Logf("tx hash: %v", tx)
 					t.Logf("ktx: %v", spew.Sdump(ktx))
 					t.Logf("vtx: %v", spew.Sdump(vtx))
-					t.Logf("%s", spew.Sdump(sis))
+					t.Log(spew.Sdump(sis))
 					return errors.New("block mismatch")
 				}
 
@@ -1236,7 +1228,7 @@ func TestFork(t *testing.T) {
 				t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
 			}
 			t.Logf("balance %v", spew.Sdump(balance))
-			utxos, err := s.UtxosByAddress(ctx, true, address.String(), 0, 100)
+			utxos, err := s.UtxosByAddress(ctx, address.String(), 0, 100)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1479,7 +1471,7 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure tbc downloads blocks
+	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1520,7 +1512,7 @@ func TestIndexNoFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v (%v): %v", address, key.name, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1645,7 +1637,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		MempoolEnabled:          true,
+		MempoolEnabled:          false,
 		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -1682,7 +1674,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure tbc downloads blocks
+	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1740,7 +1732,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v (%v): %v", address, key.name, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1819,7 +1811,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 	// check if keystone stored with correct block hash
 	if !rv.BlockHash.IsEqual(b2.Hash()) {
-		t.Fatalf("wrong blockhash for stored keystone: %v", *kss1Hash)
+		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
 	}
 
 	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
@@ -1899,7 +1891,7 @@ func TestIndexFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		MempoolEnabled:          true,
+		MempoolEnabled:          false,
 		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -1959,7 +1951,7 @@ func TestIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure tbc downloads blocks
+	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -2003,7 +1995,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2013,7 +2005,7 @@ func TestIndexFork(t *testing.T) {
 	// Verify linear indexing. Current TxIndex is sitting at b3
 	t.Logf("b3: %v", b3)
 
-	// b3 -> genesis should work with positive direction (cdiff is greater than target)
+	// b3 -> genesis should work with postive direction (cdiff is greater than target)
 	direction, err = s.TxIndexIsLinear(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
@@ -2065,7 +2057,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2104,7 +2096,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2136,7 +2128,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2155,7 +2147,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2174,7 +2166,7 @@ func TestIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2233,7 +2225,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		MempoolEnabled:          true,
+		MempoolEnabled:          false,
 		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -2293,7 +2285,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make sure tbc downloads blocks
+	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -2354,7 +2346,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2384,7 +2376,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	// Verify linear indexing. Current TxIndex is sitting at b3
 	t.Logf("b3: %v", b3)
 
-	// b3 -> genesis should work with positive direction (cdiff is greater than target)
+	// b3 -> genesis should work with postive direction (cdiff is greater than target)
 	direction, err = s.TxIndexIsLinear(ctx, *s.chainParams.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
@@ -2436,7 +2428,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2485,7 +2477,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2517,7 +2509,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2536,7 +2528,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2565,7 +2557,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		utxos, err := s.UtxosByAddress(ctx, address, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2691,12 +2683,6 @@ func TestTransactions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("coinbase signed tx out 0: %v", disasm)
-
-	err = btcmempool.CheckTransactionStandard(btcutil.NewTx(redeemTx), 0,
-		time.Now(), btcmempool.DefaultMinRelayTxFee, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestForkCanonicity(t *testing.T) {
@@ -2735,7 +2721,7 @@ func TestForkCanonicity(t *testing.T) {
 		Network:                 networkLocalnet,
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
-		MempoolEnabled:          true,
+		MempoolEnabled:          false,
 		Seeds:                   []string{"127.0.0.1:" + port},
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
@@ -2813,7 +2799,7 @@ func TestForkCanonicity(t *testing.T) {
 	}
 	altChainHashes["b3aa"] = b3aa.Hash()
 
-	// make sure tbc downloads blocks
+	// make sure tbc dowloads blocks
 	if err := n.MineAndSendEmpty(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -309,7 +309,6 @@ func NewDeleteCacheOutput(hash [32]byte, outIndex uint32) (co CacheOutput) {
 }
 
 // Utxo packs a transaction id, the value and the out index.
-// XXX why are we using ScriptHash here instead of chainhash?
 type Utxo [32 + 8 + 4]byte // tx_id + value + out_idx
 
 // String returns pretty printable CacheOutput. Hash is not reversed since it
@@ -320,12 +319,6 @@ func (u Utxo) String() string {
 		ch, binary.BigEndian.Uint32(u[40:]))
 }
 
-func (u Utxo) ChainHash() *chainhash.Hash {
-	ch, _ := chainhash.NewHash(u[0:32])
-	return ch
-}
-
-// XXX deprecate
 func (u Utxo) ScriptHash() (hash ScriptHash) {
 	copy(hash[:], u[0:32])
 	return
