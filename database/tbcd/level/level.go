@@ -46,16 +46,18 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 3
+	ldbVersion = 4
 
 	logLevel = "INFO"
 	verbose  = false
 
 	bhsCanonicalTipKey = "canonicaltip"
 
-	heighthashSize  = 8 + 1 + chainhash.HashSize
-	blockheaderSize = 120
-	keystoneSize    = chainhash.HashSize + hemi.L2KeystoneAbrevSize
+	heighthashSize         = 8 + 1 + chainhash.HashSize
+	blockheaderSize        = 120
+	keystoneSizeV3         = chainhash.HashSize + hemi.L2KeystoneAbrevSize
+	keystoneSize           = 4 + chainhash.HashSize + hemi.L2KeystoneAbrevSize
+	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize // h uint32(height) block_hash
 )
 
 type IteratorError error
@@ -137,10 +139,15 @@ type Config struct {
 	blockCacheSize       int    // parsed size of block cache
 	blockheaderCacheSize int    // parsed size of block header cache
 	nonInteractive       bool   // Set to true to prevent user interaction
+	upgradeOpen          bool   // Set to true when doing an open during upgrade
 }
 
 func (cfg *Config) SetNoninteractive(x bool) {
 	cfg.nonInteractive = x
+}
+
+func (cfg *Config) SetUpgradeOpen(x bool) {
+	cfg.upgradeOpen = x
 }
 
 func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
@@ -265,6 +272,12 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 				return nil, err
 			}
 		}
+
+		// Skip upgrades to prevent re-entrancy.
+		if cfg.upgradeOpen {
+			return l, nil
+		}
+
 		switch dbVersion {
 		case 1:
 			// Upgrade to v2
@@ -273,6 +286,9 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			// Upgrade to v3, database is closed in the process.
 			reopen = true
 			err = l.v3(ctx)
+		case 3:
+			// Upgrade to v4
+			err = l.v4(ctx)
 		default:
 			if ldbVersion == dbVersion {
 				if Welcome {
@@ -439,14 +455,13 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
 	kssDB := l.pool[level.KeystonesDB]
-	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
+	eks, err := kssDB.Get(abrevhash[:], nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
 		}
-		return nil, fmt.Errorf("l2 keystone get: %w", err)
+		return nil, fmt.Errorf("l2 keystone: %w", err)
 	}
-
 	ks := decodeKeystone(eks)
 	return &ks, nil
 }
@@ -1926,8 +1941,11 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 // [blockhash,abbreviated keystone] or [32+76] bytes. The abbreviated keystone
 // hash is the leveldb table key.
 func encodeKeystone(ks tbcd.Keystone) (eks [keystoneSize]byte) {
-	copy(eks[0:32], ks.BlockHash[:])
-	copy(eks[32:], ks.AbbreviatedKeystone[:])
+	var h [4]byte
+	binary.BigEndian.PutUint32(h[:], ks.BlockHeight)
+	copy(eks[0:4], h[:])
+	copy(eks[4:4+32], ks.BlockHash[:])
+	copy(eks[36:], ks.AbbreviatedKeystone[:])
 	return
 }
 
@@ -1938,14 +1956,97 @@ func encodeKeystoneToSlice(ks tbcd.Keystone) []byte {
 
 // decodeKeystone reverse the process of encodeKeystone.
 func decodeKeystone(eks []byte) (ks tbcd.Keystone) {
-	bh, err := chainhash.NewHash(eks[0:32])
+	ks.BlockHeight = binary.BigEndian.Uint32(eks[0:4])
+	bh, err := chainhash.NewHash(eks[4 : 4+32])
 	if err != nil {
 		panic(err) // Can't happen
 	}
 	ks.BlockHash = *bh
 	// copy the values to prevent slicing reentrancy problems.
-	copy(ks.AbbreviatedKeystone[:], eks[32:])
+	copy(ks.AbbreviatedKeystone[:], eks[36:])
 	return ks
+}
+
+func encodeKeystoneHeightHash(height uint32, hash chainhash.Hash) (e [keystoneHeightHashSize]byte) {
+	var h [4]byte
+	binary.BigEndian.PutUint32(h[:], height)
+	e[0] = 'h'
+	copy(e[1:1+4], h[:])
+	copy(e[5:5+32], hash[:])
+	return
+}
+
+func encodeKeystoneHeightHashSlice(height uint32, hash chainhash.Hash) []byte {
+	e := encodeKeystoneHeightHash(height, hash)
+	return e[:]
+}
+
+func decodeKeystoneHeightHash(v []byte) (height uint32, hash chainhash.Hash) {
+	if len(v) != keystoneHeightHashSize {
+		panic(spew.Sdump(v))
+	}
+	if v[0] != 'h' {
+		panic("not a keystone height hash index")
+	}
+	height = binary.BigEndian.Uint32(v[1 : 1+4])
+	h := &hash
+	err := h.SetBytes(v[5:])
+	if err != nil {
+		panic(err)
+	}
+	return
+}
+
+func keystoneHeightRange(height uint32, depth int) *util.Range {
+	// Casting is a bit awkward here but I am not sure if we can make this
+	// look better somehow.
+	start := int64(height)
+	end := int64(height) + int64(depth)
+	if depth < 0 {
+		start = int64(height) + int64(depth)
+		end = int64(height) + 1
+	}
+	return &util.Range{
+		Start: encodeKeystoneHeightHashSlice(uint32(start), chainhash.Hash{}),
+		Limit: encodeKeystoneHeightHashSlice(uint32(end), chainhash.Hash{}),
+	}
+}
+
+func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]tbcd.Keystone, error) {
+	log.Tracef("KeystonesByHeight")
+	defer log.Tracef("KeystonesByHeight exit")
+
+	if depth == 0 {
+		return nil, errors.New("depth must not be 0")
+	}
+	if int64(height)+int64(depth) > math.MaxUint32 {
+		return nil, errors.New("the overflow that matters")
+	}
+	if int64(height)+int64(depth) <= 0 {
+		return nil, errors.New("underflow")
+	}
+
+	kssDB := l.pool[level.KeystonesDB]
+	i := kssDB.NewIterator(keystoneHeightRange(height, depth), nil)
+	defer func() { i.Release() }()
+
+	kssList := make([]tbcd.Keystone, 0, 16)
+	for i.Next() {
+		_, hash := decodeKeystoneHeightHash(i.Key())
+		eks, err := kssDB.Get(hash[:], nil)
+		if err != nil {
+			// mismatch between heighthash and hash indexes
+			panic(fmt.Sprintf("data corruption: %v", err))
+		}
+		deks := decodeKeystone(eks)
+		kssList = append(kssList, deks)
+	}
+	if len(kssList) == 0 {
+		return nil, database.NotFoundError(fmt.Sprintf("no keystones: height %v",
+			height))
+	}
+
+	return kssList, i.Error()
 }
 
 func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {
@@ -1976,13 +2077,15 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 				// previously found block.
 				if ks.BlockHash.IsEqual(&v.BlockHash) {
 					kssBatch.Delete(k[:])
+					kssBatch.Delete(encodeKeystoneHeightHashSlice(v.BlockHeight, k))
 				}
 			}
 		case 1:
 			has, _ := kssTx.Has(k[:], nil)
 			if !has {
-				// Only store unknown keystones
+				// Only store unknown keystones and indexes
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
+				kssBatch.Put(encodeKeystoneHeightHashSlice(v.BlockHeight, k), nil)
 			}
 		}
 

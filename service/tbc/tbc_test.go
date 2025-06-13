@@ -14,7 +14,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -30,9 +29,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
-	"github.com/juju/loggo"
 	"github.com/phayes/freeport"
-	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -40,7 +37,6 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 )
 
@@ -124,268 +120,6 @@ func countKeystones(b *btcutil.Block) int {
 	return keystonesFound
 }
 
-func TestDbUpgradePipeline(t *testing.T) {
-	home := t.TempDir()
-	network := "upgradetest"
-	t.Logf("temp: %v", home)
-
-	err := extract("testdata/testdatabase.tar.gz", home)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer func() {
-		cancel()
-	}()
-
-	t.Log("Upgrading with move")
-
-	// We are setting the batchSize to exercise restarts.
-	level.SetBatchSize(3)
-
-	// Upgrade database to v3 with move
-	cfg, err := level.NewConfig(network, home, "0mb", "0mb")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dbTemp, err := level.New(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Get all db keys
-	keys := make([]string, 0, len(dbTemp.DB()))
-	for k := range dbTemp.DB() {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	// Close temporary DB
-	if err = dbTemp.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Rename database $HOME to $HOME.move
-	err = os.Rename(cfg.Home, cfg.Home+".move")
-	if err != nil {
-		t.Fatal(fmt.Errorf("rename destination: %w", err))
-	}
-
-	// Open move DB
-	cfgMove, err := level.NewConfig(network, home, "0mb", "0mb")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cfgMove.Home = cfgMove.Home + ".move"
-
-	dbMove, err := level.New(ctx, cfgMove)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = extract("testdata/testdatabase.tar.gz", home)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Set mode to copy
-	level.SetMode(false)
-
-	t.Log("Upgrading with copy")
-
-	// Upgrade database to v3 with copy which
-	// creates a testnet3.v3 folder
-	dbv2, err := level.New(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Open copy DB
-	cfgCopy, err := level.NewConfig(network, home, "0mb", "0mb")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cfgCopy.Home = cfgCopy.Home + ".v3"
-
-	dbCopy, err := level.New(ctx, cfgCopy)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Log("Comparing DBs")
-
-	// Compare all databases
-	for _, dbs := range keys {
-		a := dbv2.DB()[dbs]
-		b := dbMove.DB()[dbs]
-		c := dbCopy.DB()[dbs]
-
-		t.Logf("Comparing original records against dbmove (%v)", dbs)
-		records, err := cmpDB(a, b)
-		if err != nil {
-			t.Errorf("found diff in record %v: %v", records, err)
-		} else {
-			t.Logf("Found no diff in %v records of %v", records, dbs)
-		}
-
-		t.Logf("Comparing dbmove records against original (%v)", dbs)
-		records, err = cmpDB(b, a)
-		if err != nil {
-			t.Errorf("found diff in record %v: %v", records, err)
-		} else {
-			t.Logf("Found no diff in %v records of %v", records, dbs)
-		}
-
-		t.Logf("Comparing original records against dbcopy (%v)", dbs)
-		records, err = cmpDB(a, c)
-		if err != nil {
-			t.Errorf("found diff in record %v: %v", records, err)
-		} else {
-			t.Logf("Found no diff in %v records of %v", records, dbs)
-		}
-
-		t.Logf("Comparing dbcopy records against original (%v)", dbs)
-		records, err = cmpDB(c, a)
-		if err != nil {
-			t.Errorf("found diff in record %v: %v", records, err)
-		} else {
-			t.Logf("Found no diff in %v records of %v", records, dbs)
-		}
-	}
-}
-
-func cmpDB(a, b *leveldb.DB) (int, error) {
-	i := a.NewIterator(nil, nil)
-	defer func() { i.Release() }()
-
-	records := 0
-	for records = 0; i.Next(); records++ {
-		v, err := b.Get(i.Key(), nil)
-		if err != nil {
-			return records, err
-		}
-
-		if diff := deep.Equal(i.Value(), v); len(diff) > 0 {
-			return records, fmt.Errorf("unexpected diff: %v", diff)
-		}
-	}
-	return records, nil
-}
-
-func TestDbUpgrade(t *testing.T) {
-	home := t.TempDir()
-	t.Logf("temp: %v", home)
-
-	err := extract("testdata/testdatabase.tar.gz", home)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer func() {
-		cancel()
-	}()
-
-	// Connect tbc service
-	cfg := &Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          true,
-		HemiIndex:            true,
-		LevelDBHome:          home,
-		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
-		MaxCachedTxs:            1000, // XXX
-		MaxCachedKeystones:      1000, // XXX
-		Network:                 "upgradetest",
-		PrometheusListenAddress: "",
-		ListenAddress:           "",
-		PeersWanted:             0,
-		MempoolEnabled:          false,
-		Seeds:                   []string{"127.0.0.1:18444"},
-	}
-	_ = loggo.ConfigureLoggers(cfg.LogLevel)
-	s, err := NewServer(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	go func() {
-		err := s.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) {
-			panic(err)
-		}
-	}()
-
-	// check if db upgrade finished before checking for bh
-	for !s.Running() {
-	}
-
-	_, err = s.BlockHeadersByHeight(ctx, 9)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Pull version from DB
-	version, err := s.db.Version(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if version != 3 {
-		t.Fatalf("expected version 3, got %v", version)
-	}
-
-	// version 2 checks
-
-	// Copied from level package because this test can't be run there.
-	utxoIndexHashKey := []byte("utxoindexhash")
-	txIndexHashKey := []byte("txindexhash")
-	keystoneIndexHashKey := []byte("keystoneindexhash")
-	// Make sure db no longer has index keys
-	_, err = s.db.MetadataGet(ctx, utxoIndexHashKey)
-	if err == nil {
-		t.Fatal("expected failure retrieving utxo index hash")
-	}
-	_, err = s.db.MetadataGet(ctx, txIndexHashKey)
-	if err == nil {
-		t.Fatal("expected failure retrieving tx index hash")
-	}
-	_, err = s.db.MetadataGet(ctx, keystoneIndexHashKey)
-	if err == nil {
-		t.Fatal("expected failure retrieving keystone index hash")
-	}
-
-	// Make sure we get the expected indexkeys from db
-	hash := s2h("0000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
-	utxobh, err := s.db.BlockHeaderByUtxoIndex(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !utxobh.Hash.IsEqual(&hash) {
-		t.Fatal("unexpected utxo hash")
-	}
-
-	txbh, err := s.db.BlockHeaderByTxIndex(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !txbh.Hash.IsEqual(&hash) {
-		t.Fatal("unexpected tx hash")
-	}
-
-	keystonebh, err := s.db.BlockHeaderByKeystoneIndex(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !keystonebh.Hash.IsEqual(&hash) {
-		t.Fatal("unexpected keystone hash")
-	}
-}
-
 func TestKeystonesInBlock(t *testing.T) {
 	hb1, err := os.ReadFile("testdata/0000000000000006200009cf36af2bbcb1362b887b4e2625113b6b44327435b8.hex") // Testnet3 block 3802508
 	if err != nil {
@@ -407,18 +141,20 @@ func TestKeystonesInBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	b1.SetHeight(3802508)
 	b2, err := btcutil.NewBlockFromBytes(rb2)
 	if err != nil {
 		t.Fatal(err)
 	}
+	b2.SetHeight(3802509)
 
 	// Run through processKeystones
 	kssCache1 := make(map[chainhash.Hash]tbcd.Keystone, 10000)
-	err = processKeystones(b1.Hash(), b1.Transactions(), 1, kssCache1)
+	err = processKeystones(b1, 1, kssCache1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = processKeystones(b2.Hash(), b2.Transactions(), 1, kssCache1)
+	err = processKeystones(b2, 1, kssCache1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,11 +180,11 @@ func TestKeystonesInBlock(t *testing.T) {
 
 	// Pretend unwind
 	kssCache2 := make(map[chainhash.Hash]tbcd.Keystone, 10000)
-	err = processKeystones(b2.Hash(), b2.Transactions(), -1, kssCache2)
+	err = processKeystones(b2, -1, kssCache2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = processKeystones(b1.Hash(), b1.Transactions(), -1, kssCache2)
+	err = processKeystones(b1, -1, kssCache2)
 	if err != nil {
 		t.Fatal(err)
 	}
