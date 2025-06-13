@@ -1411,7 +1411,7 @@ func processKeystones(block *btcutil.Block, direction int, kssCache map[chainhas
 			abvKss := aPoPTx.L2Keystone.Serialize()
 			kssCache[*aPoPTx.L2Keystone.Hash()] = tbcd.Keystone{
 				BlockHash:           blockHash,
-				BlockHeight:         blockHeight,
+				BlockHeight:         uint32(blockHeight),
 				AbbreviatedKeystone: abvKss,
 			}
 		}
