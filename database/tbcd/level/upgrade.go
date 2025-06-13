@@ -554,7 +554,7 @@ func (l *ldb) v3(ctx context.Context) error {
 // v4 upgrade the database from v3 to v4.
 // Changes:
 // Add heighthash (L2 height - Keystone Hash) to keystone database.
-// XXX antonio add test
+// Add height to keystones.
 func (l *ldb) v4(ctx context.Context) error {
 	log.Tracef("v4")
 	defer log.Tracef("v4 exit")
@@ -571,8 +571,15 @@ func (l *ldb) v4(ctx context.Context) error {
 		key := i.Key()
 		value := i.Value()
 		if len(value) != keystoneSize {
-			// Not a keystone.
-			continue
+			if len(value) == keystoneSizeV3 {
+				// Keystone without height encoded.
+				var u [keystoneSize]byte
+				copy(u[4:], value[:])
+				value = u[:]
+			} else {
+				// Not a keystone.
+				continue
+			}
 		}
 		ks := decodeKeystone(value)
 		ebh, err := bhs.Get(ks.BlockHash[:], nil)
@@ -586,6 +593,12 @@ func (l *ldb) v4(ctx context.Context) error {
 		}
 		ehh := encodeKeystoneHeightHash(uint32(bh.Height), *ksHash)
 		err = ksdb.Put(ehh[:], nil, nil)
+		if err != nil {
+			return fmt.Errorf("put: %w", err)
+		}
+		ks.BlockHeight = uint32(bh.Height)
+		nv := encodeKeystone(ks)
+		err = ksdb.Put(key[:], nv[:], nil)
 		if err != nil {
 			return fmt.Errorf("put: %w", err)
 		}
