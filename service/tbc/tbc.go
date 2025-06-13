@@ -23,6 +23,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	btcmempool "github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
@@ -62,6 +63,8 @@ const (
 	defaultCmdTimeout          = 7 * time.Second
 	defaultPingTimeout         = 9 * time.Second
 	defaultBlockPendingTimeout = 13 * time.Second
+
+	defaultMempoolAge = 2 * 7 * 24 * time.Hour // two weeks
 )
 
 var (
@@ -139,7 +142,7 @@ func NewDefaultConfig() *Config {
 		LogLevel:             logLevel,
 		MaxCachedKeystones:   defaultMaxCachedKeystones,
 		MaxCachedTxs:         defaultMaxCachedTxs,
-		MempoolEnabled:       false, // XXX default to false until it is fixed
+		MempoolEnabled:       true,
 		PeersWanted:          defaultPeersWanted,
 		PrometheusNamespace:  appName,
 		ExternalHeaderMode:   false, // Default anyway, but for readability
@@ -162,8 +165,7 @@ type Server struct {
 	blocksInserted int    // blocks inserted since last print
 
 	// mempool
-	//nolint:nolintlint // False positive, commented-out code.
-	// mempool *mempool
+	mempool *Mempool
 
 	// broadcast
 	broadcast map[chainhash.Hash]*wire.MsgTx
@@ -210,11 +212,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 
-	if cfg.MempoolEnabled {
-		log.Infof("mempool forced disabled")
-	}
-	cfg.MempoolEnabled = false // XXX
-
 	// Only populate pings and blocks if not in External Header Mode
 	var pings *ttl.TTL
 	var blocks *ttl.TTL
@@ -255,16 +252,16 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.pings = pings
 	}
 
-	// if s.cfg.MempoolEnabled {
-	//	if s.cfg.ExternalHeaderMode {
-	//		// Cannot combine mempool behavior with External Header Mode
-	//		panic("cannot enable mempool on an external-header-only mode TBC instance")
-	//	}
-	//	s.mempool, err = mempoolNew()
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	// }
+	if s.cfg.MempoolEnabled {
+		if s.cfg.ExternalHeaderMode {
+			// Cannot combine mempool behavior with External Header Mode
+			panic("cannot enable mempool on an external-header-only mode TBC instance")
+		}
+		s.mempool, err = NewMempool()
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	wanted := defaultPeersWanted
 	switch cfg.Network {
@@ -287,7 +284,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
-		s.checkpoints = []checkpoint{}
+		s.checkpoints = localnetCheckpoints
 		s.hemiGenesis = localnetHemiGenesis
 		wanted = 1
 
@@ -422,25 +419,25 @@ func (s *Server) pingPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	s.pings.Put(ctx, defaultPingTimeout, peer, p, s.pingExpired, nil)
 }
 
-// func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
-//	log.Tracef("mempoolPeer %v", p)
-//	defer log.Tracef("mempoolPeer %v exit", p)
-//
-//	if !s.cfg.MempoolEnabled {
-//		return
-//	}
-//
-//	// Don't ask for mempool if the other end does not advertise it.
-//	if !p.HasService(wire.SFNodeBloom) {
-//		return
-//	}
-//
-//	err := p.Write(defaultCmdTimeout, wire.NewMsgMemPool())
-//	if err != nil {
-//		log.Debugf("mempool %v: %v", p, err)
-//		return
-//	}
-// }
+func (s *Server) mempoolPeer(ctx context.Context, p *rawpeer.RawPeer) {
+	log.Tracef("mempoolPeer %v", p)
+	defer log.Tracef("mempoolPeer %v exit", p)
+
+	if !s.cfg.MempoolEnabled {
+		return
+	}
+
+	// Don't ask for mempool if the other end does not advertise it.
+	if !p.HasService(wire.SFNodeBloom) {
+		return
+	}
+
+	err := p.Write(defaultCmdTimeout, wire.NewMsgMemPool())
+	if err != nil {
+		log.Debugf("mempool %v: %v", p, err)
+		return
+	}
+}
 
 func (s *Server) headersPeer(ctx context.Context, p *rawpeer.RawPeer) {
 	log.Tracef("headersPeer %v", p)
@@ -475,9 +472,9 @@ func (s *Server) handleGeneric(ctx context.Context, p *rawpeer.RawPeer, msg wire
 		}
 
 	case *wire.MsgTx:
-		// if err := s.handleTx(ctx, p, m, raw); err != nil {
-		//	return fmt.Errorf("handle generic transaction: %w", err)
-		// }
+		if err := s.handleTx(ctx, p, m, raw); err != nil {
+			return fmt.Errorf("handle generic transaction: %w", err)
+		}
 
 	case *wire.MsgInv:
 		if err := s.handleInv(ctx, p, m, raw); err != nil {
@@ -582,8 +579,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	}
 
 	// If we are caught up start collecting mempool data.
-	if s.cfg.MempoolEnabled && p.HasService(wire.SFNodeBloom) &&
-		s.Synced(ctx).Synced {
+	if s.cfg.MempoolEnabled && p.HasService(wire.SFNodeBloom) && s.Synced(ctx).Synced {
 		err := p.Write(defaultCmdTimeout, wire.NewMsgMemPool())
 		if err != nil {
 			readError = err
@@ -816,10 +812,9 @@ func (s *Server) promPoll(ctx context.Context) error {
 		s.prom.connected, s.prom.good, s.prom.bad = s.pm.Stats()
 		s.prom.blockCache = s.db.BlockCacheStats()
 		s.prom.headerCache = s.db.BlockHeaderCacheStats()
-		s.prom.diskFree, _ = diskFree(s.cfg.LevelDBHome)
-		// if s.cfg.MempoolEnabled {
-		//	s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
-		// }
+		if s.cfg.MempoolEnabled {
+			s.prom.mempoolCount, s.prom.mempoolSize = s.mempool.stats(ctx)
+		}
 
 		if s.promPollVerbose {
 			s.mtx.RLock()
@@ -1051,36 +1046,90 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 	}
 }
 
-// func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
-//	log.Tracef("downloadMissingTx")
-//	defer log.Tracef("downloadMissingTx exit")
-//
-//	if true {
-//		return nil
-//	}
-//
-//	getData, err := s.mempool.getDataConstruct(ctx)
-//	if err != nil {
-//		return fmt.Errorf("download missing tx: %w", err)
-//	}
-//	err = p.Write(defaultCmdTimeout, getData)
-//	if err != nil {
-//		// peer dead, make sure it is reaped
-//		p.Close() // XXX this should not happen here
-//		if !errors.Is(err, net.ErrClosed) &&
-//			!errors.Is(err, os.ErrDeadlineExceeded) {
-//			log.Errorf("download missing tx write: %v %v", p, err)
-//		}
-//	}
-//	return err
-// }
+func (s *Server) downloadMissingTx(ctx context.Context, p *rawpeer.RawPeer) error {
+	log.Tracef("downloadMissingTx")
+	defer log.Tracef("downloadMissingTx exit")
 
-// func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
-//	log.Tracef("handleTx")
-//	defer log.Tracef("handleTx exit")
-//
-//	return s.mempool.txsInsert(ctx, msg, raw)
-// }
+	getData, err := s.mempool.getDataConstruct(ctx)
+	if err != nil {
+		return fmt.Errorf("download missing tx: %w", err)
+	}
+	err = p.Write(defaultCmdTimeout, getData)
+	if err != nil {
+		// peer dead, make sure it is reaped
+		p.Close() // XXX this should not happen here
+		if !errors.Is(err, net.ErrClosed) &&
+			!errors.Is(err, os.ErrDeadlineExceeded) {
+			log.Errorf("download missing tx write: %v %v", p, err)
+		}
+	}
+	return err
+}
+
+func (s *Server) handleTx(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgTx, raw []byte) error {
+	log.Tracef("handleTx")
+	defer log.Tracef("handleTx exit")
+
+	if !(s.cfg.MempoolEnabled && s.Synced(ctx).Synced) {
+		return nil
+	}
+
+	// If we have processed this tx in the past, exit. This is a little
+	// racy but it is worth pre-testing to prevent expensive database
+	// lookups to determine input values.
+	if s.mempool.txProcessed(msg.TxHash()) {
+		return nil
+	}
+
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return err // should not happen so fail
+	}
+
+	// Reject obvious bad tx' here
+	utx := btcutil.NewTx(msg)
+	err = btcmempool.CheckTransactionStandard(utx, int32(bhb.Height)+1, bhb.Timestamp(),
+		btcmempool.DefaultMinRelayTxFee, MaxTxVersion)
+	if err != nil {
+		// do allow runes which are rejected, this is a really shitty test though
+		seen := 0
+		for k := range msg.TxOut {
+			// out 0 op_return
+			//     1 witness_v1_taproot
+			//     2 witness_v0_scripthash
+			//     3 witness_v0_scripthash
+			switch k {
+			case 0:
+				if txscript.IsNullData(msg.TxOut[k].PkScript) {
+					seen++
+				}
+			case 1:
+				if txscript.IsPayToTaproot(msg.TxOut[k].PkScript) {
+					seen++
+				}
+			case 2:
+				if txscript.IsPayToWitnessScriptHash(msg.TxOut[k].PkScript) {
+					seen++
+				}
+			case 3:
+				if txscript.IsPayToWitnessScriptHash(msg.TxOut[k].PkScript) {
+					seen++
+				}
+			default:
+				seen = 0 // force failure
+			}
+		}
+		if seen != 4 {
+			return nil
+		}
+	}
+
+	mptx, err := s.mempoolTxNew(ctx, utx)
+	if err != nil {
+		return fmt.Errorf("new mempool tx: %w", err)
+	}
+	return s.mempool.TxInsert(ctx, mptx)
+}
 
 func (s *Server) syncBlocks(ctx context.Context) {
 	log.Tracef("syncBlocks")
@@ -1370,12 +1419,12 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 				log.Debugf("blockheaders caught up at %v: %v",
 					p, bhb.HH())
 			}
-		} // else {
-		// if s.cfg.MempoolEnabled {
-		//	// Start building the mempool.
-		//	s.pm.All(ctx, s.mempoolPeer)
-		// }
-		// }
+		} else {
+			if s.cfg.MempoolEnabled && s.Synced(ctx).Synced {
+				// Start building the mempool.
+				s.pm.All(ctx, s.mempoolPeer)
+			}
+		}
 
 		// Always call syncBlocks, it either downloads more blocks or
 		// kicks of indexing.
@@ -1555,28 +1604,33 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	}
 	s.mtx.Unlock()
 
-	// Reap txs from mempool, no need to log error.
-	// if s.cfg.MempoolEnabled {
-	//	_ = s.mempool.txsRemove(ctx, txHashes)
-	// }
+	// Reap txs from mempool for blocks that are within defaultMempoolAge.
+	// Sync flag is always false here so don't check it, just remove tx's
+	// from mempool.
+	blocktime := block.MsgBlock().Header.Timestamp
+	now := time.Now()
+	mempoolAge := now.Add(-defaultMempoolAge)
+	if blocktime.After(mempoolAge) && s.cfg.MempoolEnabled {
+		s.mempool.txsRemove(ctx, txHashes)
+	}
 
-	log.Debugf("inserted block at height %d, parent hash %s", height, block.MsgBlock().Header.PrevBlock)
+	log.Debugf("inserted block at height %d, parent hash %s",
+		height, block.MsgBlock().Header.PrevBlock)
 
 	s.mtx.Lock()
 	// Stats
 	s.blocksSize += uint64(len(raw))
 	s.blocksInserted++
 
-	now := time.Now()
 	if now.After(s.printTime) {
 		var (
 			mempoolCount   int
 			mempoolSize    int
 			connectedPeers int
 		)
-		// if s.cfg.MempoolEnabled {
-		//	mempoolCount, mempoolSize = s.mempool.stats(ctx)
-		// }
+		if s.cfg.MempoolEnabled {
+			mempoolCount, mempoolSize = s.mempool.stats(ctx)
+		}
 
 		// Grab some peer stats as well
 		connectedPeers, goodPeers, badPeers := s.pm.Stats()
@@ -1613,7 +1667,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 	log.Tracef("handleInv (%v)", p)
 	defer log.Tracef("handleInv exit (%v)", p)
 
-	// var txsFound bool
+	var txsFound bool
 
 	for _, v := range msg.InvList {
 		switch v.Type {
@@ -1622,7 +1676,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 		case wire.InvTypeTx:
 			// handle these later or else we have to insert txs one
 			// at a time while taking a mutex.
-			// txsFound = true
+			txsFound = true
 		case wire.InvTypeBlock:
 			// Make sure we haven't seen block header yet.
 			_, _, err := s.BlockHeaderByHash(ctx, v.Hash)
@@ -1645,12 +1699,12 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 		}
 	}
 
-	// if s.cfg.MempoolEnabled && txsFound {
-	//	if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
-	//		//nolint:errcheck // Error is intentionally ignored.
-	//		go s.downloadMissingTx(ctx, p)
-	//	}
-	// }
+	if s.cfg.MempoolEnabled && txsFound && s.Synced(ctx).Synced {
+		if err := s.mempool.invTxsInsert(ctx, msg); err != nil {
+			//nolint:errcheck // Error is intentionally ignored.
+			go s.downloadMissingTx(ctx, p)
+		}
+	}
 
 	return nil
 }
@@ -1880,7 +1934,7 @@ func (s *Server) BalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash) 
 	return balance, nil
 }
 
-func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
+func (s *Server) UtxosByAddress(ctx context.Context, filterMempool bool, encodedAddress string, start uint64, count uint64) ([]tbcd.Utxo, error) {
 	log.Tracef("UtxosByAddress")
 	defer log.Tracef("UtxosByAddress exit")
 
@@ -1901,6 +1955,12 @@ func (s *Server) UtxosByAddress(ctx context.Context, encodedAddress string, star
 		start, count)
 	if err != nil {
 		return nil, err
+	}
+
+	// XXX should we return an error if filterMempool
+	// is true and mempoolEnabled is false?
+	if filterMempool && s.cfg.MempoolEnabled {
+		return s.mempool.FilterUtxos(ctx, utxos)
 	}
 	return utxos, nil
 }
@@ -1934,6 +1994,19 @@ func (s *Server) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevha
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
 	return s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, abrevhash)
+}
+
+func (s *Server) KeystoneTxsByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash, depth uint) ([]tbcapi.KeystoneTx, error) {
+	log.Tracef("KeystoneTxsByL2KeystoneAbrevHash")
+	defer log.Tracef("KeystoneTxsByL2KeystoneAbrevHash exit")
+
+	first, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, abrevhash)
+	if err != nil {
+		return nil, err
+	}
+	_ = first
+
+	return nil, errors.New("noy yet")
 }
 
 // ScriptHashAvailableToSpend returns a boolean which indicates whether
@@ -2109,6 +2182,17 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 		return nil, ErrTxBroadcastNoPeers
 	}
 
+	if s.cfg.MempoolEnabled {
+		// Add Tx to our own mempool instead of waiting for it to come
+		// over p2p.
+		mptx, err := s.mempoolTxNew(ctx, btcutil.NewTx(tx))
+		if err != nil {
+			log.Errorf("mempool tx: %w", err)
+		} else if err := s.mempool.TxInsert(ctx, mptx); err != nil {
+			log.Errorf("broacast mempool tx: %w", err)
+		}
+	}
+
 	return &txHash, nil
 }
 
@@ -2146,61 +2230,84 @@ func (s *Server) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHea
 	return s.db.BlockHeaderByKeystoneIndex(ctx)
 }
 
-func feesFromTransactions(txs []*btcutil.Tx) error {
-	for idx, tx := range txs {
-		for _, txIn := range tx.MsgTx().TxIn {
-			if idx == 0 {
-				// Skip coinbase inputs
-				continue
-			}
-			_ = txIn
+func (s *Server) parseTx(ctx context.Context, tx *wire.MsgTx) (int64, int64, map[wire.OutPoint]struct{}, error) {
+	var iv, ov int64
+	txins := make(map[wire.OutPoint]struct{}, len(tx.TxIn))
+	for _, txIn := range tx.TxIn {
+		po := txIn.PreviousOutPoint
+		wtxo, err := s.txOutFromOutPoint(ctx, tbcd.NewOutpoint(po.Hash, po.Index))
+		if err != nil {
+			return 0, 0, nil, err
 		}
-		for outIndex, txOut := range tx.MsgTx().TxOut {
-			if txscript.IsUnspendable(txOut.PkScript) {
-				continue
-			}
-			_ = outIndex
-		}
+		iv += wtxo.Value
+
+		txins[po] = struct{}{}
 	}
 
-	return nil
+	for _, txOut := range tx.TxOut {
+		ov += txOut.Value
+	}
+
+	return iv, ov, txins, nil
 }
 
-func (s *Server) FeesAtHeight(ctx context.Context, height, count int64) (uint64, error) {
-	log.Tracef("FeesAtHeight")
-	defer log.Tracef("FeesAtHeight exit")
+func (s *Server) mempoolTxNew(ctx context.Context, utx *btcutil.Tx) (*MempoolTx, error) {
+	// Create mempool tx
+	inValue, outValue, txins, err := s.parseTx(ctx, utx.MsgTx())
+	if err != nil {
+		return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
+	}
+	return &MempoolTx{
+		id:       utx.MsgTx().TxHash(),
+		weight:   blockchain.GetTransactionWeight(utx),
+		size:     btcmempool.GetTxVirtualSize(utx),
+		outValue: outValue,
+		inValue:  inValue,
+		expires:  time.Now().Add(defaultMempoolAge),
+		txins:    txins,
+	}, nil
+}
+
+// FeesByBlockHash calculates the median fee for the provided block.
+func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbcapi.FeeEstimate, error) {
+	log.Tracef("FeesByBlockHash")
+	defer log.Tracef("FeesByBlockHash exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return 0, errors.New("cannot call FeesAtHeight on TBC running in External Header mode")
+		return nil, errors.New("fees by block hash: external header mode")
 	}
 
-	if height-count < 0 {
-		return 0, errors.New("height - count is less than 0")
+	b, err := s.db.BlockByHash(ctx, hash)
+	if err != nil {
+		return nil, fmt.Errorf("fees by block hash block: %w", err)
 	}
-	var fees uint64
-	for i := int64(0); i < count; i++ {
-		log.Infof("%v", uint64(height-i))
-		bhs, err := s.db.BlockHeadersByHeight(ctx, uint64(height-i))
+
+	mp, err := NewMempool()
+	if err != nil {
+		return nil, fmt.Errorf("could not create mempool: %w", err)
+	}
+
+	// Create mempool txs from block txs
+	for _, utx := range b.Transactions() {
+		if blockchain.IsCoinBase(utx) {
+			// Skip coinbase inputs
+			continue
+		}
+		mptx, err := s.mempoolTxNew(ctx, utx)
 		if err != nil {
-			return 0, fmt.Errorf("headers by height: %w", err)
+			return nil, fmt.Errorf("new mempool tx: %w", err)
 		}
-		if len(bhs) != 1 {
-			panic("fees at height: unsupported fork")
-			// return 0, fmt.Errorf("too many block headers: %v", len(bhs))
-		}
-		b, err := s.db.BlockByHash(ctx, bhs[0].Hash)
-		if err != nil {
-			return 0, fmt.Errorf("block by hash: %w", err)
-		}
-
-		// walk block tx'
-		if err = feesFromTransactions(b.Transactions()); err != nil {
-			return 0, fmt.Errorf("fees from transactions %v %v: %w",
-				height, b.Hash(), err)
+		if err = mp.TxInsert(ctx, mptx); err != nil {
+			return nil, fmt.Errorf("cannot insert tx in mempool: %w", err)
 		}
 	}
 
-	return fees, errors.New("not yet")
+	rf, err := mp.GetRecommendedFees(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("could not get recommended fees: %w", err)
+	}
+
+	return rf[0], nil
 }
 
 // FullBlockAvailable returns whether TBC has the full block
@@ -2623,7 +2730,7 @@ func (s *Server) Run(pctx context.Context) error {
 			httpErrCh <- httpServer.ListenAndServe()
 		}()
 		defer func() {
-			if err = httpServer.Shutdown(ctx); err != nil {
+			if err := httpServer.Shutdown(ctx); err != nil {
 				log.Errorf("http server exit: %v", err)
 				return
 			}
