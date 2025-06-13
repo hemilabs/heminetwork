@@ -55,6 +55,7 @@ const (
 
 	heighthashSize         = 8 + 1 + chainhash.HashSize
 	blockheaderSize        = 120
+	keystoneSizeV3         = chainhash.HashSize + hemi.L2KeystoneAbrevSize
 	keystoneSize           = 4 + chainhash.HashSize + hemi.L2KeystoneAbrevSize
 	keystoneHeightHashSize = 1 + 4 + chainhash.HashSize // h uint32(height) block_hash
 )
