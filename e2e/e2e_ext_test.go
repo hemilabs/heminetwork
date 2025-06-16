@@ -67,7 +67,8 @@ func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
 }
 
 func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error {
-	timeoutTicker := time.NewTicker(timeout)
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
 
 	for {
 		select {
@@ -75,16 +76,13 @@ func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error
 			conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
 			if err != nil {
 				t.Logf("error dialing: %s", err)
-				conn.Close()
 				continue
-			} else {
-				conn.Close()
-				return nil
 			}
-		case <-t.Context().Done():
-			return t.Context().Err()
-		case <-timeoutTicker.C:
-			return fmt.Errorf("could not connect to tcp port: timeout")
+
+			conn.Close()
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 }
