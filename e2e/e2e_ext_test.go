@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -25,6 +24,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/go-test/deep"
+	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/database/tbcd"
@@ -67,25 +67,27 @@ func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
 }
 
 func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error {
-	conn, err := net.DialTimeout("tcp", addr, timeout)
-	if err != nil {
-		return err
-	}
+	ctx, cancel := context.WithTimeout(t.Context(), timeout)
+	defer cancel()
 
-	conn.Close()
-	return nil
+	for {
+		select {
+		case <-time.After(100 * time.Millisecond):
+			conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+			if err != nil {
+				t.Logf("error dialing: %s", err)
+				continue
+			}
+
+			conn.Close()
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
-// since we don't use httptest when running bfg, we have to start in this port
-// range.  use the mutex to make it safe
-var (
-	somePort    = 3000
-	somePortMtx = sync.Mutex{}
-)
-
 func nextPort(ctx context.Context, t *testing.T) int {
-	somePortMtx.Lock()
-	defer somePortMtx.Unlock()
 	for {
 		select {
 		case <-ctx.Done():
@@ -93,8 +95,10 @@ func nextPort(ctx context.Context, t *testing.T) int {
 		default:
 		}
 
-		port := somePort
-		somePort++
+		port, err := freeport.GetFreePort()
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)), 1*time.Second); err != nil {
 			if errors.Is(err, syscall.ECONNREFUSED) {
@@ -110,7 +114,9 @@ func nextPort(ctx context.Context, t *testing.T) int {
 func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opgethWsUrl string) (*bfg.Server, string) {
 	_, tbcPublicUrl := createTbcServer(ctx, t, levelDbHome)
 
-	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
+	port := nextPort(ctx, t)
+
+	bfgPublicListenAddress := net.JoinHostPort("", fmt.Sprintf("%d", port))
 
 	cfg := &bfg.Config{
 		ListenAddress: bfgPublicListenAddress,
@@ -132,7 +138,7 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 		}
 	}()
 
-	bfgPublicUrl := fmt.Sprintf("localhost%s", bfgPublicListenAddress)
+	bfgPublicUrl := net.JoinHostPort("localhost", fmt.Sprintf("%d", port))
 
 	if err := EnsureCanConnectTCP(t, bfgPublicUrl, 5*time.Second); err != nil {
 		t.Fatalf("could not connect to %s: %s", bfgPublicUrl, err.Error())
@@ -142,7 +148,8 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 }
 
 func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tbc.Server, string) {
-	tbcPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
+	port := nextPort(ctx, t)
+	tbcPublicListenAddress := net.JoinHostPort("", fmt.Sprintf("%d", port))
 
 	cfg := tbc.NewDefaultConfig()
 
@@ -162,7 +169,7 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 		}
 	}()
 
-	tbcPublicUrl := fmt.Sprintf("http://localhost%s/v1/ws", tbcPublicListenAddress)
+	tbcPublicUrl := fmt.Sprintf("http://%s/v1/ws", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)))
 
 	if err := EnsureCanConnect(t, tbcPublicUrl, 5*time.Second); err != nil {
 		t.Fatalf("could not connect to %s: %s", tbcPublicUrl, err.Error())
@@ -305,7 +312,6 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
-	time.Sleep(2 * time.Second)
 
 	expectedConfirmations := []int{
 		11,
@@ -419,7 +425,6 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
-	time.Sleep(2 * time.Second)
 
 	expectedConfirmations := []int{
 		11,
@@ -520,7 +525,6 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
-	time.Sleep(2 * time.Second)
 
 	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 
@@ -643,7 +647,6 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
-	time.Sleep(2 * time.Second)
 
 	bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(*keystoneOne).Hash())
 

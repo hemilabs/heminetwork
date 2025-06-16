@@ -129,7 +129,9 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		go func() {
 			select {
 			case <-f.pctx.Done():
+				f.mtx.Lock()
 				err = f.pctx.Err()
+				f.mtx.Unlock()
 				return
 			case f.msgCh <- msg.Method:
 			}
