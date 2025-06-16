@@ -2490,9 +2490,9 @@ func TestDbUpgradeTemp(t *testing.T) {
 
 	t.Logf("Last blockheader height: %d", hed.Height)
 
-	err = s.dbClose()
-	if err != nil {
-		t.Fatal(err)
+	cancel()
+
+	for s.Running() {
 	}
 }
 
