@@ -118,9 +118,7 @@ func TestTickingPopMiner(t *testing.T) {
 	}
 
 	// keystone expiration is forced below
-	s.mtx.Lock()
-	s.l2KeystoneMaxAge = mock.DefaultNtfnDuration * 10000000
-	s.mtx.Unlock()
+	s.cfg.l2KeystoneMaxAge = mock.InfiniteDuration
 
 	// Start pop miner
 	go func() {
@@ -216,9 +214,7 @@ func TestPopmFilterUtxos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	s.mtx.Lock()
-	s.l2KeystoneMaxAge = mock.DefaultNtfnDuration * 1000000
-	s.mtx.Unlock()
+	s.cfg.l2KeystoneMaxAge = mock.InfiniteDuration
 
 	// Start pop miner
 	go func() {
@@ -283,6 +279,8 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
+	cfg.l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
+	cfg.opgethReconnectTimeout = 500 * time.Millisecond
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -293,14 +291,6 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	s.mtx.Lock()
-	s.l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
-	s.mtx.Unlock()
-
-	s.mtx.Lock()
-	s.opgethReconnectTimeout = 500 * time.Millisecond
-	s.mtx.Unlock()
 
 	// Start pop miner
 	go func() {

@@ -45,14 +45,16 @@ const (
 
 	defaultL2KeystonesCount = 12 // 1 hour
 
-	bitcoinSourceBlockstream = "blockstream"
-	bitcoinSourceTBC         = "tbc"
+	bitcoinSourceBlockstream      = "blockstream"
+	bitcoinSourceTBC              = "tbc"
+	defaultOpgethReconnectTimeout = 5 * time.Second
+	defaultL2KeystoneMaxAge       = 4 * time.Hour
+	defaultL2KeystonePollTimeout  = 13 * time.Second
+	defaultL2KeystoneRetryTimeout = 15 * time.Second
 )
 
 var (
-	log                    = loggo.GetLogger("popm")
-	l2KeystonePollTimeout  = 13 * time.Second
-	l2KeystoneRetryTimeout = 5 * time.Second
+	log = loggo.GetLogger("popm")
 )
 
 func init() {
@@ -73,16 +75,22 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	RetryMineThreshold      uint
+
+	// cooked settings, do not export
+	opgethReconnectTimeout time.Duration
+	l2KeystoneMaxAge       time.Duration
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Network:              "testnet3",
-		PrometheusNamespace:  appName,
-		OpgethURL:            defaultOpgethURL,
-		BitcoinConfirmations: defaultBitcoinConfirmations,
-		BitcoinSource:        bitcoinSourceTBC,
-		BitcoinURL:           tbcgozer.DefaultURL,
+		Network:                "testnet3",
+		PrometheusNamespace:    appName,
+		OpgethURL:              defaultOpgethURL,
+		BitcoinConfirmations:   defaultBitcoinConfirmations,
+		BitcoinSource:          bitcoinSourceTBC,
+		BitcoinURL:             tbcgozer.DefaultURL,
+		opgethReconnectTimeout: defaultOpgethReconnectTimeout,
+		l2KeystoneMaxAge:       defaultL2KeystoneMaxAge,
 	}
 }
 
@@ -140,11 +148,9 @@ type Server struct {
 	vc    *vinzclortho.VinzClortho
 
 	// mining
-	retryThreshold         uint32
-	keystones              map[chainhash.Hash]*keystone
-	workC                  chan struct{}
-	opgethReconnectTimeout time.Duration
-	l2KeystoneMaxAge       time.Duration
+	retryThreshold uint32
+	keystones      map[chainhash.Hash]*keystone
+	workC          chan struct{}
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -153,11 +159,9 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:                    cfg,
-		retryThreshold:         uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
-		workC:                  make(chan struct{}, 2),
-		opgethReconnectTimeout: 5 * time.Second,
-		l2KeystoneMaxAge:       4 * time.Hour,
+		cfg:            cfg,
+		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
+		workC:          make(chan struct{}, 2),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -386,7 +390,7 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 		}
 
 		s.mtx.Lock()
-		ks.expires = timestamp(s.l2KeystoneMaxAge)
+		ks.expires = timestamp(s.cfg.l2KeystoneMaxAge)
 		s.mtx.Unlock()
 		// Always add the entry to cache and rely on Error being !nil
 		// to retry later.
@@ -434,9 +438,9 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 	// Note that notifications can be unreliable so additionally we rely on
 	// a timeout to poll keystones.
-	t := time.NewTimer(l2KeystonePollTimeout)
+	t := time.NewTimer(defaultL2KeystonePollTimeout)
 	for {
-		t.Reset(l2KeystonePollTimeout)
+		t.Reset(defaultL2KeystonePollTimeout)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -551,10 +555,6 @@ func (s *Server) opgeth(ctx context.Context) {
 	log.Tracef("opgeth")
 	defer log.Tracef("opgeth exit")
 
-	s.mtx.Lock()
-	opgethReconnectTimeoutTmp := s.opgethReconnectTimeout
-	s.mtx.Unlock()
-
 	for {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
@@ -567,7 +567,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(opgethReconnectTimeoutTmp):
+		case <-time.After(s.cfg.opgethReconnectTimeout):
 		}
 
 		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
@@ -723,9 +723,9 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		t := time.NewTimer(l2KeystoneRetryTimeout)
+		t := time.NewTimer(defaultL2KeystoneRetryTimeout)
 		for {
-			t.Reset(l2KeystoneRetryTimeout)
+			t.Reset(defaultL2KeystoneRetryTimeout)
 			select {
 			case <-ctx.Done():
 				return
