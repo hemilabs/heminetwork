@@ -142,6 +142,8 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 		conn.Close()
 	}
 
+	// wait here for bfg to start up, setup routes, and populate db with
+	// keystones from the btc chain
 	time.Sleep(200 * time.Millisecond)
 
 	return bfgServer, bfgPublicUrl
