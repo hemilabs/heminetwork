@@ -2482,6 +2482,18 @@ func TestDbUpgradeTemp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	hed, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("Last blockheader height: %d", hed.Height)
+
+	err = s.dbClose()
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (b *btcNode) MineAndSendTemp(ctx context.Context, name string, parent *chainhash.Hash, payToAddress btcutil.Address, kssEnabled bool) (*block, error) {

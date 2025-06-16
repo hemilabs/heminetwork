@@ -337,7 +337,7 @@ func (b *btcNode) handleGetHeaders(m *wire.MsgGetHeaders) (*wire.MsgHeaders, err
 	locator := m.BlockLocatorHashes[0]
 	from, ok := b.chain[locator.String()]
 	if !ok {
-		return nil, fmt.Errorf("get headers: locator not found %v", locator)
+		return wire.NewMsgHeaders(), nil
 	}
 
 	nmh := wire.NewMsgHeaders()
