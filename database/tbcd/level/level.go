@@ -46,7 +46,7 @@ import (
 //	UTXOs
 
 const (
-	ldbVersion = 4
+	ldbVersion = 3
 
 	logLevel = "INFO"
 	verbose  = false
