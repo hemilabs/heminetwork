@@ -66,23 +66,25 @@ func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
 	return nil
 }
 
-func ConnectTCP(t *testing.T, addr string, timeout time.Duration) (net.Conn, error) {
-	start := time.Now()
-	t.Logf("ConnectTCP enters at: %v", start)
-	defer func() { t.Logf("ConnectTCP duration: %v", time.Since(start)) }()
+func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error {
+	timeoutTicker := time.NewTicker(timeout)
 
-	d := net.Dialer{
-		Timeout:   250 * time.Millisecond,
-		Deadline:  time.Now().Add(5 * time.Second),
-		DualStack: true,
+	for {
+		select {
+		case <-time.After(100 * time.Millisecond):
+			conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+			if err != nil {
+				t.Logf("error dialing: %s", err)
+				conn.Close()
+				continue
+			} else {
+				conn.Close()
+				return nil
+			}
+		case <-timeoutTicker.C:
+			return fmt.Errorf("could not connect to tcp port: timeout")
+		}
 	}
-
-	conn, err := d.DialContext(t.Context(), "tcp", addr)
-	if err != nil {
-		return nil, err
-	}
-
-	return conn, nil
 }
 
 func nextPort(ctx context.Context, t *testing.T) int {
@@ -138,10 +140,8 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 
 	bfgPublicUrl := net.JoinHostPort("localhost", fmt.Sprintf("%d", port))
 
-	if conn, err := ConnectTCP(t, bfgPublicUrl, 5*time.Second); err != nil {
+	if err := EnsureCanConnectTCP(t, bfgPublicUrl, 5*time.Second); err != nil {
 		t.Fatalf("could not connect to %s: %s", bfgPublicUrl, err.Error())
-	} else {
-		conn.Close()
 	}
 
 	return bfgServer, bfgPublicUrl
