@@ -4,7 +4,7 @@
 //
 // Copyright 2017 Edd Turtle, MIT
 
-package testutil
+package tbc
 
 import (
 	"archive/tar"
@@ -142,7 +142,7 @@ func gunzip(filename, destination string) error {
 
 // extract extracts the provided archive to the provided destination. It
 // autodetects if it is a zip or a tar archive.
-func Extract(filename, dst string) error {
+func extract(filename, dst string) error {
 	// log.Printf("Extracting: %v -> %v\n", filename, dst)
 	var err error
 	archive := filepath.Ext(filename)
