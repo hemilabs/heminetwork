@@ -67,6 +67,10 @@ func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
 }
 
 func ConnectTCP(t *testing.T, addr string, timeout time.Duration) (net.Conn, error) {
+	start := time.Now()
+	t.Logf("ConnectTCP enters at: %v", start)
+	defer func() { t.Logf("ConnectTCP duration: %v", time.Since(start)) }()
+
 	d := net.Dialer{
 		Timeout:   250 * time.Millisecond,
 		Deadline:  time.Now().Add(5 * time.Second),
