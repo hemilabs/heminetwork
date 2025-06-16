@@ -387,6 +387,99 @@ func TestDbUpgrade(t *testing.T) {
 	}
 }
 
+func TestDbUpgradeV4(t *testing.T) {
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	err := extract("testdata/testdatabasev3.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		HemiIndex:            true,
+		LevelDBHome:          home,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
+		Network:                 "upgradetest",
+		PrometheusListenAddress: "",
+		ListenAddress:           "",
+		PeersWanted:             0,
+		MempoolEnabled:          false,
+		Seeds:                   []string{"127.0.0.1:18444"},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// check if db upgrade finished before checking for bh
+	for !s.Running() {
+	}
+
+	// Pull version from DB
+	version, err := s.db.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 4 {
+		t.Fatalf("expected version 4, got %v", version)
+	}
+
+	keystoneHashes := []string{
+		"0d9a0eee5350f1da4dc76b00f999cb39cbff4e85349ce9cccb8175ac93b30427", // kss1 @ height 11
+		"1bedcd9d9a2443bbf5377e1bc1337af951646cac6b7dbbc5556d5b1a22ebbbfd", // kss2 @ height 12
+		"4465407344e588e4849c16263c005ce421336297d434c4e63dc728fda1ba56db", // kss3 @ height 12
+	}
+
+	for _, kh := range keystoneHashes {
+		hash, err := chainhash.NewHashFromStr(kh)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *hash)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		aks, err := s.KeystonesByHeight(ctx, ks.BlockHeight, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var found bool
+		for _, ksAtHeight := range aks {
+			if diff := deep.Equal(ksAtHeight, *ks); len(diff) == 0 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("keystone not found at height %d", ks.BlockHeight)
+		}
+	}
+}
+
 func TestKeystonesInBlock(t *testing.T) {
 	hb1, err := os.ReadFile("testdata/0000000000000006200009cf36af2bbcb1362b887b4e2625113b6b44327435b8.hex") // Testnet3 block 3802508
 	if err != nil {
