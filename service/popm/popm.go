@@ -53,9 +53,7 @@ const (
 	defaultL2KeystoneRetryTimeout = 15 * time.Second
 )
 
-var (
-	log = loggo.GetLogger("popm")
-)
+var log = loggo.GetLogger("popm")
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
