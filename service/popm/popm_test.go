@@ -73,7 +73,7 @@ func TestPopMiner(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestTickingPopMiner(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestPopmFilterUtxos(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,13 +334,13 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Fatal(err)
 	}
 }
 
-func messageListener(t *testing.T, ctx context.Context, expected map[string]int, errCh chan error, msgCh chan string) error {
+func messageListener(t *testing.T, expected map[string]int, errCh chan error, msgCh chan string) error {
 	for {
 		select {
 		case err := <-errCh:
@@ -348,8 +348,8 @@ func messageListener(t *testing.T, ctx context.Context, expected map[string]int,
 		case n := <-msgCh:
 			t.Logf("received message %s", n)
 			expected[n]--
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-t.Context().Done():
+			return t.Context().Err()
 		}
 		finished := true
 		for v, k := range expected {

@@ -91,7 +91,7 @@ func TestBFG(t *testing.T) {
 	}()
 
 	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, ctx, expectedMsg, errCh, msgCh); err != nil {
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -171,7 +171,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 	}()
 
 	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, ctx, expectedMsg, errCh, msgCh); err != nil {
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -235,7 +235,7 @@ func TestFullMockIntegration(t *testing.T) {
 	go sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 0, 0)
 
 	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, ctx, expectedMsg, errCh, msgCh); err != nil {
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -268,7 +268,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(t, ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}()
 
 	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, ctx, expectedMsg, errCh, msgCh); err != nil {
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -342,15 +342,15 @@ func sendFinalityRequests(ctx context.Context, kssList []hemi.L2Keystone, url st
 	}
 }
 
-func messageListener(t *testing.T, ctx context.Context, expected map[string]int, errCh chan error, msgCh chan string) error {
+func messageListener(t *testing.T, expected map[string]int, errCh chan error, msgCh chan string) error {
 	for {
 		select {
 		case err := <-errCh:
 			return err
 		case n := <-msgCh:
 			expected[n]--
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-t.Context().Done():
+			return t.Context().Err()
 		}
 		finished := true
 		for v, k := range expected {
