@@ -142,6 +142,8 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 		conn.Close()
 	}
 
+	time.Sleep(200 * time.Millisecond)
+
 	return bfgServer, bfgPublicUrl
 }
 
