@@ -22,6 +22,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/database/level"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/rawdb"
 )
 
@@ -34,6 +35,8 @@ var (
 	modeMove = true
 
 	modeFast = true // try to run fast when enough disk space is available
+
+	keystoneSizeV3 = chainhash.HashSize + hemi.L2KeystoneAbrevSize
 )
 
 func SetMode(move bool) {
@@ -569,8 +572,15 @@ func (l *ldb) v4(ctx context.Context) error {
 		key := i.Key()
 		value := i.Value()
 		if len(value) != keystoneSize {
-			// Not a keystone.
-			continue
+			if len(value) == keystoneSizeV3 {
+				// Keystone without height encoded.
+				var u [keystoneSize]byte
+				copy(u[4:], value[:])
+				value = u[:]
+			} else {
+				// Not a keystone.
+				continue
+			}
 		}
 		ks := decodeKeystone(value)
 		ebh, err := bhs.Get(ks.BlockHash[:], nil)
@@ -584,6 +594,12 @@ func (l *ldb) v4(ctx context.Context) error {
 		}
 		ehh := encodeKeystoneHeightHash(uint32(bh.Height), *ksHash)
 		err = ksdb.Put(ehh[:], nil, nil)
+		if err != nil {
+			return fmt.Errorf("put: %w", err)
+		}
+		ks.BlockHeight = uint32(bh.Height)
+		nv := encodeKeystone(ks)
+		err = ksdb.Put(key[:], nv[:], nil)
 		if err != nil {
 			return fmt.Errorf("put: %w", err)
 		}
