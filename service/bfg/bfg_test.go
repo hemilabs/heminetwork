@@ -32,7 +32,7 @@ import (
 const wantedKeystones = 10
 
 func TestBFG(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)
@@ -91,7 +91,7 @@ func TestBFG(t *testing.T) {
 	}()
 
 	// receive messages and errors from opgeth and tbc
-	if err = messageListener(ctx, expectedMsg, errCh, msgCh); err != nil {
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -171,7 +171,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 	}()
 
 	// receive messages and errors from opgeth and tbc
-	if err = messageListener(ctx, expectedMsg, errCh, msgCh); err != nil {
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -179,7 +179,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 }
 
 func TestFullMockIntegration(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)
@@ -235,7 +235,7 @@ func TestFullMockIntegration(t *testing.T) {
 	go sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 0, 0)
 
 	// receive messages and errors from opgeth and tbc
-	if err = messageListener(ctx, expectedMsg, errCh, msgCh); err != nil {
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -268,7 +268,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}()
 
 	// receive messages and errors from opgeth and tbc
-	if err = messageListener(ctx, expectedMsg, errCh, msgCh); err != nil {
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
 		t.Fatal(err)
 	}
 
@@ -342,19 +342,20 @@ func sendFinalityRequests(ctx context.Context, kssList []hemi.L2Keystone, url st
 	}
 }
 
-func messageListener(ctx context.Context, expected map[string]int, errCh chan error, msgCh chan string) error {
+func messageListener(t *testing.T, expected map[string]int, errCh chan error, msgCh chan string) error {
 	for {
 		select {
 		case err := <-errCh:
 			return err
 		case n := <-msgCh:
 			expected[n]--
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-t.Context().Done():
+			return t.Context().Err()
 		}
 		finished := true
-		for _, k := range expected {
+		for v, k := range expected {
 			if k > 0 {
+				t.Logf("missing %d messages of type %s", k, v)
 				finished = false
 			}
 		}

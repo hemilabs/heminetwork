@@ -24,7 +24,7 @@ import (
 
 const (
 	logLevel              = "INFO"
-	defaultRequestTimeout = 3 * time.Second
+	defaultRequestTimeout = 10 * time.Second
 
 	DefaultURL = "ws://localhost:8082/v1/ws"
 )

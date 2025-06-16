@@ -45,17 +45,15 @@ const (
 
 	defaultL2KeystonesCount = 12 // 1 hour
 
-	bitcoinSourceBlockstream = "blockstream"
-	bitcoinSourceTBC         = "tbc"
+	bitcoinSourceBlockstream      = "blockstream"
+	bitcoinSourceTBC              = "tbc"
+	defaultOpgethReconnectTimeout = 5 * time.Second
+	defaultL2KeystoneMaxAge       = 4 * time.Hour
+	defaultL2KeystonePollTimeout  = 13 * time.Second
+	defaultL2KeystoneRetryTimeout = 15 * time.Second
 )
 
-var (
-	log                    = loggo.GetLogger("popm")
-	l2KeystonePollTimeout  = 13 * time.Second
-	l2KeystoneRetryTimeout = 15 * time.Second
-	opgethReconnectTimeout = 5 * time.Second
-	l2KeystoneMaxAge       = 4 * time.Hour
-)
+var log = loggo.GetLogger("popm")
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -75,16 +73,24 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	RetryMineThreshold      uint
+
+	// cooked settings, do not export
+	opgethReconnectTimeout time.Duration
+	l2KeystoneMaxAge       time.Duration
+	l2KeystonePollTimeout  time.Duration
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Network:              "testnet3",
-		PrometheusNamespace:  appName,
-		OpgethURL:            defaultOpgethURL,
-		BitcoinConfirmations: defaultBitcoinConfirmations,
-		BitcoinSource:        bitcoinSourceTBC,
-		BitcoinURL:           tbcgozer.DefaultURL,
+		Network:                "testnet3",
+		PrometheusNamespace:    appName,
+		OpgethURL:              defaultOpgethURL,
+		BitcoinConfirmations:   defaultBitcoinConfirmations,
+		BitcoinSource:          bitcoinSourceTBC,
+		BitcoinURL:             tbcgozer.DefaultURL,
+		opgethReconnectTimeout: defaultOpgethReconnectTimeout,
+		l2KeystoneMaxAge:       defaultL2KeystoneMaxAge,
+		l2KeystonePollTimeout:  defaultL2KeystonePollTimeout,
 	}
 }
 
@@ -336,8 +342,6 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 		return nil, fmt.Errorf("reconcile: %w", err)
 	}
 
-	// log.Debugf("reconcileKeystones: %v", spew.Sdump(kr))
-
 	// Cross check with gozer to see what needs to be mined
 	aksHashes := make([]chainhash.Hash, 0, len(kr.L2Keystones))
 	keystones := make(map[chainhash.Hash]*keystone, defaultL2KeystonesCount)
@@ -382,7 +386,8 @@ func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*ke
 				ks.state = keystoneStateNew
 			}
 		}
-		ks.expires = timestamp(l2KeystoneMaxAge)
+		ks.expires = timestamp(s.cfg.l2KeystoneMaxAge)
+
 		// Always add the entry to cache and rely on Error being !nil
 		// to retry later.
 		ks.abbreviated = &gks.L2KeystoneBlocks[k]
@@ -405,6 +410,7 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 		return fmt.Errorf("reconcile: %w", err)
 	}
 
+	// XXX this has a logic race with the test package
 	s.mtx.Lock()
 	if s.keystones != nil {
 		s.mtx.Unlock()
@@ -428,9 +434,9 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 	// Note that notifications can be unreliable so additionally we rely on
 	// a timeout to poll keystones.
-	t := time.NewTimer(l2KeystonePollTimeout)
+	t := time.NewTimer(s.cfg.l2KeystonePollTimeout)
 	for {
-		t.Reset(l2KeystonePollTimeout)
+		t.Reset(s.cfg.l2KeystonePollTimeout)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -449,6 +455,7 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 			return fmt.Errorf("keystone notification: %w", err)
 		}
 
+		// XXX this has a logic race with the test package
 		// See if there are state changes
 		var work bool
 		s.mtx.Lock()
@@ -557,7 +564,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(opgethReconnectTimeout):
+		case <-time.After(s.cfg.opgethReconnectTimeout):
 		}
 
 		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
@@ -713,9 +720,9 @@ func (s *Server) Run(pctx context.Context) error {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		t := time.NewTimer(l2KeystoneRetryTimeout)
+		t := time.NewTimer(defaultL2KeystoneRetryTimeout)
 		for {
-			t.Reset(l2KeystoneRetryTimeout)
+			t.Reset(defaultL2KeystoneRetryTimeout)
 			select {
 			case <-ctx.Done():
 				return
