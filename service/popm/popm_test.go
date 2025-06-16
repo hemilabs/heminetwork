@@ -21,10 +21,6 @@ import (
 	"github.com/hemilabs/heminetwork/testutil/mock"
 )
 
-// XXX antonio, please add a test case where opgeth/gozer aren't connected to
-// make sure we don't deadlock or something else silly when network blips
-// occur.
-
 const wantedKeystones = 40
 
 func TestPopMiner(t *testing.T) {
@@ -346,10 +342,6 @@ func TestDisconnectedOpgeth(t *testing.T) {
 
 func messageListener(t *testing.T, ctx context.Context, expected map[string]int, errCh chan error, msgCh chan string) error {
 	for {
-		for k, v := range expected {
-			t.Logf("message: %s, expected: %d", k, v)
-		}
-
 		select {
 		case err := <-errCh:
 			return err
@@ -360,8 +352,9 @@ func messageListener(t *testing.T, ctx context.Context, expected map[string]int,
 			return ctx.Err()
 		}
 		finished := true
-		for _, k := range expected {
+		for v, k := range expected {
 			if k > 0 {
+				t.Logf("missing %d messages of type %s", k, v)
 				finished = false
 			}
 		}
