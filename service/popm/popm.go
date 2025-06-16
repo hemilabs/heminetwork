@@ -79,6 +79,7 @@ type Config struct {
 	// cooked settings, do not export
 	opgethReconnectTimeout time.Duration
 	l2KeystoneMaxAge       time.Duration
+	l2KeystonePollTimeout  time.Duration
 }
 
 func NewDefaultConfig() *Config {
@@ -91,6 +92,7 @@ func NewDefaultConfig() *Config {
 		BitcoinURL:             tbcgozer.DefaultURL,
 		opgethReconnectTimeout: defaultOpgethReconnectTimeout,
 		l2KeystoneMaxAge:       defaultL2KeystoneMaxAge,
+		l2KeystonePollTimeout:  defaultL2KeystonePollTimeout,
 	}
 }
 
@@ -419,7 +421,6 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 		s.mtx.Unlock()
 		return errors.New("already hydrated")
 	}
-	log.Infof("setting keystones hydrating to %d", len(keystones))
 	s.keystones = keystones
 	s.mtx.Unlock()
 
@@ -438,9 +439,9 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 
 	// Note that notifications can be unreliable so additionally we rely on
 	// a timeout to poll keystones.
-	t := time.NewTimer(defaultL2KeystonePollTimeout)
+	t := time.NewTimer(s.cfg.l2KeystonePollTimeout)
 	for {
-		t.Reset(defaultL2KeystonePollTimeout)
+		t.Reset(s.cfg.l2KeystonePollTimeout)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
