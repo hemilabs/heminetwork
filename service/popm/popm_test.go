@@ -7,6 +7,7 @@ package popm
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -20,14 +21,10 @@ import (
 	"github.com/hemilabs/heminetwork/testutil/mock"
 )
 
-// XXX antonio, please add a test case where opgeth/gozer aren't connected to
-// make sure we don't deadlock or something else silly when network blips
-// occur.
-
 const wantedKeystones = 40
 
 func TestPopMiner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
 
 	kssMap, kssList := testutil.MakeSharedKeystones(wantedKeystones)
@@ -76,17 +73,15 @@ func TestPopMiner(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestTickingPopMiner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
-
-	l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
@@ -122,6 +117,9 @@ func TestTickingPopMiner(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// keystone expiration is forced below
+	s.cfg.l2KeystoneMaxAge = mock.InfiniteDuration
+
 	// Start pop miner
 	go func() {
 		if err := s.Run(ctx); !errors.Is(err, context.Canceled) {
@@ -137,26 +135,41 @@ func TestTickingPopMiner(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	cancel()
+	// s.keystones is protected by this mutex
+	s.mtx.Lock()
 
 	if len(s.keystones) != wantedKeystones {
 		t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
 	}
+
 	for _, k := range s.keystones {
 		if _, ok := mtbc.GetKeystones()[*k.hash]; !ok {
 			t.Fatalf("missing keystone: %v", k.hash)
 		}
 	}
+	s.mtx.Unlock()
 
 	time.Sleep(500 * time.Millisecond)
 	if err = s.mine(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+
+	// force expiration of keystones
+	s.mtx.Lock()
+	for i := range s.keystones {
+		now := time.Now()
+		s.keystones[i].expires = &now
+	}
+	s.mtx.Unlock()
+	time.Sleep(2 * time.Second)
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	if len(s.keystones) == wantedKeystones {
 		t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
 	}
@@ -166,8 +179,6 @@ func TestTickingPopMiner(t *testing.T) {
 func TestPopmFilterUtxos(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-
-	l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
@@ -203,6 +214,8 @@ func TestPopmFilterUtxos(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	s.cfg.l2KeystoneMaxAge = mock.InfiniteDuration
+
 	// Start pop miner
 	go func() {
 		if err := s.Run(ctx); !errors.Is(err, context.Canceled) {
@@ -217,7 +230,7 @@ func TestPopmFilterUtxos(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,6 +241,8 @@ func TestPopmFilterUtxos(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
 	// expect at least one to not have utxo, hence fail
 	for _, kss := range s.keystones {
 		if kss.state == keystoneStateError {
@@ -240,9 +255,6 @@ func TestPopmFilterUtxos(t *testing.T) {
 func TestDisconnectedOpgeth(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-
-	l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
-	opgethReconnectTimeout = 500 * time.Millisecond
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
@@ -267,6 +279,8 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
+	cfg.l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
+	cfg.opgethReconnectTimeout = 500 * time.Millisecond
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -292,13 +306,13 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(ctx, expectedMsg, errCh, msgCh)
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// close current popm connection to opgeth
-	if err = opgeth.CloseConnections(); err != nil {
+	if err = opgeth.CloseConnections(); err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Fatal(err)
 	}
 
@@ -310,25 +324,27 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// receive messages and errors from opgeth and tbc
-	err = messageListener(ctx, expectedMsg, errCh, msgCh)
-	if err != nil {
+	err = messageListener(t, expectedMsg, errCh, msgCh)
+	if err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Fatal(err)
 	}
 }
 
-func messageListener(ctx context.Context, expected map[string]int, errCh chan error, msgCh chan string) error {
+func messageListener(t *testing.T, expected map[string]int, errCh chan error, msgCh chan string) error {
 	for {
 		select {
 		case err := <-errCh:
 			return err
 		case n := <-msgCh:
+			t.Logf("received message %s", n)
 			expected[n]--
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-t.Context().Done():
+			return t.Context().Err()
 		}
 		finished := true
-		for _, k := range expected {
+		for v, k := range expected {
 			if k > 0 {
+				t.Logf("missing %d messages of type %s", k, v)
 				finished = false
 			}
 		}

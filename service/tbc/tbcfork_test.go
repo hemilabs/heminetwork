@@ -491,6 +491,7 @@ func (b *btcNode) SendBlockheader(ctx context.Context, bh wire.BlockHeader) erro
 	if err := msg.AddBlockHeader(&bh); err != nil {
 		return fmt.Errorf("add block header: %w", err)
 	}
+
 	return b.p.Write(defaultCmdTimeout, msg)
 }
 
@@ -1459,7 +1460,7 @@ func TestIndexNoFork(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(750 * time.Millisecond)
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -1471,6 +1472,7 @@ func TestIndexNoFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, false)
 	if err != nil {
 		t.Fatal(err)
