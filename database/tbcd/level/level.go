@@ -285,11 +285,11 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			// Upgrade to v3, database is closed in the process.
 			reopen = true
 			err = l.v3(ctx)
-		case 3:
-			// Upgrade to v4
-			err = l.v4(ctx)
+		// case 3:
+		// 	// Upgrade to v4
+		// 	err = l.v4(ctx)
 		default:
-			if ldbVersion == dbVersion {
+			if 3 == dbVersion {
 				if Welcome {
 					log.Infof("tbcdb database version: %v",
 						ldbVersion)

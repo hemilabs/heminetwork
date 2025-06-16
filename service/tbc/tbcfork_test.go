@@ -398,7 +398,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 	b.t.Logf("handleRPC %v", conn.RemoteAddr())
 	defer b.t.Logf("handleRPC exit %v", conn.RemoteAddr())
 
-	p, err := rawpeer.NewFromConn(conn, wire.TestNet, wire.AddrV2Version, 0xbeef)
+	p, err := rawpeer.NewFromConn(conn, wire.TestNet3, wire.AddrV2Version, 0xbeef)
 	if err != nil {
 		b.logf("new from connection %v: %v", conn.RemoteAddr(), err)
 		return err

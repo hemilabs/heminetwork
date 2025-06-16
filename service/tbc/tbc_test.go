@@ -7,11 +7,13 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"sort"
@@ -42,6 +44,8 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 const (
@@ -276,8 +280,8 @@ func cmpDB(a, b *leveldb.DB) (int, error) {
 	return records, nil
 }
 
-func TestDbUpgrade(t *testing.T) {
-	home := t.TempDir()
+func TestDbUpgradeFull(t *testing.T) {
+	home := "./../../testdatabase"
 	t.Logf("temp: %v", home)
 
 	err := extract("testdata/testdatabase.tar.gz", home)
@@ -2299,4 +2303,331 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	if !bytes.Equal(bestHash[:], lastHashToAdd[:]) {
 		t.Errorf("best hash %x does not match expected hash %x", bestHash[:], lastHashToAdd[:])
 	}
+}
+
+func TestDbUpgradeTemp(t *testing.T) {
+	home := "./../../tesdatabase"
+	t.Logf("temp: %v", home)
+
+	err := extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	port := testutil.FreePort()
+	n, err := newFakeNode(t, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	popPriv, popPublic, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("pop keys:")
+	t.Logf("  private    : %x", popPriv.Serialize())
+	t.Logf("  public     : %x", popPublic.SerializeCompressed())
+	t.Logf("  address    : %v", popAddress)
+
+	kss1Hash := n.newKeystone("kss1")
+	kss2Hash := n.newKeystone("kss2")
+	kss3Hash := n.newKeystone("kss3")
+
+	_ = kss1Hash
+	_ = kss2Hash
+	_ = kss3Hash
+
+	go func() {
+		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		HemiIndex:            true,
+		LevelDBHome:          home,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
+		Network:                 "upgradetest",
+		PrometheusListenAddress: "",
+		PeersWanted:             1,
+		MempoolEnabled:          false,
+		Seeds:                   []string{"127.0.0.1:" + port},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	time.Sleep(1000 * time.Millisecond)
+
+	// check if db upgrade finished before checking for bh
+	for !s.Running() {
+	}
+
+	// best chain
+	address := n.address
+	en := random(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	var mempool []*btcutil.Tx
+	parentHash, err := chainhash.NewHashFromStr("0000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentBTC, err := newBlockTemplate(n.t, n.params, address, 10,
+		parentHash, extraNonce, mempool)
+	if err != nil {
+		t.Fatalf("height %v: %v", 10, err)
+	}
+	parent := newBlock(n.params, "b10", parentBTC)
+	_, err = n.insertBlock(parent)
+	if err != nil {
+		t.Fatalf("insert block at height %v: %v",
+			10, err)
+	}
+
+	err = n.SendBlockheader(ctx, parent.MsgBlock().Header)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b1, err := n.MineAndSendTemp(ctx, "b11", parent.Hash(), address, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSendTemp(ctx, "b12", b1.Hash(), address, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc dowloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	fakeBlks := maps.Clone(n.blocksAtHeight)
+	fakeBlks[0] = nil
+
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, fakeBlks)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	// genesis -> b3 should work with negative direction (cdiff is less than target)
+	direction, err := s.TxIndexIsLinear(ctx, *b2.Hash())
+	if err != nil {
+		t.Fatalf("expected success g -> b2, got %v", err)
+	}
+	if direction <= 0 {
+		t.Fatalf("expected 1 going from genesis to b2, got %v", direction)
+	}
+
+	// Index to b2
+	err = s.SyncIndexersToHash(ctx, *b2.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// check if keystone in db
+	_, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// check if keystone in db
+	_, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss2Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// check if keystone in db
+	_, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss3Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (b *btcNode) MineAndSendTemp(ctx context.Context, name string, parent *chainhash.Hash, payToAddress btcutil.Address, kssEnabled bool) (*block, error) {
+	blk, err := b.MineTemp(name, parent, payToAddress, kssEnabled)
+	if err != nil {
+		return nil, err
+	}
+	b.t.Logf("mined %v: %v", blk.name, blk.MsgBlock().Header.BlockHash())
+	err = b.SendBlockheader(ctx, blk.MsgBlock().Header)
+	if err != nil {
+		return nil, err
+	}
+
+	return blk, nil
+}
+
+func (b *btcNode) MineTemp(name string, parent *chainhash.Hash, payToAddress btcutil.Address, kssEnabled bool) (*block, error) {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	return b.mineKssTemp(name, parent, payToAddress)
+}
+
+func (b *btcNode) mineKssTemp(name string, from *chainhash.Hash, payToAddress btcutil.Address) (*block, error) {
+	parent, ok := b.chain[from.String()]
+	if !ok {
+		return nil, errors.New("parent hash not found")
+	}
+	// extra nonce is needed to prevent block collisions
+	en := random(8)
+	extraNonce := binary.BigEndian.Uint64(en)
+	var mempool []*btcutil.Tx
+
+	nextBlockHeight := parent.Height() + 1
+	switch nextBlockHeight {
+	case 11:
+		// spend block 1 coinbase
+		tx, err := b.newSignedTxFromTx(name, parent.TxByIndex(0), 3000000000)
+		if err != nil {
+			return nil, fmt.Errorf("new tx from tx: %w", err)
+		}
+		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
+			tx.MsgTx().TxIn[0].PreviousOutPoint)
+		mempool = []*btcutil.Tx{tx}
+
+		// Add keystone
+		l2Keystone, err := b.lookupKeystone("kss1")
+		if err != nil {
+			return nil, err
+		}
+
+		signer, err := b.findKeyByName("miner")
+		if err != nil {
+			return nil, err
+		}
+		recipient, err := b.findKeyByName("pop")
+		if err != nil {
+			return nil, err
+		}
+		popTx, err := createPopTx(uint64(nextBlockHeight), l2Keystone, signer.Serialize(), recipient.PubKey(), tx, 1)
+		if err != nil {
+			return nil, err
+		}
+
+		err = executeTX(b.t, true, tx.MsgTx().TxOut[1].PkScript, popTx)
+		if err != nil {
+			return nil, err
+		}
+
+		popTxAlt, err := createPopTx(uint64(nextBlockHeight), l2Keystone, recipient.Serialize(), recipient.PubKey(), popTx, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		err = executeTX(b.t, true, popTx.MsgTx().TxOut[0].PkScript, popTxAlt)
+		if err != nil {
+			return nil, err
+		}
+
+		mempool = append(mempool, popTx, popTxAlt)
+		// b.t.Logf("added popTx %v", popTx)
+	case 12:
+		// spend block 2 transaction 1
+		tx, err := b.newSignedTxFromTx(name+":0", parent.TxByIndex(0), 1100000000)
+		if err != nil {
+			return nil, fmt.Errorf("new tx from tx: %w", err)
+		}
+		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx.Hash(),
+			tx.MsgTx().TxIn[0].PreviousOutPoint)
+		mempool = []*btcutil.Tx{tx}
+
+		// Add keystone
+		l2Keystonedup, err := b.lookupKeystone("kss3")
+		if err != nil {
+			return nil, err
+		}
+
+		// Add keystone
+		l2Keystone, err := b.lookupKeystone("kss2")
+		if err != nil {
+			return nil, err
+		}
+
+		signer, err := b.findKeyByName("miner")
+		if err != nil {
+			return nil, err
+		}
+		recipient, err := b.findKeyByName("pop")
+		if err != nil {
+			return nil, err
+		}
+		popTxDup, err := createPopTx(uint64(nextBlockHeight), l2Keystonedup,
+			signer.Serialize(), recipient.PubKey(), tx, 1)
+		if err != nil {
+			return nil, err
+		}
+
+		err = executeTX(b.t, true, tx.MsgTx().TxOut[1].PkScript, popTxDup)
+		if err != nil {
+			return nil, err
+		}
+
+		popTx, err := createPopTx(uint64(nextBlockHeight), l2Keystone,
+			recipient.Serialize(), recipient.PubKey(), popTxDup, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		err = executeTX(b.t, true, popTxDup.MsgTx().TxOut[0].PkScript, popTx)
+		if err != nil {
+			return nil, err
+		}
+
+		mempool = append(mempool, popTxDup, popTx)
+		// b.t.Logf("added popTx %v", popTx)
+	}
+
+	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextBlockHeight,
+		parent.Hash(), extraNonce, mempool)
+	if err != nil {
+		return nil, fmt.Errorf("height %v: %w", nextBlockHeight, err)
+	}
+	blk := newBlock(b.params, name, bt)
+	_, err = b.insertBlock(blk)
+	if err != nil {
+		return nil, fmt.Errorf("insert block at height %v: %w",
+			nextBlockHeight, err)
+	}
+	// XXX this really sucks, we should get rid of height as a best indicator
+	if blk.Height() > b.height {
+		b.height = blk.Height()
+	}
+
+	return blk, nil
 }

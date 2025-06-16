@@ -553,14 +553,14 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 		readError = err
 		return fmt.Errorf("peer remote version: %w", err)
 	}
-	if uint64(remoteVersion.LastBlock) < bhb.Height {
+	if uint64(12) < bhb.Height {
 		// Disconnect for now. We only want more or less synced peers.
 		readError = err
 		return fmt.Errorf("remote peer height below ours")
 	} else {
-		err := s.getHeadersByHeights(ctx, p,
-			bhb.Height, bhb.Height-1000, bhb.Height-1999,
-			previousCheckpointHeight(bhb.Height, s.checkpoints))
+		// err := s.getHeadersByHeights(ctx, p,
+		// 	bhb.Height, bhb.Height-1000, bhb.Height-1999,
+		// 	previousCheckpointHeight(bhb.Height, s.checkpoints))
 		if err != nil {
 			readError = err
 			return fmt.Errorf("handle peer heights: %w", err)
@@ -2605,13 +2605,13 @@ func (s *Server) Run(pctx context.Context) error {
 			return fmt.Errorf("block header best: %w", err)
 		}
 
-		// This Run function is only called in regular (not external
-		// header) mode, so this is true genesis block @ 0 and we pass
-		// in a nil difficulty so it calculates the starting difficulty
-		// as the genesis block's own local difficulty.
-		if err = s.insertGenesis(ctx, 0, nil); err != nil {
-			return fmt.Errorf("insert genesis: %w", err)
-		}
+		// // This Run function is only called in regular (not external
+		// // header) mode, so this is true genesis block @ 0 and we pass
+		// // in a nil difficulty so it calculates the starting difficulty
+		// // as the genesis block's own local difficulty.
+		// if err = s.insertGenesis(ctx, 0, nil); err != nil {
+		// 	return fmt.Errorf("insert genesis: %w", err)
+		// }
 		bhb, err = s.db.BlockHeaderBest(ctx)
 		if err != nil {
 			return err
@@ -2726,7 +2726,7 @@ func (s *Server) Run(pctx context.Context) error {
 				go func(pp *rawpeer.RawPeer) {
 					err := s.handlePeer(ctx, pp)
 					if err != nil {
-						log.Debugf("%v: %v", pp, err)
+						log.Errorf("%v: %v", pp, err)
 					}
 				}(p)
 			}
