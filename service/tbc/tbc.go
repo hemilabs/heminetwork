@@ -274,14 +274,20 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.checkpoints = mainnetCheckpoints
 		s.hemiGenesis = mainnetHemiGenesis
 
-	case "testnet3", "upgradetest":
+	case "testnet3":
+		s.wireNet = wire.TestNet3
+		s.chainParams = &chaincfg.TestNet3Params
+		s.checkpoints = testnet3Checkpoints
+		s.hemiGenesis = testnet3HemiGenesis
+
+	case "upgradetest":
 		// upgradetest is a special mode to verify database upgrades.
 		// It pretends to be testnet3, however it hints to the database
 		// layer that we do not want user interaction.
 		// You probably should not touch this.
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
-		s.checkpoints = testnet3Checkpoints
+		s.checkpoints = testnet3Checkpoints[len(testnet3Checkpoints)-1:]
 		s.hemiGenesis = testnet3HemiGenesis
 
 	case networkLocalnet:

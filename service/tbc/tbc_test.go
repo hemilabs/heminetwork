@@ -2460,6 +2460,11 @@ func TestDbUpgradeTemp(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	err = s.SyncIndexersToBest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// check if keystone in db
 	_, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
 	if err != nil {
