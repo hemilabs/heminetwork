@@ -167,6 +167,13 @@ func (bs *blockstream) BlocksByL2AbrevHashes(ctx context.Context, hashes []chain
 	}
 }
 
+func (t *blockstream) KeystonesByHeight(ctx context.Context, height uint32, depth int) (*gozer.KeystonesByHeightResponse, error) {
+	err := errors.New("not supported yet")
+	return &gozer.KeystonesByHeightResponse{
+		Error: protocol.Errorf("%v", err),
+	}, err
+}
+
 func Run(params *chaincfg.Params) (gozer.Gozer, error) {
 	bs := &blockstream{}
 	switch params {

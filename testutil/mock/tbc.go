@@ -24,6 +24,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
@@ -252,6 +253,38 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 					{Blocks: 10, SatsPerByte: 1},
 				},
 			}
+		case tbcapi.CmdKeystonesByHeightRequest:
+			pl, ok := payload.(*tbcapi.KeystonesByHeightRequest)
+			if !ok {
+				return fmt.Errorf("unexpected payload format: %v", payload)
+			}
+			kssList := make([]*hemi.L2KeystoneAbrev, 0, 16)
+			start := min(pl.Height, pl.Height+uint32(pl.Depth))
+			end := max(pl.Height, pl.Height+uint32(pl.Depth))
+			for i := start; i != end; i++ {
+				if i == pl.Height {
+					continue
+				}
+				f.kssMtx.Lock()
+				for _, ks := range f.keystones {
+					if ks.L1BlockNumber == i {
+						kssList = append(kssList, ks)
+					}
+				}
+				f.kssMtx.Unlock()
+			}
+
+			if len(kssList) < 1 {
+				resp = tbcapi.KeystonesByHeightResponse{
+					Error: protocol.RequestErrorf("%v", database.ErrNotFound),
+				}
+			} else {
+				resp = tbcapi.KeystonesByHeightResponse{
+					L2KeystoneAbrevs: kssList,
+					BTCTipHeight:     uint64(f.btcTip),
+				}
+			}
+
 		default:
 			return fmt.Errorf("unknown command: %v", cmd)
 		}

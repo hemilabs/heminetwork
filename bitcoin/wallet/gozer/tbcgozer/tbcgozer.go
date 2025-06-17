@@ -179,6 +179,44 @@ func (t *tbcGozer) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash
 	return gozer.TBC2Gozer(bksr)
 }
 
+func (t *tbcGozer) KeystonesByHeight(ctx context.Context, height uint32, depth int) (*gozer.KeystonesByHeightResponse, error) {
+	ksr := &tbcapi.KeystonesByHeightRequest{
+		Height: height,
+		Depth:  depth,
+	}
+
+	res, err := t.callTBC(ctx, defaultRequestTimeout, ksr)
+	if err != nil {
+		r := &gozer.KeystonesByHeightResponse{
+			Error: protocol.Errorf("%v", err),
+		}
+		return r, err
+	}
+
+	bksr, ok := res.(*tbcapi.KeystonesByHeightResponse)
+	if !ok {
+		err = fmt.Errorf("not a keystone by height response %T", res)
+		r := &gozer.KeystonesByHeightResponse{
+			Error: protocol.Errorf("%v", err),
+		}
+		return r, err
+	}
+
+	//nolint:nilerr // only return internal error
+	if bksr.Error != nil {
+		r := &gozer.KeystonesByHeightResponse{
+			Error: bksr.Error,
+		}
+		return r, nil
+	}
+
+	r := &gozer.KeystonesByHeightResponse{
+		L2KeystoneAbrevs: bksr.L2KeystoneAbrevs,
+		BTCTipHeight:     bksr.BTCTipHeight,
+	}
+	return r, nil
+}
+
 func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {
 	log.Tracef("callTBC %T", msg)
 	defer log.Tracef("callTBC exit %T", msg)

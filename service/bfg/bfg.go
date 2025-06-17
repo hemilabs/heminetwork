@@ -44,6 +44,10 @@ const (
 
 	defaultKeystoneCount = 10
 
+	// finality short circuit constants
+	ultraFinalityDepth = 20
+	maxSearchDepth     = 100 // PNOOMA
+
 	defaultOpgethURL = "http://127.0.0.1:9999/v1/ws"
 	defaultNetwork   = "mainnet"
 )
@@ -239,6 +243,54 @@ func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Ha
 	return resp, nil
 }
 
+func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone, tip uint32) (*hemi.L2KeystoneAbrev, error) {
+	// Depth must be > 0 but height + depth > 0
+	// so min height is 2 and "min" depth is -1
+	if tip-ultraFinalityDepth <= 0 {
+		return nil, nil
+	}
+
+	height := tip - ultraFinalityDepth + 1
+	depth := max(maxSearchDepth, 1-height)
+
+	// Find keystones at height beyond ultra finality
+	bl, err := s.g.KeystonesByHeight(ctx, height, int(depth))
+	if err != nil {
+		// If error on the gozer side, return the error
+		return nil, err
+	}
+
+	//nolint:nilerr // If error on the computation side, don't short circuit
+	if bl.Error != nil {
+		// XXX change this when protocol errors get revised
+		log.Tracef("keystones by height: %w", bl.Error)
+		return nil, nil
+	}
+
+	// If one of the retrieved keystones is more recent than the one we
+	// queried for confirm it is valid with opgeth and, if so, short circuit.
+	for _, ks := range bl.L2KeystoneAbrevs {
+		if ks.L2BlockNumber >= kss.L2BlockNumber {
+			valid, err := s.opgethL2KeystoneValidity(ctx, *ks.Hash(), 0)
+			if err != nil {
+				log.Errorf("opgeth: %v", err)
+				return nil, err
+			}
+
+			if valid.Error != nil || len(valid.L2Keystones) < 1 {
+				continue
+			}
+
+			rk := hemi.L2KeystoneAbbreviate(valid.L2Keystones[0])
+			// Sanity check if op-geth returned the correct keystone.
+			if ks.Hash().IsEqual(rk.Hash()) {
+				return rk, nil
+			}
+		}
+	}
+	return nil, nil
+}
+
 func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleKeystoneFinality: %v", r.RemoteAddr)
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
@@ -251,6 +303,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	}
 
 	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
+	firstLoop := true // attempt short circuit during first loop
 	for {
 		// Call opgeth to retrieve keystones
 		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
@@ -294,6 +347,33 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		// During our first loop, after we retrieve the BTC Tip from our
+		// gozer call, check for possible finality short circuit.
+		if firstLoop && fin != nil {
+			firstLoop = false
+			rk, err := s.shortCircuitFinality(r.Context(), &fin.L2Keystone, uint32(aks.BtcTipBlockHeight))
+			if err != nil {
+				BadRequestF(w, "internal error")
+				return
+			}
+
+			if rk != nil {
+				sf := true
+				// XXX can we leave block hash and block height nil
+				// or should we query gozer again for that info?
+				shortCircuitFin := &bfgapi.L2KeystoneBitcoinFinalityResponse{
+					L2Keystone:             fin.L2Keystone,
+					EffectiveConfirmations: 20,
+					SuperFinality:          &sf,
+				}
+
+				if err := json.NewEncoder(w).Encode(shortCircuitFin); err != nil {
+					log.Errorf("encode: %v", err)
+				}
+				return
+			}
+		}
+
 		var hh *chainhash.Hash
 
 		// Cycle through each response and replace finality value for the best
@@ -333,9 +413,6 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 
-		// TODO: update to "ultra finality" either here or
-		// on the opgeth side.
-		//
 		// If the last used hash for descendant queries is the
 		// highest hash, then we can assume there are no more
 		// descendants and we can return the current best finality.

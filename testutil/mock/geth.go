@@ -233,11 +233,11 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 			if found == -1 {
 				kssResp.Error = protocol.Errorf("keystone not found: %v", abrevHash)
 			} else {
-				if found+int(count) >= len(f.keystones) {
-					kssResp.L2Keystones = f.keystones[found:]
-				} else {
-					kssResp.L2Keystones = f.keystones[found : found+int(count)]
+				desc := make([]hemi.L2Keystone, 0, int(count))
+				for i := found; i < len(f.keystones) && i <= found+int(count); i++ {
+					desc = append(desc, f.keystones[i])
 				}
+				kssResp.L2Keystones = desc
 			}
 
 			subResp = jsonrpcMessage{
