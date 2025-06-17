@@ -265,8 +265,8 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 }
 
 func newAmountFromUint64(u uint64) (btcutil.Amount, error) {
-	if u >= math.MaxFloat64 {
-		return 0, errors.New("amount is too big")
+	if u > math.MaxInt64 {
+		return 0, errors.New("invalid amount")
 	}
-	return btcutil.NewAmount(float64(u))
+	return btcutil.Amount(int64(u)), nil
 }
