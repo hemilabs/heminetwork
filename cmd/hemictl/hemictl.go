@@ -803,6 +803,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return err
 		}
+		spew.Config.DisableMethods = true
 		spew.Dump(bh)
 
 	case "blockkeystonebyl2keystoneabrevhash":
