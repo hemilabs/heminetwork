@@ -295,6 +295,73 @@ func TestFullMockIntegration(t *testing.T) {
 	wg.Wait()
 }
 
+func TestKeystoneFinalityShortCircuit(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	kssMap, kssList := testutil.MakeSharedKeystones(30)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	// Create opgeth test server with the request handler.
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	defer opgeth.Shutdown()
+
+	// Create tbc test server with the request handler.
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 10)
+	defer mtbc.Shutdown()
+
+	bfgCfg := NewDefaultConfig()
+	bfgCfg.Network = "testnet3"
+	bfgCfg.BitcoinSource = "tbc"
+	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
+	bfgCfg.ListenAddress = createAddress()
+	bfgCfg.LogLevel = "bfg=Info; mock=Trace"
+
+	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewServer(bfgCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		if err := s.Run(ctx); !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// messages we expect to receive
+	expectedMsg := map[string]int{
+		"kss_getKeystone":                      wantedKeystones,
+		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
+	}
+
+	for !s.Connected() {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	var wg sync.WaitGroup
+	// send finality requests to bfg, which should return super finality
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 20, 20)
+	}()
+
+	// receive messages and errors from opgeth and tbc
+	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
+		t.Fatal(err)
+	}
+
+	wg.Wait()
+}
+
 func sendFinalityRequests(ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
 	client := &http.Client{}
 	for i := range wantedKeystones {

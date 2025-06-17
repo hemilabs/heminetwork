@@ -16,6 +16,7 @@ import (
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/hemi"
 )
 
 // Gozer was originally worshiped as a god by the Hittites, Mesopotamians, and
@@ -26,6 +27,7 @@ type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
 	BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *BlocksByL2AbrevHashesResponse
+	KeystonesByHeight(ctx context.Context, height uint32, depth int) (*KeystonesByHeightResponse, error)
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 	BtcHeight(ctx context.Context) (uint64, error)
 }
@@ -128,4 +130,10 @@ type BlocksByL2AbrevHashesResponse struct {
 	BtcTipBlockHash   chainhash.Hash        `json:"btc_tip_block_hash"`
 	BtcTipBlockHeight uint                  `json:"btc_tip_block_height"`
 	Error             *protocol.Error       `json:"error,omitempty"`
+}
+
+type KeystonesByHeightResponse struct {
+	L2KeystoneAbrevs []*hemi.L2KeystoneAbrev `json:"l2_keystone_abrevs"`
+	BTCTipHeight     uint64                  `json:"btc_tip_height"`
+	Error            *protocol.Error         `json:"error,omitempty"`
 }
