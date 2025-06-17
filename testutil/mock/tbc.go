@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -152,9 +153,13 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				if err != nil {
 					return err
 				}
+				value, err := newAmountFromUint64(utxo.Value())
+				if err != nil {
+					return fmt.Errorf("amount from utxo value: %w", err)
+				}
 				respUtxos = append(respUtxos, &tbcapi.UTXO{
 					TxId:     *txHash,
-					Value:    btcutil.Amount(utxo.Value()), // FIXME: btcutil.Amount is int64, utxo.Value() returns uint64.
+					Value:    value,
 					OutIndex: utxo.OutputIndex(),
 				})
 			}
@@ -257,4 +262,11 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				cmd, err)
 		}
 	}
+}
+
+func newAmountFromUint64(u uint64) (btcutil.Amount, error) {
+	if u >= math.MaxFloat64 {
+		return 0, errors.New("amount is too big")
+	}
+	return btcutil.NewAmount(float64(u))
 }
