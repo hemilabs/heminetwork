@@ -78,6 +78,20 @@ func (m *Mempool) FilterUtxos(ctx context.Context, utxos []tbcd.Utxo) ([]tbcd.Ut
 	// likely to never find the utxo than it is to find it. That said, the
 	// setup and teardown would be much more expensive despite this code
 	// being called infrequently.
+
+	// DeleteFunc removes any elements from the slice for which m.inMempool
+	// returns true, returning the modified slice.
+	//
+	// It is practically the same as the code below, but far more performant
+	// and zeros the removed elements for GC.
+	//
+	// var out []tbcd.Utxo
+	// for _, utxo := range utxos {
+	// 	if !m.inMempool(utxo) {
+	// 		out = append(out, utxo)
+	// 	}
+	// }
+	// return out
 	return slices.DeleteFunc(utxos[:], m.inMempool), nil
 }
 
