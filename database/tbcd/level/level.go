@@ -1999,11 +1999,11 @@ func decodeKeystoneHeightHash(v []byte) (height uint32, hash chainhash.Hash) {
 func keystoneHeightRange(height int64, depth int64) *util.Range {
 	// Casting is a bit awkward here but I am not sure if we can make this
 	// look better somehow.
-	start := height
-	end := height + depth
+	start := height + 1
+	end := start + depth
 	if depth < 0 {
 		start = height + depth
-		end = height + 1
+		end = height
 	}
 	return &util.Range{
 		Start: encodeKeystoneHeightHashSlice(uint32(start), chainhash.Hash{}),
@@ -2011,6 +2011,8 @@ func keystoneHeightRange(height int64, depth int64) *util.Range {
 	}
 }
 
+// Searches for the first occurance of keystones within the given
+// height + range, excluding the height itself.
 func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]tbcd.Keystone, error) {
 	log.Tracef("KeystonesByHeight")
 	defer log.Tracef("KeystonesByHeight exit")
@@ -2020,7 +2022,7 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 		return nil, errors.New("depth must not be 0")
 	}
 	start := int64(height)
-	end := start + d
+	end := start + d + 1
 	if end > math.MaxUint32 {
 		return nil, errors.New("the overflow that matters")
 	}
