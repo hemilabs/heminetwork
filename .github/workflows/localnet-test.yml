@@ -22,6 +22,26 @@ jobs:
       matrix:
         go-version: [ "1.24.x" ]
     steps:
+      - name: "Login to GitHub Container Registry"
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: "ghcr.io"
+          username: "${{ github.repository_owner }}"
+          password: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build and push legacy image cache
+        uses: docker/build-push-action@v6
+        with:
+          context: ./e2e
+          file: optimism-stack-legacy.Dockerfile
+          push: true
+          tags: hemilabs/localnet-optimism-stack-legacy:latest
+          cache-from: type=registry,ref=hemilabs/localnet-optimism-stack-legacy:latest
+          cache-to: type=inline
+
       - name: "Checkout repository"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
