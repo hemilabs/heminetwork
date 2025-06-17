@@ -267,7 +267,7 @@ func TestHeightHashIndexing(t *testing.T) {
 
 	// check each height
 	for n := range blockNum {
-		kssList, err := db.KeystonesByHeight(ctx, uint32(n+1), 1)
+		kssList, err := db.KeystonesByHeight(ctx, uint32(n), 1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -284,7 +284,7 @@ func TestHeightHashIndexing(t *testing.T) {
 	}
 
 	// check all heights with positive depth
-	kssList, err := db.KeystonesByHeight(ctx, 1, blockNum)
+	kssList, err := db.KeystonesByHeight(ctx, 0, blockNum)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestHeightHashIndexing(t *testing.T) {
 	}
 
 	// check all heights with negative depth
-	kssList, err = db.KeystonesByHeight(ctx, blockNum, -blockNum+1)
+	kssList, err = db.KeystonesByHeight(ctx, blockNum+1, -blockNum)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +479,7 @@ func TestKeystoneUpdate(t *testing.T) {
 					t.Fatalf("keystone not in db: %v", err)
 				}
 
-				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight, 1)
+				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -502,7 +502,7 @@ func TestKeystoneUpdate(t *testing.T) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
 					}
 				}
-				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight, 1)
+				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
 				if err != nil {
 					if !errors.Is(err, database.ErrNotFound) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)

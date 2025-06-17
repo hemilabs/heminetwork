@@ -461,7 +461,7 @@ func TestDbUpgradeV4(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		aks, err := s.KeystonesByHeight(ctx, ks.BlockHeight, 1)
+		aks, err := s.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
 		if err != nil {
 			t.Fatal(err)
 		}
