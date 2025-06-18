@@ -20,6 +20,7 @@ GAS_COST="0x$(printf '%x' $(($(cat output/deployment.json | jq --raw-output '.ga
 TRANSACTION="0x$(cat output/deployment.json | jq --raw-output '.transaction')"
 DEPLOYER_ADDRESS="0x$(cat output/deployment.json | jq --raw-output '.address')"
 
+echo $DEPLOYER_ADDRESS
 
 sleep 3
 
@@ -38,6 +39,8 @@ sleep 3
 BYTECODE="6080604052348015600f57600080fd5b5060848061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063c3cafc6f14602d575b600080fd5b6033604f565b604051808260ff1660ff16815260200191505060405180910390f35b6000602a90509056fea165627a7a72305820ab7651cb86b8c1487590004c2444f26ae30077a6b96c6bc62dda37f1328539250029"
 MY_CONTRACT_ADDRESS=$(curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --silent --data "{\"jsonrpc\":\"2.0\", \"id\":1, \"method\": \"eth_call\", \"params\": [{\"from\":\"$MY_ADDRESS\",\"to\":\"$DEPLOYER_ADDRESS\", \"data\":\"0x0000000000000000000000000000000000000000000000000000000000000000$BYTECODE\"}, \"latest\"]}" | jq --raw-output '.result')
 
+echo $MY_CONTRACT_ADDRESS
+
 sleep 3
 
 curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\", \"id\":1, \"method\": \"eth_sendTransaction\", \"params\": [{\"from\":\"$MY_ADDRESS\",\"to\":\"$DEPLOYER_ADDRESS\", \"gas\":\"0xf4240\", \"data\":\"0x0000000000000000000000000000000000000000000000000000000000000000$BYTECODE\"}]}"
@@ -51,7 +54,17 @@ curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\
 
 cd /git/optimism/packages/contracts-bedrock
 
-forge script ./scripts/Deploy.s.sol:Deploy --non-interactive --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
+/git/optimism/op-deployer/bin/op-deployer init --help
+
+
+# /git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir /tmp/output --intent-type standard-overrides
+
+
+/git/optimism/op-deployer/bin/op-deployer apply --workdir /tmp/output/deployment \
+  --l1-rpc-url $JSON_RPC \
+  --private-key $ADMIN_PRIVATE_KEY
+
+# forge script ./scripts/Deploy.s.sol:Deploy --non-interactive --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
 
 curl -H 'Content-Type: application/json' -X POST --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x2", true],"id":1}' $JSON_RPC > /tmp/blockl1.json
 

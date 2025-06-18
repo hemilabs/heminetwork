@@ -23,12 +23,15 @@ RUN apt-get install -y jq nodejs npm netcat-openbsd
 
 RUN npm install -g pnpm
 
+
 WORKDIR /git
 COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN git checkout bde08fd3e335c235455b4cee6a6f8dbf88446201
+RUN echo asdlkfj
+RUN git fetch origin
+RUN git checkout ea38fe036a0dd089bea9f28e6f5f0ef31a9b0743
 
 WORKDIR /git/optimism
 RUN go mod tidy
@@ -61,5 +64,21 @@ RUN just op-proposer
 
 WORKDIR /git/optimism/op-conductor
 RUN just op-conductor
+
+WORKDIR /git/optimism/op-deployer
+RUN just build
+
+WORKDIR /git/optimism
+
+RUN curl -L https://foundry.paradigm.xyz | bash
+
+RUN . /root/.bashrc
+
+ENV PATH="${PATH}:/root/.foundry/bin"
+
+RUN foundryup
+
+WORKDIR /git/optimism/packages/contracts-bedrock
+RUN forge install
 
 WORKDIR /git/optimism

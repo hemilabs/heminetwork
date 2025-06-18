@@ -217,7 +217,7 @@ services:
 
   op-geth-l2-setup:
     build:
-      dockerfile: "optimism-stack-legacy.Dockerfile"
+      dockerfile: "optimism-stack.Dockerfile"
       context: "."
     depends_on:
       geth-l1:
