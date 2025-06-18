@@ -259,8 +259,6 @@ func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Databas
 }
 
 func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
-	t.Skip("FIXME: THIS FUNCTIONALITY NEEDS TO BE WORKING")
-
 	ctx, cancel := defaultTestContext()
 	defer cancel()
 
