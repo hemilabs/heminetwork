@@ -6,7 +6,7 @@ FROM golang:1.24.4-bookworm@sha256:c83619bb18b0207412fffdaf310f57ee3dd02f586ac7a
 
 WORKDIR /git
 
-ARG OP_GETH_CACHE_BREAK=12F2
+ARG OP_GETH_CACHE_BREAK=12F2d
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
 RUN git checkout ed68446430a8b726f1dceceb0e85cdc5f10f248e
@@ -23,16 +23,6 @@ RUN apt-get install -y jq nodejs npm netcat-openbsd
 
 RUN npm install -g pnpm
 
-WORKDIR /git
-COPY --from=build_1 /git/op-geth /git/op-geth
-WORKDIR /git
-RUN git clone https://github.com/hemilabs/optimism
-WORKDIR /git/optimism
-RUN git fetch origin
-RUN git checkout 7bb2a14f63d01bcb4de3ab3165b007fd85a6b1f9
-
-WORKDIR /git/optimism
-RUN go mod tidy
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="${PATH}:/root/.cargo/bin"
@@ -41,6 +31,32 @@ WORKDIR /git
 RUN git clone https://github.com/casey/just
 WORKDIR /git/just
 RUN cargo install just
+
+WORKDIR /git
+
+RUN curl -L https://foundry.paradigm.xyz | bash
+
+RUN . /root/.bashrc
+
+ENV PATH="${PATH}:/root/.foundry/bin"
+
+RUN foundryup
+
+RUN forge --help
+
+WORKDIR /git
+COPY --from=build_1 /git/op-geth /git/op-geth
+WORKDIR /git
+RUN git clone https://github.com/hemilabs/optimism
+WORKDIR /git/optimism
+RUN echo 6666666ddd
+RUN git fetch origin
+RUN git checkout 7bb2a14f63d01bcb4de3ab3165b007fd85a6b1f9
+
+WORKDIR /git/optimism
+RUN go mod tidy
+
+RUN git submodule update --init --recursive
 
 WORKDIR /git/optimism
 
@@ -62,5 +78,8 @@ RUN just op-proposer
 
 WORKDIR /git/optimism/op-conductor
 RUN just op-conductor
+
+WORKDIR /git/optimism/op-deployer
+RUN just build
 
 WORKDIR /git/optimism

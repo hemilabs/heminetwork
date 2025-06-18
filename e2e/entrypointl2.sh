@@ -5,7 +5,17 @@
 
 set -xe
 
-/bin/geth init --datadir /tmp/datadir --state.scheme hash /l2configs/genesis.json 
+/bin/geth init --datadir /tmp/datadir --state.scheme hash /shared-dir/genesis.json 
+
+JSON_RPC=http://geth-l1:8545
+
+curl -H 'Content-Type: application/json' -X POST --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x0", true],"id":1}' $JSON_RPC > /tmp/blockl1.json
+
+echo $(jq -r '.result.hash' /tmp/blockl1.json) > /tmp/l1genesisblockhash.txt
+
+cat /tmp/l1genesisblockhash.txt
+
+echo "$(jq ".genesis.l1.hash = \"$(cat /tmp/l1genesisblockhash.txt)\"" /shared-dir/rollup.json)" > /shared-dir/rollup.json
 
 BESTBLOCKHASH=$(curl --data-binary '{"jsonrpc": "1.0", "id": "curltest", "method": "getbestblockhash", "params": []}' -H 'content-type: text/plain;' http://user:password@bitcoind:18443/ | jq '.result')
 
@@ -88,8 +98,7 @@ echo $filecontents > ./config.toml
  --rpc.enabledeprecatedpersonal \
  --gcmode=archive \
  --state.scheme=hash \
- --config=./config.toml \
- --verbosity=5
+ --config=./config.toml
  # Clayton note: this fixes the mismatched state.scheme, but is it the correct
 # thing to do?
 #  --gcmode=archive  \
