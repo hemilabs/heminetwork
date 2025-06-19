@@ -1980,20 +1980,18 @@ func encodeKeystoneHeightHashSlice(height uint32, hash chainhash.Hash) []byte {
 	return e[:]
 }
 
-func decodeKeystoneHeightHash(v []byte) (height uint32, hash chainhash.Hash) {
+func decodeKeystoneHeightHash(v []byte) (uint32, chainhash.Hash) {
 	if len(v) != keystoneHeightHashSize {
-		panic(spew.Sdump(v))
+		panic(fmt.Errorf("invalid height hash size: %x", v))
 	}
 	if v[0] != 'h' {
-		panic("not a keystone height hash index")
+		panic(fmt.Errorf("not a keystone height hash index: %x", v))
 	}
-	height = binary.BigEndian.Uint32(v[1 : 1+4])
-	h := &hash
-	err := h.SetBytes(v[5:])
-	if err != nil {
+	var hash chainhash.Hash
+	if err := hash.SetBytes(v[5:]); err != nil {
 		panic(err)
 	}
-	return
+	return binary.BigEndian.Uint32(v[1 : 1+4]), hash
 }
 
 func keystoneHeightRange(height int64, depth int64) *util.Range {
@@ -2032,7 +2030,7 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 
 	kssDB := l.pool[level.KeystonesDB]
 	i := kssDB.NewIterator(keystoneHeightRange(start, d), nil)
-	defer func() { i.Release() }()
+	defer i.Release()
 
 	kssList := make([]tbcd.Keystone, 0, 16)
 	for i.Next() {
@@ -2040,7 +2038,7 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 		eks, err := kssDB.Get(hash[:], nil)
 		if err != nil {
 			// mismatch between heighthash and hash indexes
-			panic(fmt.Sprintf("data corruption: %v", err))
+			panic(fmt.Errorf("data corruption: %w", err))
 		}
 		deks := decodeKeystone(eks)
 		kssList = append(kssList, deks)
