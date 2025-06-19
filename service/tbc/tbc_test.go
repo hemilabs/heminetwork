@@ -125,163 +125,11 @@ func countKeystones(b *btcutil.Block) int {
 	return keystonesFound
 }
 
-func TestDbUpgradePipeline(t *testing.T) {
-	home := t.TempDir()
-	network := "upgradetest"
-	t.Logf("temp: %v", home)
-
-	err := extract("testdata/testdatabase.tar.gz", home)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer func() {
-		cancel()
-	}()
-
-	t.Log("Upgrading with move")
-
-	// We are setting the batchSize to exercise restarts.
-	level.SetBatchSize(3)
-
-	// Upgrade database to v3 with move
-	cfg, err := level.NewConfig(network, home, "0mb", "0mb")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dbTemp, err := level.New(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Get all db keys
-	keys := make([]string, 0, len(dbTemp.DB()))
-	for k := range dbTemp.DB() {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	// Close temporary DB
-	if err = dbTemp.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	// Rename database $HOME to $HOME.move
-	err = os.Rename(cfg.Home, cfg.Home+".move")
-	if err != nil {
-		t.Fatal(fmt.Errorf("rename destination: %w", err))
-	}
-
-	// Open move DB
-	cfgMove, err := level.NewConfig(network, home, "0mb", "0mb")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cfgMove.Home = cfgMove.Home + ".move"
-
-	dbMove, err := level.New(ctx, cfgMove)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = extract("testdata/testdatabase.tar.gz", home)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Set mode to copy
-	level.SetMode(false)
-
-	t.Log("Upgrading with copy")
-
-	// Upgrade database to v3 with copy which
-	// creates a testnet3.v3 folder
-	dbv2, err := level.New(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Open copy DB
-	cfgCopy, err := level.NewConfig(network, home, "0mb", "0mb")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cfgCopy.Home = cfgCopy.Home + ".v3"
-
-	dbCopy, err := level.New(ctx, cfgCopy)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Log("Comparing DBs")
-
-	// Compare all databases
-	for _, dbs := range keys {
-		a := dbv2.DB()[dbs]
-		b := dbMove.DB()[dbs]
-		c := dbCopy.DB()[dbs]
-
-		t.Logf("Comparing original records against dbmove (%v)", dbs)
-		records, err := cmpDB(a, b)
-		if err != nil {
-			t.Errorf("found diff in record %v: %v", records, err)
-		} else {
-			t.Logf("Found no diff in %v records of %v", records, dbs)
-		}
-
-		t.Logf("Comparing dbmove records against original (%v)", dbs)
-		records, err = cmpDB(b, a)
-		if err != nil {
-			t.Errorf("found diff in record %v: %v", records, err)
-		} else {
-			t.Logf("Found no diff in %v records of %v", records, dbs)
-		}
-
-		t.Logf("Comparing original records against dbcopy (%v)", dbs)
-		records, err = cmpDB(a, c)
-		if err != nil {
-			t.Errorf("found diff in record %v: %v", records, err)
-		} else {
-			t.Logf("Found no diff in %v records of %v", records, dbs)
-		}
-
-		t.Logf("Comparing dbcopy records against original (%v)", dbs)
-		records, err = cmpDB(c, a)
-		if err != nil {
-			t.Errorf("found diff in record %v: %v", records, err)
-		} else {
-			t.Logf("Found no diff in %v records of %v", records, dbs)
-		}
-	}
-}
-
-func cmpDB(a, b *leveldb.DB) (int, error) {
-	i := a.NewIterator(nil, nil)
-	defer func() { i.Release() }()
-
-	records := 0
-	for records = 0; i.Next(); records++ {
-		v, err := b.Get(i.Key(), nil)
-		if err != nil {
-			return records, err
-		}
-
-		if diff := deep.Equal(i.Value(), v); len(diff) > 0 {
-			return records, fmt.Errorf("unexpected diff: %v", diff)
-		}
-	}
-	return records, nil
-}
-
-func TestDbUpgrade(t *testing.T) {
+func TestDbUpgradeFull(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	err := extract("testdata/testdatabase.tar.gz", home)
+	err := testutil.Extract("testdata/testdatabase.tar.gz", home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -387,11 +235,163 @@ func TestDbUpgrade(t *testing.T) {
 	}
 }
 
+func TestDbUpgradeV3(t *testing.T) {
+	home := t.TempDir()
+	network := "upgradetest"
+	t.Logf("temp: %v", home)
+
+	err := testutil.Extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	t.Log("Upgrading with move")
+
+	// We are setting the batchSize to exercise restarts.
+	level.SetBatchSize(3)
+
+	// Upgrade database to v3 with move
+	cfg, err := level.NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dbTemp, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get all db keys
+	keys := make([]string, 0, len(dbTemp.DB()))
+	for k := range dbTemp.DB() {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Close temporary DB
+	if err = dbTemp.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rename database $HOME to $HOME.move
+	err = os.Rename(cfg.Home, cfg.Home+".move")
+	if err != nil {
+		t.Fatal(fmt.Errorf("rename destination: %w", err))
+	}
+
+	// Open move DB
+	cfgMove, err := level.NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfgMove.Home = cfgMove.Home + ".move"
+
+	dbMove, err := level.New(ctx, cfgMove)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = testutil.Extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set mode to copy
+	level.SetMode(false)
+
+	t.Log("Upgrading with copy")
+
+	// Upgrade database to v3 with copy which
+	// creates a testnet3.v3 folder
+	dbv2, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Open copy DB
+	cfgCopy, err := level.NewConfig(network, home, "0mb", "0mb")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfgCopy.Home = cfgCopy.Home + ".v3"
+
+	dbCopy, err := level.New(ctx, cfgCopy)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("Comparing DBs")
+
+	// Compare all databases
+	for _, dbs := range keys {
+		a := dbv2.DB()[dbs]
+		b := dbMove.DB()[dbs]
+		c := dbCopy.DB()[dbs]
+
+		t.Logf("Comparing original records against dbmove (%v)", dbs)
+		records, err := cmpDB(a, b)
+		if err != nil {
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
+		}
+
+		t.Logf("Comparing dbmove records against original (%v)", dbs)
+		records, err = cmpDB(b, a)
+		if err != nil {
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
+		}
+
+		t.Logf("Comparing original records against dbcopy (%v)", dbs)
+		records, err = cmpDB(a, c)
+		if err != nil {
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
+		}
+
+		t.Logf("Comparing dbcopy records against original (%v)", dbs)
+		records, err = cmpDB(c, a)
+		if err != nil {
+			t.Errorf("found diff in record %v: %v", records, err)
+		} else {
+			t.Logf("Found no diff in %v records of %v", records, dbs)
+		}
+	}
+}
+
+func cmpDB(a, b *leveldb.DB) (int, error) {
+	i := a.NewIterator(nil, nil)
+	defer func() { i.Release() }()
+
+	records := 0
+	for records = 0; i.Next(); records++ {
+		v, err := b.Get(i.Key(), nil)
+		if err != nil {
+			return records, err
+		}
+
+		if diff := deep.Equal(i.Value(), v); len(diff) > 0 {
+			return records, fmt.Errorf("unexpected diff: %v", diff)
+		}
+	}
+	return records, nil
+}
+
 func TestDbUpgradeV4(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	err := extract("testdata/testdatabasev3.tar.gz", home)
+	err := testutil.Extract("testdata/testdatabasev3.tar.gz", home)
 	if err != nil {
 		t.Fatal(err)
 	}

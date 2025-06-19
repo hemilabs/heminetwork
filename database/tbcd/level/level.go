@@ -2045,13 +2045,17 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 		deks := decodeKeystone(eks)
 		kssList = append(kssList, deks)
 	}
+	if i.Error() != nil {
+		return nil, fmt.Errorf("keystones iterator: %w", i.Error())
+	}
+
 	if len(kssList) == 0 {
 		return nil, database.NotFoundError(fmt.Sprintf("no first occurrence "+
 			"keystones range: %v < %v",
 			min(start, end), max(start, end)))
 	}
 
-	return kssList, i.Error()
+	return kssList, nil
 }
 
 func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones map[chainhash.Hash]tbcd.Keystone, keystoneIndexHash chainhash.Hash) error {

@@ -555,14 +555,13 @@ func (l *ldb) v3(ctx context.Context) error {
 // v4 upgrade the database from v3 to v4.
 // Changes:
 // Add heighthash (L2 height - Keystone Hash) to keystone database.
-// XXX antonio add test
 func (l *ldb) v4(ctx context.Context) error {
 	log.Tracef("v4")
 	defer log.Tracef("v4 exit")
 
 	log.Infof("Upgrading database from v3 to v4")
 
-	// Index all keystones to M[height][hash] format.
+	// Index all keystones to H[height][hash] format.
 	bhs := l.pool[level.BlockHeadersDB]
 	ksdb := l.pool[level.KeystonesDB]
 	i := ksdb.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
