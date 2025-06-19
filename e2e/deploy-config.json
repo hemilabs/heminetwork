@@ -24,8 +24,8 @@
     "baseFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
     "l1FeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
     "sequencerFeeVaultMinimumWithdrawalAmount": "0x8ac7230489e80000",
-    "baseFeeVaultWithdrawalNetwork": "remote",
-    "l1FeeVaultWithdrawalNetwork": "remote",
+    "baseFeeVaultWithdrawalNetwork": 1,
+    "l1FeeVaultWithdrawalNetwork": 1,
     "sequencerFeeVaultWithdrawalNetwork": 0,
     "proxyAdminOwner": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
     "finalSystemOwner": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
@@ -50,8 +50,8 @@
     "faultGameMaxDepth": 44,
     "faultGameMaxDuration": 1200,
     "systemConfigStartBlock": 0,
-    "requiredProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000",
-    "recommendedProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "requiredProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000001",
+    "recommendedProtocolVersion": "0x0000000000000000000000000000000000000000000000000000000000000001",
     "useFaultProofs": false,
     "proofMaturityDelaySeconds": 0,
     "disputeGameFinalityDelaySeconds": 0,
@@ -70,5 +70,7 @@
     "daChallengeWindow": 160,
     "daResolveWindow": 160,
     "daBondSize": 1000000,
-    "daResolverRefundPercentage": 0
+    "daResolverRefundPercentage": 0,
+    "faultGameClockExtension": 0,
+    "faultGameMaxClockDuration": 0
 }

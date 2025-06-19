@@ -29,12 +29,14 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN echo asdlkfj
+RUN echo asdlkfjasdfasdfassdsdfdffdsdffdsfasdsdffsddfadsdfdfdsdfdsdf
 RUN git fetch origin
-RUN git checkout ea38fe036a0dd089bea9f28e6f5f0ef31a9b0743
+RUN git checkout df34cb748523aa06f9528947b9f136f2736a5cfa
 
 WORKDIR /git/optimism
 RUN go mod tidy
+
+RUN git submodule update --init --recursive
 
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="${PATH}:/root/.cargo/bin"
@@ -77,8 +79,3 @@ RUN . /root/.bashrc
 ENV PATH="${PATH}:/root/.foundry/bin"
 
 RUN foundryup
-
-WORKDIR /git/optimism/packages/contracts-bedrock
-RUN forge install
-
-WORKDIR /git/optimism

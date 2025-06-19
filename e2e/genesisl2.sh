@@ -54,8 +54,17 @@ curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\
 
 cd /git/optimism/packages/contracts-bedrock
 
-/git/optimism/op-deployer/bin/op-deployer init --help
+forge install
 
+export DEPLOY_CONFIG_PATH='/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json'
+
+cat $DEPLOY_CONFIG_PATH
+
+forge script ./scripts/deploy/Deploy.s.sol:Deploy --non-interactive --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
+
+# forge create ./src/L1/OPContractsManager.sol:OPContractsManager --rpc-url $JSON_RPC --private-key $ADMIN_PRIVATE_KEY
+
+/git/optimism/op-deployer/bin/op-deployer init --help
 
 # /git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir /tmp/output --intent-type standard-overrides
 
