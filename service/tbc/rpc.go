@@ -739,7 +739,7 @@ func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.KeystonesByHeightResponse{
 				BTCTipHeight: bhb.Height,
-				Error:        protocol.RequestErrorf("could not find keystones in range"),
+				Error:        protocol.RequestErrorf("%v", err),
 			}, nil
 		}
 		e := protocol.NewInternalError(err)
