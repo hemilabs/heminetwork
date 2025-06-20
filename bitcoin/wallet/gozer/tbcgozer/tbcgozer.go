@@ -179,7 +179,7 @@ func (t *tbcGozer) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash
 	return gozer.TBC2Gozer(bksr)
 }
 
-func (t *tbcGozer) KeystonesByHeight(ctx context.Context, height uint32, depth int) (*gozer.KeystonesByHeightResponse, error) {
+func (t *tbcGozer) KeystonesByHeight(ctx context.Context, height uint32, depth int) *gozer.KeystonesByHeightResponse {
 	ksr := &tbcapi.KeystonesByHeightRequest{
 		Height: height,
 		Depth:  depth,
@@ -190,36 +190,28 @@ func (t *tbcGozer) KeystonesByHeight(ctx context.Context, height uint32, depth i
 		r := &gozer.KeystonesByHeightResponse{
 			Error: protocol.Errorf("%v", err),
 		}
-		return r, err
+		return r
 	}
 
 	bksr, ok := res.(*tbcapi.KeystonesByHeightResponse)
 	if !ok {
-		err = fmt.Errorf("not a keystone by height response %T", res)
 		r := &gozer.KeystonesByHeightResponse{
-			Error: protocol.Errorf("%v", err),
+			Error: protocol.Errorf("not a keystone by height response %T", res),
 		}
-		return r, err
+		return r
 	}
 	if bksr.Error != nil {
 		r := &gozer.KeystonesByHeightResponse{
 			Error: bksr.Error,
 		}
-		//nolint:nilerr // return err only if not protocol error
-		return r, nil
-	}
-
-	converted := make([]*gozer.L2KeystoneAbrev, 0, len(bksr.L2KeystoneAbrevs))
-	for _, k := range bksr.L2KeystoneAbrevs {
-		ck := gozer.ConvertTBCAbrevKeystone(k)
-		converted = append(converted, &ck)
+		return r
 	}
 
 	r := &gozer.KeystonesByHeightResponse{
-		L2KeystoneAbrevs: converted,
+		L2KeystoneAbrevs: bksr.L2KeystoneAbrevs,
 		BTCTipHeight:     bksr.BTCTipHeight,
 	}
-	return r, nil
+	return r
 }
 
 func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any) (any, error) {

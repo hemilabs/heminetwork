@@ -27,7 +27,7 @@ type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)
 	BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *BlocksByL2AbrevHashesResponse
-	KeystonesByHeight(ctx context.Context, height uint32, depth int) (*KeystonesByHeightResponse, error)
+	KeystonesByHeight(ctx context.Context, height uint32, depth int) *KeystonesByHeightResponse
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 	BtcHeight(ctx context.Context) (uint64, error)
 }
@@ -70,12 +70,6 @@ type L2KeystoneAbrev struct {
 	EPHash             api.ByteSlice `json:"ep_hash"`
 }
 
-func (a *L2KeystoneAbrev) Hash() *chainhash.Hash {
-	b := a.Serialize()
-	h := chainhash.DoubleHashH(b[:])
-	return &h
-}
-
 func (a *L2KeystoneAbrev) Serialize() [72]byte {
 	var r [72]byte
 	r[0] = uint8(a.Version)
@@ -88,18 +82,6 @@ func (a *L2KeystoneAbrev) Serialize() [72]byte {
 	return r
 }
 
-func ConvertTBCAbrevKeystone(ks *hemi.L2KeystoneAbrev) L2KeystoneAbrev {
-	return L2KeystoneAbrev{
-		Version:            uint(ks.Version),
-		L1BlockNumber:      uint(ks.L1BlockNumber),
-		L2BlockNumber:      uint(ks.L2BlockNumber),
-		ParentEPHash:       ks.ParentEPHash[:],
-		PrevKeystoneEPHash: ks.PrevKeystoneEPHash[:],
-		StateRoot:          ks.StateRoot[:],
-		EPHash:             ks.EPHash[:],
-	}
-}
-
 func TBC2Gozer(req *tbcapi.BlocksByL2AbrevHashesResponse) *BlocksByL2AbrevHashesResponse {
 	blkInfos := make([]L2KeystoneBlockInfo, 0, len(req.L2KeystoneBlocks))
 	for _, info := range req.L2KeystoneBlocks {
@@ -108,7 +90,15 @@ func TBC2Gozer(req *tbcapi.BlocksByL2AbrevHashesResponse) *BlocksByL2AbrevHashes
 			gi.Error = info.Error
 		} else {
 			gi = L2KeystoneBlockInfo{
-				L2KeystoneAbrev:       ConvertTBCAbrevKeystone(info.L2KeystoneAbrev),
+				L2KeystoneAbrev: L2KeystoneAbrev{
+					Version:            uint(info.L2KeystoneAbrev.Version),
+					L1BlockNumber:      uint(info.L2KeystoneAbrev.L1BlockNumber),
+					L2BlockNumber:      uint(info.L2KeystoneAbrev.L2BlockNumber),
+					ParentEPHash:       info.L2KeystoneAbrev.ParentEPHash[:],
+					PrevKeystoneEPHash: info.L2KeystoneAbrev.PrevKeystoneEPHash[:],
+					StateRoot:          info.L2KeystoneAbrev.StateRoot[:],
+					EPHash:             info.L2KeystoneAbrev.EPHash[:],
+				},
 				L2KeystoneBlockHash:   *info.L2KeystoneBlockHash,
 				L2KeystoneBlockHeight: info.L2KeystoneBlockHeight,
 			}
@@ -143,7 +133,7 @@ type BlocksByL2AbrevHashesResponse struct {
 }
 
 type KeystonesByHeightResponse struct {
-	L2KeystoneAbrevs []*L2KeystoneAbrev `json:"l2_keystone_abrevs"`
-	BTCTipHeight     uint64             `json:"btc_tip_height"`
-	Error            *protocol.Error    `json:"error,omitempty"`
+	L2KeystoneAbrevs []*hemi.L2KeystoneAbrev `json:"l2_keystone_abrevs"`
+	BTCTipHeight     uint64                  `json:"btc_tip_height"`
+	Error            *protocol.Error         `json:"error,omitempty"`
 }
