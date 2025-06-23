@@ -271,7 +271,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			for i, k := range resp.L2Keystones {
 				if hemi.L2KeystoneAbbreviate(k).Hash().IsEqual(hash) {
 					fin.L2Keystone = resp.L2Keystones[i]
-					log.Infof("responding with keystone %s", spew.Sdump(k))
+					log.Tracef("responding with keystone %s", spew.Sdump(k))
 				}
 			}
 		}

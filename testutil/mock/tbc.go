@@ -145,6 +145,8 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				return fmt.Errorf("filter utxos: %w", err)
 			}
 
+			log.Debugf("%v: filtered %v utxos, %v left %v", f.name, len(utxos)-len(filtered), len(filtered))
+
 			respUtxos := make([]*tbcapi.UTXO, 0)
 			for _, utxo := range filtered {
 				txID := utxo.ScriptHash()
@@ -187,6 +189,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				f.kssMtx.Lock()
 				f.keystones[*aPoPTx.L2Keystone.Hash()] = aPoPTx.L2Keystone
 				f.kssMtx.Unlock()
+				log.Debugf("%v: inserting broadcasted keystone %v", f.name, aPoPTx.L2Keystone.Hash().String())
 				break
 			}
 
@@ -196,6 +199,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 			if err != nil {
 				return fmt.Errorf("mempool tx inser: %w", err)
 			}
+			log.Debugf("%v: mempool inserted broadcasted tx %v", f.name, ch.String())
 		case tbcapi.CmdBlocksByL2AbrevHashesRequest:
 			pl, ok := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
 			if !ok {
