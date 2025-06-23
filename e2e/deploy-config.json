@@ -27,9 +27,9 @@
     "baseFeeVaultWithdrawalNetwork": 1,
     "l1FeeVaultWithdrawalNetwork": 1,
     "sequencerFeeVaultWithdrawalNetwork": 0,
-    "proxyAdminOwner": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
-    "finalSystemOwner": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
-    "superchainConfigGuardian": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
+    "proxyAdminOwner": "0x78697c88847dfbbb40523e42c1f2e28a13a170be",
+    "finalSystemOwner": "0x78697c88847dfbbb40523e42c1f2e28a13a170be",
+    "superchainConfigGuardian": "0x78697c88847dfbbb40523e42c1f2e28a13a170be",
     "finalizationPeriodSeconds": 4,
     "fundDevAccounts": true,
     "l2GenesisBlockBaseFeePerGas": "0x1",
@@ -38,7 +38,7 @@
     "enableGovernance": true,
     "governanceTokenSymbol": "OP",
     "governanceTokenName": "Optimism",
-    "governanceTokenOwner": "0xa0Ee7A142d267C1f36714E4a8F75612F20a79720",
+    "governanceTokenOwner": "0x78697c88847dfbbb40523e42c1f2e28a13a170be",
     "eip1559Denominator": 50,
     "eip1559DenominatorCanyon": 250,
     "eip1559Elasticity": 6,
@@ -56,8 +56,6 @@
     "proofMaturityDelaySeconds": 0,
     "disputeGameFinalityDelaySeconds": 0,
     "respectedGameType": 0,
-    "faultGameMaxDepth": 50,
-    "faultGameMaxDuration": 2400,
     "faultGameGenesisBlock": 0,
     "faultGameGenesisOutputRoot": "0xDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF",
     "faultGameSplitDepth": 14,
@@ -72,5 +70,5 @@
     "daBondSize": 1000000,
     "daResolverRefundPercentage": 0,
     "faultGameClockExtension": 0,
-    "faultGameMaxClockDuration": 0
+    "faultGameMaxClockDuration": 2000
 }

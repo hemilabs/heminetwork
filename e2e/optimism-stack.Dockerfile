@@ -29,9 +29,9 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN echo asdlkfjasdfasdfassdsdfdffdsdffdsfasdsdffsddfadsdfdfdsdfdsdf
+RUN echo asdlkfjasdfasfdffdfdddsfassffdfddfdsdfdssdfdsdfdfdf
 RUN git fetch origin
-RUN git checkout df34cb748523aa06f9528947b9f136f2736a5cfa
+RUN git checkout 90e881873e501fb3a7c8d2aa34666627636cbae0
 
 WORKDIR /git/optimism
 RUN go mod tidy

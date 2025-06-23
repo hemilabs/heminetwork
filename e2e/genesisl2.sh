@@ -56,11 +56,17 @@ cd /git/optimism/packages/contracts-bedrock
 
 forge install
 
+just build
+
 export DEPLOY_CONFIG_PATH='/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json'
 
 cat $DEPLOY_CONFIG_PATH
 
-forge script ./scripts/deploy/Deploy.s.sol:Deploy --non-interactive --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
+cp /git/optimism/op-program/bin/prestate-proof.json /git/optimism/op-program/bin/prestate-proof-interop.json
+
+sleep 3
+
+forge script ./scripts/deploy/Deploy.s.sol:Deploy --unlocked --sender $MY_ADDRESS --non-interactive --broadcast --rpc-url $JSON_RPC
 
 # forge create ./src/L1/OPContractsManager.sol:OPContractsManager --rpc-url $JSON_RPC --private-key $ADMIN_PRIVATE_KEY
 
