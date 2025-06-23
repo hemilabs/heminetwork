@@ -199,6 +199,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 				ID:      msg.ID,
 				Result:  kssResp,
 			}
+			log.Debugf("%v: sending %v last keystones", f.name, len(kssResp.L2Keystones))
 		case "kss_getKeystone":
 			var params []any
 			err = json.Unmarshal(msg.Params, &params)
@@ -245,6 +246,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 				Result:  kssResp,
 			}
 
+			log.Debugf("%v: sending keystone %v and %v descendants", f.name, shash, len(kssResp.L2Keystones)-1)
 		default:
 			return fmt.Errorf("unsupported message %v", msg.Method)
 		}

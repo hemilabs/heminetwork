@@ -295,7 +295,7 @@ func (s *Server) broadcastKeystone(pctx context.Context, popTx *wire.MsgTx) erro
 	log.Tracef("mineKeystone")
 	defer log.Tracef("mineKeystone exit")
 
-	log.Infof("Broadcast PoP tx %s %x", s.params.Name, popTx)
+	log.Infof("Broadcasting PoP tx %s with hash %v", s.params.Name, popTx.TxHash())
 
 	ctx, cancel := context.WithTimeout(pctx, 5*time.Second)
 	defer cancel()
@@ -304,7 +304,7 @@ func (s *Server) broadcastKeystone(pctx context.Context, popTx *wire.MsgTx) erro
 	if err != nil {
 		return fmt.Errorf("broadcast PoP transaction: %w", err)
 	}
-	log.Infof("Broadcast PoP tx %s %v", s.params.Name, txHash)
+	log.Infof("Broadcast PoP tx %s with TxID %v", s.params.Name, txHash)
 
 	return nil
 }
