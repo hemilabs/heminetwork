@@ -64,9 +64,7 @@ cat $DEPLOY_CONFIG_PATH
 
 cp /git/optimism/op-program/bin/prestate-proof.json /git/optimism/op-program/bin/prestate-proof-interop.json
 
-sleep 3
-
-forge script ./scripts/deploy/Deploy.s.sol:Deploy --unlocked --sender $MY_ADDRESS --non-interactive --broadcast --rpc-url $JSON_RPC
+forge script ./scripts/deploy/Deploy.s.sol:Deploy --private-key $ADMIN_PRIVATE_KEY --non-interactive --broadcast --rpc-url $JSON_RPC
 
 # forge create ./src/L1/OPContractsManager.sol:OPContractsManager --rpc-url $JSON_RPC --private-key $ADMIN_PRIVATE_KEY
 
