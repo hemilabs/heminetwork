@@ -2020,7 +2020,10 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 		return nil, errors.New("depth must not be 0")
 	}
 	start := int64(height)
-	end := start + d + 1
+	end := start + d
+	if depth > 0 {
+		end += 1
+	}
 	if end > math.MaxUint32 {
 		return nil, errors.New("the overflow that matters")
 	}
@@ -2050,7 +2053,7 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 	if len(kssList) == 0 {
 		return nil, database.NotFoundError(fmt.Sprintf("no first occurrence "+
 			"keystones range: %v < %v",
-			min(start, end), max(start, end)))
+			min(start+1, end), max(start, end)-1))
 	}
 
 	return kssList, nil
