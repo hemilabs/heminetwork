@@ -72,10 +72,22 @@ RUN just build
 
 WORKDIR /git/optimism
 
-RUN curl -L https://foundry.paradigm.xyz | bash
+WORKDIR /git
 
-RUN . /root/.bashrc
+RUN git clone https://github.com/ClaytonNorthey92/foundry
+RUN echo adlshjfdfsadfasdfasdfsdsadfsdfd
 
-ENV PATH="${PATH}:/root/.foundry/bin"
+WORKDIR /git/foundry
+RUN git fetch origin
+RUN git checkout b235066e408d246c451c38957eeb2e62a58f56f5
 
-RUN foundryup
+RUN echo alskdjf
+RUN make build
+
+ENV PATH="${PATH}:/git/foundry/target/debug"
+
+RUN ls /git/foundry/target/debug
+
+RUN forge --help
+
+WORKDIR /git/optimism

@@ -69,14 +69,14 @@ cat $DEPLOY_CONFIG_PATH
 
 cp /git/optimism/op-program/bin/prestate-proof.json /git/optimism/op-program/bin/prestate-proof-interop.json
 
-forge script ./scripts/deploy/Deploy.s.sol:Deploy --sig 'deploySuperchain()' --slow --unlocked --non-interactive --broadcast --rpc-url $JSON_RPC
+forge script ./scripts/deploy/Deploy.s.sol:Deploy --sender $MY_ADDRESS --sig 'deploySuperchain()' --slow --unlocked --non-interactive --broadcast --rpc-url $JSON_RPC
 
 # forge create ./src/L1/OPContractsManager.sol:OPContractsManager --rpc-url $JSON_RPC --private-key $ADMIN_PRIVATE_KEY
 
 # /git/optimism/op-deployer/bin/op-deployer init --help
 
-# /git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir /tmp/output --intent-type standard-overrides
 
+# /git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir /tmp/output --intent-type standard-overrides
 
 # /git/optimism/op-deployer/bin/op-deployer apply --workdir /tmp/output/deployment \
 #   --l1-rpc-url $JSON_RPC \
@@ -84,25 +84,26 @@ forge script ./scripts/deploy/Deploy.s.sol:Deploy --sig 'deploySuperchain()' --s
 
 # forge script ./scripts/Deploy.s.sol:Deploy --non-interactive --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
 
+/git/optimism/op-deployer/bin/op-deployer inspect genesis --workdir /tmp/output/deployment 901
+
 curl -H 'Content-Type: application/json' -X POST --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x2", true],"id":1}' $JSON_RPC > /tmp/blockl1.json
 
 echo $(jq '.result' /tmp/blockl1.json) > /tmp/blockl1.json
 
 cat /tmp/blockl1.json
 
-/git/optimism/op-node/bin/op-node \
-    genesis \
-    l2 \
-    --deploy-config  \
-    /git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json \
-    --l1-deployments  \
-    /git/optimism/packages/contracts-bedrock/deployments/devnetL1/.deploy \
-    --outfile.l2  \
-    /l2configs/genesis.json \
-    --outfile.rollup  \
-    /tmp/rollup.json \
-    --l1-starting-block \
-    /tmp/blockl1.json
+# /git/optimism/op-node/bin/op-node \
+#     genesis \
+#     l2 \
+#     --deploy-config  \
+#     /git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json \
+#     --l1-deployments  \
+#     /git/optimism/packages/contracts-bedrock/deployments/devnetL1/.deploy \
+#     --outfile.l2  \
+#     /l2configs/genesis.json \
+#     --outfile.rollup  \
+#     /tmp/rollup.json \
+#     --l1-rpc $JSON_RPC
 
 # HACK TO REMOVE old fields to make the generated genesis file compatible for 
 # after newer version
