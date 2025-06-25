@@ -274,6 +274,7 @@ services:
       - "--p2p.ban.threshold=-10000000000"
       - "--log.level=info"
       - "--syncmode=${OPSYNCMODE:-execution-layer}"
+      - "--override.pectrablobschedule=1751554801"
     deploy:
       restart_policy:
         condition: "any"
