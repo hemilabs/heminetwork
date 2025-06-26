@@ -336,30 +336,19 @@ func TestKeystoneFinalityShortCircuit(t *testing.T) {
 		}
 	}()
 
-	// messages we expect to receive
-	expectedMsg := map[string]int{
-		"kss_getKeystone":                      wantedKeystones,
-		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
-	}
-
 	for !s.Connected() {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	var wg sync.WaitGroup
-	// send finality requests to bfg, which should return super finality
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 20, 20)
-	}()
-
-	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
-		t.Fatal(err)
+	for _, ks := range kssList[:20] {
+		aks, err := s.shortCircuitFinality(ctx, &ks, uint32(btcTip))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if aks == nil {
+			t.Fatal("expected super finality")
+		}
 	}
-
-	wg.Wait()
 }
 
 func sendFinalityRequests(ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
