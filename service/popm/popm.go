@@ -17,11 +17,11 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/hemilabs/heminetwork/api/gethapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
@@ -317,11 +317,11 @@ func (s *Server) createAndBroadcastKeystone(ctx context.Context, ks *hemi.L2Keys
 	return s.broadcastKeystone(ctx, popTx)
 }
 
-func (s *Server) latestKeystones(ctx context.Context, count int) (*eth.L2KeystoneLatestResponse, error) {
+func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2KeystoneLatestResponse, error) {
 	log.Tracef("latestKeystones")
 	defer log.Tracef("latestKeystones exit")
 
-	var kr eth.L2KeystoneLatestResponse
+	var kr gethapi.L2KeystoneLatestResponse
 	err := s.opgethClient.Client().CallContext(ctx, &kr, "kss_getLatestKeystones", count)
 	if err != nil {
 		return nil, fmt.Errorf("opgeth rpc: %w", err)
