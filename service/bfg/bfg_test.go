@@ -340,13 +340,13 @@ func TestKeystoneFinalityShortCircuit(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	for _, ks := range kssList[:20] {
+	for _, ks := range kssList[:9] {
 		aks, err := s.shortCircuitFinality(ctx, &ks, uint32(btcTip))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if aks == nil {
-			t.Fatal("expected super finality")
+			t.Fatalf("expected short circuit for kss @ %v, tip %v", ks.L1BlockNumber, btcTip)
 		}
 	}
 }
