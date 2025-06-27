@@ -23,7 +23,6 @@ import (
 	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
-
 	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
 	e2ebindings "github.com/ethereum-optimism/optimism/op-e2e/bindings"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
