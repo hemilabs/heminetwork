@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -438,9 +439,14 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
+	abrevHashB := abrevhash[:]
+	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash: lookup %s (%s)",
+		abrevhash.String(), hex.EncodeToString(abrevHashB))
+
 	kssDB := l.pool[level.KeystonesDB]
-	eks, err := kssDB.Get(abrevhash.CloneBytes(), nil)
+	eks, err := kssDB.Get(abrevHashB, nil)
 	if err != nil {
+		log.Errorf("error found getting keystone: %s", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
 		}
@@ -1536,6 +1542,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Bl
 		}
 	}
 	// if we get here eb MUST exist
+	// XXX should we set block height? despite being an expensive lookup?
 	b, err := btcutil.NewBlockFromBytes(eb)
 	if err != nil {
 		panic(fmt.Errorf("block decode data corruption: %v %w", hash, err))
@@ -1983,6 +1990,7 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 			if !has {
 				// Only store unknown keystones
 				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
+				log.Tracef("storing found keystone: hash=%s", hex.EncodeToString(k[:]))
 			}
 		}
 

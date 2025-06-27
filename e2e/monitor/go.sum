@@ -196,6 +196,8 @@ github.com/hashicorp/go-multierror v1.1.1 h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+l
 github.com/hashicorp/go-multierror v1.1.1/go.mod h1:iw975J/qwKPdAO1clOe2L8331t/9/fmwbPZ6JB6eMoM=
 github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs4luLUK2k=
 github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
+github.com/hemilabs/heminetwork v1.6.4-0.20250611192936-d04c9f49d8e3 h1:RR0a0Pmha5Q9AP6nPT+T3BYHysexrxsLc+523XbaaeI=
+github.com/hemilabs/heminetwork v1.6.4-0.20250611192936-d04c9f49d8e3/go.mod h1:b6Myh0OdM/lzvMVjFVyh2y24IFBSWQE7hi6tUJItFxY=
 github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250423005627-59242a8f35fc h1:h7kpIvSoRqiFZvocf01SHzRSEBv7tY34o06wOAm8YUI=
 github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250423005627-59242a8f35fc/go.mod h1:/j2OmO+yIMeA6oEpgidTzucM9qC1VOn1FUMRHy+UWDM=
 github.com/hemilabs/optimism v1.5.1-0.20250425175530-97b573b6339a h1:6qszunAzQmbo2gkuQaqLQCNlK+EiI6BrrWOu7rIWy4w=
