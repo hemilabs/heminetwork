@@ -454,11 +454,9 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash")
 	defer log.Tracef("BlockKeystoneByL2KeystoneAbrevHash exit")
 
-	log.Tracef("checking the database for keystone with abrev hash %s, clone bytes value %s", abrevhash.String(), hex.EncodeToString(abrevhash.CloneBytes()))
-
-	abrevHashB := abrevhash.CloneBytes()
-
-	log.Tracef("reversed abrev hash, will query for %s", hex.EncodeToString(abrevHashB))
+	abrevHashB := abrevhash[:]
+	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash: lookup %s (%s)",
+		abrevhash.String(), hex.EncodeToString(abrevHashB))
 
 	kssDB := l.pool[level.KeystonesDB]
 	eks, err := kssDB.Get(abrevHashB, nil)
