@@ -106,10 +106,10 @@ func TestMonitor(t *testing.T) {
 			t.Fatalf("could not parse balance from %s", jo.PopMinerHemiBalance)
 		}
 
-		t.Logf("expecting actual balance %d to be greater than %d", balance, expectedPayoutBalance)
+		t.Logf("expecting actual balance %v to be greater than %v", balance, expectedPayoutBalance)
 
 		if expectedPayoutBalance.Cmp(balance) > 0 {
-			t.Logf("pop miner payout balance received %d, want at least %d", balance, expectedPayoutBalance)
+			t.Logf("pop miner payout balance received %v, want at least %v", balance, expectedPayoutBalance)
 			continue
 		}
 
