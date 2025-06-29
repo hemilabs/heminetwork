@@ -305,6 +305,20 @@ func TestKeystoneFinalityShortCircuit(t *testing.T) {
 	kssMap, kssList := testutil.MakeSharedKeystones(30)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
+	// ensure no keystone has super finality, except the
+	// last one, ensuring they inherit it
+	for i, ks := range kssList {
+		// lower l1 block than first keystone
+		ks.L1BlockNumber = 10029
+		kssList[i] = ks
+		kssMap[*hemi.L2KeystoneAbbreviate(ks).Hash()] = hemi.L2KeystoneAbbreviate(ks)
+	}
+
+	lastKss := kssList[len(kssList)-1]
+	lastKss.L1BlockNumber = uint32(btcTip) - 20
+	kssList[len(kssList)-1] = lastKss
+	kssMap[*hemi.L2KeystoneAbbreviate(lastKss).Hash()] = hemi.L2KeystoneAbbreviate(lastKss)
+
 	// Create opgeth test server with the request handler.
 	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
 	defer opgeth.Shutdown()
@@ -340,7 +354,8 @@ func TestKeystoneFinalityShortCircuit(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	for _, ks := range kssList[:9] {
+	// should be able to short circuit all keystones
+	for _, ks := range kssList {
 		aks, err := s.shortCircuitFinality(ctx, &ks, uint32(btcTip))
 		if err != nil {
 			t.Fatal(err)
@@ -348,6 +363,17 @@ func TestKeystoneFinalityShortCircuit(t *testing.T) {
 		if aks == nil {
 			t.Fatalf("expected short circuit for kss @ %v, tip %v", ks.L1BlockNumber, btcTip)
 		}
+	}
+
+	tempKs := kssList[0]
+	var fakeTip uint32 = 500
+	// should NOT be able to short circuit if no earlier keystones before tip
+	aks, err := s.shortCircuitFinality(ctx, &tempKs, fakeTip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aks != nil {
+		t.Fatalf("unexpected short circuit for kss @ %v, tip %v", tempKs.L1BlockNumber, fakeTip)
 	}
 }
 

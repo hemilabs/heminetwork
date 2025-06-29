@@ -259,14 +259,11 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				return fmt.Errorf("unexpected payload format: %v", payload)
 			}
 			height := int64(pl.Height)
-			log.Infof("%v %v", pl.Height, height)
 			depth := int64(pl.Depth)
-			log.Infof("%v %v", pl.Depth, depth)
 			kssList := make([]*hemi.L2KeystoneAbrev, 0, 16)
 			start := min(height, height+depth)
 			end := max(height, height+depth)
 			for i := start; i != end; i++ {
-				// log.Infof("%v %v", i, end)
 				if i == height {
 					continue
 				}
