@@ -172,6 +172,8 @@ type Server struct {
 	bfgCmdCh chan bfgCmd // commands to send to bfg
 
 	btcPrivateKey *secp256k1.PrivateKey
+
+	processBitcoinBlockMtx sync.Mutex
 }
 
 // metrics stores prometheus metrics.
@@ -591,6 +593,12 @@ func (s *Server) updateKeystonesForBtcBlock(ctx context.Context, btcHeaderHash [
 }
 
 func (s *Server) processBitcoinBlock(ctx context.Context, height uint64) error {
+	log.Tracef("processBitcoinBlock")
+	defer log.Tracef("processBitcoinBlockExit")
+
+	s.processBitcoinBlockMtx.Lock()
+	defer s.processBitcoinBlockMtx.Unlock()
+
 	log.Tracef("Processing Bitcoin block at height %d...", height)
 
 	netCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -834,15 +842,31 @@ func (s *Server) trackBitcoin(ctx context.Context) {
 
 			s.updateBtcHeightCache(btcHeight)
 
-			err = s.walkChain(ctx, btcHeight, !initialWalk)
-			if err != nil {
-				log.Errorf("could not walk chain: %s", err)
-				continue
+			// on first, spin up a goroutine that will walk the chain
+			// back to the "starting height".  we do this in a goroutine
+			// so that it can run concurrently with handling new blocks.
+			// on each following, only walk the chain until the first block
+			// that we have already seen
+			// note: processBitcoinBlock uses a mutex to make sure that no
+			// two blocks at the same height are being processed at the same time,
+			// avoiding RMW race conditions
+			if initialWalk {
+				go func() {
+					for {
+						if err := s.walkChain(ctx, btcHeight, false); err != nil {
+							log.Errorf("could not walk chain initial: %s", err)
+							continue
+						}
+						return
+					}
+				}()
+				initialWalk = false
+			} else {
+				if err = s.walkChain(ctx, btcHeight, true); err != nil {
+					log.Errorf("could not walk chain: %s", err)
+					continue
+				}
 			}
-
-			// after we have done the initial walk with no errors,
-			// in the future we only walk back until a block that we've seen
-			initialWalk = false
 		}
 	}
 }
