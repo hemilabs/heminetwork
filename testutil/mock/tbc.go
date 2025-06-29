@@ -17,13 +17,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/service/tbc"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 type TBCMockHandler struct {
@@ -97,13 +103,11 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		utxos = append(utxos, utxo)
 	}
 
-	// TODO: re-add mempool
-	//
-	// // create mempool
-	// mp, err := tbc.MempoolNew()
-	// if err != nil {
-	// 	return fmt.Errorf("create mempool: %w", err)
-	// }
+	// create mempool
+	mp, err := tbc.MempoolNew()
+	if err != nil {
+		return fmt.Errorf("create mempool: %w", err)
+	}
 
 	for {
 		cmd, id, payload, err := tbcapi.Read(f.pctx, wsConn)
@@ -137,15 +141,15 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				BlockHeader: nil,
 			}
 		case tbcapi.CmdUTXOsByAddressRequest:
-			// TODO: re-add mempool filtering
-			//
-			// filtered, err := mp.FilterUtxos(f.pctx, utxos)
-			// if err != nil {
-			// 	return fmt.Errorf("filter utxos: %w", err)
-			// }
+			filtered, err := mp.FilterUtxos(f.pctx, utxos)
+			if err != nil {
+				return fmt.Errorf("filter utxos: %w", err)
+			}
+
+			log.Debugf("%v: filtered %v utxos, %v left %v", f.name, len(utxos)-len(filtered), len(filtered))
 
 			respUtxos := make([]*tbcapi.UTXO, 0)
-			for _, utxo := range utxos {
+			for _, utxo := range filtered {
 				txID := utxo.ScriptHash()
 				txHash, err := chainhash.NewHash(txID[:])
 				if err != nil {
@@ -153,7 +157,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				}
 				respUtxos = append(respUtxos, &tbcapi.UTXO{
 					TxId:     *txHash,
-					Value:    utxo.Value(),
+					Value:    btcutil.Amount(float64(utxo.Value())),
 					OutIndex: utxo.OutputIndex(),
 				})
 			}
@@ -161,7 +165,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				UTXOs: respUtxos,
 			}
 		case tbcapi.CmdTxBroadcastRequest:
-			_, ok := payload.(*tbcapi.TxBroadcastRequest)
+			pl, ok := payload.(*tbcapi.TxBroadcastRequest)
 			if !ok {
 				return fmt.Errorf("unexpected payload format: %v", payload)
 			}
@@ -178,77 +182,111 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 			}
 			resp = tbcapi.TxBroadcastResponse{TxID: ch}
 
-			// TODO: re-add mempool
-			//
-			// for _, txOut := range pl.Tx.TxOut {
-			// 	aPoPTx, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
-			// 	if err != nil {
-			// 		continue
-			// 	}
-			// 	f.kssMtx.Lock()
-			// 	f.keystones[*aPoPTx.L2Keystone.Hash()] = aPoPTx.L2Keystone
-			// 	f.kssMtx.Unlock()
-			// 	break
-			// }
+			for _, txOut := range pl.Tx.TxOut {
+				aPoPTx, err := pop.ParseTransactionL2FromOpReturn(txOut.PkScript)
+				if err != nil {
+					continue
+				}
+				f.kssMtx.Lock()
+				f.keystones[*aPoPTx.L2Keystone.Hash()] = aPoPTx.L2Keystone
+				f.kssMtx.Unlock()
+				log.Debugf("%v: inserting broadcasted keystone %v", f.name, aPoPTx.L2Keystone.Hash().String())
+				break
+			}
 
-			// opp := pl.Tx.TxIn[0].PreviousOutPoint
-			// mptx := tbc.NewMempoolTx(*ch, map[wire.OutPoint]struct{}{opp: {}})
-			// err = mp.TxInsert(f.pctx, &mptx)
-			// if err != nil {
-			// 	return fmt.Errorf("mempool tx inser: %w", err)
-			// }
-		// case tbcapi.CmdBlocksByL2AbrevHashesRequest:
-		// 	pl, ok := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
-		// 	if !ok {
-		// 		return fmt.Errorf("unexpected payload format: %v", payload)
-		// 	}
+			opp := pl.Tx.TxIn[0].PreviousOutPoint
+			mptx := tbc.NewMempoolTx(*ch, map[wire.OutPoint]struct{}{opp: {}})
+			err = mp.TxInsert(f.pctx, &mptx)
+			if err != nil {
+				return fmt.Errorf("mempool tx inser: %w", err)
+			}
+			log.Debugf("%v: mempool inserted broadcasted tx %v", f.name, ch.String())
+		case tbcapi.CmdBlocksByL2AbrevHashesRequest:
+			pl, ok := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
+			if !ok {
+				return fmt.Errorf("unexpected payload format: %v", payload)
+			}
 
-		// 	blkInfos := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(pl.L2KeystoneAbrevHashes))
-		// 	for _, hash := range pl.L2KeystoneAbrevHashes {
-		// 		f.kssMtx.RLock()
-		// 		kss, ok := f.keystones[hash]
-		// 		f.kssMtx.RUnlock()
-		// 		if !ok {
-		// 			blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
-		// 				Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHashes),
-		// 			})
-		// 		} else {
-		// 			ch, err := chainhash.NewHash(digest256([]byte{byte(kss.L1BlockNumber)}))
-		// 			if err != nil {
-		// 				panic(err)
-		// 			}
-		// 			blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
-		// 				L2KeystoneAbrev:       kss,
-		// 				L2KeystoneBlockHash:   ch,
-		// 				L2KeystoneBlockHeight: uint(kss.L1BlockNumber),
-		// 			})
-		// 		}
-		// 	}
-		// 	tch, err := chainhash.NewHash(testutil.digest256([]byte{byte(f.btcTip)}))
-		// 	if err != nil {
-		// 		panic(err)
-		// 	}
-		// 	resp = &tbcapi.BlocksByL2AbrevHashesResponse{
-		// 		L2KeystoneBlocks:  blkInfos,
-		// 		BtcTipBlockHash:   tch,
-		// 		BtcTipBlockHeight: f.btcTip,
-		// 	}
+			blkInfos := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(pl.L2KeystoneAbrevHashes))
+			for _, hash := range pl.L2KeystoneAbrevHashes {
+				f.kssMtx.RLock()
+				kss, ok := f.keystones[hash]
+				f.kssMtx.RUnlock()
+				if !ok {
+					blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
+						Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHashes),
+					})
+				} else {
+					ch, err := chainhash.NewHash(testutil.SHA256([]byte{byte(kss.L1BlockNumber)}))
+					if err != nil {
+						panic(err)
+					}
+					blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
+						L2KeystoneAbrev:       kss,
+						L2KeystoneBlockHash:   ch,
+						L2KeystoneBlockHeight: uint(kss.L1BlockNumber),
+					})
+				}
+			}
+			tch, err := chainhash.NewHash(testutil.SHA256([]byte{byte(f.btcTip)}))
+			if err != nil {
+				panic(err)
+			}
+			resp = &tbcapi.BlocksByL2AbrevHashesResponse{
+				L2KeystoneBlocks:  blkInfos,
+				BtcTipBlockHash:   tch,
+				BtcTipBlockHeight: f.btcTip,
+			}
 
-		// case tbcapi.CmdFeeEstimateRequest:
-		// 	resp = tbcapi.FeeEstimateResponse{
-		// 		FeeEstimates: []*tbcapi.FeeEstimate{
-		// 			{Blocks: 1, SatsPerByte: 1},
-		// 			{Blocks: 2, SatsPerByte: 1},
-		// 			{Blocks: 3, SatsPerByte: 1},
-		// 			{Blocks: 4, SatsPerByte: 1},
-		// 			{Blocks: 5, SatsPerByte: 1},
-		// 			{Blocks: 6, SatsPerByte: 1},
-		// 			{Blocks: 7, SatsPerByte: 1},
-		// 			{Blocks: 8, SatsPerByte: 1},
-		// 			{Blocks: 9, SatsPerByte: 1},
-		// 			{Blocks: 10, SatsPerByte: 1},
-		// 		},
-		// 	}
+		case tbcapi.CmdFeeEstimateRequest:
+			resp = tbcapi.FeeEstimateResponse{
+				FeeEstimates: []*tbcapi.FeeEstimate{
+					{Blocks: 1, SatsPerByte: 1},
+					{Blocks: 2, SatsPerByte: 1},
+					{Blocks: 3, SatsPerByte: 1},
+					{Blocks: 4, SatsPerByte: 1},
+					{Blocks: 5, SatsPerByte: 1},
+					{Blocks: 6, SatsPerByte: 1},
+					{Blocks: 7, SatsPerByte: 1},
+					{Blocks: 8, SatsPerByte: 1},
+					{Blocks: 9, SatsPerByte: 1},
+					{Blocks: 10, SatsPerByte: 1},
+				},
+			}
+		case tbcapi.CmdKeystonesByHeightRequest:
+			pl, ok := payload.(*tbcapi.KeystonesByHeightRequest)
+			if !ok {
+				return fmt.Errorf("unexpected payload format: %v", payload)
+			}
+			height := int64(pl.Height)
+			depth := int64(pl.Depth)
+			kssList := make([]*hemi.L2KeystoneAbrev, 0, 16)
+			start := min(height, height+depth)
+			end := max(height, height+depth)
+			for i := start; i != end; i++ {
+				if i == height {
+					continue
+				}
+				f.kssMtx.Lock()
+				for _, ks := range f.keystones {
+					if int64(ks.L1BlockNumber) == i {
+						kssList = append(kssList, ks)
+					}
+				}
+				f.kssMtx.Unlock()
+			}
+
+			if len(kssList) < 1 {
+				resp = tbcapi.KeystonesByHeightResponse{
+					Error: protocol.RequestErrorf("%v", database.ErrNotFound),
+				}
+			} else {
+				resp = tbcapi.KeystonesByHeightResponse{
+					L2KeystoneAbrevs: kssList,
+					BTCTipHeight:     uint64(f.btcTip),
+				}
+			}
+
 		default:
 			return fmt.Errorf("unknown command: %v", cmd)
 		}

@@ -129,7 +129,9 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		go func() {
 			select {
 			case <-f.pctx.Done():
+				f.mtx.Lock()
 				err = f.pctx.Err()
+				f.mtx.Unlock()
 				return
 			case f.msgCh <- msg.Method:
 			}
@@ -197,6 +199,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 				ID:      msg.ID,
 				Result:  kssResp,
 			}
+			log.Debugf("%v: sending %v last keystones", f.name, len(kssResp.L2Keystones))
 		case "kss_getKeystone":
 			var params []any
 			err = json.Unmarshal(msg.Params, &params)
@@ -221,7 +224,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 			found := -1
 			for ki, kss := range f.keystones {
-				if *abrevHash == *hemi.L2KeystoneAbbreviate(kss).Hash() {
+				if hemi.L2KeystoneAbbreviate(kss).Hash().IsEqual(abrevHash) {
 					found = ki
 				}
 			}
@@ -230,11 +233,11 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 			if found == -1 {
 				kssResp.Error = protocol.Errorf("keystone not found: %v", abrevHash)
 			} else {
-				if found+int(count) >= len(f.keystones) {
-					kssResp.L2Keystones = f.keystones[found:]
-				} else {
-					kssResp.L2Keystones = f.keystones[found : found+int(count)]
+				desc := make([]hemi.L2Keystone, 0, int(count))
+				for i := found; i < len(f.keystones) && i <= found+int(count); i++ {
+					desc = append(desc, f.keystones[i])
 				}
+				kssResp.L2Keystones = desc
 			}
 
 			subResp = jsonrpcMessage{
@@ -243,6 +246,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 				Result:  kssResp,
 			}
 
+			log.Debugf("%v: sending keystone %v and %v descendants", f.name, shash, len(kssResp.L2Keystones)-1)
 		default:
 			return fmt.Errorf("unsupported message %v", msg.Method)
 		}

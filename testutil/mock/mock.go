@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,10 @@ import (
 	"github.com/juju/loggo"
 )
 
-const logLevel = "INFO"
+const (
+	logLevel         = "INFO"
+	InfiniteDuration = time.Duration(math.MaxInt64)
+)
 
 var (
 	log                 = loggo.GetLogger("mock")
