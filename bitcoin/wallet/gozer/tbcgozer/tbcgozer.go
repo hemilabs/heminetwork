@@ -201,7 +201,6 @@ func (t *tbcGozer) KeystonesByHeight(ctx context.Context, height uint32, depth i
 		}
 		return r, err
 	}
-
 	//nolint:nilerr // only return internal error
 	if bksr.Error != nil {
 		r := &gozer.KeystonesByHeightResponse{

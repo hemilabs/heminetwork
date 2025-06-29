@@ -258,16 +258,21 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 			if !ok {
 				return fmt.Errorf("unexpected payload format: %v", payload)
 			}
+			height := int64(pl.Height)
+			log.Infof("%v %v", pl.Height, height)
+			depth := int64(pl.Depth)
+			log.Infof("%v %v", pl.Depth, depth)
 			kssList := make([]*hemi.L2KeystoneAbrev, 0, 16)
-			start := min(pl.Height, pl.Height+uint32(pl.Depth))
-			end := max(pl.Height, pl.Height+uint32(pl.Depth))
+			start := min(height, height+depth)
+			end := max(height, height+depth)
 			for i := start; i != end; i++ {
-				if i == pl.Height {
+				// log.Infof("%v %v", i, end)
+				if i == height {
 					continue
 				}
 				f.kssMtx.Lock()
 				for _, ks := range f.keystones {
-					if ks.L1BlockNumber == i {
+					if int64(ks.L1BlockNumber) == i {
 						kssList = append(kssList, ks)
 					}
 				}

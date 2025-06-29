@@ -55,7 +55,7 @@ func TestBFG(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
-	// bfgCfg.LogLevel = "bfg=Info; mock:Trace"
+	bfgCfg.LogLevel = "bfg=TRACE; mock=Trace"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
 		t.Fatal(err)

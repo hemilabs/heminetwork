@@ -46,7 +46,7 @@ const (
 
 	// finality short circuit constants
 	ultraFinalityDepth = 20
-	maxSearchDepth     = 100 // PNOOMA
+	minSearchDepth     = -100 // PNOOMA
 
 	defaultOpgethURL = "http://127.0.0.1:9999/v1/ws"
 	defaultNetwork   = "mainnet"
@@ -108,7 +108,7 @@ type Server struct {
 	promCollectors  []prometheus.Collector
 	promPollVerbose bool // set to true to print stats during poll
 	isRunning       bool
-	connected       bool // connected to opgeth XXX is this comment correct?
+	connected       bool // connected to opgeth
 	cmdsProcessed   prometheus.Counter
 }
 
@@ -243,7 +243,7 @@ func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Ha
 	return resp, nil
 }
 
-func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone, tip uint32) (*hemi.L2KeystoneAbrev, error) {
+func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone, tip uint32) (*bfgapi.L2KeystoneBitcoinFinalityResponse, error) {
 	// Depth must be > 0 but height + depth > 0
 	// so min height is 2 and "min" depth is -1
 	if tip-ultraFinalityDepth <= 0 {
@@ -251,10 +251,13 @@ func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone,
 	}
 
 	height := tip - ultraFinalityDepth + 1
-	depth := max(maxSearchDepth, 1-height)
+
+	// if height < 100, depth is 1 - height
+	// else it is minSearchDepth
+	depth := max(minSearchDepth, 1-int(height))
 
 	// Find keystones at height beyond ultra finality
-	bl, err := s.g.KeystonesByHeight(ctx, height, int(depth))
+	bl, err := s.g.KeystonesByHeight(ctx, height, depth)
 	if err != nil {
 		// If error on the gozer side, return the error
 		return nil, err
@@ -283,9 +286,34 @@ func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone,
 
 			rk := hemi.L2KeystoneAbbreviate(valid.L2Keystones[0])
 			// Sanity check if op-geth returned the correct keystone.
-			if ks.Hash().IsEqual(rk.Hash()) {
-				return rk, nil
+			if !ks.Hash().IsEqual(rk.Hash()) {
+				return nil, fmt.Errorf("opgeth mismatch keystone sent %v and retrieved %v",
+					ks.Hash().String(), rk.Hash().String())
 			}
+
+			// Get block info
+			res := s.g.BlocksByL2AbrevHashes(ctx, []chainhash.Hash{*rk.Hash()})
+			if res.Error != nil {
+				return nil, fmt.Errorf("retrieve block info: %w", err)
+			}
+
+			if len(res.L2KeystoneBlocks) < 1 {
+				return nil, errors.New("no block info retrieved")
+			}
+
+			info := res.L2KeystoneBlocks[0]
+			if info.Error != nil {
+				return nil, info.Error
+			}
+
+			fin, err := calculateFinality(uint(tip), info.L2KeystoneBlockHeight,
+				info.L2KeystoneBlockHash)
+			if err != nil {
+				return nil, err
+			}
+
+			fin.L2Keystone = *kss
+			return fin, err
 		}
 	}
 	return nil, nil
@@ -329,6 +357,32 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 
+		// During our first loop, after we retrieve the BTC Tip from our
+		// gozer call, check for possible finality short circuit.
+		if firstLoop && fin != nil {
+			firstLoop = false
+
+			btcTip, err := s.g.BtcHeight(r.Context())
+			if err != nil {
+				log.Errorf("retrieve btc tip: %v", err)
+				BadRequestF(w, "internal error")
+				return
+			}
+			scf, err := s.shortCircuitFinality(r.Context(), &fin.L2Keystone, uint32(btcTip))
+			if err != nil {
+				log.Errorf("short circuit: %v", err)
+				BadRequestF(w, "internal error")
+				return
+			}
+
+			if scf != nil {
+				if err := json.NewEncoder(w).Encode(scf); err != nil {
+					log.Errorf("encode: %v", err)
+				}
+				return
+			}
+		}
+
 		// Generate abbreviated hashes from received keystones
 		abrevKeystones := make([]chainhash.Hash, 0, len(resp.L2Keystones))
 		km := make(map[chainhash.Hash]hemi.L2Keystone, len(resp.L2Keystones))
@@ -345,33 +399,6 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		if aks.Error != nil {
 			BadRequestF(w, "internal error")
 			return
-		}
-
-		// During our first loop, after we retrieve the BTC Tip from our
-		// gozer call, check for possible finality short circuit.
-		if firstLoop && fin != nil {
-			firstLoop = false
-			rk, err := s.shortCircuitFinality(r.Context(), &fin.L2Keystone, uint32(aks.BtcTipBlockHeight))
-			if err != nil {
-				BadRequestF(w, "internal error")
-				return
-			}
-
-			if rk != nil {
-				sf := true
-				// XXX can we leave block hash and block height nil
-				// or should we query gozer again for that info?
-				shortCircuitFin := &bfgapi.L2KeystoneBitcoinFinalityResponse{
-					L2Keystone:             fin.L2Keystone,
-					EffectiveConfirmations: 20,
-					SuperFinality:          &sf,
-				}
-
-				if err := json.NewEncoder(w).Encode(shortCircuitFin); err != nil {
-					log.Errorf("encode: %v", err)
-				}
-				return
-			}
 		}
 
 		var hh *chainhash.Hash
