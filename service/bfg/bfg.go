@@ -45,8 +45,9 @@ const (
 	defaultKeystoneCount = 10
 
 	// finality short circuit constants
-	ultraFinalityDepth = 20
-	minSearchDepth     = -100 // PNOOMA
+	ultraFinalityDepth  = 20
+	minSearchDepth      = -100 // PNOOMA
+	maxDescendantChecks = 1000 // PNOOMA
 
 	defaultOpgethURL = "http://127.0.0.1:9999/v1/ws"
 	defaultNetwork   = "mainnet"
@@ -332,6 +333,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 
 	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
 	firstLoop := true // attempt short circuit during first loop
+	totalDescendants := 0
 	for {
 		// Call opgeth to retrieve keystones
 		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
@@ -344,6 +346,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			NotFound(w, "unknown keystone: %v", resp.Error)
 			return
 		}
+		totalDescendants += defaultKeystoneCount
 
 		// from Clayton: the finality must only ever be for the l2keystone
 		// that we're querying for, it may inherit effective height from another
@@ -443,9 +446,10 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// If the last used hash for descendant queries is the
 		// highest hash, then we can assume there are no more
 		// descendants and we can return the current best finality.
-		// If keystone or descendant has superfinality then
+		// If keystone or descendant has ultrafinality then
 		// we no longer have to keep iterating.
-		if hh == nil || hash.IsEqual(hh) || *fin.SuperFinality {
+		if hh == nil || hash.IsEqual(hh) || totalDescendants >= maxDescendantChecks ||
+			fin.EffectiveConfirmations >= ultraFinalityDepth {
 			break
 		}
 		hash = hh
