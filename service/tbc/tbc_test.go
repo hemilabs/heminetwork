@@ -42,6 +42,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 const (
@@ -124,12 +125,122 @@ func countKeystones(b *btcutil.Block) int {
 	return keystonesFound
 }
 
-func TestDbUpgradePipeline(t *testing.T) {
+func TestDbUpgradeFull(t *testing.T) {
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	err := testutil.Extract("testdata/testdatabase.tar.gz", home)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          true,
+		HemiIndex:            true,
+		LevelDBHome:          home,
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
+		Network:                 "upgradetest",
+		PrometheusListenAddress: "",
+		ListenAddress:           "",
+		PeersWanted:             0,
+		MempoolEnabled:          false,
+		Seeds:                   []string{"127.0.0.1:18444"},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// check if db upgrade finished before checking for bh
+	for !s.Running() {
+	}
+
+	_, err = s.BlockHeadersByHeight(ctx, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Pull version from DB
+	version, err := s.db.Version(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 4 {
+		t.Fatalf("expected version 4, got %v", version)
+	}
+
+	// version 2 checks
+
+	// Copied from level package because this test can't be run there.
+	utxoIndexHashKey := []byte("utxoindexhash")
+	txIndexHashKey := []byte("txindexhash")
+	keystoneIndexHashKey := []byte("keystoneindexhash")
+	// Make sure db no longer has index keys
+	_, err = s.db.MetadataGet(ctx, utxoIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving utxo index hash")
+	}
+	_, err = s.db.MetadataGet(ctx, txIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving tx index hash")
+	}
+	_, err = s.db.MetadataGet(ctx, keystoneIndexHashKey)
+	if err == nil {
+		t.Fatal("expected failure retrieving keystone index hash")
+	}
+
+	// Make sure we get the expected indexkeys from db
+	hash := s2h("0000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
+	utxobh, err := s.db.BlockHeaderByUtxoIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !utxobh.Hash.IsEqual(&hash) {
+		t.Fatal("unexpected utxo hash")
+	}
+
+	txbh, err := s.db.BlockHeaderByTxIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !txbh.Hash.IsEqual(&hash) {
+		t.Fatal("unexpected tx hash")
+	}
+
+	keystonebh, err := s.db.BlockHeaderByKeystoneIndex(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !keystonebh.Hash.IsEqual(&hash) {
+		t.Fatal("unexpected keystone hash")
+	}
+}
+
+func TestDbUpgradeV3(t *testing.T) {
 	home := t.TempDir()
 	network := "upgradetest"
 	t.Logf("temp: %v", home)
 
-	err := extract("testdata/testdatabase.tar.gz", home)
+	err := testutil.Extract("testdata/testdatabase.tar.gz", home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +297,7 @@ func TestDbUpgradePipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = extract("testdata/testdatabase.tar.gz", home)
+	err = testutil.Extract("testdata/testdatabase.tar.gz", home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,16 +387,16 @@ func cmpDB(a, b *leveldb.DB) (int, error) {
 	return records, nil
 }
 
-func TestDbUpgrade(t *testing.T) {
+func TestDbUpgradeV4(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	err := extract("testdata/testdatabase.tar.gz", home)
+	err := testutil.Extract("testdata/testdatabasev3.tar.gz", home)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -295,7 +406,7 @@ func TestDbUpgrade(t *testing.T) {
 		AutoIndex:            false,
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
-		BlockSanity:          true,
+		BlockSanity:          false,
 		HemiIndex:            true,
 		LevelDBHome:          home,
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
@@ -325,64 +436,47 @@ func TestDbUpgrade(t *testing.T) {
 	for !s.Running() {
 	}
 
-	_, err = s.BlockHeadersByHeight(ctx, 9)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Pull version from DB
 	version, err := s.db.Version(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 {
-		t.Fatalf("expected version 3, got %v", version)
+	if version != 4 {
+		t.Fatalf("expected version 4, got %v", version)
 	}
 
-	// version 2 checks
-
-	// Copied from level package because this test can't be run there.
-	utxoIndexHashKey := []byte("utxoindexhash")
-	txIndexHashKey := []byte("txindexhash")
-	keystoneIndexHashKey := []byte("keystoneindexhash")
-	// Make sure db no longer has index keys
-	_, err = s.db.MetadataGet(ctx, utxoIndexHashKey)
-	if err == nil {
-		t.Fatal("expected failure retrieving utxo index hash")
-	}
-	_, err = s.db.MetadataGet(ctx, txIndexHashKey)
-	if err == nil {
-		t.Fatal("expected failure retrieving tx index hash")
-	}
-	_, err = s.db.MetadataGet(ctx, keystoneIndexHashKey)
-	if err == nil {
-		t.Fatal("expected failure retrieving keystone index hash")
+	keystoneHashes := []string{
+		"0d9a0eee5350f1da4dc76b00f999cb39cbff4e85349ce9cccb8175ac93b30427", // kss1 @ height 11
+		"1bedcd9d9a2443bbf5377e1bc1337af951646cac6b7dbbc5556d5b1a22ebbbfd", // kss2 @ height 12
+		"4465407344e588e4849c16263c005ce421336297d434c4e63dc728fda1ba56db", // kss3 @ height 12
 	}
 
-	// Make sure we get the expected indexkeys from db
-	hash := s2h("0000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
-	utxobh, err := s.db.BlockHeaderByUtxoIndex(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !utxobh.Hash.IsEqual(&hash) {
-		t.Fatal("unexpected utxo hash")
-	}
+	for _, kh := range keystoneHashes {
+		hash, err := chainhash.NewHashFromStr(kh)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	txbh, err := s.db.BlockHeaderByTxIndex(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !txbh.Hash.IsEqual(&hash) {
-		t.Fatal("unexpected tx hash")
-	}
+		ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *hash)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	keystonebh, err := s.db.BlockHeaderByKeystoneIndex(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !keystonebh.Hash.IsEqual(&hash) {
-		t.Fatal("unexpected keystone hash")
+		aks, err := s.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var found bool
+		for _, ksAtHeight := range aks {
+			if diff := deep.Equal(ksAtHeight, *ks); len(diff) == 0 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("keystone not found at height %d", ks.BlockHeight)
+		}
 	}
 }
 
@@ -407,18 +501,20 @@ func TestKeystonesInBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	b1.SetHeight(3802508)
 	b2, err := btcutil.NewBlockFromBytes(rb2)
 	if err != nil {
 		t.Fatal(err)
 	}
+	b2.SetHeight(3802509)
 
 	// Run through processKeystones
 	kssCache1 := make(map[chainhash.Hash]tbcd.Keystone, 10000)
-	err = processKeystones(b1.Hash(), b1.Transactions(), 1, kssCache1)
+	err = processKeystones(b1, 1, kssCache1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = processKeystones(b2.Hash(), b2.Transactions(), 1, kssCache1)
+	err = processKeystones(b2, 1, kssCache1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,11 +540,11 @@ func TestKeystonesInBlock(t *testing.T) {
 
 	// Pretend unwind
 	kssCache2 := make(map[chainhash.Hash]tbcd.Keystone, 10000)
-	err = processKeystones(b2.Hash(), b2.Transactions(), -1, kssCache2)
+	err = processKeystones(b2, -1, kssCache2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = processKeystones(b1.Hash(), b1.Transactions(), -1, kssCache2)
+	err = processKeystones(b1, -1, kssCache2)
 	if err != nil {
 		t.Fatal(err)
 	}

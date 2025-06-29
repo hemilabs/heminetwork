@@ -1735,6 +1735,19 @@ func (s *Server) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil
 	return s.db.BlockByHash(ctx, hash)
 }
 
+// KeystonesByHeight returns the first occurance found of keystones
+// at a given height + range. The given height is excluded.
+func (s *Server) KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]tbcd.Keystone, error) {
+	log.Tracef("KeystonesByHeight")
+	defer log.Tracef("KeystonesByHeight exit")
+
+	if s.cfg.ExternalHeaderMode {
+		return nil, errors.New("cannot call KeystonesByHeight on TBC running in External Header mode")
+	}
+
+	return s.db.KeystonesByHeight(ctx, height, depth)
+}
+
 // XXX should we return a form of tbcd.BlockHeader which contains all info? and
 // note that the return parameters here are reversed from BlockHeaderBest call.
 func (s *Server) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*wire.BlockHeader, uint64, error) {

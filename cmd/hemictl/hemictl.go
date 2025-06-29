@@ -288,6 +288,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tdeletemetadata")
 		fmt.Println("\tdumpmetadata")
 		fmt.Println("\tdumpoutputs <prefix>")
+		fmt.Println("\tkeystonesbyheight [height] [depth]")
 		fmt.Println("\tmetadataget [key]")
 		fmt.Println("\tmetadatadel [key]")
 		fmt.Println("\tmetadataput [key] [value]")
@@ -755,6 +756,34 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(value)
 
+	case "keystonesbyheight":
+		height := args["height"]
+		if height == "" {
+			return errors.New("height: must be set")
+		}
+
+		h, err := strconv.ParseUint(height, 10, 32)
+		if err != nil {
+			return fmt.Errorf("parse height: %w", err)
+		}
+
+		depth := args["depth"]
+		if depth == "" {
+			return errors.New("depth: must be set")
+		}
+
+		d, err := strconv.ParseInt(depth, 10, 0)
+		if err != nil {
+			return fmt.Errorf("parse depth: %w", err)
+		}
+
+		kssList, err := s.KeystonesByHeight(ctx, uint32(h), int(d))
+		if err != nil {
+			return fmt.Errorf("retrieve keystones: %w", err)
+		}
+
+		spew.Dump(kssList)
+
 	case "blockheaderbyutxoindex":
 		bh, err := s.BlockHeaderByUtxoIndex(ctx)
 		if err != nil {
@@ -774,6 +803,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return err
 		}
+		spew.Config.DisableMethods = true
 		spew.Dump(bh)
 
 	case "blockkeystonebyl2keystoneabrevhash":

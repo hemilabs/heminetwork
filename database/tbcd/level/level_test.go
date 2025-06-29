@@ -7,6 +7,7 @@ package level
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"maps"
@@ -18,6 +19,7 @@ import (
 	"github.com/go-test/deep"
 
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/database/level"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/testutil"
@@ -124,13 +126,14 @@ func TestMD(t *testing.T) {
 	}
 }
 
-func makeKssMap(kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
+func makeKssMap(from uint32, kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
 	kssMap := make(map[chainhash.Hash]tbcd.Keystone)
-	for _, l2Keystone := range kssList {
+	for i, l2Keystone := range kssList {
 		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
 			BlockHash:           chainhash.Hash(testutil.FillBytes(blockHashSeed, 32)),
 			AbbreviatedKeystone: abrvKs,
+			BlockHeight:         from + uint32(i),
 		}
 	}
 	return kssMap
@@ -168,7 +171,7 @@ func TestKssEncoding(t *testing.T) {
 	}
 	altAbrevKeystone := hemi.L2KeystoneAbbreviate(altKeystone).Serialize()
 
-	kssMap := makeKssMap(keystones, "blockhash")
+	kssMap := makeKssMap(0, keystones, "blockhash")
 	for _, ks := range kssMap {
 		encodedKs := encodeKeystoneToSlice(ks)
 		decodedKs := decodeKeystone(encodedKs)
@@ -180,7 +183,7 @@ func TestKssEncoding(t *testing.T) {
 			t.Fatalf("abrv Ks diff: %s", diff)
 		}
 	}
-	diffKssMap := makeKssMap(keystones, "diffblockhash")
+	diffKssMap := makeKssMap(0, keystones, "diffblockhash")
 	for key, ks := range diffKssMap {
 		dks := kssMap[key]
 		encodedKs := encodeKeystoneToSlice(dks)
@@ -193,6 +196,123 @@ func TestKssEncoding(t *testing.T) {
 		if diff := deep.Equal(decodedKs.AbbreviatedKeystone, altAbrevKeystone); len(diff) == 0 {
 			t.Fatalf("abrv Ks diff: %v", diff)
 		}
+	}
+}
+
+func TestHeightHashIndexing(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	const (
+		blockNum    = 100
+		kssPerBlock = 5
+	)
+
+	ks := hemi.L2Keystone{
+		Version:            1,
+		ParentEPHash:       testutil.FillBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("v1prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("v1stateroot", 32),
+		EPHash:             testutil.FillBytes("v1ephash", 32),
+	}
+	l2Block := 25
+	kssMap := make(map[chainhash.Hash]tbcd.Keystone, 0)
+	for i := range blockNum {
+		ks.L1BlockNumber = uint32(i + 1)
+		for range kssPerBlock {
+			ks.L2BlockNumber = uint32(l2Block)
+			abrvKs := hemi.L2KeystoneAbbreviate(ks).Serialize()
+			kssMap[*hemi.L2KeystoneAbbreviate(ks).Hash()] = tbcd.Keystone{
+				BlockHash:           chainhash.Hash(testutil.FillBytes("blockhash", 32)),
+				AbbreviatedKeystone: abrvKs,
+				BlockHeight:         uint32(i + 1),
+			}
+			l2Block += 25
+		}
+	}
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	cfg, err := NewConfig("testnet3", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	blockhash := chainhash.Hash{1, 3, 3, 7}
+	if err := db.BlockKeystoneUpdate(ctx, 1, kssMap, blockhash); err != nil {
+		t.Fatal(err)
+	}
+
+	// check each keystone individually
+	for hash, ks := range kssMap {
+		ksr, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
+		if err != nil {
+			t.Fatalf("keystone not in db: %v", err)
+		}
+
+		if diff := deep.Equal(*ksr, ks); len(diff) > 0 {
+			t.Fatalf("unexpected keystone diff: %s", diff)
+		}
+	}
+
+	// check each height
+	for n := range blockNum {
+		kssList, err := db.KeystonesByHeight(ctx, uint32(n), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if len(kssList) != kssPerBlock {
+			t.Fatalf("unexpected number of keystones: %d", len(kssList))
+		}
+
+		for _, k := range kssList {
+			if k.BlockHeight != uint32(n+1) {
+				t.Fatalf("keystone height mismatch %v, expected %v", k.BlockHeight, n+1)
+			}
+		}
+	}
+
+	// check all heights with positive depth
+	kssList, err := db.KeystonesByHeight(ctx, 0, blockNum)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(kssList) != kssPerBlock*blockNum {
+		t.Fatalf("unexpected number of keystones: %d", len(kssList))
+	}
+
+	// check all heights with negative depth
+	kssList, err = db.KeystonesByHeight(ctx, blockNum+1, -blockNum)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(kssList) != kssPerBlock*blockNum {
+		t.Fatalf("unexpected number of keystones: %d", len(kssList))
+	}
+
+	// expected errors
+	_, err = db.KeystonesByHeight(ctx, 1, 0)
+	if err == nil {
+		t.Fatalf("expected 'depth must not be 0' error")
+	}
+
+	_, err = db.KeystonesByHeight(ctx, 1, -2)
+	if err == nil {
+		t.Fatalf("expected 'underflow' error")
 	}
 }
 
@@ -253,19 +373,19 @@ func TestKeystoneUpdate(t *testing.T) {
 		{
 			name:          "invalidDirection",
 			direction:     []int{0},
-			expectedOutDB: makeKssMap(kssList[:], "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList[:], "blockhash"),
 			expectedError: fmt.Errorf("invalid direction: %v", 0),
 		},
 		{
 			name:          "nilMap",
 			direction:     []int{-1, 1},
-			expectedOutDB: makeKssMap(kssList, "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:          "emptyMap",
 			direction:     []int{-1, 1},
-			kssMap:        makeKssMap(nil, "blockhash"),
-			expectedOutDB: makeKssMap(kssList, "blockhash"),
+			kssMap:        makeKssMap(5, nil, "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList, "blockhash"),
 		},
 
 		{
@@ -273,50 +393,50 @@ func TestKeystoneUpdate(t *testing.T) {
 			direction:      []int{1},
 			expectedError:  nil,
 			preInsertValid: true,
-			kssMap:         makeKssMap(kssList[:2], "blockhash"),
-			expectedInDB:   makeKssMap(kssList[:2], "blockhash"),
-			expectedOutDB:  makeKssMap(kssList[2:], "blockhash"),
+			kssMap:         makeKssMap(5, kssList[:2], "blockhash"),
+			expectedInDB:   makeKssMap(5, kssList[:2], "blockhash"),
+			expectedOutDB:  makeKssMap(5, kssList[2:], "blockhash"),
 		},
 
 		{
 			name:          "invalidRemove",
 			direction:     []int{-1},
-			kssMap:        makeKssMap(kssList[2:], "blockhash"),
-			expectedOutDB: makeKssMap(kssList, "blockhash"),
+			kssMap:        makeKssMap(5, kssList[2:], "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:          "validInsert",
 			direction:     []int{1},
-			kssMap:        makeKssMap(kssList[:2], "blockhash"),
-			expectedInDB:  makeKssMap(kssList[:2], "blockhash"),
-			expectedOutDB: makeKssMap(kssList[2:], "blockhash"),
+			kssMap:        makeKssMap(5, kssList[:2], "blockhash"),
+			expectedInDB:  makeKssMap(5, kssList[:2], "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList[2:], "blockhash"),
 		},
 		{
 			name:          "validRemove",
 			direction:     []int{1, -1},
-			kssMap:        makeKssMap(kssList[2:], "blockhash"),
-			expectedOutDB: makeKssMap(kssList, "blockhash"),
+			kssMap:        makeKssMap(5, kssList[2:], "blockhash"),
+			expectedOutDB: makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:           "mixedRemove",
 			direction:      []int{-1},
 			preInsertValid: true,
-			kssMap:         makeKssMap(kssList, "blockhash"),
-			expectedOutDB:  makeKssMap(kssList, "blockhash"),
+			kssMap:         makeKssMap(5, kssList, "blockhash"),
+			expectedOutDB:  makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:           "mixedInsert",
 			direction:      []int{1},
 			preInsertValid: true,
-			kssMap:         makeKssMap(kssList, "blockhash"),
-			expectedInDB:   makeKssMap(kssList, "blockhash"),
+			kssMap:         makeKssMap(5, kssList, "blockhash"),
+			expectedInDB:   makeKssMap(5, kssList, "blockhash"),
 		},
 		{
 			name:           "invalidBlockhashRemove",
 			direction:      []int{-1},
 			preInsertValid: true,
-			kssMap:         makeKssMap(kssList, "fakeblockhash"),
-			expectedInDB:   makeKssMap(kssList[:2], "blockhash"),
+			kssMap:         makeKssMap(5, kssList, "fakeblockhash"),
+			expectedInDB:   makeKssMap(5, kssList[:2], "blockhash"),
 		},
 	}
 
@@ -342,7 +462,7 @@ func TestKeystoneUpdate(t *testing.T) {
 			}()
 
 			if tti.preInsertValid {
-				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(kssList[:2], "blockhash"), blockhash); err != nil {
+				if err := db.BlockKeystoneUpdate(ctx, 1, makeKssMap(5, kssList[:2], "blockhash"), blockhash); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -354,20 +474,45 @@ func TestKeystoneUpdate(t *testing.T) {
 				}
 			}
 
-			for v := range tti.expectedInDB {
+			for v, ks := range tti.expectedInDB {
 				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
 				if err != nil {
 					t.Fatalf("keystone not in db: %v", err)
 				}
+
+				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if len(kssList) != 1 {
+					t.Fatalf("unexpected number of keystons: %d", len(kssList))
+				}
+
+				if diff := deep.Equal(ks, kssList[0]); len(diff) > 0 {
+					t.Fatalf("unexpected keystone diff: %s", diff)
+				}
 			}
 
-			for k, v := range tti.expectedOutDB {
-				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, k)
+			for v, ks := range tti.expectedOutDB {
+				_, err := db.BlockKeystoneByL2KeystoneAbrevHash(ctx, v)
 				if err == nil {
-					t.Fatalf("keystone in db: %v", spew.Sdump(v))
+					t.Fatalf("keystone in db: %v", spew.Sdump(ks))
 				} else {
 					if !errors.Is(err, database.ErrNotFound) {
 						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+					}
+				}
+				kssList, err := db.KeystonesByHeight(ctx, ks.BlockHeight-1, 1)
+				if err != nil {
+					if !errors.Is(err, database.ErrNotFound) {
+						t.Fatalf("expected '%v', got '%v'", database.ErrNotFound, err)
+					}
+				}
+
+				for _, k := range kssList {
+					if diff := deep.Equal(ks, k); len(diff) == 0 {
+						t.Fatalf("keystone in heighthash db: %v", spew.Sdump(ks))
 					}
 				}
 			}
@@ -524,4 +669,172 @@ func TestKeystoneDBCache(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestHeightHashEncoding(t *testing.T) {
+	hks := hemi.L2Keystone{
+		Version:            1,
+		L1BlockNumber:      1000,
+		L2BlockNumber:      100,
+		ParentEPHash:       testutil.FillBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("v1prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("v1stateroot", 32),
+		EPHash:             testutil.FillBytes("v1ephash", 32),
+	}
+	hash := *hemi.L2KeystoneAbbreviate(hks).Hash()
+
+	// encode keystone and height
+	e := encodeKeystoneHeightHash(hks.L1BlockNumber, hash)
+
+	if e[0] != 'h' {
+		t.Fatal("not a height hash index")
+	}
+
+	var h [4]byte
+	binary.BigEndian.PutUint32(h[:], hks.L1BlockNumber)
+
+	// test encoded height
+	if !bytes.Equal(e[1:1+4], h[:]) {
+		t.Fatalf("encoded height != kss height (%v != %v)", e[1:1+4], h)
+	}
+
+	ehash, err := chainhash.NewHash(e[5 : 5+32])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// test encoded hash
+	if !ehash.IsEqual(&hash) {
+		t.Fatalf("encoded hash != kss hash (%v != %v)", ehash, hash)
+	}
+
+	// decode index
+	uheight, uhash := decodeKeystoneHeightHash(e[:])
+
+	// test decoded height
+	if uheight != hks.L1BlockNumber {
+		t.Fatalf("decoded height != kss height (%d != %d)", uheight, hks.L1BlockNumber)
+	}
+
+	// test decoded hash
+	if !uhash.IsEqual(&hash) {
+		t.Fatalf("decoded hash != kss hash (%v != %v)", uhash, hash)
+	}
+}
+
+func TestDbUpgradeV4Errors(t *testing.T) {
+	type testTableItem struct {
+		name  string
+		key   []byte
+		value []byte
+		pass  bool
+	}
+
+	ks := hemi.L2Keystone{
+		Version:            1,
+		ParentEPHash:       testutil.FillBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillBytes("v1prevkeystoneephash", 32),
+		StateRoot:          testutil.FillBytes("v1stateroot", 32),
+		EPHash:             testutil.FillBytes("v1ephash", 32),
+	}
+	abrevKss := hemi.L2KeystoneAbbreviate(ks)
+
+	fakeHash, err := chainhash.NewHashFromStr("1000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	realHash, err := chainhash.NewHashFromStr("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	invalidBlockKss := tbcd.Keystone{
+		BlockHash:           *fakeHash,
+		BlockHeight:         10,
+		AbbreviatedKeystone: abrevKss.Serialize(),
+	}
+	validKss := tbcd.Keystone{
+		BlockHash:           *realHash,
+		BlockHeight:         10,
+		AbbreviatedKeystone: abrevKss.Serialize(),
+	}
+
+	testTable := []testTableItem{
+		{
+			name:  "invalid blockheader",
+			key:   fakeHash[:],
+			value: encodeKeystoneToSliceV1(invalidBlockKss),
+		},
+		{
+			name:  "invalid keystone hash",
+			key:   realHash[:15],
+			value: encodeKeystoneToSliceV1(validKss),
+		},
+		{
+			name: "no errors",
+			pass: true,
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			home := t.TempDir()
+			network := "upgradetest"
+			t.Logf("temp: %v", home)
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer func() {
+				cancel()
+			}()
+
+			cfg, err := NewConfig(network, home, "0mb", "0mb")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			cfg.SetUpgradeOpen(true)
+			dbTemp, err := New(ctx, cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := dbTemp.insertTable(level.KeystonesDB, tti.key, tti.value); err != nil {
+				panic(err)
+			}
+
+			// Write new version
+			v := make([]byte, 8)
+			binary.BigEndian.PutUint64(v, 1)
+			if err := dbTemp.MetadataPut(ctx, versionKey, v); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := dbTemp.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			cfg.SetUpgradeOpen(false)
+			// upgrade
+			_, err = New(ctx, cfg)
+			if !tti.pass && err == nil {
+				t.Fatal("expected error")
+			}
+			if tti.pass && err != nil {
+				t.Fatal(err)
+			}
+
+			t.Log(err)
+		})
+	}
+}
+
+func encodeKeystoneV1(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte) {
+	copy(eks[0:32], ks.BlockHash[:])
+	copy(eks[32:], ks.AbbreviatedKeystone[:])
+	return
+}
+
+func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
+	eks := encodeKeystoneV1(ks)
+	return eks[:]
 }

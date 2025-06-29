@@ -199,6 +199,13 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdKeystonesByHeightRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.KeystonesByHeightRequest)
+				return s.handleKeystonesByHeightRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -638,6 +645,44 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 
 	hash := b.Header.BlockHash()
 	return &tbcapi.BlockInsertRawResponse{BlockHash: &hash}, nil
+}
+
+func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi.KeystonesByHeightRequest) (any, error) {
+	log.Tracef("handleKeystonesByHeightRequest")
+	defer log.Tracef("handleKeystonesByHeightRequest exit")
+
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.KeystonesByHeightResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	kssList, err := s.KeystonesByHeight(ctx, req.Height, req.Depth)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.KeystonesByHeightResponse{
+				BTCTipHeight: bhb.Height,
+				Error:        protocol.RequestErrorf("could not find keystones in range"),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.KeystonesByHeightResponse{
+			BTCTipHeight: bhb.Height,
+			Error:        e.ProtocolError(),
+		}, e
+	}
+
+	aks := make([]*hemi.L2KeystoneAbrev, len(kssList))
+	for i, k := range kssList {
+		aks[i] = hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(k.AbbreviatedKeystone))
+	}
+
+	return &tbcapi.KeystonesByHeightResponse{
+		L2KeystoneAbrevs: aks,
+		BTCTipHeight:     bhb.Height,
+	}, nil
 }
 
 func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest) (any, error) {

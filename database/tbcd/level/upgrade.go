@@ -13,6 +13,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/dustin/go-humanize"
 	"github.com/mitchellh/go-homedir"
 	cp "github.com/otiai10/copy"
@@ -21,6 +22,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/database/level"
+	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/rawdb"
 )
 
@@ -33,6 +35,8 @@ var (
 	modeMove = true
 
 	modeFast = true // try to run fast when enough disk space is available
+
+	keystoneSizeV3 = chainhash.HashSize + hemi.L2KeystoneAbrevSize
 )
 
 func SetMode(move bool) {
@@ -364,14 +368,14 @@ func (l *ldb) v3(ctx context.Context) error {
 		}
 	}
 
-	if !l.cfg.nonInteractive {
-		log.Infof("This operation will take a long time. " +
-			"Press ctrl-c within 30 seconds to abort upgrade!")
-		select {
-		case <-ctx.Done():
-		case <-time.Tick(30 * time.Second):
-		}
-	}
+	//if !l.cfg.nonInteractive {
+	//	log.Infof("This operation will take a long time. " +
+	//		"Press ctrl-c within 30 seconds to abort upgrade!")
+	//	select {
+	//	case <-ctx.Done():
+	//	case <-time.Tick(30 * time.Second):
+	//	}
+	//}
 
 	// sort database names
 	keys := make([]string, 0, len(l.pool))
@@ -383,6 +387,7 @@ func (l *ldb) v3(ctx context.Context) error {
 	// copy config and create database destination.
 	var err error
 	dcfg := *l.cfg
+	dcfg.upgradeOpen = true // prevent re-entrant upgrades
 	dcfg.Home, err = homedir.Expand(dcfg.Home + ".v3")
 	if err != nil {
 		return fmt.Errorf("destination expand: %w", err)
@@ -545,4 +550,66 @@ func (l *ldb) v3(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// v4 upgrade the database from v3 to v4.
+// Changes:
+// Add heighthash (L2 height - Keystone Hash) to keystone database.
+func (l *ldb) v4(ctx context.Context) error {
+	log.Tracef("v4")
+	defer log.Tracef("v4 exit")
+
+	log.Infof("Upgrading database from v3 to v4")
+
+	// Index all keystones to H[height][hash] format.
+	bhs := l.pool[level.BlockHeadersDB]
+	ksdb := l.pool[level.KeystonesDB]
+	i := ksdb.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
+	defer func() { i.Release() }()
+	var records int
+	for records = 0; i.Next(); records++ {
+		key := i.Key()
+		value := i.Value()
+		if len(value) != keystoneSize {
+			if len(value) == keystoneSizeV3 {
+				// Keystone without height encoded.
+				var u [keystoneSize]byte
+				copy(u[4:], value[:])
+				value = u[:]
+			} else {
+				// Not a keystone.
+				continue
+			}
+		}
+		ks := decodeKeystone(value)
+		ebh, err := bhs.Get(ks.BlockHash[:], nil)
+		if err != nil {
+			return fmt.Errorf("blockheader: %w", err)
+		}
+		bh := decodeBlockHeader(ebh)
+		ksHash, err := chainhash.NewHash(key)
+		if err != nil {
+			return fmt.Errorf("hash: %w", err)
+		}
+		ehh := encodeKeystoneHeightHash(uint32(bh.Height), *ksHash)
+		err = ksdb.Put(ehh[:], nil, nil)
+		if err != nil {
+			return fmt.Errorf("put: %w", err)
+		}
+		ks.BlockHeight = uint32(bh.Height)
+		nv := encodeKeystone(ks)
+		err = ksdb.Put(key[:], nv[:], nil)
+		if err != nil {
+			return fmt.Errorf("put: %w", err)
+		}
+	}
+	if i.Error() != nil {
+		return fmt.Errorf("keystones iterator: %w", i.Error())
+	}
+	log.Infof("records handled: %v", records)
+
+	// Write new version
+	v := make([]byte, 8)
+	binary.BigEndian.PutUint64(v, 4)
+	return l.MetadataPut(ctx, versionKey, v)
 }
