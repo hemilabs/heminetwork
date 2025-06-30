@@ -2,7 +2,9 @@ module github.com/hemilabs/heminetwork/e2e/monitor
 
 go 1.24.4
 
-replace github.com/hemilabs/heminetwork => ../../
+// this is an older commit on heminetwork to keep the api in sync with
+// op-geth. this won't affect application code, just testing
+replace github.com/hemilabs/heminetwork => github.com/hemilabs/heminetwork v1.6.4-0.20250611192936-d04c9f49d8e3
 
 replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250425175530-97b573b6339a
 

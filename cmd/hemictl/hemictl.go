@@ -46,6 +46,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/service/tbc/peer"
 	"github.com/hemilabs/heminetwork/version"
@@ -276,27 +277,29 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("ACTIONS:")
 		fmt.Println("\tbalancebyscripthash [hash]")
 		fmt.Println("\tblockbyhash [hash]")
-		fmt.Println("\tblockheaderbyhash [hash]")
+		fmt.Println("\tblockhashbytxid <txid>")
 		fmt.Println("\tblockheaderbest")
-		fmt.Println("\tblockheadersbyheight [height]")
-		fmt.Println("\tblocksbytxid [hash]")
-		fmt.Println("\tblocksmissing [count]")
-		fmt.Println("\tblockheaderbyutxoindex")
-		fmt.Println("\tblockheaderbytxindex")
+		fmt.Println("\tblockheaderbyhash [hash]")
 		fmt.Println("\tblockheaderbykeystoneindex")
+		fmt.Println("\tblockheaderbytxindex")
+		fmt.Println("\tblockheaderbyutxoindex")
+		fmt.Println("\tblockheadersbyheight [height]")
+		fmt.Println("\tblockintxindex <blkid>")
 		fmt.Println("\tblockkeystonebyl2keystoneabrevhash [abrevhash]")
-		fmt.Println("\tdeletemetadata")
+		fmt.Println("\tblocksmissing [count]")
 		fmt.Println("\tdumpmetadata")
 		fmt.Println("\tdumpoutputs <prefix>")
 		fmt.Println("\tkeystonesbyheight [height] [depth]")
-		fmt.Println("\tmetadataget [key]")
+		fmt.Println("\tfeesbyblockhash <hash>")
+		fmt.Println("\tkeystonesbyblockhash <blockhash>")
 		fmt.Println("\tmetadatadel [key]")
+		fmt.Println("\tmetadataget [key]")
 		fmt.Println("\tmetadataput [key] [value]")
 		fmt.Println("\tscripthashbyoutpoint [txid] [index]")
+		fmt.Println("\tscripthashfromaddress [network] <address>")
 		fmt.Println("\tspentoutputsbytxid <txid>")
+		fmt.Println("\tsyncindexerstohash <height> <count> <maxcache>")
 		fmt.Println("\ttxbyid <hash>")
-		fmt.Println("\ttxindex <height> <count> <maxcache>")
-		fmt.Println("\tutxoindex <height> <count> <maxcache>")
 		fmt.Println("\tutxosbyscripthash [hash] <count> <start>")
 		fmt.Println("\tutxosbyscripthashcount [hash]")
 		fmt.Println("\tversion")
@@ -347,6 +350,44 @@ func tbcdb(pctx context.Context, flags []string) error {
 
 	// commands
 	switch action {
+	// utility
+	case "scripthashfromaddress":
+		address := args["address"]
+		network := args["network"]
+		if address == "" {
+			return errors.New("hash or address: must be set")
+		}
+		if network == "" {
+			network = "mainnet"
+		}
+
+		var (
+			sh tbcd.ScriptHash
+			a  btcutil.Address
+		)
+		switch network {
+		case "testnet3":
+			a, err = btcutil.DecodeAddress(address, &chaincfg.TestNet3Params)
+			if err != nil {
+				return err
+			}
+		case "mainnet":
+			a, err = btcutil.DecodeAddress(address, &chaincfg.MainNetParams)
+			if err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("invalid network: %v", network)
+		}
+		h, err := txscript.PayToAddrScript(a)
+		if err != nil {
+			return err
+		}
+		sh = tbcd.NewScriptHashFromScript(h)
+		fmt.Printf("script     : %x\n", h)
+		fmt.Printf("script hash: %v\n", sh)
+
+	// actual commands
 	case "blockheaderbyhash":
 		hash := args["hash"]
 		if hash == "" {
@@ -419,30 +460,22 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(b)
 
-	case "feesbyheight":
-		height := args["height"]
-		if height == "" {
-			return errors.New("height: must be set")
+	case "feesbyblockhash":
+		hash := args["hash"]
+		if hash == "" {
+			return errors.New("hash: must be set")
 		}
-		h, err := strconv.ParseInt(height, 10, 64)
+		ch, err := chainhash.NewHashFromStr(hash)
 		if err != nil {
-			return fmt.Errorf("parse uint: %w", err)
+			return fmt.Errorf("chainhash: %w", err)
 		}
-		count := args["count"]
-		c, err := strconv.ParseInt(count, 10, 64)
-		if len(count) > 0 && err != nil {
-			return fmt.Errorf("parse uint: %w", err)
-		}
-		if c == 0 {
-			c = 1
-		}
-		bh, err := s.FeesAtHeight(ctx, h, c)
+		rf, err := s.FeesByBlockHash(ctx, *ch)
 		if err != nil {
-			return fmt.Errorf("fees by height: %w", err)
+			return fmt.Errorf("fees by hash: %w", err)
 		}
-		spew.Dump(bh)
+		spew.Dump(rf)
 
-	case "utxoindex":
+	case "syncindexerstohash":
 		hash := args["hash"]
 		if hash == "" {
 			return errors.New("must provide hash")
@@ -460,30 +493,8 @@ func tbcdb(pctx context.Context, flags []string) error {
 			}
 			cfg.MaxCachedTxs = int(mc)
 		}
-		err = s.UtxoIndexer(ctx, *eh)
+		err = s.SyncIndexersToHash(ctx, *eh)
 		if err != nil {
-			return fmt.Errorf("indexer: %w", err)
-		}
-
-	case "txindex":
-		hash := args["hash"]
-		if hash == "" {
-			return errors.New("must provide hash")
-		}
-		eh, err := chainhash.NewHashFromStr(hash)
-		if err != nil {
-			return fmt.Errorf("parse hash: %w", err)
-		}
-
-		maxCache := args["maxcache"]
-		if maxCache != "" {
-			mc, err := strconv.ParseInt(maxCache, 10, 0)
-			if err != nil {
-				return fmt.Errorf("maxCache: %w", err)
-			}
-			cfg.MaxCachedTxs = int(mc)
-		}
-		if err = s.TxIndexer(ctx, *eh); err != nil {
 			return fmt.Errorf("indexer: %w", err)
 		}
 
@@ -824,6 +835,29 @@ func tbcdb(pctx context.Context, flags []string) error {
 
 		spew.Dump(keystone)
 
+	case "keystonesbyblockhash":
+		blockhash := args["blockhash"]
+		if blockhash == "" {
+			return errors.New("blockhash: must be set")
+		}
+		ch, err := chainhash.NewHashFromStr(blockhash)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		block, err := s.BlockByHash(ctx, *ch)
+		if err != nil {
+			return err
+		}
+		keystones := tbc.BlockKeystones(block)
+		for k, keystone := range keystones {
+			aPoPTx, err := pop.ParseTransactionL2FromOpReturn(keystone.RawTx)
+			if err != nil {
+				return fmt.Errorf("tx %v:, %w", k, err)
+			}
+			fmt.Printf("keystone hash %2v: %v\n", k, aPoPTx.L2Keystone.Hash())
+		}
+
 	case "dumpmetadata":
 		return fmt.Errorf("fixme dumpmetadata")
 
@@ -831,26 +865,26 @@ func tbcdb(pctx context.Context, flags []string) error {
 		return fmt.Errorf("fixme dumpoutputs")
 		// s.DBClose()
 
-		//levelDBHome := "~/.tbcd" // XXX
-		//network := "testnet3"
-		//db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
-		//if err != nil {
+		// levelDBHome := "~/.tbcd" // XXX
+		// network := "testnet3"
+		// db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
+		// if err != nil {
 		//	return err
-		//}
-		//defer db.Close()
-		//prefix := args["prefix"]
-		//if len(prefix) > 1 {
+		// }
+		// defer db.Close()
+		// prefix := args["prefix"]
+		// if len(prefix) > 1 {
 		//	return errors.New("prefix must be one byte")
-		//} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
+		// } else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
 		//	return errors.New("prefix must be h or u")
-		//}
-		//pool := db.DB()
-		//outsDB := pool[ldb.OutputsDB]
-		//it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
-		//defer it.Release()
-		//for it.Next() {
+		// }
+		// pool := db.DB()
+		// outsDB := pool[ldb.OutputsDB]
+		// it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
+		// defer it.Release()
+		// for it.Next() {
 		//	fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
-		//}
+		// }
 
 	case "version":
 		version, err := s.DatabaseVersion(ctx)

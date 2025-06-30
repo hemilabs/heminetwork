@@ -23,6 +23,7 @@ linters:
     - "govet" # Runs go vet.
     - "ineffassign" # Detects when assignments to variables are not used.
     - "makezero" # 	Finds slice declarations with non-zero initial length and later used with append.
+    - "misspell" # Finds common typing mistakes
     - "nilerr" # Finds the code that returns nil even if it checks that the error is not nil.
     - "noctx" # Finds http requests without context.Context.
     - "nolintlint" # Reports ill-formed or insufficient nolint directives.

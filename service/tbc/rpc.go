@@ -26,6 +26,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/database"
+	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -192,10 +193,31 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdBlockKeystoneByL2KeystoneAbrevHashRequest:
+		case tbcapi.CmdBlocksByL2AbrevHashesRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest)
+				req := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
 				return s.handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdKeystoneTxsByL2KeystoneAbrevHashRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest)
+				return s.handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdFeeEstimateRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.FeeEstimateRequest)
+				return s.handleFeeEstimateRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdMempoolInfoRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.MempoolInfoRequest)
+				return s.handleMempoolInfoRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -432,7 +454,7 @@ func (s *Server) handleUtxosByAddressRawRequest(ctx context.Context, req *tbcapi
 	log.Tracef("handleUtxosByAddressRawRequest")
 	defer log.Tracef("handleUtxosByAddressRawRequest exit")
 
-	utxos, err := s.UtxosByAddress(ctx, req.Address, uint64(req.Start), uint64(req.Count))
+	utxos, err := s.UtxosByAddress(ctx, req.FilterMempool, req.Address, uint64(req.Start), uint64(req.Count))
 	if err != nil {
 		if errors.Is(err, level.ErrIterator) {
 			e := protocol.NewInternalError(err)
@@ -460,7 +482,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UT
 	log.Tracef("handleUtxosByAddressRequest")
 	defer log.Tracef("handleUtxosByAddressRequest exit")
 
-	utxos, err := s.UtxosByAddress(ctx, req.Address, uint64(req.Start), uint64(req.Count))
+	utxos, err := s.UtxosByAddress(ctx, req.FilterMempool, req.Address, uint64(req.Start), uint64(req.Count))
 	if err != nil {
 		if errors.Is(err, level.ErrIterator) {
 			e := protocol.NewInternalError(err)
@@ -486,7 +508,7 @@ func (s *Server) handleUtxosByAddressRequest(ctx context.Context, req *tbcapi.UT
 
 		responseUtxos = append(responseUtxos, &tbcapi.UTXO{
 			TxId:     *txId,
-			Value:    utxo.Value(),
+			Value:    btcutil.Amount(utxo.Value()),
 			OutIndex: utxo.OutputIndex(),
 		})
 	}
@@ -685,26 +707,185 @@ func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi
 	}, nil
 }
 
-func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlockKeystoneByL2KeystoneAbrevHashRequest) (any, error) {
+func (s *Server) handleMempoolInfoRequest(_ context.Context, _ *tbcapi.MempoolInfoRequest) (any, error) {
+	log.Tracef("handleMempoolInfoRequest")
+	defer log.Tracef("handleMempoolInfoRequest exit")
+
+	if !s.cfg.MempoolEnabled {
+		err := errors.New("mempool not enabled")
+		e := protocol.NewInternalError(err)
+		return &tbcapi.MempoolInfoResponse{
+			Error: e.ProtocolError(),
+		}, err
+	}
+
+	return &tbcapi.MempoolInfoResponse{
+		Size:  s.mempool.size,
+		TxNum: uint(len(s.mempool.txs)),
+	}, nil
+}
+
+func (s *Server) handleFeeEstimateRequest(ctx context.Context, _ *tbcapi.FeeEstimateRequest) (any, error) {
+	log.Tracef("handleFeeEstimateRequest")
+	defer log.Tracef("handleFeeEstimateRequest exit")
+
+	if !s.cfg.MempoolEnabled {
+		err := errors.New("mempool not enabled")
+		e := protocol.NewInternalError(err)
+		return &tbcapi.FeeEstimateResponse{
+			Error: e.ProtocolError(),
+		}, err
+	}
+
+	rf, err := s.mempool.GetRecommendedFees(ctx)
+	if err != nil {
+		e := protocol.NewInternalError(err)
+		return &tbcapi.FeeEstimateResponse{Error: e.ProtocolError()}, err
+	}
+
+	return &tbcapi.FeeEstimateResponse{
+		FeeEstimates: rf,
+	}, nil
+}
+
+func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, hash chainhash.Hash) (*tbcd.Keystone, *tbcd.BlockHeader, error) {
+	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("keystone by abbreviated hash: %w", err)
+	}
+	ksBh, err := s.db.BlockHeaderByHash(ctx, ks.BlockHash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("block header by hash: %w", err)
+	}
+	return ks, ksBh, nil
+}
+
+func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.BlocksByL2AbrevHashesRequest) (any, error) {
 	log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest")
 	defer log.Tracef("handleBlockKeystoneByL2KeystoneAbrevHashRequest exit")
 
-	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, req.L2KeystoneAbrevHash)
+	if len(req.L2KeystoneAbrevHashes) < 1 {
+		e := protocol.RequestError(errors.New("no l2 hashes provided"))
+		return &tbcapi.BlocksByL2AbrevHashesResponse{
+			Error: e,
+		}, e
+	}
+
+	// Obtain best block first, if new block headers arrive the rest of the
+	// call remains idempotent.
+	bhb, err := s.db.BlockHeaderBest(ctx)
 	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-				Error: protocol.RequestErrorf("could not find l2 keystone"),
-			}, nil
-		}
 		e := protocol.NewInternalError(err)
-		return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
+		return &tbcapi.BlocksByL2AbrevHashesResponse{
 			Error: e.ProtocolError(),
 		}, e
 	}
-	return &tbcapi.BlockKeystoneByL2KeystoneAbrevHashResponse{
-		L2KeystoneAbrev: hemi.L2KeystoneAbrevDeserialize(hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)),
-		BtcBlockHash:    &ks.BlockHash,
+
+	blks := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(req.L2KeystoneAbrevHashes))
+	for _, hash := range req.L2KeystoneAbrevHashes {
+		ks, ksBh, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, hash)
+		if err != nil {
+			// XXX add error not found type
+			if errors.Is(err, database.ErrNotFound) {
+				blks = append(blks, &tbcapi.L2KeystoneBlockInfo{
+					Error: protocol.RequestErrorf("%v", err),
+				})
+				continue
+			}
+			e := protocol.NewInternalError(err)
+			return &tbcapi.BlocksByL2AbrevHashesResponse{
+				Error: e.ProtocolError(),
+			}, e
+		}
+		abrevKss := hemi.RawAbbreviatedL2Keystone(ks.AbbreviatedKeystone)
+		blks = append(blks, &tbcapi.L2KeystoneBlockInfo{
+			L2KeystoneAbrev:       hemi.L2KeystoneAbrevDeserialize(abrevKss),
+			L2KeystoneBlockHash:   &ksBh.Hash,
+			L2KeystoneBlockHeight: uint(ksBh.Height),
+		})
+	}
+
+	return &tbcapi.BlocksByL2AbrevHashesResponse{
+		L2KeystoneBlocks:  blks,
+		BtcTipBlockHash:   &bhb.Hash,
+		BtcTipBlockHeight: uint(bhb.Height),
 	}, nil
+}
+
+func (s *Server) KeystoneTxsByHash(ctx context.Context, req *tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest) (*tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse, error) {
+	log.Tracef("keystoneTxs")
+	defer log.Tracef("keystoneTxs exit")
+
+	// Obtain best block first, we are going to use this as the path for
+	// nextCanonicalBlockheader thus making the call logically idempotent.
+	bhb, err := s.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("best blockheader: %w", err)
+	}
+	_, ksBh, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx,
+		req.L2KeystoneAbrevHash)
+	if err != nil {
+		return nil, fmt.Errorf("keystone by hash: %w", err)
+	}
+
+	// Fake out hash height and use best block as end condition.
+	hh := &HashHeight{
+		Hash:   ksBh.Hash,
+		Height: ksBh.Height,
+	}
+	ktxs := make([]tbcapi.KeystoneTx, 0, 16*req.Depth)
+	for i := uint(0); i < req.Depth; i++ {
+		// Retrieve first block
+		block, err := s.db.BlockByHash(ctx, hh.Hash)
+		if err != nil {
+			return nil, fmt.Errorf("block by hash: %w", err)
+		}
+		block.SetHeight(int32(hh.Height))
+		ktxs = append(ktxs, BlockKeystonesByHash(block, &req.L2KeystoneAbrevHash)...)
+
+		// next canonical block
+		hh, err = s.nextCanonicalBlockheader(ctx, &bhb.Hash, hh)
+		if err != nil {
+			// if we can't get the next canonical block, we should still
+			// return keytones that we have found
+			log.Errorf("next block: %w", err)
+			break
+		}
+	}
+
+	return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{KeystoneTxs: ktxs}, nil
+}
+
+func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Context, req *tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest) (any, error) {
+	t := time.Now()
+	log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest")
+	defer func() {
+		log.Tracef("handleKeystoneTxsByL2KeystoneAbrevHashRequest exit took %v",
+			time.Since(t))
+	}()
+
+	maxDepth := uint(3)
+	if req.Depth > maxDepth {
+		return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
+			Error: protocol.RequestErrorf("invalid depth: %v > %v",
+				req.Depth, maxDepth),
+		}, nil
+	}
+
+	ktxsr, err := s.KeystoneTxsByHash(ctx, req)
+	if err != nil {
+		// XXX add error not found type
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
+				Error: protocol.RequestErrorf("%v", err),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+	return ktxsr, nil
 }
 
 // handleBlockDownloadAsyncRequest handles tbcapi.BlockDownloadAsyncRequest.
@@ -798,12 +979,12 @@ func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
 		log.Errorf("Write ping: %v", err)
 	}
 
-	log.Infof("Connection from %v", r.RemoteAddr)
+	log.Infof("RPC connection from %v", r.RemoteAddr)
 
 	// Wait for termination
 	ws.wg.Wait()
 
-	log.Infof("Connection terminated from %v", r.RemoteAddr)
+	log.Infof("RPC connection terminated from %v", r.RemoteAddr)
 }
 
 func (s *Server) newSession(ws *tbcWs) (string, error) {
