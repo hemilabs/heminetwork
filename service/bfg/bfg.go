@@ -42,12 +42,13 @@ const (
 	bitcoinSourceBlockstream = "blockstream"
 	bitcoinSourceTBC         = "tbc"
 
+	shortCircuit = false
+
 	defaultKeystoneCount = 10
 
 	// finality short circuit constants
-	ultraFinalityDepth  = 20
-	minSearchDepth      = -100 // PNOOMA
-	maxDescendantChecks = 1000 // PNOOMA
+	ultraFinalityDepth = 20
+	minSearchDepth     = -100 // PNOOMA
 
 	defaultOpgethURL = "http://127.0.0.1:9999/v1/ws"
 	defaultNetwork   = "mainnet"
@@ -244,6 +245,12 @@ func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Ha
 	return resp, nil
 }
 
+// When enabled, short-circuiting will check for the latest keystones to achieve
+// ultrafinality. If any of them are more recent (higher L2 number) than
+// the keystone whose finality is being queried for, it will inherit that value.
+// This attempts to prevent a hypothetical worst-case scenario where neither the
+// keystone nor any close descendants have reached ultrafinality, requiring
+// N amount of checks for the finality value of N descendants.
 func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone, tip uint32) (*bfgapi.L2KeystoneBitcoinFinalityResponse, error) {
 	// Depth must be > 0 but height + depth > 0
 	// so min height is 2 and "min" depth is -1
@@ -332,8 +339,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	}
 
 	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
-	firstLoop := true // attempt short circuit during first loop
-	totalDescendants := 0
+	firstLoop := shortCircuit // attempt short circuit during first loop
 	for {
 		// Call opgeth to retrieve keystones
 		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
@@ -346,7 +352,6 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			NotFound(w, "unknown keystone: %v", resp.Error)
 			return
 		}
-		totalDescendants += defaultKeystoneCount
 
 		// from Clayton: the finality must only ever be for the l2keystone
 		// that we're querying for, it may inherit effective height from another
@@ -448,7 +453,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// descendants and we can return the current best finality.
 		// If keystone or descendant has ultrafinality then
 		// we no longer have to keep iterating.
-		if hh == nil || hash.IsEqual(hh) || totalDescendants >= maxDescendantChecks ||
+		if hh == nil || hash.IsEqual(hh) ||
 			fin.EffectiveConfirmations >= ultraFinalityDepth {
 			break
 		}
