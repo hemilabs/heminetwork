@@ -368,14 +368,14 @@ func (l *ldb) v3(ctx context.Context) error {
 		}
 	}
 
-	//if !l.cfg.nonInteractive {
-	//	log.Infof("This operation will take a long time. " +
-	//		"Press ctrl-c within 30 seconds to abort upgrade!")
-	//	select {
-	//	case <-ctx.Done():
-	//	case <-time.Tick(30 * time.Second):
-	//	}
-	//}
+	if !l.cfg.nonInteractive {
+		log.Infof("This operation will take a long time. " +
+			"Press ctrl-c within 30 seconds to abort upgrade!")
+		select {
+		case <-ctx.Done():
+		case <-time.Tick(30 * time.Second):
+		}
+	}
 
 	// sort database names
 	keys := make([]string, 0, len(l.pool))
