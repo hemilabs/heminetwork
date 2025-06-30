@@ -242,7 +242,6 @@ services:
       - "./genesisl2.sh:/tmp/genesisl2.sh"
       - "./output:/tmp/output"
       - "l2configs:/l2configs"
-      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - "./transactionsmaybe:/git/optimism/packages/contracts-bedrock/broadcast/Deploy.s.sol/1337/"
       - {type: "tmpfs", target: "/tmp"}
@@ -260,7 +259,7 @@ services:
         condition: "service_started"
       bitcoind-initialblocks:
         condition: "service_completed_successfully"
-      holocene-deploy:
+      op-geth-l2-setup:
         condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
@@ -283,7 +282,6 @@ services:
       - "./genesisl2.sh:/tmp/genesisl2.sh"
       - "./output:/tmp/output"
       - "l2configs:/l2configs"
-      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - {type: "tmpfs", target: "/tmp"}
     ports:
@@ -410,26 +408,6 @@ services:
       - "--allow-non-finalized"
       - "--resubmission-timeout=15s"
       - "--safe-abort-nonce-too-low-count=1"
-    networks:
-      e2e:
-
-  holocene-deploy:
-    depends_on:
-      op-geth-l2-setup:
-        condition: "service_completed_successfully"
-      geth-l1:
-        condition: "service_started"
-    build:
-      dockerfile: "holocene-upgrade.Dockerfile"
-      context: "."
-    command:
-      - "/holocene-upgrade.sh"
-    volumes:
-      - "./holocene-upgrade.sh:/holocene-upgrade.sh"
-      - "./deploy-config.json:/tmp/deploy-config.json"
-      - "/var/run/docker.sock:/var/run/docker.sock"
-    environment:
-      HOLOCENE_DEPLOY_CONFIG_PATH: ${PWD}/e2e/deploy-config-holocene.json
     networks:
       e2e:
 volumes:

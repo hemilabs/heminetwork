@@ -63,12 +63,6 @@ cd /git/optimism/packages/contracts-bedrock
 
 # just build
 
-export DEPLOY_CONFIG_PATH='/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json'
-
-cat $DEPLOY_CONFIG_PATH
-
-cp /git/optimism/op-program/bin/prestate-proof.json /git/optimism/op-program/bin/prestate-proof-interop.json
-
 # forge script ./scripts/deploy/Deploy.s.sol:Deploy --sender $MY_ADDRESS --sig 'deploySuperchain()' --slow --unlocked --non-interactive --broadcast --rpc-url $JSON_RPC
 
 # forge script ./scripts/deploy/Deploy.s.sol:Deploy --sender $MY_ADDRESS --sig 'deployOpChain()' --slow --unlocked --non-interactive --broadcast --rpc-url $JSON_RPC
@@ -81,15 +75,45 @@ cp /git/optimism/op-program/bin/prestate-proof.json /git/optimism/op-program/bin
 
 /git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir .deployer --intent-type standard-overrides
 
+
 cd /git/optimism/packages/contracts-bedrock
 
+
 forge build --deny-warnings --skip test --out .artifacts
-ls .artifacts
+
+/git/optimism/op-deployer/bin/op-deployer bootstrap proxy \
+  --l1-rpc-url $JSON_RPC \
+  --private-key $ADMIN_PRIVATE_KEY \
+  --artifacts-locator file://$(pwd)/.artifacts \
+  --proxy-owner $MY_ADDRESS
+
+/git/optimism/op-deployer/bin/op-deployer bootstrap superchain \
+  --l1-rpc-url $JSON_RPC \
+  --private-key $ADMIN_PRIVATE_KEY \
+  --artifacts-locator file://$(pwd)/.artifacts \
+  --superchain-proxy-admin-owner $MY_ADDRESS \
+  --protocol-versions-owner $MY_ADDRESS \
+  --guardian $MY_ADDRESS \
+  --paused false \
+  --outfile superchain-output.json
+
+/git/optimism/op-deployer/bin/op-deployer bootstrap implementations \
+  --l1-rpc-url $JSON_RPC \
+  --private-key $ADMIN_PRIVATE_KEY \
+  --artifacts-locator file://$(pwd)/.artifacts \
+  --outfile .deployer/bootstrap_implementations.json \
+  --protocol-versions-proxy 0x0875bb7930651b28557c4fe0944cfd64cfae033b \
+  --superchain-config-proxy 0x3c54ad3aa68c00e53e053e30e130618b6d9efcdb \
+  --upgrade-controller $MY_ADDRESS
+
+cat .deployer/bootstrap_implementations.json
 
 apt-get install -y yq
 
 echo "$(tomlq -t ".chains[0].roles.systemConfigOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.unsafeBlockSigner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.l1ProxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.l2ProxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.batcher = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.proposer = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].baseFeeVaultRecipient = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
@@ -102,36 +126,41 @@ echo "$(tomlq -t ".l2ContractsLocator = \"file://$(pwd)/.artifacts\"" .deployer/
 cat .deployer/intent.toml
 cat .deployer/state.json
 
-/git/optimism/op-deployer/bin/op-deployer apply --workdir .deployer \
-  --l1-rpc-url $JSON_RPC \
-  --private-key $ADMIN_PRIVATE_KEY
+/git/optimism/op-deployer/bin/op-deployer apply --workdir .deployer --deployment-target live \
+--l1-rpc-url $JSON_RPC --private-key $ADMIN_PRIVATE_KEY
 
-exit 33
+ls -a .deployer
+
+cat .deployer/state.json
 
 # forge script ./scripts/Deploy.s.sol:Deploy --non-interactive --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
 
 # /git/optimism/op-deployer/bin/op-deployer --log.level=trace inspect genesis --workdir /tmp/output/deployment 901
 
-curl -H 'Content-Type: application/json' -X POST --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x2", true],"id":1}' $JSON_RPC > /tmp/blockl1.json
+# curl -H 'Content-Type: application/json' -X POST --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x2", true],"id":1}' $JSON_RPC > /tmp/blockl1.json
 
-echo $(jq '.result' /tmp/blockl1.json) > /tmp/blockl1.json
+# echo $(jq '.result' /tmp/blockl1.json) > /tmp/blockl1.json
 
-cat /tmp/blockl1.json
+# cat /tmp/blockl1.json
 
-/git/optimism/op-node/bin/op-node \
-    genesis \
-    l2 \
-    --deploy-config  \
-    /git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json \
-    --l1-deployments  \
-    /tmp/output/deployment.json \
-    --outfile.l2  \
-    /l2configs/genesis.json \
-    --outfile.rollup  \
-    /tmp/rollup.json \
-    --l1-rpc $JSON_RPC \
-    --l2-allocs /tmp/output/deployment/state.json
+/git/optimism/op-deployer/bin/op-deployer inspect genesis --workdir .deployer 901 > /l2configs/genesis.json
+/git/optimism/op-deployer/bin/op-deployer inspect rollup --workdir .deployer 901 > /l2configs/rollup.json
+/git/optimism/op-deployer/bin/op-deployer inspect deploy-config --workdir .deployer 901 > /l2configs/deploy-config.json
 
-# HACK TO REMOVE old fields to make the generated genesis file compatible for 
-# after newer version
-cat /tmp/rollup.json | jq ".genesis.l1.hash = $(cat /tmp/blockl1.json | jq '.hash' )" | jq 'del(.da_resolve_window,.da_challenge_window,.da_challenge_address,.use_plasma)' | jq '. += {"chain_op_config": {"eip1559Elasticity": 6,"eip1559Denominator": 50,"eip1559DenominatorCanyon": 250}}' | jq ". += { \"holocene_time\": $HVM_PHASE0_TIMESTAMP, \"granite_time\": $HVM_PHASE0_TIMESTAMP, \"fjord_time\": $HVM_PHASE0_TIMESTAMP, \"ecotone_time\": 1725868497, \"delta_time\": 1725868497, \"canyon_time\": 1725868497, \"regolith_time\": 1725868497, \"isthmus_time\": $HVM_PHASE0_TIMESTAMP }" > /l2configs/rollup.json
+# /git/optimism/op-node/bin/op-node \
+#     genesis \
+#     l2 \
+#     --deploy-config  \
+#     /git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json \
+#     --l1-deployments  \
+#     /tmp/output/deployment.json \
+#     --outfile.l2  \
+#     /l2configs/genesis.json \
+#     --outfile.rollup  \
+#     /tmp/rollup.json \
+#     --l1-rpc $JSON_RPC \
+#     --l2-allocs /tmp/output/deployment/state.json
+
+# # HACK TO REMOVE old fields to make the generated genesis file compatible for 
+# # after newer version
+# cat /tmp/rollup.json | jq ".genesis.l1.hash = $(cat /tmp/blockl1.json | jq '.hash' )" | jq 'del(.da_resolve_window,.da_challenge_window,.da_challenge_address,.use_plasma)' | jq '. += {"chain_op_config": {"eip1559Elasticity": 6,"eip1559Denominator": 50,"eip1559DenominatorCanyon": 250}}' | jq ". += { \"holocene_time\": $HVM_PHASE0_TIMESTAMP, \"granite_time\": $HVM_PHASE0_TIMESTAMP, \"fjord_time\": $HVM_PHASE0_TIMESTAMP, \"ecotone_time\": 1725868497, \"delta_time\": 1725868497, \"canyon_time\": 1725868497, \"regolith_time\": 1725868497, \"isthmus_time\": $HVM_PHASE0_TIMESTAMP }" > /l2configs/rollup.json
