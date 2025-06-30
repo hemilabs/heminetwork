@@ -2016,7 +2016,7 @@ func keystoneHeightRange(height int64, depth int64) *util.Range {
 	}
 }
 
-// Searches for the first occurance of keystones within the given
+// Searches for the first occurrence of keystones within the given
 // height + range, excluding the height itself.
 func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]tbcd.Keystone, error) {
 	log.Tracef("KeystonesByHeight")
