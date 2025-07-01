@@ -332,12 +332,13 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
 
 	// validate input.
-	hash, err := chainhash.NewHashFromStr(r.PathValue("hash"))
+	qh, err := chainhash.NewHashFromStr(r.PathValue("hash"))
 	if err != nil {
 		BadRequestF(w, "invalid keystone length")
 		return
 	}
 
+	hash := qh
 	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
 	firstLoop := shortCircuit // attempt short circuit during first loop
 	for {
@@ -356,9 +357,9 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// from Clayton: the finality must only ever be for the l2keystone
 		// that we're querying for, it may inherit effective height from another
 		// but is still the keystone being queried for
-		if len(resp.L2Keystones) > 0 {
+		if hash.IsEqual(qh) && len(resp.L2Keystones) > 0 {
 			for i, k := range resp.L2Keystones {
-				if hemi.L2KeystoneAbbreviate(k).Hash().IsEqual(hash) {
+				if hemi.L2KeystoneAbbreviate(k).Hash().IsEqual(qh) {
 					fin.L2Keystone = resp.L2Keystones[i]
 					log.Tracef("responding with keystone %s", spew.Sdump(k))
 				}
