@@ -210,6 +210,8 @@ func (s *Server) Run(pctx context.Context) error {
 					r.SetURL(u)
 					// r.Out.Host = r.In.Host // XXX yes/no?
 				},
+				ErrorLog:     nil, // XXX wrap in loggo
+				ErrorHandler: nil, // XXX add this to deal with errors
 			},
 			u: u, // XXX do we need this?
 		})
