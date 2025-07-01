@@ -24,20 +24,6 @@ RUN apt-get install -y jq nodejs npm netcat-openbsd
 RUN npm install -g pnpm
 
 
-WORKDIR /git
-COPY --from=build_1 /git/op-geth /git/op-geth
-WORKDIR /git
-RUN git clone https://github.com/hemilabs/optimism
-WORKDIR /git/optimism
-RUN echo asdfsdfdsdsfasdfsdf
-RUN git fetch origin
-RUN git checkout 863ccc9143fa9e937602b5f9b9dc98e0d9a6d71e
-
-WORKDIR /git/optimism
-RUN go mod tidy
-
-RUN git submodule update --init --recursive
-
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="${PATH}:/root/.cargo/bin"
 
@@ -45,6 +31,38 @@ WORKDIR /git
 RUN git clone https://github.com/casey/just
 WORKDIR /git/just
 RUN cargo install just
+
+WORKDIR /git
+
+RUN git clone https://github.com/ClaytonNorthey92/foundry
+RUN echo adlshjfdfsadfasdfasdfsdsadfsdfd
+
+WORKDIR /git/foundry
+RUN git fetch origin
+RUN git checkout b235066e408d246c451c38957eeb2e62a58f56f5
+
+RUN echo alskdjf
+RUN make build
+
+ENV PATH="${PATH}:/git/foundry/target/debug"
+
+RUN ls /git/foundry/target/debug
+
+RUN forge --help
+
+WORKDIR /git
+COPY --from=build_1 /git/op-geth /git/op-geth
+WORKDIR /git
+RUN git clone https://github.com/hemilabs/optimism
+WORKDIR /git/optimism
+RUN echo asdfsdfsdfsedffdsd007d7sddfsdf
+RUN git fetch origin
+RUN git checkout e751487674b7a6f7e1ff846e739bc3b26f37c4aa
+
+WORKDIR /git/optimism
+RUN go mod tidy
+
+RUN git submodule update --init --recursive
 
 WORKDIR /git/optimism
 
@@ -69,25 +87,5 @@ RUN just op-conductor
 
 WORKDIR /git/optimism/op-deployer
 RUN just build
-
-WORKDIR /git/optimism
-
-WORKDIR /git
-
-RUN git clone https://github.com/ClaytonNorthey92/foundry
-RUN echo adlshjfdfsadfasdfasdfsdsadfsdfd
-
-WORKDIR /git/foundry
-RUN git fetch origin
-RUN git checkout b235066e408d246c451c38957eeb2e62a58f56f5
-
-RUN echo alskdjf
-RUN make build
-
-ENV PATH="${PATH}:/git/foundry/target/debug"
-
-RUN ls /git/foundry/target/debug
-
-RUN forge --help
 
 WORKDIR /git/optimism
