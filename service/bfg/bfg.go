@@ -42,8 +42,6 @@ const (
 	bitcoinSourceBlockstream = "blockstream"
 	bitcoinSourceTBC         = "tbc"
 
-	shortCircuit = false
-
 	defaultKeystoneCount = 10
 
 	// finality short circuit constants
@@ -340,7 +338,8 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 
 	hash := qh
 	fin := &bfgapi.L2KeystoneBitcoinFinalityResponse{}
-	firstLoop := shortCircuit // attempt short circuit during first loop
+	// attempt short circuit during first loop
+	// firstLoop := true
 	for {
 		// Call opgeth to retrieve keystones
 		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
@@ -366,31 +365,34 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 
-		// During our first loop, after we retrieve the BTC Tip from our
-		// gozer call, check for possible finality short circuit.
-		if firstLoop && fin != nil {
-			firstLoop = false
+		// Uncomment this out to add a shortcircuit if there are large gaps
+		// between keystones getting mined.
+		//
+		// // During our first loop, after we retrieve the BTC Tip from our
+		// // gozer call, check for possible finality short circuit.
+		// if firstLoop && fin != nil {
+		// 	firstLoop = false
 
-			btcTip, err := s.g.BtcHeight(r.Context())
-			if err != nil {
-				log.Errorf("retrieve btc tip: %v", err)
-				BadRequestF(w, "internal error")
-				return
-			}
-			scf, err := s.shortCircuitFinality(r.Context(), &fin.L2Keystone, uint32(btcTip))
-			if err != nil {
-				log.Errorf("short circuit: %v", err)
-				BadRequestF(w, "internal error")
-				return
-			}
+		// 	btcTip, err := s.g.BtcHeight(r.Context())
+		// 	if err != nil {
+		// 		log.Errorf("retrieve btc tip: %v", err)
+		// 		BadRequestF(w, "internal error")
+		// 		return
+		// 	}
+		// 	scf, err := s.shortCircuitFinality(r.Context(), &fin.L2Keystone, uint32(btcTip))
+		// 	if err != nil {
+		// 		log.Errorf("short circuit: %v", err)
+		// 		BadRequestF(w, "internal error")
+		// 		return
+		// 	}
 
-			if scf != nil {
-				if err := json.NewEncoder(w).Encode(scf); err != nil {
-					log.Errorf("encode: %v", err)
-				}
-				return
-			}
-		}
+		// 	if scf != nil {
+		// 		if err := json.NewEncoder(w).Encode(scf); err != nil {
+		// 			log.Errorf("encode: %v", err)
+		// 		}
+		// 		return
+		// 	}
+		// }
 
 		// Generate abbreviated hashes from received keystones
 		abrevKeystones := make([]chainhash.Hash, 0, len(resp.L2Keystones))
