@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -23,13 +24,17 @@ import (
 )
 
 const (
+	appName = "hproxy" // Prometheus
+
 	logLevel = "INFO"
 
 	promSubsystem = "hproxy_service" // Prometheus
 
+	DefaultRequestTimeout = 9 * time.Second  // Smaller than 12s
+	DefaultListenAddress  = "localhost:8545" // Default geth port
 )
 
-var log = loggo.GetLogger("hproxy")
+var log = loggo.GetLogger(appName)
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -39,33 +44,40 @@ func init() {
 
 type Config struct {
 	HVMURLs                 []string
-	Network                 string
-	RequestTimeout          time.Duration
+	ListenAddress           string
 	LogLevel                string
+	Network                 string
 	PrometheusListenAddress string
+	PrometheusNamespace     string
 	PprofListenAddress      string
+	RequestTimeout          time.Duration
 }
-
-const DefaultRequestTimeout = 9 * time.Second // Smaller than 12s
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Network:        "mainnet",
-		RequestTimeout: DefaultRequestTimeout,
+		ListenAddress:       DefaultListenAddress,
+		Network:             "mainnet",
+		PrometheusNamespace: appName,
+		RequestTimeout:      DefaultRequestTimeout,
 	}
 }
 
-type HProxy struct {
+type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
 	cfg *Config
 
+	hvmHandlers []HVMHandler // hvm nodes
+
 	// Prometheus
-	isRunning bool
+	promCollectors  []prometheus.Collector
+	promPollVerbose bool // set to true to print stats during poll
+	isRunning       bool
+	cmdsProcessed   prometheus.Counter
 }
 
-func NewHProxy(cfg *Config) (*HProxy, error) {
+func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
@@ -73,8 +85,13 @@ func NewHProxy(cfg *Config) (*HProxy, error) {
 		cfg.RequestTimeout = DefaultRequestTimeout
 	}
 
-	hp := &HProxy{
+	s := &Server{
 		cfg: cfg,
+		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: cfg.PrometheusNamespace,
+			Name:      "proxy_calls",
+			Help:      "The total number of successful proxy calls",
+		}),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -84,84 +101,102 @@ func NewHProxy(cfg *Config) (*HProxy, error) {
 		return nil, fmt.Errorf("unknown network %q", cfg.Network)
 	}
 
-	return hp, nil
+	return s, nil
 }
 
-func (h *HProxy) handlePrometheus(ctx context.Context) error {
-	d, err := deucalion.New(&deucalion.Config{
-		ListenAddress: h.cfg.PrometheusListenAddress,
-	})
-	if err != nil {
-		return fmt.Errorf("create server: %w", err)
-	}
-	cs := []prometheus.Collector{
-		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Subsystem: promSubsystem,
-			Name:      "running",
-			Help:      "Is hproxy service running.",
-		}, h.promRunning),
-	}
-	h.wg.Add(1)
-	go func() {
-		defer h.wg.Done()
-		if err := d.Run(ctx, cs, nil); !errors.Is(err, context.Canceled) {
-			log.Errorf("prometheus terminated with error: %v", err)
-			return
+// Collectors returns the Prometheus collectors available for the server.
+func (s *Server) Collectors() []prometheus.Collector {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if s.promCollectors == nil {
+		// Naming: https://prometheus.io/docs/practices/naming/
+		s.promCollectors = []prometheus.Collector{
+			s.cmdsProcessed,
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "running",
+				Help:      "Whether the hproxy service is running",
+			}, s.promRunning),
 		}
-		log.Infof("prometheus clean shutdown")
-	}()
-
-	return nil
+	}
+	return s.promCollectors
 }
 
-func (h *HProxy) running() bool {
-	h.mtx.Lock()
-	defer h.mtx.Unlock()
-	return h.isRunning
+func (s *Server) promPoll(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+
+		if s.promPollVerbose {
+			s.mtx.RLock()
+			log.Infof("FIXME PROMETHEUS POLL")
+			s.mtx.RUnlock()
+		}
+	}
 }
 
-func (h *HProxy) testAndSetRunning(b bool) bool {
-	h.mtx.Lock()
-	defer h.mtx.Unlock()
-	old := h.isRunning
-	h.isRunning = b
-	return old != h.isRunning
+func (s *Server) running() bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return s.isRunning
 }
 
-func (h *HProxy) promRunning() float64 {
-	r := h.running()
+func (s *Server) testAndSetRunning(b bool) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	old := s.isRunning
+	s.isRunning = b
+	return old != s.isRunning
+}
+
+func (s *Server) promRunning() float64 {
+	r := s.running()
 	if r {
 		return 1
 	}
 	return 0
 }
 
-type ProxyHandler struct {
-	p      *httputil.ReverseProxy
-	remote *url.URL
+type HVMHandler struct {
+	rp *httputil.ReverseProxy
+	u  *url.URL // XXX remove?
 }
 
-func (p *ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Infof("ServeHTTP %v", r.URL)
-	w.Header().Set("X-Cow", "Moo")
-	r.Host = p.remote.Host
-	p.p.ServeHTTP(w, r)
+func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
+	log.Infof("handleProxyRequest: %v", r.RemoteAddr)
+	log.Tracef("handleProxyRequest: %v", r.RemoteAddr)
+	defer log.Tracef("handleProxyRequest exit: %v", r.RemoteAddr)
+
+	w.Header().Set("X-Hproxy", "Moo") // return to caller
+
+	// Select host to call
+	hvm := s.hvmHandlers[0]
+
+	// Throw call over the fence
+	hvm.rp.ServeHTTP(w, r)
+
+	s.cmdsProcessed.Inc()
 }
 
-func (h *HProxy) Run(pctx context.Context) error {
-	if !h.testAndSetRunning(true) {
+func (s *Server) Run(pctx context.Context) error {
+	if !s.testAndSetRunning(true) {
 		return errors.New("hproxy already running")
 	}
-	defer h.testAndSetRunning(false)
+	defer s.testAndSetRunning(false)
 
 	// Validate urls
-	if len(h.cfg.HVMURLs) == 0 {
+	if len(s.cfg.HVMURLs) == 0 {
 		return errors.New("must provide hvm url(s)")
 	}
-	for k := range h.cfg.HVMURLs {
-		u, err := url.Parse(h.cfg.HVMURLs[k])
+	s.hvmHandlers = make([]HVMHandler, 0, len(s.cfg.HVMURLs))
+	for k := range s.cfg.HVMURLs {
+		u, err := url.Parse(s.cfg.HVMURLs[k])
 		if err != nil {
-			return fmt.Errorf("invalid url %v: %v", h.cfg.HVMURLs[k], err)
+			return fmt.Errorf("invalid url %v: %v", s.cfg.HVMURLs[k], err)
 		}
 		switch u.Scheme {
 		case "http", "https":
@@ -169,36 +204,86 @@ func (h *HProxy) Run(pctx context.Context) error {
 			return fmt.Errorf("unsuported scheme [%v]: %v", k, u.Scheme)
 		}
 
-		proxy := httputil.NewSingleHostReverseProxy(u)
-		// use http.Handle instead of http.HandleFunc when your struct implements http.Handler interface
-		http.Handle("/", &ProxyHandler{p: proxy, remote: u})
-		err = http.ListenAndServe(":8080", nil)
-		if err != nil {
-			panic(err)
-		}
+		s.hvmHandlers = append(s.hvmHandlers, HVMHandler{
+			rp: &httputil.ReverseProxy{
+				Rewrite: func(r *httputil.ProxyRequest) {
+					r.SetURL(u)
+					// r.Out.Host = r.In.Host // XXX yes/no?
+				},
+			},
+			u: u, // XXX do we need this?
+		})
 	}
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	// Prometheus
-	if h.cfg.PrometheusListenAddress != "" {
-		if err := h.handlePrometheus(ctx); err != nil {
-			return fmt.Errorf("handlePrometheus: %w", err)
+	// HTTP server
+	httpErrCh := make(chan error)
+	if s.cfg.ListenAddress == "" {
+		return errors.New("must provide listen address")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handleProxyRequest)
+
+	httpServer := &http.Server{
+		Addr:        s.cfg.ListenAddress,
+		Handler:     mux,
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
+	}
+	go func() {
+		log.Infof("Listening: %s", s.cfg.ListenAddress)
+		httpErrCh <- httpServer.ListenAndServe()
+	}()
+	defer func() {
+		if err := httpServer.Shutdown(ctx); err != nil {
+			log.Errorf("http server exit: %v", err)
+			return
 		}
+		log.Infof("web server shutdown cleanly")
+	}()
+
+	// Prometheus
+	if s.cfg.PrometheusListenAddress != "" {
+		d, err := deucalion.New(&deucalion.Config{
+			ListenAddress: s.cfg.PrometheusListenAddress,
+		})
+		if err != nil {
+			return fmt.Errorf("create server: %w", err)
+		}
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := d.Run(ctx, s.Collectors(), nil); !errors.Is(err, context.Canceled) {
+				log.Errorf("prometheus terminated with error: %v", err)
+				return
+			}
+			log.Infof("prometheus clean shutdown")
+		}()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			err := s.promPoll(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Errorf("prometheus poll terminated with error: %v", err)
+				}
+				return
+			}
+		}()
 	}
 
 	// pprof
-	if h.cfg.PprofListenAddress != "" {
+	if s.cfg.PprofListenAddress != "" {
 		p, err := pprof.NewServer(&pprof.Config{
-			ListenAddress: h.cfg.PprofListenAddress,
+			ListenAddress: s.cfg.PprofListenAddress,
 		})
 		if err != nil {
 			return fmt.Errorf("create pprof server: %w", err)
 		}
-		h.wg.Add(1)
+		s.wg.Add(1)
 		go func() {
-			defer h.wg.Done()
+			defer s.wg.Done()
 			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
 				log.Errorf("pprof server terminated with error: %v", err)
 				return
@@ -213,12 +298,12 @@ func (h *HProxy) Run(pctx context.Context) error {
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()
+	case err = <-httpErrCh:
 	}
 	cancel()
 
 	log.Infof("hproxy shutting down...")
-
-	h.wg.Wait()
+	s.wg.Wait()
 	log.Infof("hproxy shutdown cleanly")
 
 	return err

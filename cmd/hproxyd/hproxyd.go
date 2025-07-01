@@ -31,26 +31,23 @@ var (
 
 	cfg = hproxy.NewDefaultConfig()
 	cm  = config.CfgMap{
-		"HPROXY_LOG_LEVEL": config.Config{
-			Value:        &cfg.LogLevel,
-			DefaultValue: defaultLogLevel,
-			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
-			Print:        config.PrintAll,
-		},
 		"HPROXY_HVM_URLS": config.Config{
 			Value:        &cfg.HVMURLs,
 			DefaultValue: cfg.HVMURLs,
 			Help:         "comma separated HVM URLs",
 			Print:        config.PrintAll,
 		},
-		"HPROXY_REQUEST_TIMEOUT": config.Config{
-			Value:        &cfg.RequestTimeout,
-			DefaultValue: cfg.RequestTimeout,
-			Help:         "HVM request timeout",
+		"HPROXY_LOG_LEVEL": config.Config{
+			Value:        &cfg.LogLevel,
+			DefaultValue: defaultLogLevel,
+			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
-			Parse: func(envValue string) (any, error) {
-				return time.ParseDuration(envValue)
-			},
+		},
+		"HPROXY_LISTEN_ADDRESS": config.Config{
+			Value:        &cfg.ListenAddress,
+			DefaultValue: hproxy.DefaultListenAddress,
+			Help:         "listen address for incomming connections",
+			Print:        config.PrintAll,
 		},
 		"HPROXY_NETWORK": config.Config{
 			Value:        &cfg.Network,
@@ -65,10 +62,19 @@ var (
 			Print:        config.PrintAll,
 		},
 		"HPROXY_PPROF_ADDRESS": config.Config{
-			Value:        &cfg.PrometheusListenAddress,
+			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",
 			Help:         "address and port hproxy pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
+		},
+		"HPROXY_REQUEST_TIMEOUT": config.Config{
+			Value:        &cfg.RequestTimeout,
+			DefaultValue: cfg.RequestTimeout,
+			Help:         "HVM request timeout",
+			Print:        config.PrintAll,
+			Parse: func(envValue string) (any, error) {
+				return time.ParseDuration(envValue)
+			},
 		},
 	}
 )
@@ -113,7 +119,7 @@ func _main() error {
 		log.Infof("hproxy service received signal: %s", s)
 	})
 
-	hp, err := hproxy.NewHProxy(cfg)
+	hp, err := hproxy.NewServer(cfg)
 	if err != nil {
 		return fmt.Errorf("create hproxy: %w", err)
 	}
