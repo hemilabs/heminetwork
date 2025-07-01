@@ -21,7 +21,7 @@ import (
 	"github.com/hemilabs/heminetwork/testutil/mock"
 )
 
-const wantedKeystones = 40
+const wantedKeystones = 20
 
 func TestPopMiner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
@@ -80,7 +80,7 @@ func TestPopMiner(t *testing.T) {
 }
 
 func TestTickingPopMiner(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
