@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -32,6 +33,8 @@ const (
 
 	DefaultRequestTimeout = 9 * time.Second  // Smaller than 12s
 	DefaultListenAddress  = "localhost:8545" // Default geth port
+
+	expectedClients = 1000
 )
 
 var log = loggo.GetLogger(appName)
@@ -87,7 +90,8 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg: cfg,
+		cfg:     cfg,
+		clients: make(map[string]int, expectedClients),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: cfg.PrometheusNamespace,
 			Name:      "proxy_calls",
@@ -168,6 +172,20 @@ type HVMHandler struct {
 	u  *url.URL // XXX remove?
 }
 
+func lowest(x []int) int {
+	if len(x) == 0 {
+		return -1
+	}
+
+	minIndex := 0
+	for i := 1; i < len(x); i++ {
+		if x[i] < x[minIndex] {
+			minIndex = i
+		}
+	}
+	return minIndex
+}
+
 func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	log.Infof("handleProxyRequest: %v", r.RemoteAddr)
 	log.Tracef("handleProxyRequest: %v", r.RemoteAddr)
@@ -181,14 +199,16 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		id int
 		ok bool
 	)
+	connections := make([]int, len(s.hvmHandlers))
 	if id, ok = s.clients[r.RemoteAddr]; !ok {
-		//for k := range s.clients {
-		//}
-
-		id = 0
+		for _, v := range s.clients {
+			connections[v]++
+		}
+		spew.Dump(connections)
+		id = lowest(connections)
 		s.clients[r.RemoteAddr] = id
 	}
-	hvm := s.hvmHandlers[v]
+	hvm := s.hvmHandlers[id]
 	s.mtx.Unlock()
 
 	// XXX handle aggressive timeputs for ServeHTTP
