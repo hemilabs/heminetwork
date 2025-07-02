@@ -2,6 +2,8 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
+// Package blockstream implements [gozer.Gozer] and retrieves Bitcoin data from
+// Blockstream (https://blockstream.info/).
 package blockstream
 
 import (
@@ -32,13 +34,29 @@ var (
 	bsTestne3tURL = "https://blockstream.info/testnet/api"
 )
 
-type blockstream struct {
+// blockstreamGozer implements [gozer.Gozer] and retrieves Bitcoin data from
+// Blockstream.
+type blockstreamGozer struct {
 	url string
 }
 
-var _ gozer.Gozer = (*blockstream)(nil)
+var _ gozer.Gozer = (*blockstreamGozer)(nil)
 
-func (bs *blockstream) BtcHeight(ctx context.Context) (uint64, error) {
+// Run returns a new Blockstream Gozer.
+func Run(params *chaincfg.Params) (gozer.Gozer, error) {
+	bs := &blockstreamGozer{}
+	switch params {
+	case &chaincfg.MainNetParams:
+		bs.url = bsMainnetURL
+	case &chaincfg.TestNet3Params:
+		bs.url = bsTestne3tURL
+	default:
+		return nil, errors.New("invalid net")
+	}
+	return bs, nil
+}
+
+func (bs *blockstreamGozer) BtcHeight(ctx context.Context) (uint64, error) {
 	u := fmt.Sprintf("%v/blocks/tip/height", bs.url)
 	rawHeight, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
@@ -54,7 +72,7 @@ func (bs *blockstream) BtcHeight(ctx context.Context) (uint64, error) {
 	return height, nil
 }
 
-func (bs *blockstream) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
+func (bs *blockstreamGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
 	u := fmt.Sprintf("%v/fee-estimates", bs.url)
 	feeEstimates, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
@@ -75,7 +93,7 @@ func (bs *blockstream) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate,
 	return frv, nil
 }
 
-func (bs *blockstream) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {
+func (bs *blockstreamGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error) {
 	u := fmt.Sprintf("%v/tx", bs.url)
 
 	var buf bytes.Buffer
@@ -121,7 +139,7 @@ func (bs *blockstream) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainh
 	return txidHash, nil
 }
 
-func (bs *blockstream) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
+func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error) {
 	u := fmt.Sprintf("%v/address/%v/utxo", bs.url, addr)
 	utxos, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
@@ -161,28 +179,15 @@ func (bs *blockstream) UtxosByAddress(ctx context.Context, filterMempool bool, a
 	return urv, nil
 }
 
-func (bs *blockstream) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *gozer.BlocksByL2AbrevHashesResponse {
+func (bs *blockstreamGozer) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *gozer.BlocksByL2AbrevHashesResponse {
 	return &gozer.BlocksByL2AbrevHashesResponse{
 		Error: protocol.Errorf("not supported yet"),
 	}
 }
 
-func (t *blockstream) KeystonesByHeight(ctx context.Context, height uint32, depth int) (*gozer.KeystonesByHeightResponse, error) {
+func (t *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32, depth int) (*gozer.KeystonesByHeightResponse, error) {
 	err := errors.New("not supported yet")
 	return &gozer.KeystonesByHeightResponse{
 		Error: protocol.Errorf("%v", err),
 	}, err
-}
-
-func Run(params *chaincfg.Params) (gozer.Gozer, error) {
-	bs := &blockstream{}
-	switch params {
-	case &chaincfg.MainNetParams:
-		bs.url = bsMainnetURL
-	case &chaincfg.TestNet3Params:
-		bs.url = bsTestne3tURL
-	default:
-		return nil, errors.New("invalid net")
-	}
-	return bs, nil
 }

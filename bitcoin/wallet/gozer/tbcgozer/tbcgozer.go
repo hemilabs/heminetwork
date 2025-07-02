@@ -55,6 +55,8 @@ type tbcGozer struct {
 	connected bool
 }
 
+var _ gozer.Gozer = (*tbcGozer)(nil)
+
 // Run returns and starts a new TBC Gozer.
 func Run(ctx context.Context, tbcUrl string) (gozer.Gozer, error) {
 	t := &tbcGozer{

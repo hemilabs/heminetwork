@@ -81,8 +81,8 @@ func TestBlockstreamGozer(t *testing.T) {
 	ts := mockHttpServer()
 	defer ts.Close()
 
-	// can't use BlockstreamNew() for custom urls
-	b := &blockstream{}
+	// can't use Run() for custom urls
+	b := &blockstreamGozer{}
 	b.url = ts.URL
 
 	feeEstimates, err := b.FeeEstimates(ctx)
