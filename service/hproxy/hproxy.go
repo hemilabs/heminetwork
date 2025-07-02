@@ -187,7 +187,6 @@ func lowest(x []int) int {
 }
 
 func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
-	log.Infof("handleProxyRequest: %v", r.RemoteAddr)
 	log.Tracef("handleProxyRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleProxyRequest exit: %v", r.RemoteAddr)
 
@@ -211,6 +210,8 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	s.mtx.Unlock()
 
 	// XXX handle aggressive timeputs for ServeHTTP
+	log.Debugf("handleProxyRequest: remote %v url '%v' -> node %v",
+		r.RemoteAddr, r.URL, id)
 
 	// Throw call over the fence
 	w.Header().Set("X-Hproxy", strconv.Itoa(id))
@@ -242,17 +243,16 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 
 		s.hvmHandlers = append(s.hvmHandlers, HVMHandler{
+			id: k,
+			u:  u, // XXX do we need this?
 			rp: &httputil.ReverseProxy{
 				Rewrite: func(r *httputil.ProxyRequest) {
 					r.SetURL(u)
 					r.SetXForwarded()
-					r.Out.Host = r.In.Host // XXX yes/no?
 				},
 				ErrorLog:     nil, // XXX wrap in loggo
 				ErrorHandler: nil, // XXX add this to deal with errors
 			},
-			u:  u, // XXX do we need this?
-			id: k, // XXX do we need this?
 		})
 	}
 
