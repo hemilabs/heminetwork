@@ -16,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -194,6 +193,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Hproxy", "Moo") // return to caller
 
 	// Select host to call
+	// XXX expire client connections at some point
 	s.mtx.Lock()
 	var (
 		id int
@@ -204,7 +204,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		for _, v := range s.clients {
 			connections[v]++
 		}
-		spew.Dump(connections)
+		// spew.Dump(connections)
 		id = lowest(connections)
 		s.clients[r.RemoteAddr] = id
 	}
