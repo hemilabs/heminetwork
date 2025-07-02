@@ -166,6 +166,22 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+func (s *Server) isHealthy(_ context.Context) bool {
+	return true // XXX
+}
+
+func (s *Server) health(ctx context.Context) (bool, any, error) {
+	log.Tracef("health")
+	defer log.Tracef("health exit")
+
+	type health struct {
+		Healthy bool   `json:"health"`
+		Remove  string `json:"remove"`
+	}
+
+	return s.isHealthy(ctx), health{Healthy: true, Remove: "FIXME"}, nil // XXX
+}
+
 type HVMHandler struct {
 	id int // server id
 	rp *httputil.ReverseProxy
@@ -295,7 +311,7 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, s.Collectors(), nil); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
