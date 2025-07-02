@@ -16,6 +16,7 @@ require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/ethereum-optimism/optimism v0.0.0-00010101000000-000000000000
 	github.com/ethereum/go-ethereum v1.15.9
+	github.com/go-test/deep v1.1.1
 	github.com/gosuri/uilive v0.0.4
 	github.com/hemilabs/heminetwork v1.0.0
 	github.com/jedib0t/go-pretty/v6 v6.5.8
