@@ -176,6 +176,8 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// Select host to call
 	hvm := s.hvmHandlers[0]
 
+	// XXX handle aggressive timeputs for ServeHTTP
+
 	// Throw call over the fence
 	hvm.rp.ServeHTTP(w, r)
 
