@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -190,8 +191,6 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleProxyRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleProxyRequest exit: %v", r.RemoteAddr)
 
-	w.Header().Set("X-Hproxy", "Moo") // return to caller
-
 	// Select host to call
 	// XXX expire client connections at some point
 	s.mtx.Lock()
@@ -214,6 +213,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// XXX handle aggressive timeputs for ServeHTTP
 
 	// Throw call over the fence
+	w.Header().Set("X-Hproxy", strconv.Itoa(id))
 	hvm.rp.ServeHTTP(w, r)
 
 	s.cmdsProcessed.Inc()
@@ -245,7 +245,8 @@ func (s *Server) Run(pctx context.Context) error {
 			rp: &httputil.ReverseProxy{
 				Rewrite: func(r *httputil.ProxyRequest) {
 					r.SetURL(u)
-					// r.Out.Host = r.In.Host // XXX yes/no?
+					r.SetXForwarded()
+					r.Out.Host = r.In.Host // XXX yes/no?
 				},
 				ErrorLog:     nil, // XXX wrap in loggo
 				ErrorHandler: nil, // XXX add this to deal with errors

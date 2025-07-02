@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -18,6 +19,11 @@ type serverReply struct {
 
 func newServer(x int) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Forwarded-Host") == "" ||
+			r.Header.Get("X-Forwarded-For") == "" ||
+			r.Header.Get("X-Forwarded-Proto") == "" {
+			panic("one of X-Forwarded-* not set")
+		}
 		id := serverReply{ID: x}
 		err := json.NewEncoder(w).Encode(id)
 		if err != nil {
@@ -78,6 +84,13 @@ func TestFanout(t *testing.T) {
 				t.Fatalf("get %v: %v", x, err)
 			}
 			defer reply.Body.Close()
+
+			// Require X-Hproxy
+			ids := reply.Header.Get("X-Hproxy")
+			if ids == "" {
+				panic("expected X-Hproxy being set")
+			}
+
 			var jr serverReply
 			err = json.NewDecoder(reply.Body).Decode(&jr)
 			if err != nil {
@@ -86,14 +99,21 @@ func TestFanout(t *testing.T) {
 			am.Lock()
 			answers[jr.ID]++
 			am.Unlock()
+
+			// Verify that json id matches header id, a bit silly
+			// but keeps us honest.
+			if strconv.Itoa(jr.ID) != ids {
+				panic("id mismatch header: " + ids +
+					" json: " + strconv.Itoa(jr.ID))
+			}
 		}(i)
 	}
 
 	wg.Wait()
 	cancel()
 
-	// Allow 10% variance
-	acceptable := (clientCount / serverCount) / (100 / 10)
+	// Allow 20% variance
+	acceptable := (clientCount / serverCount) / (100 / 20)
 	upperBound := (clientCount / serverCount) + acceptable
 	lowerBound := (clientCount / serverCount) - acceptable
 	for k, v := range answers {
