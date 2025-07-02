@@ -185,7 +185,7 @@ func (bs *blockstreamGozer) BlocksByL2AbrevHashes(ctx context.Context, hashes []
 	}
 }
 
-func (t *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32, depth int) (*gozer.KeystonesByHeightResponse, error) {
+func (bs *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32, depth int) (*gozer.KeystonesByHeightResponse, error) {
 	err := errors.New("not supported yet")
 	return &gozer.KeystonesByHeightResponse{
 		Error: protocol.Errorf("%v", err),
