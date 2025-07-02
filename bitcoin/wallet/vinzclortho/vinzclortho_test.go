@@ -119,7 +119,7 @@ func TestVinzClorthoCreate(t *testing.T) {
 	expectedAddress := "14fjqmZJU7qrRtWHgVjh6jcoKjqu6y1gyM"
 	expectedPub, _ := hex.DecodeString("02dc2f5439d4e4e1d7da99daa5707d7d7da72caf4e31c5aa206322e00bc1f2ce8c")
 
-	vc, err := VinzClorthoNew(&chaincfg.MainNetParams)
+	vc, err := New(&chaincfg.MainNetParams)
 	if err != nil {
 		t.Fatal(err)
 	}

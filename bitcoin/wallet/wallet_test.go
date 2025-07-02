@@ -79,7 +79,7 @@ func TestIntegration(t *testing.T) {
 	}
 
 	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
-	w, err := vinzclortho.VinzClorthoNew(&chaincfg.TestNet3Params)
+	w, err := vinzclortho.New(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
