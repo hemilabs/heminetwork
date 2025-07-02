@@ -340,8 +340,8 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	err = conn.Connect(ctx)
-	if err != nil {
+	// TODO: implement exponential backoff retry
+	if err = conn.Connect(ctx); err != nil {
 		return err
 	}
 
@@ -371,7 +371,7 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 func (t *tbcGozer) run(ctx context.Context) {
 	for {
 		if err := t.connectTBC(ctx); err != nil {
-			log.Infof("%v", err)
+			log.Errorf("Failed to connect to TBC: %v", err)
 		}
 		// See if we were terminated
 		select {
