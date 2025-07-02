@@ -79,10 +79,10 @@ cd /git/optimism/packages/contracts-bedrock
 
 
 forge build --deny-warnings --skip test --out .artifacts
-/git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir .deployer --intent-type standard-overrides
+/git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir .deployer --intent-type custom
 
-# ARTIFACTS_AT="file://$(pwd)/.artifacts"
-ARTIFACTS_AT="tag://op-contracts/v3.0.0-rc.2"
+ARTIFACTS_AT="file://$(pwd)/.artifacts"
+# ARTIFACTS_AT="tag://op-contracts/v3.0.0-rc.2"
 
 /git/optimism/op-deployer/bin/op-deployer bootstrap proxy \
   --l1-rpc-url $JSON_RPC \
@@ -90,6 +90,7 @@ ARTIFACTS_AT="tag://op-contracts/v3.0.0-rc.2"
   --artifacts-locator $ARTIFACTS_AT \
   --proxy-owner $MY_ADDRESS \
   --outfile proxy-output.json
+
 
 cat proxy-output.json
 
@@ -105,15 +106,15 @@ cat proxy-output.json
   --superchain-proxy-admin-owner $MY_ADDRESS \
   --guardian $MY_ADDRESS
 
+ls -a
+
 cat > superchain-output.json <<EOL
 {
   "proxyAdminAddress": "0x06118d32f4473c01f969238fb1c08c695be9643d",
-  "superchainConfigImplAddress": "0x4da82a327773965b8d4d85fa3db8249b387458e7",
+  "superchainConfigImplAddress": "0xbdc8ca17f9d94efafcc25b28a07c41a71f59338b",
   "superchainConfigProxyAddress": "0x3c54ad3aa68c00e53e053e30e130618b6d9efcdb",
   "protocolVersionsImplAddress": "0x37e15e4d6dffa9e5e320ee1ec036922e563cb76c",
-  "protocolVersionsProxyAddress": "0x0875bb7930651b28557c4fe0944cfd64cfae033b",
-  "superchainProxyAdminOwner": "$MY_ADDRESS",
-  "guardian": "$MY_ADDRESS"
+  "protocolVersionsProxyAddress": "0x0875bb7930651b28557c4fe0944cfd64cfae033b"
 }
 EOL
 
@@ -127,31 +128,31 @@ EOL
   --superchain-proxy-admin $MY_ADDRESS \
   --upgrade-controller $MY_ADDRESS
 
-cat > upgrade-config.json <<EOL
-{
-  "prank": "$MY_ADDRESS",
-  "opcmAddress": $(jq '.opcmAddress' .deployer/bootstrap_implementations.json),
-  "chainConfigs": [
-    {
-      "systemConfigProxy": "0x3c54ad3aa68c00e53e053e30e130618b6d9efcdb",
-      "protocolVersionsProxy": "0x0875bb7930651b28557c4fe0944cfd64cfae033b",
-      "absolutePrestate": "0x0000000000000000000000000000000000000000000000000000000000000000"
-    }
-  ]
-}
-EOL
+# cat > upgrade-config.json <<EOL
+# {
+#   "prank": "$MY_ADDRESS",
+#   "opcmAddress": $(jq '.opcmAddress' .deployer/bootstrap_implementations.json),
+#   "chainConfigs": [
+#     {
+#       "systemConfigProxy": "0x3c54ad3aa68c00e53e053e30e130618b6d9efcdb",
+#       "protocolVersionsProxy": "0x0875bb7930651b28557c4fe0944cfd64cfae033b",
+#       "absolutePrestate": "0x0000000000000000000000000000000000000000000000000000000000000000"
+#     }
+#   ]
+# }
+# EOL
 
-cat upgrade-config.json
+# cat upgrade-config.json
 
-/git/optimism/op-deployer/bin/op-deployer upgrade v3.0.0 \
-  --l1-rpc-url $JSON_RPC \
-  --override-artifacts-url $ARTIFACTS_AT \
-  --config upgrade-config.json \
-  --log.format json
+# /git/optimism/op-deployer/bin/op-deployer upgrade v3.0.0 \
+#   --l1-rpc-url $JSON_RPC \
+#   --override-artifacts-url $ARTIFACTS_AT \
+#   --config upgrade-config.json \
+#   --log.format json
 
-cast call --trace $MY_ADDRESS '0xff2dd5a1000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000003c54ad3aa68c00e53e053e30e130618b6d9efcdb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' --private-key $ADMIN_PRIVATE_KEY  --rpc-url $JSON_RPC
+# cast call --trace $MY_ADDRESS '0xff2dd5a1000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000003c54ad3aa68c00e53e053e30e130618b6d9efcdb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' --private-key $ADMIN_PRIVATE_KEY  --rpc-url $JSON_RPC
 
-cast send $MY_ADDRESS '0xff2dd5a1000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000003c54ad3aa68c00e53e053e30e130618b6d9efcdb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' --private-key $ADMIN_PRIVATE_KEY  --rpc-url $JSON_RPC
+# cast send $MY_ADDRESS '0xff2dd5a1000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000010000000000000000000000003c54ad3aa68c00e53e053e30e130618b6d9efcdb00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000' --private-key $ADMIN_PRIVATE_KEY  --rpc-url $JSON_RPC
 
 cat .deployer/bootstrap_implementations.json
 
@@ -164,6 +165,10 @@ echo "$(tomlq -t ".chains[0].roles.l1ProxyAdminOwner = \"$MY_ADDRESS\"" .deploye
 echo "$(tomlq -t ".chains[0].roles.l2ProxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.batcher = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].roles.proposer = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.challenger = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].eip1559Denominator = 1" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].eip1559DenominatorCanyon = 1" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].eip1559Elasticity = 1" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].baseFeeVaultRecipient = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].l1FeeVaultRecipient = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".chains[0].sequencerFeeVaultRecipient = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
@@ -175,17 +180,21 @@ echo "$(tomlq -t ".l2ContractsLocator = \"$ARTIFACTS_AT\"" .deployer/intent.toml
 # echo "$(tomlq -t ".superchainRoles.protocolVersionsOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 # echo "$(tomlq -t ".superchainRoles.guardian = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 
+echo "$(tomlq -t "del(.superchainRoles)" .deployer/intent.toml)" > .deployer/intent.toml
+
 
 echo "$(tomlq -t ".opcmAddress = $(jq '.opcmAddress' .deployer/bootstrap_implementations.json)" .deployer/intent.toml)" > .deployer/intent.toml
 
 echo "$(jq --argjson implDeps "$(cat .deployer/bootstrap_implementations.json)" '.implementationsDeployment = $implDeps' .deployer/state.json)" > .deployer/state.json
 echo "$(jq --argjson implDeps "$(cat superchain-output.json)" '.superchainDeployment = $implDeps' .deployer/state.json)" > .deployer/state.json
 echo "$(jq '.create2Salt = "0xb080c6ee4463bd9b316689feedc48eab73e6cf3e78a036533de77decb0430135"' .deployer/state.json)" > .deployer/state.json
+echo "$(jq '.l1ChainID = 1337' .deployer/state.json)" > .deployer/state.json
 
 # echo "$(jq ".implementationsDeployment.opcmAddress = $(jq '.opcmAddress' .deployer/bootstrap_implementations.json)" .deployer/state.json)" > .deployer/state.json
 
 cat .deployer/intent.toml
 cat .deployer/state.json
+
 
 # echo '{
 #   "opcm": null,
@@ -202,6 +211,7 @@ cat .deployer/state.json
 
 /git/optimism/op-deployer/bin/op-deployer apply --workdir .deployer --deployment-target live \
 --l1-rpc-url $JSON_RPC --private-key $ADMIN_PRIVATE_KEY
+exit 55
 
 ls -a .deployer
 
