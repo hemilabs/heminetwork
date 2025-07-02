@@ -68,7 +68,8 @@ type Server struct {
 
 	cfg *Config
 
-	hvmHandlers []HVMHandler // hvm nodes
+	hvmHandlers []HVMHandler   // hvm nodes
+	clients     map[string]int // [ip_address]server_id
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -162,6 +163,7 @@ func (s *Server) promRunning() float64 {
 }
 
 type HVMHandler struct {
+	id int // server id
 	rp *httputil.ReverseProxy
 	u  *url.URL // XXX remove?
 }
@@ -174,7 +176,20 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Hproxy", "Moo") // return to caller
 
 	// Select host to call
-	hvm := s.hvmHandlers[0]
+	s.mtx.Lock()
+	var (
+		id int
+		ok bool
+	)
+	if id, ok = s.clients[r.RemoteAddr]; !ok {
+		//for k := range s.clients {
+		//}
+
+		id = 0
+		s.clients[r.RemoteAddr] = id
+	}
+	hvm := s.hvmHandlers[v]
+	s.mtx.Unlock()
 
 	// XXX handle aggressive timeputs for ServeHTTP
 
@@ -215,7 +230,8 @@ func (s *Server) Run(pctx context.Context) error {
 				ErrorLog:     nil, // XXX wrap in loggo
 				ErrorHandler: nil, // XXX add this to deal with errors
 			},
-			u: u, // XXX do we need this?
+			u:  u, // XXX do we need this?
+			id: k, // XXX do we need this?
 		})
 	}
 
