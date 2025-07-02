@@ -157,7 +157,7 @@ func TransactionSign(params *chaincfg.Params, z zuul.Zuul, tx *wire.MsgTx, prevO
 		}
 		sigScript, err := txscript.SignTxOutput(params, tx, i,
 			prevPkScript, txscript.SigHashAll,
-			txscript.KeyClosure(z.LookupByAddr), nil, nil)
+			txscript.KeyClosure(z.LookupKeyByAddr), nil, nil)
 		if err != nil {
 			return err
 		}

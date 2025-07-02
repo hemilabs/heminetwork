@@ -14,23 +14,25 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
 )
 
-type memory struct {
+// memoryZuul is an in-memory implementation of [zuul.Zuul].
+type memoryZuul struct {
 	mtx    sync.Mutex
 	params *chaincfg.Params
 	keys   map[string]*zuul.NamedKey
 }
 
-var _ zuul.Zuul = (*memory)(nil)
+var _ zuul.Zuul = (*memoryZuul)(nil)
 
-func MemoryNew(params *chaincfg.Params) (zuul.Zuul, error) {
-	m := &memory{
+// New returns a new [zuul.Zuul] implementation that stores data in-memory.
+func New(params *chaincfg.Params) (zuul.Zuul, error) {
+	m := &memoryZuul{
 		params: params,
 		keys:   make(map[string]*zuul.NamedKey, 10),
 	}
 	return m, nil
 }
 
-func (m *memory) PutKey(nk *zuul.NamedKey) error {
+func (m *memoryZuul) PutKey(nk *zuul.NamedKey) error {
 	// Generate address for lookup
 	addr, err := nk.PrivateKey.Address(m.params)
 	if err != nil {
@@ -47,7 +49,7 @@ func (m *memory) PutKey(nk *zuul.NamedKey) error {
 	return nil
 }
 
-func (m *memory) GetKey(addr btcutil.Address) (*zuul.NamedKey, error) {
+func (m *memoryZuul) GetKey(addr btcutil.Address) (*zuul.NamedKey, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -58,7 +60,7 @@ func (m *memory) GetKey(addr btcutil.Address) (*zuul.NamedKey, error) {
 	return nk, nil
 }
 
-func (m *memory) PurgeKey(addr btcutil.Address) error {
+func (m *memoryZuul) PurgeKey(addr btcutil.Address) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -72,7 +74,7 @@ func (m *memory) PurgeKey(addr btcutil.Address) error {
 	return nil
 }
 
-func (m *memory) LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) {
+func (m *memoryZuul) LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 

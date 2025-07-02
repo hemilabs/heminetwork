@@ -137,7 +137,7 @@ func TestMemoryZuul(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			m, err := MemoryNew(&chaincfg.TestNet3Params)
+			m, err := New(&chaincfg.TestNet3Params)
 			if err != nil {
 				t.Fatal(err)
 			}

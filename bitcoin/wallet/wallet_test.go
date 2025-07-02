@@ -73,7 +73,7 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 
 func TestIntegration(t *testing.T) {
 	// KeyStore for key looksups during signing
-	m, err := memory.MemoryNew(&chaincfg.TestNet3Params)
+	m, err := memory.New(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestIntegration(t *testing.T) {
 	t.Logf("%v", pub)
 
 	// Store in key store
-	err = m.Put(&zuul.NamedKey{
+	err = m.PutKey(&zuul.NamedKey{
 		Name:       "my private key",
 		Account:    0,
 		Child:      0,
