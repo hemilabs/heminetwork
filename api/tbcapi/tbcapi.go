@@ -100,8 +100,7 @@ var (
 	RouteWebsocket  = fmt.Sprintf("/%s/ws", APIVersionRoute)
 
 	DefaultListen = "localhost:8082"
-
-	DefaultURL = fmt.Sprintf("ws://%s/%s", DefaultListen, RouteWebsocket)
+	DefaultURL    = fmt.Sprintf("ws://%s/%s", DefaultListen, RouteWebsocket)
 )
 
 type (
@@ -172,8 +171,8 @@ type L2KeystoneBlockInfo struct {
 }
 
 type FeeEstimate struct {
-	Blocks      uint
-	SatsPerByte float64
+	Blocks      uint    `json:"blocks"`
+	SatsPerByte float64 `json:"sats_per_byte"`
 }
 
 // BlockByHashRequest requests a [Block] by its hash.

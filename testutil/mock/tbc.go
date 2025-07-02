@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -24,7 +25,6 @@ import (
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
@@ -104,7 +104,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 	}
 
 	// create mempool
-	mp, err := tbc.MempoolNew()
+	mp, err := tbc.NewMempool()
 	if err != nil {
 		return fmt.Errorf("create mempool: %w", err)
 	}
@@ -146,8 +146,6 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				return fmt.Errorf("filter utxos: %w", err)
 			}
 
-			log.Debugf("%v: filtered %v utxos, %v left %v", f.name, len(utxos)-len(filtered), len(filtered))
-
 			respUtxos := make([]*tbcapi.UTXO, 0)
 			for _, utxo := range filtered {
 				txID := utxo.ScriptHash()
@@ -155,9 +153,13 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				if err != nil {
 					return err
 				}
+				value, err := newAmountFromUint64(utxo.Value())
+				if err != nil {
+					return fmt.Errorf("amount from utxo value: %w", err)
+				}
 				respUtxos = append(respUtxos, &tbcapi.UTXO{
 					TxId:     *txHash,
-					Value:    btcutil.Amount(float64(utxo.Value())),
+					Value:    value,
 					OutIndex: utxo.OutputIndex(),
 				})
 			}
@@ -190,7 +192,6 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				f.kssMtx.Lock()
 				f.keystones[*aPoPTx.L2Keystone.Hash()] = aPoPTx.L2Keystone
 				f.kssMtx.Unlock()
-				log.Debugf("%v: inserting broadcasted keystone %v", f.name, aPoPTx.L2Keystone.Hash().String())
 				break
 			}
 
@@ -198,9 +199,8 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 			mptx := tbc.NewMempoolTx(*ch, map[wire.OutPoint]struct{}{opp: {}})
 			err = mp.TxInsert(f.pctx, &mptx)
 			if err != nil {
-				return fmt.Errorf("mempool tx inser: %w", err)
+				return fmt.Errorf("mempool tx insert: %w", err)
 			}
-			log.Debugf("%v: mempool inserted broadcasted tx %v", f.name, ch.String())
 		case tbcapi.CmdBlocksByL2AbrevHashesRequest:
 			pl, ok := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
 			if !ok {
@@ -253,40 +253,6 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 					{Blocks: 10, SatsPerByte: 1},
 				},
 			}
-		case tbcapi.CmdKeystonesByHeightRequest:
-			pl, ok := payload.(*tbcapi.KeystonesByHeightRequest)
-			if !ok {
-				return fmt.Errorf("unexpected payload format: %v", payload)
-			}
-			height := int64(pl.Height)
-			depth := int64(pl.Depth)
-			kssList := make([]*hemi.L2KeystoneAbrev, 0, 16)
-			start := min(height, height+depth)
-			end := max(height, height+depth)
-			for i := start; i != end; i++ {
-				if i == height {
-					continue
-				}
-				f.kssMtx.Lock()
-				for _, ks := range f.keystones {
-					if int64(ks.L1BlockNumber) == i {
-						kssList = append(kssList, ks)
-					}
-				}
-				f.kssMtx.Unlock()
-			}
-
-			if len(kssList) < 1 {
-				resp = tbcapi.KeystonesByHeightResponse{
-					Error: protocol.RequestErrorf("%v", database.ErrNotFound),
-				}
-			} else {
-				resp = tbcapi.KeystonesByHeightResponse{
-					L2KeystoneAbrevs: kssList,
-					BTCTipHeight:     uint64(f.btcTip),
-				}
-			}
-
 		default:
 			return fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -296,4 +262,11 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				cmd, err)
 		}
 	}
+}
+
+func newAmountFromUint64(u uint64) (btcutil.Amount, error) {
+	if u > math.MaxInt64 {
+		return 0, errors.New("invalid amount")
+	}
+	return btcutil.Amount(int64(u)), nil
 }

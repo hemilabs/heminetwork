@@ -210,27 +210,29 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("ACTIONS:")
 		fmt.Println("\tbalancebyscripthash [hash]")
 		fmt.Println("\tblockbyhash [hash]")
-		fmt.Println("\tblockheaderbyhash [hash]")
+		fmt.Println("\tblockhashbytxid <txid>")
 		fmt.Println("\tblockheaderbest")
-		fmt.Println("\tblockheadersbyheight [height]")
-		fmt.Println("\tblocksbytxid [hash]")
-		fmt.Println("\tblocksmissing [count]")
-		fmt.Println("\tblockheaderbyutxoindex")
-		fmt.Println("\tblockheaderbytxindex")
+		fmt.Println("\tblockheaderbyhash [hash]")
 		fmt.Println("\tblockheaderbykeystoneindex")
+		fmt.Println("\tblockheaderbytxindex")
+		fmt.Println("\tblockheaderbyutxoindex")
+		fmt.Println("\tblockheadersbyheight [height]")
+		fmt.Println("\tblockintxindex <blkid>")
 		fmt.Println("\tblockkeystonebyl2keystoneabrevhash [abrevhash]")
-		fmt.Println("\tdeletemetadata")
+		fmt.Println("\tblocksmissing [count]")
 		fmt.Println("\tdumpmetadata")
 		fmt.Println("\tdumpoutputs <prefix>")
 		fmt.Println("\tkeystonesbyheight [height] [depth]")
-		fmt.Println("\tmetadataget [key]")
+		fmt.Println("\tfeesbyblockhash <hash>")
+		fmt.Println("\tkeystonesbyblockhash <blockhash>")
 		fmt.Println("\tmetadatadel [key]")
+		fmt.Println("\tmetadataget [key]")
 		fmt.Println("\tmetadataput [key] [value]")
 		fmt.Println("\tscripthashbyoutpoint [txid] [index]")
+		fmt.Println("\tscripthashfromaddress [network] <address>")
 		fmt.Println("\tspentoutputsbytxid <txid>")
+		fmt.Println("\tsyncindexerstohash <height> <count> <maxcache>")
 		fmt.Println("\ttxbyid <hash>")
-		fmt.Println("\ttxindex <height> <count> <maxcache>")
-		fmt.Println("\tutxoindex <height> <count> <maxcache>")
 		fmt.Println("\tutxosbyscripthash [hash] <count> <start>")
 		fmt.Println("\tutxosbyscripthashcount [hash]")
 		fmt.Println("\tversion")
@@ -406,7 +408,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		spew.Dump(rf)
 
-	case "synindexerstohash":
+	case "syncindexerstohash":
 		hash := args["hash"]
 		if hash == "" {
 			return errors.New("must provide hash")
@@ -796,26 +798,26 @@ func tbcdb(pctx context.Context, flags []string) error {
 		return fmt.Errorf("fixme dumpoutputs")
 		// s.DBClose()
 
-		//levelDBHome := "~/.tbcd" // XXX
-		//network := "testnet3"
-		//db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
-		//if err != nil {
+		// levelDBHome := "~/.tbcd" // XXX
+		// network := "testnet3"
+		// db, err := level.New(ctx, level.NewConfig(filepath.Join(levelDBHome, network), "1mb", "128mb"))
+		// if err != nil {
 		//	return err
-		//}
-		//defer db.Close()
-		//prefix := args["prefix"]
-		//if len(prefix) > 1 {
+		// }
+		// defer db.Close()
+		// prefix := args["prefix"]
+		// if len(prefix) > 1 {
 		//	return errors.New("prefix must be one byte")
-		//} else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
+		// } else if len(prefix) == 1 && !(prefix[0] == 'h' || prefix[0] == 'u') {
 		//	return errors.New("prefix must be h or u")
-		//}
-		//pool := db.DB()
-		//outsDB := pool[ldb.OutputsDB]
-		//it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
-		//defer it.Release()
-		//for it.Next() {
+		// }
+		// pool := db.DB()
+		// outsDB := pool[ldb.OutputsDB]
+		// it := outsDB.NewIterator(&util.Range{Start: []byte(prefix)}, nil)
+		// defer it.Release()
+		// for it.Next() {
 		//	fmt.Printf("outputs key %vvalue %v", spew.Sdump(it.Key()), spew.Sdump(it.Value()))
-		//}
+		// }
 
 	case "version":
 		version, err := s.DatabaseVersion(ctx)

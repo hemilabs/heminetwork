@@ -26,7 +26,7 @@ func TestMempoolFees(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
-	mp, err := MempoolNew()
+	mp, err := NewMempool()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestMempoolFees(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			mptx := mempoolTx{
+			mptx := MempoolTx{
 				id:       *ch,
 				expires:  time.Now().Add(1 * time.Minute),
 				weight:   3000,
@@ -67,7 +67,7 @@ func TestMempoolMassReaping(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	mp, err := MempoolNew()
+	mp, err := NewMempool()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestMempoolMassReaping(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			mptx := mempoolTx{
+			mptx := MempoolTx{
 				id:      *ch,
 				expires: expire.Add(time.Duration(k) * time.Second),
 			}
@@ -154,7 +154,7 @@ func TestMempoolReaping(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 			defer cancel()
 
-			mp, err := MempoolNew()
+			mp, err := NewMempool()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -224,7 +224,7 @@ func TestMempoolRemove(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
 			defer cancel()
 
-			mp, err := MempoolNew()
+			mp, err := NewMempool()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -235,7 +235,7 @@ func TestMempoolRemove(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				mptx := mempoolTx{
+				mptx := MempoolTx{
 					id:      *ch,
 					expires: time.Now().Add(1 * time.Hour),
 				}
@@ -282,7 +282,7 @@ func TestMempoolFiltering(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
-	mp, err := MempoolNew()
+	mp, err := NewMempool()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestMempoolFiltering(t *testing.T) {
 
 		if len(utxos) > numToFilter {
 			opp := wire.NewOutPoint(ch, 0)
-			mptx := mempoolTx{
+			mptx := MempoolTx{
 				id:      *ch,
 				expires: time.Now().Add(1 * time.Hour),
 				txins:   map[wire.OutPoint]struct{}{*opp: {}},
@@ -335,12 +335,12 @@ func TestMempoolFiltering(t *testing.T) {
 func BenchmarkMempoolFilter(b *testing.B) {
 	for _, mempoolTxNum := range []int{1, 10, 100, 1000, 10000} {
 		for _, txInNum := range []int{1, 10, 100, 1000, 10000} {
-			mp, err := MempoolNew()
+			mp, err := NewMempool()
 			if err != nil {
 				b.Fatal(err)
 			}
 			utxos := make([]tbcd.Utxo, 0, txInNum*mempoolTxNum)
-			// Create new mempoolTx
+			// Create new MempoolTx
 			for k := range mempoolTxNum {
 				txIdBytes := make([]byte, 32)
 				binary.BigEndian.PutUint32(txIdBytes[0:32], uint32(k))
@@ -349,12 +349,12 @@ func BenchmarkMempoolFilter(b *testing.B) {
 					b.Fatal(err)
 				}
 
-				mptx := mempoolTx{
+				mptx := MempoolTx{
 					id:      *txId,
 					expires: time.Now().Add(10 * time.Hour),
 					txins:   make(map[wire.OutPoint]struct{}),
 				}
-				// Create utxo and add it to the mempoolTx
+				// Create utxo and add it to the MempoolTx
 				for i := range txInNum {
 					uniqueBytes := make([]byte, 32)
 					binary.BigEndian.PutUint32(uniqueBytes[0:15], uint32(i))
@@ -389,8 +389,8 @@ func BenchmarkMempoolFilter(b *testing.B) {
 	}
 }
 
-func createTxs(count int, expiration time.Time, increase time.Duration) []mempoolTx {
-	txs := make([]mempoolTx, 0, count)
+func createTxs(count int, expiration time.Time, increase time.Duration) []MempoolTx {
+	txs := make([]MempoolTx, 0, count)
 	for i := range count {
 		uniqueBytes := make([]byte, 32)
 		binary.BigEndian.PutUint32(uniqueBytes, uint32(i))
@@ -399,7 +399,7 @@ func createTxs(count int, expiration time.Time, increase time.Duration) []mempoo
 			panic(err)
 		}
 
-		mptx := mempoolTx{
+		mptx := MempoolTx{
 			id:      *ch,
 			expires: expiration.Add(time.Duration(i+1) * increase),
 		}

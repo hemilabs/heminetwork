@@ -275,6 +275,10 @@ services:
       - "--log.level=info"
       - "--syncmode=${OPSYNCMODE:-execution-layer}"
       - "--override.pectrablobschedule=1751554801"
+      - "--override.isthmus=1751554801"
+      - "--override.holocene=1751554801"
+      - "--override.granite=1751554801"
+      - "--override.fjord=1751554801"
     deploy:
       restart_policy:
         condition: "any"

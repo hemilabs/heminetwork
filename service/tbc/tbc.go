@@ -165,7 +165,7 @@ type Server struct {
 	blocksInserted int    // blocks inserted since last print
 
 	// mempool
-	mempool *mempool
+	mempool *Mempool
 
 	// broadcast
 	broadcast map[chainhash.Hash]*wire.MsgTx
@@ -257,7 +257,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			// Cannot combine mempool behavior with External Header Mode
 			panic("cannot enable mempool on an external-header-only mode TBC instance")
 		}
-		s.mempool, err = MempoolNew()
+		s.mempool, err = NewMempool()
 		if err != nil {
 			return nil, err
 		}
@@ -1789,7 +1789,7 @@ func (s *Server) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil
 	return s.db.BlockByHash(ctx, hash)
 }
 
-// KeystonesByHeight returns the first occurance found of keystones
+// KeystonesByHeight returns the first occurrence found of keystones
 // at a given height + range. The given height is excluded.
 func (s *Server) KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]tbcd.Keystone, error) {
 	log.Tracef("KeystonesByHeight")
@@ -2264,13 +2264,13 @@ func (s *Server) parseTx(ctx context.Context, tx *wire.MsgTx) (int64, int64, map
 	return iv, ov, txins, nil
 }
 
-func (s *Server) mempoolTxNew(ctx context.Context, utx *btcutil.Tx) (*mempoolTx, error) {
+func (s *Server) mempoolTxNew(ctx context.Context, utx *btcutil.Tx) (*MempoolTx, error) {
 	// Create mempool tx
 	inValue, outValue, txins, err := s.parseTx(ctx, utx.MsgTx())
 	if err != nil {
 		return nil, fmt.Errorf("cannot obtain values from tx: %w", err)
 	}
-	return &mempoolTx{
+	return &MempoolTx{
 		id:       utx.MsgTx().TxHash(),
 		weight:   blockchain.GetTransactionWeight(utx),
 		size:     btcmempool.GetTxVirtualSize(utx),
@@ -2295,7 +2295,7 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 		return nil, fmt.Errorf("fees by block hash block: %w", err)
 	}
 
-	mp, err := MempoolNew()
+	mp, err := NewMempool()
 	if err != nil {
 		return nil, fmt.Errorf("could not create mempool: %w", err)
 	}
