@@ -2,6 +2,8 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
+// Package tbcgozer provides an implementation of [gozer.Gozer] which receives
+// Bitcoin data from a TBC server over RPC.
 package tbcgozer
 
 import (
@@ -37,18 +39,32 @@ func init() {
 	}
 }
 
-// Wrap for calling tbc commands
+// tbcCmd wraps tbc commands.
 type tbcCmd struct {
 	msg any
 	ch  chan any
 }
 
+// tbcGozer implements [gozer.Gozer] and retrieves Bitcoin data from a TBC
+// server over RPC.
 type tbcGozer struct {
 	mtx       sync.Mutex
 	wg        sync.WaitGroup
 	url       string
 	cmdCh     chan tbcCmd // commands to send to tbc
 	connected bool
+}
+
+// Run returns and starts a new TBC Gozer.
+func Run(ctx context.Context, tbcUrl string) (gozer.Gozer, error) {
+	t := &tbcGozer{
+		url:   tbcUrl,
+		cmdCh: make(chan tbcCmd, 10),
+	}
+
+	go t.run(ctx)
+
+	return t, nil
 }
 
 func (t *tbcGozer) Connected() bool {
@@ -364,15 +380,4 @@ func (t *tbcGozer) run(ctx context.Context) {
 
 		log.Debugf("Reconnecting to: %v", t.url)
 	}
-}
-
-func Run(ctx context.Context, tbcUrl string) (gozer.Gozer, error) {
-	t := &tbcGozer{
-		url:   tbcUrl,
-		cmdCh: make(chan tbcCmd, 10),
-	}
-
-	go t.run(ctx)
-
-	return t, nil
 }
