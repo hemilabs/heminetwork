@@ -25,7 +25,7 @@ import (
 )
 
 const (
-	logLevel              = "INFO"
+	logLevel              = "tbcgozer=INFO"
 	defaultRequestTimeout = 10 * time.Second
 
 	DefaultURL = "ws://localhost:8082/v1/ws"
