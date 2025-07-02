@@ -30,7 +30,7 @@ func MemoryNew(params *chaincfg.Params) (zuul.Zuul, error) {
 	return m, nil
 }
 
-func (m *memory) Put(nk *zuul.NamedKey) error {
+func (m *memory) PutKey(nk *zuul.NamedKey) error {
 	// Generate address for lookup
 	addr, err := nk.PrivateKey.Address(m.params)
 	if err != nil {
@@ -47,7 +47,7 @@ func (m *memory) Put(nk *zuul.NamedKey) error {
 	return nil
 }
 
-func (m *memory) Get(addr btcutil.Address) (*zuul.NamedKey, error) {
+func (m *memory) GetKey(addr btcutil.Address) (*zuul.NamedKey, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -58,7 +58,7 @@ func (m *memory) Get(addr btcutil.Address) (*zuul.NamedKey, error) {
 	return nk, nil
 }
 
-func (m *memory) Purge(addr btcutil.Address) error {
+func (m *memory) PurgeKey(addr btcutil.Address) error {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 
@@ -72,7 +72,7 @@ func (m *memory) Purge(addr btcutil.Address) error {
 	return nil
 }
 
-func (m *memory) LookupByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) {
+func (m *memory) LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 

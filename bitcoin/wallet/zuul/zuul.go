@@ -36,8 +36,8 @@ type NamedKey struct {
 
 // Zuul is an interface for storing secret material.
 type Zuul interface {
-	Put(nk *NamedKey) error
-	Get(addr btcutil.Address) (*NamedKey, error)
-	Purge(addr btcutil.Address) error
-	LookupByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) // signing lookup
+	PutKey(nk *NamedKey) error
+	GetKey(addr btcutil.Address) (*NamedKey, error)
+	PurgeKey(addr btcutil.Address) error
+	LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, bool, error) // signing lookup
 }
