@@ -182,10 +182,21 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	return s.isHealthy(ctx), health{Healthy: true, Remove: "FIXME"}, nil // XXX
 }
 
+type HVMState int
+
+const (
+	StateInvalid   HVMState = 0
+	StateHealthy            = 1
+	StateUnhealthy          = 2
+	StateRemoved            = 3
+)
+
 type HVMHandler struct {
 	id int // server id
 	rp *httputil.ReverseProxy
 	u  *url.URL // XXX remove?
+
+	state HVMState
 }
 
 func lowest(x []int) int {

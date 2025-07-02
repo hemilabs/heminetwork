@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
 type serverReply struct {
@@ -32,6 +34,48 @@ func newServer(x int) *httptest.Server {
 	}))
 }
 
+func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
+	hpCfg := NewDefaultConfig()
+	hpCfg.HVMURLs = servers
+	hpCfg.LogLevel = "TRACE"
+	hp, err := NewServer(hpCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err = hp.Run(t.Context())
+		if err != nil && err != context.Canceled {
+			panic(err)
+		}
+	}()
+	return hp, hpCfg
+}
+
+func TestNobodyHome(t *testing.T) {
+	servers := []string{"http://localhost:1"}
+	_, hpCfg := newHproxy(t, servers)
+	time.Sleep(250 * time.Millisecond)
+
+	reply, err := http.Get("http://" + hpCfg.ListenAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reply.Body.Close()
+
+	// Require X-Hproxy
+	ids := reply.Header.Get("X-Hproxy")
+	if ids == "" {
+		panic("expected X-Hproxy being set")
+	}
+
+	var jr serverReply
+	err = json.NewDecoder(reply.Body).Decode(&jr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%v", spew.Sdump(jr))
+}
+
 func TestFanout(t *testing.T) {
 	serverCount := 5
 
@@ -49,23 +93,12 @@ func TestFanout(t *testing.T) {
 	}
 
 	testDuration := 5 * time.Second
-	ctx, cancel := context.WithTimeout(context.Background(), testDuration)
+	ctx, cancel := context.WithTimeout(t.Context(), testDuration)
+	_ = ctx
 	defer cancel()
 
 	// Setup hproxy
-	hpCfg := NewDefaultConfig()
-	hpCfg.HVMURLs = servers
-	hpCfg.LogLevel = "TRACE"
-	hp, err := NewServer(hpCfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() {
-		err = hp.Run(ctx)
-		if err != nil && err != context.Canceled {
-			panic(err)
-		}
-	}()
+	_, hpCfg := newHproxy(t, servers)
 	time.Sleep(250 * time.Millisecond)
 
 	// clients
