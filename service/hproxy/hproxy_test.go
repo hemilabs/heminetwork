@@ -3,6 +3,8 @@ package hproxy
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,8 +12,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/davecgh/go-spew/spew"
 )
 
 type serverReply struct {
@@ -37,7 +37,8 @@ func newServer(x int) *httptest.Server {
 func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
 	hpCfg := NewDefaultConfig()
 	hpCfg.HVMURLs = servers
-	hpCfg.LogLevel = "TRACE"
+	hpCfg.LogLevel = "hproxy=TRACE" // XXX figure out why this isn't working
+	hpCfg.RequestTimeout = time.Second
 	hp, err := NewServer(hpCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -68,12 +69,46 @@ func TestNobodyHome(t *testing.T) {
 		panic("expected X-Hproxy being set")
 	}
 
+	// Expect 502
+	if reply.StatusCode != http.StatusBadGateway {
+		t.Fatalf("http error mismatch: got %v wanted %v",
+			reply.StatusCode, http.StatusBadGateway)
+	}
+
+	// Expect EOF
 	var jr serverReply
 	err = json.NewDecoder(reply.Body).Decode(&jr)
-	if err != nil {
+	if err != io.EOF {
 		t.Fatal(err)
 	}
-	t.Logf("%v", spew.Sdump(jr))
+}
+
+//func TestDialTimeout(t *testing.T) {
+// XXX tried to build a test for this but did not succeed. Remove or fix.
+//}
+
+func TestRequestTimeout(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wg.Wait() // Stupid test server is stupid
+
+		// exit so that we can complete the test. If we don't exit the
+		// httptest server just sits there.
+	}))
+	defer s.Close()
+
+	servers := []string{s.URL}
+	_, hpCfg := newHproxy(t, servers)
+	time.Sleep(250 * time.Millisecond)
+
+	_, err := http.Get("http://" + hpCfg.ListenAddress)
+	wg.Done()
+	if err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("%T", err)
+		}
+	}
 }
 
 func TestFanout(t *testing.T) {
@@ -106,7 +141,7 @@ func TestFanout(t *testing.T) {
 		wg sync.WaitGroup
 		am sync.Mutex
 	)
-	clientCount := serverCount * 10
+	clientCount := serverCount * 100
 	answers := make([]int, serverCount)
 	for i := 0; i < clientCount; i++ {
 		wg.Add(1)

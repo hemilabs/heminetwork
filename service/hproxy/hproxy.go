@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/juju/loggo"
@@ -247,6 +248,51 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	s.cmdsProcessed.Inc()
 }
 
+func (s *Server) handleProxyError(w http.ResponseWriter, r *http.Request, e error) {
+	log.Tracef("handleProxyError: %v", r.RemoteAddr)
+	defer log.Tracef("handleProxyError exit: %v", r.RemoteAddr)
+
+	//cs := spew.ConfigState{
+	//	DisableMethods:        true,
+	//	DisablePointerMethods: true,
+	//	ContinueOnMethod:      true,
+	//}
+
+	// log.Errorf("proxy error: %T", e)
+	// log.Errorf("proxy error: %v", cs.Sdump(e))
+
+	// connection errors
+	// XXX or is this all ohio?
+	var netErr net.Error
+	switch {
+	case errors.As(e, &netErr) && netErr.Timeout():
+		w.WriteHeader(http.StatusBadGateway)
+	case errors.Is(e, net.ErrClosed):
+		w.WriteHeader(http.StatusBadGateway)
+	case errors.Is(e, net.ErrWriteToConnected):
+		w.WriteHeader(http.StatusBadGateway)
+	case errors.Is(e, syscall.ECONNREFUSED):
+		w.WriteHeader(http.StatusBadGateway)
+	default:
+		panic(e)
+	}
+}
+
+func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (net.Conn, error) {
+	log.Tracef("handleProxyDial: %v %v", network, addr)
+	defer log.Tracef("handleProxyDial exit: %v %v", network, addr)
+
+	// This function only exists for future use. Maybe remove and use the
+	// default dialer with a timeout/deadline.
+	defaultDialTimeout := 5 * time.Second
+	d := &net.Dialer{
+		// XXX Do we want to futz with keepalive?
+	}
+	ctx, cancel := context.WithTimeout(pctx, defaultDialTimeout)
+	defer cancel()
+	return d.DialContext(ctx, network, addr)
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	if !s.testAndSetRunning(true) {
 		return errors.New("hproxy already running")
@@ -278,7 +324,14 @@ func (s *Server) Run(pctx context.Context) error {
 					r.SetXForwarded()
 				},
 				ErrorLog:     nil, // XXX wrap in loggo
-				ErrorHandler: nil, // XXX add this to deal with errors
+				ErrorHandler: s.handleProxyError,
+				// FlushInterval: -1,
+				// Transport: trt,
+				Transport: &http.Transport{
+					DialContext:           s.handleProxyDial,
+					TLSHandshakeTimeout:   5 * time.Second,
+					ResponseHeaderTimeout: s.cfg.RequestTimeout,
+				},
 			},
 		})
 	}
