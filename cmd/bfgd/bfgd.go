@@ -40,7 +40,7 @@ var (
 		"BFG_BITCOIN_URL": config.Config{
 			Value:        &cfg.BitcoinURL,
 			DefaultValue: "",
-			Help:         "conection url for bitcoin source if needed e.g. ws://localhost:8082/v1/ws",
+			Help:         "connection url for bitcoin source if needed e.g. ws://localhost:8082/v1/ws",
 			Print:        config.PrintAll,
 		},
 		"BFG_LOG_LEVEL": config.Config{

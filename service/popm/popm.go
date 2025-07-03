@@ -252,7 +252,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 		return nil, fmt.Errorf("get pay to address script: %w", err)
 	}
 	if len(payToScript) != 25 {
-		return nil, fmt.Errorf("invalid pay to public key script lenght (%d != 25)",
+		return nil, fmt.Errorf("invalid pay to public key script length (%d != 25)",
 			len(payToScript))
 	}
 	scriptHash := vinzclortho.ScriptHashFromScript(payToScript)
