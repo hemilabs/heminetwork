@@ -21,6 +21,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
 	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
 	e2ebindings "github.com/ethereum-optimism/optimism/op-e2e/bindings"
+	bindingspreview  "github.com/ethereum-optimism/optimism/op-node/bindings/preview"
 	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/wait"
 	"github.com/ethereum-optimism/optimism/op-node/bindings"
 	"github.com/ethereum-optimism/optimism/op-node/withdrawals"
@@ -42,7 +43,7 @@ const (
 )
 
 var (
-	l1StandardBridge = common.Address(common.FromHex("654fe8bC4F8Bf51f0CeC4567399aD7067E145C3F"))
+	l1StandardBridge = common.Address(common.FromHex("70e042aDFC3a4580b1f3A064612F7eD7f25cd059"))
 	abort            = retries - 1
 )
 
@@ -408,6 +409,8 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
+	t.Logf("receiver address is %s", receiverAddress)
+
 	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge, l1Client)
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +434,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		}
 		auth.Nonce = big.NewInt(int64(nonce))
 		auth.Value = big.NewInt(0)      // in wei
-		auth.GasLimit = uint64(2000000) // in units
+		auth.GasLimit = uint64(20000000) // in units
 		auth.GasFeeCap = gasPrice
 		auth.Value = big.NewInt(9000000000000000000)
 		value = auth.Value
@@ -479,7 +482,7 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
+	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0xC0d3c0d3c0D3c0d3C0D3c0D3C0d3C0D3C0D30010")), l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,11 +536,16 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	t.Logf("waiting for output root to be published")
 
-	ooproxy := common.Address(common.FromHex("e67575204500AA637a013Db8fF9610940CACf9E6"))
+	disputeGameFactoryProxy := common.Address(common.FromHex("e15fbbd3344dd919bdad8dafa45d2e343de9d843"))
+	optimismPortalProxy := common.Address(common.FromHex("30a55C96BF3bB38e4ADCbEF00Bb90C6D91F2358C"))
 
-	t.Logf("assuming L2OutputOracle is at %s", ooproxy)
+	bestL2Block, err := l2Client.BlockNumber(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	blockNumber, err := wait.ForOutputRootPublished(ctx, l1Client, ooproxy, receipt.BlockNumber)
+
+	_, err = wait.ForGamePublished(ctx, l1Client, optimismPortalProxy, disputeGameFactoryProxy,  big.NewInt(int64(bestL2Block)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,19 +553,23 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 	receiptCl := l2Client
 	proofCl := gethclient.New(receiptCl.Client())
 
-	header, err := receiptCl.HeaderByNumber(ctx, big.NewInt(int64(blockNumber)))
+	// header, err := receiptCl.HeaderByNumber(ctx, big.NewInt(int64(blockNumber)))
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+
+	disputeGameCaller, err := bindings.NewDisputeGameFactoryCaller(disputeGameFactoryProxy, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	oracle, err := bindings.NewL2OutputOracleCaller(ooproxy, l1Client)
+	optimismPortalProxyCaller, err := bindingspreview.NewOptimismPortal2Caller(optimismPortalProxy, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	optimismPortalProxy := common.Address(common.FromHex("4859725d8f2f49aE689512eE5F150FdcB76cd72c"))
 
-	params, err := withdrawals.ProveWithdrawalParameters(ctx, proofCl, receiptCl, tx.Hash(), header, oracle)
+	params, err := withdrawals.ProveWithdrawalParametersFaultProofs(ctx, proofCl, receiptCl, receiptCl, tx.Hash(), disputeGameCaller, optimismPortalProxyCaller)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,11 +637,6 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			t.Fatal("tx failed")
 		}
 		break
-	}
-
-	t.Logf("waiting for the finalization period")
-	if err := wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err != nil {
-		t.Fatal(err)
 	}
 
 	for i := 0; i < retries; i++ {
@@ -897,7 +904,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
+	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0xC0d3c0d3c0D3c0d3C0D3c0D3C0d3C0D3C0D30010")), l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -921,7 +928,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		}
 		auth.Nonce = big.NewInt(int64(nonce))
 		auth.Value = big.NewInt(0)      // in wei
-		auth.GasLimit = uint64(3000000) // in units
+		auth.GasLimit = uint64(30000000) // in units
 		auth.GasFeeCap = gasPrice
 
 		tx, err = bridge.L2StandardBridgeTransactor.BridgeERC20To(auth, l2Address, l1Address, receiverAddress, big.NewInt(50), 0, []byte{})
@@ -947,13 +954,16 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		break
 	}
 
-	t.Logf("waiting for output root to be published")
+	disputeGameFactoryProxy := common.Address(common.FromHex("e15fbbd3344dd919bdad8dafa45d2e343de9d843"))
+	optimismPortalProxy := common.Address(common.FromHex("30a55C96BF3bB38e4ADCbEF00Bb90C6D91F2358C"))
 
-	ooproxy := common.Address(common.FromHex("e67575204500AA637a013Db8fF9610940CACf9E6"))
+	bestL2Block, err := l2Client.BlockNumber(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	t.Logf("assuming L2OutputOracle is at %s", ooproxy)
 
-	blockNumber, err := wait.ForOutputRootPublished(ctx, l1Client, ooproxy, receipt.BlockNumber)
+	_, err = wait.ForGamePublished(ctx, l1Client, optimismPortalProxy, disputeGameFactoryProxy,  big.NewInt(int64(bestL2Block)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -961,19 +971,17 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 	receiptCl := l2Client
 	proofCl := gethclient.New(receiptCl.Client())
 
-	header, err := receiptCl.HeaderByNumber(ctx, big.NewInt(int64(blockNumber)))
+	disputeGameCaller, err := bindings.NewDisputeGameFactoryCaller(disputeGameFactoryProxy, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	oracle, err := bindings.NewL2OutputOracleCaller(ooproxy, l1Client)
+	optimismPortalProxyCaller, err := bindingspreview.NewOptimismPortal2Caller(optimismPortalProxy, l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	optimismPortalProxy := common.Address(common.FromHex("4859725d8f2f49aE689512eE5F150FdcB76cd72c"))
-
-	params, err := withdrawals.ProveWithdrawalParameters(ctx, proofCl, receiptCl, tx.Hash(), header, oracle)
+	params, err := withdrawals.ProveWithdrawalParametersFaultProofs(ctx, proofCl, receiptCl, receiptCl, tx.Hash(), disputeGameCaller, optimismPortalProxyCaller)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1043,10 +1051,10 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		break
 	}
 
-	t.Logf("waiting for the finalization period")
-	if err := wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err != nil {
-		t.Fatal(err)
-	}
+	// t.Logf("waiting for the finalization period")
+	// if err := wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err != nil {
+	// 	t.Fatal(err)
+	// }
 
 	for i := 0; i < retries; i++ {
 		nonce, err := l1Client.PendingNonceAt(ctx, receiverAddress)

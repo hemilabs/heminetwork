@@ -26,7 +26,7 @@ import (
 const (
 	dataRefreshSeconds   = 1
 	tableRefreshSeconds  = 1
-	batcherInboxAddress  = "0xff00000000000000000000000000000000000901"
+	batcherInboxAddress  = "0x00289c189bee4e70334629f04cd5ed602b6600eb"
 	batcherSenderAddress = "0x78697c88847dfbbb40523e42c1f2e28a13a170be"
 )
 
@@ -320,9 +320,9 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 	}
 
 	for {
-		first := runJs(firstBatcherTxBlockJs, "l1", "geth.ipc", "1")
-		last := runJs(lastBatcherTxBlockJs, "l1", "geth.ipc", "1")
-		count := runJs(batcherPublicationCountJs, "l1", "geth.ipc", "1")
+		first := runJs(firstBatcherTxBlockJs, "l1", "/l2configs/gethl1datadir/geth.ipc", "1")
+		last := runJs(lastBatcherTxBlockJs, "l1", "/l2configs/gethl1datadir/geth.ipc", "1")
+		count := runJs(batcherPublicationCountJs, "l1", "/l2configs/gethl1datadir/geth.ipc", "1")
 		popMinerBalance := runJs(popMinerBalanceJs, "l2", "datadir/geth.ipc", "1")
 
 		mtx.Lock()

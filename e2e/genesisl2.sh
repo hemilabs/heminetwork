@@ -179,6 +179,7 @@ echo "$(tomlq -t ".l2ContractsLocator = \"$ARTIFACTS_AT\"" .deployer/intent.toml
 echo "$(tomlq -t ".superchainRoles.proxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".superchainRoles.protocolVersionsOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".superchainRoles.guardian = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.l2BlockTime = 1" .deployer/intent.toml)" > .deployer/intent.toml
 
 # echo "$(tomlq -t "del(.superchainRoles)" .deployer/intent.toml)" > .deployer/intent.toml
 
@@ -239,6 +240,8 @@ cat /l2configs/l1StateDump.bin
 cat /l2configs/deploy-config.json
 cat /l2configs/l1deployments.json
 
+cat l1allocs.json
+
 /git/optimism/op-node/bin/op-node \
     genesis \
     l1 \
@@ -246,7 +249,12 @@ cat /l2configs/l1deployments.json
     /l2configs/deploy-config.json \
     --l1-deployments /l2configs/deploy-config.json \
     --outfile.l1 /l2configs/l1genesis.json \
-    --l1-allocs /l2configs/l1StateDump.bin
+    --l1-allocs ./l1allocs.json
+
+echo "$(jq '.alloc."0x78697c88847dfbbb40523e42c1f2e28a13a170be".balance = "0x999999999999999999"' /l2configs/l1genesis.json)" > /l2configs/l1genesis.json
+
+cat /l2configs/l1genesis.json
+
 
 # # HACK TO REMOVE old fields to make the generated genesis file compatible for 
 # # after newer version
