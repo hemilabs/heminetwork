@@ -137,7 +137,7 @@ func TestMemoryZuul(t *testing.T) {
 
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			m, err := MemoryNew(&chaincfg.TestNet3Params)
+			m, err := New(&chaincfg.TestNet3Params)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -151,7 +151,7 @@ func TestMemoryZuul(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, ki := range privKeys {
-						err = m.Put(ki.nk)
+						err = m.PutKey(ki.nk)
 						if !command.fail {
 							if err != nil {
 								t.Fatal(err)
@@ -169,7 +169,7 @@ func TestMemoryZuul(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, ki := range privKeys {
-						err = m.Purge(*(ki.addr))
+						err = m.PurgeKey(*(ki.addr))
 						if !command.fail {
 							if err != nil {
 								t.Fatal(err)
@@ -191,7 +191,7 @@ func TestMemoryZuul(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, ki := range expectedIn {
-				nk, err := m.Get(*ki.addr)
+				nk, err := m.GetKey(*ki.addr)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -199,7 +199,7 @@ func TestMemoryZuul(t *testing.T) {
 					t.Fatalf("unexpected error diff: %s", diff)
 				}
 
-				priv, ok, err := m.LookupByAddr(*ki.addr)
+				priv, ok, err := m.LookupKeyByAddr(*ki.addr)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -217,11 +217,11 @@ func TestMemoryZuul(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, ki := range expectedOut {
-				_, err = m.Get(*ki.addr)
+				_, err = m.GetKey(*ki.addr)
 				if err == nil || !errors.Is(err, zuul.ErrKeyDoesntExist) {
 					t.Fatalf("expected '%v' error, got '%v'", zuul.ErrKeyDoesntExist, err)
 				}
-				_, _, err = m.LookupByAddr(*ki.addr)
+				_, _, err = m.LookupKeyByAddr(*ki.addr)
 				if err == nil || !errors.Is(err, zuul.ErrKeyDoesntExist) {
 					t.Fatalf("expected '%v' error, got '%v'", zuul.ErrKeyDoesntExist, err)
 				}

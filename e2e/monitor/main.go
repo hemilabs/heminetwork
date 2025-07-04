@@ -38,6 +38,9 @@ type state struct {
 	lastBatcherPublicationHash  string
 	batcherPublicationCount     int
 	popMinerBalance             string // very large number
+	tipDiff                     int
+	tipHash                     string
+	tipHashNonSequencing        string
 }
 
 type jsonOutput struct {
@@ -47,6 +50,8 @@ type jsonOutput struct {
 	LastBatcherPublicationHash  string `json:"last_batcher_publication_hash"`
 	BatcherPublicationCount     uint64 `json:"batcher_publication_count"`
 	PopMinerHemiBalance         string `json:"pop_miner_hemi_balance"`
+	TipHash                     string `json:"tip_hash"`
+	TipHashNonSequencing        string `json:"tip_hash_non_sequencing"`
 }
 
 func main() {
@@ -113,6 +118,12 @@ func render(ctx context.Context, s *state, w table.Writer, mtx *sync.Mutex) {
 		w.AppendRow(table.Row{"batcher publication count", fmt.Sprintf("%d", s.batcherPublicationCount)})
 
 		w.AppendRow(table.Row{"pop miner $HEMI balance", fmt.Sprintf("%s", s.popMinerBalance)})
+
+		w.AppendRow(table.Row{"sequencer vs non-sequencer tip diff", fmt.Sprintf("%d", s.tipDiff)})
+
+		w.AppendRow(table.Row{"sequencer tip", fmt.Sprintf("%s", s.tipHash)})
+
+		w.AppendRow(table.Row{"non-sequencer tip", fmt.Sprintf("%s", s.tipHashNonSequencing)})
 
 		for _, c := range s.containersRunning {
 			w.AppendRow(table.Row{fmt.Sprintf("container %s", c), "running"})
@@ -310,6 +321,14 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		console.log(Number.parseInt(hexValue, 16));
 	`
 
+	tipJs := `
+		console.log(eth.blockNumber)
+	`
+
+	tipHashJs := `
+		console.log(eth.getBlock(eth.blockNumber).hash)
+	`
+
 	runJs := func(jsi string, layer string, ipcPath string, replica string) string {
 		prefix := "op-"
 		if layer == "l1" {
@@ -335,17 +354,45 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		return strings.Split(string(output), "\n")[0]
 	}
 
+	runJsToInt := func(jsi string, layer string, ipcPath string, replica string) int {
+		val := runJs(jsi, layer, ipcPath, replica)
+		intVal, err := strconv.Atoi(val)
+		if err != nil {
+			panic(fmt.Sprintf("error converting to int: %s", err))
+		}
+
+		return intVal
+	}
+
 	for {
 		first := runJs(firstBatcherTxBlockJs, "l1", "geth.ipc", "1")
 		last := runJs(lastBatcherTxBlockJs, "l1", "geth.ipc", "1")
 		count := runJs(batcherPublicationCountJs, "l1", "geth.ipc", "1")
-		popMinerBalance := runJs(popMinerBalanceJs, "l2", "datadir/geth.ipc", "1")
+
+		popMinerBalance := runJsToInt(popMinerBalanceJs, "l2", "datadir/geth.ipc", "1")
+		popMinerBalanceNonSequencing := runJsToInt(popMinerBalanceJs, "l2-non-sequencing", "datadir/geth.ipc", "1")
+
+		tip := runJsToInt(tipJs, "l2", "datadir/geth.ipc", "1")
+		tipNonSequencing := runJsToInt(tipJs, "l2-non-sequencing", "datadir/geth.ipc", "1")
+
+		tipHash := runJs(tipHashJs, "l2", "datadir/geth.ipc", "1")
+		tipHashNonSequencing := runJs(tipHashJs, "l2-non-sequencing", "datadir/geth.ipc", "1")
+
+		// choose the min of these values; the values should be going up.  if
+		// one node is not keeping up, it will have a (noticeably) lower balance
+		if popMinerBalanceNonSequencing < popMinerBalance {
+			popMinerBalance = popMinerBalanceNonSequencing
+		}
+
+		tipDiff := tip - tipNonSequencing
 
 		mtx.Lock()
 		s.firstBatcherPublicationHash = first
 		s.lastBatcherPublicationHash = last
-
-		s.popMinerBalance = popMinerBalance
+		s.tipDiff = tipDiff
+		s.popMinerBalance = fmt.Sprintf("%d", popMinerBalance)
+		s.tipHash = tipHash
+		s.tipHashNonSequencing = tipHashNonSequencing
 		var err error
 		s.batcherPublicationCount, err = strconv.Atoi(count)
 		if err != nil {
@@ -387,6 +434,8 @@ func dumpJson(mtx *sync.Mutex, s *state) string {
 		LastBatcherPublicationHash:  s.lastBatcherPublicationHash,
 		BatcherPublicationCount:     uint64(s.batcherPublicationCount),
 		PopMinerHemiBalance:         s.popMinerBalance,
+		TipHash:                     s.tipHash,
+		TipHashNonSequencing:        s.tipHashNonSequencing,
 	}
 	mtx.Unlock()
 

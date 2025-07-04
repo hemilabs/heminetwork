@@ -2,6 +2,8 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
+// Package tbcgozer provides an implementation of [gozer.Gozer] which receives
+// Bitcoin data from a TBC server over RPC.
 package tbcgozer
 
 import (
@@ -23,7 +25,7 @@ import (
 )
 
 const (
-	logLevel              = "INFO"
+	logLevel              = "tbcgozer=INFO"
 	defaultRequestTimeout = 10 * time.Second
 
 	DefaultURL = "ws://localhost:8082/v1/ws"
@@ -37,18 +39,34 @@ func init() {
 	}
 }
 
-// Wrap for calling tbc commands
+// tbcCmd wraps tbc commands.
 type tbcCmd struct {
 	msg any
 	ch  chan any
 }
 
+// tbcGozer implements [gozer.Gozer] and retrieves Bitcoin data from a TBC
+// server over RPC.
 type tbcGozer struct {
 	mtx       sync.Mutex
 	wg        sync.WaitGroup
 	url       string
 	cmdCh     chan tbcCmd // commands to send to tbc
 	connected bool
+}
+
+var _ gozer.Gozer = (*tbcGozer)(nil)
+
+// Run returns and starts a new TBC Gozer.
+func Run(ctx context.Context, tbcUrl string) (gozer.Gozer, error) {
+	t := &tbcGozer{
+		url:   tbcUrl,
+		cmdCh: make(chan tbcCmd, 10),
+	}
+
+	go t.run(ctx)
+
+	return t, nil
 }
 
 func (t *tbcGozer) Connected() bool {
@@ -322,8 +340,8 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	err = conn.Connect(ctx)
-	if err != nil {
+	// TODO: implement exponential backoff retry
+	if err = conn.Connect(ctx); err != nil {
 		return err
 	}
 
@@ -353,7 +371,7 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 func (t *tbcGozer) run(ctx context.Context) {
 	for {
 		if err := t.connectTBC(ctx); err != nil {
-			log.Infof("%v", err)
+			log.Errorf("Failed to connect to TBC: %v", err)
 		}
 		// See if we were terminated
 		select {
@@ -364,15 +382,4 @@ func (t *tbcGozer) run(ctx context.Context) {
 
 		log.Debugf("Reconnecting to: %v", t.url)
 	}
-}
-
-func Run(ctx context.Context, tbcUrl string) (gozer.Gozer, error) {
-	t := &tbcGozer{
-		url:   tbcUrl,
-		cmdCh: make(chan tbcCmd, 10),
-	}
-
-	go t.run(ctx)
-
-	return t, nil
 }

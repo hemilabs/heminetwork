@@ -2,6 +2,11 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
+// Package gozer provides an interface for accessing Bitcoin data.
+//
+// Gozer was originally worshiped as a god by the Hittites, Mesopotamians, and
+// the Sumerians around 6000 BC. Gozer was genderless and could assume any form
+// it wanted.
 package gozer
 
 import (
@@ -19,10 +24,7 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 )
 
-// Gozer was originally worshiped as a god by the Hittites, Mesopotamians, and
-// the Sumerians around 6000 BC. Gozer was genderless and could assume any form
-// it wanted.
-
+// Gozer is an interface providing access to Bitcoin data.
 type Gozer interface {
 	FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error)
 	UtxosByAddress(ctx context.Context, filterMempool bool, addr btcutil.Address, start, count uint) ([]*tbcapi.UTXO, error)

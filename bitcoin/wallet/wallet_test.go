@@ -73,13 +73,13 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 
 func TestIntegration(t *testing.T) {
 	// KeyStore for key looksups during signing
-	m, err := memory.MemoryNew(&chaincfg.TestNet3Params)
+	m, err := memory.New(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
-	w, err := vinzclortho.VinzClorthoNew(&chaincfg.TestNet3Params)
+	w, err := vinzclortho.New(&chaincfg.TestNet3Params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestIntegration(t *testing.T) {
 	t.Logf("%v", pub)
 
 	// Store in key store
-	err = m.Put(&zuul.NamedKey{
+	err = m.PutKey(&zuul.NamedKey{
 		Name:       "my private key",
 		Account:    0,
 		Child:      0,
@@ -226,143 +226,3 @@ func TestIntegration(t *testing.T) {
 
 	t.Logf("txID: %v", txID)
 }
-
-// func TestUTXOFilter(t *testing.T) {
-//	const utxoValue = btcutil.Amount(1000)
-//
-//	type testTableItem struct {
-//		name     string
-//		single   bool
-//		amount   btcutil.Amount
-//		utxoIDs  []string
-//		filter   []string
-//		expected []string
-//	}
-//
-//	testTable := []testTableItem{
-//		{
-//			name:     "TestSingleNoFilter",
-//			single:   true,
-//			amount:   utxoValue,
-//			utxoIDs:  []string{"a"},
-//			filter:   nil,
-//			expected: []string{"a"},
-//		},
-//		{
-//			name:     "TestMultipleNoFilter",
-//			single:   false,
-//			amount:   utxoValue * 2,
-//			utxoIDs:  []string{"a", "b"},
-//			filter:   nil,
-//			expected: []string{"a", "b"},
-//		},
-//		{
-//			name:     "TestSingleFilterAll",
-//			single:   true,
-//			amount:   utxoValue,
-//			utxoIDs:  []string{"a", "b"},
-//			filter:   []string{"a", "b"},
-//			expected: nil,
-//		},
-//		{
-//			name:     "TestMultipleFilterAll",
-//			single:   false,
-//			amount:   utxoValue,
-//			utxoIDs:  []string{"a", "b"},
-//			filter:   []string{"a", "b"},
-//			expected: nil,
-//		},
-//		{
-//			name:     "TestSingleMixedFilter",
-//			single:   true,
-//			amount:   utxoValue,
-//			utxoIDs:  []string{"a", "b", "c"},
-//			filter:   []string{"a", "c"},
-//			expected: []string{"b"},
-//		},
-//		{
-//			name:     "TestMultipleMixedFilter",
-//			single:   false,
-//			amount:   utxoValue * 2,
-//			utxoIDs:  []string{"a", "b", "c", "d"},
-//			filter:   []string{"a", "c"},
-//			expected: []string{"b", "d"},
-//		},
-//		{
-//			name:     "TestSingleFailure",
-//			single:   true,
-//			amount:   utxoValue * 2,
-//			utxoIDs:  []string{"a", "b", "c"},
-//			filter:   []string{"a", "c"},
-//			expected: nil,
-//		},
-//		{
-//			name:     "TestMultipleFailure",
-//			single:   false,
-//			amount:   utxoValue * 2,
-//			utxoIDs:  []string{"a", "b", "c"},
-//			filter:   []string{"a", "c"},
-//			expected: nil,
-//		},
-//	}
-//
-//	for _, tti := range testTable {
-//		t.Run(tti.name, func(t *testing.T) {
-//			utxos := make([]*tbcapi.UTXO, 0, len(tti.utxoIDs))
-//			for _, id := range tti.utxoIDs {
-//				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
-//				if err != nil {
-//					panic(err)
-//				}
-//				utxos = append(utxos, &tbcapi.UTXO{TxId: *hash, Value: utxoValue})
-//			}
-//
-//			filter := make([]chainhash.Hash, 0, len(tti.filter))
-//			for _, id := range tti.filter {
-//				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
-//				if err != nil {
-//					panic(err)
-//				}
-//				filter = append(filter, *hash)
-//			}
-//
-//			var result []*tbcapi.UTXO
-//			var err error
-//			if tti.single {
-//				u, err := UtxoPickerSingle(tti.amount, 0, utxos, filter)
-//				if err != nil {
-//					if len(tti.expected) == 0 {
-//						return
-//					} else {
-//						t.Fatal("expected error")
-//					}
-//				}
-//				result = []*tbcapi.UTXO{u}
-//			} else {
-//				result, err = UtxoPickerMultiple(tti.amount, 0, utxos, filter)
-//				if err != nil {
-//					if tti.expected == nil {
-//						return
-//					} else {
-//						t.Fatal("expected error")
-//					}
-//				}
-//			}
-//
-//			if len(tti.expected) != len(result) {
-//				t.Fatalf("got %x utxos, expected %v", len(tti.expected), len(result))
-//			}
-//
-//			for _, id := range tti.expected {
-//				hash, err := chainhash.NewHash(fillOutBytes(id, 32))
-//				if err != nil {
-//					panic(err)
-//				}
-//
-//				if !utxoByHash(*hash, result) {
-//					t.Fatalf("expected utxo %v to be in results", hash)
-//				}
-//			}
-//		})
-//	}
-// }

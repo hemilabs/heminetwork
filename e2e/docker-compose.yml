@@ -220,6 +220,8 @@ services:
       ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
       OP_GETH_L1_RPC: "http://geth-l1:8545"
       HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
+      # yamllint disable-line rule:line-length
+      GETH_NODEKEYHEX: "76e3e48b25c512e1036069538041df813b759fc67d4756b80ace2586b123e913"
     working_dir: "/tmp"
     command:
       - "sh"
@@ -239,6 +241,7 @@ services:
       - 8546:8546
     networks:
       e2e:
+        ipv4_address: 192.169.199.8
 
   op-node:
     build:
@@ -272,8 +275,6 @@ services:
       - "--p2p.no-discovery"
       - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
       - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
-      - "--p2p.static=/ip4/192.169.198.7/tcp/9222/p2p/16Uiu2HAkx8gegEci9Jk2GDJ92S7HuF7odZCgg9mbos18qiqNEpFz"
-      - "--p2p.static=/ip4/192.169.197.7/tcp/9222/p2p/16Uiu2HAmVqqZGwbuWDffuQo2jCLBSULod13CZuoACZQS8WTKEL2X"
       - "--log.level=debug"
       - "--log.format=terminal"
       - "--override.ecotone=1725868497"
@@ -292,6 +293,92 @@ services:
     networks:
       e2e:
         ipv4_address: 192.169.199.7
+    ports:
+      - "8547:8547"
+
+  op-node-non-sequencing:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    depends_on:
+      op-node:
+        condition: "service_started"
+    healthcheck:
+      start_period: 180s
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+    command:
+      - "op-node/bin/op-node"
+      - "--l2=ws://op-geth-l2-non-sequencing:8551"
+      - "--l2.jwt-secret=/tmp/jwt.hex"
+      - "--verifier.l1-confs=0"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--rpc.enable-admin"
+      - "--l1=http://geth-l1:8545"
+      - "--l1.rpckind=standard"
+      - "--l1.trustrpc"
+      - "--log.level=info"
+      - "--l1.trustrpc=true"
+      - "--l1.http-poll-interval=1s"
+      - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
+      - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
+      - "--p2p.static=/ip4/192.169.199.7/tcp/9222/p2p/16Uiu2HAmGCJv5C97ZcdMr6pCCQFqdNXvwE8k6RgTd7vWu4WtVUmr"
+      - "--log.level=debug"
+      - "--log.format=terminal"
+      - "--override.ecotone=1725868497"
+      - "--override.canyon=1725868497"
+      - "--override.delta=1725868497"
+      - "--override.pectrablobschedule=1744238662"
+      - "--override.isthmus=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.holocene=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
+      - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
+      - "--l1.beacon.ignore=true"
+    volumes:
+      - "l2configs:/l2configs"
+      - "./jwt.hex:/tmp/jwt.hex"
+    networks:
+      e2e:
+    ports:
+      - "18547:8547"
+
+  op-geth-l2-non-sequencing:
+    build:
+      dockerfile: "optimism-stack.Dockerfile"
+      context: "."
+    depends_on:
+      op-geth-l2:
+        condition: "service_started"
+    healthcheck:
+      test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
+      interval: 5s
+      retries: 300
+      start_period: 30s
+    environment:
+      ADMIN_PRIVATE_KEY: "${ADMIN_PRIVATE_KEY}"
+      OP_GETH_L1_RPC: "http://geth-l1:8545"
+      HVM_PHASE0_TIMESTAMP: ${HVM_PHASE0_TIMESTAMP}
+    working_dir: "/tmp"
+    command:
+      - "sh"
+      - "/tmp/entrypointl2.sh"
+    volumes:
+      - "./e2e/keystore:/tmp/keystore:ro"
+      - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
+      - "./jwt.hex:/tmp/jwt.hex:ro"
+      - "./entrypointl2.sh:/tmp/entrypointl2.sh"
+      - "./genesisl2.sh:/tmp/genesisl2.sh"
+      - "./output:/tmp/output"
+      - "l2configs:/l2configs"
+      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
+      - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
+      - {type: "tmpfs", target: "/tmp"}
+    networks:
+      e2e:
+    ports:
+      - "18546:8546"
 
   op-batcher:
     build:

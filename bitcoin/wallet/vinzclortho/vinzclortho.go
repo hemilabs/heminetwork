@@ -2,10 +2,12 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-package vinzclortho
-
+// Package vinzclortho handles creation and deriviation of Bitcoin addresses.
+//
 // Vinz Clortho, a minion of the god known as Gozer, was worshiped as a demigod
 // by the Sumerians, Mesopotamians and Hittites in 6000 BC.
+package vinzclortho
+
 import (
 	"crypto/sha256"
 	"encoding/hex"
@@ -22,6 +24,8 @@ import (
 	"github.com/tyler-smith/go-bip39"
 )
 
+// VinzClortho is a wallet implementation that handles the creation and
+// derivation of Bitcoin addresses.
 type VinzClortho struct {
 	mtx sync.Mutex
 
@@ -31,13 +35,15 @@ type VinzClortho struct {
 	master *hdkeychain.ExtendedKey
 }
 
-func VinzClorthoNew(params *chaincfg.Params) (*VinzClortho, error) {
+// New returns a new VinzClortho with the given chain params.
+func New(params *chaincfg.Params) (*VinzClortho, error) {
 	vc := &VinzClortho{
 		params: params,
 	}
 	return vc, nil
 }
 
+// Lock locks the wallet.
 func (vc *VinzClortho) Lock() error {
 	if vc.master == nil {
 		return errors.New("wallet already locked")
@@ -51,7 +57,7 @@ func (vc *VinzClortho) Lock() error {
 	return nil
 }
 
-// Secret unlocks the wallet by deriving a seed from the provided secret.
+// Unlock unlocks the wallet by deriving a seed from the provided secret.
 // Supports xprv, hex encoded seed and mnemonic.
 func (vc *VinzClortho) Unlock(secret string) error {
 	vc.mtx.Lock()
@@ -106,7 +112,7 @@ func (vc *VinzClortho) Unlock(secret string) error {
 // Hardened addresses require the private key to derive public keys whereas a
 // regular address can derive public keys without.
 //
-// This function uses the same paths as used in bitcoin core and electrum.
+// This function uses the same paths as used in Bitcoin core and Electrum.
 func (vc *VinzClortho) derive(account, child, offset uint32) (*hdkeychain.ExtendedKey, error) {
 	if vc.master == nil {
 		return nil, errors.New("wallet locked")
@@ -135,7 +141,7 @@ func (vc *VinzClortho) DeriveHD(account, child uint32) (*hdkeychain.ExtendedKey,
 	return vc.derive(account, child, hdkeychain.HardenedKeyStart)
 }
 
-// DeriveHD derives an extended public key and address.
+// Derive derives an extended public key and address.
 // E.g. account 0 child 1 m/0/1
 func (vc *VinzClortho) Derive(account, child uint32) (*hdkeychain.ExtendedKey, error) {
 	return vc.derive(account, child, 0)
@@ -159,7 +165,7 @@ func AddressAndPublicFromExtended(params *chaincfg.Params, ek *hdkeychain.Extend
 	return addr, pub, nil
 }
 
-// Compresses converts an extended key to the compressed public key representation.
+// Compressed converts an extended key to the compressed public key representation.
 func Compressed(pub *hdkeychain.ExtendedKey) ([]byte, error) {
 	ecpub, err := pub.ECPubKey()
 	if err != nil {
