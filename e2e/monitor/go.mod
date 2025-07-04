@@ -1,14 +1,16 @@
 module github.com/hemilabs/heminetwork/e2e/monitor
 
-go 1.24.4
+go 1.24.2
+
+toolchain go1.24.3
 
 // this is an older commit on heminetwork to keep the api in sync with
 // op-geth. this won't affect application code, just testing
 replace github.com/hemilabs/heminetwork => github.com/hemilabs/heminetwork v1.6.4-0.20250611192936-d04c9f49d8e3
 
-replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250425175530-97b573b6339a
+replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250528162153-94b9f49ebe16
 
-replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250423005627-59242a8f35fc
+replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250528153428-6f8b8c7f469f
 
 require (
 	github.com/btcsuite/btcd v0.24.2
@@ -18,7 +20,7 @@ require (
 	github.com/ethereum/go-ethereum v1.15.9
 	github.com/go-test/deep v1.1.1
 	github.com/gosuri/uilive v0.0.4
-	github.com/hemilabs/heminetwork v1.0.0
+	github.com/hemilabs/heminetwork v1.1.1-0.20250528115641-6941c7f47b6d
 	github.com/jedib0t/go-pretty/v6 v6.5.8
 )
 
@@ -69,7 +71,7 @@ require (
 	github.com/hashicorp/go-bexpr v0.1.11 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
-	github.com/holiman/billy v0.0.0-20240216141850-2abb0c79d3c4 // indirect
+	github.com/holiman/billy v0.0.0-20250108194907-5352da567d3e // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
