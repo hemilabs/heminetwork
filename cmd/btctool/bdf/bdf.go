@@ -152,16 +152,14 @@ func writeHeight(height int, hash, dir string) error {
 	f, err := os.Open(filename)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			// do nothing
-			defer f.Close()
+			// File does not exist, proceed to create it
 		} else {
 			return fmt.Errorf("open file: %w", err)
 		}
 	} else {
 		defer f.Close()
 		d := json.NewDecoder(f)
-		err = d.Decode(&lh)
-		if err != nil {
+		if err := d.Decode(&lh); err != nil {
 			return fmt.Errorf("%v corrupt: %w", filename, err)
 		}
 	}
