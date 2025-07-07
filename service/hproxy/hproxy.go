@@ -202,7 +202,8 @@ type HVMHandler struct {
 
 	connections uint
 
-	state HVMState
+	poking bool // true when getting health
+	state  HVMState
 }
 
 func (s *Server) lowest(x []int) int {
@@ -317,17 +318,27 @@ func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (ne
 }
 
 func (s *Server) poke(ctx context.Context, id int) {
-	log.Infof("poke: %v", id)
 	log.Tracef("poke: %v", id)
 	defer log.Tracef("poke exit: %v", id)
 
 	s.mtx.Lock()
+	if s.hvmHandlers[id].poking {
+		s.mtx.Unlock()
+		return
+	}
+	s.hvmHandlers[id].poking = true
 	u := s.hvmHandlers[id].u
 	s.mtx.Unlock()
+	defer func() {
+		s.mtx.Lock()
+		s.hvmHandlers[id].poking = false
+		s.mtx.Unlock()
+	}()
 	if u == nil {
 		// XXX
 		panic(fmt.Sprintf("url not set: %v", id))
 	}
+	// XXX move into s.hvmHandlers so it can be persistent
 	c := &http.Client{
 		Transport: &http.Transport{
 			DialContext:           s.handleProxyDial,
