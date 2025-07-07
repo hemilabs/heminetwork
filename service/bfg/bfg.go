@@ -151,10 +151,11 @@ func Errorf(format string, args ...any) *HTTPError {
 	}
 }
 
-func InternalErrorf(w http.ResponseWriter, format string, args ...any) {
-	err := Errorf(format, args...)
+// InternalErrorf writes an HTTP 500 response with "internal error" to the
+// client and logs the given error.
+func InternalErrorf(w http.ResponseWriter, err error) {
 	log.Errorf("internal server error: %v", err)
-	writeHTTPError(w, http.StatusInternalServerError, err)
+	writeHTTPError(w, http.StatusInternalServerError, Errorf("internal error"))
 }
 
 func BadRequestf(w http.ResponseWriter, format string, args ...any) {
@@ -350,8 +351,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// Call opgeth to retrieve keystones
 		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
 		if err != nil {
-			log.Errorf("opgeth: %v", err)
-			InternalErrorf(w, "internal error")
+			InternalErrorf(w, fmt.Errorf("opgeth: %w", err))
 			return
 		}
 		if resp.Error != nil {
@@ -381,14 +381,12 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 
 		// 	btcTip, err := s.gozer.BtcHeight(r.Context())
 		// 	if err != nil {
-		// 		log.Errorf("retrieve btc tip: %v", err)
-		// 		InternalErrorf(w, "internal error")
+		// 		InternalErrorf(w, fmt.Errorf("retrieve btc tip: %w", err))
 		// 		return
 		// 	}
 		// 	scf, err := s.shortCircuitFinality(r.Context(), &fin.L2Keystone, uint32(btcTip))
 		// 	if err != nil {
-		// 		log.Errorf("short circuit: %v", err)
-		// 		InternalErrorf(w, "internal error")
+		// 		InternalErrorf(w, fmt.Errorf("short circuit: %w", err)
 		// 		return
 		// 	}
 
@@ -414,7 +412,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// Get abbreviated keystones from gozer
 		aks := s.gozer.BlocksByL2AbrevHashes(r.Context(), abrevKeystones)
 		if aks.Error != nil {
-			InternalErrorf(w, "internal error")
+			InternalErrorf(w, fmt.Errorf("blocks by l2abrev hashes: %w", aks.Error))
 			return
 		}
 
@@ -448,8 +446,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 				}
 			} else {
 				// This really shouldn't happen
-				log.Errorf("cannot find stateroot: %v", spew.Sdump(bk))
-				InternalErrorf(w, "internal error")
+				InternalErrorf(w, fmt.Errorf("cannot find stateroot: %v", spew.Sdump(bk)))
 				return
 			}
 			if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
