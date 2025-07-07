@@ -433,21 +433,21 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 				continue
 			}
 
-			if ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]; ok {
-				if fin != nil {
-					altFin.L2Keystone = fin.L2Keystone
-				}
-				// If this keystone has a higher l2 number, store it the
-				// abrev hash for future descendant queries to op-geth.
-				// The height check is a sanity check in case the keystones
-				// are not ordered.
-				if fin == nil || ks.L2BlockNumber > fin.L2Keystone.L2BlockNumber {
-					hh = hemi.L2KeystoneAbbreviate(ks).Hash()
-				}
-			} else {
+			ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]
+			if !ok {
 				// This really shouldn't happen
 				InternalErrorf(w, fmt.Errorf("cannot find stateroot: %v", spew.Sdump(bk)))
 				return
+			}
+			if fin != nil {
+				altFin.L2Keystone = fin.L2Keystone
+			}
+			// If this keystone has a higher l2 number, store it the
+			// abrev hash for future descendant queries to op-geth.
+			// The height check is a sanity check in case the keystones
+			// are not ordered.
+			if fin == nil || ks.L2BlockNumber > fin.L2Keystone.L2BlockNumber {
+				hh = hemi.L2KeystoneAbbreviate(ks).Hash()
 			}
 			if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
 				fin = altFin
