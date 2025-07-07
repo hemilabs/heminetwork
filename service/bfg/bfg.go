@@ -23,7 +23,6 @@ import (
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/bfgapi"
 	"github.com/hemilabs/heminetwork/api/gethapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
@@ -152,9 +151,15 @@ func Errorf(format string, args ...any) *HTTPError {
 	}
 }
 
+func InternalErrorf(w http.ResponseWriter, format string, args ...any) {
+	err := Errorf(format, args...)
+	log.Errorf("internal server error: %v", err)
+	writeHTTPError(w, http.StatusInternalServerError, err)
+}
+
 func BadRequestf(w http.ResponseWriter, format string, args ...any) {
 	err := Errorf(format, args...)
-	log.Errorf("bad request: %v", err)
+	log.Debugf("bad request: %v", err)
 	writeHTTPError(w, http.StatusBadRequest, err)
 }
 
@@ -219,7 +224,7 @@ func calculateFinality(bestHeight uint, publishedHeight uint, hash chainhash.Has
 	superFinality := confirmations >= bfgapi.BitcoinSuperFinality
 	return &bfgapi.L2KeystoneBitcoinFinalityResponse{
 		BlockHeight:            publishedHeight,
-		BlockHash:              api.ByteSlice(hash[:]),
+		BlockHash:              hash[:],
 		EffectiveConfirmations: confirmations,
 		SuperFinality:          &superFinality,
 	}, nil
@@ -346,7 +351,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
 		if err != nil {
 			log.Errorf("opgeth: %v", err)
-			BadRequestf(w, "internal error")
+			InternalErrorf(w, "internal error")
 			return
 		}
 		if resp.Error != nil {
@@ -377,13 +382,13 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// 	btcTip, err := s.gozer.BtcHeight(r.Context())
 		// 	if err != nil {
 		// 		log.Errorf("retrieve btc tip: %v", err)
-		// 		BadRequestF(w, "internal error")
+		// 		InternalErrorf(w, "internal error")
 		// 		return
 		// 	}
 		// 	scf, err := s.shortCircuitFinality(r.Context(), &fin.L2Keystone, uint32(btcTip))
 		// 	if err != nil {
 		// 		log.Errorf("short circuit: %v", err)
-		// 		BadRequestF(w, "internal error")
+		// 		InternalErrorf(w, "internal error")
 		// 		return
 		// 	}
 
@@ -409,7 +414,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// Get abbreviated keystones from gozer
 		aks := s.gozer.BlocksByL2AbrevHashes(r.Context(), abrevKeystones)
 		if aks.Error != nil {
-			BadRequestf(w, "internal error")
+			InternalErrorf(w, "internal error")
 			return
 		}
 
@@ -444,7 +449,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			} else {
 				// This really shouldn't happen
 				log.Errorf("cannot find stateroot: %v", spew.Sdump(bk))
-				BadRequestf(w, "internal error")
+				InternalErrorf(w, "internal error")
 				return
 			}
 			if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
