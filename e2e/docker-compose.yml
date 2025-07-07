@@ -417,18 +417,15 @@ services:
         condition: "service_started"
     healthcheck:
       start_period: 180s
+    environment:
+      ADMIN_PRIVATE_KEY: ${ADMIN_PRIVATE_KEY}
+    entrypoint:
+      - sh
     command:
-      - "op-proposer/bin/op-proposer"
-      - "--poll-interval=1s"
-      - "--rpc.port=8560"
-      - "--game-factory-address=${DISPUTE_GAME_FACTORY_ADDRESS}"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-      - "--rollup-rpc=http://op-node:8547"
-      - "--allow-non-finalized"
-      - "--resubmission-timeout=15s"
-      - "--safe-abort-nonce-too-low-count=1"
-      - "--proposal-interval=10s"
+      - /proposer-entrypoint.sh
+    volumes:
+      - l2configs:/l2configs
+      - ./proposer-entrypoint.sh:/proposer-entrypoint.sh
     networks:
       e2e:
 volumes:

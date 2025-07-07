@@ -180,6 +180,7 @@ echo "$(tomlq -t ".superchainRoles.proxyAdminOwner = \"$MY_ADDRESS\"" .deployer/
 echo "$(tomlq -t ".superchainRoles.protocolVersionsOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".superchainRoles.guardian = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".globalDeployOverrides.l2BlockTime = 1" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.proofMaturityDelaySeconds = 10" .deployer/intent.toml)" > .deployer/intent.toml
 
 # echo "$(tomlq -t "del(.superchainRoles)" .deployer/intent.toml)" > .deployer/intent.toml
 
@@ -230,6 +231,11 @@ cat .deployer/state.json
 /git/optimism/op-deployer/bin/op-deployer inspect deploy-config --workdir .deployer 901 > /l2configs/deploy-config.json
 
 echo "$(jq '.l1CancunTimeOffset = "0x0"' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+echo "$(jq '.disputeGameFinalityDelaySeconds = 10' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+echo "$(jq '.faultGameWithdrawalDelay = 10' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+echo "$(jq '.sequencerWindowSize = 200' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+echo "$(jq '.l1BlockTime = 3' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+echo "$(jq '.proofMaturityDelaySeconds = 10' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
 
 /git/optimism/op-deployer/bin/op-deployer inspect l1 --workdir .deployer 901 > /l2configs/l1deployments.json
 
@@ -253,7 +259,11 @@ cat l1allocs.json
 
 echo "$(jq '.alloc."0x78697c88847dfbbb40523e42c1f2e28a13a170be".balance = "0x999999999999999999"' /l2configs/l1genesis.json)" > /l2configs/l1genesis.json
 
+echo "$(jq --argjson timestamp "$(jq '.timestamp' /l2configs/genesis.json)" '.timestamp = $timestamp' /l2configs/l1genesis.json)" > /l2configs/l1genesis.json
+
 cat /l2configs/l1genesis.json
+
+cp .deployer/state.json /l2configs/state.json
 
 
 # # HACK TO REMOVE old fields to make the generated genesis file compatible for 

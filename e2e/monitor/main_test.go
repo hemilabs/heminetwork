@@ -13,6 +13,7 @@ import (
 	"slices"
 	"testing"
 	"time"
+	"os/exec"
 
 	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -43,9 +44,43 @@ const (
 )
 
 var (
-	l1StandardBridge = common.Address(common.FromHex("70e042aDFC3a4580b1f3A064612F7eD7f25cd059"))
+	// l1StandardBridge = common.Address(common.FromHex("0x0F38Af108B73731E95EA057ef8463E4B2327f36e"))
 	abort            = retries - 1
 )
+
+func addressAt(t *testing.T, path string) common.Address {
+	cmd := exec.Command(
+		"docker", 
+		"exec", 
+		"e2e-op-geth-l2-1", "jq", "-r", "-j", path, "/l2configs/state.json" )
+	
+		output, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("Command failed with error: %v -- %s", err, output)
+		}
+	
+		return common.Address(common.FromHex(string(output))) 
+}
+
+func disputeGameFactory(t *testing.T) common.Address {
+		a := addressAt(t, ".opChainDeployments[0].disputeGameFactoryProxyAddress")
+		t.Logf("assuming dispute game factory proxy address is %s", a)
+		return a
+	}
+
+func l1StandardBridge(t *testing.T) common.Address {
+	a := addressAt(t, ".opChainDeployments[0].l1StandardBridgeProxyAddress")
+	t.Logf("assuming l1 standard bridge proxy address is %s", a)
+	return a
+}
+
+func optimismPortalProxy(t *testing.T) common.Address {
+	a := addressAt(t, ".opChainDeployments[0].optimismPortalProxyAddress")
+	t.Logf("assuming optimism portal proxy address is %s", a)
+	return a
+}
+
+
 
 // Test_Monitor is a small, bare-bones test to dump the state of localnet
 // after 5 minutes and check that it has progressed at least to a certain
@@ -375,7 +410,7 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 		auth.GasLimit = uint64(3000000) // in units
 		auth.GasPrice = gasPrice
 
-		tx, err = testToken.Approve(auth, l1StandardBridge, big.NewInt(100))
+		tx, err = testToken.Approve(auth, l1StandardBridge(t), big.NewInt(100))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -411,7 +446,7 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	t.Logf("receiver address is %s", receiverAddress)
 
-	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge, l1Client)
+	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge(t), l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,8 +571,8 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	t.Logf("waiting for output root to be published")
 
-	disputeGameFactoryProxy := common.Address(common.FromHex("e15fbbd3344dd919bdad8dafa45d2e343de9d843"))
-	optimismPortalProxy := common.Address(common.FromHex("30a55C96BF3bB38e4ADCbEF00Bb90C6D91F2358C"))
+	disputeGameFactoryProxy := disputeGameFactory(t)
+	optimismPortalProxy := optimismPortalProxy(t)
 
 	bestL2Block, err := l2Client.BlockNumber(ctx)
 	if err != nil {
@@ -775,7 +810,7 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge, l1Client)
+	bridge, err := e2ebindings.NewL1StandardBridge(l1StandardBridge(t), l1Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -805,7 +840,7 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 		auth.GasLimit = uint64(3000000) // in units
 		auth.GasFeeCap = gasPrice
 
-		tx, err := optimismMintableErc2.OptimismMintableERC20Transactor.IncreaseAllowance(auth, l1StandardBridge, big.NewInt(10000))
+		tx, err := optimismMintableErc2.OptimismMintableERC20Transactor.IncreaseAllowance(auth, l1StandardBridge(t), big.NewInt(10000))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -904,7 +939,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0xC0d3c0d3c0D3c0d3C0D3c0D3C0d3C0D3C0D30010")), l2Client)
+	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -954,8 +989,8 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		break
 	}
 
-	disputeGameFactoryProxy := common.Address(common.FromHex("e15fbbd3344dd919bdad8dafa45d2e343de9d843"))
-	optimismPortalProxy := common.Address(common.FromHex("30a55C96BF3bB38e4ADCbEF00Bb90C6D91F2358C"))
+	disputeGameFactoryProxy := disputeGameFactory(t)
+	optimismPortalProxy := optimismPortalProxy(t)
 
 	bestL2Block, err := l2Client.BlockNumber(ctx)
 	if err != nil {
@@ -1051,10 +1086,19 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		break
 	}
 
-	// t.Logf("waiting for the finalization period")
-	// if err := wait.ForFinalizationPeriod(ctx, l1Client, receipt.BlockNumber, ooproxy); err != nil {
-	// 	t.Fatal(err)
-	// }
+	bestL2Block, err = l2Client.BlockNumber(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+
+	_, err = wait.ForGamePublished(ctx, l1Client, optimismPortalProxy, disputeGameFactoryProxy,  big.NewInt(int64(bestL2Block)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	proofMaturityDelaySeconds := 10
+	time.Sleep(time.Duration(proofMaturityDelaySeconds+1) * time.Second)
 
 	for i := 0; i < retries; i++ {
 		nonce, err := l1Client.PendingNonceAt(ctx, receiverAddress)
