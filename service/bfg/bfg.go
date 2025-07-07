@@ -56,7 +56,11 @@ var log = loggo.GetLogger(appName)
 type HTTPError struct {
 	Timestamp int64  `json:"timestamp"`
 	Trace     string `json:"trace"`
-	Error     string `json:"error"`
+	Message   string `json:"error"`
+}
+
+func (e *HTTPError) Error() string {
+	return fmt.Sprintf("%s [%d:%s]", e.Message, e.Timestamp, e.Trace)
 }
 
 func init() {
@@ -140,35 +144,35 @@ func random(n int) []byte {
 	return buf
 }
 
-func Error(format string, args ...any) (*HTTPError, []byte, error) {
-	e := &HTTPError{
+func Errorf(format string, args ...any) *HTTPError {
+	return &HTTPError{
 		Timestamp: time.Now().Unix(),
 		Trace:     hex.EncodeToString(random(8)),
-		Error:     fmt.Sprintf(format, args...),
+		Message:   fmt.Sprintf(format, args...),
 	}
-	je, err := json.MarshalIndent(e, "", "  ")
-	if err != nil {
-		return nil, nil, err
-	}
-	return e, je, err
 }
 
-func BadRequestF(w http.ResponseWriter, format string, args ...any) {
-	e, je, err := Error(format, args...)
-	if err != nil {
-		panic(err)
-	}
-	log.Errorf("bad request: %v trace %v error %v", e.Timestamp, e.Trace, e.Error)
-	http.Error(w, string(je), http.StatusBadRequest)
+func BadRequestf(w http.ResponseWriter, format string, args ...any) {
+	err := Errorf(format, args...)
+	log.Errorf("bad request: %v", err)
+	writeHTTPError(w, http.StatusBadRequest, err)
 }
 
-func NotFound(w http.ResponseWriter, format string, args ...any) {
-	e, je, err := Error(format, args...)
-	if err != nil {
-		panic(err)
+func NotFoundf(w http.ResponseWriter, format string, args ...any) {
+	err := Errorf(format, args...)
+	log.Tracef("not found: %v", err)
+	writeHTTPError(w, http.StatusNotFound, err)
+}
+
+func writeHTTPError(w http.ResponseWriter, code int, httpError *HTTPError) {
+	h := w.Header()
+	h.Del("Content-Length")
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	h.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(httpError); err != nil {
+		log.Errorf("writeHTTPError: %v", err)
 	}
-	log.Tracef("not found: %v trace %v error %v", e.Timestamp, e.Trace, e.Error)
-	http.Error(w, string(je), http.StatusNotFound)
 }
 
 func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
@@ -329,7 +333,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	// validate input.
 	qh, err := chainhash.NewHashFromStr(r.PathValue("hash"))
 	if err != nil {
-		BadRequestF(w, "invalid keystone length")
+		BadRequestf(w, "invalid keystone length")
 		return
 	}
 
@@ -342,11 +346,11 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
 		if err != nil {
 			log.Errorf("opgeth: %v", err)
-			BadRequestF(w, "internal error")
+			BadRequestf(w, "internal error")
 			return
 		}
 		if resp.Error != nil {
-			NotFound(w, "unknown keystone: %v", resp.Error)
+			NotFoundf(w, "unknown keystone: %v", resp.Error)
 			return
 		}
 
@@ -405,7 +409,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// Get abbreviated keystones from gozer
 		aks := s.gozer.BlocksByL2AbrevHashes(r.Context(), abrevKeystones)
 		if aks.Error != nil {
-			BadRequestF(w, "internal error")
+			BadRequestf(w, "internal error")
 			return
 		}
 
@@ -440,7 +444,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 			} else {
 				// This really shouldn't happen
 				log.Errorf("cannot find stateroot: %v", spew.Sdump(bk))
-				BadRequestF(w, "internal error")
+				BadRequestf(w, "internal error")
 				return
 			}
 			if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
@@ -450,7 +454,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 
 		// If the last used hash for descendant queries is the
 		// highest hash, then we can assume there are no more
-		// descendants and we can return the current best finality.
+		// descendants, and we can return the current best finality.
 		// If keystone or descendant has ultrafinality then
 		// we no longer have to keep iterating.
 		if hh == nil || hash.IsEqual(hh) ||
