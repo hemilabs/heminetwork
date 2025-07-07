@@ -106,7 +106,6 @@ func main() {
 		fmt.Printf("v%v\n", version.String())
 		os.Exit(0)
 	}
-	flag.Parse()
 
 	if err := _main(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
