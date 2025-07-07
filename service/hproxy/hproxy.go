@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -197,10 +198,12 @@ type HVMHandler struct {
 	rp *httputil.ReverseProxy
 	u  *url.URL // XXX remove?
 
+	connections uint
+
 	state HVMState
 }
 
-func lowest(x []int) int {
+func (s *Server) lowest(x []int) int {
 	if len(x) == 0 {
 		return -1
 	}
@@ -221,20 +224,36 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	// Select host to call
 	// XXX expire client connections at some point
 	s.mtx.Lock()
-	var (
-		id int
-		ok bool
-	)
-	connections := make([]int, len(s.hvmHandlers))
-	if id, ok = s.clients[r.RemoteAddr]; !ok {
-		for _, v := range s.clients {
-			connections[v]++
+	id := -1
+	if v, ok := s.clients[r.RemoteAddr]; ok {
+		if s.hvmHandlers[v].state == StateHealthy {
+			id = v
+		} else {
+			// XXX should we move client connection? or return try later?
 		}
-		// spew.Dump(connections)
-		id = lowest(connections)
-		s.clients[r.RemoteAddr] = id
+	} else {
+		// Find suitable candidate
+		var leastConnections uint = math.MaxUint
+		for k := range s.hvmHandlers {
+			if s.hvmHandlers[k].state == StateHealthy {
+				if s.hvmHandlers[k].connections < leastConnections {
+					leastConnections = s.hvmHandlers[k].connections
+					id = k
+				}
+			}
+		}
+		if id >= 0 {
+			// Add connection to candidate
+			s.clients[r.RemoteAddr] = id
+			s.hvmHandlers[id].connections++
+		}
 	}
-	hvm := s.hvmHandlers[id]
+	if id == -1 {
+		// No candidates, exit with error
+		w.WriteHeader(http.StatusServiceUnavailable)
+		s.mtx.Unlock()
+		return
+	}
 	s.mtx.Unlock()
 
 	// XXX handle aggressive timeputs for ServeHTTP
@@ -243,7 +262,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Throw call over the fence
 	w.Header().Set("X-Hproxy", strconv.Itoa(id))
-	hvm.rp.ServeHTTP(w, r)
+	s.hvmHandlers[id].rp.ServeHTTP(w, r)
 
 	s.cmdsProcessed.Inc()
 }
@@ -251,6 +270,8 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleProxyError(w http.ResponseWriter, r *http.Request, e error) {
 	log.Tracef("handleProxyError: %v", r.RemoteAddr)
 	defer log.Tracef("handleProxyError exit: %v", r.RemoteAddr)
+
+	// XXX only called when ModifyResponse is used.
 
 	//cs := spew.ConfigState{
 	//	DisableMethods:        true,
@@ -316,22 +337,25 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 
 		s.hvmHandlers = append(s.hvmHandlers, HVMHandler{
-			id: k,
-			u:  u, // XXX do we need this?
+			id:    k,
+			state: StateHealthy, // XXX add poll to determine this
+			u:     u,            // XXX do we need this?
 			rp: &httputil.ReverseProxy{
 				Rewrite: func(r *httputil.ProxyRequest) {
 					r.SetURL(u)
 					r.SetXForwarded()
 				},
-				ErrorLog:     nil, // XXX wrap in loggo
-				ErrorHandler: s.handleProxyError,
-				// FlushInterval: -1,
-				// Transport: trt,
+				Director: nil, // XXX not needed
 				Transport: &http.Transport{
 					DialContext:           s.handleProxyDial,
 					TLSHandshakeTimeout:   5 * time.Second,
 					ResponseHeaderTimeout: s.cfg.RequestTimeout,
 				},
+				FlushInterval:  0,
+				ErrorLog:       nil, // XXX wrap in loggo
+				BufferPool:     nil, // XXX not useful for different sized calls
+				ModifyResponse: nil, // XXX not needed
+				ErrorHandler:   nil, // XXX s.handleProxyError, ModifyResponse only
 			},
 		})
 	}
