@@ -54,7 +54,7 @@ const (
 
 var log = loggo.GetLogger(appName)
 
-type HttpError struct {
+type HTTPError struct {
 	Timestamp int64  `json:"timestamp"`
 	Trace     string `json:"trace"`
 	Error     string `json:"error"`
@@ -96,9 +96,7 @@ type Server struct {
 	cfg *Config
 
 	params *chaincfg.Params
-
-	g gozer.Gozer
-
+	gozer  gozer.Gozer
 	server *http.ServeMux
 
 	// opgeth
@@ -143,8 +141,8 @@ func random(n int) []byte {
 	return buffer
 }
 
-func Error(format string, args ...any) (*HttpError, []byte, error) {
-	e := &HttpError{
+func Error(format string, args ...any) (*HTTPError, []byte, error) {
+	e := &HTTPError{
 		Timestamp: time.Now().Unix(),
 		Trace:     hex.EncodeToString(random(8)),
 		Error:     fmt.Sprintf(format, args...),
@@ -263,7 +261,7 @@ func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone,
 	depth := max(minSearchDepth, 1-int(height))
 
 	// Find keystones at height beyond ultra finality
-	bl, err := s.g.KeystonesByHeight(ctx, height, depth)
+	bl, err := s.gozer.KeystonesByHeight(ctx, height, depth)
 	if err != nil {
 		// If error on the gozer side, return the error
 		return nil, err
@@ -298,7 +296,7 @@ func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone,
 			}
 
 			// Get block info
-			res := s.g.BlocksByL2AbrevHashes(ctx, []chainhash.Hash{*rk.Hash()})
+			res := s.gozer.BlocksByL2AbrevHashes(ctx, []chainhash.Hash{*rk.Hash()})
 			if res.Error != nil {
 				return nil, fmt.Errorf("retrieve block info: %w", err)
 			}
@@ -373,7 +371,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		// if firstLoop && fin != nil {
 		// 	firstLoop = false
 
-		// 	btcTip, err := s.g.BtcHeight(r.Context())
+		// 	btcTip, err := s.gozer.BtcHeight(r.Context())
 		// 	if err != nil {
 		// 		log.Errorf("retrieve btc tip: %v", err)
 		// 		BadRequestF(w, "internal error")
@@ -406,7 +404,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 		}
 
 		// Get abbreviated keystones from gozer
-		aks := s.g.BlocksByL2AbrevHashes(r.Context(), abrevKeystones)
+		aks := s.gozer.BlocksByL2AbrevHashes(r.Context(), abrevKeystones)
 		if aks.Error != nil {
 			BadRequestF(w, "internal error")
 			return
@@ -609,14 +607,14 @@ func (s *Server) Run(pctx context.Context) error {
 	switch s.cfg.BitcoinSource {
 	case bitcoinSourceBlockstream:
 		var err error
-		s.g, err = blockstream.Run(s.params)
+		s.gozer, err = blockstream.Run(s.params)
 		if err != nil {
 			return fmt.Errorf("could not setup %v blockstream: %w",
 				s.cfg.Network, err)
 		}
 	case bitcoinSourceTBC:
 		var err error
-		s.g, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL)
+		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL)
 		if err != nil {
 			return fmt.Errorf("could not setup %v tbc: %w",
 				s.cfg.Network, err)
