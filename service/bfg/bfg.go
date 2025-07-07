@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"sync"
@@ -134,11 +133,11 @@ func (s *Server) Connected() bool {
 }
 
 func random(n int) []byte {
-	buffer := make([]byte, n)
-	if _, err := io.ReadFull(rand.Reader, buffer); err != nil {
-		panic("random")
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		panic(fmt.Errorf("read random: %w", err))
 	}
-	return buffer
+	return buf
 }
 
 func Error(format string, args ...any) (*HTTPError, []byte, error) {
