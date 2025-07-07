@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +25,32 @@ func newServer(x int) *httptest.Server {
 		if r.Header.Get("X-Forwarded-Host") == "" ||
 			r.Header.Get("X-Forwarded-For") == "" ||
 			r.Header.Get("X-Forwarded-Proto") == "" {
-			panic("one of X-Forwarded-* not set")
+			// When we get here we are getting a health
+			// check which does not have headers set. Check
+			// to see if the check is expected and panic if
+			// it isn't.
+			defer r.Body.Close()
+			jr := json.NewDecoder(r.Body)
+			var j map[string]any
+			err := jr.Decode(&j)
+			if err != nil {
+				panic(err)
+			}
+			if x, ok := j["method"]; !ok || x != "eth_blockNumber" {
+				panic("invalid health command")
+			}
+			// return some bs
+			err = json.NewEncoder(w).Encode(
+				map[string]any{
+					"jsonrpc": "2.0",
+					"id":      1,
+					"result":  "0x37af32",
+					"health":  1,
+				})
+			if err != nil {
+				panic(err)
+			}
+			return
 		}
 		id := serverReply{ID: x}
 		err := json.NewEncoder(w).Encode(id)
@@ -63,16 +89,10 @@ func TestNobodyHome(t *testing.T) {
 	}
 	defer reply.Body.Close()
 
-	// Require X-Hproxy
-	ids := reply.Header.Get("X-Hproxy")
-	if ids == "" {
-		panic("expected X-Hproxy being set")
-	}
-
-	// Expect 502
-	if reply.StatusCode != http.StatusBadGateway {
+	// Expect 503
+	if reply.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("http error mismatch: got %v wanted %v",
-			reply.StatusCode, http.StatusBadGateway)
+			reply.StatusCode, http.StatusServiceUnavailable)
 	}
 
 	// Expect EOF
@@ -108,6 +128,45 @@ func TestRequestTimeout(t *testing.T) {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("%T", err)
 		}
+	}
+}
+
+func TestProxy(t *testing.T) {
+	serverID := 1337
+	s := newServer(serverID)
+	defer s.Close()
+	servers := []string{s.URL}
+
+	// Setup hproxy
+	_, hpCfg := newHproxy(t, servers)
+	time.Sleep(250 * time.Millisecond) // XXX
+
+	reply, err := http.Get("http://" + hpCfg.ListenAddress)
+	if err != nil {
+		t.Fatalf("get %v: %v", 0, err)
+	}
+	defer reply.Body.Close()
+	switch reply.StatusCode {
+	case http.StatusOK:
+	default:
+		panic(fmt.Sprintf("%v replied %v",
+			hpCfg.ListenAddress, reply.StatusCode))
+	}
+
+	// Require X-Hproxy
+	ids := reply.Header.Get("X-Hproxy")
+	if ids == "" {
+		panic("expected X-Hproxy being set")
+	}
+
+	// Read body
+	var jr serverReply
+	err = json.NewDecoder(reply.Body).Decode(&jr)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if jr.ID != serverID {
+		t.Fatalf("invalid repsonse got %v, wanted %v", jr.ID, serverID)
 	}
 }
 
@@ -152,6 +211,12 @@ func TestFanout(t *testing.T) {
 				t.Fatalf("get %v: %v", x, err)
 			}
 			defer reply.Body.Close()
+			switch reply.StatusCode {
+			case http.StatusOK:
+			default:
+				panic(fmt.Sprintf("%v replied %v",
+					hpCfg.ListenAddress, reply.StatusCode))
+			}
 
 			// Require X-Hproxy
 			ids := reply.Header.Get("X-Hproxy")

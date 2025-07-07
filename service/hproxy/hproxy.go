@@ -5,7 +5,9 @@
 package hproxy
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -314,6 +316,89 @@ func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (ne
 	return d.DialContext(ctx, network, addr)
 }
 
+func (s *Server) poke(ctx context.Context, id int) {
+	log.Infof("poke: %v", id)
+	log.Tracef("poke: %v", id)
+	defer log.Tracef("poke exit: %v", id)
+
+	s.mtx.Lock()
+	u := s.hvmHandlers[id].u
+	s.mtx.Unlock()
+	if u == nil {
+		// XXX
+		panic(fmt.Sprintf("url not set: %v", id))
+	}
+	c := &http.Client{
+		Transport: &http.Transport{
+			DialContext:           s.handleProxyDial,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: s.cfg.RequestTimeout,
+		},
+	}
+	cmd := `{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}`
+	r := bytes.NewBufferString(cmd)
+	resp, err := c.Post(u.String(), "application/json", r)
+	if err != nil {
+		// XXX make function
+		s.mtx.Lock()
+		s.hvmHandlers[id].state = StateUnhealthy
+		s.mtx.Unlock()
+		return
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	default:
+		s.mtx.Lock()
+		s.hvmHandlers[id].state = StateUnhealthy
+		s.mtx.Unlock()
+	}
+
+	j := make(map[string]any)
+	err = json.NewDecoder(resp.Body).Decode(&j)
+	if err != nil {
+		log.Errorf("decode %v: %v", id, err)
+		s.mtx.Lock()
+		s.hvmHandlers[id].state = StateUnhealthy
+		s.mtx.Unlock()
+		return
+	}
+	// Make sure we have a result
+	if result, ok := j["result"]; !ok {
+		log.Errorf("no result %v", id)
+		s.mtx.Lock()
+		s.hvmHandlers[id].state = StateUnhealthy
+		s.mtx.Unlock()
+		return
+	} else {
+		_ = result
+	}
+}
+
+func (s *Server) monitor(ctx context.Context) {
+	log.Tracef("monitor")
+	defer log.Tracef("monitor exit")
+	defer s.wg.Done()
+
+	for {
+		// Poke hvms
+		s.mtx.Lock()
+		for k := range s.hvmHandlers {
+			if s.hvmHandlers[k].state != StateRemoved {
+				go s.poke(ctx, k)
+			}
+		}
+		s.mtx.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(9 * time.Second): // XXX
+		}
+	}
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	if !s.testAndSetRunning(true) {
 		return errors.New("hproxy already running")
@@ -338,7 +423,7 @@ func (s *Server) Run(pctx context.Context) error {
 
 		s.hvmHandlers = append(s.hvmHandlers, HVMHandler{
 			id:    k,
-			state: StateHealthy, // XXX add poll to determine this
+			state: StateHealthy, // XXX make StateInvalid
 			u:     u,            // XXX do we need this?
 			rp: &httputil.ReverseProxy{
 				Rewrite: func(r *httputil.ProxyRequest) {
@@ -362,6 +447,10 @@ func (s *Server) Run(pctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
+
+	// Launch hvm monitor
+	s.wg.Add(1)
+	go s.monitor(ctx)
 
 	// HTTP server
 	httpErrCh := make(chan error)
