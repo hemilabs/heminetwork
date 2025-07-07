@@ -215,15 +215,16 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 	}
 }
 
-func calculateFinality(bestHeight uint, publishedHeight uint, hash chainhash.Hash) (*bfgapi.L2KeystoneBitcoinFinalityResponse, error) {
+func calculateFinality(bestHeight uint, publishedHeight uint, hash chainhash.Hash) (bfgapi.L2KeystoneBitcoinFinalityResponse, error) {
 	if publishedHeight > bestHeight {
-		return nil, fmt.Errorf("invalid published height: %v best height %v",
+		fin := bfgapi.L2KeystoneBitcoinFinalityResponse{}
+		return fin, fmt.Errorf("invalid published height: %v best height %v",
 			publishedHeight, bestHeight)
 	}
 
 	confirmations := bestHeight - publishedHeight
 	superFinality := confirmations >= bfgapi.BitcoinSuperFinality
-	return &bfgapi.L2KeystoneBitcoinFinalityResponse{
+	return bfgapi.L2KeystoneBitcoinFinalityResponse{
 		BlockHeight:            publishedHeight,
 		BlockHash:              hash[:],
 		EffectiveConfirmations: confirmations,
@@ -326,7 +327,7 @@ func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone,
 			}
 
 			fin.L2Keystone = *kss
-			return fin, err
+			return &fin, err
 		}
 	}
 	return nil, nil
@@ -426,31 +427,31 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 				continue
 			}
 
-			altFin, err := calculateFinality(aks.BtcTipBlockHeight,
-				bk.L2KeystoneBlockHeight, bk.L2KeystoneBlockHash)
-			if err != nil {
-				log.Errorf("calculate finality: %v", err)
-				continue
-			}
-
 			ks, ok := km[chainhash.HashH(bk.L2KeystoneAbrev.StateRoot)]
 			if !ok {
 				// This really shouldn't happen
 				InternalErrorf(w, fmt.Errorf("cannot find stateroot: %v", spew.Sdump(bk)))
 				return
 			}
-			if fin != nil {
-				altFin.L2Keystone = fin.L2Keystone
+
+			altFin, err := calculateFinality(aks.BtcTipBlockHeight,
+				bk.L2KeystoneBlockHeight, bk.L2KeystoneBlockHash)
+			if err != nil {
+				log.Errorf("calculate finality: %v", err)
+				continue
 			}
-			// If this keystone has a higher l2 number, store it the
+			altFin.L2Keystone = fin.L2Keystone
+
+			if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
+				fin = &altFin
+			}
+
+			// If this keystone has a higher l2 number, store the
 			// abrev hash for future descendant queries to op-geth.
 			// The height check is a sanity check in case the keystones
 			// are not ordered.
-			if fin == nil || ks.L2BlockNumber > fin.L2Keystone.L2BlockNumber {
+			if ks.L2BlockNumber > fin.L2Keystone.L2BlockNumber {
 				hh = hemi.L2KeystoneAbbreviate(ks).Hash()
-			}
-			if altFin.EffectiveConfirmations > fin.EffectiveConfirmations {
-				fin = altFin
 			}
 		}
 
