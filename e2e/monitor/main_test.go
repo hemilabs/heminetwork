@@ -37,8 +37,9 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/go-test/deep"
 
-	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 	"github.com/hemilabs/heminetwork/hemi"
+
+	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 )
 
 const (
@@ -131,7 +132,7 @@ func TestL1L2Comms(t *testing.T) {
 			name = "testing non-sequencing client"
 		}
 		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 			defer cancel()
 
 			l1Client, err := ethclient.Dial("http://localhost:8545")
@@ -186,7 +187,7 @@ func TestL1L2Comms(t *testing.T) {
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
 	l2Client, err := ethclient.Dial("http://localhost:8546")
@@ -1228,7 +1229,7 @@ func assertSafeAndFinalBlocksAreProgressing(t *testing.T, ctx context.Context, l
 }
 
 func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *ethclient.Client, opNodeSequencingEndpoint string, opNodeNonSequencingEndpoint string) {
-	bigTip, err := l2Client.HeaderByNumber(context.Background(), nil)
+	bigTip, err := l2Client.HeaderByNumber(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("error getting l2 tip: %s", err)
 	}
