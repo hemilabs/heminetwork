@@ -21,8 +21,9 @@ Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin wi
     * [Web](#web)
   * [▶️ Running bfgd](#-running-bfgd)
     * [🏁 Prerequisites](#-prerequisites-2)
+    * [Running your own Bitcoin Finality Governor (bfgd) and PoP mining with it](#running-your-own-bitcoin-finality-governor-bfgd-and-pop-mining-with-it)
     * [🏁 Prerequisites](#-prerequisites-3)
-  * [▶️ Running a full node](#-running-a-full-node)
+  * [▶️ Running the Hemi stack](#-running-the-hemi-stack)
   * [▶️ Running the localnet network](#-running-the-localnet-network)
     * [🏁 Prerequisites](#-prerequisites-4)
     * [📚 Tutorial](#-tutorial)
@@ -138,10 +139,6 @@ go run ./integrationtest
 ### Running your own Bitcoin Finality Governor (bfgd) and PoP mining with it
 
 XXX FIXME
-
-### 🏁 Prerequisites
-
-- Connect to a live [bfgd](cmd/bfgd) instance.
 
 ## ▶️ Running the Hemi stack
 
