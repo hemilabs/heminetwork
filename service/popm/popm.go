@@ -179,7 +179,7 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, errors.New("no bitcoin secret provided")
 	}
 	var err error
-	s.vc, err = vinzclortho.VinzClorthoNew(s.params)
+	s.vc, err = vinzclortho.New(s.params)
 	if err != nil {
 		return nil, err
 	}
@@ -196,11 +196,11 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, err
 	}
 
-	s.mz, err = memory.MemoryNew(s.params)
+	s.mz, err = memory.New(s.params)
 	if err != nil {
 		return nil, err
 	}
-	err = s.mz.Put(&zuul.NamedKey{
+	err = s.mz.PutKey(&zuul.NamedKey{
 		Name:       "private",
 		Account:    defaultPopAccount,
 		Child:      defaultPopChild,
