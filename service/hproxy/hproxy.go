@@ -197,10 +197,12 @@ const (
 
 type HVMHandler struct {
 	id int // server id
-	rp *httputil.ReverseProxy
-	u  *url.URL // XXX remove?
 
-	connections uint
+	rp *httputil.ReverseProxy
+	u  *url.URL     // Connection URL for HVM
+	c  *http.Client // In here to reuse connection
+
+	connections uint // Open connections, XXX not being reaped yet
 
 	poking bool // true when getting health
 	state  HVMState
@@ -321,6 +323,9 @@ func (s *Server) poke(ctx context.Context, id int) {
 	log.Tracef("poke: %v", id)
 	defer log.Tracef("poke exit: %v", id)
 
+	// XXX this is shit, split apart and when an hvm goes bad, kill all
+	// open connections.
+
 	s.mtx.Lock()
 	if s.hvmHandlers[id].poking {
 		s.mtx.Unlock()
@@ -328,6 +333,7 @@ func (s *Server) poke(ctx context.Context, id int) {
 	}
 	s.hvmHandlers[id].poking = true
 	u := s.hvmHandlers[id].u
+	c := s.hvmHandlers[id].c
 	s.mtx.Unlock()
 	defer func() {
 		s.mtx.Lock()
@@ -337,14 +343,6 @@ func (s *Server) poke(ctx context.Context, id int) {
 	if u == nil {
 		// XXX
 		panic(fmt.Sprintf("url not set: %v", id))
-	}
-	// XXX move into s.hvmHandlers so it can be persistent
-	c := &http.Client{
-		Transport: &http.Transport{
-			DialContext:           s.handleProxyDial,
-			TLSHandshakeTimeout:   5 * time.Second,
-			ResponseHeaderTimeout: s.cfg.RequestTimeout,
-		},
 	}
 	cmd := `{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}`
 	r := bytes.NewBufferString(cmd)
@@ -436,6 +434,13 @@ func (s *Server) Run(pctx context.Context) error {
 			id:    k,
 			state: StateHealthy, // XXX make StateInvalid
 			u:     u,            // XXX do we need this?
+			c: &http.Client{
+				Transport: &http.Transport{
+					DialContext:           s.handleProxyDial,
+					TLSHandshakeTimeout:   5 * time.Second,
+					ResponseHeaderTimeout: s.cfg.RequestTimeout,
+				},
+			},
 			rp: &httputil.ReverseProxy{
 				Rewrite: func(r *httputil.ProxyRequest) {
 					r.SetURL(u)
