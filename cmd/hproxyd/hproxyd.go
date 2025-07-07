@@ -43,6 +43,12 @@ var (
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
 		},
+		"HPROXY_CONTROL_ADDRESS": config.Config{
+			Value:        &cfg.ControlAddress,
+			DefaultValue: hproxy.DefaultControlAddress,
+			Help:         "control address for incomming commands",
+			Print:        config.PrintAll,
+		},
 		"HPROXY_LISTEN_ADDRESS": config.Config{
 			Value:        &cfg.ListenAddress,
 			DefaultValue: hproxy.DefaultListenAddress,

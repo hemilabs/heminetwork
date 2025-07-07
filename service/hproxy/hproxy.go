@@ -37,6 +37,7 @@ const (
 
 	DefaultRequestTimeout = 9 * time.Second  // Smaller than 12s
 	DefaultListenAddress  = "localhost:8545" // Default geth port
+	DefaultControlAddress = "localhost:1337" // Default control port
 
 	expectedClients = 1000
 )
@@ -50,6 +51,7 @@ func init() {
 }
 
 type Config struct {
+	ControlAddress          string
 	HVMURLs                 []string
 	ListenAddress           string
 	LogLevel                string
@@ -62,6 +64,7 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
+		ControlAddress:      DefaultControlAddress,
 		ListenAddress:       DefaultListenAddress,
 		Network:             "mainnet",
 		PrometheusNamespace: appName,
@@ -195,6 +198,13 @@ const (
 	StateRemoved            = 3
 )
 
+var stateString = map[HVMState]string{
+	StateInvalid:   "invalid",
+	StateHealthy:   "healthy",
+	StateUnhealthy: "unhealthy",
+	StateRemoved:   "removed",
+}
+
 type HVMHandler struct {
 	id int // server id
 
@@ -319,6 +329,24 @@ func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (ne
 	return d.DialContext(ctx, network, addr)
 }
 
+func (s *Server) setHealthy(id int) {
+	s.mtx.Lock()
+	if s.hvmHandlers[id].state != StateHealthy {
+		s.hvmHandlers[id].state = StateHealthy
+		log.Infof("Marking hvm healthy %v: %v", id, s.hvmHandlers[id].u)
+	}
+	s.mtx.Unlock()
+}
+
+func (s *Server) setUnhealthy(id int) {
+	s.mtx.Lock()
+	if s.hvmHandlers[id].state != StateUnhealthy {
+		s.hvmHandlers[id].state = StateUnhealthy
+		log.Infof("Marking hvm unhealthy %v: %v", id, s.hvmHandlers[id].u)
+	}
+	s.mtx.Unlock()
+}
+
 func (s *Server) poke(ctx context.Context, id int) {
 	log.Tracef("poke: %v", id)
 	defer log.Tracef("poke exit: %v", id)
@@ -341,17 +369,15 @@ func (s *Server) poke(ctx context.Context, id int) {
 		s.mtx.Unlock()
 	}()
 	if u == nil {
-		// XXX
+		// This should not happen
 		panic(fmt.Sprintf("url not set: %v", id))
 	}
+	// XXX make this a setting?
 	cmd := `{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}`
 	r := bytes.NewBufferString(cmd)
 	resp, err := c.Post(u.String(), "application/json", r)
 	if err != nil {
-		// XXX make function
-		s.mtx.Lock()
-		s.hvmHandlers[id].state = StateUnhealthy
-		s.mtx.Unlock()
+		s.setUnhealthy(id)
 		return
 	}
 	defer resp.Body.Close()
@@ -359,28 +385,24 @@ func (s *Server) poke(ctx context.Context, id int) {
 	switch resp.StatusCode {
 	case http.StatusOK:
 	default:
-		s.mtx.Lock()
-		s.hvmHandlers[id].state = StateUnhealthy
-		s.mtx.Unlock()
+		s.setUnhealthy(id)
+		return
 	}
 
 	j := make(map[string]any)
 	err = json.NewDecoder(resp.Body).Decode(&j)
 	if err != nil {
 		log.Errorf("decode %v: %v", id, err)
-		s.mtx.Lock()
-		s.hvmHandlers[id].state = StateUnhealthy
-		s.mtx.Unlock()
+		s.setUnhealthy(id)
 		return
 	}
 	// Make sure we have a result
 	if result, ok := j["result"]; !ok {
 		log.Errorf("no result %v", id)
-		s.mtx.Lock()
-		s.hvmHandlers[id].state = StateUnhealthy
-		s.mtx.Unlock()
-		return
+		s.setUnhealthy(id)
 	} else {
+		// Mark server heathy
+		s.setHealthy(id)
 		_ = result
 	}
 }
@@ -408,6 +430,38 @@ func (s *Server) monitor(ctx context.Context) {
 	}
 }
 
+func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request) {
+	log.Tracef("handleControlAddRequest: %v", r.RemoteAddr)
+	defer log.Tracef("handleControlAddRequest exit: %v", r.RemoteAddr)
+
+	panic("fixme")
+}
+
+func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Request) {
+	log.Tracef("handleControlRemoveRequest: %v", r.RemoteAddr)
+	defer log.Tracef("handleControlRemoveRequest exit: %v", r.RemoteAddr)
+
+	panic("fixme")
+}
+
+func (s *Server) handleControlListRequest(w http.ResponseWriter, r *http.Request) {
+	log.Tracef("handleControlListRequest: %v", r.RemoteAddr)
+	defer log.Tracef("handleControlListRequest exit: %v", r.RemoteAddr)
+
+	s.mtx.Lock()
+	resp := make(map[string]any, len(s.hvmHandlers))
+	for k := range s.hvmHandlers {
+		resp[s.hvmHandlers[k].u.String()] = stateString[s.hvmHandlers[k].state]
+	}
+	s.mtx.Unlock()
+
+	err := json.NewEncoder(w).Encode(resp)
+	if err != nil {
+		log.Errorf("encode %v: %v", r.RemoteAddr, err)
+		return
+	}
+}
+
 func (s *Server) Run(pctx context.Context) error {
 	if !s.testAndSetRunning(true) {
 		return errors.New("hproxy already running")
@@ -432,8 +486,8 @@ func (s *Server) Run(pctx context.Context) error {
 
 		s.hvmHandlers = append(s.hvmHandlers, HVMHandler{
 			id:    k,
-			state: StateHealthy, // XXX make StateInvalid
-			u:     u,            // XXX do we need this?
+			state: StateInvalid,
+			u:     u, // XXX do we need this?
 			c: &http.Client{
 				Transport: &http.Transport{
 					DialContext:           s.handleProxyDial,
@@ -493,6 +547,32 @@ func (s *Server) Run(pctx context.Context) error {
 		log.Infof("web server shutdown cleanly")
 	}()
 
+	// Control HTTP server
+	ctrlHttpErrCh := make(chan error)
+	if s.cfg.ControlAddress != "" {
+		cmux := http.NewServeMux()
+		cmux.HandleFunc("/control/add", s.handleControlAddRequest)
+		cmux.HandleFunc("/control/remove", s.handleControlRemoveRequest)
+		cmux.HandleFunc("/control/list", s.handleControlListRequest)
+
+		ctrlHttpServer := &http.Server{
+			Addr:        s.cfg.ControlAddress,
+			Handler:     cmux,
+			BaseContext: func(_ net.Listener) context.Context { return ctx },
+		}
+		go func() {
+			log.Infof("Control listening: %s", s.cfg.ControlAddress)
+			ctrlHttpErrCh <- ctrlHttpServer.ListenAndServe()
+		}()
+		defer func() {
+			if err := ctrlHttpServer.Shutdown(ctx); err != nil {
+				log.Errorf("control http server exit: %v", err)
+				return
+			}
+			log.Infof("control web server shutdown cleanly")
+		}()
+	}
+
 	// Prometheus
 	if s.cfg.PrometheusListenAddress != "" {
 		d, err := deucalion.New(&deucalion.Config{
@@ -549,6 +629,7 @@ func (s *Server) Run(pctx context.Context) error {
 	case <-ctx.Done():
 		err = ctx.Err()
 	case err = <-httpErrCh:
+	case err = <-ctrlHttpErrCh:
 	}
 	cancel()
 
