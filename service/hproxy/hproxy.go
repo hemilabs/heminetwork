@@ -37,8 +37,9 @@ type NodeError struct {
 }
 
 type NodeHealth struct {
-	NodeURL string `json:"node_url"`
-	Status  string `json:"status"`
+	NodeURL     string `json:"node_url"`
+	Status      string `json:"status"`
+	Connections int    `json:"connections"`
 }
 
 const (
@@ -508,11 +509,32 @@ func (s *Server) nodeRemove(node string) error {
 	return errors.New("not found")
 }
 
+// _countNode must be called with the mutext held.
+func (s *Server) _nodeCount(id int) int {
+	var count int
+	for _, v := range s.clients {
+		if v == id {
+			count++
+		}
+	}
+	return count
+}
+
+// _nodeReap must be called with the mutext held.
+func (s *Server) _nodeReap(id int) {
+	for k, v := range s.clients {
+		if v == id {
+			delete(s.clients, k)
+		}
+	}
+}
+
 // _nodeNew must be called with lock held.
 func (s *Server) _nodeNew(id int) {
 	if s.hvmHandlers[id].state != StateNew {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateNew
+		s._nodeReap(id)
 		log.Infof("Marking hvm new %v: %v", id, s.hvmHandlers[id].u)
 	}
 }
@@ -522,6 +544,7 @@ func (s *Server) _nodeRemoved(id int) {
 	if s.hvmHandlers[id].state != StateRemoved {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateRemoved
+		s._nodeReap(id)
 		log.Infof("Marking hvm removed %v: %v", id, s.hvmHandlers[id].u)
 	}
 }
@@ -531,6 +554,7 @@ func (s *Server) nodeHealthy(id int) {
 	if s.hvmHandlers[id].state != StateHealthy {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateHealthy
+		s._nodeReap(id)
 		log.Infof("Marking hvm healthy %v: %v", id, s.hvmHandlers[id].u)
 	}
 	s.mtx.Unlock()
@@ -541,6 +565,7 @@ func (s *Server) nodeUnhealthy(id int) {
 	if s.hvmHandlers[id].state != StateUnhealthy {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateUnhealthy
+		s._nodeReap(id)
 		log.Infof("Marking hvm unhealthy %v: %v", id, s.hvmHandlers[id].u)
 	}
 	s.mtx.Unlock()
@@ -664,8 +689,9 @@ func (s *Server) handleControlListRequest(w http.ResponseWriter, r *http.Request
 	nhs := make([]NodeHealth, 0, len(s.hvmHandlers))
 	for k := range s.hvmHandlers {
 		nhs = append(nhs, NodeHealth{
-			NodeURL: s.hvmHandlers[k].u.String(),
-			Status:  stateString[s.hvmHandlers[k].state],
+			NodeURL:     s.hvmHandlers[k].u.String(),
+			Status:      stateString[s.hvmHandlers[k].state],
+			Connections: s._nodeCount(k),
 		})
 	}
 	s.mtx.Unlock()
