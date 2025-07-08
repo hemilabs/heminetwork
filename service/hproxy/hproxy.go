@@ -239,17 +239,24 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	defer log.Tracef("health exit")
 
 	type health struct {
+		NewNodes       int `json:"new_nodes"`
 		HealthyNodes   int `json:"healthy_nodes"`
 		UnhealthyNodes int `json:"unhealthy_nodes"`
+		RemovedNodes   int `json:"removed_nodes"`
 	}
 
 	var h health
 	s.mtx.Lock()
 	for k := range s.hvmHandlers {
-		if s.hvmHandlers[k].state == StateHealthy {
+		switch s.hvmHandlers[k].state {
+		case StateNew:
+			h.NewNodes++
+		case StateHealthy:
 			h.HealthyNodes++
-		} else {
+		case StateUnhealthy:
 			h.UnhealthyNodes++
+		case StateRemoved:
+			h.RemovedNodes++
 		}
 	}
 	s.mtx.Unlock()
@@ -284,7 +291,7 @@ type HVMHandler struct {
 
 	poking bool // true when getting health
 	poker  Proxy
-	state  HVMState
+	state  HVMState // Do NOT directly set, use utility functions!
 }
 
 func (s *Server) lowest(x []int) int {
@@ -406,9 +413,7 @@ func (s *Server) nodeAdd(node string) error {
 	for k := range s.hvmHandlers {
 		if s.hvmHandlers[k].u.String() == u.String() {
 			if s.hvmHandlers[k].state == StateRemoved {
-				s.hvmHandlers[k].state = StateNew // add it back
-				log.Infof("Marking hvm new %v: %v",
-					s.hvmHandlers[k].id, s.hvmHandlers[k].u)
+				s._nodeNew(k) // add it back
 				return nil
 			}
 			return errors.New("duplicate")
@@ -494,9 +499,7 @@ func (s *Server) nodeRemove(node string) error {
 	for k := range s.hvmHandlers {
 		if s.hvmHandlers[k].u.String() == u.String() {
 			if s.hvmHandlers[k].state != StateRemoved {
-				s.hvmHandlers[k].state = StateRemoved
-				log.Infof("Marking hvm removed %v: %v",
-					s.hvmHandlers[k].id, s.hvmHandlers[k].u)
+				s._nodeRemoved(k)
 				return nil
 			}
 			return errors.New("already removed")
@@ -505,9 +508,28 @@ func (s *Server) nodeRemove(node string) error {
 	return errors.New("not found")
 }
 
+// _nodeNew must be called with lock held.
+func (s *Server) _nodeNew(id int) {
+	if s.hvmHandlers[id].state != StateNew {
+		s.hvmHandlers[id].connections = 0 // reset connections
+		s.hvmHandlers[id].state = StateNew
+		log.Infof("Marking hvm new %v: %v", id, s.hvmHandlers[id].u)
+	}
+}
+
+// _nodeRemoved must be called with lock held.
+func (s *Server) _nodeRemoved(id int) {
+	if s.hvmHandlers[id].state != StateRemoved {
+		s.hvmHandlers[id].connections = 0 // reset connections
+		s.hvmHandlers[id].state = StateRemoved
+		log.Infof("Marking hvm removed %v: %v", id, s.hvmHandlers[id].u)
+	}
+}
+
 func (s *Server) nodeHealthy(id int) {
 	s.mtx.Lock()
 	if s.hvmHandlers[id].state != StateHealthy {
+		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateHealthy
 		log.Infof("Marking hvm healthy %v: %v", id, s.hvmHandlers[id].u)
 	}
@@ -517,6 +539,7 @@ func (s *Server) nodeHealthy(id int) {
 func (s *Server) nodeUnhealthy(id int) {
 	s.mtx.Lock()
 	if s.hvmHandlers[id].state != StateUnhealthy {
+		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateUnhealthy
 		log.Infof("Marking hvm unhealthy %v: %v", id, s.hvmHandlers[id].u)
 	}
