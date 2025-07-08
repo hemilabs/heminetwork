@@ -65,6 +65,7 @@ func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
 	hpCfg.HVMURLs = servers
 	hpCfg.LogLevel = "hproxy=TRACE" // XXX figure out why this isn't working
 	hpCfg.RequestTimeout = time.Second
+	hpCfg.PollFrequency = time.Second
 	hp, err := NewServer(hpCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -193,7 +194,7 @@ func TestFanout(t *testing.T) {
 
 	// Setup hproxy
 	_, hpCfg := newHproxy(t, servers)
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond) // Let proxies be marked healthy
 
 	// clients
 	var (

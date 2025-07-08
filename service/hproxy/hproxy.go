@@ -110,6 +110,7 @@ func NewDefaultConfig() *Config {
 	return &Config{
 		ControlAddress:      DefaultControlAddress,
 		ListenAddress:       DefaultListenAddress,
+		PollFrequency:       DefaultPollFrequency,
 		Network:             "mainnet",
 		PrometheusNamespace: appName,
 		RequestTimeout:      DefaultRequestTimeout,
@@ -434,6 +435,8 @@ func (s *Server) nodeAdd(node string) error {
 				DialContext:           dialer,
 				TLSHandshakeTimeout:   5 * time.Second,
 				ResponseHeaderTimeout: s.cfg.RequestTimeout,
+				MaxIdleConnsPerHost:   1,
+				MaxConnsPerHost:       1,
 			},
 			FlushInterval:  0,
 			ErrorLog:       nil, // XXX wrap in loggo
