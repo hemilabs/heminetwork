@@ -396,6 +396,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		// Only call same host when healthy
 		if s.hvmHandlers[v].state == StateHealthy {
 			id = v
+			// XXX reset timer for reuse here
 		} else {
 			// hvm died, remove persistence
 			delete(s.clients, r.RemoteAddr)
@@ -417,6 +418,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 			// Add connection to candidate
 			s.clients[r.RemoteAddr] = id
 			s.hvmHandlers[id].connections++
+			// XXX set timer for reuse here
 		}
 	}
 	s.mtx.Unlock()
