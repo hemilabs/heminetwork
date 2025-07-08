@@ -332,7 +332,7 @@ func TestProxyPersistence(t *testing.T) {
 		}
 		// Discard so that we can reuse connection
 		if _, err := io.Copy(ioutil.Discard, reply.Body); err != nil {
-			// t.Fatal(err)
+			t.Fatal(err)
 		}
 
 		am.Lock()
