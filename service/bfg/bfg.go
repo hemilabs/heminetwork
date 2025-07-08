@@ -82,7 +82,7 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		BitcoinSource:       bitcoinSourceBlockstream,
+		BitcoinSource:       bitcoinSourceTBC,
 		ListenAddress:       bfgapi.DefaultListenAddress,
 		LogLevel:            logLevel,
 		Network:             defaultNetwork,
