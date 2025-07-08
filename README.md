@@ -136,9 +136,23 @@ go run ./integrationtest
 
 - A **connection to a Bitcoin network source of truth.
 
-### Running your own Bitcoin Finality Governor (bfgd) and PoP mining with it
+### Running your own Bitcoin Finality Governor (bfgd)
+
+If you'd like to run your own `bfgd` and don't want to rely on Hemi Labs (or any third party) for verifying the finality of mined keystones, you may run `bfgd` and connect it to a _trusted_ `op-geth` instance, as well as an l2 keystone (l2 keystones represent l2 state and are what are mined in PoP transactions) aware `gozer`, such as TBC.  In this case, your `bfgd` instance will communicate with `op-geth` to verify the _validity_ of l2 keystones, and confirm their _canonicity_ and _finality status_, based on their presence in the bitcoin chain, using the `gozer`.
+
+BFG is very light-weight, thus only requiring `bfgd` in order to be run (provided you have a valid `op-geth` and `gozer` instance to connect it to).
+
+When running BFG, you'll want the following env variables set:
+
+* `BFG_BITCOIN_URL`: the `TBC`'s websocket url that you will connect to
 
 XXX FIXME
+
+## ▶️ Running bssd
+
+### 🏁 Prerequisites
+
+- Connect to a live [bfgd](cmd/bfgd) instance.
 
 ## ▶️ Running the Hemi stack
 
