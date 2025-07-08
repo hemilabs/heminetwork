@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/juju/loggo"
@@ -224,6 +223,7 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 		HealthyNodes   int `json:"healthy_nodes"`
 		UnhealthyNodes int `json:"unhealthy_nodes"`
 	}
+
 	var h health
 	s.mtx.Lock()
 	for k := range s.hvmHandlers {
@@ -321,7 +321,6 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mtx.Unlock()
 
-	// XXX handle aggressive timeputs for ServeHTTP
 	log.Debugf("handleProxyRequest: remote %v url '%v' -> node %v",
 		r.RemoteAddr, r.URL, id)
 
@@ -332,37 +331,37 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	s.cmdsProcessed.Inc()
 }
 
-func (s *Server) handleProxyError(w http.ResponseWriter, r *http.Request, e error) {
-	log.Tracef("handleProxyError: %v", r.RemoteAddr)
-	defer log.Tracef("handleProxyError exit: %v", r.RemoteAddr)
-
-	// XXX only called when ModifyResponse is used.
-
-	//cs := spew.ConfigState{
-	//	DisableMethods:        true,
-	//	DisablePointerMethods: true,
-	//	ContinueOnMethod:      true,
-	//}
-
-	// log.Errorf("proxy error: %T", e)
-	// log.Errorf("proxy error: %v", cs.Sdump(e))
-
-	// connection errors
-	// XXX or is this all ohio?
-	var netErr net.Error
-	switch {
-	case errors.As(e, &netErr) && netErr.Timeout():
-		w.WriteHeader(http.StatusBadGateway)
-	case errors.Is(e, net.ErrClosed):
-		w.WriteHeader(http.StatusBadGateway)
-	case errors.Is(e, net.ErrWriteToConnected):
-		w.WriteHeader(http.StatusBadGateway)
-	case errors.Is(e, syscall.ECONNREFUSED):
-		w.WriteHeader(http.StatusBadGateway)
-	default:
-		panic(e)
-	}
-}
+//func (s *Server) handleProxyError(w http.ResponseWriter, r *http.Request, e error) {
+//	log.Tracef("handleProxyError: %v", r.RemoteAddr)
+//	defer log.Tracef("handleProxyError exit: %v", r.RemoteAddr)
+//
+//	// XXX only called when ModifyResponse is used.
+//
+//	//cs := spew.ConfigState{
+//	//	DisableMethods:        true,
+//	//	DisablePointerMethods: true,
+//	//	ContinueOnMethod:      true,
+//	//}
+//
+//	// log.Errorf("proxy error: %T", e)
+//	// log.Errorf("proxy error: %v", cs.Sdump(e))
+//
+//	// connection errors
+//	// XXX or is this all ohio?
+//	var netErr net.Error
+//	switch {
+//	case errors.As(e, &netErr) && netErr.Timeout():
+//		w.WriteHeader(http.StatusBadGateway)
+//	case errors.Is(e, net.ErrClosed):
+//		w.WriteHeader(http.StatusBadGateway)
+//	case errors.Is(e, net.ErrWriteToConnected):
+//		w.WriteHeader(http.StatusBadGateway)
+//	case errors.Is(e, syscall.ECONNREFUSED):
+//		w.WriteHeader(http.StatusBadGateway)
+//	default:
+//		panic(e)
+//	}
+//}
 
 func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (net.Conn, error) {
 	log.Tracef("handleProxyDial: %v %v", network, addr)
@@ -372,7 +371,12 @@ func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (ne
 	// default dialer with a timeout/deadline.
 	defaultDialTimeout := 5 * time.Second
 	d := &net.Dialer{
-		// XXX Do we want to futz with keepalive?
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     7 * time.Second,
+			Interval: 7 * time.Second,
+			Count:    2,
+		},
 	}
 	ctx, cancel := context.WithTimeout(pctx, defaultDialTimeout)
 	defer cancel()
@@ -417,12 +421,14 @@ func (s *Server) nodeAdd(node string) error {
 				ResponseHeaderTimeout: s.cfg.RequestTimeout,
 			},
 		},
+		// Ethereum only needs what is set. If we want to make this
+		// generic we may have to fart with this a bit.
 		rp: &httputil.ReverseProxy{
 			Rewrite: func(r *httputil.ProxyRequest) {
 				r.SetURL(u)
 				r.SetXForwarded()
 			},
-			Director: nil, // XXX not needed
+			Director: nil, // not needed
 			Transport: &http.Transport{
 				DialContext:           s.handleProxyDial,
 				TLSHandshakeTimeout:   5 * time.Second,
@@ -430,9 +436,9 @@ func (s *Server) nodeAdd(node string) error {
 			},
 			FlushInterval:  0,
 			ErrorLog:       nil, // XXX wrap in loggo
-			BufferPool:     nil, // XXX not useful for different sized calls
-			ModifyResponse: nil, // XXX not needed
-			ErrorHandler:   nil, // XXX s.handleProxyError, ModifyResponse only
+			BufferPool:     nil, // not useful for different sized calls
+			ModifyResponse: nil, // not needed
+			ErrorHandler:   nil, // s.handleProxyError, ModifyResponse only
 		},
 	}
 
@@ -570,7 +576,7 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	err := json.NewDecoder(r.Body).Decode(&ns)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		log.Errorf("%v %v: %v", routeControlAdd, r.RemoteAddr, err) // XXX too loud?
+		log.Errorf("%v %v: %v", routeControlAdd, r.RemoteAddr, err) // too loud?
 		return
 	}
 
@@ -586,7 +592,7 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	err = json.NewEncoder(w).Encode(nes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Errorf("%v %v: %v", routeControlAdd, r.RemoteAddr, err) // XXX too loud?
+		log.Errorf("%v %v: %v", routeControlAdd, r.RemoteAddr, err) // too loud?
 		return
 	}
 }
@@ -599,7 +605,7 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	err := json.NewDecoder(r.Body).Decode(&ns)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // XXX too loud?
+		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // too loud?
 		return
 	}
 
@@ -615,7 +621,7 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	err = json.NewEncoder(w).Encode(nes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // XXX too loud?
+		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // too loud?
 		return
 	}
 }
