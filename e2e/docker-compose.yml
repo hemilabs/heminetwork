@@ -305,8 +305,6 @@ services:
         condition: "service_started"
     healthcheck:
       start_period: 180s
-    environment:
-      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
       - "op-node/bin/op-node"
       - "--l2=ws://op-geth-l2-non-sequencing:8551"

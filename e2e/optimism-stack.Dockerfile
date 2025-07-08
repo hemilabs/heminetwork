@@ -29,7 +29,7 @@ WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
 RUN git fetch origin
-RUN git checkout ea9fe7b4f2e10f2573934957f4808d8494cfeb9f
+RUN git checkout 45b0b23c3bd102da5985d6a47badfc70c3dfd819
 
 WORKDIR /git/optimism
 RUN go mod tidy
