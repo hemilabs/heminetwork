@@ -314,6 +314,9 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		// Only call same host when healthy
 		if s.hvmHandlers[v].state == StateHealthy {
 			id = v
+		} else {
+			// hvm died, remove persistence
+			delete(s.clients, r.RemoteAddr)
 		}
 	}
 

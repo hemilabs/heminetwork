@@ -361,3 +361,100 @@ func TestPersistence(t *testing.T) {
 		t.Fatalf("expected %v connections, got %v", clientCount, total)
 	}
 }
+
+func TestFailover(t *testing.T) {
+	serverCount := 5
+
+	servers := make([]string, 0, serverCount)
+	for i := 0; i < serverCount; i++ {
+		s := newServer(i)
+		defer s.Close()
+
+		// Verify url
+		_, err := url.Parse(s.URL)
+		if err != nil {
+			t.Fatalf("server %v: %v", i, err)
+		}
+		servers = append(servers, s.URL)
+	}
+
+	testDuration := 5 * time.Second
+	ctx, cancel := context.WithTimeout(t.Context(), testDuration)
+	_ = ctx
+	defer cancel()
+
+	// Setup hproxy
+	hp, hpCfg := newHproxy(t, servers)
+	time.Sleep(500 * time.Millisecond) // Let proxies be marked healthy
+
+	// Do 10 command and fail node 0
+
+	// single client
+	var am sync.Mutex
+	clientCount := serverCount * 100
+	answers := make([]int, serverCount)
+	c := &http.Client{
+		Transport: http.DefaultTransport,
+	}
+	for i := 0; i < clientCount; i++ {
+		x := i
+		if i != 0 && i%100 == 0 {
+			t.Logf("marking node unhealthy: %v", i/100-1)
+			hp.nodeUnhealthy(i/100 - 1)
+		}
+
+		reply, err := c.Get("http://" + hpCfg.ListenAddress)
+		if err != nil {
+			t.Fatalf("get %v: %v", x, err)
+		}
+		defer reply.Body.Close()
+		switch reply.StatusCode {
+		case http.StatusOK:
+		default:
+			panic(fmt.Sprintf("%v replied %v",
+				hpCfg.ListenAddress, reply.StatusCode))
+		}
+
+		// Require X-Hproxy
+		ids := reply.Header.Get("X-Hproxy")
+		if ids == "" {
+			panic("expected X-Hproxy being set")
+		}
+
+		var jr serverReply
+		err = json.NewDecoder(reply.Body).Decode(&jr)
+		if err != nil {
+			t.Fatalf("decode %v: %v", x, err)
+		}
+		// Discard so that we can reuse connection
+		if _, err := io.Copy(ioutil.Discard, reply.Body); err != nil {
+			t.Fatal(err)
+		}
+
+		am.Lock()
+		answers[jr.ID]++
+		am.Unlock()
+
+		// Verify that json id matches header id, a bit silly
+		// but keeps us honest.
+		if strconv.Itoa(jr.ID) != ids {
+			panic("id mismatch header: " + ids +
+				" json: " + strconv.Itoa(jr.ID))
+		}
+	}
+
+	cancel()
+
+	total := 0
+	for k, v := range answers {
+		t.Logf("node %v: %v", k, v)
+		if v != 100 {
+			t.Fatalf("unexpected number of calls node %v got %v wanted %v",
+				k, v, 100)
+		}
+		total += v
+	}
+	if total != clientCount {
+		t.Fatalf("expected %v connections, got %v", clientCount, total)
+	}
+}
