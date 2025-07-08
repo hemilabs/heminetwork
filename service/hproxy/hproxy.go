@@ -28,6 +28,20 @@ import (
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
 
+type Node struct {
+	NodeURL string `json:"node_url"`
+}
+
+type NodeError struct {
+	NodeURL string `json:"node_url"`
+	Error   string `json:"error"`
+}
+
+type NodeHealth struct {
+	NodeURL string `json:"node_url"`
+	Status  string `json:"status"`
+}
+
 const (
 	appName = "hproxy" // Prometheus
 
@@ -35,7 +49,9 @@ const (
 
 	promSubsystem = "hproxy_service" // Prometheus
 
+	// XXX think about these durations
 	DefaultRequestTimeout = 9 * time.Second  // Smaller than 12s
+	DefaultPollFrequency  = 11 * time.Second // Smaller than 12s
 	DefaultListenAddress  = "localhost:8545" // Default geth port
 	DefaultControlAddress = "localhost:1337" // Default control port
 
@@ -56,6 +72,7 @@ type Config struct {
 	ListenAddress           string
 	LogLevel                string
 	Network                 string
+	PollFrequency           time.Duration
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
@@ -136,11 +153,15 @@ func (s *Server) Collectors() []prometheus.Collector {
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
+	promPollFrequency := 5 * time.Second
+	ticker := time.NewTicker(promPollFrequency)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-ticker.C:
 		}
 
 		if s.promPollVerbose {
@@ -148,6 +169,7 @@ func (s *Server) promPoll(ctx context.Context) error {
 			log.Infof("FIXME PROMETHEUS POLL")
 			s.mtx.RUnlock()
 		}
+		ticker.Reset(promPollFrequency)
 	}
 }
 
@@ -192,14 +214,14 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 type HVMState int
 
 const (
-	StateInvalid   HVMState = 0
+	StateNew       HVMState = 0
 	StateHealthy            = 1
 	StateUnhealthy          = 2
 	StateRemoved            = 3
 )
 
 var stateString = map[HVMState]string{
-	StateInvalid:   "invalid",
+	StateNew:       "new",
 	StateHealthy:   "healthy",
 	StateUnhealthy: "unhealthy",
 	StateRemoved:   "removed",
@@ -329,7 +351,75 @@ func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (ne
 	return d.DialContext(ctx, network, addr)
 }
 
-func (s *Server) setHealthy(id int) {
+func (s *Server) nodeAdd(u *url.URL) error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	// make sure it isn't a dupe
+	for k := range s.hvmHandlers {
+		if s.hvmHandlers[k].u.String() == u.String() {
+			if s.hvmHandlers[k].state == StateRemoved {
+				s.hvmHandlers[k].state = StateNew // add it back
+				log.Infof("Marking hvm new %v: %v",
+					s.hvmHandlers[k].id, s.hvmHandlers[k].u)
+				return nil
+			}
+			return errors.New("duplicate")
+		}
+	}
+
+	s.hvmHandlers = append(s.hvmHandlers, HVMHandler{
+		id:    len(s.hvmHandlers),
+		state: StateNew,
+		u:     u,
+		c: &http.Client{
+			Transport: &http.Transport{
+				DialContext:           s.handleProxyDial,
+				TLSHandshakeTimeout:   5 * time.Second,
+				ResponseHeaderTimeout: s.cfg.RequestTimeout,
+			},
+		},
+		rp: &httputil.ReverseProxy{
+			Rewrite: func(r *httputil.ProxyRequest) {
+				r.SetURL(u)
+				r.SetXForwarded()
+			},
+			Director: nil, // XXX not needed
+			Transport: &http.Transport{
+				DialContext:           s.handleProxyDial,
+				TLSHandshakeTimeout:   5 * time.Second,
+				ResponseHeaderTimeout: s.cfg.RequestTimeout,
+			},
+			FlushInterval:  0,
+			ErrorLog:       nil, // XXX wrap in loggo
+			BufferPool:     nil, // XXX not useful for different sized calls
+			ModifyResponse: nil, // XXX not needed
+			ErrorHandler:   nil, // XXX s.handleProxyError, ModifyResponse only
+		},
+	})
+
+	return nil
+}
+
+func (s *Server) nodeRemove(u *url.URL) error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	// make sure it isn't a dupe
+	for k := range s.hvmHandlers {
+		if s.hvmHandlers[k].u.String() == u.String() {
+			if s.hvmHandlers[k].state != StateRemoved {
+				s.hvmHandlers[k].state = StateRemoved
+				log.Infof("Marking hvm removed %v: %v",
+					s.hvmHandlers[k].id, s.hvmHandlers[k].u)
+			}
+			return nil
+		}
+	}
+	return errors.New("not found")
+}
+
+func (s *Server) nodeHealthy(id int) {
 	s.mtx.Lock()
 	if s.hvmHandlers[id].state != StateHealthy {
 		s.hvmHandlers[id].state = StateHealthy
@@ -338,7 +428,7 @@ func (s *Server) setHealthy(id int) {
 	s.mtx.Unlock()
 }
 
-func (s *Server) setUnhealthy(id int) {
+func (s *Server) nodeUnhealthy(id int) {
 	s.mtx.Lock()
 	if s.hvmHandlers[id].state != StateUnhealthy {
 		s.hvmHandlers[id].state = StateUnhealthy
@@ -377,7 +467,7 @@ func (s *Server) poke(ctx context.Context, id int) {
 	r := bytes.NewBufferString(cmd)
 	resp, err := c.Post(u.String(), "application/json", r)
 	if err != nil {
-		s.setUnhealthy(id)
+		s.nodeUnhealthy(id)
 		return
 	}
 	defer resp.Body.Close()
@@ -385,7 +475,7 @@ func (s *Server) poke(ctx context.Context, id int) {
 	switch resp.StatusCode {
 	case http.StatusOK:
 	default:
-		s.setUnhealthy(id)
+		s.nodeUnhealthy(id)
 		return
 	}
 
@@ -393,16 +483,16 @@ func (s *Server) poke(ctx context.Context, id int) {
 	err = json.NewDecoder(resp.Body).Decode(&j)
 	if err != nil {
 		log.Errorf("decode %v: %v", id, err)
-		s.setUnhealthy(id)
+		s.nodeUnhealthy(id)
 		return
 	}
 	// Make sure we have a result
 	if result, ok := j["result"]; !ok {
 		log.Errorf("no result %v", id)
-		s.setUnhealthy(id)
+		s.nodeUnhealthy(id)
 	} else {
 		// Mark server heathy
-		s.setHealthy(id)
+		s.nodeHealthy(id)
 		_ = result
 	}
 }
@@ -412,6 +502,8 @@ func (s *Server) monitor(ctx context.Context) {
 	defer log.Tracef("monitor exit")
 	defer s.wg.Done()
 
+	ticker := time.NewTicker(s.cfg.PollFrequency)
+	defer ticker.Stop()
 	for {
 		// Poke hvms
 		s.mtx.Lock()
@@ -425,8 +517,9 @@ func (s *Server) monitor(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(9 * time.Second): // XXX
+		case <-ticker.C:
 		}
+		ticker.Reset(s.cfg.PollFrequency)
 	}
 }
 
@@ -434,14 +527,78 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	log.Tracef("handleControlAddRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleControlAddRequest exit: %v", r.RemoteAddr)
 
-	panic("fixme")
+	ns := make([]Node, 0, 16)
+	err := json.NewDecoder(r.Body).Decode(&ns)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		// create route defaults
+		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
+		return
+	}
+
+	nes := make([]NodeError, len(ns))
+	for k := range ns {
+		nes[k].NodeURL = ns[k].NodeURL
+		u, err := url.Parse(ns[k].NodeURL)
+		if err != nil {
+			nes[k].Error = err.Error()
+			continue
+		}
+		switch u.Scheme {
+		case "http", "https":
+		default:
+			nes[k].Error = fmt.Sprintf("unsuported scheme: %v", u.Scheme)
+			continue
+		}
+		err = s.nodeAdd(u)
+		if err != nil {
+			nes[k].Error = err.Error()
+			continue
+		}
+	}
+	err = json.NewEncoder(w).Encode(nes)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		// create route defaults
+		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
+		return
+	}
 }
 
 func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleControlRemoveRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleControlRemoveRequest exit: %v", r.RemoteAddr)
 
-	panic("fixme")
+	ns := make([]Node, 0, 16)
+	err := json.NewDecoder(r.Body).Decode(&ns)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		// create route defaults
+		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
+		return
+	}
+
+	nes := make([]NodeError, len(ns))
+	for k := range ns {
+		nes[k].NodeURL = ns[k].NodeURL
+		u, err := url.Parse(ns[k].NodeURL)
+		if err != nil {
+			nes[k].Error = err.Error()
+			continue
+		}
+		err = s.nodeRemove(u)
+		if err != nil {
+			nes[k].Error = err.Error()
+			continue
+		}
+	}
+	err = json.NewEncoder(w).Encode(nes)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		// create route defaults
+		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
+		return
+	}
 }
 
 func (s *Server) handleControlListRequest(w http.ResponseWriter, r *http.Request) {
@@ -449,13 +606,16 @@ func (s *Server) handleControlListRequest(w http.ResponseWriter, r *http.Request
 	defer log.Tracef("handleControlListRequest exit: %v", r.RemoteAddr)
 
 	s.mtx.Lock()
-	resp := make(map[string]any, len(s.hvmHandlers))
+	nhs := make([]NodeHealth, 0, len(s.hvmHandlers))
 	for k := range s.hvmHandlers {
-		resp[s.hvmHandlers[k].u.String()] = stateString[s.hvmHandlers[k].state]
+		nhs = append(nhs, NodeHealth{
+			NodeURL: s.hvmHandlers[k].u.String(),
+			Status:  stateString[s.hvmHandlers[k].state],
+		})
 	}
 	s.mtx.Unlock()
 
-	err := json.NewEncoder(w).Encode(resp)
+	err := json.NewEncoder(w).Encode(nhs)
 	if err != nil {
 		log.Errorf("encode %v: %v", r.RemoteAddr, err)
 		return
@@ -483,36 +643,10 @@ func (s *Server) Run(pctx context.Context) error {
 		default:
 			return fmt.Errorf("unsuported scheme [%v]: %v", k, u.Scheme)
 		}
-
-		s.hvmHandlers = append(s.hvmHandlers, HVMHandler{
-			id:    k,
-			state: StateInvalid,
-			u:     u, // XXX do we need this?
-			c: &http.Client{
-				Transport: &http.Transport{
-					DialContext:           s.handleProxyDial,
-					TLSHandshakeTimeout:   5 * time.Second,
-					ResponseHeaderTimeout: s.cfg.RequestTimeout,
-				},
-			},
-			rp: &httputil.ReverseProxy{
-				Rewrite: func(r *httputil.ProxyRequest) {
-					r.SetURL(u)
-					r.SetXForwarded()
-				},
-				Director: nil, // XXX not needed
-				Transport: &http.Transport{
-					DialContext:           s.handleProxyDial,
-					TLSHandshakeTimeout:   5 * time.Second,
-					ResponseHeaderTimeout: s.cfg.RequestTimeout,
-				},
-				FlushInterval:  0,
-				ErrorLog:       nil, // XXX wrap in loggo
-				BufferPool:     nil, // XXX not useful for different sized calls
-				ModifyResponse: nil, // XXX not needed
-				ErrorHandler:   nil, // XXX s.handleProxyError, ModifyResponse only
-			},
-		})
+		err = s.nodeAdd(u)
+		if err != nil {
+			return fmt.Errorf("node add %v: %v", u, err)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(pctx)

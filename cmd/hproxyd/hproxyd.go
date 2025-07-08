@@ -73,6 +73,12 @@ var (
 			Help:         "address and port hproxy pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
+		"HPROXY_POLL_FREQUENCY": config.Config{
+			Value:        &cfg.PollFrequency,
+			DefaultValue: hproxy.DefaultPollFrequency,
+			Help:         "frequency that hproxy pokes nodes for health information",
+			Print:        config.PrintAll,
+		},
 		"HPROXY_REQUEST_TIMEOUT": config.Config{
 			Value:        &cfg.RequestTimeout,
 			DefaultValue: cfg.RequestTimeout,
