@@ -75,6 +75,24 @@ func handle(service string, mux *http.ServeMux, pattern string, handler func(htt
 	log.Infof("handle (%v): %v", service, pattern)
 }
 
+func dialer(pctx context.Context, network, addr string) (net.Conn, error) {
+	log.Tracef("handleProxyDial: %v %v", network, addr)
+	defer log.Tracef("handleProxyDial exit: %v %v", network, addr)
+
+	defaultDialTimeout := 5 * time.Second
+	d := &net.Dialer{
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable:   true,
+			Idle:     7 * time.Second,
+			Interval: 7 * time.Second,
+			Count:    2,
+		},
+	}
+	ctx, cancel := context.WithTimeout(pctx, defaultDialTimeout)
+	defer cancel()
+	return d.DialContext(ctx, network, addr)
+}
+
 type Config struct {
 	ControlAddress          string
 	HVMURLs                 []string
@@ -363,26 +381,6 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 //	}
 //}
 
-func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (net.Conn, error) {
-	log.Tracef("handleProxyDial: %v %v", network, addr)
-	defer log.Tracef("handleProxyDial exit: %v %v", network, addr)
-
-	// This function only exists for future use. Maybe remove and use the
-	// default dialer with a timeout/deadline.
-	defaultDialTimeout := 5 * time.Second
-	d := &net.Dialer{
-		KeepAliveConfig: net.KeepAliveConfig{
-			Enable:   true,
-			Idle:     7 * time.Second,
-			Interval: 7 * time.Second,
-			Count:    2,
-		},
-	}
-	ctx, cancel := context.WithTimeout(pctx, defaultDialTimeout)
-	defer cancel()
-	return d.DialContext(ctx, network, addr)
-}
-
 func (s *Server) nodeAdd(node string) error {
 	u, err := url.Parse(node)
 	if err != nil {
@@ -416,7 +414,7 @@ func (s *Server) nodeAdd(node string) error {
 		u:     u,
 		c: &http.Client{
 			Transport: &http.Transport{
-				DialContext:           s.handleProxyDial,
+				DialContext:           dialer,
 				TLSHandshakeTimeout:   5 * time.Second,
 				ResponseHeaderTimeout: s.cfg.RequestTimeout,
 			},
@@ -430,7 +428,7 @@ func (s *Server) nodeAdd(node string) error {
 			},
 			Director: nil, // not needed
 			Transport: &http.Transport{
-				DialContext:           s.handleProxyDial,
+				DialContext:           dialer,
 				TLSHandshakeTimeout:   5 * time.Second,
 				ResponseHeaderTimeout: s.cfg.RequestTimeout,
 			},
