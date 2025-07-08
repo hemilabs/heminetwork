@@ -73,7 +73,7 @@ func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
 	}
 	go func() {
 		err = hp.Run(t.Context())
-		if err != nil && err != context.Canceled {
+		if err != nil && !errors.Is(err, context.Canceled) {
 			panic(err)
 		}
 	}()
@@ -100,7 +100,7 @@ func TestNobodyHome(t *testing.T) {
 	// Expect EOF
 	var jr serverReply
 	err = json.NewDecoder(reply.Body).Decode(&jr)
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Fatal(err)
 	}
 }
@@ -121,7 +121,7 @@ func TestRequestTimeout(t *testing.T) {
 	defer s.Close()
 
 	servers := []string{s.URL}
-	_, hpCfg := newHproxy(t, servers)
+	resp, hpCfg := newHproxy(t, servers)
 	time.Sleep(250 * time.Millisecond)
 
 	_, err := http.Get("http://" + hpCfg.ListenAddress)
@@ -131,12 +131,13 @@ func TestRequestTimeout(t *testing.T) {
 			t.Fatalf("%T", err)
 		}
 	}
+	resp.Body.Close()
 }
 
 func request(serverID int, hpCfg *Config) error {
 	reply, err := http.Get("http://" + hpCfg.ListenAddress)
 	if err != nil {
-		return fmt.Errorf("get %v: %v", 0, err)
+		return fmt.Errorf("get %v: %w", 0, err)
 	}
 	defer reply.Body.Close()
 	switch reply.StatusCode {
@@ -155,7 +156,7 @@ func request(serverID int, hpCfg *Config) error {
 	var jr serverReply
 	err = json.NewDecoder(reply.Body).Decode(&jr)
 	if err != nil {
-		return fmt.Errorf("decode: %v", err)
+		return fmt.Errorf("decode: %w", err)
 	}
 	if jr.ID != serverID {
 		return fmt.Errorf("invalid response got %v, wanted %v", jr.ID, serverID)

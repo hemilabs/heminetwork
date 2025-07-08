@@ -162,6 +162,71 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
+func (s *Server) promHVMNew() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	var newNodes int
+	for k := range s.hvmHandlers {
+		switch s.hvmHandlers[k].state {
+		case StateNew:
+			newNodes++
+		}
+	}
+	return deucalion.IntToFloat(newNodes)
+}
+
+func (s *Server) promHVMHealthy() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	var healthyNodes int
+	for k := range s.hvmHandlers {
+		switch s.hvmHandlers[k].state {
+		case StateHealthy:
+			healthyNodes++
+		}
+	}
+	return deucalion.IntToFloat(healthyNodes)
+}
+
+func (s *Server) promHVMUnhealthy() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	var unhealthyNodes int
+	for k := range s.hvmHandlers {
+		switch s.hvmHandlers[k].state {
+		case StateUnhealthy:
+			unhealthyNodes++
+		}
+	}
+	return deucalion.IntToFloat(unhealthyNodes)
+}
+
+func (s *Server) promHVMRemoved() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	var removedNodes int
+	for k := range s.hvmHandlers {
+		switch s.hvmHandlers[k].state {
+		case StateRemoved:
+			removedNodes++
+		}
+	}
+	return deucalion.IntToFloat(removedNodes)
+}
+
+func (s *Server) promConnections() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	var connections uint64
+	for k := range s.hvmHandlers {
+		switch s.hvmHandlers[k].state {
+		case StateHealthy:
+			connections += uint64(s.hvmHandlers[k].connections)
+		}
+	}
+	return deucalion.Uint64ToFloat(connections)
+}
+
 // Collectors returns the Prometheus collectors available for the server.
 func (s *Server) Collectors() []prometheus.Collector {
 	s.mtx.Lock()
@@ -176,6 +241,31 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Name:      "running",
 				Help:      "Whether the hproxy service is running",
 			}, s.promRunning),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "hvm_new",
+				Help:      "Number of new HVMs",
+			}, s.promHVMNew),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "hvm_healthy",
+				Help:      "Number of healthy HVMs",
+			}, s.promHVMHealthy),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "hvm_unhealthy",
+				Help:      "Number of unhealthy HVMs",
+			}, s.promHVMUnhealthy),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "hvm_removed",
+				Help:      "Number of removed HVMs",
+			}, s.promHVMRemoved),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "connections",
+				Help:      "Number of active client connections",
+			}, s.promConnections),
 		}
 	}
 	return s.promCollectors
@@ -269,9 +359,9 @@ type HVMState int
 
 const (
 	StateNew       HVMState = 0
-	StateHealthy            = 1
-	StateUnhealthy          = 2
-	StateRemoved            = 3
+	StateHealthy   HVMState = 1
+	StateUnhealthy HVMState = 2
+	StateRemoved   HVMState = 3
 )
 
 var stateString = map[HVMState]string{
@@ -399,7 +489,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) nodeAdd(node string) error {
 	u, err := url.Parse(node)
 	if err != nil {
-		return fmt.Errorf("invalid url: %v", err)
+		return fmt.Errorf("invalid url: %w", err)
 	}
 	switch u.Scheme {
 	case "http", "https":
@@ -485,7 +575,7 @@ func (s *Server) nodeAdd(node string) error {
 func (s *Server) nodeRemove(node string) error {
 	u, err := url.Parse(node)
 	if err != nil {
-		return fmt.Errorf("invalid url: %v", err)
+		return fmt.Errorf("invalid url: %w", err)
 	}
 	switch u.Scheme {
 	case "http", "https":
@@ -717,7 +807,7 @@ func (s *Server) Run(pctx context.Context) error {
 	for k := range s.cfg.HVMURLs {
 		err := s.nodeAdd(s.cfg.HVMURLs[k])
 		if err != nil {
-			return fmt.Errorf("node add: %v", err)
+			return fmt.Errorf("node add: %w", err)
 		}
 	}
 
