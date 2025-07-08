@@ -171,7 +171,7 @@ func TestProxy(t *testing.T) {
 
 	// Setup hproxy
 	_, hpCfg := newHproxy(t, servers)
-	time.Sleep(250 * time.Millisecond) // XXX
+	time.Sleep(250 * time.Millisecond)
 
 	// Send command
 	err := request(serverID, hpCfg)
@@ -273,7 +273,7 @@ func TestFanout(t *testing.T) {
 	}
 }
 
-func TestProxyPersistence(t *testing.T) {
+func TestPersistence(t *testing.T) {
 	serverCount := 5
 
 	servers := make([]string, 0, serverCount)
