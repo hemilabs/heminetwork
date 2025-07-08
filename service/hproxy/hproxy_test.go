@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -132,6 +133,36 @@ func TestRequestTimeout(t *testing.T) {
 	}
 }
 
+func request(serverID int, hpCfg *Config) error {
+	reply, err := http.Get("http://" + hpCfg.ListenAddress)
+	if err != nil {
+		return fmt.Errorf("get %v: %v", 0, err)
+	}
+	defer reply.Body.Close()
+	switch reply.StatusCode {
+	case http.StatusOK:
+	default:
+		return fmt.Errorf("%v replied %v", hpCfg.ListenAddress, reply.StatusCode)
+	}
+
+	// Require X-Hproxy
+	ids := reply.Header.Get("X-Hproxy")
+	if ids == "" {
+		return errors.New("expected X-Hproxy being set")
+	}
+
+	// Read body
+	var jr serverReply
+	err = json.NewDecoder(reply.Body).Decode(&jr)
+	if err != nil {
+		return fmt.Errorf("decode: %v", err)
+	}
+	if jr.ID != serverID {
+		return fmt.Errorf("invalid response got %v, wanted %v", jr.ID, serverID)
+	}
+	return nil
+}
+
 func TestProxy(t *testing.T) {
 	serverID := 1337
 	s := newServer(serverID)
@@ -142,32 +173,10 @@ func TestProxy(t *testing.T) {
 	_, hpCfg := newHproxy(t, servers)
 	time.Sleep(250 * time.Millisecond) // XXX
 
-	reply, err := http.Get("http://" + hpCfg.ListenAddress)
+	// Send command
+	err := request(serverID, hpCfg)
 	if err != nil {
-		t.Fatalf("get %v: %v", 0, err)
-	}
-	defer reply.Body.Close()
-	switch reply.StatusCode {
-	case http.StatusOK:
-	default:
-		panic(fmt.Sprintf("%v replied %v",
-			hpCfg.ListenAddress, reply.StatusCode))
-	}
-
-	// Require X-Hproxy
-	ids := reply.Header.Get("X-Hproxy")
-	if ids == "" {
-		panic("expected X-Hproxy being set")
-	}
-
-	// Read body
-	var jr serverReply
-	err = json.NewDecoder(reply.Body).Decode(&jr)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if jr.ID != serverID {
-		t.Fatalf("invalid repsonse got %v, wanted %v", jr.ID, serverID)
+		t.Fatal(err)
 	}
 }
 
@@ -250,10 +259,105 @@ func TestFanout(t *testing.T) {
 	acceptable := (clientCount / serverCount) / (100 / 20)
 	upperBound := (clientCount / serverCount) + acceptable
 	lowerBound := (clientCount / serverCount) - acceptable
+	total := 0
 	for k, v := range answers {
 		if v < lowerBound || v > upperBound {
 			t.Fatalf("%v out of bounds lower %v upper %v got %v",
 				k, lowerBound, upperBound, v)
 		}
+		t.Logf("node %v: %v", k, v)
+		total += v
+	}
+	if total != clientCount {
+		t.Fatalf("expected %v connections, got %v", clientCount, total)
+	}
+}
+
+func TestProxyPersistence(t *testing.T) {
+	serverCount := 5
+
+	servers := make([]string, 0, serverCount)
+	for i := 0; i < serverCount; i++ {
+		s := newServer(i)
+		defer s.Close()
+
+		// Verify url
+		_, err := url.Parse(s.URL)
+		if err != nil {
+			t.Fatalf("server %v: %v", i, err)
+		}
+		servers = append(servers, s.URL)
+	}
+
+	testDuration := 5 * time.Second
+	ctx, cancel := context.WithTimeout(t.Context(), testDuration)
+	_ = ctx
+	defer cancel()
+
+	// Setup hproxy
+	_, hpCfg := newHproxy(t, servers)
+	time.Sleep(500 * time.Millisecond) // Let proxies be marked healthy
+
+	// single client
+	var am sync.Mutex
+	clientCount := serverCount * 100
+	answers := make([]int, serverCount)
+	c := &http.Client{
+		Transport: http.DefaultTransport,
+	}
+	for i := 0; i < clientCount; i++ {
+		x := i
+		reply, err := c.Get("http://" + hpCfg.ListenAddress)
+		if err != nil {
+			t.Fatalf("get %v: %v", x, err)
+		}
+		defer reply.Body.Close()
+		switch reply.StatusCode {
+		case http.StatusOK:
+		default:
+			panic(fmt.Sprintf("%v replied %v",
+				hpCfg.ListenAddress, reply.StatusCode))
+		}
+
+		// Require X-Hproxy
+		ids := reply.Header.Get("X-Hproxy")
+		if ids == "" {
+			panic("expected X-Hproxy being set")
+		}
+
+		var jr serverReply
+		err = json.NewDecoder(reply.Body).Decode(&jr)
+		if err != nil {
+			t.Fatalf("decode %v: %v", x, err)
+		}
+		// Discard so that we can reuse connection
+		if _, err := io.Copy(ioutil.Discard, reply.Body); err != nil {
+			// t.Fatal(err)
+		}
+
+		am.Lock()
+		answers[jr.ID]++
+		am.Unlock()
+
+		// Verify that json id matches header id, a bit silly
+		// but keeps us honest.
+		if strconv.Itoa(jr.ID) != ids {
+			panic("id mismatch header: " + ids +
+				" json: " + strconv.Itoa(jr.ID))
+		}
+	}
+
+	cancel()
+
+	total := 0
+	for k, v := range answers {
+		t.Logf("node %v: %v", k, v)
+		total += v
+		if k != 0 && v != 0 {
+			t.Fatalf("connection was not persisted, node %v was used", k)
+		}
+	}
+	if total != clientCount {
+		t.Fatalf("expected %v connections, got %v", clientCount, total)
 	}
 }
