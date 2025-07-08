@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package hproxy
 
 import (
@@ -6,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -85,9 +88,15 @@ func TestNobodyHome(t *testing.T) {
 	_, hpCfg := newHproxy(t, servers)
 	time.Sleep(250 * time.Millisecond)
 
-	reply, err := http.Get("http://" + hpCfg.ListenAddress)
+	c := &http.Client{}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+		"http://"+hpCfg.ListenAddress, nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("get: %v", err)
+	}
+	reply, err := c.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
 	}
 	defer reply.Body.Close()
 
@@ -121,21 +130,33 @@ func TestRequestTimeout(t *testing.T) {
 	defer s.Close()
 
 	servers := []string{s.URL}
-	resp, hpCfg := newHproxy(t, servers)
+	_, hpCfg := newHproxy(t, servers)
 	time.Sleep(250 * time.Millisecond)
 
-	_, err := http.Get("http://" + hpCfg.ListenAddress)
+	c := &http.Client{}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+		"http://"+hpCfg.ListenAddress, nil)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	reply, err := c.Do(req)
 	wg.Done()
 	if err != nil {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("%T", err)
 		}
 	}
-	resp.Body.Close()
+	reply.Body.Close() // shut linter up
 }
 
-func request(serverID int, hpCfg *Config) error {
-	reply, err := http.Get("http://" + hpCfg.ListenAddress)
+func request(ctx context.Context, serverID int, hpCfg *Config) error {
+	c := &http.Client{}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://"+hpCfg.ListenAddress, nil)
+	if err != nil {
+		return fmt.Errorf("get: %w", err)
+	}
+	reply, err := c.Do(req)
 	if err != nil {
 		return fmt.Errorf("get %v: %w", 0, err)
 	}
@@ -175,7 +196,7 @@ func TestProxy(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 
 	// Send command
-	err := request(serverID, hpCfg)
+	err := request(t.Context(), serverID, hpCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,9 +238,15 @@ func TestFanout(t *testing.T) {
 		wg.Add(1)
 		go func(x int) {
 			defer wg.Done()
-			reply, err := http.Get("http://" + hpCfg.ListenAddress)
+			c := &http.Client{}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
+				"http://"+hpCfg.ListenAddress, nil)
 			if err != nil {
-				t.Fatalf("get %v: %v", x, err)
+				panic(fmt.Sprintf("get %v: %v", x, err))
+			}
+			reply, err := c.Do(req)
+			if err != nil {
+				panic(fmt.Sprintf("do %v: %v", x, err))
 			}
 			defer reply.Body.Close()
 			switch reply.StatusCode {
@@ -238,7 +265,7 @@ func TestFanout(t *testing.T) {
 			var jr serverReply
 			err = json.NewDecoder(reply.Body).Decode(&jr)
 			if err != nil {
-				t.Fatalf("decode %v: %v", x, err)
+				panic(fmt.Sprintf("decode %v: %v", x, err))
 			}
 			am.Lock()
 			answers[jr.ID]++
@@ -308,9 +335,14 @@ func TestPersistence(t *testing.T) {
 	}
 	for i := 0; i < clientCount; i++ {
 		x := i
-		reply, err := c.Get("http://" + hpCfg.ListenAddress)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			"http://"+hpCfg.ListenAddress, nil)
 		if err != nil {
 			t.Fatalf("get %v: %v", x, err)
+		}
+		reply, err := c.Do(req)
+		if err != nil {
+			t.Fatalf("do %v: %v", x, err)
 		}
 		defer reply.Body.Close()
 		switch reply.StatusCode {
@@ -332,7 +364,7 @@ func TestPersistence(t *testing.T) {
 			t.Fatalf("decode %v: %v", x, err)
 		}
 		// Discard so that we can reuse connection
-		if _, err := io.Copy(ioutil.Discard, reply.Body); err != nil {
+		if _, err := io.Copy(io.Discard, reply.Body); err != nil {
 			t.Fatal(err)
 		}
 
@@ -404,7 +436,12 @@ func TestFailover(t *testing.T) {
 			hp.nodeUnhealthy(i/100 - 1)
 		}
 
-		reply, err := c.Get("http://" + hpCfg.ListenAddress)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			"http://"+hpCfg.ListenAddress, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reply, err := c.Do(req)
 		if err != nil {
 			t.Fatalf("get %v: %v", x, err)
 		}
@@ -428,7 +465,7 @@ func TestFailover(t *testing.T) {
 			t.Fatalf("decode %v: %v", x, err)
 		}
 		// Discard so that we can reuse connection
-		if _, err := io.Copy(ioutil.Discard, reply.Body); err != nil {
+		if _, err := io.Copy(io.Discard, reply.Body); err != nil {
 			t.Fatal(err)
 		}
 

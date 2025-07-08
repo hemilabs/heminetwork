@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package hproxy
 
 import (
@@ -39,7 +43,7 @@ func ethID() uint64 {
 	return binary.LittleEndian.Uint64(buf)
 }
 
-func CallEthereum(c *http.Client, url, method string, params []any) ([]byte, error) {
+func CallEthereum(ctx context.Context, c *http.Client, url, method string, params []any) ([]byte, error) {
 	ec := EthereumCall{
 		Method:  method,
 		Params:  params,
@@ -50,7 +54,13 @@ func CallEthereum(c *http.Client, url, method string, params []any) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	resp, err := c.Post(url, "application/json", bytes.NewBuffer(jec))
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(jec))
+	// resp, err := c.Post(url, "application/json", bytes.NewBuffer(jec))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Content-Type", "application/json")
+	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
 	}

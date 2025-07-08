@@ -47,8 +47,6 @@ const (
 
 	logLevel = "INFO"
 
-	promSubsystem = "hproxy_service" // Prometheus
-
 	// XXX think about these durations
 	DefaultRequestTimeout = 9 * time.Second  // Smaller than 12s
 	DefaultPollFrequency  = 11 * time.Second // Smaller than 12s
@@ -385,20 +383,6 @@ type HVMHandler struct {
 	state  HVMState // Do NOT directly set, use utility functions!
 }
 
-func (s *Server) lowest(x []int) int {
-	if len(x) == 0 {
-		return -1
-	}
-
-	minIndex := 0
-	for i := 1; i < len(x); i++ {
-		if x[i] < x[minIndex] {
-			minIndex = i
-		}
-	}
-	return minIndex
-}
-
 func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleProxyRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleProxyRequest exit: %v", r.RemoteAddr)
@@ -548,7 +532,7 @@ func (s *Server) nodeAdd(node string) error {
 	// For now, everything is ethereum but we can use the poker function to
 	// handle different types health checks.
 	hvmHandler.poker = NewEthereumProxy(func(ctx context.Context) error {
-		resp, err := CallEthereum(hvmHandler.c, hvmHandler.u.String(),
+		resp, err := CallEthereum(ctx, hvmHandler.c, hvmHandler.u.String(),
 			"eth_blockNumber", nil)
 		if err != nil {
 			return err
