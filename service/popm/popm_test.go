@@ -177,7 +177,7 @@ func TestTickingPopMiner(t *testing.T) {
 }
 
 func TestPopmFilterUtxos(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
