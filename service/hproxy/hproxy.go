@@ -206,7 +206,14 @@ func (s *Server) promRunning() float64 {
 }
 
 func (s *Server) isHealthy(_ context.Context) bool {
-	return true // XXX
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	for k := range s.hvmHandlers {
+		if s.hvmHandlers[k].state == StateHealthy {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) health(ctx context.Context) (bool, any, error) {
@@ -214,11 +221,21 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	defer log.Tracef("health exit")
 
 	type health struct {
-		Healthy bool   `json:"health"`
-		Remove  string `json:"remove"`
+		HealthyNodes   int `json:"healthy_nodes"`
+		UnhealthyNodes int `json:"unhealthy_nodes"`
 	}
+	var h health
+	s.mtx.Lock()
+	for k := range s.hvmHandlers {
+		if s.hvmHandlers[k].state == StateHealthy {
+			h.HealthyNodes++
+		} else {
+			h.UnhealthyNodes++
+		}
+	}
+	s.mtx.Unlock()
 
-	return s.isHealthy(ctx), health{Healthy: true, Remove: "FIXME"}, nil // XXX
+	return s.isHealthy(ctx), h, nil
 }
 
 type HVMState int
@@ -569,7 +586,7 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	err = json.NewEncoder(w).Encode(nes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
+		log.Errorf("%v %v: %v", routeControlAdd, r.RemoteAddr, err) // XXX too loud?
 		return
 	}
 }
@@ -598,7 +615,7 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	err = json.NewEncoder(w).Encode(nes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
+		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // XXX too loud?
 		return
 	}
 }
