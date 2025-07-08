@@ -304,18 +304,20 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleProxyRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleProxyRequest exit: %v", r.RemoteAddr)
 
-	// Select host to call
 	// XXX expire client connections at some point
+
+	// Select host to call
 	s.mtx.Lock()
 	id := -1
 	if v, ok := s.clients[r.RemoteAddr]; ok {
+		// Only call same host when healthy
 		if s.hvmHandlers[v].state == StateHealthy {
 			id = v
-		} else {
-			// XXX should we move client connection? or return try later?
 		}
-	} else {
-		// Find suitable candidate
+	}
+
+	// Find suitable candidate
+	if id == -1 {
 		var leastConnections uint = math.MaxUint
 		for k := range s.hvmHandlers {
 			if s.hvmHandlers[k].state == StateHealthy {
@@ -331,13 +333,14 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 			s.hvmHandlers[id].connections++
 		}
 	}
+	s.mtx.Unlock()
+
+	// If no candidate was found return error
 	if id == -1 {
 		// No candidates, exit with error
 		w.WriteHeader(http.StatusServiceUnavailable)
-		s.mtx.Unlock()
 		return
 	}
-	s.mtx.Unlock()
 
 	log.Debugf("handleProxyRequest: remote %v url '%v' -> node %v",
 		r.RemoteAddr, r.URL, id)
