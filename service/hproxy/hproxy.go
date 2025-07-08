@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,6 +57,11 @@ const (
 	DefaultControlAddress = "localhost:1337" // Default control port
 
 	expectedClients = 1000
+
+	routeControl       = "/v1/control"
+	routeControlAdd    = routeControl + "/add"
+	routeControlRemove = routeControl + "/remove"
+	routeControlList   = routeControl + "/list"
 )
 
 var log = loggo.GetLogger(appName)
@@ -64,6 +70,11 @@ func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
 		panic(err)
 	}
+}
+
+func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
+	mux.HandleFunc(pattern, handler)
+	log.Infof("handle (%v): %v", service, pattern)
 }
 
 type Config struct {
@@ -351,7 +362,17 @@ func (s *Server) handleProxyDial(pctx context.Context, network, addr string) (ne
 	return d.DialContext(ctx, network, addr)
 }
 
-func (s *Server) nodeAdd(u *url.URL) error {
+func (s *Server) nodeAdd(node string) error {
+	u, err := url.Parse(node)
+	if err != nil {
+		return fmt.Errorf("invalid url: %v", err)
+	}
+	switch u.Scheme {
+	case "http", "https":
+	default:
+		return fmt.Errorf("unsuported scheme: %v", u.Scheme)
+	}
+
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
@@ -401,7 +422,17 @@ func (s *Server) nodeAdd(u *url.URL) error {
 	return nil
 }
 
-func (s *Server) nodeRemove(u *url.URL) error {
+func (s *Server) nodeRemove(node string) error {
+	u, err := url.Parse(node)
+	if err != nil {
+		return fmt.Errorf("invalid url: %v", err)
+	}
+	switch u.Scheme {
+	case "http", "https":
+	default:
+		return fmt.Errorf("unsuported scheme: %v", u.Scheme)
+	}
+
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 
@@ -412,8 +443,9 @@ func (s *Server) nodeRemove(u *url.URL) error {
 				s.hvmHandlers[k].state = StateRemoved
 				log.Infof("Marking hvm removed %v: %v",
 					s.hvmHandlers[k].id, s.hvmHandlers[k].u)
+				return nil
 			}
-			return nil
+			return errors.New("already removed")
 		}
 	}
 	return errors.New("not found")
@@ -531,26 +563,14 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	err := json.NewDecoder(r.Body).Decode(&ns)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		// create route defaults
-		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
+		log.Errorf("%v %v: %v", routeControlAdd, r.RemoteAddr, err) // XXX too loud?
 		return
 	}
 
 	nes := make([]NodeError, len(ns))
 	for k := range ns {
 		nes[k].NodeURL = ns[k].NodeURL
-		u, err := url.Parse(ns[k].NodeURL)
-		if err != nil {
-			nes[k].Error = err.Error()
-			continue
-		}
-		switch u.Scheme {
-		case "http", "https":
-		default:
-			nes[k].Error = fmt.Sprintf("unsuported scheme: %v", u.Scheme)
-			continue
-		}
-		err = s.nodeAdd(u)
+		err = s.nodeAdd(ns[k].NodeURL)
 		if err != nil {
 			nes[k].Error = err.Error()
 			continue
@@ -574,19 +594,14 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		// create route defaults
-		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
+		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // XXX too loud?
 		return
 	}
 
 	nes := make([]NodeError, len(ns))
 	for k := range ns {
 		nes[k].NodeURL = ns[k].NodeURL
-		u, err := url.Parse(ns[k].NodeURL)
-		if err != nil {
-			nes[k].Error = err.Error()
-			continue
-		}
-		err = s.nodeRemove(u)
+		err = s.nodeRemove(ns[k].NodeURL)
 		if err != nil {
 			nes[k].Error = err.Error()
 			continue
@@ -634,18 +649,9 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 	s.hvmHandlers = make([]HVMHandler, 0, len(s.cfg.HVMURLs))
 	for k := range s.cfg.HVMURLs {
-		u, err := url.Parse(s.cfg.HVMURLs[k])
+		err := s.nodeAdd(s.cfg.HVMURLs[k])
 		if err != nil {
-			return fmt.Errorf("invalid url %v: %v", s.cfg.HVMURLs[k], err)
-		}
-		switch u.Scheme {
-		case "http", "https":
-		default:
-			return fmt.Errorf("unsuported scheme [%v]: %v", k, u.Scheme)
-		}
-		err = s.nodeAdd(u)
-		if err != nil {
-			return fmt.Errorf("node add %v: %v", u, err)
+			return fmt.Errorf("node add: %v", err)
 		}
 	}
 
@@ -685,9 +691,9 @@ func (s *Server) Run(pctx context.Context) error {
 	ctrlHttpErrCh := make(chan error)
 	if s.cfg.ControlAddress != "" {
 		cmux := http.NewServeMux()
-		cmux.HandleFunc("/control/add", s.handleControlAddRequest)
-		cmux.HandleFunc("/control/remove", s.handleControlRemoveRequest)
-		cmux.HandleFunc("/control/list", s.handleControlListRequest)
+		handle("Control", cmux, routeControlAdd, s.handleControlAddRequest)
+		handle("Control", cmux, routeControlRemove, s.handleControlRemoveRequest)
+		handle("Control", cmux, routeControlList, s.handleControlListRequest)
 
 		ctrlHttpServer := &http.Server{
 			Addr:        s.cfg.ControlAddress,
@@ -756,6 +762,7 @@ func (s *Server) Run(pctx context.Context) error {
 		}()
 	}
 
+	runtime.Gosched() // just for pretty print
 	log.Infof("Starting hproxy")
 
 	var err error
