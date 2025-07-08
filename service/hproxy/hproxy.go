@@ -5,7 +5,6 @@
 package hproxy
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -248,6 +247,7 @@ type HVMHandler struct {
 	connections uint // Open connections, XXX not being reaped yet
 
 	poking bool // true when getting health
+	poker  Proxy
 	state  HVMState
 }
 
@@ -389,7 +389,7 @@ func (s *Server) nodeAdd(node string) error {
 		}
 	}
 
-	s.hvmHandlers = append(s.hvmHandlers, HVMHandler{
+	hvmHandler := HVMHandler{
 		id:    len(s.hvmHandlers),
 		state: StateNew,
 		u:     u,
@@ -417,7 +417,31 @@ func (s *Server) nodeAdd(node string) error {
 			ModifyResponse: nil, // XXX not needed
 			ErrorHandler:   nil, // XXX s.handleProxyError, ModifyResponse only
 		},
+	}
+
+	// For now, everything is ethereum but we can use the poker function to
+	// handle different types health checks.
+	hvmHandler.poker = NewEthereumProxy(func(ctx context.Context) error {
+		resp, err := CallEthereum(hvmHandler.c, hvmHandler.u.String(),
+			"eth_blockNumber", nil)
+		if err != nil {
+			return err
+		}
+
+		j := make(map[string]any)
+		err = json.Unmarshal(resp, &j)
+		if err != nil {
+			return err
+		}
+
+		// Make sure we have "result"
+		if _, ok := j["result"]; !ok {
+			return errors.New("no result")
+		}
+		return nil
 	})
+
+	s.hvmHandlers = append(s.hvmHandlers, hvmHandler)
 
 	return nil
 }
@@ -473,59 +497,25 @@ func (s *Server) poke(ctx context.Context, id int) {
 	log.Tracef("poke: %v", id)
 	defer log.Tracef("poke exit: %v", id)
 
-	// XXX this is shit, split apart and when an hvm goes bad, kill all
-	// open connections.
-
 	s.mtx.Lock()
 	if s.hvmHandlers[id].poking {
 		s.mtx.Unlock()
 		return
 	}
 	s.hvmHandlers[id].poking = true
-	u := s.hvmHandlers[id].u
-	c := s.hvmHandlers[id].c
+	poker := s.hvmHandlers[id].poker
 	s.mtx.Unlock()
 	defer func() {
 		s.mtx.Lock()
 		s.hvmHandlers[id].poking = false
 		s.mtx.Unlock()
 	}()
-	if u == nil {
-		// This should not happen
-		panic(fmt.Sprintf("url not set: %v", id))
-	}
-	// XXX make this a setting?
-	cmd := `{"method":"eth_blockNumber","params":[],"id":1,"jsonrpc":"2.0"}`
-	r := bytes.NewBufferString(cmd)
-	resp, err := c.Post(u.String(), "application/json", r)
-	if err != nil {
-		s.nodeUnhealthy(id)
-		return
-	}
-	defer resp.Body.Close()
 
-	switch resp.StatusCode {
-	case http.StatusOK:
-	default:
-		s.nodeUnhealthy(id)
-		return
-	}
-
-	j := make(map[string]any)
-	err = json.NewDecoder(resp.Body).Decode(&j)
+	err := poker.Poke(ctx)
 	if err != nil {
-		log.Errorf("decode %v: %v", id, err)
-		s.nodeUnhealthy(id)
-		return
-	}
-	// Make sure we have a result
-	if result, ok := j["result"]; !ok {
-		log.Errorf("no result %v", id)
 		s.nodeUnhealthy(id)
 	} else {
-		// Mark server heathy
 		s.nodeHealthy(id)
-		_ = result
 	}
 }
 
@@ -579,7 +569,6 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	err = json.NewEncoder(w).Encode(nes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		// create route defaults
 		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
 		return
 	}
@@ -593,7 +582,6 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	err := json.NewDecoder(r.Body).Decode(&ns)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		// create route defaults
 		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // XXX too loud?
 		return
 	}
@@ -610,7 +598,6 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	err = json.NewEncoder(w).Encode(nes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		// create route defaults
 		log.Errorf("control/add %v: %v", r.RemoteAddr, err) // XXX too loud?
 		return
 	}

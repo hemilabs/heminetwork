@@ -1,0 +1,74 @@
+package hproxy
+
+import (
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+)
+
+type Proxy interface {
+	Poke(ctx context.Context) error
+}
+
+type EthereumProxy struct {
+	f func(ctx context.Context) error
+}
+
+var _ Proxy = EthereumProxy{}
+
+const EthereumVersion = "2.0"
+
+type EthereumCall struct {
+	Method  string `json:"method"`
+	Params  []any  `json:"params"`
+	ID      uint64 `json:"id"`
+	Version string `json:"jsonrpc"`
+}
+
+func ethID() uint64 {
+	buf := make([]byte, 8)
+	_, err := rand.Read(buf)
+	if err != nil {
+		panic(err)
+	}
+	return binary.LittleEndian.Uint64(buf)
+}
+
+func CallEthereum(c *http.Client, url, method string, params []any) ([]byte, error) {
+	ec := EthereumCall{
+		Method:  method,
+		Params:  params,
+		ID:      ethID(),
+		Version: EthereumVersion,
+	}
+	jec, err := json.Marshal(ec)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.Post(url, "application/json", bytes.NewBuffer(jec))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	default:
+		return nil, errors.New(http.StatusText(resp.StatusCode))
+	}
+
+	return io.ReadAll(resp.Body)
+}
+
+func (e EthereumProxy) Poke(ctx context.Context) error {
+	return e.f(ctx)
+}
+
+func NewEthereumProxy(f func(ctx context.Context) error) Proxy {
+	return &EthereumProxy{f: f}
+}
