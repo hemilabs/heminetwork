@@ -31,6 +31,12 @@ var (
 
 	cfg = hproxy.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"HPROXY_CLIENT_IDLE_TIMEOUT": config.Config{
+			Value:        &cfg.ClientIdleTimeout,
+			DefaultValue: hproxy.DefaultClientIdleTimeout,
+			Help:         "max idle time to persists hvm reuse per client",
+			Print:        config.PrintAll,
+		},
 		"HPROXY_HVM_URLS": config.Config{
 			Value:        &cfg.HVMURLs,
 			DefaultValue: cfg.HVMURLs,

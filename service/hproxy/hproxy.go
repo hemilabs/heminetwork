@@ -48,10 +48,11 @@ const (
 	logLevel = "INFO"
 
 	// XXX think about these durations
-	DefaultRequestTimeout = 9 * time.Second  // Smaller than 12s
-	DefaultPollFrequency  = 11 * time.Second // Smaller than 12s
-	DefaultListenAddress  = "localhost:8545" // Default geth port
-	DefaultControlAddress = "localhost:1337" // Default control port
+	DefaultClientIdleTimeout = 5 * time.Minute  // Reap timer for client persistence
+	DefaultRequestTimeout    = 9 * time.Second  // Smaller than 12s
+	DefaultPollFrequency     = 11 * time.Second // Smaller than 12s
+	DefaultListenAddress     = "localhost:8545" // Default geth port
+	DefaultControlAddress    = "localhost:1337" // Default control port
 
 	expectedClients = 1000
 
@@ -92,7 +93,39 @@ func dialer(pctx context.Context, network, addr string) (net.Conn, error) {
 	return d.DialContext(ctx, network, addr)
 }
 
+// client structure handles persistence and client timeouts. We can't use TTL
+// here because we need to be able to reset the timer.
+type client struct {
+	node   int // persistent node
+	ticker *time.Ticker
+}
+
+func newClient(ctx context.Context, node int, duration time.Duration, timeout func()) *client {
+	c := &client{
+		node:   node,
+		ticker: time.NewTicker(duration),
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			c.ticker.Stop()
+		case <-c.ticker.C:
+			timeout()
+		}
+	}()
+	return c
+}
+
+func (c *client) reset(duration time.Duration) {
+	c.ticker.Reset(duration)
+}
+
+func (c *client) abort() {
+	c.ticker.Stop()
+}
+
 type Config struct {
+	ClientIdleTimeout       time.Duration
 	ControlAddress          string
 	HVMURLs                 []string
 	ListenAddress           string
@@ -107,6 +140,7 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
+		ClientIdleTimeout:   DefaultClientIdleTimeout,
 		ControlAddress:      DefaultControlAddress,
 		ListenAddress:       DefaultListenAddress,
 		PollFrequency:       DefaultPollFrequency,
@@ -117,13 +151,14 @@ func NewDefaultConfig() *Config {
 }
 
 type Server struct {
-	mtx sync.RWMutex
-	wg  sync.WaitGroup
+	mtx  sync.RWMutex
+	wg   sync.WaitGroup
+	gctx context.Context // We need the global context in client requests
 
 	cfg *Config
 
-	hvmHandlers []HVMHandler   // hvm nodes
-	clients     map[string]int // [ip_address]server_id
+	hvmHandlers []HVMHandler       // hvm nodes
+	clients     map[string]*client // [ip_address]server_id
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -142,7 +177,7 @@ func NewServer(cfg *Config) (*Server, error) {
 
 	s := &Server{
 		cfg:     cfg,
-		clients: make(map[string]int, expectedClients),
+		clients: make(map[string]*client, expectedClients),
 		cmdsProcessed: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: cfg.PrometheusNamespace,
 			Name:      "proxy_calls",
@@ -394,12 +429,12 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	id := -1
 	if v, ok := s.clients[r.RemoteAddr]; ok {
 		// Only call same host when healthy
-		if s.hvmHandlers[v].state == StateHealthy {
-			id = v
-			// XXX reset timer for reuse here
+		if s.hvmHandlers[v.node].state == StateHealthy {
+			id = v.node
+			v.reset(s.cfg.ClientIdleTimeout) // reset timer for reuse here
 		} else {
-			// hvm died, remove persistence
-			delete(s.clients, r.RemoteAddr)
+			// hvm died, remove persisted client
+			s._clientRemove(r.RemoteAddr)
 		}
 	}
 
@@ -415,10 +450,15 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if id >= 0 {
-			// Add connection to candidate
-			s.clients[r.RemoteAddr] = id
+			// Add connection to candidate.
+			// We need global context here, not request context
+			// since that one goes away prior the client idle
+			// timeout.
+			s.clients[r.RemoteAddr] = newClient(s.gctx, id,
+				s.cfg.ClientIdleTimeout, func() {
+					s.clientRemove(r.RemoteAddr)
+				})
 			s.hvmHandlers[id].connections++
-			// XXX set timer for reuse here
 		}
 	}
 	s.mtx.Unlock()
@@ -471,6 +511,19 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 //		panic(e)
 //	}
 //}
+
+func (s *Server) _clientRemove(remoteAddr string) {
+	if v, ok := s.clients[remoteAddr]; ok {
+		v.abort()
+		delete(s.clients, remoteAddr)
+	}
+}
+
+func (s *Server) clientRemove(remoteAddr string) {
+	s.mtx.Lock()
+	s._clientRemove(remoteAddr)
+	s.mtx.Unlock()
+}
 
 func (s *Server) nodeAdd(node string) error {
 	u, err := url.Parse(node)
@@ -589,7 +642,7 @@ func (s *Server) nodeRemove(node string) error {
 func (s *Server) _nodeCount(id int) int {
 	var count int
 	for _, v := range s.clients {
-		if v == id {
+		if v.node == id {
 			count++
 		}
 	}
@@ -599,7 +652,7 @@ func (s *Server) _nodeCount(id int) int {
 // _nodeReap must be called with the mutext held.
 func (s *Server) _nodeReap(id int) {
 	for k, v := range s.clients {
-		if v == id {
+		if v.node == id {
 			delete(s.clients, k)
 		}
 	}
@@ -799,6 +852,9 @@ func (s *Server) Run(pctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
+
+	// Set global context for client timeouts during requests
+	s.gctx = ctx
 
 	// Launch hvm monitor
 	s.wg.Add(1)

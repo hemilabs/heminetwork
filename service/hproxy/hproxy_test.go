@@ -17,6 +17,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
 type serverReply struct {
@@ -114,9 +116,95 @@ func TestNobodyHome(t *testing.T) {
 	}
 }
 
-//func TestDialTimeout(t *testing.T) {
+// func TestDialTimeout(t *testing.T) {
 // XXX tried to build a test for this but did not succeed. Remove or fix.
-//}
+// }
+func TestClientReap(t *testing.T) {
+	s := newServer(0)
+	defer s.Close()
+	servers := []string{s.URL}
+
+	hpCfg := NewDefaultConfig()
+	hpCfg.HVMURLs = servers
+	hpCfg.LogLevel = "hproxy=TRACE"       // XXX figure out why this isn't working
+	hpCfg.ClientIdleTimeout = time.Second // reap clients after 1 second
+	hpCfg.RequestTimeout = time.Second
+	hpCfg.PollFrequency = time.Second
+	hp, err := NewServer(hpCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err = hp.Run(t.Context())
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	time.Sleep(250 * time.Millisecond)
+
+	testDuration := 5 * time.Second
+	ctx, cancel := context.WithTimeout(t.Context(), testDuration)
+	defer cancel()
+
+	// Launch 5 clients
+	var wg sync.WaitGroup
+	clientCount := 5
+	for i := 0; i < clientCount; i++ {
+		wg.Add(1)
+		go func(x int) {
+			defer wg.Done()
+			c := &http.Client{Transport: http.DefaultTransport}
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+				"http://"+hpCfg.ListenAddress, nil)
+			if err != nil {
+				panic(fmt.Sprintf("get %v: %v", x, err))
+			}
+			reply, err := c.Do(req)
+			if err != nil {
+				panic(fmt.Sprintf("do %v: %v", x, err))
+			}
+			defer reply.Body.Close()
+			switch reply.StatusCode {
+			case http.StatusOK:
+			default:
+				panic(fmt.Sprintf("%v replied %v",
+					hpCfg.ListenAddress, reply.StatusCode))
+			}
+
+			// Require X-Hproxy
+			ids := reply.Header.Get("X-Hproxy")
+			if ids == "" {
+				panic("expected X-Hproxy being set")
+			}
+
+			var jr serverReply
+			err = json.NewDecoder(reply.Body).Decode(&jr)
+			if err != nil {
+				panic(fmt.Sprintf("decode %v: %v", x, err))
+			}
+
+			// Verify that json id matches header id, a bit silly
+			// but keeps us honest.
+			if strconv.Itoa(jr.ID) != ids {
+				panic("id mismatch header: " + ids +
+					" json: " + strconv.Itoa(jr.ID))
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	if len(hp.clients) != clientCount {
+		t.Fatalf("expected %v clients got %v", len(hp.clients), clientCount)
+	}
+
+	// Wait for reap and check client list
+	time.Sleep(1 * time.Second)
+	if len(hp.clients) != 0 {
+		t.Fatalf("not reaped clients: %v", spew.Sdump(hp.clients))
+	}
+}
 
 func TestRequestTimeout(t *testing.T) {
 	var wg sync.WaitGroup
@@ -204,7 +292,6 @@ func TestProxy(t *testing.T) {
 
 func TestFanout(t *testing.T) {
 	serverCount := 5
-
 	servers := make([]string, 0, serverCount)
 	for i := 0; i < serverCount; i++ {
 		s := newServer(i)
