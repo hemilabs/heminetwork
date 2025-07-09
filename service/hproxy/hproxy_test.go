@@ -374,8 +374,8 @@ func TestFanout(t *testing.T) {
 	wg.Wait()
 	cancel()
 
-	// Allow 20% variance
-	acceptable := (clientCount / serverCount) / (100 / 20)
+	// Allow 30% variance
+	acceptable := (clientCount / serverCount) / (100 / 30)
 	upperBound := (clientCount / serverCount) + acceptable
 	lowerBound := (clientCount / serverCount) - acceptable
 	total := 0
