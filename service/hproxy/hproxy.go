@@ -434,7 +434,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 			// We need global context here, not request context
 			// since that one goes away prior the client idle
 			// timeout.
-			s.clients[r.RemoteAddr] = newClient(s.gctx, id,
+			s.clients[r.RemoteAddr] = newClient(s.BaseContext, id,
 				s.cfg.ClientIdleTimeout, func() {
 					s.clientRemove(r.RemoteAddr)
 				})
@@ -513,7 +513,7 @@ func (s *Server) nodeAdd(node string) error {
 	switch u.Scheme {
 	case "http", "https":
 	default:
-		return fmt.Errorf("unsuported scheme: %v", u.Scheme)
+		return fmt.Errorf("unsupported scheme: %v", u.Scheme)
 	}
 
 	s.mtx.Lock()
@@ -598,7 +598,7 @@ func (s *Server) nodeRemove(node string) error {
 	switch u.Scheme {
 	case "http", "https":
 	default:
-		return fmt.Errorf("unsuported scheme: %v", u.Scheme)
+		return fmt.Errorf("unsupported scheme: %v", u.Scheme)
 	}
 
 	s.mtx.Lock()
