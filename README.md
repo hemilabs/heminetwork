@@ -21,11 +21,10 @@ Hemi is an EVM-compatible L2 blockchain that combines the security of Bitcoin wi
     * [Web](#web)
   * [▶️ Running bfgd](#-running-bfgd)
     * [🏁 Prerequisites](#-prerequisites-2)
-    * [Running your own Bitcoin Finality Governor (bfgd) and PoP mining with it](#running-your-own-bitcoin-finality-governor-bfgd-and-pop-mining-with-it)
-    * [🏁 Prerequisites](#-prerequisites-3)
+    * [Running your own Bitcoin Finality Governor (bfgd)](#running-your-own-bitcoin-finality-governor-bfgd)
   * [▶️ Running the Hemi stack](#-running-the-hemi-stack)
   * [▶️ Running the localnet network](#-running-the-localnet-network)
-    * [🏁 Prerequisites](#-prerequisites-4)
+    * [🏁 Prerequisites](#-prerequisites-3)
     * [📚 Tutorial](#-tutorial)
   * [📄 License](#-license)
 <!-- TOC -->
@@ -41,6 +40,7 @@ The Hemi Network consists of three key services, each serving a unique and impor
 |-------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
 | [**PoP Miner (popmd)**](https://github.com/hemilabs/heminetwork/blob/main/service/popm)               | **Mines** L2 Keystones into Bitcoin blocks for Proof-of-Proof.                                                   |
 | [**Bitcoin Finality Governor (bfgd)**](https://github.com/hemilabs/heminetwork/blob/main/service/bfg) | Acts as the gateway to the Bitcoin network.                                                                      |
+
 ## 🌐 Binaries
 
 - [**bfgd (Bitcoin Finality Governor Daemon)**](cmd/bfgd): Manages connections and data transfers between the Hemi
@@ -138,21 +138,20 @@ go run ./integrationtest
 
 ### Running your own Bitcoin Finality Governor (bfgd)
 
-If you'd like to run your own `bfgd` and don't want to rely on Hemi Labs (or any third party) for verifying the finality of mined keystones, you may run `bfgd` and connect it to a _trusted_ `op-geth` instance, as well as an l2 keystone (l2 keystones represent l2 state and are what are mined in PoP transactions) aware `gozer`, such as TBC.  In this case, your `bfgd` instance will communicate with `op-geth` to verify the _validity_ of l2 keystones, and confirm their _canonicity_ and _finality status_, based on their presence in the bitcoin chain, using the `gozer`.
+If you'd like to run your own `bfgd` and don't want to rely on Hemi Labs (or any third party) for verifying the finality
+of mined keystones, you may run `bfgd` and connect it to a _trusted_ `op-geth` instance, as well as an l2 keystone (l2
+keystones represent l2 state and are what are mined in PoP transactions) aware `gozer`, such as TBC. In this case, your
+`bfgd` instance will communicate with `op-geth` to verify the _validity_ of l2 keystones, and confirm their _canonicity_
+and _finality status_, based on their presence in the bitcoin chain, using the `gozer`.
 
-BFG is very light-weight, thus only requiring `bfgd` in order to be run (provided you have a valid `op-geth` and `gozer` instance to connect it to).
+BFG is very light-weight, thus only requiring `bfgd` in order to be run (provided you have a valid `op-geth` and `gozer`
+instance to connect it to).
 
 When running BFG, you'll want the following env variables set:
 
 * `BFG_BITCOIN_URL`: the `TBC`'s websocket url that you will connect to
 
-XXX FIXME
-
-## ▶️ Running bssd
-
-### 🏁 Prerequisites
-
-- Connect to a live [bfgd](cmd/bfgd) instance.
+*More details coming soon!*
 
 ## ▶️ Running the Hemi stack
 
@@ -189,15 +188,15 @@ To run the full Hemi stack (non-sequencing), please see [NODE_RUNNING](localnode
 > During rebuilding, `popmd` and `bfgd` may force a rebuild due to the `COPY` command, which can break the
 > cache. If you need to deliberately break the cache for the op-stack, use the following arguments:
 
-   - For op-geth + optimism (op-node):
-     ```shell
-     docker compose -f ./e2e/docker-compose.yml build --build-arg OP_GETH_CACHE_BREAK="$(date)"
-     ```
+- For op-geth + optimism (op-node):
+  ```shell
+  docker compose -f ./e2e/docker-compose.yml build --build-arg OP_GETH_CACHE_BREAK="$(date)"
+  ```
 
-   - For optimism cache break only:
-     ```shell
-     docker compose -f ./e2e/docker-compose.yml build --build-arg OPTIMISM_CACHE_BREAK="$(date)"
-     ```
+- For optimism cache break only:
+  ```shell
+  docker compose -f ./e2e/docker-compose.yml build --build-arg OPTIMISM_CACHE_BREAK="$(date)"
+  ```
 
 > [!IMPORTANT]
 > Make sure you run the cleanup command to remove data and ensure a fresh start.
