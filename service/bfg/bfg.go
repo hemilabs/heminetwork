@@ -257,6 +257,8 @@ func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Ha
 // This attempts to prevent a hypothetical worst-case scenario where neither the
 // keystone nor any close descendants have reached ultrafinality, requiring
 // N amount of checks for the finality value of N descendants.
+//
+//nolint:unused // hyphotetically useful, but currently unused
 func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone, tip uint32) (*bfgapi.L2KeystoneBitcoinFinalityResponse, error) {
 	// Depth must be > 0 but height + depth > 0
 	// so min height is 2 and "min" depth is -1
