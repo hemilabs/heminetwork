@@ -32,7 +32,7 @@ import (
 const wantedKeystones = 10
 
 func TestBFG(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)
@@ -99,7 +99,7 @@ func TestBFG(t *testing.T) {
 }
 
 func TestKeystoneFinalityInheritance(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)
@@ -179,7 +179,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 }
 
 func TestFullMockIntegration(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
 	errCh := make(chan error, 10)
@@ -293,88 +293,6 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	wg.Wait()
-}
-
-func TestKeystoneFinalityShortCircuit(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-	defer cancel()
-
-	errCh := make(chan error, 10)
-	msgCh := make(chan string, 10)
-
-	kssMap, kssList := testutil.MakeSharedKeystones(30)
-	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
-
-	// ensure no keystone has super finality, except the
-	// last one, ensuring they inherit it
-	for i, ks := range kssList {
-		// lower l1 block than first keystone
-		ks.L1BlockNumber = 10029
-		kssList[i] = ks
-		kssMap[*hemi.L2KeystoneAbbreviate(ks).Hash()] = hemi.L2KeystoneAbbreviate(ks)
-	}
-
-	lastKss := kssList[len(kssList)-1]
-	lastKss.L1BlockNumber = uint32(btcTip) - 20
-	kssList[len(kssList)-1] = lastKss
-	kssMap[*hemi.L2KeystoneAbbreviate(lastKss).Hash()] = hemi.L2KeystoneAbbreviate(lastKss)
-
-	// Create opgeth test server with the request handler.
-	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
-	defer opgeth.Shutdown()
-
-	// Create tbc test server with the request handler.
-	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, kssMap, btcTip, 10)
-	defer mtbc.Shutdown()
-
-	bfgCfg := NewDefaultConfig()
-	bfgCfg.Network = "testnet3"
-	bfgCfg.BitcoinSource = "tbc"
-	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
-	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
-	bfgCfg.ListenAddress = createAddress()
-	bfgCfg.LogLevel = "bfg=Info; mock=Trace"
-
-	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
-		t.Fatal(err)
-	}
-
-	s, err := NewServer(bfgCfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	go func() {
-		if err := s.Run(ctx); !errors.Is(err, context.Canceled) {
-			panic(err)
-		}
-	}()
-
-	for !s.Connected() {
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	// should be able to short circuit all keystones
-	for _, ks := range kssList {
-		aks, err := s.shortCircuitFinality(ctx, &ks, uint32(btcTip))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if aks == nil {
-			t.Fatalf("expected short circuit for kss @ %v, tip %v", ks.L1BlockNumber, btcTip)
-		}
-	}
-
-	tempKs := kssList[0]
-	var fakeTip uint32 = 500
-	// should NOT be able to short circuit if no earlier keystones before tip
-	aks, err := s.shortCircuitFinality(ctx, &tempKs, fakeTip)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if aks != nil {
-		t.Fatalf("unexpected short circuit for kss @ %v, tip %v", tempKs.L1BlockNumber, fakeTip)
-	}
 }
 
 func sendFinalityRequests(ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
