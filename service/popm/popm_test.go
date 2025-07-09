@@ -152,26 +152,30 @@ func TestTickingPopMiner(t *testing.T) {
 			t.Fatalf("missing keystone: %v", k.hash)
 		}
 	}
-	s.mtx.Unlock()
-
-	time.Sleep(500 * time.Millisecond)
-	if err = s.mine(t.Context()); err != nil {
-		t.Fatal(err)
-	}
 
 	// force expiration of keystones
-	s.mtx.Lock()
 	for i := range s.keystones {
 		now := time.Now()
 		s.keystones[i].expires = &now
 	}
 	s.mtx.Unlock()
-	time.Sleep(2 * time.Second)
+
+	time.Sleep(500 * time.Millisecond)
+
+	// ensure keystones transition to 'mined' state
+	if _, err := s.updateKeystoneStates(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// ensure 'mined' keystones get removed
+	if err = s.mine(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	if len(s.keystones) == wantedKeystones {
-		t.Fatalf("cached keystones %v wanted %v", len(s.keystones), wantedKeystones)
+	if len(s.keystones) >= wantedKeystones {
+		t.Fatalf("cached keystones %v wanted less than %v", len(s.keystones), wantedKeystones)
 	}
 	t.Log("Received all expected messages")
 }

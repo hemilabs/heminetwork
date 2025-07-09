@@ -422,6 +422,44 @@ func (s *Server) hydrateKeystones(ctx context.Context) error {
 	return nil
 }
 
+func (s *Server) updateKeystoneStates(ctx context.Context) (bool, error) {
+	nkss, err := s.reconcileKeystones(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	// XXX this has a logic race with the test package
+	// See if there are state changes
+	var work bool
+	s.mtx.Lock()
+	for _, nks := range nkss {
+		cks, ok := s.keystones[*nks.hash]
+		if ok {
+			switch nks.state {
+			case keystoneStateNew:
+				// Already in cache
+				log.Tracef("skip %v: %v %v", nks.hash,
+					nks.state, nks.keystone.L2BlockNumber)
+				continue
+			case keystoneStateMined:
+				// Move to mined state
+				log.Tracef("mined %v: %v %v", nks.hash,
+					nks.state, nks.keystone.L2BlockNumber)
+				cks.state = keystoneStateMined
+			}
+		} else {
+			// Insert new keystone in cache
+			log.Tracef("insert %v: %v %v", nks.hash, nks.state,
+				nks.keystone.L2BlockNumber)
+			s.keystones[*nks.hash] = nks
+		}
+		work = true
+	}
+	s.mtx.Unlock()
+
+	return work, nil
+}
+
 func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	log.Tracef("handleOpgethSubscription")
 	defer log.Tracef("handleOpgethSubscription exit")
@@ -448,41 +486,12 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 			log.Tracef("keystone poll")
 		}
 
-		nkss, err := s.reconcileKeystones(ctx)
+		work, err := s.updateKeystoneStates(ctx)
 		if err != nil {
 			// This only happens on non-recoverable errors so it is
 			// ok to exit.
 			return fmt.Errorf("keystone notification: %w", err)
 		}
-
-		// XXX this has a logic race with the test package
-		// See if there are state changes
-		var work bool
-		s.mtx.Lock()
-		for _, nks := range nkss {
-			cks, ok := s.keystones[*nks.hash]
-			if ok {
-				switch nks.state {
-				case keystoneStateNew:
-					// Already in cache
-					log.Tracef("skip %v: %v %v", nks.hash,
-						nks.state, nks.keystone.L2BlockNumber)
-					continue
-				case keystoneStateMined:
-					// Move to mined state
-					log.Tracef("mined %v: %v %v", nks.hash,
-						nks.state, nks.keystone.L2BlockNumber)
-					cks.state = keystoneStateMined
-				}
-			} else {
-				// Insert new keystone in cache
-				log.Tracef("insert %v: %v %v", nks.hash, nks.state,
-					nks.keystone.L2BlockNumber)
-				s.keystones[*nks.hash] = nks
-			}
-			work = true
-		}
-		s.mtx.Unlock()
 
 		// Signal miner to get to work
 		if work {
