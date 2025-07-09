@@ -38,7 +38,7 @@ type state struct {
 	lastBatcherPublicationHash  string
 	batcherPublicationCount     int
 	popMinerBalance             string // very large number
-	tipDiff                     int
+	tipDiff                     uint64
 	tipHash                     string
 	tipHashNonSequencing        string
 }
@@ -354,9 +354,9 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		return strings.Split(string(output), "\n")[0]
 	}
 
-	runJsToInt := func(jsi string, layer string, ipcPath string, replica string) int {
+	runJsToInt := func(jsi string, layer string, ipcPath string, replica string) uint64 {
 		val := runJs(jsi, layer, ipcPath, replica)
-		intVal, err := strconv.Atoi(val)
+		intVal, err := strconv.ParseUint(val, 10, 64)
 		if err != nil {
 			panic(fmt.Sprintf("error converting to int: %s", err))
 		}
