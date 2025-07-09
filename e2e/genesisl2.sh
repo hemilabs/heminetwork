@@ -181,6 +181,10 @@ echo "$(tomlq -t ".superchainRoles.protocolVersionsOwner = \"$MY_ADDRESS\"" .dep
 echo "$(tomlq -t ".superchainRoles.guardian = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".globalDeployOverrides.l2BlockTime = 1" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".globalDeployOverrides.proofMaturityDelaySeconds = 10" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.preimageOracleChallengePeriod = 10" .deployer/intent.toml)" > .deployer/intent.toml
+# echo "$(tomlq -t ".globalDeployOverrides.faultGameMaxClockDuration = 100" .deployer/intent.toml)" > .deployer/intent.toml
+# echo "$(tomlq -t ".globalDeployOverrides.faultGameClockExtension = 100" .deployer/intent.toml)" > .deployer/intent.toml
+
 
 # echo "$(tomlq -t "del(.superchainRoles)" .deployer/intent.toml)" > .deployer/intent.toml
 
@@ -236,6 +240,12 @@ echo "$(jq '.faultGameWithdrawalDelay = 10' /l2configs/deploy-config.json)" > /l
 echo "$(jq '.sequencerWindowSize = 200' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
 echo "$(jq '.l1BlockTime = 3' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
 echo "$(jq '.proofMaturityDelaySeconds = 10' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+echo "$(jq '.preimageOracleChallengePeriod = 10' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+# echo "$(jq '.faultGameMaxClockDuration = 100' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+# echo "$(jq '.faultGameClockExtension = 100' /l2configs/deploy-config.json)" > /l2configs/deploy-config.json
+
+
+
 
 /git/optimism/op-deployer/bin/op-deployer inspect l1 --workdir .deployer 901 > /l2configs/l1deployments.json
 

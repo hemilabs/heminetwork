@@ -4,7 +4,7 @@ go 1.24.4
 
 replace github.com/hemilabs/heminetwork => ../../
 
-replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250707193857-2503ac65c87c
+replace github.com/ethereum-optimism/optimism => github.com/hemilabs/optimism v1.5.1-0.20250708213734-05a6fb4c7b3b
 
 replace github.com/ethereum/go-ethereum => github.com/hemilabs/op-geth v1.101308.0-synctest.0.0.20250423005627-59242a8f35fc
 

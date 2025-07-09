@@ -32,6 +32,11 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
+	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts"
+	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
+	"github.com/ethereum-optimism/optimism/op-e2e/e2eutils/transactions"
+
+	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 
 	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 	"github.com/hemilabs/heminetwork/hemi"
@@ -77,6 +82,12 @@ func l1StandardBridge(t *testing.T) common.Address {
 func optimismPortalProxy(t *testing.T) common.Address {
 	a := addressAt(t, ".opChainDeployments[0].optimismPortalProxyAddress")
 	t.Logf("assuming optimism portal proxy address is %s", a)
+	return a
+}
+
+func game(t *testing.T) common.Address {
+	a := addressAt(t, ".opChainDeployments[0].permissionedDisputeGameAddress")
+	t.Logf("assuming permissioned dispute game address is %s", a)
 	return a
 }
 
@@ -706,6 +717,10 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			Data:     params.Data,
 		}
 
+		if err := wait.ForWithdrawalCheck(ctx, l1Client, wd, optimismPortalProxy, opts.From); err != nil {
+			t.Fatal(err)
+		}
+
 		tx, err = portal.FinalizeWithdrawalTransaction(opts, wd.WithdrawalTransaction())
 		if err != nil {
 			t.Fatal(err)
@@ -931,6 +946,26 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 }
 
 func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.Address, l2Address common.Address, privateKey *ecdsa.PrivateKey, l1Client *ethclient.Client, l2Client *ethclient.Client) {
+	optimismPortalProxy := optimismPortalProxy(t)
+	optimismPortalProxyCaller, err := bindingspreview.NewOptimismPortal2Caller(optimismPortalProxy, l1Client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seconds, err := optimismPortalProxyCaller.ProofMaturityDelaySeconds(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("the ProofMaturityDelaySeconds are: %d", seconds)
+
+	l2Sender, err := optimismPortalProxyCaller.L2Sender(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("the l2sender is: %s", l2Sender)
+
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
@@ -990,7 +1025,6 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 	}
 
 	disputeGameFactoryProxy := disputeGameFactory(t)
-	optimismPortalProxy := optimismPortalProxy(t)
 
 	bestL2Block, err := l2Client.BlockNumber(ctx)
 	if err != nil {
@@ -1011,10 +1045,6 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		t.Fatal(err)
 	}
 
-	optimismPortalProxyCaller, err := bindingspreview.NewOptimismPortal2Caller(optimismPortalProxy, l1Client)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	params, err := withdrawals.ProveWithdrawalParametersFaultProofs(ctx, proofCl, receiptCl, receiptCl, tx.Hash(), disputeGameCaller, optimismPortalProxyCaller)
 	if err != nil {
@@ -1091,14 +1121,9 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		t.Fatal(err)
 	}
 
-
-	_, err = wait.ForGamePublished(ctx, l1Client, optimismPortalProxy, disputeGameFactoryProxy,  big.NewInt(int64(bestL2Block)))
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	proofMaturityDelaySeconds := 10
-	time.Sleep(time.Duration(proofMaturityDelaySeconds+1) * time.Second)
+	time.Sleep(time.Duration((proofMaturityDelaySeconds+1)*2 ) * time.Second)
+
 
 	for i := 0; i < retries; i++ {
 		nonce, err := l1Client.PendingNonceAt(ctx, receiverAddress)
@@ -1132,6 +1157,66 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 			Data:     params.Data,
 		}
 
+		portal2, err := bindingspreview.NewOptimismPortal2(optimismPortalProxy, l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		wdHash, err := wd.Hash()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		provenGame, err := portal2.ProvenWithdrawals(&bind.CallOpts{}, wdHash, opts.From)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		caller := batching.NewMultiCaller(l1Client.Client(), batching.DefaultBatchSize)
+		gameContract, err := contracts.NewFaultDisputeGameContract(ctx, metrics.NoopContractMetrics, provenGame.DisputeGameProxy, caller)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
+			if i == abort {
+				t.Fatal(err)
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		resolvedtx, err := gameContract.ResolveClaimTx(0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resolvedtx, err = gameContract.ResolveTx()
+		if err != nil {
+			t.Fatal(err)
+		}
+		
+		transactions.RequireSendTx(t, ctx, l1Client, resolvedtx, privateKey, transactions.WithReceiptStatusIgnore())
+
+		t.Log("FinalizeWithdrawal: waiting for successful withdrawal check...")
+		err = wait.ForWithdrawalCheck(ctx, l1Client, wd, optimismPortalProxy, opts.From)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		nonce, err = l1Client.PendingNonceAt(ctx, receiverAddress)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// wd.Nonce = big.NewInt(int64(nonce))
+		opts.Nonce = big.NewInt(int64(nonce))
+
 		tx, err = portal.FinalizeWithdrawalTransaction(opts, wd.WithdrawalTransaction())
 		if err != nil {
 			t.Fatal(err)
@@ -1148,7 +1233,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		}
 
 		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+			t.Fatalf("tx failed, logs: %v", receipt.Logs)
 		}
 
 		break
