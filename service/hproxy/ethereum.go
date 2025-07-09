@@ -55,7 +55,6 @@ func CallEthereum(ctx context.Context, c *http.Client, url, method string, param
 		return nil, err
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(jec))
-	// resp, err := c.Post(url, "application/json", bytes.NewBuffer(jec))
 	if err != nil {
 		return nil, err
 	}

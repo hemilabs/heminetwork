@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
+
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 type serverReply struct {
@@ -72,6 +74,8 @@ func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
 	hpCfg.LogLevel = "hproxy=TRACE" // XXX figure out why this isn't working
 	hpCfg.RequestTimeout = time.Second
 	hpCfg.PollFrequency = time.Second
+	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
+	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
 	hp, err := NewServer(hpCfg)
 	if err != nil {
 		t.Fatal(err)
