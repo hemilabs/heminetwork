@@ -669,13 +669,14 @@ func (s *Server) nodeHealthy(id int) {
 	s.mtx.Unlock()
 }
 
-func (s *Server) nodeUnhealthy(id int) {
+func (s *Server) nodeUnhealthy(id int, err error) {
 	s.mtx.Lock()
 	if s.hvmHandlers[id].state != StateUnhealthy {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateUnhealthy
 		s._nodeReap(id)
-		log.Infof("Marking hvm unhealthy %v: %v", id, s.hvmHandlers[id].u)
+		log.Infof("Marking hvm unhealthy %v: %v reason: %v",
+			id, s.hvmHandlers[id].u, err)
 	}
 	s.mtx.Unlock()
 }
@@ -700,7 +701,7 @@ func (s *Server) poke(ctx context.Context, id int) {
 
 	err := poker.Poke(ctx)
 	if err != nil {
-		s.nodeUnhealthy(id)
+		s.nodeUnhealthy(id, err)
 	} else {
 		s.nodeHealthy(id)
 	}
