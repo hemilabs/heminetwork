@@ -57,9 +57,9 @@ const (
 	expectedClients = 1000
 
 	routeControl       = "/v1/control"
-	routeControlAdd    = routeControl + "/add"
-	routeControlRemove = routeControl + "/remove"
-	routeControlList   = routeControl + "/list"
+	RouteControlAdd    = routeControl + "/add"
+	RouteControlRemove = routeControl + "/remove"
+	RouteControlList   = routeControl + "/list"
 )
 
 var log = loggo.GetLogger(appName)
@@ -740,7 +740,7 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	err := json.NewDecoder(r.Body).Decode(&ns)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		log.Errorf("%v %v: %v", routeControlAdd, r.RemoteAddr, err) // too loud?
+		log.Errorf("%v %v: %v", RouteControlAdd, r.RemoteAddr, err) // too loud?
 		return
 	}
 
@@ -756,7 +756,7 @@ func (s *Server) handleControlAddRequest(w http.ResponseWriter, r *http.Request)
 	err = json.NewEncoder(w).Encode(nes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Errorf("%v %v: %v", routeControlAdd, r.RemoteAddr, err) // too loud?
+		log.Errorf("%v %v: %v", RouteControlAdd, r.RemoteAddr, err) // too loud?
 		return
 	}
 }
@@ -769,7 +769,7 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	err := json.NewDecoder(r.Body).Decode(&ns)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // too loud?
+		log.Errorf("%v %v: %v", RouteControlRemove, r.RemoteAddr, err) // too loud?
 		return
 	}
 
@@ -785,7 +785,7 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	err = json.NewEncoder(w).Encode(nes)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		log.Errorf("%v %v: %v", routeControlRemove, r.RemoteAddr, err) // too loud?
+		log.Errorf("%v %v: %v", RouteControlRemove, r.RemoteAddr, err) // too loud?
 		return
 	}
 }
@@ -869,9 +869,9 @@ func (s *Server) Run(pctx context.Context) error {
 	ctrlHttpErrCh := make(chan error)
 	if s.cfg.ControlAddress != "" {
 		cmux := http.NewServeMux()
-		handle("Control", cmux, routeControlAdd, s.handleControlAddRequest)
-		handle("Control", cmux, routeControlRemove, s.handleControlRemoveRequest)
-		handle("Control", cmux, routeControlList, s.handleControlListRequest)
+		handle("Control", cmux, RouteControlAdd, s.handleControlAddRequest)
+		handle("Control", cmux, RouteControlRemove, s.handleControlRemoveRequest)
+		handle("Control", cmux, RouteControlList, s.handleControlListRequest)
 
 		ctrlHttpServer := &http.Server{
 			Addr:        s.cfg.ControlAddress,

@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"os/user"
@@ -47,6 +48,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/service/hproxy"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/service/tbc/peer"
 	"github.com/hemilabs/heminetwork/version"
@@ -248,6 +250,172 @@ func directLevel(pctx context.Context, flags []string) error {
 		if err != nil {
 			return fmt.Errorf("leveldb close: %w", err)
 		}
+	default:
+		return fmt.Errorf("invalid action: %v", action)
+	}
+
+	return nil
+}
+
+func httpCall(ctx context.Context, method, url string, requestBody io.Reader) (io.ReadCloser, error) {
+	c := http.DefaultClient
+	req, err := http.NewRequestWithContext(ctx, method, url, requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	reply, err := c.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http.do: %v", err)
+	}
+	switch reply.StatusCode {
+	case http.StatusOK:
+	default:
+		return nil, fmt.Errorf("status %v", reply.StatusCode)
+	}
+	return reply.Body, nil
+}
+
+func hproxyctl(pctx context.Context, flags []string) error {
+	flagSet := flag.NewFlagSet("hproxy commands", flag.ExitOnError)
+	var (
+		helpFlag     = flagSet.Bool("h", false, "displays help information")
+		helpLongFlag = flagSet.Bool("help", false, "displays help information")
+	)
+
+	flagSet.Usage = func() {
+		fmt.Fprintf(os.Stderr, "%v\n", welcome)
+		fmt.Fprintf(os.Stderr, "Usage: %v hproxy [OPTION]... [ACTION] [<args>]\n\n", os.Args[0])
+		fmt.Println("COMMAND OVERVIEW:")
+		fmt.Println("\tThe 'hproxy' command allows you to issues commands to hproxy .")
+		fmt.Println("")
+		fmt.Println("OPTIONS:")
+		fmt.Println("\t-h, -help\tDisplay help information")
+		fmt.Println("\t-debug   \tEnable debug mode (required for certain actions)")
+		fmt.Println("")
+		fmt.Println("ACTIONS:")
+		fmt.Println("\tadd [hproxy=hproxy_address] <hvm=url,...>")
+		fmt.Println("\tlist [hproxy=hproxy_address]")
+		fmt.Println("\tremove [hproxy=hproxy_address] <hvm=url,...>")
+		fmt.Println("")
+		fmt.Println("ARGUMENTS:")
+		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
+		fmt.Println("\tNote that the hvm parameter is comma separated.")
+		fmt.Fprintf(os.Stderr, "\tExample: '%v hproxy add hvm=\"http://1.2.3.4\"'\n", os.Args[0])
+	}
+
+	err := flagSet.Parse(flags)
+	if err != nil {
+		return err
+	}
+
+	if len(flags) < 1 || *helpFlag || *helpLongFlag {
+		flagSet.Usage()
+		return nil
+	}
+
+	action, args, err := parseArgs(flagSet.Args())
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
+	// commands
+	switch action {
+	// utility
+	case "add":
+		hp := args["hproxy"]
+		if hp == "" {
+			hp = hproxy.DefaultControlAddress
+		}
+		hvm := args["hvm"]
+		if hvm == "" {
+			return fmt.Errorf("hvm must be set")
+		}
+		hvms := strings.Split(hvm, ",")
+		r := make([]map[string]any, len(hvms))
+		for k := range hvms {
+			r[k] = make(map[string]any)
+			r[k]["node_url"] = hvms[k]
+		}
+		req, err := json.Marshal(r)
+		if err != nil {
+			return fmt.Errorf("request: %v", err)
+		}
+		request := bytes.NewReader(req)
+		body, err := httpCall(ctx, http.MethodGet, "http://"+hp+hproxy.RouteControlAdd, request)
+		if err != nil {
+			return err
+		}
+		defer body.Close()
+
+		var jr []map[string]interface{}
+		err = json.NewDecoder(body).Decode(&jr)
+		if err != nil {
+			return fmt.Errorf("decode: %v", err)
+		}
+		for _, v := range jr {
+			fmt.Printf("node: %v error: %v\n", v["node_url"], v["error"])
+		}
+
+	case "list":
+		hp := args["hproxy"]
+		if hp == "" {
+			hp = hproxy.DefaultControlAddress
+		}
+		body, err := httpCall(ctx, http.MethodGet, "http://"+hp+hproxy.RouteControlList, nil)
+		if err != nil {
+			return err
+		}
+		defer body.Close()
+
+		var jr []map[string]interface{}
+		err = json.NewDecoder(body).Decode(&jr)
+		if err != nil {
+			return fmt.Errorf("decode: %v", err)
+		}
+		for _, v := range jr {
+			fmt.Printf("node: %v status: %v connections: %v\n",
+				v["node_url"], v["status"], v["connections"])
+		}
+
+	case "remove":
+		hp := args["hproxy"]
+		if hp == "" {
+			hp = hproxy.DefaultControlAddress
+		}
+		hvm := args["hvm"]
+		if hvm == "" {
+			return fmt.Errorf("hvm must be set")
+		}
+		hvms := strings.Split(hvm, ",")
+		r := make([]map[string]any, len(hvms))
+		for k := range hvms {
+			r[k] = make(map[string]any)
+			r[k]["node_url"] = hvms[k]
+		}
+		req, err := json.Marshal(r)
+		if err != nil {
+			return fmt.Errorf("request: %v", err)
+		}
+		request := bytes.NewReader(req)
+		body, err := httpCall(ctx, http.MethodGet, "http://"+hp+hproxy.RouteControlRemove, request)
+		if err != nil {
+			return err
+		}
+		defer body.Close()
+
+		var jr []map[string]interface{}
+		err = json.NewDecoder(body).Decode(&jr)
+		if err != nil {
+			return fmt.Errorf("decode: %v", err)
+		}
+		for _, v := range jr {
+			fmt.Printf("node: %v error: %v\n", v["node_url"], v["error"])
+		}
+
 	default:
 		return fmt.Errorf("invalid action: %v", action)
 	}
@@ -1354,6 +1522,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tp2p\t\tp2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "\tlevel\t\tdb manipulation\n\n")
+	fmt.Fprintf(os.Stderr, "\thproxy\t\thproxy controller\n\n")
 	fmt.Fprintf(os.Stderr, "ENVIRONMENT:\n")
 	config.Help(os.Stderr, cm)
 	fmt.Fprintf(os.Stderr, "\nuse 'hemictl <command> -h' or 'hemictl <command> -help' to"+
@@ -1597,6 +1766,8 @@ func _main(args []string) error {
 		return client("bss")
 	case "p2p":
 		return p2p(args[1:])
+	case "hproxy":
+		return hproxyctl(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown action: %v", cmd)
 	}
