@@ -341,11 +341,14 @@ func (s *Server) isHealthy(_ context.Context) bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	for k := range s.hvmHandlers {
-		if s.hvmHandlers[k].state == StateHealthy {
-			return true
+		// If we see a single hvm unhealthy bail with unhealthy status.
+		// XXX i think this is technically correct but we do return
+		// 503 to the caller here.
+		if s.hvmHandlers[k].state == StateUnhealthy {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (s *Server) health(ctx context.Context) (bool, any, error) {
