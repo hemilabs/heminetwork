@@ -34,7 +34,7 @@ var (
 		"BFG_BITCOIN_SOURCE": config.Config{
 			Value:        &cfg.BitcoinSource,
 			DefaultValue: "blockstream",
-			Help:         "which bitcoin source of truth is used (blockstream and tbc)",
+			Help:         "bitcoin source of truth used (blockstream or tbc)",
 			Print:        config.PrintAll,
 		},
 		"BFG_BITCOIN_URL": config.Config{
