@@ -434,7 +434,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 			// We need global context here, not request context
 			// since that one goes away prior the client idle
 			// timeout.
-			s.clients[r.RemoteAddr] = newClient(s.BaseContext, id,
+			s.clients[r.RemoteAddr] = newClient(s.gctx, id,
 				s.cfg.ClientIdleTimeout, func() {
 					s.clientRemove(r.RemoteAddr)
 				})
