@@ -261,12 +261,12 @@ func httpCall(ctx context.Context, method, url string, requestBody io.Reader) (i
 	c := http.DefaultClient
 	req, err := http.NewRequestWithContext(ctx, method, url, requestBody)
 	if err != nil {
-		return nil, fmt.Errorf("request: %v", err)
+		return nil, fmt.Errorf("request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	reply, err := c.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("http.do: %v", err)
+		return nil, fmt.Errorf("http.do: %w", err)
 	}
 	switch reply.StatusCode {
 	case http.StatusOK:
@@ -342,7 +342,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		}
 		req, err := json.Marshal(r)
 		if err != nil {
-			return fmt.Errorf("request: %v", err)
+			return fmt.Errorf("request: %w", err)
 		}
 		request := bytes.NewReader(req)
 		body, err := httpCall(ctx, http.MethodGet, "http://"+hp+hproxy.RouteControlAdd, request)
@@ -354,7 +354,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		var jr []map[string]interface{}
 		err = json.NewDecoder(body).Decode(&jr)
 		if err != nil {
-			return fmt.Errorf("decode: %v", err)
+			return fmt.Errorf("decode: %w", err)
 		}
 		for _, v := range jr {
 			fmt.Printf("node: %v error: %v\n", v["node_url"], v["error"])
@@ -374,7 +374,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		var jr []map[string]interface{}
 		err = json.NewDecoder(body).Decode(&jr)
 		if err != nil {
-			return fmt.Errorf("decode: %v", err)
+			return fmt.Errorf("decode: %w", err)
 		}
 		for _, v := range jr {
 			fmt.Printf("node: %v status: %v connections: %v\n",
@@ -398,7 +398,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		}
 		req, err := json.Marshal(r)
 		if err != nil {
-			return fmt.Errorf("request: %v", err)
+			return fmt.Errorf("request: %w", err)
 		}
 		request := bytes.NewReader(req)
 		body, err := httpCall(ctx, http.MethodGet, "http://"+hp+hproxy.RouteControlRemove, request)
@@ -410,7 +410,7 @@ func hproxyctl(pctx context.Context, flags []string) error {
 		var jr []map[string]interface{}
 		err = json.NewDecoder(body).Decode(&jr)
 		if err != nil {
-			return fmt.Errorf("decode: %v", err)
+			return fmt.Errorf("decode: %w", err)
 		}
 		for _, v := range jr {
 			fmt.Printf("node: %v error: %v\n", v["node_url"], v["error"])
@@ -1522,7 +1522,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "\tp2p\t\tp2p commands\n")
 	fmt.Fprintf(os.Stderr, "\ttbcdb\t\tdatabase open (tbcd must not be running)\n")
 	fmt.Fprintf(os.Stderr, "\tlevel\t\tdb manipulation\n\n")
-	fmt.Fprintf(os.Stderr, "\thproxy\t\thproxy controller\n\n")
+	fmt.Fprintf(os.Stderr, "\thproxy\t\tcontroller\n\n")
 	fmt.Fprintf(os.Stderr, "ENVIRONMENT:\n")
 	config.Help(os.Stderr, cm)
 	fmt.Fprintf(os.Stderr, "\nuse 'hemictl <command> -h' or 'hemictl <command> -help' to"+
