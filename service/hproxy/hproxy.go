@@ -161,10 +161,12 @@ type Server struct {
 	clients     map[string]*client // [ip_address]server_id
 
 	// Prometheus
-	promCollectors  []prometheus.Collector
-	promPollVerbose bool // set to true to print stats during poll
-	isRunning       bool
-	cmdsProcessed   prometheus.Counter
+	promCollectors        []prometheus.Collector
+	promPollVerbose       bool // set to true to print stats during poll
+	isRunning             bool
+	cmdsProcessed         prometheus.Counter
+	promHealth            health
+	persistentConnections uint64
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -196,68 +198,33 @@ func NewServer(cfg *Config) (*Server, error) {
 }
 
 func (s *Server) promHVMNew() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	var newNodes int
-	for k := range s.hvmHandlers {
-		switch s.hvmHandlers[k].state {
-		case StateNew:
-			newNodes++
-		}
-	}
-	return deucalion.IntToFloat(newNodes)
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return deucalion.IntToFloat(s.promHealth.NewNodes)
 }
 
 func (s *Server) promHVMHealthy() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	var healthyNodes int
-	for k := range s.hvmHandlers {
-		switch s.hvmHandlers[k].state {
-		case StateHealthy:
-			healthyNodes++
-		}
-	}
-	return deucalion.IntToFloat(healthyNodes)
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return deucalion.IntToFloat(s.promHealth.HealthyNodes)
 }
 
 func (s *Server) promHVMUnhealthy() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	var unhealthyNodes int
-	for k := range s.hvmHandlers {
-		switch s.hvmHandlers[k].state {
-		case StateUnhealthy:
-			unhealthyNodes++
-		}
-	}
-	return deucalion.IntToFloat(unhealthyNodes)
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return deucalion.IntToFloat(s.promHealth.UnhealthyNodes)
 }
 
 func (s *Server) promHVMRemoved() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	var removedNodes int
-	for k := range s.hvmHandlers {
-		switch s.hvmHandlers[k].state {
-		case StateRemoved:
-			removedNodes++
-		}
-	}
-	return deucalion.IntToFloat(removedNodes)
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return deucalion.IntToFloat(s.promHealth.RemovedNodes)
 }
 
 func (s *Server) promConnections() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	var connections uint64
-	for k := range s.hvmHandlers {
-		switch s.hvmHandlers[k].state {
-		case StateHealthy:
-			connections += uint64(s.hvmHandlers[k].connections)
-		}
-	}
-	return deucalion.Uint64ToFloat(connections)
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return deucalion.Uint64ToFloat(s.persistentConnections)
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -316,10 +283,33 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
+		var (
+			h           health
+			connections uint64
+		)
+		s.mtx.Lock()
+		for k := range s.hvmHandlers {
+			switch s.hvmHandlers[k].state {
+			case StateNew:
+				h.NewNodes++
+			case StateHealthy:
+				h.HealthyNodes++
+				connections += uint64(s.hvmHandlers[k].connections)
+			case StateUnhealthy:
+				h.UnhealthyNodes++
+			case StateRemoved:
+				h.RemovedNodes++
+			}
+		}
+		s.promHealth = h
+		s.persistentConnections = connections
+		s.mtx.Unlock()
+
 		if s.promPollVerbose {
-			s.mtx.RLock()
-			log.Infof("FIXME PROMETHEUS POLL")
-			s.mtx.RUnlock()
+			log.Infof("new: %v healthy: %v unhealthy: %v removed: %v "+
+				"persistent connections: %v", h.NewNodes,
+				h.HealthyNodes, h.UnhealthyNodes, h.RemovedNodes,
+				connections)
 		}
 		ticker.Reset(promPollFrequency)
 	}
@@ -362,33 +352,21 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	type health struct {
-		NewNodes       int `json:"new_nodes"`
-		HealthyNodes   int `json:"healthy_nodes"`
-		UnhealthyNodes int `json:"unhealthy_nodes"`
-		RemovedNodes   int `json:"removed_nodes"`
-	}
-
-	var h health
-	s.mtx.Lock()
-	for k := range s.hvmHandlers {
-		switch s.hvmHandlers[k].state {
-		case StateNew:
-			h.NewNodes++
-		case StateHealthy:
-			h.HealthyNodes++
-		case StateUnhealthy:
-			h.UnhealthyNodes++
-		case StateRemoved:
-			h.RemovedNodes++
-		}
-	}
-	s.mtx.Unlock()
+	s.mtx.RLock()
+	h := s.promHealth
+	s.mtx.RUnlock()
 
 	return s.isHealthy(ctx), h, nil
 }
 
 type HVMState int
+
+type health struct {
+	NewNodes       int `json:"new_nodes"`
+	HealthyNodes   int `json:"healthy_nodes"`
+	UnhealthyNodes int `json:"unhealthy_nodes"`
+	RemovedNodes   int `json:"removed_nodes"`
+}
 
 const (
 	StateNew       HVMState = 0
@@ -405,13 +383,13 @@ var stateString = map[HVMState]string{
 }
 
 type HVMHandler struct {
-	id int // server id
+	id int // node id
 
 	rp *httputil.ReverseProxy
 	u  *url.URL     // Connection URL for HVM
 	c  *http.Client // In here to reuse connection
 
-	connections uint // Open connections, XXX not being reaped yet
+	connections uint // Open connections
 
 	poking bool // true when getting health
 	poker  Proxy
@@ -421,8 +399,6 @@ type HVMHandler struct {
 func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleProxyRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleProxyRequest exit: %v", r.RemoteAddr)
-
-	// XXX expire client connections at some point
 
 	// Select host to call
 	s.mtx.Lock()
@@ -451,6 +427,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		if id >= 0 {
 			// Add connection to candidate.
+			//
 			// We need global context here, not request context
 			// since that one goes away prior the client idle
 			// timeout.
