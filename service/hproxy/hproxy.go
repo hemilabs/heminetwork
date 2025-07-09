@@ -567,8 +567,7 @@ func (s *Server) nodeAdd(node string) error {
 	// For now, everything is ethereum but we can use the poker function to
 	// handle different types health checks.
 	hvmHandler.poker = NewEthereumProxy(func(ctx context.Context) error {
-		resp, err := CallEthereum(ctx, hvmHandler.c, hvmHandler.u.String(),
-			"eth_blockNumber", nil)
+		resp, err := CallEthereum(ctx, hvmHandler.c, hvmHandler.u.String(), "eth_blockNumber", nil)
 		if err != nil {
 			return err
 		}
