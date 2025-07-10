@@ -158,21 +158,23 @@ func TestClientReap(t *testing.T) {
 		wg.Add(1)
 		go func(x int) {
 			defer wg.Done()
-			c := &http.Client{Transport: http.DefaultTransport}
+			// This uses a new http.Transport to prevent using idle connections,
+			// which would result in a new client not being created.
+			c := &http.Client{Transport: &http.Transport{}}
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 				"http://"+hpCfg.ListenAddress, nil)
 			if err != nil {
-				panic(fmt.Sprintf("get %v: %v", x, err))
+				panic(fmt.Errorf("get %v: %v", x, err))
 			}
 			reply, err := c.Do(req)
 			if err != nil {
-				panic(fmt.Sprintf("do %v: %v", x, err))
+				panic(fmt.Errorf("do %v: %v", x, err))
 			}
 			defer reply.Body.Close()
 			switch reply.StatusCode {
 			case http.StatusOK:
 			default:
-				panic(fmt.Sprintf("%v replied %v",
+				panic(fmt.Errorf("%v replied %v",
 					hpCfg.ListenAddress, reply.StatusCode))
 			}
 
@@ -191,23 +193,26 @@ func TestClientReap(t *testing.T) {
 			// Verify that json id matches header id, a bit silly
 			// but keeps us honest.
 			if strconv.Itoa(jr.ID) != ids {
-				panic("id mismatch header: " + ids +
-					" json: " + strconv.Itoa(jr.ID))
+				panic(fmt.Errorf("id mismatch header: %s, json: %s",
+					ids, strconv.Itoa(jr.ID)))
 			}
 		}(i)
 	}
 
 	wg.Wait()
-
+	hp.mtx.RLock()
 	if len(hp.clients) != clientCount {
-		t.Fatalf("expected %v clients got %v", len(hp.clients), clientCount)
+		t.Fatalf("got %v clients, want %v", len(hp.clients), clientCount)
 	}
+	hp.mtx.RUnlock()
 
 	// Wait for reap and check client list
 	time.Sleep(1 * time.Second)
+	hp.mtx.RLock()
 	if len(hp.clients) != 0 {
 		t.Fatalf("not reaped clients: %v", spew.Sdump(hp.clients))
 	}
+	hp.mtx.RUnlock()
 }
 
 func TestRequestTimeout(t *testing.T) {
