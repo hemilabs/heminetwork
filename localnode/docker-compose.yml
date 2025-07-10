@@ -16,8 +16,6 @@ services:
     depends_on:
       bfgd-postgres:
         condition: "service_started"
-      electrs:
-        condition: "service_healthy"
     environment:
       BFG_LOG_LEVEL: "INFO"
       BFG_PUBLIC_ADDRESS: ":8383"
@@ -223,5 +221,4 @@ volumes:
   prysm_data: {}
   psql_data: {}
   op-geth_data: {}
-  electrs_data: {}
   tbc_data: {}
