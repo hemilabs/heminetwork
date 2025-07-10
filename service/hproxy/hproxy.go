@@ -567,27 +567,45 @@ func (s *Server) nodeAdd(node string) error {
 
 	// For now, everything is ethereum, but we can use the poker function to
 	// handle different types health checks.
-	hvmHandler.poker = NewEthereumProxy(func(ctx context.Context) error {
-		body, err := CallEthereum(ctx, hvmHandler.c, hvmHandler.u.String(), "eth_blockNumber", nil)
-		if err != nil {
-			return err
-		}
-
-		j := make(map[string]any)
-		if err := json.NewDecoder(body).Decode(&j); err != nil {
-			return err
-		}
-
-		// Make sure we have "result"
-		if _, ok := j["result"]; !ok {
-			return errors.New("no result")
-		}
-		return nil
-	})
+	hvmHandler.poker = NewEthereumProxy(newEthereumPoker(hvmHandler.c, hvmHandler.u.String()))
 
 	s.hvmHandlers = append(s.hvmHandlers, hvmHandler)
 
 	return nil
+}
+
+// newEthereumPoker returns a new poker which checks the health of an Ethereum
+// node. The health of the node is determined by the age of the latest block.
+func newEthereumPoker(client *http.Client, url string) func(ctx context.Context) error {
+	const maxBlockAge = 30 * time.Second // TODO: make this configurable?
+
+	// TODO: Improve health checks.
+
+	return func(ctx context.Context) error {
+		blockRes, err := CallEthereum(ctx, client, url, "eth_getBlockByNumber", "latest")
+		if err != nil {
+			return err
+		}
+
+		var block struct {
+			Timestamp string `json:"timestamp"`
+		}
+		if err = json.Unmarshal(blockRes.Result, &block); err != nil {
+			return fmt.Errorf("eth_getBlockByNumber result: %w", err)
+		}
+
+		ts, err := strconv.ParseInt(block.Timestamp, 0, 64)
+		if err != nil {
+			return fmt.Errorf("eth_getBlockByNumber timestamp: %w", err)
+		}
+
+		if age := time.Since(time.Unix(ts, 0)); age > maxBlockAge {
+			return fmt.Errorf("eth_getBlockByNumber timestamp too old: %v (%v ago)",
+				block.Timestamp, age)
+		}
+
+		return nil
+	}
 }
 
 func (s *Server) nodeRemove(node string) error {

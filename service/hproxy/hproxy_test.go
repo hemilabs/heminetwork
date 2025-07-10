@@ -30,6 +30,8 @@ type serverReply struct {
 
 func newServer(x int) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
 		if r.Header.Get("X-Forwarded-Host") == "" ||
 			r.Header.Get("X-Forwarded-For") == "" ||
 			r.Header.Get("X-Forwarded-Proto") == "" {
@@ -37,32 +39,36 @@ func newServer(x int) *httptest.Server {
 			// check which does not have headers set. Check
 			// to see if the check is expected and panic if
 			// it isn't.
-			defer r.Body.Close()
-			jr := json.NewDecoder(r.Body)
-			var j map[string]any
-			err := jr.Decode(&j)
-			if err != nil {
+
+			// Decode the request
+			var j EthereumRequest
+			if err := json.NewDecoder(r.Body).Decode(&j); err != nil {
 				panic(err)
 			}
-			if x, ok := j["method"]; !ok || x != "eth_blockNumber" {
-				panic("invalid health command")
+
+			if j.Method != "eth_getBlockByNumber" {
+				panic(fmt.Errorf("unexpected health method: %s", j.Method))
 			}
-			// return some bs
-			err = json.NewEncoder(w).Encode(
-				map[string]any{
-					"jsonrpc": "2.0",
-					"id":      1,
-					"result":  "0x37af32",
-					"health":  1,
-				})
+
+			result, err := json.Marshal(map[string]any{
+				"timestamp": "0x" + strconv.FormatInt(time.Now().Unix(), 16),
+			})
 			if err != nil {
+				panic(fmt.Errorf("marshal result: %w", err))
+			}
+
+			res := &EthereumResponse{
+				Version: EthereumVersion,
+				ID:      j.ID,
+				Result:  result,
+			}
+			if err := json.NewEncoder(w).Encode(res); err != nil {
 				panic(err)
 			}
-			return
 		}
+
 		id := serverReply{ID: x}
-		err := json.NewEncoder(w).Encode(id)
-		if err != nil {
+		if err := json.NewEncoder(w).Encode(id); err != nil {
 			panic(err)
 		}
 	}))
@@ -114,8 +120,7 @@ func TestNobodyHome(t *testing.T) {
 
 	// Expect EOF
 	var jr serverReply
-	err = json.NewDecoder(reply.Body).Decode(&jr)
-	if !errors.Is(err, io.EOF) {
+	if err = json.NewDecoder(reply.Body).Decode(&jr); !errors.Is(err, io.EOF) {
 		t.Fatal(err)
 	}
 }
@@ -185,16 +190,14 @@ func TestClientReap(t *testing.T) {
 			}
 
 			var jr serverReply
-			err = json.NewDecoder(reply.Body).Decode(&jr)
-			if err != nil {
+			if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
 				panic(fmt.Errorf("decode %v: %w", x, err))
 			}
 
 			// Verify that json id matches header id, a bit silly
 			// but keeps us honest.
 			if strconv.Itoa(jr.ID) != ids {
-				panic(fmt.Errorf("id mismatch header: %s, json: %s",
-					ids, strconv.Itoa(jr.ID)))
+				panic(fmt.Errorf("id mismatch header: %s, json: %d", ids, jr.ID))
 			}
 		}(i)
 	}
@@ -272,8 +275,7 @@ func request(ctx context.Context, serverID int, hpCfg *Config) error {
 
 	// Read body
 	var jr serverReply
-	err = json.NewDecoder(reply.Body).Decode(&jr)
-	if err != nil {
+	if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
 		return fmt.Errorf("decode: %w", err)
 	}
 	if jr.ID != serverID {
@@ -359,8 +361,7 @@ func TestFanout(t *testing.T) {
 			}
 
 			var jr serverReply
-			err = json.NewDecoder(reply.Body).Decode(&jr)
-			if err != nil {
+			if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
 				panic(fmt.Errorf("decode %v: %w", x, err))
 			}
 			am.Lock()
@@ -370,8 +371,7 @@ func TestFanout(t *testing.T) {
 			// Verify that json id matches header id, a bit silly
 			// but keeps us honest.
 			if strconv.Itoa(jr.ID) != ids {
-				panic("id mismatch header: " + ids +
-					" json: " + strconv.Itoa(jr.ID))
+				panic(fmt.Errorf("id mismatch header: %s, json: %d", ids, jr.ID))
 			}
 		}(i)
 	}
@@ -455,8 +455,7 @@ func TestPersistence(t *testing.T) {
 		}
 
 		var jr serverReply
-		err = json.NewDecoder(reply.Body).Decode(&jr)
-		if err != nil {
+		if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
 			t.Fatalf("decode %v: %v", x, err)
 		}
 		// Discard so that we can reuse connection
@@ -471,8 +470,7 @@ func TestPersistence(t *testing.T) {
 		// Verify that json id matches header id, a bit silly
 		// but keeps us honest.
 		if strconv.Itoa(jr.ID) != ids {
-			panic("id mismatch header: " + ids +
-				" json: " + strconv.Itoa(jr.ID))
+			panic(fmt.Errorf("id mismatch header: %s, json: %d", ids, jr.ID))
 		}
 	}
 
@@ -525,7 +523,7 @@ func TestFailover(t *testing.T) {
 	c := &http.Client{
 		Transport: http.DefaultTransport,
 	}
-	nextUnhealthy := 0
+	var nextUnhealthy int
 	for i := 0; i < clientCount; i++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 			"http://"+hpCfg.ListenAddress, nil)
@@ -551,8 +549,7 @@ func TestFailover(t *testing.T) {
 		}
 
 		var jr serverReply
-		err = json.NewDecoder(reply.Body).Decode(&jr)
-		if err != nil {
+		if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
 			t.Fatalf("decode %v: %v", i, err)
 		}
 		// Discard so that we can reuse connection
@@ -568,8 +565,7 @@ func TestFailover(t *testing.T) {
 		// Verify that json id matches header id, a bit silly
 		// but keeps us honest.
 		if strconv.Itoa(jr.ID) != ids {
-			panic("id mismatch header: " + ids +
-				" json: " + strconv.Itoa(jr.ID))
+			panic(fmt.Errorf("id mismatch header: %s, json: %d", ids, jr.ID))
 		}
 
 		// Mark node unhealthy after it has received 100 requests

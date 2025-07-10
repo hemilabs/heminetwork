@@ -8,10 +8,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
+	"fmt"
 	"net/http"
 )
 
@@ -27,24 +27,35 @@ var _ Proxy = EthereumProxy{}
 
 const EthereumVersion = "2.0"
 
-type EthereumCall struct {
-	Method  string `json:"method"`
-	Params  []any  `json:"params"`
-	ID      uint64 `json:"id"`
+// EthereumRequest is a JSON-RPC request object.
+// https://www.jsonrpc.org/specification
+type EthereumRequest struct {
 	Version string `json:"jsonrpc"`
+	Method  string `json:"method"`
+	Params  []any  `json:"params,omitempty"`
+	ID      any    `json:"id"`
 }
 
-func ethID() uint64 {
+// EthereumResponse is a JSON-RPC response object.
+// https://www.jsonrpc.org/specification
+type EthereumResponse struct {
+	Version string          `json:"jsonrpc"`
+	Result  json.RawMessage `json:"result"`
+	Error   any             `json:"error"`
+	ID      any             `json:"id"`
+}
+
+func ethID() string {
 	buf := make([]byte, 8)
 	_, err := rand.Read(buf)
 	if err != nil {
 		panic(err)
 	}
-	return binary.LittleEndian.Uint64(buf)
+	return hex.EncodeToString(buf)
 }
 
-func CallEthereum(ctx context.Context, c *http.Client, url, method string, params []any) (io.ReadCloser, error) {
-	ec := EthereumCall{
+func CallEthereum(ctx context.Context, c *http.Client, url, method string, params ...any) (*EthereumResponse, error) {
+	ec := EthereumRequest{
 		Method:  method,
 		Params:  params,
 		ID:      ethID(),
@@ -63,6 +74,7 @@ func CallEthereum(ctx context.Context, c *http.Client, url, method string, param
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -70,7 +82,18 @@ func CallEthereum(ctx context.Context, c *http.Client, url, method string, param
 		return nil, errors.New(http.StatusText(resp.StatusCode))
 	}
 
-	return resp.Body, nil
+	var res EthereumResponse
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return nil, err
+	}
+	if res.Version != EthereumVersion {
+		return nil, fmt.Errorf("unexpected version: %s", res.Version)
+	}
+	if res.ID != ec.ID {
+		return nil, fmt.Errorf("invalid response id: %s instead of %s",
+			res.ID, ec.ID)
+	}
+	return &res, nil
 }
 
 func (e EthereumProxy) Poke(ctx context.Context) error {
