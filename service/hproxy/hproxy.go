@@ -151,9 +151,10 @@ func NewDefaultConfig() *Config {
 }
 
 type Server struct {
-	mtx  sync.RWMutex
-	wg   sync.WaitGroup
-	gctx context.Context // We need the global context in client requests
+	mtx sync.RWMutex
+	wg  sync.WaitGroup
+
+	httpServer *http.Server // We need the BaseContext in client requests
 
 	cfg *Config
 
@@ -434,7 +435,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 			// We need global context here, not request context
 			// since that one goes away prior the client idle
 			// timeout.
-			s.clients[r.RemoteAddr] = newClient(s.gctx, id,
+			s.clients[r.RemoteAddr] = newClient(s.httpServer.BaseContext(nil), id,
 				s.cfg.ClientIdleTimeout, func() {
 					s.clientRemove(r.RemoteAddr)
 				})
@@ -833,9 +834,6 @@ func (s *Server) Run(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	// Set global context for client timeouts during requests
-	s.gctx = ctx
-
 	// Launch hvm monitor
 	s.wg.Add(1)
 	go s.monitor(ctx)
@@ -848,17 +846,17 @@ func (s *Server) Run(pctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleProxyRequest)
 
-	httpServer := &http.Server{
+	s.httpServer = &http.Server{
 		Addr:        s.cfg.ListenAddress,
 		Handler:     mux,
 		BaseContext: func(_ net.Listener) context.Context { return ctx },
 	}
 	go func() {
 		log.Infof("Listening: %s", s.cfg.ListenAddress)
-		httpErrCh <- httpServer.ListenAndServe()
+		httpErrCh <- s.httpServer.ListenAndServe()
 	}()
 	defer func() {
-		if err := httpServer.Shutdown(ctx); err != nil {
+		if err := s.httpServer.Shutdown(ctx); err != nil {
 			log.Errorf("http server exit: %v", err)
 			return
 		}
