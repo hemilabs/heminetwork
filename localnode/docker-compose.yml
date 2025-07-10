@@ -130,6 +130,16 @@ services:
       - "65532"  # geth user
       - "/tbcdata"
 
+  tbcd:
+    profiles: ["hemi", "full"]
+    build:
+      dockerfile: "./docker/tbcd/Dockerfile"
+      context: "./.."
+    environment:
+      TBC_NETWORK: "testnet3"
+      TBC_HEMI_INDEX: "true"
+      TBC_LISTEN_ADDRESS: "0.0.0.0:8082"
+
   # Hemi op-node
   op-node:
     # yamllint disable-line rule:line-length
