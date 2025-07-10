@@ -524,7 +524,7 @@ func TestFailover(t *testing.T) {
 		x := i
 		if i != 0 && i%100 == 0 {
 			t.Logf("marking node unhealthy: %v", i/100-1)
-			hp.nodeUnhealthy(i/100 - 1)
+			hp.nodeUnhealthy(i/100-1, errors.New("forced"))
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
