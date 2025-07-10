@@ -50,12 +50,11 @@ func CallEthereum(ctx context.Context, c *http.Client, url, method string, param
 		ID:      ethID(),
 		Version: EthereumVersion,
 	}
-	jec, err := json.Marshal(ec)
-	if err != nil {
+	b := new(bytes.Buffer)
+	if err := json.NewEncoder(b).Encode(ec); err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url,
-		bytes.NewBuffer(jec))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, b)
 	if err != nil {
 		return nil, err
 	}
