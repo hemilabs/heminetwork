@@ -525,13 +525,8 @@ func TestFailover(t *testing.T) {
 	c := &http.Client{
 		Transport: http.DefaultTransport,
 	}
+	nextUnhealthy := 0
 	for i := 0; i < clientCount; i++ {
-		x := i
-		if i != 0 && i%100 == 0 {
-			t.Logf("marking node unhealthy: %v", i/100-1)
-			hp.nodeUnhealthy(i/100-1, errors.New("forced"))
-		}
-
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 			"http://"+hpCfg.ListenAddress, nil)
 		if err != nil {
@@ -539,7 +534,7 @@ func TestFailover(t *testing.T) {
 		}
 		reply, err := c.Do(req)
 		if err != nil {
-			t.Fatalf("get %v: %v", x, err)
+			t.Fatalf("get %v: %v", i, err)
 		}
 		defer reply.Body.Close()
 		switch reply.StatusCode {
@@ -558,7 +553,7 @@ func TestFailover(t *testing.T) {
 		var jr serverReply
 		err = json.NewDecoder(reply.Body).Decode(&jr)
 		if err != nil {
-			t.Fatalf("decode %v: %v", x, err)
+			t.Fatalf("decode %v: %v", i, err)
 		}
 		// Discard so that we can reuse connection
 		if _, err := io.Copy(io.Discard, reply.Body); err != nil {
@@ -567,6 +562,7 @@ func TestFailover(t *testing.T) {
 
 		am.Lock()
 		answers[jr.ID]++
+		count := answers[jr.ID]
 		am.Unlock()
 
 		// Verify that json id matches header id, a bit silly
@@ -575,20 +571,27 @@ func TestFailover(t *testing.T) {
 			panic("id mismatch header: " + ids +
 				" json: " + strconv.Itoa(jr.ID))
 		}
+
+		// Mark node unhealthy after it has received 100 requests
+		if jr.ID == nextUnhealthy && count == 100 && nextUnhealthy < serverCount-1 {
+			t.Logf("marking node unhealthy: %v", nextUnhealthy)
+			hp.nodeUnhealthy(nextUnhealthy, errors.New("forced"))
+			nextUnhealthy++
+		}
 	}
 
 	cancel()
 
 	total := 0
-	for k, v := range answers {
-		t.Logf("node %v: %v", k, v)
-		if v != 100 {
-			t.Fatalf("unexpected number of calls node %v got %v wanted %v",
-				k, v, 100)
+	for k, got := range answers {
+		t.Logf("node %v: %v", k, got)
+		if want := 100; got != want {
+			t.Fatalf("unexpected number of calls node %v: got %v, want %v",
+				k, got, want)
 		}
-		total += v
+		total += got
 	}
 	if total != clientCount {
-		t.Fatalf("expected %v connections, got %v", clientCount, total)
+		t.Fatalf("got %v answers, want %v", total, clientCount)
 	}
 }
