@@ -565,7 +565,7 @@ func (s *Server) nodeAdd(node string) error {
 		},
 	}
 
-	// For now, everything is ethereum but we can use the poker function to
+	// For now, everything is ethereum, but we can use the poker function to
 	// handle different types health checks.
 	hvmHandler.poker = NewEthereumProxy(func(ctx context.Context) error {
 		body, err := CallEthereum(ctx, hvmHandler.c, hvmHandler.u.String(), "eth_blockNumber", nil)
@@ -617,7 +617,7 @@ func (s *Server) nodeRemove(node string) error {
 	return errors.New("not found")
 }
 
-// _countNode must be called with the mutext held.
+// _countNode must be called with the mutex held.
 func (s *Server) _nodeCount(id int) int {
 	var count int
 	for _, v := range s.clients {
@@ -628,7 +628,7 @@ func (s *Server) _nodeCount(id int) int {
 	return count
 }
 
-// _nodeReap must be called with the mutext held.
+// _nodeReap must be called with the mutex held.
 func (s *Server) _nodeReap(id int) {
 	for k, v := range s.clients {
 		if v.node == id {
