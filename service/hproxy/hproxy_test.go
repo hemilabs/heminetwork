@@ -164,11 +164,11 @@ func TestClientReap(t *testing.T) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet,
 				"http://"+hpCfg.ListenAddress, nil)
 			if err != nil {
-				panic(fmt.Errorf("get %v: %v", x, err))
+				panic(fmt.Errorf("get %v: %w", x, err))
 			}
 			reply, err := c.Do(req)
 			if err != nil {
-				panic(fmt.Errorf("do %v: %v", x, err))
+				panic(fmt.Errorf("do %v: %w", x, err))
 			}
 			defer reply.Body.Close()
 			switch reply.StatusCode {
@@ -187,7 +187,7 @@ func TestClientReap(t *testing.T) {
 			var jr serverReply
 			err = json.NewDecoder(reply.Body).Decode(&jr)
 			if err != nil {
-				panic(fmt.Sprintf("decode %v: %v", x, err))
+				panic(fmt.Errorf("decode %v: %w", x, err))
 			}
 
 			// Verify that json id matches header id, a bit silly
@@ -338,17 +338,17 @@ func TestFanout(t *testing.T) {
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
 				"http://"+hpCfg.ListenAddress, nil)
 			if err != nil {
-				panic(fmt.Sprintf("get %v: %v", x, err))
+				panic(fmt.Errorf("get %v: %w", x, err))
 			}
 			reply, err := c.Do(req)
 			if err != nil {
-				panic(fmt.Sprintf("do %v: %v", x, err))
+				panic(fmt.Errorf("do %v: %w", x, err))
 			}
 			defer reply.Body.Close()
 			switch reply.StatusCode {
 			case http.StatusOK:
 			default:
-				panic(fmt.Sprintf("%v replied %v",
+				panic(fmt.Errorf("%v replied %v",
 					hpCfg.ListenAddress, reply.StatusCode))
 			}
 
@@ -361,7 +361,7 @@ func TestFanout(t *testing.T) {
 			var jr serverReply
 			err = json.NewDecoder(reply.Body).Decode(&jr)
 			if err != nil {
-				panic(fmt.Sprintf("decode %v: %v", x, err))
+				panic(fmt.Errorf("decode %v: %w", x, err))
 			}
 			am.Lock()
 			answers[jr.ID]++
@@ -444,7 +444,7 @@ func TestPersistence(t *testing.T) {
 		switch reply.StatusCode {
 		case http.StatusOK:
 		default:
-			panic(fmt.Sprintf("%v replied %v",
+			panic(fmt.Errorf("%v replied %v",
 				hpCfg.ListenAddress, reply.StatusCode))
 		}
 
@@ -540,7 +540,7 @@ func TestFailover(t *testing.T) {
 		switch reply.StatusCode {
 		case http.StatusOK:
 		default:
-			panic(fmt.Sprintf("%v replied %v",
+			panic(fmt.Errorf("%v replied %v",
 				hpCfg.ListenAddress, reply.StatusCode))
 		}
 
