@@ -28,7 +28,15 @@ type serverReply struct {
 	Error error `json:"error,omitempty"`
 }
 
-func newServer(x int) *httptest.Server {
+func defaultNodeState() (int, time.Time) {
+	return http.StatusOK, time.Now()
+}
+
+func newServer(x int, state func() (int, time.Time)) *httptest.Server {
+	if state == nil {
+		state = defaultNodeState
+	}
+
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
 
@@ -50,13 +58,15 @@ func newServer(x int) *httptest.Server {
 				panic(fmt.Errorf("unexpected health method: %s", j.Method))
 			}
 
+			status, blockTime := state()
 			result, err := json.Marshal(map[string]any{
-				"timestamp": "0x" + strconv.FormatInt(time.Now().Unix(), 16),
+				"timestamp": "0x" + strconv.FormatInt(blockTime.Unix(), 16),
 			})
 			if err != nil {
 				panic(fmt.Errorf("marshal result: %w", err))
 			}
 
+			w.WriteHeader(status)
 			res := &EthereumResponse{
 				Version: EthereumVersion,
 				ID:      j.ID,
@@ -129,7 +139,7 @@ func TestNobodyHome(t *testing.T) {
 // XXX tried to build a test for this but did not succeed. Remove or fix.
 // }
 func TestClientReap(t *testing.T) {
-	s := newServer(0)
+	s := newServer(0, nil)
 	defer s.Close()
 	servers := []string{s.URL}
 
@@ -286,7 +296,7 @@ func request(ctx context.Context, serverID int, hpCfg *Config) error {
 
 func TestProxy(t *testing.T) {
 	serverID := 1337
-	s := newServer(serverID)
+	s := newServer(serverID, nil)
 	defer s.Close()
 	servers := []string{s.URL}
 
@@ -305,7 +315,7 @@ func TestFanout(t *testing.T) {
 	serverCount := 5
 	servers := make([]string, 0, serverCount)
 	for i := 0; i < serverCount; i++ {
-		s := newServer(i)
+		s := newServer(i, nil)
 		defer s.Close()
 
 		// Verify url
@@ -402,7 +412,7 @@ func TestPersistence(t *testing.T) {
 
 	servers := make([]string, 0, serverCount)
 	for i := 0; i < serverCount; i++ {
-		s := newServer(i)
+		s := newServer(i, nil)
 		defer s.Close()
 
 		// Verify url
@@ -494,7 +504,7 @@ func TestFailover(t *testing.T) {
 
 	servers := make([]string, 0, serverCount)
 	for i := 0; i < serverCount; i++ {
-		s := newServer(i)
+		s := newServer(i, nil)
 		defer s.Close()
 
 		// Verify url
@@ -507,7 +517,6 @@ func TestFailover(t *testing.T) {
 
 	testDuration := 5 * time.Second
 	ctx, cancel := context.WithTimeout(t.Context(), testDuration)
-	_ = ctx
 	defer cancel()
 
 	// Setup hproxy
@@ -589,5 +598,59 @@ func TestFailover(t *testing.T) {
 	}
 	if total != clientCount {
 		t.Fatalf("got %v answers, want %v", total, clientCount)
+	}
+}
+
+func TestNodePoking(t *testing.T) {
+	const (
+		healthyCount   = 5
+		unhealthyCount = 4
+	)
+
+	servers := make([]string, 0, 5)
+	for i := range healthyCount {
+		s := newServer(i, nil)
+		t.Cleanup(s.Close)
+		servers = append(servers, s.URL)
+	}
+	for i := range unhealthyCount / 2 {
+		s := newServer(i, func() (int, time.Time) {
+			// Block timestamp is 5 seconds ago, 500 status
+			return http.StatusInternalServerError, time.Now().Add(-5 * time.Second)
+		})
+		t.Cleanup(s.Close)
+		servers = append(servers, s.URL)
+	}
+	for i := range unhealthyCount / 2 {
+		s := newServer(i, func() (int, time.Time) {
+			// Block timestamp is 45 seconds ago, OK status
+			return http.StatusOK, time.Now().Add(-45 * time.Second)
+		})
+		t.Cleanup(s.Close)
+		servers = append(servers, s.URL)
+	}
+
+	// Setup hproxy
+	hp, _ := newHproxy(t, servers)
+	time.Sleep(500 * time.Millisecond) // Let healthcheck happen
+
+	// Count healthy and unhealthy nodes
+	var healthy, unhealthy int
+	hp.mtx.RLock()
+	for _, h := range hp.hvmHandlers {
+		if h.state == StateHealthy {
+			healthy++
+			continue
+		}
+		unhealthy++
+	}
+	hp.mtx.RUnlock()
+	t.Logf("healthy: %v, unhealthy: %v", healthy, unhealthy)
+
+	if healthy != healthyCount {
+		t.Errorf("got %v healthy, want %v", healthy, healthyCount)
+	}
+	if unhealthy != unhealthyCount {
+		t.Errorf("got %v unhealthy, want %v", unhealthy, unhealthyCount)
 	}
 }
