@@ -43,7 +43,7 @@ func ethID() uint64 {
 	return binary.LittleEndian.Uint64(buf)
 }
 
-func CallEthereum(ctx context.Context, c *http.Client, url, method string, params []any) ([]byte, error) {
+func CallEthereum(ctx context.Context, c *http.Client, url, method string, params []any) (io.ReadCloser, error) {
 	ec := EthereumCall{
 		Method:  method,
 		Params:  params,
@@ -63,7 +63,6 @@ func CallEthereum(ctx context.Context, c *http.Client, url, method string, param
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -71,7 +70,7 @@ func CallEthereum(ctx context.Context, c *http.Client, url, method string, param
 		return nil, errors.New(http.StatusText(resp.StatusCode))
 	}
 
-	return io.ReadAll(resp.Body)
+	return resp.Body, nil
 }
 
 func (e EthereumProxy) Poke(ctx context.Context) error {

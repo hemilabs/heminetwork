@@ -461,7 +461,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	s.cmdsProcessed.Inc()
 }
 
-//func (s *Server) handleProxyError(w http.ResponseWriter, r *http.Request, e error) {
+// func (s *Server) handleProxyError(w http.ResponseWriter, r *http.Request, e error) {
 //	log.Tracef("handleProxyError: %v", r.RemoteAddr)
 //	defer log.Tracef("handleProxyError exit: %v", r.RemoteAddr)
 //
@@ -491,7 +491,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 //	default:
 //		panic(e)
 //	}
-//}
+// }
 
 func (s *Server) _clientRemove(remoteAddr string) {
 	if v, ok := s.clients[remoteAddr]; ok {
@@ -568,14 +568,13 @@ func (s *Server) nodeAdd(node string) error {
 	// For now, everything is ethereum but we can use the poker function to
 	// handle different types health checks.
 	hvmHandler.poker = NewEthereumProxy(func(ctx context.Context) error {
-		resp, err := CallEthereum(ctx, hvmHandler.c, hvmHandler.u.String(), "eth_blockNumber", nil)
+		body, err := CallEthereum(ctx, hvmHandler.c, hvmHandler.u.String(), "eth_blockNumber", nil)
 		if err != nil {
 			return err
 		}
 
 		j := make(map[string]any)
-		err = json.Unmarshal(resp, &j)
-		if err != nil {
+		if err := json.NewDecoder(body).Decode(&j); err != nil {
 			return err
 		}
 
