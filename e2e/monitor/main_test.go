@@ -159,7 +159,7 @@ func TestMonitor(t *testing.T) {
 }
 
 func TestL1L2Comms(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Minute)
 	defer cancel()
 
 	l1Client, err := ethclient.Dial("http://localhost:8545")
@@ -528,7 +528,7 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	receiverAddress := crypto.PubkeyToAddress(*publicKeyECDSA)
 
-	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0xC0d3c0d3c0D3c0d3C0D3c0D3C0d3C0D3C0D30010")), l2Client)
+	bridge, err := e2ebindings.NewL2StandardBridge(common.Address(common.FromHex("0x4200000000000000000000000000000000000010")), l2Client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,29 +717,107 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			Data:     params.Data,
 		}
 
-		if err := wait.ForWithdrawalCheck(ctx, l1Client, wd, optimismPortalProxy, opts.From); err != nil {
-			t.Fatal(err)
-		}
-
-		tx, err = portal.FinalizeWithdrawalTransaction(opts, wd.WithdrawalTransaction())
+		portal2, err := bindingspreview.NewOptimismPortal2(optimismPortalProxy, l1Client)
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		t.Logf("the finalization tx is %s", tx.Hash())
+		wdHash, err := wd.Hash()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
-		if receipt == nil {
+		provenGame, err := portal2.ProvenWithdrawals(&bind.CallOpts{}, wdHash, opts.From)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		caller := batching.NewMultiCaller(l1Client.Client(), batching.DefaultBatchSize)
+		gameContract, err := contracts.NewFaultDisputeGameContract(ctx, metrics.NoopContractMetrics, provenGame.DisputeGameProxy, caller)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
 			if i == abort {
-				t.Fatal("retries exceeded")
+				t.Fatal(err)
 			}
+			time.Sleep(1 * time.Second)
 			continue
 		}
 
-		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatal("tx failed")
+		resolvedtx, err := gameContract.ResolveClaimTx(0)
+		if err != nil {
+			t.Fatal(err)
 		}
 
+		_, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resolvedtx, err = gameContract.ResolveTx()
+		if err != nil {
+			t.Fatal(err)
+		}
+		
+		transactions.RequireSendTx(t, ctx, l1Client, resolvedtx, privateKey, transactions.WithReceiptStatusIgnore())
+
+		t.Log("FinalizeWithdrawal: waiting for successful withdrawal check...")
+
+		if err := wait.ForWithdrawalCheck(ctx, l1Client, wd, optimismPortalProxy, opts.From); err != nil {
+			t.Fatal(err)
+		}
+
+		tries := []*types.Transaction{}
+		for i := 0;i< retries;i++ {
+			nonce, err := l1Client.PendingNonceAt(ctx, receiverAddress)
+			if err != nil {
+				t.Fatal(err)
+			}
+	
+			gasPrice, err := l1Client.SuggestGasPrice(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+	
+			opts, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(1337))
+			if err != nil {
+				t.Fatal(err)
+			}
+	
+			opts.Nonce = big.NewInt(int64(nonce))
+			opts.GasLimit = 9000000
+			opts.GasFeeCap = gasPrice
+			opts.Value = big.NewInt(0)
+	
+			tx, err = portal.FinalizeWithdrawalTransaction(opts, wd.WithdrawalTransaction())
+			if err != nil {
+				t.Fatal(err)
+			}
+	
+			t.Logf("the finalization tx is %s", tx.Hash())
+			
+			tries = append(tries, tx)
+
+			receiptFound := false
+
+			for _, try := range tries {
+				receipt = waitForTxReceiptForSeconds(t, ctx, l1Client, try, 120 * time.Second)
+				if receipt == nil || receipt.Status == types.ReceiptStatusFailed {
+					if i == abort {
+						t.Fatal("retries exceeded")
+					}
+				} else if receipt.Status != types.ReceiptStatusFailed {
+					receiptFound = true
+					break
+				}
+			}
+
+			if receiptFound {
+				break
+			}
+		}
 		break
 
 	}
@@ -1209,35 +1287,57 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 			t.Fatal(err)
 		}
 
-		nonce, err = l1Client.PendingNonceAt(ctx, receiverAddress)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		// wd.Nonce = big.NewInt(int64(nonce))
-		opts.Nonce = big.NewInt(int64(nonce))
-
-		tx, err = portal.FinalizeWithdrawalTransaction(opts, wd.WithdrawalTransaction())
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		t.Logf("the finalization tx is %s", tx.Hash())
-
-		receipt = waitForTxReceipt(t, ctx, l1Client, tx)
-		if receipt == nil {
-			if i == abort {
-				t.Fatal("retries exceeded")
+		
+		tries := []*types.Transaction{}
+		for i := 0;i< retries;i++ {
+			nonce, err := l1Client.PendingNonceAt(ctx, receiverAddress)
+			if err != nil {
+				t.Fatal(err)
 			}
-			continue
-		}
+	
+			gasPrice, err := l1Client.SuggestGasPrice(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+	
+			opts, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(1337))
+			if err != nil {
+				t.Fatal(err)
+			}
+	
+			opts.Nonce = big.NewInt(int64(nonce))
+			opts.GasLimit = 9000000
+			opts.GasFeeCap = gasPrice
+			opts.Value = big.NewInt(0)
+	
+			tx, err = portal.FinalizeWithdrawalTransaction(opts, wd.WithdrawalTransaction())
+			if err != nil {
+				t.Fatal(err)
+			}
+	
+			t.Logf("the finalization tx is %s", tx.Hash())
+			
+			tries = append(tries, tx)
 
-		if receipt.Status == types.ReceiptStatusFailed {
-			t.Fatalf("tx failed, logs: %v", receipt.Logs)
-		}
+			receiptFound := false
 
+			for _, try := range tries {
+				receipt = waitForTxReceiptForSeconds(t, ctx, l1Client, try, 120 * time.Second)
+				if receipt == nil || receipt.Status == types.ReceiptStatusFailed {
+					if i == abort {
+						t.Fatal("retries exceeded")
+					}
+				} else if receipt.Status != types.ReceiptStatusFailed {
+					receiptFound = true
+					break
+				}
+			}
+
+			if receiptFound {
+				break
+			}
+		}
 		break
-
 	}
 
 	testToken, err := mybindings.NewTesttoken(l1Address, l1Client)
@@ -1255,9 +1355,9 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 	}
 }
 
-func waitForTxReceipt(t *testing.T, ctx context.Context, client *ethclient.Client, tx *types.Transaction) *types.Receipt {
+func waitForTxReceiptForSeconds(t *testing.T, ctx context.Context, client *ethclient.Client, tx *types.Transaction, s time.Duration) *types.Receipt {
 	t.Logf("will wait for receipt of tx %s", tx.Hash())
-	time.Sleep(5 * time.Second)
+	time.Sleep(s)
 	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
 	if err != nil {
 		t.Logf("error getting tx receipt, will retry: %s", err)
@@ -1265,6 +1365,10 @@ func waitForTxReceipt(t *testing.T, ctx context.Context, client *ethclient.Clien
 	} else {
 		return receipt
 	}
+}
+
+func waitForTxReceipt(t *testing.T, ctx context.Context, client *ethclient.Client, tx *types.Transaction) *types.Receipt {
+	return waitForTxReceiptForSeconds(t, ctx, client, tx, 5 * time.Second)
 }
 
 // put here for readability
