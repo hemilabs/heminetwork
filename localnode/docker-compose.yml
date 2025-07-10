@@ -13,9 +13,6 @@ services:
       dockerfile: "./docker/bfgd/Dockerfile"
       context: "./.."
     profiles: ["hemi", "full"]
-    depends_on:
-      bfgd-postgres:
-        condition: "service_started"
     environment:
       BFG_LOG_LEVEL: "INFO"
       BFG_PUBLIC_ADDRESS: ":8383"
