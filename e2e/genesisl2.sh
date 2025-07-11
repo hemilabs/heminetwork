@@ -186,6 +186,7 @@ echo "$(tomlq -t ".globalDeployOverrides.preimageOracleChallengePeriod = 10" .de
 echo "$(tomlq -t ".globalDeployOverrides.faultGameClockExtension = 10" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".globalDeployOverrides.faultGameMaxClockDuration = 100" .deployer/intent.toml)" > .deployer/intent.toml
 echo "$(tomlq -t ".globalDeployOverrides.dangerouslyAllowCustomDisputeParameters = true" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.disputeGameFinalityDelaySeconds = 10" .deployer/intent.toml)" > .deployer/intent.toml
 
 
 # echo "$(tomlq -t "del(.superchainRoles)" .deployer/intent.toml)" > .deployer/intent.toml

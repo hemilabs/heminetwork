@@ -192,13 +192,13 @@ func TestL1L2Comms(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go func() {
+	func() {
 		defer wg.Done()
 		bridgeERC20FromL2ToL1(t, ctx, l1Address, l2Address, privateKey, l1Client, l2Client)
 	}()
 
 	wg.Add(1)
-	go func() {
+	func() {
 		defer wg.Done()
 		bridgeEthL2ToL1(t, ctx, l1Client, l2Client, privateKey)
 	}()
@@ -730,51 +730,65 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			Data:     params.Data,
 		}
 
-		// portal2, err := bindingspreview.NewOptimismPortal2(optimismPortalProxy, l1Client)
-		// if err != nil {
-		// 	t.Fatal(err)
-		// }
+		portal2, err := bindingspreview.NewOptimismPortal2(optimismPortalProxy, l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		// wdHash, err := wd.Hash()
-		// if err != nil {
-		// 	t.Fatal(err)
-		// }
+		wdHash, err := wd.Hash()
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		// provenGame, err := portal2.ProvenWithdrawals(&bind.CallOpts{}, wdHash, opts.From)
-		// if err != nil {
-		// 	t.Fatal(err)
-		// }
+		provenGame, err := portal2.ProvenWithdrawals(&bind.CallOpts{}, wdHash, opts.From)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		// caller := batching.NewMultiCaller(l1Client.Client(), batching.DefaultBatchSize)
-		// gameContract, err := contracts.NewFaultDisputeGameContract(ctx, metrics.NoopContractMetrics, provenGame.DisputeGameProxy, caller)
-		// if err != nil {
-		// 	t.Fatal(err)
-		// }
+		caller := batching.NewMultiCaller(l1Client.Client(), batching.DefaultBatchSize)
+		gameContract, err := contracts.NewFaultDisputeGameContract(ctx, metrics.NoopContractMetrics, provenGame.DisputeGameProxy, caller)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		// if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
-		// 	if i == abort {
-		// 		t.Fatal(err)
-		// 	}
-		// 	time.Sleep(1 * time.Second)
-		// 	continue
-		// }
+		gameContractCaller, err := e2ebindings.NewFaultDisputeGame(provenGame.DisputeGameProxy, l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		// resolvedtx, err := gameContract.ResolveClaimTx(0)
-		// if err != nil {
-		// 	t.Fatal(err)
-		// }
+		maxClockDuration, err := gameContractCaller.MaxClockDuration(&bind.CallOpts{} )
+		if err != nil {
+			t.Fatal(err)
+		}
 
-		// _, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
-		// if err != nil {
-		// 	t.Fatal(err)
-		// }
+		t.Logf("the max clock duration is %d, will wait", maxClockDuration)
 
-		// resolvedtx, err = gameContract.ResolveTx()
-		// if err != nil {
-		// 	t.Fatal(err)
-		// }
+		time.Sleep(time.Duration(maxClockDuration) * time.Second + 1)
+
+		if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
+			if i == abort {
+				t.Fatal(err)
+			}
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		resolvedtx, err := gameContract.ResolveClaimTx(0)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resolvedtx, err = gameContract.ResolveTx()
+		if err != nil {
+			t.Fatal(err)
+		}
 		
-		// transactions.RequireSendTx(t, ctx, l1Client, resolvedtx, privateKey, transactions.WithReceiptStatusIgnore())
+		transactions.RequireSendTx(t, ctx, l1Client, resolvedtx, privateKey, transactions.WithReceiptStatusIgnore())
 
 		t.Log("FinalizeWithdrawal: waiting for successful withdrawal check...")
 
@@ -1253,6 +1267,13 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 			t.Fatal(err)
 		}
 
+		fds, err := portal2.DisputeGameFinalityDelaySeconds(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("the disputeGameFinalityDelaySeconds is %d", fds)
+
 		wdHash, err := wd.Hash()
 		if err != nil {
 			t.Fatal(err)
@@ -1268,6 +1289,20 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		gameContractCaller, err := e2ebindings.NewFaultDisputeGame(provenGame.DisputeGameProxy, l1Client)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		maxClockDuration, err := gameContractCaller.MaxClockDuration(&bind.CallOpts{} )
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("the max clock duration is %d, will wait", maxClockDuration)
+
+		time.Sleep(time.Duration(maxClockDuration) * time.Second + 1)
 
 		if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
 			if i == abort {
