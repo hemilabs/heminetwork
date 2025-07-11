@@ -243,12 +243,18 @@ func (s *Server) promConnections() float64 {
 func (s *Server) promAvgClientSetupLatency() float64 {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
+	if s.proxyCalls == 0 {
+		return 0
+	}
 	return math.Round(float64(s.setupDuration) / float64(s.proxyCalls))
 }
 
 func (s *Server) promAvgProxyLatency() float64 {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
+	if s.proxyCalls == 0 {
+		return 0
+	}
 	return math.Round(float64(s.proxyDuration) / float64(s.proxyCalls))
 }
 
