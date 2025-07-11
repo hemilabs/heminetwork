@@ -100,6 +100,12 @@ type client struct {
 	ticker *time.Ticker
 }
 
+// newClient creates a new client that has a timeout callback function. This
+// can be used to construct a idle timeout reaper.
+//
+// XXX this function is remarkably slow, we should call it sparingly unlike
+// we do now. Reaped clients should be halted and returned to a pool for
+// future use.
 func newClient(ctx context.Context, node int, duration time.Duration, timeout func()) *client {
 	c := &client{
 		node:   node,
@@ -437,6 +443,8 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 			// We need global context here, not request context
 			// since that one goes away prior the client idle
 			// timeout.
+			// XXX newClient is very expensive. See function for
+			// additional comments.
 			s.clients[r.RemoteAddr] = newClient(s.httpServer.BaseContext(nil), id,
 				s.cfg.ClientIdleTimeout, func() {
 					s.clientRemove(r.RemoteAddr)
@@ -526,7 +534,7 @@ func (s *Server) nodeAdd(node string) error {
 	for k := range s.hvmHandlers {
 		if s.hvmHandlers[k].u.String() == u.String() {
 			if s.hvmHandlers[k].state == StateRemoved {
-				s._nodeNew(k) // add it back
+				s._newNode(k) // add it back
 				return nil
 			}
 			return errors.New("duplicate")
@@ -612,7 +620,7 @@ func newEthereumPoker(client *http.Client, url string) func(ctx context.Context)
 	}
 }
 
-func (s *Server) nodeRemove(node string) error {
+func (s *Server) removeNode(node string) error {
 	u, err := url.Parse(node)
 	if err != nil {
 		return fmt.Errorf("invalid url: %w", err)
@@ -640,7 +648,7 @@ func (s *Server) nodeRemove(node string) error {
 }
 
 // _countNode must be called with the mutex held.
-func (s *Server) _nodeCount(id int) int {
+func (s *Server) _countNode(id int) int {
 	var count int
 	for _, v := range s.clients {
 		if v.node == id {
@@ -650,8 +658,8 @@ func (s *Server) _nodeCount(id int) int {
 	return count
 }
 
-// _nodeReap must be called with the mutex held.
-func (s *Server) _nodeReap(id int) {
+// _reapNode must be called with the mutex held.
+func (s *Server) _reapNode(id int) {
 	for k, v := range s.clients {
 		if v.node == id {
 			delete(s.clients, k)
@@ -659,12 +667,12 @@ func (s *Server) _nodeReap(id int) {
 	}
 }
 
-// _nodeNew must be called with lock held.
-func (s *Server) _nodeNew(id int) {
+// _newNode must be called with lock held.
+func (s *Server) _newNode(id int) {
 	if s.hvmHandlers[id].state != StateNew {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateNew
-		s._nodeReap(id)
+		s._reapNode(id)
 		log.Infof("Marking hvm new %v: %v", id, s.hvmHandlers[id].u)
 	}
 }
@@ -674,7 +682,7 @@ func (s *Server) _nodeRemoved(id int) {
 	if s.hvmHandlers[id].state != StateRemoved {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateRemoved
-		s._nodeReap(id)
+		s._reapNode(id)
 		log.Infof("Marking hvm removed %v: %v", id, s.hvmHandlers[id].u)
 	}
 }
@@ -684,7 +692,7 @@ func (s *Server) nodeHealthy(id int) {
 	if s.hvmHandlers[id].state != StateHealthy {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateHealthy
-		s._nodeReap(id)
+		s._reapNode(id)
 		log.Infof("Marking hvm healthy %v: %v", id, s.hvmHandlers[id].u)
 	}
 	s.mtx.Unlock()
@@ -695,7 +703,7 @@ func (s *Server) nodeUnhealthy(id int, err error) {
 	if s.hvmHandlers[id].state != StateUnhealthy {
 		s.hvmHandlers[id].connections = 0 // reset connections
 		s.hvmHandlers[id].state = StateUnhealthy
-		s._nodeReap(id)
+		s._reapNode(id)
 		log.Infof("Marking hvm unhealthy %v: %v reason: %v",
 			id, s.hvmHandlers[id].u, err)
 	}
@@ -798,7 +806,7 @@ func (s *Server) handleControlRemoveRequest(w http.ResponseWriter, r *http.Reque
 	nes := make([]NodeError, len(ns))
 	for k := range ns {
 		nes[k].NodeURL = ns[k].NodeURL
-		err = s.nodeRemove(ns[k].NodeURL)
+		err = s.removeNode(ns[k].NodeURL)
 		if err != nil {
 			nes[k].Error = err.Error()
 			continue
@@ -822,7 +830,7 @@ func (s *Server) handleControlListRequest(w http.ResponseWriter, r *http.Request
 		nhs = append(nhs, NodeHealth{
 			NodeURL:     s.hvmHandlers[k].u.String(),
 			Status:      stateString[s.hvmHandlers[k].state],
-			Connections: s._nodeCount(k),
+			Connections: s._countNode(k),
 		})
 	}
 	s.mtx.Unlock()
