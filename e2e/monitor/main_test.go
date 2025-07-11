@@ -44,7 +44,7 @@ import (
 const (
 	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 	retries            = 10
-	btcAddress         = "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG"
+	btcAddress         = "mv5gj33YaFviPFDmkkUpb31C4uxoB4ZZ5D"
 )
 
 var (
@@ -131,7 +131,7 @@ func TestL1L2Comms(t *testing.T) {
 			name = "testing non-sequencing client"
 		}
 		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Minute)
 			defer cancel()
 
 			l1Client, err := ethclient.Dial("http://localhost:8545")
@@ -327,7 +327,7 @@ func hvmBtcBalance(t *testing.T, ctx context.Context, l2Client *ethclient.Client
 
 	waitForTxReceipt(t, ctx, l2Client, tx)
 
-	balance, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinAddressBalance(nil, "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG")
+	balance, err := l2ReadBalances.L2ReadBalancesCaller.GetBitcoinAddressBalance(nil, btcAddress)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1228,7 +1228,7 @@ func assertSafeAndFinalBlocksAreProgressing(t *testing.T, ctx context.Context, l
 }
 
 func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *ethclient.Client, opNodeSequencingEndpoint string, opNodeNonSequencingEndpoint string) {
-	bigTip, err := l2Client.HeaderByNumber(context.Background(), nil)
+	bigTip, err := l2Client.HeaderByNumber(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("error getting l2 tip: %s", err)
 	}

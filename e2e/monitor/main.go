@@ -38,7 +38,7 @@ type state struct {
 	lastBatcherPublicationHash  string
 	batcherPublicationCount     int
 	popMinerBalance             string // very large number
-	tipDiff                     int
+	tipDiff                     uint64
 	tipHash                     string
 	tipHashNonSequencing        string
 }
@@ -152,6 +152,10 @@ func monitorBitcoinBlocksCreated(ctx context.Context, s *state, mtx *sync.Mutex)
 			panic(fmt.Sprintf("could not create new client from config %v: %v", config, err))
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
+
 		count, err := c.GetBlockCount()
 		if err != nil {
 			panic(fmt.Sprintf("could not get block count: %v", err))
@@ -185,6 +189,10 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			panic(fmt.Sprintf("could not create new client with config %v: %v", config, err))
 		}
 
+		if ctx.Err() != nil {
+			return
+		}
+
 		tips, err := c.GetChainTips()
 		if err != nil {
 			panic(fmt.Sprintf("could not get chain tips: %v", err))
@@ -198,6 +206,10 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		hash, err := chainhash.NewHashFromStr(tips[0].Hash)
 		if err != nil {
 			panic(fmt.Sprintf("could not get hash from string %s: %v", tips[0].Hash, err))
+		}
+
+		if ctx.Err() != nil {
+			return
 		}
 
 		block, err := c.GetBlock(hash)
@@ -219,6 +231,10 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 			}
 
 			hash = &block.Header.PrevBlock
+			if ctx.Err() != nil {
+				return
+			}
+
 			block, err = c.GetBlock(hash)
 			if err != nil {
 				break
@@ -300,7 +316,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		const hexValue = eth.call({
 		  to: '0x4200000000000000000000000000000000000042',
 		  from: eth.accounts[0],
-		  data: '0x70a08231000000000000000000000000B275Ec0935e404BEe2d40622de13495F42F84d90',
+		  data: '0x70a0823100000000000000000000000033F689A1d3a51881Ce0c279664C7Fb647bB5c7fC',
 		});
 		console.log(Number.parseInt(hexValue, 16));
 	`
@@ -338,9 +354,9 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		return strings.Split(string(output), "\n")[0]
 	}
 
-	runJsToInt := func(jsi string, layer string, ipcPath string, replica string) int {
+	runJsToInt := func(jsi string, layer string, ipcPath string, replica string) uint64 {
 		val := runJs(jsi, layer, ipcPath, replica)
-		intVal, err := strconv.Atoi(val)
+		intVal, err := strconv.ParseUint(val, 10, 64)
 		if err != nil {
 			panic(fmt.Sprintf("error converting to int: %s", err))
 		}

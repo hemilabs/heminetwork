@@ -5,60 +5,55 @@
 package popm
 
 import (
-	"bytes"
-	"cmp"
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
-	"net/http"
-	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
-	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
-	btcmempool "github.com/btcsuite/btcd/mempool"
-	btctxscript "github.com/btcsuite/btcd/txscript"
-	btcwire "github.com/btcsuite/btcd/wire"
-	"github.com/davecgh/go-spew/spew"
-	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/btcsuite/btcd/btcutil/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/api/auth"
-	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/api/gethapi"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul/memory"
 	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
-	"github.com/hemilabs/heminetwork/version"
 )
-
-// XXX we should debate if we can make pop miner fully transient. It feels like
-// it should be.
 
 const (
 	logLevel = "INFO"
+	appName  = "popm"
 
-	promSubsystem = "popm_service" // Prometheus
+	defaultPopAccount           = 1337
+	defaultPopChild             = 0
+	defaultBitcoinConfirmations = 6
+	defaultOpgethURL            = "http://127.0.0.1:9999/v1/ws"
 
-	l2KeystonesMaxSize = 10
+	defaultL2KeystonesCount = 12 // 1 hour
+
+	bitcoinSourceBlockstream      = "blockstream"
+	bitcoinSourceTBC              = "tbc"
+	defaultOpgethReconnectTimeout = 5 * time.Second
+	defaultL2KeystoneMaxAge       = 4 * time.Hour
+	defaultL2KeystonePollTimeout  = 13 * time.Second
+	defaultL2KeystoneRetryTimeout = 15 * time.Second
 )
 
-var (
-	log = loggo.GetLogger("popm")
-
-	l2KeystoneRetryTimeout = 15 * time.Second
-)
+var log = loggo.GetLogger("popm")
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -67,857 +62,637 @@ func init() {
 }
 
 type Config struct {
-	// BFGWSURL specifies the URL of the BFG private websocket endpoint
-	BFGWSURL string
-
-	// BTCChainName specifies the name of the Bitcoin chain that
-	// this PoP miner is operating on.
-	BTCChainName string // XXX are we brave enough to rename this BTCNetwork?
-
-	// BTCPrivateKey provides a BTC private key as a string of
-	// hexadecimal digits.
-	BTCPrivateKey string
-
-	BFGRequestTimeout time.Duration
-
-	LogLevel string
-
+	BitcoinConfirmations    uint
+	BitcoinSecret           string
+	BitcoinSource           string
+	BitcoinURL              string
+	LogLevel                string
+	Network                 string
+	OpgethURL               string
+	PprofListenAddress      string
 	PrometheusListenAddress string
+	PrometheusNamespace     string
+	RetryMineThreshold      uint
 
-	PprofListenAddress string
-
-	RetryMineThreshold uint
-
-	StaticFee uint
+	// cooked settings, do not export
+	opgethReconnectTimeout time.Duration
+	l2KeystoneMaxAge       time.Duration
+	l2KeystonePollTimeout  time.Duration
 }
-
-const DefaultBFGRequestTimeout = 15 * time.Second
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		BFGWSURL:          "http://localhost:8383/v1/ws/public",
-		BFGRequestTimeout: DefaultBFGRequestTimeout,
-		BTCChainName:      "mainnet",
+		Network:                "testnet3",
+		PrometheusNamespace:    appName,
+		OpgethURL:              defaultOpgethURL,
+		BitcoinConfirmations:   defaultBitcoinConfirmations,
+		BitcoinSource:          bitcoinSourceTBC,
+		BitcoinURL:             tbcgozer.DefaultURL,
+		opgethReconnectTimeout: defaultOpgethReconnectTimeout,
+		l2KeystoneMaxAge:       defaultL2KeystoneMaxAge,
+		l2KeystonePollTimeout:  defaultL2KeystonePollTimeout,
 	}
 }
 
-type bfgCmd struct {
-	msg any
-	ch  chan any
+type keystoneState int
+
+const (
+	keystoneStateInvalid   keystoneState = 0
+	keystoneStateNew       keystoneState = 1
+	keystoneStateBroadcast keystoneState = 2
+	keystoneStateError     keystoneState = 3
+	keystoneStateMined     keystoneState = 4
+)
+
+type keystone struct {
+	// comes from opgeth
+	keystone *hemi.L2Keystone
+	hash     *chainhash.Hash // map key
+
+	// comes from gozer
+	abbreviated *gozer.L2KeystoneBlockInfo
+
+	expires *time.Time // Used to age out of cache
+
+	// internal state                  /-----> 4
+	state keystoneState // 0 -> 1 -> 2 -> 3 -> 4
+	//                               2 <---/
 }
 
-type L2KeystoneProcessingContainer struct {
-	l2Keystone         hemi.L2Keystone
-	requiresProcessing bool
+func timestamp(d time.Duration) *time.Time {
+	t := time.Now().Add(d)
+	return &t
 }
 
-type Miner struct {
+type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
-	holdoffTimeout time.Duration
-	requestTimeout time.Duration
+	cfg *Config
 
-	cfg   *Config
-	txFee atomic.Uint32
+	// bitcoin
+	params  *chaincfg.Params
+	public  *hdkeychain.ExtendedKey
+	address btcutil.Address
 
-	btcChainParams *btcchaincfg.Params
-	btcPrivateKey  *dcrsecp256k1.PrivateKey
-	btcPublicKey   *dcrsecp256k1.PublicKey
-	btcAddress     *btcutil.AddressPubKeyHash
+	isRunning      bool
+	promCollectors []prometheus.Collector
 
-	lastKeystone *hemi.L2Keystone
+	// opgeth
+	opgethClient *ethclient.Client
+	opgethWG     sync.WaitGroup
 
-	// Prometheus
-	isRunning bool
+	// wallet
+	gozer gozer.Gozer
+	mz    zuul.Zuul
+	vc    *vinzclortho.VinzClortho
 
-	bfgWg        sync.WaitGroup
-	bfgCmdCh     chan bfgCmd // commands to send to bfg
-	bfgConnected atomic.Bool
-
-	mineNowCh chan struct{}
-
-	l2Keystones map[string]L2KeystoneProcessingContainer
+	// mining
+	retryThreshold uint32
+	keystones      map[chainhash.Hash]*keystone
+	workC          chan struct{}
 }
 
-func NewMiner(cfg *Config) (*Miner, error) {
+func NewServer(cfg *Config) (*Server, error) {
 	if cfg == nil {
 		cfg = NewDefaultConfig()
 	}
-	if cfg.BFGRequestTimeout <= 0 {
-		cfg.BFGRequestTimeout = DefaultBFGRequestTimeout
-	}
 
-	m := &Miner{
+	s := &Server{
 		cfg:            cfg,
-		bfgCmdCh:       make(chan bfgCmd, 10),
-		holdoffTimeout: 5 * time.Second,
-		requestTimeout: cfg.BFGRequestTimeout,
-		mineNowCh:      make(chan struct{}, 1),
-		l2Keystones:    make(map[string]L2KeystoneProcessingContainer, l2KeystonesMaxSize),
+		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
+		workC:          make(chan struct{}, 2),
 	}
-	m.SetFee(cfg.StaticFee)
 
-	switch strings.ToLower(cfg.BTCChainName) {
+	switch strings.ToLower(cfg.Network) {
 	case "mainnet":
-		m.btcChainParams = &btcchaincfg.MainNetParams
+		s.params = &chaincfg.MainNetParams
 	case "testnet", "testnet3":
-		m.btcChainParams = &btcchaincfg.TestNet3Params
+		s.params = &chaincfg.TestNet3Params
+	case "localnet":
+		s.params = &chaincfg.RegressionNetParams
 	default:
-		return nil, fmt.Errorf("unknown BTC chain name %q", cfg.BTCChainName)
+		return nil, fmt.Errorf("unknown bitcoin network %v", cfg.Network)
 	}
 
-	if cfg.BTCPrivateKey == "" {
-		return nil, errors.New("no BTC private key provided")
+	if cfg.BitcoinSecret == "" {
+		return nil, errors.New("no bitcoin secret provided")
 	}
 	var err error
-	m.btcPrivateKey, m.btcPublicKey, m.btcAddress, err = bitcoin.KeysAndAddressFromHexString(cfg.BTCPrivateKey, m.btcChainParams)
+	s.vc, err = vinzclortho.New(s.params)
 	if err != nil {
 		return nil, err
 	}
-	return m, nil
-}
-
-// Fee returns the current fee in sats/vB used by the PoP Miner when
-// creating PoP transactions.
-func (m *Miner) Fee() uint {
-	return uint(m.txFee.Load())
-}
-
-// SetFee sets the fee in sats/vB used by the PoP Miner when creating
-// PoP transactions.
-func (m *Miner) SetFee(fee uint) {
-	switch {
-	case fee < 1:
-		fee = 1
-	case fee > 1<<32-1:
-		fee = 1<<32 - 1
+	err = s.vc.Unlock(cfg.BitcoinSecret)
+	if err != nil {
+		return nil, err
 	}
-	m.txFee.Store(uint32(fee))
-}
-
-func (m *Miner) bitcoinBroadcast(ctx context.Context, tx []byte) ([]byte, error) {
-	bbr := &bfgapi.BitcoinBroadcastRequest{
-		Transaction: tx,
+	ek, err := s.vc.DeriveHD(defaultPopAccount, defaultPopChild)
+	if err != nil {
+		return nil, err
 	}
-	res, err := m.callBFG(ctx, m.requestTimeout, bbr)
+	s.address, s.public, err = vinzclortho.AddressAndPublicFromExtended(s.params, ek)
 	if err != nil {
 		return nil, err
 	}
 
-	bbResp, ok := res.(*bfgapi.BitcoinBroadcastResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a bitcoin broadcast response %T", res)
-	}
-
-	if bbResp.Error != nil {
-		return nil, bbResp.Error
-	}
-
-	return bbResp.TXID, nil
-}
-
-func (m *Miner) bitcoinHeight(ctx context.Context) (uint64, error) {
-	bir := &bfgapi.BitcoinInfoRequest{}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, bir)
+	s.mz, err = memory.New(s.params)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-
-	biResp, ok := res.(*bfgapi.BitcoinInfoResponse)
-	if !ok {
-		return 0, errors.New("not a BitcoinIfnoResponse")
-	}
-
-	if biResp.Error != nil {
-		return 0, biResp.Error
-	}
-
-	return biResp.Height, nil
-}
-
-func (m *Miner) bitcoinUTXOs(ctx context.Context, scriptHash []byte) ([]*bfgapi.BitcoinUTXO, error) {
-	bur := &bfgapi.BitcoinUTXOsRequest{
-		ScriptHash: scriptHash,
-	}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, bur)
+	err = s.mz.PutKey(&zuul.NamedKey{
+		Name:       "private",
+		Account:    defaultPopAccount,
+		Child:      defaultPopChild,
+		HD:         true,
+		PrivateKey: ek,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	buResp, ok := res.(*bfgapi.BitcoinUTXOsResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a buResp %T", res)
-	}
-
-	if buResp.Error != nil {
-		return nil, buResp.Error
-	}
-
-	return buResp.UTXOs, nil
+	return s, nil
 }
 
-func pickUTXO(utxos []*bfgapi.BitcoinUTXO, amount int64) (*bfgapi.BitcoinUTXO, error) {
-	log.Tracef("pickUTXO")
-	defer log.Debugf("pickUTXO exit")
-
-	// Filter available UTXOs with value >= amount.
-	var ux []*bfgapi.BitcoinUTXO
-	for i, utxo := range utxos {
-		if utxo.Value >= amount {
-			ux = append(ux, utxos[i])
-		}
-	}
-
-	num := len(ux)
-	log.Debugf("Found %d UTXOs (in %d) with value >= %d",
-		num, len(utxos), amount)
-
-	if num == 0 {
-		// There are no available UTXOs with a value >= amount.
-		return nil, errors.New("insufficient funds to PoP mine, " +
-			"please send additional funds to continue mining")
-	}
-
-	utxo := ux[0]
-	if num > 1 {
-		// There are more than one UTXOs with values >= amount.
-		// Select one randomly.
-		r, err := rand.Int(rand.Reader, big.NewInt(int64(len(ux))))
-		if err != nil {
-			return nil, fmt.Errorf("generate random: %w", err)
-		}
-		utxo = ux[int(r.Int64())]
-	}
-
-	log.Debugf("Selected UTXO to spend: %s (%d) with value %d",
-		utxo.Hash, utxo.Index, utxo.Value)
-	return utxo, nil
+func (s *Server) running() bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return s.isRunning
 }
 
-func createTx(l2Keystone *hemi.L2Keystone, btcHeight uint64, utxo *bfgapi.BitcoinUTXO, payToScript []byte, feeAmount int64, minRelayTxFee int64) (*btcwire.MsgTx, error) {
-	btx := btcwire.MsgTx{
-		Version:  2,
-		LockTime: uint32(btcHeight),
-	}
-
-	// Add UTXO as input.
-	outPoint := btcwire.OutPoint{
-		Hash:  btcchainhash.Hash(utxo.Hash),
-		Index: utxo.Index,
-	}
-	btx.TxIn = []*btcwire.TxIn{
-		btcwire.NewTxIn(&outPoint, payToScript, nil),
-	}
-
-	// Add output for change as P2PKH.
-	changeAmount := utxo.Value - feeAmount
-	changeTxOut := btcwire.NewTxOut(changeAmount, payToScript)
-
-	// If the change output would be considered dust, then don't include the
-	// output and instead leave the remaining to be included as a fee.
-	//
-	// TODO: When we rewrite the fee estimation and BFG has access to a mempool,
-	//  improve the minRelayTxFee to be calculated from the mempool data.
-	if minRelayTxFee < 1 || !btcmempool.IsDust(changeTxOut, btcutil.Amount(minRelayTxFee)) {
-		btx.TxOut = []*btcwire.TxOut{changeTxOut}
-	}
-
-	// Add PoP TX using OP_RETURN output.
-	aks := hemi.L2KeystoneAbbreviate(*l2Keystone)
-	popTx := pop.TransactionL2{L2Keystone: aks}
-	popTxOpReturn, err := popTx.EncodeToOpReturn()
-	if err != nil {
-		return nil, fmt.Errorf("encode PoP transaction: %w", err)
-	}
-	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
-
-	return &btx, nil
+func (s *Server) testAndSetRunning(b bool) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	old := s.isRunning
+	s.isRunning = b
+	return old != s.isRunning
 }
 
-// XXX this function is not right. Clean it up and ensure we make this in at
-// least 2 functions. This needs to create and sign a tx, and then broadcast
-// separately. Also utxo picker needs to be fixed. Don't return a fake utxo
-// etc. Fix fee estimation.
-func (m *Miner) mineKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
-	log.Infof("Mining an L2 keystone at height %d...", ks.L2BlockNumber)
-
-	btcHeight, err := m.bitcoinHeight(ctx)
-	if err != nil {
-		return fmt.Errorf("get Bitcoin height: %w", err)
-	}
-
-	payToScript, err := btctxscript.PayToAddrScript(m.btcAddress)
-	if err != nil {
-		return fmt.Errorf("get pay to address script: %w", err)
-	}
-	if len(payToScript) != 25 {
-		return fmt.Errorf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
-	}
-	scriptHash := btcchainhash.Hash(sha256.Sum256(payToScript))
-
-	// Estimate BTC fees.
-	txLen := 285 // XXX: for now all transactions are the same size
-	feePerKB := 1024 * m.Fee()
-	feeAmount := (int64(txLen) * int64(feePerKB)) / 1024
-
-	// Retrieve available UTXOs for the miner.
-	log.Tracef("Looking for UTXOs for script hash %v", scriptHash)
-	utxos, err := m.bitcoinUTXOs(ctx, scriptHash[:])
-	if err != nil {
-		return fmt.Errorf("retrieve available Bitcoin UTXOs: %w", err)
-	}
-
-	log.Debugf("Miner has %d available UTXOs for script hash %v at Bitcoin height %d",
-		len(utxos), scriptHash, btcHeight)
-
-	// Select UTXO to spend.
-	utxo, err := pickUTXO(utxos, feeAmount)
-	if err != nil {
-		return fmt.Errorf("pick UTXO to spend: %w", err)
-	}
-
-	// Build transaction.
-	btx, err := createTx(ks, btcHeight, utxo, payToScript, feeAmount, int64(btcmempool.DefaultMinRelayTxFee))
-	if err != nil {
-		return fmt.Errorf("create Bitcoin transaction: %w", err)
-	}
-
-	// Sign input.
-	err = bitcoin.SignTx(btx, payToScript, m.btcPrivateKey, m.btcPublicKey)
-	if err != nil {
-		return fmt.Errorf("sign Bitcoin transaction: %w", err)
-	}
-
-	// broadcast tx
-	var buf bytes.Buffer
-	if err := btx.Serialize(&buf); err != nil {
-		return fmt.Errorf("serialize Bitcoin transaction: %w", err)
-	}
-	txb := buf.Bytes()
-
-	log.Tracef("Broadcasting Bitcoin transaction %x", txb)
-	log.Infof("Broadcasting PoP transaction to Bitcoin %s...",
-		m.btcChainParams.Name)
-
-	txh, err := m.bitcoinBroadcast(ctx, txb)
-	if err != nil {
-		return fmt.Errorf("broadcast PoP transaction: %w", err)
-	}
-	txHash, err := btcchainhash.NewHash(txh)
-	if err != nil {
-		return fmt.Errorf("create BTC hash from transaction hash: %w", err)
-	}
-
-	log.Infof(
-		"Successfully broadcast PoP transaction to Bitcoin %s with TX hash %v",
-		m.btcChainParams.Name, txHash,
-	)
-
-	return nil
-}
-
-func (m *Miner) Ping(ctx context.Context, timestamp int64) (*bfgapi.PingResponse, error) {
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.PingRequest{
-		Timestamp: timestamp,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("ping: %w", err)
-	}
-
-	pr, ok := res.(*bfgapi.PingResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a PingResponse: %T", res)
-	}
-
-	return pr, nil
-}
-
-func (m *Miner) L2Keystones(ctx context.Context, count uint64) (*bfgapi.L2KeystonesResponse, error) {
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.L2KeystonesRequest{
-		NumL2Keystones: count,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("l2keystones: %w", err)
-	}
-
-	kr, ok := res.(*bfgapi.L2KeystonesResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a L2KeystonesResponse: %T", res)
-	}
-
-	if kr.Error != nil {
-		return nil, kr.Error
-	}
-
-	return kr, nil
-}
-
-func (m *Miner) BitcoinBalance(ctx context.Context, scriptHash string) (*bfgapi.BitcoinBalanceResponse, error) {
-	if scriptHash[0:2] == "0x" || scriptHash[0:2] == "0X" {
-		scriptHash = scriptHash[2:]
-	}
-	sh, err := hex.DecodeString(scriptHash)
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinBalanceRequest{
-		ScriptHash: sh,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-
-	br, ok := res.(*bfgapi.BitcoinBalanceResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinBalanceResponse: %T", res)
-	}
-
-	if br.Error != nil {
-		return nil, br.Error
-	}
-
-	return br, nil
-}
-
-func (m *Miner) BitcoinInfo(ctx context.Context) (*bfgapi.BitcoinInfoResponse, error) {
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinInfoRequest{})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinInfo: %w", err)
-	}
-
-	ir, ok := res.(*bfgapi.BitcoinInfoResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinInfoResponse: %T", res)
-	}
-
-	if ir.Error != nil {
-		return nil, ir.Error
-	}
-
-	return ir, nil
-}
-
-func (m *Miner) BitcoinUTXOs(ctx context.Context, scriptHash string) (*bfgapi.BitcoinUTXOsResponse, error) {
-	if scriptHash[0:2] == "0x" || scriptHash[0:2] == "0X" {
-		scriptHash = scriptHash[2:]
-	}
-	sh, err := hex.DecodeString(scriptHash)
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinBalance: %w", err)
-	}
-	res, err := m.callBFG(ctx, m.requestTimeout, &bfgapi.BitcoinUTXOsRequest{
-		ScriptHash: sh,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("bitcoinUTXOs: %w", err)
-	}
-
-	ir, ok := res.(*bfgapi.BitcoinUTXOsResponse)
-	if !ok {
-		return nil, fmt.Errorf("not a BitcoinUTXOsResponse: %T", res)
-	}
-
-	if ir.Error != nil {
-		return nil, ir.Error
-	}
-
-	return ir, nil
-}
-
-func (m *Miner) mineKnownKeystones(ctx context.Context) {
-	copies := m.l2KeystonesForProcessing()
-
-	for _, e := range copies {
-		serialized := hemi.L2KeystoneAbbreviate(e).Serialize()
-		key := hex.EncodeToString(serialized[:])
-
-		log.Debugf("Received keystone for mining with height %v...", e.L2BlockNumber)
-
-		err := m.mineKeystone(ctx, &e)
-		if err != nil {
-			log.Errorf("Failed to mine keystone with height %d: %v",
-				e.L2BlockNumber, err)
-		}
-
-		m.mtx.Lock()
-
-		if v, ok := m.l2Keystones[key]; ok {
-			// if there is an error, mark keystone as "requires processing" so
-			// potentially gets retried, otherwise set this to false to
-			// nothing tries to process it
-			v.requiresProcessing = err != nil
-			m.l2Keystones[key] = v
-		}
-
-		m.mtx.Unlock()
-	}
-}
-
-func (m *Miner) mine(ctx context.Context) {
-	defer m.wg.Done()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.mineNowCh:
-			m.mineKnownKeystones(ctx)
-		case <-time.After(l2KeystoneRetryTimeout):
-			m.mineKnownKeystones(ctx)
-		}
-	}
-}
-
-func (m *Miner) queueKeystoneForMining(keystone *hemi.L2Keystone) {
-	m.AddL2Keystone(*keystone)
-	select {
-	case m.mineNowCh <- struct{}{}:
-	default:
-	}
-}
-
-func sortL2KeystonesByL2BlockNumberAsc(a, b hemi.L2Keystone) int {
-	return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
-}
-
-func (m *Miner) processReceivedKeystones(ctx context.Context, l2Keystones []hemi.L2Keystone) {
-	slices.SortFunc(l2Keystones, sortL2KeystonesByL2BlockNumberAsc)
-
-	for _, kh := range l2Keystones {
-		if ctx.Err() != nil {
-			return
-		}
-
-		var lastL2BlockNumber uint32
-		if m.lastKeystone != nil {
-			lastL2BlockNumber = m.lastKeystone.L2BlockNumber
-			log.Debugf(
-				"Checking keystone received with height %d against last keystone %d",
-				kh.L2BlockNumber, lastL2BlockNumber,
-			)
-		}
-
-		if m.lastKeystone == nil || kh.L2BlockNumber > m.lastKeystone.L2BlockNumber {
-			log.Debugf("Received new keystone with block height %d", kh.L2BlockNumber)
-			m.lastKeystone = &kh
-			m.queueKeystoneForMining(&kh)
-			continue
-		}
-
-		if m.cfg.RetryMineThreshold > 0 {
-			retryThreshold := uint32(m.cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod
-			if (lastL2BlockNumber - kh.L2BlockNumber) <= retryThreshold {
-				log.Debugf(
-					"Received keystone old keystone with block height %d, within threshold %d",
-					kh.L2BlockNumber, retryThreshold,
-				)
-				m.queueKeystoneForMining(&kh)
-				continue
-			}
-		}
-
-		log.Debugf(
-			"Refusing to mine keystone with block height %d, highest received: %d",
-			kh.L2BlockNumber, lastL2BlockNumber,
-		)
-	}
-}
-
-func (m *Miner) callBFG(parrentCtx context.Context, timeout time.Duration, msg any) (any, error) {
-	log.Tracef("callBFG %T", msg)
-	defer log.Tracef("callBFG exit %T", msg)
-
-	bc := bfgCmd{
-		msg: msg,
-		ch:  make(chan any),
-	}
-
-	ctx, cancel := context.WithTimeout(parrentCtx, timeout)
-	defer cancel()
-
-	// attempt to send
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case m.bfgCmdCh <- bc:
-	default:
-		return nil, errors.New("bfg command queue full")
-	}
-
-	// Wait for response
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case payload := <-bc.ch:
-		if err, ok := payload.(error); ok {
-			return nil, err
-		}
-		return payload, nil
-	}
-
-	// Won't get here
-}
-
-func (m *Miner) checkForKeystones(ctx context.Context) error {
-	log.Tracef("Checking for new keystone headers...")
-
-	ghkr := &bfgapi.L2KeystonesRequest{
-		NumL2Keystones: 3, // XXX this needs to be a bit smarter, do this based on some sort of time calculation. Do keep it simple, we don't need keystones that are older than let's say, 30 minutes.
-	}
-
-	res, err := m.callBFG(ctx, m.requestTimeout, ghkr)
-	if err != nil {
-		return err
-	}
-
-	ghkrResp, ok := res.(*bfgapi.L2KeystonesResponse)
-	if !ok {
-		return errors.New("not an L2KeystonesResponse")
-	}
-
-	if ghkrResp.Error != nil {
-		return ghkrResp.Error
-	}
-
-	log.Tracef("Got response with %v keystones", len(ghkrResp.L2Keystones))
-
-	m.processReceivedKeystones(ctx, ghkrResp.L2Keystones)
-
-	return nil
-}
-
-func (m *Miner) Connected() bool {
-	return m.bfgConnected.Load()
-}
-
-func (m *Miner) running() bool {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	return m.isRunning
-}
-
-func (m *Miner) testAndSetRunning(b bool) bool {
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-	old := m.isRunning
-	m.isRunning = b
-	return old != m.isRunning
-}
-
-func (m *Miner) promRunning() float64 {
-	r := m.running()
+func (s *Server) promRunning() float64 {
+	r := s.running()
 	if r {
 		return 1
 	}
 	return 0
 }
 
-func (m *Miner) handleBFGCallCompletion(parrentCtx context.Context, conn *protocol.Conn, bc bfgCmd) {
-	log.Tracef("handleBFGCallCompletion")
-	defer log.Tracef("handleBFGCallCompletion exit")
+func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wire.MsgTx, error) {
+	log.Tracef("createKeystoneTx")
+	defer log.Tracef("createKeystoneTx exit")
 
-	ctx, cancel := context.WithTimeout(parrentCtx, m.requestTimeout)
+	log.Infof("Mine L2 keystone height %v", ks.L2BlockNumber)
+
+	btcHeight, err := s.gozer.BtcHeight(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("bitcoin height: %w", err)
+	}
+
+	payToScript, err := vinzclortho.ScriptFromPubKeyHash(s.address)
+	if err != nil {
+		return nil, fmt.Errorf("get pay to address script: %w", err)
+	}
+	if len(payToScript) != 25 {
+		return nil, fmt.Errorf("invalid pay to public key script length (%d != 25)",
+			len(payToScript))
+	}
+	scriptHash := vinzclortho.ScriptHashFromScript(payToScript)
+
+	// Estimate BTC fees.
+	feeEstimates, err := s.gozer.FeeEstimates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fee estimates: %w", err)
+	}
+	feeAmount, err := gozer.FeeByConfirmations(s.cfg.BitcoinConfirmations, feeEstimates)
+	if err != nil {
+		return nil, fmt.Errorf("fee by confirmations: %w", err)
+	}
+
+	// Retrieve available UTXOs for the miner.
+	utxos, err := s.gozer.UtxosByAddress(ctx, true, s.address, 0, 100)
+	if err != nil {
+		return nil, fmt.Errorf("utxos by address: %w", err)
+	}
+	log.Infof("utxos %d, script hash %v height %d",
+		len(utxos), scriptHash, btcHeight)
+
+	// Build transaction.
+	popTx, prevOut, err := wallet.PoPTransactionCreate(ks, uint32(btcHeight),
+		btcutil.Amount(feeAmount.SatsPerByte), utxos, payToScript)
+	if err != nil {
+		return nil, fmt.Errorf("create transaction: %w", err)
+	}
+
+	// Sign transaction.
+	err = wallet.TransactionSign(s.params, s.mz, popTx, prevOut)
+	if err != nil {
+		return nil, fmt.Errorf("sign transaction: %w", err)
+	}
+
+	return popTx, nil
+}
+
+func (s *Server) broadcastKeystone(pctx context.Context, popTx *wire.MsgTx) error {
+	log.Tracef("mineKeystone")
+	defer log.Tracef("mineKeystone exit")
+
+	log.Infof("Broadcasting PoP tx %s with hash %v", s.params.Name, popTx.TxHash())
+
+	ctx, cancel := context.WithTimeout(pctx, 5*time.Second)
 	defer cancel()
 
-	log.Tracef("handleBFGCallCompletion: %v", spew.Sdump(bc.msg))
-
-	cmd, _, payload, err := bfgapi.Call(ctx, conn, bc.msg)
+	txHash, err := s.gozer.BroadcastTx(ctx, popTx)
 	if err != nil {
-		log.Debugf("handleBFGCallCompletion %T: %v", bc.msg, err)
-		select {
-		case <-ctx.Done():
-			bc.ch <- ctx.Err()
-		case bc.ch <- err:
-		default:
-		}
+		return fmt.Errorf("broadcast PoP transaction: %w", err)
 	}
-	select {
-	case bc.ch <- payload:
-		log.Tracef("handleBFGCallCompletion returned: %v", spew.Sdump(payload))
-	case <-time.After(m.requestTimeout):
-		log.Errorf("handleBFGCallCompletion: response time out %v", cmd)
-	case <-ctx.Done():
-	}
+	log.Infof("Broadcast PoP tx %s with TxID %v", s.params.Name, txHash)
+
+	return nil
 }
 
-func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn) error {
-	defer m.bfgWg.Done()
-
-	log.Tracef("handleBFGWebsocketRead")
-	defer log.Tracef("handleBFGWebsocketRead exit")
-	for {
-		cmd, rid, payload, err := bfgapi.ReadConn(ctx, conn)
-		if err != nil {
-			// XXX kinda don't want to do thi here
-			if errors.Is(err, protocol.ErrPublicKeyAuth) {
-				return err
-			}
-
-			// See if we were terminated
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(m.holdoffTimeout):
-			}
-
-			log.Infof("Connection with BFG server was lost, reconnecting...")
-			continue
-		}
-
-		switch cmd {
-		case bfgapi.CmdPingRequest:
-			p := payload.(*bfgapi.PingRequest)
-			response := &bfgapi.PingResponse{
-				OriginTimestamp: p.Timestamp,
-				Timestamp:       time.Now().Unix(),
-			}
-			// XXX WriteConn ??
-			if err := bfgapi.Write(ctx, conn, rid, response); err != nil {
-				log.Errorf("Failed to write ping response to BFG server: %v", err)
-			}
-		case bfgapi.CmdL2KeystonesNotification:
-			go func() {
-				if err := m.checkForKeystones(ctx); err != nil {
-					log.Errorf("An error occurred while checking for keystones: %v", err)
-				}
-			}()
-		default:
-			return fmt.Errorf("unknown command: %v", cmd)
-		}
-	}
-}
-
-func (m *Miner) handleBFGWebsocketCall(ctx context.Context, conn *protocol.Conn) {
-	defer m.bfgWg.Done()
-
-	log.Tracef("handleBFGWebsocketCall")
-	defer log.Tracef("handleBFGWebsocketCall exit")
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case bc := <-m.bfgCmdCh:
-			go m.handleBFGCallCompletion(ctx, conn, bc)
-		}
-	}
-}
-
-func (m *Miner) connectBFG(pctx context.Context) error {
-	log.Tracef("connectBFG")
-	defer log.Tracef("connectBFG exit")
-
-	var (
-		err           error
-		authenticator protocol.Authenticator
-		conn          *protocol.Conn
-	)
-
-	authenticator, err = auth.NewSecp256k1AuthClient(m.btcPrivateKey)
+func (s *Server) createAndBroadcastKeystone(ctx context.Context, ks *hemi.L2Keystone) error {
+	popTx, err := s.createKeystoneTx(ctx, ks)
 	if err != nil {
 		return err
 	}
-
-	headers := http.Header{}
-	headers.Add("User-Agent", version.UserAgent())
-
-	conn, err = protocol.NewConn(m.cfg.BFGWSURL, &protocol.ConnOptions{
-		Authenticator: authenticator,
-		Headers:       headers,
-	})
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithCancel(pctx)
-	defer cancel()
-
-	err = conn.Connect(ctx)
-	if err != nil {
-		return err
-	}
-
-	m.bfgWg.Add(1)
-	go m.handleBFGWebsocketCall(ctx, conn)
-
-	// XXX ugh
-	rWSCh := make(chan error)
-	m.bfgWg.Add(1)
-	go func() {
-		rWSCh <- m.handleBFGWebsocketRead(ctx, conn)
-	}()
-
-	log.Debugf("Connected to BFG: %s", m.cfg.BFGWSURL)
-	m.bfgConnected.Store(true)
-
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-	case err = <-rWSCh:
-	}
-	cancel()
-
-	// Wait for exit
-	m.bfgWg.Wait()
-	m.bfgConnected.Store(false)
-
-	return err
+	return s.broadcastKeystone(ctx, popTx)
 }
 
-func (m *Miner) bfg(ctx context.Context) error {
-	defer m.wg.Done()
+func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2KeystoneLatestResponse, error) {
+	log.Tracef("latestKeystones")
+	defer log.Tracef("latestKeystones exit")
 
-	log.Tracef("bfg")
-	defer log.Tracef("bfg exit")
+	var kr gethapi.L2KeystoneLatestResponse
+	err := s.opgethClient.Client().CallContext(ctx, &kr, "kss_getLatestKeystones", count)
+	if err != nil {
+		return nil, fmt.Errorf("opgeth rpc: %w", err)
+	}
+	if len(kr.L2Keystones) <= 0 {
+		return nil, fmt.Errorf("no keystones")
+	}
+	return &kr, nil
+}
 
-	for {
-		if err := m.connectBFG(ctx); err != nil {
-			log.Debugf("connectBFG: %v", err)
+// reconcileKeystones generates a keystones map
+func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*keystone, error) {
+	log.Tracef("reconcileKeystones")
+	defer log.Tracef("reconciletKeystones exit")
 
-			if errors.Is(err, protocol.ErrPublicKeyAuth) {
-				return err
+	kr, err := s.latestKeystones(ctx, defaultL2KeystonesCount)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile: %w", err)
+	}
+
+	// Cross check with gozer to see what needs to be mined
+	aksHashes := make([]chainhash.Hash, 0, len(kr.L2Keystones))
+	keystones := make(map[chainhash.Hash]*keystone, defaultL2KeystonesCount)
+	for k := range kr.L2Keystones {
+		h := hemi.L2KeystoneAbbreviate(kr.L2Keystones[k]).Hash()
+
+		// fill out hashes array for gozer
+		aksHashes = append(aksHashes, *h)
+
+		// while looping fill out keystones state cache
+		keystones[*h] = &keystone{
+			keystone: &kr.L2Keystones[k],
+			hash:     h,
+		}
+	}
+
+	gks := s.gozer.BlocksByL2AbrevHashes(ctx, aksHashes)
+	if gks.Error != nil {
+		return nil, fmt.Errorf("blocks by abrev hashes: %w", gks.Error)
+	}
+	if len(gks.L2KeystoneBlocks) != len(aksHashes) {
+		// Shouldn't happen
+		panic(fmt.Sprintf("len diagnostic %v != %v", len(gks.L2KeystoneBlocks), len(aksHashes)))
+	}
+	// log.Debugf("BlockKeystoneByL2KeystoneAbrevHash: %v", spew.Sdump(gks))
+	for k := range gks.L2KeystoneBlocks {
+		// Fixup keystone cache based on gozer response, note that gks
+		// or is identical to aks order thus we can use the hash array
+		// for identification in the keystone cache map.
+		ks, ok := keystones[aksHashes[k]]
+		if !ok {
+			// Not found in keystones cache map so Error must be !nil
+			if gks.L2KeystoneBlocks[k].Error == nil {
+				panic("hash not found " + aksHashes[k].String())
+			}
+			ks.state = keystoneStateNew
+		} else {
+			// found, set state based on Error
+			if gks.L2KeystoneBlocks[k].Error == nil {
+				ks.state = keystoneStateMined
+			} else {
+				ks.state = keystoneStateNew
 			}
 		}
+		ks.expires = timestamp(s.cfg.l2KeystoneMaxAge)
 
-		// See if we were terminated
+		// Always add the entry to cache and rely on Error being !nil
+		// to retry later.
+		ks.abbreviated = &gks.L2KeystoneBlocks[k]
+	}
+
+	return keystones, nil
+}
+
+// hydrateKeystones should be called once at start of day. It will build the
+// keystone state cache. It returns an error if the cache is already hydrated.
+// This is to prevent invalid successive calls to a function that may only be
+// called once per connection. The caller should assert that the cache is empty
+// prior to calling.
+func (s *Server) hydrateKeystones(ctx context.Context) error {
+	log.Tracef("hydrateKeystones")
+	defer log.Tracef("hydrateKeystones exit")
+
+	keystones, err := s.reconcileKeystones(ctx)
+	if err != nil {
+		return fmt.Errorf("reconcile: %w", err)
+	}
+
+	// XXX this has a logic race with the test package
+	s.mtx.Lock()
+	if s.keystones != nil {
+		s.mtx.Unlock()
+		return errors.New("already hydrated")
+	}
+	s.keystones = keystones
+	s.mtx.Unlock()
+
+	return nil
+}
+
+func (s *Server) updateKeystoneStates(ctx context.Context) (bool, error) {
+	nkss, err := s.reconcileKeystones(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	// XXX this has a logic race with the test package
+	// See if there are state changes
+	var work bool
+	s.mtx.Lock()
+	for _, nks := range nkss {
+		cks, ok := s.keystones[*nks.hash]
+		if ok {
+			switch nks.state {
+			case keystoneStateNew:
+				// Already in cache
+				log.Tracef("skip %v: %v %v", nks.hash,
+					nks.state, nks.keystone.L2BlockNumber)
+				continue
+			case keystoneStateMined:
+				// Move to mined state
+				log.Tracef("mined %v: %v %v", nks.hash,
+					nks.state, nks.keystone.L2BlockNumber)
+				cks.state = keystoneStateMined
+			}
+		} else {
+			// Insert new keystone in cache
+			log.Tracef("insert %v: %v %v", nks.hash, nks.state,
+				nks.keystone.L2BlockNumber)
+			s.keystones[*nks.hash] = nks
+		}
+		work = true
+	}
+	s.mtx.Unlock()
+
+	return work, nil
+}
+
+func (s *Server) handleOpgethSubscription(ctx context.Context) error {
+	log.Tracef("handleOpgethSubscription")
+	defer log.Tracef("handleOpgethSubscription exit")
+
+	headersCh := make(chan string, 10) // PNOOMA 10 notifications
+	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
+	if err != nil {
+		return fmt.Errorf("keystone subscription: %w", err)
+	}
+
+	// Note that notifications can be unreliable so additionally we rely on
+	// a timeout to poll keystones.
+	t := time.NewTimer(s.cfg.l2KeystonePollTimeout)
+	for {
+		t.Reset(s.cfg.l2KeystonePollTimeout)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(m.holdoffTimeout):
+		case err := <-sub.Err():
+			return err
+		case <-headersCh:
+			log.Tracef("keystone notification")
+		case <-t.C:
+			log.Tracef("keystone poll")
 		}
 
-		log.Debugf("Reconnecting to: %v", m.cfg.BFGWSURL)
+		work, err := s.updateKeystoneStates(ctx)
+		if err != nil {
+			// This only happens on non-recoverable errors so it is
+			// ok to exit.
+			return fmt.Errorf("keystone notification: %w", err)
+		}
+
+		// Signal miner to get to work
+		if work {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case s.workC <- struct{}{}:
+			default:
+			}
+		}
 	}
 }
 
-func (m *Miner) Run(pctx context.Context) error {
-	if !m.testAndSetRunning(true) {
+func (s *Server) connectOpgeth(pctx context.Context) error {
+	log.Tracef("connectOpgeth")
+	defer log.Tracef("connectOpgeth exit")
+
+	// Allow the connection to timeout.
+	connCtx, connCancel := context.WithTimeout(pctx, 5*time.Second)
+	defer connCancel()
+
+	var err error
+	s.opgethClient, err = ethclient.DialContext(connCtx, s.cfg.OpgethURL)
+	if err != nil {
+		return err
+	}
+	defer s.opgethClient.Close()
+
+	log.Debugf("connected to opgeth: %s", s.cfg.OpgethURL)
+
+	// Create a context to exit function.
+	ctx, cancel := context.WithCancel(pctx)
+	defer cancel()
+
+	// Rehydrate keystones state
+	err = s.hydrateKeystones(ctx)
+	if err != nil {
+		return fmt.Errorf("hydrate: %w", err)
+	}
+
+	s.opgethWG.Add(1)
+	go func() {
+		defer s.opgethWG.Done()
+
+		err := s.handleOpgethSubscription(ctx)
+		if err != nil {
+			log.Errorf("subscription: %v", err)
+		}
+		cancel()
+
+		// Purge keystones on the way out.
+		s.mtx.Lock()
+		s.keystones = nil
+		s.mtx.Unlock()
+	}()
+
+	<-ctx.Done()
+	s.opgethClient.Close()
+
+	// Wait for exit
+	s.opgethWG.Wait()
+
+	return ctx.Err()
+}
+
+func (s *Server) opgeth(ctx context.Context) {
+	log.Tracef("opgeth")
+	defer log.Tracef("opgeth exit")
+
+	for {
+		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
+		if err := s.connectOpgeth(ctx); err != nil {
+			// Do nothing, this is too loud so make it Tracef.
+			log.Tracef("connectOpgeth: %v", err)
+		} else {
+			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
+		}
+		// See if we were terminated
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(s.cfg.opgethReconnectTimeout):
+		}
+
+		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
+	}
+}
+
+func (s *Server) mine(ctx context.Context) error {
+	log.Tracef("mine")
+	defer log.Tracef("mine exit")
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	// sks := sortKeystones(s.keystones)
+
+	// log.Infof("mine: %v", spew.Sdump(sks))
+	// This is crappy to do all in the mutex but let's make sure it works first.
+	for _, ks := range s.keystones {
+		switch ks.state {
+		case keystoneStateNew, keystoneStateError:
+			err := s.createAndBroadcastKeystone(ctx, ks.keystone)
+			if err != nil {
+				log.Errorf("new keystone: %v", err)
+				ks.state = keystoneStateError
+			} else {
+				ks.state = keystoneStateBroadcast
+			}
+		case keystoneStateBroadcast:
+			// Do nothing, wait for mined.
+		case keystoneStateMined:
+			// Remove if older than max age
+			if time.Now().After(*ks.expires) {
+				delete(s.keystones, *ks.hash)
+			}
+		}
+	}
+
+	return nil
+}
+
+func (s *Server) promPoll(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Second):
+		}
+
+		// Insert prometheus poll here
+	}
+}
+
+// Collectors returns the Prometheus collectors available for the server.
+func (s *Server) Collectors() []prometheus.Collector {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if s.promCollectors == nil {
+		// Naming: https://prometheus.io/docs/practices/naming/
+		s.promCollectors = []prometheus.Collector{
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "running",
+				Help:      "Whether the pop miner service is running",
+			}, s.promRunning),
+		}
+	}
+	return s.promCollectors
+}
+
+func (s *Server) Run(pctx context.Context) error {
+	if !s.testAndSetRunning(true) {
 		return errors.New("popmd already running")
 	}
-	defer m.testAndSetRunning(false)
+	defer s.testAndSetRunning(false)
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
 	// Prometheus
-	if m.cfg.PrometheusListenAddress != "" {
-		if err := m.handlePrometheus(ctx); err != nil {
-			return fmt.Errorf("handlePrometheus: %w", err)
+	if s.cfg.PrometheusListenAddress != "" {
+		d, err := deucalion.New(&deucalion.Config{
+			ListenAddress: s.cfg.PrometheusListenAddress,
+		})
+		if err != nil {
+			return fmt.Errorf("create server: %w", err)
 		}
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := d.Run(ctx, s.Collectors(), nil); !errors.Is(err, context.Canceled) {
+				log.Errorf("prometheus terminated with error: %v", err)
+				return
+			}
+			log.Infof("prometheus clean shutdown")
+		}()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			err := s.promPoll(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					log.Errorf("prometheus poll terminated with error: %v", err)
+				}
+				return
+			}
+		}()
 	}
 
 	// pprof
-	if m.cfg.PprofListenAddress != "" {
+	if s.cfg.PprofListenAddress != "" {
 		p, err := pprof.NewServer(&pprof.Config{
-			ListenAddress: m.cfg.PprofListenAddress,
+			ListenAddress: s.cfg.PprofListenAddress,
 		})
 		if err != nil {
 			return fmt.Errorf("create pprof server: %w", err)
 		}
-		m.wg.Add(1)
+		s.wg.Add(1)
 		go func() {
-			defer m.wg.Done()
+			defer s.wg.Done()
 			if err := p.Run(ctx); !errors.Is(err, context.Canceled) {
 				log.Errorf("pprof server terminated with error: %v", err)
 				return
@@ -926,129 +701,61 @@ func (m *Miner) Run(pctx context.Context) error {
 		}()
 	}
 
-	log.Infof("Starting PoP miner with BTC address %v (public key %x)",
-		m.btcAddress.EncodeAddress(), m.btcPublicKey.SerializeCompressed())
+	var err error
+	switch s.cfg.BitcoinSource {
+	case bitcoinSourceTBC:
+		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL)
+		if err != nil {
+			return fmt.Errorf("could not setup %v tbc: %w",
+				s.cfg.Network, err)
+		}
+	case bitcoinSourceBlockstream:
+		s.gozer, err = blockstream.Run(s.params)
+		if err != nil {
+			return fmt.Errorf("could not setup %v blockstream: %w",
+				s.cfg.Network, err)
+		}
+	default:
+		return fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
+	}
 
-	bfgErrCh := make(chan error)
-	m.wg.Add(1)
+	s.wg.Add(1)
 	go func() {
-		bfgErrCh <- m.bfg(ctx)
+		defer s.wg.Done()
+		s.opgeth(ctx)
 	}()
 
-	m.wg.Add(1)
-	go m.mine(ctx)
+	// Mining
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		t := time.NewTimer(defaultL2KeystoneRetryTimeout)
+		for {
+			t.Reset(defaultL2KeystoneRetryTimeout)
+			select {
+			case <-ctx.Done():
+				return
+			case <-s.workC:
+			case <-t.C:
+			}
 
-	var err error
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-	case err = <-bfgErrCh:
-	}
-	cancel()
+			err := s.mine(ctx)
+			if err != nil {
+				log.Errorf("mine: %v", err)
+			}
+		}
+	}()
 
-	log.Infof("PoP miner shutting down...")
+	log.Infof("bitcoin address   : %v", s.address)
+	log.Infof("bitcoin public key: %v", s.public)
 
-	m.wg.Wait()
-	log.Infof("PoP miner has shutdown cleanly")
+	<-ctx.Done()
+	err = ctx.Err()
+
+	log.Infof("pop miner shutting down")
+
+	s.wg.Wait()
+	log.Infof("pop miner has shutdown cleanly")
 
 	return err
-}
-
-func (m *Miner) AddL2Keystone(val hemi.L2Keystone) {
-	serialized := hemi.L2KeystoneAbbreviate(val).Serialize()
-	key := hex.EncodeToString(serialized[:])
-
-	toInsert := L2KeystoneProcessingContainer{
-		l2Keystone:         val,
-		requiresProcessing: true,
-	}
-
-	m.mtx.Lock()
-	defer m.mtx.Unlock()
-
-	// keystone already exists, no-op
-	if _, ok := m.l2Keystones[key]; ok {
-		return
-	}
-
-	if len(m.l2Keystones) < l2KeystonesMaxSize {
-		m.l2Keystones[key] = toInsert
-		return
-	}
-
-	var smallestL2BlockNumber uint32
-	var smallestKey string
-
-	for k, v := range m.l2Keystones {
-		if smallestL2BlockNumber == 0 || v.l2Keystone.L2BlockNumber < smallestL2BlockNumber {
-			smallestL2BlockNumber = v.l2Keystone.L2BlockNumber
-			smallestKey = k
-		}
-	}
-
-	// do not insert an L2Keystone that is older than all of the ones already
-	// added
-	if val.L2BlockNumber < smallestL2BlockNumber {
-		return
-	}
-
-	delete(m.l2Keystones, smallestKey)
-
-	m.l2Keystones[key] = toInsert
-}
-
-// l2KeystonesForProcessing creates copies of the l2 keystones, set them to
-// "processing", then returns the copies with the newest first
-func (m *Miner) l2KeystonesForProcessing() []hemi.L2Keystone {
-	copies := make([]hemi.L2Keystone, 0)
-
-	m.mtx.Lock()
-
-	for i, v := range m.l2Keystones {
-		// if we're currently processing, or we've already processed the keystone
-		// then don't process
-		if !v.requiresProcessing {
-			continue
-		}
-
-		// since we're about to process, mark this as false so others don't
-		// process the same
-		v.requiresProcessing = false
-		m.l2Keystones[i] = v
-		copies = append(copies, v.l2Keystone)
-	}
-	m.mtx.Unlock()
-
-	slices.SortFunc(copies, func(a, b hemi.L2Keystone) int {
-		return int(b.L2BlockNumber) - int(a.L2BlockNumber)
-	})
-
-	return copies
-}
-
-func (m *Miner) handlePrometheus(ctx context.Context) error {
-	d, err := deucalion.New(&deucalion.Config{
-		ListenAddress: m.cfg.PrometheusListenAddress,
-	})
-	if err != nil {
-		return fmt.Errorf("create server: %w", err)
-	}
-	cs := []prometheus.Collector{
-		prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-			Subsystem: promSubsystem,
-			Name:      "running",
-			Help:      "Is pop miner service running.",
-		}, m.promRunning),
-	}
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
-		if err := d.Run(ctx, cs, nil); !errors.Is(err, context.Canceled) {
-			log.Errorf("prometheus terminated with error: %v", err)
-			return
-		}
-		log.Infof("prometheus clean shutdown")
-	}()
-
-	return nil
 }
