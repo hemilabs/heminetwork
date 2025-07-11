@@ -62,7 +62,10 @@ const (
 	RouteControlList   = routeControl + "/list"
 )
 
-var log = loggo.GetLogger(appName)
+var (
+	log            = loggo.GetLogger(appName)
+	measureLatency = true
+)
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -174,6 +177,9 @@ type Server struct {
 	cmdsProcessed         prometheus.Counter
 	promHealth            health
 	persistentConnections uint64
+	setupDuration         int64
+	proxyDuration         int64
+	proxyCalls            int64
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -234,6 +240,18 @@ func (s *Server) promConnections() float64 {
 	return deucalion.Uint64ToFloat(s.persistentConnections)
 }
 
+func (s *Server) promAvgClientSetupLatency() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return math.Round(float64(s.setupDuration) / float64(s.proxyCalls))
+}
+
+func (s *Server) promAvgProxyLatency() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	return math.Round(float64(s.proxyDuration) / float64(s.proxyCalls))
+}
+
 // Collectors returns the Prometheus collectors available for the server.
 func (s *Server) Collectors() []prometheus.Collector {
 	s.mtx.Lock()
@@ -274,6 +292,20 @@ func (s *Server) Collectors() []prometheus.Collector {
 				Help:      "Number of active client connections",
 			}, s.promConnections),
 		}
+		if measureLatency {
+			s.promCollectors = append(s.promCollectors,
+				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+					Namespace: s.cfg.PrometheusNamespace,
+					Name:      "avg_client_setup_latency",
+					Help:      "Average client setup latency in nanoseconds",
+				}, s.promAvgClientSetupLatency),
+				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+					Namespace: s.cfg.PrometheusNamespace,
+					Name:      "avg_proxy_latency",
+					Help:      "Average proxy latency in nanoseconds",
+				}, s.promAvgProxyLatency),
+			)
+		}
 	}
 	return s.promCollectors
 }
@@ -296,6 +328,11 @@ func (s *Server) promPoll(ctx context.Context) error {
 		)
 		s.mtx.Lock()
 		for k := range s.hvmHandlers {
+			if measureLatency {
+				s.setupDuration += s.hvmHandlers[k].setupDuration
+				s.proxyDuration += s.hvmHandlers[k].proxyDuration
+				s.proxyCalls += s.hvmHandlers[k].proxyCalls
+			}
 			switch s.hvmHandlers[k].state {
 			case StateNew:
 				h.NewNodes++
@@ -406,11 +443,18 @@ type HVMHandler struct {
 	poking bool // true when getting health
 	poker  Proxy
 	state  HVMState // Do NOT directly set, use utility functions!
+
+	// latency stats
+	setupDuration int64 // Time spent on setting up and routing call
+	proxyDuration int64 // Time spent sending the call over the wall
+	proxyCalls    int64 // Total number of calls
 }
 
 func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("handleProxyRequest: %v", r.RemoteAddr)
 	defer log.Tracef("handleProxyRequest exit: %v", r.RemoteAddr)
+
+	startTime := time.Now()
 
 	// Select host to call
 	s.mtx.Lock()
@@ -461,14 +505,27 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// XXX this is expensive
 	log.Debugf("handleProxyRequest: remote %v url '%v' -> node %v",
 		r.RemoteAddr, r.URL, id)
+
+	setupDuration := time.Since(startTime)
 
 	// Throw call over the fence
 	w.Header().Set("X-Hproxy", strconv.Itoa(id))
 	s.hvmHandlers[id].rp.ServeHTTP(w, r)
-
 	s.cmdsProcessed.Inc()
+
+	proxyDuration := time.Since(startTime)
+
+	// XXX this is where we need to rethink using a single mutex.
+	if measureLatency {
+		s.mtx.Lock()
+		s.hvmHandlers[id].setupDuration += int64(setupDuration)
+		s.hvmHandlers[id].proxyDuration += int64(proxyDuration)
+		s.hvmHandlers[id].proxyCalls += 1
+		s.mtx.Unlock()
+	}
 }
 
 // func (s *Server) handleProxyError(w http.ResponseWriter, r *http.Request, e error) {
@@ -564,8 +621,8 @@ func (s *Server) nodeAdd(node string) error {
 				DialContext:           dialer,
 				TLSHandshakeTimeout:   5 * time.Second,
 				ResponseHeaderTimeout: s.cfg.RequestTimeout,
-				MaxIdleConnsPerHost:   1,
-				MaxConnsPerHost:       1,
+				MaxIdleConnsPerHost:   1, // XXX think about this
+				MaxConnsPerHost:       1, // XXX think about this
 			},
 			FlushInterval:  0,
 			ErrorLog:       nil, // XXX wrap in loggo
@@ -594,9 +651,20 @@ func newEthereumPoker(client *http.Client, url string) func(ctx context.Context)
 
 	return func(ctx context.Context) error {
 		blockRes, err := CallEthereum(ctx, client, url,
-			"eth_getBlockByNumber", "latest")
+			"eth_getBlockByNumber", "latest", false)
 		if err != nil {
 			return err
+		}
+		if blockRes.Error != nil {
+			var eErr struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			}
+			if err = json.Unmarshal(blockRes.Error, &eErr); err != nil {
+				return fmt.Errorf("eth_getBlockByNumber error: %w", err)
+			}
+			return fmt.Errorf("ethereum call failed code %v, message %v",
+				eErr.Code, eErr.Message)
 		}
 
 		var block struct {

@@ -41,7 +41,7 @@ type EthereumRequest struct {
 type EthereumResponse struct {
 	Version string          `json:"jsonrpc"`
 	Result  json.RawMessage `json:"result"`
-	Error   any             `json:"error"`
+	Error   json.RawMessage `json:"error,omitempty"`
 	ID      any             `json:"id"`
 }
 
