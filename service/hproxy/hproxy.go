@@ -342,7 +342,9 @@ func (s *Server) isHealthy(_ context.Context) bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	for k := range s.hvmHandlers {
-		// If we see a single hvm unhealthy bail with unhealthy status.
+		// If we see a single hvm unhealthy bail with unhealthy
+		// status.
+		//
 		// XXX i think this is technically correct but we do return
 		// 503 to the caller here.
 		if s.hvmHandlers[k].state == StateUnhealthy {
@@ -565,8 +567,8 @@ func (s *Server) nodeAdd(node string) error {
 		},
 	}
 
-	// For now, everything is ethereum, but we can use the poker function to
-	// handle different types health checks.
+	// For now, everything is ethereum, but we can use the poker function
+	// to handle different types health checks.
 	hvmHandler.poker = NewEthereumProxy(newEthereumPoker(hvmHandler.c, hvmHandler.u.String()))
 
 	s.hvmHandlers = append(s.hvmHandlers, hvmHandler)
@@ -574,15 +576,17 @@ func (s *Server) nodeAdd(node string) error {
 	return nil
 }
 
-// newEthereumPoker returns a new poker which checks the health of an Ethereum
-// node. The health of the node is determined by the age of the latest block.
+// newEthereumPoker returns a new poker which checks the health of an
+// Ethereum node. The health of the node is determined by the age of the
+// latest block.
 func newEthereumPoker(client *http.Client, url string) func(ctx context.Context) error {
 	const maxBlockAge = 30 * time.Second // TODO: make this configurable?
 
 	// TODO: Improve health checks.
 
 	return func(ctx context.Context) error {
-		blockRes, err := CallEthereum(ctx, client, url, "eth_getBlockByNumber", "latest")
+		blockRes, err := CallEthereum(ctx, client, url,
+			"eth_getBlockByNumber", "latest")
 		if err != nil {
 			return err
 		}
@@ -600,8 +604,8 @@ func newEthereumPoker(client *http.Client, url string) func(ctx context.Context)
 		}
 
 		if age := time.Since(time.Unix(ts, 0)); age > maxBlockAge {
-			return fmt.Errorf("eth_getBlockByNumber timestamp too old: %v (%v ago)",
-				block.Timestamp, age)
+			return fmt.Errorf("eth_getBlockByNumber timestamp "+
+				"too old: %v (%v ago)", block.Timestamp, age)
 		}
 
 		return nil
