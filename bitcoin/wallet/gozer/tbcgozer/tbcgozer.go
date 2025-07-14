@@ -313,7 +313,7 @@ func (t *tbcGozer) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Co
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(5 * time.Second):
+			case <-time.Tick(5 * time.Second):
 			}
 
 			cc := conn.ConnectCount()
@@ -377,7 +377,7 @@ func (t *tbcGozer) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.Tick(5 * time.Second):
 		}
 
 		log.Debugf("Reconnecting to: %v", t.url)

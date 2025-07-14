@@ -805,7 +805,7 @@ func (s *Server) promPoll(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-time.Tick(5 * time.Second):
 		}
 
 		s.prom.syncInfo = s.Synced(ctx)
@@ -2848,7 +2848,7 @@ func (s *Server) Run(pctx context.Context) error {
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(13 * time.Second):
+				case <-time.Tick(13 * time.Second):
 				}
 				s.pm.All(ctx, s.pingPeer)
 			}

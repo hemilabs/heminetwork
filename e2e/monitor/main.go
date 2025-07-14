@@ -86,7 +86,7 @@ func monitor(dumpJsonAfterMs uint) string {
 
 	if dumpJsonAfterMs > 0 {
 		select {
-		case <-time.After(time.Duration(dumpJsonAfterMs) * time.Millisecond):
+		case <-time.Tick(time.Duration(dumpJsonAfterMs) * time.Millisecond):
 			output := dumpJson(&mtx, &s)
 			return output
 		case <-ctx.Done():
@@ -133,7 +133,7 @@ func render(ctx context.Context, s *state, w table.Writer, mtx *sync.Mutex) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(tableRefreshSeconds * time.Second):
+		case <-time.Tick(tableRefreshSeconds * time.Second):
 		}
 	}
 }
@@ -167,7 +167,7 @@ func monitorBitcoinBlocksCreated(ctx context.Context, s *state, mtx *sync.Mutex)
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(dataRefreshSeconds * time.Second):
+		case <-time.Tick(dataRefreshSeconds * time.Second):
 
 		}
 	}
@@ -247,7 +247,7 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(dataRefreshSeconds * time.Second):
+		case <-time.Tick(dataRefreshSeconds * time.Second):
 
 		}
 	}
@@ -402,7 +402,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(dataRefreshSeconds * time.Second):
+		case <-time.Tick(dataRefreshSeconds * time.Second):
 		}
 	}
 }

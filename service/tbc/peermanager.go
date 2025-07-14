@@ -408,7 +408,7 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(holdOff):
+			case <-time.Tick(holdOff):
 			}
 		}
 		log.Infof("DNS seeding complete")
@@ -429,7 +429,7 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 			p, err := pm.randomPeer(ctx, slot)
 			if err != nil {
 				// basically no addresses, hold-off
-				<-time.After(7 * time.Second)
+				<-time.Tick(7 * time.Second)
 				pm.slotsC <- slot // give the slot back
 				continue
 			}
