@@ -1711,7 +1711,7 @@ loop:
 		select {
 		case <-lctx.Done():
 			t.Fatal(lctx.Err())
-		case <-time.After(1 * time.Second):
+		case <-time.Tick(1 * time.Second):
 			btcBlockHeader, err = db.BtcBlockByHash(ctx, [32]byte(btcHeaderHash))
 			if err == nil {
 				break loop
@@ -1819,7 +1819,7 @@ loop:
 		select {
 		case <-lctx.Done():
 			break loop
-		case <-time.After(1 * time.Second):
+		case <-time.Tick(1 * time.Second):
 			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).HashB()), false, 0)
 			if len(popBases) > 0 {
 				break loop
@@ -2015,7 +2015,7 @@ loop:
 		select {
 		case <-lctx.Done():
 			break loop
-		case <-time.After(1 * time.Second):
+		case <-time.Tick(1 * time.Second):
 			popBases, err = db.PopBasisByL2KeystoneAbrevHash(ctx, [32]byte(hemi.L2KeystoneAbbreviate(l2Keystone).HashB()), true, 0)
 			if len(popBases) > 0 {
 				break loop
@@ -3549,7 +3549,7 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 	// give a few seconds for the notification to be processed in the other
 	// bfg (saving keystones etc.)
 	select {
-	case <-time.After(5 * time.Second):
+	case <-time.Tick(5 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}

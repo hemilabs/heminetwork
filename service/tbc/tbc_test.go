@@ -571,7 +571,7 @@ func TestServerBlockHeadersBest(t *testing.T) {
 	tbcServer, _ := createTbcServer(ctx, t, mappedPeerPort)
 
 	select {
-	case <-time.After(1 * time.Second):
+	case <-time.Tick(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -1298,7 +1298,7 @@ func createTbcServer(ctx context.Context, t *testing.T, mappedPeerPort nat.Port)
 
 	// let tbc index
 	select {
-	case <-time.After(1 * time.Second):
+	case <-time.Tick(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}

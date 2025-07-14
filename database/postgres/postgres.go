@@ -178,7 +178,7 @@ func (p *Database) ntfnListenHandler(ctx context.Context) {
 			// processed at the same time.
 			go p.ntfnEventHandler(ctx, pqn)
 
-		case <-time.After(60 * time.Second):
+		case <-time.Tick(60 * time.Second):
 			go func() {
 				// log.Tracef("ntfnHandler: ping")
 				err := p.listener.Ping()

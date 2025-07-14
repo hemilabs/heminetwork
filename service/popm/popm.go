@@ -564,7 +564,7 @@ func (m *Miner) mine(ctx context.Context) {
 			return
 		case <-m.mineNowCh:
 			m.mineKnownKeystones(ctx)
-		case <-time.After(l2KeystoneRetryTimeout):
+		case <-time.Tick(l2KeystoneRetryTimeout):
 			m.mineKnownKeystones(ctx)
 		}
 	}
@@ -736,7 +736,7 @@ func (m *Miner) handleBFGCallCompletion(parrentCtx context.Context, conn *protoc
 	select {
 	case bc.ch <- payload:
 		log.Tracef("handleBFGCallCompletion returned: %v", spew.Sdump(payload))
-	case <-time.After(m.requestTimeout):
+	case <-time.Tick(m.requestTimeout):
 		log.Errorf("handleBFGCallCompletion: response time out %v", cmd)
 	case <-ctx.Done():
 	}
@@ -759,7 +759,7 @@ func (m *Miner) handleBFGWebsocketRead(ctx context.Context, conn *protocol.Conn)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(m.holdoffTimeout):
+			case <-time.Tick(m.holdoffTimeout):
 			}
 
 			log.Infof("Connection with BFG server was lost, reconnecting...")
@@ -884,7 +884,7 @@ func (m *Miner) bfg(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(m.holdoffTimeout):
+		case <-time.Tick(m.holdoffTimeout):
 		}
 
 		log.Debugf("Reconnecting to: %v", m.cfg.BFGWSURL)
