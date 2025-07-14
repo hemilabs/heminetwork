@@ -133,6 +133,7 @@ func render(ctx context.Context, s *state, w table.Writer, mtx *sync.Mutex) {
 		select {
 		case <-ctx.Done():
 			return
+		/// XXX ticker check
 		case <-time.Tick(tableRefreshSeconds * time.Second):
 		}
 	}
@@ -163,6 +164,8 @@ func monitorBitcoinBlocksCreated(ctx context.Context, s *state, mtx *sync.Mutex)
 		select {
 		case <-ctx.Done():
 			return
+
+		/// XXX ticker check
 		case <-time.Tick(dataRefreshSeconds * time.Second):
 
 		}
@@ -231,8 +234,9 @@ func monitorPopTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.Tick(dataRefreshSeconds * time.Second):
 
+		/// XXX ticker check
+		case <-time.Tick(dataRefreshSeconds * time.Second):
 		}
 	}
 }
@@ -386,6 +390,8 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		select {
 		case <-ctx.Done():
 			return
+
+		/// XXX ticker check
 		case <-time.Tick(dataRefreshSeconds * time.Second):
 		}
 	}
