@@ -212,6 +212,13 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		return nil, err
+	}
+
+	// do I have to re-set this?
+	log = loggo.GetLogger(appName)
+
 	// Only populate pings and blocks if not in External Header Mode
 	var pings *ttl.TTL
 	var blocks *ttl.TTL
