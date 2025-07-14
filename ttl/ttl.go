@@ -52,16 +52,9 @@ func New(capacity int, autoDelete bool) (*TTL, error) {
 }
 
 // ttl waits for a timeout or cancel. Should be called as a go routine.
-func (tm *TTL) ttl(ctx context.Context, d time.Duration, key any) {
-	var err error
-	select {
-	case <-ctx.Done():
-		err = ctx.Err()
-	case <-time.Tick(d):
-		// manual expiration in case ctx fails to expire
-		// due to long system / hardware sleeps
-		err = context.DeadlineExceeded
-	}
+func (tm *TTL) ttl(ctx context.Context, key any) {
+	<-ctx.Done()
+	err := ctx.Err()
 	if err == nil {
 		return
 	}
@@ -109,7 +102,7 @@ func (tm *TTL) Put(pctx context.Context, ttl time.Duration, key any, val any, ex
 	}
 	v.ctx, v.cancel = context.WithTimeout(pctx, ttl)
 	tm.m[key] = v
-	go tm.ttl(v.ctx, ttl, key)
+	go tm.ttl(v.ctx, key)
 }
 
 // Get returns the corresponding value for the provided key. It also returns
