@@ -805,6 +805,8 @@ func (s *Server) promPoll(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
+		/// XXX ticker check
 		case <-time.Tick(5 * time.Second):
 		}
 
@@ -2848,6 +2850,8 @@ func (s *Server) Run(pctx context.Context) error {
 				select {
 				case <-ctx.Done():
 					return
+
+				/// XXX ticker check
 				case <-time.Tick(13 * time.Second):
 				}
 				s.pm.All(ctx, s.pingPeer)
