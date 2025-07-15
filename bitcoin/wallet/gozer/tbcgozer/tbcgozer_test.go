@@ -7,6 +7,7 @@ package tbcgozer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/service/tbc"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func TestTBCGozer(t *testing.T) {
@@ -27,23 +29,25 @@ func TestTBCGozer(t *testing.T) {
 		t.Fatalf("Failed to decode address: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(t.Context())
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
+
+	port := testutil.FreePort()
 
 	// Connect tbc service
 	tbcCfg := &tbc.Config{
-		AutoIndex:            false,
-		BlockCacheSize:       "10mb",
-		BlockheaderCacheSize: "1mb",
-		BlockSanity:          false,
-		LevelDBHome:          t.TempDir(),
-		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		AutoIndex:               false,
+		BlockCacheSize:          "10mb",
+		BlockheaderCacheSize:    "1mb",
+		BlockSanity:             false,
+		LevelDBHome:             t.TempDir(),
+		LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 "localnet",
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:18444"},
-		ListenAddress:           "localhost:8881",
+		ListenAddress:           "localhost:" + port,
 	}
 	_ = loggo.ConfigureLoggers(tbcCfg.LogLevel)
 	s, err := tbc.NewServer(tbcCfg)
@@ -59,12 +63,19 @@ func TestTBCGozer(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	b, err := Run(ctx, "http://localhost:8881/v1/ws")
+	b, err := Run(ctx, fmt.Sprintf("http://%s/v1/ws", tbcCfg.ListenAddress))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(2 * time.Second)
+	tg, ok := b.(*tbcGozer)
+	if !ok {
+		t.Fatal("expected gozer to be of type tbcGozer")
+	}
+
+	if !tg.Connected() {
+		time.Sleep(50 * time.Millisecond)
+	}
 
 	feeEstimates, err := b.FeeEstimates(ctx)
 	if err != nil {
