@@ -4,14 +4,12 @@
 
 ---
 
-name: "hemi-testnet-stack"
+name: "hemi-stack"
 
 services:
   # Bitcoin Finality Governor
   bfgd:
-    build:
-      dockerfile: "./docker/bfgd/Dockerfile"
-      context: "./.."
+    image: hemilabs/bfgd:1.6.3
     profiles: ["hemi", "full"]
     depends_on:
       bfgd-postgres:
@@ -22,13 +20,13 @@ services:
       # yamllint disable-line rule:line-length
       BFG_POSTGRES_URI: "postgres://postgres@bfgd-postgres:5432/bfg?sslmode=disable"
       ### XXXX Make this variable and set to recent block
-      BFG_BTC_START_HEIGHT: "3195980"
+      BFG_BTC_START_HEIGHT: "869309"
       BFG_EXBTC_ADDRESS: "electrs:50001"
       BFG_LOG_LEVEL: "INFO"
       BFG_PUBLIC_ADDRESS: ":8383"
       BFG_PRIVATE_ADDRESS: ":8080"
-      BFG_BASELINE_L2_BLOCK_HEIGHT: "3000000"
-      BFG_BASELINE_L2_BLOCK_TIMESTAMP: "1744110816000"
+      BFG_BASELINE_L2_BLOCK_HEIGHT: "1800000"
+      BFG_BASELINE_L2_BLOCK_TIMESTAMP: "1747466711000"
     ports:
       ### CHANGE HOST PORTS
       - '8082:8080'
@@ -46,7 +44,7 @@ services:
       context: "./.."
     profiles: ["hemi", "full"]
     volumes:
-      - psql_data:/var
+      - psql_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: "bfg"
       POSTGRES_HOST_AUTH_METHOD: "trust"
@@ -67,24 +65,21 @@ services:
     volumes:
       - bitcoin_data:/bitcoin/.bitcoin
     ports:
-      - '18333:18333'
+      - '8333:8333'
     networks:
       - "localnode"
     command:
       - "bitcoind"
-      - "-testnet=1"
       - "-rpcuser=user"
       - "-rpcpassword=password"
       - "-rpcallowip=0.0.0.0/0"
-      - "-rpcbind=0.0.0.0:18332"
+      - "-rpcbind=0.0.0.0:8332"
       - "-txindex=1"
       - "-rpcworkqueue=400"
 
   # Bitcoin Secure Sequencer
   bssd:
-    build:
-      dockerfile: "./docker/bssd/Dockerfile"
-      context: "./.."
+    image: hemilabs/bssd:1.6.3
     profiles: ["hemi", "hemi-min", "full"]
     environment:
       BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
@@ -114,12 +109,10 @@ services:
       - "--electrum-rpc-addr"
       - "0.0.0.0:50001"
       - "--daemon-rpc-addr"
-      - "${BITCOINENDPOINT:-bitcoind:18332}"
-      - "--network"
-      - "testnet"
+      - "${BITCOINENDPOINT:-bitcoind:8332}"
+      - "--cookie"
       # NOTE: If you expose electrs ports,
       # you may want to ensure that this is changed!
-      - "--cookie"
       - "${BITCOINCREDS:-user:password}"
       - "-vvv"
       - "--timestamp"
@@ -148,7 +141,6 @@ services:
     networks:
       - "localnode"
     command:
-      - "--sepolia"
       - "--http"
       - "--http.port=8545"
       - "--http.addr=0.0.0.0"
@@ -161,6 +153,7 @@ services:
       - "--datadir"
       - "/tmp/geth"
       - "--gpo.percentile=0"
+      - "--mainnet"
     working_dir: "/tmp/geth"
 
   # Hemi L2 node
@@ -181,14 +174,15 @@ services:
       timeout: 5s
       retries: 999999
     volumes:
-      - ./testnet-genesis.json:/tmp/testnet-genesis.json
+      - ./mainnet-genesis.json:/tmp/genesis.json
       # change this token value if you expose this service's ports for
       # connection from other machines
       - ./jwt.hex:/tmp/jwt/jwt.hex:ro
-      - ./entrypointl2.sh:/tmp/entrypointl2.sh
+      - ./mainnet-entrypointl2.sh:/tmp/entrypointl2.sh
       - op-geth_data:/tmp/datadir
-      - ./rollup.json:/tmp/rollup.json
-      - ./l2-config.toml:/tmp/l2-config.toml
+      - ./mainnet-rollup.json:/tmp/rollup.json
+      # TODO make a testnet specific one
+      - ./mainnet-l2-config.toml:/tmp/l2-config.toml
       - tbc_data:/tbcdata
     environment:
       OP_GETH_L1_RPC: "${GETHL1ENDPOINT:-http://geth-l1:8545}"
@@ -248,7 +242,7 @@ services:
       # connection from other machines
       - ./jwt.hex:/tmp/jwt/jwt.hex
       - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
-      - ./rollup.json:/tmp/rollup.json
+      - ./mainnet-rollup.json:/tmp/rollup.json
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     ports:
@@ -257,7 +251,6 @@ services:
       - "localnode"
     command:
       - "op-node"
-      - "--ignore-missing-pectra-blob-schedule"
       - "--l1=${GETHL1ENDPOINT:-http://geth-l1:8545}"
       - "--l1.rpckind=any"
       - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
@@ -265,23 +258,23 @@ services:
       - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
       - "--sequencer.enabled=false"
       - "--rollup.config=/tmp/rollup.json"
-      - "--override.ecotone=1715865630"
-      - "--override.canyon=1715865630"
-      - "--override.delta=1715865630"
+      - "--override.ecotone=1725868497"
+      - "--override.canyon=1725868497"
+      - "--override.delta=1725868497"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
-      - "--p2p.static=/ip4/34.147.95.117/tcp/9003/p2p/16Uiu2HAmFtpk79F9M1TdC2cnq8c1pJy59yrb5AWeM1qH6d13Fbi2"
-      - "--p2p.no-discovery"
+      - "--p2p.bootnodes=enr:-J64QACnJ0giPmPXowNCHP-FDleMMbDqYg5nuLABYfJeYbP9OA6_fZtvCsTbAwvlPD8_C6ZSXEk1-XPabDBwD8UTyNCGAZMxdy4tgmlkgnY0gmlwhCINopiHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED22EOmUryrNnFOwq6Ve1Hpw5CMFz_TnhIkVS4Sq8JhkmDdGNwgiMrg3VkcIKjLg,enr:-J64QA20VNMfLMtbSuHYmQH2I-xaqT4-9g7lqO-VHr0fFvtSB7QybJ_7W5fuEjLAa6kh82fGLjRUdZE0hW0pfVBcxP6GAZMxdwfngmlkgnY0gmlwhCJaFfaHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDjt3C-gv87B5rWa5M52WUFGy16mjQvFsC7OgPkqu-rn-DdGNwgiMrg3VkcIKRXQ,enr:-J64QLQyh3lXjQLzfCbfNw0DUb4A0OEcTLmVGexMbK-2jjCtHOIlRnDqLuedQ0orNHt7zmsILELYi4ozg-0bQzc34F-GAZMxdxNogmlkgnY0gmlwhCINq4uHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaED1NV9w0EmnMXBNRnDWj6kdqzE6_4HigHopeu3ewQTwouDdGNwgiMrg3VkcIK1Iw,enr:-J64QNPfOEViWkN7U_ul5Zhw_mc5_Hta92eUufrgu6oTqSMzRsqCje-P0vPrOQ9XjVIk4VP7mmFVP6qoTrtkIwvwUV2GAZMxdv4zgmlkgnY0gmlwhCJb2HmHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaEDYAidV8rzABKrKAL9jwP1aoi3wj-GtuML4FKtUDOgzCGDdGNwgiMrg3VkcILijg,enr:-J64QFalFr9Y4r9v8Svh7XFwerJeLTRnfTixfCy_NZw3OTMVZL_dSAvcZ6JIeK0JAZf6-PU3YknV9m9Jd5V5WlnqHKWGAZMxdxT4gmlkgnY0gmlwhCKNlBOHb3BzdGFja4Tn0AIAiXNlY3AyNTZrMaECI1jqAzkQ0JRkwL-UBP2TBUfUdLyTaqAXtey82CTysdCDdGNwgiMrg3VkcILOyg"
+      - "--p2p.static=/ip4/34.90.21.246/tcp/9003/p2p/16Uiu2HAmNGgNTgiFBAqH58aCT3iXWMnetYMtQgH21Ydjq2R7QRbt,/ip4/34.13.162.152/tcp/9003/p2p/16Uiu2HAm33YRmCya94zRXddxaWj25QAXW5MhuJkaEvfMLXkB4GCK,/ip4/34.13.171.139/tcp/9003/p2p/16Uiu2HAm5d71wTbQPkBA3VW9suge2afCKtrGdk7UapRHR4va8jTY,/ip4/34.91.216.121/tcp/9003/p2p/16Uiu2HAmK7s7F1ALmtXKH3LxeEENstqw8jiDzUtifasS4LkUKGVE,/ip4/34.141.148.19/tcp/9003/p2p/16Uiu2HAkwoetK83q3WNRQ4t4eV8B3DosnwcFqd9VHxz24ZZzzEgo"
       - "--p2p.ban.peers=false"
       - "--p2p.ban.duration=1s"
       - "--p2p.ban.threshold=-10000000000"
       - "--log.level=info"
       - "--syncmode=${OPSYNCMODE:-execution-layer}"
-      - "--override.pectrablobschedule=1748963425"
-      - "--override.isthmus=1748963425"
-      - "--override.holocene=1748963425"
-      - "--override.granite=1748963425"
-      - "--override.fjord=1748963425"
+      - "--override.pectrablobschedule=1751554801"
+      - "--override.isthmus=1751554801"
+      - "--override.holocene=1751554801"
+      - "--override.granite=1751554801"
+      - "--override.fjord=1751554801"
     deploy:
       restart_policy:
         condition: "any"
@@ -302,10 +295,10 @@ services:
       - "localnode"
     command:
       - "--execution-endpoint=${GETHL1ENDPOINT:-http://geth-l1:8551}"
-      - "--sepolia"
+      - "--mainnet"
       - "--jwt-secret=/tmp/jwt/jwt.hex"
-      - "--checkpoint-sync-url=https://sepolia.beaconstate.info"
-      - "--genesis-beacon-api-url=https://sepolia.beaconstate.info"
+      - "--checkpoint-sync-url=https://beaconstate.info"
+      - "--genesis-beacon-api-url=https://beaconstate.info"
       - "--accept-terms-of-use"
       - "--datadir=/data/prysm"
       - "--rpc-host=0.0.0.0"
