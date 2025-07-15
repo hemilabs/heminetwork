@@ -166,7 +166,6 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 					case <-f.pctx.Done():
 						return
 
-					/// XXX ticker check
 					case <-time.Tick(DefaultNtfnDuration):
 						if !f.Running() {
 							return
