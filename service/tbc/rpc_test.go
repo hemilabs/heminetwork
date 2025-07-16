@@ -100,7 +100,7 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 
 	var response tbcapi.BlockHeadersByHeightRawResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -171,7 +171,7 @@ func TestBlockHeadersByHeight(t *testing.T) {
 
 	var response tbcapi.BlockHeadersByHeightResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -235,7 +235,7 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 
 	var response tbcapi.BlockHeadersByHeightResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -293,7 +293,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 
 	var response tbcapi.BlockHeaderBestRawResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -361,7 +361,7 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 
 	var response tbcapi.BlockHeaderBestResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -530,7 +530,7 @@ func TestBalanceByAddress(t *testing.T) {
 			var response tbcapi.BalanceByAddressResponse
 			for {
 				select {
-				case <-time.Tick(1 * time.Second):
+				case <-time.After(1 * time.Second):
 				case <-ctx.Done():
 					t.Fatal(ctx.Err())
 				}
@@ -752,7 +752,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 
 			var response tbcapi.UTXOsByAddressRawResponse
 			select {
-			case <-time.Tick(1 * time.Second):
+			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
@@ -964,7 +964,7 @@ func TestUtxosByAddress(t *testing.T) {
 
 			var response tbcapi.UTXOsByAddressResponse
 			select {
-			case <-time.Tick(1 * time.Second):
+			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
@@ -1043,7 +1043,7 @@ func TestTxByIdRaw(t *testing.T) {
 
 	var response tbcapi.TxByIdRawResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -1125,7 +1125,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 
 	var response tbcapi.TxByIdRawResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -1214,7 +1214,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 
 	var response tbcapi.TxByIdRawResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -1288,7 +1288,7 @@ func TestTxById(t *testing.T) {
 	}
 
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -1368,7 +1368,7 @@ func TestTxByIdInvalid(t *testing.T) {
 
 	var response tbcapi.TxByIdResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -1457,7 +1457,7 @@ func TestTxByIdNotFound(t *testing.T) {
 
 	var response tbcapi.TxByIdResponse
 	select {
-	case <-time.Tick(1 * time.Second):
+	case <-time.After(1 * time.Second):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -1571,7 +1571,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 
 			var response tbcapi.BlocksByL2AbrevHashesResponse
 			select {
-			case <-time.Tick(1 * time.Second):
+			case <-time.After(1 * time.Second):
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}

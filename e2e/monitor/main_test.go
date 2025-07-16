@@ -81,7 +81,7 @@ func TestMonitor(t *testing.T) {
 		select {
 		case <-blockWaitTimeoutTimer.C:
 			t.Fatalf("timed out")
-		case <-time.Tick(10 * time.Second):
+		case <-time.After(10 * time.Second):
 		}
 
 		// let the goroutines gather stats for 10 seconds, then dump
