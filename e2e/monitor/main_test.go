@@ -19,12 +19,10 @@ import (
 	"testing"
 	"time"
 
-	// "github.com/ethereum-optimism/optimism/op-e2e/bindingspreview"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum-optimism/optimism/op-chain-ops/crossdomain"
-	// ope2e "github.com/ethereum-optimism/optimism/op-e2e"
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts"
 	"github.com/ethereum-optimism/optimism/op-challenger/game/fault/contracts/metrics"
 	e2ebindings "github.com/ethereum-optimism/optimism/op-e2e/bindings"
@@ -42,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/go-test/deep"
+
 	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -223,7 +222,6 @@ func TestL1L2Comms(t *testing.T) {
 			assertSafeAndFinalBlocksAreProgressing(t, ctx, l2ClientToUse)
 		})
 	}
-
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
