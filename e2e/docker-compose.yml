@@ -19,6 +19,8 @@ services:
       - "-rpcbind=0.0.0.0:18443"
       - "-txindex=1"
       - "-rpcworkqueue=400"
+      - "-printtoconsole"
+      - "-debug=1"
     ports:
       - "18443:18443"
       - "18444:18444"
@@ -69,56 +71,15 @@ services:
     networks:
       e2e:
 
-  electrs:
-    # yamllint disable-line rule:line-length
-    image: blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8
-    depends_on:
-      - "bitcoind"
-    command:
-      - electrs_bitcoin/bin/electrs
-      - --electrum-rpc-addr
-      - '0.0.0.0:50001'
-      - --daemon-rpc-addr
-      - "bitcoind:18443"
-      - --network
-      - regtest
-      - --cookie
-      - "user:password"
-      - "-vvv"
-      - "--timestamp"
-      - --utxos-limit
-      - "50000"
-      - --electrum-txs-limit
-      - "50000"
-      - --jsonrpc-import
-    environment:
-      RUST_LOG: debug
-      RUST_BACKTRACE: "full"
-    volumes:
-      - ./cookie:/tmp/.cookie
-    deploy:
-      restart_policy:
-        condition: "on-failure"
-    networks:
-      e2e:
-
-  bfgd-postgres:
+  tbcd:
     build:
-      dockerfile: "./e2e/postgres.Dockerfile"
+      dockerfile: "./docker/tbcd/Dockerfile"
       context: "./.."
-    command:
-      - "postgres"
-      # lower random_page_cost (opposed to default 4.0) to cause planner
-      # to choose index scans vs sequential scans when at fewer rows in a table
-      - "-c"
-      - "random_page_cost=1.0"
-    ports:
-      - "5432:5432"
     environment:
-      POSTGRES_DB: "bfg"
-      POSTGRES_HOST_AUTH_METHOD: "trust"
-    volumes:
-      - {type: "tmpfs", target: "/var"}
+      TBC_NETWORK: "localnet"
+      TBC_HEMI_INDEX: "true"
+      TBC_SEEDS: "bitcoind:18444"
+      TBC_LISTEN_ADDRESS: "0.0.0.0:8082"
     networks:
       e2e:
 
@@ -129,9 +90,6 @@ services:
     deploy:
       restart_policy:
         condition: "any"
-    depends_on:
-      - "bfgd-postgres"
-      - "electrs"
     ports:
       - "8080:8080"
       - "8383:8383"
@@ -143,21 +101,8 @@ services:
       BFG_LOG_LEVEL: "INFO"
       BFG_PUBLIC_ADDRESS: ":8383"
       BFG_PRIVATE_ADDRESS: ":8080"
-    networks:
-      e2e:
-
-  bssd:
-    build:
-      dockerfile: "./docker/bssd/Dockerfile"
-      context: "./.."
-    depends_on:
-      - "bfgd"
-    ports:
-      - "8081:8081"
-    environment:
-      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
-      BSS_LOG_LEVEL: "INFO"
-      BSS_ADDRESS: ":8081"
+      BFG_BITCOIN_SOURCE: "tbc"
+      BFG_BITCOIN_URL: "ws://tbcd:8082/v1/ws"
     networks:
       e2e:
 
@@ -167,11 +112,16 @@ services:
       context: "./.."
     depends_on:
       - "bfgd"
+      - "tbcd"
+      - "op-geth-l2"
     environment:
-      POPM_BTC_PRIVKEY: "${POPM_BTC_PRIVATE_KEY}"
+      POPM_BITCOIN_SECRET: "${POPM_BTC_PRIVATE_KEY}"
       POPM_BFG_URL: "http://bfgd:8383/v1/ws/public"
       POPM_LOG_LEVEL: "INFO"
+      POPM_OPGETH_URL: "ws://op-geth-l2:28546"
       POPM_REMINE_THRESHOLD: "1"
+      POPM_BITCOIN_URL: "ws://tbcd:8082/v1/ws"
+      POPM_BITCOIN_NETWORK: "localnet"
     networks:
       e2e:
 
@@ -302,12 +252,8 @@ services:
         condition: "service_started"
       op-geth-l2:
         condition: "service_healthy"
-      bssd:
-        condition: "service_started"
     healthcheck:
       start_period: 180s
-    environment:
-      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
       - "op-node/bin/op-node"
       - "--l2=ws://op-geth-l2:8551"
@@ -359,8 +305,6 @@ services:
         condition: "service_started"
     healthcheck:
       start_period: 180s
-    environment:
-      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     command:
       - "op-node/bin/op-node"
       - "--l2=ws://op-geth-l2-non-sequencing:8551"

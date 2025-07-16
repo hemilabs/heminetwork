@@ -45,30 +45,6 @@ builds:
       - goos: "windows"
         goarch: arm
 
-  # Bitcoin Secure Sequencer Daemon
-  - id: "bssd"
-    binary: "bssd"
-    main: "./cmd/bssd/"
-    env: ["CGO_ENABLED=0", "GOGC=off"]
-    ldflags:
-      - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
-    flags: ["-trimpath"]
-    goos:
-      - "linux"
-      - "windows"
-      - "darwin"
-      - "openbsd"
-    goarch: ["amd64", "arm64", "arm"]
-    goarm: ["7"]
-    ignore:
-      - goos: "windows"
-        goarch: arm
-
   # btctool util
   - id: "btctool"
     binary: "btctool"
@@ -271,7 +247,6 @@ signs:
 
 # Creates Docker images:
 #  - bfgd: linux/amd64, linux/arm64
-#  - bssd: linux/amd64, linux/arm64
 #  - popmd: linux/amd64, linux/arm64/v8, linux/arm/v7
 #  - tbcd: linux/amd64, linux/arm64
 #  - hproxyd: linux/amd64, linux/arm64
@@ -300,36 +275,6 @@ dockers:
     image_templates:
       - "hemilabs/bfgd:{{ .Version }}-arm64"
       - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64/v8"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
-
-  # bssd amd64
-  - id: "bssd-amd64"
-    goos: "linux"
-    goarch: "amd64"
-    dockerfile: "docker/bssd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/bssd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
-
-  # bssd arm64
-  - id: "bssd-arm64"
-    goos: "linux"
-    goarch: "arm64"
-    dockerfile: "docker/bssd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/bssd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
     build_flag_templates:
       - "--platform=linux/arm64/v8"
       - "--build-arg=VERSION={{ .Version }}"
@@ -480,42 +425,6 @@ docker_manifests:
     image_templates:
       - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
       - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
-
-  # bssd - Docker Hub
-  - name_template: "hemilabs/bssd:latest"
-    image_templates:
-      - "hemilabs/bssd:{{ .Version }}-amd64"
-      - "hemilabs/bssd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/bssd:{{ .Major }}"
-    image_templates:
-      - "hemilabs/bssd:{{ .Version }}-amd64"
-      - "hemilabs/bssd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/bssd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "hemilabs/bssd:{{ .Version }}-amd64"
-      - "hemilabs/bssd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/bssd:{{ .Version }}"
-    image_templates:
-      - "hemilabs/bssd:{{ .Version }}-amd64"
-      - "hemilabs/bssd:{{ .Version }}-arm64"
-
-  # bssd - GitHub Container Registry
-  - name_template: "ghcr.io/hemilabs/bssd:latest"
-    image_templates:
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/bssd:{{ .Major }}"
-    image_templates:
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/bssd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/bssd:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bssd:{{ .Version }}-arm64"
 
   # popmd - Docker Hub
   - name_template: "hemilabs/popmd:latest"

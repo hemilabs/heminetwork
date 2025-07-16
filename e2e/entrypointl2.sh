@@ -53,8 +53,8 @@ echo $filecontents > ./config.toml
  --ws.addr=0.0.0.0  \
  --ws.port=28546  \
  --ws.origins="*"  \
- --http.api=web3,debug,eth,txpool,net,engine,miner \
- --ws.api=debug,eth,txpool,net,engine,miner \
+ --http.api=web3,debug,eth,txpool,net,engine,miner,kss \
+ --ws.api=debug,eth,txpool,net,engine,miner,kss \
  --syncmode=full  \
  --nodiscover  \
  --maxpeers=50 \
@@ -84,7 +84,6 @@ echo $filecontents > ./config.toml
  --override.holocene=$HVM_PHASE0_TIMESTAMP \
  --override.granite=$HVM_PHASE0_TIMESTAMP \
  --override.fjord=$HVM_PHASE0_TIMESTAMP \
- --verbosity=5 \
  --unlock='78697c88847dfbbb40523e42c1f2e28a13a170be' \
  --rpc.enabledeprecatedpersonal \
  --gcmode=archive \

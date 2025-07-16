@@ -1,72 +1,34 @@
 ## hemictl
 
-The `hemictl` command is a generic tool to script commands to various daemons.
+The `hemictl` command is a generic tool to manipulate script commands to various daemons and their internal framework.
 
 ### Usage
 ```bash
-hemictl <daemon> <action> [json parameters]
+hemictl <command> <action> [parameters]
 ```
 
 ### Components
 
-- `daemon`: Determines the default URI `hemictl` connects to (e.g., `bss` connects to `ws://localhost:8081/v1/ws`)
+- `command`: Determines the daemon / module to be manipulated (e.g., `tbcdb` is used to manipulated a TBC database)
 - `action`: Specifies which command will be called (e.g., `ping`)
-- `parameters`: JSON encoded parameters for the `action` (e.g., `{"timestamp":1}`)
+- `parameters`: Key-value pair or JSON encoded parameters for the `action` (e.g., `timestamp=1` or `{"timestamp":1}`)
 
 ### Environment Variables
 
-- `LOGLEVEL`: Sets the logging level (e.g., `INFO`, `DEBUG`)
-- `PGURI`: Override database connection URI for database operations
-- `HEMI_URI`: Override default daemon URI (format: `ws://host:port/v1/ws`)
+- `HEMICTL_LOG_LEVEL`: Sets the logging level (e.g., `INFO`, `DEBUG`)
+- `HEMICTL_LEVELDB_HOME`: The tbcdb leveldb home directory (default: `~/.tbcd`)
+- `HEMICTL_NETWORK`: Bitcoin network (e.g., `mainnet`, `testnet3`)
 
-### Examples
+### Detailed Overview
 
-#### Basic Ping Command
+For a detailed overview of the available modules, use:
 ```bash
-hemictl bss ping '{"timestamp":1}'
+hemictl -help
 ```
 
-Response:
-```json
-{
-    "origintimestamp": 1,
-    "timestamp": 1701091119
-}
-```
-
-#### Error Handling Example
+For a detailed overview of a specific module's subcommands, use:
 ```bash
-hemictl bss l1tick '{"l1_height":0}'
-```
-
-Response:
-```json
-{
-    "error": {
-        "timestamp": 1701091156,
-        "trace": "804d952f893e686c",
-        "error": "L1 tick notification with height zero"
-    }
-}
-```
-
-### Database Operations
-
-`hemictl` provides direct access to the storage layer, currently supporting PostgreSQL.
-
-#### Check Database Version
-```bash
-hemictl bfgdb version
-```
-
-Response:
-```json
-{"bfgdb_version":1}
-```
-
-#### Custom Database Connection
-```bash
-LOGLEVEL=INFO PGURI="user=username password=secretpassword database=bfgdb" hemictl bfgdb version
+hemictl <command> -help
 ```
 
 ### Error Handling
@@ -77,6 +39,6 @@ The tool provides detailed error messages with:
 - Human-readable error message
 
 ### Notes
-- Always ensure proper JSON formatting in parameters
+- Always ensure proper formatting in parameters
 - Use appropriate environment variables for production deployments
 - Check logs when troubleshooting failed commands

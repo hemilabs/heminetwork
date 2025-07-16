@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/juju/loggo"
 
@@ -31,38 +30,35 @@ var (
 
 	cfg = popm.NewDefaultConfig()
 	cm  = config.CfgMap{
+		"POPM_OPGETH_URL": config.Config{
+			Value:        &cfg.OpgethURL,
+			DefaultValue: "localhost:9999",
+			Help:         "URL for opgeth",
+			Print:        config.PrintAll,
+		},
+		"POPM_BITCOIN_NETWORK": config.Config{
+			Value:        &cfg.Network,
+			DefaultValue: "mainnet",
+			Help:         "bitcoin chain to connect to (ex. \"mainnet\", \"testnet3\")",
+			Print:        config.PrintAll,
+		},
+		"POPM_BITCOIN_SECRET": config.Config{
+			Value:        &cfg.BitcoinSecret,
+			Required:     true,
+			DefaultValue: "",
+			Help:         "bitcoin secret (mnemonic, seed, xpriv)",
+			Print:        config.PrintSecret,
+		},
 		"POPM_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
 		},
-		"POPM_BTC_PRIVKEY": config.Config{
-			Value:        &cfg.BTCPrivateKey,
-			Required:     true,
+		"POPM_PPROF_ADDRESS": config.Config{
+			Value:        &cfg.PprofListenAddress,
 			DefaultValue: "",
-			Help:         "bitcoin private key",
-			Print:        config.PrintSecret,
-		},
-		"POPM_BFG_URL": config.Config{
-			Value:        &cfg.BFGWSURL,
-			DefaultValue: cfg.BFGWSURL,
-			Help:         "url for BFG (Bitcoin Finality Governor)",
-			Print:        config.PrintAll,
-		},
-		"POPM_BFG_REQUEST_TIMEOUT": config.Config{
-			Value:        &cfg.BFGRequestTimeout,
-			DefaultValue: cfg.BFGRequestTimeout,
-			Help:         "request timeout for BFG (Bitcoin Finality Governor)",
-			Print:        config.PrintAll,
-			Parse: func(envValue string) (any, error) {
-				return time.ParseDuration(envValue)
-			},
-		},
-		"POPM_BTC_CHAIN_NAME": config.Config{
-			Value:        &cfg.BTCChainName,
-			DefaultValue: popm.NewDefaultConfig().BTCChainName,
-			Help:         "the name of the bitcoin chain to connect to (ex. \"mainnet\", \"testnet3\")",
+			Help:         "address and port popm pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
 		"POPM_PROMETHEUS_ADDRESS": config.Config{
@@ -71,22 +67,16 @@ var (
 			Help:         "address and port popm prometheus listens on",
 			Print:        config.PrintAll,
 		},
-		"POPM_PPROF_ADDRESS": config.Config{
-			Value:        &cfg.PrometheusListenAddress,
-			DefaultValue: "",
-			Help:         "address and port popm pprof listens on (open <address>/debug/pprof to see available profiles)",
-			Print:        config.PrintAll,
-		},
 		"POPM_REMINE_THRESHOLD": config.Config{
 			Value:        &cfg.RetryMineThreshold,
 			DefaultValue: uint(0),
 			Help:         "the number of L2 Keystones behind the latest seen that we are willing to remine, this is handy for re-orgs",
 			Print:        config.PrintAll,
 		},
-		"POPM_STATIC_FEE": config.Config{
-			Value:        &cfg.StaticFee,
-			DefaultValue: uint(1),
-			Help:         "specify the number of sats/vB the PoP Miner will pay for fees",
+		"POPM_BITCOIN_URL": config.Config{
+			Value:        &cfg.BitcoinURL,
+			DefaultValue: "",
+			Help:         "the bitcoin url to connect to; it's either a tbc or blockstream url",
 			Print:        config.PrintAll,
 		},
 	}
@@ -132,7 +122,7 @@ func _main() error {
 		log.Infof("popm service received signal: %s", s)
 	})
 
-	miner, err := popm.NewMiner(cfg)
+	miner, err := popm.NewServer(cfg)
 	if err != nil {
 		return fmt.Errorf("create POP miner: %w", err)
 	}
