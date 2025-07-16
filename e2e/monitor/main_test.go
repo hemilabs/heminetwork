@@ -33,6 +33,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-node/bindings"
 	bindingspreview "github.com/ethereum-optimism/optimism/op-node/bindings/preview"
 	"github.com/ethereum-optimism/optimism/op-node/withdrawals"
+	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -41,9 +42,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/go-test/deep"
-
-	"github.com/ethereum-optimism/optimism/op-service/sources/batching"
-
 	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 	"github.com/hemilabs/heminetwork/hemi"
 )
@@ -54,10 +52,7 @@ const (
 	btcAddress         = "mv5gj33YaFviPFDmkkUpb31C4uxoB4ZZ5D"
 )
 
-var (
-	// l1StandardBridge = common.Address(common.FromHex("0x0F38Af108B73731E95EA057ef8463E4B2327f36e"))
-	abort = retries - 1
-)
+var abort = retries - 1
 
 func addressAt(t *testing.T, path string) common.Address {
 	cmd := exec.Command(
