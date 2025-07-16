@@ -515,7 +515,7 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(s.holdoffTimeout):
+			case <-time.Tick(s.holdoffTimeout):
 			}
 			continue
 		}
@@ -664,7 +664,7 @@ func (s *Server) bfg(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(s.holdoffTimeout):
+		case <-time.Tick(s.holdoffTimeout):
 		}
 
 		log.Debugf("Reconnecting to: %v", s.cfg.BFGURL)
