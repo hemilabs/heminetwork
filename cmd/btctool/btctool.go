@@ -34,7 +34,7 @@ import (
 	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/util/version"
 )
 
 func parseTxFromHex(txs string) (*btcutil.Tx, error) {

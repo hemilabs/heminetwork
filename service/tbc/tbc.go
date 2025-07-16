@@ -43,7 +43,7 @@ import (
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
 	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
-	"github.com/hemilabs/heminetwork/ttl"
+	"github.com/hemilabs/heminetwork/util/ttl"
 )
 
 const (

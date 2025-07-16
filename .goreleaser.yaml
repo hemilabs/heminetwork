@@ -28,11 +28,11 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+      - "-X 'github.com/hemilabs/heminetwork/util/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/util/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
     flags: ["-trimpath"]
     goos:
       - "linux"
@@ -52,11 +52,11 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+      - "-X 'github.com/hemilabs/heminetwork/util/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/util/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
     flags: ["-trimpath"]
     goos:
       - "linux"
@@ -76,11 +76,11 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+      - "-X 'github.com/hemilabs/heminetwork/util/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/util/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
     flags: ["-trimpath"]
     goos:
       - "linux"
@@ -100,11 +100,11 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+      - "-X 'github.com/hemilabs/heminetwork/util/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/util/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
     flags: ["-trimpath"]
     goos:
       - "linux"
@@ -124,11 +124,11 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+      - "-X 'github.com/hemilabs/heminetwork/util/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/util/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
     flags: ["-trimpath"]
     goos:
       - "linux"
@@ -148,11 +148,11 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+      - "-X 'github.com/hemilabs/heminetwork/util/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/util/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
     flags: ["-trimpath"]
     goos:
       - "linux"
@@ -172,11 +172,11 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+      - "-X 'github.com/hemilabs/heminetwork/util/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/util/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
     flags: ["-trimpath"]
     goos:
       - "linux"
@@ -191,11 +191,11 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
+      - "-X 'github.com/hemilabs/heminetwork/util/version.Brand=Hemi Labs'"
+      - "-X github.com/hemilabs/heminetwork/util/version.Major={{ .Major }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Minor={{ .Minor }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.Patch={{ .Patch }}"
+      - "-X github.com/hemilabs/heminetwork/util/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
     flags: ["-trimpath"]
     goos:
       - "linux"

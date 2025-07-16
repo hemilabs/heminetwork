@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -17,7 +17,7 @@ import (
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/hemi/electrs"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/util/version"
 )
 
 func init() {

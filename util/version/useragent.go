@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Hemi Labs, Inc.
+// Copyright (c) 2024-2025 Hemi Labs, Inc.
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
@@ -26,7 +26,7 @@ var (
 	//
 	// This should be set at link-time using:
 	//
-	//	-ldflags "-X 'github.com/hemilabs/heminetwork/version.Brand=my brand'"
+	//	-ldflags "-X 'github.com/hemilabs/heminetwork/util/version.Brand=my brand'"
 	Brand string
 
 	// Component is an identifier for the binary.

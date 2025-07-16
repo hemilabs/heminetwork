@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/util/testutil"
 )
 
 func TestClientConn(t *testing.T) {

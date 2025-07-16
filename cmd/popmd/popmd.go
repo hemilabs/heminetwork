@@ -16,7 +16,7 @@ import (
 
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/service/popm"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/util/version"
 )
 
 const (

@@ -20,7 +20,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/util/testutil"
 )
 
 type serverReply struct {

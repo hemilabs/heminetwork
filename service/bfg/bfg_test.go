@@ -25,8 +25,8 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/popm"
-	"github.com/hemilabs/heminetwork/testutil"
-	"github.com/hemilabs/heminetwork/testutil/mock"
+	"github.com/hemilabs/heminetwork/util/testutil"
+	"github.com/hemilabs/heminetwork/util/testutil/mock"
 )
 
 const wantedKeystones = 10
