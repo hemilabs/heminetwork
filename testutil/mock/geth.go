@@ -165,8 +165,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 					select {
 					case <-f.pctx.Done():
 						return
-
-					case <-time.Tick(DefaultNtfnDuration):
+					case <-time.After(DefaultNtfnDuration):
 						if !f.Running() {
 							return
 						}

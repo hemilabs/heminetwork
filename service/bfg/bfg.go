@@ -371,7 +371,7 @@ func (s *Server) handleOneBroadcastRequest(pctx context.Context, highPriority bo
 
 		// if there is a communication error, backoff a bit
 		select {
-		case <-time.Tick(1 * time.Second):
+		case <-time.After(1 * time.Second):
 			return
 		case <-ctx.Done():
 			return
@@ -381,7 +381,7 @@ func (s *Server) handleOneBroadcastRequest(pctx context.Context, highPriority bo
 	// if there are no new serialized txs, backoff a bit
 	if serializedTx == nil {
 		select {
-		case <-time.Tick(1 * time.Second):
+		case <-time.After(1 * time.Second):
 			return
 		case <-ctx.Done():
 			return
@@ -1678,7 +1678,7 @@ func (s *Server) handleBFGWebsocketReadUnauth(ctx context.Context, conn *protoco
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.Tick(s.holdoffTimeout):
+			case <-time.After(s.holdoffTimeout):
 			}
 			continue
 		}
@@ -1827,7 +1827,7 @@ func (s *Server) bfg(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.Tick(s.holdoffTimeout):
+		case <-time.After(s.holdoffTimeout):
 		}
 
 		log.Debugf("Reconnecting to: %v", s.cfg.BFGURL)
@@ -1907,7 +1907,7 @@ func (s *Server) Run(pctx context.Context) error {
 		defer s.wg.Done()
 		for {
 			select {
-			case <-time.Tick(1 * time.Minute):
+			case <-time.After(1 * time.Minute):
 				log.Infof("sending notifications of l2 keystones")
 				go s.handleL2KeystonesNotification()
 			case <-ctx.Done():
@@ -1930,7 +1930,7 @@ func (s *Server) Run(pctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.Tick(1 * time.Second):
+			case <-time.After(1 * time.Second):
 				s.refreshL2KeystoneCache(ctx)
 			}
 		}
@@ -1943,7 +1943,7 @@ func (s *Server) Run(pctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.Tick(5 * time.Minute):
+			case <-time.After(5 * time.Minute):
 				if err := s.db.BtcTransactionBroadcastRequestTrim(ctx); err != nil {
 					log.Errorf("error trimming old requests: %v", err)
 				}

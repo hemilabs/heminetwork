@@ -396,7 +396,6 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 		log.Infof("DNS seeder started")
 		minW := 5
 		maxW := 59
-		dnsTicker := time.NewTicker(time.Minute)
 		for {
 			err := pm.seed(ctx)
 			if err != nil {
@@ -406,11 +405,10 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 			}
 
 			holdOff := time.Duration(minW+rand.IntN(maxW-minW)) * time.Second
-			dnsTicker.Reset(holdOff)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-dnsTicker.C:
+			case <-time.After(holdOff):
 			}
 		}
 		log.Infof("DNS seeding complete")
@@ -425,33 +423,19 @@ func (pm *PeerManager) Run(ctx context.Context) error {
 	for i := 0; i < pm.want; i++ {
 		pm.slotsC <- i
 	}
-	peerHoldoff := 7 * time.Second
-	peerTicker := time.NewTicker(peerHoldoff)
-	peerTicker.Stop()
 	for {
 		select {
 		case slot := <-pm.slotsC:
 			p, err := pm.randomPeer(ctx, slot)
 			if err != nil {
 				// basically no addresses, hold-off
-				peerTicker.Reset(peerHoldoff)
-				select {
-				case <-ctx.Done():
-					// XXX why do we need this?
-					err := ctx.Err()
-					if errors.Is(err, context.Canceled) {
-						return nil
-					}
-				case <-peerTicker.C:
-				}
-				peerTicker.Stop()
+				<-time.After(7 * time.Second)
 				pm.slotsC <- slot // give the slot back
 				continue
 			}
 			go pm.connectSlot(ctx, p)
 
 		case <-ctx.Done():
-			// XXX why do we need this?
 			err := ctx.Err()
 			if errors.Is(err, context.Canceled) {
 				return nil
