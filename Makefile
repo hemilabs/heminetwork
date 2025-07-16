@@ -21,6 +21,7 @@ cmds = \
 	bfgd	\
 	extool	\
 	hemictl	\
+	hproxyd	\
 	keygen	\
 	popmd	\
 	tbcd

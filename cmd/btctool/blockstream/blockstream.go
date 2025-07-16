@@ -54,7 +54,7 @@ func Tip(ctx context.Context) (int, error) {
 	}
 	height, err := strconv.ParseInt(string(b), 10, 0)
 	if err != nil {
-		return 0, fmt.Errorf("parse uint: %w", err)
+		return 0, fmt.Errorf("parse int: %w", err)
 	}
 	if height < 0 {
 		return 0, fmt.Errorf("parse uint: unexpected negative value")
