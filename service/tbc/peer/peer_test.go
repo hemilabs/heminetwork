@@ -55,7 +55,7 @@ func TestPeer(t *testing.T) {
 
 	// Get unknown block
 	blockUnknown := &chainhash.Hash{}
-	h, err = p.GetHeaders(ctx, []*chainhash.Hash{blockUnknown}, nil)
+	_, err = p.GetHeaders(ctx, []*chainhash.Hash{blockUnknown}, nil)
 	if !errors.Is(err, ErrUnknown) {
 		t.Fatalf("expected unknown error, got %v", err)
 	}
