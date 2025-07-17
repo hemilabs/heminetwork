@@ -28,7 +28,7 @@ var (
 
 // PreRelease contains the prerelease name of the application. It is a variable,
 // so it can be modified at link time (e.g.
-// `-ldflags "-X github.com/hemilabs/heminetwork/version.PreRelease=rc1"`).
+// `-ldflags "-X github.com/hemilabs/heminetwork/util/version.PreRelease=rc1"`).
 // It must only contain characters from the semantic version alphabet.
 var PreRelease = "dev"
 

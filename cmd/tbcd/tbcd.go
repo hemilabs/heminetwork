@@ -17,7 +17,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/util/version"
 )
 
 const (

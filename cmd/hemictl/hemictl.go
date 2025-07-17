@@ -44,7 +44,7 @@ import (
 	"github.com/hemilabs/heminetwork/service/hproxy"
 	"github.com/hemilabs/heminetwork/service/tbc"
 	"github.com/hemilabs/heminetwork/service/tbc/peer"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/util/version"
 )
 
 const (

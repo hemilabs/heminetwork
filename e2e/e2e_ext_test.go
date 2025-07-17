@@ -32,8 +32,8 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/bfg"
 	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/hemilabs/heminetwork/testutil"
-	"github.com/hemilabs/heminetwork/testutil/mock"
+	"github.com/hemilabs/heminetwork/util/testutil"
+	"github.com/hemilabs/heminetwork/util/testutil/mock"
 )
 
 func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
