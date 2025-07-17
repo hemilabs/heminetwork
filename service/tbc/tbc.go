@@ -801,11 +801,13 @@ func diskFree(path string) (uint64, error) {
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
+	ticker := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(5 * time.Second):
+
+		case <-ticker.C:
 		}
 
 		s.prom.syncInfo = s.Synced(ctx)
@@ -2844,11 +2846,13 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
+			ticker := time.NewTicker(13 * time.Second)
 			for {
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(13 * time.Second):
+
+				case <-ticker.C:
 				}
 				s.pm.All(ctx, s.pingPeer)
 			}

@@ -546,7 +546,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(5 * time.Second):
+		case <-time.Tick(5 * time.Second):
 		}
 
 		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
@@ -573,11 +573,12 @@ func (s *Server) Collectors() []prometheus.Collector {
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
+	ticker := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-ticker.C:
 		}
 
 		if s.promPollVerbose {

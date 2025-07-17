@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -384,6 +385,7 @@ func TestFanout(t *testing.T) {
 				panic(fmt.Errorf("id mismatch header: %s, json: %d", ids, jr.ID))
 			}
 		}(i)
+		runtime.Gosched()
 	}
 
 	wg.Wait()

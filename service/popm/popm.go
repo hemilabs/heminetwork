@@ -573,7 +573,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(s.cfg.opgethReconnectTimeout):
+		case <-time.Tick(s.cfg.opgethReconnectTimeout):
 		}
 
 		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
@@ -614,11 +614,12 @@ func (s *Server) mine(ctx context.Context) error {
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
+	ticker := time.NewTicker(5 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(5 * time.Second):
+		case <-ticker.C:
 		}
 
 		// Insert prometheus poll here
