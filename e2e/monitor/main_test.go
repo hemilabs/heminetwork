@@ -183,7 +183,7 @@ func TestL1L2Comms(t *testing.T) {
 				t.Fatalf("could not dial eth l1 %s", err)
 			}
 
-			l2ClientNonSequencing, err := ethclient.Dial("http://localhost:18549")
+			l2ClientNonSequencing, err := ethclient.Dial("http://localhost:18546")
 			if err != nil {
 				t.Fatalf("could not dial eth l1 %s", err)
 			}

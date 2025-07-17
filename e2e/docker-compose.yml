@@ -396,7 +396,7 @@ services:
     networks:
       e2e:
     ports:
-      - "18549:8549"
+      - "18546:8546"
 
   op-batcher:
     build:
