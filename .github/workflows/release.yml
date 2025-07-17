@@ -24,6 +24,8 @@ jobs:
   # Build and test
   test-go:
     name: "Test (Go)"
+    permissions:
+      contents: read
     uses: ./.github/workflows/go.yml
 
   # Create GitHub Release
