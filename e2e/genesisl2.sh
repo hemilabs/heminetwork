@@ -15,9 +15,6 @@ forge build --deny-warnings --skip test --out .artifacts
 
 ARTIFACTS_AT="file://$(pwd)/.artifacts"
 
-apt-get install -y yq
-
-
 # the generated intent.toml file generated from init will need to be modified 
 # below, there isn't a way to do this other than just modifying the file
 # directly 

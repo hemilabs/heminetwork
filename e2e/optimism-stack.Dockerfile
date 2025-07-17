@@ -21,7 +21,7 @@ FROM golang:1.24.4-bookworm@sha256:c83619bb18b0207412fffdaf310f57ee3dd02f586ac7a
 COPY --from=build_1 /git/op-geth/build/bin/geth /bin/geth
 
 RUN apt-get update
-RUN apt-get install -y jq nodejs npm netcat-openbsd
+RUN apt-get install -y jq nodejs npm netcat-openbsd yq
 
 RUN npm install -g pnpm
 

@@ -284,7 +284,7 @@ services:
       - "--verifier.l1-confs=0"
       - "--rollup.config=/shared-dir/rollup.json"
       - "--rpc.addr=0.0.0.0"
-      - "--rpc.port=8547"
+      - "--rpc.port=8548"
       - "--rpc.enable-admin"
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
@@ -314,7 +314,7 @@ services:
       e2e:
         ipv4_address: 192.169.199.7
     ports:
-      - "8548:8547"
+      - "8548:8548"
 
   op-node-non-sequencing:
     build:
@@ -332,7 +332,7 @@ services:
       - "--verifier.l1-confs=0"
       - "--rollup.config=/shared-dir/rollup.json"
       - "--rpc.addr=0.0.0.0"
-      - "--rpc.port=8547"
+      - "--rpc.port=8548"
       - "--rpc.enable-admin"
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
@@ -360,7 +360,7 @@ services:
     networks:
       e2e:
     ports:
-      - "18547:8547"
+      - "18548:8548"
 
   op-geth-l2-non-sequencing:
     build:
@@ -396,7 +396,7 @@ services:
     networks:
       e2e:
     ports:
-      - "18548:8546"
+      - "18549:8549"
 
   op-batcher:
     build:
@@ -410,7 +410,7 @@ services:
     command:
       - "op-batcher/bin/op-batcher"
       - "--l2-eth-rpc=http://op-geth-l2:8546"
-      - "--rollup-rpc=http://op-node:8547"
+      - "--rollup-rpc=http://op-node:8548"
       - "--poll-interval=1s"
       - "--sub-safety-margin=1"
       - "--num-confirmations=1"

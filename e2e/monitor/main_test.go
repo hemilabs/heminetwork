@@ -183,7 +183,7 @@ func TestL1L2Comms(t *testing.T) {
 				t.Fatalf("could not dial eth l1 %s", err)
 			}
 
-			l2ClientNonSequencing, err := ethclient.Dial("http://localhost:18548")
+			l2ClientNonSequencing, err := ethclient.Dial("http://localhost:18549")
 			if err != nil {
 				t.Fatalf("could not dial eth l1 %s", err)
 			}
@@ -217,7 +217,7 @@ func TestL1L2Comms(t *testing.T) {
 			hvmBtcBalance(t, ctx, l2ClientToUse, privateKey)
 
 			opNodeSequencingEndpoint := "http://localhost:8548"
-			opNodeNonSequencingEndpoint := "http://localhost:18547"
+			opNodeNonSequencingEndpoint := "http://localhost:18548"
 			assertOutputRootsAreTheSame(t, ctx, l2ClientToUse, opNodeSequencingEndpoint, opNodeNonSequencingEndpoint)
 			assertSafeAndFinalBlocksAreProgressing(t, ctx, l2ClientToUse)
 		})
