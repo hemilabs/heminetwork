@@ -2,14 +2,16 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
+ARG OP_GETH_COMMIT=ed68446430a8b726f1dceceb0e85cdc5f10f248e
+ARG OPTIMISM_COMMIT=7bb2a14f63d01bcb4de3ab3165b007fd85a6b1f9
+
 FROM golang:1.24.4-bookworm@sha256:c83619bb18b0207412fffdaf310f57ee3dd02f586ac7a5b44b9c36a29a9d5122 AS build_1
 
 WORKDIR /git
 
-ARG OP_GETH_CACHE_BREAK=12F2d
 RUN git clone https://github.com/hemilabs/op-geth
 WORKDIR /git/op-geth
-RUN git checkout ed68446430a8b726f1dceceb0e85cdc5f10f248e
+RUN git checkout $OP_GETH_COMMIT
 
 RUN go run build/ci.go install -static ./cmd/geth
 
@@ -49,9 +51,8 @@ COPY --from=build_1 /git/op-geth /git/op-geth
 WORKDIR /git
 RUN git clone https://github.com/hemilabs/optimism
 WORKDIR /git/optimism
-RUN echo 6666666ddd
 RUN git fetch origin
-RUN git checkout 7bb2a14f63d01bcb4de3ab3165b007fd85a6b1f9
+RUN git checkout $OPTIMISM_COMMIT
 
 WORKDIR /git/optimism
 RUN go mod tidy

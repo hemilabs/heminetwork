@@ -9,9 +9,6 @@ MY_ADDRESS="0x78697c88847dfbbb40523e42c1f2e28a13a170be"
 
 cd /git/optimism/packages/contracts-bedrock
 
-cd /git/optimism/packages/contracts-bedrock
-
-
 forge build --deny-warnings --skip test --out .artifacts
 
 /git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir .deployer --intent-type custom

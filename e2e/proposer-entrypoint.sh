@@ -11,3 +11,4 @@ op-proposer/bin/op-proposer \
     --safe-abort-nonce-too-low-count=1 \
     --proposal-interval=10s \
     --game-type=1
+    
