@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -106,14 +107,18 @@ func (l *Database) DB() Pool {
 	log.Tracef("DB")
 	defer log.Tracef("DB exit")
 
-	return l.pool
+	l.mtx.RLock()
+	defer l.mtx.RUnlock()
+	return maps.Clone(l.pool)
 }
 
 func (l *Database) RawDB() RawPool {
 	log.Tracef("RawDB")
 	defer log.Tracef("RawDB exit")
 
-	return l.rawPool
+	l.mtx.RLock()
+	defer l.mtx.RUnlock()
+	return maps.Clone(l.rawPool)
 }
 
 func (l *Database) openDB(name string) error {
