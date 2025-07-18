@@ -78,8 +78,7 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	RetryMineThreshold      uint
-	StaticFee               bool
-	StaticFeeAmount         uint
+	StaticFee               uint
 
 	// cooked settings, do not export
 	opgethReconnectTimeout time.Duration
@@ -171,9 +170,9 @@ func NewServer(cfg *Config) (*Server, error) {
 		workC:          make(chan struct{}, 2),
 	}
 
-	if cfg.StaticFee && cfg.StaticFeeAmount < minRelayFee {
+	if cfg.StaticFee != 0 && cfg.StaticFee < minRelayFee {
 		return nil, fmt.Errorf("static fee set to %v, minimum is %v",
-			cfg.StaticFeeAmount, minRelayFee)
+			cfg.StaticFee, minRelayFee)
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -346,10 +345,10 @@ func (s *Server) getFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
 	defer log.Tracef("getFee exit")
 
 	var feeAmount *tbcapi.FeeEstimate
-	if s.cfg.StaticFee {
+	if s.cfg.StaticFee != 0 {
 		feeAmount = &tbcapi.FeeEstimate{
 			Blocks:      s.cfg.BitcoinConfirmations,
-			SatsPerByte: float64(s.cfg.StaticFeeAmount),
+			SatsPerByte: float64(s.cfg.StaticFee),
 		}
 	} else {
 		// Estimate BTC fees.

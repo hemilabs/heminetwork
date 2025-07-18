@@ -343,21 +343,12 @@ func TestStaticFee(t *testing.T) {
 	cfg.BitcoinSource = "tbc"
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
-	cfg.StaticFee = true
-	cfg.StaticFeeAmount = 0
+	cfg.StaticFee = 3
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
 	}
 
-	// shouldn't allow static fee of 0
-	_, err := NewServer(cfg)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-
-	cfg.StaticFeeAmount = 3
-	// should allow static fee of 3
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
