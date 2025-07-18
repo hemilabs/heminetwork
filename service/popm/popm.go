@@ -16,12 +16,14 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	btcmempool "github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/heminetwork/api/gethapi"
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
@@ -51,6 +53,9 @@ const (
 	defaultL2KeystoneMaxAge       = 4 * time.Hour
 	defaultL2KeystonePollTimeout  = 13 * time.Second
 	defaultL2KeystoneRetryTimeout = 15 * time.Second
+
+	// convert btcd minimum fee from sat/kB to sat/byte
+	minRelayFee = uint(btcmempool.DefaultMinRelayTxFee) / 1000
 )
 
 var log = loggo.GetLogger("popm")
@@ -73,6 +78,8 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	RetryMineThreshold      uint
+	StaticFee               bool
+	StaticFeeAmount         uint
 
 	// cooked settings, do not export
 	opgethReconnectTimeout time.Duration
@@ -162,6 +169,11 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg:            cfg,
 		retryThreshold: uint32(cfg.RetryMineThreshold) * hemi.KeystoneHeaderPeriod,
 		workC:          make(chan struct{}, 2),
+	}
+
+	if cfg.StaticFee && cfg.StaticFeeAmount < minRelayFee {
+		return nil, fmt.Errorf("static fee set to %v, minimum is %v",
+			cfg.StaticFeeAmount, minRelayFee)
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -259,14 +271,9 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 	}
 	scriptHash := vinzclortho.ScriptHashFromScript(payToScript)
 
-	// Estimate BTC fees.
-	feeEstimates, err := s.gozer.FeeEstimates(ctx)
+	feeAmount, err := s.getFee(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("fee estimates: %w", err)
-	}
-	feeAmount, err := gozer.FeeByConfirmations(s.cfg.BitcoinConfirmations, feeEstimates)
-	if err != nil {
-		return nil, fmt.Errorf("fee by confirmations: %w", err)
+		return nil, err
 	}
 
 	// Retrieve available UTXOs for the miner.
@@ -332,6 +339,30 @@ func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2Key
 		return nil, fmt.Errorf("no keystones")
 	}
 	return &kr, nil
+}
+
+func (s *Server) getFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
+	log.Tracef("getFee")
+	defer log.Tracef("getFee exit")
+
+	var feeAmount *tbcapi.FeeEstimate
+	if s.cfg.StaticFee {
+		feeAmount = &tbcapi.FeeEstimate{
+			Blocks:      s.cfg.BitcoinConfirmations,
+			SatsPerByte: float64(s.cfg.StaticFeeAmount),
+		}
+	} else {
+		// Estimate BTC fees.
+		feeEstimates, err := s.gozer.FeeEstimates(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("fee estimates: %w", err)
+		}
+		feeAmount, err = gozer.FeeByConfirmations(s.cfg.BitcoinConfirmations, feeEstimates)
+		if err != nil {
+			return nil, fmt.Errorf("fee by confirmations: %w", err)
+		}
+	}
+	return feeAmount, nil
 }
 
 // reconcileKeystones generates a keystones map

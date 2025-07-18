@@ -79,6 +79,18 @@ var (
 			Help:         "the bitcoin url to connect to; it's either a tbc or blockstream url",
 			Print:        config.PrintAll,
 		},
+		"POPM_FEE_OVERRIDE": config.Config{
+			Value:        &cfg.StaticFee,
+			DefaultValue: false,
+			Help:         "if popm should override fee estimation and use a static fee",
+			Print:        config.PrintAll,
+		},
+		"POPM_FEE_AMOUNT": config.Config{
+			Value:        &cfg.StaticFeeAmount,
+			DefaultValue: uint(1),
+			Help:         "static fee amount in sats/byte (requires POPM_FEE_OVERRIDE=true)",
+			Print:        config.PrintAll,
+		},
 	}
 )
 
