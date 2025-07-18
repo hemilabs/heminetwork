@@ -852,7 +852,7 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			receiptFound := false
 
 			for _, try := range tries {
-				receipt = waitForTxReceiptForSeconds(t, ctx, l1Client, try, 120*time.Second)
+				receipt = waitForTxReceipt(t, ctx, l1Client, try)
 				if receipt == nil || receipt.Status == types.ReceiptStatusFailed {
 					if i == abort {
 						t.Fatal("retries exceeded")
@@ -1388,7 +1388,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 			receiptFound := false
 
 			for _, try := range tries {
-				receipt = waitForTxReceiptForSeconds(t, ctx, l1Client, try, 120*time.Second)
+				receipt = waitForTxReceipt(t, ctx, l1Client, try)
 				if receipt == nil || receipt.Status == types.ReceiptStatusFailed {
 					if i == abort {
 						t.Fatal("retries exceeded")
