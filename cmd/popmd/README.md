@@ -1,20 +1,26 @@
-# 🌐 Hemi PoP Miner (`popmd`)
+# Hemi PoP Miner (`popmd`)
 
-`popmd` is a **lightweight PoP (Proof-of-Proof) miner**. It is designed to wrap the `popm` service, which
-periodically receives information about the current state of the hemi network (a keystone), constructs 
+`popmd` is a **lightweight PoP (Proof-of-Proof) miner**, which wraps the `popm` service.
+
+![Depiction of L1 Profile](images/popminer.svg)
+
+`popmd` will periodically receive information about the current state of the hemi network (a keystone), constructs 
 a bitcoin transaction embedding the aforementioned keystone, and broadcasts these transactions - resulting in 
 rewards, once validated.
 
-## 🖥️ System Requirements
+## System Requirements
 
-`popmd` is very lightweight, off-loading most heavy functionality to other daemons that it can connect to.
-As such, most systems should be able to run popmd over long periods of time without requiring significant resources.
+`popmd` is a **lightweight daemon** and most systems should be able to run popmd over long periods of time without requiring significant resources, as it off-loads most heavy functionality to other daemons it connects to.
 
-## 🛠️ Running `popmd`
+Furthermore, a **GPU is neither required nor helpful** to the functioning of `popmd`.
+
+## Running `popmd`
 
 In order to run `popmd`, you may either use _docker_, download a pre-built binary, or build the tool from source.
 
-### 📦 Downloading Release Binaries (Recommended)
+**NOTE:** URLs for both a [BTC Gozer](../../bitcoin/wallet/README.md) with indexed keystones (such as [`tbcd`]((../tbcd/README.md).)), as well as an [HVM-aware op-geth](https://github.com/hemilabs/op-geth) instance, are required in order to use `popmd`.
+
+### Downloading Release Binaries (Recommended)
 
 Pre-built binaries are available on the [Releases Page](https://github.com/hemilabs/heminetwork/releases).
 
@@ -24,15 +30,15 @@ After extracting the archive that matches your system, start `popmd` by running:
 /path/to/popmd
 ```
 
-### 🐳 Running with Docker
+### Running Local Docker Image
 
 The `heminetwork` repository provides docker images that can be used to run `popmd` using `Docker`.
 
-#### 🏁 Prerequisites
+#### Prerequisites
 
 - `docker` available in your cli
 
-#### ▶️ Execution
+####  Execution
 
 To build and run the provided docker images, run the following on your cli:
 
@@ -50,11 +56,11 @@ docker run \
 popmd:latest
 ```
 
-NOTE: check the [runtime settings](#⚙️-runtime-settings) section for a full list of available environment variables.
+NOTE: check the [runtime settings](#runtime-settings) section for a full list of available environment variables.
 
-### 🏗 Building from Source
+### Building from Source
 
-#### 🏁 Prerequisites
+#### Prerequisites
 
 - [Go v1.24+](https://go.dev/dl/)
 - `make` (optional)
@@ -92,7 +98,7 @@ Once the `popmd` binary is built using one of the previous two options, you can 
 /path/to/popmd
 ```
 
-## ⚙️ Runtime Settings
+## Runtime Settings
 
 `popmd` is **designed to be run both locally and in cloud environments**, as such it uses environment variables for runtime settings.
 
@@ -112,6 +118,7 @@ To see a full list of runtime settings, execute `popmd` with the **`--help`** fl
 #         POPM_PPROF_ADDRESS     : address and port popm pprof listens on (open <address>/debug/pprof to see available profiles) 
 #         POPM_PROMETHEUS_ADDRESS: address and port popm prometheus listens on 
 #         POPM_REMINE_THRESHOLD  : the number of L2 Keystones behind the latest seen that we are willing to remine, this is handy for re-orgs (default: 0)
+#         POPM_STATIC_FEE        : static fee amount in sats/byte; overrides fee estimation if greater than 0 (default: 0)
 ```
 
 Namely, ensure the following variables are properly set: 
@@ -124,7 +131,7 @@ Namely, ensure the following variables are properly set:
 
 - `POPM_OPGETH_URL`: URL to a public HVM-aware opgeth instance, used to retrieve keystones from the hemi network.
 
-\* **NOTE**: `TBC` is the only currently functional bitcoin source of truth available.
+\* **NOTE**: `TBC` is the only functional bitcoin source of truth _currently_ available.
 
 ## FAQ
 
@@ -135,19 +142,15 @@ L2 Blocks are generated rougly every 12 seconds, and a keystone is generated eve
 - 12 * 25 = `300 seconds (5 minutes) between keystones`
 - 86400 / 300 = `288 keystones per day`
 
-As of July 17, 2025, the normal average fee for a bitcoin transaction is around `3 sats/vB`, and each transaction created by the PoP Miner has a size of 284 vB, meaning: 
+Considering that each transaction created by the PoP Miner has a size of `284 vB` and presuming an average bitcoin transaction fee of `3 sats/vB`: 
 
 - 284 * 3 = `852 sats per PoP Tx`
 - 852 * 288 = `245376 sats` or `0.00245376 BTC` per day
 
 The value of BTC can fluctuate heavily, but presuming a cost of `110 000 USD / BTC`, it would cost `~270 USD` per day to run `popmd` on mainnet.
 
-DISCLAIMER: The presented values are not guaranteed, and may not be up-to-date. Different versions of the network's protocols and daemons may incur higher costs and fees. Monitor your spending and mine at your own discretion!
+_**DISCLAIMER:**_ These are example values ONLY. The presented values are not guaranteed, and may not be up-to-date. Different versions of the network's protocols and daemons may incur higher costs and fees. You should get up-to-date values yourself to determine if PoP mining makes sense for you.
 
 ### How many HEMI tokens will I be awarded for mining?
 
 Each keystone has a total payout of `100 HEMI`, which is divided by the number of PoP Txs that mine said keystone. As such, you can expect a "return" of `28800 HEMI` per day, divided by the number of PoP miners (assuming a consistent number of PoP Miners).
-
-### Do I need a GPU to run `popmd`?
-
-No, `popmd` is a lightweight daemon, and does not require a GPU to be run.
