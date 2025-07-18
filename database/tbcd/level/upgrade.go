@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"testing"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -28,9 +29,12 @@ import (
 
 var (
 	upgradeVerbose = true
-	batchSize      = 1_000_000          // move one million records per batch
-	chunkSize      = 1024 * 1024 * 1024 // 1 GiB
-	gib            = uint64(1024 * 1024 * 1024)
+	batchSize      = 1_000_000 // move one million records per batch
+	mib            = uint64(1024 * 1024)
+	gib            = 1024 * mib
+	chunkSize      = int(gib)
+
+	requiredDiskSpace = 10 * gib // require 10GiB at least to perform upgrde
 
 	modeMove = true
 
@@ -38,6 +42,12 @@ var (
 
 	keystoneSizeV3 = chainhash.HashSize + hemi.L2KeystoneAbrevSize
 )
+
+func init() {
+	if testing.Testing() {
+		requiredDiskSpace = 100 * mib
+	}
+}
 
 func SetMode(move bool) {
 	modeMove = move
@@ -352,9 +362,8 @@ func (l *ldb) v3(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("diskFree: %w", err)
 		}
-		// require at least 10G free
-		required := 10 * gib
-		if got < required {
+		if got < requiredDiskSpace {
+			log.Infof("==== %v", l.cfg.Home)
 			return fmt.Errorf("not enough disk space available for upgrade: %v",
 				humanize.IBytes(got))
 		}

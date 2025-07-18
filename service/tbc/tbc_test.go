@@ -489,11 +489,11 @@ func TestKeystonesInBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rb1, err := hex.DecodeString(string(hb1))
+	rb1, err := hex.DecodeString(strings.TrimSpace(string(hb1)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rb2, err := hex.DecodeString(string(hb2))
+	rb2, err := hex.DecodeString(strings.TrimSpace(string(hb2)))
 	if err != nil {
 		t.Fatal(err)
 	}
