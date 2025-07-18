@@ -1,0 +1,33 @@
+services:
+  l1:
+    build:
+      dockerfile: ./hardhat.Dockerfile
+      context: .
+    command:
+      - npx
+      - hardhat
+      - node
+      - --fork 
+      - https://morning-skilled-leaf.ethereum-sepolia.quiknode.pro/05c05aa5a21cd883aeea5252928ec3ec85cec957/
+      - --fork-block-number
+      - '8791294'
+      - --port
+      - '9988'
+    ports:
+      - 9988:9988
+  l2:
+    build:
+      dockerfile: ./hardhat.Dockerfile
+      context: .
+    command:
+      - npx
+      - hardhat
+      - node
+      - --fork 
+      - https://testnet.rpc.hemi.network/rpc
+      - --fork-block-number
+      - '3728323'
+      - --port
+      - '19988'
+    ports:
+      - 19988:19988
