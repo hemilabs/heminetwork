@@ -357,7 +357,7 @@ func TestStaticFee(t *testing.T) {
 	}
 
 	cfg.StaticFeeAmount = 3
-	// shouldn't allow static fee of 0
+	// should allow static fee of 3
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
