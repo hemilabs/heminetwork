@@ -125,16 +125,39 @@ services:
     networks:
       e2e:
 
+  geth-l1-setup:
+    # yamllint disable-line rule:line-length
+    image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
+    working_dir: "/tmp/geth"
+    depends_on:
+      op-geth-l2-setup:
+        condition: "service_completed_successfully"
+    command:
+      - "init"
+      - "--datadir"
+      - "/shared-dir/gethl1datadir"
+      - "/shared-dir/l1genesis.json"
+    volumes:
+      - "shared-dir:/shared-dir"
+    networks:
+      e2e:
+
   geth-l1:
     # yamllint disable-line rule:line-length
     image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
+    container_name: e2e-geth-l1-1
     ports:
       - "8545:8545"
     working_dir: "/tmp/geth"
+    depends_on:
+      geth-l1-setup:
+        condition: "service_completed_successfully"
     command:
       - "--dev"
       - "--dev.period"
       - "3"
+      - "--networkid"
+      - "1337"
       - "--keystore"
       - "/tmp/keystore"
       - "--password"
@@ -146,18 +169,18 @@ services:
       - "--http.vhosts"
       - "*"
       - "--syncmode=full"
-      - "--gcmode=archive"
       - "--nodiscover"
       - "--maxpeers=0"
       - "--authrpc.vhosts=\"*\""
       - "--rpc.allow-unprotected-txs"
       - "--datadir"
-      - "/tmp/geth"
+      - "/shared-dir/gethl1datadir"
       - "--gpo.percentile=0"
       - --http.api=web3,debug,eth,txpool,net,engine,miner
       - --ws.api=debug,eth,txpool,net,engine,miner
-      - --verbosity=5
+      - --rpc.txfeecap=0
     volumes:
+      - "shared-dir:/shared-dir"
       - "./e2e/keystore:/tmp/keystore:ro"
       - "./e2e/passwords.txt:/tmp/passwords.txt:ro"
       - "./e2e/jwt.hex:/tmp/jwt.hex:ro"
@@ -167,11 +190,9 @@ services:
 
   op-geth-l2-setup:
     build:
-      dockerfile: "optimism-stack-legacy.Dockerfile"
+      dockerfile: "optimism-stack.Dockerfile"
       context: "."
     depends_on:
-      geth-l1:
-        condition: "service_started"
       bitcoind:
         condition: "service_started"
       bitcoind-initialblocks:
@@ -191,9 +212,9 @@ services:
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - "./genesisl2.sh:/tmp/genesisl2.sh"
       - "./output:/tmp/output"
-      - "l2configs:/l2configs"
-      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
+      - "shared-dir:/shared-dir"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
+      - "./transactionsmaybe:/git/optimism/packages/contracts-bedrock/broadcast/Deploy.s.sol/1337/"
       - {type: "tmpfs", target: "/tmp"}
     networks:
       e2e:
@@ -209,7 +230,7 @@ services:
         condition: "service_started"
       bitcoind-initialblocks:
         condition: "service_completed_successfully"
-      holocene-deploy:
+      op-geth-l2-setup:
         condition: "service_completed_successfully"
     healthcheck:
       test: ["CMD-SHELL", "ls /tmp/datadir/geth.ipc"]
@@ -233,8 +254,7 @@ services:
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - "./genesisl2.sh:/tmp/genesisl2.sh"
       - "./output:/tmp/output"
-      - "l2configs:/l2configs"
-      - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
+      - "shared-dir:/shared-dir"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - {type: "tmpfs", target: "/tmp"}
     ports:
@@ -262,9 +282,9 @@ services:
       - "--sequencer.l1-confs=0"
       - "--sequencer.stopped=false"
       - "--verifier.l1-confs=0"
-      - "--rollup.config=/l2configs/rollup.json"
+      - "--rollup.config=/shared-dir/rollup.json"
       - "--rpc.addr=0.0.0.0"
-      - "--rpc.port=8547"
+      - "--rpc.port=8548"
       - "--rpc.enable-admin"
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
@@ -287,14 +307,14 @@ services:
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
     volumes:
-      - "l2configs:/l2configs"
+      - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
       - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
     networks:
       e2e:
         ipv4_address: 192.169.199.7
     ports:
-      - "8547:8547"
+      - "8548:8548"
 
   op-node-non-sequencing:
     build:
@@ -310,9 +330,9 @@ services:
       - "--l2=ws://op-geth-l2-non-sequencing:8551"
       - "--l2.jwt-secret=/tmp/jwt.hex"
       - "--verifier.l1-confs=0"
-      - "--rollup.config=/l2configs/rollup.json"
+      - "--rollup.config=/shared-dir/rollup.json"
       - "--rpc.addr=0.0.0.0"
-      - "--rpc.port=8547"
+      - "--rpc.port=8548"
       - "--rpc.enable-admin"
       - "--l1=http://geth-l1:8545"
       - "--l1.rpckind=standard"
@@ -335,12 +355,12 @@ services:
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
     volumes:
-      - "l2configs:/l2configs"
+      - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
     networks:
       e2e:
     ports:
-      - "18547:8547"
+      - "18548:8548"
 
   op-geth-l2-non-sequencing:
     build:
@@ -369,7 +389,7 @@ services:
       - "./entrypointl2.sh:/tmp/entrypointl2.sh"
       - "./genesisl2.sh:/tmp/genesisl2.sh"
       - "./output:/tmp/output"
-      - "l2configs:/l2configs"
+      - "shared-dir:/shared-dir"
       - "./deploy-config.json:/git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json"
       - "./prestate-proof.json:/git/optimism/op-program/bin/prestate-proof.json"
       - {type: "tmpfs", target: "/tmp"}
@@ -390,7 +410,7 @@ services:
     command:
       - "op-batcher/bin/op-batcher"
       - "--l2-eth-rpc=http://op-geth-l2:8546"
-      - "--rollup-rpc=http://op-node:8547"
+      - "--rollup-rpc=http://op-node:8548"
       - "--poll-interval=1s"
       - "--sub-safety-margin=1"
       - "--num-confirmations=1"
@@ -429,41 +449,19 @@ services:
         condition: "service_started"
     healthcheck:
       start_period: 180s
-    command:
-      - "op-proposer/bin/op-proposer"
-      - "--poll-interval=1s"
-      - "--rpc.port=8560"
-      - "--l2oo-address=${L2OO_ADDRESS}"
-      - "--private-key=${ADMIN_PRIVATE_KEY}"
-      - "--l1-eth-rpc=http://geth-l1:8545"
-      - "--rollup-rpc=http://op-node:8547"
-      - "--allow-non-finalized"
-      - "--resubmission-timeout=15s"
-      - "--safe-abort-nonce-too-low-count=1"
-    networks:
-      e2e:
-
-  holocene-deploy:
-    depends_on:
-      op-geth-l2-setup:
-        condition: "service_completed_successfully"
-      geth-l1:
-        condition: "service_started"
-    build:
-      dockerfile: "holocene-upgrade.Dockerfile"
-      context: "."
-    command:
-      - "/holocene-upgrade.sh"
-    volumes:
-      - "./holocene-upgrade.sh:/holocene-upgrade.sh"
-      - "./deploy-config.json:/tmp/deploy-config.json"
-      - "/var/run/docker.sock:/var/run/docker.sock"
     environment:
-      HOLOCENE_DEPLOY_CONFIG_PATH: ${PWD}/e2e/deploy-config-holocene.json
+      ADMIN_PRIVATE_KEY: ${ADMIN_PRIVATE_KEY}
+    entrypoint:
+      - sh
+    command:
+      - /proposer-entrypoint.sh
+    volumes:
+      - shared-dir:/shared-dir
+      - ./proposer-entrypoint.sh:/proposer-entrypoint.sh
     networks:
       e2e:
 volumes:
-  l2configs:
+  shared-dir:
 networks:
   e2e:
     ipam:

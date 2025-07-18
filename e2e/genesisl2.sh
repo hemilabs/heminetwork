@@ -5,74 +5,97 @@
 
 set -ex
 
-JSON_RPC=$OP_GETH_L1_RPC
-
-# start geth in a local container
-# wait for geth to become responsive
-until curl --silent --fail $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\", \"id\":1, \"method\": \"net_version\", \"params\": []}"; do sleep 3; done
-
-sleep 3
-
-# extract the variables we need from json output
 MY_ADDRESS="0x78697c88847dfbbb40523e42c1f2e28a13a170be"
-ONE_TIME_SIGNER_ADDRESS="0x$(cat output/deployment.json | jq --raw-output '.signerAddress')"
-GAS_COST="0x$(printf '%x' $(($(cat output/deployment.json | jq --raw-output '.gasPrice') * $(cat output/deployment.json | jq --raw-output '.gasLimit'))))"
-TRANSACTION="0x$(cat output/deployment.json | jq --raw-output '.transaction')"
-DEPLOYER_ADDRESS="0x$(cat output/deployment.json | jq --raw-output '.address')"
-
-
-sleep 3
-
-# send gas money to signer
-curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\", \"id\":1, \"method\": \"eth_sendTransaction\", \"params\": [{\"from\":\"$MY_ADDRESS\",\"to\":\"$ONE_TIME_SIGNER_ADDRESS\",\"value\":\"$GAS_COST\"}]}"
-
-sleep 3
-
-# deploy the deployer contract
-curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\", \"id\":1, \"method\": \"eth_sendRawTransaction\", \"params\": [\"$TRANSACTION\"]}"
-
-sleep 3
-
-# deploy our contract
-# contract: pragma solidity 0.5.8; contract Apple {function banana() external pure returns (uint8) {return 42;}}
-BYTECODE="6080604052348015600f57600080fd5b5060848061001e6000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c8063c3cafc6f14602d575b600080fd5b6033604f565b604051808260ff1660ff16815260200191505060405180910390f35b6000602a90509056fea165627a7a72305820ab7651cb86b8c1487590004c2444f26ae30077a6b96c6bc62dda37f1328539250029"
-MY_CONTRACT_ADDRESS=$(curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --silent --data "{\"jsonrpc\":\"2.0\", \"id\":1, \"method\": \"eth_call\", \"params\": [{\"from\":\"$MY_ADDRESS\",\"to\":\"$DEPLOYER_ADDRESS\", \"data\":\"0x0000000000000000000000000000000000000000000000000000000000000000$BYTECODE\"}, \"latest\"]}" | jq --raw-output '.result')
-
-sleep 3
-
-curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\", \"id\":1, \"method\": \"eth_sendTransaction\", \"params\": [{\"from\":\"$MY_ADDRESS\",\"to\":\"$DEPLOYER_ADDRESS\", \"gas\":\"0xf4240\", \"data\":\"0x0000000000000000000000000000000000000000000000000000000000000000$BYTECODE\"}]}"
-
-sleep 3
-
-# call our contract (NOTE: MY_CONTRACT_ADDRESS is the same no matter what chain we deploy to!)
-MY_CONTRACT_METHOD_SIGNATURE="c3cafc6f"
-curl $JSON_RPC -X 'POST' -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\", \"id\":1, \"method\": \"eth_call\", \"params\": [{\"to\":\"$MY_CONTRACT_ADDRESS\", \"data\":\"0x$MY_CONTRACT_METHOD_SIGNATURE\"}, \"latest\"]}"
-# expected result is 0x000000000000000000000000000000000000000000000000000000000000002a (hex encoded 42)
 
 cd /git/optimism/packages/contracts-bedrock
 
-forge script ./scripts/Deploy.s.sol:Deploy --non-interactive --private-key=$ADMIN_PRIVATE_KEY --broadcast --rpc-url $JSON_RPC
+forge build --deny-warnings --skip test --out .artifacts
 
-curl -H 'Content-Type: application/json' -X POST --data '{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x2", true],"id":1}' $JSON_RPC > /tmp/blockl1.json
+/git/optimism/op-deployer/bin/op-deployer init --l1-chain-id 1337 --l2-chain-ids 901 --workdir .deployer --intent-type custom
 
-echo $(jq '.result' /tmp/blockl1.json) > /tmp/blockl1.json
+ARTIFACTS_AT="file://$(pwd)/.artifacts"
 
-cat /tmp/blockl1.json
+# the generated intent.toml file generated from init will need to be modified 
+# below, there isn't a way to do this other than just modifying the file
+# directly 
+
+echo "$(tomlq -t ".chains[0].roles.systemConfigOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.unsafeBlockSigner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.l1ProxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.l2ProxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.batcher = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.proposer = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].roles.challenger = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].eip1559Denominator = 1" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].eip1559DenominatorCanyon = 1" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].eip1559Elasticity = 1" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].baseFeeVaultRecipient = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].l1FeeVaultRecipient = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".chains[0].sequencerFeeVaultRecipient = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+
+echo "$(tomlq -t ".l1ContractsLocator = \"$ARTIFACTS_AT\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".l2ContractsLocator = \"$ARTIFACTS_AT\"" .deployer/intent.toml)" > .deployer/intent.toml
+
+echo "$(tomlq -t ".superchainRoles.proxyAdminOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".superchainRoles.protocolVersionsOwner = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".superchainRoles.guardian = \"$MY_ADDRESS\"" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.l2BlockTime = 1" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.proofMaturityDelaySeconds = 10" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.preimageOracleChallengePeriod = 10" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.faultGameClockExtension = 10" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.faultGameMaxClockDuration = 100" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.dangerouslyAllowCustomDisputeParameters = true" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.disputeGameFinalityDelaySeconds = 10" .deployer/intent.toml)" > .deployer/intent.toml
+echo "$(tomlq -t ".globalDeployOverrides.enableGovernance = true" .deployer/intent.toml)" > .deployer/intent.toml
+
+cat .deployer/intent.toml
+cat .deployer/state.json
+
+/git/optimism/op-deployer/bin/op-deployer apply --workdir .deployer --deployment-target genesis
+
+ls -a .deployer
+
+cat .deployer/state.json
+
+/git/optimism/op-deployer/bin/op-deployer inspect genesis --workdir .deployer 901 > /shared-dir/genesis.json
+/git/optimism/op-deployer/bin/op-deployer inspect rollup --workdir .deployer 901 > /shared-dir/rollup.json
+/git/optimism/op-deployer/bin/op-deployer inspect deploy-config --workdir .deployer 901 > /shared-dir/deploy-config.json
+
+echo "$(jq '.l1CancunTimeOffset = "0x0"' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq '.disputeGameFinalityDelaySeconds = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq '.faultGameWithdrawalDelay = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq '.sequencerWindowSize = 200' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq '.l1BlockTime = 3' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq '.proofMaturityDelaySeconds = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+echo "$(jq '.preimageOracleChallengePeriod = 10' /shared-dir/deploy-config.json)" > /shared-dir/deploy-config.json
+
+/git/optimism/op-deployer/bin/op-deployer inspect l1 --workdir .deployer 901 > /shared-dir/l1deployments.json
+
+echo "$(jq -r '.l1StateDump' .deployer/state.json)" > /shared-dir/l1StateDump.bin
+
+cat /shared-dir/l1StateDump.bin
+
+cat /shared-dir/deploy-config.json
+cat /shared-dir/l1deployments.json
+
+cat l1allocs.json
 
 /git/optimism/op-node/bin/op-node \
     genesis \
-    l2 \
+    l1 \
     --deploy-config  \
-    /git/optimism/packages/contracts-bedrock/deploy-config/devnetL1.json \
-    --l1-deployments  \
-    /git/optimism/packages/contracts-bedrock/deployments/devnetL1/.deploy \
-    --outfile.l2  \
-    /l2configs/genesis.json \
-    --outfile.rollup  \
-    /tmp/rollup.json \
-    --l1-starting-block \
-    /tmp/blockl1.json
+    /shared-dir/deploy-config.json \
+    --l1-deployments /shared-dir/deploy-config.json \
+    --outfile.l1 /shared-dir/l1genesis.json \
+    --l1-allocs ./l1allocs.json
 
-# HACK TO REMOVE old fields to make the generated genesis file compatible for 
-# after newer version
-cat /tmp/rollup.json | jq ".genesis.l1.hash = $(cat /tmp/blockl1.json | jq '.hash' )" | jq 'del(.da_resolve_window,.da_challenge_window,.da_challenge_address,.use_plasma)' | jq '. += {"chain_op_config": {"eip1559Elasticity": 6,"eip1559Denominator": 50,"eip1559DenominatorCanyon": 250}}' | jq ". += { \"holocene_time\": $HVM_PHASE0_TIMESTAMP, \"granite_time\": $HVM_PHASE0_TIMESTAMP, \"fjord_time\": $HVM_PHASE0_TIMESTAMP, \"ecotone_time\": 1725868497, \"delta_time\": 1725868497, \"canyon_time\": 1725868497, \"regolith_time\": 1725868497, \"isthmus_time\": $HVM_PHASE0_TIMESTAMP }" > /l2configs/rollup.json
+
+# this adds an allocation line to fund our address on L1, this allows us
+# to transact with the L1
+echo "$(jq '.alloc."0x78697c88847dfbbb40523e42c1f2e28a13a170be".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
+
+echo "$(jq --argjson timestamp "$(jq '.timestamp' /shared-dir/genesis.json)" '.timestamp = $timestamp' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
+
+cat /shared-dir/l1genesis.json
+
+cp .deployer/state.json /shared-dir/state.json
