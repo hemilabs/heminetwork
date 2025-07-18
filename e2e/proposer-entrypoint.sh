@@ -10,5 +10,7 @@ op-proposer/bin/op-proposer \
     --resubmission-timeout=15s \
     --safe-abort-nonce-too-low-count=1 \
     --proposal-interval=10s \
-    --game-type=1
+    --game-type=1 \
+    --txmgr.not-in-mempool-timeout=3s \
+    --allow-non-finalized=true
     
