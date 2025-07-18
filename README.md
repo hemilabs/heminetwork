@@ -100,7 +100,7 @@ For any service, you can view configuration options by running:
 
 ## ▶️ Running popmd
 
-The easiest way to run `popmd`is by using our provided docker images. A list of `popmd` docker images for each major release is available [here](https://hub.docker.com/r/hemilabs/popmd).
+The easiest way to run `popmd` is by using our provided docker images. A list of `popmd` docker images for each major release is available [here](https://hub.docker.com/r/hemilabs/popmd).
 
 Refer to the [dedicated `popmd` README](/cmd/popmd/README.md) for an overview of other installation options and further details.
 
