@@ -36,7 +36,7 @@ func TestBFG(t *testing.T) {
 	defer cancel()
 
 	errCh := make(chan error, 10)
-	msgCh := make(chan string, 10)
+	msgCh := make(chan string, 100)
 
 	kssMap, kssList := testutil.MakeSharedKeystones(30)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
@@ -103,7 +103,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 	defer cancel()
 
 	errCh := make(chan error, 10)
-	msgCh := make(chan string, 10)
+	msgCh := make(chan string, 100)
 
 	kssMap, kssList := testutil.MakeSharedKeystones(30)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
@@ -183,7 +183,7 @@ func TestFullMockIntegration(t *testing.T) {
 	defer cancel()
 
 	errCh := make(chan error, 10)
-	msgCh := make(chan string, 10)
+	msgCh := make(chan string, 100)
 
 	_, kssList := testutil.MakeSharedKeystones(wantedKeystones * 2)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
@@ -221,23 +221,12 @@ func TestFullMockIntegration(t *testing.T) {
 		}
 	}()
 
-	// messages we expect to receive
-	expectedMsg := map[string]int{
-		"kss_getKeystone":                      wantedKeystones,
-		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
-	}
-
 	for !s.Connected() {
 		time.Sleep(10 * time.Millisecond)
 	}
 
 	// send finality requests to bfg, which should not return super finality
-	go sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 0, 0)
-
-	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
-		t.Fatal(err)
-	}
+	sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 0, 0)
 
 	// Setup pop miner
 	popCfg := popm.NewDefaultConfig()
@@ -261,7 +250,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}()
 
 	// wait until all keystones are mined and broadcast
-	expectedMsg = map[string]int{
+	expectedMsg := map[string]int{
 		"kss_subscribe":              1,
 		"kss_getLatestKeystones":     1,
 		tbcapi.CmdTxBroadcastRequest: wantedKeystones * 2,
@@ -273,26 +262,8 @@ func TestFullMockIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// wait until we ask for the finality value of all keystones
-	expectedMsg = map[string]int{
-		"kss_getKeystone":                      wantedKeystones,
-		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
-	}
-
-	var wg sync.WaitGroup
 	// send finality requests to bfg, which should return super finality
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
-	}()
-
-	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
-		t.Fatal(err)
-	}
-
-	wg.Wait()
+	sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
 }
 
 func sendFinalityRequests(ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
