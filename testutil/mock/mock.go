@@ -64,11 +64,18 @@ func (f *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Force close all websocket connection to the test server
-func (f *mockHandler) CloseConnections() error {
+// Close all websocket connection to the test server
+func (f *mockHandler) CloseConnections(force bool) error {
 	log.Infof("%v: websocket connections closed", f.name)
 	for _, c := range f.conns {
-		err := c.CloseNow()
+		if force {
+			err := c.CloseNow()
+			if err != nil {
+				return err
+			}
+			continue
+		}
+		err := c.Close(websocket.StatusNormalClosure, "")
 		if err != nil {
 			return err
 		}
@@ -97,7 +104,7 @@ func (f *mockHandler) Shutdown() {
 	log.Tracef("%v: server shutting down", f.name)
 	f.Stop()
 	f.server.Close()
-	if err := f.CloseConnections(); err != nil {
+	if err := f.CloseConnections(true); err != nil {
 		if !errors.Is(err, net.ErrClosed) {
 			// should never happen
 			panic(err)
