@@ -316,7 +316,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// close current popm connection to opgeth
-	if err = opgeth.CloseConnections(); err != nil && !errors.Is(err, net.ErrClosed) {
+	if err = opgeth.CloseConnections(false); err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Fatal(err)
 	}
 

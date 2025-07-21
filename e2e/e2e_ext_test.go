@@ -144,7 +144,52 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 		t.Fatalf("could not connect to %s: %s", bfgPublicUrl, err.Error())
 	}
 
+	if err := EnsureCanConnectHTTP(t, fmt.Sprintf("http://%s/somethinginvalid", bfgPublicUrl)); err != nil {
+		t.Fatalf("could not make http request to bfg in timeout: %s", err)
+	}
+
 	return bfgServer, bfgPublicUrl
+}
+
+func EnsureCanConnectHTTP(t *testing.T, url string) error {
+	t.Logf("try to receive response for %s", url)
+
+	for {
+		select {
+		case <-t.Context().Done():
+			return t.Context().Err()
+		default:
+			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
+
+			client := http.Client{}
+			request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+			if err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+
+			resp, err := client.Do(request)
+			if err != nil {
+				t.Logf("could not make http request: %s", err)
+				cancel()
+				continue
+			}
+
+			defer resp.Body.Close()
+
+			// we're making an http request to an invalid URL, ensure that we
+			// get the expected code of 404: Not Found
+			if resp.StatusCode != http.StatusNotFound {
+				t.Fatalf("received unexpected status code %d", resp.StatusCode)
+			}
+
+			cancel()
+			break
+		}
+		break
+	}
+
+	return nil
 }
 
 func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tbc.Server, string) {

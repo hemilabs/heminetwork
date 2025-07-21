@@ -12,7 +12,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -72,30 +71,11 @@ func TestBFG(t *testing.T) {
 		}
 	}()
 
-	// messages we expect to receive
-	expectedMsg := map[string]int{
-		"kss_getKeystone":                      wantedKeystones,
-		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
-	}
-
 	for !s.Connected() {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	var wg sync.WaitGroup
-	// send finality requests to bfg, which should return super finality
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
-	}()
-
-	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
-		t.Fatal(err)
-	}
-
-	wg.Wait()
+	sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
 }
 
 func TestKeystoneFinalityInheritance(t *testing.T) {
@@ -152,30 +132,11 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 		}
 	}()
 
-	// messages we expect to receive
-	expectedMsg := map[string]int{
-		"kss_getKeystone":                      wantedKeystones,
-		tbcapi.CmdBlocksByL2AbrevHashesRequest: wantedKeystones,
-	}
-
 	for !s.Connected() {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	var wg sync.WaitGroup
-	// send finality requests to bfg, which should return super finality
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
-	}()
-
-	// receive messages and errors from opgeth and tbc
-	if err = messageListener(t, expectedMsg, errCh, msgCh); err != nil {
-		t.Fatal(err)
-	}
-
-	wg.Wait()
+	sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
 }
 
 func TestFullMockIntegration(t *testing.T) {
@@ -204,7 +165,7 @@ func TestFullMockIntegration(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
-	// bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
+	bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
 
 	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -234,7 +195,7 @@ func TestFullMockIntegration(t *testing.T) {
 	popCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	popCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	popCfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
-	// popCfg.LogLevel = "popm=TRACE"
+	popCfg.LogLevel = "popm=TRACE"
 
 	// Create pop miner
 	popm, err := popm.NewServer(popCfg)

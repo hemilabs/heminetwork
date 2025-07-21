@@ -82,12 +82,15 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Network:              "mainnet",
-		PrometheusNamespace:  appName,
-		OpgethURL:            defaultOpgethURL,
-		BitcoinConfirmations: defaultBitcoinConfirmations,
-		BitcoinSource:        bitcoinSourceTBC,
-		BitcoinURL:           tbcgozer.DefaultURL,
+		Network:                "mainnet",
+		PrometheusNamespace:    appName,
+		OpgethURL:              defaultOpgethURL,
+		BitcoinConfirmations:   defaultBitcoinConfirmations,
+		BitcoinSource:          bitcoinSourceTBC,
+		BitcoinURL:             tbcgozer.DefaultURL,
+		opgethReconnectTimeout: defaultOpgethReconnectTimeout,
+		l2KeystoneMaxAge:       defaultL2KeystoneMaxAge,
+		l2KeystonePollTimeout:  defaultL2KeystonePollTimeout,
 	}
 }
 
