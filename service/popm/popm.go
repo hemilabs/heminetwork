@@ -344,23 +344,22 @@ func (s *Server) getFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
 	log.Tracef("getFee")
 	defer log.Tracef("getFee exit")
 
-	var feeAmount *tbcapi.FeeEstimate
 	if s.cfg.StaticFee != 0 {
-		feeAmount = &tbcapi.FeeEstimate{
+		return &tbcapi.FeeEstimate{
 			Blocks:      s.cfg.BitcoinConfirmations,
 			SatsPerByte: float64(s.cfg.StaticFee),
-		}
-	} else {
-		// Estimate BTC fees.
-		feeEstimates, err := s.gozer.FeeEstimates(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("fee estimates: %w", err)
-		}
-		feeAmount, err = gozer.FeeByConfirmations(s.cfg.BitcoinConfirmations, feeEstimates)
-		if err != nil {
-			return nil, fmt.Errorf("fee by confirmations: %w", err)
-		}
+		}, nil
 	}
+	// Estimate BTC fees.
+	feeEstimates, err := s.gozer.FeeEstimates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("fee estimates: %w", err)
+	}
+	feeAmount, err := gozer.FeeByConfirmations(s.cfg.BitcoinConfirmations, feeEstimates)
+	if err != nil {
+		return nil, fmt.Errorf("fee by confirmations: %w", err)
+	}
+
 	return feeAmount, nil
 }
 
