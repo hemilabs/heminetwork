@@ -14,6 +14,7 @@ import (
 
 	"github.com/juju/loggo"
 
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/service/popm"
 	"github.com/hemilabs/heminetwork/version"
@@ -75,7 +76,7 @@ var (
 		},
 		"POPM_BITCOIN_URL": config.Config{
 			Value:        &cfg.BitcoinURL,
-			DefaultValue: "",
+			DefaultValue: tbcapi.DefaultURL,
 			Help:         "the bitcoin url to connect to; it's either a tbc or blockstream url",
 			Print:        config.PrintAll,
 		},

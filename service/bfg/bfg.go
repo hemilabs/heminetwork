@@ -625,7 +625,7 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	case bitcoinSourceTBC:
 		var err error
-		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL)
+		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL, nil)
 		if err != nil {
 			return fmt.Errorf("could not setup %v tbc: %w",
 				s.cfg.Network, err)

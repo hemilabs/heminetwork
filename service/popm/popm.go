@@ -38,8 +38,8 @@ const (
 	logLevel = "INFO"
 	appName  = "popm"
 
-	defaultPopAccount           = 1337
-	defaultPopChild             = 0
+	DefaultPopAccount           = 1337
+	DefaultPopChild             = 0
 	defaultBitcoinConfirmations = 6
 	defaultOpgethURL            = "http://127.0.0.1:9999/v1/ws"
 
@@ -164,11 +164,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	switch strings.ToLower(cfg.Network) {
 	case "mainnet":
 		s.params = &chaincfg.MainNetParams
-	case "testnet", "testnet3":
+	case "testnet3":
 		s.params = &chaincfg.TestNet3Params
 	case "testnet4":
 		s.params = &chaincfg.TestNet4Params
-	case "localnet":
+	case "localnet", "testnet":
 		s.params = &chaincfg.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown bitcoin network %v", cfg.Network)
@@ -186,7 +186,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	ek, err := s.vc.DeriveHD(defaultPopAccount, defaultPopChild)
+	ek, err := s.vc.DeriveHD(DefaultPopAccount, DefaultPopChild)
 	if err != nil {
 		return nil, err
 	}
@@ -201,8 +201,8 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 	err = s.mz.PutKey(&zuul.NamedKey{
 		Name:       "private",
-		Account:    defaultPopAccount,
-		Child:      defaultPopChild,
+		Account:    DefaultPopAccount,
+		Child:      DefaultPopChild,
 		HD:         true,
 		PrivateKey: ek,
 	})
@@ -704,7 +704,13 @@ func (s *Server) Run(pctx context.Context) error {
 	var err error
 	switch s.cfg.BitcoinSource {
 	case bitcoinSourceTBC:
-		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL)
+		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL, func() {
+			utxos, err := s.gozer.UtxosByAddress(ctx, true, s.address, 0, 100)
+			if err == nil {
+				log.Infof("confirmed bitcoin balance %v: %v",
+					s.address, gozer.BalanceFromUtxos(utxos))
+			}
+		})
 		if err != nil {
 			return fmt.Errorf("could not setup %v tbc: %w",
 				s.cfg.Network, err)

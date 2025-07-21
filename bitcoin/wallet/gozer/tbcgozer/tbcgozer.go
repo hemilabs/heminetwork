@@ -58,13 +58,13 @@ type tbcGozer struct {
 var _ gozer.Gozer = (*tbcGozer)(nil)
 
 // Run returns and starts a new TBC Gozer.
-func Run(ctx context.Context, tbcUrl string) (gozer.Gozer, error) {
+func Run(ctx context.Context, tbcUrl string, connected func()) (gozer.Gozer, error) {
 	t := &tbcGozer{
 		url:   tbcUrl,
 		cmdCh: make(chan tbcCmd, 10),
 	}
 
-	go t.run(ctx)
+	go t.run(ctx, connected)
 
 	return t, nil
 }
@@ -326,7 +326,7 @@ func (t *tbcGozer) handleTBCWebsocketRead(ctx context.Context, conn *protocol.Co
 	}
 }
 
-func (t *tbcGozer) connectTBC(pctx context.Context) error {
+func (t *tbcGozer) connectTBC(pctx context.Context, connected func()) error {
 	log.Tracef("connectTBC")
 	defer log.Tracef("connectTBC exit")
 
@@ -362,17 +362,23 @@ func (t *tbcGozer) connectTBC(pctx context.Context) error {
 
 	log.Debugf("Connected to tbc: %s", t.url)
 
+	// Callback after connection if set.
+	if connected != nil {
+		connected()
+	}
+
 	// Wait for exit
 	t.wg.Wait()
 
 	return nil
 }
 
-func (t *tbcGozer) run(ctx context.Context) {
+func (t *tbcGozer) run(ctx context.Context, connected func()) {
 	for {
-		if err := t.connectTBC(ctx); err != nil {
+		if err := t.connectTBC(ctx, connected); err != nil {
 			log.Errorf("Failed to connect to TBC: %v", err)
 		}
+
 		// See if we were terminated
 		select {
 		case <-ctx.Done():
