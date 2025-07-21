@@ -6,7 +6,7 @@ The "Test Monitor Bindings" are go files that are generated from solidity files.
 These should never need to change, so the transpilation process has been 
 omitted.  
 
-The files themselves are meant to provide and api for deploying and interacting
+The files themselves are meant to provide an API for deploying and interacting
 with custom smart contracts in the localnet test environment.  If these need to
 be change, it's best to create new ones for the new test case's need and deploy
 it.
