@@ -13,10 +13,14 @@ import (
 	"os"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/btcutil/hdkeychain"
+	"github.com/btcsuite/btcd/chaincfg"
 	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/ethereum"
+	"github.com/hemilabs/heminetwork/service/popm"
 	"github.com/hemilabs/heminetwork/version"
 )
 
@@ -39,10 +43,33 @@ func init() {
 	welcome = "Key Generator " + version.BuildInfo()
 }
 
+func popMinerAddressAndPublic(secret string, params *chaincfg.Params) (btcutil.Address, *hdkeychain.ExtendedKey, error) {
+	var err error
+	vc, err := vinzclortho.New(params)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = vc.Unlock(secret)
+	if err != nil {
+		return nil, nil, err
+	}
+	ek, err := vc.DeriveHD(popm.DefaultPopAccount, popm.DefaultPopChild)
+	if err != nil {
+		return nil, nil, err
+	}
+	address, public, err := vinzclortho.AddressAndPublicFromExtended(params, ek)
+	if err != nil {
+		return nil, nil, err
+	}
+	return address, public, err
+}
+
 func _main() error {
 	var btcChainParams *btcchaincfg.Params
 	switch *net {
-	case "testnet3", "testnet":
+	case "testnet":
+		btcChainParams = &btcchaincfg.RegressionNetParams
+	case "testnet3":
 		btcChainParams = &btcchaincfg.TestNet3Params
 	case "testnet4":
 		btcChainParams = &btcchaincfg.TestNet4Params
@@ -65,20 +92,33 @@ func _main() error {
 		}
 		hash := btcAddress.AddressPubKeyHash().String()
 		ethAddress := ethereum.AddressFromPrivateKey(privKey)
+		popMinerAddress, popMinerPub, err := popMinerAddressAndPublic(hex.EncodeToString(privKey.Serialize()),
+			btcChainParams)
+		if err != nil {
+			return fmt.Errorf("pop miner addresses: %w", err)
+		}
+		if popMinerAddress.String() == hash {
+			return fmt.Errorf("derived pop miner hash equal %v == %v",
+				popMinerAddress, hash)
+		}
 		if *jsonFormat {
 			type Secp256k1 struct {
-				EthereumAddress string `json:"ethereum_address"`
-				Network         string `json:"network"`
-				PrivateKey      string `json:"private_key"`
-				PublicKey       string `json:"public_key"`
-				PubkeyHash      string `json:"pubkey_hash"`
+				EthereumAddress   string `json:"ethereum_address"`
+				Network           string `json:"network"`
+				PrivateKey        string `json:"private_key"`
+				PublicKey         string `json:"public_key"`
+				PubkeyHash        string `json:"pubkey_hash"`
+				PopMinerAddress   string `json:"pop_miner_address"`
+				PopMinerPublicKey string `json:"pop_miner_public_key"`
 			}
 			s := &Secp256k1{
-				EthereumAddress: ethAddress.String(),
-				Network:         *net,
-				PrivateKey:      hex.EncodeToString(privKey.Serialize()),
-				PublicKey:       hex.EncodeToString(privKey.PubKey().SerializeCompressed()),
-				PubkeyHash:      hash,
+				EthereumAddress:   ethAddress.String(),
+				Network:           *net,
+				PrivateKey:        hex.EncodeToString(privKey.Serialize()),
+				PublicKey:         hex.EncodeToString(privKey.PubKey().SerializeCompressed()),
+				PubkeyHash:        hash,
+				PopMinerAddress:   popMinerAddress.EncodeAddress(),
+				PopMinerPublicKey: popMinerPub.String(),
 			}
 			js, err := json.MarshalIndent(s, "", "  ")
 			if err != nil {
@@ -86,11 +126,13 @@ func _main() error {
 			}
 			fmt.Printf("%s\n", js)
 		} else {
-			fmt.Printf("eth address: %v\n", ethAddress)
-			fmt.Printf("network    : %v\n", *net)
-			fmt.Printf("private key: %x\n", privKey.Serialize())
-			fmt.Printf("public key : %x\n", privKey.PubKey().SerializeCompressed())
-			fmt.Printf("pubkey hash:  %v\n", hash)
+			fmt.Printf("eth address      : %v\n", ethAddress)
+			fmt.Printf("network          : %v\n", *net)
+			fmt.Printf("private key      : %x\n", privKey.Serialize())
+			fmt.Printf("public key       : %x\n", privKey.PubKey().SerializeCompressed())
+			fmt.Printf("pubkey hash      :  %v\n", hash)
+			fmt.Printf("pop miner address:  %v\n", popMinerAddress.EncodeAddress())
+			fmt.Printf("pop miner pubkey :  %v\n", popMinerPub)
 		}
 
 	default:
