@@ -39,7 +39,7 @@ var (
 		"POPM_BITCOIN_NETWORK": config.Config{
 			Value:        &cfg.Network,
 			DefaultValue: "mainnet",
-			Help:         "bitcoin chain to connect to (ex. \"mainnet\", \"testnet3\")",
+			Help:         "bitcoin chain to connect to (ex. \"mainnet\", \"testnet3|testnet4\")",
 			Print:        config.PrintAll,
 		},
 		"POPM_BITCOIN_SECRET": config.Config{

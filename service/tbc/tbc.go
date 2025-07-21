@@ -91,6 +91,10 @@ var (
 		Hash:   s2h("0000000000000014a1717b82329a58e344f1821389d0415601f1b12ebce35881"),
 		Height: 2577400,
 	}
+	testnet4HemiGenesis = &HashHeight{
+		Hash:   s2h("00000000916dacbf30938a100bd67a048389c1c6676f656853e9a55129747218"),
+		Height: 84190,
+	}
 	localnetHemiGenesis = &HashHeight{
 		Hash:   *chaincfg.RegressionNetParams.GenesisHash,
 		Height: 0,
@@ -280,6 +284,12 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.chainParams = &chaincfg.TestNet3Params
 		s.checkpoints = testnet3Checkpoints
 		s.hemiGenesis = testnet3HemiGenesis
+
+	case "testnet4":
+		s.wireNet = wire.TestNet4
+		s.chainParams = &chaincfg.TestNet4Params
+		s.checkpoints = testnet4Checkpoints
+		s.hemiGenesis = testnet4HemiGenesis
 
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
@@ -2489,6 +2499,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	// This should have been verified but let's not make assumptions.
 	switch s.cfg.Network {
 	case "testnet3":
+	case "testnet4":
 	case "mainnet":
 	case "upgradetest":
 	case networkLocalnet: // XXX why is this here?, this breaks the filepath.Join

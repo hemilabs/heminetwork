@@ -82,15 +82,12 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Network:                "testnet3",
-		PrometheusNamespace:    appName,
-		OpgethURL:              defaultOpgethURL,
-		BitcoinConfirmations:   defaultBitcoinConfirmations,
-		BitcoinSource:          bitcoinSourceTBC,
-		BitcoinURL:             tbcgozer.DefaultURL,
-		opgethReconnectTimeout: defaultOpgethReconnectTimeout,
-		l2KeystoneMaxAge:       defaultL2KeystoneMaxAge,
-		l2KeystonePollTimeout:  defaultL2KeystonePollTimeout,
+		Network:              "mainnet",
+		PrometheusNamespace:  appName,
+		OpgethURL:            defaultOpgethURL,
+		BitcoinConfirmations: defaultBitcoinConfirmations,
+		BitcoinSource:        bitcoinSourceTBC,
+		BitcoinURL:           tbcgozer.DefaultURL,
 	}
 }
 
@@ -169,6 +166,8 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.params = &chaincfg.MainNetParams
 	case "testnet", "testnet3":
 		s.params = &chaincfg.TestNet3Params
+	case "testnet4":
+		s.params = &chaincfg.TestNet4Params
 	case "localnet":
 		s.params = &chaincfg.RegressionNetParams
 	default:

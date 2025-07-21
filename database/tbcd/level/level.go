@@ -177,9 +177,10 @@ func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*C
 	}
 	var nonInteractive bool
 	switch network {
-	case "testnet3":
-	case "mainnet":
 	case "localnet":
+	case "mainnet":
+	case "testnet3":
+	case "testnet4":
 	case "upgradetest":
 		network = "testnet3"
 		nonInteractive = true

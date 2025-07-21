@@ -42,20 +42,6 @@ type blockstreamGozer struct {
 
 var _ gozer.Gozer = (*blockstreamGozer)(nil)
 
-// Run returns a new Blockstream Gozer.
-func Run(params *chaincfg.Params) (gozer.Gozer, error) {
-	bs := &blockstreamGozer{}
-	switch params {
-	case &chaincfg.MainNetParams:
-		bs.url = bsMainnetURL
-	case &chaincfg.TestNet3Params:
-		bs.url = bsTestne3tURL
-	default:
-		return nil, errors.New("invalid net")
-	}
-	return bs, nil
-}
-
 func (bs *blockstreamGozer) BtcHeight(ctx context.Context) (uint64, error) {
 	u := fmt.Sprintf("%v/blocks/tip/height", bs.url)
 	rawHeight, err := httpclient.Request(ctx, "GET", u, nil)
@@ -190,4 +176,19 @@ func (bs *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32
 	return &gozer.KeystonesByHeightResponse{
 		Error: protocol.Errorf("%v", err),
 	}, err
+}
+
+// Run returns a new Blockstream Gozer.
+func Run(params *chaincfg.Params) (gozer.Gozer, error) {
+	bs := &blockstreamGozer{}
+	switch params {
+	case &chaincfg.MainNetParams:
+		bs.url = bsMainnetURL
+	case &chaincfg.TestNet3Params:
+		bs.url = bsTestne3tURL
+	default:
+		// XXX blockstream does not currently support testnet4
+		return nil, errors.New("invalid net")
+	}
+	return bs, nil
 }

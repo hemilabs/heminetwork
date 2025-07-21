@@ -472,6 +472,11 @@ func tbcdb(pctx context.Context, flags []string) error {
 			if err != nil {
 				return err
 			}
+		case "testnet4":
+			a, err = btcutil.DecodeAddress(address, &chaincfg.TestNet4Params)
+			if err != nil {
+				return err
+			}
 		case "mainnet":
 			a, err = btcutil.DecodeAddress(address, &chaincfg.MainNetParams)
 			if err != nil {
@@ -1035,7 +1040,7 @@ func p2p(flags []string) error {
 		fmt.Println("\tping <nonce>                   - ping remote node with a nonce")
 		fmt.Println("\tremote                         - return remote version")
 		fmt.Println("")
-		fmt.Println("\tAll actions support [addr=netaddress] <out=[json|raw|spew]> <net=[mainnet|testnet|testnet3]> <timeout=duration>")
+		fmt.Println("\tAll actions support [addr=netaddress] <out=[json|raw|spew]> <net=[mainnet|testnet|testnet3|testnet4]> <timeout=duration>")
 		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
@@ -1080,6 +1085,8 @@ func p2p(flags []string) error {
 		network = wire.TestNet
 	case "", "testnet3":
 		network = wire.TestNet3
+	case "testnet4":
+		network = wire.TestNet4
 	default:
 		return fmt.Errorf("invalid net: %v", net)
 	}

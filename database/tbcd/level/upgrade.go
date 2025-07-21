@@ -34,7 +34,7 @@ var (
 	gib            = 1024 * mib
 	chunkSize      = int(gib)
 
-	requiredDiskSpace = 10 * gib // require 10GiB at least to perform upgrde
+	requiredDiskSpace = 10 * gib // require 10GiB at least to perform upgrade
 
 	modeMove = true
 
@@ -348,12 +348,14 @@ func (l *ldb) v3(ctx context.Context) error {
 	// First let's make sure we have enough disk space to process this.
 	var need uint64
 	switch l.cfg.Network {
-	case "testnet3":
-		need = 100 * gib // 100GB
-	case "mainnet":
-		need = 350 * gib // 350GB
 	case "localnet":
 		need = 10 * 1024 * 1024 // 10MB
+	case "mainnet":
+		need = 350 * gib // 350GB
+	case "testnet3":
+		need = 100 * gib // 100GB
+	case "testnet4":
+		need = 10 * gib // 10GB
 	default:
 		return fmt.Errorf("invalid network: %v", l.cfg.Network)
 	}

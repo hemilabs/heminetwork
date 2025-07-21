@@ -17,7 +17,7 @@ hemictl <command> <action> [parameters]
 
 - `HEMICTL_LOG_LEVEL`: Sets the logging level (e.g., `INFO`, `DEBUG`)
 - `HEMICTL_LEVELDB_HOME`: The tbcdb leveldb home directory (default: `~/.tbcd`)
-- `HEMICTL_NETWORK`: Bitcoin network (e.g., `mainnet`, `testnet3`)
+- `HEMICTL_NETWORK`: Bitcoin network (e.g., `mainnet`, `testnet3`, `testnet4`)
 
 ### Detailed Overview
 
