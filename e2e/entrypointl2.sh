@@ -5,7 +5,7 @@
 
 set -xe
 
-/bin/geth init --state.scheme hash --datadir /tmp/datadir /shared-dir/genesis.json 
+/bin/geth init --datadir /tmp/datadir --state.scheme hash /shared-dir/genesis.json 
 
 JSON_RPC=http://geth-l1:8545
 
