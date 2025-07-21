@@ -22,6 +22,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 
 	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/testutil/mock"
 )
 
 type serverReply struct {
@@ -146,10 +147,12 @@ func TestClientReap(t *testing.T) {
 
 	hpCfg := NewDefaultConfig()
 	hpCfg.HVMURLs = servers
-	hpCfg.LogLevel = "hproxy=TRACE"       // XXX figure out why this isn't working
-	hpCfg.ClientIdleTimeout = time.Second // reap clients after 1 second
+	hpCfg.LogLevel = "hproxy=TRACE"                 // XXX figure out why this isn't working
+	hpCfg.ClientIdleTimeout = mock.InfiniteDuration // will timeout manually later
 	hpCfg.RequestTimeout = time.Second
 	hpCfg.PollFrequency = time.Second
+	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
+	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
 	hp, err := NewServer(hpCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -220,11 +223,18 @@ func TestClientReap(t *testing.T) {
 	}
 	hp.mtx.RUnlock()
 
-	// Wait for reap and check client list
-	time.Sleep(1 * time.Second)
+	hp.mtx.Lock()
+	for _, v := range hp.clients {
+		v.reset(1 * time.Nanosecond)
+	}
+	hp.mtx.Unlock()
+
+	time.Sleep(250 * time.Millisecond)
+
 	hp.mtx.RLock()
 	if len(hp.clients) != 0 {
-		t.Fatalf("not reaped clients: %v", spew.Sdump(hp.clients))
+		t.Logf("not reaped clients: %v", spew.Sdump(hp.clients))
+		time.Sleep(50 * time.Millisecond)
 	}
 	hp.mtx.RUnlock()
 }

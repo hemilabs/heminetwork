@@ -126,13 +126,13 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 
 		log.Tracef("%v: command is %v", f.name, cmd)
 
-		go func() {
-			select {
-			case <-f.pctx.Done():
-				return
-			case f.msgCh <- string(cmd):
-			}
-		}()
+		select {
+		case <-f.pctx.Done():
+			return f.pctx.Err()
+		case f.msgCh <- string(cmd):
+		default:
+			// discard message if channel is blocked
+		}
 
 		var resp any
 		switch cmd {

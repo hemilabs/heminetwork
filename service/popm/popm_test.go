@@ -283,7 +283,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
-	cfg.l2KeystoneMaxAge = mock.DefaultNtfnDuration * (wantedKeystones + 1 - defaultL2KeystonesCount)
+	cfg.l2KeystoneMaxAge = mock.InfiniteDuration
 	cfg.opgethReconnectTimeout = 500 * time.Millisecond
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {

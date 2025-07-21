@@ -126,16 +126,13 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 		log.Tracef("%v: command is %v", f.name, msg.Method)
 
-		go func() {
-			select {
-			case <-f.pctx.Done():
-				f.mtx.Lock()
-				err = f.pctx.Err()
-				f.mtx.Unlock()
-				return
-			case f.msgCh <- msg.Method:
-			}
-		}()
+		select {
+		case <-f.pctx.Done():
+			return f.pctx.Err()
+		case f.msgCh <- msg.Method:
+		default:
+			// discard message if channel is blocked
+		}
 
 		var subResp jsonrpcMessage
 		switch msg.Method {
