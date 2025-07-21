@@ -102,7 +102,7 @@ set -xe
 if [ -d "/tmp/datadir/geth" ]; then
 	echo "geth data dir exists, skipping genesis."
 else
-	geth init --datadir /tmp/datadir/geth /tmp/$GENESIS
+	geth init --state.scheme hash --datadir /tmp/datadir/geth /tmp/$GENESIS
 fi
 
 geth \\
