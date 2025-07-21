@@ -1,8 +1,8 @@
 services:
   l1:
     build:
-      dockerfile: ./hardhat.Dockerfile
-      context: .
+      dockerfile: ./hemitrap/hardhat.Dockerfile
+      context: ".."
     command:
       - npx
       - hardhat
@@ -15,10 +15,12 @@ services:
       - '9988'
     ports:
       - 9988:9988
+    volumes:
+      - ./l1.hardhat.config.js:/app/hardhat.config.js
   l2:
     build:
-      dockerfile: ./hardhat.Dockerfile
-      context: .
+      dockerfile: ./hemitrap/hardhat.Dockerfile
+      context: ".."
     command:
       - npx
       - hardhat
@@ -31,3 +33,59 @@ services:
       - '19988'
     ports:
       - 19988:19988
+    volumes:
+      - ./l2.hardhat.config.js:/app/hardhat.config.js
+  op-node:
+    image: "ghcr.io/hemilabs/op-node:ea9fe7b@sha256:7110e3c4c61e495ea0a6621d7ec211ceb7e948e25c648b05bd51fcc557ad06bc"
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:18081/v1/ws"
+    depends_on:
+      l1:
+        condition: "service_started"
+      l2:
+        condition: "service_started"
+    command:
+      - "op-node"
+      - "--l2=http://l2:19988"
+      - "--l2.jwt-secret=/tmp/jwt.hex"
+      - "--sequencer.enabled=true"
+      - "--sequencer.l1-confs=0"
+      - "--sequencer.stopped=false"
+      - "--verifier.l1-confs=0"
+      - "--rollup.config=/l2configs/rollup.json"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--rpc.enable-admin"
+      - "--l1=http://l1:9988"
+      - "--l1.rpckind=standard"
+      - "--l1.trustrpc"
+      - "--log.level=info"
+      - "--l1.trustrpc=true"
+      - "--l1.http-poll-interval=1s"
+      - "--p2p.no-discovery"
+      - "--p2p.sequencer.key=${ADMIN_PRIVATE_KEY}"
+      - "--log.level=info"
+      - "--log.format=terminal"
+      - "--override.ecotone=1715865630"
+      - "--override.canyon=1715865630"
+      - "--override.delta=1715865630"
+      - "--override.pectrablobschedule=1748963425"
+      - "--override.isthmus=1748963425"
+      - "--override.holocene=1748963425"
+      - "--override.granite=1748963425"
+      - "--override.fjord=1748963425"
+      - "--l1.beacon.ignore=true"
+    volumes:
+      - "../localnode/rollup.json:/l2configs/rollup.json"
+      - "../e2e/jwt.hex:/tmp/jwt.hex"
+      # - "./op-node-priv-key.txt:/tmp/op-node-priv-key.txt"
+    ports:
+      - "8547:8547"
+  bssd:
+    image: hemilabs/bssd:1.6.3
+    environment:
+      BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
+      BSS_LOG_LEVEL: "INFO"
+      BSS_ADDRESS: ":18081"
+    ports:
+      - '18081:18081'
