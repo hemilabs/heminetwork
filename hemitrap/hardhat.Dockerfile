@@ -4,5 +4,3 @@ WORKDIR /app
 
 # put this in a package.json file 
 RUN npm install --save-dev-exact hardhat@2.26.0
-
-RUN touch hardhat.config.js
