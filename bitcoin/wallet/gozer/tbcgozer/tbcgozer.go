@@ -262,6 +262,7 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	// Wait for response
 	select {
 	case <-ctx.Done():
+		panic("panic here clayton")
 		return nil, ctx.Err()
 	case payload := <-bc.ch:
 		if err, ok := payload.(error); ok {
@@ -282,20 +283,22 @@ func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Co
 		select {
 		case <-ctx.Done():
 			return
-		case bc := <-t.cmdCh:
-			_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
-			if err != nil {
-				log.Errorf("handleTBCWebsocketCall %T: %v", bc.msg, err)
+		case c := <-t.cmdCh:
+			go func(bc tbcCmd) {
+				_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
+				if err != nil {
+					log.Errorf("handleTBCWebsocketCall %T: %v", bc.msg, err)
+					select {
+					case bc.ch <- err:
+					default:
+					}
+				}
 				select {
-				case bc.ch <- err:
+				case bc.ch <- payload:
+					log.Tracef("handleTBCWebsocketCall returned: %v", spew.Sdump(payload))
 				default:
 				}
-			}
-			select {
-			case bc.ch <- payload:
-				log.Tracef("handleTBCWebsocketCall returned: %v", spew.Sdump(payload))
-			default:
-			}
+			}(c)
 		}
 	}
 }
