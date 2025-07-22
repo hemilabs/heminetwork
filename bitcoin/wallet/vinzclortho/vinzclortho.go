@@ -60,14 +60,14 @@ func (vc *VinzClortho) RootKey() string {
 
 // Lock locks the wallet.
 func (vc *VinzClortho) Lock() error {
+	vc.mtx.Lock()
+	defer vc.mtx.Unlock()
 	if vc.master == nil {
 		return errors.New("wallet already locked")
 	}
 
-	vc.mtx.Lock()
 	vc.master.Zero()
 	vc.master = nil
-	vc.mtx.Unlock()
 
 	return nil
 }
@@ -129,13 +129,14 @@ func (vc *VinzClortho) Unlock(secret string) error {
 //
 // This function uses the same paths as used in Bitcoin core and Electrum.
 func (vc *VinzClortho) derive(account, offset uint32, children ...uint32) (*hdkeychain.ExtendedKey, error) {
-	if vc.master == nil {
+	rk := vc.rootKey()
+	if rk == nil {
 		return nil, errors.New("wallet locked")
 	}
 
 	// Derive child key for (hardened) account.
 	// E.g. hardened account 0: m/0'
-	ek, err := vc.master.Derive(account + offset)
+	ek, err := rk.Derive(account + offset)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +183,8 @@ func pathElement(p string) (uint32, error) {
 // "m/1337'/0'/1", this will return a non-hardned extended key from the hardned
 // 1337/0 path.
 func (vc *VinzClortho) DerivePath(path string) (*hdkeychain.ExtendedKey, error) {
-	if vc.master == nil {
+	rk := vc.rootKey()
+	if rk == nil {
 		return nil, errors.New("wallet locked")
 	}
 
@@ -202,7 +204,7 @@ func (vc *VinzClortho) DerivePath(path string) (*hdkeychain.ExtendedKey, error) 
 		return nil, err
 	}
 	// Use Derive since HD is already included in account
-	ek, err := vc.master.Derive(account)
+	ek, err := rk.Derive(account)
 	if err != nil {
 		return nil, err
 	}
