@@ -117,10 +117,10 @@ docker pull hemilabs/popmd
 
 # run the image using the correct environment variables
 docker run \
--e POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET> \
--e POPM_OPGETH_URL=<YOUR_OPGETH_URL> \
--e POPM_BITCOIN_URL=<YOUR_BITCOIN_URL> \
-hemilabs/popmd:latest
+	-e POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET> \
+	-e POPM_OPGETH_URL=<YOUR_OPGETH_URL> \
+	-e POPM_BITCOIN_URL=<YOUR_BITCOIN_URL> \
+	hemilabs/popmd
 ```
 
 ## ▶️ Running bfgd
