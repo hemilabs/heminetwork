@@ -81,8 +81,8 @@ var (
 		},
 		"POPM_STATIC_FEE": config.Config{
 			Value:        &cfg.StaticFee,
-			DefaultValue: uint(0),
-			Help:         "static fee amount in sats/byte; overrides fee estimation if greater than 0",
+			DefaultValue: float64(0),
+			Help:         "static fee amount in sats/byte; overrides fee estimation if greater than 0. Can be decimal (ex. 1.5 sats/byte)",
 			Print:        config.PrintAll,
 		},
 	}

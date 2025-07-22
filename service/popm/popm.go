@@ -53,7 +53,7 @@ const (
 	defaultL2KeystonePollTimeout  = 13 * time.Second
 	defaultL2KeystoneRetryTimeout = 15 * time.Second
 
-	minRelayFee = 1 // sats/vB
+	minRelayFee = 1 // sats/byte
 )
 
 var log = loggo.GetLogger("popm")
@@ -76,7 +76,7 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	RetryMineThreshold      uint
-	StaticFee               uint
+	StaticFee               float64
 
 	// cooked settings, do not export
 	opgethReconnectTimeout time.Duration
@@ -268,7 +268,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 	}
 	scriptHash := vinzclortho.ScriptHashFromScript(payToScript)
 
-	feeAmount, err := s.getFee(ctx)
+	feeAmount, err := s.estimateFee(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +283,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 
 	// Build transaction.
 	popTx, prevOut, err := wallet.PoPTransactionCreate(ks, uint32(btcHeight),
-		btcutil.Amount(feeAmount.SatsPerByte), utxos, payToScript)
+		feeAmount.SatsPerByte, utxos, payToScript)
 	if err != nil {
 		return nil, fmt.Errorf("create transaction: %w", err)
 	}
@@ -338,14 +338,14 @@ func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2Key
 	return &kr, nil
 }
 
-func (s *Server) getFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
-	log.Tracef("getFee")
-	defer log.Tracef("getFee exit")
+func (s *Server) estimateFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
+	log.Tracef("estimateFee")
+	defer log.Tracef("estimateFee exit")
 
 	if s.cfg.StaticFee != 0 {
 		return &tbcapi.FeeEstimate{
 			Blocks:      s.cfg.BitcoinConfirmations,
-			SatsPerByte: float64(s.cfg.StaticFee),
+			SatsPerByte: s.cfg.StaticFee,
 		}, nil
 	}
 	// Estimate BTC fees.
