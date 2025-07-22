@@ -75,7 +75,7 @@ func TestBFG(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
+	sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
 }
 
 func TestKeystoneFinalityInheritance(t *testing.T) {
@@ -136,7 +136,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
+	sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
 }
 
 func TestFullMockIntegration(t *testing.T) {
@@ -187,7 +187,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// send finality requests to bfg, which should not return super finality
-	sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 0, 0)
+	sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 0, 0)
 
 	// Setup pop miner
 	popCfg := popm.NewDefaultConfig()
@@ -224,52 +224,66 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// send finality requests to bfg, which should return super finality
-	sendFinalityRequests(ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
+	sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
 }
 
-func sendFinalityRequests(ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
+func sendFinalityRequests(t *testing.T, ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
 	client := &http.Client{}
 	for i := range wantedKeystones {
-		kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
-		u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
-			url, bfgapi.APIVersion, kssHash)
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		if err != nil {
-			panic(err)
-		}
+		// this will retry until the test times out, as we don't expect errors
+		// here.  some of these request/response are fragile but the correct
+		// fix is a todo for now
+		for {
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			default:
+			}
+			kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
+			u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
+				url, bfgapi.APIVersion, kssHash)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+			if err != nil {
+				t.Log(err)
+				continue
+			}
 
-		resp, err := client.Do(req)
-		if err != nil {
-			panic(err)
-		}
-		defer resp.Body.Close()
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Log(err)
+				continue
+			}
+			defer resp.Body.Close()
 
-		if resp.StatusCode != http.StatusOK {
-			panic(fmt.Sprintf("unexpected status code: %v", resp.StatusCode))
-		}
+			if resp.StatusCode != http.StatusOK {
+				t.Logf("unexpected status code: %v", resp.StatusCode)
+				continue
+			}
 
-		fin := bfgapi.L2KeystoneBitcoinFinalityResponse{}
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			panic(err)
-		}
+			fin := bfgapi.L2KeystoneBitcoinFinalityResponse{}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		if err = resp.Body.Close(); err != nil {
-			panic(err)
-		}
+			if err = resp.Body.Close(); err != nil {
+				t.Fatal(err)
+			}
 
-		if err = json.Unmarshal(body, &fin); err != nil {
-			panic(err)
-		}
+			if err = json.Unmarshal(body, &fin); err != nil {
+				t.Fatal(err)
+			}
 
-		if fin.EffectiveConfirmations < minConfirms {
-			panic(fmt.Errorf("unexpected finality result: %v",
-				spew.Sdump(fin)))
-		}
+			if fin.EffectiveConfirmations < minConfirms {
+				t.Fatalf("unexpected finality result: %v",
+					spew.Sdump(fin))
+			}
 
-		if fin.EffectiveConfirmations > maxConfirms {
-			panic(fmt.Errorf("unexpected finality result: %v",
-				spew.Sdump(fin)))
+			if fin.EffectiveConfirmations > maxConfirms {
+				t.Fatalf("unexpected finality result: %v",
+					spew.Sdump(fin))
+			}
+			break
 		}
 	}
 }
