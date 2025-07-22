@@ -7,6 +7,7 @@ package vinzclortho
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"testing"
 
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
@@ -14,6 +15,108 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/tyler-smith/go-bip39"
 )
+
+func TestDerivePath(t *testing.T) {
+	mnemonic := "dinosaur banner version pistol need area dream champion kiss thank business shrug explain intact puzzle"
+	vc, err := New(&chaincfg.MainNetParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = vc.Unlock(mnemonic)
+	if err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+
+	// Source https://iancoleman.io/bip39/
+	expect := []string{
+		"1JrfuYPAWrum33zGXK136n6gM8KNj1PUR3",
+		"1ASZnMhiWXJ8aGigzYAXBeXVdRkbeMK7sS",
+		"12kP3USpmHMynnXXvP3APhoPHqCNZTnLzr",
+		"1G4ppesVsX1CSUDzVaXEJAh5UHPm7LeM48",
+		"157mHF16CG39h6YWDY4QbAEoHjzeguiENd",
+	}
+	// standard HD key path m/1337'/0'/0'
+	for k := range expect {
+		path := fmt.Sprintf("m/1337'/0'/%v'", k)
+		ek, err := vc.DerivePath(path)
+		if err != nil {
+			t.Fatalf("derive path: %v", err)
+		}
+		addr, _, err := AddressAndPublicFromExtended(&chaincfg.MainNetParams, ek)
+		if err != nil {
+			t.Fatalf("address: %v", err)
+		}
+		if addr.String() != expect[k] {
+			t.Logf("invalid address %v: %v != %v",
+				k, addr, expect[k])
+		}
+
+		// Now derive using DeriveHD
+		ek2, err := vc.DeriveHD(1337, 0, uint32(k))
+		if err != nil {
+			t.Fatalf("derive uint path: %v", err)
+		}
+		addr2, _, _ := AddressAndPublicFromExtended(&chaincfg.MainNetParams, ek2)
+		if addr2.String() != addr.String() {
+			t.Fatalf("got %v, wanted %v", addr2, addr)
+		}
+	}
+
+	// Mix HD+normal path m/1337'/0'/0
+	expect = []string{
+		"1NLymtCszixrUGt3T2k1jdKzdQMvMRAFZ2",
+		"1Bwsc2kLDXJ1oxY24SAeBNinQg9jJcRWdn",
+		"1Q6y8LZUG7vPa2TvgKHvhcn754zpq6TbRc",
+		"1SR7Hj2NAPKQumDZN6MgfmE3Ab69QDx1K",
+		"12efxcdszLdBXR9FZMMgSvgEwW1tBnJHg4",
+	}
+	for k := range expect {
+		path := fmt.Sprintf("m/1337'/0'/%v", k)
+		ek, err := vc.DerivePath(path)
+		if err != nil {
+			t.Fatalf("derive path: %v", err)
+		}
+		addr, _, err := AddressAndPublicFromExtended(&chaincfg.MainNetParams, ek)
+		if err != nil {
+			t.Fatalf("address: %v", err)
+		}
+		if addr.String() != expect[k] {
+			t.Logf("invalid address %v: %v != %v",
+				k, addr, expect[k])
+		}
+	}
+
+	// Test negative paths
+	path := ""
+	_, err = vc.DerivePath(path)
+	if err == nil {
+		t.Fatalf("expected invalid path")
+	}
+
+	path = "m"
+	_, err = vc.DerivePath(path)
+	if err == nil {
+		t.Fatalf("expected invalid path")
+	}
+
+	path = "m/"
+	_, err = vc.DerivePath(path)
+	if err == nil {
+		t.Fatalf("invalid syntax")
+	}
+
+	path = "x/1337'/0'"
+	_, err = vc.DerivePath(path)
+	if err == nil {
+		t.Fatalf("expected invalid prefix")
+	}
+
+	path = "m/A'/0'"
+	_, err = vc.DerivePath(path)
+	if err == nil {
+		t.Fatalf("expected invalid syntax")
+	}
+}
 
 func TestEntropyMnemonicSeed(t *testing.T) {
 	// Do the whole rigamarole of Entropy -> Mnemonic -> Seed

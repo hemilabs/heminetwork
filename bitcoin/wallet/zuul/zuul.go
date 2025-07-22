@@ -14,7 +14,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
+	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
 var (
@@ -22,16 +22,22 @@ var (
 	ErrKeyDoesntExist = errors.New("key does not exist")
 )
 
+// NamedKeyHD contains a private key with metadata.
+// Implement interface for various keytypes
+// XXX we need an extended key in here somehow at some point
+//type NamedKeyHD struct {
+//	Name string // User defined name
+//
+//	DerivationPath string // Derivation path
+//
+//	PrivateKey *hdkeychain.ExtendedKey
+//}
+
 // NamedKey contains a private key with metadata.
 type NamedKey struct {
 	Name string // User defined name
 
-	// Derivation path
-	Account uint
-	Child   uint
-	HD      bool
-
-	PrivateKey *hdkeychain.ExtendedKey
+	PrivateKey *dcrsecpk256k1.PrivateKey
 }
 
 // Zuul is an interface for storing secret material.

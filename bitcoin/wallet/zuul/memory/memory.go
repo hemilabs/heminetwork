@@ -6,6 +6,7 @@
 package memory
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/btcsuite/btcd/btcec/v2"
@@ -35,18 +36,19 @@ func New(params *chaincfg.Params) (zuul.Zuul, error) {
 
 func (m *memoryZuul) PutKey(nk *zuul.NamedKey) error {
 	// Generate address for lookup
-	addr, err := nk.PrivateKey.Address(m.params)
+	pubBytes := nk.PrivateKey.PubKey().SerializeCompressed()
+	btcAddress, err := btcutil.NewAddressPubKey(pubBytes, m.params)
 	if err != nil {
-		return err
+		return fmt.Errorf("new address: %w", err)
 	}
+	addr := btcAddress.AddressPubKeyHash().String()
 
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
-
-	if _, ok := m.keys[addr.String()]; ok {
+	if _, ok := m.keys[addr]; ok {
 		return zuul.ErrKeyExists
 	}
-	m.keys[addr.String()] = nk
+	m.keys[addr] = nk
 	return nil
 }
 
@@ -83,9 +85,5 @@ func (m *memoryZuul) LookupKeyByAddr(addr btcutil.Address) (*btcec.PrivateKey, b
 	if !ok {
 		return nil, false, zuul.ErrKeyDoesntExist
 	}
-	priv, err := nk.PrivateKey.ECPrivKey()
-	if err != nil {
-		return nil, false, err
-	}
-	return priv, true, nil
+	return nk.PrivateKey, true, nil
 }
