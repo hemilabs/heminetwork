@@ -79,6 +79,14 @@ func Parse(c CfgMap) error {
 				}
 				reflect.ValueOf(v.Value).Elem().SetInt(evTyped)
 
+			case reflect.Float32, reflect.Float64:
+				evTyped, err := strconv.ParseFloat(envValue, 64)
+				if err != nil {
+					return fmt.Errorf("invalid float for %v: %w",
+						k, err)
+				}
+				reflect.ValueOf(v.Value).Elem().SetFloat(evTyped)
+
 			case reflect.Uint, reflect.Uint8, reflect.Uint16,
 				reflect.Uint32, reflect.Uint64:
 
