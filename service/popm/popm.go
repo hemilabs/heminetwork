@@ -16,7 +16,6 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	btcmempool "github.com/btcsuite/btcd/mempool"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
@@ -54,8 +53,7 @@ const (
 	defaultL2KeystonePollTimeout  = 13 * time.Second
 	defaultL2KeystoneRetryTimeout = 15 * time.Second
 
-	// convert btcd minimum fee from sat/kB to sat/byte
-	minRelayFee = uint(btcmempool.DefaultMinRelayTxFee) / 1000
+	minRelayFee = 1 // sats/vB
 )
 
 var log = loggo.GetLogger("popm")
