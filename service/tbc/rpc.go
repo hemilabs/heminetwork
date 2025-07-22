@@ -305,7 +305,7 @@ func (s *Server) handleBlockByHashRequest(ctx context.Context, req *tbcapi.Block
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockByHashResponse{
-				Error: protocol.RequestErrorf("block not found with hash %s", req.Hash),
+				Error: protocol.NotFoundError("block by hash", req.Hash),
 			}, nil
 		}
 
@@ -328,7 +328,7 @@ func (s *Server) handleBlockByHashRawRequest(ctx context.Context, req *tbcapi.Bl
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockByHashRawResponse{
-				Error: protocol.RequestErrorf("block not found with hash: %s", req.Hash),
+				Error: protocol.NotFoundError("block by hash", req.Hash),
 			}, nil
 		}
 
@@ -359,7 +359,7 @@ func (s *Server) handleBlockHeadersByHeightRequest(ctx context.Context, req *tbc
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockHeadersByHeightResponse{
-				Error: protocol.RequestErrorf("block headers not found at height %d", req.Height),
+				Error: protocol.NotFoundError("blocks headers at height", req.Height),
 			}, nil
 		}
 
@@ -382,7 +382,7 @@ func (s *Server) handleBlockHeadersByHeightRawRequest(ctx context.Context, req *
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.BlockHeadersByHeightRawResponse{
-				Error: protocol.RequestErrorf("block headers not found at height %d", req.Height),
+				Error: protocol.NotFoundError("blocks headers at height", req.Height),
 			}, nil
 		}
 
@@ -525,7 +525,7 @@ func (s *Server) handleTxByIdRawRequest(ctx context.Context, req *tbcapi.TxByIdR
 	tx, err := s.TxById(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
+			responseErr := protocol.NotFoundError("TxID", req.TxID)
 			return &tbcapi.TxByIdRawResponse{
 				Error: responseErr,
 			}, nil
@@ -557,7 +557,7 @@ func (s *Server) handleTxByIdRequest(ctx context.Context, req *tbcapi.TxByIdRequ
 	tx, err := s.TxById(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			responseErr := protocol.RequestErrorf("tx not found: %s", req.TxID)
+			responseErr := protocol.NotFoundError("TxID", req.TxID)
 			return &tbcapi.TxByIdResponse{
 				Error: responseErr,
 			}, nil
@@ -686,7 +686,7 @@ func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.KeystonesByHeightResponse{
 				BTCTipHeight: bhb.Height,
-				Error:        protocol.RequestErrorf("could not find keystones in range"),
+				Error:        protocol.RequestError(err),
 			}, nil
 		}
 		e := protocol.NewInternalError(err)
@@ -785,10 +785,9 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 	for _, hash := range req.L2KeystoneAbrevHashes {
 		ks, ksBh, err := s.blockKeystoneByL2KeystoneAbrevHashRequest(ctx, hash)
 		if err != nil {
-			// XXX add error not found type
 			if errors.Is(err, database.ErrNotFound) {
 				blks = append(blks, &tbcapi.L2KeystoneBlockInfo{
-					Error: protocol.RequestErrorf("%v", err),
+					Error: protocol.NotFoundError("block by l2 abrev hash", hash),
 				})
 				continue
 			}
@@ -874,10 +873,9 @@ func (s *Server) handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx context.Conte
 
 	ktxsr, err := s.KeystoneTxsByHash(ctx, req)
 	if err != nil {
-		// XXX add error not found type
 		if errors.Is(err, database.ErrNotFound) {
 			return &tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
-				Error: protocol.RequestErrorf("%v", err),
+				Error: protocol.NotFoundError("txs by l2 abrev hash", req.L2KeystoneAbrevHash),
 			}, nil
 		}
 		e := protocol.NewInternalError(err)
