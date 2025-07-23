@@ -100,7 +100,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
 
@@ -116,15 +116,26 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		var msg jsonrpcMessage
 		_, br, err := c.Read(f.pctx)
 		if err != nil {
-			log.Errorf("%v", err)
 			return nil
 		}
 		err = json.Unmarshal(br, &msg)
 		if err != nil {
-			return err
+			panic(err)
 		}
 
 		log.Tracef("%v: command is %v", f.name, msg.Method)
+
+		// Tell caller we got it but delay a bit. This is super hokey
+		// and should be rewritten but the net is that we need to do
+		// the write prior to the msg being sent.
+		go func() {
+			time.Sleep(250 * time.Millisecond)
+			select {
+			case <-f.pctx.Done():
+				return
+			case f.msgCh <- msg.Method:
+			}
+		}()
 
 		var subResp jsonrpcMessage
 		switch msg.Method {
@@ -204,7 +215,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 			abrevHash, err := chainhash.NewHashFromStr(shash)
 			if err != nil {
-				return err
+				panic(err)
 			}
 
 			count, ok := params[1].(float64)
@@ -238,23 +249,16 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 			log.Debugf("%v: sending keystone %v and %v descendants", f.name, shash, len(kssResp.L2Keystones)-1)
 		default:
-			return fmt.Errorf("unsupported message %v", msg.Method)
+			panic(fmt.Errorf("unsupported message %v", msg.Method))
 		}
 		p, err := json.Marshal(subResp)
 		if err != nil {
-			return err
+			panic(err)
 		}
 
 		err = c.Write(f.pctx, websocket.MessageText, p)
 		if err != nil {
-			return err
-		}
-
-		// Tell caller
-		select {
-		case <-f.pctx.Done():
-			return f.pctx.Err()
-		case f.msgCh <- msg.Method:
+			panic(err)
 		}
 	}
 }

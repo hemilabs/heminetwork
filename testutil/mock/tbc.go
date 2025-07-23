@@ -73,8 +73,8 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to accept websocket connection for %s: %w",
-			r.RemoteAddr, err)
+		panic(fmt.Errorf("failed to accept websocket connection for %s: %w",
+			r.RemoteAddr, err))
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "") // Force close connection
 
@@ -86,7 +86,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 	wsConn := protocol.NewWSConn(conn)
 
 	if err = tbcapi.Write(r.Context(), wsConn, "0", ping); err != nil {
-		return fmt.Errorf("write ping: %w", err)
+		panic(fmt.Errorf("write ping: %w", err))
 	}
 
 	f.mtx.Lock()
@@ -107,7 +107,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 	// create mempool
 	mp, err := tbc.NewMempool()
 	if err != nil {
-		return fmt.Errorf("create mempool: %w", err)
+		panic(fmt.Errorf("create mempool: %w", err))
 	}
 
 	for {
@@ -115,16 +115,28 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			var ce websocket.CloseError
 			if errors.As(err, &ce) {
-				return fmt.Errorf("handleWebsocketRead: %w", err)
+				panic(fmt.Errorf("handleWebsocketRead: %w", err))
 			}
 			if errors.Is(err, io.EOF) {
-				return fmt.Errorf("handleWebsocketRead: EOF")
+				panic(fmt.Errorf("handleWebsocketRead: EOF"))
 			}
 
-			return fmt.Errorf("handleWebsocketRead: %w", err)
+			panic(fmt.Errorf("handleWebsocketRead: %w", err))
 		}
 
 		log.Tracef("%v: command is %v", f.name, cmd)
+
+		// Tell caller we got it but delay a bit. This is super hokey
+		// and should be rewritten but the net is that we need to do
+		// the write prior to the msg being sent.
+		go func() {
+			time.Sleep(250 * time.Millisecond)
+			select {
+			case <-f.pctx.Done():
+				return
+			case f.msgCh <- string(cmd):
+			}
+		}()
 
 		var resp any
 		switch cmd {
@@ -136,7 +148,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		case tbcapi.CmdUTXOsByAddressRequest:
 			filtered, err := mp.FilterUtxos(f.pctx, utxos)
 			if err != nil {
-				return fmt.Errorf("filter utxos: %w", err)
+				panic(fmt.Errorf("filter utxos: %w", err))
 			}
 
 			respUtxos := make([]*tbcapi.UTXO, 0)
@@ -144,11 +156,11 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				txID := utxo.ScriptHash()
 				txHash, err := chainhash.NewHash(txID[:])
 				if err != nil {
-					return err
+					panic(err)
 				}
 				value, err := newAmountFromUint64(utxo.Value())
 				if err != nil {
-					return fmt.Errorf("amount from utxo value: %w", err)
+					panic(fmt.Errorf("amount from utxo value: %w", err))
 				}
 				respUtxos = append(respUtxos, &tbcapi.UTXO{
 					TxId:     *txHash,
@@ -162,7 +174,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		case tbcapi.CmdTxBroadcastRequest:
 			pl, ok := payload.(*tbcapi.TxBroadcastRequest)
 			if !ok {
-				return fmt.Errorf("unexpected payload format: %v", payload)
+				panic(fmt.Errorf("unexpected payload format: %v", payload))
 			}
 
 			ph := make([]byte, 32)
@@ -192,12 +204,12 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 			mptx := tbc.NewMempoolTx(*ch, map[wire.OutPoint]struct{}{opp: {}})
 			err = mp.TxInsert(f.pctx, &mptx)
 			if err != nil {
-				return fmt.Errorf("mempool tx insert: %w", err)
+				panic(fmt.Errorf("mempool tx insert: %w", err))
 			}
 		case tbcapi.CmdBlocksByL2AbrevHashesRequest:
 			pl, ok := payload.(*tbcapi.BlocksByL2AbrevHashesRequest)
 			if !ok {
-				return fmt.Errorf("unexpected payload format: %v", payload)
+				panic(fmt.Errorf("unexpected payload format: %v", payload))
 			}
 
 			blkInfos := make([]*tbcapi.L2KeystoneBlockInfo, 0, len(pl.L2KeystoneAbrevHashes))
@@ -249,7 +261,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		case tbcapi.CmdKeystonesByHeightRequest:
 			pl, ok := payload.(*tbcapi.KeystonesByHeightRequest)
 			if !ok {
-				return fmt.Errorf("unexpected payload format: %v", payload)
+				panic(fmt.Errorf("unexpected payload format: %v", payload))
 			}
 			height := int64(pl.Height)
 			depth := int64(pl.Depth)
@@ -280,19 +292,12 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				}
 			}
 		default:
-			return fmt.Errorf("unknown command: %v", cmd)
+			panic(fmt.Errorf("unknown command: %v", cmd))
 		}
 
 		if err = tbcapi.Write(f.pctx, wsConn, id, resp); err != nil {
-			return fmt.Errorf("failed to handle %s request: %w",
-				cmd, err)
-		}
-
-		// Tell caller
-		select {
-		case <-f.pctx.Done():
-			return f.pctx.Err()
-		case f.msgCh <- string(cmd):
+			panic(fmt.Errorf("failed to handle %s request: %w",
+				cmd, err))
 		}
 	}
 }

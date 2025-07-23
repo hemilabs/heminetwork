@@ -326,7 +326,6 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		resp, err := client.Do(request)
 		if err != nil {
 			panic(err)
-			t.Fatal(err)
 		}
 
 		defer resp.Body.Close()
