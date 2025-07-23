@@ -255,11 +255,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		case <-f.pctx.Done():
 			return f.pctx.Err()
 		case f.msgCh <- msg.Method:
-			// default:
-			// discard message if channel is blocked
-			//	panic("this one?")
 		}
-
 	}
 }
 

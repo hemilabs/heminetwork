@@ -293,11 +293,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		case <-f.pctx.Done():
 			return f.pctx.Err()
 		case f.msgCh <- string(cmd):
-			// default:
-			// discard message if channel is blocked
-			//	panic("or this one?")
 		}
-
 	}
 }
 
