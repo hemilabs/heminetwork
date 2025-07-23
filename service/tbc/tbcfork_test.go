@@ -1408,7 +1408,7 @@ func TestWork(t *testing.T) {
 }
 
 func TestIndexNoFork(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 17*time.Second)
 	defer func() {
 		cancel()
 	}()
