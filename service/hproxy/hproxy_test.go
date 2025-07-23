@@ -401,7 +401,7 @@ func TestFanout(t *testing.T) {
 	wg.Wait()
 	cancel()
 
-	// Allow 50% variance, this is to accomodate trash CI boxes.
+	// Allow 50% variance, this is to accommodate trash CI boxes.
 	acceptable := (clientCount / serverCount) / (100 / 50)
 	upperBound := (clientCount / serverCount) + acceptable
 	lowerBound := (clientCount / serverCount) - acceptable
