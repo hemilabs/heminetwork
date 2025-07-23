@@ -563,6 +563,12 @@ func (s *Server) opgeth(ctx context.Context) {
 	log.Tracef("opgeth")
 	defer log.Tracef("opgeth exit")
 
+	const maxExponentialAttempts = 3
+	const maxDelay = 15 * time.Second
+	baseDelay := s.cfg.opgethReconnectTimeout
+
+	attempt := 1
+
 	for {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
@@ -570,15 +576,35 @@ func (s *Server) opgeth(ctx context.Context) {
 			log.Tracef("connectOpgeth: %v", err)
 		} else {
 			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
+			// Reset attempt on success
+			attempt = 1
 		}
 		// See if we were terminated
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.Tick(s.cfg.opgethReconnectTimeout):
+		default:
 		}
 
-		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
+		delay := baseDelay * (1 << (attempt - 1))
+		if delay > maxDelay {
+			delay = maxDelay
+		}
+
+		jitter := time.Duration(time.Now().UnixNano() % int64(delay/10))
+		delay += jitter	
+
+		log.Debugf("reconnecting to: %v in %v", s.cfg.OpgethURL, delay)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+
+		if attempt < maxExponentialAttempts {
+			attempt++
+		}
 	}
 }
 
