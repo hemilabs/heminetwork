@@ -296,7 +296,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		}
 
 		if err = tbcapi.Write(f.pctx, wsConn, id, resp); err != nil {
-			fmt.Errorf("failed to handle %s request: %w",
+			return fmt.Errorf("failed to handle %s request: %w",
 				cmd, err)
 		}
 	}
