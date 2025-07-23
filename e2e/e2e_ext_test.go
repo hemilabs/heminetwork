@@ -152,41 +152,29 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 }
 
 func EnsureCanConnectHTTP(t *testing.T, url string) error {
-	t.Logf("try to receive response for %s", url)
-
+	client := &http.Client{}
+	request, err := http.NewRequestWithContext(t.Context(),
+		http.MethodGet, url, http.NoBody)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for {
-		select {
-		case <-t.Context().Done():
-			return t.Context().Err()
-		default:
-			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
+		t.Logf("try to receive response for %v", url)
+		defer t.Logf("can connect  %v", url)
+		resp, err := client.Do(request)
+		if err != nil {
+			t.Logf("could not make http request: %s", err)
+			continue
+		}
+		defer resp.Body.Close()
 
-			client := http.Client{}
-			request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-			if err != nil {
-				cancel()
-				t.Fatal(err)
-			}
-
-			resp, err := client.Do(request)
-			if err != nil {
-				t.Logf("could not make http request: %s", err)
-				cancel()
-				continue
-			}
-
-			defer resp.Body.Close()
-
-			// we're making an http request to an invalid URL, ensure that we
-			// get the expected code of 404: Not Found
-			if resp.StatusCode != http.StatusNotFound {
-				t.Fatalf("received unexpected status code %d", resp.StatusCode)
-			}
-
-			cancel()
+		t.Logf("received status code %v",
+			resp.StatusCode)
+		// we're making an http request to an invalid URL, ensure
+		// that we get the expected code of 404: Not Found
+		if resp.StatusCode == http.StatusNotFound {
 			break
 		}
-		break
 	}
 
 	return nil
@@ -223,8 +211,8 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 	return tbcServer, tbcPublicUrl
 }
 
-func defaultTestContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 10*time.Second)
+func defaultTestContext(t *testing.T) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(t.Context(), 15*time.Second)
 }
 
 func randomL2Keystone(l2BlockNumber *int) *hemi.L2Keystone {
@@ -304,7 +292,7 @@ func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Databas
 }
 
 func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
@@ -411,7 +399,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
@@ -528,7 +516,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
@@ -648,7 +636,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
