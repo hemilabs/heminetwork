@@ -33,6 +33,7 @@ import (
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
@@ -1725,6 +1726,8 @@ func TestNotFoundError(t *testing.T) {
 		cancel()
 	}()
 
+	var dupErr database.DuplicateError
+
 	// Connect tbc service
 	cfg := &Config{
 		AutoIndex:            false,
@@ -1747,16 +1750,28 @@ func TestNotFoundError(t *testing.T) {
 
 	go func() {
 		err := s.Run(ctx)
-		if err != nil && !errors.Is(err, context.Canceled) {
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, dupErr) {
 			panic(err)
 		}
 	}()
 
-	time.Sleep(250 * time.Millisecond)
+	// wait for server to start
+	for !s.Running() {
+	}
 
-	bhb, err := s.db.BlockHeaderBest(ctx)
-	if err != nil {
-		t.Fatal(err)
+	var notFoundErr database.NotFoundError
+	var bhb *tbcd.BlockHeader
+	for {
+		// get genesis block header
+		bhb, err = s.db.BlockHeaderBest(ctx)
+		if err != nil {
+			if !errors.Is(err, notFoundErr) {
+				t.Fatal(err)
+			}
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		break
 	}
 
 	testTable := []testTableItem{
