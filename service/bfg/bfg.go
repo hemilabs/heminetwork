@@ -336,10 +336,8 @@ func (s *Server) shortCircuitFinality(ctx context.Context, kss *hemi.L2Keystone,
 }
 
 func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) {
-	log.Infof("handleKeystoneFinality: %v", r.RemoteAddr)
 	log.Tracef("handleKeystoneFinality: %v", r.RemoteAddr)
 	defer log.Tracef("handleKeystoneFinality exit: %v", r.RemoteAddr)
-	defer log.Infof("handleKeystoneFinality exit: %v", r.RemoteAddr)
 
 	// validate input.
 	qh, err := chainhash.NewHashFromStr(r.PathValue("hash"))
