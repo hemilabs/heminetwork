@@ -6,10 +6,8 @@ package mock
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -104,10 +102,10 @@ func (f *mockHandler) Shutdown() {
 	log.Tracef("%v: server shutting down", f.name)
 	f.Stop()
 	f.server.Close()
-	if err := f.CloseConnections(true); err != nil {
-		if !errors.Is(err, net.ErrClosed) {
-			// should never happen
-			panic(err)
-		}
-	}
+	//if err := f.CloseConnections(true); err != nil {
+	//	if !errors.Is(err, net.ErrClosed) {
+	//		// should never happen
+	//		panic(err)
+	//	}
+	//}
 }

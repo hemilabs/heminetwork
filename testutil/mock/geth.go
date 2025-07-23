@@ -126,14 +126,6 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 		log.Tracef("%v: command is %v", f.name, msg.Method)
 
-		select {
-		case <-f.pctx.Done():
-			return f.pctx.Err()
-		case f.msgCh <- msg.Method:
-		default:
-			// discard message if channel is blocked
-		}
-
 		var subResp jsonrpcMessage
 		switch msg.Method {
 		case "kss_subscribe":
@@ -172,7 +164,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 						log.Tracef("%v: Sending new keystone notification", f.name)
 						err = c.Write(f.pctx, websocket.MessageText, p)
 						if err != nil {
-							log.Errorf("%v: notification sender: %w", f.name, err.Error())
+							log.Errorf("%v: notification sender: %v", f.name, err.Error())
 							return
 						}
 						kssMtx.Lock()
@@ -257,6 +249,17 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		if err != nil {
 			return err
 		}
+
+		// Tell caller
+		select {
+		case <-f.pctx.Done():
+			return f.pctx.Err()
+		case f.msgCh <- msg.Method:
+			// default:
+			// discard message if channel is blocked
+			//	panic("this one?")
+		}
+
 	}
 }
 

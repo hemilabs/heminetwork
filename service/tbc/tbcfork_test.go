@@ -450,6 +450,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 
 func (b *btcNode) handleMsg(ctx context.Context, p *rawpeer.RawPeer, msg wire.Message) error {
 	// b.t.Logf("%v", spew.Sdump(msg))
+	b.t.Logf("%T", msg)
 	switch m := msg.(type) {
 	case *wire.MsgVersion:
 		mva := &wire.MsgVerAck{}
@@ -998,7 +999,6 @@ func (b *btcNode) MineAndSend(ctx context.Context, name string, parent *chainhas
 
 func (b *btcNode) MineAndSendEmpty(ctx context.Context) error {
 	b.t.Logf("send empty headers message")
-	time.Sleep(250 * time.Millisecond)
 	return b.p.Write(defaultCmdTimeout, wire.NewMsgHeaders())
 }
 
