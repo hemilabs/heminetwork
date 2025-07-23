@@ -262,7 +262,6 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	// Wait for response
 	select {
 	case <-ctx.Done():
-		panic("panic here clayton")
 		return nil, ctx.Err()
 	case payload := <-bc.ch:
 		if err, ok := payload.(error); ok {
