@@ -57,6 +57,7 @@ func (f *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, string("mock server closed"), http.StatusServiceUnavailable)
 		return
 	}
+	log.Infof("serving %v: %v", r.RemoteAddr, r.RequestURI)
 	if err := f.handleFunc(w, r); err != nil {
 		f.errCh <- fmt.Errorf("%s error: %w", f.name, err)
 	}
@@ -86,7 +87,7 @@ func (f *mockHandler) Start() {
 	f.mtx.Lock()
 	defer f.mtx.Unlock()
 	f.isRunning = true
-	log.Tracef("%v: server started", f.name)
+	log.Infof("%v: server started", f.name)
 }
 
 // Stop the test server from accept incoming websocket connection
@@ -94,12 +95,12 @@ func (f *mockHandler) Stop() {
 	f.mtx.Lock()
 	defer f.mtx.Unlock()
 	f.isRunning = false
-	log.Tracef("%v: server stopped", f.name)
+	log.Infof("%v: server stopped", f.name)
 }
 
 // Fully shutdown the test server
 func (f *mockHandler) Shutdown() {
-	log.Tracef("%v: server shutting down", f.name)
+	log.Infof("%v: server shutting down", f.name)
 	f.Stop()
 	f.server.Close()
 	//if err := f.CloseConnections(true); err != nil {

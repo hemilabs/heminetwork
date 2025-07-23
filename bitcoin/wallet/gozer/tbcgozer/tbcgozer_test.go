@@ -73,9 +73,13 @@ func TestTBCGozer(t *testing.T) {
 		t.Fatal("expected gozer to be of type tbcGozer")
 	}
 
-	if !tg.Connected() {
+	for {
+		if tg.Connected() {
+			break
+		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	t.Logf("gozer connected")
 
 	feeEstimates, err := b.FeeEstimates(ctx)
 	if err != nil {

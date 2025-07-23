@@ -22,11 +22,11 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/coder/websocket"
 	"github.com/go-test/deep"
 	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi"
@@ -35,57 +35,6 @@ import (
 	"github.com/hemilabs/heminetwork/testutil"
 	"github.com/hemilabs/heminetwork/testutil/mock"
 )
-
-func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(t.Context(), timeout)
-	defer cancel()
-
-	t.Logf("connecting to %s", url)
-
-	var err error
-
-	doneCh := make(chan bool)
-	go func() {
-		for {
-			c, _, err := websocket.Dial(ctx, url, nil)
-			if err != nil {
-				time.Sleep(1 * time.Second)
-				continue
-			}
-			c.CloseNow()
-			doneCh <- true
-		}
-	}()
-
-	select {
-	case <-doneCh:
-	case <-ctx.Done():
-		return fmt.Errorf("timed out trying to reach WS server in tests, last error: %w", err)
-	}
-
-	return nil
-}
-
-func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(t.Context(), timeout)
-	defer cancel()
-
-	for {
-		select {
-		case <-time.After(100 * time.Millisecond):
-			conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-			if err != nil {
-				t.Logf("error dialing: %s", err)
-				continue
-			}
-
-			conn.Close()
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
 
 func nextPort(ctx context.Context, t *testing.T) int {
 	for {
@@ -137,12 +86,9 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 			panic(err)
 		}
 	}()
+	time.Sleep(time.Second) // Let bfg settle
 
 	bfgPublicUrl := net.JoinHostPort("localhost", fmt.Sprintf("%d", port))
-
-	if err := EnsureCanConnectTCP(t, bfgPublicUrl, 5*time.Second); err != nil {
-		t.Fatalf("could not connect to %s: %s", bfgPublicUrl, err.Error())
-	}
 
 	if err := EnsureCanConnectHTTP(t, fmt.Sprintf("http://%s/somethinginvalid", bfgPublicUrl)); err != nil {
 		t.Fatalf("could not make http request to bfg in timeout: %s", err)
@@ -153,31 +99,32 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 
 func EnsureCanConnectHTTP(t *testing.T, url string) error {
 	client := &http.Client{}
-	request, err := http.NewRequestWithContext(t.Context(),
-		http.MethodGet, url, http.NoBody)
-	if err != nil {
-		t.Fatal(err)
-	}
 	for {
-		t.Logf("try to receive response for %v", url)
-		defer t.Logf("can connect  %v", url)
+		t.Logf("try to connect: %v", url)
+		defer t.Logf("connected:  %v", url)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		request, err := http.NewRequestWithContext(ctx,
+			http.MethodGet, url, http.NoBody)
+		if err != nil {
+			return err
+		}
 		resp, err := client.Do(request)
 		if err != nil {
+			if t.Context().Err() != nil {
+				return t.Context().Err()
+			}
 			t.Logf("could not make http request: %s", err)
 			continue
 		}
 		defer resp.Body.Close()
 
-		t.Logf("received status code %v",
-			resp.StatusCode)
 		// we're making an http request to an invalid URL, ensure
 		// that we get the expected code of 404: Not Found
 		if resp.StatusCode == http.StatusNotFound {
-			break
+			return nil
 		}
 	}
-
-	return nil
 }
 
 func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tbc.Server, string) {
@@ -201,12 +148,23 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 			panic(err)
 		}
 	}()
+	time.Sleep(time.Second) // Let tbc settle
 
-	tbcPublicUrl := fmt.Sprintf("http://%s/v1/ws", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)))
+	tbcPublicUrl := fmt.Sprintf("http://%s/v1/ws",
+		net.JoinHostPort("localhost", fmt.Sprintf("%d", port)))
 
-	if err := EnsureCanConnect(t, tbcPublicUrl, 5*time.Second); err != nil {
-		t.Fatalf("could not connect to %s: %s", tbcPublicUrl, err.Error())
+	// Connect with gozer to ensure connectedness
+	g, err := tbcgozer.Run(ctx, tbcPublicUrl)
+	if err != nil {
+		panic(err)
 	}
+	// defer g.Close() // XXX add?
+	for {
+		if _, err := g.BtcHeight(ctx); err == nil {
+			break
+		}
+	}
+	t.Logf("gozer connected")
 
 	return tbcServer, tbcPublicUrl
 }
@@ -299,7 +257,6 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	defer func() {
 		if err := os.RemoveAll(levelDbHome); err != nil {
 			t.Fatal(err)
@@ -310,12 +267,12 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	db, err := level.New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	t.Logf("preload database")
 	l2BlockNumber := 1
 	keystoneOne := randomL2Keystone(&l2BlockNumber)
 	l2BlockNumber++
@@ -334,6 +291,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	t.Logf("launch opgeth")
 	opgeth := mock.NewMockOpGeth(ctx, nil, nil, []hemi.L2Keystone{
 		*keystoneOne,
 		*keystoneTwo,
@@ -342,7 +300,10 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
+	t.Logf("launch bfg and tbc")
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
+	time.Sleep(1 * time.Second)
+	t.Logf("launching test")
 
 	expectedConfirmations := []int{
 		11,
@@ -354,8 +315,9 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		*keystoneTwo,
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
+		t.Logf("%v", bfgUrlTmp)
 
-		client := http.Client{}
+		client := &http.Client{}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
 		if err != nil {
 			t.Fatal(err)
@@ -363,6 +325,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 
 		resp, err := client.Do(request)
 		if err != nil {
+			panic(err)
 			t.Fatal(err)
 		}
 
