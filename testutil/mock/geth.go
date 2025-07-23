@@ -258,7 +258,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 		err = c.Write(f.pctx, websocket.MessageText, p)
 		if err != nil {
-			panic(err)
+			return err
 		}
 	}
 }
