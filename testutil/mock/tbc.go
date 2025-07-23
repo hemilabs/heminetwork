@@ -121,7 +121,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				panic(fmt.Errorf("handleWebsocketRead: EOF"))
 			}
 
-			panic(fmt.Errorf("handleWebsocketRead: %w", err))
+			return fmt.Errorf("handleWebsocketRead: %w", err)
 		}
 
 		log.Tracef("%v: command is %v", f.name, cmd)
@@ -296,8 +296,8 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		}
 
 		if err = tbcapi.Write(f.pctx, wsConn, id, resp); err != nil {
-			panic(fmt.Errorf("failed to handle %s request: %w",
-				cmd, err))
+			fmt.Errorf("failed to handle %s request: %w",
+				cmd, err)
 		}
 	}
 }
