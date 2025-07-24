@@ -337,6 +337,13 @@ func TestDisconnectedOpgeth(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-errCh:
+		// discard expected error from forced closure
+	}
+
 	// messages we expect to receive
 	expectedMsg = map[string]int{
 		"kss_getLatestKeystones":     1,
@@ -346,7 +353,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 
 	// receive messages and errors from opgeth and tbc
 	err = messageListener(t, expectedMsg, errCh, msgCh)
-	if err != nil && !errors.Is(err, net.ErrClosed) {
+	if err != nil {
 		t.Fatal(err)
 	}
 }

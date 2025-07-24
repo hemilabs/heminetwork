@@ -37,8 +37,8 @@ func init() {
 
 type mockHandler struct {
 	handleFunc func(w http.ResponseWriter, r *http.Request) error
-	errCh      chan error  // use notifyMsg to write to it
-	msgCh      chan string // use notifyErr to write to it
+	errCh      chan error  // use notifyErr to write to it
+	msgCh      chan string // use notifyMsg to write to it
 	name       string
 	pctx       context.Context
 	conns      []*websocket.Conn
