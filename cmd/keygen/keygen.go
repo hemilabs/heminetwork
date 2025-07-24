@@ -13,24 +13,24 @@ import (
 	"os"
 
 	"github.com/btcsuite/btcd/btcutil"
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/chaincfg"
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/tyler-smith/go-bip39"
 
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/version"
 )
 
 var (
-	net              = flag.String("net", "mainnet", "Generate address of this type")
-	secp256k1KeyPair = flag.Bool("secp256k1", false, "Generate a secp256k1 key pair")
-	jsonFormat       = flag.Bool("json", false, "print output as JSON")
-
+	keyType = flag.String("key", "popminer", "generate key type")
+	net     = flag.String("net", "mainnet", "Generate address of this type")
 	welcome string
 )
 
 func usage() {
 	fmt.Fprintf(os.Stderr, "%v\n", welcome)
-	fmt.Fprintf(os.Stderr, "\t%v [-net mainnet|testnet3|testnet4] [-json] <-secp256k1>\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "\t%v [-net=mainnet|testnet3|testnet4] <-key=popminer|secp256k1|hdwallet>\n", os.Args[0])
 	flag.PrintDefaults()
 }
 
@@ -40,58 +40,117 @@ func init() {
 }
 
 func _main() error {
-	var btcChainParams *btcchaincfg.Params
+	var btcChainParams *chaincfg.Params
 	switch *net {
-	case "testnet3", "testnet":
-		btcChainParams = &btcchaincfg.TestNet3Params
+	case "testnet":
+		btcChainParams = &chaincfg.RegressionNetParams
+	case "testnet3":
+		btcChainParams = &chaincfg.TestNet3Params
 	case "testnet4":
-		btcChainParams = &btcchaincfg.TestNet4Params
+		btcChainParams = &chaincfg.TestNet4Params
 	case "mainnet":
-		btcChainParams = &btcchaincfg.MainNetParams
+		btcChainParams = &chaincfg.MainNetParams
 	default:
 		return fmt.Errorf("invalid net: %v", *net)
 	}
 
-	switch {
-	case *secp256k1KeyPair:
+	switch *keyType {
+	case "secp256k1":
 		privKey, err := dcrsecpk256k1.GeneratePrivateKey()
 		if err != nil {
 			return fmt.Errorf("generate secp256k1 private key: %w", err)
 		}
-		btcAddress, err := btcutil.NewAddressPubKey(privKey.PubKey().SerializeCompressed(),
-			btcChainParams)
+		privBytes := privKey.Serialize()
+		pubBytes := privKey.PubKey().SerializeCompressed()
+		type Secp256k1 struct {
+			PrivateKey string `json:"private_key"`
+			PublicKey  string `json:"public_key"`
+		}
+		s := Secp256k1{
+			PrivateKey: hex.EncodeToString(privBytes),
+			PublicKey:  hex.EncodeToString(pubBytes),
+		}
+		js, err := json.MarshalIndent(s, "", "  ")
 		if err != nil {
-			return fmt.Errorf("create BTC address from public key: %w", err)
+			return fmt.Errorf("marshal: %w", err)
 		}
-		hash := btcAddress.AddressPubKeyHash().String()
+		fmt.Printf("%s\n", js)
+
+	case "popminer":
+		// Generate secp256k1 key and share it with ethereum.
+		privKey, err := dcrsecpk256k1.GeneratePrivateKey()
+		if err != nil {
+			return fmt.Errorf("generate secp256k1 private key: %w", err)
+		}
+		privBytes := privKey.Serialize()
+		pubBytes := privKey.PubKey().SerializeCompressed()
+
+		btcAddress, err := btcutil.NewAddressPubKey(pubBytes, btcChainParams)
+		if err != nil {
+			return fmt.Errorf("create btc address from public key: %w", err)
+		}
+		btcAddrHash := btcAddress.AddressPubKeyHash().String()
 		ethAddress := ethereum.AddressFromPrivateKey(privKey)
-		if *jsonFormat {
-			type Secp256k1 struct {
-				EthereumAddress string `json:"ethereum_address"`
-				Network         string `json:"network"`
-				PrivateKey      string `json:"private_key"`
-				PublicKey       string `json:"public_key"`
-				PubkeyHash      string `json:"pubkey_hash"`
-			}
-			s := &Secp256k1{
-				EthereumAddress: ethAddress.String(),
-				Network:         *net,
-				PrivateKey:      hex.EncodeToString(privKey.Serialize()),
-				PublicKey:       hex.EncodeToString(privKey.PubKey().SerializeCompressed()),
-				PubkeyHash:      hash,
-			}
-			js, err := json.MarshalIndent(s, "", "  ")
-			if err != nil {
-				return fmt.Errorf("marshal: %w", err)
-			}
-			fmt.Printf("%s\n", js)
-		} else {
-			fmt.Printf("eth address: %v\n", ethAddress)
-			fmt.Printf("network    : %v\n", *net)
-			fmt.Printf("private key: %x\n", privKey.Serialize())
-			fmt.Printf("public key : %x\n", privKey.PubKey().SerializeCompressed())
-			fmt.Printf("pubkey hash:  %v\n", hash)
+
+		type PopMinerKey struct {
+			Network         string `json:"network"`
+			PrivateKey      string `json:"private_key"`
+			PublicKey       string `json:"public_key"`
+			BitcoinAddress  string `json:"bitcoin_address"`
+			EthereumAddress string `json:"ethereum_address"`
 		}
+		p := PopMinerKey{
+			Network:         *net,
+			PrivateKey:      hex.EncodeToString(privBytes),
+			PublicKey:       hex.EncodeToString(pubBytes),
+			BitcoinAddress:  btcAddrHash,
+			EthereumAddress: ethAddress.String(),
+		}
+		js, err := json.MarshalIndent(p, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal: %w", err)
+		}
+		fmt.Printf("%s\n", js)
+
+	case "hdwallet":
+		entropy, err := bip39.NewEntropy(256)
+		if err != nil {
+			return fmt.Errorf("seed: %w", err)
+		}
+		mnemonic, err := bip39.NewMnemonic(entropy[:])
+		if err != nil {
+			return fmt.Errorf("mnemonic: %w", err)
+		}
+		seed, err := bip39.NewSeedWithErrorChecking(mnemonic, "")
+		if err != nil {
+			return fmt.Errorf("new seed: %w", err)
+		}
+		vc, err := vinzclortho.New(btcChainParams)
+		if err != nil {
+			return err
+		}
+		err = vc.Unlock(hex.EncodeToString(seed))
+		if err != nil {
+			return err
+		}
+		type HDWalletKey struct {
+			Network  string `json:"network"`
+			Mnemonic string `json:"mnemonic"`
+			RootKey  string `json:"root_key"`
+			Seed     string `json:"seed"`
+		}
+
+		p := HDWalletKey{
+			Network:  *net,
+			Mnemonic: mnemonic,
+			RootKey:  vc.RootKey(),
+			Seed:     hex.EncodeToString(seed),
+		}
+		js, err := json.MarshalIndent(p, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal: %w", err)
+		}
+		fmt.Printf("%s\n", js)
 
 	default:
 		usage()

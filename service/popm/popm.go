@@ -6,6 +6,7 @@ package popm
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,10 +14,11 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -29,6 +31,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul/memory"
+	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/deucalion"
 	"github.com/hemilabs/heminetwork/service/pprof"
@@ -38,8 +41,6 @@ const (
 	logLevel = "INFO"
 	appName  = "popm"
 
-	defaultPopAccount           = 1337
-	defaultPopChild             = 0
 	defaultBitcoinConfirmations = 6
 	defaultOpgethURL            = "http://127.0.0.1:9999/v1/ws"
 
@@ -131,9 +132,9 @@ type Server struct {
 	cfg *Config
 
 	// bitcoin
-	params  *chaincfg.Params
-	public  *hdkeychain.ExtendedKey
-	address btcutil.Address
+	params     *chaincfg.Params
+	btcAddress btcutil.Address
+	ethAddress common.Address
 
 	isRunning      bool
 	promCollectors []prometheus.Collector
@@ -145,7 +146,7 @@ type Server struct {
 	// wallet
 	gozer gozer.Gozer
 	mz    zuul.Zuul
-	vc    *vinzclortho.VinzClortho
+	// vc    *vinzclortho.VinzClortho
 
 	// mining
 	retryThreshold uint32
@@ -167,11 +168,11 @@ func NewServer(cfg *Config) (*Server, error) {
 	switch strings.ToLower(cfg.Network) {
 	case "mainnet":
 		s.params = &chaincfg.MainNetParams
-	case "testnet", "testnet3":
+	case "testnet3":
 		s.params = &chaincfg.TestNet3Params
 	case "testnet4":
 		s.params = &chaincfg.TestNet4Params
-	case "localnet":
+	case "localnet", "testnet":
 		s.params = &chaincfg.RegressionNetParams
 	default:
 		return nil, fmt.Errorf("unknown bitcoin network %v", cfg.Network)
@@ -180,23 +181,19 @@ func NewServer(cfg *Config) (*Server, error) {
 	if cfg.BitcoinSecret == "" {
 		return nil, errors.New("no bitcoin secret provided")
 	}
-	var err error
-	s.vc, err = vinzclortho.New(s.params)
+	pk, err := hex.DecodeString(cfg.BitcoinSecret)
 	if err != nil {
 		return nil, err
 	}
-	err = s.vc.Unlock(cfg.BitcoinSecret)
+	privKey := dcrsecpk256k1.PrivKeyFromBytes(pk)
+	pubBytes := privKey.PubKey().SerializeCompressed()
+
+	btcAddress, err := btcutil.NewAddressPubKey(pubBytes, s.params)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("new address: %w", err)
 	}
-	ek, err := s.vc.DeriveHD(defaultPopAccount, defaultPopChild)
-	if err != nil {
-		return nil, err
-	}
-	s.address, s.public, err = vinzclortho.AddressAndPublicFromExtended(s.params, ek)
-	if err != nil {
-		return nil, err
-	}
+	s.btcAddress = btcAddress.AddressPubKeyHash()
+	s.ethAddress = ethereum.AddressFromPrivateKey(privKey)
 
 	s.mz, err = memory.New(s.params)
 	if err != nil {
@@ -204,10 +201,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 	err = s.mz.PutKey(&zuul.NamedKey{
 		Name:       "private",
-		Account:    defaultPopAccount,
-		Child:      defaultPopChild,
-		HD:         true,
-		PrivateKey: ek,
+		PrivateKey: privKey,
 	})
 	if err != nil {
 		return nil, err
@@ -249,7 +243,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 		return nil, fmt.Errorf("bitcoin height: %w", err)
 	}
 
-	payToScript, err := vinzclortho.ScriptFromPubKeyHash(s.address)
+	payToScript, err := vinzclortho.ScriptFromPubKeyHash(s.btcAddress)
 	if err != nil {
 		return nil, fmt.Errorf("get pay to address script: %w", err)
 	}
@@ -270,7 +264,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 	}
 
 	// Retrieve available UTXOs for the miner.
-	utxos, err := s.gozer.UtxosByAddress(ctx, true, s.address, 0, 100)
+	utxos, err := s.gozer.UtxosByAddress(ctx, true, s.btcAddress, 0, 100)
 	if err != nil {
 		return nil, fmt.Errorf("utxos by address: %w", err)
 	}
@@ -707,7 +701,14 @@ func (s *Server) Run(pctx context.Context) error {
 	var err error
 	switch s.cfg.BitcoinSource {
 	case bitcoinSourceTBC:
-		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL)
+		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL, func() {
+			utxos, err := s.gozer.UtxosByAddress(ctx, true,
+				s.btcAddress, 0, 100)
+			if err == nil {
+				log.Infof("confirmed bitcoin balance %v: %v",
+					s.btcAddress, gozer.BalanceFromUtxos(utxos))
+			}
+		})
 		if err != nil {
 			return fmt.Errorf("could not setup %v tbc: %w",
 				s.cfg.Network, err)
@@ -749,8 +750,8 @@ func (s *Server) Run(pctx context.Context) error {
 		}
 	}()
 
-	log.Infof("bitcoin address   : %v", s.address)
-	log.Infof("bitcoin public key: %v", s.public)
+	log.Infof("bitcoin address : %v", s.btcAddress)
+	log.Infof("ethereum address: %v", s.ethAddress)
 
 	<-ctx.Done()
 	err = ctx.Err()

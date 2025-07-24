@@ -14,6 +14,7 @@ import (
 
 	"github.com/juju/loggo"
 
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/service/popm"
 	"github.com/hemilabs/heminetwork/version"
@@ -30,12 +31,6 @@ var (
 
 	cfg = popm.NewDefaultConfig()
 	cm  = config.CfgMap{
-		"POPM_OPGETH_URL": config.Config{
-			Value:        &cfg.OpgethURL,
-			DefaultValue: "localhost:9999",
-			Help:         "URL for opgeth",
-			Print:        config.PrintAll,
-		},
 		"POPM_BITCOIN_NETWORK": config.Config{
 			Value:        &cfg.Network,
 			DefaultValue: "mainnet",
@@ -49,10 +44,22 @@ var (
 			Help:         "bitcoin secret (mnemonic, seed, xpriv)",
 			Print:        config.PrintSecret,
 		},
+		"POPM_BITCOIN_URL": config.Config{
+			Value:        &cfg.BitcoinURL,
+			DefaultValue: tbcapi.DefaultURL,
+			Help:         "tbc bitcoin url to connect to",
+			Print:        config.PrintAll,
+		},
 		"POPM_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
+			Print:        config.PrintAll,
+		},
+		"POPM_OPGETH_URL": config.Config{
+			Value:        &cfg.OpgethURL,
+			DefaultValue: "localhost:9999",
+			Help:         "URL for opgeth",
 			Print:        config.PrintAll,
 		},
 		"POPM_PPROF_ADDRESS": config.Config{
@@ -71,12 +78,6 @@ var (
 			Value:        &cfg.RetryMineThreshold,
 			DefaultValue: uint(0),
 			Help:         "the number of L2 Keystones behind the latest seen that we are willing to remine, this is handy for re-orgs",
-			Print:        config.PrintAll,
-		},
-		"POPM_BITCOIN_URL": config.Config{
-			Value:        &cfg.BitcoinURL,
-			DefaultValue: "",
-			Help:         "the bitcoin url to connect to; it's either a tbc or blockstream url",
 			Print:        config.PrintAll,
 		},
 	}

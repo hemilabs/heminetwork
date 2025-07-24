@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -43,16 +44,30 @@ func New(params *chaincfg.Params) (*VinzClortho, error) {
 	return vc, nil
 }
 
+func (vc *VinzClortho) rootKey() *hdkeychain.ExtendedKey {
+	vc.mtx.Lock()
+	defer vc.mtx.Unlock()
+	return vc.master
+}
+
+func (vc *VinzClortho) RootKey() string {
+	rk := vc.rootKey()
+	if rk == nil {
+		return ""
+	}
+	return rk.String()
+}
+
 // Lock locks the wallet.
 func (vc *VinzClortho) Lock() error {
+	vc.mtx.Lock()
+	defer vc.mtx.Unlock()
 	if vc.master == nil {
 		return errors.New("wallet already locked")
 	}
 
-	vc.mtx.Lock()
 	vc.master.Zero()
 	vc.master = nil
-	vc.mtx.Unlock()
 
 	return nil
 }
@@ -113,23 +128,25 @@ func (vc *VinzClortho) Unlock(secret string) error {
 // regular address can derive public keys without.
 //
 // This function uses the same paths as used in Bitcoin core and Electrum.
-func (vc *VinzClortho) derive(account, child, offset uint32) (*hdkeychain.ExtendedKey, error) {
-	if vc.master == nil {
+func (vc *VinzClortho) derive(account, offset uint32, children ...uint32) (*hdkeychain.ExtendedKey, error) {
+	rk := vc.rootKey()
+	if rk == nil {
 		return nil, errors.New("wallet locked")
 	}
 
 	// Derive child key for (hardened) account.
 	// E.g. hardened account 0: m/0'
-	acct, err := vc.master.Derive(offset + account)
+	ek, err := rk.Derive(account + offset)
 	if err != nil {
 		return nil, err
 	}
 
-	// Derive child key for external (hardened) account.
-	// E.g. hardened account 0 external 0 -> m/0'/0'
-	ek, err := acct.Derive(offset + child)
-	if err != nil {
-		return nil, err
+	// Derive child keys
+	for _, child := range children {
+		ek, err = ek.Derive(child + offset) // Yes, overwrite ek!
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return ek, nil
@@ -137,14 +154,75 @@ func (vc *VinzClortho) derive(account, child, offset uint32) (*hdkeychain.Extend
 
 // DeriveHD derives a hardened extended public key and address.
 // E.g. account 1 child 4 m/1'/4'
-func (vc *VinzClortho) DeriveHD(account, child uint32) (*hdkeychain.ExtendedKey, error) {
-	return vc.derive(account, child, hdkeychain.HardenedKeyStart)
+func (vc *VinzClortho) DeriveHD(account uint32, children ...uint32) (*hdkeychain.ExtendedKey, error) {
+	return vc.derive(account, hdkeychain.HardenedKeyStart, children...)
 }
 
 // Derive derives an extended public key and address.
 // E.g. account 0 child 1 m/0/1
-func (vc *VinzClortho) Derive(account, child uint32) (*hdkeychain.ExtendedKey, error) {
-	return vc.derive(account, child, 0)
+func (vc *VinzClortho) Derive(account uint32, children ...uint32) (*hdkeychain.ExtendedKey, error) {
+	return vc.derive(account, 0, children...)
+}
+
+// pathElement decodes a path element into a child index. A ' suffix means
+// it's a hardened address.
+func pathElement(p string) (uint32, error) {
+	var offset uint32
+	e, isHD := strings.CutSuffix(p, "'")
+	if isHD {
+		offset = hdkeychain.HardenedKeyStart
+	}
+	x, err := strconv.ParseUint(e, 10, 32)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(x) + offset, nil
+}
+
+// DerivePath returns an extended key from the provided path. E.g.
+// "m/1337'/0'/1", this will return a non-hardned extended key from the hardned
+// 1337/0 path.
+func (vc *VinzClortho) DerivePath(path string) (*hdkeychain.ExtendedKey, error) {
+	rk := vc.rootKey()
+	if rk == nil {
+		return nil, errors.New("wallet locked")
+	}
+
+	p := strings.Split(path, "/")
+	if len(p) < 2 {
+		return nil, fmt.Errorf("invalid path")
+	}
+
+	// p[0] must be m
+	if p[0] != "m" {
+		return nil, fmt.Errorf("invalid path prefix")
+	}
+
+	// p[1] is the account key and subsequent p elements are children.
+	account, err := pathElement(p[1])
+	if err != nil {
+		return nil, err
+	}
+	// Use Derive since HD is already included in account
+	ek, err := rk.Derive(account)
+	if err != nil {
+		return nil, err
+	}
+
+	// Now derive all children
+	for _, v := range p[2:] {
+		child, err := pathElement(v)
+		if err != nil {
+			return nil, err
+		}
+
+		// Overwrite ek
+		ek, err = ek.Derive(child)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return ek, nil
 }
 
 // AddressAndPublicFromExtended returns the public bits from a private extended
