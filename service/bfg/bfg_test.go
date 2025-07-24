@@ -165,11 +165,11 @@ func TestFullMockIntegration(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
-	bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
+	// bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
 
-	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
-		t.Fatal(err)
-	}
+	//if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
+	//	t.Fatal(err)
+	//}
 
 	s, err := NewServer(bfgCfg)
 	if err != nil {
@@ -242,6 +242,7 @@ func sendFinalityRequests(t *testing.T, ctx context.Context, kssList []hemi.L2Ke
 			kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
 			u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
 				url, bfgapi.APIVersion, kssHash)
+			log.Infof("sendFinalityRequests: %v", u)
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 			if err != nil {
 				t.Log(err)

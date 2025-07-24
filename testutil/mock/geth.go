@@ -95,6 +95,152 @@ func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, ke
 	return &th
 }
 
+func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *http.Request) (string, error) {
+	var (
+		keystoneCounter int
+		kssMtx          sync.RWMutex
+		msg             jsonrpcMessage
+	)
+	_, br, err := c.Read(f.pctx)
+	if err != nil {
+		// XXX used to be nil
+		return "", fmt.Errorf("read: %w", err)
+	}
+	err = json.Unmarshal(br, &msg)
+	if err != nil {
+		return "", fmt.Errorf("unmarshal: %w", err)
+	}
+
+	log.Tracef("%v: command is %v", f.name, msg.Method)
+	log.Infof("%v: command is %v", f.name, msg.Method)
+
+	var subResp jsonrpcMessage
+	switch msg.Method {
+	case "kss_subscribe":
+		subResp = jsonrpcMessage{
+			Version: "2.0",
+			ID:      msg.ID,
+			Result:  "0x5a395650bce324475634d746a831c227",
+		}
+
+		encResult := subscriptionResultEnc{
+			ID:     "0x5a395650bce324475634d746a831c227",
+			Result: "New Keystone Available",
+		}
+		subNotif := jsonrpcSubscriptionNotification{
+			Version: "2.0",
+			Method:  "eth_subscription",
+			Params:  encResult,
+		}
+
+		p, err := json.Marshal(subNotif)
+		if err != nil {
+			panic(err)
+		}
+
+		// send new keystone notifications periodically
+		go func() {
+			for {
+				select {
+				case <-f.pctx.Done():
+					return
+
+				case <-time.Tick(DefaultNtfnDuration):
+					if !f.Running() {
+						return
+					}
+					log.Tracef("%v: Sending new keystone notification", f.name)
+					err = c.Write(f.pctx, websocket.MessageText, p)
+					if err != nil {
+						log.Errorf("%v: notification sender: %v", f.name, err.Error())
+						return
+					}
+					kssMtx.Lock()
+					keystoneCounter++
+					kssMtx.Unlock()
+				}
+			}
+		}()
+	case "kss_getLatestKeystones":
+		var count []int
+		err = json.Unmarshal(msg.Params, &count)
+		if err != nil {
+			panic(err)
+		}
+		kssMtx.RLock()
+		kssResp := L2KeystoneLatestResponse{
+			L2Keystones: lastKeystones(count[0], f.keystones[:min(keystoneCounter+count[0], len(f.keystones))]),
+		}
+		kssMtx.RUnlock()
+		subResp = jsonrpcMessage{
+			Version: "2.0",
+			ID:      msg.ID,
+			Result:  kssResp,
+		}
+		log.Debugf("%v: sending %v last keystones", f.name, len(kssResp.L2Keystones))
+	case "kss_getKeystone":
+		var params []any
+		err = json.Unmarshal(msg.Params, &params)
+		if err != nil {
+			panic(err)
+		}
+
+		shash, ok := params[0].(string)
+		if !ok {
+			panic("unexpected param type")
+		}
+
+		abrevHash, err := chainhash.NewHashFromStr(shash)
+		if err != nil {
+			panic(err)
+		}
+
+		count, ok := params[1].(float64)
+		if !ok {
+			panic("unexpected param type")
+		}
+
+		found := -1
+		for ki, kss := range f.keystones {
+			if hemi.L2KeystoneAbbreviate(kss).Hash().IsEqual(abrevHash) {
+				found = ki
+			}
+		}
+
+		kssResp := L2KeystoneValidityResponse{}
+		if found == -1 {
+			kssResp.Error = protocol.NotFoundError("keystone", abrevHash)
+		} else {
+			desc := make([]hemi.L2Keystone, 0, int(count))
+			for i := found; i < len(f.keystones) && i <= found+int(count); i++ {
+				desc = append(desc, f.keystones[i])
+			}
+			kssResp.L2Keystones = desc
+		}
+
+		subResp = jsonrpcMessage{
+			Version: "2.0",
+			ID:      msg.ID,
+			Result:  kssResp,
+		}
+
+		log.Debugf("%v: sending keystone %v and %v descendants", f.name, shash, len(kssResp.L2Keystones)-1)
+	default:
+		panic(fmt.Errorf("unsupported message %v", msg.Method))
+	}
+	p, err := json.Marshal(subResp)
+	if err != nil {
+		panic(err)
+	}
+
+	err = c.Write(f.pctx, websocket.MessageText, p)
+	if err != nil {
+		return "", fmt.Errorf("write: %w", err)
+	}
+
+	return msg.Method, nil
+}
+
 func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.Request) error {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
@@ -105,161 +251,19 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
 
 	f.mtx.Lock()
-	f.conns = append(f.conns, c)
+	f.conns = append(f.conns, c) // XXX don't we need to reap this?
 	f.mtx.Unlock()
 
 	log.Infof("%v: new connection to %v", f.name, r.RemoteAddr)
 
-	var keystoneCounter int
-	var kssMtx sync.RWMutex
 	for {
-		var msg jsonrpcMessage
-		_, br, err := c.Read(f.pctx)
+		// Handle command
+		method, err := f.handle(c, w, r)
 		if err != nil {
-			return nil
-		}
-		err = json.Unmarshal(br, &msg)
-		if err != nil {
-			panic(err)
-		}
-
-		log.Tracef("%v: command is %v", f.name, msg.Method)
-
-		// Tell caller we got it but delay a bit. This is super hokey
-		// and should be rewritten but the net is that we need to do
-		// the write prior to the msg being sent.
-		go func() {
-			time.Sleep(250 * time.Millisecond)
-			select {
-			case <-f.pctx.Done():
-				return
-			case f.msgCh <- msg.Method:
-			}
-		}()
-
-		var subResp jsonrpcMessage
-		switch msg.Method {
-		case "kss_subscribe":
-			subResp = jsonrpcMessage{
-				Version: "2.0",
-				ID:      msg.ID,
-				Result:  "0x5a395650bce324475634d746a831c227",
-			}
-
-			encResult := subscriptionResultEnc{
-				ID:     "0x5a395650bce324475634d746a831c227",
-				Result: "New Keystone Available",
-			}
-			subNotif := jsonrpcSubscriptionNotification{
-				Version: "2.0",
-				Method:  "eth_subscription",
-				Params:  encResult,
-			}
-
-			p, err := json.Marshal(subNotif)
-			if err != nil {
-				panic(err)
-			}
-
-			// send new keystone notifications periodically
-			go func() {
-				for {
-					select {
-					case <-f.pctx.Done():
-						return
-
-					case <-time.Tick(DefaultNtfnDuration):
-						if !f.Running() {
-							return
-						}
-						log.Tracef("%v: Sending new keystone notification", f.name)
-						err = c.Write(f.pctx, websocket.MessageText, p)
-						if err != nil {
-							log.Errorf("%v: notification sender: %v", f.name, err.Error())
-							return
-						}
-						kssMtx.Lock()
-						keystoneCounter++
-						kssMtx.Unlock()
-					}
-				}
-			}()
-		case "kss_getLatestKeystones":
-			var count []int
-			err = json.Unmarshal(msg.Params, &count)
-			if err != nil {
-				panic(err)
-			}
-			kssMtx.RLock()
-			kssResp := L2KeystoneLatestResponse{
-				L2Keystones: lastKeystones(count[0], f.keystones[:min(keystoneCounter+count[0], len(f.keystones))]),
-			}
-			kssMtx.RUnlock()
-			subResp = jsonrpcMessage{
-				Version: "2.0",
-				ID:      msg.ID,
-				Result:  kssResp,
-			}
-			log.Debugf("%v: sending %v last keystones", f.name, len(kssResp.L2Keystones))
-		case "kss_getKeystone":
-			var params []any
-			err = json.Unmarshal(msg.Params, &params)
-			if err != nil {
-				panic(err)
-			}
-
-			shash, ok := params[0].(string)
-			if !ok {
-				panic("unexpected param type")
-			}
-
-			abrevHash, err := chainhash.NewHashFromStr(shash)
-			if err != nil {
-				panic(err)
-			}
-
-			count, ok := params[1].(float64)
-			if !ok {
-				panic("unexpected param type")
-			}
-
-			found := -1
-			for ki, kss := range f.keystones {
-				if hemi.L2KeystoneAbbreviate(kss).Hash().IsEqual(abrevHash) {
-					found = ki
-				}
-			}
-
-			kssResp := L2KeystoneValidityResponse{}
-			if found == -1 {
-				kssResp.Error = protocol.NotFoundError("keystone", abrevHash)
-			} else {
-				desc := make([]hemi.L2Keystone, 0, int(count))
-				for i := found; i < len(f.keystones) && i <= found+int(count); i++ {
-					desc = append(desc, f.keystones[i])
-				}
-				kssResp.L2Keystones = desc
-			}
-
-			subResp = jsonrpcMessage{
-				Version: "2.0",
-				ID:      msg.ID,
-				Result:  kssResp,
-			}
-
-			log.Debugf("%v: sending keystone %v and %v descendants", f.name, shash, len(kssResp.L2Keystones)-1)
-		default:
-			panic(fmt.Errorf("unsupported message %v", msg.Method))
-		}
-		p, err := json.Marshal(subResp)
-		if err != nil {
-			panic(err)
-		}
-
-		err = c.Write(f.pctx, websocket.MessageText, p)
-		if err != nil {
+			log.Errorf("exiting mockOpGethHandleFunc: %v", err)
 			return err
 		}
+		f.notifyMsg(f.pctx, method)
 	}
 }
 

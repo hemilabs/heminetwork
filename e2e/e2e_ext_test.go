@@ -327,7 +327,6 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-
 		defer resp.Body.Close()
 
 		var finalityResponse bfgapi.L2KeystoneBitcoinFinalityResponse
