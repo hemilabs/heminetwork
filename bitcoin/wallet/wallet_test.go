@@ -98,14 +98,15 @@ func TestIntegration(t *testing.T) {
 	}
 	t.Logf("%v", addr)
 	t.Logf("%v", pub)
+	ecpk, err := ek.ECPrivKey()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Store in key store
 	err = m.PutKey(&zuul.NamedKey{
 		Name:       "my private key",
-		Account:    0,
-		Child:      0,
-		HD:         true,
-		PrivateKey: ek,
+		PrivateKey: ecpk,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +130,7 @@ func TestIntegration(t *testing.T) {
 	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, nil, 0, 10)
 	defer mtbc.Shutdown()
 
-	tg, err := tbcgozer.Run(ctx, mtbc.URL())
+	tg, err := tbcgozer.Run(ctx, mtbc.URL(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

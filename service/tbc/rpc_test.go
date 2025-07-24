@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -25,12 +26,14 @@ import (
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
+	"github.com/juju/loggo"
 	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
@@ -1709,4 +1712,208 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 	btx.TxIn[0].SignatureScript = sigScript
 
 	return btx.TxOut[1].PkScript
+}
+
+func TestNotFoundError(t *testing.T) {
+	type testTableItem struct {
+		name           string
+		handler        func(ctx context.Context) (any, error)
+		expectedResult any
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	var dupErr database.DuplicateError
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		HemiIndex:            true,
+		LevelDBHome:          t.TempDir(),
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		Network:                 networkLocalnet,
+		PrometheusListenAddress: "",
+		Seeds:                   []string{"127.0.0.1:" + testutil.FreePort()},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, dupErr) {
+			panic(err)
+		}
+	}()
+
+	// wait for server to start
+	for !s.Running() {
+	}
+
+	var notFoundErr database.NotFoundError
+	var bhb *tbcd.BlockHeader
+	for {
+		// get genesis block header
+		bhb, err = s.db.BlockHeaderBest(ctx)
+		if err != nil {
+			if !errors.Is(err, notFoundErr) {
+				t.Fatal(err)
+			}
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		break
+	}
+
+	testTable := []testTableItem{
+		{
+			name: "BlockByHash",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.BlockByHashRequest{
+					Hash: chainhash.Hash{},
+				}
+				return s.handleBlockByHashRequest(ctx, &req)
+			},
+			expectedResult: tbcapi.BlockByHashResponse{
+				Error: protocol.NotFoundError("block", chainhash.Hash{}),
+			},
+		},
+		{
+			name: "BlockByHashRaw",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.BlockByHashRawRequest{
+					Hash: chainhash.Hash{},
+				}
+				return s.handleBlockByHashRawRequest(ctx, &req)
+			},
+			expectedResult: tbcapi.BlockByHashRawResponse{
+				Error: protocol.NotFoundError("block", chainhash.Hash{}),
+			},
+		},
+		{
+			name: "BlockHeadersByHeight",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.BlockHeadersByHeightRequest{
+					Height: 1,
+				}
+				return s.handleBlockHeadersByHeightRequest(ctx, &req)
+			},
+			expectedResult: tbcapi.BlockHeadersByHeightResponse{
+				Error: protocol.NotFoundError("block headers", 1),
+			},
+		},
+		{
+			name: "BlockHeadersByHeightRaw",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.BlockHeadersByHeightRawRequest{
+					Height: 1,
+				}
+				return s.handleBlockHeadersByHeightRawRequest(ctx, &req)
+			},
+			expectedResult: tbcapi.BlockHeadersByHeightRawResponse{
+				Error: protocol.NotFoundError("block headers", 1),
+			},
+		},
+		{
+			name: "TxById",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.TxByIdRequest{
+					TxID: chainhash.Hash{},
+				}
+				return s.handleTxByIdRequest(ctx, &req)
+			},
+			expectedResult: tbcapi.TxByIdResponse{
+				Error: protocol.NotFoundError("tx", chainhash.Hash{}),
+			},
+		},
+		{
+			name: "TxByIdRaw",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.TxByIdRawRequest{
+					TxID: chainhash.Hash{},
+				}
+				return s.handleTxByIdRawRequest(ctx, &req)
+			},
+			expectedResult: tbcapi.TxByIdRawResponse{
+				Error: protocol.NotFoundError("tx", chainhash.Hash{}),
+			},
+		},
+		{
+			name: "TxByIdRaw",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.TxByIdRawRequest{
+					TxID: chainhash.Hash{},
+				}
+				return s.handleTxByIdRawRequest(ctx, &req)
+			},
+			expectedResult: tbcapi.TxByIdRawResponse{
+				Error: protocol.NotFoundError("tx", chainhash.Hash{}),
+			},
+		},
+		{
+			name: "BlockKeystoneByL2KeystoneAbrevHash",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.BlocksByL2AbrevHashesRequest{
+					L2KeystoneAbrevHashes: []chainhash.Hash{{}},
+				}
+				return s.handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx, &req)
+			},
+			expectedResult: &tbcapi.BlocksByL2AbrevHashesResponse{
+				L2KeystoneBlocks: []*tbcapi.L2KeystoneBlockInfo{
+					{
+						Error: protocol.NotFoundError("keystone", chainhash.Hash{}),
+					},
+				},
+				BtcTipBlockHash:   &bhb.Hash,
+				BtcTipBlockHeight: uint(bhb.Height),
+			},
+		},
+		{
+			name: "KeystoneTxsByL2KeystoneAbrevHash",
+			handler: func(ctx context.Context) (any, error) {
+				req := tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest{
+					L2KeystoneAbrevHash: chainhash.Hash{},
+				}
+				return s.handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx, &req)
+			},
+			expectedResult: tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
+				Error: protocol.NotFoundError("keystone", chainhash.Hash{}),
+			},
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			resp, err := tti.handler(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// marshal rather than dereference this pointer with reflect,
+			// which would be messier
+			respRaw, err := json.Marshal(resp)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			expectedRaw, err := json.Marshal(tti.expectedResult)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if diff := deep.Equal(respRaw, expectedRaw); len(diff) > 0 {
+				t.Logf("%v != %v", spew.Sdump(resp), spew.Sdump(tti.expectedResult))
+				t.Fatalf("unexpected diff: %s", diff)
+			}
+		})
+	}
 }

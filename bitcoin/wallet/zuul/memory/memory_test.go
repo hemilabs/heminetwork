@@ -38,13 +38,14 @@ func keyInfoFromXprevs(xprevs []string) ([]keyInfo, error) {
 		if err != nil {
 			return nil, err
 		}
+		ecpk, err := ek.ECPrivKey()
+		if err != nil {
+			return nil, err
+		}
 
 		nk := zuul.NamedKey{
 			Name:       "pk",
-			Account:    0,
-			Child:      0,
-			HD:         true,
-			PrivateKey: ek,
+			PrivateKey: ecpk,
 		}
 
 		expectedPriv, err := ek.ECPrivKey()

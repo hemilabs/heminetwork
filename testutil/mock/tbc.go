@@ -215,7 +215,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 				f.kssMtx.RUnlock()
 				if !ok {
 					blkInfos = append(blkInfos, &tbcapi.L2KeystoneBlockInfo{
-						Error: protocol.Errorf("unknown keystone: %v", pl.L2KeystoneAbrevHashes),
+						Error: protocol.NotFoundError("keystone", hash),
 					})
 				} else {
 					ch, err := chainhash.NewHash(testutil.SHA256([]byte{byte(kss.L1BlockNumber)}))

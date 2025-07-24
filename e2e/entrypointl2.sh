@@ -98,7 +98,5 @@ echo $filecontents > ./config.toml
  --rpc.enabledeprecatedpersonal \
  --gcmode=archive \
  --state.scheme=hash \
- --config=./config.toml
- # Clayton note: this fixes the mismatched state.scheme, but is it the correct
-# thing to do?
-#  --gcmode=archive  \
+ --config=./config.toml \
+ --gcmode=archive
