@@ -337,7 +337,7 @@ func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2Key
 // reconcileKeystones generates a keystones map
 func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*keystone, error) {
 	log.Tracef("reconcileKeystones")
-	defer log.Tracef("reconciletKeystones exit")
+	defer log.Tracef("reconcileKeystones exit")
 
 	kr, err := s.latestKeystones(ctx, defaultL2KeystonesCount)
 	if err != nil {

@@ -240,8 +240,24 @@ func TestPopmFilterUtxos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// try to mine keystones
-	err = s.mine(ctx)
+	go func() {
+		defer func() {
+			msgCh <- "miningDone"
+		}()
+		// try to mine keystones
+		err = s.mine(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	// wait until all keystones are mined and broadcast
+	expectedMsg = map[string]int{
+		"miningDone": 1,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -95,12 +95,9 @@ func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, ke
 	return &th
 }
 
-func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *http.Request) (string, error) {
-	var (
-		keystoneCounter int
-		kssMtx          sync.RWMutex
-		msg             jsonrpcMessage
-	)
+func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *http.Request, kc *keystoneCounter) (string, error) {
+	var msg jsonrpcMessage
+
 	_, br, err := c.Read(f.pctx)
 	if err != nil {
 		// XXX used to be nil
@@ -155,9 +152,7 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 						log.Errorf("%v: notification sender: %v", f.name, err.Error())
 						return
 					}
-					kssMtx.Lock()
-					keystoneCounter++
-					kssMtx.Unlock()
+					kc.increment()
 				}
 			}
 		}()
@@ -167,11 +162,10 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 		if err != nil {
 			panic(err)
 		}
-		kssMtx.RLock()
+		currCount := kc.count()
 		kssResp := L2KeystoneLatestResponse{
-			L2Keystones: lastKeystones(count[0], f.keystones[:min(keystoneCounter+count[0], len(f.keystones))]),
+			L2Keystones: lastKeystones(count[0], f.keystones[:min(currCount+count[0], len(f.keystones))]),
 		}
-		kssMtx.RUnlock()
 		subResp = jsonrpcMessage{
 			Version: "2.0",
 			ID:      msg.ID,
@@ -241,6 +235,23 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 	return msg.Method, nil
 }
 
+type keystoneCounter struct {
+	counter int
+	mtx     sync.RWMutex
+}
+
+func (kc *keystoneCounter) increment() {
+	kc.mtx.Lock()
+	defer kc.mtx.Unlock()
+	kc.counter++
+}
+
+func (kc *keystoneCounter) count() int {
+	kc.mtx.RLock()
+	defer kc.mtx.RUnlock()
+	return kc.counter
+}
+
 func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.Request) error {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
@@ -256,9 +267,10 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 	log.Infof("%v: new connection to %v", f.name, r.RemoteAddr)
 
+	var kc keystoneCounter
 	for {
 		// Handle command
-		method, err := f.handle(c, w, r)
+		method, err := f.handle(c, w, r, &kc)
 		if err != nil {
 			log.Errorf("exiting mockOpGethHandleFunc: %v", err)
 			return err
