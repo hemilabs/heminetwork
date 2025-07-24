@@ -450,7 +450,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 
 func (b *btcNode) handleMsg(ctx context.Context, p *rawpeer.RawPeer, msg wire.Message) error {
 	// b.t.Logf("%v", spew.Sdump(msg))
-	b.t.Logf("%T", msg)
+	// b.t.Logf("%T", msg)
 	switch m := msg.(type) {
 	case *wire.MsgVersion:
 		mva := &wire.MsgVerAck{}

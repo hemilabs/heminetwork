@@ -272,7 +272,6 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf("preload database")
 	l2BlockNumber := 1
 	keystoneOne := randomL2Keystone(&l2BlockNumber)
 	l2BlockNumber++
@@ -291,7 +290,6 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Logf("launch opgeth")
 	opgeth := mock.NewMockOpGeth(ctx, nil, nil, []hemi.L2Keystone{
 		*keystoneOne,
 		*keystoneTwo,
@@ -300,10 +298,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 
-	t.Logf("launch bfg and tbc")
 	_, bfgUrl := createBfgServer(ctx, t, levelDbHome, opgethWsurl)
-	time.Sleep(1 * time.Second)
-	t.Logf("launching test")
 
 	expectedConfirmations := []int{
 		11,

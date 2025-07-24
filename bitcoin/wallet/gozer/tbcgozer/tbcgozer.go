@@ -283,10 +283,13 @@ func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Co
 		case <-ctx.Done():
 			return
 		case c := <-t.cmdCh:
+			// Parallelize calls. There is no reason to do them
+			// in order and wait for potentially slow completion.
 			go func(bc tbcCmd) {
 				_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
 				if err != nil {
-					log.Errorf("handleTBCWebsocketCall %T: %v", bc.msg, err)
+					log.Errorf("handleTBCWebsocketCall %T: %v",
+						bc.msg, err)
 					select {
 					case bc.ch <- err:
 					default:
@@ -294,7 +297,8 @@ func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Co
 				}
 				select {
 				case bc.ch <- payload:
-					log.Tracef("handleTBCWebsocketCall returned: %v", spew.Sdump(payload))
+					log.Tracef("handleTBCWebsocketCall returned: %v",
+						spew.Sdump(payload))
 				default:
 				}
 			}(c)

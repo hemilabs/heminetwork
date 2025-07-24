@@ -352,9 +352,7 @@ func (s *Server) handleKeystoneFinality(w http.ResponseWriter, r *http.Request) 
 	// firstLoop := true
 	for {
 		// Call opgeth to retrieve keystones
-		log.Infof("handleKeystoneFinality: calling opgeth")
 		resp, err := s.opgethL2KeystoneValidity(r.Context(), *hash, defaultKeystoneCount)
-		log.Infof("handleKeystoneFinality: opgeth %v", err)
 		if err != nil {
 			InternalErrorf(w, fmt.Errorf("opgeth: %w", err))
 			return
