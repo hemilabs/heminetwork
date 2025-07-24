@@ -8,7 +8,9 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -100,6 +102,10 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 
 	_, br, err := c.Read(f.pctx)
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			log.Errorf("read: %v", err)
+			return "", nil
+		}
 		return "", fmt.Errorf("read: %w", err)
 	}
 	err = json.Unmarshal(br, &msg)
