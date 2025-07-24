@@ -95,12 +95,14 @@ func _main() error {
 		type PopMinerKey struct {
 			Network         string `json:"network"`
 			PrivateKey      string `json:"private_key"`
+			PublicKey       string `json:"public_key"`
 			BitcoinAddress  string `json:"bitcoin_address"`
 			EthereumAddress string `json:"ethereum_address"`
 		}
 		p := PopMinerKey{
 			Network:         *net,
 			PrivateKey:      hex.EncodeToString(privBytes),
+			PublicKey:       hex.EncodeToString(pubBytes),
 			BitcoinAddress:  btcAddrHash,
 			EthereumAddress: ethAddress.String(),
 		}
