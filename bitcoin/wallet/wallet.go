@@ -57,7 +57,7 @@ func UtxoPickerSingle(amount, fee btcutil.Amount, utxos []*tbcapi.UTXO) (*tbcapi
 	return nil, errors.New("no suitable utxo found")
 }
 
-func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+func TransactionCreate(locktime uint32, amount btcutil.Amount, satsPerByte float64, address btcutil.Address, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
 	// Create TxOut
 	payToScript, err := txscript.PayToAddrScript(address)
 	if err != nil {
@@ -70,7 +70,7 @@ func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, addr
 
 	// Calculate fee for worst case input number and assume there is change
 	txSize := txsizes.EstimateSerializeSize(len(utxos), []*wire.TxOut{txOut}, true)
-	fee := btcutil.Amount(txSize) * satsPerByte
+	fee := btcutil.Amount(float64(txSize) * satsPerByte)
 
 	// Find utxo list that is big enough for entire transaction
 	utxoList, err := UtxoPickerMultiple(amount, fee, utxos)
@@ -80,7 +80,7 @@ func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, addr
 
 	// Calculate fee for real input number and assume there is change
 	txSize = txsizes.EstimateSerializeSize(len(utxoList), []*wire.TxOut{txOut}, true)
-	fee = btcutil.Amount(txSize) * satsPerByte
+	fee = btcutil.Amount(float64(txSize) * satsPerByte)
 
 	// Assemble transaction
 	tx := wire.NewMsgTx(2) // Latest supported version
@@ -104,7 +104,7 @@ func TransactionCreate(locktime uint32, amount, satsPerByte btcutil.Amount, addr
 	return tx, prevOuts, nil
 }
 
-func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte btcutil.Amount, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
+func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerByte float64, utxos []*tbcapi.UTXO, script []byte) (*wire.MsgTx, map[string][]byte, error) {
 	// Create OP_RETURN
 	aks := hemi.L2KeystoneAbbreviate(*l2keystone)
 	popTx := pop.TransactionL2{L2Keystone: aks}
@@ -116,7 +116,7 @@ func PoPTransactionCreate(l2keystone *hemi.L2Keystone, locktime uint32, satsPerB
 
 	// Calculate fee for 1 input and assume there is change
 	txSize := txsizes.EstimateSerializeSize(1, []*wire.TxOut{popTxOut}, true)
-	fee := btcutil.Amount(txSize) * satsPerByte
+	fee := btcutil.Amount(float64(txSize) * satsPerByte)
 
 	// Find utxo that is big enough for entire transaction
 	utxo, err := UtxoPickerSingle(0, fee, utxos) // no amount, just fees

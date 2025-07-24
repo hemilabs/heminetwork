@@ -334,6 +334,42 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 }
 
+func TestStaticFee(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	// Setup pop miner
+	cfg := NewDefaultConfig()
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
+	cfg.StaticFee = 0.5
+
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := NewServer(cfg)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	cfg.StaticFee = 1.5
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fee, err := s.estimateFee(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fee.SatsPerByte != 1.5 {
+		t.Fatalf("expected fee of 1.5 sats/byte, got %v sats/byte", fee.SatsPerByte)
+	}
+}
+
 func messageListener(t *testing.T, expected map[string]int, errCh chan error, msgCh chan string) error {
 	for {
 		select {
