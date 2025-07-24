@@ -167,8 +167,25 @@ func TestTickingPopMiner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ensure 'mined' keystones get removed
-	if err = s.mine(ctx); err != nil {
+	go func() {
+		defer func() {
+			msgCh <- "miningDone"
+		}()
+		// ensure 'mined' keystones get removed
+		err = s.mine(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	// wait until all keystones are mined and broadcast
+	expectedMsg = map[string]int{
+		"miningDone": 1,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = messageListener(t, expectedMsg, errCh, msgCh)
+	if err != nil {
 		t.Fatal(err)
 	}
 
@@ -206,8 +223,9 @@ func TestPopmFilterUtxos(t *testing.T) {
 	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
-	cfg.LogLevel = "popm=TRACE"
+	// cfg.LogLevel = "popm=TRACE"
 
+	// XXX is this not handled in pop miner?
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
 	}
@@ -239,8 +257,24 @@ func TestPopmFilterUtxos(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// try to mine keystones
-	err = s.mine(ctx)
+	go func() {
+		defer func() {
+			msgCh <- "miningDone"
+		}()
+		// try to mine keystones
+		err = s.mine(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	// wait until all keystones are mined and broadcast
+	expectedMsg = map[string]int{
+		"miningDone": 1,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = messageListener(t, expectedMsg, errCh, msgCh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,6 +354,13 @@ func TestDisconnectedOpgeth(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-errCh:
+		// discard expected error from forced closure
+	}
+
 	// messages we expect to receive
 	expectedMsg = map[string]int{
 		"kss_getLatestKeystones":     1,
@@ -329,7 +370,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 
 	// receive messages and errors from opgeth and tbc
 	err = messageListener(t, expectedMsg, errCh, msgCh)
-	if err != nil && !errors.Is(err, net.ErrClosed) {
+	if err != nil {
 		t.Fatal(err)
 	}
 }

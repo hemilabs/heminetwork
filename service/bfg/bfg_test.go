@@ -165,11 +165,11 @@ func TestFullMockIntegration(t *testing.T) {
 	bfgCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	bfgCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	bfgCfg.ListenAddress = createAddress()
-	bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
+	// bfgCfg.LogLevel = "bfg=Info; mock=Trace; popm=TRACE"
 
-	if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
-		t.Fatal(err)
-	}
+	// if err := loggo.ConfigureLoggers(bfgCfg.LogLevel); err != nil {
+	// 	t.Fatal(err)
+	// }
 
 	s, err := NewServer(bfgCfg)
 	if err != nil {
@@ -187,7 +187,23 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// send finality requests to bfg, which should not return super finality
-	sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 0, 0)
+	go func() {
+		defer func() {
+			msgCh <- "finalityRequestDone"
+		}()
+		sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 0, 0)
+	}()
+
+	// wait until all keystones are mined and broadcast
+	expectedMsg := map[string]int{
+		"finalityRequestDone": 1,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = messageListener(t, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Setup pop miner
 	popCfg := popm.NewDefaultConfig()
@@ -195,7 +211,6 @@ func TestFullMockIntegration(t *testing.T) {
 	popCfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	popCfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	popCfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
-	popCfg.LogLevel = "popm=TRACE"
 
 	// Create pop miner
 	popm, err := popm.NewServer(popCfg)
@@ -211,7 +226,7 @@ func TestFullMockIntegration(t *testing.T) {
 	}()
 
 	// wait until all keystones are mined and broadcast
-	expectedMsg := map[string]int{
+	expectedMsg = map[string]int{
 		"kss_subscribe":              1,
 		"kss_getLatestKeystones":     1,
 		tbcapi.CmdTxBroadcastRequest: wantedKeystones * 2,
@@ -224,7 +239,23 @@ func TestFullMockIntegration(t *testing.T) {
 	}
 
 	// send finality requests to bfg, which should return super finality
-	sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
+	go func() {
+		defer func() {
+			msgCh <- "finalityRequestDone"
+		}()
+		sendFinalityRequests(t, ctx, kssList, bfgCfg.ListenAddress, 9, 10000)
+	}()
+
+	// wait until all keystones are mined and broadcast
+	expectedMsg = map[string]int{
+		"finalityRequestDone": 1,
+	}
+
+	// receive messages and errors from opgeth and tbc
+	err = messageListener(t, expectedMsg, errCh, msgCh)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func sendFinalityRequests(t *testing.T, ctx context.Context, kssList []hemi.L2Keystone, url string, minConfirms, maxConfirms uint) {
@@ -242,6 +273,7 @@ func sendFinalityRequests(t *testing.T, ctx context.Context, kssList []hemi.L2Ke
 			kssHash := hemi.L2KeystoneAbbreviate(kssList[i]).Hash()
 			u := fmt.Sprintf("http://%v/v%v/keystonefinality/%v",
 				url, bfgapi.APIVersion, kssHash)
+			log.Infof("sendFinalityRequests: %v", u)
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 			if err != nil {
 				t.Log(err)

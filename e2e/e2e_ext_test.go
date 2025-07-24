@@ -22,11 +22,11 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/coder/websocket"
 	"github.com/go-test/deep"
 	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
+	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/hemi"
@@ -35,57 +35,6 @@ import (
 	"github.com/hemilabs/heminetwork/testutil"
 	"github.com/hemilabs/heminetwork/testutil/mock"
 )
-
-func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(t.Context(), timeout)
-	defer cancel()
-
-	t.Logf("connecting to %s", url)
-
-	var err error
-
-	doneCh := make(chan bool)
-	go func() {
-		for {
-			c, _, err := websocket.Dial(ctx, url, nil)
-			if err != nil {
-				time.Sleep(1 * time.Second)
-				continue
-			}
-			c.CloseNow()
-			doneCh <- true
-		}
-	}()
-
-	select {
-	case <-doneCh:
-	case <-ctx.Done():
-		return fmt.Errorf("timed out trying to reach WS server in tests, last error: %w", err)
-	}
-
-	return nil
-}
-
-func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(t.Context(), timeout)
-	defer cancel()
-
-	for {
-		select {
-		case <-time.After(100 * time.Millisecond):
-			conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
-			if err != nil {
-				t.Logf("error dialing: %s", err)
-				continue
-			}
-
-			conn.Close()
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
 
 func nextPort(ctx context.Context, t *testing.T) int {
 	for {
@@ -137,12 +86,9 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 			panic(err)
 		}
 	}()
+	time.Sleep(time.Second) // Let bfg settle
 
 	bfgPublicUrl := net.JoinHostPort("localhost", fmt.Sprintf("%d", port))
-
-	if err := EnsureCanConnectTCP(t, bfgPublicUrl, 5*time.Second); err != nil {
-		t.Fatalf("could not connect to %s: %s", bfgPublicUrl, err.Error())
-	}
 
 	if err := EnsureCanConnectHTTP(t, fmt.Sprintf("http://%s/somethinginvalid", bfgPublicUrl)); err != nil {
 		t.Fatalf("could not make http request to bfg in timeout: %s", err)
@@ -152,44 +98,33 @@ func createBfgServer(ctx context.Context, t *testing.T, levelDbHome string, opge
 }
 
 func EnsureCanConnectHTTP(t *testing.T, url string) error {
-	t.Logf("try to receive response for %s", url)
-
+	client := &http.Client{}
 	for {
-		select {
-		case <-t.Context().Done():
-			return t.Context().Err()
-		default:
-			ctx, cancel := context.WithTimeout(t.Context(), 1*time.Second)
-
-			client := http.Client{}
-			request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
-			if err != nil {
-				cancel()
-				t.Fatal(err)
-			}
-
-			resp, err := client.Do(request)
-			if err != nil {
-				t.Logf("could not make http request: %s", err)
-				cancel()
-				continue
-			}
-
-			defer resp.Body.Close()
-
-			// we're making an http request to an invalid URL, ensure that we
-			// get the expected code of 404: Not Found
-			if resp.StatusCode != http.StatusNotFound {
-				t.Fatalf("received unexpected status code %d", resp.StatusCode)
-			}
-
-			cancel()
-			break
+		t.Logf("try to connect: %v", url)
+		defer t.Logf("connected:  %v", url)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		request, err := http.NewRequestWithContext(ctx,
+			http.MethodGet, url, http.NoBody)
+		if err != nil {
+			return err
 		}
-		break
-	}
+		resp, err := client.Do(request)
+		if err != nil {
+			if t.Context().Err() != nil {
+				return t.Context().Err()
+			}
+			t.Logf("could not make http request: %s", err)
+			continue
+		}
+		defer resp.Body.Close()
 
-	return nil
+		// we're making an http request to an invalid URL, ensure
+		// that we get the expected code of 404: Not Found
+		if resp.StatusCode == http.StatusNotFound {
+			return nil
+		}
+	}
 }
 
 func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tbc.Server, string) {
@@ -213,18 +148,33 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 			panic(err)
 		}
 	}()
+	time.Sleep(time.Second) // Let tbc settle
 
-	tbcPublicUrl := fmt.Sprintf("http://%s/v1/ws", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)))
+	tbcPublicUrl := fmt.Sprintf("http://%s/v1/ws",
+		net.JoinHostPort("localhost", fmt.Sprintf("%d", port)))
 
-	if err := EnsureCanConnect(t, tbcPublicUrl, 5*time.Second); err != nil {
-		t.Fatalf("could not connect to %s: %s", tbcPublicUrl, err.Error())
+	// Connect with gozer to ensure connectedness
+	g, err := tbcgozer.Run(ctx, tbcPublicUrl)
+	if err != nil {
+		panic(err)
 	}
+	for {
+		select {
+		case <-ctx.Done():
+			panic(ctx.Err())
+		case <-time.Tick(50 * time.Millisecond):
+		}
+		if _, err := g.BtcHeight(ctx); err == nil {
+			break
+		}
+	}
+	t.Logf("gozer connected")
 
 	return tbcServer, tbcPublicUrl
 }
 
-func defaultTestContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 10*time.Second)
+func defaultTestContext(t *testing.T) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(t.Context(), 15*time.Second)
 }
 
 func randomL2Keystone(l2BlockNumber *int) *hemi.L2Keystone {
@@ -304,14 +254,13 @@ func createChainWithKeystones(ctx context.Context, t *testing.T, db tbcd.Databas
 }
 
 func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	defer func() {
 		if err := os.RemoveAll(levelDbHome); err != nil {
 			t.Fatal(err)
@@ -322,7 +271,6 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	db, err := level.New(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -366,8 +314,9 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		*keystoneTwo,
 	} {
 		bfgUrlTmp := fmt.Sprintf("http://%s/v2/keystonefinality/%s", bfgUrl, hemi.L2KeystoneAbbreviate(k).Hash())
+		t.Logf("%v", bfgUrlTmp)
 
-		client := http.Client{}
+		client := &http.Client{}
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, bfgUrlTmp, http.NoBody)
 		if err != nil {
 			t.Fatal(err)
@@ -375,9 +324,8 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 
 		resp, err := client.Do(request)
 		if err != nil {
-			t.Fatal(err)
+			panic(err)
 		}
-
 		defer resp.Body.Close()
 
 		var finalityResponse bfgapi.L2KeystoneBitcoinFinalityResponse
@@ -411,7 +359,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
@@ -528,7 +476,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac
@@ -648,7 +596,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 }
 
 func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
-	ctx, cancel := defaultTestContext()
+	ctx, cancel := defaultTestContext(t)
 	defer cancel()
 
 	levelDbHome, err := os.MkdirTemp("", "tbc-random-*") //nolint:all // I was having permission issues with TempDir() on mac

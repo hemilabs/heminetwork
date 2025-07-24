@@ -42,6 +42,10 @@ type blockstreamGozer struct {
 
 var _ gozer.Gozer = (*blockstreamGozer)(nil)
 
+func (bs *blockstreamGozer) Connected() bool {
+	return true // XXX should we try to connect first?
+}
+
 func (bs *blockstreamGozer) BtcHeight(ctx context.Context) (uint64, error) {
 	u := fmt.Sprintf("%v/blocks/tip/height", bs.url)
 	rawHeight, err := httpclient.Request(ctx, "GET", u, nil)

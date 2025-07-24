@@ -262,7 +262,7 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if response.Error.Message != "block headers not found at height 550" {
+	if response.Error.Message != protocol.NotFoundError("block headers", 550).Message {
 		t.Fatalf("unexpected error message: %s", response.Error.Message)
 	}
 }
@@ -1250,7 +1250,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	}
 
 	if response.Error != nil {
-		if !strings.Contains(response.Error.Message, "tx not found") {
+		if !strings.Contains(response.Error.Message, "not found: tx") {
 			t.Fatalf("incorrect error found: %s", response.Error.Message)
 		}
 	}
@@ -1494,7 +1494,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 
 	if response.Error != nil {
-		if !strings.Contains(response.Error.Message, "tx not found") {
+		if !strings.Contains(response.Error.Message, "not found: tx") {
 			t.Fatalf("incorrect error found: %s", response.Error.Message)
 		}
 	}

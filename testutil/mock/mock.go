@@ -37,8 +37,8 @@ func init() {
 
 type mockHandler struct {
 	handleFunc func(w http.ResponseWriter, r *http.Request) error
-	errCh      chan error
-	msgCh      chan string
+	errCh      chan error  // use notifyErr to write to it
+	msgCh      chan string // use notifyMsg to write to it
 	name       string
 	pctx       context.Context
 	conns      []*websocket.Conn
@@ -53,14 +53,37 @@ func (f *mockHandler) Running() bool {
 	return f.isRunning
 }
 
+func (f *mockHandler) notifyMsg(ctx context.Context, msg string) {
+	if f.msgCh == nil {
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case f.msgCh <- msg:
+	}
+}
+
+func (f *mockHandler) notifyErr(ctx context.Context, err error) {
+	if f.errCh == nil {
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	case f.errCh <- err:
+	}
+}
+
 func (f *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !f.Running() {
 		log.Infof("%v: %v connection to closed server", f.name, r.RemoteAddr)
 		http.Error(w, string("mock server closed"), http.StatusServiceUnavailable)
 		return
 	}
+	log.Infof("serving %v: %v", r.RemoteAddr, r.RequestURI)
 	if err := f.handleFunc(w, r); err != nil {
-		f.errCh <- fmt.Errorf("%s error: %w", f.name, err)
+		f.notifyErr(f.pctx, fmt.Errorf("%s error: %w", f.name, err))
 	}
 }
 
@@ -88,7 +111,7 @@ func (f *mockHandler) Start() {
 	f.mtx.Lock()
 	defer f.mtx.Unlock()
 	f.isRunning = true
-	log.Tracef("%v: server started", f.name)
+	log.Infof("%v: server started", f.name)
 }
 
 // Stop the test server from accept incoming websocket connection
@@ -96,14 +119,15 @@ func (f *mockHandler) Stop() {
 	f.mtx.Lock()
 	defer f.mtx.Unlock()
 	f.isRunning = false
-	log.Tracef("%v: server stopped", f.name)
+	log.Infof("%v: server stopped", f.name)
 }
 
 // Fully shutdown the test server
 func (f *mockHandler) Shutdown() {
-	log.Tracef("%v: server shutting down", f.name)
+	log.Infof("%v: server shutting down", f.name)
 	f.Stop()
 	f.server.Close()
+
 	if err := f.CloseConnections(true); err != nil {
 		if !errors.Is(err, net.ErrClosed) {
 			// should never happen

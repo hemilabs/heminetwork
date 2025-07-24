@@ -358,7 +358,7 @@ func (s *Server) estimateFee(ctx context.Context) (*tbcapi.FeeEstimate, error) {
 // reconcileKeystones generates a keystones map
 func (s *Server) reconcileKeystones(ctx context.Context) (map[chainhash.Hash]*keystone, error) {
 	log.Tracef("reconcileKeystones")
-	defer log.Tracef("reconciletKeystones exit")
+	defer log.Tracef("reconcileKeystones exit")
 
 	kr, err := s.latestKeystones(ctx, defaultL2KeystonesCount)
 	if err != nil {

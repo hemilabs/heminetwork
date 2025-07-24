@@ -32,6 +32,8 @@ type Gozer interface {
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) (*KeystonesByHeightResponse, error)
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
 	BtcHeight(ctx context.Context) (uint64, error)
+
+	Connected() bool // ready to use
 }
 
 // FeeByConfirmations picks a suitable fee by matching the exact number of
