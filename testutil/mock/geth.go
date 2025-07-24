@@ -229,7 +229,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 
 			kssResp := L2KeystoneValidityResponse{}
 			if found == -1 {
-				kssResp.Error = protocol.Errorf("keystone not found: %v", abrevHash)
+				kssResp.Error = protocol.NotFoundError("keystone", abrevHash)
 			} else {
 				desc := make([]hemi.L2Keystone, 0, int(count))
 				for i := found; i < len(f.keystones) && i <= found+int(count); i++ {

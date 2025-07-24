@@ -230,7 +230,13 @@ func RequestErrorf(msg string, args ...any) *Error {
 	}
 }
 
-// XXX we need a not found error as well. These errors should be revisited.
+// NotFoundError creates a special protocol request error.
+//
+// Not Found errors should be used when the client makes a valid request that
+// the server cannot fulfill due to missing or unknown resources.
+func NotFoundError(resource, value any) *Error {
+	return RequestErrorf("not found: %s %v", resource, value)
+}
 
 // InternalError represents an internal application error.
 //
