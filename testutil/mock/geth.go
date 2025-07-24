@@ -100,7 +100,6 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 
 	_, br, err := c.Read(f.pctx)
 	if err != nil {
-		// XXX used to be nil
 		return "", fmt.Errorf("read: %w", err)
 	}
 	err = json.Unmarshal(br, &msg)
@@ -108,7 +107,6 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 		return "", fmt.Errorf("unmarshal: %w", err)
 	}
 
-	log.Tracef("%v: command is %v", f.name, msg.Method)
 	log.Infof("%v: command is %v", f.name, msg.Method)
 
 	var subResp jsonrpcMessage

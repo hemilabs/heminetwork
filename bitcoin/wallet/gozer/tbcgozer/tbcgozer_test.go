@@ -74,7 +74,11 @@ func TestTBCGozer(t *testing.T) {
 	}
 
 	for !tg.Connected() {
-		time.Sleep(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.Tick(50 * time.Millisecond):
+		}
 	}
 	t.Logf("gozer connected")
 

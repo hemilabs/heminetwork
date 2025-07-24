@@ -128,7 +128,6 @@ func (f *mockHandler) Shutdown() {
 	f.Stop()
 	f.server.Close()
 
-	// XXX this is kind of a bad idea
 	if err := f.CloseConnections(true); err != nil {
 		if !errors.Is(err, net.ErrClosed) {
 			// should never happen
