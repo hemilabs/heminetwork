@@ -48,7 +48,7 @@ import (
 const (
 	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 	retries            = 10
-	btcAddress         = "mv5gj33YaFviPFDmkkUpb31C4uxoB4ZZ5D"
+	btcAddress         = "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG"
 )
 
 var abort = retries - 1
