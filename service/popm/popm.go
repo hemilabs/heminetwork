@@ -738,10 +738,6 @@ func (s *Server) health(ctx context.Context) (bool, any, error) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
 
-	// Connected to tbc?
-
-	// Connected to geth?
-
 	s.mtx.RLock()
 	h := s.promHealth
 	s.mtx.RUnlock()

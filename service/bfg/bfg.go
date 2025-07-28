@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/deucalion"
+	"github.com/hemilabs/heminetwork/service/hproxy"
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
 
@@ -109,6 +111,7 @@ type Server struct {
 
 	// opgeth
 	opgethClient *ethclient.Client
+	ethPoker     hproxy.Proxy // Use poker for health
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -506,6 +509,45 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
+func (s *Sever) ethHealth(ctx context.Context) error {
+	const maxBlockAge = 30 * time.Second // TODO: make this configurable?
+	blockRes, err := CallEthereum(ctx, client, url,
+		"eth_getBlockByNumber", "latest", false)
+	if err != nil {
+		return err
+	}
+	if blockRes.Error != nil {
+		var eErr struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		}
+		if err = json.Unmarshal(blockRes.Error, &eErr); err != nil {
+			return fmt.Errorf("eth_getBlockByNumber error: %w", err)
+		}
+		return fmt.Errorf("ethereum call failed code %v, message %v",
+			eErr.Code, eErr.Message)
+	}
+
+	var block struct {
+		Timestamp string `json:"timestamp"`
+	}
+	if err = json.Unmarshal(blockRes.Result, &block); err != nil {
+		return fmt.Errorf("eth_getBlockByNumber result: %w", err)
+	}
+
+	ts, err := strconv.ParseInt(block.Timestamp, 0, 64)
+	if err != nil {
+		return fmt.Errorf("eth_getBlockByNumber timestamp: %w", err)
+	}
+
+	if age := time.Since(time.Unix(ts, 0)); age > maxBlockAge {
+		return fmt.Errorf("eth_getBlockByNumber timestamp "+
+			"too old: %v (%v ago)", block.Timestamp, age)
+	}
+
+	return nil
+}
+
 func (s *Server) connectOpgeth(pctx context.Context) error {
 	log.Tracef("connectOpgeth")
 	defer log.Tracef("connectOpgeth exit")
@@ -651,10 +693,6 @@ func (s *Server) isHealthy(_ context.Context) bool {
 func (s *Server) health(ctx context.Context) (bool, any, error) {
 	log.Tracef("health")
 	defer log.Tracef("health exit")
-
-	// Connected to tbc?
-
-	// Connected to geth?
 
 	s.mtx.RLock()
 	h := s.promHealth
