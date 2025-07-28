@@ -59,9 +59,9 @@ const (
 )
 
 type health struct {
-	GozerConnected bool `json:"gozer_connected"`
-	GethConnected  bool `json:"geth_connected"`
-	// XXX add tbc blockheader and get height/hash/timestamp?
+	BitcoinHeight  uint64 `json:"bitcoin_height"`
+	GozerConnected bool   `json:"gozer_connected"`
+	GethConnected  bool   `json:"geth_connected"`
 }
 
 var log = loggo.GetLogger("popm")
@@ -706,7 +706,14 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		h := health{GozerConnected: s.gozer.Connected()}
+		var h health
+		if height, err := s.gozer.BtcHeight(ctx); err == nil {
+			h.GozerConnected = true
+			h.BitcoinHeight = height
+		} else {
+			h.GozerConnected = false
+			h.BitcoinHeight = 0
+		}
 		s.mtx.Lock()
 		h.GethConnected = s.gethConnected
 		s.promHealth = h

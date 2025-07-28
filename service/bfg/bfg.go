@@ -53,9 +53,9 @@ const (
 var log = loggo.GetLogger(appName)
 
 type health struct {
-	GozerConnected bool `json:"gozer_connected"`
-	GethConnected  bool `json:"geth_connected"`
-	// XXX add tbc blockheader and get height/hash/timestamp?
+	BitcoinHeight  uint64 `json:"bitcoin_height"`
+	GozerConnected bool   `json:"gozer_connected"`
+	GethConnected  bool   `json:"geth_connected"`
 }
 
 type HTTPError struct {
@@ -617,7 +617,17 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		h := health{GozerConnected: s.gozer.Connected()}
+		// We should consider moving this call outside of this loop
+		// since it may cause long delays in status updates.
+		var h health
+		if height, err := s.gozer.BtcHeight(ctx); err == nil {
+			h.GozerConnected = true
+			h.BitcoinHeight = height
+		} else {
+			h.GozerConnected = false
+			h.BitcoinHeight = 0
+		}
+
 		s.mtx.Lock()
 		h.GethConnected = s.gethConnected
 		s.promHealth = h
