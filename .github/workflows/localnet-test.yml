@@ -27,7 +27,9 @@ jobs:
 
       - name: generate key and addresses
         run: |
-          echo "POPM_BTC_PRIVATE_KEY=$(go run ./e2e/generator/gen.go privkey)" >> $GITHUB_ENV
+          set -e 
+          POPM_BTC_PRIVATE_KEY=$(go run ./e2e/generator/gen.go privkey)
+          echo "POPM_BTC_PRIVATE_KEY=$POPM_BTC_PRIVATE_KEY" >> $GITHUB_ENV
           echo "BTC_ADDRESS=$(go run ./e2e/generator/gen.go btc $POPM_BTC_PRIVATE_KEY)" >> $GITHUB_ENV
           echo "ETH_ADDRESS=$(go run ./e2e/generator/gen.go eth $POPM_BTC_PRIVATE_KEY)" >> $GITHUB_ENV
 
