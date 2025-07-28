@@ -278,7 +278,6 @@ func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Has
 	log.Tracef("gethBestHeightHash")
 	defer log.Tracef("gethBestHeightHash exit")
 
-	// Call op-geth to retrieve keystone and descendants.
 	rp, err := s.callOpgeth(ctx, gethapi.BlockBestRequest{})
 	if err != nil {
 		return 0, nil, err
@@ -292,8 +291,9 @@ func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Has
 	if err != nil {
 		return 0, nil, err
 	}
+	h := resp.Number().Uint64()
 
-	return 0, ch, nil
+	return h, ch, nil
 }
 
 // When enabled, short-circuiting will check for the latest keystones to achieve
