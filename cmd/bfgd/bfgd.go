@@ -15,6 +15,7 @@ import (
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/api/bfgapi"
+	"github.com/hemilabs/heminetwork/api/tbcapi"
 	"github.com/hemilabs/heminetwork/config"
 	"github.com/hemilabs/heminetwork/service/bfg"
 	"github.com/hemilabs/heminetwork/version"
@@ -33,13 +34,13 @@ var (
 	cm  = config.CfgMap{
 		"BFG_BITCOIN_SOURCE": config.Config{
 			Value:        &cfg.BitcoinSource,
-			DefaultValue: "blockstream",
-			Help:         "bitcoin source of truth used (blockstream or tbc)",
+			DefaultValue: "tbc",
+			Help:         "bitcoin source of truth used (tbc only for now)",
 			Print:        config.PrintAll,
 		},
 		"BFG_BITCOIN_URL": config.Config{
 			Value:        &cfg.BitcoinURL,
-			DefaultValue: "",
+			DefaultValue: tbcapi.DefaultURL,
 			Help:         "connection url for bitcoin source if needed e.g. ws://localhost:8082/v1/ws",
 			Print:        config.PrintAll,
 		},
