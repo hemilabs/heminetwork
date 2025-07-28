@@ -53,9 +53,9 @@ const (
 var log = loggo.GetLogger(appName)
 
 type health struct {
-	TbcConnected  int `json:"tbc_connected"`
-	GethConnected int `json:"geth_connected"`
-	// XXX add tbc blockheader and get height/hash/timestamp
+	GozerConnected bool `json:"gozer_connected"`
+	GethConnected  bool `json:"geth_connected"`
+	// XXX add tbc blockheader and get height/hash/timestamp?
 }
 
 type HTTPError struct {
@@ -114,7 +114,7 @@ type Server struct {
 	promCollectors  []prometheus.Collector
 	promPollVerbose bool // set to true to print stats during poll
 	isRunning       bool
-	connected       bool // connected to opgeth
+	gethConnected   bool // connected to opgeth
 	cmdsProcessed   prometheus.Counter
 	promHealth      health
 }
@@ -139,7 +139,7 @@ func NewServer(cfg *Config) (*Server, error) {
 func (s *Server) Connected() bool {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
-	return s.connected
+	return s.gethConnected
 }
 
 func random(n int) []byte {
@@ -521,11 +521,11 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	defer s.opgethClient.Close()
 
 	s.mtx.Lock()
-	s.connected = true
+	s.gethConnected = true
 	s.mtx.Unlock()
 	defer func() {
 		s.mtx.Lock()
-		s.connected = false
+		s.gethConnected = false
 		s.mtx.Unlock()
 	}()
 
@@ -571,12 +571,38 @@ func (s *Server) Collectors() []prometheus.Collector {
 			s.cmdsProcessed,
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "geth_connected",
+				Help:      "Whether the pop miner is connected to geth",
+			}, s.promGethConnected),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "gozer_connected",
+				Help:      "Whether the pop miner is connected to gozer",
+			}, s.promGozerConnected),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
 				Help:      "Whether the BFG service is running",
 			}, s.promRunning),
 		}
 	}
 	return s.promCollectors
+}
+
+func (s *Server) promGethConnected() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if s.gethConnected {
+		return 1
+	}
+	return 0
+}
+
+func (s *Server) promGozerConnected() float64 {
+	if s.gozer.Connected() {
+		return 1
+	}
+	return 0
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
@@ -591,14 +617,15 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		var h health
+		h := health{GozerConnected: s.gozer.Connected()}
 		s.mtx.Lock()
+		h.GethConnected = s.gethConnected
 		s.promHealth = h
 		s.mtx.Unlock()
 
 		if s.promPollVerbose {
-			log.Infof("tbc connected: %v geth connected %v",
-				h.TbcConnected, h.GethConnected)
+			log.Infof("gozer connected: %v geth connected %v",
+				h.GozerConnected, h.GethConnected)
 		}
 		ticker.Reset(promPollFrequency)
 	}

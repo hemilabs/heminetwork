@@ -58,6 +58,12 @@ const (
 	minRelayFee = 1 // sats/byte
 )
 
+type health struct {
+	GozerConnected bool `json:"gozer_connected"`
+	GethConnected  bool `json:"geth_connected"`
+	// XXX add tbc blockheader and get height/hash/timestamp?
+}
+
 var log = loggo.GetLogger("popm")
 
 func init() {
@@ -141,8 +147,12 @@ type Server struct {
 	btcAddress btcutil.Address
 	ethAddress common.Address
 
-	isRunning      bool
-	promCollectors []prometheus.Collector
+	// Prometheus
+	isRunning       bool
+	promCollectors  []prometheus.Collector
+	gethConnected   bool
+	promHealth      health
+	promPollVerbose bool // set to true to print stats during poll
 
 	// opgeth
 	opgethClient *ethclient.Client
@@ -556,6 +566,16 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 		return fmt.Errorf("hydrate: %w", err)
 	}
 
+	// Mark geth connected
+	s.mtx.Lock()
+	s.gethConnected = true
+	s.mtx.Unlock()
+	defer func() {
+		s.mtx.Lock()
+		s.gethConnected = false
+		s.mtx.Unlock()
+	}()
+
 	s.opgethWG.Add(1)
 	go func() {
 		defer s.opgethWG.Done()
@@ -658,8 +678,27 @@ func (s *Server) mine(ctx context.Context) error {
 	return nil
 }
 
+func (s *Server) promGethConnected() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if s.gethConnected {
+		return 1
+	}
+	return 0
+}
+
+func (s *Server) promGozerConnected() float64 {
+	if s.gozer.Connected() {
+		return 1
+	}
+	return 0
+}
+
 func (s *Server) promPoll(ctx context.Context) error {
-	ticker := time.NewTicker(5 * time.Second)
+	promPollFrequency := 5 * time.Second
+	ticker := time.NewTicker(promPollFrequency)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -667,8 +706,40 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
-		// Insert prometheus poll here
+		h := health{GozerConnected: s.gozer.Connected()}
+		s.mtx.Lock()
+		h.GethConnected = s.gethConnected
+		s.promHealth = h
+		s.mtx.Unlock()
+
+		if s.promPollVerbose {
+			log.Infof("gozer connected: %v geth connected %v",
+				h.GozerConnected, h.GethConnected)
+		}
+		ticker.Reset(promPollFrequency)
 	}
+}
+
+func (s *Server) isHealthy(_ context.Context) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	// XXX
+	return true
+}
+
+func (s *Server) health(ctx context.Context) (bool, any, error) {
+	log.Tracef("health")
+	defer log.Tracef("health exit")
+
+	// Connected to tbc?
+
+	// Connected to geth?
+
+	s.mtx.RLock()
+	h := s.promHealth
+	s.mtx.RUnlock()
+
+	return s.isHealthy(ctx), h, nil
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -679,6 +750,16 @@ func (s *Server) Collectors() []prometheus.Collector {
 	if s.promCollectors == nil {
 		// Naming: https://prometheus.io/docs/practices/naming/
 		s.promCollectors = []prometheus.Collector{
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "geth_connected",
+				Help:      "Whether the pop miner is connected to geth",
+			}, s.promGethConnected),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "gozer_connected",
+				Help:      "Whether the pop miner is connected to gozer",
+			}, s.promGozerConnected),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
@@ -709,7 +790,7 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, s.Collectors(), nil); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
