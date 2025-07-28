@@ -31,9 +31,6 @@ jobs:
       - name: generate bitcoin address
         run: echo "BTC_ADDRESS=$(go run ./e2e/address/gen.go address $POPM_BTC_PRIVATE_KEY)" >> $GITHUB_ENV
 
-      - name: test env
-        run: echo "privkey: $POPM_BTC_PRIVATE_KEY" && echo "btc address: $BTC_ADDRESS"
-
       - name: "build localnet"
         run: docker compose -f ./e2e/docker-compose.yml build
 
