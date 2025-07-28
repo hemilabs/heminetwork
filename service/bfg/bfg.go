@@ -52,6 +52,12 @@ const (
 
 var log = loggo.GetLogger(appName)
 
+type health struct {
+	TbcConnected  int `json:"tbc_connected"`
+	GethConnected int `json:"geth_connected"`
+	// XXX add tbc blockheader and get height/hash/timestamp
+}
+
 type HTTPError struct {
 	Timestamp int64  `json:"timestamp"`
 	Trace     string `json:"trace"`
@@ -110,6 +116,7 @@ type Server struct {
 	isRunning       bool
 	connected       bool // connected to opgeth
 	cmdsProcessed   prometheus.Counter
+	promHealth      health
 }
 
 func NewServer(cfg *Config) (*Server, error) {
@@ -573,7 +580,10 @@ func (s *Server) Collectors() []prometheus.Collector {
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
-	ticker := time.NewTicker(5 * time.Second)
+	promPollFrequency := 5 * time.Second
+	ticker := time.NewTicker(promPollFrequency)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -581,12 +591,39 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
+		var h health
+		s.mtx.Lock()
+		s.promHealth = h
+		s.mtx.Unlock()
+
 		if s.promPollVerbose {
-			s.mtx.RLock()
-			log.Infof("FIXME PROMETHEUS POLL")
-			s.mtx.RUnlock()
+			log.Infof("tbc connected: %v geth connected %v",
+				h.TbcConnected, h.GethConnected)
 		}
+		ticker.Reset(promPollFrequency)
 	}
+}
+
+func (s *Server) isHealthy(_ context.Context) bool {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	// XXX
+	return true
+}
+
+func (s *Server) health(ctx context.Context) (bool, any, error) {
+	log.Tracef("health")
+	defer log.Tracef("health exit")
+
+	// Connected to tbc?
+
+	// Connected to geth?
+
+	s.mtx.RLock()
+	h := s.promHealth
+	s.mtx.RUnlock()
+
+	return s.isHealthy(ctx), h, nil
 }
 
 func (s *Server) Run(pctx context.Context) error {
@@ -689,7 +726,7 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, s.Collectors(), nil); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
