@@ -31,7 +31,7 @@ type Gozer interface {
 	BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *BlocksByL2AbrevHashesResponse
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) (*KeystonesByHeightResponse, error)
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
-	BtcHeight(ctx context.Context) (uint64, error)
+	BestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, error)
 
 	Connected() bool // ready to use
 }

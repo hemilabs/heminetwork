@@ -59,9 +59,12 @@ const (
 )
 
 type health struct {
-	BitcoinHeight  uint64 `json:"bitcoin_height"`
-	GozerConnected bool   `json:"gozer_connected"`
-	GethConnected  bool   `json:"geth_connected"`
+	BitcoinBestHeight  uint64 `json:"bitcoin_best_height"`
+	BitcoinBestHash    string `json:"bitcoin_best_hash"`
+	EthereumBestHeight uint64 `json:"ethereum_best_height"`
+	EthereumBestHash   string `json:"ethereum_best_hash"`
+	GozerConnected     bool   `json:"gozer_connected"`
+	GethConnected      bool   `json:"geth_connected"`
 }
 
 var log = loggo.GetLogger("popm")
@@ -258,7 +261,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 
 	log.Infof("Mine L2 keystone height %v", ks.L2BlockNumber)
 
-	btcHeight, err := s.gozer.BtcHeight(ctx)
+	btcHeight, _, err := s.gozer.BestHeightHash(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bitcoin height: %w", err)
 	}
@@ -707,12 +710,14 @@ func (s *Server) promPoll(ctx context.Context) error {
 		}
 
 		var h health
-		if height, err := s.gozer.BtcHeight(ctx); err == nil {
+		if height, hash, err := s.gozer.BestHeightHash(ctx); err == nil {
 			h.GozerConnected = true
-			h.BitcoinHeight = height
+			h.BitcoinBestHeight = height
+			h.BitcoinBestHash = hash.String()
 		} else {
 			h.GozerConnected = false
-			h.BitcoinHeight = 0
+			h.BitcoinBestHeight = 0
+			h.BitcoinBestHash = ""
 		}
 		s.mtx.Lock()
 		h.GethConnected = s.gethConnected

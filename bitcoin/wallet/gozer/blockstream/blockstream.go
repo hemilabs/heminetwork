@@ -46,20 +46,35 @@ func (bs *blockstreamGozer) Connected() bool {
 	return true // XXX should we try to connect first?
 }
 
-func (bs *blockstreamGozer) BtcHeight(ctx context.Context) (uint64, error) {
-	u := fmt.Sprintf("%v/blocks/tip/height", bs.url)
-	rawHeight, err := httpclient.Request(ctx, "GET", u, nil)
+func (bs *blockstreamGozer) BestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, error) {
+	u := fmt.Sprintf("%v/blocks/tip/hash", bs.url)
+	rawHash, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
-		return 0, fmt.Errorf("request: %w", err)
+		return 0, nil, fmt.Errorf("request: %w", err)
+	}
+	hash, err := chainhash.NewHashFromStr(string(rawHash))
+	if err != nil {
+		return 0, nil, err
 	}
 
-	var height uint64
-	err = json.Unmarshal(rawHeight, &height)
+	u = fmt.Sprintf("%v/block/%v", bs.url, hash)
+	blockInfo, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
-		return 0, err
+		return 0, nil, fmt.Errorf("request: %w", err)
 	}
 
-	return height, nil
+	var bi map[string]any
+	err = json.Unmarshal(blockInfo, &bi)
+	if err != nil {
+		return 0, nil, err
+	}
+	if h, ok := bi["height"]; ok {
+		if height, ok := h.(uint64); ok {
+			return height, hash, nil
+		}
+	}
+
+	return 0, nil, fmt.Errorf("no height found")
 }
 
 func (bs *blockstreamGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {

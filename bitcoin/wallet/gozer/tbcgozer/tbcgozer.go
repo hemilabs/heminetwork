@@ -7,6 +7,7 @@
 package tbcgozer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -75,24 +76,30 @@ func (t *tbcGozer) Connected() bool {
 	return t.connected
 }
 
-func (t *tbcGozer) BtcHeight(ctx context.Context) (uint64, error) {
-	bur := &tbcapi.BlockHeaderBestRequest{}
+func (t *tbcGozer) BestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, error) {
+	bur := &tbcapi.BlockHeaderBestRawRequest{}
 
 	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
-	buResp, ok := res.(*tbcapi.BlockHeaderBestResponse)
+	buResp, ok := res.(*tbcapi.BlockHeaderBestRawResponse)
 	if !ok {
-		return 0, fmt.Errorf("not a fee estimate response %T", res)
+		return 0, nil, fmt.Errorf("not a blockheader best raw response %T", res)
 	}
-
 	if buResp.Error != nil {
-		return 0, buResp.Error
+		return 0, nil, buResp.Error
 	}
 
-	return buResp.Height, nil
+	bh := &wire.BlockHeader{}
+	err = bh.Deserialize(bytes.NewReader(buResp.BlockHeader))
+	if err != nil {
+		return 0, nil, err
+	}
+	blockHash := bh.BlockHash()
+
+	return buResp.Height, &blockHash, nil
 }
 
 func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {

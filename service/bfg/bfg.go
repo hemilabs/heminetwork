@@ -57,9 +57,12 @@ const (
 var log = loggo.GetLogger(appName)
 
 type health struct {
-	BitcoinHeight  uint64 `json:"bitcoin_height"`
-	GozerConnected bool   `json:"gozer_connected"`
-	GethConnected  bool   `json:"geth_connected"`
+	BitcoinBestHeight  uint64 `json:"bitcoin_best_height"`
+	BitcoinBestHash    string `json:"bitcoin_best_hash"`
+	EthereumBestHeight uint64 `json:"ethereum_best_height"`
+	EthereumBestHash   string `json:"ethereum_best_hash"`
+	GozerConnected     bool   `json:"gozer_connected"`
+	GethConnected      bool   `json:"geth_connected"`
 }
 
 type HTTPError struct {
@@ -269,6 +272,28 @@ func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Ha
 		return nil, fmt.Errorf("invalid response type: %T", rp)
 	}
 	return resp, nil
+}
+
+func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, error) {
+	log.Tracef("gethBestHeightHash")
+	defer log.Tracef("gethBestHeightHash exit")
+
+	// Call op-geth to retrieve keystone and descendants.
+	rp, err := s.callOpgeth(ctx, gethapi.BlockBestRequest{})
+	if err != nil {
+		return 0, nil, err
+	}
+	resp, ok := rp.(*types.Block)
+	if !ok {
+		return 0, nil, fmt.Errorf("invalid response type: %T", rp)
+	}
+	commonHash := resp.Hash()
+	ch, err := chainhash.NewHash(commonHash[:])
+	if err != nil {
+		return 0, nil, err
+	}
+
+	return 0, ch, nil
 }
 
 // When enabled, short-circuiting will check for the latest keystones to achieve
@@ -654,12 +679,23 @@ func (s *Server) promPoll(ctx context.Context) error {
 		// We should consider moving this call outside of this loop
 		// since it may cause long delays in status updates.
 		var h health
-		if height, err := s.gozer.BtcHeight(ctx); err == nil {
+		if height, hash, err := s.gozer.BestHeightHash(ctx); err == nil {
 			h.GozerConnected = true
-			h.BitcoinHeight = height
+			h.BitcoinBestHeight = height
+			h.BitcoinBestHash = hash.String()
 		} else {
 			h.GozerConnected = false
-			h.BitcoinHeight = 0
+			h.BitcoinBestHeight = 0
+			h.BitcoinBestHash = ""
+		}
+		if height, hash, err := s.gethBestHeightHash(ctx); err == nil {
+			h.GozerConnected = true
+			h.EthereumBestHeight = height
+			h.EthereumBestHash = hash.String()
+		} else {
+			h.GozerConnected = false
+			h.EthereumBestHeight = 0
+			h.EthereumBestHash = ""
 		}
 
 		s.mtx.Lock()
