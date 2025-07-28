@@ -11,15 +11,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
@@ -219,6 +220,19 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 				return nil, fmt.Errorf("error calling opgeth: %w", err)
 			}
 			return &resp, nil
+		case gethapi.BlockBestRequest:
+			num, err := s.opgethClient.BlockNumber(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("error calling opgeth: %w", err)
+			}
+			height := big.NewInt(int64(num))
+
+			latest, err := s.opgethClient.BlockByNumber(ctx, height)
+			if err != nil {
+				return nil, fmt.Errorf("error calling opgeth: %w", err)
+			}
+
+			return latest, nil
 		default:
 			return nil, fmt.Errorf("unknown opgeth command: %T", request)
 		}
@@ -509,40 +523,22 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func (s *Sever) ethHealth(ctx context.Context) error {
+func (s *Server) ethHealth(ctx context.Context) error {
 	const maxBlockAge = 30 * time.Second // TODO: make this configurable?
-	blockRes, err := CallEthereum(ctx, client, url,
-		"eth_getBlockByNumber", "latest", false)
+	res, err := s.callOpgeth(ctx, gethapi.BlockBestRequest{})
 	if err != nil {
 		return err
 	}
-	if blockRes.Error != nil {
-		var eErr struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		}
-		if err = json.Unmarshal(blockRes.Error, &eErr); err != nil {
-			return fmt.Errorf("eth_getBlockByNumber error: %w", err)
-		}
-		return fmt.Errorf("ethereum call failed code %v, message %v",
-			eErr.Code, eErr.Message)
+
+	block, ok := res.(*types.Block)
+	if !ok {
+		return fmt.Errorf("unexpected type: %T", res)
 	}
 
-	var block struct {
-		Timestamp string `json:"timestamp"`
-	}
-	if err = json.Unmarshal(blockRes.Result, &block); err != nil {
-		return fmt.Errorf("eth_getBlockByNumber result: %w", err)
-	}
-
-	ts, err := strconv.ParseInt(block.Timestamp, 0, 64)
-	if err != nil {
-		return fmt.Errorf("eth_getBlockByNumber timestamp: %w", err)
-	}
-
-	if age := time.Since(time.Unix(ts, 0)); age > maxBlockAge {
+	timestamp := time.Unix(int64(block.Time()), 0)
+	if age := time.Since(timestamp); age > maxBlockAge {
 		return fmt.Errorf("eth_getBlockByNumber timestamp "+
-			"too old: %v (%v ago)", block.Timestamp, age)
+			"too old: %v (%v ago)", timestamp, age)
 	}
 
 	return nil
