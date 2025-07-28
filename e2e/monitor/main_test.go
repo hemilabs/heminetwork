@@ -46,12 +46,14 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 )
 
-const retries = 10
+const (
+	retries            = 10
+	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
+)
 
 var (
-	abort              = retries - 1
-	localnetPrivateKey = os.Getenv("POPM_BTC_PRIVATE_KEY")
-	btcAddress         = os.Getenv("BTC_ADDRESS")
+	abort      = retries - 1
+	btcAddress = os.Getenv("BTC_ADDRESS")
 )
 
 func addressAt(t *testing.T, path string) common.Address {
@@ -163,10 +165,6 @@ func TestMonitor(t *testing.T) {
 }
 
 func TestL1L2Comms(t *testing.T) {
-	if localnetPrivateKey == "" {
-		t.Fatal("private key: not set")
-	}
-
 	for _, sequencing := range []bool{true, false} {
 		var name string
 		if sequencing {
