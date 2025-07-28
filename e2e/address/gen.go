@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 
@@ -11,8 +12,22 @@ import (
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
 
-func _main() error {
-	pk, err := hex.DecodeString(os.Args[1])
+func privKey() error {
+	privKey, err := dcrsecpk256k1.GeneratePrivateKey()
+	if err != nil {
+		return fmt.Errorf("generate secp256k1 private key: %w", err)
+	}
+	privBytes := privKey.Serialize()
+	fmt.Println(hex.EncodeToString(privBytes))
+	return nil
+}
+
+func address() error {
+	if len(os.Args) < 3 {
+		return errors.New("missing private key")
+	}
+
+	pk, err := hex.DecodeString(os.Args[2])
 	if err != nil {
 		return err
 	}
@@ -31,11 +46,21 @@ func _main() error {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "no key provided!")
+		fmt.Fprintf(os.Stderr, "missing subcommand\n")
 		os.Exit(1)
 	}
 
-	if err := _main(); err != nil {
+	var err error
+	switch os.Args[1] {
+	case "privkey":
+		err = privKey()
+	case "address":
+		err = address()
+	default:
+		err = fmt.Errorf("unknown subcommand: %v", os.Args[1])
+	}
+
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
