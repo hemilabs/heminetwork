@@ -22,6 +22,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -221,12 +222,7 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 			}
 			return &resp, nil
 		case gethapi.BlockBestRequest:
-			num, err := s.opgethClient.BlockNumber(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("error calling opgeth: %w", err)
-			}
-			height := big.NewInt(int64(num))
-
+			height := big.NewInt(int64(rpc.LatestBlockNumber))
 			latest, err := s.opgethClient.BlockByNumber(ctx, height)
 			if err != nil {
 				return nil, fmt.Errorf("error calling opgeth: %w", err)
