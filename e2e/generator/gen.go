@@ -8,6 +8,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/hemilabs/heminetwork/ethereum"
 
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 )
@@ -22,7 +23,7 @@ func privKey() error {
 	return nil
 }
 
-func address() error {
+func btcAddress() error {
 	if len(os.Args) < 3 {
 		return errors.New("missing private key")
 	}
@@ -44,6 +45,22 @@ func address() error {
 	return nil
 }
 
+func ethAddress() error {
+	if len(os.Args) < 3 {
+		return errors.New("missing private key")
+	}
+
+	pk, err := hex.DecodeString(os.Args[2])
+	if err != nil {
+		return err
+	}
+	privKey := dcrsecpk256k1.PrivKeyFromBytes(pk)
+	ethAddress := ethereum.AddressFromPrivateKey(privKey).String()[2:]
+
+	fmt.Println(ethAddress)
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "missing subcommand\n")
@@ -54,8 +71,10 @@ func main() {
 	switch os.Args[1] {
 	case "privkey":
 		err = privKey()
-	case "address":
-		err = address()
+	case "btc":
+		err = btcAddress()
+	case "eth":
+		err = ethAddress()
 	default:
 		err = fmt.Errorf("unknown subcommand: %v", os.Args[1])
 	}

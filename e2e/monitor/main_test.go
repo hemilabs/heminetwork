@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"os"
 	"os/exec"
 	"slices"
 	"testing"
@@ -45,13 +46,13 @@ import (
 	"github.com/hemilabs/heminetwork/hemi"
 )
 
-const (
-	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
-	retries            = 10
-	btcAddress         = "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG"
-)
+const retries = 10
 
-var abort = retries - 1
+var (
+	abort              = retries - 1
+	localnetPrivateKey = os.Getenv("POPM_BTC_PRIVATE_KEY")
+	btcAddress         = os.Getenv("BTC_ADDRESS")
+)
 
 func addressAt(t *testing.T, path string) common.Address {
 	cmd := exec.Command(
@@ -162,6 +163,10 @@ func TestMonitor(t *testing.T) {
 }
 
 func TestL1L2Comms(t *testing.T) {
+	if localnetPrivateKey == "" {
+		t.Fatal("private key: not set")
+	}
+
 	for _, sequencing := range []bool{true, false} {
 		var name string
 		if sequencing {
@@ -332,6 +337,10 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 }
 
 func hvmBtcBalance(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+	if btcAddress == "" {
+		t.Fatal("BTC address: not set")
+	}
+
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
