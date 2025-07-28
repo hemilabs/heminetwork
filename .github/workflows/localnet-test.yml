@@ -7,9 +7,6 @@ name: "Localnet Test"
 on:
   workflow_dispatch: # Manually triggered
 
-env:
-  POPM_BTC_PRIVATE_KEY=72a2c41c84147325ce3c0f37697ef1e670c7169063dda89be9995c3c5219740f
-
 concurrency:
   group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
   cancel-in-progress: true
