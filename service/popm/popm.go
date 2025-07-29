@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	mathrand "math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -590,8 +591,8 @@ func (s *Server) opgeth(ctx context.Context) {
 			delay = maxDelay
 		}
 
-		jitter := time.Duration(time.Now().UnixNano() % int64(delay/10))
-		delay += jitter
+		jitter := delay / 10
+		delay += time.Duration(mathrand.Uint64N(jitter*2) - jitter)
 
 		log.Debugf("reconnecting to: %v in %v", s.cfg.OpgethURL, delay)
 
