@@ -8,7 +8,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -100,14 +99,16 @@ func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, ke
 func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *http.Request, kc *keystoneCounter) (string, error) {
 	var msg jsonrpcMessage
 
-	_, br, err := c.Read(f.pctx)
+	_, rd, err := c.Reader(f.pctx)
 	if err != nil {
-		if errors.Is(err, io.EOF) {
-			log.Errorf("read: %v", err)
-			return "", nil
-		}
+		return "", fmt.Errorf("reader: %w", err)
+	}
+
+	br, err := io.ReadAll(rd)
+	if err != nil {
 		return "", fmt.Errorf("read: %w", err)
 	}
+
 	err = json.Unmarshal(br, &msg)
 	if err != nil {
 		return "", fmt.Errorf("unmarshal: %w", err)
