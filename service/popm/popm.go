@@ -590,8 +590,8 @@ func (s *Server) opgeth(ctx context.Context) {
 			delay = maxDelay
 		}
 
-		jitter := delay / 10
-		delay += time.Duration(mathrand.Int64N(int64(jitter)*2) - int64(jitter))
+		jitter := int64(delay / 10)
+		delay += time.Duration(mathrand.Int64N(jitter*2) - jitter)
 
 		log.Debugf("reconnecting to: %v in %v", s.cfg.OpgethURL, delay)
 
