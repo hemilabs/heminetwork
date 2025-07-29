@@ -563,7 +563,6 @@ func (s *Server) opgeth(ctx context.Context) {
 	log.Tracef("opgeth")
 	defer log.Tracef("opgeth exit")
 
-	const maxExponentialAttempts = 3
 	const maxDelay = 15 * time.Second
 	baseDelay := s.cfg.opgethReconnectTimeout
 
@@ -599,12 +598,10 @@ func (s *Server) opgeth(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(delay):
+		case <-time.Tick(delay):
 		}
 
-		if attempt < maxExponentialAttempts {
-			attempt++
-		}
+		attempt++
 	}
 }
 
