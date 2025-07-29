@@ -69,8 +69,8 @@ func (bs *blockstreamGozer) BestHeightHash(ctx context.Context) (uint64, *chainh
 		return 0, nil, err
 	}
 	if h, ok := bi["height"]; ok {
-		if height, ok := h.(uint64); ok {
-			return height, hash, nil
+		if height, ok := h.(float64); ok && height >= 0 {
+			return uint64(height), hash, nil
 		}
 	}
 

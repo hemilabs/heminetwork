@@ -164,7 +164,7 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 			panic(ctx.Err())
 		case <-time.Tick(50 * time.Millisecond):
 		}
-		if _, err := g.BtcHeight(ctx); err == nil {
+		if _, _, err := g.BestHeightHash(ctx); err == nil {
 			break
 		}
 	}

@@ -116,7 +116,7 @@ type Server struct {
 
 	// opgeth
 	opgethClient *ethclient.Client
-	ethPoker     hproxy.Proxy // Use poker for health
+	ethPoker     hproxy.Proxy // XXX is the poker necessary for health?
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -140,13 +140,14 @@ func NewServer(cfg *Config) (*Server, error) {
 			Help:      "The total number of successful web commands",
 		}),
 	}
+	s.ethPoker = hproxy.NewEthereumProxy(s.ethHealth)
 
 	return s, nil
 }
 
 func (s *Server) Connected() bool {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
 	return s.gethConnected
 }
 
@@ -197,8 +198,8 @@ func writeHTTPError(w http.ResponseWriter, code int, httpError *HTTPError) {
 }
 
 func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
-	log.Tracef("callOpgeth %v", request)
-	defer log.Tracef("callOpgeth exit %v", request)
+	log.Tracef("callOpgeth %T", request)
+	defer log.Tracef("callOpgeth exit %T", request)
 
 	if !s.Connected() {
 		return nil, errors.New("not connected to opgeth")
@@ -649,8 +650,8 @@ func (s *Server) Collectors() []prometheus.Collector {
 }
 
 func (s *Server) promGethConnected() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
 	if s.gethConnected {
 		return 1
 	}
@@ -680,20 +681,19 @@ func (s *Server) promPoll(ctx context.Context) error {
 		// since it may cause long delays in status updates.
 		var h health
 		if height, hash, err := s.gozer.BestHeightHash(ctx); err == nil {
-			h.GozerConnected = true
 			h.BitcoinBestHeight = height
 			h.BitcoinBestHash = hash.String()
 		} else {
-			h.GozerConnected = false
 			h.BitcoinBestHeight = 0
 			h.BitcoinBestHash = ""
+			log.Errorf("%w", err)
 		}
+		h.GozerConnected = s.gozer.Connected()
+
 		if height, hash, err := s.gethBestHeightHash(ctx); err == nil {
-			h.GozerConnected = true
 			h.EthereumBestHeight = height
 			h.EthereumBestHash = hash.String()
 		} else {
-			h.GozerConnected = false
 			h.EthereumBestHeight = 0
 			h.EthereumBestHash = ""
 		}
@@ -711,10 +711,13 @@ func (s *Server) promPoll(ctx context.Context) error {
 	}
 }
 
-func (s *Server) isHealthy(_ context.Context) bool {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	// XXX
+func (s *Server) isHealthy(ctx context.Context) bool {
+	// XXX probably want to do this periodically and store the result
+	// rather than query opgeth every call
+	if err := s.ethPoker.Poke(ctx); err != nil {
+		return false
+	}
+
 	return true
 }
 
