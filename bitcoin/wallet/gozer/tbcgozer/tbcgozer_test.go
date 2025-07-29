@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,16 +20,10 @@ import (
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/v2/service/tbc"
 	"github.com/hemilabs/heminetwork/v2/testutil"
+	"github.com/hemilabs/heminetwork/v2/testutil/mock"
 )
 
-func TestTBCGozer(t *testing.T) {
-	testAddrString := "n2BosBT7DvxWk1tZprk1tR1kyQmXwcv8M8"
-
-	testAddr, err := btcutil.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
-	if err != nil {
-		t.Fatalf("Failed to decode address: %v", err)
-	}
-
+func TestTBCGozerConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
@@ -83,6 +78,50 @@ func TestTBCGozer(t *testing.T) {
 	}
 	t.Logf("gozer connected")
 
+	height, _, _, err := b.BestHeightHashTime(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("BTC tip height: %v", height)
+}
+
+func TestTBCGozerCalls(t *testing.T) {
+	testAddrString := "n2BosBT7DvxWk1tZprk1tR1kyQmXwcv8M8"
+
+	testAddr, err := btcutil.DecodeAddress(testAddrString, &chaincfg.TestNet3Params)
+	if err != nil {
+		t.Fatalf("Failed to decode address: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+
+	kssMap, kssList := testutil.MakeSharedKeystones(10)
+	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
+
+	// Create tbc test server with the request handler.
+	mtbc := mock.NewMockTBC(ctx, nil, nil, kssMap, btcTip, 100)
+	defer mtbc.Shutdown()
+
+	b := New("ws" + strings.TrimPrefix(mtbc.URL(), "http"))
+	if err = b.Run(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	tg, ok := b.(*tbcGozer)
+	if !ok {
+		t.Fatal("expected gozer to be of type tbcGozer")
+	}
+
+	for !tg.Connected() {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.Tick(50 * time.Millisecond):
+		}
+	}
+	t.Logf("gozer connected")
+
 	feeEstimates, err := b.FeeEstimates(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -105,4 +144,10 @@ func TestTBCGozer(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("BTC tip height: %v", height)
+
+	_, err = b.KeystonesByHeight(ctx, 1000, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 }
