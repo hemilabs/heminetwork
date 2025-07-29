@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	mathrand "math/rand/v2"
 	"strings"
 	"sync"
 	"time"
@@ -584,6 +585,10 @@ func (s *Server) opgeth(ctx context.Context) {
 	log.Tracef("opgeth")
 	defer log.Tracef("opgeth exit")
 
+	const maxDelay = 15 * time.Second
+	baseDelay := s.cfg.opgethReconnectTimeout
+
+	var attempt int
 	for {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
@@ -591,15 +596,32 @@ func (s *Server) opgeth(ctx context.Context) {
 			log.Tracef("connectOpgeth: %v", err)
 		} else {
 			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
+			// Reset attempt on success
+			attempt = 0
 		}
 		// See if we were terminated
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.Tick(s.cfg.opgethReconnectTimeout):
+		default:
 		}
 
-		log.Debugf("reconnecting to: %v", s.cfg.OpgethURL)
+		delay := baseDelay * (1 << attempt)
+		if delay > maxDelay {
+			delay = maxDelay
+		}
+
+		jitter := int64(delay / 10)
+		delay += time.Duration(mathrand.Int64N(jitter*2) - jitter)
+
+		log.Debugf("reconnecting to: %v in %v", s.cfg.OpgethURL, delay)
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.Tick(delay):
+		}
+		attempt++
 	}
 }
 
