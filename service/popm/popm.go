@@ -567,8 +567,7 @@ func (s *Server) opgeth(ctx context.Context) {
 	const maxDelay = 15 * time.Second
 	baseDelay := s.cfg.opgethReconnectTimeout
 
-	attempt := 1
-
+	var attempt int
 	for {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
@@ -577,7 +576,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		} else {
 			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
 			// Reset attempt on success
-			attempt = 1
+			attempt = 0
 		}
 		// See if we were terminated
 		select {
@@ -586,7 +585,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		default:
 		}
 
-		delay := baseDelay * (1 << (attempt - 1))
+		delay := baseDelay * (1 << attempt)
 		if delay > maxDelay {
 			delay = maxDelay
 		}
@@ -601,7 +600,6 @@ func (s *Server) opgeth(ctx context.Context) {
 			return
 		case <-time.Tick(delay):
 		}
-
 		attempt++
 	}
 }
