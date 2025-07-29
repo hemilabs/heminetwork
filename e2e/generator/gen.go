@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package main
 
 import (
@@ -8,9 +12,9 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/hemilabs/heminetwork/ethereum"
-
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
+
+	"github.com/hemilabs/heminetwork/ethereum"
 )
 
 func privKey() error {
