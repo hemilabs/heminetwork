@@ -118,7 +118,7 @@ type Server struct {
 	server *http.ServeMux
 
 	// opgeth
-	opgethClient *ethclient.Client
+	opgethClient *ethclient.Client // access via Server.geth
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -143,6 +143,16 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	return s, nil
+}
+
+func (s *Server) geth() (*ethclient.Client, error) {
+	s.mtx.RLock()
+	geth := s.opgethClient
+	s.mtx.RUnlock()
+	if geth == nil {
+		return nil, fmt.Errorf("no connected")
+	}
+	return geth, nil
 }
 
 func (s *Server) Connected() bool {
@@ -219,8 +229,11 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 				return nil, fmt.Errorf("invalid keystone count: %v",
 					cmd.KeystoneCount)
 			}
-
-			err := s.opgethClient.Client().CallContext(ctx, &resp, "kss_getKeystone",
+			geth, err := s.geth()
+			if err != nil {
+				return nil, err
+			}
+			err = geth.Client().CallContext(ctx, &resp, "kss_getKeystone",
 				cmd.L2KeystoneHash, cmd.KeystoneCount)
 			if err != nil {
 				return nil, fmt.Errorf("error calling opgeth: %w", err)
@@ -275,7 +288,11 @@ func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Has
 	var t time.Time
 
 	height := big.NewInt(int64(rpc.LatestBlockNumber))
-	header, err := s.opgethClient.HeaderByNumber(ctx, height)
+	geth, err := s.geth()
+	if err != nil {
+		return 0, nil, t, err
+	}
+	header, err := geth.HeaderByNumber(ctx, height)
 	if err != nil {
 		return 0, nil, t, fmt.Errorf("error calling opgeth: %w", err)
 	}
@@ -545,18 +562,19 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	var err error
-	s.opgethClient, err = ethclient.DialContext(ctx, s.cfg.OpgethURL)
+	opgethClient, err := ethclient.DialContext(ctx, s.cfg.OpgethURL)
 	if err != nil {
 		return err
 	}
-	defer s.opgethClient.Close()
+	defer opgethClient.Close()
 
 	s.mtx.Lock()
+	s.opgethClient = opgethClient
 	s.promHealth.GethConnected = true
 	s.mtx.Unlock()
 	defer func() {
 		s.mtx.Lock()
+		s.opgethClient = nil
 		s.promHealth.GethConnected = false
 		s.mtx.Unlock()
 	}()
