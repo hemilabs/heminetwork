@@ -13,6 +13,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -31,7 +32,7 @@ type Gozer interface {
 	BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash.Hash) *BlocksByL2AbrevHashesResponse
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) (*KeystonesByHeightResponse, error)
 	BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.Hash, error)
-	BestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, error)
+	BestHeightHashTime(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error)
 
 	Connected() bool // ready to use
 }

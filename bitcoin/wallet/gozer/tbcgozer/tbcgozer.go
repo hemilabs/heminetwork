@@ -76,30 +76,32 @@ func (t *tbcGozer) Connected() bool {
 	return t.connected
 }
 
-func (t *tbcGozer) BestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, error) {
+func (t *tbcGozer) BestHeightHashTime(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
 	bur := &tbcapi.BlockHeaderBestRawRequest{}
 
+	var ts time.Time
 	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, ts, err
 	}
 
 	buResp, ok := res.(*tbcapi.BlockHeaderBestRawResponse)
 	if !ok {
-		return 0, nil, fmt.Errorf("not a blockheader best raw response %T", res)
+		return 0, nil, ts, fmt.Errorf("not a blockheader best raw response %T",
+			res)
 	}
 	if buResp.Error != nil {
-		return 0, nil, buResp.Error
+		return 0, nil, ts, buResp.Error
 	}
 
 	bh := &wire.BlockHeader{}
 	err = bh.Deserialize(bytes.NewReader(buResp.BlockHeader))
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, ts, err
 	}
 	blockHash := bh.BlockHash()
 
-	return buResp.Height, &blockHash, nil
+	return buResp.Height, &blockHash, bh.Timestamp, nil
 }
 
 func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {

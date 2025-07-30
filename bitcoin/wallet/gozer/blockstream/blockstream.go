@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -46,35 +47,43 @@ func (bs *blockstreamGozer) Connected() bool {
 	return true // XXX should we try to connect first?
 }
 
-func (bs *blockstreamGozer) BestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, error) {
+func (bs *blockstreamGozer) BestHeightHashTime(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
+	var timestamp time.Time
 	u := fmt.Sprintf("%v/blocks/tip/hash", bs.url)
 	rawHash, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
-		return 0, nil, fmt.Errorf("request: %w", err)
+		return 0, nil, timestamp, fmt.Errorf("request: %w", err)
 	}
 	hash, err := chainhash.NewHashFromStr(string(rawHash))
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, timestamp, err
 	}
 
 	u = fmt.Sprintf("%v/block/%v", bs.url, hash)
 	blockInfo, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
-		return 0, nil, fmt.Errorf("request: %w", err)
+		return 0, nil, timestamp, fmt.Errorf("request: %w", err)
 	}
 
 	var bi map[string]any
 	err = json.Unmarshal(blockInfo, &bi)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, timestamp, err
+	}
+	if t, ok := bi["timestamp"]; ok {
+		if ts, ok := t.(int64); ok && ts > 0 {
+			timestamp = time.Unix(ts, 0)
+		} else {
+			return 0, nil, timestamp, fmt.Errorf("invalid timestamp")
+		}
 	}
 	if h, ok := bi["height"]; ok {
 		if height, ok := h.(float64); ok && height >= 0 {
-			return uint64(height), hash, nil
+			return uint64(height), hash, timestamp, nil
 		}
 	}
 
-	return 0, nil, fmt.Errorf("no height found")
+	return 0, nil, timestamp, fmt.Errorf("invalid height")
 }
 
 func (bs *blockstreamGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {

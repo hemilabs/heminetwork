@@ -60,6 +60,7 @@ var log = loggo.GetLogger(appName)
 type health struct {
 	BitcoinBestHeight  uint64    `json:"bitcoin_best_height"`
 	BitcoinBestHash    string    `json:"bitcoin_best_hash"`
+	BitcoinBestTime    time.Time `json:"bitcoin_best_time"`
 	EthereumBestHeight uint64    `json:"ethereum_best_height"`
 	EthereumBestHash   string    `json:"ethereum_best_hash"`
 	EthereumBestTime   time.Time `json:"ethereum_best_time"`
@@ -602,9 +603,14 @@ func (s *Server) Collectors() []prometheus.Collector {
 			s.cmdsProcessed,
 			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "bitcoin_block_height",
+				Help:      "Best bitcoin block canonical height and hash",
+			}, []string{"hash", "timestamp"}), s.promBitcoinTime),
+			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "ethereum_block_height",
 				Help:      "Best ethereum block canonical height and hash",
-			}, []string{"hash", "timestamp"}), s.promBlockHeader),
+			}, []string{"hash", "timestamp"}), s.promEthereumTime),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "geth_connected",
@@ -641,7 +647,18 @@ func (s *Server) promGozerConnected() float64 {
 	return 0
 }
 
-func (s *Server) promBlockHeader(m *prometheus.GaugeVec) {
+func (s *Server) promBitcoinTime(m *prometheus.GaugeVec) {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	m.Reset()
+	m.With(prometheus.Labels{
+		"hash":      s.promHealth.BitcoinBestHash,
+		"timestamp": strconv.Itoa(int(s.promHealth.BitcoinBestTime.Unix())),
+	}).Set(deucalion.Uint64ToFloat(s.promHealth.BitcoinBestHeight))
+}
+
+func (s *Server) promEthereumTime(m *prometheus.GaugeVec) {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
 
@@ -667,15 +684,18 @@ func (s *Server) promPoll(ctx context.Context) error {
 		// We should consider moving this call outside of this loop
 		// since it may cause long delays in status updates.
 		var h health
-		if height, hash, err := s.gozer.BestHeightHash(ctx); err == nil {
+		if height, hash, t, err := s.gozer.BestHeightHashTime(ctx); err == nil {
 			h.BitcoinBestHeight = height
 			h.BitcoinBestHash = hash.String()
+			h.BitcoinBestTime = t
+			h.GozerConnected = true
 		} else {
+			log.Debugf("btc height hash: %v", err)
 			h.BitcoinBestHeight = 0
 			h.BitcoinBestHash = ""
-			log.Debugf("btc height hash: %v", err)
+			h.BitcoinBestTime = time.Time{}
+			h.GozerConnected = false
 		}
-		h.GozerConnected = s.gozer.Connected()
 
 		if height, hash, t, err := s.gethBestHeightHash(ctx); err == nil {
 			h.EthereumBestHeight = height

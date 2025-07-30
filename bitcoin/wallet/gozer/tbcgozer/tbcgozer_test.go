@@ -99,7 +99,7 @@ func TestTBCGozer(t *testing.T) {
 	}
 	t.Logf("balance %v: %v", testAddr, gozer.BalanceFromUtxos(utxos))
 
-	height, _, err := b.BestHeightHash(ctx)
+	height, _, _, err := b.BestHeightHashTime(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

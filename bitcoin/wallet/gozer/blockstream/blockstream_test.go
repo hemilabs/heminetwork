@@ -120,9 +120,12 @@ func TestBlockstreamGozer(t *testing.T) {
 	}
 	t.Logf("balance %v: %v", testAddr, gozer.BalanceFromUtxos(utxos))
 
-	height, _, err := b.BestHeightHash(ctx)
+	height, _, timestamp, err := b.BestHeightHashTime(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if timestamp.Unix() == 0 {
+		t.Fatal("invalid timestamp")
 	}
 	t.Logf("BTC tip height: %v", height)
 }
