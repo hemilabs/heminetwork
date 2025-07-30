@@ -30,6 +30,8 @@ const (
 	batcherSenderAddress = "0x78697c88847dfbbb40523e42c1f2e28a13a170be"
 )
 
+var ethAddress = os.Getenv("ETH_ADDRESS")
+
 type state struct {
 	bitcoinBlockCount           uint64
 	containersRunning           []string
@@ -313,14 +315,18 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		console.log(count);
 	`, batcherSenderAddress, batcherInboxAddress)
 
-	popMinerBalanceJs := `
+	if ethAddress == "" {
+		panic("eth address: not set")
+	}
+
+	popMinerBalanceJs := fmt.Sprintf(`
 		const hexValue = eth.call({
 		  to: '0x4200000000000000000000000000000000000042',
 		  from: eth.accounts[0],
-		  data: '0x70a08231000000000000000000000000B275Ec0935e404BEe2d40622de13495F42F84d90',
+		  data: '0x70a08231000000000000000000000000%s',
 		});
 		console.log(Number.parseInt(hexValue, 16));
-	`
+	`, ethAddress[2:])
 
 	tipJs := `
 		console.log(eth.blockNumber)

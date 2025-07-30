@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"os"
 	"os/exec"
 	"slices"
 	"testing"
@@ -46,12 +47,16 @@ import (
 )
 
 const (
+	retries = 10
+
+	// hardcoded pre-funded private key that shouldn't change with our changes
 	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
-	retries            = 10
-	btcAddress         = "mw47rj9rG25J67G6W8bbjRayRQjWN5ZSEG"
 )
 
-var abort = retries - 1
+var (
+	abort      = retries - 1
+	btcAddress = os.Getenv("BTC_ADDRESS")
+)
 
 func addressAt(t *testing.T, path string) common.Address {
 	cmd := exec.Command(
@@ -332,6 +337,10 @@ func hvmTipNearBtcTip(t *testing.T, ctx context.Context, l2Client *ethclient.Cli
 }
 
 func hvmBtcBalance(t *testing.T, ctx context.Context, l2Client *ethclient.Client, privateKey *ecdsa.PrivateKey) {
+	if btcAddress == "" {
+		t.Fatal("BTC address: not set")
+	}
+
 	publicKey := privateKey.Public()
 	publicKeyECDSA, ok := publicKey.(*ecdsa.PublicKey)
 	if !ok {
