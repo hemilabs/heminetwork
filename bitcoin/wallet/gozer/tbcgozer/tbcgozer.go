@@ -7,6 +7,7 @@
 package tbcgozer
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -57,16 +58,17 @@ type tbcGozer struct {
 
 var _ gozer.Gozer = (*tbcGozer)(nil)
 
-// Run returns and starts a new TBC Gozer.
-func Run(ctx context.Context, tbcUrl string, connected func()) (gozer.Gozer, error) {
-	t := &tbcGozer{
+func New(tbcUrl string) gozer.Gozer {
+	return &tbcGozer{
 		url:   tbcUrl,
 		cmdCh: make(chan tbcCmd, 10),
 	}
+}
 
+// Run returns and starts a new TBC Gozer.
+func (t *tbcGozer) Run(ctx context.Context, connected func()) error {
 	go t.run(ctx, connected)
-
-	return t, nil
+	return nil
 }
 
 func (t *tbcGozer) Connected() bool {
@@ -75,24 +77,32 @@ func (t *tbcGozer) Connected() bool {
 	return t.connected
 }
 
-func (t *tbcGozer) BtcHeight(ctx context.Context) (uint64, error) {
-	bur := &tbcapi.BlockHeaderBestRequest{}
+func (t *tbcGozer) BestHeightHashTime(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
+	bur := &tbcapi.BlockHeaderBestRawRequest{}
 
+	var ts time.Time
 	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
 	if err != nil {
-		return 0, err
+		return 0, nil, ts, err
 	}
 
-	buResp, ok := res.(*tbcapi.BlockHeaderBestResponse)
+	buResp, ok := res.(*tbcapi.BlockHeaderBestRawResponse)
 	if !ok {
-		return 0, fmt.Errorf("not a fee estimate response %T", res)
+		return 0, nil, ts, fmt.Errorf("not a blockheader best raw response %T",
+			res)
 	}
-
 	if buResp.Error != nil {
-		return 0, buResp.Error
+		return 0, nil, ts, buResp.Error
 	}
 
-	return buResp.Height, nil
+	bh := &wire.BlockHeader{}
+	err = bh.Deserialize(bytes.NewReader(buResp.BlockHeader))
+	if err != nil {
+		return 0, nil, ts, err
+	}
+	blockHash := bh.BlockHash()
+
+	return buResp.Height, &blockHash, bh.Timestamp, nil
 }
 
 func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {

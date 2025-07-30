@@ -90,6 +90,12 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 			Height:      8,
 			BlockHeader: nil,
 		}
+	case tbcapi.CmdBlockHeaderBestRawRequest:
+		bh := tbcd.BlockHeader{}
+		resp = &tbcapi.BlockHeaderBestRawResponse{
+			Height:      8,
+			BlockHeader: bh.Header[:],
+		}
 	case tbcapi.CmdUTXOsByAddressRequest:
 		filtered, err := mp.FilterUtxos(f.pctx, utxos)
 		if err != nil {

@@ -63,7 +63,8 @@ func TestTBCGozer(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	b, err := Run(ctx, fmt.Sprintf("http://%s/v1/ws", tbcCfg.ListenAddress), nil)
+	b := New(fmt.Sprintf("http://%s/v1/ws", tbcCfg.ListenAddress))
+	err = b.Run(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func TestTBCGozer(t *testing.T) {
 	}
 	t.Logf("balance %v: %v", testAddr, gozer.BalanceFromUtxos(utxos))
 
-	height, err := b.BtcHeight(ctx)
+	height, _, _, err := b.BestHeightHashTime(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

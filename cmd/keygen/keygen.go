@@ -42,7 +42,7 @@ func init() {
 func _main() error {
 	var btcChainParams *chaincfg.Params
 	switch *net {
-	case "testnet":
+	case "testnet", "localnet":
 		btcChainParams = &chaincfg.RegressionNetParams
 	case "testnet3":
 		btcChainParams = &chaincfg.TestNet3Params

@@ -9,7 +9,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	mathrand "math/rand/v2"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -21,6 +23,7 @@ import (
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -55,8 +58,20 @@ const (
 	defaultL2KeystonePollTimeout  = 13 * time.Second
 	defaultL2KeystoneRetryTimeout = 15 * time.Second
 
-	minRelayFee = 1 // sats/byte
+	minRelayFee = 1                // sats/byte
+	maxBlockAge = 30 * time.Second // XXX make this configurable?
 )
+
+type health struct {
+	BitcoinBestHeight  uint64    `json:"bitcoin_best_height"`
+	BitcoinBestHash    string    `json:"bitcoin_best_hash"`
+	BitcoinBestTime    time.Time `json:"bitcoin_best_time"`
+	EthereumBestHeight uint64    `json:"ethereum_best_height"`
+	EthereumBestHash   string    `json:"ethereum_best_hash"`
+	EthereumBestTime   time.Time `json:"ethereum_best_time"`
+	GozerConnected     bool      `json:"gozer_connected"`
+	GethConnected      bool      `json:"geth_connected"`
+}
 
 var log = loggo.GetLogger("popm")
 
@@ -141,8 +156,12 @@ type Server struct {
 	btcAddress btcutil.Address
 	ethAddress common.Address
 
-	isRunning      bool
-	promCollectors []prometheus.Collector
+	// Prometheus
+	isRunning       bool
+	promPolling     bool
+	promCollectors  []prometheus.Collector
+	promHealth      health
+	promPollVerbose bool // set to true to print stats during poll
 
 	// opgeth
 	opgethClient *ethclient.Client
@@ -217,6 +236,22 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, err
 	}
 
+	switch s.cfg.BitcoinSource {
+	case bitcoinSourceTBC:
+		if s.cfg.BitcoinURL == "" {
+			return nil, fmt.Errorf("invalid bitcoin url")
+		}
+		s.gozer = tbcgozer.New(s.cfg.BitcoinURL)
+	case bitcoinSourceBlockstream:
+		s.gozer, err = blockstream.New(s.params)
+		if err != nil {
+			return nil, fmt.Errorf("could not setup %v blockstream: %w",
+				s.cfg.Network, err)
+		}
+	default:
+		return nil, fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
+	}
+
 	return s, nil
 }
 
@@ -248,7 +283,7 @@ func (s *Server) createKeystoneTx(ctx context.Context, ks *hemi.L2Keystone) (*wi
 
 	log.Infof("Mine L2 keystone height %v", ks.L2BlockNumber)
 
-	btcHeight, err := s.gozer.BtcHeight(ctx)
+	btcHeight, _, _, err := s.gozer.BestHeightHashTime(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("bitcoin height: %w", err)
 	}
@@ -323,7 +358,8 @@ func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2Key
 	defer log.Tracef("latestKeystones exit")
 
 	var kr gethapi.L2KeystoneLatestResponse
-	err := s.opgethClient.Client().CallContext(ctx, &kr, "kss_getLatestKeystones", count)
+	err := s.opgethClient.Client().CallContext(ctx, &kr,
+		"kss_getLatestKeystones", count)
 	if err != nil {
 		return nil, fmt.Errorf("opgeth rpc: %w", err)
 	}
@@ -489,7 +525,8 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	defer log.Tracef("handleOpgethSubscription exit")
 
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
-	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
+	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh,
+		"newKeystones")
 	if err != nil {
 		return fmt.Errorf("keystone subscription: %w", err)
 	}
@@ -543,6 +580,15 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 		return err
 	}
 	defer s.opgethClient.Close()
+
+	s.mtx.Lock()
+	s.promHealth.GethConnected = true
+	s.mtx.Unlock()
+	defer func() {
+		s.mtx.Lock()
+		s.promHealth.GethConnected = false
+		s.mtx.Unlock()
+	}()
 
 	log.Debugf("connected to opgeth: %s", s.cfg.OpgethURL)
 
@@ -658,17 +704,158 @@ func (s *Server) mine(ctx context.Context) error {
 	return nil
 }
 
-func (s *Server) promPoll(ctx context.Context) error {
-	ticker := time.NewTicker(5 * time.Second)
+func (s *Server) promBitcoinTime(m *prometheus.GaugeVec) {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	m.Reset()
+	m.With(prometheus.Labels{
+		"hash":      s.promHealth.BitcoinBestHash,
+		"timestamp": strconv.Itoa(int(s.promHealth.BitcoinBestTime.Unix())),
+	}).Set(deucalion.Uint64ToFloat(s.promHealth.BitcoinBestHeight))
+}
+
+func (s *Server) promEthereumTime(m *prometheus.GaugeVec) {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	m.Reset()
+	m.With(prometheus.Labels{
+		"hash":      s.promHealth.EthereumBestHash,
+		"timestamp": strconv.Itoa(int(s.promHealth.EthereumBestTime.Unix())),
+	}).Set(deucalion.Uint64ToFloat(s.promHealth.EthereumBestHeight))
+}
+
+func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
+	log.Tracef("gethBestHeightHash")
+	defer log.Tracef("gethBestHeightHash exit")
+
+	var t time.Time
+
+	height := big.NewInt(int64(rpc.LatestBlockNumber))
+	header, err := s.opgethClient.HeaderByNumber(ctx, height)
+	if err != nil {
+		return 0, nil, t, fmt.Errorf("error calling opgeth: %w", err)
+	}
+	commonHash := header.Hash()
+	ch, err := chainhash.NewHash(commonHash[:])
+	if err != nil {
+		return 0, nil, t, err
+	}
+	h := header.Number.Uint64()
+	t = time.Unix(int64(header.Time), 0)
+
+	return h, ch, t, nil
+}
+
+func (s *Server) promGethConnected() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.promHealth.GethConnected {
+		return 1
+	}
+	return 0
+}
+
+func (s *Server) promGozerConnected() float64 {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.promHealth.GozerConnected {
+		return 1
+	}
+	return 0
+}
+
+func (s *Server) promPoll(pctx context.Context) error {
+	promPollFrequency := 5 * time.Second
+	ticker := time.NewTicker(promPollFrequency)
+	defer ticker.Stop()
+
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-pctx.Done():
+			return pctx.Err()
 		case <-ticker.C:
 		}
 
-		// Insert prometheus poll here
+		s.mtx.Lock()
+		gozer := s.gozer
+		if gozer == nil {
+			// Not ready
+			s.promHealth = health{}
+			s.mtx.Unlock()
+			continue
+		}
+		if s.promPolling {
+			s.mtx.Unlock()
+			continue
+		}
+		s.promPolling = true
+		s.mtx.Unlock()
+
+		ctx, cancel := context.WithTimeout(pctx, promPollFrequency-time.Second)
+
+		var h health
+		if height, hash, t, err := gozer.BestHeightHashTime(ctx); err == nil {
+			h.BitcoinBestHeight = height
+			h.BitcoinBestHash = hash.String()
+			h.BitcoinBestTime = t
+			h.GozerConnected = true
+		} else {
+			log.Debugf("btc height hash: %v", err)
+			h.BitcoinBestHeight = 0
+			h.BitcoinBestHash = ""
+			h.BitcoinBestTime = time.Time{}
+			h.GozerConnected = false
+		}
+
+		if height, hash, t, err := s.gethBestHeightHash(ctx); err == nil {
+			h.EthereumBestHeight = height
+			h.EthereumBestHash = hash.String()
+			h.EthereumBestTime = t
+			h.GethConnected = true
+		} else {
+			log.Debugf("geth height hash: %v", err)
+			h.EthereumBestHeight = 0
+			h.EthereumBestHash = ""
+			h.EthereumBestTime = time.Time{}
+			h.GethConnected = false
+		}
+
+		cancel()
+
+		s.mtx.Lock()
+		s.promHealth = h
+		s.promPolling = false
+		s.mtx.Unlock()
+
+		if s.promPollVerbose {
+			log.Infof("gozer connected: %v geth connected %v",
+				h.GozerConnected, h.GethConnected)
+		}
+		ticker.Reset(promPollFrequency)
 	}
+}
+
+func (s *Server) isHealthy(_ context.Context) bool {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if age := time.Since(s.promHealth.EthereumBestTime); age > maxBlockAge ||
+		!s.promHealth.GozerConnected || !s.promHealth.GethConnected {
+		return false
+	}
+	return true
+}
+
+func (s *Server) health(ctx context.Context) (bool, any, error) {
+	log.Tracef("health")
+	defer log.Tracef("health exit")
+
+	s.mtx.RLock()
+	h := s.promHealth
+	s.mtx.RUnlock()
+
+	return s.isHealthy(ctx), h, nil
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -679,6 +866,26 @@ func (s *Server) Collectors() []prometheus.Collector {
 	if s.promCollectors == nil {
 		// Naming: https://prometheus.io/docs/practices/naming/
 		s.promCollectors = []prometheus.Collector{
+			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "bitcoin_block_height",
+				Help:      "Best bitcoin block canonical height and hash",
+			}, []string{"hash", "timestamp"}), s.promBitcoinTime),
+			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ethereum_block_height",
+				Help:      "Best ethereum block canonical height and hash",
+			}, []string{"hash", "timestamp"}), s.promEthereumTime),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "geth_connected",
+				Help:      "Whether the pop miner is connected to geth",
+			}, s.promGethConnected),
+			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "gozer_connected",
+				Help:      "Whether the pop miner is connected to gozer",
+			}, s.promGozerConnected),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "running",
@@ -698,6 +905,17 @@ func (s *Server) Run(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
+	err := s.gozer.Run(ctx, func() {
+		utxos, err := s.gozer.UtxosByAddress(ctx, true, s.btcAddress, 0, 100)
+		if err == nil {
+			log.Infof("confirmed bitcoin balance %v: %v",
+				s.btcAddress, gozer.BalanceFromUtxos(utxos))
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("gozer run: %w", err)
+	}
+
 	// Prometheus
 	if s.cfg.PrometheusListenAddress != "" {
 		d, err := deucalion.New(&deucalion.Config{
@@ -709,7 +927,7 @@ func (s *Server) Run(pctx context.Context) error {
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := d.Run(ctx, s.Collectors(), nil); !errors.Is(err, context.Canceled) {
+			if err := d.Run(ctx, s.Collectors(), s.health); !errors.Is(err, context.Canceled) {
 				log.Errorf("prometheus terminated with error: %v", err)
 				return
 			}
@@ -745,31 +963,6 @@ func (s *Server) Run(pctx context.Context) error {
 			}
 			log.Infof("pprof server clean shutdown")
 		}()
-	}
-
-	var err error
-	switch s.cfg.BitcoinSource {
-	case bitcoinSourceTBC:
-		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL, func() {
-			utxos, err := s.gozer.UtxosByAddress(ctx, true,
-				s.btcAddress, 0, 100)
-			if err == nil {
-				log.Infof("confirmed bitcoin balance %v: %v",
-					s.btcAddress, gozer.BalanceFromUtxos(utxos))
-			}
-		})
-		if err != nil {
-			return fmt.Errorf("could not setup %v tbc: %w",
-				s.cfg.Network, err)
-		}
-	case bitcoinSourceBlockstream:
-		s.gozer, err = blockstream.Run(s.params)
-		if err != nil {
-			return fmt.Errorf("could not setup %v blockstream: %w",
-				s.cfg.Network, err)
-		}
-	default:
-		return fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
 	}
 
 	s.wg.Add(1)
