@@ -158,6 +158,7 @@ type Server struct {
 
 	// Prometheus
 	isRunning       bool
+	promPolling     bool
 	promCollectors  []prometheus.Collector
 	promHealth      health
 	promPollVerbose bool // set to true to print stats during poll
@@ -765,15 +766,15 @@ func (s *Server) promGozerConnected() float64 {
 	return 0
 }
 
-func (s *Server) promPoll(ctx context.Context) error {
+func (s *Server) promPoll(pctx context.Context) error {
 	promPollFrequency := 5 * time.Second
 	ticker := time.NewTicker(promPollFrequency)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-pctx.Done():
+			return pctx.Err()
 		case <-ticker.C:
 		}
 
@@ -785,10 +786,15 @@ func (s *Server) promPoll(ctx context.Context) error {
 			s.mtx.Unlock()
 			continue
 		}
+		if s.promPolling == true {
+			s.mtx.Unlock()
+			continue
+		}
+		s.promPolling = true
 		s.mtx.Unlock()
 
-		// We should consider moving this call outside of this loop
-		// since it may cause long delays in status updates.
+		ctx, cancel := context.WithTimeout(pctx, promPollFrequency-time.Second)
+
 		var h health
 		if height, hash, t, err := gozer.BestHeightHashTime(ctx); err == nil {
 			h.BitcoinBestHeight = height
@@ -816,8 +822,11 @@ func (s *Server) promPoll(ctx context.Context) error {
 			h.GethConnected = false
 		}
 
+		cancel()
+
 		s.mtx.Lock()
 		s.promHealth = h
+		s.promPolling = false
 		s.mtx.Unlock()
 
 		if s.promPollVerbose {
