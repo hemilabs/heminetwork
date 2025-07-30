@@ -142,6 +142,37 @@ func NewServer(cfg *Config) (*Server, error) {
 		}),
 	}
 
+	// Setup gozer
+	switch s.cfg.Network {
+	case "mainnet":
+		s.params = &chaincfg.MainNetParams
+	case "testnet3":
+		s.params = &chaincfg.TestNet3Params
+	case "localnet":
+		s.params = &chaincfg.RegressionNetParams
+	case "testnet4":
+		s.params = &chaincfg.TestNet4Params
+	default:
+		return nil, fmt.Errorf("invalid network: %v", s.cfg.Network)
+	}
+
+	switch s.cfg.BitcoinSource {
+	case bitcoinSourceBlockstream:
+		var err error
+		s.gozer, err = blockstream.New(s.params)
+		if err != nil {
+			return nil, fmt.Errorf("could not setup %v blockstream: %w",
+				s.cfg.Network, err)
+		}
+	case bitcoinSourceTBC:
+		if s.cfg.BitcoinURL == "" {
+			return nil, fmt.Errorf("invalid bitcoin url")
+		}
+		s.gozer = tbcgozer.New(s.cfg.BitcoinURL)
+	default:
+		return nil, fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
+	}
+
 	return s, nil
 }
 
@@ -785,43 +816,9 @@ func (s *Server) Run(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
-	// Setup gozer
-	switch s.cfg.Network {
-	case "mainnet":
-		s.params = &chaincfg.MainNetParams
-	case "testnet3":
-		s.params = &chaincfg.TestNet3Params
-	case "localnet":
-		s.params = &chaincfg.RegressionNetParams
-	case "testnet4":
-		s.params = &chaincfg.TestNet4Params
-	default:
-		return fmt.Errorf("invalid network: %v", s.cfg.Network)
-	}
-
-	switch s.cfg.BitcoinSource {
-	case bitcoinSourceBlockstream:
-		var err error
-		s.mtx.Lock()
-		s.gozer, err = blockstream.New(s.params)
-		if err != nil {
-			s.mtx.Unlock()
-			return fmt.Errorf("could not setup %v blockstream: %w",
-				s.cfg.Network, err)
-		}
-		_ = s.gozer.Run(ctx, nil) // Nohthing to check
-		s.mtx.Unlock()
-	case bitcoinSourceTBC:
-		s.mtx.Lock()
-		s.gozer = tbcgozer.New(s.cfg.BitcoinURL)
-		err := s.gozer.Run(ctx, nil)
-		s.mtx.Unlock()
-		if err != nil {
-			return fmt.Errorf("could not setup %v tbc: %w",
-				s.cfg.Network, err)
-		}
-	default:
-		return fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
+	err := s.gozer.Run(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("gozer run: %w", err)
 	}
 
 	// HTTP server
@@ -906,7 +903,6 @@ func (s *Server) Run(pctx context.Context) error {
 
 	// Welcome user.
 
-	var err error
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()

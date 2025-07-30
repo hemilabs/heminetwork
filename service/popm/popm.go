@@ -235,6 +235,22 @@ func NewServer(cfg *Config) (*Server, error) {
 		return nil, err
 	}
 
+	switch s.cfg.BitcoinSource {
+	case bitcoinSourceTBC:
+		if s.cfg.BitcoinURL == "" {
+			return nil, fmt.Errorf("invalid bitcoin url")
+		}
+		s.gozer = tbcgozer.New(s.cfg.BitcoinURL)
+	case bitcoinSourceBlockstream:
+		s.gozer, err = blockstream.New(s.params)
+		if err != nil {
+			return nil, fmt.Errorf("could not setup %v blockstream: %w",
+				s.cfg.Network, err)
+		}
+	default:
+		return nil, fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
+	}
+
 	return s, nil
 }
 
@@ -880,6 +896,17 @@ func (s *Server) Run(pctx context.Context) error {
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()
 
+	err := s.gozer.Run(ctx, func() {
+		utxos, err := s.gozer.UtxosByAddress(ctx, true, s.btcAddress, 0, 100)
+		if err == nil {
+			log.Infof("confirmed bitcoin balance %v: %v",
+				s.btcAddress, gozer.BalanceFromUtxos(utxos))
+		}
+	})
+	if err != nil {
+		return fmt.Errorf("gozer run: %w", err)
+	}
+
 	// Prometheus
 	if s.cfg.PrometheusListenAddress != "" {
 		d, err := deucalion.New(&deucalion.Config{
@@ -927,42 +954,6 @@ func (s *Server) Run(pctx context.Context) error {
 			}
 			log.Infof("pprof server clean shutdown")
 		}()
-	}
-
-	var err error
-	switch s.cfg.BitcoinSource {
-	case bitcoinSourceTBC:
-		s.mtx.Lock()
-		s.gozer = tbcgozer.New(s.cfg.BitcoinURL)
-		err = s.gozer.Run(ctx, func() {
-			utxos, err := s.gozer.UtxosByAddress(ctx, true,
-				s.btcAddress, 0, 100)
-			if err == nil {
-				log.Infof("confirmed bitcoin balance %v: %v",
-					s.btcAddress, gozer.BalanceFromUtxos(utxos))
-			}
-		})
-		s.mtx.Unlock()
-		if err != nil {
-			return fmt.Errorf("could not setup %v tbc: %w",
-				s.cfg.Network, err)
-		}
-	case bitcoinSourceBlockstream:
-		s.mtx.Lock()
-		s.gozer, err = blockstream.New(s.params)
-		if err != nil {
-			s.mtx.Unlock()
-			return fmt.Errorf("could not setup %v blockstream: %w",
-				s.cfg.Network, err)
-		}
-		err := s.gozer.Run(ctx, nil)
-		s.mtx.Unlock()
-		if err != nil {
-			return fmt.Errorf("could not run %v blockstream: %w",
-				s.cfg.Network, err)
-		}
-	default:
-		return fmt.Errorf("invalid bitcoin source: %v", s.cfg.BitcoinSource)
 	}
 
 	s.wg.Add(1)
