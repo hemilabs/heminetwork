@@ -242,13 +242,16 @@ func writeHTTPError(w http.ResponseWriter, code int, httpError *HTTPError) {
 	}
 }
 
-func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
+func (s *Server) callOpgeth(pctx context.Context, request any) (any, error) {
 	log.Tracef("callOpgeth %T", request)
 	defer log.Tracef("callOpgeth exit %T", request)
 
 	if !s.Connected() {
 		return nil, errors.New("not connected to opgeth")
 	}
+
+	ctx, cancel := context.WithTimeout(pctx, gethapi.DefaultCommandTimeout)
+	defer cancel()
 
 	select {
 	case <-ctx.Done():
