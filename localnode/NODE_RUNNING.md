@@ -344,6 +344,17 @@ To access the nodes, you can use JSON-RPC or WebSockets exposed on the following
 | op-geth JSON-RPC      | `18546` |
 | op-geth WebSocket RPC | `28546` |
 
+## Updating your node
+
+The [localnode project](.) will always contain versions of Docker images that
+are stable releases and will be compatible with each other and the greater
+hemitwork.  Therefore, if you want to update your node, pull the update from 
+Github and simply re-run the [gen-files.sh](./gen-files.sh) script and the
+ appropriate compose file.  Any daemons that go away will not
+be run.  Any daemons that are added or updated will be run.  Datad irectories and
+default configs will be updated with the config files and scripts within the
+project.
+
 ## Peer-to-Peer (P2P)
 
 > [!TIP]
