@@ -68,7 +68,10 @@ func mockHttpServer() *httptest.Server {
 				panic(err)
 			}
 		case r.URL.Path == fmt.Sprintf("/block/%s", fakeHash):
-			response := map[string]uint64{"height": uint64(10)}
+			response := map[string]any{
+				"height":    uint64(10),
+				"timestamp": int64(15),
+			}
 			b, err := json.Marshal(response)
 			if err != nil {
 				panic(err)

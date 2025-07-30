@@ -786,7 +786,7 @@ func (s *Server) promPoll(pctx context.Context) error {
 			s.mtx.Unlock()
 			continue
 		}
-		if s.promPolling == true {
+		if s.promPolling {
 			s.mtx.Unlock()
 			continue
 		}

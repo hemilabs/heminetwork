@@ -318,7 +318,7 @@ func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Ha
 	return resp, nil
 }
 
-func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
+func (s *Server) gethBestHeightHash(pctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
 	log.Tracef("gethBestHeightHash")
 	defer log.Tracef("gethBestHeightHash exit")
 
@@ -329,6 +329,9 @@ func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Has
 	if err != nil {
 		return 0, nil, t, err
 	}
+
+	ctx, cancel := context.WithTimeout(pctx, gethapi.DefaultCommandTimeout)
+	defer cancel()
 	header, err := geth.HeaderByNumber(ctx, height)
 	if err != nil {
 		return 0, nil, t, fmt.Errorf("error calling opgeth: %w", err)
@@ -744,7 +747,7 @@ func (s *Server) promPoll(pctx context.Context) error {
 			s.mtx.Unlock()
 			continue
 		}
-		if s.promPolling == true {
+		if s.promPolling {
 			s.mtx.Unlock()
 			continue
 		}

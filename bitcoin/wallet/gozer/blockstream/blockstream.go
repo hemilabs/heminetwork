@@ -71,8 +71,8 @@ func (bs *blockstreamGozer) BestHeightHashTime(ctx context.Context) (uint64, *ch
 		return 0, nil, timestamp, err
 	}
 	if t, ok := bi["timestamp"]; ok {
-		if ts, ok := t.(int64); ok && ts > 0 {
-			timestamp = time.Unix(ts, 0)
+		if ts, ok := t.(float64); ok && ts > 0 {
+			timestamp = time.Unix(int64(ts), 0)
 		} else {
 			return 0, nil, timestamp, fmt.Errorf("invalid timestamp")
 		}
