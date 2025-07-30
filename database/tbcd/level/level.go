@@ -26,10 +26,10 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
-	"github.com/hemilabs/heminetwork/database"
-	"github.com/hemilabs/heminetwork/database/level"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/v2/database"
+	"github.com/hemilabs/heminetwork/v2/database/level"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/hemi"
 )
 
 // Locking order:

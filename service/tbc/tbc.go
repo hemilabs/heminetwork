@@ -34,16 +34,16 @@ import (
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/syndtr/goleveldb/leveldb"
 
-	"github.com/hemilabs/heminetwork/api"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/database"
-	dbnames "github.com/hemilabs/heminetwork/database/level"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/database/tbcd/level"
-	"github.com/hemilabs/heminetwork/service/deucalion"
-	"github.com/hemilabs/heminetwork/service/pprof"
-	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
-	"github.com/hemilabs/heminetwork/ttl"
+	"github.com/hemilabs/heminetwork/v2/api"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/database"
+	dbnames "github.com/hemilabs/heminetwork/v2/database/level"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/v2/service/deucalion"
+	"github.com/hemilabs/heminetwork/v2/service/pprof"
+	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
+	"github.com/hemilabs/heminetwork/v2/ttl"
 )
 
 const (

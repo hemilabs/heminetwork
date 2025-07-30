@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/hemilabs/heminetwork/cmd/btctool/httpclient"
+	"github.com/hemilabs/heminetwork/v2/cmd/btctool/httpclient"
 )
 
 var (

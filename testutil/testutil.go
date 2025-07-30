@@ -11,7 +11,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/phayes/freeport"
 
-	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/v2/hemi"
 )
 
 // MakeSharedKeystones creates a matching map and slice of N keystones.

@@ -40,7 +40,6 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient/gethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/go-test/deep"
-
 	mybindings "github.com/hemilabs/heminetwork/e2e/monitor/bindings"
 	"github.com/hemilabs/heminetwork/hemi"
 )

@@ -15,7 +15,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 func mockPeerServer(ctx context.Context, id int, listener net.Listener, msgCh chan string) error {

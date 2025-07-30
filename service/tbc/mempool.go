@@ -15,7 +15,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
 var MaxTxVersion = int32(2) // XXX this should not be a global

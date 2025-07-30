@@ -8,8 +8,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/hemilabs/heminetwork/cmd/btctool/bdf"
-	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
+	"github.com/hemilabs/heminetwork/v2/cmd/btctool/bdf"
+	"github.com/hemilabs/heminetwork/v2/cmd/btctool/blockstream"
 )
 
 func GetAndStoreBlockHeader(ctx context.Context, height int, dir string) (string, error) {

@@ -20,7 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sethvargo/go-retry"
 
-	"github.com/hemilabs/heminetwork/bitcoin"
+	"github.com/hemilabs/heminetwork/v2/bitcoin"
 )
 
 var log = loggo.GetLogger("electrs")

@@ -23,8 +23,8 @@ import (
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/service/deucalion"
-	"github.com/hemilabs/heminetwork/service/pprof"
+	"github.com/hemilabs/heminetwork/v2/service/deucalion"
+	"github.com/hemilabs/heminetwork/v2/service/pprof"
 )
 
 type Node struct {

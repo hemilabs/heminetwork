@@ -41,7 +41,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/hemilabs/heminetwork/config"
+	"github.com/hemilabs/heminetwork/v2/config"
 )
 
 const (

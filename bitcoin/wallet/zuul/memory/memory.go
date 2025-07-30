@@ -13,7 +13,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 )
 
 // memoryZuul is an in-memory implementation of [zuul.Zuul].

@@ -20,8 +20,8 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/syndtr/goleveldb/leveldb"
 
-	"github.com/hemilabs/heminetwork/database"
-	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/v2/database"
+	"github.com/hemilabs/heminetwork/v2/hemi"
 )
 
 type InsertType int

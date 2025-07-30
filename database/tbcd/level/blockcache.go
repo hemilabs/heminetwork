@@ -11,7 +11,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
-	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
 var blockSize = 1677721 // ~1.6MB rough size of a mainnet block as of Jan 2025

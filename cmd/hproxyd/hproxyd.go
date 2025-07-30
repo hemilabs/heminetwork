@@ -15,9 +15,9 @@ import (
 
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/config"
-	"github.com/hemilabs/heminetwork/service/hproxy"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/v2/config"
+	"github.com/hemilabs/heminetwork/v2/service/hproxy"
+	"github.com/hemilabs/heminetwork/v2/version"
 )
 
 const (

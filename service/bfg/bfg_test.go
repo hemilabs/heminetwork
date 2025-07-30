@@ -20,12 +20,12 @@ import (
 	"github.com/juju/loggo"
 	"github.com/phayes/freeport"
 
-	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/service/popm"
-	"github.com/hemilabs/heminetwork/testutil"
-	"github.com/hemilabs/heminetwork/testutil/mock"
+	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/service/popm"
+	"github.com/hemilabs/heminetwork/v2/testutil"
+	"github.com/hemilabs/heminetwork/v2/testutil/mock"
 )
 
 const wantedKeystones = 10

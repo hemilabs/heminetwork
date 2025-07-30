@@ -18,7 +18,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
 )
 
 func mockHttpServer() *httptest.Server {

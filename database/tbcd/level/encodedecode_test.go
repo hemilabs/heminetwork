@@ -10,9 +10,9 @@ import (
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 func TestKeystoneEncodeDecode(t *testing.T) {

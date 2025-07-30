@@ -18,9 +18,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	client "github.com/btcsuite/btcd/rpcclient"
 	"github.com/gosuri/uilive"
-	"github.com/jedib0t/go-pretty/v6/table"
-
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/jedib0t/go-pretty/v6/table"
 )
 
 const (

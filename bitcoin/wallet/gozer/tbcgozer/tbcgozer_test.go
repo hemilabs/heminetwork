@@ -16,9 +16,9 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
-	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/service/tbc"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 func TestTBCGozer(t *testing.T) {

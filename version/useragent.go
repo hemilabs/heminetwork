@@ -26,7 +26,7 @@ var (
 	//
 	// This should be set at link-time using:
 	//
-	//	-ldflags "-X 'github.com/hemilabs/heminetwork/version.Brand=my brand'"
+	//	-ldflags "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=my brand'"
 	Brand string
 
 	// Component is an identifier for the binary.

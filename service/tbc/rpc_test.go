@@ -29,15 +29,15 @@ import (
 	"github.com/juju/loggo"
 	"github.com/testcontainers/testcontainers-go"
 
-	"github.com/hemilabs/heminetwork/api"
-	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/bitcoin"
-	"github.com/hemilabs/heminetwork/database"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/v2/api"
+	"github.com/hemilabs/heminetwork/v2/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/bitcoin"
+	"github.com/hemilabs/heminetwork/v2/database"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/hemi/pop"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 func bytes2Tx(b []byte) (*wire.MsgTx, error) {

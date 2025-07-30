@@ -36,13 +36,13 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/hemilabs/heminetwork/api"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/bitcoin"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/database/tbcd/level"
-	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/v2/api"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/bitcoin"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/v2/hemi/pop"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 const (

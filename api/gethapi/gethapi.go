@@ -7,8 +7,8 @@ package gethapi
 import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
-	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/v2/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/hemi"
 )
 
 // TODO: Find better solution

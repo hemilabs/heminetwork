@@ -18,11 +18,11 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
 
-	"github.com/hemilabs/heminetwork/database"
-	"github.com/hemilabs/heminetwork/database/level"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/v2/database"
+	"github.com/hemilabs/heminetwork/v2/database/level"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 func TestMD(t *testing.T) {

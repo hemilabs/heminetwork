@@ -14,10 +14,10 @@ import (
 
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/config"
-	"github.com/hemilabs/heminetwork/service/bfg"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
+	"github.com/hemilabs/heminetwork/v2/config"
+	"github.com/hemilabs/heminetwork/v2/service/bfg"
+	"github.com/hemilabs/heminetwork/v2/version"
 )
 
 const (

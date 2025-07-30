@@ -14,8 +14,8 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/go-test/deep"
 
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/vinzclortho"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 )
 
 type keyInfo struct {

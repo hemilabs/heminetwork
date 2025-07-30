@@ -10,7 +10,7 @@ import (
 	"maps"
 	"reflect"
 
-	"github.com/hemilabs/heminetwork/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/api/protocol"
 )
 
 const (

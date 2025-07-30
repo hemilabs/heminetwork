@@ -11,7 +11,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
 func TestNewOutpoint(t *testing.T) {

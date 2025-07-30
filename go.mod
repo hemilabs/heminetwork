@@ -1,4 +1,4 @@
-module github.com/hemilabs/heminetwork
+module github.com/hemilabs/heminetwork/v2
 
 go 1.24.2
 
