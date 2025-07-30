@@ -206,8 +206,12 @@ func (bs *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32
 	}, err
 }
 
-// Run returns a new Blockstream Gozer.
-func Run(params *chaincfg.Params) (gozer.Gozer, error) {
+func (bs *blockstreamGozer) Run(_ context.Context, _ func()) error {
+	return nil
+}
+
+// New returns a new Blockstream Gozer.
+func New(params *chaincfg.Params) (gozer.Gozer, error) {
 	bs := &blockstreamGozer{}
 	switch params {
 	case &chaincfg.MainNetParams:

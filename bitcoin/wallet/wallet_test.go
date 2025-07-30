@@ -130,7 +130,8 @@ func TestIntegration(t *testing.T) {
 	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, nil, 0, 10)
 	defer mtbc.Shutdown()
 
-	tg, err := tbcgozer.Run(ctx, mtbc.URL(), nil)
+	tg := tbcgozer.New(mtbc.URL())
+	err = tg.Run(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

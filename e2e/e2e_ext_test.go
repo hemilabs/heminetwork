@@ -154,7 +154,8 @@ func createTbcServer(ctx context.Context, t *testing.T, levelDbHome string) (*tb
 		net.JoinHostPort("localhost", fmt.Sprintf("%d", port)))
 
 	// Connect with gozer to ensure connectedness
-	g, err := tbcgozer.Run(ctx, tbcPublicUrl, nil)
+	g := tbcgozer.New(tbcPublicUrl)
+	err = g.Run(ctx, nil)
 	if err != nil {
 		panic(err)
 	}

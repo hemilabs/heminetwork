@@ -63,7 +63,8 @@ func TestTBCGozer(t *testing.T) {
 
 	time.Sleep(1 * time.Second)
 
-	b, err := Run(ctx, fmt.Sprintf("http://%s/v1/ws", tbcCfg.ListenAddress), nil)
+	b := New(fmt.Sprintf("http://%s/v1/ws", tbcCfg.ListenAddress))
+	err = b.Run(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

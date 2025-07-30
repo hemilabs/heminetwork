@@ -156,6 +156,8 @@ func (s *Server) geth() (*ethclient.Client, error) {
 }
 
 func (s *Server) Connected() bool {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
 	if s.gozer != nil {
 		return s.gozer.Connected()
 	}
@@ -699,6 +701,16 @@ func (s *Server) promPoll(ctx context.Context) error {
 		case <-ticker.C:
 		}
 
+		s.mtx.Lock()
+		gozer := s.gozer
+		if gozer == nil {
+			// Not ready
+			s.promHealth = health{}
+			s.mtx.Unlock()
+			continue
+		}
+		s.mtx.Unlock()
+
 		// We should consider moving this call outside of this loop
 		// since it may cause long delays in status updates.
 		var h health
@@ -790,14 +802,20 @@ func (s *Server) Run(pctx context.Context) error {
 	switch s.cfg.BitcoinSource {
 	case bitcoinSourceBlockstream:
 		var err error
-		s.gozer, err = blockstream.Run(s.params)
+		s.mtx.Lock()
+		s.gozer, err = blockstream.New(s.params)
 		if err != nil {
+			s.mtx.Unlock()
 			return fmt.Errorf("could not setup %v blockstream: %w",
 				s.cfg.Network, err)
 		}
+		_ = s.gozer.Run(ctx, nil) // Nohthing to check
+		s.mtx.Unlock()
 	case bitcoinSourceTBC:
-		var err error
-		s.gozer, err = tbcgozer.Run(ctx, s.cfg.BitcoinURL, nil)
+		s.mtx.Lock()
+		s.gozer = tbcgozer.New(s.cfg.BitcoinURL)
+		err := s.gozer.Run(ctx, nil)
+		s.mtx.Unlock()
 		if err != nil {
 			return fmt.Errorf("could not setup %v tbc: %w",
 				s.cfg.Network, err)

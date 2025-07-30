@@ -58,16 +58,17 @@ type tbcGozer struct {
 
 var _ gozer.Gozer = (*tbcGozer)(nil)
 
-// Run returns and starts a new TBC Gozer.
-func Run(ctx context.Context, tbcUrl string, connected func()) (gozer.Gozer, error) {
-	t := &tbcGozer{
+func New(tbcUrl string) gozer.Gozer {
+	return &tbcGozer{
 		url:   tbcUrl,
 		cmdCh: make(chan tbcCmd, 10),
 	}
+}
 
+// Run returns and starts a new TBC Gozer.
+func (t *tbcGozer) Run(ctx context.Context, connected func()) error {
 	go t.run(ctx, connected)
-
-	return t, nil
+	return nil
 }
 
 func (t *tbcGozer) Connected() bool {
