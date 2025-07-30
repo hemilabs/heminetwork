@@ -31,12 +31,12 @@ import (
 	"github.com/go-test/deep"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/bitcoin"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/v2/bitcoin"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/hemi/pop"
+	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 type block struct {

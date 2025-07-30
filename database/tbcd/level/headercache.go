@@ -10,7 +10,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
-	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
 const blockHeaderSize = 8 + 32 + 80 + 8 // rough size of tbcd.BlockHeader

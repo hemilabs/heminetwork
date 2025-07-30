@@ -18,7 +18,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
+	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
 )
 
 const (

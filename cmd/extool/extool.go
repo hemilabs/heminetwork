@@ -16,8 +16,8 @@ import (
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
 
-	"github.com/hemilabs/heminetwork/hemi/electrs"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/v2/hemi/electrs"
+	"github.com/hemilabs/heminetwork/v2/version"
 )
 
 func init() {

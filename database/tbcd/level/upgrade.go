@@ -22,9 +22,9 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
-	"github.com/hemilabs/heminetwork/database/level"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/rawdb"
+	"github.com/hemilabs/heminetwork/v2/database/level"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/rawdb"
 )
 
 var (

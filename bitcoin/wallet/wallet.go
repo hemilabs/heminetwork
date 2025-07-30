@@ -15,11 +15,11 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/btcsuite/btcwallet/wallet/txsizes"
 
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/hemi/pop"
 )
 
 // UtxoPickerMultiple is a simple utxo picker that returns a random set of utxos from

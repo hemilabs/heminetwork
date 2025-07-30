@@ -11,7 +11,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
-	"github.com/hemilabs/heminetwork/api"
+	"github.com/hemilabs/heminetwork/v2/api"
 )
 
 const (

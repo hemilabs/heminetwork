@@ -35,16 +35,16 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 
-	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/config"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/database/tbcd/level"
-	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/hemilabs/heminetwork/service/hproxy"
-	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/hemilabs/heminetwork/service/tbc/peer"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/v2/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/config"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/v2/hemi/pop"
+	"github.com/hemilabs/heminetwork/v2/service/hproxy"
+	"github.com/hemilabs/heminetwork/v2/service/tbc"
+	"github.com/hemilabs/heminetwork/v2/service/tbc/peer"
+	"github.com/hemilabs/heminetwork/v2/version"
 )
 
 const (

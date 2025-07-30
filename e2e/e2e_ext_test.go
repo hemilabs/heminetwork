@@ -25,15 +25,15 @@ import (
 	"github.com/go-test/deep"
 	"github.com/phayes/freeport"
 
-	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/database/tbcd/level"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/service/bfg"
-	"github.com/hemilabs/heminetwork/service/tbc"
-	"github.com/hemilabs/heminetwork/testutil"
-	"github.com/hemilabs/heminetwork/testutil/mock"
+	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer/tbcgozer"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/service/bfg"
+	"github.com/hemilabs/heminetwork/v2/service/tbc"
+	"github.com/hemilabs/heminetwork/v2/testutil"
+	"github.com/hemilabs/heminetwork/v2/testutil/mock"
 )
 
 func nextPort(ctx context.Context, t *testing.T) int {

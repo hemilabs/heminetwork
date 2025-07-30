@@ -7,8 +7,8 @@ package bfgapi
 import (
 	"fmt"
 
-	"github.com/hemilabs/heminetwork/api"
-	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/v2/api"
+	"github.com/hemilabs/heminetwork/v2/hemi"
 )
 
 const (

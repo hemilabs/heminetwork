@@ -20,9 +20,9 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
 
-	"github.com/hemilabs/heminetwork/api/protocol"
-	"github.com/hemilabs/heminetwork/api/tbcapi"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/api/protocol"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
 )
 
 const (

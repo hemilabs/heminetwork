@@ -15,13 +15,13 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/zuul/memory"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/testutil/mock"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer/tbcgozer"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/vinzclortho"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul/memory"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/testutil/mock"
 )
 
 func digest256(x []byte) []byte {

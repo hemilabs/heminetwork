@@ -29,12 +29,12 @@ import (
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 
-	"github.com/hemilabs/heminetwork/cmd/btctool/bdf"
-	"github.com/hemilabs/heminetwork/cmd/btctool/blockstream"
-	"github.com/hemilabs/heminetwork/cmd/btctool/btctool"
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/hemi/pop"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/v2/cmd/btctool/bdf"
+	"github.com/hemilabs/heminetwork/v2/cmd/btctool/blockstream"
+	"github.com/hemilabs/heminetwork/v2/cmd/btctool/btctool"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/hemi/pop"
+	"github.com/hemilabs/heminetwork/v2/version"
 )
 
 func parseTxFromHex(txs string) (*btcutil.Tx, error) {

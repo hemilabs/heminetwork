@@ -26,14 +26,14 @@ import (
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/hemilabs/heminetwork/api/bfgapi"
-	"github.com/hemilabs/heminetwork/api/gethapi"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/blockstream"
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
-	"github.com/hemilabs/heminetwork/hemi"
-	"github.com/hemilabs/heminetwork/service/deucalion"
-	"github.com/hemilabs/heminetwork/service/pprof"
+	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
+	"github.com/hemilabs/heminetwork/v2/api/gethapi"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer/blockstream"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer/tbcgozer"
+	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/service/deucalion"
+	"github.com/hemilabs/heminetwork/v2/service/pprof"
 )
 
 const (

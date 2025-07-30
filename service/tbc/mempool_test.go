@@ -18,8 +18,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
 
-	"github.com/hemilabs/heminetwork/database/tbcd"
-	"github.com/hemilabs/heminetwork/testutil"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 func TestMempoolFees(t *testing.T) {

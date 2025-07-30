@@ -11,7 +11,7 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 
-	"github.com/hemilabs/heminetwork/api/tbcapi"
+	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 )
 
 const (

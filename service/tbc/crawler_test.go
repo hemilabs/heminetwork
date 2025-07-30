@@ -7,7 +7,7 @@ package tbc
 import (
 	"testing"
 
-	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
 // func TestIndex(t *testing.T) {

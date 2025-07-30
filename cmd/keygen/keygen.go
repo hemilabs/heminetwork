@@ -17,9 +17,9 @@ import (
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/tyler-smith/go-bip39"
 
-	"github.com/hemilabs/heminetwork/bitcoin/wallet/vinzclortho"
-	"github.com/hemilabs/heminetwork/ethereum"
-	"github.com/hemilabs/heminetwork/version"
+	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/vinzclortho"
+	"github.com/hemilabs/heminetwork/v2/ethereum"
+	"github.com/hemilabs/heminetwork/v2/version"
 )
 
 var (
