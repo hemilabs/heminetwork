@@ -564,6 +564,15 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	}
 	defer s.opgethClient.Close()
 
+	s.mtx.Lock()
+	s.promHealth.GethConnected = true
+	s.mtx.Unlock()
+	defer func() {
+		s.mtx.Lock()
+		s.promHealth.GethConnected = false
+		s.mtx.Unlock()
+	}()
+
 	log.Debugf("connected to opgeth: %s", s.cfg.OpgethURL)
 
 	// Create a context to exit function.

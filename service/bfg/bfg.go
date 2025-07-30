@@ -124,7 +124,6 @@ type Server struct {
 	promCollectors  []prometheus.Collector
 	promPollVerbose bool // set to true to print stats during poll
 	isRunning       bool
-	gethConnected   bool // connected to opgeth
 	cmdsProcessed   prometheus.Counter
 	promHealth      health
 }
@@ -147,9 +146,10 @@ func NewServer(cfg *Config) (*Server, error) {
 }
 
 func (s *Server) Connected() bool {
-	s.mtx.RLock()
-	defer s.mtx.RUnlock()
-	return s.gethConnected
+	if s.gozer != nil {
+		return s.gozer.Connected()
+	}
+	return false
 }
 
 func random(n int) []byte {
@@ -553,11 +553,11 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	defer s.opgethClient.Close()
 
 	s.mtx.Lock()
-	s.gethConnected = true
+	s.promHealth.GethConnected = true
 	s.mtx.Unlock()
 	defer func() {
 		s.mtx.Lock()
-		s.gethConnected = false
+		s.promHealth.GethConnected = false
 		s.mtx.Unlock()
 	}()
 
@@ -634,7 +634,7 @@ func (s *Server) Collectors() []prometheus.Collector {
 func (s *Server) promGethConnected() float64 {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
-	if s.gethConnected {
+	if s.promHealth.GethConnected {
 		return 1
 	}
 	return 0
@@ -711,7 +711,6 @@ func (s *Server) promPoll(ctx context.Context) error {
 		}
 
 		s.mtx.Lock()
-		h.GethConnected = s.gethConnected
 		s.promHealth = h
 		s.mtx.Unlock()
 
