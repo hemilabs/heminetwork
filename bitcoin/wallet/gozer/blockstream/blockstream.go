@@ -83,7 +83,7 @@ func (bs *blockstreamGozer) BestHeightHashTime(ctx context.Context) (uint64, *ch
 		}
 	}
 
-	return 0, nil, timestamp, fmt.Errorf("invalid height")
+	return 0, nil, time.Time{}, fmt.Errorf("invalid height")
 }
 
 func (bs *blockstreamGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
