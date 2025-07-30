@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -599,6 +600,11 @@ func (s *Server) Collectors() []prometheus.Collector {
 		// Naming: https://prometheus.io/docs/practices/naming/
 		s.promCollectors = []prometheus.Collector{
 			s.cmdsProcessed,
+			newValueVecFunc(prometheus.NewGaugeVec(prometheus.GaugeOpts{
+				Namespace: s.cfg.PrometheusNamespace,
+				Name:      "ethereum_block_height",
+				Help:      "Best ethereum block canonical height and hash",
+			}, []string{"hash", "timestamp"}), s.promBlockHeader),
 			prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 				Namespace: s.cfg.PrometheusNamespace,
 				Name:      "geth_connected",
@@ -633,6 +639,17 @@ func (s *Server) promGozerConnected() float64 {
 		return 1
 	}
 	return 0
+}
+
+func (s *Server) promBlockHeader(m *prometheus.GaugeVec) {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+
+	m.Reset()
+	m.With(prometheus.Labels{
+		"hash":      s.promHealth.EthereumBestHash,
+		"timestamp": strconv.Itoa(int(s.promHealth.EthereumBestTime.Unix())),
+	}).Set(deucalion.Uint64ToFloat(s.promHealth.EthereumBestHeight))
 }
 
 func (s *Server) promPoll(ctx context.Context) error {
