@@ -5,10 +5,16 @@
 package gethapi
 
 import (
+	"time"
+
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/hemi"
+)
+
+const (
+	DefaultCommandTimeout = 5 * time.Second
 )
 
 // TODO: Find better solution

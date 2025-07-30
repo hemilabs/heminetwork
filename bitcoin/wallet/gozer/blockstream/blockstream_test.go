@@ -7,6 +7,7 @@ package blockstream
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +24,7 @@ import (
 
 func mockHttpServer() *httptest.Server {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fakeHash := "00000000c5cbf1fcdc75539ac75fe8a98417976e548197355b3e5f6c4e884a17"
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/address/") && strings.HasSuffix(r.URL.Path, "/utxo"):
 			utxos := []map[string]interface{}{
@@ -57,6 +59,25 @@ func mockHttpServer() *httptest.Server {
 			response := []byte(`1000`)
 			w.WriteHeader(http.StatusOK)
 			if _, err := w.Write(response); err != nil {
+				panic(err)
+			}
+		case r.URL.Path == "/blocks/tip/hash":
+			response := fakeHash
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write([]byte(response)); err != nil {
+				panic(err)
+			}
+		case r.URL.Path == fmt.Sprintf("/block/%s", fakeHash):
+			response := map[string]any{
+				"height":    uint64(10),
+				"timestamp": int64(15),
+			}
+			b, err := json.Marshal(response)
+			if err != nil {
+				panic(err)
+			}
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write(b); err != nil {
 				panic(err)
 			}
 		default:
@@ -102,9 +123,12 @@ func TestBlockstreamGozer(t *testing.T) {
 	}
 	t.Logf("balance %v: %v", testAddr, gozer.BalanceFromUtxos(utxos))
 
-	height, err := b.BtcHeight(ctx)
+	height, _, timestamp, err := b.BestHeightHashTime(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if timestamp.Unix() == 0 {
+		t.Fatal("invalid timestamp")
 	}
 	t.Logf("BTC tip height: %v", height)
 }

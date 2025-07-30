@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -46,20 +47,45 @@ func (bs *blockstreamGozer) Connected() bool {
 	return true // XXX should we try to connect first?
 }
 
-func (bs *blockstreamGozer) BtcHeight(ctx context.Context) (uint64, error) {
-	u := fmt.Sprintf("%v/blocks/tip/height", bs.url)
-	rawHeight, err := httpclient.Request(ctx, "GET", u, nil)
+func (bs *blockstreamGozer) BestHeightHashTime(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
+	var timestamp time.Time
+	u := fmt.Sprintf("%v/blocks/tip/hash", bs.url)
+	rawHash, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
-		return 0, fmt.Errorf("request: %w", err)
+		return 0, nil, timestamp, fmt.Errorf("request: %w", err)
+	}
+	hash, err := chainhash.NewHashFromStr(string(rawHash))
+	if err != nil {
+		return 0, nil, timestamp, err
 	}
 
-	var height uint64
-	err = json.Unmarshal(rawHeight, &height)
+	u = fmt.Sprintf("%v/block/%v", bs.url, hash)
+	blockInfo, err := httpclient.Request(ctx, "GET", u, nil)
 	if err != nil {
-		return 0, err
+		return 0, nil, timestamp, fmt.Errorf("request: %w", err)
 	}
 
-	return height, nil
+	var bi map[string]any
+	err = json.Unmarshal(blockInfo, &bi)
+	if err != nil {
+		return 0, nil, timestamp, err
+	}
+	if t, ok := bi["timestamp"]; ok {
+		if ts, ok := t.(float64); ok && ts > 0 {
+			timestamp = time.Unix(int64(ts), 0)
+		} else {
+			return 0, nil, timestamp, fmt.Errorf("invalid timestamp")
+		}
+	} else {
+		return 0, nil, timestamp, fmt.Errorf("invalid timestamp")
+	}
+	if h, ok := bi["height"]; ok {
+		if height, ok := h.(float64); ok && height >= 0 {
+			return uint64(height), hash, timestamp, nil
+		}
+	}
+
+	return 0, nil, time.Time{}, fmt.Errorf("invalid height")
 }
 
 func (bs *blockstreamGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
@@ -182,8 +208,12 @@ func (bs *blockstreamGozer) KeystonesByHeight(ctx context.Context, height uint32
 	}, err
 }
 
-// Run returns a new Blockstream Gozer.
-func Run(params *chaincfg.Params) (gozer.Gozer, error) {
+func (bs *blockstreamGozer) Run(_ context.Context, _ func()) error {
+	return nil
+}
+
+// New returns a new Blockstream Gozer.
+func New(params *chaincfg.Params) (gozer.Gozer, error) {
 	bs := &blockstreamGozer{}
 	switch params {
 	case &chaincfg.MainNetParams:
