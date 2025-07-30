@@ -326,7 +326,7 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		  data: '0x70a08231000000000000000000000000%s',
 		});
 		console.log(Number.parseInt(hexValue, 16));
-	`, ethAddress)
+	`, ethAddress[2:])
 
 	tipJs := `
 		console.log(eth.blockNumber)
