@@ -20,7 +20,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/juju/loggo"
@@ -33,7 +32,6 @@ import (
 	"github.com/hemilabs/heminetwork/bitcoin/wallet/gozer/tbcgozer"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/service/deucalion"
-	"github.com/hemilabs/heminetwork/service/hproxy"
 	"github.com/hemilabs/heminetwork/service/pprof"
 )
 
@@ -46,6 +44,8 @@ const (
 
 	defaultKeystoneCount = 10
 
+	maxBlockAge = 30 * time.Second // XXX make this configurable?
+
 	// finality short circuit constants
 	ultraFinalityDepth = 20
 	minSearchDepth     = -100 // PNOOMA
@@ -57,12 +57,13 @@ const (
 var log = loggo.GetLogger(appName)
 
 type health struct {
-	BitcoinBestHeight  uint64 `json:"bitcoin_best_height"`
-	BitcoinBestHash    string `json:"bitcoin_best_hash"`
-	EthereumBestHeight uint64 `json:"ethereum_best_height"`
-	EthereumBestHash   string `json:"ethereum_best_hash"`
-	GozerConnected     bool   `json:"gozer_connected"`
-	GethConnected      bool   `json:"geth_connected"`
+	BitcoinBestHeight  uint64    `json:"bitcoin_best_height"`
+	BitcoinBestHash    string    `json:"bitcoin_best_hash"`
+	EthereumBestHeight uint64    `json:"ethereum_best_height"`
+	EthereumBestHash   string    `json:"ethereum_best_hash"`
+	EthereumBestTime   time.Time `json:"ethereum_best_time"`
+	GozerConnected     bool      `json:"gozer_connected"`
+	GethConnected      bool      `json:"geth_connected"`
 }
 
 type HTTPError struct {
@@ -116,7 +117,6 @@ type Server struct {
 
 	// opgeth
 	opgethClient *ethclient.Client
-	ethPoker     hproxy.Proxy // XXX is the poker necessary for health?
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -140,7 +140,6 @@ func NewServer(cfg *Config) (*Server, error) {
 			Help:      "The total number of successful web commands",
 		}),
 	}
-	s.ethPoker = hproxy.NewEthereumProxy(s.ethHealth)
 
 	return s, nil
 }
@@ -225,14 +224,6 @@ func (s *Server) callOpgeth(ctx context.Context, request any) (any, error) {
 				return nil, fmt.Errorf("error calling opgeth: %w", err)
 			}
 			return &resp, nil
-		case gethapi.BlockBestRequest:
-			height := big.NewInt(int64(rpc.LatestBlockNumber))
-			latest, err := s.opgethClient.BlockByNumber(ctx, height)
-			if err != nil {
-				return nil, fmt.Errorf("error calling opgeth: %w", err)
-			}
-
-			return latest, nil
 		default:
 			return nil, fmt.Errorf("unknown opgeth command: %T", request)
 		}
@@ -275,26 +266,26 @@ func (s *Server) opgethL2KeystoneValidity(ctx context.Context, hash chainhash.Ha
 	return resp, nil
 }
 
-func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, error) {
+func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
 	log.Tracef("gethBestHeightHash")
 	defer log.Tracef("gethBestHeightHash exit")
 
-	rp, err := s.callOpgeth(ctx, gethapi.BlockBestRequest{})
+	var t time.Time
+
+	height := big.NewInt(int64(rpc.LatestBlockNumber))
+	header, err := s.opgethClient.HeaderByNumber(ctx, height)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, t, fmt.Errorf("error calling opgeth: %w", err)
 	}
-	resp, ok := rp.(*types.Block)
-	if !ok {
-		return 0, nil, fmt.Errorf("invalid response type: %T", rp)
-	}
-	commonHash := resp.Hash()
+	commonHash := header.Hash()
 	ch, err := chainhash.NewHash(commonHash[:])
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, t, err
 	}
-	h := resp.Number().Uint64()
+	h := header.Number.Uint64()
+	t = time.Unix(int64(header.Time), 0)
 
-	return h, ch, nil
+	return h, ch, t, nil
 }
 
 // When enabled, short-circuiting will check for the latest keystones to achieve
@@ -545,27 +536,6 @@ func (s *Server) promRunning() float64 {
 	return 0
 }
 
-func (s *Server) ethHealth(ctx context.Context) error {
-	const maxBlockAge = 30 * time.Second // TODO: make this configurable?
-	res, err := s.callOpgeth(ctx, gethapi.BlockBestRequest{})
-	if err != nil {
-		return err
-	}
-
-	block, ok := res.(*types.Block)
-	if !ok {
-		return fmt.Errorf("unexpected type: %T", res)
-	}
-
-	timestamp := time.Unix(int64(block.Time()), 0)
-	if age := time.Since(timestamp); age > maxBlockAge {
-		return fmt.Errorf("eth_getBlockByNumber timestamp "+
-			"too old: %v (%v ago)", timestamp, age)
-	}
-
-	return nil
-}
-
 func (s *Server) connectOpgeth(pctx context.Context) error {
 	log.Tracef("connectOpgeth")
 	defer log.Tracef("connectOpgeth exit")
@@ -686,16 +656,21 @@ func (s *Server) promPoll(ctx context.Context) error {
 		} else {
 			h.BitcoinBestHeight = 0
 			h.BitcoinBestHash = ""
-			log.Errorf("%w", err)
+			log.Debugf("btc height hash: %v", err)
 		}
 		h.GozerConnected = s.gozer.Connected()
 
-		if height, hash, err := s.gethBestHeightHash(ctx); err == nil {
+		if height, hash, t, err := s.gethBestHeightHash(ctx); err == nil {
 			h.EthereumBestHeight = height
 			h.EthereumBestHash = hash.String()
+			h.EthereumBestTime = t
+			h.GethConnected = true
 		} else {
+			log.Debugf("geth height hash: %v", err)
 			h.EthereumBestHeight = 0
 			h.EthereumBestHash = ""
+			h.EthereumBestTime = time.Time{}
+			h.GethConnected = false
 		}
 
 		s.mtx.Lock()
@@ -711,13 +686,13 @@ func (s *Server) promPoll(ctx context.Context) error {
 	}
 }
 
-func (s *Server) isHealthy(ctx context.Context) bool {
-	// XXX probably want to do this periodically and store the result
-	// rather than query opgeth every call
-	if err := s.ethPoker.Poke(ctx); err != nil {
+func (s *Server) isHealthy(_ context.Context) bool {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if age := time.Since(s.promHealth.EthereumBestTime); age > maxBlockAge ||
+		!s.promHealth.GozerConnected || !s.promHealth.GethConnected {
 		return false
 	}
-
 	return true
 }
 

@@ -36,5 +36,3 @@ type L2KeystoneLatestResponse struct {
 	L2Keystones []hemi.L2Keystone `json:"keystones"`
 	Error       *protocol.Error   `json:"error,omitempty"`
 }
-
-type BlockBestRequest struct{}

@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	mathrand "math/rand/v2"
 	"strings"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	dcrsecpk256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -55,16 +57,18 @@ const (
 	defaultL2KeystonePollTimeout  = 13 * time.Second
 	defaultL2KeystoneRetryTimeout = 15 * time.Second
 
-	minRelayFee = 1 // sats/byte
+	minRelayFee = 1                // sats/byte
+	maxBlockAge = 30 * time.Second // XXX make this configurable?
 )
 
 type health struct {
-	BitcoinBestHeight  uint64 `json:"bitcoin_best_height"`
-	BitcoinBestHash    string `json:"bitcoin_best_hash"`
-	EthereumBestHeight uint64 `json:"ethereum_best_height"`
-	EthereumBestHash   string `json:"ethereum_best_hash"`
-	GozerConnected     bool   `json:"gozer_connected"`
-	GethConnected      bool   `json:"geth_connected"`
+	BitcoinBestHeight  uint64    `json:"bitcoin_best_height"`
+	BitcoinBestHash    string    `json:"bitcoin_best_hash"`
+	EthereumBestHeight uint64    `json:"ethereum_best_height"`
+	EthereumBestHash   string    `json:"ethereum_best_hash"`
+	EthereumBestTime   time.Time `json:"ethereum_best_time"`
+	GozerConnected     bool      `json:"gozer_connected"`
+	GethConnected      bool      `json:"geth_connected"`
 }
 
 var log = loggo.GetLogger("popm")
@@ -153,7 +157,6 @@ type Server struct {
 	// Prometheus
 	isRunning       bool
 	promCollectors  []prometheus.Collector
-	gethConnected   bool
 	promHealth      health
 	promPollVerbose bool // set to true to print stats during poll
 
@@ -336,7 +339,8 @@ func (s *Server) latestKeystones(ctx context.Context, count int) (*gethapi.L2Key
 	defer log.Tracef("latestKeystones exit")
 
 	var kr gethapi.L2KeystoneLatestResponse
-	err := s.opgethClient.Client().CallContext(ctx, &kr, "kss_getLatestKeystones", count)
+	err := s.opgethClient.Client().CallContext(ctx, &kr,
+		"kss_getLatestKeystones", count)
 	if err != nil {
 		return nil, fmt.Errorf("opgeth rpc: %w", err)
 	}
@@ -502,7 +506,8 @@ func (s *Server) handleOpgethSubscription(ctx context.Context) error {
 	defer log.Tracef("handleOpgethSubscription exit")
 
 	headersCh := make(chan string, 10) // PNOOMA 10 notifications
-	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh, "newKeystones")
+	sub, err := s.opgethClient.Client().Subscribe(ctx, "kss", headersCh,
+		"newKeystones")
 	if err != nil {
 		return fmt.Errorf("keystone subscription: %w", err)
 	}
@@ -568,16 +573,6 @@ func (s *Server) connectOpgeth(pctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hydrate: %w", err)
 	}
-
-	// Mark geth connected
-	s.mtx.Lock()
-	s.gethConnected = true
-	s.mtx.Unlock()
-	defer func() {
-		s.mtx.Lock()
-		s.gethConnected = false
-		s.mtx.Unlock()
-	}()
 
 	s.opgethWG.Add(1)
 	go func() {
@@ -681,17 +676,41 @@ func (s *Server) mine(ctx context.Context) error {
 	return nil
 }
 
+func (s *Server) gethBestHeightHash(ctx context.Context) (uint64, *chainhash.Hash, time.Time, error) {
+	log.Tracef("gethBestHeightHash")
+	defer log.Tracef("gethBestHeightHash exit")
+
+	var t time.Time
+
+	height := big.NewInt(int64(rpc.LatestBlockNumber))
+	header, err := s.opgethClient.HeaderByNumber(ctx, height)
+	if err != nil {
+		return 0, nil, t, fmt.Errorf("error calling opgeth: %w", err)
+	}
+	commonHash := header.Hash()
+	ch, err := chainhash.NewHash(commonHash[:])
+	if err != nil {
+		return 0, nil, t, err
+	}
+	h := header.Number.Uint64()
+	t = time.Unix(int64(header.Time), 0)
+
+	return h, ch, t, nil
+}
+
 func (s *Server) promGethConnected() float64 {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	if s.gethConnected {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.promHealth.GethConnected {
 		return 1
 	}
 	return 0
 }
 
 func (s *Server) promGozerConnected() float64 {
-	if s.gozer.Connected() {
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if s.promHealth.GozerConnected {
 		return 1
 	}
 	return 0
@@ -715,12 +734,26 @@ func (s *Server) promPoll(ctx context.Context) error {
 			h.BitcoinBestHeight = height
 			h.BitcoinBestHash = hash.String()
 		} else {
+			log.Debugf("bitcoin height hash: %v", err)
 			h.GozerConnected = false
 			h.BitcoinBestHeight = 0
 			h.BitcoinBestHash = ""
 		}
+
+		if height, hash, t, err := s.gethBestHeightHash(ctx); err == nil {
+			h.EthereumBestHeight = height
+			h.EthereumBestHash = hash.String()
+			h.EthereumBestTime = t
+			h.GethConnected = true
+		} else {
+			log.Debugf("geth height hash: %v", err)
+			h.EthereumBestHeight = 0
+			h.EthereumBestHash = ""
+			h.EthereumBestTime = time.Time{}
+			h.GethConnected = false
+		}
+
 		s.mtx.Lock()
-		h.GethConnected = s.gethConnected
 		s.promHealth = h
 		s.mtx.Unlock()
 
@@ -733,9 +766,12 @@ func (s *Server) promPoll(ctx context.Context) error {
 }
 
 func (s *Server) isHealthy(_ context.Context) bool {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-	// XXX
+	s.mtx.RLock()
+	defer s.mtx.RUnlock()
+	if age := time.Since(s.promHealth.EthereumBestTime); age > maxBlockAge ||
+		!s.promHealth.GozerConnected || !s.promHealth.GethConnected {
+		return false
+	}
 	return true
 }
 
