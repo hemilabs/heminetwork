@@ -32,7 +32,7 @@ After extracting the archive that matches your system, start `popmd` by running:
 
 ### Running Local Docker Image
 
-The `heminetwork` repository provides docker images that can be used to run `popmd` using `Docker`.
+The `heminetwork` repository provides docker files that can be used to run `popmd` using `Docker`.
 
 #### Prerequisites
 
