@@ -7,6 +7,10 @@ sequencer.*
 > This setup is only for users looking to run a full node on the Hemi network, and is not required to use a wallet (
 > Metamask, Rabby, etc.) to interact with dApps on Hemi or run a PoP Miner.
 
+> [!NOTE]
+> Localnode, while it remains in the heminetwork repository, will follow
+> v1 (v2 will remain backwards-compatible in p2p) until it is moved to its own
+> repository.
 
 <details>
   <summary>Table of Contents</summary>
@@ -343,6 +347,21 @@ To access the nodes, you can use JSON-RPC or WebSockets exposed on the following
 | op-node JSON-RPC      | `8547`  |
 | op-geth JSON-RPC      | `18546` |
 | op-geth WebSocket RPC | `28546` |
+
+## Updating your node
+
+The [localnode project](.) will always contain versions of Docker images that
+are stable releases and will be compatible with each other and the greater
+hemi network.  Therefore, if you want to update your node, pull the update from 
+Github and simply re-run the [gen-files.sh](./gen-files.sh) script and the
+appropriate compose file.  Any daemons that are no longer used will not be
+started by the new compose file.
+Any daemons that are added or updated will be run.  Data directories and
+default configs will be updated with the config files and scripts within the
+project.
+
+_Important Note: It is your responsibility to backup any important data before_ 
+_performing an upgrade._
 
 ## Peer-to-Peer (P2P)
 
