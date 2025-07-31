@@ -1,10 +1,10 @@
 # Hemi PoP Miner (`popmd`)
 
-`popmd` is a **lightweight PoP (Proof-of-Proof) miner**, which wraps the `popm` service.
+`popmd` is the **lightweight PoP (Proof-of-Proof) miner**, which wraps the `popm` service.
 
 ![Depiction of L1 Profile](images/popminer.svg)
 
-`popmd` will periodically receive information about the current state of the hemi network (a keystone), constructs 
+`popmd` will periodically receive information about the current state of the Heminetwork (a keystone), constructs 
 a bitcoin transaction embedding the aforementioned keystone, and broadcasts these transactions - resulting in 
 rewards, once validated.
 
@@ -129,7 +129,7 @@ Namely, ensure the following variables are properly set:
 
 - *`POPM_BITCOIN_URL`: URL to the bitcoin source of truth used in order to transmit data to and from the bitcoin network. [Read more on how to run your own `tbcd` instance here](../tbcd/README.md).
 
-- `POPM_OPGETH_URL`: URL to a public HVM-aware opgeth instance, used to retrieve keystones from the hemi network.
+- `POPM_OPGETH_URL`: URL to a public HVM-aware opgeth instance, used to retrieve keystones from the Hemi network.
 
 \* **NOTE**: `TBC` is the only functional bitcoin source of truth _currently_ available.
 
