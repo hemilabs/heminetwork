@@ -22,12 +22,30 @@ In order to run `popmd`, you may either use _docker_, download a pre-built binar
 
 ### Downloading Release Binaries (Recommended)
 
-Pre-built binaries are available on the [Releases Page](https://github.com/hemilabs/heminetwork/releases).
+Pre-built binaries for Linux, macOS, Windows and OpenBSD are available
+via [GitHub Releases](https://github.com/hemilabs/heminetwork/releases).
 
 After extracting the archive that matches your system, start `popmd` by running:
 
 ```shell
 /path/to/popmd
+```
+
+### Docker images (Recommended)
+
+Docker images for `popmd` are published to both [GitHub Container Registry](https://github.com/orgs/hemilabs/packages/container/package/popmd)
+and [Docker Hub](https://hub.docker.com/r/hemilabs/popmd).
+
+If using Docker Hub, run the following command:
+```shell
+docker pull hemilabs/popmd
+
+# run the image using the correct environment variables
+docker run \
+	-e POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET> \
+	-e POPM_OPGETH_URL=<YOUR_OPGETH_URL> \
+	-e POPM_BITCOIN_URL=<YOUR_BITCOIN_URL> \
+	hemilabs/popmd
 ```
 
 ### Running Local Docker Image
