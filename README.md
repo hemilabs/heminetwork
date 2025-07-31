@@ -46,8 +46,6 @@ The Hemi Network consists of three key services, each serving a unique and impor
 - [**bfgd (Bitcoin Finality Governor Daemon)**](cmd/bfgd): Manages connections and data transfers between the Hemi
   Network and the Bitcoin blockchain, ensuring finality.
   bridge to the Bitcoin Finality Governor.
-- [**extool**](cmd/extool): A utility tool for extracting and processing data from various file formats, tailored for
-  blockchain data analysis.
 - [**hemictl**](cmd/hemictl): The command-line interface for controlling and managing all Hemi Network services.
 - [**keygen**](cmd/keygen): Generates and manages cryptographic keys used within the Hemi network, ensuring secure
   operations.
