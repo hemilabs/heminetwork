@@ -41,7 +41,7 @@ This repository also contains several utility binaries.
 
 ### Binaries
 
-Pre-built binaries for Linux, macOS, Windows and OpenBSD are available
+Pre-built binaries for Linux, macOS, Windows, and OpenBSD are available
 via [GitHub Releases](https://github.com/hemilabs/heminetwork/releases).
 
 ### Docker images
