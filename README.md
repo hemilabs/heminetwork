@@ -100,27 +100,34 @@ For any service, you can view configuration options by running:
 
 ## ▶️ Running popmd
 
-The easiest way to run `popmd` is by using our provided docker images. A list of `popmd` docker images for each major release is available [here](https://hub.docker.com/r/hemilabs/popmd).
+### 🏁 Prerequisites
 
-Refer to the [dedicated `popmd` README](/cmd/popmd/README.md) for an overview of other installation options and further details.
+- A funded BTC private key. This can be a testnet address if configured for test environments.
+- A BFG URL to establish a connection.
 
-### Prerequisites
+Once properly configured and running, `popmd` will start mining L2 Keystones by adding them to Bitcoin blocks that make
+it into the chain.
 
-- `docker` available in your cli
+### CLI
 
-### Execution
-
-To build and run the ***latest*** provided docker image, run the following on your cli:
+Set up and start popmd using:
 
 ```shell
-docker pull hemilabs/popmd
+./bin/popmd
+```
 
-# run the image using the correct environment variables
-docker run \
-	-e POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET> \
-	-e POPM_OPGETH_URL=<YOUR_OPGETH_URL> \
-	-e POPM_BITCOIN_URL=<YOUR_BITCOIN_URL> \
-	hemilabs/popmd
+### Web
+
+There is also a web interface that can be used to run a PoP miner.
+Build and run the web interface with:
+
+> [!NOTE]
+> The web PoP Miner is currently a proof-of-concept.
+
+```shell
+cd ./web
+make
+go run ./integrationtest
 ```
 
 ## ▶️ Running bfgd
