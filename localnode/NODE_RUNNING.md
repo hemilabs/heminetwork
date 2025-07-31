@@ -7,6 +7,10 @@ sequencer.*
 > This setup is only for users looking to run a full node on the Hemi network, and is not required to use a wallet (
 > Metamask, Rabby, etc.) to interact with dApps on Hemi or run a PoP Miner.
 
+> [!NOTE]
+> Localnode, while it remains in the heminetwork repository, will follow
+> v1 (v2 will remain backwards-compatible in p2p) until it is moved to its own
+> repository (after the v2 release).
 
 <details>
   <summary>Table of Contents</summary>
