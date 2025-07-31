@@ -34,7 +34,6 @@ This repository also contains several utility binaries.
 | Name                       | Description                   |
 |----------------------------|-------------------------------|
 | [`btctool`](./cmd/btctool) | Bitcoin utility tool          |
-| [`extool`](./cmd/extool)   | ElectrumX/Electrs client tool |
 | [`hemictl`](./cmd/hemictl) | Hemi network controller CLI   |
 | [`keygen`](./cmd/keygen)   | Keypair generation tool       |
 
