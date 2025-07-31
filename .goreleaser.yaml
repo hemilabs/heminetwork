@@ -69,30 +69,6 @@ builds:
       - goos: "windows"
         goarch: arm
 
-  # extool util
-  - id: "extool"
-    binary: "extool"
-    main: "./cmd/extool/"
-    env: ["CGO_ENABLED=0", "GOGC=off"]
-    ldflags:
-      - "-s -w"
-      - "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=Hemi Labs'"
-      - "-X github.com/hemilabs/heminetwork/v2/version.Major={{ .Major }}"
-      - "-X github.com/hemilabs/heminetwork/v2/version.Minor={{ .Minor }}"
-      - "-X github.com/hemilabs/heminetwork/v2/version.Patch={{ .Patch }}"
-      - "-X github.com/hemilabs/heminetwork/v2/version.PreRelease={{ if .IsSnapshot }}dev{{ else }}{{ .Prerelease }}{{ end }}"
-    flags: ["-trimpath"]
-    goos:
-      - "linux"
-      - "windows"
-      - "darwin"
-      - "openbsd"
-    goarch: ["amd64", "arm64", "arm"]
-    goarm: ["7"]
-    ignore:
-      - goos: "windows"
-        goarch: arm
-
   # hemictl util
   - id: "hemictl"
     binary: "hemictl"
