@@ -10,7 +10,7 @@ sequencer.*
 > [!NOTE]
 > Localnode, while it remains in the heminetwork repository, will follow
 > v1 (v2 will remain backwards-compatible in p2p) until it is moved to its own
-> repository (after the v2 release).
+> repository.
 
 <details>
   <summary>Table of Contents</summary>
