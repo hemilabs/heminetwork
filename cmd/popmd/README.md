@@ -10,18 +10,24 @@ rewards, once validated.
 
 ## System Requirements
 
-`popmd` is a **lightweight daemon** and most systems should be able to run popmd over long periods of time without
-requiring significant resources, as it off-loads most heavy functionality to other daemons it connects to.
+The Hemi PoP Miner daemon (`popmd`) is **extremely lightweight**. It will run on almost any system, and only requires
+minimal system resources.
 
-Furthermore, a **GPU is neither required nor helpful** to the functioning of `popmd`.
+By relying on connections to a Bitcoin node with indexed Hemi keystones (such as [`tbcd`](../tbcd/README.md)), and
+a [hVM-aware op-geth node](https://github.com/hemilabs/op-geth), `popmd` requires very minimal CPU and RAM to operate,
+as most heavy functionality is offloaded to these daemons.
+
+> [!TIP]
+> No additional hardware, such as a GPU, is required to run a PoP Miner.
 
 ## Running `popmd`
 
-In order to run `popmd`, you may either use _docker_, download a pre-built binary, or build the tool from source.
+To run `popmd`, you can use Docker, download a pre-built binary, or build the binary from source.
 
-**NOTE:** URLs for both a [BTC Gozer](../../bitcoin/wallet/README.md) with indexed keystones (such as [
-`tbcd`]((../tbcd/README.md).)), as well as an [HVM-aware op-geth](https://github.com/hemilabs/op-geth) instance, are
-required in order to use `popmd`.
+> [!IMPORTANT]
+> Running a PoP Miner requires URLs for the following services:
+>  - [BTC Gozer](../../bitcoin/wallet/README.md) with indexed keystones, such as [`tbcd`](../tbcd/README.md).
+>  - [hVM-aware op-geth node](https://github.com/hemilabs/op-geth)
 
 ### Downloading Release Binaries (Recommended)
 
@@ -73,7 +79,7 @@ To build and run the provided docker images, run the following on your cli:
 ```shell
 cd heminetwork
 
-# Build the image using the popmd dockerfile
+# Build the image using the popmd Dockerfile
 docker build -t popmd:dev -f ./docker/popmd/Dockerfile .
 
 # Run the built image using the correct environment variables
