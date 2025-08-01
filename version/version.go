@@ -21,8 +21,8 @@ const semverAlphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrst
 // Defines the application version number. These are set at link-time by
 // GoReleaser for releases.
 var (
-	Major = "1"
-	Minor = "1"
+	Major = "2"
+	Minor = "0"
 	Patch = "0"
 )
 
