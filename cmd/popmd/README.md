@@ -1,16 +1,42 @@
 # Hemi PoP Miner (`popmd`)
 
-`popmd` is the **lightweight PoP (Proof-of-Proof) miner**, which wraps the `popm` service.
+`popmd` is the lightweight Hemi PoP (Proof-of-Proof) miner daemon.
+
+<details>
+  <summary>Table of Contents</summary>
+
+<!-- TOC -->
+* [Hemi PoP Miner (`popmd`)](#hemi-pop-miner-popmd)
+  * [System Requirements](#system-requirements)
+  * [Running `popmd`](#running-popmd)
+    * [Downloading Release Binaries (Recommended)](#downloading-release-binaries-recommended)
+    * [Docker images (Recommended)](#docker-images-recommended)
+    * [Running Local Docker Image](#running-local-docker-image)
+      * [Prerequisites](#prerequisites)
+      * [Execution](#execution)
+    * [Building from Source](#building-from-source)
+      * [Prerequisites](#prerequisites-1)
+      * [Option 1: Using Makefile](#option-1-using-makefile)
+      * [Option 2: Standalone Build](#option-2-standalone-build)
+  * [Runtime Settings](#runtime-settings)
+  * [FAQ](#faq)
+    * [How much does it cost to run `popmd`?](#how-much-does-it-cost-to-run-popmd)
+    * [How many HEMI tokens will I be awarded for mining?](#how-many-hemi-tokens-will-i-be-awarded-for-mining)
+<!-- TOC -->
+</details>
 
 ![PoP Miner architecture](images/popminer.svg)
 
-`popmd` will periodically receive information about the current state of the Hemi Network (a keystone), constructs
-a Bitcoin transaction embedding the aforementioned keystone, and broadcasts these transactions - resulting in
-rewards, once validated.
+The PoP Miner works by periodically receiving information about the current state of the Hemi Network, in the form of a
+keystone. When a keystone is received, the PoP Miner creates a Bitcoin transaction containing the keystone data, and
+broadcasts the transaction to Bitcoin - tying the Hemi Network's state to Bitcoin.
+
+PoP Mining on Hemi is incentivised with a reward algorithm, which pays out tokens for helping secure the Hemi Network
+by broadcasting network keystones.
 
 ## System Requirements
 
-The Hemi PoP Miner daemon (`popmd`) is **extremely lightweight**. It will run on almost any system, and only requires
+The Hemi PoP Miner daemon (`popmd`) is **extremely lightweight**. It will run on almost any system, and requires
 minimal system resources.
 
 By relying on connections to a Bitcoin node with indexed Hemi keystones (such as [`tbcd`](../tbcd/README.md)), and
