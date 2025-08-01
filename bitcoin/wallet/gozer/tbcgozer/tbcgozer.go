@@ -269,6 +269,8 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 		return nil, errors.New("tbc command queue full")
 	}
 
+	log.Tracef("request sent: %T", msg)
+
 	// Wait for response
 	select {
 	case <-ctx.Done():
@@ -300,17 +302,14 @@ func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Co
 				if err != nil {
 					log.Errorf("handleTBCWebsocketCall %T: %v",
 						bc.msg, err)
-					select {
-					case bc.ch <- err:
-					default:
-					}
+					bc.ch <- err
+					return
 				}
-				select {
-				case bc.ch <- payload:
-					log.Tracef("handleTBCWebsocketCall returned: %v",
-						spew.Sdump(payload))
-				default:
-				}
+
+				bc.ch <- payload
+				log.Tracef("handleTBCWebsocketCall returned: %v",
+					spew.Sdump(payload))
+
 			}(c)
 		}
 	}
