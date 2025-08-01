@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -267,7 +268,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
 
 	f.mtx.Lock()
-	f.conns = append(f.conns, c) // XXX don't we need to reap this?
+	f.conns = append(f.conns, c) // XXX don't we need to reap this? yes.
 	f.mtx.Unlock()
 
 	log.Infof("%v: new connection to %v", f.name, r.RemoteAddr)
@@ -278,6 +279,11 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		method, err := f.handle(c, w, r, &kc)
 		if err != nil {
 			log.Errorf("exiting mockOpGethHandleFunc: %v", err)
+			if errors.Is(err, io.EOF) {
+				log.Tracef("websocket was closed")
+				return nil
+			}
+
 			return err
 		}
 		f.notifyMsg(f.pctx, method)
