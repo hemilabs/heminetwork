@@ -90,7 +90,7 @@ func NewHeaderFromBytes(b []byte) (*Header, error) {
 	return h, nil
 }
 
-// L2KeystoneVersion designates hwta version of the L2 keystone we are using.
+// L2KeystoneVersion designates what version of the L2 keystone we are using.
 const (
 	L2KeystoneAbrevVersion uint8 = 1
 
