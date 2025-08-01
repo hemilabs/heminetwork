@@ -34,7 +34,7 @@ func TestPopMiner(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create opgeth test server with the request handler.
-	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, defaultL2KeystonesCount)
 	defer opgeth.Shutdown()
 
 	// Create tbc test server with the request handler.
@@ -90,7 +90,7 @@ func TestTickingPopMiner(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create opgeth test server with the request handler.
-	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, defaultL2KeystonesCount)
 	defer opgeth.Shutdown()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
@@ -208,7 +208,7 @@ func TestPopmFilterUtxos(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create opgeth test server with the request handler.
-	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, defaultL2KeystonesCount)
 	defer opgeth.Shutdown()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
@@ -301,7 +301,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	msgCh := make(chan string, 10)
 
 	// Create opgeth test server with the request handler.
-	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, defaultL2KeystonesCount)
 	defer opgeth.Shutdown()
 
 	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)

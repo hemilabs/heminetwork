@@ -298,7 +298,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 	opgeth := mock.NewMockOpGeth(ctx, nil, nil, []hemi.L2Keystone{
 		*keystoneOne,
 		*keystoneTwo,
-	})
+	}, 12)
 	defer opgeth.Shutdown()
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
@@ -411,7 +411,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 		*keystoneOne,
 		*keystoneTwo,
 		*keystoneThree,
-	})
+	}, 12)
 	defer opgeth.Shutdown()
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
@@ -511,7 +511,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 
 	opgeth := mock.NewMockOpGeth(ctx, nil, nil, []hemi.L2Keystone{
 		*keystoneOne,
-	})
+	}, 12)
 	defer opgeth.Shutdown()
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")
@@ -633,7 +633,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	opgeth := mock.NewMockOpGeth(ctx, nil, nil, []hemi.L2Keystone{})
+	opgeth := mock.NewMockOpGeth(ctx, nil, nil, []hemi.L2Keystone{}, 12)
 	defer opgeth.Shutdown()
 
 	opgethWsurl := "ws" + strings.TrimPrefix(opgeth.URL(), "http")

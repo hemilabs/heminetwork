@@ -73,9 +73,13 @@ func (f *mockHandler) URL() string {
 type OpGethMockHandler struct {
 	mockHandler
 	keystones []hemi.L2Keystone
+
+	// how many keystones are originally considered available from the
+	// keystones slice, prior to new keystone notifications being sent
+	initialKeystoneCount int
 }
 
-func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, keystones []hemi.L2Keystone) *OpGethMockHandler {
+func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, keystones []hemi.L2Keystone, initKssCount int) *OpGethMockHandler {
 	// Sort keystones in ascending order
 	slices.SortFunc(keystones, func(a, b hemi.L2Keystone) int {
 		return cmp.Compare(a.L2BlockNumber, b.L2BlockNumber)
@@ -89,7 +93,8 @@ func NewMockOpGeth(pctx context.Context, errCh chan error, msgCh chan string, ke
 			pctx:  pctx,
 			conns: make([]*websocket.Conn, 0),
 		},
-		keystones: keystones,
+		keystones:            keystones,
+		initialKeystoneCount: initKssCount,
 	}
 	th.handleFunc = th.mockOpGethHandleFunc
 	th.server = httptest.NewServer(&th)
@@ -141,10 +146,9 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 			panic(err)
 		}
 
-		total := len(f.keystones)
 		// send new keystone notifications periodically
 		go func() {
-			for kc.count()+12 <= total {
+			for kc.count()+f.initialKeystoneCount <= len(f.keystones) {
 				select {
 				case <-f.pctx.Done():
 					return
