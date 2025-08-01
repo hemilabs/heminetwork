@@ -42,8 +42,9 @@ func init() {
 
 // tbcCmd wraps tbc commands.
 type tbcCmd struct {
-	msg any
-	ch  chan any
+	msg     any
+	ch      chan any
+	timeout time.Duration
 }
 
 // tbcGozer implements [gozer.Gozer] and retrieves Bitcoin data from a TBC
@@ -253,8 +254,9 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	}
 
 	bc := tbcCmd{
-		msg: msg,
-		ch:  make(chan any),
+		msg:     msg,
+		ch:      make(chan any),
+		timeout: timeout,
 	}
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
@@ -268,8 +270,6 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	default:
 		return nil, errors.New("tbc command queue full")
 	}
-
-	log.Tracef("request sent: %T", msg)
 
 	// Wait for response
 	select {
@@ -285,31 +285,37 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	// Won't get here
 }
 
-func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Conn) {
+func (t *tbcGozer) handleTBCWebsocketCall(pctx context.Context, conn *protocol.Conn) {
 	defer t.wg.Done()
 
 	log.Tracef("handleTBCWebsocketCall")
 	defer log.Tracef("handleTBCWebsocketCall exit")
 	for {
 		select {
-		case <-ctx.Done():
+		case <-pctx.Done():
 			return
 		case c := <-t.cmdCh:
 			// Parallelize calls. There is no reason to do them
 			// in order and wait for potentially slow completion.
 			go func(bc tbcCmd) {
+				ctx, cancel := context.WithTimeout(pctx, bc.timeout)
+				defer cancel()
 				_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
 				if err != nil {
 					log.Errorf("handleTBCWebsocketCall %T: %v",
 						bc.msg, err)
-					bc.ch <- err
+					select {
+					case <-ctx.Done():
+					case bc.ch <- err:
+					}
 					return
 				}
-
-				bc.ch <- payload
-				log.Tracef("handleTBCWebsocketCall returned: %v",
-					spew.Sdump(payload))
-
+				select {
+				case <-ctx.Done():
+				case bc.ch <- payload:
+					log.Tracef("handleTBCWebsocketCall returned: %v",
+						spew.Sdump(payload))
+				}
 			}(c)
 		}
 	}
