@@ -8,6 +8,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -234,7 +235,7 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 
 	err = c.Write(f.pctx, websocket.MessageText, p)
 	if err != nil {
-		return "", fmt.Errorf("write: %w", err)
+		panic(err)
 	}
 
 	return msg.Method, nil
@@ -278,6 +279,10 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		method, err := f.handle(c, w, r, &kc)
 		if err != nil {
 			log.Errorf("exiting mockOpGethHandleFunc: %v", err)
+			if errors.Is(err, io.EOF) {
+				log.Tracef("websocket was closed")
+				return nil
+			}
 			return err
 		}
 		f.notifyMsg(f.pctx, method)

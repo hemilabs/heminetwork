@@ -247,8 +247,7 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 	}
 
 	if err = tbcapi.Write(f.pctx, c, id, resp); err != nil {
-		return "", fmt.Errorf("failed to handle %s request: %w",
-			cmd, err)
+		panic(err)
 	}
 
 	return string(cmd), nil
@@ -300,6 +299,10 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		method, err := f.handle(wsConn, utxos, mp, w, r)
 		if err != nil {
 			log.Errorf("exiting mockTBCHandleFunc: %v", err)
+			if errors.Is(err, io.EOF) {
+				log.Tracef("websocket was closed")
+				return nil
+			}
 			return err
 		}
 		f.notifyMsg(f.pctx, method)
