@@ -241,8 +241,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
   # bfgd arm64
   - id: "bfgd-arm64"
@@ -258,8 +256,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
   # popmd amd64
   - id: "popmd-amd64"
@@ -275,8 +271,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
   # popmd arm64
   - id: "popmd-arm64"
@@ -292,8 +286,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
   # popmd armv7
   - id: "popmd-armv7"
@@ -310,8 +302,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
   # tbcd amd64
   - id: "tbcd-amd64"
@@ -327,8 +317,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
   # tbcd arm64
   - id: "tbcd-arm64"
@@ -344,8 +332,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
   # hproxyd amd64
   - id: "hproxyd-amd64"
@@ -361,8 +347,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
   # hproxyd arm64
   - id: "hproxyd-arm64"
@@ -378,8 +362,6 @@ dockers:
       - "--build-arg=VERSION={{ .Version }}"
       - "--build-arg=VCS_REF={{ .FullCommit }}"
       - "--build-arg=BUILD_DATE={{ .Date }}"
-      - "--sbom=true"
-      - "--provenance=mode=max"
 
 # Creates Docker manifests for each image containing the images for each
 # architecture.
