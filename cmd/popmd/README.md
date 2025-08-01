@@ -44,7 +44,8 @@ a [hVM-aware op-geth node](https://github.com/hemilabs/op-geth), `popmd` require
 as most heavy functionality is offloaded to these daemons.
 
 > [!TIP]
-> No additional hardware, such as a GPU, is required to run a PoP Miner.
+> Running a PoP Miner does not require a GPU or any specialised hardware. `popmd` can easily be run on a lightweight
+> computer, such as a Raspberry Pi.
 
 ## Running `popmd`
 
