@@ -41,7 +41,7 @@ func TestBFG(t *testing.T) {
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
-	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, 12)
 	defer opgeth.Shutdown()
 
 	// Create tbc test server with the request handler.
@@ -102,7 +102,7 @@ func TestKeystoneFinalityInheritance(t *testing.T) {
 	kssMap[*hemi.L2KeystoneAbbreviate(lastKss).Hash()] = hemi.L2KeystoneAbbreviate(lastKss)
 
 	// Create opgeth test server with the request handler.
-	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, 12)
 	defer opgeth.Shutdown()
 
 	// Create tbc test server with the request handler.
@@ -150,7 +150,7 @@ func TestFullMockIntegration(t *testing.T) {
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
 	// Create opgeth test server with the request handler.
-	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList)
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, 12)
 	defer opgeth.Shutdown()
 
 	kssMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev)
