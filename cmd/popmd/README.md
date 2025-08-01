@@ -43,14 +43,19 @@ and [Docker Hub](https://hub.docker.com/r/hemilabs/popmd).
 If using Docker Hub, run the following command:
 
 ```shell
+# Pull Hemi popmd image from Docker Hub
 docker pull hemilabs/popmd
 
-# run the image using the correct environment variables
+# Run the built image using the correct environment variables
+BITCOIN_SECRET=<YOUR_BITCOIN_SECRET>
+OPGETH_URL=<YOUR_OPGETH_URL>
+BITCOIN_URL=<YOUR_BITCOIN_URL>
+
 docker run \
-	-e POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET> \
-	-e POPM_OPGETH_URL=<YOUR_OPGETH_URL> \
-	-e POPM_BITCOIN_URL=<YOUR_BITCOIN_URL> \
-	hemilabs/popmd
+  -e POPM_BITCOIN_SECRET=$BITCOIN_SECRET \
+  -e POPM_OPGETH_URL=$OPGETH_URL \
+  -e POPM_BITCOIN_URL=$BITCOIN_URL \
+  hemilabs/popmd:latest
 ```
 
 ### Running Local Docker Image
@@ -68,15 +73,19 @@ To build and run the provided docker images, run the following on your cli:
 ```shell
 cd heminetwork
 
-# build the image using the popmd dockerfile
-docker build -t popmd:latest -f ./docker/popmd/Dockerfile .
+# Build the image using the popmd dockerfile
+docker build -t popmd:dev -f ./docker/popmd/Dockerfile .
 
-# run the built image using the correct environment variables
+# Run the built image using the correct environment variables
+BITCOIN_SECRET=<YOUR_BITCOIN_SECRET>
+OPGETH_URL=<YOUR_OPGETH_URL>
+BITCOIN_URL=<YOUR_BITCOIN_URL>
+
 docker run \
--e POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET> \
--e POPM_OPGETH_URL=<YOUR_OPGETH_URL> \
--e POPM_BITCOIN_URL=<YOUR_BITCOIN_URL> \
-popmd:latest
+  -e POPM_BITCOIN_SECRET=$BITCOIN_SECRET \
+  -e POPM_OPGETH_URL=$OPGETH_URL \
+  -e POPM_BITCOIN_URL=$BITCOIN_URL \
+  popmd:dev
 ```
 
 NOTE: check the [runtime settings](#runtime-settings) section for a full list of available environment variables.
@@ -130,19 +139,19 @@ To see a full list of runtime settings, execute `popmd` with the **`--help`** fl
 
 ```shell
 ./bin/popmd --h
-# Hemi Proof-of-Proof Miner v1.1.0-dev+d22973902
+# Hemi Proof-of-Proof Miner v2.0.0-dev+76217560a (popmd, go1.24.5 linux/amd64)
 # Usage:
 #         help (this help)
 # Environment:
-#         POPM_BITCOIN_NETWORK   : bitcoin chain to connect to (ex. "mainnet", "testnet3") (default: mainnet)
+#         POPM_BITCOIN_NETWORK   : bitcoin chain to connect to (ex. "mainnet", "testnet3|testnet4") (default: mainnet)
 #         POPM_BITCOIN_SECRET    : bitcoin secret (mnemonic, seed, xpriv) (required) 
-#         POPM_BITCOIN_URL       : the bitcoin url to connect to; it's either a tbc or blockstream url 
+#         POPM_BITCOIN_URL       : tbc bitcoin url to connect to (default: ws://localhost:8082/v1/ws)
 #         POPM_LOG_LEVEL         : loglevel for various packages; INFO, DEBUG and TRACE (default: popmd=INFO;popm=INFO)
 #         POPM_OPGETH_URL        : URL for opgeth (default: localhost:9999)
 #         POPM_PPROF_ADDRESS     : address and port popm pprof listens on (open <address>/debug/pprof to see available profiles) 
 #         POPM_PROMETHEUS_ADDRESS: address and port popm prometheus listens on 
 #         POPM_REMINE_THRESHOLD  : the number of L2 Keystones behind the latest seen that we are willing to remine, this is handy for re-orgs (default: 0)
-#         POPM_STATIC_FEE        : static fee amount in sats/byte; overrides fee estimation if greater than 0 (default: 0)
+#         POPM_STATIC_FEE        : static fee amount in sats/byte; overrides fee estimation if greater than 0. Can be decimal (ex. 1.5 sats/byte) (default: 0)
 ```
 
 Namely, ensure the following variables are properly set:
