@@ -105,7 +105,7 @@ func TestTickingPopMiner(t *testing.T) {
 	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
 	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
-	// cfg.LogLevel = "popm=TRACE"
+	cfg.LogLevel = "popm=TRACE; mock=TRACE"
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
