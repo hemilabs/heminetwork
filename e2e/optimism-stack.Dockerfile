@@ -2,7 +2,7 @@
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-ARG OP_GETH_COMMIT=ed68446430a8b726f1dceceb0e85cdc5f10f248e
+ARG OP_GETH_COMMIT=7e5f69438e20320cd40c02feee90621fdbd215dd
 ARG OPTIMISM_COMMIT=7bb2a14f63d01bcb4de3ab3165b007fd85a6b1f9
 
 FROM golang:1.24.4-bookworm@sha256:c83619bb18b0207412fffdaf310f57ee3dd02f586ac7a5b44b9c36a29a9d5122 AS build_1
