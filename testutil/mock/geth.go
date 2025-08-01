@@ -141,9 +141,10 @@ func (f *OpGethMockHandler) handle(c *websocket.Conn, w http.ResponseWriter, r *
 			panic(err)
 		}
 
+		total := len(f.keystones)
 		// send new keystone notifications periodically
 		go func() {
-			for {
+			for kc.count()+12 <= total {
 				select {
 				case <-f.pctx.Done():
 					return
