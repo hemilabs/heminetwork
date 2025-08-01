@@ -15,10 +15,9 @@ before:
     - "go mod download"
     - "go mod verify"
 
-# Re-enable once we no longer need the 'replace' directive in go.mod.
-# gomod:
-#   # Proxy the module from proxy.golang.org, making the builds verifiable.
-#   proxy: true
+gomod:
+  # Proxy the module from proxy.golang.org, making the builds verifiable.
+  proxy: true
 
 builds:
   # Bitcoin Finality Governor Daemon
