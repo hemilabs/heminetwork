@@ -9,9 +9,9 @@
 * [Hemi PoP Miner (`popmd`)](#hemi-pop-miner-popmd)
   * [System Requirements](#system-requirements)
   * [Running `popmd`](#running-popmd)
-    * [Downloading Release Binaries (Recommended)](#downloading-release-binaries-recommended)
-    * [Docker images (Recommended)](#docker-images-recommended)
-    * [Running Local Docker Image](#running-local-docker-image)
+    * [Standalone binary (Recommended)](#standalone-binary-recommended)
+    * [Docker (Recommended)](#docker-recommended)
+    * [Building Docker images](#building-docker-images)
       * [Prerequisites](#prerequisites)
       * [Execution](#execution)
     * [Building from Source](#building-from-source)
@@ -48,59 +48,71 @@ as most heavy functionality is offloaded to these daemons.
 
 ## Running `popmd`
 
-To run `popmd`, you can use Docker, download a pre-built binary, or build the binary from source.
+We support running `popmd` in Docker or as a standalone binary. We provide pre-built binaries, or you can build the
+`popmd` binary from source code.
 
 > [!IMPORTANT]
 > Running a PoP Miner requires URLs for the following services:
 >  - [BTC Gozer](../../bitcoin/wallet/README.md) with indexed keystones, such as [`tbcd`](../tbcd/README.md).
 >  - [hVM-aware op-geth node](https://github.com/hemilabs/op-geth)
 
-### Downloading Release Binaries (Recommended)
+### Standalone binary (Recommended)
 
-Pre-built binaries for Linux, macOS, Windows and OpenBSD are available
+Pre-built binaries for Linux, macOS, Windows, and OpenBSD are available
 via [GitHub Releases](https://github.com/hemilabs/heminetwork/releases).
 
-After extracting the archive that matches your system, start `popmd` by running:
+After downloading and extracting the archive for your system, start `popmd` by running:
 
 ```shell
 /path/to/popmd
 ```
 
-### Docker images (Recommended)
+> [!NOTE]
+> In production environments, especially when running PoP Miners on mainnet, we highly recommend verifying the checksum
+> of the downloaded archive, as well as signatures provided for the archive, to ensure the security of your PoP Miner.
+
+### Docker (Recommended)
 
 Docker images for `popmd` are published to
-both [GitHub Container Registry](https://github.com/orgs/hemilabs/packages/container/package/popmd)
+both the [GitHub Container Registry](https://github.com/orgs/hemilabs/packages/container/package/popmd)
 and [Docker Hub](https://hub.docker.com/r/hemilabs/popmd).
 
-If using Docker Hub, run the following command:
+**Example**
 
 ```shell
 # Pull Hemi popmd image from Docker Hub
 docker pull hemilabs/popmd
 
 # Run the built image using the correct environment variables
-BITCOIN_SECRET=<YOUR_BITCOIN_SECRET>
-OPGETH_URL=<YOUR_OPGETH_URL>
-BITCOIN_URL=<YOUR_BITCOIN_URL>
+POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET>
+POPM_OPGETH_URL=<YOUR_OPGETH_URL>
+POPM_BITCOIN_URL=<YOUR_BITCOIN_URL>
 
 docker run \
-  -e POPM_BITCOIN_SECRET=$BITCOIN_SECRET \
-  -e POPM_OPGETH_URL=$OPGETH_URL \
-  -e POPM_BITCOIN_URL=$BITCOIN_URL \
+  -e POPM_BITCOIN_SECRET=$POPM_BITCOIN_SECRET \
+  -e POPM_OPGETH_URL=$POPM_OPGETH_URL \
+  -e POPM_BITCOIN_URL=$POPM_BITCOIN_URL \
   hemilabs/popmd:latest
 ```
 
-### Running Local Docker Image
+> [!NOTE]
+> In production environments, especially when running PoP Miners on mainnet, we highly recommend verifying image
+> signatures and pinning images to SHA-256 digests, to ensure the security of your PoP Miner.
 
-The `heminetwork` repository provides docker files that can be used to run `popmd` using `Docker`.
+### Building Docker images
+
+The `heminetwork` repository provides Docker files, which can be used to build Docker images locally.
 
 #### Prerequisites
 
-- `docker` available in your cli
+- `docker` CLI installed and setup.
 
 #### Execution
 
-To build and run the provided docker images, run the following on your cli:
+To build the Docker image locally and run a `popmd` daemon, use the following:
+
+> [!IMPORTANT]
+> Check the [runtime settings](#runtime-settings) section for a full list of available environment variables.
 
 ```shell
 cd heminetwork
@@ -109,18 +121,16 @@ cd heminetwork
 docker build -t popmd:dev -f ./docker/popmd/Dockerfile .
 
 # Run the built image using the correct environment variables
-BITCOIN_SECRET=<YOUR_BITCOIN_SECRET>
-OPGETH_URL=<YOUR_OPGETH_URL>
-BITCOIN_URL=<YOUR_BITCOIN_URL>
+POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET>
+POPM_OPGETH_URL=<YOUR_OPGETH_URL>
+POPM_BITCOIN_URL=<YOUR_BITCOIN_URL>
 
 docker run \
-  -e POPM_BITCOIN_SECRET=$BITCOIN_SECRET \
-  -e POPM_OPGETH_URL=$OPGETH_URL \
-  -e POPM_BITCOIN_URL=$BITCOIN_URL \
+  -e POPM_BITCOIN_SECRET=$POPM_BITCOIN_SECRET \
+  -e POPM_OPGETH_URL=$POPM_OPGETH_URL \
+  -e POPM_BITCOIN_URL=$POPM_BITCOIN_URL \
   popmd:dev
 ```
-
-NOTE: check the [runtime settings](#runtime-settings) section for a full list of available environment variables.
 
 ### Building from Source
 
@@ -156,7 +166,7 @@ go install ./cmd/popmd/
 
 <br>
 
-Once the `popmd` binary is built using one of the previous two options, you can start it by running:
+Once the `popmd` binary is built using one of the two options above, you can start it by running:
 
 ```shell
 /path/to/popmd
@@ -188,18 +198,25 @@ To see a full list of runtime settings, execute `popmd` with the **`--help`** fl
 
 Namely, ensure the following variables are properly set:
 
-- `POPM_BITCOIN_NETWORK`: This determines what bitcoin network `popmd` should connect to. This defaults to `mainnet`,
-  but `testnet3` and `localnet` are also available for test environments.
+> [!CAUTION]
+> Running a PoP Miner requires providing a private key for a funded Bitcoin wallet. It is important to keep this
+> private key safe and secure, to prevent loss of funds.
+> 
+> It is recommended to create a new wallet specifically for use by the PoP Miner, and not to reuse existing wallets.
 
-- `POPM_BITCOIN_SECRET`: A funded bitcoin address is necessary in order to sign, broadcast, and get rewarded for the
-  transactions constructed by `popmd`.
+- `POPM_BITCOIN_NETWORK`: This determines what Bitcoin network `popmd` should connect to. This defaults to `mainnet`,
+  however `testnet3`, `testnet4` and `localnet` are also available for test environments.
 
-- *`POPM_BITCOIN_URL`: URL to the bitcoin source of truth used in order to transmit data to and from the bitcoin
+- `POPM_BITCOIN_SECRET`: A funded Bitcoin address is necessary in order to sign, broadcast, and get rewarded for the
+  transactions constructed by `popmd`. The private key for the funded wallet must be provided here.
+
+- `POPM_BITCOIN_URL`*: URL to the Bitcoin node used in order to transmit data to and from the Bitcoin
   network. [Read more on how to run your own `tbcd` instance here](../tbcd/README.md).
 
-- `POPM_OPGETH_URL`: URL to a public HVM-aware opgeth instance, used to retrieve keystones from the Hemi network.
+- `POPM_OPGETH_URL`: URL to an accessible hVM-aware op-geth instance, used to retrieve keystones from the Hemi Network.
 
-\* **NOTE**: `TBC` is the only functional bitcoin source of truth _currently_ available.
+> [!NOTE]
+> \* `TBC` is currently the only functional Bitcoin node providing indexed Hemi keystones.
 
 ## FAQ
 
@@ -219,12 +236,18 @@ transaction fee of `3 sats/vB`:
 The value of BTC can fluctuate heavily, but presuming a cost of `110 000 USD / BTC`, it would cost `~270 USD` per day to
 run `popmd` on mainnet.
 
-_**DISCLAIMER:**_ These are example values ONLY. The presented values are not guaranteed, and may not be up-to-date.
-Different versions of the network's protocols and daemons may incur higher costs and fees. You should get up-to-date
-values yourself to determine if PoP mining makes sense for you.
+> [!WARNING]
+> These are example values ONLY. The presented values are not guaranteed, and may not be up-to-date.
+> Different versions of the network's protocols and daemons may incur higher costs and fees. You should get up-to-date
+> values yourself to determine if PoP mining makes sense for you.
 
 ### How many HEMI tokens will I be awarded for mining?
 
 Each keystone has a total payout of `100 HEMI`, which is divided by the number of PoP Txs that mine said keystone. As
 such, you can expect rewards of `28800 HEMI` per day, divided by the number of PoP miners (assuming a consistent
 number of PoP Miners).
+
+> [!WARNING]
+> These are example values ONLY. The presented values are not guaranteed, and may not be up-to-date.
+> Different versions of the network's protocols and daemons may incur higher costs and fees. You should get up-to-date
+> values yourself to determine if PoP mining makes sense for you.
