@@ -27,7 +27,7 @@
 
 ![PoP Miner architecture](images/popminer.svg)
 
-The PoP Miner works by periodically receiving information about the current state of the Hemi Network, in the form of a
+The PoP Miner periodically receives information about the current state of the Hemi Network, in the form of a
 keystone. When a keystone is received, the PoP Miner creates a Bitcoin transaction containing the keystone data, and
 broadcasts the transaction to Bitcoin - tying the Hemi Network's state to Bitcoin.
 
@@ -84,14 +84,10 @@ and [Docker Hub](https://hub.docker.com/r/hemilabs/popmd).
 docker pull hemilabs/popmd
 
 # Run the built image using the correct environment variables
-POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET>
-POPM_OPGETH_URL=<YOUR_OPGETH_URL>
-POPM_BITCOIN_URL=<YOUR_BITCOIN_URL>
-
 docker run \
-  -e POPM_BITCOIN_SECRET=$POPM_BITCOIN_SECRET \
-  -e POPM_OPGETH_URL=$POPM_OPGETH_URL \
-  -e POPM_BITCOIN_URL=$POPM_BITCOIN_URL \
+  -e POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET> \
+  -e POPM_OPGETH_URL=<YOUR_OPGETH_URL> \
+  -e POPM_BITCOIN_URL=<YOUR_BITCOIN_URL> \
   hemilabs/popmd:latest
 ```
 
@@ -121,14 +117,10 @@ cd heminetwork
 docker build -t popmd:dev -f ./docker/popmd/Dockerfile .
 
 # Run the built image using the correct environment variables
-POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET>
-POPM_OPGETH_URL=<YOUR_OPGETH_URL>
-POPM_BITCOIN_URL=<YOUR_BITCOIN_URL>
-
 docker run \
-  -e POPM_BITCOIN_SECRET=$POPM_BITCOIN_SECRET \
-  -e POPM_OPGETH_URL=$POPM_OPGETH_URL \
-  -e POPM_BITCOIN_URL=$POPM_BITCOIN_URL \
+  -e POPM_BITCOIN_SECRET=<YOUR_BITCOIN_SECRET> \
+  -e POPM_OPGETH_URL=<YOUR_OPGETH_URL> \
+  -e POPM_BITCOIN_URL=<YOUR_BITCOIN_URL> \
   popmd:dev
 ```
 
@@ -145,6 +137,9 @@ If you have `make` installed on your system, you may build the binary by running
 
 ```shell
 cd heminetwork
+
+# Download and install dependencies
+make deps
 
 # Output binary will be written to bin/popmd or bin/popmd.exe
 make popmd
