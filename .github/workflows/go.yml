@@ -120,8 +120,8 @@ jobs:
       - name: "make test (with E2E tests)"
         env:
           PGTESTURI: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable"
-          HEMI_DOCKER_TESTS: "1"
-        run: make GOCACHE="$(go env GOCACHE)" test
+          HEMI_DOCKER_TESTS: "0"
+        run: GOCACHE="$(go env GOCACHE)" go test -v -test.timeout=20m -count 10 ./...
 
   test-race:
     name: "Test (race)"
@@ -142,4 +142,4 @@ jobs:
         run: make GOCACHE="$(go env GOCACHE)" go-deps
 
       - name: "make race"
-        run: make GOCACHE="$(go env GOCACHE)" race
+        run: GOCACHE="$(go env GOCACHE)" go test -v -race -count 10 ./...
