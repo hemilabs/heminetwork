@@ -222,19 +222,19 @@ Namely, ensure the following variables are properly set:
 
 ### How much does it cost to run `popmd`?
 
-L2 Blocks are generated rougly every 12 seconds, and a keystone is generated every 25 blocks. As such:
+Hemi L2 Blocks are generated approximately every 12 seconds, and a keystone is generated every 25 blocks. As such:
 
-- 12 * 25 = `300 seconds (5 minutes) between keystones`
-- 86400 / 300 = `288 keystones per day`
+- `12 * 25` = `300` seconds (5 minutes) between keystones
+- `86400 / 300` = `288` keystones per day
 
 Considering that each transaction created by the PoP Miner has a size of `284 vB` and presuming an average bitcoin
 transaction fee of `3 sats/vB`:
 
-- 284 * 3 = `852 sats per PoP Tx`
-- 852 * 288 = `245376 sats` or `0.00245376 BTC` per day
+- `284 * 3` = `852 sats` per PoP transaction
+- `852 * 288` = `245376 sats` or `0.00245376 BTC` per day
 
-The value of BTC can fluctuate heavily, but presuming a cost of `110 000 USD / BTC`, it would cost `~270 USD` per day to
-run `popmd` on mainnet.
+The value of BTC can fluctuate heavily, but presuming a cost of `110,000 USD / BTC`, it would cost `~270 USD` per day
+to run `popmd` on mainnet - assuming the PoP Miner broadcasts a transaction for every generated Hemi keystone.
 
 > [!WARNING]
 > These are example values ONLY. The presented values are not guaranteed, and may not be up-to-date.
@@ -243,11 +243,17 @@ run `popmd` on mainnet.
 
 ### How many HEMI tokens will I be awarded for mining?
 
-Each keystone has a total payout of `100 HEMI`, which is divided by the number of PoP Txs that mine said keystone. As
-such, you can expect rewards of `28800 HEMI` per day, divided by the number of PoP miners (assuming a consistent
-number of PoP Miners).
+*Last updated: August 2025*
+
+With the current PoP payout algorithm, each keystone has a total payout of `100 HEMI`, which is divided by the number
+of PoP transactions that mine said keystone.
+
+On average, a new keystone is created every 5 minutes, meaning `28,800 HEMI` is paid out to PoP miners per day.
+
+The total payout is divided between the PoP Miners which broadcast a transaction for a keystone, meaning that the total
+payout a single PoP Miner will receive is heavily dependent on the number of PoP Miners actively broadcasting.
 
 > [!WARNING]
-> These are example values ONLY. The presented values are not guaranteed, and may not be up-to-date.
-> Different versions of the network's protocols and daemons may incur higher costs and fees. You should get up-to-date
-> values yourself to determine if PoP mining makes sense for you.
+> These values are not guaranteed, and may not be up-to-date. Different versions of the network's protocols and daemons
+> may incur higher costs or fees. You should get up-to-date values yourself to determine if PoP mining makes sense for
+> you.
