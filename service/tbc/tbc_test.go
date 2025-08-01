@@ -396,6 +396,8 @@ func TestDbUpgradeV4(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	time.Sleep(250 * time.Millisecond)
+
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer func() {
 		cancel()
@@ -434,6 +436,7 @@ func TestDbUpgradeV4(t *testing.T) {
 
 	// check if db upgrade finished before checking for bh
 	for !s.Running() {
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Pull version from DB
@@ -477,6 +480,12 @@ func TestDbUpgradeV4(t *testing.T) {
 		if !found {
 			t.Fatalf("keystone not found at height %d", ks.BlockHeight)
 		}
+	}
+
+	cancel()
+	for err == nil {
+		_, _, err = s.BlockHeaderBest(t.Context())
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
