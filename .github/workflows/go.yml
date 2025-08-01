@@ -139,7 +139,7 @@ jobs:
 
       - name: "Download and verify dependencies"
         id: deps
-        run: make GOCACHE="$(go env GOCACHE)" go-deps
+        run: GOCACHE="$(go env GOCACHE)" go test -v -count 20 ./...
 
       - name: "make race"
-        run: make GOCACHE="$(go env GOCACHE)" race
+        run:  GOCACHE="$(go env GOCACHE)" go test -v -race -count 20 ./...
