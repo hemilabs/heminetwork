@@ -36,7 +36,7 @@ func TestTBCGozerConnection(t *testing.T) {
 		BlockheaderCacheSize:    "1mb",
 		BlockSanity:             false,
 		LevelDBHome:             t.TempDir(),
-		LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG:tbcgozer=TRACE",
 		MaxCachedTxs:            1000, // XXX
 		Network:                 "localnet",
 		PrometheusListenAddress: "",
