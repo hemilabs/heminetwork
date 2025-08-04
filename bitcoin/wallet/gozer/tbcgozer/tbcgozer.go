@@ -26,13 +26,17 @@ import (
 )
 
 const (
-	logLevel              = "tbcgozer=INFO"
-	defaultRequestTimeout = 10 * time.Second
+	logLevel = "tbcgozer=INFO"
 
 	DefaultURL = "ws://localhost:8082/v1/ws"
+
+	DefaultCommandQueueDepth = 10
 )
 
-var log = loggo.GetLogger("tbcgozer")
+var (
+	log                   = loggo.GetLogger("tbcgozer")
+	DefaultRequestTimeout = 5 * time.Second
+)
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -42,8 +46,9 @@ func init() {
 
 // tbcCmd wraps tbc commands.
 type tbcCmd struct {
-	msg any
-	ch  chan any
+	msg     any
+	ch      chan any
+	timeout time.Duration
 }
 
 // tbcGozer implements [gozer.Gozer] and retrieves Bitcoin data from a TBC
@@ -61,7 +66,7 @@ var _ gozer.Gozer = (*tbcGozer)(nil)
 func New(tbcUrl string) gozer.Gozer {
 	return &tbcGozer{
 		url:   tbcUrl,
-		cmdCh: make(chan tbcCmd, 10),
+		cmdCh: make(chan tbcCmd, DefaultCommandQueueDepth),
 	}
 }
 
@@ -81,7 +86,7 @@ func (t *tbcGozer) BestHeightHashTime(ctx context.Context) (uint64, *chainhash.H
 	bur := &tbcapi.BlockHeaderBestRawRequest{}
 
 	var ts time.Time
-	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
+	res, err := t.callTBC(ctx, DefaultRequestTimeout, bur)
 	if err != nil {
 		return 0, nil, ts, err
 	}
@@ -108,7 +113,7 @@ func (t *tbcGozer) BestHeightHashTime(ctx context.Context) (uint64, *chainhash.H
 func (t *tbcGozer) FeeEstimates(ctx context.Context) ([]*tbcapi.FeeEstimate, error) {
 	bur := &tbcapi.FeeEstimateRequest{}
 
-	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
+	res, err := t.callTBC(ctx, DefaultRequestTimeout, bur)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +136,7 @@ func (t *tbcGozer) BroadcastTx(ctx context.Context, tx *wire.MsgTx) (*chainhash.
 		Force: false, // XXX allow this to be passed in some way
 	}
 
-	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
+	res, err := t.callTBC(ctx, DefaultRequestTimeout, bur)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +166,7 @@ func (t *tbcGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr 
 		Count:         count,
 	}
 
-	res, err := t.callTBC(ctx, defaultRequestTimeout, bur)
+	res, err := t.callTBC(ctx, DefaultRequestTimeout, bur)
 	if err != nil {
 		return nil, err
 	}
@@ -183,7 +188,7 @@ func (t *tbcGozer) BlocksByL2AbrevHashes(ctx context.Context, hashes []chainhash
 		L2KeystoneAbrevHashes: hashes,
 	}
 
-	res, err := t.callTBC(ctx, defaultRequestTimeout, ksr)
+	res, err := t.callTBC(ctx, DefaultRequestTimeout, ksr)
 	if err != nil {
 		r := &gozer.BlocksByL2AbrevHashesResponse{
 			Error: protocol.Errorf("%v", err),
@@ -213,7 +218,7 @@ func (t *tbcGozer) KeystonesByHeight(ctx context.Context, height uint32, depth i
 		Depth:  depth,
 	}
 
-	res, err := t.callTBC(ctx, defaultRequestTimeout, ksr)
+	res, err := t.callTBC(ctx, DefaultRequestTimeout, ksr)
 	if err != nil {
 		r := &gozer.KeystonesByHeightResponse{
 			Error: protocol.Errorf("%v", err),
@@ -252,9 +257,14 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 		return nil, errors.New("not connected to tbc")
 	}
 
+	if timeout == 0 {
+		timeout = DefaultRequestTimeout
+	}
+
 	bc := tbcCmd{
-		msg: msg,
-		ch:  make(chan any),
+		msg:     msg,
+		ch:      make(chan any),
+		timeout: timeout,
 	}
 
 	ctx, cancel := context.WithTimeout(pctx, timeout)
@@ -265,8 +275,6 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case t.cmdCh <- bc:
-	default:
-		return nil, errors.New("tbc command queue full")
 	}
 
 	// Wait for response
@@ -283,33 +291,41 @@ func (t *tbcGozer) callTBC(pctx context.Context, timeout time.Duration, msg any)
 	// Won't get here
 }
 
-func (t *tbcGozer) handleTBCWebsocketCall(ctx context.Context, conn *protocol.Conn) {
+func (t *tbcGozer) handleTBCWebsocketCall(pctx context.Context, conn *protocol.Conn) {
 	defer t.wg.Done()
 
 	log.Tracef("handleTBCWebsocketCall")
 	defer log.Tracef("handleTBCWebsocketCall exit")
 	for {
 		select {
-		case <-ctx.Done():
+		case <-pctx.Done():
 			return
 		case c := <-t.cmdCh:
 			// Parallelize calls. There is no reason to do them
 			// in order and wait for potentially slow completion.
 			go func(bc tbcCmd) {
+				if bc.timeout == 0 {
+					bc.timeout = DefaultRequestTimeout
+				}
+				ctx, cancel := context.WithTimeout(pctx, bc.timeout)
+				defer cancel()
+
 				_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
 				if err != nil {
+					// XXX very loud
 					log.Errorf("handleTBCWebsocketCall %T: %v",
 						bc.msg, err)
 					select {
+					case <-ctx.Done():
 					case bc.ch <- err:
-					default:
 					}
+					return
 				}
 				select {
+				case <-ctx.Done():
 				case bc.ch <- payload:
 					log.Tracef("handleTBCWebsocketCall returned: %v",
 						spew.Sdump(payload))
-				default:
 				}
 			}(c)
 		}
