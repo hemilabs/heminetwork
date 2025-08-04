@@ -132,6 +132,7 @@ func TestTBCGozerCalls(t *testing.T) {
 	mtbc := mock.NewMockTBC(ctx, nil, nil, kssMap, btcTip, 100)
 	defer mtbc.Shutdown()
 
+	DefaultRequestTimeout = 10 * time.Second // CI is slow as balls
 	b := New("ws" + strings.TrimPrefix(mtbc.URL(), "http"))
 	if err = b.Run(ctx, nil); err != nil {
 		t.Fatal(err)

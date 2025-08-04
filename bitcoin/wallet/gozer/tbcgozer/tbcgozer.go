@@ -30,11 +30,13 @@ const (
 
 	DefaultURL = "ws://localhost:8082/v1/ws"
 
-	DefaultRequestTimeout    = 5 * time.Second
 	DefaultCommandQueueDepth = 10
 )
 
-var log = loggo.GetLogger("tbcgozer")
+var (
+	log                   = loggo.GetLogger("tbcgozer")
+	DefaultRequestTimeout = 5 * time.Second
+)
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
@@ -310,6 +312,7 @@ func (t *tbcGozer) handleTBCWebsocketCall(pctx context.Context, conn *protocol.C
 
 				_, _, payload, err := tbcapi.Call(ctx, conn, bc.msg)
 				if err != nil {
+					// XXX very loud
 					log.Errorf("handleTBCWebsocketCall %T: %v",
 						bc.msg, err)
 					select {
