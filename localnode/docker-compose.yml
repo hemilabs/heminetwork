@@ -266,7 +266,7 @@ services:
       - "--override.delta=1715865630"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
-      - "--p2p.static=/ip4/34.147.95.117/tcp/9003/p2p/16Uiu2HAmFtpk79F9M1TdC2cnq8c1pJy59yrb5AWeM1qH6d13Fbi2"
+      - "--p2p.static=/ip4/34.147.95.117/tcp/9003/p2p/16Uiu2HAmFtpk79F9M1TdC2cnq8c1pJy59yrb5AWeM1qH6d13Fbi2,/ip4/34.90.95.68/tcp/9003/p2p/16Uiu2HAmEDnT7hSbpD5x7TEyywofqtMw6CBCn1Yasn8Ut8CefBi3,/ip4/34.34.97.92/tcp/9003/p2p/16Uiu2HAm9SXFzfB1Mx5aJ6j9QKSs44jA4MNiDVBbGF2JPWs4h8eU"
       - "--p2p.no-discovery"
       - "--p2p.ban.peers=false"
       - "--p2p.ban.duration=1s"
