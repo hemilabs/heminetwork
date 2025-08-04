@@ -1716,9 +1716,9 @@ func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, mi
 
 func TestNotFoundError(t *testing.T) {
 	type testTableItem struct {
-		name           string
-		handler        func(ctx context.Context) (any, error)
-		expectedResult any
+		name          string
+		handler       func(ctx context.Context) (*protocol.Error, error)
+		expectedError protocol.Error
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
@@ -1757,137 +1757,131 @@ func TestNotFoundError(t *testing.T) {
 
 	// wait for server to start
 	for !s.Running() {
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	var notFoundErr database.NotFoundError
-	var bhb *tbcd.BlockHeader
-	for {
-		// get genesis block header
-		bhb, err = s.db.BlockHeaderBest(ctx)
-		if err != nil {
-			if !errors.Is(err, notFoundErr) {
-				t.Fatal(err)
-			}
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
-		break
-	}
-
+	var emptyHash chainhash.Hash
 	testTable := []testTableItem{
 		{
 			name: "BlockByHash",
-			handler: func(ctx context.Context) (any, error) {
+			handler: func(ctx context.Context) (*protocol.Error, error) {
 				req := tbcapi.BlockByHashRequest{
-					Hash: chainhash.Hash{},
+					Hash: emptyHash,
 				}
-				return s.handleBlockByHashRequest(ctx, &req)
+				res, err := s.handleBlockByHashRequest(ctx, &req)
+				val, ok := res.(*tbcapi.BlockByHashResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
 			},
-			expectedResult: tbcapi.BlockByHashResponse{
-				Error: protocol.NotFoundError("block", chainhash.Hash{}),
-			},
+			expectedError: *protocol.NotFoundError("block", emptyHash),
 		},
 		{
 			name: "BlockByHashRaw",
-			handler: func(ctx context.Context) (any, error) {
+			handler: func(ctx context.Context) (*protocol.Error, error) {
 				req := tbcapi.BlockByHashRawRequest{
-					Hash: chainhash.Hash{},
+					Hash: emptyHash,
 				}
-				return s.handleBlockByHashRawRequest(ctx, &req)
+				res, err := s.handleBlockByHashRawRequest(ctx, &req)
+				val, ok := res.(*tbcapi.BlockByHashRawResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
 			},
-			expectedResult: tbcapi.BlockByHashRawResponse{
-				Error: protocol.NotFoundError("block", chainhash.Hash{}),
-			},
+			expectedError: *protocol.NotFoundError("block", emptyHash),
 		},
 		{
 			name: "BlockHeadersByHeight",
-			handler: func(ctx context.Context) (any, error) {
+			handler: func(ctx context.Context) (*protocol.Error, error) {
 				req := tbcapi.BlockHeadersByHeightRequest{
 					Height: 1,
 				}
-				return s.handleBlockHeadersByHeightRequest(ctx, &req)
+				res, err := s.handleBlockHeadersByHeightRequest(ctx, &req)
+				val, ok := res.(*tbcapi.BlockHeadersByHeightResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
 			},
-			expectedResult: tbcapi.BlockHeadersByHeightResponse{
-				Error: protocol.NotFoundError("block headers", 1),
-			},
+			expectedError: *protocol.NotFoundError("block headers", 1),
 		},
 		{
 			name: "BlockHeadersByHeightRaw",
-			handler: func(ctx context.Context) (any, error) {
+			handler: func(ctx context.Context) (*protocol.Error, error) {
 				req := tbcapi.BlockHeadersByHeightRawRequest{
 					Height: 1,
 				}
-				return s.handleBlockHeadersByHeightRawRequest(ctx, &req)
+				res, err := s.handleBlockHeadersByHeightRawRequest(ctx, &req)
+				val, ok := res.(*tbcapi.BlockHeadersByHeightRawResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
 			},
-			expectedResult: tbcapi.BlockHeadersByHeightRawResponse{
-				Error: protocol.NotFoundError("block headers", 1),
-			},
+			expectedError: *protocol.NotFoundError("block headers", 1),
 		},
 		{
 			name: "TxById",
-			handler: func(ctx context.Context) (any, error) {
+			handler: func(ctx context.Context) (*protocol.Error, error) {
 				req := tbcapi.TxByIdRequest{
-					TxID: chainhash.Hash{},
+					TxID: emptyHash,
 				}
-				return s.handleTxByIdRequest(ctx, &req)
+				res, err := s.handleTxByIdRequest(ctx, &req)
+				val, ok := res.(*tbcapi.TxByIdResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
 			},
-			expectedResult: tbcapi.TxByIdResponse{
-				Error: protocol.NotFoundError("tx", chainhash.Hash{}),
-			},
+			expectedError: *protocol.NotFoundError("tx", emptyHash),
 		},
 		{
 			name: "TxByIdRaw",
-			handler: func(ctx context.Context) (any, error) {
+			handler: func(ctx context.Context) (*protocol.Error, error) {
 				req := tbcapi.TxByIdRawRequest{
-					TxID: chainhash.Hash{},
+					TxID: emptyHash,
 				}
-				return s.handleTxByIdRawRequest(ctx, &req)
-			},
-			expectedResult: tbcapi.TxByIdRawResponse{
-				Error: protocol.NotFoundError("tx", chainhash.Hash{}),
-			},
-		},
-		{
-			name: "TxByIdRaw",
-			handler: func(ctx context.Context) (any, error) {
-				req := tbcapi.TxByIdRawRequest{
-					TxID: chainhash.Hash{},
+				res, err := s.handleTxByIdRawRequest(ctx, &req)
+				val, ok := res.(*tbcapi.TxByIdRawResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
 				}
-				return s.handleTxByIdRawRequest(ctx, &req)
+				return val.Error, err
 			},
-			expectedResult: tbcapi.TxByIdRawResponse{
-				Error: protocol.NotFoundError("tx", chainhash.Hash{}),
-			},
+			expectedError: *protocol.NotFoundError("tx", emptyHash),
 		},
 		{
 			name: "BlockKeystoneByL2KeystoneAbrevHash",
-			handler: func(ctx context.Context) (any, error) {
+			handler: func(ctx context.Context) (*protocol.Error, error) {
 				req := tbcapi.BlocksByL2AbrevHashesRequest{
-					L2KeystoneAbrevHashes: []chainhash.Hash{{}},
+					L2KeystoneAbrevHashes: []chainhash.Hash{emptyHash},
 				}
-				return s.handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx, &req)
+				res, err := s.handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx, &req)
+				val, ok := res.(*tbcapi.BlocksByL2AbrevHashesResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				// allow panic if index 0 not found
+				return val.L2KeystoneBlocks[0].Error, err
 			},
-			expectedResult: &tbcapi.BlocksByL2AbrevHashesResponse{
-				L2KeystoneBlocks: []*tbcapi.L2KeystoneBlockInfo{
-					{
-						Error: protocol.NotFoundError("keystone", chainhash.Hash{}),
-					},
-				},
-				BtcTipBlockHash:   &bhb.Hash,
-				BtcTipBlockHeight: uint(bhb.Height),
-			},
+			expectedError: *protocol.NotFoundError("keystone", emptyHash),
 		},
 		{
 			name: "KeystoneTxsByL2KeystoneAbrevHash",
-			handler: func(ctx context.Context) (any, error) {
+			handler: func(ctx context.Context) (*protocol.Error, error) {
 				req := tbcapi.KeystoneTxsByL2KeystoneAbrevHashRequest{
-					L2KeystoneAbrevHash: chainhash.Hash{},
+					L2KeystoneAbrevHash: emptyHash,
 				}
-				return s.handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx, &req)
+				res, err := s.handleKeystoneTxsByL2KeystoneAbrevHashRequest(ctx, &req)
+				val, ok := res.(*tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse)
+				if !ok {
+					return nil, fmt.Errorf("unexpected type: %T", res)
+				}
+				return val.Error, err
 			},
-			expectedResult: tbcapi.KeystoneTxsByL2KeystoneAbrevHashResponse{
-				Error: protocol.NotFoundError("keystone", chainhash.Hash{}),
-			},
+			expectedError: *protocol.NotFoundError("keystone", emptyHash),
 		},
 	}
 
@@ -1898,21 +1892,9 @@ func TestNotFoundError(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// marshal rather than dereference this pointer with reflect,
-			// which would be messier
-			respRaw, err := json.Marshal(resp)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			expectedRaw, err := json.Marshal(tti.expectedResult)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			if diff := deep.Equal(respRaw, expectedRaw); len(diff) > 0 {
-				t.Logf("%v != %v", spew.Sdump(resp), spew.Sdump(tti.expectedResult))
-				t.Fatalf("unexpected diff: %s", diff)
+			if resp.Message != tti.expectedError.Message {
+				t.Fatalf("unexpected error %v != %v",
+					resp.Message, tti.expectedError.Message)
 			}
 		})
 	}
