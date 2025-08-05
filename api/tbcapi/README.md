@@ -117,7 +117,7 @@ with the `tbcd` daemon. The client provides a command-line interface for all sup
 For developers looking to integrate or extend functionality:
 - View the raw Go types used in TBC's RPC commands: [View `tbcapi.go`](tbcapi.go)
 - Check our [contribution guidelines](../../CONTRIBUTING.md)
-- Review our [security policy](../../SECURITY.md)
+- Review our [security policy](https://github.com/hemilabs/.github/blob/main/SECURITY.md)
 
 ---
 
