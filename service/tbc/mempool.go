@@ -201,7 +201,7 @@ func (m *Mempool) txsRemove(ctx context.Context, txs []chainhash.Hash) {
 
 	// if the map length does not change, nothing was deleted.
 	if reaped != 0 {
-		log.Infof("Mempool removed txs: %v", reaped)
+		log.Tracef("Mempool removed txs: %v", reaped)
 	}
 }
 
