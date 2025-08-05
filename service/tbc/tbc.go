@@ -92,7 +92,7 @@ var (
 		Height: 2577400,
 	}
 	testnet4HemiGenesis = &HashHeight{
-		Hash:   s2h("00000000916dacbf30938a100bd67a048389c1c6676f656853e9a55129747218"),
+		Hash:   s2h("00000000a14c6e63123ba02d7e9fd173d4b04412c71a31b7a6ab8bb3106c9231"),
 		Height: 84190,
 	}
 	localnetHemiGenesis = &HashHeight{
