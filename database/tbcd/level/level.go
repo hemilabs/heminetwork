@@ -704,25 +704,29 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	bmBatch := new(leveldb.Batch)
 	bhBatch := new(leveldb.Batch)
 
-	// Genesis insert can be called with an effective genesis block at a particular height
-	// and with a particular cumulative difficulty which is guaranteed canonical (protocol
-	// assumes this effective genesis block will never fork), allowing a header-only TBC
-	// instance to maintain Bitcoin consensus starting from a non-genesis block rather
-	// than requiring all historical state which is irrelevant to conesnsus assuming the
-	// effective genesis block is never forked.
+	// Genesis insert can be called with an effective genesis block at a
+	// particular height and with a particular cumulative difficulty which
+	// is guaranteed canonical (protocol assumes this effective genesis
+	// block will never fork), allowing a header-only TBC instance to
+	// maintain Bitcoin consensus starting from a non-genesis block rather
+	// than requiring all historical state which is irrelevant to conesnsus
+	// assuming the effective genesis block is never forked.
 	hhKey := heightHashToKey(height, bhash[:])
 	hhBatch.Put(hhKey, []byte{})
 
-	// Handle the default case where the passed-in block is actually the genesis
+	// Handle the default case where the passed-in block is actually the
+	// genesis
 	cdiff := blockchain.CalcWork(wbh.Bits)
 
-	// If an effective starting difficulty is supplied and is not set to zero, then use it
-	// instead (used for external header mode). In the event that an effective genesis block
-	// is supplied but the cumulative difficulty is not set, the difficulty of that
-	// effective genesis block (set above) will be retained, which has no effect on local
-	// consensus determination but will not permit direct comparison of cumulative difficulty
-	// against the full chain, only relative comparisons between cumulative difficulties of
-	// blocks on top of the same effective genesis block are guaranteed valid.
+	// If an effective starting difficulty is supplied and is not set to
+	// zero, then use it instead (used for external header mode). In the
+	// event that an effective genesis block is supplied but the cumulative
+	// difficulty is not set, the difficulty of that effective genesis
+	// block (set above) will be retained, which has no effect on local
+	// consensus determination but will not permit direct comparison of
+	// cumulative difficulty against the full chain, only relative
+	// comparisons between cumulative difficulties of blocks on top of the
+	// same effective genesis block are guaranteed valid.
 	if diff != nil && diff.Cmp(big.NewInt(0)) > 0 {
 		cdiff = diff
 	}
