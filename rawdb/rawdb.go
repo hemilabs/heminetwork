@@ -75,6 +75,7 @@ func New(cfg *Config) (*RawDB, error) {
 	case "badger":
 	case "level":
 	case "pebble":
+	case "bitcask":
 	default:
 		return nil, fmt.Errorf("invalid db: %v", cfg.DB)
 	}
@@ -110,6 +111,9 @@ func (r *RawDB) Open() error {
 	case "pebble":
 		pcfg := db.DefaultPebbleConfig(filepath.Join(r.cfg.Home, indexDir))
 		r.index, err = db.NewPebbleDB(pcfg)
+	case "bitcask":
+		pcfg := db.DefaultBitcaskConfig(filepath.Join(r.cfg.Home, indexDir))
+		r.index, err = db.NewBitcaskDB(pcfg)
 	default:
 	}
 	if err != nil {

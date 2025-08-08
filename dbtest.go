@@ -45,7 +45,7 @@ func _main() error {
 	home := action
 
 	switch action {
-	case "level-rawdb", "badger-rawdb", "pebble-rawdb":
+	case "level-rawdb", "badger-rawdb", "pebble-rawdb", "bitcask-rawdb":
 		rdb, err = rawdb.New(&rawdb.Config{
 			DB:      *dbs,
 			Home:    home,
@@ -61,6 +61,7 @@ func _main() error {
 		if err != nil {
 			return err
 		}
+
 	case "level-direct":
 		cfg := db.DefaultLevelConfig(home)
 		ddb, err = db.NewLevelDB(cfg)
@@ -71,6 +72,13 @@ func _main() error {
 	case "pebble-direct":
 		cfg := db.DefaultPebbleConfig(home)
 		ddb, err = db.NewPebbleDB(cfg)
+		if err != nil {
+			return err
+		}
+
+	case "bitcask-direct":
+		cfg := db.DefaultBitcaskConfig(home)
+		ddb, err = db.NewBitcaskDB(cfg)
 		if err != nil {
 			return err
 		}
