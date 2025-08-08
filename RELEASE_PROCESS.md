@@ -1,20 +1,25 @@
-This is a guide to releasing new releases of Hemi Network. It's super easy, even if you're new and afraid of breaking something. We'll write it as is, no extra words.
+This is a guide to releasing new releases of **Hemi Network**. It's super easy, even if you're new and afraid of breaking something. We'll write it as is, no extra words.
 
 Versions – What are those numbers? We use SemVer, it's MAJOR.MINOR.PATCH. Here's the deal:
 
-MAJOR – Major changes that break everything. API, config, protocols. Users need to fix their configs or they're screwed. MINOR – New features, old stuff still works. Upgrade and enjoy. PATCH – Bug fixes, code improvements, documentation. Upgrade safely, no stress.
+**MAJOR** – Major changes that break everything. API, config, protocols. Users need to fix their configs or they're screwed. 
+
+**MINOR** – New features, old stuff still works. Upgrade and enjoy. 
+
+**PATCH** – Bug fixes, code improvements, documentation. Upgrade safely, no stress.
 
 Examples:
-2.0.0 – Protocol rewrite, get ready for manual config changes.
 
-2.1.0 – Validator detection added.
+`2.0.0` – Protocol rewrite, get ready for manual config changes.
 
-2.1.1 – Memory leak fixed.
+`2.1.0` – Validator detection added.
 
-Tip: Not sure which version to upgrade? Write to the team in chat, they will figure it out.
+`2.1.1` – Memory leak fixed.
 
-Changelog - tell us what changed. The changelog is your story about what you wrote and why. Don't just say "something changed", but explain it as if you were talking to a friend. Tell us what's new, what's fixed, and what might break. Example:
 
+Changelog - tell us what changed. The changelog is your story about what you wrote and why. Don't just say "something changed", but explain it as if you were talking to a friend. Tell us what's new, what's fixed, and what might break. 
+
+*Example:*
 [2.0.0] - 2025-08-07
 News
 Added support for X, now you can process Y faster.
