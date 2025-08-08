@@ -9,6 +9,7 @@ type Database interface {
 	Open(context.Context) error
 	Close(context.Context) error
 
+	Del(context.Context, []byte) error
 	Has(context.Context, []byte) (bool, error)
 	Get(context.Context, []byte) ([]byte, error)
 	Put(context.Context, []byte, []byte) error

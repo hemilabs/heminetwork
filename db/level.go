@@ -56,6 +56,10 @@ func (b *levelDB) Close(_ context.Context) error {
 	return b.db.Close()
 }
 
+func (b *levelDB) Del(_ context.Context, key []byte) error {
+	return b.db.Delete(key, nil)
+}
+
 func (b *levelDB) Has(_ context.Context, key []byte) (bool, error) {
 	return b.db.Has(key, nil)
 }

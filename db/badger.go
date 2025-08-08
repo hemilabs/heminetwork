@@ -56,6 +56,19 @@ func (b *badgerDB) Close(_ context.Context) error {
 	return b.db.Close()
 }
 
+func (b *badgerDB) Del(_ context.Context, key []byte) error {
+	err := b.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete(key)
+	})
+	if err != nil {
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return ErrKeyNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 func (b *badgerDB) Has(_ context.Context, key []byte) (bool, error) {
 	_, err := b.Get(nil, key)
 	if errors.Is(err, ErrKeyNotFound) {
