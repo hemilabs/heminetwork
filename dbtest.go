@@ -20,7 +20,7 @@ import (
 func _main() error {
 	bs := flag.Int("blocksize", 4096, "block size default 4096")
 	mb := flag.Int("maxblocks", 1000, "number of blocks, default 1000")
-	dbs := flag.String("db", "", "level or badger")
+	dbs := flag.String("db", "", "badger, bitcask, bunt, level, nuts or pebble")
 	test := flag.String("test", "", "rawdb (split key/value), direct (direct access)")
 	flag.Parse()
 
