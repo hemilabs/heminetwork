@@ -12,7 +12,7 @@ import (
 
 func TestRawDB(t *testing.T) {
 	home := t.TempDir()
-	remove := true
+	remove := false
 	defer func() {
 		if !remove {
 			t.Logf("did not remove home: %v", home)
@@ -24,7 +24,7 @@ func TestRawDB(t *testing.T) {
 		}
 	}()
 	blockSize := int64(4096)
-	rdb, err := New(&Config{Home: home, MaxSize: blockSize})
+	rdb, err := New(&Config{DB: "badger", Home: home, MaxSize: blockSize})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestRawDB(t *testing.T) {
 	}()
 
 	// Open again and expect locked failure
-	rdb2, err := New(&Config{Home: home, MaxSize: blockSize})
+	rdb2, err := New(&Config{DB: "badger", Home: home, MaxSize: blockSize})
 	if err != nil {
 		t.Fatal(err)
 	}

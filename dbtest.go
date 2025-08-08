@@ -1,0 +1,152 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"flag"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/hemilabs/heminetwork/v2/db"
+	"github.com/hemilabs/heminetwork/v2/rawdb"
+)
+
+func _main() error {
+	blockSize := 4_096
+	maxBlocks := 1000
+	value := make([]byte, int(blockSize))
+	_, err := rand.Read(value)
+	if err != nil {
+		return err
+	}
+
+	dbs := flag.String("db", "", "level or badger")
+	test := flag.String("test", "", "rawdb (split key/value), direct (direct access)")
+	flag.Parse()
+
+	var (
+		ddb db.Database
+		rdb *rawdb.RawDB
+	)
+	action := fmt.Sprintf("%v-%v", *dbs, *test)
+	home := action
+
+	log.Printf("Starting %v", action)
+	overall := time.Now()
+	ctx := context.Background()
+
+	switch action {
+	case "badger-rawdb":
+		rdb, err = rawdb.New(&rawdb.Config{
+			DB:      *dbs,
+			Home:    home,
+			MaxSize: int64(blockSize),
+		})
+		if err != nil {
+			return err
+		}
+
+	case "badger-direct":
+		cfg := db.DefaultBadgerConfig(home)
+		ddb, err = db.NewBadgerDB(cfg)
+		if err != nil {
+			return err
+		}
+
+	default:
+		return fmt.Errorf("invalid db: %v", *dbs)
+	}
+
+	if ddb != nil {
+		err = ddb.Open(ctx)
+		if err != nil {
+			return err
+		}
+	} else {
+		err = rdb.Open()
+		if err != nil {
+			return err
+		}
+	}
+
+	switch *test {
+	case "direct":
+		// insert 1000 blocks
+		start := time.Now()
+		for i := 0; i < maxBlocks; i++ {
+			var key [4]byte
+			binary.BigEndian.PutUint32(key[:], uint32(i))
+			err := ddb.Put(ctx, key[:], value)
+			if err != nil {
+				return err
+			}
+		}
+		log.Printf("%v inserts: %v size %v duration: %v",
+			action, maxBlocks, maxBlocks*blockSize, time.Since(start))
+
+		// 1000 retrievals
+		start = time.Now()
+		for i := 0; i < maxBlocks; i++ {
+			var key [4]byte
+			binary.BigEndian.PutUint32(key[:], uint32(i))
+			_, err := ddb.Get(ctx, key[:])
+			if err != nil {
+				return err
+			}
+		}
+		log.Printf("%v gets: %v size %v duration: %v",
+			action, maxBlocks, maxBlocks*blockSize, time.Since(start))
+
+	case "rawdb":
+		// insert 1000 blocks
+		start := time.Now()
+		for i := 0; i < maxBlocks; i++ {
+			var key [4]byte
+			binary.BigEndian.PutUint32(key[:], uint32(i))
+			err := rdb.Insert(key[:], value)
+			if err != nil {
+				return err
+			}
+		}
+		log.Printf("%v inserts: %v size %v duration: %v",
+			action, maxBlocks, maxBlocks*blockSize, time.Since(start))
+		// 1000 retrievals
+		start = time.Now()
+		for i := 0; i < maxBlocks; i++ {
+			var key [4]byte
+			binary.BigEndian.PutUint32(key[:], uint32(i))
+			v, err := rdb.Get(key[:])
+			if err != nil {
+				return err
+			}
+			_ = v
+		}
+		log.Printf("%v gets: %v size %v duration: %v",
+			action, maxBlocks, maxBlocks*blockSize, time.Since(start))
+	}
+
+	if ddb != nil {
+		err = ddb.Close(ctx)
+		if err != nil {
+			return err
+		}
+	} else {
+		err = rdb.Close()
+		if err != nil {
+			return err
+		}
+	}
+
+	log.Printf("overall duration %v (ctrl-c to exit)", time.Since(overall))
+	<-ctx.Done()
+	return nil
+}
+
+func main() {
+	err := _main()
+	if err != nil {
+		panic(err)
+	}
+}
