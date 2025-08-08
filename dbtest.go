@@ -4,27 +4,38 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/hemilabs/heminetwork/v2/db"
 	"github.com/hemilabs/heminetwork/v2/rawdb"
 )
 
 func _main() error {
-	blockSize := 4_096
-	maxBlocks := 1000
+	bs := flag.Int("blocksize", 4096, "block size default 4096")
+	mb := flag.Int("maxblocks", 1000, "number of blocks, default 1000")
+	dbs := flag.String("db", "", "level or badger")
+	test := flag.String("test", "", "rawdb (split key/value), direct (direct access)")
+	flag.Parse()
+
+	if *dbs == "" || *test == "" {
+		return errors.New("must provide -db and -test")
+	}
+
+	blockSize := *bs
+	maxBlocks := *mb
+
 	value := make([]byte, int(blockSize))
 	_, err := rand.Read(value)
 	if err != nil {
 		return err
 	}
-
-	dbs := flag.String("db", "", "level or badger")
-	test := flag.String("test", "", "rawdb (split key/value), direct (direct access)")
-	flag.Parse()
 
 	var (
 		ddb db.Database
@@ -32,10 +43,6 @@ func _main() error {
 	)
 	action := fmt.Sprintf("%v-%v", *dbs, *test)
 	home := action
-
-	log.Printf("Starting %v", action)
-	overall := time.Now()
-	ctx := context.Background()
 
 	switch action {
 	case "badger-rawdb":
@@ -56,8 +63,33 @@ func _main() error {
 		}
 
 	default:
-		return fmt.Errorf("invalid db: %v", *dbs)
+		return fmt.Errorf("invalid action: %v", action)
 	}
+
+	fi, err := os.Stat(action)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if fi != nil {
+		if fi.IsDir() {
+			log.Printf("Removing %v", action)
+			err = os.RemoveAll(action)
+			if err != nil {
+				return err
+			}
+			log.Printf("Syncing...")
+			unix.Sync()
+			time.Sleep(3 * time.Second) // Give sync a chance
+		} else {
+			return fmt.Errorf("not a directory: %v", action)
+		}
+	}
+
+	log.Printf("Starting %v", action)
+	overall := time.Now()
+	ctx := context.Background()
 
 	if ddb != nil {
 		err = ddb.Open(ctx)
