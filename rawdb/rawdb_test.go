@@ -98,7 +98,7 @@ func testRawDB(t *testing.T, dbs string) {
 }
 
 func TestRawDBS(t *testing.T) {
-	dbs := []string{"badger", "level", "pebble", "bitcask"}
+	dbs := []string{"badger", "level", "pebble", "bitcask", "bunt"}
 	for _, v := range dbs {
 		log.Infof("testing: %v", v)
 		testRawDB(t, v)
