@@ -14,4 +14,7 @@ type Database interface {
 	Put(context.Context, []byte, []byte) error
 }
 
-var ErrInvalidConfig = errors.New("invalid config")
+var (
+	ErrKeyNotFound   = errors.New("key not found")
+	ErrInvalidConfig = errors.New("invalid config")
+)

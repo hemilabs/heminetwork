@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/dgraph-io/badger/v4"
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/v2/db"
@@ -44,8 +43,7 @@ type RawDB struct {
 	cfg *Config
 
 	index db.Database
-	// index *leveldb.DB
-	open bool
+	open  bool
 }
 
 type Config struct {
@@ -75,6 +73,7 @@ func New(cfg *Config) (*RawDB, error) {
 
 	switch cfg.DB {
 	case "badger":
+	case "level":
 	default:
 		return nil, fmt.Errorf("invalid db: %v", cfg.DB)
 	}
@@ -99,22 +98,24 @@ func (r *RawDB) Open() error {
 	if err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	bcfg := db.DefaultBadgerConfig(filepath.Join(r.cfg.Home, indexDir))
-	r.index, err = db.NewBadgerDB(bcfg)
-	if err != nil {
-		return fmt.Errorf("new badger: %w", err)
+	// We do this late because directories are created at this point
+	switch r.cfg.DB {
+	case "badger":
+		bcfg := db.DefaultBadgerConfig(filepath.Join(r.cfg.Home, indexDir))
+		r.index, err = db.NewBadgerDB(bcfg)
+	case "level":
+		lcfg := db.DefaultLevelConfig(filepath.Join(r.cfg.Home, indexDir))
+		r.index, err = db.NewLevelDB(lcfg)
+	default:
 	}
+	if err != nil {
+		return fmt.Errorf("new: %w", err)
+	}
+
 	err = r.index.Open(nil)
 	if err != nil {
-		return fmt.Errorf("open badger: %w", err)
+		return fmt.Errorf("open: %w", err)
 	}
-	//r.index, err = leveldb.OpenFile(filepath.Join(r.cfg.Home, indexDir), &opt.Options{
-	//	BlockCacheEvictRemoved: true,
-	//	Compression:            opt.NoCompression,
-	//})
-	//if err != nil {
-	//	return fmt.Errorf("open: %w", err)
-	//}
 	r.open = true
 
 	return nil
@@ -181,7 +182,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 
 		lfe, err := r.index.Get(nil, lastFilenameKey)
 		if err != nil {
-			if errors.Is(err, badger.ErrKeyNotFound) {
+			if errors.Is(err, db.ErrKeyNotFound) {
 				lfe = []byte{0, 0, 0, 0}
 			} else {
 				return err
