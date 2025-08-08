@@ -8,10 +8,13 @@ MAJOR – Big changes that break stuff. APIs, configs, protocols. Users gotta fi
 MINOR – New features, old stuff still works. Update and enjoy.
 PATCH – Bug fixes, code tweaks, docs. Safe to update, no stress.
 
-Examples:
+#### Examples:
 2.0.0 – Rewrote the protocol, brace for manual config changes.
+
 2.1.0 – Added validator discovery thing.
+
 2.1.1 – Plugged a memory leak.
+
 Tip: Not sure which version to bump? Ping the team in chat, they’ll sort you out.
 
  Changelog – Spill What Changed
