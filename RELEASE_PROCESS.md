@@ -1,5 +1,4 @@
-Hemi Network – How to Reject a Release
-Yo, this is a guide to releasing new releases of Hemi Network. It's super easy, even if you're new and afraid of breaking something. We'll write it as is, no extra words.
+This is a guide to releasing new releases of Hemi Network. It's super easy, even if you're new and afraid of breaking something. We'll write it as is, no extra words.
 
 Versions – What are those numbers? We use SemVer, it's MAJOR.MINOR.PATCH. Here's the deal:
 
