@@ -36,9 +36,12 @@ require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/abcum/lcp v0.0.0-20201209214815-7a3f3840be81 // indirect
 	github.com/aead/siphash v1.0.1 // indirect
+	github.com/antlabs/stl v0.0.1 // indirect
+	github.com/antlabs/timer v0.0.11 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bits-and-blooms/bitset v1.22.0 // indirect
 	github.com/btcsuite/btclog v1.0.0 // indirect
+	github.com/bwmarrin/snowflake v0.3.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cockroachdb/errors v1.11.3 // indirect
@@ -95,6 +98,7 @@ require (
 	github.com/moby/term v0.5.2 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/nutsdb/nutsdb v1.0.4 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
 	github.com/otiai10/mint v1.6.3 // indirect
@@ -120,6 +124,8 @@ require (
 	github.com/tidwall/tinyqueue v0.1.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
+	github.com/xujiajun/mmap-go v1.0.1 // indirect
+	github.com/xujiajun/utils v0.0.0-20220904132955-5f7c5b914235 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.mills.io/bitcask/v2 v2.1.3 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
