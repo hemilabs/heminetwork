@@ -111,7 +111,7 @@ func _main() error {
 
 	switch *test {
 	case "direct":
-		// insert 1000 blocks
+		// insert blocks
 		start := time.Now()
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
@@ -124,7 +124,7 @@ func _main() error {
 		log.Printf("%v inserts: %v size %v duration: %v",
 			action, maxBlocks, maxBlocks*blockSize, time.Since(start))
 
-		// 1000 retrievals
+		// retrievals
 		start = time.Now()
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
@@ -137,8 +137,21 @@ func _main() error {
 		log.Printf("%v gets: %v size %v duration: %v",
 			action, maxBlocks, maxBlocks*blockSize, time.Since(start))
 
+		// Deletes
+		start = time.Now()
+		for i := 0; i < maxBlocks; i++ {
+			var key [4]byte
+			binary.BigEndian.PutUint32(key[:], uint32(i))
+			err := ddb.Del(ctx, key[:])
+			if err != nil {
+				return err
+			}
+		}
+		log.Printf("%v deletes: %v size %v duration: %v",
+			action, maxBlocks, maxBlocks*blockSize, time.Since(start))
+
 	case "rawdb":
-		// insert 1000 blocks
+		// insert blocks
 		start := time.Now()
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
@@ -150,7 +163,7 @@ func _main() error {
 		}
 		log.Printf("%v inserts: %v size %v duration: %v",
 			action, maxBlocks, maxBlocks*blockSize, time.Since(start))
-		// 1000 retrievals
+		// retrievals
 		start = time.Now()
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
