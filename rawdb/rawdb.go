@@ -74,6 +74,7 @@ func New(cfg *Config) (*RawDB, error) {
 	switch cfg.DB {
 	case "badger":
 	case "level":
+	case "pebble":
 	default:
 		return nil, fmt.Errorf("invalid db: %v", cfg.DB)
 	}
@@ -106,6 +107,9 @@ func (r *RawDB) Open() error {
 	case "level":
 		lcfg := db.DefaultLevelConfig(filepath.Join(r.cfg.Home, indexDir))
 		r.index, err = db.NewLevelDB(lcfg)
+	case "pebble":
+		pcfg := db.DefaultPebbleConfig(filepath.Join(r.cfg.Home, indexDir))
+		r.index, err = db.NewPebbleDB(pcfg)
 	default:
 	}
 	if err != nil {
