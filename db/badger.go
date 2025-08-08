@@ -14,6 +14,13 @@ type BadgerConfig struct {
 	Home string
 }
 
+type badgerDB struct {
+	db  *badger.DB
+	opt *badger.Options
+
+	cfg *BadgerConfig
+}
+
 func NewBadgerDB(cfg *BadgerConfig) (Database, error) {
 	if cfg == nil {
 		return nil, ErrInvalidConfig
@@ -25,13 +32,6 @@ func NewBadgerDB(cfg *BadgerConfig) (Database, error) {
 	}
 
 	return bdb, nil
-}
-
-type badgerDB struct {
-	db  *badger.DB
-	opt *badger.Options
-
-	cfg *BadgerConfig
 }
 
 func (b *badgerDB) Open(_ context.Context) error {

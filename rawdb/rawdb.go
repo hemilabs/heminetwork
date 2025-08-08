@@ -12,9 +12,10 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/dgraph-io/badger/v4"
 	"github.com/juju/loggo"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/opt"
+
+	"github.com/hemilabs/heminetwork/v2/db"
 )
 
 const (
@@ -27,7 +28,7 @@ const (
 )
 
 var (
-	log             = loggo.GetLogger("rawdb")
+	log             = loggo.GetLogger("db")
 	lastFilenameKey = []byte("lastfilename")
 )
 
@@ -42,11 +43,13 @@ type RawDB struct {
 
 	cfg *Config
 
-	index *leveldb.DB
-	open  bool
+	index db.Database
+	// index *leveldb.DB
+	open bool
 }
 
 type Config struct {
+	DB      string
 	Home    string
 	MaxSize int64
 }
@@ -70,6 +73,12 @@ func New(cfg *Config) (*RawDB, error) {
 		return nil, fmt.Errorf("invalid max size: %v", cfg.MaxSize)
 	}
 
+	switch cfg.DB {
+	case "badger":
+	default:
+		return nil, fmt.Errorf("invalid db: %v", cfg.DB)
+	}
+
 	return &RawDB{
 		cfg: cfg,
 	}, nil
@@ -90,13 +99,22 @@ func (r *RawDB) Open() error {
 	if err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	r.index, err = leveldb.OpenFile(filepath.Join(r.cfg.Home, indexDir), &opt.Options{
-		BlockCacheEvictRemoved: true,
-		Compression:            opt.NoCompression,
-	})
+	bcfg := db.DefaultBadgerConfig(filepath.Join(r.cfg.Home, indexDir))
+	r.index, err = db.NewBadgerDB(bcfg)
 	if err != nil {
-		return fmt.Errorf("mkdir: %w", err)
+		return fmt.Errorf("new badger: %w", err)
 	}
+	err = r.index.Open(nil)
+	if err != nil {
+		return fmt.Errorf("open badger: %w", err)
+	}
+	//r.index, err = leveldb.OpenFile(filepath.Join(r.cfg.Home, indexDir), &opt.Options{
+	//	BlockCacheEvictRemoved: true,
+	//	Compression:            opt.NoCompression,
+	//})
+	//if err != nil {
+	//	return fmt.Errorf("open: %w", err)
+	//}
 	r.open = true
 
 	return nil
@@ -109,7 +127,7 @@ func (r *RawDB) Close() error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
-	err := r.index.Close()
+	err := r.index.Close(nil)
 	if err != nil {
 		return err
 	}
@@ -124,7 +142,7 @@ func (r *RawDB) Close() error {
 // DB returns the underlying index database.
 // You should probably not be calling this! It is used for external database
 // upgrades.
-func (r *RawDB) DB() *leveldb.DB {
+func (r *RawDB) DB() db.Database {
 	return r.index
 }
 
@@ -132,7 +150,7 @@ func (r *RawDB) Has(key []byte) (bool, error) {
 	log.Tracef("Has")
 	defer log.Tracef("Has exit")
 
-	return r.index.Has(key, nil)
+	return r.index.Has(nil, key)
 }
 
 func (r *RawDB) Insert(key, value []byte) error {
@@ -145,7 +163,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 	}
 
 	// Assert we do not have this key stored yet.
-	if ok, err := r.index.Has(key, nil); ok {
+	if ok, err := r.index.Has(nil, key); ok {
 		return errors.New("key already exists")
 	} else if err != nil {
 		return err
@@ -161,9 +179,9 @@ func (r *RawDB) Insert(key, value []byte) error {
 			return errors.New("could not determine last filename")
 		}
 
-		lfe, err := r.index.Get(lastFilenameKey, nil)
+		lfe, err := r.index.Get(nil, lastFilenameKey)
 		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
+			if errors.Is(err, badger.ErrKeyNotFound) {
 				lfe = []byte{0, 0, 0, 0}
 			} else {
 				return err
@@ -191,7 +209,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			last++
 			lastData := make([]byte, 8)
 			binary.BigEndian.PutUint32(lastData, last)
-			err = r.index.Put(lastFilenameKey, lastData, nil)
+			err = r.index.Put(nil, lastFilenameKey, lastData)
 			if err != nil {
 				return err
 			}
@@ -214,7 +232,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			}
 
 			// Write coordinates
-			err = r.index.Put(key, c, nil)
+			err = r.index.Put(nil, key, c)
 			if err != nil {
 				return err
 			}
@@ -228,7 +246,7 @@ func (r *RawDB) Get(key []byte) ([]byte, error) {
 	log.Tracef("Get: %x", key)
 	defer log.Tracef("Get exit: %x", key)
 
-	c, err := r.index.Get(key, nil)
+	c, err := r.index.Get(nil, key)
 	if err != nil {
 		return nil, err
 	}
