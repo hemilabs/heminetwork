@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-func TestRawDB(t *testing.T) {
+func testRawDB(t *testing.T, dbs string) {
 	home := t.TempDir()
-	remove := false
+	remove := true
 	defer func() {
 		if !remove {
 			t.Logf("did not remove home: %v", home)
@@ -24,7 +24,7 @@ func TestRawDB(t *testing.T) {
 		}
 	}()
 	blockSize := int64(4096)
-	rdb, err := New(&Config{DB: "badger", Home: home, MaxSize: blockSize})
+	rdb, err := New(&Config{DB: dbs, Home: home, MaxSize: blockSize})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestRawDB(t *testing.T) {
 	}()
 
 	// Open again and expect locked failure
-	rdb2, err := New(&Config{DB: "badger", Home: home, MaxSize: blockSize})
+	rdb2, err := New(&Config{DB: dbs, Home: home, MaxSize: blockSize})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestRawDB(t *testing.T) {
 	data := []byte("hello, world!")
 	err = rdb.Insert(key, data)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%T %v", err, err)
 	}
 	KEY := []byte("KEY")
 	DATA := []byte("HELLO, WORLD!")
@@ -94,5 +94,13 @@ func TestRawDB(t *testing.T) {
 	}
 	if !bytes.Equal(overflowData, overflowRead) {
 		t.Fatal("overflow data not identical")
+	}
+}
+
+func TestRawDBS(t *testing.T) {
+	dbs := []string{"badger", "level"}
+	for _, v := range dbs {
+		log.Infof("testing: %v", v)
+		testRawDB(t, v)
 	}
 }

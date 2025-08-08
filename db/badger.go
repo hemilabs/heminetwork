@@ -14,6 +14,12 @@ type BadgerConfig struct {
 	Home string
 }
 
+func DefaultBadgerConfig(home string) *BadgerConfig {
+	return &BadgerConfig{
+		Home: home,
+	}
+}
+
 type badgerDB struct {
 	db  *badger.DB
 	opt *badger.Options
@@ -52,7 +58,7 @@ func (b *badgerDB) Close(_ context.Context) error {
 
 func (b *badgerDB) Has(_ context.Context, key []byte) (bool, error) {
 	_, err := b.Get(nil, key)
-	if errors.Is(err, badger.ErrKeyNotFound) {
+	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
 	return err == nil, err
@@ -69,7 +75,10 @@ func (b *badgerDB) Get(_ context.Context, key []byte) ([]byte, error) {
 		return err
 	})
 	if err != nil {
-		return nil, err // XXX return generic
+		if errors.Is(err, badger.ErrKeyNotFound) {
+			return nil, ErrKeyNotFound
+		}
+		return nil, err
 	}
 	return val, nil
 }
@@ -79,13 +88,7 @@ func (b *badgerDB) Put(_ context.Context, key, value []byte) error {
 		return txn.Set(key, value)
 	})
 	if err != nil {
-		return err // return generic
+		return err
 	}
 	return nil
-}
-
-func DefaultBadgerConfig(home string) *BadgerConfig {
-	return &BadgerConfig{
-		Home: home,
-	}
 }

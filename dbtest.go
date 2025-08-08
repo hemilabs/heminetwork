@@ -45,11 +45,11 @@ func _main() error {
 	home := action
 
 	switch action {
-	case "badger-rawdb":
+	case "level-rawdb", "badger-rawdb":
 		rdb, err = rawdb.New(&rawdb.Config{
 			DB:      *dbs,
 			Home:    home,
-			MaxSize: int64(blockSize),
+			MaxSize: rawdb.DefaultMaxFileSize,
 		})
 		if err != nil {
 			return err
@@ -58,6 +58,12 @@ func _main() error {
 	case "badger-direct":
 		cfg := db.DefaultBadgerConfig(home)
 		ddb, err = db.NewBadgerDB(cfg)
+		if err != nil {
+			return err
+		}
+	case "level-direct":
+		cfg := db.DefaultLevelConfig(home)
+		ddb, err = db.NewLevelDB(cfg)
 		if err != nil {
 			return err
 		}
