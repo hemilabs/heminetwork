@@ -23,6 +23,7 @@ func testRawDB(t *testing.T, dbs string) {
 			panic(err)
 		}
 	}()
+
 	blockSize := int64(4096)
 	rdb, err := New(&Config{DB: dbs, Home: home, MaxSize: blockSize})
 	if err != nil {
@@ -39,14 +40,16 @@ func testRawDB(t *testing.T, dbs string) {
 		}
 	}()
 
-	// Open again and expect locked failure
-	rdb2, err := New(&Config{DB: dbs, Home: home, MaxSize: blockSize})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = rdb2.Open()
-	if err == nil {
-		t.Fatal("expected locked db")
+	if dbs != "mongo" {
+		// Open again and expect locked failure
+		rdb2, err := New(&Config{DB: dbs, Home: home, MaxSize: blockSize})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = rdb2.Open()
+		if err == nil {
+			t.Fatal("expected locked db")
+		}
 	}
 
 	key := []byte("key")
@@ -103,4 +106,12 @@ func TestRawDBS(t *testing.T) {
 		log.Infof("testing: %v", v)
 		testRawDB(t, v)
 	}
+}
+
+func TestRemoteDBS(t *testing.T) {
+	if os.Getenv(DefaultMongoEnvURI) == "" {
+		t.Logf("%v env variable not set, skipping test", DefaultMongoEnvURI)
+		t.Skip()
+	}
+	testRawDB(t, "mongo")
 }
