@@ -17,24 +17,6 @@ services:
       - 9988:9988
     volumes:
       - ./l1.hardhat.config.js:/app/hardhat.config.js
-  l2:
-    build:
-      dockerfile: ./hemitrap/hardhat.Dockerfile
-      context: ".."
-    command:
-      - npx
-      - hardhat
-      - node
-      - --fork 
-      - https://testnet.rpc.hemi.network/rpc
-      - --fork-block-number
-      - '3728323'
-      - --port
-      - '19988'
-    ports:
-      - 19988:19988
-    volumes:
-      - ./l2.hardhat.config.js:/app/hardhat.config.js
   op-node:
     image: "ghcr.io/hemilabs/op-node:ea9fe7b@sha256:7110e3c4c61e495ea0a6621d7ec211ceb7e948e25c648b05bd51fcc557ad06bc"
     environment:

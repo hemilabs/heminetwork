@@ -131,38 +131,32 @@ services:
 
   # Ethereum L1 node
   geth-l1:
-    # yamllint disable-line rule:line-length
-    image: "ethereum/client-go@sha256:343cff592e1a9daf99a89261d3263941ff9c3350b62b3ebc0f7c30d35721d905"
-    profiles: ["L1", "full"]
-    volumes:
-      - geth_data:/tmp/geth
-      # change this token value if you expose this service's ports for
-      # connection from other machines
-      - ./jwt.hex:/tmp/jwt/jwt.hex
+    profiles:
+      - hemi-min
+    build:
+      dockerfile: ./hemitrap/hardhat.Dockerfile
+      context: ".."
+    command:
+      - npx
+      - hardhat
+      - node
+      - --fork 
+      - https://morning-skilled-leaf.ethereum-sepolia.quiknode.pro/05c05aa5a21cd883aeea5252928ec3ec85cec957/
+      - --fork-block-number
+      - '8968841'
+      - --port
+      - '9988'
     ports:
-      - '8545:8545'
+      - 9988:9988
+    volumes:
+      - ./../hemitrap/l1.hardhat.config.js:/app/hardhat.config.js
     networks:
       - "localnode"
-    command:
-      - "--sepolia"
-      - "--http"
-      - "--http.port=8545"
-      - "--http.addr=0.0.0.0"
-      - "--http.api=eth,net,engine,admin"
-      - "--authrpc.vhosts=*"
-      - "--authrpc.addr=0.0.0.0"
-      - "--authrpc.jwtsecret=/tmp/jwt/jwt.hex"
-      - "--http.vhosts"
-      - "*"
-      - "--datadir"
-      - "/tmp/geth"
-      - "--gpo.percentile=0"
-    working_dir: "/tmp/geth"
 
   # Hemi L2 node
   op-geth-l2:
     # yamllint disable-line rule:line-length
-    image: "ghcr.io/hemilabs/op-geth:e79d992@sha256:dbe292e013345a8a41c9dc8ee09088853410b17c06ef779258d251f55356c501"
+    image: "0896a3c4ff973f3ceac1475a7d14e6047d844375d1237571219baab078124412"
     platform: linux/amd64
     # XXX does geth need to be fully synced
     profiles: ["hemi", "hemi-min", "full"]
@@ -233,7 +227,7 @@ services:
   # Hemi op-node
   op-node:
     # yamllint disable-line rule:line-length
-    image: "ghcr.io/hemilabs/op-node:ea9fe7b@sha256:7110e3c4c61e495ea0a6621d7ec211ceb7e948e25c648b05bd51fcc557ad06bc"
+    image: "3344b4315ae3abd852361ad988acc82afdd2df0de24cce313b"
     platform: linux/amd64
     profiles: ["hemi", "hemi-min", "full"]
     depends_on:
@@ -255,22 +249,24 @@ services:
       - "op-node"
       - "--ignore-missing-pectra-blob-schedule"
       - "--l1=${GETHL1ENDPOINT:-http://geth-l1:8545}"
-      - "--l1.rpckind=any"
+      - "--l1.rpckind=basic"
       - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
       - "--l2=ws://op-geth-l2:8551"
       - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
-      - "--sequencer.enabled=false"
+      - "--sequencer.enabled=true"
+      - "--sequencer.stopped=false"
       - "--rollup.config=/tmp/rollup.json"
       - "--override.ecotone=1715865630"
       - "--override.canyon=1715865630"
       - "--override.delta=1715865630"
       - "--rpc.addr=0.0.0.0"
       - "--rpc.port=8547"
-      - "--p2p.static=/ip4/34.147.95.117/tcp/9003/p2p/16Uiu2HAmFtpk79F9M1TdC2cnq8c1pJy59yrb5AWeM1qH6d13Fbi2,/ip4/34.90.95.68/tcp/9003/p2p/16Uiu2HAmEDnT7hSbpD5x7TEyywofqtMw6CBCn1Yasn8Ut8CefBi3,/ip4/34.34.97.92/tcp/9003/p2p/16Uiu2HAm9SXFzfB1Mx5aJ6j9QKSs44jA4MNiDVBbGF2JPWs4h8eU"
       - "--p2p.no-discovery"
       - "--p2p.ban.peers=false"
       - "--p2p.ban.duration=1s"
       - "--p2p.ban.threshold=-10000000000"
+      - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
+      - "--p2p.sequencer.key=caa4d3f71fa10a2cd87923055f61f36a94e06f094e38ee080cc1f5babd0a620a"
       - "--log.level=info"
       - "--syncmode=${OPSYNCMODE:-execution-layer}"
       - "--override.pectrablobschedule=1748963425"
@@ -278,9 +274,60 @@ services:
       - "--override.holocene=1748963425"
       - "--override.granite=1748963425"
       - "--override.fjord=1748963425"
+      - "--l1.trustrpc=true"
+      - "--log.level=TRACE"
     deploy:
       restart_policy:
         condition: "any"
+
+  op-proposer:
+    image: "3344b4315ae3abd852361ad988acc82afdd2df0de24cce313b"
+    deploy:
+      restart_policy:
+        condition: "any"
+    healthcheck:
+      start_period: 180s
+    command:
+      - /bin/op-proposer
+      - --poll-interval=1s
+      - --rpc.port=8560
+      - --private-key=0xdfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530
+      - --l1-eth-rpc=http://geth-l1:9988
+      - --rollup-rpc=http://op-node:8547
+      - --resubmission-timeout=15s
+      - --safe-abort-nonce-too-low-count=1
+      - --txmgr.not-in-mempool-timeout=3s
+      - --allow-non-finalized=true
+      - --l2oo-address=0x032d1e1dd960A4B027a9a35FF8B2b672E333Bc27
+    networks:
+      - localnode
+  
+  op-batcher:
+    image: "3344b4315ae3abd852361ad988acc82afdd2df0de24cce313b"
+    deploy:
+      restart_policy:
+        condition: "any"
+    healthcheck:
+      start_period: 180s
+    command:
+      - "/bin/op-batcher"
+      - "--l2-eth-rpc=http://op-geth-l2:18546"
+      - "--rollup-rpc=http://op-node:8547"
+      - "--poll-interval=1s"
+      - "--sub-safety-margin=1"
+      - "--num-confirmations=1"
+      - "--safe-abort-nonce-too-low-count=1"
+      - "--resubmission-timeout=15s"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8548"
+      - "--rpc.enable-admin"
+      - "--max-channel-duration=5"
+      - "--max-pending-tx=1"
+      - "--l1-eth-rpc=http://geth-l1:9988"
+      - "--private-key=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      - --throttle-threshold=0
+    networks:
+      - localnode
 
   # Prysm
   prysm:
