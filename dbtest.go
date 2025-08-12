@@ -45,7 +45,7 @@ func _main() error {
 	home := action
 
 	switch action {
-	case "level-rawdb", "badger-rawdb", "pebble-rawdb", "bitcask-rawdb", "bunt-rawdb", "nuts-rawdb":
+	case "level-rawdb", "badger-rawdb", "pebble-rawdb", "bitcask-rawdb", "bunt-rawdb", "nuts-rawdb", "mongo-rawdb":
 		rdb, err = rawdb.New(&rawdb.Config{
 			DB:      *dbs,
 			Home:    home,
@@ -93,6 +93,13 @@ func _main() error {
 	case "nuts-direct":
 		cfg := db.DefaultNutsConfig(home)
 		ddb, err = db.NewNutsDB(cfg)
+		if err != nil {
+			return err
+		}
+
+	case "mongo-direct":
+		cfg := db.DefaultMongoConfig(os.Getenv(rawdb.DefaultMongoEnvURI))
+		ddb, err = db.NewMongoDB(cfg)
 		if err != nil {
 			return err
 		}

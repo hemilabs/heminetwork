@@ -24,6 +24,8 @@ const (
 	DataDir  = "data"
 
 	DefaultMaxFileSize = 256 * 1024 * 1024 // 256MB file max; will never be bigger.
+
+	DefaultMongoEnvURI = "RAWDB_MONGO_URI" // XXX
 )
 
 var (
@@ -78,6 +80,9 @@ func New(cfg *Config) (*RawDB, error) {
 	case "bitcask":
 	case "bunt":
 	case "nuts":
+
+	// remote
+	case "mongo":
 	default:
 		return nil, fmt.Errorf("invalid db: %v", cfg.DB)
 	}
@@ -122,6 +127,12 @@ func (r *RawDB) Open() error {
 	case "nuts":
 		pcfg := db.DefaultNutsConfig(filepath.Join(r.cfg.Home, indexDir))
 		r.index, err = db.NewNutsDB(pcfg)
+
+	// remote
+	case "mongo":
+		mcfg := db.DefaultMongoConfig(os.Getenv(DefaultMongoEnvURI))
+		r.index, err = db.NewMongoDB(mcfg)
+
 	default:
 	}
 	if err != nil {

@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"errors"
+
+	"github.com/juju/loggo"
 )
 
 type Database interface {
@@ -19,3 +21,13 @@ var (
 	ErrKeyNotFound   = errors.New("key not found")
 	ErrInvalidConfig = errors.New("invalid config")
 )
+
+const logLevel = "INFO"
+
+var log = loggo.GetLogger("db")
+
+func init() {
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
+}
