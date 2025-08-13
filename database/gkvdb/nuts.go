@@ -1,4 +1,4 @@
-package db
+package gkvdb
 
 import (
 	"context"
@@ -30,7 +30,7 @@ func DefaultNutsConfig(home string, tables []string) *NutsConfig {
 }
 
 type nutsDB struct {
-	db *nutsdb.DB
+	gkvdb *nutsdb.DB
 
 	cfg *NutsConfig
 }
@@ -47,7 +47,7 @@ func NewNutsDB(cfg *NutsConfig) (Database, error) {
 }
 
 func (b *nutsDB) Open(_ context.Context) error {
-	if b.db != nil {
+	if b.gkvdb != nil {
 		return nil // XXX return already open?
 	}
 	// XXX no compression
@@ -67,16 +67,16 @@ func (b *nutsDB) Open(_ context.Context) error {
 	if err != nil {
 		return err
 	}
-	b.db = ndb
+	b.gkvdb = ndb
 	return nil
 }
 
 func (b *nutsDB) Close(_ context.Context) error {
-	return b.db.Close()
+	return b.gkvdb.Close()
 }
 
 func (b *nutsDB) Del(_ context.Context, table string, key []byte) error {
-	err := b.db.View(
+	err := b.gkvdb.View(
 		func(tx *nutsdb.Tx) error {
 			_, err := tx.ValueLen(table, key)
 			if err != nil {
@@ -104,7 +104,7 @@ func (b *nutsDB) Has(_ context.Context, table string, key []byte) (bool, error) 
 
 func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
 	var value []byte
-	err := b.db.View(func(tx *nutsdb.Tx) error {
+	err := b.gkvdb.View(func(tx *nutsdb.Tx) error {
 		key := key
 		val, err := tx.Get(table, key)
 		if err != nil {
@@ -124,7 +124,7 @@ func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error
 }
 
 func (b *nutsDB) Put(_ context.Context, table string, key, value []byte) error {
-	err := b.db.Update(
+	err := b.gkvdb.Update(
 		func(tx *nutsdb.Tx) error {
 			key := key
 			val := value
@@ -146,7 +146,7 @@ func (b *nutsDB) Put(_ context.Context, table string, key, value []byte) error {
 }
 
 //	func (b *nutsDB) View(ctx context.Context, callback func(ctx context.Context, tx *Transaction) error) error {
-//		itx, err := b.db.Begin(false)
+//		itx, err := b.gkvdb.Begin(false)
 //		if err != nil {
 //			return err
 //		}

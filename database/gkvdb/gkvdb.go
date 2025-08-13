@@ -1,4 +1,4 @@
-package db
+package gkvdb
 
 import (
 	"context"
@@ -86,7 +86,7 @@ var (
 
 const logLevel = "INFO"
 
-var log = loggo.GetLogger("db")
+var log = loggo.GetLogger("gkvdb")
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
