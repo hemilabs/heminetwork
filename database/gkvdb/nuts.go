@@ -197,6 +197,7 @@ func (tx *nutsTX) Get(ctx context.Context, table string, key []byte) ([]byte, er
 }
 
 func (tx *nutsTX) Put(ctx context.Context, table string, key []byte, value []byte) error {
+	log.Infof("Put: %s %x %x", table, key, value)
 	return xerr(tx.tx.Put(table, key, value, 0))
 }
 
