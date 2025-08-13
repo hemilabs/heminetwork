@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package main
 
 import (
@@ -13,7 +17,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	db "github.com/hemilabs/heminetwork/v2/database/gkvdb"
+	"github.com/hemilabs/heminetwork/v2/database/gkvdb"
 	"github.com/hemilabs/heminetwork/v2/database/gkvdb/dbtest/rawdb"
 )
 
@@ -31,7 +35,7 @@ func _main() error {
 	blockSize := *bs
 	maxBlocks := *mb
 
-	value := make([]byte, int(blockSize))
+	value := make([]byte, blockSize)
 	_, err := rand.Read(value)
 	if err != nil {
 		return err
@@ -55,55 +59,55 @@ func _main() error {
 			return err
 		}
 
-	case "badger-direct":
-		cfg := db.DefaultBadgerConfig(home)
-		ddb, err = db.NewBadgerDB(cfg)
-		if err != nil {
-			return err
-		}
+	// case "badger-direct":
+	//	cfg := db.DefaultBadgerConfig(home)
+	//	ddb, err = db.NewBadgerDB(cfg)
+	//	if err != nil {
+	//		return err
+	//	}
 
-	case "level-direct":
-		cfg := db.DefaultLevelConfig(home)
-		ddb, err = db.NewLevelDB(cfg)
-		if err != nil {
-			return err
-		}
+	// case "level-direct":
+	//	cfg := db.DefaultLevelConfig(home)
+	//	ddb, err = db.NewLevelDB(cfg)
+	//	if err != nil {
+	//		return err
+	//	}
 
-	case "pebble-direct":
-		cfg := db.DefaultPebbleConfig(home)
-		ddb, err = db.NewPebbleDB(cfg)
-		if err != nil {
-			return err
-		}
+	// case "pebble-direct":
+	//	cfg := db.DefaultPebbleConfig(home)
+	//	ddb, err = db.NewPebbleDB(cfg)
+	//	if err != nil {
+	//		return err
+	//	}
 
-	case "bitcask-direct":
-		cfg := db.DefaultBitcaskConfig(home)
-		ddb, err = db.NewBitcaskDB(cfg)
-		if err != nil {
-			return err
-		}
+	// case "bitcask-direct":
+	//	cfg := db.DefaultBitcaskConfig(home)
+	//	ddb, err = db.NewBitcaskDB(cfg)
+	//	if err != nil {
+	//		return err
+	//	}
 
-	case "bunt-direct":
-		cfg := db.DefaultBuntConfig(home)
-		ddb, err = db.NewBuntDB(cfg)
-		if err != nil {
-			return err
-		}
+	// case "bunt-direct":
+	//	cfg := db.DefaultBuntConfig(home)
+	//	ddb, err = db.NewBuntDB(cfg)
+	//	if err != nil {
+	//		return err
+	//	}
 
 	case "nuts-direct":
-		cfg := db.DefaultNutsConfig(home, []string{"mytable"})
-		ddb, err = db.NewNutsDB(cfg)
+		cfg := gkvdb.DefaultNutsConfig(home, []string{"mytable"})
+		ddb, err = gkvdb.NewNutsDB(cfg)
 		if err != nil {
 			return err
 		}
 
-	case "mongo-direct":
-		cfg := db.DefaultMongoConfig(os.Getenv(rawdb.DefaultMongoEnvURI),
-			[]string{"mytable"})
-		ddb, err = db.NewMongoDB(cfg)
-		if err != nil {
-			return err
-		}
+	// case "mongo-direct":
+	//	cfg := db.DefaultMongoConfig(os.Getenv(rawdb.DefaultMongoEnvURI),
+	//		[]string{"mytable"})
+	//	ddb, err = db.NewMongoDB(cfg)
+	//	if err != nil {
+	//		return err
+	//	}
 
 	default:
 		return fmt.Errorf("invalid action: %v", action)

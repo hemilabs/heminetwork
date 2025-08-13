@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package gkvdb
 
 import (
@@ -5,8 +9,19 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/juju/loggo"
 	"github.com/nutsdb/nutsdb"
 )
+
+const logLevel = "INFO"
+
+var log = loggo.GetLogger("nutsdb")
+
+func init() {
+	if err := loggo.ConfigureLoggers(logLevel); err != nil {
+		panic(err)
+	}
+}
 
 // Assert required inteerfaces
 var (
@@ -47,6 +62,8 @@ func NewNutsDB(cfg *NutsConfig) (Database, error) {
 }
 
 func (b *nutsDB) Open(_ context.Context) error {
+	log.Tracef("open")
+
 	if b.gkvdb != nil {
 		return nil // XXX return already open?
 	}
@@ -132,11 +149,6 @@ func (b *nutsDB) Put(_ context.Context, table string, key, value []byte) error {
 			if err != nil {
 				if nutsdb.IsBucketNotFound(err) {
 					panic(err)
-					err := tx.NewBucket(nutsdb.DataStructureBTree, table)
-					if err != nil {
-						return err
-					}
-					return tx.Put(table, key, val, 0)
 				}
 				return err
 			}
@@ -167,28 +179,28 @@ func (b *nutsDB) Begin(ctx context.Context, write bool) (Transaction, error) {
 
 type nutsTX struct{}
 
-var nutsNotYet = errors.New("not yet")
+var errNutsNotYet = errors.New("not yet")
 
 func (tx *nutsTX) Del(ctx context.Context, table string, key []byte) error {
-	return nutsNotYet
+	return errNutsNotYet
 }
 
 func (tx *nutsTX) Has(ctx context.Context, table string, key []byte) (bool, error) {
-	return false, nutsNotYet
+	return false, errNutsNotYet
 }
 
 func (tx *nutsTX) Get(ctx context.Context, table string, key []byte) ([]byte, error) {
-	return nil, nutsNotYet
+	return nil, errNutsNotYet
 }
 
 func (tx *nutsTX) Put(ctx context.Context, table string, key []byte, value []byte) error {
-	return nutsNotYet
+	return errNutsNotYet
 }
 
 func (tx *nutsTX) Commit(ctx context.Context) error {
-	return nutsNotYet
+	return errNutsNotYet
 }
 
 func (tx *nutsTX) Rollback(ctx context.Context) error {
-	return nutsNotYet
+	return errNutsNotYet
 }
