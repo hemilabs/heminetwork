@@ -100,6 +100,71 @@ func dbgetsNegative(ctx context.Context, db Database, tables []string, insertCou
 	return nil
 }
 
+func dbhasOdds(ctx context.Context, db Database, tables []string, insertCount int) error {
+	for i := 0; i < insertCount; i++ {
+		table := tables[i%len(tables)]
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], uint64(i))
+		has, err := db.Has(ctx, table, key[:])
+		if i%2 == 0 {
+			// Assert we don't have evens
+			if err != nil {
+				return fmt.Errorf("odds has %v: %v %v", table, i, err)
+			}
+			if has {
+				return fmt.Errorf("odds has %v: %v", table, i)
+			}
+		} else {
+			if err != nil {
+				return fmt.Errorf("odds has %v: %v %v", table, i, err)
+			}
+			if !has {
+				return fmt.Errorf("odds has %v: %v", table, i)
+			}
+		}
+	}
+	return nil
+}
+
+func txputs(ctx context.Context, tx Transaction, tables []string, insertCount int) error {
+	for i := 0; i < insertCount; i++ {
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], uint64(i))
+		value := sha256.Sum256(key[:])
+		table := tables[i%len(tables)]
+		err := tx.Put(ctx, table, key[:], value[:])
+		if err != nil {
+			return fmt.Errorf("tx put %v: %v", table, i)
+		}
+	}
+	return nil
+}
+
+func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCount int) error {
+	for i := 0; i < insertCount; i++ {
+		table := tables[i%len(tables)]
+		var key [8]byte
+		binary.BigEndian.PutUint64(key[:], uint64(i))
+		if i%2 == 0 {
+			err := tx.Del(ctx, table, key[:])
+			if err != nil {
+				return fmt.Errorf("del %v: %v %v", table, i, err)
+			}
+		} else {
+			// Assert odd record exist
+			valueExpected := sha256.Sum256(key[:])
+			value, err := tx.Get(ctx, table, key[:])
+			if err != nil {
+				return fmt.Errorf("even get %v: %v %v", table, i, err)
+			}
+			if !bytes.Equal(value, valueExpected[:]) {
+				return fmt.Errorf("even get unequal %v: %v", table, i)
+			}
+		}
+	}
+	return nil
+}
+
 func TestGKVDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
 	defer cancel()
@@ -169,15 +234,9 @@ func TestGKVDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < insertCount; i++ {
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
-		value := sha256.Sum256(key[:])
-		table := tables[i%tableCount]
-		err := tx.Put(ctx, table, key[:], value[:])
-		if err != nil {
-			t.Fatalf("put %v: %v", table, i)
-		}
+	err = txputs(ctx, tx, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
 	}
 	err = tx.Rollback(ctx)
 	if err != nil {
@@ -193,21 +252,33 @@ func TestGKVDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < insertCount; i++ {
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
-		value := sha256.Sum256(key[:])
-		table := tables[i%tableCount]
-		err := tx.Put(ctx, table, key[:], value[:])
-		if err != nil {
-			t.Fatalf("put %v: %v", table, i)
-		}
+	err = txputs(ctx, tx, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
 	}
 	err = tx.Commit(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = dbgets(ctx, db, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Transaction delete even records
+	tx, err = db.Begin(ctx, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = txdelsEven(ctx, tx, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tx.Commit(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = dbhasOdds(ctx, db, tables, insertCount)
 	if err != nil {
 		t.Fatal(err)
 	}

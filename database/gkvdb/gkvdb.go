@@ -21,6 +21,8 @@ type Database interface {
 
 	// Transactions
 	Begin(ctx context.Context, write bool) (Transaction, error)
+	View(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error
+	Update(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error
 
 	// Iterators
 	// XXX should work only in Transactions?

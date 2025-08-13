@@ -114,16 +114,15 @@ func (b *nutsDB) Has(_ context.Context, table string, key []byte) (bool, error) 
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
-	return err == nil, err
+	return err == nil, xerr(err)
 }
 
 func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
 	var value []byte = nil
 	err := b.db.View(func(tx *nutsdb.Tx) error {
-		key := key
 		val, err := tx.Get(table, key)
 		if err != nil {
-			return xerr(err)
+			return err
 		}
 		// nutsdb unfortunately invalidates value outside of the transaction
 		value = make([]byte, len(val))
@@ -134,42 +133,46 @@ func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error
 }
 
 func (b *nutsDB) Put(_ context.Context, table string, key, value []byte) error {
-	err := b.db.Update(
-		func(tx *nutsdb.Tx) error {
-			key := key
-			val := value
-			err := tx.Put(table, key, val, 0)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-	return xerr(err)
+	return xerr(b.db.Update(func(tx *nutsdb.Tx) error {
+		return tx.Put(table, key, val, 0)
+	}))
 }
 
-//	func (b *nutsDB) View(ctx context.Context, callback func(ctx context.Context, tx *Transaction) error) error {
-//		itx, err := b.db.Begin(false)
-//		if err != nil {
-//			return err
-//		}
-//		err = callback(ctx, &Transaction{tx: itx})
-//		if err != nil {
-//			if rberr := itx.Rollback(); err != nil {
-//				return fmt.Errorf("rollback: %w", rberr)
-//			}
-//			return err
-//		}
-//		return itx.Commit()
-//	}
 func (b *nutsDB) Begin(_ context.Context, write bool) (Transaction, error) {
 	tx, err := b.db.Begin(write)
 	if err != nil {
-		return nil, err
+		return nil, xerr(err)
 	}
 	return &nutsTX{
 		db: b.db, // XXX do we need this?
 		tx: tx,
 	}, nil
+}
+
+// execute runs a transaction and commits or rolls it back depending on errors.
+// It does not perform error translation meaning that the caller must handle
+// that prior to returning to the caller.
+func (b *nutsDB) execute(ctx context.Context, write bool, callback func(ctx context.Context, tx Transaction) error) error {
+	itx, err := b.Begin(ctx, write)
+	if err != nil {
+		return err
+	}
+	err = callback(ctx, itx)
+	if err != nil {
+		if rberr := itx.Rollback(ctx); rberr != nil {
+			return fmt.Errorf("rollback: callback: %v -> %w", err, rberr)
+		}
+		return err
+	}
+	return itx.Commit(ctx)
+}
+
+func (b *nutsDB) View(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error {
+	return xerr(b.execute(ctx, false, callback))
+}
+
+func (b *nutsDB) Update(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error {
+	return xerr(b.execute(ctx, true, callback))
 }
 
 // Transactions
@@ -188,7 +191,7 @@ func (tx *nutsTX) Has(ctx context.Context, table string, key []byte) (bool, erro
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
-	return err == nil, err
+	return err == nil, xerr(err)
 }
 
 func (tx *nutsTX) Get(ctx context.Context, table string, key []byte) ([]byte, error) {
