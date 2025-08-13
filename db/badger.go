@@ -56,9 +56,9 @@ func (b *badgerDB) Close(_ context.Context) error {
 	return b.db.Close()
 }
 
-func (b *badgerDB) Del(_ context.Context, key []byte) error {
+func (b *badgerDB) Del(_ context.Context, table string, key []byte) error {
 	err := b.db.Update(func(txn *badger.Txn) error {
-		return txn.Delete(key)
+		return txn.Delete(NewCompositeKey(table, key))
 	})
 	if err != nil {
 		if errors.Is(err, badger.ErrKeyNotFound) {
@@ -69,18 +69,18 @@ func (b *badgerDB) Del(_ context.Context, key []byte) error {
 	return nil
 }
 
-func (b *badgerDB) Has(_ context.Context, key []byte) (bool, error) {
-	_, err := b.Get(nil, key)
+func (b *badgerDB) Has(_ context.Context, table string, key []byte) (bool, error) {
+	_, err := b.Get(nil, table, key)
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
 	return err == nil, err
 }
 
-func (b *badgerDB) Get(_ context.Context, key []byte) ([]byte, error) {
+func (b *badgerDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
 	var val []byte
 	err := b.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(key)
+		item, err := txn.Get(NewCompositeKey(table, key))
 		if err != nil {
 			return err
 		}
@@ -96,9 +96,9 @@ func (b *badgerDB) Get(_ context.Context, key []byte) ([]byte, error) {
 	return val, nil
 }
 
-func (b *badgerDB) Put(_ context.Context, key, value []byte) error {
+func (b *badgerDB) Put(_ context.Context, table string, key, value []byte) error {
 	err := b.db.Update(func(txn *badger.Txn) error {
-		return txn.Set(key, value)
+		return txn.Set(NewCompositeKey(table, key), value)
 	})
 	if err != nil {
 		return err

@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -17,18 +18,19 @@ type mongoKV struct {
 }
 
 type MongoConfig struct {
-	URI string
+	URI    string
+	Tables []string // XXX remove at some point
 }
 
-func DefaultMongoConfig(URI string) *MongoConfig {
+func DefaultMongoConfig(URI string, tables []string) *MongoConfig {
 	return &MongoConfig{
-		URI: URI,
+		URI:    URI,
+		Tables: tables,
 	}
 }
 
 type mongoDB struct {
 	db *mongo.Client
-	co *mongo.Collection
 
 	cfg *MongoConfig
 }
@@ -55,9 +57,17 @@ func (b *mongoDB) Open(ctx context.Context) error {
 		return err
 	}
 	b.db = client
-	b.co = client.Database("mydatabase").Collection("mycollection")
-	// XXX drop mycollection
-	return b.co.Drop(ctx) // XXX don't do this
+	if true {
+		// XXX don't do this
+		for _, table := range b.cfg.Tables {
+			co := client.Database("mydatabase").Collection(table)
+			err := co.Drop(ctx)
+			if err != nil {
+				return fmt.Errorf("could not drop table: %v", table)
+			}
+		}
+	}
+	return nil
 }
 
 func (b *mongoDB) Close(ctx context.Context) error {
@@ -69,8 +79,9 @@ func (b *mongoDB) Close(ctx context.Context) error {
 	return nil
 }
 
-func (b *mongoDB) Del(ctx context.Context, key []byte) error {
-	rv, err := b.co.DeleteOne(ctx, bson.D{
+func (b *mongoDB) Del(ctx context.Context, table string, key []byte) error {
+	co := b.db.Database("mydatabase").Collection(table)
+	rv, err := co.DeleteOne(ctx, bson.D{
 		{"_id", key},
 	})
 	_ = rv
@@ -78,10 +89,9 @@ func (b *mongoDB) Del(ctx context.Context, key []byte) error {
 	return err
 }
 
-func (b *mongoDB) Has(ctx context.Context, key []byte) (bool, error) {
-	count, err := b.co.CountDocuments(ctx, bson.M{
-		"_id": key,
-	})
+func (b *mongoDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
+	co := b.db.Database("mydatabase").Collection(table)
+	count, err := co.CountDocuments(ctx, bson.M{"_id": key})
 	if err != nil {
 		return false, err
 	}
@@ -91,11 +101,10 @@ func (b *mongoDB) Has(ctx context.Context, key []byte) (bool, error) {
 	return true, nil
 }
 
-func (b *mongoDB) Get(ctx context.Context, key []byte) ([]byte, error) {
+func (b *mongoDB) Get(ctx context.Context, table string, key []byte) ([]byte, error) {
 	var result mongoKV
-	err := b.co.FindOne(ctx, bson.M{
-		"_id": key,
-	}).Decode(&result)
+	co := b.db.Database("mydatabase").Collection(table)
+	err := co.FindOne(ctx, bson.M{"_id": key}).Decode(&result)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
 			return nil, ErrKeyNotFound
@@ -106,10 +115,11 @@ func (b *mongoDB) Get(ctx context.Context, key []byte) ([]byte, error) {
 	return result.Value, nil
 }
 
-func (b *mongoDB) Put(pctx context.Context, key, value []byte) error {
+func (b *mongoDB) Put(pctx context.Context, table string, key, value []byte) error {
 	opts := options.UpdateOne().SetUpsert(true)
 	update := bson.D{{"$set", bson.D{{"value", value}}}}
-	_, err := b.co.UpdateByID(pctx, key, update, opts)
+	co := b.db.Database("mydatabase").Collection(table)
+	_, err := co.UpdateByID(pctx, key, update, opts)
 	if err != nil {
 		return err
 	}

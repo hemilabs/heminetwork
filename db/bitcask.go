@@ -56,16 +56,16 @@ func (b *bitcaskDB) Close(_ context.Context) error {
 	return b.db.Close()
 }
 
-func (b *bitcaskDB) Del(_ context.Context, key []byte) error {
-	return b.db.Delete(key)
+func (b *bitcaskDB) Del(_ context.Context, table string, key []byte) error {
+	return b.db.Delete(bitcask.Key(NewCompositeKey(table, key)))
 }
 
-func (b *bitcaskDB) Has(_ context.Context, key []byte) (bool, error) {
-	return b.db.Has(key), nil
+func (b *bitcaskDB) Has(_ context.Context, table string, key []byte) (bool, error) {
+	return b.db.Has(bitcask.Key(NewCompositeKey(table, key))), nil
 }
 
-func (b *bitcaskDB) Get(_ context.Context, key []byte) ([]byte, error) {
-	value, err := b.db.Get(key)
+func (b *bitcaskDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
+	value, err := b.db.Get(bitcask.Key(NewCompositeKey(table, key)))
 	if err != nil {
 		if errors.Is(err, bitcask.ErrKeyNotFound) {
 			return nil, ErrKeyNotFound
@@ -75,6 +75,6 @@ func (b *bitcaskDB) Get(_ context.Context, key []byte) ([]byte, error) {
 	return value, nil
 }
 
-func (b *bitcaskDB) Put(_ context.Context, key, value []byte) error {
-	return b.db.Put(key, value)
+func (b *bitcaskDB) Put(_ context.Context, table string, key, value []byte) error {
+	return b.db.Put(bitcask.Key(NewCompositeKey(table, key)), value)
 }

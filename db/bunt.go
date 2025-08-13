@@ -64,9 +64,9 @@ func (b *buntDB) Close(_ context.Context) error {
 	return b.db.Close()
 }
 
-func (b *buntDB) Del(_ context.Context, key []byte) error {
+func (b *buntDB) Del(_ context.Context, table string, key []byte) error {
 	err := b.db.Update(func(tx *buntdb.Tx) error {
-		_, err := tx.Delete(string(key))
+		_, err := tx.Delete(string(NewCompositeKey(table, key)))
 		return err
 	})
 	if err != nil {
@@ -78,18 +78,18 @@ func (b *buntDB) Del(_ context.Context, key []byte) error {
 	return err
 }
 
-func (b *buntDB) Has(_ context.Context, key []byte) (bool, error) {
-	_, err := b.Get(nil, key)
+func (b *buntDB) Has(_ context.Context, table string, key []byte) (bool, error) {
+	_, err := b.Get(nil, table, key)
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
 	return err == nil, err
 }
 
-func (b *buntDB) Get(_ context.Context, key []byte) ([]byte, error) {
+func (b *buntDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
 	var value []byte
 	err := b.db.View(func(tx *buntdb.Tx) error {
-		val, err := tx.Get(string(key))
+		val, err := tx.Get(string(NewCompositeKey(table, key)))
 		if err != nil {
 			return err
 		}
@@ -105,9 +105,10 @@ func (b *buntDB) Get(_ context.Context, key []byte) ([]byte, error) {
 	return value, nil
 }
 
-func (b *buntDB) Put(_ context.Context, key, value []byte) error {
+func (b *buntDB) Put(_ context.Context, table string, key, value []byte) error {
 	err := b.db.Update(func(tx *buntdb.Tx) error {
-		_, _, err := tx.Set(string(key), string(value), nil)
+		_, _, err := tx.Set(string(NewCompositeKey(table, key)),
+			string(value), nil)
 		return err
 	})
 	return err

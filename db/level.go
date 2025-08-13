@@ -56,16 +56,16 @@ func (b *levelDB) Close(_ context.Context) error {
 	return b.db.Close()
 }
 
-func (b *levelDB) Del(_ context.Context, key []byte) error {
-	return b.db.Delete(key, nil)
+func (b *levelDB) Del(_ context.Context, table string, key []byte) error {
+	return b.db.Delete(NewCompositeKey(table, key), nil)
 }
 
-func (b *levelDB) Has(_ context.Context, key []byte) (bool, error) {
-	return b.db.Has(key, nil)
+func (b *levelDB) Has(_ context.Context, table string, key []byte) (bool, error) {
+	return b.db.Has(NewCompositeKey(table, key), nil)
 }
 
-func (b *levelDB) Get(_ context.Context, key []byte) ([]byte, error) {
-	value, err := b.db.Get(key, nil)
+func (b *levelDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
+	value, err := b.db.Get(NewCompositeKey(table, key), nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, ErrKeyNotFound
@@ -75,6 +75,6 @@ func (b *levelDB) Get(_ context.Context, key []byte) ([]byte, error) {
 	return value, nil
 }
 
-func (b *levelDB) Put(_ context.Context, key, value []byte) error {
-	return b.db.Put(key, value, nil)
+func (b *levelDB) Put(_ context.Context, table string, key, value []byte) error {
+	return b.db.Put(NewCompositeKey(table, key), value, nil)
 }
