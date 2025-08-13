@@ -91,14 +91,15 @@ func _main() error {
 		}
 
 	case "nuts-direct":
-		cfg := db.DefaultNutsConfig(home)
+		cfg := db.DefaultNutsConfig(home, []string{"mytable"})
 		ddb, err = db.NewNutsDB(cfg)
 		if err != nil {
 			return err
 		}
 
 	case "mongo-direct":
-		cfg := db.DefaultMongoConfig(os.Getenv(rawdb.DefaultMongoEnvURI))
+		cfg := db.DefaultMongoConfig(os.Getenv(rawdb.DefaultMongoEnvURI),
+			[]string{"mytable"})
 		ddb, err = db.NewMongoDB(cfg)
 		if err != nil {
 			return err
@@ -152,7 +153,7 @@ func _main() error {
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
 			binary.BigEndian.PutUint32(key[:], uint32(i))
-			err := ddb.Put(ctx, key[:], value)
+			err := ddb.Put(ctx, "", key[:], value)
 			if err != nil {
 				return err
 			}
@@ -165,7 +166,7 @@ func _main() error {
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
 			binary.BigEndian.PutUint32(key[:], uint32(i))
-			_, err := ddb.Get(ctx, key[:])
+			_, err := ddb.Get(ctx, "", key[:])
 			if err != nil {
 				return err
 			}
@@ -178,7 +179,7 @@ func _main() error {
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
 			binary.BigEndian.PutUint32(key[:], uint32(i))
-			err := ddb.Del(ctx, key[:])
+			err := ddb.Del(ctx, "", key[:])
 			if err != nil {
 				return err
 			}

@@ -56,27 +56,20 @@ func (b *pebbleDB) Close(_ context.Context) error {
 	return b.db.Close()
 }
 
-func (b *pebbleDB) Del(_ context.Context, key []byte) error {
-	return b.db.Delete(key, nil)
+func (b *pebbleDB) Del(_ context.Context, table string, key []byte) error {
+	return b.db.Delete(NewCompositeKey(table, key), nil)
 }
 
-func (b *pebbleDB) Has(_ context.Context, key []byte) (bool, error) {
-	_, closer, err := b.db.Get(key)
-	if err != nil {
-		if errors.Is(err, pebble.ErrNotFound) {
-			return false, nil
-		}
-		return false, err
+func (b *pebbleDB) Has(_ context.Context, table string, key []byte) (bool, error) {
+	_, err := b.Get(nil, table, key)
+	if errors.Is(err, ErrKeyNotFound) {
+		return false, nil
 	}
-	err = closer.Close()
-	if err != nil {
-		return false, err
-	}
-	return true, nil
+	return err == nil, err
 }
 
-func (b *pebbleDB) Get(_ context.Context, key []byte) ([]byte, error) {
-	value, closer, err := b.db.Get(key)
+func (b *pebbleDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
+	value, closer, err := b.db.Get(NewCompositeKey(table, key))
 	if err != nil {
 		if errors.Is(err, pebble.ErrNotFound) {
 			return nil, ErrKeyNotFound
@@ -92,6 +85,6 @@ func (b *pebbleDB) Get(_ context.Context, key []byte) ([]byte, error) {
 	return v, nil
 }
 
-func (b *pebbleDB) Put(_ context.Context, key, value []byte) error {
-	return b.db.Set(key, value, nil)
+func (b *pebbleDB) Put(_ context.Context, table string, key, value []byte) error {
+	return b.db.Set(NewCompositeKey(table, key), value, nil)
 }

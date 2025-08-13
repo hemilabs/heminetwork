@@ -20,6 +20,7 @@ import (
 const (
 	logLevel = "INFO"
 
+	dbname   = "rawdb"
 	indexDir = "index"
 	DataDir  = "data"
 
@@ -125,12 +126,14 @@ func (r *RawDB) Open() error {
 		pcfg := db.DefaultBuntConfig(filepath.Join(r.cfg.Home, indexDir))
 		r.index, err = db.NewBuntDB(pcfg)
 	case "nuts":
-		pcfg := db.DefaultNutsConfig(filepath.Join(r.cfg.Home, indexDir))
+		pcfg := db.DefaultNutsConfig(filepath.Join(r.cfg.Home, indexDir),
+			[]string{dbname})
 		r.index, err = db.NewNutsDB(pcfg)
 
 	// remote
 	case "mongo":
-		mcfg := db.DefaultMongoConfig(os.Getenv(DefaultMongoEnvURI))
+		mcfg := db.DefaultMongoConfig(os.Getenv(DefaultMongoEnvURI),
+			[]string{dbname})
 		r.index, err = db.NewMongoDB(mcfg)
 
 	default:
@@ -178,7 +181,7 @@ func (r *RawDB) Has(key []byte) (bool, error) {
 	log.Tracef("Has")
 	defer log.Tracef("Has exit")
 
-	return r.index.Has(nil, key)
+	return r.index.Has(nil, dbname, key)
 }
 
 func (r *RawDB) Insert(key, value []byte) error {
@@ -191,7 +194,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 	}
 
 	// Assert we do not have this key stored yet.
-	if ok, err := r.index.Has(nil, key); ok {
+	if ok, err := r.index.Has(nil, dbname, key); ok {
 		return errors.New("key already exists")
 	} else if err != nil {
 		return err
@@ -207,7 +210,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			return errors.New("could not determine last filename")
 		}
 
-		lfe, err := r.index.Get(nil, lastFilenameKey)
+		lfe, err := r.index.Get(nil, dbname, lastFilenameKey)
 		if err != nil {
 			if errors.Is(err, db.ErrKeyNotFound) {
 				lfe = []byte{0, 0, 0, 0}
@@ -237,7 +240,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			last++
 			lastData := make([]byte, 8)
 			binary.BigEndian.PutUint32(lastData, last)
-			err = r.index.Put(nil, lastFilenameKey, lastData)
+			err = r.index.Put(nil, dbname, lastFilenameKey, lastData)
 			if err != nil {
 				return err
 			}
@@ -260,7 +263,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			}
 
 			// Write coordinates
-			err = r.index.Put(nil, key, c)
+			err = r.index.Put(nil, dbname, key, c)
 			if err != nil {
 				return err
 			}
@@ -274,7 +277,7 @@ func (r *RawDB) Get(key []byte) ([]byte, error) {
 	log.Tracef("Get: %x", key)
 	defer log.Tracef("Get exit: %x", key)
 
-	c, err := r.index.Get(nil, key)
+	c, err := r.index.Get(nil, dbname, key)
 	if err != nil {
 		return nil, err
 	}
