@@ -20,7 +20,7 @@ type Database interface {
 	Put(ctx context.Context, table string, key []byte, value []byte) error
 
 	// Transactions
-	// Begin(ctx context.Context, write bool) (*Transaction, error)
+	Begin(ctx context.Context, write bool) (Transaction, error)
 
 	// Iterators
 	// XXX should work only in Transactions?
@@ -71,7 +71,7 @@ const (
 	OPDel Operation = 2
 )
 
-// Batch is used to import large datasets into the database.
+// Batch is used to replay large datasets into the database.
 type Batch struct {
 	Op    Operation
 	Table string
