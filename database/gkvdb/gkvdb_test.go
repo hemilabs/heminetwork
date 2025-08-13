@@ -106,7 +106,7 @@ func TestGKVDB(t *testing.T) {
 	home := t.TempDir()
 
 	tableCount := 5
-	tables := make([]string, tableCount)
+	tables := make([]string, 0, tableCount)
 	for i := 0; i < tableCount; i++ {
 		tables = append(tables, fmt.Sprintf("table%v", i))
 	}
@@ -128,7 +128,7 @@ func TestGKVDB(t *testing.T) {
 	}()
 
 	// Puts
-	insertCount := 6
+	insertCount := 10000
 	err = dbputs(ctx, db, tables, insertCount)
 	if err != nil {
 		t.Fatal(err)
