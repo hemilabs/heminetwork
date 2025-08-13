@@ -13,8 +13,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/hemilabs/heminetwork/v2/db"
-	"github.com/hemilabs/heminetwork/v2/rawdb"
+	db "github.com/hemilabs/heminetwork/v2/database/gkvdb"
+	"github.com/hemilabs/heminetwork/v2/database/gkvdb/dbtest/rawdb"
 )
 
 func _main() error {
@@ -38,7 +38,7 @@ func _main() error {
 	}
 
 	var (
-		ddb db.Database
+		ddb gkvdb.Database
 		rdb *rawdb.RawDB
 	)
 	action := fmt.Sprintf("%v-%v", *dbs, *test)

@@ -13,24 +13,21 @@ import (
 	"sync"
 
 	"github.com/juju/loggo"
-
-	"github.com/hemilabs/heminetwork/v2/database/gkvdb"
+	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 )
 
 const (
 	logLevel = "INFO"
 
-	dbname   = "rawdb"
 	indexDir = "index"
 	DataDir  = "data"
 
 	DefaultMaxFileSize = 256 * 1024 * 1024 // 256MB file max; will never be bigger.
-
-	DefaultMongoEnvURI = "RAWDB_MONGO_URI" // XXX
 )
 
 var (
-	log             = loggo.GetLogger("db")
+	log             = loggo.GetLogger("rawdb")
 	lastFilenameKey = []byte("lastfilename")
 )
 
@@ -45,12 +42,11 @@ type RawDB struct {
 
 	cfg *Config
 
-	index gkvdb.Database
+	index *leveldb.DB
 	open  bool
 }
 
 type Config struct {
-	DB      string
 	Home    string
 	MaxSize int64
 }
@@ -74,20 +70,6 @@ func New(cfg *Config) (*RawDB, error) {
 		return nil, fmt.Errorf("invalid max size: %v", cfg.MaxSize)
 	}
 
-	switch cfg.DB {
-	case "badger":
-	case "level":
-	case "pebble":
-	case "bitcask":
-	case "bunt":
-	case "nuts":
-
-	// remote
-	case "mongo":
-	default:
-		return nil, fmt.Errorf("invalid db: %v", cfg.DB)
-	}
-
 	return &RawDB{
 		cfg: cfg,
 	}, nil
@@ -108,43 +90,12 @@ func (r *RawDB) Open() error {
 	if err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	// We do this late because directories are created at this point
-	switch r.cfg.DB {
-	case "badger":
-		bcfg := gkvdb.DefaultBadgerConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewBadgerDB(bcfg)
-	case "level":
-		lcfg := gkvdb.DefaultLevelConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewLevelDB(lcfg)
-	case "pebble":
-		pcfg := gkvdb.DefaultPebbleConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewPebbleDB(pcfg)
-	case "bitcask":
-		pcfg := gkvdb.DefaultBitcaskConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewBitcaskDB(pcfg)
-	case "bunt":
-		pcfg := gkvdb.DefaultBuntConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewBuntDB(pcfg)
-	case "nuts":
-		pcfg := gkvdb.DefaultNutsConfig(filepath.Join(r.cfg.Home, indexDir),
-			[]string{dbname})
-		r.index, err = gkvdb.NewNutsDB(pcfg)
-
-	// remote
-	case "mongo":
-		mcfg := gkvdb.DefaultMongoConfig(os.Getenv(DefaultMongoEnvURI),
-			[]string{dbname})
-		r.index, err = gkvdb.NewMongoDB(mcfg)
-
-	default:
-	}
+	r.index, err = leveldb.OpenFile(filepath.Join(r.cfg.Home, indexDir), &opt.Options{
+		BlockCacheEvictRemoved: true,
+		Compression:            opt.NoCompression,
+	})
 	if err != nil {
-		return fmt.Errorf("new: %w", err)
-	}
-
-	err = r.index.Open(nil)
-	if err != nil {
-		return fmt.Errorf("open: %w", err)
+		return fmt.Errorf("mkdir: %w", err)
 	}
 	r.open = true
 
@@ -158,7 +109,7 @@ func (r *RawDB) Close() error {
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
-	err := r.index.Close(nil)
+	err := r.index.Close()
 	if err != nil {
 		return err
 	}
@@ -173,7 +124,7 @@ func (r *RawDB) Close() error {
 // DB returns the underlying index database.
 // You should probably not be calling this! It is used for external database
 // upgrades.
-func (r *RawDB) DB() gkvdb.Database {
+func (r *RawDB) DB() *leveldb.DB {
 	return r.index
 }
 
@@ -181,7 +132,7 @@ func (r *RawDB) Has(key []byte) (bool, error) {
 	log.Tracef("Has")
 	defer log.Tracef("Has exit")
 
-	return r.index.Has(nil, dbname, key)
+	return r.index.Has(key, nil)
 }
 
 func (r *RawDB) Insert(key, value []byte) error {
@@ -194,7 +145,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 	}
 
 	// Assert we do not have this key stored yet.
-	if ok, err := r.index.Has(nil, dbname, key); ok {
+	if ok, err := r.index.Has(key, nil); ok {
 		return errors.New("key already exists")
 	} else if err != nil {
 		return err
@@ -210,9 +161,9 @@ func (r *RawDB) Insert(key, value []byte) error {
 			return errors.New("could not determine last filename")
 		}
 
-		lfe, err := r.index.Get(nil, dbname, lastFilenameKey)
+		lfe, err := r.index.Get(lastFilenameKey, nil)
 		if err != nil {
-			if errors.Is(err, gkvdb.ErrKeyNotFound) {
+			if errors.Is(err, leveldb.ErrNotFound) {
 				lfe = []byte{0, 0, 0, 0}
 			} else {
 				return err
@@ -240,7 +191,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			last++
 			lastData := make([]byte, 8)
 			binary.BigEndian.PutUint32(lastData, last)
-			err = r.index.Put(nil, dbname, lastFilenameKey, lastData)
+			err = r.index.Put(lastFilenameKey, lastData, nil)
 			if err != nil {
 				return err
 			}
@@ -263,7 +214,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			}
 
 			// Write coordinates
-			err = r.index.Put(nil, dbname, key, c)
+			err = r.index.Put(key, c, nil)
 			if err != nil {
 				return err
 			}
@@ -277,7 +228,7 @@ func (r *RawDB) Get(key []byte) ([]byte, error) {
 	log.Tracef("Get: %x", key)
 	defer log.Tracef("Get exit: %x", key)
 
-	c, err := r.index.Get(nil, dbname, key)
+	c, err := r.index.Get(key, nil)
 	if err != nil {
 		return nil, err
 	}
