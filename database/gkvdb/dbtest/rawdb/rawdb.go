@@ -110,31 +110,31 @@ func (r *RawDB) Open() error {
 	}
 	// We do this late because directories are created at this point
 	switch r.cfg.DB {
-	case "badger":
-		bcfg := gkvdb.DefaultBadgerConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewBadgerDB(bcfg)
-	case "level":
-		lcfg := gkvdb.DefaultLevelConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewLevelDB(lcfg)
-	case "pebble":
-		pcfg := gkvdb.DefaultPebbleConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewPebbleDB(pcfg)
-	case "bitcask":
-		pcfg := gkvdb.DefaultBitcaskConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewBitcaskDB(pcfg)
-	case "bunt":
-		pcfg := gkvdb.DefaultBuntConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = gkvdb.NewBuntDB(pcfg)
+	// case "badger":
+	//	bcfg := gkvdb.DefaultBadgerConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = gkvdb.NewBadgerDB(bcfg)
+	// case "level":
+	//	lcfg := gkvdb.DefaultLevelConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = gkvdb.NewLevelDB(lcfg)
+	// case "pebble":
+	//	pcfg := gkvdb.DefaultPebbleConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = gkvdb.NewPebbleDB(pcfg)
+	// case "bitcask":
+	//	pcfg := gkvdb.DefaultBitcaskConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = gkvdb.NewBitcaskDB(pcfg)
+	// case "bunt":
+	//	pcfg := gkvdb.DefaultBuntConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = gkvdb.NewBuntDB(pcfg)
 	case "nuts":
 		pcfg := gkvdb.DefaultNutsConfig(filepath.Join(r.cfg.Home, indexDir),
 			[]string{dbname})
 		r.index, err = gkvdb.NewNutsDB(pcfg)
 
 	// remote
-	case "mongo":
-		mcfg := gkvdb.DefaultMongoConfig(os.Getenv(DefaultMongoEnvURI),
-			[]string{dbname})
-		r.index, err = gkvdb.NewMongoDB(mcfg)
+	// case "mongo":
+	//	mcfg := gkvdb.DefaultMongoConfig(os.Getenv(DefaultMongoEnvURI),
+	//		[]string{dbname})
+	//	r.index, err = gkvdb.NewMongoDB(mcfg)
 
 	default:
 	}

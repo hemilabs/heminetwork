@@ -1,10 +1,12 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package gkvdb
 
 import (
 	"context"
 	"errors"
-
-	"github.com/juju/loggo"
 )
 
 type Database interface {
@@ -65,8 +67,8 @@ type Operation int
 
 const (
 	OPInv Operation = 0
-	OPPut           = 1
-	OPDel           = 2
+	OPPut Operation = 1
+	OPDel Operation = 2
 )
 
 // Batch is used to import large datasets into the database.
@@ -83,16 +85,6 @@ var (
 	ErrKeyNotFound   = errors.New("key not found")
 	ErrInvalidConfig = errors.New("invalid config")
 )
-
-const logLevel = "INFO"
-
-var log = loggo.GetLogger("gkvdb")
-
-func init() {
-	if err := loggo.ConfigureLoggers(logLevel); err != nil {
-		panic(err)
-	}
-}
 
 /*
 	bucket:key:value
