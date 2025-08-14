@@ -21,12 +21,11 @@ type Database interface {
 
 	// Transactions
 	Begin(ctx context.Context, write bool) (Transaction, error)
-	View(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error
 	Update(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error
+	View(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error
 
-	// Iterators
-	// XXX should work only in Transactions?
-	// Range()
+	// Iterators, exist inside a Transaction
+	NewIterator(ctx context.Context, table string) (Iterator, error)
 
 	// Batches
 	// Import([]Batch) // XXX this should be a reader as well
@@ -68,7 +67,6 @@ type Transaction interface {
 type Operation int
 
 const (
-	OPInv Operation = 0
 	OPPut Operation = 1
 	OPDel Operation = 2
 )
@@ -81,7 +79,42 @@ type Batch struct {
 	Value []byte
 }
 
-type Iterator struct{}
+// Iterator
+type Range struct {
+	Start []byte
+	End   []byte
+}
+
+// Iterator is a generic database iterator that only supports minimal
+// functionality. It is NOT concurrency safe and there are no guarantees about
+// the life-cycle of the returned key and value outside of the iterator or even
+// upon a seek type operation. It is wise to make a copy of key/value for use
+// outside the iterator loop.
+//
+// Next is special as in that on first use it returns the first record.
+//
+// Typical use is as follows:
+// ```
+//
+//	it, _ := NewIterator()
+//	for it.Next() {
+//		// Do things
+//	}
+//
+// ```
+// Several backends do not work that way thus it is be emulated in the various
+// implementations.
+type Iterator interface {
+	First(ctx context.Context) bool
+	Last(ctx context.Context) bool
+	Next(ctx context.Context) bool
+	Seek(ctx context.Context, key []byte) bool
+
+	Key(ctx context.Context) []byte
+	Value(ctx context.Context) []byte
+
+	Close(ctx context.Context) error
+}
 
 var (
 	ErrKeyNotFound   = errors.New("key not found")

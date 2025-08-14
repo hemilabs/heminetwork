@@ -134,7 +134,7 @@ func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error
 
 func (b *nutsDB) Put(_ context.Context, table string, key, value []byte) error {
 	return xerr(b.db.Update(func(tx *nutsdb.Tx) error {
-		return tx.Put(table, key, val, 0)
+		return tx.Put(table, key, value, 0)
 	}))
 }
 
@@ -144,7 +144,7 @@ func (b *nutsDB) Begin(_ context.Context, write bool) (Transaction, error) {
 		return nil, xerr(err)
 	}
 	return &nutsTX{
-		db: b.db, // XXX do we need this?
+		// db: b.db, // XXX do we need this?
 		tx: tx,
 	}, nil
 }
@@ -175,10 +175,23 @@ func (b *nutsDB) Update(ctx context.Context, callback func(ctx context.Context, 
 	return xerr(b.execute(ctx, true, callback))
 }
 
+func (b *nutsDB) NewIterator(ctx context.Context, table string) (Iterator, error) {
+	tx, err := b.Begin(ctx, false)
+	if err != nil {
+		return nil, xerr(err)
+	}
+	return &nutsIterator{
+		table: table,
+		tx:    tx,
+		it: nutsdb.NewIterator(tx.(*nutsTX).tx, table,
+			nutsdb.IteratorOptions{Reverse: false}),
+	}, nil
+}
+
 // Transactions
 
 type nutsTX struct {
-	db *nutsdb.DB
+	// db *nutsdb.DB
 	tx *nutsdb.Tx
 }
 
@@ -209,4 +222,57 @@ func (tx *nutsTX) Commit(ctx context.Context) error {
 
 func (tx *nutsTX) Rollback(ctx context.Context) error {
 	return xerr(tx.tx.Rollback())
+}
+
+func (tx *nutsTX) nutsTx() *nutsdb.Tx {
+	return tx.tx
+}
+
+// Iterations
+type nutsIterator struct {
+	table string
+	tx    Transaction
+	it    *nutsdb.Iterator
+
+	first bool
+}
+
+func (ni *nutsIterator) First(_ context.Context) bool {
+	return ni.it.Rewind()
+}
+
+func (ni *nutsIterator) Last(_ context.Context) bool {
+	key, err := ni.tx.(*nutsTX).nutsTx().GetMaxKey(ni.table)
+	if err != nil {
+		log.Errorf("last: %v", err)
+		return false
+	}
+	return ni.Seek(nil, key)
+}
+
+func (ni *nutsIterator) Next(_ context.Context) bool {
+	// The first next should be the first record.
+	if !ni.first {
+		ni.first = true
+		return ni.it.Rewind()
+	}
+	return ni.it.Next()
+}
+
+func (ni *nutsIterator) Seek(_ context.Context, key []byte) bool {
+	ni.first = true
+	return ni.it.Seek(key)
+}
+
+func (ni *nutsIterator) Key(_ context.Context) []byte {
+	return ni.it.Key()
+}
+
+func (ni *nutsIterator) Value(_ context.Context) []byte {
+	v, _ := ni.it.Value()
+	return v
+}
+
+func (ni *nutsIterator) Close(ctx context.Context) error {
+	return ni.tx.Commit(ctx)
 }

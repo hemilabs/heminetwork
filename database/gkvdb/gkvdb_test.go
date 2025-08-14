@@ -282,4 +282,110 @@ func TestGKVDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Iterate over remaining records
+	on := 1 // Table to test
+	it, err := db.NewIterator(ctx, tables[on])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err = it.Close(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+	i := 0
+	for it.Next(ctx) {
+		// t.Logf("table %s key %x value %x", tables[on], it.Key(ctx), it.Value(ctx))
+		i++
+	}
+	if insertCount/len(tables)/2 != i {
+		t.Fatalf("invalid number of records: got %v wanted %v",
+			insertCount/len(tables)/2, i)
+	}
+}
+
+func TestIterator(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
+	defer cancel()
+	home := t.TempDir()
+
+	table := "mytable"
+	tables := []string{table}
+	cfg := DefaultNutsConfig(home, tables)
+	db, err := NewNutsDB(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	recordCount := 10 // We test a byte so do not overflow it
+	for i := 0; i < recordCount; i++ {
+		err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Verify that Next returns the first record.
+	it1, err := db.NewIterator(ctx, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := 0
+	for it1.Next(ctx) {
+		i++
+	}
+	defer func() {
+		err = it1.Close(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	// Verify that Next returns the Next record after a seek.
+	it2, err := db.NewIterator(ctx, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err = it2.Close(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+	if !it2.Seek(ctx, []byte{1}) {
+		t.Fatal("seek 1")
+	}
+	if !it2.Next(ctx) {
+		t.Fatal("next")
+	}
+	if !bytes.Equal(it2.Key(ctx), []byte{2}) {
+		t.Fatalf("not equal seek, got %v wanted %v", it2.Key(ctx), []byte{2})
+	}
+	// Verify First while here
+	if !it2.First(ctx) {
+		t.Fatal("first")
+	}
+	if !bytes.Equal(it2.Key(ctx), []byte{uint8(0)}) {
+		t.Fatalf("not equal first, got %v wanted %v", it2.Key(ctx), []byte{0})
+	}
+	// Verify Last while here
+	if !it2.Last(ctx) {
+		t.Fatal("last")
+	}
+	if !bytes.Equal(it2.Key(ctx), []byte{uint8(recordCount - 1)}) {
+		t.Fatalf("not equal last, got %v wanted %v",
+			it2.Key(ctx), []byte{uint8(recordCount - 1)})
+	}
 }
