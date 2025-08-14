@@ -17,7 +17,8 @@ sequencer.*
 
 <!-- TOC -->
 * [Running the Hemi stack](#running-the-hemi-stack)
-  * [Quickstart Summary](#quickstart-summary)
+  * [Quickstart](#quickstart)
+  * [Summary](#summary)
   * [Prerequisites](#prerequisites)
     * [System Requirements](#system-requirements)
       * [CPU, RAM, and Disk](#cpu-ram-and-disk)
@@ -49,7 +50,32 @@ sequencer.*
 
 ---
 
-## Quickstart Summary
+## Quickstart
+
+This section shows the most common way to run a Hemi rpc node.  Most users should follow this.  For additional options
+or if you have addtional requirement, refer to the rest of the document.
+
+1. Clone the repo:
+```sh
+git clone ssh://git@github.com/hemilabs/heminetwork.git
+cd heminetwork
+```
+2. Prepare the config files:
+```sh
+./gen-files.sh mainnet snap hemi-min
+```
+3. Set your ethereum rpc provider:
+Edit the file `.env` and put the following to entries in (with your own Ethereum RPC Urls):
+```sh
+GETHL1ENDPOINT=<EthereumExecutionRPCEndpoint>
+PRYSMENDPOINT=<EthereumBeaconRPCEndpoint>
+```
+3. Run the node:
+```sh
+docker compose -f docker-compose_mainnet.yml --profile hemi-min up --build
+```
+
+## Summary
 
 1. Decide on which Hemi components you want to run based off of the [Docker profiles](#docker-profiles).
 2. Ensure you have the required [prerequisites](#prerequisites) installed and your system matches the system
@@ -352,7 +378,7 @@ To access the nodes, you can use JSON-RPC or WebSockets exposed on the following
 
 The [localnode project](.) will always contain versions of Docker images that
 are stable releases and will be compatible with each other and the greater
-hemi network.  Therefore, if you want to update your node, pull the update from 
+hemi network.  Therefore, if you want to update your node, pull the update from
 Github and simply re-run the [gen-files.sh](./gen-files.sh) script and the
 appropriate compose file.  Any daemons that are no longer used will not be
 started by the new compose file.
@@ -360,7 +386,7 @@ Any daemons that are added or updated will be run.  Data directories and
 default configs will be updated with the config files and scripts within the
 project.
 
-_Important Note: It is your responsibility to backup any important data before_ 
+_Important Note: It is your responsibility to backup any important data before_
 _performing an upgrade._
 
 ## Peer-to-Peer (P2P)
