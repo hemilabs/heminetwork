@@ -188,6 +188,20 @@ func (b *nutsDB) NewIterator(ctx context.Context, table string) (Iterator, error
 	}, nil
 }
 
+func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) (Range, error) {
+	tx, err := b.Begin(ctx, false)
+	if err != nil {
+		return nil, xerr(err)
+	}
+	return &nutsRange{
+		table: table,
+		tx:    tx,
+		ntx:   tx.(*nutsTX).nutsTx(),
+		start: start,
+		end:   end,
+	}, nil
+}
+
 // Transactions
 
 type nutsTX struct {
@@ -233,6 +247,7 @@ type nutsIterator struct {
 	table string
 	tx    Transaction
 	it    *nutsdb.Iterator
+	r     *Range
 
 	first bool
 }
@@ -276,3 +291,42 @@ func (ni *nutsIterator) Value(_ context.Context) []byte {
 func (ni *nutsIterator) Close(ctx context.Context) error {
 	return ni.tx.Commit(ctx)
 }
+
+// Ranges
+type nutsRange struct {
+	table string
+	tx    Transaction
+	ntx   *nutsdb.Tx
+	start []byte
+	end   []byte
+
+	cursor []byte // Current key
+}
+
+func (nr *nutsRange) First(_ context.Context) bool {
+	//log.Infof("first: %v", spew.Sdump(nr.start))
+	// v, err := nr.ntx.GetRange(nr.table, nr.start, 0, 8)
+	// v, err := nr.ntx.PrefixScan(nr.table, nr.start, 0, 1)
+	// v, err := nr.ntx.RangeScan(nr.table, nr.start, nil)
+	//if err != nil {
+	//	log.Errorf("range first: %v", err)
+	//	return false
+	//}
+	//log.Infof("got %v", spew.Sdump(v))
+	//if len(v) != 1 {
+	//	return false
+	//}
+	//nr.cursor = make([]byte, len(v[0]))
+	//copy(nr.cursor, v[0])
+	return false
+	return true
+}
+
+func (nr *nutsRange) Close(ctx context.Context) error {
+	return nr.tx.Commit(ctx)
+}
+
+//func (ni *nutsIterator) Range(ctx context.Context) error {
+//	spew.Dump(ni.tx.(*nutsTX).nutsTx().RangeScan(ni.table, ni.r.Start, ni.r.End))
+//	return nil
+//}

@@ -26,6 +26,7 @@ type Database interface {
 
 	// Iterators, exist inside a Transaction
 	NewIterator(ctx context.Context, table string) (Iterator, error)
+	NewRange(ctx context.Context, table string, start, end []byte) (Range, error)
 
 	// Batches
 	// Import([]Batch) // XXX this should be a reader as well
@@ -79,12 +80,6 @@ type Batch struct {
 	Value []byte
 }
 
-// Iterator
-type Range struct {
-	Start []byte
-	End   []byte
-}
-
 // Iterator is a generic database iterator that only supports minimal
 // functionality. It is NOT concurrency safe and there are no guarantees about
 // the life-cycle of the returned key and value outside of the iterator or even
@@ -120,6 +115,13 @@ var (
 	ErrKeyNotFound   = errors.New("key not found")
 	ErrInvalidConfig = errors.New("invalid config")
 )
+
+// Range
+type Range interface {
+	First(ctx context.Context) bool
+
+	Close(ctx context.Context) error
+}
 
 /*
 	bucket:key:value

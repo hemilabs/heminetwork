@@ -3,6 +3,7 @@ package gkvdb
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -364,6 +365,7 @@ func TestIterator(t *testing.T) {
 			panic(err)
 		}
 	}()
+
 	if !it2.Seek(ctx, []byte{1}) {
 		t.Fatal("seek 1")
 	}
@@ -388,4 +390,105 @@ func TestIterator(t *testing.T) {
 		t.Fatalf("not equal last, got %v wanted %v",
 			it2.Key(ctx), []byte{uint8(recordCount - 1)})
 	}
+}
+
+func TestRange(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
+	defer cancel()
+	home := "xxx" // t.TempDir()
+
+	table := "users"
+	tables := []string{table}
+	cfg := DefaultNutsConfig(home, tables)
+	db, err := NewNutsDB(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+
+	// Stuff a bunch of records into the same table to validate that ranges
+	// don't over or underflow.
+	recordCount := 1_000_000
+	value := make([]byte, 4*1024*1024)
+	_, err = rand.Read(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < recordCount; i++ {
+		// Emulate user records "userXXXX"
+		var key [8]byte
+		copy(key[:], []byte{'u', 's', 'e', 'r'})
+		binary.BigEndian.PutUint32(key[4:], uint32(i))
+		err := db.Put(ctx, table, key[:], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Emulate user records "passXXXX"
+		var pkey [8]byte
+		copy(pkey[:], []byte{'p', 'a', 's', 's'})
+		binary.BigEndian.PutUint32(pkey[4:], uint32(i))
+		err = db.Put(ctx, table, pkey[:], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Emulate avatar records "avatarXXXX"
+		var akey [10]byte
+		copy(akey[:], []byte{'a', 'v', 'a', 't', 'a', 'r'})
+		binary.BigEndian.PutUint32(akey[6:], uint32(i))
+		err = db.Put(ctx, table, akey[:], nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Verify al records were inserted
+	it, err := db.NewIterator(ctx, table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err = it.Close(ctx)
+		if err != nil {
+			panic(err)
+		}
+	}()
+	i := 0
+	for it.Next(ctx) {
+		// t.Logf("table %v key %v", table, spew.Sdump(it.Key(ctx)))
+		i++
+	}
+	if i != recordCount*3 {
+		t.Fatalf("invalid record count got %v want %v", i, recordCount*3)
+	}
+
+	//// Range over user 100-199
+	//start := [4]byte{'u', 's', 'e', 'r'}
+	//r, err := db.NewRange(ctx, table, start[:], nil)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//defer func() {
+	//	err := r.Close(ctx)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//}()
+	//for r.First(ctx) {
+	//	t.Logf("1")
+	//	break
+	//}
+	<-ctx.Done()
+
+	// Range over all users and make sure we don't hit avatar
 }
