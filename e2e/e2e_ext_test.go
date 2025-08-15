@@ -16,35 +16,25 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	mathrand "math/rand/v2"
 	"net"
-	"net/url"
-	"os"
-	"path/filepath"
 	"reflect"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
-	"github.com/btcsuite/btcd/btcutil"
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
-	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	btcwire "github.com/btcsuite/btcd/wire"
+
+	// "github.com/coder/websocket" // centralized in testutil
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
-	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/go-test/deep"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/api"
 	"github.com/hemilabs/heminetwork/api/auth"
@@ -52,17 +42,15 @@ import (
 	"github.com/hemilabs/heminetwork/api/bssapi"
 	"github.com/hemilabs/heminetwork/api/protocol"
 	"github.com/hemilabs/heminetwork/database/bfgd"
-	"github.com/hemilabs/heminetwork/database/bfgd/postgres"
 	"github.com/hemilabs/heminetwork/ethereum"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/electrs"
-	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/bfg"
 	"github.com/hemilabs/heminetwork/service/bss"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 const (
-	testDBPrefix              = "e2e_ext_test_db_"
 	mockEncodedBlockHeader    = "\"0000c02048cd664586152c3dcf356d010cbb9216fdeb3b1aeae256d59a0700000000000086182c855545356ec11d94972cf31b97ef01ae7c9887f4349ad3f0caf2d3c0b118e77665efdf2819367881fb\""
 	mockTxHash                = "7fe9c3262f8fe26764b01955b4c996296f7c0c72945af1556038a084fcb37dbb"
 	mockTxPos                 = 3
@@ -107,186 +95,14 @@ func init() {
 	}
 }
 
-func EnsureCanConnect(t *testing.T, url string, timeout time.Duration) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	t.Logf("connecting to %s", url)
-
-	var err error
-
-	doneCh := make(chan bool)
-	go func() {
-		for {
-			c, _, err := websocket.Dial(ctx, url, nil)
-			if err != nil {
-				time.Sleep(1 * time.Second)
-				continue
-			}
-			c.CloseNow()
-			doneCh <- true
-		}
-	}()
-
-	select {
-	case <-doneCh:
-	case <-ctx.Done():
-		return fmt.Errorf("timed out trying to reach WS server in tests, last error: %s", err)
-	}
-
-	return nil
-}
-
-func EnsureCanConnectTCP(t *testing.T, addr string, timeout time.Duration) error {
-	conn, err := net.DialTimeout("tcp", addr, timeout)
-	if err != nil {
-		return err
-	}
-
-	conn.Close()
-	return nil
-}
-
-func applySQLFiles(ctx context.Context, t *testing.T, sdb *sql.DB, path string) {
-	t.Helper()
-
-	sqlFiles, err := filepath.Glob(path)
-	if err != nil {
-		t.Fatalf("Failed to get schema files: %v", err)
-	}
-	sort.Strings(sqlFiles)
-
-	for _, sqlFile := range sqlFiles {
-		t.Logf("Applying SQL file %v", filepath.Base(sqlFile))
-		sql, err := os.ReadFile(sqlFile)
-		if err != nil {
-			t.Fatalf("Failed to read SQL file: %v", err)
-		}
-		if _, err := sdb.ExecContext(ctx, string(sql)); err != nil {
-			t.Fatalf("Failed to execute SQL: %v", err)
-		}
-	}
-}
-
-func getPgUri(t *testing.T) string {
-	pgURI := os.Getenv("PGTESTURI")
-	if pgURI == "" {
-		t.Skip("PGTESTURI environment variable is not set, skipping...")
-	}
-
-	return pgURI
-}
-
 func createTestDB(ctx context.Context, t *testing.T) (bfgd.Database, string, *sql.DB, func()) {
-	t.Helper()
-
-	pgURI := getPgUri(t)
-
-	var (
-		cleanup     func()
-		ddb, sdb    *sql.DB
-		needCleanup = true
-	)
-	defer func() {
-		if !needCleanup {
-			return
-		}
-		if sdb != nil {
-			sdb.Close()
-		}
-		if cleanup != nil {
-			cleanup()
-		}
-		if ddb != nil {
-			ddb.Close()
-		}
-	}()
-
-	ddb, err := postgres.Connect(ctx, pgURI)
-	if err != nil {
-		t.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	dbn := mathrand.IntN(999999999)
-	dbName := fmt.Sprintf("%v_%d", testDBPrefix, dbn)
-
-	t.Logf("Creating test database %v", dbName)
-
-	qCreateDB := fmt.Sprintf("CREATE DATABASE %v", dbName)
-	if _, err := ddb.ExecContext(ctx, qCreateDB); err != nil {
-		t.Fatalf("Failed to create test database: %v", err)
-	}
-
-	cleanup = func() {
-		t.Logf("Removing test database %v", dbName)
-		qDropDB := fmt.Sprintf("DROP DATABASE %v WITH (FORCE)", dbName)
-		if _, err := ddb.ExecContext(ctx, qDropDB); err != nil {
-			t.Fatalf("Failed to drop test database: %v", err)
-		}
-		ddb.Close()
-	}
-
-	u, err := url.Parse(pgURI)
-	if err != nil {
-		t.Fatalf("Failed to parse postgresql URI: %v", err)
-	}
-	u.Path = dbName
-
-	sdb, err = postgres.Connect(ctx, u.String())
-	if err != nil {
-		t.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	// Load schema.
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Failed to get working directory: %v", err)
-	}
-	applySQLFiles(ctx, t, sdb, filepath.Join(wd, "./../database/bfgd/scripts/*.sql"))
-
-	db, err := postgres.New(ctx, u.String())
-	if err != nil {
-		t.Fatalf("Failed to connect to database: %v", err)
-	}
-
-	if dbVersion, err := db.Version(ctx); err != nil {
-		t.Fatalf("Failed to obtain database version: %v", err)
-	} else {
-		t.Logf("Database version: %v", dbVersion)
-	}
-
-	needCleanup = false
-
-	return db, u.String(), sdb, cleanup
-}
-
-func nextPort(ctx context.Context, t *testing.T) int {
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		default:
-		}
-
-		port, err := freeport.GetFreePort()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)), 1*time.Second); err != nil {
-			if errors.Is(err, syscall.ECONNREFUSED) {
-				// connection error, port is open
-				return port
-			}
-
-			t.Fatal(err)
-		}
-	}
+	// Use centralized testutil function
+	return testutil.CreateTestDBWithURI(ctx, t)
 }
 
 func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, electrsAddr string, btcStartHeight uint64, otherBfgUrl string, publicDisabled bool) (*bfg.Server, string, string, string) {
-	bfgPrivateListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
-	bfgPublicListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
+	bfgPrivateListenAddress := fmt.Sprintf(":%d", testutil.GetVerifiedFreePort(ctx, t))
+	bfgPublicListenAddress := fmt.Sprintf(":%d", testutil.GetVerifiedFreePort(ctx, t))
 
 	cfg := &bfg.Config{
 		PrivateListenAddress: bfgPrivateListenAddress,
@@ -324,11 +140,11 @@ func createBfgServerWithAccess(ctx context.Context, t *testing.T, pgUri string, 
 	bfgWsPrivateUrl := fmt.Sprintf("http://localhost%s%s", bfgPrivateListenAddress, bfgapi.RouteWebsocketPrivate)
 	bfgWsPublicUrl := fmt.Sprintf("http://localhost%s%s", bfgPublicListenAddress, bfgapi.RouteWebsocketPublic)
 
-	if err := EnsureCanConnect(t, bfgWsPrivateUrl, 5*time.Second); err != nil {
+	if err := testutil.EnsureCanConnectWS(t, bfgWsPrivateUrl, 5*time.Second); err != nil {
 		t.Fatalf("could not connect to %s: %s", bfgWsPrivateUrl, err.Error())
 	}
 
-	if err := EnsureCanConnect(t, bfgWsPublicUrl, 5*time.Second); err != nil {
+	if err := testutil.EnsureCanConnectWS(t, bfgWsPublicUrl, 5*time.Second); err != nil {
 		t.Fatalf("could not connect to %s: %s", bfgWsPublicUrl, err.Error())
 	}
 
@@ -348,7 +164,7 @@ func createBfgServerConnectedToAnother(ctx context.Context, t *testing.T, pgUri 
 }
 
 func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.Server, string, string) {
-	bssListenAddress := fmt.Sprintf(":%d", nextPort(ctx, t))
+	bssListenAddress := fmt.Sprintf(":%d", testutil.GetVerifiedFreePort(ctx, t))
 
 	bssServer, err := bss.NewServer(&bss.Config{
 		BFGURL:        bfgWsurl,
@@ -366,7 +182,7 @@ func createBssServer(ctx context.Context, t *testing.T, bfgWsurl string) (*bss.S
 	}()
 
 	bssWsurl := fmt.Sprintf("http://localhost%s%s", bssListenAddress, bssapi.RouteWebsocket)
-	err = EnsureCanConnect(t, bssWsurl, 5*time.Second)
+	err = testutil.EnsureCanConnectWS(t, bssWsurl, 5*time.Second)
 	if err != nil {
 		t.Fatalf("could not connect to %s: %s", bssWsurl, err.Error())
 	}
@@ -384,7 +200,7 @@ func reverseAndEncodeEncodedHash(encodedHash string) string {
 }
 
 func createMockElectrsServer(ctx context.Context, t *testing.T, l2Keystone *hemi.L2Keystone, btx []byte) (string, func()) {
-	addr := fmt.Sprintf("localhost:%d", nextPort(ctx, t))
+	addr := fmt.Sprintf("localhost:%d", testutil.GetVerifiedFreePort(ctx, t))
 
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -606,44 +422,7 @@ func handleMockElectrsConnection(ctx context.Context, t *testing.T, conn net.Con
 	}
 }
 
-func defaultTestContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), 30*time.Second)
-}
-
-// assertPing is a short helper method to assert reading a ping after connecting
-func assertPing(ctx context.Context, t *testing.T, c *websocket.Conn, cmd protocol.Command) {
-	var v protocol.Message
-	err := wsjson.Read(ctx, c, &v)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if v.Header.Command != cmd {
-		t.Fatalf("unexpected command: %s", v.Header.Command)
-	}
-}
-
-// fillOutBytesWith0s will take a string and return a slice of bytes
-// with values from the string suffixed until a size with bytes '_'
-func fillOutBytesWith0s(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, 0)
-	}
-
-	return result
-}
-
-// fillOutBytes will take a string and return a slice of bytes
-// with values from the string suffixed until a size with bytes '_'
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-
-	return result
-}
+func defaultTestContext() (context.Context, context.CancelFunc) { return testutil.DefaultTestContext() }
 
 func bfgdL2KeystoneToHemiL2Keystone(l2KeystoneSavedDB *bfgd.L2Keystone) *hemi.L2Keystone {
 	return &hemi.L2Keystone{
@@ -658,59 +437,7 @@ func bfgdL2KeystoneToHemiL2Keystone(l2KeystoneSavedDB *bfgd.L2Keystone) *hemi.L2
 }
 
 func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx := &btcwire.MsgTx{
-		Version:  2,
-		LockTime: uint32(btcHeight),
-	}
-
-	popTx := pop.TransactionL2{
-		L2Keystone: hemi.L2KeystoneAbbreviate(*l2Keystone),
-	}
-
-	popTxOpReturn, err := popTx.EncodeToOpReturn()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
-	publicKey := privateKey.PubKey()
-	pubKeyBytes := publicKey.SerializeCompressed()
-	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(payToScript) != 25 {
-		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
-	}
-
-	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
-	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
-
-	changeAmount := int64(100)
-	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
-
-	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
-
-	sig := dcrecdsa.Sign(privateKey, []byte{})
-	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
-	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
-	if err != nil {
-		t.Fatal(err)
-	}
-	btx.TxIn[0].SignatureScript = sigScript
-
-	var buf bytes.Buffer
-	if err := btx.Serialize(&buf); err != nil {
-		t.Fatal(err)
-	}
-
-	return buf.Bytes()
+	return testutil.CreateBtcTx(t, btcHeight, l2Keystone, minerPrivateKeyBytes)
 }
 
 func TestBFGPublicDisabled(t *testing.T) {
@@ -772,17 +499,17 @@ func TestNewL2Keystone(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 	// 1
 	l2Keystone := hemi.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	l2KeystoneRequest := bssapi.L2KeystoneRequest{
@@ -849,8 +576,8 @@ func TestL2Keystone(t *testing.T) {
 
 	_, _, _, bfgPublicWsUrl := createBfgServer(ctx, t, pgUri, "", 1)
 
-	keystoneOneHash := fillOutBytes("somehashone", 32)
-	keystoneTwoHash := fillOutBytes("somehashtwo", 32)
+	keystoneOneHash := testutil.FillOutBytes("somehashone", 32)
+	keystoneTwoHash := testutil.FillOutBytes("somehashtwo", 32)
 
 	// 1
 	keystoneOne := bfgd.L2Keystone{
@@ -858,10 +585,10 @@ func TestL2Keystone(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephashone", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephashone", 32),
-		StateRoot:          fillOutBytes("staterootone", 32),
-		EPHash:             fillOutBytes("ephashone", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
+		StateRoot:          testutil.FillOutBytes("staterootone", 32),
+		EPHash:             testutil.FillOutBytes("ephashone", 32),
 	}
 
 	keystoneTwo := bfgd.L2Keystone{
@@ -869,10 +596,10 @@ func TestL2Keystone(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      33,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephashtwo", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephashtwo", 32),
-		StateRoot:          fillOutBytes("stateroottwo", 32),
-		EPHash:             fillOutBytes("ephashtwo", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephashtwo", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashtwo", 32),
+		StateRoot:          testutil.FillOutBytes("stateroottwo", 32),
+		EPHash:             testutil.FillOutBytes("ephashtwo", 32),
 	}
 
 	// 2
@@ -900,7 +627,7 @@ func TestL2Keystone(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -972,7 +699,7 @@ func TestPublicPing(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 }
 
 func TestBitcoinBalance(t *testing.T) {
@@ -990,17 +717,17 @@ func TestBitcoinBalance(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+	err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1017,7 +744,7 @@ func TestBitcoinBalance(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -1058,10 +785,10 @@ func TestBFGPublicErrorCases(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
@@ -1158,17 +885,17 @@ func TestBFGPublicErrorCases(t *testing.T) {
 					Version:            1,
 					L1BlockNumber:      5,
 					L2BlockNumber:      44,
-					ParentEPHash:       fillOutBytes("parentephash", 32),
-					PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-					StateRoot:          fillOutBytes("stateroot", 32),
-					EPHash:             fillOutBytes("ephash", 32),
+					ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+					PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+					StateRoot:          testutil.FillOutBytes("stateroot", 32),
+					EPHash:             testutil.FillOutBytes("ephash", 32),
 				}
 
 				btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 				electrsAddr, cleanupE = createMockElectrsServer(ctx, t, nil, btx)
 				defer cleanupE()
-				err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+				err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1187,7 +914,7 @@ func TestBFGPublicErrorCases(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+			testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 			bws := &bfgWs{
 				conn: protocol.NewWSConn(c),
@@ -1251,17 +978,17 @@ func TestBitcoinInfo(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+	err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1278,7 +1005,7 @@ func TestBitcoinInfo(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -1335,17 +1062,17 @@ func TestBitcoinUTXOs(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+	err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1362,7 +1089,7 @@ func TestBitcoinUTXOs(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -1426,10 +1153,10 @@ func TestBitcoinBroadcast(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	// 1
@@ -1437,7 +1164,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+	err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1474,7 +1201,7 @@ func TestBitcoinBroadcast(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -1517,10 +1244,10 @@ func TestBitcoinBroadcast(t *testing.T) {
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
-			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
-			StateRoot:          fillOutBytes("stateroot", 32),
-			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			ParentEPHash:       testutil.FillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          testutil.FillOutBytes("stateroot", 32),
+			EPHash:             testutil.FillOutBytesWith0s("ephash______", 32),
 			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
@@ -1556,10 +1283,10 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	// 1
@@ -1567,7 +1294,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, nil, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+	err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1598,7 +1325,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -1665,7 +1392,7 @@ func TestBitcoinBroadcastDuplicate(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws = &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -1719,10 +1446,10 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 800, &l2Keystone, minerPrivateKeyBytes)
@@ -1730,7 +1457,7 @@ func TestProcessBitcoinBlockNewBtcBlock(t *testing.T) {
 	// 1
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+	err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1802,10 +1529,10 @@ loop:
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
-			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
-			StateRoot:          fillOutBytes("stateroot", 32),
-			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			ParentEPHash:       testutil.FillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          testutil.FillOutBytes("stateroot", 32),
+			EPHash:             testutil.FillOutBytesWith0s("ephash______", 32),
 			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
@@ -1835,10 +1562,10 @@ func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	// 1
@@ -1847,7 +1574,7 @@ func TestProcessBitcoinBlockNewFullPopBasis(t *testing.T) {
 	// 2
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+	err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1941,10 +1668,10 @@ loop:
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytesWith0s("parentephas", 32),
-			PrevKeystoneEPHash: fillOutBytesWith0s("prevkeystone", 32),
-			StateRoot:          fillOutBytes("stateroot", 32),
-			EPHash:             fillOutBytesWith0s("ephash______", 32),
+			ParentEPHash:       testutil.FillOutBytesWith0s("parentephas", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytesWith0s("prevkeystone", 32),
+			StateRoot:          testutil.FillOutBytes("stateroot", 32),
+			EPHash:             testutil.FillOutBytesWith0s("ephash______", 32),
 			Hash:               hemi.L2KeystoneAbbreviate(l2Keystone).HashB(),
 		},
 	}); len(diff) > 0 {
@@ -1976,10 +1703,10 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	// 1
@@ -1992,7 +1719,7 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 	// 2
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	err := EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
+	err := testutil.EnsureCanConnectTCP(t, electrsAddr, mockElectrsConnectTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2017,7 +1744,7 @@ func TestBitcoinBroadcastThenUpdate(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -2148,27 +1875,27 @@ func TestPopPayouts(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	differentL2Keystone := hemi.L2Keystone{
 		Version:            1,
 		L1BlockNumber:      13,
 		L2BlockNumber:      23,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
-	btcHeaderHash := fillOutBytes("btcheaderhash", 32)
+	btcHeaderHash := testutil.FillOutBytes("btcheaderhash", 32)
 
 	btcBlock := bfgd.BtcBlock{
 		Hash:   btcHeaderHash,
-		Header: fillOutBytes("btcheader", 80),
+		Header: testutil.FillOutBytes("btcheader", 80),
 		Height: 99,
 	}
 
@@ -2185,9 +1912,9 @@ func TestPopPayouts(t *testing.T) {
 	var txIndex uint64 = 1
 
 	popBasis := bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid1", 32),
+		BtcTxId:             testutil.FillOutBytes("btctxid1", 32),
 		BtcRawTx:            []byte("btcrawtx1"),
-		PopTxId:             fillOutBytes("poptxid1", 32),
+		PopTxId:             testutil.FillOutBytes("poptxid1", 32),
 		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
@@ -2202,9 +1929,9 @@ func TestPopPayouts(t *testing.T) {
 	txIndex = 2
 
 	popBasis = bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid2", 32),
+		BtcTxId:             testutil.FillOutBytes("btctxid2", 32),
 		BtcRawTx:            []byte("btcrawtx2"),
-		PopTxId:             fillOutBytes("poptxid2", 32),
+		PopTxId:             testutil.FillOutBytes("poptxid2", 32),
 		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   otherPublicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
@@ -2219,9 +1946,9 @@ func TestPopPayouts(t *testing.T) {
 	txIndex = 3
 
 	popBasis = bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid3", 32),
+		BtcTxId:             testutil.FillOutBytes("btctxid3", 32),
 		BtcRawTx:            []byte("btcrawtx3"),
-		PopTxId:             fillOutBytes("poptxid3", 32),
+		PopTxId:             testutil.FillOutBytes("poptxid3", 32),
 		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
@@ -2236,9 +1963,9 @@ func TestPopPayouts(t *testing.T) {
 	txIndex = 4
 
 	popBasis = bfgd.PopBasis{
-		BtcTxId:             fillOutBytes("btctxid4", 32),
+		BtcTxId:             testutil.FillOutBytes("btctxid4", 32),
 		BtcRawTx:            []byte("btcrawtx4"),
-		PopTxId:             fillOutBytes("poptxid4", 32),
+		PopTxId:             testutil.FillOutBytes("poptxid4", 32),
 		L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(differentL2Keystone).HashB(),
 		PopMinerPublicKey:   publicKeyUncompressed,
 		BtcHeaderHash:       btcHeaderHash,
@@ -2260,7 +1987,7 @@ func TestPopPayouts(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 	bws := &bssWs{
 		conn: protocol.NewWSConn(c),
@@ -2351,17 +2078,17 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
-	btcHeaderHash := fillOutBytes("btcheaderhash", 32)
+	btcHeaderHash := testutil.FillOutBytes("btcheaderhash", 32)
 
 	btcBlock := bfgd.BtcBlock{
 		Hash:   btcHeaderHash,
-		Header: fillOutBytes("btcheader", 80),
+		Header: testutil.FillOutBytes("btcheader", 80),
 		Height: 99,
 	}
 
@@ -2389,9 +2116,9 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 
 		txIndex++
 		popBasis := bfgd.PopBasis{
-			BtcTxId:             fillOutBytes("btctxid1", 32),
+			BtcTxId:             testutil.FillOutBytes("btctxid1", 32),
 			BtcRawTx:            []byte("btcrawtx1"),
-			PopTxId:             fillOutBytes("poptxid1", 32),
+			PopTxId:             testutil.FillOutBytes("poptxid1", 32),
 			L2KeystoneAbrevHash: hemi.L2KeystoneAbbreviate(includedL2Keystone).HashB(),
 			PopMinerPublicKey:   publicKeyUncompressed,
 			BtcHeaderHash:       btcHeaderHash,
@@ -2413,7 +2140,7 @@ func TestPopPayoutsMultiplePages(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 	bws := &bssWs{
 		conn: protocol.NewWSConn(c),
@@ -2534,9 +2261,9 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	btcBlock := createBtcBlock(ctx, t, db, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
+	createBtcBlock(ctx, t, db, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	createBtcBlock(ctx, t, db, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
 	expectedFinalitiesDesc := []int32{-8, -8, -6}
 
 	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
@@ -2545,7 +2272,7 @@ func TestGetMostRecentL2BtcFinalitiesBSS(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 	bws := &bssWs{
 		conn: protocol.NewWSConn(c),
@@ -2623,9 +2350,9 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	btcBlock := createBtcBlock(ctx, t, db, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
+	createBtcBlock(ctx, t, db, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	createBtcBlock(ctx, t, db, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
@@ -2634,7 +2361,7 @@ func TestGetFinalitiesByL2KeystoneBSS(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 	bws := &bssWs{
 		conn: protocol.NewWSConn(c),
@@ -2721,9 +2448,9 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 
 	_, _, bssWsurl := createBssServer(ctx, t, bfgWsurl)
 
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	btcBlock := createBtcBlock(ctx, t, db, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
+	createBtcBlock(ctx, t, db, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	createBtcBlock(ctx, t, db, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bssWsurl, nil)
@@ -2732,7 +2459,7 @@ func TestGetFinalitiesByL2KeystoneBSSLowerServerHeight(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 	bws := &bssWs{
 		conn: protocol.NewWSConn(c),
@@ -2816,9 +2543,9 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
 
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	btcBlock := createBtcBlock(ctx, t, db, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
+	createBtcBlock(ctx, t, db, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	createBtcBlock(ctx, t, db, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
 	expectedFinalitiesDesc := []int32{-8, -8, -6}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -2827,7 +2554,7 @@ func TestGetMostRecentL2BtcFinalitiesBFG(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -2901,9 +2628,9 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, "", 1000)
 
-	btcBlock := createBtcBlock(ctx, t, db, 1, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
-	createBtcBlock(ctx, t, db, 1, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
-	createBtcBlock(ctx, t, db, 1, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
+	btcBlock := createBtcBlock(ctx, t, db, 998, []byte{}, 1) // finality should be 1000 - 998 - 9 + 1 = -6
+	createBtcBlock(ctx, t, db, -1, []byte{}, 2)              // finality should be 1000 - 1000 - 9 + 1 = -8 (unpublished)
+	createBtcBlock(ctx, t, db, 1000, btcBlock.Hash, 3)       // finality should be 1000 - 1000 - 9 + 1 = -8
 	expectedFinalitiesDesc := []int32{-8, -6}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -2912,7 +2639,7 @@ func TestGetFinalitiesByL2KeystoneBFG(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -2999,7 +2726,7 @@ func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
 
 	height := 1
 	l2BlockNumber := uint32(1)
-	createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+	createBtcBlock(ctx, t, db, height, []byte{}, l2BlockNumber)
 	// get the btc block's finality, this is the only one that
 	// we care about in this test
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1)
@@ -3024,7 +2751,7 @@ func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
 	for height < 300 {
 		height++
 		l2BlockNumber++
-		createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+		createBtcBlock(ctx, t, db, height, []byte{}, l2BlockNumber)
 	}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -3033,7 +2760,7 @@ func TestGetFinalitiesByL2KeystoneBFGVeryOld(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -3102,7 +2829,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 
 	height := 1
 	l2BlockNumber := uint32(1)
-	createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+	createBtcBlock(ctx, t, db, height, []byte{}, l2BlockNumber)
 	// get the btc block's finality, this is the only one that
 	// we care about in this test
 	recentFinalities, err := db.L2BTCFinalityMostRecent(ctx, 1)
@@ -3126,7 +2853,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 	for height < 100+8 {
 		height++
 		l2BlockNumber++
-		createBtcBlock(ctx, t, db, 1, height, []byte{}, l2BlockNumber)
+		createBtcBlock(ctx, t, db, height, []byte{}, l2BlockNumber)
 	}
 
 	c, _, err := websocket.Dial(ctx, bfgWsurl, nil)
@@ -3135,7 +2862,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotThatOld(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	bws := &bfgWs{
 		conn: protocol.NewWSConn(c),
@@ -3208,22 +2935,22 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	if err := EnsureCanConnectTCP(
+	if err := testutil.EnsureCanConnectTCP(
 		t,
 		electrsAddr,
 		mockElectrsConnectTimeout,
 	); err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to connect to electrs: %v", err)
 	}
 
 	_, _, bfgWsurl, _ := createBfgServer(ctx, t, pgUri, electrsAddr, 1)
@@ -3235,7 +2962,7 @@ func TestNotifyOnNewBtcBlockBFGClients(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	// 2
 	retries := 2
@@ -3278,17 +3005,17 @@ func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	if err := EnsureCanConnectTCP(
+	if err := testutil.EnsureCanConnectTCP(
 		t,
 		electrsAddr,
 		mockElectrsConnectTimeout,
@@ -3305,7 +3032,7 @@ func TestNotifyOnNewBtcFinalityBFGClients(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	retries := 2
 	found := false
@@ -3351,17 +3078,17 @@ func TestNotifyOnL2KeystonesBFGClients(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	l2Keystone := bfgd.L2Keystone{
-		Hash:               fillOutBytes("somehashone", 32),
+		Hash:               testutil.FillOutBytes("somehashone", 32),
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephashone", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephashone", 32),
-		StateRoot:          fillOutBytes("staterootone", 32),
-		EPHash:             fillOutBytes("ephashone", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
+		StateRoot:          testutil.FillOutBytes("staterootone", 32),
+		EPHash:             testutil.FillOutBytes("ephashone", 32),
 	}
 
 	if err := db.L2KeystonesInsert(ctx, []bfgd.L2Keystone{
@@ -3421,17 +3148,17 @@ func TestNotifyOnL2KeystonesBFGClientsViaOtherBFG(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	l2Keystone := bfgd.L2Keystone{
-		Hash:               fillOutBytes("somehashone", 32),
+		Hash:               testutil.FillOutBytes("somehashone", 32),
 		Version:            1,
 		L1BlockNumber:      11,
 		L2BlockNumber:      22,
-		ParentEPHash:       fillOutBytes("parentephashone", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephashone", 32),
-		StateRoot:          fillOutBytes("staterootone", 32),
-		EPHash:             fillOutBytes("ephashone", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
+		StateRoot:          testutil.FillOutBytes("staterootone", 32),
+		EPHash:             testutil.FillOutBytes("ephashone", 32),
 	}
 
 	// insert the l2 keystone into the first bfg server's postgres,
@@ -3497,38 +3224,38 @@ func TestOtherBFGSavesL2KeystonesOnNotifications(t *testing.T) {
 	if err := authClient.HandshakeClient(ctx, protocolConn); err != nil {
 		t.Fatal(err)
 	}
-	assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 	l2Keystones := []bfgd.L2Keystone{
 		{
-			Hash:               fillOutBytes("somehash22", 32),
+			Hash:               testutil.FillOutBytes("somehash22", 32),
 			Version:            1,
 			L1BlockNumber:      11,
 			L2BlockNumber:      22,
-			ParentEPHash:       fillOutBytes("parentephashone", 32),
-			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephashone", 32),
-			StateRoot:          fillOutBytes("staterootone", 32),
-			EPHash:             fillOutBytes("ephashone", 32),
+			ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
+			StateRoot:          testutil.FillOutBytes("staterootone", 32),
+			EPHash:             testutil.FillOutBytes("ephashone", 32),
 		},
 		{
-			Hash:               fillOutBytes("somehash23", 32),
+			Hash:               testutil.FillOutBytes("somehash23", 32),
 			Version:            1,
 			L1BlockNumber:      11,
 			L2BlockNumber:      23,
-			ParentEPHash:       fillOutBytes("parentephashone", 32),
-			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephashone", 32),
-			StateRoot:          fillOutBytes("staterootone", 32),
-			EPHash:             fillOutBytes("ephashone", 32),
+			ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
+			StateRoot:          testutil.FillOutBytes("staterootone", 32),
+			EPHash:             testutil.FillOutBytes("ephashone", 32),
 		},
 		{
-			Hash:               fillOutBytes("somehash24", 32),
+			Hash:               testutil.FillOutBytes("somehash24", 32),
 			Version:            1,
 			L1BlockNumber:      11,
 			L2BlockNumber:      24,
-			ParentEPHash:       fillOutBytes("parentephashone", 32),
-			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephashone", 32),
-			StateRoot:          fillOutBytes("staterootone", 32),
-			EPHash:             fillOutBytes("ephashone", 32),
+			ParentEPHash:       testutil.FillOutBytes("parentephashone", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephashone", 32),
+			StateRoot:          testutil.FillOutBytes("staterootone", 32),
+			EPHash:             testutil.FillOutBytes("ephashone", 32),
 		},
 	}
 
@@ -3634,17 +3361,17 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	if err := EnsureCanConnectTCP(
+	if err := testutil.EnsureCanConnectTCP(
 		t,
 		electrsAddr,
 		mockElectrsConnectTimeout,
@@ -3662,7 +3389,7 @@ func TestNotifyOnNewBtcBlockBSSClients(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 	retries := 2
 	found := false
@@ -3704,17 +3431,17 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	if err := EnsureCanConnectTCP(
+	if err := testutil.EnsureCanConnectTCP(
 		t,
 		electrsAddr,
 		mockElectrsConnectTimeout,
@@ -3732,7 +3459,7 @@ func TestNotifyOnNewBtcFinalityBSSClients(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, bssapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 	retries := 2
 	found := false
@@ -3769,17 +3496,17 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	if err := EnsureCanConnectTCP(
+	if err := testutil.EnsureCanConnectTCP(
 		t,
 		electrsAddr,
 		mockElectrsConnectTimeout,
@@ -3808,7 +3535,7 @@ func TestNotifyMultipleBFGClients(t *testing.T) {
 				defer c.CloseNow()
 			}
 
-			assertPing(ctx, t, c, bfgapi.CmdPingRequest)
+			testutil.AssertPing(ctx, t, c, bfgapi.CmdPingRequest)
 
 			var v protocol.Message
 			if err = wsjson.Read(ctx, c, &v); err != nil {
@@ -3840,17 +3567,17 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	btx := createBtcTx(t, 199, &l2Keystone, minerPrivateKeyBytes)
 
 	electrsAddr, cleanupE := createMockElectrsServer(ctx, t, &l2Keystone, btx)
 	defer cleanupE()
-	if err := EnsureCanConnectTCP(
+	if err := testutil.EnsureCanConnectTCP(
 		t,
 		electrsAddr,
 		mockElectrsConnectTimeout,
@@ -3880,7 +3607,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 				defer c.CloseNow()
 			}
 
-			assertPing(ctx, t, c, bssapi.CmdPingRequest)
+			testutil.AssertPing(ctx, t, c, bssapi.CmdPingRequest)
 
 			var v protocol.Message
 			if err = wsjson.Read(ctx, c, &v); err != nil {
@@ -3897,7 +3624,7 @@ func TestNotifyMultipleBSSClients(t *testing.T) {
 	wg.Wait()
 }
 
-func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, count int, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {
+func createBtcBlock(ctx context.Context, t *testing.T, db bfgd.Database, height int, lastHash []byte, l2BlockNumber uint32) bfgd.BtcBlock {
 	header := make([]byte, 80)
 	hash := make([]byte, 32)
 	parentEpHash := make([]byte, 32)

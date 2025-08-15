@@ -6,25 +6,20 @@ package ttl
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func callback(ctx context.Context, key any, value any) {
-	v, ok := value.(*sync.WaitGroup)
-	if !ok {
-		panic(fmt.Sprintf("invalid value type: %T", value))
-	}
-	v.Done()
+	testutil.CreateCallback()(ctx, key, value)
 }
 
 func callbackPanic(ctx context.Context, key any, value any) {
-	panic(fmt.Sprintf("unexpected callback: %v", spew.Sdump(key)))
+	testutil.CreateCallbackPanic()(ctx, key, value)
 }
 
 func TestTTLExpireAuto(t *testing.T) {

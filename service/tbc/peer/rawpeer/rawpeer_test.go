@@ -15,16 +15,8 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/phayes/freeport"
+	// "github.com/phayes/freeport" // replaced by testutil.GetFreePort
 )
-
-func GetFreePort() string {
-	port, err := freeport.GetFreePort()
-	if err != nil {
-		panic(err)
-	}
-	return strconv.Itoa(port)
-}
 
 func mockPeerServer(ctx context.Context, id int, listener net.Listener, msgCh chan string) error {
 	conn, err := listener.Accept()
@@ -59,9 +51,15 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 	msgCh := make(chan string)
 
-	port := GetFreePort()
+	// Get a free port by listening on port 0
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
 
-	listener, err := net.Listen("tcp", ":"+port)
+	listener, err = net.Listen("tcp", ":"+strconv.Itoa(port))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +72,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 		}
 	}()
 
-	conn, err := net.Dial("tcp", "localhost:"+port)
+	conn, err := net.Dial("tcp", "localhost:"+strconv.Itoa(port))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,9 +93,9 @@ func TestConcurrentReadWrite(t *testing.T) {
 	)
 
 	var fakeCh chainhash.Hash
-	for k := range writerNum {
-		go func() {
-			for range writeCount {
+	for k := 0; k < writerNum; k++ {
+		go func(k int) {
+			for j := 0; j < writeCount; j++ {
 				bh := wire.NewBlockHeader(int32(k), &fakeCh, &fakeCh, uint32(k), uint32(k))
 				mva := wire.NewMsgHeaders()
 				mva.AddBlockHeader(bh)
@@ -105,7 +103,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 					panic(err)
 				}
 			}
-		}()
+		}(k)
 	}
 
 	expectedCmds := map[string]int{

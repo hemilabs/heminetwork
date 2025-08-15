@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 // func TestIndex(t *testing.T) {
@@ -83,11 +84,7 @@ import (
 // Test the various mapsizes
 // run with go test -v -bench . -benchmem -run=BenchmarkMap
 func allocateMap(size int) map[tbcd.Outpoint]tbcd.Utxo {
-	m := make(map[tbcd.Outpoint]tbcd.Utxo, size)
-	for range size {
-		m[tbcd.Outpoint{}] = tbcd.Utxo{}
-	}
-	return m
+	return testutil.AllocateMap(size, tbcd.Outpoint{}, tbcd.Utxo{})
 }
 
 func BenchmarkMap10(b *testing.B) {

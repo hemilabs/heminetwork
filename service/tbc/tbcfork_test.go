@@ -13,7 +13,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
-	"strconv"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -22,23 +22,19 @@ import (
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
-	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
-	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/juju/loggo"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/bitcoin"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
 	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 type block struct {
@@ -48,7 +44,7 @@ type block struct {
 	txs map[tbcd.TxKey]*tbcd.TxValue // Parsed Txs in cache format
 }
 
-func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
+func newBlock(_ *chaincfg.Params, name string, b *btcutil.Block) *block {
 	blk := &block{
 		name: name,
 		b:    b,
@@ -207,10 +203,10 @@ func (b *btcNode) newKeystone(name string) *chainhash.Hash {
 		Version:            1,
 		L1BlockNumber:      2,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes(name+"parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes(name+"prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes(name+"stateroot", 32),
-		EPHash:             fillOutBytes(name+"ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes(name+"parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes(name+"prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes(name+"stateroot", 32),
+		EPHash:             testutil.FillOutBytes(name+"ephash", 32),
 	}
 
 	b.keystones[name] = &l2Keystone
@@ -443,7 +439,7 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 	}
 }
 
-func (b *btcNode) handleMsg(ctx context.Context, p *rawpeer.RawPeer, msg wire.Message) error {
+func (b *btcNode) handleMsg(_ context.Context, p *rawpeer.RawPeer, msg wire.Message) error {
 	// b.t.Logf("%v", spew.Sdump(msg))
 	switch m := msg.(type) {
 	case *wire.MsgVersion:
@@ -596,44 +592,7 @@ func random(count int) []byte {
 	return b
 }
 
-type addressToKey struct {
-	key        *btcec.PrivateKey
-	compressed bool
-}
-
-func mkGetKey(keys map[string]addressToKey) txscript.KeyDB {
-	if keys == nil {
-		return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
-			bool, error,
-		) {
-			return nil, false, errors.New("nope")
-		})
-	}
-	return txscript.KeyClosure(func(addr btcutil.Address) (*btcec.PrivateKey,
-		bool, error,
-	) {
-		a2k, ok := keys[addr.EncodeAddress()]
-		if !ok {
-			return nil, false, errors.New("nope")
-		}
-		return a2k.key, a2k.compressed, nil
-	})
-}
-
-func mkGetScript(scripts map[string][]byte) txscript.ScriptDB {
-	if scripts == nil {
-		return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
-			return nil, errors.New("nope")
-		})
-	}
-	return txscript.ScriptClosure(func(addr btcutil.Address) ([]byte, error) {
-		script, ok := scripts[addr.EncodeAddress()]
-		if !ok {
-			return nil, errors.New("nope")
-		}
-		return script, nil
-	})
-}
+// Removed unused addressToKey and helper closures mkGetKey/mkGetScript
 
 func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) error {
 	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
@@ -646,7 +605,7 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 		t.Logf("=== executing tx %v", tx.Hash())
 	}
 	for i := 0; ; i++ {
-		d, err := vm.DisasmPC()
+		d, _ := vm.DisasmPC()
 		if dump {
 			t.Logf("%v: %v", i, d)
 		}
@@ -674,7 +633,7 @@ func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) err
 }
 
 func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte, recipient *secp256k1.PublicKey, inTx *btcutil.Tx, idx uint32) (*btcutil.Tx, error) {
-	btx := &btcwire.MsgTx{
+	btx := &wire.MsgTx{
 		Version:  2,
 		LockTime: uint32(btcHeight),
 	}
@@ -688,24 +647,24 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 		return nil, err
 	}
 
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
+	privateKey := secp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
 	publicKey := privateKey.PubKey() // just send it back to the miner
 	var btcAddress *btcutil.AddressPubKey
 	if recipient == nil {
 		pubKeyBytes := publicKey.SerializeCompressed()
-		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		pubKeyBytes := recipient.SerializeCompressed()
-		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
+		btcAddress, err = btcutil.NewAddressPubKey(pubKeyBytes, &chaincfg.TestNet3Params)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
+	payToScript, err := txscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
 	if err != nil {
 		return nil, err
 	}
@@ -715,7 +674,7 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 	}
 
 	var (
-		outPoint     btcwire.OutPoint
+		outPoint     wire.OutPoint
 		changeAmount int64
 		PkScript     []byte
 	)
@@ -725,9 +684,9 @@ func createPopTx(btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyB
 	changeAmount = inTx.MsgTx().TxOut[idx].Value // spend entire tx
 	PkScript = inTx.MsgTx().TxOut[idx].PkScript  // Lift PkScript from utxo we are spending
 
-	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
-	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
-	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
+	btx.TxIn = []*wire.TxIn{wire.NewTxIn(&outPoint, payToScript, nil)}
+	btx.TxOut = []*wire.TxOut{wire.NewTxOut(changeAmount, payToScript)}
+	btx.TxOut = append(btx.TxOut, wire.NewTxOut(0, popTxOpReturn))
 	err = bitcoin.SignTx(btx, PkScript, privateKey, publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("sign Bitcoin transaction: %w", err)
@@ -776,7 +735,7 @@ func (b *btcNode) mine(name string, from *chainhash.Hash, payToAddress btcutil.A
 		}
 		b.t.Logf("tx %v: %v spent from %v", nextBlockHeight, tx2.Hash(),
 			tx2.MsgTx().TxIn[0].PreviousOutPoint)
-		mempool = []*btcutil.Tx{tx, tx2}
+		mempool = append(mempool, tx2)
 	}
 
 	bt, err := newBlockTemplate(b.t, b.params, payToAddress, nextBlockHeight,
@@ -1021,21 +980,6 @@ func (b *btcNode) Stop() error {
 	return b.listener.Close()
 }
 
-func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
-	key, err := btcec.NewPrivateKey()
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	pk := key.PubKey().SerializeUncompressed()
-	// address, err := btcutil.NewAddressPubKey(pk, params)
-	address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), params)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	return key, key.PubKey(), address, nil
-}
-
 func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
 	for _, b := range blocks {
 		_, height, err := s.BlockHeaderByHash(ctx, *b.Hash())
@@ -1072,7 +1016,7 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					t.Logf("tx hash: %v", tx)
 					t.Logf("ktx: %v", spew.Sdump(ktx))
 					t.Logf("vtx: %v", spew.Sdump(vtx))
-					t.Logf(spew.Sdump(sis))
+					t.Log(spew.Sdump(sis))
 					return errors.New("block mismatch")
 				}
 
@@ -1112,21 +1056,18 @@ func errorIsOneOf(err error, errs []error) bool {
 	return false
 }
 
-func GetFreePort() string {
-	port, err := freeport.GetFreePort()
-	if err != nil {
-		panic(err)
-	}
-	return strconv.Itoa(port)
-}
-
 func TestFork(t *testing.T) {
+	// Skip on Windows due to file system issues
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows due to file system issues")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1378,12 +1319,17 @@ func TestWork(t *testing.T) {
 }
 
 func TestIndexNoFork(t *testing.T) {
+	// Skip on Windows due to file system issues
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping on Windows due to file system issues")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1561,7 +1507,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -1821,7 +1767,7 @@ func TestIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)
@@ -2130,7 +2076,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		cancel()
 	}()
 
-	port := GetFreePort()
+	port := testutil.GetFreePort()
 	n, err := newFakeNode(t, port)
 	if err != nil {
 		t.Fatal(err)

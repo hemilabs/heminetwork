@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/phayes/freeport"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func TestClientConn(t *testing.T) {
@@ -323,13 +323,7 @@ func (s *mockServer) handleConnection(t *testing.T, conn net.Conn) {
 	}
 }
 
-func createAddress() string {
-	port, err := freeport.GetFreePort()
-	if err != nil {
-		panic(fmt.Errorf("find free port: %w", err))
-	}
-	return fmt.Sprintf("localhost:%d", port)
-}
+func createAddress() string { return testutil.CreateAddress() }
 
 func mustNewJSONRPCRequest(id uint64, method string, params any) *JSONRPCRequest {
 	req, err := NewJSONRPCRequest(id, method, params)

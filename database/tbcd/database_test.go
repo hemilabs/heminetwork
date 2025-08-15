@@ -6,12 +6,11 @@ package tbcd_test
 
 import (
 	"bytes"
-	"encoding/hex"
 	"fmt"
-	"slices"
 	"testing"
 
 	"github.com/hemilabs/heminetwork/database/tbcd"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func TestNewOutpoint(t *testing.T) {
@@ -77,20 +76,9 @@ func TestNewOutpoint(t *testing.T) {
 }
 
 func decodeHex(s string) []byte {
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		panic(err)
-	}
-	return b
+	return testutil.DecodeHex(s)
 }
 
 func decodeTxId(s string) [32]byte {
-	b := decodeHex(s)
-	if len(b) != 32 {
-		panic(fmt.Errorf("invalid txid: %s", s))
-	}
-
-	// Convert from display order to natural order
-	slices.Reverse(b)
-	return [32]byte(b)
+	return testutil.DecodeTxID(s)
 }

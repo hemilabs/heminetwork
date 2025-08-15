@@ -15,17 +15,11 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	btcchaincfg "github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
-	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
-	btctxscript "github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
-	btcwire "github.com/btcsuite/btcd/wire"
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/davecgh/go-spew/spew"
-	dcrsecp256k1 "github.com/decred/dcrd/dcrec/secp256k1/v4"
-	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/testcontainers/testcontainers-go"
@@ -37,6 +31,7 @@ import (
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
 	"github.com/hemilabs/heminetwork/hemi/pop"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func bytes2Tx(b []byte) (*wire.MsgTx, error) {
@@ -94,7 +89,7 @@ func TestBlockHeadersByHeightRaw(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -165,7 +160,7 @@ func TestBlockHeadersByHeight(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -229,7 +224,7 @@ func TestBlockHeadersByHeightDoesNotExist(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -287,7 +282,7 @@ func TestBlockHeaderBestRaw(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -355,7 +350,7 @@ func TestBtcBlockHeaderBest(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -523,7 +518,7 @@ func TestBalanceByAddress(t *testing.T) {
 			}
 			defer c.CloseNow()
 
-			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+			testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 			tws := &tbcWs{
 				conn: protocol.NewWSConn(c),
@@ -746,7 +741,7 @@ func TestUtxosByAddressRaw(t *testing.T) {
 			}
 			defer c.CloseNow()
 
-			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+			testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 			tws := &tbcWs{
 				conn: protocol.NewWSConn(c),
@@ -958,7 +953,7 @@ func TestUtxosByAddress(t *testing.T) {
 			}
 			defer c.CloseNow()
 
-			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+			testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 			tws := &tbcWs{
 				conn: protocol.NewWSConn(c),
@@ -1037,7 +1032,7 @@ func TestTxByIdRaw(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -1119,7 +1114,7 @@ func TestTxByIdRawInvalid(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -1208,7 +1203,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -1220,6 +1215,7 @@ func TestTxByIdRawNotFound(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
+
 	indexAll(ctx, t, tbcServer)
 
 	txId := getRandomTxId(ctx, t, bitcoindContainer)
@@ -1283,7 +1279,7 @@ func TestTxById(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -1362,7 +1358,7 @@ func TestTxByIdInvalid(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -1451,7 +1447,7 @@ func TestTxByIdNotFound(t *testing.T) {
 	}
 	defer c.CloseNow()
 
-	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+	testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 	tws := &tbcWs{
 		conn: protocol.NewWSConn(c),
@@ -1504,10 +1500,10 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      5,
 		L2BlockNumber:      44,
-		ParentEPHash:       fillOutBytes("parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("stateroot", 32),
-		EPHash:             fillOutBytes("ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("stateroot", 32),
+		EPHash:             testutil.FillOutBytes("ephash", 32),
 	}
 
 	popTx := pop.TransactionL2{
@@ -1521,9 +1517,9 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 
 	t.Log(spew.Sdump(popTxOpReturn))
 
-	btcBlockHash := btcchainhash.Hash(fillOutBytes("blockhash", 32))
+	btcBlockHash := chainhash.Hash(testutil.FillOutBytes("blockhash", 32))
 
-	invalidL2KeystoneAbrevHash := chainhash.Hash(fillOutBytes("123", 32))
+	invalidL2KeystoneAbrevHash := chainhash.Hash(testutil.FillOutBytes("123", 32))
 
 	type testTableItem struct {
 		name                    string
@@ -1563,7 +1559,7 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 			}
 			defer c.CloseNow()
 
-			assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+			testutil.AssertPing(ctx, t, c, tbcapi.CmdPingRequest)
 
 			tws := &tbcWs{
 				conn: protocol.NewWSConn(c),
@@ -1635,18 +1631,6 @@ func TestL2BlockByAbrevHash(t *testing.T) {
 	}
 }
 
-func assertPing(ctx context.Context, t *testing.T, c *websocket.Conn, cmd protocol.Command) {
-	var v protocol.Message
-	err := wsjson.Read(ctx, c, &v)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if v.Header.Command != cmd {
-		t.Fatalf("unexpected command: %s", v.Header.Command)
-	}
-}
-
 func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
 	_, bh, err := tbcServer.BlockHeaderBest(ctx)
 	if err != nil {
@@ -1660,61 +1644,7 @@ func indexAll(ctx context.Context, t *testing.T, tbcServer *Server) {
 	}
 }
 
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-	return result
-}
-
 func createBtcTx(t *testing.T, btcHeight uint64, l2Keystone *hemi.L2Keystone, minerPrivateKeyBytes []byte) []byte {
-	btx := &btcwire.MsgTx{
-		Version:  2,
-		LockTime: uint32(btcHeight),
-	}
-
-	popTx := pop.TransactionL2{
-		L2Keystone: hemi.L2KeystoneAbbreviate(*l2Keystone),
-	}
-
-	popTxOpReturn, err := popTx.EncodeToOpReturn()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	privateKey := dcrsecp256k1.PrivKeyFromBytes(minerPrivateKeyBytes)
-	publicKey := privateKey.PubKey()
-	pubKeyBytes := publicKey.SerializeCompressed()
-	btcAddress, err := btcutil.NewAddressPubKey(pubKeyBytes, &btcchaincfg.TestNet3Params)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	payToScript, err := btctxscript.PayToAddrScript(btcAddress.AddressPubKeyHash())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(payToScript) != 25 {
-		t.Fatalf("incorrect length for pay to public key script (%d != 25)", len(payToScript))
-	}
-
-	outPoint := btcwire.OutPoint{Hash: btcchainhash.Hash(fillOutBytes("hash", 32)), Index: 0}
-	btx.TxIn = []*btcwire.TxIn{btcwire.NewTxIn(&outPoint, payToScript, nil)}
-
-	changeAmount := int64(100)
-	btx.TxOut = []*btcwire.TxOut{btcwire.NewTxOut(changeAmount, payToScript)}
-
-	btx.TxOut = append(btx.TxOut, btcwire.NewTxOut(0, popTxOpReturn))
-
-	sig := dcrecdsa.Sign(privateKey, []byte{})
-	sigBytes := append(sig.Serialize(), byte(btctxscript.SigHashAll))
-	sigScript, err := btctxscript.NewScriptBuilder().AddData(sigBytes).AddData(pubKeyBytes).Script()
-	if err != nil {
-		t.Fatal(err)
-	}
-	btx.TxIn[0].SignatureScript = sigScript
-
-	return btx.TxOut[1].PkScript
+	// Use centralized testutil function
+	return testutil.CreateBtcTx(t, btcHeight, l2Keystone, minerPrivateKeyBytes)
 }

@@ -6,34 +6,17 @@ package tbc
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/btcsuite/btcd/wire"
 
 	"github.com/hemilabs/heminetwork/service/tbc/peer/rawpeer"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func ping(ctx context.Context, t *testing.T, p *rawpeer.RawPeer) error {
-	err := p.Write(time.Second, wire.NewMsgPing(uint64(time.Now().Unix())))
-	if err != nil {
-		return err
-	}
-
-	for {
-		msg, _, err := p.Read(time.Second)
-		if errors.Is(err, wire.ErrUnknownMessage) {
-			continue
-		} else if err != nil {
-			return err
-		}
-		switch msg.(type) {
-		case *wire.MsgPong:
-			return nil
-		}
-	}
+	return testutil.PingPeer(ctx, t, p)
 }
 
 func TestPeerManager(t *testing.T) {

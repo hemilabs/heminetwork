@@ -16,6 +16,7 @@ import (
 	"github.com/hemilabs/heminetwork/database"
 	"github.com/hemilabs/heminetwork/database/tbcd"
 	"github.com/hemilabs/heminetwork/hemi"
+	"github.com/hemilabs/heminetwork/testutil"
 )
 
 func TestMD(t *testing.T) {
@@ -117,20 +118,12 @@ func TestMD(t *testing.T) {
 	}
 }
 
-func fillOutBytes(prefix string, size int) []byte {
-	result := []byte(prefix)
-	for len(result) < size {
-		result = append(result, '_')
-	}
-	return result
-}
-
 func makeKssMap(kssList []hemi.L2Keystone, blockHashSeed string) map[chainhash.Hash]tbcd.Keystone {
 	kssMap := make(map[chainhash.Hash]tbcd.Keystone)
 	for _, l2Keystone := range kssList {
 		abrvKs := hemi.L2KeystoneAbbreviate(l2Keystone).Serialize()
 		kssMap[*hemi.L2KeystoneAbbreviate(l2Keystone).Hash()] = tbcd.Keystone{
-			BlockHash:           chainhash.Hash(fillOutBytes(blockHashSeed, 32)),
+			BlockHash:           chainhash.Hash(testutil.FillOutBytes(blockHashSeed, 32)),
 			AbbreviatedKeystone: abrvKs,
 		}
 	}
@@ -143,18 +136,18 @@ func TestKssEncoding(t *testing.T) {
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytes("parentephash", 32),
-			PrevKeystoneEPHash: fillOutBytes("prevkeystoneephash", 32),
-			StateRoot:          fillOutBytes("stateroot", 32),
-			EPHash:             fillOutBytes("ephash", 32),
+			ParentEPHash:       testutil.FillOutBytes("parentephash", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("prevkeystoneephash", 32),
+			StateRoot:          testutil.FillOutBytes("stateroot", 32),
+			EPHash:             testutil.FillOutBytes("ephash", 32),
 		}, {
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytes("altparentephash", 32),
-			PrevKeystoneEPHash: fillOutBytes("altprevkeystoneephash", 32),
-			StateRoot:          fillOutBytes("altstateroot", 32),
-			EPHash:             fillOutBytes("altephash", 32),
+			ParentEPHash:       testutil.FillOutBytes("altparentephash", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("altprevkeystoneephash", 32),
+			StateRoot:          testutil.FillOutBytes("altstateroot", 32),
+			EPHash:             testutil.FillOutBytes("altephash", 32),
 		},
 	}
 
@@ -162,10 +155,10 @@ func TestKssEncoding(t *testing.T) {
 		Version:            2,
 		L1BlockNumber:      6,
 		L2BlockNumber:      64,
-		ParentEPHash:       fillOutBytes("fakeparentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("fakeprevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("fakestateroot", 32),
-		EPHash:             fillOutBytes("fakeephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("fakeparentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("fakeprevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("fakestateroot", 32),
+		EPHash:             testutil.FillOutBytes("fakeephash", 32),
 	}
 	altAbrevKeystone := hemi.L2KeystoneAbbreviate(altKeystone).Serialize()
 
@@ -206,37 +199,37 @@ func TestKeystoneUpdate(t *testing.T) {
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytes("v1parentephash", 32),
-			PrevKeystoneEPHash: fillOutBytes("v1prevkeystoneephash", 32),
-			StateRoot:          fillOutBytes("v1stateroot", 32),
-			EPHash:             fillOutBytes("v1ephash", 32),
+			ParentEPHash:       testutil.FillOutBytes("v1parentephash", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("v1prevkeystoneephash", 32),
+			StateRoot:          testutil.FillOutBytes("v1stateroot", 32),
+			EPHash:             testutil.FillOutBytes("v1ephash", 32),
 		},
 		{
 			Version:            1,
 			L1BlockNumber:      6,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytes("v2parentephash", 32),
-			PrevKeystoneEPHash: fillOutBytes("v2prevkeystoneephash", 32),
-			StateRoot:          fillOutBytes("v2stateroot", 32),
-			EPHash:             fillOutBytes("v2ephash", 32),
+			ParentEPHash:       testutil.FillOutBytes("v2parentephash", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("v2prevkeystoneephash", 32),
+			StateRoot:          testutil.FillOutBytes("v2stateroot", 32),
+			EPHash:             testutil.FillOutBytes("v2ephash", 32),
 		},
 		{
 			Version:            1,
 			L1BlockNumber:      5,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytes("i1parentephash", 32),
-			PrevKeystoneEPHash: fillOutBytes("i1prevkeystoneephash", 32),
-			StateRoot:          fillOutBytes("i1stateroot", 32),
-			EPHash:             fillOutBytes("i1ephash", 32),
+			ParentEPHash:       testutil.FillOutBytes("i1parentephash", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("i1prevkeystoneephash", 32),
+			StateRoot:          testutil.FillOutBytes("i1stateroot", 32),
+			EPHash:             testutil.FillOutBytes("i1ephash", 32),
 		},
 		{
 			Version:            1,
 			L1BlockNumber:      6,
 			L2BlockNumber:      44,
-			ParentEPHash:       fillOutBytes("i2parentephash", 32),
-			PrevKeystoneEPHash: fillOutBytes("i2prevkeystoneephash", 32),
-			StateRoot:          fillOutBytes("i2stateroot", 32),
-			EPHash:             fillOutBytes("i2ephash", 32),
+			ParentEPHash:       testutil.FillOutBytes("i2parentephash", 32),
+			PrevKeystoneEPHash: testutil.FillOutBytes("i2prevkeystoneephash", 32),
+			StateRoot:          testutil.FillOutBytes("i2stateroot", 32),
+			EPHash:             testutil.FillOutBytes("i2ephash", 32),
 		},
 	}
 
@@ -378,10 +371,10 @@ func newKeystone(blockhash *chainhash.Hash, l1, l2 uint32) (*chainhash.Hash, tbc
 		Version:            1,
 		L1BlockNumber:      l1,
 		L2BlockNumber:      l2,
-		ParentEPHash:       fillOutBytes("v1parentephash", 32),
-		PrevKeystoneEPHash: fillOutBytes("v1prevkeystoneephash", 32),
-		StateRoot:          fillOutBytes("v1stateroot", 32),
-		EPHash:             fillOutBytes("v1ephash", 32),
+		ParentEPHash:       testutil.FillOutBytes("v1parentephash", 32),
+		PrevKeystoneEPHash: testutil.FillOutBytes("v1prevkeystoneephash", 32),
+		StateRoot:          testutil.FillOutBytes("v1stateroot", 32),
+		EPHash:             testutil.FillOutBytes("v1ephash", 32),
 	}
 	abrvKs := hemi.L2KeystoneAbbreviate(hks)
 	return abrvKs.Hash(), tbcd.Keystone{

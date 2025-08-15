@@ -49,7 +49,6 @@ const (
 	appName  = "tbc"
 
 	defaultPeersWanted   = 64
-	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
 	defaultMaxCachedKeystones = 1024 // number of cached keystones prior to flush
@@ -327,7 +326,7 @@ func (s *Server) invInsert(h chainhash.Hash) bool {
 	return s.invInsertUnlocked(h)
 }
 
-func (s *Server) getHeadersByHashes(ctx context.Context, p *rawpeer.RawPeer, hashes ...*chainhash.Hash) error {
+func (s *Server) getHeadersByHashes(_ context.Context, p *rawpeer.RawPeer, hashes ...*chainhash.Hash) error {
 	log.Tracef("getHeadersByHashes %v %v", p, hashes)
 	defer log.Tracef("getHeadersByHashes exit %v %v", p, hashes)
 
@@ -375,7 +374,7 @@ func (s *Server) getHeadersByHeights(ctx context.Context, p *rawpeer.RawPeer, he
 	return nil
 }
 
-func (s *Server) pingExpired(ctx context.Context, key any, value any) {
+func (s *Server) pingExpired(_ context.Context, key any, value any) {
 	log.Tracef("pingExpired")
 	defer log.Tracef("pingExpired exit")
 
@@ -1579,7 +1578,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	return nil
 }
 
-func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgInv, raw []byte) error {
+func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgInv, _ []byte) error {
 	switch msg.InvList[0].Type {
 	case wire.InvTypeTx:
 	case wire.InvTypeBlock:
@@ -1632,7 +1631,7 @@ func (s *Server) handleInv(ctx context.Context, p *rawpeer.RawPeer, msg *wire.Ms
 	return nil
 }
 
-func (s *Server) handleNotFound(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgNotFound, raw []byte) error {
+func (s *Server) handleNotFound(_ context.Context, _ *rawpeer.RawPeer, _ *wire.MsgNotFound, _ []byte) error {
 	// log.Infof("handleNotFound %v", spew.Sdump(msg))
 	// defer log.Infof("handleNotFound exit")
 
@@ -1642,7 +1641,7 @@ func (s *Server) handleNotFound(ctx context.Context, p *rawpeer.RawPeer, msg *wi
 	return nil
 }
 
-func (s *Server) handleGetData(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgGetData, raw []byte) error {
+func (s *Server) handleGetData(_ context.Context, p *rawpeer.RawPeer, msg *wire.MsgGetData, _ []byte) error {
 	log.Tracef("handleGetData %v", p)
 	defer log.Tracef("handleGetData %v exit", p)
 
