@@ -52,8 +52,8 @@ sequencer.*
 
 ## Quickstart
 
-This section shows the most common way to run a Hemi rpc node.  Most users should follow this.  For additional options
-or if you have addtional requirement, refer to the rest of the document.
+This section shows the most common way to run a Hemi RPC node.  Most users should follow this.  For additional options
+or if you have additional requirement, refer to the rest of the document.
 
 1. Clone the repo:
 ```sh
