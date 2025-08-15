@@ -64,8 +64,8 @@ cd heminetwork
 ```sh
 ./gen-files.sh mainnet snap hemi-min
 ```
-3. Set your ethereum rpc provider:
-Edit the file `.env` and put the following to entries in (with your own Ethereum RPC Urls):
+3. Configure Ethereum RPC provider:
+Edit the file `.env` and put the following to entries in (with your own Ethereum RPC URLs):
 ```sh
 GETHL1ENDPOINT=<EthereumExecutionRPCEndpoint>
 PRYSMENDPOINT=<EthereumBeaconRPCEndpoint>
