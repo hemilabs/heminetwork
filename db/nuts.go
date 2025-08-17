@@ -51,15 +51,28 @@ func (b *nutsDB) Open(_ context.Context) error {
 		return nil // XXX return already open?
 	}
 	// XXX no compression
-	ndb, err := nutsdb.Open(nutsdb.DefaultOptions, nutsdb.WithDir(b.cfg.Home))
+	ndb, err := nutsdb.Open(nutsdb.DefaultOptions,
+		nutsdb.WithDir(b.cfg.Home),
+		nutsdb.WithSyncEnable(false),
+		nutsdb.WithGCWhenClose(true),
+		// nutsdb.WithRWMode(nutsdb.FileIO),
+		nutsdb.WithRWMode(nutsdb.MMap),
+		nutsdb.WithEntryIdxMode(nutsdb.HintKeyAndRAMIdxMode), // cache keys
+		// nutsdb.WithEntryIdxMode(nutsdb.HintKeyValAndRAMIdxMode), // cache keys and data
+		nutsdb.WithHintKeyAndRAMIdxCacheSize(1_000_000),
+	)
 	if err != nil {
 		return err
 	}
 	err = ndb.Update(func(tx *nutsdb.Tx) error {
 		for _, table := range b.cfg.Tables {
+			if tx.ExistBucket(nutsdb.DataStructureBTree, table) {
+				continue
+			}
 			err := tx.NewBucket(nutsdb.DataStructureBTree, table)
 			if err != nil {
-				return fmt.Errorf("could not create table: %v", table)
+				return fmt.Errorf("could not create table (%v): %w",
+					table, err)
 			}
 		}
 		return nil
@@ -76,9 +89,9 @@ func (b *nutsDB) Close(_ context.Context) error {
 }
 
 func (b *nutsDB) Del(_ context.Context, table string, key []byte) error {
-	err := b.db.View(
+	err := b.db.Update(
 		func(tx *nutsdb.Tx) error {
-			_, err := tx.ValueLen(table, key)
+			err := tx.Delete(table, key)
 			if err != nil {
 				return err
 			}
@@ -95,17 +108,30 @@ func (b *nutsDB) Del(_ context.Context, table string, key []byte) error {
 }
 
 func (b *nutsDB) Has(_ context.Context, table string, key []byte) (bool, error) {
-	_, err := b.Get(nil, table, key)
-	if errors.Is(err, ErrKeyNotFound) {
-		return false, nil
+	//_, err := b.Get(nil, table, key)
+	//if errors.Is(err, ErrKeyNotFound) {
+	//	return false, nil
+	//}
+	//return err == nil, err
+	err := b.db.View(func(tx *nutsdb.Tx) error {
+		_, err := tx.ValueLen(table, key)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, nutsdb.ErrKeyNotFound) {
+			return false, nil
+		}
+		return false, err
 	}
-	return err == nil, err
+	return true, nil
 }
 
 func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
 	var value []byte
 	err := b.db.View(func(tx *nutsdb.Tx) error {
-		key := key
 		val, err := tx.Get(table, key)
 		if err != nil {
 			return err
@@ -126,23 +152,62 @@ func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error
 func (b *nutsDB) Put(_ context.Context, table string, key, value []byte) error {
 	err := b.db.Update(
 		func(tx *nutsdb.Tx) error {
-			key := key
-			val := value
-			err := tx.Put(table, key, val, 0)
+			err := tx.Put(table, key, value, 0)
 			if err != nil {
-				if nutsdb.IsBucketNotFound(err) {
-					panic(err)
-					err := tx.NewBucket(nutsdb.DataStructureBTree, table)
-					if err != nil {
-						return err
-					}
-					return tx.Put(table, key, val, 0)
-				}
+				//if nutsdb.IsBucketNotFound(err) {
+				//	err := tx.NewBucket(nutsdb.DataStructureBTree, table)
+				//	if err != nil {
+				//		return err
+				//	}
+				//	return tx.Put(table, key, value, 0)
+				//}
 				return err
 			}
 			return nil
 		})
 	return err
+}
+
+func (b *nutsDB) Last(ctx context.Context, table string) ([]byte, []byte, error) {
+	var key, value []byte
+	err := b.db.View(func(tx *nutsdb.Tx) error {
+		k, err := tx.GetMaxKey(table)
+		if err != nil {
+			return err
+		}
+
+		val, err := tx.Get(table, k)
+		if err != nil {
+			return err
+		}
+
+		key = make([]byte, len(k))
+		copy(key, k)
+		value = make([]byte, len(val))
+		copy(value, val)
+
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, nutsdb.ErrKeyNotFound) {
+			return nil, nil, ErrKeyNotFound
+		}
+		return nil, nil, err
+	}
+	return key, value, nil
+}
+
+func (b *nutsDB) All(ctx context.Context, table string) {
+	b.db.View(func(tx *nutsdb.Tx) error {
+		k, v, err := tx.GetAll(table)
+		if err != nil {
+			panic(err)
+		}
+		for x := range v {
+			log.Infof("%v: %x", x, k[x])
+		}
+		return nil
+	})
 }
 
 //	func (b *nutsDB) View(ctx context.Context, callback func(ctx context.Context, tx *Transaction) error) error {

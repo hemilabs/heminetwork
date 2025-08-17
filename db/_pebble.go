@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/cockroachdb/pebble"
 )
@@ -87,4 +88,8 @@ func (b *pebbleDB) Get(_ context.Context, table string, key []byte) ([]byte, err
 
 func (b *pebbleDB) Put(_ context.Context, table string, key, value []byte) error {
 	return b.db.Set(NewCompositeKey(table, key), value, nil)
+}
+
+func (b *pebbleDB) Last(ctx context.Context, table string) ([]byte, []byte, error) {
+	return nil, nil, fmt.Errorf("not yet")
 }

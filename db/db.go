@@ -17,6 +17,9 @@ type Database interface {
 	Get(ctx context.Context, table string, key []byte) ([]byte, error)
 	Put(ctx context.Context, table string, key []byte, value []byte) error
 
+	Last(ctx context.Context, table string) ([]byte, []byte, error)
+	All(ctx context.Context, table string)
+
 	// Transactions
 	// Begin(ctx context.Context, write bool) (*Transaction, error)
 

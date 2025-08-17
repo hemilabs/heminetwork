@@ -113,3 +113,7 @@ func (b *buntDB) Put(_ context.Context, table string, key, value []byte) error {
 	})
 	return err
 }
+
+func (b *buntDB) Last(ctx context.Context, table string) ([]byte, []byte, error) {
+	return nil, nil, fmt.Errorf("not yet")
+}

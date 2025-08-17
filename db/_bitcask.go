@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"go.mills.io/bitcask/v2"
 )
@@ -77,4 +78,8 @@ func (b *bitcaskDB) Get(_ context.Context, table string, key []byte) ([]byte, er
 
 func (b *bitcaskDB) Put(_ context.Context, table string, key, value []byte) error {
 	return b.db.Put(bitcask.Key(NewCompositeKey(table, key)), value)
+}
+
+func (b *bitcaskDB) Last(ctx context.Context, table string) ([]byte, []byte, error) {
+	return nil, nil, fmt.Errorf("not yet")
 }

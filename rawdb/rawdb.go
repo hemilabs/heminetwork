@@ -110,31 +110,31 @@ func (r *RawDB) Open() error {
 	}
 	// We do this late because directories are created at this point
 	switch r.cfg.DB {
-	case "badger":
-		bcfg := db.DefaultBadgerConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = db.NewBadgerDB(bcfg)
-	case "level":
-		lcfg := db.DefaultLevelConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = db.NewLevelDB(lcfg)
-	case "pebble":
-		pcfg := db.DefaultPebbleConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = db.NewPebbleDB(pcfg)
-	case "bitcask":
-		pcfg := db.DefaultBitcaskConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = db.NewBitcaskDB(pcfg)
-	case "bunt":
-		pcfg := db.DefaultBuntConfig(filepath.Join(r.cfg.Home, indexDir))
-		r.index, err = db.NewBuntDB(pcfg)
+	// case "badger":
+	//	bcfg := db.DefaultBadgerConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = db.NewBadgerDB(bcfg)
+	// case "level":
+	//	lcfg := db.DefaultLevelConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = db.NewLevelDB(lcfg)
+	// case "pebble":
+	//	pcfg := db.DefaultPebbleConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = db.NewPebbleDB(pcfg)
+	// case "bitcask":
+	//	pcfg := db.DefaultBitcaskConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = db.NewBitcaskDB(pcfg)
+	// case "bunt":
+	//	pcfg := db.DefaultBuntConfig(filepath.Join(r.cfg.Home, indexDir))
+	//	r.index, err = db.NewBuntDB(pcfg)
 	case "nuts":
 		pcfg := db.DefaultNutsConfig(filepath.Join(r.cfg.Home, indexDir),
 			[]string{dbname})
 		r.index, err = db.NewNutsDB(pcfg)
 
 	// remote
-	case "mongo":
-		mcfg := db.DefaultMongoConfig(os.Getenv(DefaultMongoEnvURI),
-			[]string{dbname})
-		r.index, err = db.NewMongoDB(mcfg)
+	// case "mongo":
+	//	mcfg := db.DefaultMongoConfig(os.Getenv(DefaultMongoEnvURI),
+	//		[]string{dbname})
+	//	r.index, err = db.NewMongoDB(mcfg)
 
 	default:
 	}

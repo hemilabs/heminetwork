@@ -158,3 +158,7 @@ func (b *mongoDB) Put(pctx context.Context, table string, key, value []byte) err
 
 	// return err
 }
+
+func (b *mongoDB) Last(ctx context.Context, table string) ([]byte, []byte, error) {
+	return nil, nil, fmt.Errorf("not yet")
+}

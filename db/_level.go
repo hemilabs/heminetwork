@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
@@ -77,4 +78,8 @@ func (b *levelDB) Get(_ context.Context, table string, key []byte) ([]byte, erro
 
 func (b *levelDB) Put(_ context.Context, table string, key, value []byte) error {
 	return b.db.Put(NewCompositeKey(table, key), value, nil)
+}
+
+func (b *levelDB) Last(ctx context.Context, table string) ([]byte, []byte, error) {
+	return nil, nil, fmt.Errorf("not yet")
 }

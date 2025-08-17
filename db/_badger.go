@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/badger/v4/options"
@@ -104,4 +105,8 @@ func (b *badgerDB) Put(_ context.Context, table string, key, value []byte) error
 		return err
 	}
 	return nil
+}
+
+func (b *badgerDB) Last(ctx context.Context, table string) ([]byte, []byte, error) {
+	return nil, nil, fmt.Errorf("not yet")
 }
