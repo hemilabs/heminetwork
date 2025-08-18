@@ -64,12 +64,16 @@ func NewCompositeKey(table string, key []byte) CompositeKey {
 // to the caller to copy returned values as needed outside of the transaction.
 //
 // The following idiom is considered best practice:
-// tx, _ := db.Begin(ctx, false)
-// value, _ := tx.Get(ctx, []byte{"mykey")
-// rv := make([]byte, len(value))
-// copy(rv, value)
-// tx.Commit(ctx)
-// fmt.Printf("value: %x\n", rv)
+// ```
+//
+//	tx, _ := db.Begin(ctx, false)
+//	value, _ := tx.Get(ctx, []byte{"mykey")
+//	rv := make([]byte, len(value))
+//	copy(rv, value)
+//	tx.Commit(ctx)
+//	fmt.Printf("value: %x\n", rv)
+//
+// ```
 //
 // Note, the caller must call Commit or Rollback on ALL open transactions.
 // Failure to do so may end up in programs not being able to exit due to
@@ -107,17 +111,20 @@ type Batch struct {
 // functionality. It is NOT concurrency safe and there are no guarantees about
 // the life-cycle of the returned key and value outside of the iterator or even
 // upon a seek type operation. It is wise to make a copy of key/value for use
-// outside the iterator loop.
+// outside the iterator loop. Close must be called upon completions since it
+// lives inside a read-only database transaction and thus may prevent the
+// program from exiting.
 //
 // Next is special as in that on first use it returns the first record.
 //
 // Typical use is as follows:
 // ```
 //
-//	it, _ := NewIterator()
+//	it, _ := NewIterator(ctx)
 //	for it.Next() {
 //		// Do things
 //	}
+//	it.Close(ctx)
 //
 // ```
 // Several backends do not work that way thus it is be emulated in the various
