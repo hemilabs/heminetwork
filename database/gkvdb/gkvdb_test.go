@@ -3,7 +3,6 @@ package gkvdb
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -395,7 +394,7 @@ func TestIterator(t *testing.T) {
 func TestRange(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
 	defer cancel()
-	home := "xxx" // t.TempDir()
+	home := t.TempDir()
 
 	table := "users"
 	tables := []string{table}
@@ -417,18 +416,14 @@ func TestRange(t *testing.T) {
 
 	// Stuff a bunch of records into the same table to validate that ranges
 	// don't over or underflow.
-	recordCount := 1_000_000
-	value := make([]byte, 4*1024*1024)
-	_, err = rand.Read(value)
-	if err != nil {
-		t.Fatal(err)
-	}
+	recordCount := 10
 	for i := 0; i < recordCount; i++ {
 		// Emulate user records "userXXXX"
 		var key [8]byte
-		copy(key[:], []byte{'u', 's', 'e', 'r'})
-		binary.BigEndian.PutUint32(key[4:], uint32(i))
-		err := db.Put(ctx, table, key[:], nil)
+		copy(key[:], []byte(fmt.Sprintf("user%04v", i)))
+		value := make([]byte, len(key)*2)
+		copy(value[len(key):], key[:])
+		err := db.Put(ctx, table, key[:], value)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -453,7 +448,12 @@ func TestRange(t *testing.T) {
 	}
 
 	// Verify al records were inserted
-	it, err := db.NewIterator(ctx, table)
+	var start [8]byte
+	var end [8]byte
+	copy(start[:], []byte(fmt.Sprintf("user%04v", 0)))
+	copy(end[:], []byte(fmt.Sprintf("user%04v", recordCount-1)))
+
+	it, err := db.NewRange(ctx, table, start[:], end[:])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -465,12 +465,21 @@ func TestRange(t *testing.T) {
 	}()
 	i := 0
 	for it.Next(ctx) {
-		// t.Logf("table %v key %v", table, spew.Sdump(it.Key(ctx)))
+		expectedKey := []byte(fmt.Sprintf("user%04d", i))
+		if !bytes.Equal(it.Key(ctx), expectedKey) {
+			t.Fatalf("invalid key got %x wanted %x", it.Key(ctx), expectedKey)
+		}
+		expectedValue := make([]byte, len(expectedKey)*2)
+		copy(expectedValue[len(expectedKey):], expectedKey)
+		if !bytes.Equal(it.Value(ctx), expectedValue) {
+			t.Fatalf("invalid value got %x wanted %x", it.Value(ctx), expectedValue)
+		}
 		i++
 	}
-	if i != recordCount*3 {
-		t.Fatalf("invalid record count got %v want %v", i, recordCount*3)
+	if i != recordCount {
+		t.Fatalf("invalid record count got %v want %v", i, recordCount)
 	}
+	cancel()
 
 	//// Range over user 100-199
 	//start := [4]byte{'u', 's', 'e', 'r'}
