@@ -142,8 +142,9 @@ type Iterator interface {
 }
 
 var (
-	ErrKeyNotFound   = errors.New("key not found")
 	ErrInvalidConfig = errors.New("invalid config")
+	ErrInvalidRange  = errors.New("invalid or empty range")
+	ErrKeyNotFound   = errors.New("key not found")
 )
 
 // Range

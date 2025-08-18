@@ -28,6 +28,8 @@ func xerr(err error) error {
 	switch {
 	case errors.Is(err, nutsdb.ErrKeyNotFound):
 		err = ErrKeyNotFound
+	case errors.Is(err, nutsdb.ErrRangeScan):
+		err = ErrInvalidRange
 	}
 	return err
 }
@@ -207,7 +209,7 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 		if cerr := tx.Commit(ctx); cerr != nil {
 			log.Errorf("commit error: %v", cerr)
 		}
-		return nil, err // XXX this key needs to be generic
+		return nil, xerr(err)
 	}
 	nr.keys = keys
 	return nr, nil
@@ -216,7 +218,6 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 // Transactions
 
 type nutsTX struct {
-	// db *nutsdb.DB
 	tx *nutsdb.Tx
 }
 
@@ -316,19 +317,6 @@ type nutsRange struct {
 }
 
 func (nr *nutsRange) First(_ context.Context) bool {
-	// log.Infof("first: %v", spew.Sdump(nr.start))
-	// v, err := nr.ntx.GetRange(nr.table, nr.start, 0, 8)
-	// v, err := nr.ntx.PrefixScan(nr.table, nr.start, 0, 1)
-	//if err != nil {
-	//	log.Errorf("range first: %v", err)
-	//	return false
-	//}
-	//log.Infof("got %v", spew.Sdump(v))
-	//if len(v) != 1 {
-	//	return false
-	//}
-	//nr.cursor = make([]byte, len(v[0]))
-	//copy(nr.cursor, v[0])
 	if len(nr.keys) == 0 {
 		return false
 	}
@@ -372,8 +360,3 @@ func (nr *nutsRange) Value(ctx context.Context) []byte {
 func (nr *nutsRange) Close(ctx context.Context) error {
 	return nr.tx.Commit(ctx)
 }
-
-//func (ni *nutsIterator) Range(ctx context.Context) error {
-//	spew.Dump(ni.tx.(*nutsTX).nutsTx().RangeScan(ni.table, ni.r.Start, ni.r.End))
-//	return nil
-//}
