@@ -193,13 +193,24 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 	if err != nil {
 		return nil, xerr(err)
 	}
-	return &nutsRange{
-		table: table,
-		tx:    tx,
-		ntx:   tx.(*nutsTX).nutsTx(),
-		start: start,
-		end:   end,
-	}, nil
+	nr := &nutsRange{
+		table:  table,
+		tx:     tx,
+		ntx:    tx.(*nutsTX).nutsTx(),
+		start:  start,
+		end:    end,
+		cursor: -1, // first key when next called
+	}
+	keys, _, err := nr.ntx.RangeScanEntries(nr.table, nr.start, nr.end, true, false)
+	if err != nil {
+		// Kill tx
+		if cerr := tx.Commit(ctx); cerr != nil {
+			log.Errorf("commit error: %v", cerr)
+		}
+		return nil, err // XXX this key needs to be generic
+	}
+	nr.keys = keys
+	return nr, nil
 }
 
 // Transactions
@@ -300,14 +311,14 @@ type nutsRange struct {
 	start []byte
 	end   []byte
 
-	cursor []byte // Current key
+	keys   [][]byte
+	cursor int // Current key
 }
 
 func (nr *nutsRange) First(_ context.Context) bool {
-	//log.Infof("first: %v", spew.Sdump(nr.start))
+	// log.Infof("first: %v", spew.Sdump(nr.start))
 	// v, err := nr.ntx.GetRange(nr.table, nr.start, 0, 8)
 	// v, err := nr.ntx.PrefixScan(nr.table, nr.start, 0, 1)
-	// v, err := nr.ntx.RangeScan(nr.table, nr.start, nil)
 	//if err != nil {
 	//	log.Errorf("range first: %v", err)
 	//	return false
@@ -318,8 +329,44 @@ func (nr *nutsRange) First(_ context.Context) bool {
 	//}
 	//nr.cursor = make([]byte, len(v[0]))
 	//copy(nr.cursor, v[0])
-	return false
+	if len(nr.keys) == 0 {
+		return false
+	}
+	nr.cursor = 0
 	return true
+}
+
+func (nr *nutsRange) Last(_ context.Context) bool {
+	if len(nr.keys) == 0 {
+		return false
+	}
+	nr.cursor = len(nr.keys) - 1
+	return true
+}
+
+func (nr *nutsRange) Next(_ context.Context) bool {
+	if len(nr.keys) == 0 {
+		return false
+	}
+	if nr.cursor < len(nr.keys)-1 {
+		nr.cursor++
+		return true
+	}
+	return false
+}
+
+func (nr *nutsRange) Key(ctx context.Context) []byte {
+	return nr.keys[nr.cursor]
+}
+
+func (nr *nutsRange) Value(ctx context.Context) []byte {
+	value, err := nr.tx.Get(ctx, nr.table, nr.keys[nr.cursor])
+	if err != nil {
+		// meh, this should not happen
+		log.Errorf("value %v", err)
+		return nil
+	}
+	return value
 }
 
 func (nr *nutsRange) Close(ctx context.Context) error {
