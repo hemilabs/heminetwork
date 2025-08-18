@@ -9,6 +9,12 @@ import (
 	"errors"
 )
 
+var (
+	ErrInvalidConfig = errors.New("invalid config")
+	ErrInvalidRange  = errors.New("invalid or empty range")
+	ErrKeyNotFound   = errors.New("key not found")
+)
+
 type Database interface {
 	Open(context.Context) error
 	Close(context.Context) error
@@ -27,6 +33,8 @@ type Database interface {
 	// Iterators, exist inside a Transaction
 	NewIterator(ctx context.Context, table string) (Iterator, error)
 	NewRange(ctx context.Context, table string, start, end []byte) (Range, error)
+	// XXX I am kind of the opinion that we need a prefix index as well;
+	// maybe that can be achieved with Iterator as well. Think about this.
 
 	// Batches
 	// Import([]Batch) // XXX this should be a reader as well
@@ -120,7 +128,7 @@ type Batch struct {
 // Typical use is as follows:
 // ```
 //
-//	it, _ := NewIterator(ctx)
+//	it, _ := NewIterator(ctx, table)
 //	for it.Next() {
 //		// Do things
 //	}
@@ -141,13 +149,28 @@ type Iterator interface {
 	Close(ctx context.Context) error
 }
 
-var (
-	ErrInvalidConfig = errors.New("invalid config")
-	ErrInvalidRange  = errors.New("invalid or empty range")
-	ErrKeyNotFound   = errors.New("key not found")
-)
-
-// Range
+// Range is a generic database bound iterator that only supports minimal
+// functionality. It is NOT concurrency safe and there are no guarantees about
+// the life-cycle of the returned key and value outside of the iterator or even
+// upon a seek type operation. It is wise to make a copy of key/value for use
+// outside the iterator loop. Close must be called upon completions since it
+// lives inside a read-only database transaction and thus may prevent the
+// program from exiting.
+//
+// Next is special as in that on first use it returns the first record.
+//
+// Typical use is as follows:
+// ```
+//
+//	ir, _ := NewRange(ctx, table, start, end)
+//	for ir.Next() {
+//		// Do things
+//	}
+//	ir.Close(ctx)
+//
+// ```
+// Several backends do not work that way thus it is be emulated in the various
+// implementations.
 type Range interface {
 	First(ctx context.Context) bool
 	Last(ctx context.Context) bool
@@ -158,14 +181,3 @@ type Range interface {
 
 	Close(ctx context.Context) error
 }
-
-/*
-	bucket:key:value
-
-	transactions:txid:tx
-
-	wishlist
-		buckets
-		transactions
-		snapshots
-*/
