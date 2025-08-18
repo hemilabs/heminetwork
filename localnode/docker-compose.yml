@@ -227,7 +227,7 @@ services:
   # Hemi op-node
   op-node:
     # yamllint disable-line rule:line-length
-    image: "3344b4315ae3abd852361ad988acc82afdd2df0de24cce313b"
+    image: "2428f66033a361492dad315922079e2aac9ac2f03fa6d7b90"
     platform: linux/amd64
     profiles: ["hemi", "hemi-min", "full"]
     depends_on:
@@ -239,6 +239,7 @@ services:
       - ./jwt.hex:/tmp/jwt/jwt.hex
       - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
       - ./rollup.json:/tmp/rollup.json
+      - ./hemi-testnet-deploy-config.json:/tmp/hemi-testnet-deploy-config.json
     environment:
       OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
     ports:

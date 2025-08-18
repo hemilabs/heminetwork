@@ -1,0 +1,11 @@
+{
+    "prank": "0x382D0AA958998408DD7695c8965C46BdaBBC3003",
+    "opcm": "<address of the chain's OPCM>",
+    "chainConfigs": [
+        {
+            "systemConfigProxy": "<address of the chain's system config proxy>",
+            "proxyAdmin": "<address of the chain's proxy admin>",
+            "absolutePrestate": "<32-byte hash of the chain's absolute prestate>"
+        }
+    ]
+}
