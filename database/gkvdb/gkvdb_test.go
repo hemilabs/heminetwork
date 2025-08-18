@@ -3,7 +3,6 @@ package gkvdb
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -12,10 +11,11 @@ import (
 )
 
 func dbputs(ctx context.Context, db Database, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
-		value := sha256.Sum256(key[:])
+	for i := range insertCount {
+		var key [4]byte
+		var value [8]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
+		binary.BigEndian.PutUint64(value[:], uint64(i))
 		table := tables[i%len(tables)]
 		err := db.Put(ctx, table, key[:], value[:])
 		if err != nil {
@@ -25,12 +25,54 @@ func dbputs(ctx context.Context, db Database, tables []string, insertCount int) 
 	return nil
 }
 
+func dbputEmpty(ctx context.Context, db Database, tables []string) error {
+	for _, table := range tables {
+		err := db.Put(ctx, table, nil, nil)
+		if err == nil {
+			return fmt.Errorf("put expected empty key error: %v", table)
+		}
+	}
+	return nil
+}
+
+func dbputInvalidTable(ctx context.Context, db Database, table string) error {
+	var key [4]byte
+	binary.BigEndian.PutUint32(key[:], uint32(0))
+	err := db.Put(ctx, table, nil, nil)
+	if !errors.Is(err, ErrTableNotFound) {
+		return fmt.Errorf("put expected not found error %v: %v", table, err)
+	}
+	return nil
+}
+
+func dbputDuplicate(ctx context.Context, db Database, table string, insertCount int) error {
+	for i := range insertCount {
+		var key [4]byte
+		var value [8]byte
+		binary.BigEndian.PutUint32(key[:], uint32(0))
+		binary.BigEndian.PutUint64(value[:], uint64(i))
+		err := db.Put(ctx, table, key[:], value[:])
+		if err != nil {
+			return fmt.Errorf("put %v: %v", table, i)
+		}
+		rv, err := db.Get(ctx, table, key[:])
+		if err != nil {
+			return fmt.Errorf("get %v: %v %v", table, i, err)
+		}
+		if !bytes.Equal(rv, value[:]) {
+			return fmt.Errorf("get unequal %v: %v", table, i)
+		}
+	}
+	return nil
+}
+
 func dbgets(ctx context.Context, db Database, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
+	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
-		valueExpected := sha256.Sum256(key[:])
+		var key [4]byte
+		var valueExpected [8]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
+		binary.BigEndian.PutUint64(valueExpected[:], uint64(i))
 		value, err := db.Get(ctx, table, key[:])
 		if err != nil {
 			return fmt.Errorf("get %v: %v %v", table, i, err)
@@ -42,11 +84,21 @@ func dbgets(ctx context.Context, db Database, tables []string, insertCount int) 
 	return nil
 }
 
+func dbgetInvalidTable(ctx context.Context, db Database, table string) error {
+	var key [4]byte
+	binary.BigEndian.PutUint32(key[:], uint32(0))
+	_, err := db.Get(ctx, table, key[:])
+	if !errors.Is(err, ErrTableNotFound) {
+		return fmt.Errorf("get expected not found error %v: %v", table, err)
+	}
+	return nil
+}
+
 func dbhas(ctx context.Context, db Database, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
+	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
 		has, err := db.Has(ctx, table, key[:])
 		if err != nil {
 			return fmt.Errorf("has %v: %v %v", table, i, err)
@@ -58,11 +110,24 @@ func dbhas(ctx context.Context, db Database, tables []string, insertCount int) e
 	return nil
 }
 
+func dbhasInvalidTable(ctx context.Context, db Database, table string) error {
+	var key [4]byte
+	binary.BigEndian.PutUint32(key[:], uint32(0))
+	has, err := db.Has(ctx, table, key[:])
+	if !errors.Is(err, ErrTableNotFound) {
+		return fmt.Errorf("has expected not found error %v: %v", table, err)
+	}
+	if has {
+		return fmt.Errorf("expected not has %v: %v", table, 0)
+	}
+	return nil
+}
+
 func dbdels(ctx context.Context, db Database, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
+	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
 		err := db.Del(ctx, table, key[:])
 		if err != nil {
 			return fmt.Errorf("del %v: %v %v", table, i, err)
@@ -71,11 +136,34 @@ func dbdels(ctx context.Context, db Database, tables []string, insertCount int) 
 	return nil
 }
 
-func dbhasNegative(ctx context.Context, db Database, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
+func dbdelInvalidKey(ctx context.Context, db Database, tables []string, insertCount int) error {
+	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
+		err := db.Del(ctx, table, key[:])
+		if !errors.Is(err, ErrKeyNotFound) {
+			return fmt.Errorf("del expected not found error %v: %v %v", table, i, err)
+		}
+	}
+	return nil
+}
+
+func dbdelInvalidTable(ctx context.Context, db Database, table string) error {
+	var key [4]byte
+	binary.BigEndian.PutUint32(key[:], uint32(0))
+	err := db.Del(ctx, table, key[:])
+	if !errors.Is(err, ErrTableNotFound) {
+		return fmt.Errorf("del expected not found error %v: %v", table, err)
+	}
+	return nil
+}
+
+func dbhasNegative(ctx context.Context, db Database, tables []string, insertCount int) error {
+	for i := range insertCount {
+		table := tables[i%len(tables)]
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
 		has, err := db.Has(ctx, table, key[:])
 		if err != nil {
 			return fmt.Errorf("has %v: %v %v", table, i, err)
@@ -88,10 +176,10 @@ func dbhasNegative(ctx context.Context, db Database, tables []string, insertCoun
 }
 
 func dbgetsNegative(ctx context.Context, db Database, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
+	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
 		_, err := db.Get(ctx, table, key[:])
 		if !errors.Is(err, ErrKeyNotFound) {
 			return fmt.Errorf("get expected not found error %v: %v %v", table, i, err)
@@ -101,10 +189,10 @@ func dbgetsNegative(ctx context.Context, db Database, tables []string, insertCou
 }
 
 func dbhasOdds(ctx context.Context, db Database, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
+	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
 		has, err := db.Has(ctx, table, key[:])
 		if i%2 == 0 {
 			// Assert we don't have evens
@@ -126,11 +214,53 @@ func dbhasOdds(ctx context.Context, db Database, tables []string, insertCount in
 	return nil
 }
 
+func txputEmpty(ctx context.Context, tx Transaction, tables []string) error {
+	for _, table := range tables {
+		err := tx.Put(ctx, table, nil, nil)
+		if err == nil {
+			return fmt.Errorf("tx put expected empty key error: %v", table)
+		}
+	}
+	return nil
+}
+
+func txputInvalidTable(ctx context.Context, tx Transaction, table string) error {
+	var key [4]byte
+	binary.BigEndian.PutUint32(key[:], uint32(0))
+	err := tx.Put(ctx, table, nil, nil)
+	if !errors.Is(err, ErrTableNotFound) {
+		return fmt.Errorf("tx put expected not found error %v: %v", table, err)
+	}
+	return nil
+}
+
+func txputDuplicate(ctx context.Context, tx Transaction, table string, insertCount int) error {
+	for i := range insertCount {
+		var key [4]byte
+		var value [8]byte
+		binary.BigEndian.PutUint32(key[:], uint32(0))
+		binary.BigEndian.PutUint64(value[:], uint64(i))
+		err := tx.Put(ctx, table, key[:], value[:])
+		if err != nil {
+			return fmt.Errorf("put %v: %v", table, i)
+		}
+		rv, err := tx.Get(ctx, table, key[:])
+		if err != nil {
+			return fmt.Errorf("get %v: %v %v", table, i, err)
+		}
+		if i != 0 && bytes.Equal(rv, value[:]) {
+			return fmt.Errorf("get equal %v: expect %d, got %d", table, value, rv)
+		}
+	}
+	return nil
+}
+
 func txputs(ctx context.Context, tx Transaction, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
-		value := sha256.Sum256(key[:])
+	for i := range insertCount {
+		var key [4]byte
+		var value [8]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
+		binary.BigEndian.PutUint64(value[:], uint64(i))
 		table := tables[i%len(tables)]
 		err := tx.Put(ctx, table, key[:], value[:])
 		if err != nil {
@@ -141,10 +271,10 @@ func txputs(ctx context.Context, tx Transaction, tables []string, insertCount in
 }
 
 func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCount int) error {
-	for i := 0; i < insertCount; i++ {
+	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [8]byte
-		binary.BigEndian.PutUint64(key[:], uint64(i))
+		var key [4]byte
+		binary.BigEndian.PutUint32(key[:], uint32(i))
 		if i%2 == 0 {
 			err := tx.Del(ctx, table, key[:])
 			if err != nil {
@@ -152,7 +282,8 @@ func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCoun
 			}
 		} else {
 			// Assert odd record exist
-			valueExpected := sha256.Sum256(key[:])
+			var valueExpected [8]byte
+			binary.BigEndian.PutUint64(valueExpected[:], uint64(i))
 			value, err := tx.Get(ctx, table, key[:])
 			if err != nil {
 				return fmt.Errorf("even get %v: %v %v", table, i, err)
@@ -165,182 +296,223 @@ func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCoun
 	return nil
 }
 
-func TestGKVDB(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
-	defer cancel()
-	home := t.TempDir()
-
-	tableCount := 5
-	tables := make([]string, 0, tableCount)
-	for i := 0; i < tableCount; i++ {
-		tables = append(tables, fmt.Sprintf("table%v", i))
+func dbBasic(ctx context.Context, db Database, tables []string, insertCount int) error {
+	// Put Empty
+	err := dbputEmpty(ctx, db, tables)
+	if err != nil {
+		return fmt.Errorf("dbputEmpty: %w", err)
 	}
 
-	cfg := DefaultNutsConfig(home, tables)
-	db, err := NewNutsDB(cfg)
+	// Put Invalid Table
+	err = dbputInvalidTable(ctx, db, fmt.Sprintf("table%d", len(tables)))
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbputInvalidTable: %w", err)
 	}
-	err = db.Open(ctx)
+
+	// Put Duplicate
+	err = dbputDuplicate(ctx, db, tables[0], insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbputDuplicate: %w", err)
 	}
-	defer func() {
-		err := db.Close(ctx)
-		if err != nil {
-			panic(err)
-		}
-	}()
 
 	// Puts
-	insertCount := 10000
 	err = dbputs(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbputs: %w", err)
+	}
+
+	// Get Invalid Table
+	err = dbgetInvalidTable(ctx, db, fmt.Sprintf("table%d", len(tables)))
+	if err != nil {
+		return fmt.Errorf("dbgetInvalidTable: %w", err)
 	}
 
 	// Get
 	err = dbgets(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbgets: %w", err)
+	}
+
+	// Has Invalid Table
+	err = dbhasInvalidTable(ctx, db, fmt.Sprintf("table%d", len(tables)))
+	if err != nil {
+		return fmt.Errorf("dbgetInvalidTable: %w", err)
 	}
 
 	// Has
 	err = dbhas(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbhas: %w", err)
 	}
 
 	// Del
 	err = dbdels(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbdels: %w", err)
+	}
+
+	// Del Invalid Table
+	err = dbdelInvalidTable(ctx, db, fmt.Sprintf("table%d", len(tables)))
+	if err != nil {
+		return fmt.Errorf("dbdelInvalidTable: %w", err)
+	}
+
+	// Del Invalid Key
+	err = dbdelInvalidKey(ctx, db, tables, insertCount)
+	if err != nil {
+		return fmt.Errorf("dbdelInvalidKey: %w", err)
 	}
 
 	// Has negative
 	err = dbhasNegative(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbhasNegative: %w", err)
 	}
 
 	// Get negative
 	err = dbgetsNegative(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbgetsNegative: %w", err)
 	}
 
-	// Transaction Rollback
+	return nil
+}
+
+// Transaction Rollback
+func dbTransactionsRollback(ctx context.Context, db Database, tables []string, insertCount int) error {
 	tx, err := db.Begin(ctx, true)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil && !errors.Is(err, ErrDBClosed) {
+		return fmt.Errorf("db begin: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			err = tx.Rollback(ctx)
+			if err != nil {
+				panic(fmt.Errorf("tx rollback: %w", err))
+			}
+		}
+	}()
 	err = txputs(ctx, tx, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbgetsNegative: %w", err)
 	}
 	err = tx.Rollback(ctx)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("tx rollback: %w", err)
 	}
 	err = dbhasNegative(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbgetsNegative: %w", err)
 	}
+	return nil
+}
 
-	// Transaction Commit
-	tx, err = db.Begin(ctx, true)
+// Transaction Commit
+func dbTransactionsCommit(ctx context.Context, db Database, tables []string, insertCount int) error {
+	tx, err := db.Begin(ctx, true)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("db begin: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			err = tx.Rollback(ctx)
+			if err != nil && !errors.Is(err, ErrDBClosed) {
+				panic(fmt.Errorf("tx rollback: %w", err))
+			}
+		}
+	}()
 	err = txputs(ctx, tx, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbgetsNegative: %w", err)
 	}
 	err = tx.Commit(ctx)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("tx commit: %w", err)
 	}
 	err = dbgets(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbgetsNegative: %w", err)
 	}
 
-	// Transaction delete even records
-	tx, err = db.Begin(ctx, true)
+	return nil
+}
+
+// Transaction delete even records
+func dbTransactionsDelete(ctx context.Context, db Database, tables []string, insertCount int) error {
+	tx, err := db.Begin(ctx, true)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("begin: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			err = tx.Rollback(ctx)
+			if !errors.Is(err, ErrDBClosed) {
+				panic(fmt.Errorf("tx rollback: %w", err))
+			}
+		}
+	}()
 	err = txdelsEven(ctx, tx, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("txdelsEven: %w", err)
 	}
 	err = tx.Commit(ctx)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("tx commit: %w", err)
 	}
 	err = dbhasOdds(ctx, db, tables, insertCount)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("dbhasOdds: %w", err)
 	}
 
-	// Iterate over remaining records
-	on := 1 // Table to test
-	it, err := db.NewIterator(ctx, tables[on])
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		err = it.Close(ctx)
-		if err != nil {
-			panic(err)
-		}
-	}()
-	i := 0
-	for it.Next(ctx) {
-		// t.Logf("table %s key %x value %x", tables[on], it.Key(ctx), it.Value(ctx))
-		i++
-	}
-	if insertCount/len(tables)/2 != i {
-		t.Fatalf("invalid number of records: got %v wanted %v",
-			insertCount/len(tables)/2, i)
-	}
+	return nil
 }
 
-func TestIterator(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
-	defer cancel()
-	home := t.TempDir()
-
-	table := "mytable"
-	tables := []string{table}
-	cfg := DefaultNutsConfig(home, tables)
-	db, err := NewNutsDB(cfg)
+// Transaction test expected errors
+func dbTransactionsErrors(ctx context.Context, db Database, tables []string, insertCount int) error {
+	tx, err := db.Begin(ctx, true)
 	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() {
-		err := db.Close(ctx)
 		if err != nil {
-			panic(err)
+			err = tx.Rollback(ctx)
+			if err != nil && !errors.Is(err, ErrDBClosed) {
+				panic(fmt.Errorf("tx rollback: %w", err))
+			}
 		}
 	}()
+	err = txputEmpty(ctx, tx, tables)
+	if err != nil {
+		return fmt.Errorf("txputEmpty: %w", err)
+	}
+	err = txputInvalidTable(ctx, tx, fmt.Sprintf("table%d", len(tables)))
+	if err != nil {
+		return fmt.Errorf("txputInvalidTable: %w", err)
+	}
+	err = txputDuplicate(ctx, tx, tables[0], insertCount)
+	if err != nil {
+		return fmt.Errorf("txputDuplicate: %w", err)
+	}
+	err = tx.Rollback(ctx)
+	if err != nil {
+		return fmt.Errorf("tx rollback: %w", err)
+	}
 
-	recordCount := 10 // We test a byte so do not overflow it
-	for i := 0; i < recordCount; i++ {
+	return nil
+}
+
+func dbIterate(ctx context.Context, db Database, table string, recordCount int) error {
+	for i := range recordCount {
 		err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 	}
 
 	// Verify that Next returns the first record.
 	it1, err := db.NewIterator(ctx, table)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	i := 0
 	for it1.Next(ctx) {
@@ -356,7 +528,7 @@ func TestIterator(t *testing.T) {
 	// Verify that Next returns the Next record after a seek.
 	it2, err := db.NewIterator(ctx, table)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	defer func() {
 		err = it2.Close(ctx)
@@ -366,29 +538,31 @@ func TestIterator(t *testing.T) {
 	}()
 
 	if !it2.Seek(ctx, []byte{1}) {
-		t.Fatal("seek 1")
+		return errors.New("seek 1")
 	}
 	if !it2.Next(ctx) {
-		t.Fatal("next")
+		return errors.New("next")
 	}
 	if !bytes.Equal(it2.Key(ctx), []byte{2}) {
-		t.Fatalf("not equal seek, got %v wanted %v", it2.Key(ctx), []byte{2})
+		return fmt.Errorf("not equal seek, got %v wanted %v", it2.Key(ctx), []byte{2})
 	}
 	// Verify First while here
 	if !it2.First(ctx) {
-		t.Fatal("first")
+		return errors.New("first")
 	}
 	if !bytes.Equal(it2.Key(ctx), []byte{uint8(0)}) {
-		t.Fatalf("not equal first, got %v wanted %v", it2.Key(ctx), []byte{0})
+		return fmt.Errorf("not equal first, got %v wanted %v", it2.Key(ctx), []byte{0})
 	}
 	// Verify Last while here
 	if !it2.Last(ctx) {
-		t.Fatal("last")
+		return errors.New("last")
 	}
 	if !bytes.Equal(it2.Key(ctx), []byte{uint8(recordCount - 1)}) {
-		t.Fatalf("not equal last, got %v wanted %v",
+		return fmt.Errorf("not equal last, got %v wanted %v",
 			it2.Key(ctx), []byte{uint8(recordCount - 1)})
 	}
+
+	return nil
 }
 
 func TestRange(t *testing.T) {
@@ -500,4 +674,119 @@ func TestRange(t *testing.T) {
 	<-ctx.Done()
 
 	// Range over all users and make sure we don't hit avatar
+}
+
+func TestGKVDBFull(t *testing.T) {
+	type TestTableItem struct {
+		name   string
+		dbFunc func(home string, tables []string) Database
+	}
+
+	testTable := []TestTableItem{
+		{
+			name: "nutsDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultNutsConfig(home, tables)
+				db, err := NewNutsDB(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return db
+			},
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
+			defer cancel()
+
+			// Puts
+			insertCount := 100
+			t.Run("basic", func(t *testing.T) {
+				home := t.TempDir()
+
+				tableCount := 5
+				tables := make([]string, 0, tableCount)
+				for i := range tableCount {
+					tables = append(tables, fmt.Sprintf("table%v", i))
+				}
+
+				db := tti.dbFunc(home, tables)
+				err := db.Open(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					err := db.Close(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}()
+
+				if err = dbBasic(ctx, db, tables, insertCount); err != nil {
+					t.Fatal(err)
+				}
+			})
+
+			t.Run("transactions", func(t *testing.T) {
+				home := t.TempDir()
+
+				tableCount := 5
+				tables := make([]string, 0, tableCount)
+				for i := range tableCount {
+					tables = append(tables, fmt.Sprintf("table%v", i))
+				}
+
+				db := tti.dbFunc(home, tables)
+				err := db.Open(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					err := db.Close(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}()
+
+				if err = dbTransactionsRollback(ctx, db, tables, insertCount); err != nil {
+					t.Fatal(fmt.Errorf("dbTransactionsRollback: %w", err))
+				}
+				if err = dbTransactionsCommit(ctx, db, tables, insertCount); err != nil {
+					t.Fatal(fmt.Errorf("dbTransactionsCommit: %w", err))
+				}
+				if err = dbTransactionsDelete(ctx, db, tables, insertCount); err != nil {
+					t.Fatal(fmt.Errorf("dbTransactionsDelete: %w", err))
+				}
+				if err = dbTransactionsErrors(ctx, db, tables, insertCount); err != nil {
+					t.Fatal(fmt.Errorf("dbTransactionsErrors: %w", err))
+				}
+			})
+
+			t.Run("iterator", func(t *testing.T) {
+				home := t.TempDir()
+
+				table := "mytable"
+				tables := []string{table}
+
+				db := tti.dbFunc(home, tables)
+
+				err := db.Open(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					err := db.Close(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}()
+
+				if err = dbIterate(ctx, db, table, 10); err != nil {
+					t.Fatal(err)
+				}
+			})
+		})
+	}
 }

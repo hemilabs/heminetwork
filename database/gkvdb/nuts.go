@@ -30,6 +30,11 @@ func xerr(err error) error {
 		err = ErrKeyNotFound
 	case errors.Is(err, nutsdb.ErrRangeScan):
 		err = ErrInvalidRange
+	case errors.Is(err, nutsdb.ErrBucketNotExist),
+		errors.Is(err, nutsdb.ErrorBucketNotExist):
+		err = ErrTableNotFound
+	case errors.Is(err, nutsdb.ErrDBClosed):
+		err = ErrDBClosed
 	}
 	return err
 }
@@ -113,6 +118,8 @@ func (b *nutsDB) Del(_ context.Context, table string, key []byte) error {
 	})
 }
 
+// XXX the tx.Has() function should be used,
+// but it doesn't seem to be working
 func (b *nutsDB) Has(_ context.Context, table string, key []byte) (bool, error) {
 	_, err := b.Get(nil, table, key)
 	if errors.Is(err, ErrKeyNotFound) {
@@ -228,7 +235,7 @@ func (tx *nutsTX) Del(ctx context.Context, table string, key []byte) error {
 }
 
 func (tx *nutsTX) Has(ctx context.Context, table string, key []byte) (bool, error) {
-	_, err := tx.Get(nil, table, key)
+	_, err := tx.Get(context.Background(), table, key)
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
