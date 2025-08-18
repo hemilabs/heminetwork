@@ -54,6 +54,29 @@ func NewCompositeKey(table string, key []byte) CompositeKey {
 
 // Transactions
 
+// Transactions are read-only or read-write. A read-only transaction is a
+// snapshot of the database/table tuple and will not change for the duration of
+// the transaction. A read-write transaction has the same guarantees as the
+// read-only transaction however now one can also modify data. Transaction are
+// taken on the entire database but the snapshot view is on a single table. One
+// should take great care to make transactions as short lived as possible.
+// Transactions make no guarantees about the returned key/value pairs. It's up
+// to the caller to copy returned values as needed outside of the transaction.
+//
+// The following idiom is considered best practice:
+// tx, _ := db.Begin(ctx, false)
+// value, _ := tx.Get(ctx, []byte{"mykey")
+// rv := make([]byte, len(value))
+// copy(rv, value)
+// tx.Commit(ctx)
+// fmt.Printf("value: %x\n", rv)
+//
+// Note, the caller must call Commit or Rollback on ALL open transactions.
+// Failure to do so may end up in programs not being able to exit due to
+// pending unfinished transactions.
+//
+// View and Update are convenience wrappers that take a callback for
+// read-only and read-write transactions respectively.
 type Transaction interface {
 	Del(ctx context.Context, table string, key []byte) error
 	Has(ctx context.Context, table string, key []byte) (bool, error)
@@ -119,6 +142,11 @@ var (
 // Range
 type Range interface {
 	First(ctx context.Context) bool
+	Last(ctx context.Context) bool
+	Next(ctx context.Context) bool
+
+	Key(ctx context.Context) []byte
+	Value(ctx context.Context) []byte
 
 	Close(ctx context.Context) error
 }
