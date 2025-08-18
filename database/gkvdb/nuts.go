@@ -37,6 +37,8 @@ func xerr(err error) error {
 // Assert required inteerfaces
 var (
 	_ Database    = (*nutsDB)(nil)
+	_ Iterator    = (*nutsIterator)(nil)
+	_ Range       = (*nutsRange)(nil)
 	_ Transaction = (*nutsTX)(nil)
 )
 
