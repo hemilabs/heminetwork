@@ -13,6 +13,8 @@ var (
 	ErrInvalidConfig = errors.New("invalid config")
 	ErrInvalidRange  = errors.New("invalid or empty range")
 	ErrKeyNotFound   = errors.New("key not found")
+	ErrTableNotFound = errors.New("table not found")
+	ErrDBClosed      = errors.New("database is closed")
 )
 
 type Database interface {
@@ -149,6 +151,7 @@ type Iterator interface {
 	Close(ctx context.Context) error
 }
 
+// Range
 // Range is a generic database bound iterator that only supports minimal
 // functionality. It is NOT concurrency safe and there are no guarantees about
 // the life-cycle of the returned key and value outside of the iterator or even
