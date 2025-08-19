@@ -221,11 +221,11 @@ func (ni *levelIterator) Next(_ context.Context) bool {
 }
 
 func (ni *levelIterator) Seek(_ context.Context, key []byte) bool {
-	return ni.it.Seek(key)
+	return ni.it.Seek(NewCompositeKey(ni.table, key))
 }
 
 func (ni *levelIterator) Key(_ context.Context) []byte {
-	return ni.it.Key()
+	return KeyFromComposite(ni.table, ni.it.Key())
 }
 
 func (ni *levelIterator) Value(_ context.Context) []byte {

@@ -7,6 +7,7 @@ package gkvdb
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 var (
@@ -61,6 +62,13 @@ func NewCompositeKey(table string, key []byte) CompositeKey {
 	ck[len(table)] = byte(':')
 	copy(ck[len(table)+1:], key)
 	return CompositeKey(ck)
+}
+
+func KeyFromComposite(table string, key []byte) []byte {
+	if len(table)+1 > len(key) {
+		panic(fmt.Sprintf("fix you code %v > %v", len(table)+1, len(key)))
+	}
+	return key[len(table)+1:]
 }
 
 // Transactions
