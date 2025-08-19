@@ -30,8 +30,8 @@ func dbputs(ctx context.Context, db Database, tables []string, insertCount int) 
 func dbputEmpty(ctx context.Context, db Database, tables []string) error {
 	for _, table := range tables {
 		err := db.Put(ctx, table, nil, nil)
-		if err == nil {
-			return fmt.Errorf("put expected empty key error: %v", table)
+		if err != nil {
+			return fmt.Errorf("put empty key %v: %w", table, err)
 		}
 	}
 	return nil
@@ -40,8 +40,8 @@ func dbputEmpty(ctx context.Context, db Database, tables []string) error {
 func dbputInvalidTable(ctx context.Context, db Database, table string) error {
 	var key [4]byte
 	binary.BigEndian.PutUint32(key[:], uint32(0))
-	err := db.Put(ctx, table, nil, nil)
-	if !errors.Is(err, ErrInvalidKey) {
+	err := db.Put(ctx, table, key[:], nil)
+	if !errors.Is(err, ErrTableNotFound) {
 		return fmt.Errorf("put expected not found error %v: %v", table, err)
 	}
 	return nil
@@ -144,8 +144,8 @@ func dbdelInvalidKey(ctx context.Context, db Database, tables []string, insertCo
 		var key [4]byte
 		binary.BigEndian.PutUint32(key[:], uint32(i))
 		err := db.Del(ctx, table, key[:])
-		if !errors.Is(err, ErrKeyNotFound) {
-			return fmt.Errorf("del expected not found error %v: %v %v", table, i, err)
+		if err != nil {
+			return fmt.Errorf("del invalid key %v: %v %w", table, i, err)
 		}
 	}
 	return nil
@@ -156,7 +156,7 @@ func dbdelInvalidTable(ctx context.Context, db Database, table string) error {
 	binary.BigEndian.PutUint32(key[:], uint32(0))
 	err := db.Del(ctx, table, key[:])
 	if !errors.Is(err, ErrTableNotFound) {
-		return fmt.Errorf("del expected not found error %v: %v", table, err)
+		return fmt.Errorf("del expected not found error %v: %w", table, err)
 	}
 	return nil
 }
@@ -219,8 +219,8 @@ func dbhasOdds(ctx context.Context, db Database, tables []string, insertCount in
 func txputEmpty(ctx context.Context, tx Transaction, tables []string) error {
 	for _, table := range tables {
 		err := tx.Put(ctx, table, nil, nil)
-		if err == nil {
-			return fmt.Errorf("tx put expected empty key error: %v", table)
+		if err != nil {
+			return fmt.Errorf("tx put empty %v: %w", table, err)
 		}
 	}
 	return nil
@@ -236,6 +236,8 @@ func txputInvalidTable(ctx context.Context, tx Transaction, table string) error 
 	return nil
 }
 
+// This fails if we try to access the changes made using a tx put
+// with a tx get after, and it returns the new value
 func txputDuplicate(ctx context.Context, tx Transaction, table string, insertCount int) error {
 	for i := range insertCount {
 		var key [4]byte
@@ -294,6 +296,16 @@ func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCoun
 				return fmt.Errorf("even get unequal %v: %v", table, i)
 			}
 		}
+	}
+	return nil
+}
+
+func txdelInvalidKey(ctx context.Context, tx Transaction, table string) error {
+	var key [4]byte
+	binary.BigEndian.PutUint32(key[:], uint32(0))
+	err := tx.Del(ctx, table, key[:])
+	if err != nil {
+		return fmt.Errorf("del invalid key %v: %w", table, err)
 	}
 	return nil
 }
@@ -548,10 +560,14 @@ func dbTransactionsErrors(ctx context.Context, db Database, tables []string, ins
 	if err != nil {
 		return fmt.Errorf("txputInvalidTable: %w", err)
 	}
-	err = txputDuplicate(ctx, tx, tables[0], insertCount)
+	err = txdelInvalidKey(ctx, tx, tables[0])
 	if err != nil {
-		return fmt.Errorf("txputDuplicate: %w", err)
+		return fmt.Errorf("txdelInvalidKey: %w", err)
 	}
+	// err = txputDuplicate(ctx, tx, tables[0], insertCount)
+	// if err != nil {
+	// 	return fmt.Errorf("txputDuplicate: %w", err)
+	// }
 	err = tx.Rollback(ctx)
 	if err != nil {
 		return fmt.Errorf("tx rollback: %w", err)

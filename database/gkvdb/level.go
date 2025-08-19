@@ -69,9 +69,6 @@ func (b *levelDB) Close(_ context.Context) error {
 }
 
 func (b *levelDB) Del(_ context.Context, table string, key []byte) error {
-	if key == nil {
-		return ErrInvalidKey
-	}
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
@@ -79,9 +76,6 @@ func (b *levelDB) Del(_ context.Context, table string, key []byte) error {
 }
 
 func (b *levelDB) Has(_ context.Context, table string, key []byte) (bool, error) {
-	if key == nil {
-		return false, ErrInvalidKey
-	}
 	if _, ok := b.tables[table]; !ok {
 		return false, ErrTableNotFound
 	}
@@ -89,9 +83,6 @@ func (b *levelDB) Has(_ context.Context, table string, key []byte) (bool, error)
 }
 
 func (b *levelDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
-	if key == nil {
-		return nil, ErrInvalidKey
-	}
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
@@ -106,9 +97,6 @@ func (b *levelDB) Get(_ context.Context, table string, key []byte) ([]byte, erro
 }
 
 func (b *levelDB) Put(_ context.Context, table string, key, value []byte) error {
-	if key == nil {
-		return ErrInvalidKey
-	}
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
@@ -160,9 +148,6 @@ type levelTX struct {
 }
 
 func (tx *levelTX) Del(ctx context.Context, table string, key []byte) error {
-	if key == nil {
-		return ErrInvalidKey
-	}
 	if _, ok := tx.db.tables[table]; !ok {
 		return ErrTableNotFound
 	}
@@ -170,9 +155,6 @@ func (tx *levelTX) Del(ctx context.Context, table string, key []byte) error {
 }
 
 func (tx *levelTX) Has(ctx context.Context, table string, key []byte) (bool, error) {
-	if key == nil {
-		return false, ErrInvalidKey
-	}
 	if _, ok := tx.db.tables[table]; !ok {
 		return false, ErrTableNotFound
 	}
@@ -181,9 +163,6 @@ func (tx *levelTX) Has(ctx context.Context, table string, key []byte) (bool, err
 }
 
 func (tx *levelTX) Get(ctx context.Context, table string, key []byte) ([]byte, error) {
-	if key == nil {
-		return nil, ErrInvalidKey
-	}
 	if _, ok := tx.db.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
@@ -192,9 +171,6 @@ func (tx *levelTX) Get(ctx context.Context, table string, key []byte) ([]byte, e
 }
 
 func (tx *levelTX) Put(ctx context.Context, table string, key []byte, value []byte) error {
-	if key == nil {
-		return ErrInvalidKey
-	}
 	if _, ok := tx.db.tables[table]; !ok {
 		return ErrTableNotFound
 	}
