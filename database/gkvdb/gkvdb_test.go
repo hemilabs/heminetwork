@@ -739,6 +739,17 @@ func TestGKVDBFull(t *testing.T) {
 				return db
 			},
 		},
+		{
+			name: "levelDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultLevelConfig(home)
+				db, err := NewLevelDB(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return db
+			},
+		},
 	}
 
 	for _, tti := range testTable {
