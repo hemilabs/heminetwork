@@ -873,8 +873,8 @@ func TestBatch(t *testing.T) {
 
 	table := "users"
 	tables := []string{table}
-	cfg := DefaultNutsConfig(home, tables)
-	db, err := NewNutsDB(cfg)
+	cfg := DefaultLevelConfig(home, tables)
+	db, err := NewLevelDB(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
