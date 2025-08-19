@@ -36,6 +36,8 @@ func xerr(err error) error {
 		err = ErrTableNotFound
 	case errors.Is(err, nutsdb.ErrDBClosed):
 		err = ErrDBClosed
+	case errors.Is(err, nutsdb.ErrKeyEmpty):
+		return nil
 	}
 	return err
 }
@@ -115,9 +117,13 @@ func (b *nutsDB) Close(_ context.Context) error {
 }
 
 func (b *nutsDB) Del(_ context.Context, table string, key []byte) error {
-	return b.db.Update(func(tx *nutsdb.Tx) error {
+	err := b.db.Update(func(tx *nutsdb.Tx) error {
 		return xerr(tx.Delete(table, key))
 	})
+	if errors.Is(err, ErrKeyNotFound) {
+		return nil
+	}
+	return err
 }
 
 // XXX the tx.Has() function should be used,
@@ -146,9 +152,6 @@ func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error
 }
 
 func (b *nutsDB) Put(_ context.Context, table string, key, value []byte) error {
-	if key == nil {
-		return ErrInvalidKey
-	}
 	return xerr(b.db.Update(func(tx *nutsdb.Tx) error {
 		return tx.Put(table, key, value, 0)
 	}))
@@ -246,7 +249,11 @@ type nutsTX struct {
 }
 
 func (tx *nutsTX) Del(ctx context.Context, table string, key []byte) error {
-	return xerr(tx.tx.Delete(table, key))
+	err := xerr(tx.tx.Delete(table, key))
+	if errors.Is(err, ErrKeyNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (tx *nutsTX) Has(ctx context.Context, table string, key []byte) (bool, error) {
@@ -392,9 +399,6 @@ func (nb *nutsBatch) Del(ctx context.Context, table string, key []byte) error {
 }
 
 func (nb *nutsBatch) Put(ctx context.Context, table string, key, value []byte) error {
-	if key == nil {
-		return ErrInvalidKey
-	}
 	return xerr(nb.wb.Put(table, key, value, 0))
 }
 
