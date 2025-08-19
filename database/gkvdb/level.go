@@ -160,7 +160,15 @@ func (b *levelDB) NewRange(ctx context.Context, table string, start, end []byte)
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
-	return nil, fmt.Errorf("not yet")
+	return &levelRange{
+		table: table,
+		it: b.db.NewIterator(&util.Range{
+			Start: NewCompositeKey(table, start),
+			Limit: NewCompositeKey(table, end),
+		}, nil),
+		start: start,
+		end:   end,
+	}, nil
 }
 
 func (b *levelDB) NewBatch(ctx context.Context) (Batch, error) {
@@ -247,65 +255,40 @@ func (ni *levelIterator) Value(_ context.Context) []byte {
 	return ni.it.Value()
 }
 
-func (ni *levelIterator) Close(ctx context.Context) error {
+func (ni *levelIterator) Close(ctx context.Context) {
 	ni.it.Release()
-	return nil
 }
 
 // Ranges
 type levelRange struct {
 	table string
-	tx    Transaction
+	it    iterator.Iterator
 	start []byte
 	end   []byte
-
-	keys   [][]byte
-	cursor int // Current key
 }
 
 func (nr *levelRange) First(_ context.Context) bool {
-	if len(nr.keys) == 0 {
-		return false
-	}
-	nr.cursor = 0
-	return true
+	return nr.it.First()
 }
 
 func (nr *levelRange) Last(_ context.Context) bool {
-	if len(nr.keys) == 0 {
-		return false
-	}
-	nr.cursor = len(nr.keys) - 1
-	return true
+	return nr.it.Last()
 }
 
 func (nr *levelRange) Next(_ context.Context) bool {
-	if len(nr.keys) == 0 {
-		return false
-	}
-	if nr.cursor < len(nr.keys)-1 {
-		nr.cursor++
-		return true
-	}
-	return false
+	return nr.it.Next()
 }
 
 func (nr *levelRange) Key(ctx context.Context) []byte {
-	return nr.keys[nr.cursor]
+	return KeyFromComposite(nr.table, nr.it.Key())
 }
 
 func (nr *levelRange) Value(ctx context.Context) []byte {
-	value, err := nr.tx.Get(ctx, nr.table, nr.keys[nr.cursor])
-	if err != nil {
-		// meh, this should not happen
-		log.Errorf("value %v", err)
-		return nil
-	}
-	return value
+	return nr.it.Value()
 }
 
-func (nr *levelRange) Close(ctx context.Context) error {
-	return nr.tx.Commit(ctx)
+func (nr *levelRange) Close(ctx context.Context) {
+	nr.it.Release()
 }
 
 // Batches
