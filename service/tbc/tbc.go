@@ -106,7 +106,7 @@ var (
 // ExternalHeaderNotAllowedError is returned when an operation is invoked
 // that is not allowed while TBC is running in External Header Mode.
 type ExternalHeaderNotAllowedError struct {
-	Operation string
+	Op string
 }
 
 // Error implements the error interface.
