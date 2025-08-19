@@ -233,13 +233,7 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 }
 
 func (b *nutsDB) NewBatch(ctx context.Context) (Batch, error) {
-	wb, err := b.db.NewWriteBatch()
-	if err != nil {
-		return nil, err
-	}
-	return &nutsBatch{
-		wb: wb,
-	}, nil
+	return &nutsBatch{}, nil
 }
 
 // Transactions
@@ -279,6 +273,10 @@ func (tx *nutsTX) Commit(ctx context.Context) error {
 
 func (tx *nutsTX) Rollback(ctx context.Context) error {
 	return xerr(tx.tx.Rollback())
+}
+
+func (tx *nutsTX) Write(ctx context.Context, b Batch) error {
+	return fmt.Errorf("not yet")
 }
 
 // Iterations
@@ -389,22 +387,13 @@ func (nr *nutsRange) Close(ctx context.Context) error {
 
 // Batches
 
-type nutsBatch struct {
-	wb *nutsdb.WriteBatch
+type nutsBatch struct{}
+
+func (nb *nutsBatch) Del(ctx context.Context, table string, key []byte) {
 }
 
-func (nb *nutsBatch) Del(ctx context.Context, table string, key []byte) error {
-	return xerr(nb.wb.Delete(table, key))
+func (nb *nutsBatch) Put(ctx context.Context, table string, key, value []byte) {
 }
 
-func (nb *nutsBatch) Put(ctx context.Context, table string, key, value []byte) error {
-	return xerr(nb.wb.Put(table, key, value, 0))
-}
-
-func (nb *nutsBatch) Cancel(ctx context.Context) error {
-	return xerr(nb.wb.Cancel())
-}
-
-func (nb *nutsBatch) Replay(ctx context.Context) error {
-	return xerr(nb.wb.Flush())
+func (nb *nutsBatch) Reset(ctx context.Context) {
 }

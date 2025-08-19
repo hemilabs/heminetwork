@@ -149,7 +149,7 @@ func (b *levelDB) NewRange(ctx context.Context, table string, start, end []byte)
 }
 
 func (b *levelDB) NewBatch(ctx context.Context) (Batch, error) {
-	return nil, fmt.Errorf("not yet")
+	return &levelBatch{wb: new(leveldb.Batch)}, nil
 }
 
 // Transactions
@@ -196,6 +196,10 @@ func (tx *levelTX) Commit(ctx context.Context) error {
 func (tx *levelTX) Rollback(ctx context.Context) error {
 	tx.tx.Discard()
 	return nil
+}
+
+func (tx *levelTX) Write(ctx context.Context, b Batch) error {
+	return tx.tx.Write(b.(*levelBatch).wb, nil)
 }
 
 // Iterations
@@ -295,20 +299,14 @@ type levelBatch struct {
 	wb *leveldb.Batch
 }
 
-func (nb *levelBatch) Del(ctx context.Context, table string, key []byte) error {
-	// nb.wb.Delete(NewCompositeKey(table, key))
-	return fmt.Errorf("not yet")
+func (nb *levelBatch) Del(ctx context.Context, table string, key []byte) {
+	nb.wb.Delete(NewCompositeKey(table, key))
 }
 
-func (nb *levelBatch) Put(ctx context.Context, table string, key, value []byte) error {
-	// nb.wb.Put(NewCompositeKey(table, key), value)
-	return fmt.Errorf("not yet")
+func (nb *levelBatch) Put(ctx context.Context, table string, key, value []byte) {
+	nb.wb.Put(NewCompositeKey(table, key), value)
 }
 
-func (nb *levelBatch) Cancel(ctx context.Context) error {
-	return fmt.Errorf("not yet")
-}
-
-func (nb *levelBatch) Replay(ctx context.Context) error {
-	return fmt.Errorf("not yet")
+func (nb *levelBatch) Reset(ctx context.Context) {
+	nb.wb.Reset()
 }
