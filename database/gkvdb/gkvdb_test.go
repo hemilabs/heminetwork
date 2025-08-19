@@ -229,7 +229,7 @@ func txputEmpty(ctx context.Context, tx Transaction, tables []string) error {
 func txputInvalidTable(ctx context.Context, tx Transaction, table string) error {
 	var key [4]byte
 	binary.BigEndian.PutUint32(key[:], uint32(0))
-	err := tx.Put(ctx, table, nil, nil)
+	err := tx.Put(ctx, table, key[:], nil)
 	if !errors.Is(err, ErrTableNotFound) {
 		return fmt.Errorf("tx put expected not found error %v: %v", table, err)
 	}
