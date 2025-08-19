@@ -100,30 +100,26 @@ type Transaction interface {
 
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context) error
+	Write(ctx context.Context, b Batch) error
 }
 
 // Batches
 
-// Batch is used to replay large datasets into the database. Adding an
-// operation to the batch is concurrency safe and will be executed in order of
-// appearance. Note that a batch is executed in a read-write transaction. It
-// may be wrapped in a read-only transaction and thus deadlocks may occur.
-//
 // The following idiom is considered best practice:
 // ```
 //
-//	b, _ := db.NewBatch(ctx)
-//	_ = b.Put(ctx, table, []byte{"mykey", nil)
-//	_ = b.Del(ctx, table, []byte{"delkey")
-//	_ = b.Flush(ctx)
+//	db.Update(ctx, func((ctx context.Context, tx Transaction) {
+//		b := NewBatch(ctx)
+//		b.Put(ctx, table, []byte{"mykey", nil)
+//		b.Del(ctx, table, []byte{"delkey")
+//		return tx.Write(ctx, b)
+//	}))
 //
 // ```
 type Batch interface {
-	Del(ctx context.Context, table string, key []byte) error
-	Put(ctx context.Context, table string, key, value []byte) error
-
-	Cancel(ctx context.Context) error
-	Replay(ctx context.Context) error
+	Del(ctx context.Context, table string, key []byte)
+	Put(ctx context.Context, table string, key, value []byte)
+	Reset(ctx context.Context)
 }
 
 // Iterator is a generic database iterator that only supports minimal
