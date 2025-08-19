@@ -24,6 +24,7 @@ func init() {
 }
 
 // Translate nutsb errors into gkvdb errors
+// XXX move this out of here and add leveldb errors
 func xerr(err error) error {
 	switch {
 	case errors.Is(err, nutsdb.ErrKeyNotFound):
