@@ -121,4 +121,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/nutsdb/nutsdb v1.0.4 => ../tmp/nutsdb
+replace github.com/nutsdb/nutsdb => ../tmp/nutsdb
