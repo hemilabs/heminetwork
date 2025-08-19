@@ -66,7 +66,7 @@ func NewCompositeKey(table string, key []byte) CompositeKey {
 
 func KeyFromComposite(table string, key []byte) []byte {
 	if len(table)+1 > len(key) {
-		panic(fmt.Sprintf("fix you code %v > %v", len(table)+1, len(key)))
+		panic(fmt.Sprintf("fix your code %v > %v", len(table)+1, len(key)))
 	}
 	return key[len(table)+1:]
 }
