@@ -42,7 +42,7 @@ func xerr(err error) error {
 	return err
 }
 
-// Assert required inteerfaces
+// Assert required interfaces
 var (
 	_ Batch       = (*nutsBatch)(nil)
 	_ Database    = (*nutsDB)(nil)
@@ -286,7 +286,6 @@ type nutsIterator struct {
 	table string
 	tx    Transaction
 	it    *nutsdb.Iterator
-	r     *Range
 
 	first bool
 }

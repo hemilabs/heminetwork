@@ -6,10 +6,19 @@ import (
 	"fmt"
 
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
-var _ Database = (*levelDB)(nil)
+// Assert required interfaces
+var (
+	_ Batch       = (*levelBatch)(nil)
+	_ Database    = (*levelDB)(nil)
+	_ Iterator    = (*levelIterator)(nil)
+	_ Range       = (*levelRange)(nil)
+	_ Transaction = (*levelTX)(nil)
+)
 
 type LevelConfig struct {
 	Home   string
@@ -126,7 +135,10 @@ func (b *levelDB) NewIterator(ctx context.Context, table string) (Iterator, erro
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
-	return nil, fmt.Errorf("not yet")
+	return &levelIterator{
+		table: table,
+		it:    b.db.NewIterator(&util.Range{}, nil),
+	}, nil
 }
 
 func (b *levelDB) NewRange(ctx context.Context, table string, start, end []byte) (Range, error) {
@@ -184,4 +196,119 @@ func (tx *levelTX) Commit(ctx context.Context) error {
 func (tx *levelTX) Rollback(ctx context.Context) error {
 	tx.tx.Discard()
 	return nil
+}
+
+// Iterations
+type levelIterator struct {
+	table string
+	it    iterator.Iterator
+}
+
+func (ni *levelIterator) First(_ context.Context) bool {
+	return ni.it.First()
+}
+
+func (ni *levelIterator) Last(_ context.Context) bool {
+	return ni.it.Last()
+}
+
+func (ni *levelIterator) Next(_ context.Context) bool {
+	return ni.it.Next()
+}
+
+func (ni *levelIterator) Seek(_ context.Context, key []byte) bool {
+	return ni.it.Seek(key)
+}
+
+func (ni *levelIterator) Key(_ context.Context) []byte {
+	return ni.it.Key()
+}
+
+func (ni *levelIterator) Value(_ context.Context) []byte {
+	return ni.it.Value()
+}
+
+func (ni *levelIterator) Close(ctx context.Context) error {
+	ni.it.Release()
+	return nil
+}
+
+// Ranges
+type levelRange struct {
+	table string
+	tx    Transaction
+	start []byte
+	end   []byte
+
+	keys   [][]byte
+	cursor int // Current key
+}
+
+func (nr *levelRange) First(_ context.Context) bool {
+	if len(nr.keys) == 0 {
+		return false
+	}
+	nr.cursor = 0
+	return true
+}
+
+func (nr *levelRange) Last(_ context.Context) bool {
+	if len(nr.keys) == 0 {
+		return false
+	}
+	nr.cursor = len(nr.keys) - 1
+	return true
+}
+
+func (nr *levelRange) Next(_ context.Context) bool {
+	if len(nr.keys) == 0 {
+		return false
+	}
+	if nr.cursor < len(nr.keys)-1 {
+		nr.cursor++
+		return true
+	}
+	return false
+}
+
+func (nr *levelRange) Key(ctx context.Context) []byte {
+	return nr.keys[nr.cursor]
+}
+
+func (nr *levelRange) Value(ctx context.Context) []byte {
+	value, err := nr.tx.Get(ctx, nr.table, nr.keys[nr.cursor])
+	if err != nil {
+		// meh, this should not happen
+		log.Errorf("value %v", err)
+		return nil
+	}
+	return value
+}
+
+func (nr *levelRange) Close(ctx context.Context) error {
+	return nr.tx.Commit(ctx)
+}
+
+// Batches
+
+type levelBatch struct {
+	wb *leveldb.Batch
+}
+
+func (nb *levelBatch) Del(ctx context.Context, table string, key []byte) error {
+	// nb.wb.Delete(NewCompositeKey(table, key))
+	return fmt.Errorf("not yet")
+}
+
+func (nb *levelBatch) Put(ctx context.Context, table string, key, value []byte) error {
+	// nb.wb.Put(NewCompositeKey(table, key), value)
+	return fmt.Errorf("not yet")
+}
+
+func (nb *levelBatch) Cancel(ctx context.Context) error {
+	return fmt.Errorf("not yet")
+}
+
+func (nb *levelBatch) Replay(ctx context.Context) error {
+	return fmt.Errorf("not yet")
 }
