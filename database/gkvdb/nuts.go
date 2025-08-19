@@ -251,7 +251,7 @@ func (tx *nutsTX) Del(ctx context.Context, table string, key []byte) error {
 }
 
 func (tx *nutsTX) Has(ctx context.Context, table string, key []byte) (bool, error) {
-	_, err := tx.Get(context.Background(), table, key)
+	_, err := tx.Get(ctx, table, key)
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}

@@ -453,6 +453,8 @@ func dbTransactionsCommit(ctx context.Context, db Database, tables []string, ins
 }
 
 // Transaction Multiple Write
+// This will race for PebbleDB since it doesn't have real
+// transactions, and instead must rely on batches.
 func dbTransactionsMultipleWrite(ctx context.Context, db Database, table string, txCount int) error {
 	last := txCount + 1
 	var key [4]byte
@@ -518,7 +520,7 @@ func dbTransactionsDelete(ctx context.Context, db Database, tables []string, ins
 	defer func() {
 		if err != nil {
 			err = tx.Rollback(ctx)
-			if !errors.Is(err, ErrDBClosed) {
+			if err != nil && !errors.Is(err, ErrDBClosed) {
 				panic(fmt.Errorf("tx rollback: %w", err))
 			}
 		}
@@ -730,7 +732,7 @@ func TestRange(t *testing.T) {
 	// Range over all users and make sure we don't hit avatar
 }
 
-func TestGKVDBFull(t *testing.T) {
+func TestGKVDB(t *testing.T) {
 	type TestTableItem struct {
 		name   string
 		dbFunc func(home string, tables []string) Database
@@ -753,6 +755,17 @@ func TestGKVDBFull(t *testing.T) {
 			dbFunc: func(home string, tables []string) Database {
 				cfg := DefaultLevelConfig(home, tables)
 				db, err := NewLevelDB(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "pebbleDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultPebbleConfig(home, tables)
+				db, err := NewPebbleDB(cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -866,8 +879,8 @@ func TestBatch(t *testing.T) {
 
 	table := "users"
 	tables := []string{table}
-	cfg := DefaultLevelConfig(home, tables)
-	db, err := NewLevelDB(cfg)
+	cfg := DefaultPebbleConfig(home, tables)
+	db, err := NewPebbleDB(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
