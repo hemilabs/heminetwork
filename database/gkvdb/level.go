@@ -160,6 +160,9 @@ type levelTX struct {
 }
 
 func (tx *levelTX) Del(ctx context.Context, table string, key []byte) error {
+	if key == nil {
+		return ErrInvalidKey
+	}
 	if _, ok := tx.db.tables[table]; !ok {
 		return ErrTableNotFound
 	}
@@ -167,6 +170,9 @@ func (tx *levelTX) Del(ctx context.Context, table string, key []byte) error {
 }
 
 func (tx *levelTX) Has(ctx context.Context, table string, key []byte) (bool, error) {
+	if key == nil {
+		return false, ErrInvalidKey
+	}
 	if _, ok := tx.db.tables[table]; !ok {
 		return false, ErrTableNotFound
 	}
@@ -175,6 +181,9 @@ func (tx *levelTX) Has(ctx context.Context, table string, key []byte) (bool, err
 }
 
 func (tx *levelTX) Get(ctx context.Context, table string, key []byte) ([]byte, error) {
+	if key == nil {
+		return nil, ErrInvalidKey
+	}
 	if _, ok := tx.db.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
