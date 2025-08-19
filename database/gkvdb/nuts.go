@@ -276,7 +276,7 @@ func (tx *nutsTX) Rollback(ctx context.Context) error {
 }
 
 func (tx *nutsTX) Write(ctx context.Context, b Batch) error {
-	return fmt.Errorf("not yet")
+	return fmt.Errorf("not yet nuts")
 }
 
 // Iterations

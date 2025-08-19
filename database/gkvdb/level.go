@@ -123,12 +123,27 @@ func (b *levelDB) Begin(_ context.Context, write bool) (Transaction, error) {
 	}, nil
 }
 
+func (b *levelDB) execute(ctx context.Context, write bool, callback func(ctx context.Context, tx Transaction) error) error {
+	tx, err := b.Begin(ctx, write)
+	if err != nil {
+		return err
+	}
+	err = callback(ctx, tx)
+	if err != nil {
+		if cerr := tx.Rollback(ctx); cerr != nil {
+			return fmt.Errorf("rollback %v: %w", cerr, err)
+		}
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func (b *levelDB) View(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error {
-	return fmt.Errorf("not yet")
+	return b.execute(ctx, false, callback)
 }
 
 func (b *levelDB) Update(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error {
-	return fmt.Errorf("not yet")
+	return b.execute(ctx, true, callback)
 }
 
 func (b *levelDB) NewIterator(ctx context.Context, table string) (Iterator, error) {
