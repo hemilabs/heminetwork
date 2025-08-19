@@ -39,7 +39,7 @@ type Database interface {
 	// maybe that can be achieved with Iterator as well. Think about this.
 
 	// Batches
-	// Import([]Batch) // XXX this should be a reader as well
+	NewBatch(ctx context.Context) (Batch, error)
 
 	// Backup
 	// DumpAll()
@@ -102,19 +102,27 @@ type Transaction interface {
 }
 
 // Batches
-type Operation int
 
-const (
-	OPPut Operation = 1
-	OPDel Operation = 2
-)
+// Batch is used to replay large datasets into the database. Adding an
+// operation to the batch is concurrency safe and will be executed in order of
+// appearance. Note that a batch is executed in a read-write transaction. It
+// may be wrapped in a read-only transaction and thus deadlocks may occur.
+//
+// The following idiom is considered best practice:
+// ```
+//
+//	b, _ := db.NewBatch(ctx)
+//	_ = b.Put(ctx, table, []byte{"mykey", nil)
+//	_ = b.Del(ctx, table, []byte{"delkey")
+//	_ = b.Flush(ctx)
+//
+// ```
+type Batch interface {
+	Del(ctx context.Context, table string, key []byte) error
+	Put(ctx context.Context, table string, key, value []byte) error
 
-// Batch is used to replay large datasets into the database.
-type Batch struct {
-	Op    Operation
-	Table string
-	Key   []byte
-	Value []byte
+	Cancel(ctx context.Context) error
+	Replay(ctx context.Context) error
 }
 
 // Iterator is a generic database iterator that only supports minimal

@@ -41,6 +41,7 @@ func xerr(err error) error {
 
 // Assert required inteerfaces
 var (
+	_ Batch       = (*nutsBatch)(nil)
 	_ Database    = (*nutsDB)(nil)
 	_ Iterator    = (*nutsIterator)(nil)
 	_ Range       = (*nutsRange)(nil)
@@ -207,7 +208,7 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 	nr := &nutsRange{
 		table:  table,
 		tx:     tx,
-		ntx:    tx.(*nutsTX).nutsTx(),
+		ntx:    tx.(*nutsTX).tx,
 		start:  start,
 		end:    end,
 		cursor: -1, // first key when next called
@@ -222,6 +223,16 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 	}
 	nr.keys = keys
 	return nr, nil
+}
+
+func (b *nutsDB) NewBatch(ctx context.Context) (Batch, error) {
+	wb, err := b.db.NewWriteBatch()
+	if err != nil {
+		return nil, err
+	}
+	return &nutsBatch{
+		wb: wb,
+	}, nil
 }
 
 // Transactions
@@ -259,10 +270,6 @@ func (tx *nutsTX) Rollback(ctx context.Context) error {
 	return xerr(tx.tx.Rollback())
 }
 
-func (tx *nutsTX) nutsTx() *nutsdb.Tx {
-	return tx.tx
-}
-
 // Iterations
 type nutsIterator struct {
 	table string
@@ -278,7 +285,7 @@ func (ni *nutsIterator) First(_ context.Context) bool {
 }
 
 func (ni *nutsIterator) Last(_ context.Context) bool {
-	key, err := ni.tx.(*nutsTX).nutsTx().GetMaxKey(ni.table)
+	key, err := ni.tx.(*nutsTX).tx.GetMaxKey(ni.table)
 	if err != nil {
 		log.Errorf("last: %v", err)
 		return false
@@ -368,4 +375,26 @@ func (nr *nutsRange) Value(ctx context.Context) []byte {
 
 func (nr *nutsRange) Close(ctx context.Context) error {
 	return nr.tx.Commit(ctx)
+}
+
+// Batches
+
+type nutsBatch struct {
+	wb *nutsdb.WriteBatch
+}
+
+func (nb *nutsBatch) Del(ctx context.Context, table string, key []byte) error {
+	return xerr(nb.wb.Delete(table, key))
+}
+
+func (nb *nutsBatch) Put(ctx context.Context, table string, key, value []byte) error {
+	return xerr(nb.wb.Put(table, key, value, 0))
+}
+
+func (nb *nutsBatch) Cancel(ctx context.Context) error {
+	return xerr(nb.wb.Cancel())
+}
+
+func (nb *nutsBatch) Replay(ctx context.Context) error {
+	return xerr(nb.wb.Flush())
 }
