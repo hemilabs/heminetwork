@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func dbputs(ctx context.Context, db Database, tables []string, insertCount int) error {
@@ -437,6 +439,63 @@ func dbTransactionsCommit(ctx context.Context, db Database, tables []string, ins
 	return nil
 }
 
+// Transaction Multiple Write
+func dbTransactionsMultipleWrite(ctx context.Context, db Database, table string, txCount int) error {
+	last := txCount + 1
+	var key [4]byte
+	var val [8]byte
+	binary.BigEndian.PutUint32(key[:], uint32(0))
+	binary.BigEndian.PutUint64(val[:], uint64(last))
+	err := db.Put(ctx, table, key[:], val[:])
+	if err != nil {
+		return fmt.Errorf("initial put")
+	}
+	eg, ctx := errgroup.WithContext(ctx)
+	for i := range txCount {
+		eg.Go(func() error {
+			tx, err := db.Begin(ctx, true)
+			if err != nil {
+				return fmt.Errorf("tx%d - db begin: %w", i, err)
+			}
+			defer func() {
+				if err != nil {
+					err = tx.Rollback(ctx)
+					if err != nil && !errors.Is(err, ErrDBClosed) {
+						panic(fmt.Errorf("tx%d - tx rollback: %w", i, err))
+					}
+				}
+			}()
+			// see if value set by last tx matches "last"
+			var ve [8]byte
+			binary.BigEndian.PutUint64(ve[:], uint64(last))
+			rv, err := tx.Get(ctx, table, key[:])
+			if err != nil {
+				return fmt.Errorf("tx%d - get: %w", i, err)
+			}
+			if !bytes.Equal(rv, ve[:]) {
+				return fmt.Errorf("tx%d - expected %v, got %v", i, ve[:], rv)
+			}
+
+			// set value and "last" to "i"
+			binary.BigEndian.PutUint64(ve[:], uint64(i))
+			err = tx.Put(ctx, table, key[:], ve[:])
+			if err != nil {
+				return fmt.Errorf("tx put %v: %v", table, i)
+			}
+			last = i
+			err = tx.Commit(ctx)
+			if err != nil {
+				return fmt.Errorf("tx%d - tx commit: %w", i, err)
+			}
+			return nil
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Transaction delete even records
 func dbTransactionsDelete(ctx context.Context, db Database, tables []string, insertCount int) error {
 	tx, err := db.Begin(ctx, true)
@@ -760,6 +819,9 @@ func TestGKVDBFull(t *testing.T) {
 					t.Fatal(fmt.Errorf("dbTransactionsDelete: %w", err))
 				}
 				if err = dbTransactionsErrors(ctx, db, tables, insertCount); err != nil {
+					t.Fatal(fmt.Errorf("dbTransactionsErrors: %w", err))
+				}
+				if err = dbTransactionsMultipleWrite(ctx, db, tables[0], 5); err != nil {
 					t.Fatal(fmt.Errorf("dbTransactionsErrors: %w", err))
 				}
 			})
