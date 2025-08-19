@@ -146,6 +146,9 @@ func (b *nutsDB) Get(_ context.Context, table string, key []byte) ([]byte, error
 }
 
 func (b *nutsDB) Put(_ context.Context, table string, key, value []byte) error {
+	if key == nil {
+		return ErrInvalidKey
+	}
 	return xerr(b.db.Update(func(tx *nutsdb.Tx) error {
 		return tx.Put(table, key, value, 0)
 	}))
@@ -389,6 +392,9 @@ func (nb *nutsBatch) Del(ctx context.Context, table string, key []byte) error {
 }
 
 func (nb *nutsBatch) Put(ctx context.Context, table string, key, value []byte) error {
+	if key == nil {
+		return ErrInvalidKey
+	}
 	return xerr(nb.wb.Put(table, key, value, 0))
 }
 

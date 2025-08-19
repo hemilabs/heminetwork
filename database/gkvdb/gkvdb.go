@@ -10,11 +10,13 @@ import (
 )
 
 var (
-	ErrInvalidConfig = errors.New("invalid config")
-	ErrInvalidRange  = errors.New("invalid or empty range")
-	ErrKeyNotFound   = errors.New("key not found")
-	ErrTableNotFound = errors.New("table not found")
-	ErrDBClosed      = errors.New("database is closed")
+	ErrDBClosed       = errors.New("database is closed")
+	ErrDuplicateTable = errors.New("duplicate table")
+	ErrInvalidConfig  = errors.New("invalid config")
+	ErrInvalidKey     = errors.New("invalid key")
+	ErrInvalidRange   = errors.New("invalid or empty range")
+	ErrKeyNotFound    = errors.New("key not found")
+	ErrTableNotFound  = errors.New("table not found")
 )
 
 type Database interface {

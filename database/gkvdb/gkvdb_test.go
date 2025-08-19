@@ -41,7 +41,7 @@ func dbputInvalidTable(ctx context.Context, db Database, table string) error {
 	var key [4]byte
 	binary.BigEndian.PutUint32(key[:], uint32(0))
 	err := db.Put(ctx, table, nil, nil)
-	if !errors.Is(err, ErrTableNotFound) {
+	if !errors.Is(err, ErrInvalidKey) {
 		return fmt.Errorf("put expected not found error %v: %v", table, err)
 	}
 	return nil
@@ -742,7 +742,7 @@ func TestGKVDBFull(t *testing.T) {
 		{
 			name: "levelDB",
 			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultLevelConfig(home)
+				cfg := DefaultLevelConfig(home, tables)
 				db, err := NewLevelDB(cfg)
 				if err != nil {
 					t.Fatal(err)
