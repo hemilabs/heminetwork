@@ -65,7 +65,7 @@ func (tx *TransactionL2) EncodeToOpReturn() ([]byte, error) {
 	return tsb.Script()
 }
 
-// ParseTransactionFromOpReturn attempts to parse the given data
+// ParseTransactionL2FromOpReturn attempts to parse the given data
 // as an OP_RETURN encoded PoP transaction.
 func ParseTransactionL2FromOpReturn(script []byte) (*TransactionL2, error) {
 	txst := txscript.MakeScriptTokenizer(0, script)
