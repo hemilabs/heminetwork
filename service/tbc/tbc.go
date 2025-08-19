@@ -103,6 +103,26 @@ var (
 	fixupStrategy = 3 // Do not touch unless your name is marco
 )
 
+// ExternalHeaderNotAllowedError is returned when an operation is invoked
+// that is not allowed while TBC is running in External Header Mode.
+type ExternalHeaderNotAllowedError struct {
+	Operation string
+}
+
+// Error implements the error interface.
+func (e *ExternalHeaderNotAllowedError) Error() string {
+	if e.Operation == "" {
+		return "not allowed in external-header mode"
+	}
+	return fmt.Sprintf("%s: not allowed in external-header mode", e.Operation)
+}
+
+// Is allows errors.Is(err, &ExternalHeaderNotAllowedError{}) to match by type.
+func (e *ExternalHeaderNotAllowedError) Is(target error) bool {
+	_, ok := target.(*ExternalHeaderNotAllowedError)
+	return ok
+}
+
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
 		panic(err)
@@ -1795,7 +1815,7 @@ func (s *Server) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil
 	defer log.Tracef("BlockByHash exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call BlockByHash on TBC running in External Header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "BlockByHash"}
 	}
 
 	return s.db.BlockByHash(ctx, hash)
@@ -1808,7 +1828,7 @@ func (s *Server) KeystonesByHeight(ctx context.Context, height uint32, depth int
 	defer log.Tracef("KeystonesByHeight exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call KeystonesByHeight on TBC running in External Header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "KeystonesByHeight"}
 	}
 
 	return s.db.KeystonesByHeight(ctx, height, depth)
@@ -1836,7 +1856,7 @@ func (s *Server) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIden
 	defer log.Tracef("BlocksMissing exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call BlocksMissing on TBC running in External Header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "BlocksMissing"}
 	}
 
 	return s.db.BlocksMissing(ctx, count)
@@ -1921,7 +1941,7 @@ func (s *Server) BalanceByAddress(ctx context.Context, encodedAddress string) (u
 	defer log.Tracef("BalanceByAddress exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return 0, errors.New("cannot call BalanceByAddress on TBC running in External Header mode")
+		return 0, &ExternalHeaderNotAllowedError{Operation: "BalanceByAddress"}
 	}
 
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
@@ -1948,7 +1968,7 @@ func (s *Server) BalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash) 
 	defer log.Tracef("BalanceByScriptHash exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return 0, errors.New("cannot call BalanceByScriptHash on TBC running in External Header mode")
+		return 0, &ExternalHeaderNotAllowedError{Operation: "BalanceByScriptHash"}
 	}
 
 	balance, err := s.db.BalanceByScriptHash(ctx, hash)
@@ -1964,7 +1984,7 @@ func (s *Server) UtxosByAddress(ctx context.Context, filterMempool bool, encoded
 	defer log.Tracef("UtxosByAddress exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call UtxosByAddress on TBC running in External Header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "UtxosByAddress"}
 	}
 
 	addr, err := btcutil.DecodeAddress(encodedAddress, s.chainParams)
@@ -2044,7 +2064,7 @@ func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId chainhash.
 	log.Tracef("ScriptHashAvailableToSpend")
 	defer log.Tracef("ScriptHashAvailableToSpend exit")
 	if s.cfg.ExternalHeaderMode {
-		return false, errors.New("cannot call script hash available to spend on TBC running in External Header mode")
+		return false, &ExternalHeaderNotAllowedError{Operation: "ScriptHashAvailableToSpend"}
 	}
 
 	txIdBytes := [32]byte(txId.CloneBytes())
@@ -2068,7 +2088,7 @@ func (s *Server) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([
 	defer log.Tracef("SpentOutputsByTxId exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call SpentOutputsByTxId on TBC running in External Header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "SpentOutputsByTxId"}
 	}
 
 	// As it is written now it returns all spent outputs per the tx index view.
@@ -2085,7 +2105,7 @@ func (s *Server) BlockInTxIndex(ctx context.Context, blkid chainhash.Hash) (bool
 	defer log.Tracef("BlockInTxIndex exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return false, errors.New("cannot call BlockInTxIndex on TBC running in External Header mode")
+		return false, &ExternalHeaderNotAllowedError{Operation: "BlockInTxIndex"}
 	}
 
 	// As it is written now it returns true/false per the tx index view.
@@ -2097,7 +2117,7 @@ func (s *Server) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*cha
 	defer log.Tracef("BlockHashByTxId exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call BlockHashByTxId on TBC running in External Header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "BlockHashByTxId"}
 	}
 
 	return s.db.BlockHashByTxId(ctx, txId)
@@ -2108,7 +2128,7 @@ func (s *Server) TxById(ctx context.Context, txId chainhash.Hash) (*wire.MsgTx, 
 	defer log.Tracef("TxById exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call TxById on TBC running in External Header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "TxById"}
 	}
 
 	blockHash, err := s.db.BlockHashByTxId(ctx, txId)
@@ -2133,7 +2153,7 @@ func (s *Server) TxBroadcastAllToPeer(ctx context.Context, p *rawpeer.RawPeer) e
 	defer log.Tracef("TxBroadcastAllToPeer %v exit", p)
 
 	if s.cfg.ExternalHeaderMode {
-		return errors.New("cannot call TxBroadcastAllToPeer on TBC running in External Header mode")
+		return &ExternalHeaderNotAllowedError{Operation: "TxBroadcastAllToPeer"}
 	}
 
 	s.mtx.RLock()
@@ -2167,7 +2187,7 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 	defer log.Tracef("TxBroadcast exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("cannot call TxBroadcast on TBC running in External Header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "TxBroadcast"}
 	}
 
 	if tx == nil {
@@ -2299,7 +2319,7 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 	defer log.Tracef("FeesByBlockHash exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return nil, errors.New("fees by block hash: external header mode")
+		return nil, &ExternalHeaderNotAllowedError{Operation: "FeesByBlockHash"}
 	}
 
 	b, err := s.db.BlockByHash(ctx, hash)
@@ -2339,7 +2359,7 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 // corresponding to the specified hash available in its database.
 func (s *Server) FullBlockAvailable(ctx context.Context, hash chainhash.Hash) (bool, error) {
 	if s.cfg.ExternalHeaderMode {
-		return false, errors.New("cannot call full block available on TBC running in External Header mode")
+		return false, &ExternalHeaderNotAllowedError{Operation: "FullBlockAvailable"}
 	}
 
 	return s.db.BlockExistsByHash(ctx, hash)
@@ -2677,7 +2697,7 @@ func (s *Server) Run(pctx context.Context) error {
 	defer log.Tracef("Run exit")
 
 	if s.cfg.ExternalHeaderMode {
-		return errors.New("run called but External Header mode is enabled")
+		return &ExternalHeaderNotAllowedError{Operation: "Run"}
 	}
 
 	var err error

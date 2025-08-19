@@ -2403,3 +2403,81 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 		t.Errorf("best hash %x does not match expected hash %x", bestHash[:], lastHashToAdd[:])
 	}
 }
+
+func TestExternalHeaderMode_DisallowedOperationsReturnTypedError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	tbc := createTbcServerExternalHeaderMode(ctx, t)
+	defer func() { _ = tbc.ExternalHeaderTearDown() }()
+
+	// BlockByHash should return typed error
+	_, err := tbc.BlockByHash(ctx, chainhash.Hash{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var ehn *ExternalHeaderNotAllowedError
+	if !errors.As(err, &ehn) {
+		t.Fatalf("expected ExternalHeaderNotAllowedError, got %T: %v", err, err)
+	}
+	if ehn.Operation != "BlockByHash" {
+		t.Fatalf("expected operation BlockByHash, got %s", ehn.Operation)
+	}
+
+	// TxBroadcast should return typed error
+	_, err = tbc.TxBroadcast(ctx, nil, false)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	ehn = nil
+	if !errors.As(err, &ehn) {
+		t.Fatalf("expected ExternalHeaderNotAllowedError, got %T: %v", err, err)
+	}
+	if ehn.Operation != "TxBroadcast" {
+		t.Fatalf("expected operation TxBroadcast, got %s", ehn.Operation)
+	}
+
+	// FullBlockAvailable should return typed error
+	_, err = tbc.FullBlockAvailable(ctx, chainhash.Hash{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	ehn = nil
+	if !errors.As(err, &ehn) {
+		t.Fatalf("expected ExternalHeaderNotAllowedError, got %T: %v", err, err)
+	}
+	if ehn.Operation != "FullBlockAvailable" {
+		t.Fatalf("expected operation FullBlockAvailable, got %s", ehn.Operation)
+	}
+}
+
+func TestExternalHeaderMode_RunReturnsTypedError(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	cfg := NewDefaultConfig()
+	cfg.ExternalHeaderMode = true
+	cfg.LevelDBHome = t.TempDir()
+	cfg.Network = networkLocalnet
+	cfg.MempoolEnabled = false
+	cfg.BlockCacheSize = ""
+	cfg.BlockheaderCacheSize = ""
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := any(s).(*Server); !ok {
+		t.Fatal("invalid server type")
+	}
+	err = s.Run(ctx)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var ehn *ExternalHeaderNotAllowedError
+	if !errors.As(err, &ehn) {
+		t.Fatalf("expected ExternalHeaderNotAllowedError, got %T: %v", err, err)
+	}
+	if ehn.Operation != "Run" {
+		t.Fatalf("expected operation Run, got %s", ehn.Operation)
+	}
+}
