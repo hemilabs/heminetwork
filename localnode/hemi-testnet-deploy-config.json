@@ -50,5 +50,8 @@
     "faultGameGenesisOutputRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "preimageOracleMinProposalSize": 1,
     "preimageOracleChallengePeriod": 1,
-    "useFaultProofs": false
+    "useFaultProofs": false,
+    "faultGameClockExtension": 1,
+    "faultGameMaxClockDuration": 2,
+    "faultGameWithdrawalDelay": 2
 }
