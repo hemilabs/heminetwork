@@ -148,8 +148,6 @@ type Batch interface {
 //	it.Close(ctx)
 //
 // ```
-// Several backends do not work that way thus it is be emulated in the various
-// implementations.
 type Iterator interface {
 	First(ctx context.Context) bool
 	Last(ctx context.Context) bool
@@ -172,6 +170,10 @@ type Iterator interface {
 // program from exiting.
 //
 // Next is special as in that on first use it returns the first record.
+//
+// Note that `start` is included in the range and `end` is NOT. This may seem
+// odd but it uses standard 0 based indexing where the terminator is 'less
+// than'.
 //
 // Typical use is as follows:
 // ```
