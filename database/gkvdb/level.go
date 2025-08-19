@@ -18,7 +18,8 @@ type LevelConfig struct {
 
 func DefaultLevelConfig(home string, tables []string) *LevelConfig {
 	return &LevelConfig{
-		Home: home,
+		Home:   home,
+		Tables: tables,
 	}
 }
 
@@ -68,6 +69,9 @@ func (b *levelDB) Close(_ context.Context) error {
 }
 
 func (b *levelDB) Del(_ context.Context, table string, key []byte) error {
+	if key == nil {
+		return ErrInvalidKey
+	}
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
@@ -75,6 +79,9 @@ func (b *levelDB) Del(_ context.Context, table string, key []byte) error {
 }
 
 func (b *levelDB) Has(_ context.Context, table string, key []byte) (bool, error) {
+	if key == nil {
+		return false, ErrInvalidKey
+	}
 	if _, ok := b.tables[table]; !ok {
 		return false, ErrTableNotFound
 	}
@@ -82,6 +89,9 @@ func (b *levelDB) Has(_ context.Context, table string, key []byte) (bool, error)
 }
 
 func (b *levelDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
+	if key == nil {
+		return nil, ErrInvalidKey
+	}
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
