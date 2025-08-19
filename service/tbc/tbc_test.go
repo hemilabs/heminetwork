@@ -2404,7 +2404,7 @@ func TestExternalHeaderModeSimpleIncorrectRemoval(t *testing.T) {
 	}
 }
 
-func TestExternalHeaderMode_DisallowedOperationsReturnTypedError(t *testing.T) {
+func TestExternalHeaderModeDisallowedOperationsReturnTypedError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 
@@ -2420,8 +2420,8 @@ func TestExternalHeaderMode_DisallowedOperationsReturnTypedError(t *testing.T) {
 	if !errors.As(err, &ehn) {
 		t.Fatalf("expected ExternalHeaderNotAllowedError, got %T: %v", err, err)
 	}
-	if ehn.Operation != "BlockByHash" {
-		t.Fatalf("expected operation BlockByHash, got %s", ehn.Operation)
+	if ehn.Op != "BlockByHash" {
+		t.Fatalf("expected operation BlockByHash, got %s", ehn.Op)
 	}
 
 	// TxBroadcast should return typed error
@@ -2433,8 +2433,8 @@ func TestExternalHeaderMode_DisallowedOperationsReturnTypedError(t *testing.T) {
 	if !errors.As(err, &ehn) {
 		t.Fatalf("expected ExternalHeaderNotAllowedError, got %T: %v", err, err)
 	}
-	if ehn.Operation != "TxBroadcast" {
-		t.Fatalf("expected operation TxBroadcast, got %s", ehn.Operation)
+	if ehn.Op != "TxBroadcast" {
+		t.Fatalf("expected operation TxBroadcast, got %s", ehn.Op)
 	}
 
 	// FullBlockAvailable should return typed error
@@ -2446,12 +2446,12 @@ func TestExternalHeaderMode_DisallowedOperationsReturnTypedError(t *testing.T) {
 	if !errors.As(err, &ehn) {
 		t.Fatalf("expected ExternalHeaderNotAllowedError, got %T: %v", err, err)
 	}
-	if ehn.Operation != "FullBlockAvailable" {
-		t.Fatalf("expected operation FullBlockAvailable, got %s", ehn.Operation)
+	if ehn.Op != "FullBlockAvailable" {
+		t.Fatalf("expected operation FullBlockAvailable, got %s", ehn.Op)
 	}
 }
 
-func TestExternalHeaderMode_RunReturnsTypedError(t *testing.T) {
+func TestExternalHeaderModeRunReturnsTypedError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
@@ -2477,7 +2477,7 @@ func TestExternalHeaderMode_RunReturnsTypedError(t *testing.T) {
 	if !errors.As(err, &ehn) {
 		t.Fatalf("expected ExternalHeaderNotAllowedError, got %T: %v", err, err)
 	}
-	if ehn.Operation != "Run" {
-		t.Fatalf("expected operation Run, got %s", ehn.Operation)
+	if ehn.Op != "Run" {
+		t.Fatalf("expected operation Run, got %s", ehn.Op)
 	}
 }
