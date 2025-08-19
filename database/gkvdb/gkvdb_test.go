@@ -922,50 +922,55 @@ func TestBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	//// Read everything back and create two batches. One that will be
-	//// canceled and one that deletes all keys.
-	//it, err := db.NewIterator(ctx, table)
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
+	// Read everything back and create two batches. One that will be
+	// canceled and one that deletes all keys.
+	it, err := db.NewIterator(ctx, table)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	//// XXX nutsb has a huge limitation. We cannot iterate and perform
-	//// actions on a WriteBatch. This is an odd decision but the net is it
-	//// deadlocks the reads and writes (iterator rlocks then the del/put
-	//// locks thus deadlocking).
-	////
-	//// The solution must come from within nuts because there is a need to
-	//// atomic read some shit and perform a write. Maybe the answer is using
-	//// nutsdb.Tx.CommitWith(). Investigate this.
-	//// For now use a shitty raceable non-atomic test.
-	////
-	//// In addition to shity mutex use, we cannot do this either in tests:
-	////
-	//// NewIterator()
-	//// t.Fatal()
-	////
-	//// This will deadlock on the defer db.Close because of outstanding
-	//// transactions that haven't been closed.
-	//i := 0
-	//bd, err := db.NewBatch(ctx)
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//keys := make([][]byte, 0, recordCount*3)
-	//for it.Next(ctx) {
-	//	keys = append(keys, append([]byte{}, it.Key(ctx)...))
+	// XXX nutsb has a huge limitation. We cannot iterate and perform
+	// actions on a WriteBatch. This is an odd decision but the net is it
+	// deadlocks the reads and writes (iterator rlocks then the del/put
+	// locks thus deadlocking).
+	//
+	// The solution must come from within nuts because there is a need to
+	// atomic read some shit and perform a write. Maybe the answer is using
+	// nutsdb.Tx.CommitWith(). Investigate this.
+	// For now use a shitty raceable non-atomic test.
+	//
+	// In addition to shity mutex use, we cannot do this either in tests:
+	//
+	// NewIterator()
+	// t.Fatal()
+	//
+	// This will deadlock on the defer db.Close because of outstanding
+	// transactions that haven't been closed.
+	i := 0
+	bd, err := db.NewBatch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for it.Next(ctx) {
+		key := append([]byte{}, it.Key(ctx)...)
+		// XXX can't do this with nutsdb
+		bd.Del(ctx, table, key)
+		i++
+	}
+	if i != recordCount*3 {
+		t.Fatalf("invalid record count got %v, wanted %v", i, recordCount*3)
+	}
 
-	//	// XXX can't do this with nutsdb
-	//	bd.Del(ctx, table, key)
-	//	i++
-	//}
-	//if i != recordCount*3 {
-	//	t.Fatalf("invalid record count got %v, wanted %v", i, recordCount*3)
-	//}
+	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, b)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	//// Close iterator so that we don't block
-	//err = it.Close(ctx)
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
+	// Close iterator so that we don't block
+	err = it.Close(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
