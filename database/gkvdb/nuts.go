@@ -324,8 +324,11 @@ func (ni *nutsIterator) Value(_ context.Context) []byte {
 	return v
 }
 
-func (ni *nutsIterator) Close(ctx context.Context) error {
-	return ni.tx.Commit(ctx)
+func (ni *nutsIterator) Close(ctx context.Context) {
+	err := ni.tx.Commit(ctx)
+	if err != nil {
+		log.Errorf("iterator close: %v", err)
+	}
 }
 
 // Ranges
@@ -381,8 +384,11 @@ func (nr *nutsRange) Value(ctx context.Context) []byte {
 	return value
 }
 
-func (nr *nutsRange) Close(ctx context.Context) error {
-	return nr.tx.Commit(ctx)
+func (nr *nutsRange) Close(ctx context.Context) {
+	err := nr.tx.Commit(ctx)
+	if err != nil {
+		log.Errorf("range close: %v", err)
+	}
 }
 
 // Batches

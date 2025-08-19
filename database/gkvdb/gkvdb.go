@@ -134,9 +134,7 @@ type Batch interface {
 // functionality. It is NOT concurrency safe and there are no guarantees about
 // the life-cycle of the returned key and value outside of the iterator or even
 // upon a seek type operation. It is wise to make a copy of key/value for use
-// outside the iterator loop. Close must be called upon completions since it
-// lives inside a read-only database transaction and thus may prevent the
-// program from exiting.
+// outside the iterator loop. Close must be called upon completion.
 //
 // Next is special as in that on first use it returns the first record.
 //
@@ -161,7 +159,7 @@ type Iterator interface {
 	Key(ctx context.Context) []byte
 	Value(ctx context.Context) []byte
 
-	Close(ctx context.Context) error
+	Close(ctx context.Context)
 }
 
 // Range
@@ -195,5 +193,5 @@ type Range interface {
 	Key(ctx context.Context) []byte
 	Value(ctx context.Context) []byte
 
-	Close(ctx context.Context) error
+	Close(ctx context.Context)
 }

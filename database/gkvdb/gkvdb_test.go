@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -594,10 +595,7 @@ func dbIterate(ctx context.Context, db Database, table string, recordCount int) 
 		i++
 	}
 	defer func() {
-		err = it1.Close(ctx)
-		if err != nil {
-			panic(err)
-		}
+		it1.Close(ctx)
 	}()
 
 	// Verify that Next returns the Next record after a seek.
@@ -606,10 +604,7 @@ func dbIterate(ctx context.Context, db Database, table string, recordCount int) 
 		return err
 	}
 	defer func() {
-		err = it2.Close(ctx)
-		if err != nil {
-			panic(err)
-		}
+		it2.Close(ctx)
 	}()
 
 	if !it2.Seek(ctx, []byte{1}) {
@@ -647,8 +642,8 @@ func TestRange(t *testing.T) {
 
 	table := "users"
 	tables := []string{table}
-	cfg := DefaultNutsConfig(home, tables)
-	db, err := NewNutsDB(cfg)
+	cfg := DefaultLevelConfig(home, tables)
+	db, err := NewLevelDB(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -700,23 +695,21 @@ func TestRange(t *testing.T) {
 	var start [8]byte
 	var end [8]byte
 	copy(start[:], []byte(fmt.Sprintf("user%04v", 0)))
-	copy(end[:], []byte(fmt.Sprintf("user%04v", recordCount-1)))
+	copy(end[:], []byte(fmt.Sprintf("user%04v", recordCount)))
 
 	it, err := db.NewRange(ctx, table, start[:], end[:])
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		err = it.Close(ctx)
-		if err != nil {
-			panic(err)
-		}
+		it.Close(ctx)
 	}()
 	i := 0
 	for it.Next(ctx) {
 		expectedKey := []byte(fmt.Sprintf("user%04d", i))
 		if !bytes.Equal(it.Key(ctx), expectedKey) {
-			t.Fatalf("invalid key got %x wanted %x", it.Key(ctx), expectedKey)
+			t.Fatalf("invalid key got %v wanted %v",
+				spew.Sdump(it.Key(ctx)), spew.Sdump(expectedKey))
 		}
 		expectedValue := make([]byte, len(expectedKey)*2)
 		copy(expectedValue[len(expectedKey):], expectedKey)
@@ -922,8 +915,7 @@ func TestBatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Read everything back and create two batches. One that will be
-	// canceled and one that deletes all keys.
+	// Read everything back and create a batch to delete all keys.
 	it, err := db.NewIterator(ctx, table)
 	if err != nil {
 		t.Fatal(err)
@@ -969,8 +961,5 @@ func TestBatch(t *testing.T) {
 	}
 
 	// Close iterator so that we don't block
-	err = it.Close(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	it.Close(ctx)
 }
