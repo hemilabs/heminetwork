@@ -1477,315 +1477,315 @@ func processKeystones(block *btcutil.Block, direction int, kssCache map[chainhas
 	return nil
 }
 
-// indexKeystonesInBlocks indexes txs from the last processed block until the
-// provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it processed.
-func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Keystone) (int, *HashHeight, error) {
-	log.Tracef("indexKeystonesInBlocks")
-	defer log.Tracef("indexKeystonesInBlocks exit")
-
-	// indicates if we have processed endHash and thus have hit the exit
-	// condition.
-	var last *HashHeight
-
-	// Find start hash
-	keystoneHH, err := s.KeystoneIndexHash(ctx)
-	if err != nil {
-		return 0, last, fmt.Errorf("keystone index hash: %w", err)
-	}
-
-	// If we have a real block move forward to the next block since we
-	// already indexed the last block.
-	hh := keystoneHH
-	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
-		if err != nil {
-			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
-		}
-	} else {
-		// Keystone indexer is special, override genesis.
-		hh = s.hemiGenesis
-	}
-
-	keystonesPercentage := 95 // flush cache at >95% capacity
-	blocksProcessed := 0
-	for {
-		log.Debugf("indexing keystones: %v", hh)
-
-		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
-		if err != nil {
-			return 0, last, err
-		}
-
-		// Index block
-		err = processKeystones(b, 1, kss)
-		if err != nil {
-			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
-		}
-
-		blocksProcessed++
-
-		// Try not to overshoot the cache to prevent costly allocations
-		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
-		if bh.Height%10000 == 0 || cp > keystonesPercentage || blocksProcessed == 1 {
-			log.Infof("Keystone indexer: %v keystone cache %v%%", hh, cp)
-		}
-
-		if cp > keystonesPercentage {
-			// Set keystonesMax to the largest keystone capacity seen
-			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
-			last = hh
-			// Flush
-			break
-		}
-
-		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hh.Hash) {
-			last = hh
-			break
-		}
-
-		// Move to next block
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
-		if err != nil {
-			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
-		}
-	}
-
-	return blocksProcessed, last, nil
-}
-
-// unindexKeystonesInBlocks unindexes keystones from the last processed block
-// until the provided end hash, inclusive. It returns the number of blocks
-// processed and the last hash it processed.
-func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Keystone) (int, *HashHeight, error) {
-	log.Tracef("unindexKeystonesInBlocks")
-	defer log.Tracef("unindexKeystonesInBlocks exit")
-
-	// indicates if we have processed endHash and thus have hit the exit
-	// condition.
-	var last *HashHeight
-
-	// Find start hash
-	ksHH, err := s.KeystoneIndexHash(ctx)
-	if err != nil {
-		return 0, last, fmt.Errorf("keystone index hash: %w", err)
-	}
-
-	kssPercentage := 95 // flush cache at >95% capacity
-	blocksProcessed := 0
-	hh := ksHH
-	for {
-		log.Debugf("unindexing keystones: %v", hh)
-
-		hash := hh.Hash
-
-		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
-			last = hh
-			break
-		}
-
-		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
-		if err != nil {
-			return 0, last, err
-		}
-
-		err = processKeystones(b, -1, kss)
-		if err != nil {
-			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
-		}
-
-		blocksProcessed++
-
-		// Try not to overshoot the cache to prevent costly allocations
-		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
-		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
-			log.Infof("Keystone unindexer: %v keystone cache %v%%", hh, cp)
-		}
-
-		// Move to previous block
-		height := bh.Height - 1
-		pbh, err := s.db.BlockHeaderByHash(ctx, *bh.ParentHash())
-		if err != nil {
-			return 0, last, fmt.Errorf("block headers by height %v: %w",
-				height, err)
-		}
-		hh.Hash = *pbh.BlockHash()
-		hh.Height = pbh.Height
-
-		// We check overflow AFTER obtaining the previous hash so that
-		// we can update the database with the LAST processed block.
-		if cp > kssPercentage {
-			// Set kssMax to the largest keystone capacity seen
-			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
-			last = hh
-			// Flush
-			break
-		}
-	}
-
-	return blocksProcessed, last, nil
-}
-
-func (s *Server) keystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("keystoneIndexerUnwind")
-	defer log.Tracef("keystoneIndexerUnwind exit")
-
-	// XXX dedup with keystoneIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
-
-	s.mtx.Lock()
-	if !s.indexing {
-		// XXX this prob should be an error but pusnish bad callers for now
-		s.mtx.Unlock()
-		panic("keystoneIndexerUnwind indexing not true")
-	}
-	s.mtx.Unlock()
-	// Allocate here so that we don't waste space when not indexing.
-	kss := make(map[chainhash.Hash]tbcd.Keystone, s.cfg.MaxCachedKeystones)
-	defer clear(kss)
-
-	log.Infof("Start unwinding keystones at hash %v height %v", startBH, startBH.Height)
-	log.Infof("End unwinding keystones at hash %v height %v", endBH, endBH.Height)
-	endHash := endBH.BlockHash()
-	for {
-		start := time.Now()
-		blocksProcessed, last, err := s.unindexKeystonesInBlocks(ctx, endHash, kss)
-		if err != nil {
-			return fmt.Errorf("unindex keystones in blocks: %w", err)
-		}
-		if blocksProcessed == 0 {
-			return nil
-		}
-		kssCached := len(kss)
-		log.Infof("Keystone unwinder blocks processed %v in %v keystones cached %v cache unused %v avg keystone/blk %v",
-			blocksProcessed, time.Since(start), kssCached,
-			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
-
-		// Flush to disk
-		start = time.Now()
-		if err = s.db.BlockKeystoneUpdate(ctx, -1, kss, last.Hash); err != nil {
-			return fmt.Errorf("block keystone update: %w", err)
-		}
-		// leveldb does all kinds of allocations, force GC to lower
-		// memory pressure.
-		logMemStats()
-		runtime.GC()
-
-		log.Infof("Flushing unwind keystones complete %v took %v",
-			kssCached, time.Since(start))
-
-		if endHash.IsEqual(&last.Hash) {
-			break
-		}
-	}
-	return nil
-}
-
-func (s *Server) keystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("keystoneIndexerWind")
-	defer log.Tracef("keystoneIndexerWind exit")
-
-	s.mtx.Lock()
-	if !s.indexing {
-		// XXX this prob should be an error but pusnish bad callers for now
-		s.mtx.Unlock()
-		panic("keystoneIndexerWind not true")
-	}
-	s.mtx.Unlock()
-
-	// Allocate here so that we don't waste space when not indexing.
-	kss := make(map[chainhash.Hash]tbcd.Keystone, s.cfg.MaxCachedKeystones)
-	defer clear(kss)
-
-	log.Infof("Start indexing keystones at hash %v height %v", startBH, startBH.Height)
-	log.Infof("End indexing keystones at hash %v height %v", endBH, endBH.Height)
-	endHash := endBH.BlockHash()
-	for {
-		start := time.Now()
-		blocksProcessed, last, err := s.indexKeystonesInBlocks(ctx, endHash, kss)
-		if err != nil {
-			return fmt.Errorf("index blocks: %w", err)
-		}
-		if blocksProcessed == 0 {
-			return nil
-		}
-		kssCached := len(kss)
-		log.Infof("Keystone indexer blocks processed %v in %v keystones cached %v cache unused %v avg keystones/blk %v",
-			blocksProcessed, time.Since(start), kssCached,
-			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
-
-		// Flush to disk
-		start = time.Now()
-		if err = s.db.BlockKeystoneUpdate(ctx, 1, kss, last.Hash); err != nil {
-			return fmt.Errorf("block hemi update: %w", err)
-		}
-		// leveldb does all kinds of allocations, force GC to lower
-		// memory pressure.
-		logMemStats()
-		runtime.GC()
-
-		log.Infof("Flushing keystones complete %v took %v",
-			kssCached, time.Since(start))
-
-		if endHash.IsEqual(&last.Hash) {
-			break
-		}
-	}
-
-	return nil
-}
-
-func (s *Server) keystoneIndexer(ctx context.Context, endHash chainhash.Hash) error {
-	log.Tracef("keystoneIndexer")
-	defer log.Tracef("keystoneIndexer exit")
-
-	// XXX this is basically duplicate from KeystoneIndexIsLinear
-
-	if !s.cfg.HemiIndex {
-		return errors.New("disabled")
-	}
-	s.mtx.Lock()
-	if !s.indexing {
-		// XXX this prob should be an error but pusnish bad callers for now
-		s.mtx.Unlock()
-		panic("keystoneIndexer not true")
-	}
-	s.mtx.Unlock()
-
-	// Verify exit condition hash
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
-	if err != nil {
-		return fmt.Errorf("blockheader end hash: %w", err)
-	}
-
-	// Verify start point is not after the end point
-	keystoneHH, err := s.KeystoneIndexHash(ctx)
-	if err != nil {
-		return fmt.Errorf("keystone index hash: %w", err)
-	}
-
-	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, keystoneHH.Hash)
-	if err != nil {
-		return fmt.Errorf("blockheader keystone hash: %w", err)
-	}
-	direction, err := s.KeystoneIndexIsLinear(ctx, endHash)
-	if err != nil {
-		return fmt.Errorf("keystone index is linear: %w", err)
-	}
-	switch direction {
-	case 1:
-		return s.keystoneIndexerWind(ctx, startBH, endBH)
-	case -1:
-		return s.keystoneIndexerUnwind(ctx, startBH, endBH)
-	case 0:
-		// Because we call KeystoneIndexIsLinear we know it's the same block.
-		return nil
-	}
-
-	return fmt.Errorf("invalid direction: %v", direction)
-}
+//// indexKeystonesInBlocks indexes txs from the last processed block until the
+//// provided end hash, inclusive. It returns the number of blocks processed and
+//// the last hash it processed.
+//func (s *Server) indexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Keystone) (int, *HashHeight, error) {
+//	log.Tracef("indexKeystonesInBlocks")
+//	defer log.Tracef("indexKeystonesInBlocks exit")
+//
+//	// indicates if we have processed endHash and thus have hit the exit
+//	// condition.
+//	var last *HashHeight
+//
+//	// Find start hash
+//	keystoneHH, err := s.KeystoneIndexHash(ctx)
+//	if err != nil {
+//		return 0, last, fmt.Errorf("keystone index hash: %w", err)
+//	}
+//
+//	// If we have a real block move forward to the next block since we
+//	// already indexed the last block.
+//	hh := keystoneHH
+//	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
+//		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
+//		}
+//	} else {
+//		// Keystone indexer is special, override genesis.
+//		hh = s.hemiGenesis
+//	}
+//
+//	keystonesPercentage := 95 // flush cache at >95% capacity
+//	blocksProcessed := 0
+//	for {
+//		log.Debugf("indexing keystones: %v", hh)
+//
+//		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
+//		if err != nil {
+//			return 0, last, err
+//		}
+//
+//		// Index block
+//		err = processKeystones(b, 1, kss)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
+//		}
+//
+//		blocksProcessed++
+//
+//		// Try not to overshoot the cache to prevent costly allocations
+//		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
+//		if bh.Height%10000 == 0 || cp > keystonesPercentage || blocksProcessed == 1 {
+//			log.Infof("Keystone indexer: %v keystone cache %v%%", hh, cp)
+//		}
+//
+//		if cp > keystonesPercentage {
+//			// Set keystonesMax to the largest keystone capacity seen
+//			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
+//			last = hh
+//			// Flush
+//			break
+//		}
+//
+//		// Exit if we processed the provided end hash
+//		if endHash.IsEqual(&hh.Hash) {
+//			last = hh
+//			break
+//		}
+//
+//		// Move to next block
+//		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("keystone next block %v: %w", hh, err)
+//		}
+//	}
+//
+//	return blocksProcessed, last, nil
+//}
+//
+//// unindexKeystonesInBlocks unindexes keystones from the last processed block
+//// until the provided end hash, inclusive. It returns the number of blocks
+//// processed and the last hash it processed.
+//func (s *Server) unindexKeystonesInBlocks(ctx context.Context, endHash *chainhash.Hash, kss map[chainhash.Hash]tbcd.Keystone) (int, *HashHeight, error) {
+//	log.Tracef("unindexKeystonesInBlocks")
+//	defer log.Tracef("unindexKeystonesInBlocks exit")
+//
+//	// indicates if we have processed endHash and thus have hit the exit
+//	// condition.
+//	var last *HashHeight
+//
+//	// Find start hash
+//	ksHH, err := s.KeystoneIndexHash(ctx)
+//	if err != nil {
+//		return 0, last, fmt.Errorf("keystone index hash: %w", err)
+//	}
+//
+//	kssPercentage := 95 // flush cache at >95% capacity
+//	blocksProcessed := 0
+//	hh := ksHH
+//	for {
+//		log.Debugf("unindexing keystones: %v", hh)
+//
+//		hash := hh.Hash
+//
+//		// Exit if we processed the provided end hash
+//		if endHash.IsEqual(&hash) {
+//			last = hh
+//			break
+//		}
+//
+//		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
+//		if err != nil {
+//			return 0, last, err
+//		}
+//
+//		err = processKeystones(b, -1, kss)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("process keystones %v: %w", hh, err)
+//		}
+//
+//		blocksProcessed++
+//
+//		// Try not to overshoot the cache to prevent costly allocations
+//		cp := len(kss) * 100 / s.cfg.MaxCachedKeystones
+//		if bh.Height%10000 == 0 || cp > kssPercentage || blocksProcessed == 1 {
+//			log.Infof("Keystone unindexer: %v keystone cache %v%%", hh, cp)
+//		}
+//
+//		// Move to previous block
+//		height := bh.Height - 1
+//		pbh, err := s.db.BlockHeaderByHash(ctx, *bh.ParentHash())
+//		if err != nil {
+//			return 0, last, fmt.Errorf("block headers by height %v: %w",
+//				height, err)
+//		}
+//		hh.Hash = *pbh.BlockHash()
+//		hh.Height = pbh.Height
+//
+//		// We check overflow AFTER obtaining the previous hash so that
+//		// we can update the database with the LAST processed block.
+//		if cp > kssPercentage {
+//			// Set kssMax to the largest keystone capacity seen
+//			s.cfg.MaxCachedKeystones = max(len(kss), s.cfg.MaxCachedKeystones)
+//			last = hh
+//			// Flush
+//			break
+//		}
+//	}
+//
+//	return blocksProcessed, last, nil
+//}
+//
+//func (s *Server) keystoneIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+//	log.Tracef("keystoneIndexerUnwind")
+//	defer log.Tracef("keystoneIndexerUnwind exit")
+//
+//	// XXX dedup with keystoneIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+//
+//	s.mtx.Lock()
+//	if !s.indexing {
+//		// XXX this prob should be an error but pusnish bad callers for now
+//		s.mtx.Unlock()
+//		panic("keystoneIndexerUnwind indexing not true")
+//	}
+//	s.mtx.Unlock()
+//	// Allocate here so that we don't waste space when not indexing.
+//	kss := make(map[chainhash.Hash]tbcd.Keystone, s.cfg.MaxCachedKeystones)
+//	defer clear(kss)
+//
+//	log.Infof("Start unwinding keystones at hash %v height %v", startBH, startBH.Height)
+//	log.Infof("End unwinding keystones at hash %v height %v", endBH, endBH.Height)
+//	endHash := endBH.BlockHash()
+//	for {
+//		start := time.Now()
+//		blocksProcessed, last, err := s.unindexKeystonesInBlocks(ctx, endHash, kss)
+//		if err != nil {
+//			return fmt.Errorf("unindex keystones in blocks: %w", err)
+//		}
+//		if blocksProcessed == 0 {
+//			return nil
+//		}
+//		kssCached := len(kss)
+//		log.Infof("Keystone unwinder blocks processed %v in %v keystones cached %v cache unused %v avg keystone/blk %v",
+//			blocksProcessed, time.Since(start), kssCached,
+//			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
+//
+//		// Flush to disk
+//		start = time.Now()
+//		if err = s.db.BlockKeystoneUpdate(ctx, -1, kss, last.Hash); err != nil {
+//			return fmt.Errorf("block keystone update: %w", err)
+//		}
+//		// leveldb does all kinds of allocations, force GC to lower
+//		// memory pressure.
+//		logMemStats()
+//		runtime.GC()
+//
+//		log.Infof("Flushing unwind keystones complete %v took %v",
+//			kssCached, time.Since(start))
+//
+//		if endHash.IsEqual(&last.Hash) {
+//			break
+//		}
+//	}
+//	return nil
+//}
+//
+//func (s *Server) keystoneIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+//	log.Tracef("keystoneIndexerWind")
+//	defer log.Tracef("keystoneIndexerWind exit")
+//
+//	s.mtx.Lock()
+//	if !s.indexing {
+//		// XXX this prob should be an error but pusnish bad callers for now
+//		s.mtx.Unlock()
+//		panic("keystoneIndexerWind not true")
+//	}
+//	s.mtx.Unlock()
+//
+//	// Allocate here so that we don't waste space when not indexing.
+//	kss := make(map[chainhash.Hash]tbcd.Keystone, s.cfg.MaxCachedKeystones)
+//	defer clear(kss)
+//
+//	log.Infof("Start indexing keystones at hash %v height %v", startBH, startBH.Height)
+//	log.Infof("End indexing keystones at hash %v height %v", endBH, endBH.Height)
+//	endHash := endBH.BlockHash()
+//	for {
+//		start := time.Now()
+//		blocksProcessed, last, err := s.indexKeystonesInBlocks(ctx, endHash, kss)
+//		if err != nil {
+//			return fmt.Errorf("index blocks: %w", err)
+//		}
+//		if blocksProcessed == 0 {
+//			return nil
+//		}
+//		kssCached := len(kss)
+//		log.Infof("Keystone indexer blocks processed %v in %v keystones cached %v cache unused %v avg keystones/blk %v",
+//			blocksProcessed, time.Since(start), kssCached,
+//			s.cfg.MaxCachedKeystones-kssCached, kssCached/blocksProcessed)
+//
+//		// Flush to disk
+//		start = time.Now()
+//		if err = s.db.BlockKeystoneUpdate(ctx, 1, kss, last.Hash); err != nil {
+//			return fmt.Errorf("block hemi update: %w", err)
+//		}
+//		// leveldb does all kinds of allocations, force GC to lower
+//		// memory pressure.
+//		logMemStats()
+//		runtime.GC()
+//
+//		log.Infof("Flushing keystones complete %v took %v",
+//			kssCached, time.Since(start))
+//
+//		if endHash.IsEqual(&last.Hash) {
+//			break
+//		}
+//	}
+//
+//	return nil
+//}
+//
+//func (s *Server) keystoneIndexer(ctx context.Context, endHash chainhash.Hash) error {
+//	log.Tracef("keystoneIndexer")
+//	defer log.Tracef("keystoneIndexer exit")
+//
+//	// XXX this is basically duplicate from KeystoneIndexIsLinear
+//
+//	if !s.cfg.HemiIndex {
+//		return errors.New("disabled")
+//	}
+//	s.mtx.Lock()
+//	if !s.indexing {
+//		// XXX this prob should be an error but pusnish bad callers for now
+//		s.mtx.Unlock()
+//		panic("keystoneIndexer not true")
+//	}
+//	s.mtx.Unlock()
+//
+//	// Verify exit condition hash
+//	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
+//	if err != nil {
+//		return fmt.Errorf("blockheader end hash: %w", err)
+//	}
+//
+//	// Verify start point is not after the end point
+//	keystoneHH, err := s.KeystoneIndexHash(ctx)
+//	if err != nil {
+//		return fmt.Errorf("keystone index hash: %w", err)
+//	}
+//
+//	// Make sure there is no gap between start and end or vice versa.
+//	startBH, err := s.db.BlockHeaderByHash(ctx, keystoneHH.Hash)
+//	if err != nil {
+//		return fmt.Errorf("blockheader keystone hash: %w", err)
+//	}
+//	direction, err := s.KeystoneIndexIsLinear(ctx, endHash)
+//	if err != nil {
+//		return fmt.Errorf("keystone index is linear: %w", err)
+//	}
+//	switch direction {
+//	case 1:
+//		return s.keystoneIndexerWind(ctx, startBH, endBH)
+//	case -1:
+//		return s.keystoneIndexerUnwind(ctx, startBH, endBH)
+//	case 0:
+//		// Because we call KeystoneIndexIsLinear we know it's the same block.
+//		return nil
+//	}
+//
+//	return fmt.Errorf("invalid direction: %v", direction)
+//}
 
 func (s *Server) UtxoIndexIsLinear(ctx context.Context, endHash chainhash.Hash) (int, error) {
 	log.Tracef("UtxoIndexIsLinear")
@@ -1929,7 +1929,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 
 	// Hemi indexes
 	if s.cfg.HemiIndex {
-		if err := s.keystoneIndexer(ctx, hash); err != nil {
+		if err := s.newKeystoneIndexer().modeIndexer(ctx, hash); err != nil {
 			return fmt.Errorf("keystone indexer: %w", err)
 		}
 	}
@@ -2016,33 +2016,32 @@ func (s *Server) keystoneIndexersToBest(ctx context.Context, bhb *tbcd.BlockHead
 	log.Tracef("keystoneIndexersToBest")
 	defer log.Tracef("keystoneIndexersToBest exit")
 
-	// Index keystones to best
-	keystoneHH, err := s.KeystoneIndexHash(ctx)
-	if err != nil {
-		return fmt.Errorf("keystone index hash: %w", err)
-	}
-	keystoneBH, err := s.db.BlockHeaderByHash(ctx, keystoneHH.Hash)
-	if err != nil {
-		return err
-	}
-	cp, err := s.findCanonicalParent(ctx, keystoneBH)
-	if err != nil {
-		return err
-	}
-	if !cp.Hash.IsEqual(&keystoneBH.Hash) {
-		log.Infof("Syncing keystone index to: %v from: %v via: %v",
-			bhb.HH(), keystoneBH.HH(), cp.HH())
-		// keystoneBH is NOT on canonical chain, unwind first
-		if err := s.keystoneIndexer(ctx, cp.Hash); err != nil {
-			return fmt.Errorf("keystone indexer unwind: %w", err)
-		}
-	}
-	// Index keystones to best block
-	if err := s.keystoneIndexer(ctx, bhb.Hash); err != nil {
-		return fmt.Errorf("keystone indexer: %w", err)
-	}
-
-	return nil
+	return s.newKeystoneIndexer().modeIndexersToBest(ctx, bhb)
+	//// Index keystones to best
+	//keystoneHH, err := s.KeystoneIndexHash(ctx)
+	//if err != nil {
+	//	return fmt.Errorf("keystone index hash: %w", err)
+	//}
+	//keystoneBH, err := s.db.BlockHeaderByHash(ctx, keystoneHH.Hash)
+	//if err != nil {
+	//	return err
+	//}
+	//cp, err := s.findCanonicalParent(ctx, keystoneBH)
+	//if err != nil {
+	//	return err
+	//}
+	//if !cp.Hash.IsEqual(&keystoneBH.Hash) {
+	//	log.Infof("Syncing keystone index to: %v from: %v via: %v",
+	//		bhb.HH(), keystoneBH.HH(), cp.HH())
+	//	// keystoneBH is NOT on canonical chain, unwind first
+	//	if err := s.keystoneIndexer(ctx, cp.Hash); err != nil {
+	//		return fmt.Errorf("keystone indexer unwind: %w", err)
+	//	}
+	//}
+	//// Index keystones to best block
+	//if err := s.keystoneIndexer(ctx, bhb.Hash); err != nil {
+	//	return fmt.Errorf("keystone indexer: %w", err)
+	//}
 }
 
 func (s *Server) syncIndexersToBest(ctx context.Context) error {
