@@ -3,10 +3,10 @@ package db
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 var _ Database = (*levelDB)(nil)
@@ -81,5 +81,10 @@ func (b *levelDB) Put(_ context.Context, table string, key, value []byte) error 
 }
 
 func (b *levelDB) Last(ctx context.Context, table string) ([]byte, []byte, error) {
-	return nil, nil, fmt.Errorf("not yet")
+	it := b.db.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
+	defer it.Release()
+	if it.Last() {
+		return it.Key(), it.Value(), nil
+	}
+	return nil, nil, ErrKeyNotFound
 }

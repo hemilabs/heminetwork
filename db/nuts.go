@@ -197,18 +197,18 @@ func (b *nutsDB) Last(ctx context.Context, table string) ([]byte, []byte, error)
 	return key, value, nil
 }
 
-func (b *nutsDB) All(ctx context.Context, table string) {
-	b.db.View(func(tx *nutsdb.Tx) error {
-		k, v, err := tx.GetAll(table)
-		if err != nil {
-			panic(err)
-		}
-		for x := range v {
-			log.Infof("%v: %x", x, k[x])
-		}
-		return nil
-	})
-}
+//func (b *nutsDB) All(ctx context.Context, table string) {
+//	b.db.View(func(tx *nutsdb.Tx) error {
+//		k, v, err := tx.GetAll(table)
+//		if err != nil {
+//			panic(err)
+//		}
+//		for x := range v {
+//			log.Infof("%v: %x", x, k[x])
+//		}
+//		return nil
+//	})
+//}
 
 //	func (b *nutsDB) View(ctx context.Context, callback func(ctx context.Context, tx *Transaction) error) error {
 //		itx, err := b.db.Begin(false)

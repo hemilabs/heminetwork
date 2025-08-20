@@ -113,19 +113,19 @@ func _main() error {
 			return err
 		}
 
-	// case "badger-direct":
-	//	cfg := db.DefaultBadgerConfig(home)
-	//	ddb, err = db.NewBadgerDB(cfg)
-	//	if err != nil {
-	//		return err
-	//	}
+		// case "badger-direct":
+		//	cfg := db.DefaultBadgerConfig(home)
+		//	ddb, err = db.NewBadgerDB(cfg)
+		//	if err != nil {
+		//		return err
+		//	}
 
-	// case "level-direct":
-	//	cfg := db.DefaultLevelConfig(home)
-	//	ddb, err = db.NewLevelDB(cfg)
-	//	if err != nil {
-	//		return err
-	//	}
+	case "level-direct":
+		cfg := db.DefaultLevelConfig(home)
+		ddb, err = db.NewLevelDB(cfg)
+		if err != nil {
+			return err
+		}
 
 	// case "pebble-direct":
 	//	cfg := db.DefaultPebbleConfig(home)
