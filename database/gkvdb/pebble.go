@@ -170,6 +170,10 @@ func (b *pebbleDB) NewIterator(ctx context.Context, table string) (Iterator, err
 	if err != nil {
 		return nil, err
 	}
+
+	// set iterator to before first value
+	iter.SeekLT([]byte{})
+
 	return &pebbleIterator{
 		table: table,
 		it:    iter,
@@ -187,6 +191,10 @@ func (b *pebbleDB) NewRange(ctx context.Context, table string, start, end []byte
 	if err != nil {
 		return nil, err
 	}
+
+	// set iterator to before first value
+	iter.SeekLT([]byte{})
+
 	return &pebbleRange{
 		table: table,
 		it:    iter,
@@ -275,6 +283,7 @@ type pebbleIterator struct {
 	it    *pebble.Iterator
 }
 
+// This has to be called prior to iterating
 func (ni *pebbleIterator) First(_ context.Context) bool {
 	return ni.it.First()
 }

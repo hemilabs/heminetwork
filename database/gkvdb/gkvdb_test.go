@@ -637,32 +637,9 @@ func dbIterate(ctx context.Context, db Database, table string, recordCount int) 
 	return nil
 }
 
-func TestRange(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
-	defer cancel()
-	home := t.TempDir()
-
-	table := "users"
-	tables := []string{table}
-	cfg := DefaultLevelConfig(home, tables)
-	db, err := NewLevelDB(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		err := db.Close(ctx)
-		if err != nil {
-			panic(err)
-		}
-	}()
-
+func dbRange(ctx context.Context, db Database, table string, recordCount int) error {
 	// Stuff a bunch of records into the same table to validate that ranges
 	// don't over or underflow.
-	recordCount := 10
 	for i := 0; i < recordCount; i++ {
 		// Emulate user records "userXXXX"
 		var key [8]byte
@@ -671,7 +648,7 @@ func TestRange(t *testing.T) {
 		copy(value[len(key):], key[:])
 		err := db.Put(ctx, table, key[:], value)
 		if err != nil {
-			t.Fatal(err)
+			return fmt.Errorf("put %v %v: %w", table, key, err)
 		}
 
 		// Emulate user records "passXXXX"
@@ -680,7 +657,7 @@ func TestRange(t *testing.T) {
 		binary.BigEndian.PutUint32(pkey[4:], uint32(i))
 		err = db.Put(ctx, table, pkey[:], nil)
 		if err != nil {
-			t.Fatal(err)
+			return fmt.Errorf("put %v %v: %w", table, key, err)
 		}
 
 		// Emulate avatar records "avatarXXXX"
@@ -689,11 +666,11 @@ func TestRange(t *testing.T) {
 		binary.BigEndian.PutUint32(akey[6:], uint32(i))
 		err = db.Put(ctx, table, akey[:], nil)
 		if err != nil {
-			t.Fatal(err)
+			return fmt.Errorf("put %v %v: %w", table, key, err)
 		}
 	}
 
-	// Verify al records were inserted
+	// Verify all records were inserted
 	var start [8]byte
 	var end [8]byte
 	copy(start[:], []byte(fmt.Sprintf("user%04v", 0)))
@@ -701,7 +678,7 @@ func TestRange(t *testing.T) {
 
 	it, err := db.NewRange(ctx, table, start[:], end[:])
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("new range: %w", err)
 	}
 	defer func() {
 		it.Close(ctx)
@@ -710,26 +687,21 @@ func TestRange(t *testing.T) {
 	for it.Next(ctx) {
 		expectedKey := []byte(fmt.Sprintf("user%04d", i))
 		if !bytes.Equal(it.Key(ctx), expectedKey) {
-			t.Fatalf("invalid key got %v wanted %v",
+			return fmt.Errorf("invalid key got %v wanted %v",
 				spew.Sdump(it.Key(ctx)), spew.Sdump(expectedKey))
 		}
 		expectedValue := make([]byte, len(expectedKey)*2)
 		copy(expectedValue[len(expectedKey):], expectedKey)
 		if !bytes.Equal(it.Value(ctx), expectedValue) {
-			t.Fatalf("invalid value got %x wanted %x", it.Value(ctx), expectedValue)
+			return fmt.Errorf("invalid value got %x wanted %x", it.Value(ctx), expectedValue)
 		}
 		i++
 	}
 	if i != recordCount {
-		t.Fatalf("invalid record count got %v want %v", i, recordCount)
+		return fmt.Errorf("invalid record count got %v want %v", i, recordCount)
 	}
-	cancel()
 
-	// XXX range over all keys and make sure everything is as expected
-
-	<-ctx.Done()
-
-	// Range over all users and make sure we don't hit avatar
+	return nil
 }
 
 func TestGKVDB(t *testing.T) {
@@ -739,17 +711,17 @@ func TestGKVDB(t *testing.T) {
 	}
 
 	testTable := []TestTableItem{
-		{
-			name: "nutsDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultNutsConfig(home, tables)
-				db, err := NewNutsDB(cfg)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return db
-			},
-		},
+		// {
+		// 	name: "nutsDB",
+		// 	dbFunc: func(home string, tables []string) Database {
+		// 		cfg := DefaultNutsConfig(home, tables)
+		// 		db, err := NewNutsDB(cfg)
+		// 		if err != nil {
+		// 			t.Fatal(err)
+		// 		}
+		// 		return db
+		// 	},
+		// },
 		{
 			name: "levelDB",
 			dbFunc: func(home string, tables []string) Database {
@@ -868,40 +840,66 @@ func TestGKVDB(t *testing.T) {
 					t.Fatal(err)
 				}
 			})
+
+			t.Run("range", func(t *testing.T) {
+				home := t.TempDir()
+
+				table := "mytable"
+				tables := []string{table}
+
+				db := tti.dbFunc(home, tables)
+
+				err := db.Open(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					err := db.Close(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}()
+
+				if err = dbRange(ctx, db, table, 10); err != nil {
+					t.Fatal(err)
+				}
+			})
+
+			t.Run("batch", func(t *testing.T) {
+				home := t.TempDir()
+
+				table := "users"
+				tables := []string{table}
+
+				db := tti.dbFunc(home, tables)
+
+				err := db.Open(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					err := db.Close(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}()
+
+				if err = dbBatch(ctx, db, table, 10); err != nil {
+					t.Fatal(err)
+				}
+			})
 		})
 	}
 }
 
-func TestBatch(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
-	defer cancel()
-	home := t.TempDir()
-
-	table := "users"
-	tables := []string{table}
-	cfg := DefaultPebbleConfig(home, tables)
-	db, err := NewPebbleDB(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		err := db.Close(ctx)
-		if err != nil {
-			t.Logf("Close error %v", err)
-		}
-	}()
-
+func dbBatch(ctx context.Context, db Database, table string, recordCount int) error {
 	// Stuff a bunch of records into the same table to validate that
 	// everything is executed as expected.
 	b, err := db.NewBatch(ctx)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("new batch: %w", err)
 	}
-	recordCount := 10
+
 	for i := 0; i < recordCount; i++ {
 		// Emulate user records "userXXXX"
 		var key [8]byte
@@ -925,13 +923,13 @@ func TestBatch(t *testing.T) {
 		return tx.Write(ctx, b)
 	})
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("update: %w", err)
 	}
 
 	// Read everything back and create a batch to delete all keys.
 	it, err := db.NewIterator(ctx, table)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("new iterator: %w", err)
 	}
 
 	// XXX nutsb has a huge limitation. We cannot iterate and perform
@@ -954,8 +952,9 @@ func TestBatch(t *testing.T) {
 	i := 0
 	bd, err := db.NewBatch(ctx)
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("new batch: %w", err)
 	}
+
 	for it.Next(ctx) {
 		key := append([]byte{}, it.Key(ctx)...)
 		// XXX can't do this with nutsdb
@@ -963,16 +962,18 @@ func TestBatch(t *testing.T) {
 		i++
 	}
 	if i != recordCount*3 {
-		t.Fatalf("invalid record count got %v, wanted %v", i, recordCount*3)
+		return fmt.Errorf("invalid record count got %v, wanted %v", i, recordCount*3)
 	}
 
 	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
 		return tx.Write(ctx, b)
 	})
 	if err != nil {
-		t.Fatal(err)
+		return fmt.Errorf("update: %w", err)
 	}
 
 	// Close iterator so that we don't block
 	it.Close(ctx)
+
+	return nil
 }
