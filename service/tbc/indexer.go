@@ -44,7 +44,8 @@ type indexer struct {
 
 	blockHeaderByModeIndex func(context.Context) (*tbcd.BlockHeader, error)
 	blockModeUpdate        func(context.Context, int, any, chainhash.Hash) error
-	processMode            func(*btcutil.Block, int, any) error
+	processMode            func(context.Context, *btcutil.Block, int, any) error
+	fixupCache             func(context.Context, *btcutil.Block, any) error
 }
 
 func (i *indexer) String() string {
@@ -62,6 +63,61 @@ func (i *indexer) String() string {
 //
 //	return i.modeIndexersToBest(ctx, nil) // XXX
 //}
+
+func (s *Server) newUtxoIndexer() *indexer {
+	i := &indexer{
+		indexer:                "utxo",
+		s:                      s,
+		enabled:                true,
+		maxCachedEntries:       s.cfg.MaxCachedTxs,
+		allocateEntries:        allocateCacheUtxos,
+		lenEntries:             lenCacheUtxos,
+		clearEntries:           clearCacheUtxos,
+		blockHeaderByModeIndex: s.db.BlockHeaderByUtxoIndex,
+	}
+	i.blockModeUpdate = i.blockUtxoUpdate // XXX double eew
+	i.processMode = i.processUtxos        // XXX double eew
+	i.fixupCache = i.fixupUtxos           // XXX double eew
+	return i
+}
+
+// allocateCacheUtxos allocates cahe for the txs
+func allocateCacheUtxos(maxCachedEntries int) any {
+	return make(map[tbcd.Outpoint]tbcd.CacheOutput, maxCachedEntries)
+}
+
+// lenCacheUtxos returns the entry count in the tx cache.
+func lenCacheUtxos(cache any) int {
+	return len(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+}
+
+// clearCacheUtxos empties cached txs to lower memory pressure.
+func clearCacheUtxos(cache any) {
+	clear(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+}
+
+// blockUtxoUpdate calls the database update method
+func (i *indexer) blockUtxoUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
+	return i.s.db.BlockUtxoUpdate(ctx, direction,
+		cache.(map[tbcd.Outpoint]tbcd.CacheOutput), modeIndexHash)
+}
+
+func (i *indexer) unprocessUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
+	return i.s.unprocessUtxos(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+}
+
+// processUtxo walks a block and peels out the relevant keystones that
+// will be stored in the database.
+func (i *indexer) processUtxos(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+	if direction == -1 {
+		return i.unprocessUtxos(ctx, block, cache)
+	}
+	return processUtxos(block, direction, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+}
+
+func (i *indexer) fixupUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
+	return i.s.fixupCache(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+}
 
 func (s *Server) newTxIndexer() *indexer {
 	i := &indexer{
@@ -102,7 +158,7 @@ func (i *indexer) blockTxUpdate(ctx context.Context, direction int, cache any, m
 
 // processTx walks a block and peels out the relevant keystones that
 // will be stored in the database.
-func (i indexer) processTxs(block *btcutil.Block, direction int, cache any) error {
+func (i *indexer) processTxs(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
 	return processTxs(block, direction, cache.(map[tbcd.TxKey]*tbcd.TxValue))
 }
 
@@ -140,7 +196,7 @@ func clearCacheKeystones(cache any) {
 
 // processKeystones walks a block and peels out the relevant keystones that
 // will be stored in the database.
-func (i indexer) processKeystones(block *btcutil.Block, direction int, cache any) error {
+func (i *indexer) processKeystones(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
 	return processKeystones(block, direction, cache.(map[chainhash.Hash]tbcd.Keystone))
 }
 
@@ -419,8 +475,15 @@ func (i *indexer) indexModeInBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, err
 		}
 
+		if i.fixupCache != nil {
+			err = i.fixupCache(ctx, b, cache)
+			if err != nil {
+				return 0, last, fmt.Errorf("process %v fixup %v: %w",
+					i, hh, err)
+			}
+		}
 		// Index block
-		err = i.processMode(b, 1, cache)
+		err = i.processMode(ctx, b, 1, cache)
 		if err != nil {
 			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
 		}
@@ -494,7 +557,7 @@ func (i *indexer) unindexModeInBlocks(ctx context.Context, endHash *chainhash.Ha
 			return 0, last, err
 		}
 
-		err = i.processMode(b, -1, cache)
+		err = i.processMode(ctx, b, -1, cache)
 		if err != nil {
 			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
 		}
