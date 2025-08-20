@@ -355,11 +355,15 @@ type pebbleBatch struct {
 }
 
 func (nb *pebbleBatch) Del(ctx context.Context, table string, key []byte) {
-	nb.wb.Delete(NewCompositeKey(table, key), nil)
+	if err := nb.wb.Delete(NewCompositeKey(table, key), nil); err != nil {
+		log.Errorf("delete %v: %v", table, key)
+	}
 }
 
 func (nb *pebbleBatch) Put(ctx context.Context, table string, key, value []byte) {
-	nb.wb.Set(NewCompositeKey(table, key), value, nil)
+	if err := nb.wb.Set(NewCompositeKey(table, key), value, nil); err != nil {
+		log.Errorf("set %v: %v %v", table, key, value)
+	}
 }
 
 func (nb *pebbleBatch) Reset(ctx context.Context) {
