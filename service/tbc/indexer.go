@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package tbc
 
 import (
@@ -7,19 +11,20 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
-type indexMode int
-
-const (
-	indexUtxos indexMode = iota
-	indexTxs
-	indexKeystones
-)
+//type indexMode int
+//
+//const (
+//	indexUtxos indexMode = iota
+//	indexTxs
+//	indexKeystones
+//)
 
 // indexer is a collection of function pointers and constants that abstract the
 // nearly identical index functions.
@@ -32,27 +37,31 @@ type indexer struct {
 	s                *Server
 	enabled          bool          // Index allowed to run, e.g. cfg.HemiIndex
 	maxCachedEntries int           // Max index size, e.g. cfg.MaxCachedKeystones
-	allocateEntries  func(int) any // allocate cache
+	genesis          *HashHeight   // Genesis override
+	allocateEntries  func(int) any // Allocate a cache
+	lenEntries       func(any) int // Return actual used cache entries
+	clearEntries     func(any)     // Delete all items in cache
 
 	blockHeaderByModeIndex func(context.Context) (*tbcd.BlockHeader, error)
 	blockModeUpdate        func(context.Context, int, any, chainhash.Hash) error
+	processMode            func(*btcutil.Block, int, any) error
 }
 
 func (i *indexer) String() string {
 	return i.indexer
 }
 
-func (s *Server) index(ctx context.Context, mode indexMode) error {
-	var i *indexer
-	switch mode {
-	case indexKeystones:
-		i = s.newKeystoneIndexer()
-	default:
-		return fmt.Errorf("unsuported indexer: %v", mode)
-	}
-
-	return i.modeIndexersToBest(ctx, nil) // XXX
-}
+//func (s *Server) indexToBest(ctx context.Context, mode indexMode) error {
+//	var i *indexer
+//	switch mode {
+//	case indexKeystones:
+//		i = s.newKeystoneIndexer()
+//	default:
+//		return fmt.Errorf("unsuported indexer: %v", mode)
+//	}
+//
+//	return i.modeIndexersToBest(ctx, nil) // XXX
+//}
 
 func (s *Server) newKeystoneIndexer() *indexer {
 	i := &indexer{
@@ -60,10 +69,14 @@ func (s *Server) newKeystoneIndexer() *indexer {
 		s:                      s,
 		enabled:                s.cfg.HemiIndex,
 		maxCachedEntries:       s.cfg.MaxCachedKeystones,
+		genesis:                s.hemiGenesis,
 		allocateEntries:        allocateCacheKeystones,
+		lenEntries:             lenCacheKeystones,
+		clearEntries:           clearCacheKeystones,
 		blockHeaderByModeIndex: s.db.BlockHeaderByKeystoneIndex,
 	}
 	i.blockModeUpdate = i.blockKeystoneUpdate // XXX double eew
+	i.processMode = i.processKeystones        // XXX double eew
 	return i
 }
 
@@ -88,10 +101,26 @@ func allocateCacheKeystones(maxCachedEntries int) any {
 	return make(map[chainhash.Hash]tbcd.Keystone, maxCachedEntries)
 }
 
+// lenCacheKeystones returns the entry count in the keystone cache.
+func lenCacheKeystones(cache any) int {
+	return len(cache.(map[chainhash.Hash]tbcd.Keystone))
+}
+
+// clearCacheKeystones empties cached keystones to lower memory pressure.
+func clearCacheKeystones(cache any) {
+	clear(cache.(map[chainhash.Hash]tbcd.Keystone))
+}
+
 // blockKeystoneUpdate calls the database update method
 func (i *indexer) blockKeystoneUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
 	return i.s.db.BlockKeystoneUpdate(ctx, direction,
 		cache.(map[chainhash.Hash]tbcd.Keystone), modeIndexHash)
+}
+
+// processKeystones walks a block and peels out the relevant keystones that
+// will be stored in the database.
+func (i indexer) processKeystones(block *btcutil.Block, direction int, cache any) error {
+	return processKeystones(block, direction, cache.(map[chainhash.Hash]tbcd.Keystone))
 }
 
 // modeIndexersToBest replaces (Utxo|Tx|Keystone)IndexersToBest
@@ -210,7 +239,7 @@ func (i *indexer) modeIndexerWind(ctx context.Context, startBH, endBH *tbcd.Bloc
 	// Allocate here so that we don't waste space when not indexing.
 	// XXX the cache *really* should become a list methinks.
 	es := i.allocateEntries(i.maxCachedEntries)
-	defer clear(es.(map[any]any))
+	defer i.clearEntries(es)
 
 	log.Infof("Start indexing %vs at hash %v height %v", i, startBH, startBH.Height)
 	log.Infof("End indexing %vs at hash %v height %v", i, endBH, endBH.Height)
@@ -224,7 +253,7 @@ func (i *indexer) modeIndexerWind(ctx context.Context, startBH, endBH *tbcd.Bloc
 		if blocksProcessed == 0 {
 			return nil
 		}
-		esCached := len(es.(map[any]any)) // XXX eew
+		esCached := i.lenEntries(es)
 		log.Infof("%v indexer blocks processed %v in %v cached %v cache unused %v avg/blk %v",
 			i, blocksProcessed, time.Since(start), esCached,
 			i.maxCachedEntries-esCached, esCached/blocksProcessed)
@@ -265,7 +294,7 @@ func (i *indexer) modeIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Bl
 	i.s.mtx.Unlock()
 	// Allocate here so that we don't waste space when not indexing.
 	es := i.allocateEntries(i.maxCachedEntries)
-	defer clear(es.(map[any]any))
+	defer i.clearEntries(es)
 
 	log.Infof("Start unwinding %v at hash %v height %v", i, startBH, startBH.Height)
 	log.Infof("End unwinding %v at hash %v height %v", i, endBH, endBH.Height)
@@ -279,7 +308,7 @@ func (i *indexer) modeIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Bl
 		if blocksProcessed == 0 {
 			return nil
 		}
-		esCached := len(es.(map[any]any)) // XXX eew
+		esCached := i.lenEntries(es)
 		log.Infof("%v unwinder blocks processed %v in %v cached %v cache unused %v avg/blk %v",
 			blocksProcessed, time.Since(start), esCached,
 			i.maxCachedEntries-esCached, esCached/blocksProcessed)
@@ -302,4 +331,159 @@ func (i *indexer) modeIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Bl
 		}
 	}
 	return nil
+}
+
+// indexModeInBlocks indexes txs from the last processed block until the
+// provided end hash, inclusive. It returns the number of blocks processed and
+// the last hash it processed.
+// Replaces index(Utxos|Txs|Keystones)InBlocks
+func (i *indexer) indexModeInBlocks(ctx context.Context, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
+	log.Tracef("%v indexModeInBlocks", i)
+	defer log.Tracef("%v indexModeInBlocks exit", i)
+
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	// Find start hash
+	modeHH, err := i.modeIndexHash(ctx)
+	if err != nil {
+		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
+	}
+
+	// If we have a real block move forward to the next block since we
+	// already indexed the last block.
+	hh := modeHH
+	if !hh.Hash.IsEqual(i.s.chainParams.GenesisHash) {
+		hh, err = i.s.nextCanonicalBlockheader(ctx, endHash, hh)
+		if err != nil {
+			return 0, last, fmt.Errorf("%v next block %v: %w", i, hh, err)
+		}
+	} else {
+		// Some indexers use a different genesis, e.g. keystones
+		if i.genesis != nil {
+			hh = i.genesis
+		}
+	}
+
+	percentage := 95 // flush cache at >95% capacity
+	blocksProcessed := 0
+	for {
+		log.Debugf("indexing %vs: %v", i, hh)
+
+		bh, b, err := i.s.headerAndBlock(ctx, hh.Hash)
+		if err != nil {
+			return 0, last, err
+		}
+
+		// Index block
+		err = i.processMode(b, 1, cache)
+		if err != nil {
+			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
+		}
+
+		blocksProcessed++
+
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := i.lenEntries(cache) * 100 / i.maxCachedEntries
+		if bh.Height%10000 == 0 || cp > percentage || blocksProcessed == 1 {
+			log.Infof("%v indexer: %v cache %v%%", i, hh, cp)
+		}
+
+		if cp > percentage {
+			// Set cache to the largest capacity seen
+			i.maxCachedEntries = max(i.lenEntries(cache), i.maxCachedEntries)
+			last = hh
+			// Flush
+			break
+		}
+
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hh.Hash) {
+			last = hh
+			break
+		}
+
+		// Move to next block
+		hh, err = i.s.nextCanonicalBlockheader(ctx, endHash, hh)
+		if err != nil {
+			return 0, last, fmt.Errorf("%v next block %v: %w", i, hh, err)
+		}
+	}
+
+	return blocksProcessed, last, nil
+}
+
+// unindexModeInBlocks unindexes whatever type from the last processed block
+// until the provided end hash, inclusive. It returns the number of blocks
+// processed and the last hash it processed.
+// Replaces index(Utxos|Txs|Keystones)InBlocks
+func (i *indexer) unindexModeInBlocks(ctx context.Context, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
+	log.Tracef("%v unindexModeInBlocks", i)
+	defer log.Tracef("%v unindexModeInBlocks exit", i)
+
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	// Find start hash
+	ksHH, err := i.modeIndexHash(ctx)
+	if err != nil {
+		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
+	}
+
+	percentage := 95 // flush cache at >95% capacity
+	blocksProcessed := 0
+	hh := ksHH
+	for {
+		log.Debugf("unindexing %vs: %v", i, hh)
+
+		hash := hh.Hash
+
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
+		bh, b, err := i.s.headerAndBlock(ctx, hh.Hash)
+		if err != nil {
+			return 0, last, err
+		}
+
+		err = i.processMode(b, -1, cache)
+		if err != nil {
+			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
+		}
+
+		blocksProcessed++
+
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := i.lenEntries(cache) * 100 / i.maxCachedEntries
+		if bh.Height%10000 == 0 || cp > percentage || blocksProcessed == 1 {
+			log.Infof("%v unindexer: %v cache %v%%", i, hh, cp)
+		}
+
+		// Move to previous block
+		height := bh.Height - 1
+		pbh, err := i.s.db.BlockHeaderByHash(ctx, *bh.ParentHash())
+		if err != nil {
+			return 0, last, fmt.Errorf("block headers by height %v: %w",
+				height, err)
+		}
+		hh.Hash = *pbh.BlockHash()
+		hh.Height = pbh.Height
+
+		// We check overflow AFTER obtaining the previous hash so that
+		// we can update the database with the LAST processed block.
+		if cp > percentage {
+			// Set cache to the largest mode capacity seen
+			i.maxCachedEntries = max(i.lenEntries(cache), i.maxCachedEntries)
+			last = hh
+			// Flush
+			break
+		}
+	}
+
+	return blocksProcessed, last, nil
 }
