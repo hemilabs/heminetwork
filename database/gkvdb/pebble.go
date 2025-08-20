@@ -147,7 +147,7 @@ func (b *pebbleDB) execute(ctx context.Context, write bool, callback func(ctx co
 	err = callback(ctx, tx)
 	if err != nil {
 		if cerr := tx.Rollback(ctx); cerr != nil {
-			return fmt.Errorf("rollback %v: %w", cerr, err)
+			return fmt.Errorf("rollback %w: %w", cerr, err)
 		}
 		return err
 	}

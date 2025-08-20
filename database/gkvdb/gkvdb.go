@@ -161,7 +161,7 @@ type Iterator interface {
 }
 
 // Range
-// Range is a generic database bound iterator that only supports minimal
+// is a generic database bound iterator that only supports minimal
 // functionality. It is NOT concurrency safe and there are no guarantees about
 // the life-cycle of the returned key and value outside of the iterator or even
 // upon a seek type operation. It is wise to make a copy of key/value for use

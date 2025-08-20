@@ -179,7 +179,7 @@ func (b *nutsDB) execute(ctx context.Context, write bool, callback func(ctx cont
 	err = callback(ctx, itx)
 	if err != nil {
 		if rberr := itx.Rollback(ctx); rberr != nil {
-			return fmt.Errorf("rollback: callback: %v -> %w", err, rberr)
+			return fmt.Errorf("rollback: callback: %w -> %w", err, rberr)
 		}
 		return err
 	}
