@@ -824,7 +824,7 @@ func processKeystones(block *btcutil.Block, direction int, kssCache map[chainhas
 	return nil
 }
 
-// TxIndexIsLinear do we really want this exported?
+// XXX TxIndexIsLinear do we really want this exported? remove
 func (s *Server) TxIndexIsLinear(ctx context.Context, endHash chainhash.Hash) (int, error) {
 	log.Tracef("TxIndexIsLinear")
 	defer log.Tracef("TxIndexIsLinear exit")
