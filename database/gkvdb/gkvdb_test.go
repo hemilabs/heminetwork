@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -579,126 +578,127 @@ func dbTransactionsErrors(ctx context.Context, db Database, tables []string, ins
 	return nil
 }
 
-func dbIterate(ctx context.Context, db Database, table string, recordCount int) error {
-	for i := range recordCount {
-		err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
-		if err != nil {
-			return err
-		}
-	}
-
-	// Verify that Next returns the first record.
-	it1, err := db.NewIterator(ctx, table)
+func dbIterateNext(ctx context.Context, db Database, table string, recordCount int) error {
+	it, err := db.NewIterator(ctx, table)
 	if err != nil {
 		return err
 	}
+	defer it.Close(ctx)
+
+	// Next
 	i := 0
-	for it1.Next(ctx) {
+	for it.Next(ctx) {
+		key := it.Key(ctx)
+		val := it.Value(ctx)
+		expected := []byte{uint8(i)}
+		if !bytes.Equal(key, expected) {
+			return fmt.Errorf("next unequal key: got %v, expected %v", key, expected)
+		}
+		if !bytes.Equal(val, expected) {
+			return fmt.Errorf("next unequal value: got %v, expected %v", val, expected)
+		}
 		i++
 	}
-	defer func() {
-		it1.Close(ctx)
-	}()
 
-	// Verify that Next returns the Next record after a seek.
-	it2, err := db.NewIterator(ctx, table)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		it2.Close(ctx)
-	}()
-
-	if !it2.Seek(ctx, []byte{1}) {
-		return errors.New("seek 1")
-	}
-	if !it2.Next(ctx) {
-		return errors.New("next")
-	}
-	if !bytes.Equal(it2.Key(ctx), []byte{2}) {
-		return fmt.Errorf("not equal seek, got %v wanted %v", it2.Key(ctx), []byte{2})
-	}
-	// Verify First while here
-	if !it2.First(ctx) {
+	// First
+	if !it.First(ctx) {
 		return errors.New("first")
 	}
-	if !bytes.Equal(it2.Key(ctx), []byte{uint8(0)}) {
-		return fmt.Errorf("not equal first, got %v wanted %v", it2.Key(ctx), []byte{0})
+	key := it.Key(ctx)
+	val := it.Value(ctx)
+	expected := []byte{uint8(0)}
+	if !bytes.Equal(key, expected) {
+		return fmt.Errorf("first unequal key: got %v, expected %v", key, expected)
 	}
-	// Verify Last while here
-	if !it2.Last(ctx) {
+	if !bytes.Equal(val, expected) {
+		return fmt.Errorf("first unequal value: got %v, expected %v", val, expected)
+	}
+
+	// Last
+	if !it.Last(ctx) {
 		return errors.New("last")
 	}
-	if !bytes.Equal(it2.Key(ctx), []byte{uint8(recordCount - 1)}) {
-		return fmt.Errorf("not equal last, got %v wanted %v",
-			it2.Key(ctx), []byte{uint8(recordCount - 1)})
+	key = it.Key(ctx)
+	val = it.Value(ctx)
+	expected = []byte{uint8(recordCount - 1)}
+	if !bytes.Equal(key, expected) {
+		return fmt.Errorf("last unequal key: got %v, expected %v", key, expected)
+	}
+	if !bytes.Equal(val, expected) {
+		return fmt.Errorf("last unequal value: got %v, expected %v", val, expected)
 	}
 
 	return nil
 }
 
-func dbRange(ctx context.Context, db Database, table string, recordCount int) error {
-	// Stuff a bunch of records into the same table to validate that ranges
-	// don't over or underflow.
-	for i := 0; i < recordCount; i++ {
-		// Emulate user records "userXXXX"
-		var key [8]byte
-		copy(key[:], []byte(fmt.Sprintf("user%04v", i)))
-		value := make([]byte, len(key)*2)
-		copy(value[len(key):], key[:])
-		err := db.Put(ctx, table, key[:], value)
-		if err != nil {
-			return fmt.Errorf("put %v %v: %w", table, key, err)
-		}
-
-		// Emulate user records "passXXXX"
-		var pkey [8]byte
-		copy(pkey[:], []byte{'p', 'a', 's', 's'})
-		binary.BigEndian.PutUint32(pkey[4:], uint32(i))
-		err = db.Put(ctx, table, pkey[:], nil)
-		if err != nil {
-			return fmt.Errorf("put %v %v: %w", table, key, err)
-		}
-
-		// Emulate avatar records "avatarXXXX"
-		var akey [10]byte
-		copy(akey[:], []byte{'a', 'v', 'a', 't', 'a', 'r'})
-		binary.BigEndian.PutUint32(akey[6:], uint32(i))
-		err = db.Put(ctx, table, akey[:], nil)
-		if err != nil {
-			return fmt.Errorf("put %v %v: %w", table, key, err)
-		}
-	}
-
-	// Verify all records were inserted
-	var start [8]byte
-	var end [8]byte
-	copy(start[:], []byte(fmt.Sprintf("user%04v", 0)))
-	copy(end[:], []byte(fmt.Sprintf("user%04v", recordCount)))
-
-	it, err := db.NewRange(ctx, table, start[:], end[:])
+func dbIterateSeek(ctx context.Context, db Database, table string, recordCount int) error {
+	it, err := db.NewIterator(ctx, table)
 	if err != nil {
-		return fmt.Errorf("new range: %w", err)
+		return err
 	}
-	defer func() {
-		it.Close(ctx)
-	}()
-	i := 0
-	for it.Next(ctx) {
-		expectedKey := []byte(fmt.Sprintf("user%04d", i))
-		if !bytes.Equal(it.Key(ctx), expectedKey) {
-			return fmt.Errorf("invalid key got %v wanted %v",
-				spew.Sdump(it.Key(ctx)), spew.Sdump(expectedKey))
+	defer it.Close(ctx)
+
+	// Seek even
+	for i := range recordCount {
+		if i%2 == 0 {
+			expected := []byte{uint8(i)}
+			if !it.Seek(ctx, expected) {
+				return fmt.Errorf("seek %v", expected)
+			}
+			key := it.Key(ctx)
+			val := it.Value(ctx)
+			if !bytes.Equal(key, expected) {
+				return fmt.Errorf("seek unequal key: got %v, expected %v",
+					key, expected)
+			}
+			if !bytes.Equal(val, expected) {
+				return fmt.Errorf("seek unequal value: got %v, expected %v",
+					val, expected)
+			}
 		}
-		expectedValue := make([]byte, len(expectedKey)*2)
-		copy(expectedValue[len(expectedKey):], expectedKey)
-		if !bytes.Equal(it.Value(ctx), expectedValue) {
-			return fmt.Errorf("invalid value got %x wanted %x", it.Value(ctx), expectedValue)
-		}
-		i++
 	}
-	if i != recordCount {
-		return fmt.Errorf("invalid record count got %v want %v", i, recordCount)
+
+	// Verify that Next returns the Next record after a seek.
+	if !it.Seek(ctx, []byte{1}) {
+		return errors.New("seek 1")
+	}
+	if !it.Next(ctx) {
+		return errors.New("next")
+	}
+	if !bytes.Equal(it.Key(ctx), []byte{2}) {
+		return fmt.Errorf("not equal seek, got %v wanted %v", it.Key(ctx), []byte{2})
+	}
+
+	return nil
+}
+
+func dbRange(ctx context.Context, db Database, tables []string, recordCount int) error {
+	for _, table := range tables {
+		start := []byte{uint8(0)}
+		end := []byte{uint8(recordCount)}
+
+		it, err := db.NewRange(ctx, table, start[:], end[:])
+		if err != nil {
+			return fmt.Errorf("new range: %w", err)
+		}
+		defer it.Close(ctx)
+
+		i := 0
+		for it.Next(ctx) {
+			expected := []byte{uint8(i)}
+			if !bytes.Equal(it.Key(ctx), expected) {
+				return fmt.Errorf("invalid key got %v wanted %v",
+					it.Key(ctx), expected)
+			}
+			if !bytes.Equal(it.Value(ctx), expected) {
+				return fmt.Errorf("invalid value got %x wanted %x",
+					it.Value(ctx), expected)
+			}
+			i++
+		}
+		if i != recordCount {
+			return fmt.Errorf("invalid record count got %v want %v", i, recordCount)
+		}
 	}
 
 	return nil
@@ -752,7 +752,7 @@ func TestGKVDB(t *testing.T) {
 			defer cancel()
 
 			// Puts
-			insertCount := 100
+			const insertCount = 100
 			t.Run("basic", func(t *testing.T) {
 				home := t.TempDir()
 
@@ -824,7 +824,6 @@ func TestGKVDB(t *testing.T) {
 				tables := []string{table}
 
 				db := tti.dbFunc(home, tables)
-
 				err := db.Open(ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -836,7 +835,18 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
-				if err = dbIterate(ctx, db, table, 10); err != nil {
+				// Populate db
+				for i := range insertCount {
+					err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
+					if err != nil {
+						t.Fatal(fmt.Errorf("put [%v,%v]: %w", i, i, err))
+					}
+				}
+
+				if err = dbIterateNext(ctx, db, table, insertCount); err != nil {
+					t.Fatal(err)
+				}
+				if err = dbIterateSeek(ctx, db, table, insertCount); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -844,11 +854,13 @@ func TestGKVDB(t *testing.T) {
 			t.Run("range", func(t *testing.T) {
 				home := t.TempDir()
 
-				table := "mytable"
-				tables := []string{table}
+				tableCount := 3
+				tables := make([]string, 0, tableCount)
+				for i := range tableCount {
+					tables = append(tables, fmt.Sprintf("table%v", i))
+				}
 
 				db := tti.dbFunc(home, tables)
-
 				err := db.Open(ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -860,7 +872,17 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
-				if err = dbRange(ctx, db, table, 10); err != nil {
+				// Populate db
+				for _, table := range tables {
+					for i := range insertCount {
+						err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
+						if err != nil {
+							t.Fatal(fmt.Errorf("put [%v,%v] in %v: %w", table, i, i, err))
+						}
+					}
+				}
+
+				if err = dbRange(ctx, db, tables, insertCount); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -872,7 +894,6 @@ func TestGKVDB(t *testing.T) {
 				tables := []string{table}
 
 				db := tti.dbFunc(home, tables)
-
 				err := db.Open(ctx)
 				if err != nil {
 					t.Fatal(err)
