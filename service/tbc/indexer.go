@@ -13,10 +13,27 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/dustin/go-humanize"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
+
+func logMemStats() {
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
+	// Go memory statistics are hard to interpret but the following list is
+	// an approximation:
+	//	Alloc is currently allocated memory
+	// 	TotalAlloc is all memory allocated over time
+	// 	Sys is basically a peak memory use
+	log.Infof("Alloc = %v, TotalAlloc = %v, Sys = %v, NumGC = %v\n",
+		humanize.IBytes(mem.Alloc),
+		humanize.IBytes(mem.TotalAlloc),
+		humanize.IBytes(mem.Sys),
+		mem.NumGC)
+}
 
 //type indexMode int
 //
