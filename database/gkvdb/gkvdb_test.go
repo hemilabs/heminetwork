@@ -42,7 +42,7 @@ func dbputInvalidTable(ctx context.Context, db Database, table string) error {
 	binary.BigEndian.PutUint32(key[:], uint32(0))
 	err := db.Put(ctx, table, key[:], nil)
 	if !errors.Is(err, ErrTableNotFound) {
-		return fmt.Errorf("put expected not found error %v: %v", table, err)
+		return fmt.Errorf("put expected not found error %v: %w", table, err)
 	}
 	return nil
 }
@@ -59,7 +59,7 @@ func dbputDuplicate(ctx context.Context, db Database, table string, insertCount 
 		}
 		rv, err := db.Get(ctx, table, key[:])
 		if err != nil {
-			return fmt.Errorf("get %v: %v %v", table, i, err)
+			return fmt.Errorf("get %v: %v %w", table, i, err)
 		}
 		if !bytes.Equal(rv, value[:]) {
 			return fmt.Errorf("get unequal %v: %v", table, i)
@@ -77,7 +77,7 @@ func dbgets(ctx context.Context, db Database, tables []string, insertCount int) 
 		binary.BigEndian.PutUint64(valueExpected[:], uint64(i))
 		value, err := db.Get(ctx, table, key[:])
 		if err != nil {
-			return fmt.Errorf("get %v: %v %v", table, i, err)
+			return fmt.Errorf("get %v: %v %w", table, i, err)
 		}
 		if !bytes.Equal(value, valueExpected[:]) {
 			return fmt.Errorf("get unequal %v: %v", table, i)
@@ -91,7 +91,7 @@ func dbgetInvalidTable(ctx context.Context, db Database, table string) error {
 	binary.BigEndian.PutUint32(key[:], uint32(0))
 	_, err := db.Get(ctx, table, key[:])
 	if !errors.Is(err, ErrTableNotFound) {
-		return fmt.Errorf("get expected not found error %v: %v", table, err)
+		return fmt.Errorf("get expected not found error %v: %w", table, err)
 	}
 	return nil
 }
@@ -103,7 +103,7 @@ func dbhas(ctx context.Context, db Database, tables []string, insertCount int) e
 		binary.BigEndian.PutUint32(key[:], uint32(i))
 		has, err := db.Has(ctx, table, key[:])
 		if err != nil {
-			return fmt.Errorf("has %v: %v %v", table, i, err)
+			return fmt.Errorf("has %v: %v %w", table, i, err)
 		}
 		if !has {
 			return fmt.Errorf("has %v: %v", table, i)
@@ -117,7 +117,7 @@ func dbhasInvalidTable(ctx context.Context, db Database, table string) error {
 	binary.BigEndian.PutUint32(key[:], uint32(0))
 	has, err := db.Has(ctx, table, key[:])
 	if !errors.Is(err, ErrTableNotFound) {
-		return fmt.Errorf("has expected not found error %v: %v", table, err)
+		return fmt.Errorf("has expected not found error %v: %w", table, err)
 	}
 	if has {
 		return fmt.Errorf("expected not has %v: %v", table, 0)
@@ -132,7 +132,7 @@ func dbdels(ctx context.Context, db Database, tables []string, insertCount int) 
 		binary.BigEndian.PutUint32(key[:], uint32(i))
 		err := db.Del(ctx, table, key[:])
 		if err != nil {
-			return fmt.Errorf("del %v: %v %v", table, i, err)
+			return fmt.Errorf("del %v: %v %w", table, i, err)
 		}
 	}
 	return nil
@@ -168,7 +168,7 @@ func dbhasNegative(ctx context.Context, db Database, tables []string, insertCoun
 		binary.BigEndian.PutUint32(key[:], uint32(i))
 		has, err := db.Has(ctx, table, key[:])
 		if err != nil {
-			return fmt.Errorf("has %v: %v %v", table, i, err)
+			return fmt.Errorf("has %v: %v %w", table, i, err)
 		}
 		if has {
 			return fmt.Errorf("has %v: %v", table, i)
@@ -184,7 +184,7 @@ func dbgetsNegative(ctx context.Context, db Database, tables []string, insertCou
 		binary.BigEndian.PutUint32(key[:], uint32(i))
 		_, err := db.Get(ctx, table, key[:])
 		if !errors.Is(err, ErrKeyNotFound) {
-			return fmt.Errorf("get expected not found error %v: %v %v", table, i, err)
+			return fmt.Errorf("get expected not found error %v: %v %w", table, i, err)
 		}
 	}
 	return nil
@@ -199,14 +199,14 @@ func dbhasOdds(ctx context.Context, db Database, tables []string, insertCount in
 		if i%2 == 0 {
 			// Assert we don't have evens
 			if err != nil {
-				return fmt.Errorf("odds has %v: %v %v", table, i, err)
+				return fmt.Errorf("odds has %v: %v %w", table, i, err)
 			}
 			if has {
 				return fmt.Errorf("odds has %v: %v", table, i)
 			}
 		} else {
 			if err != nil {
-				return fmt.Errorf("odds has %v: %v %v", table, i, err)
+				return fmt.Errorf("odds has %v: %v %w", table, i, err)
 			}
 			if !has {
 				return fmt.Errorf("odds has %v: %v", table, i)
@@ -231,7 +231,7 @@ func txputInvalidTable(ctx context.Context, tx Transaction, table string) error 
 	binary.BigEndian.PutUint32(key[:], uint32(0))
 	err := tx.Put(ctx, table, key[:], nil)
 	if !errors.Is(err, ErrTableNotFound) {
-		return fmt.Errorf("tx put expected not found error %v: %v", table, err)
+		return fmt.Errorf("tx put expected not found error %v: %w", table, err)
 	}
 	return nil
 }
@@ -250,7 +250,7 @@ func txputDuplicate(ctx context.Context, tx Transaction, table string, insertCou
 		}
 		rv, err := tx.Get(ctx, table, key[:])
 		if err != nil {
-			return fmt.Errorf("get %v: %v %v", table, i, err)
+			return fmt.Errorf("get %v: %v %w", table, i, err)
 		}
 		if i != 0 && bytes.Equal(rv, value[:]) {
 			return fmt.Errorf("get equal %v: expect %d, got %d", table, value, rv)
@@ -282,7 +282,7 @@ func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCoun
 		if i%2 == 0 {
 			err := tx.Del(ctx, table, key[:])
 			if err != nil {
-				return fmt.Errorf("del %v: %v %v", table, i, err)
+				return fmt.Errorf("del %v: %v %w", table, i, err)
 			}
 		} else {
 			// Assert odd record exist
@@ -290,7 +290,7 @@ func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCoun
 			binary.BigEndian.PutUint64(valueExpected[:], uint64(i))
 			value, err := tx.Get(ctx, table, key[:])
 			if err != nil {
-				return fmt.Errorf("even get %v: %v %v", table, i, err)
+				return fmt.Errorf("even get %v: %v %w", table, i, err)
 			}
 			if !bytes.Equal(value, valueExpected[:]) {
 				return fmt.Errorf("even get unequal %v: %v", table, i)
