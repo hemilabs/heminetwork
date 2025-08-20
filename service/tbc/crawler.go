@@ -1092,7 +1092,9 @@ func (s *Server) utxoIndexer(ctx context.Context, endHash chainhash.Hash) error 
 	return fmt.Errorf("invalid direction: %v", direction)
 }
 
-func processTxs(blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
+func processTxs(block *btcutil.Block, direction int, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
+	blockHash := block.Hash()
+	txs := block.Transactions()
 	for _, tx := range txs {
 		// cache txid <-> block
 		txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
@@ -1116,323 +1118,323 @@ func processTxs(blockHash *chainhash.Hash, txs []*btcutil.Tx, txsCache map[tbcd.
 	return nil
 }
 
-// indexTxsInBlocks indexes txs from the last processed block until the
-// provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processed.
-func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, txs map[tbcd.TxKey]*tbcd.TxValue) (int, *HashHeight, error) {
-	log.Tracef("indexTxsInBlocks")
-	defer log.Tracef("indexTxsInBlocks exit")
-
-	// indicates if we have processed endHash and thus have hit the exit
-	// condition.
-	var last *HashHeight
-
-	// Find start hash
-	txHH, err := s.TxIndexHash(ctx)
-	if err != nil {
-		return 0, last, fmt.Errorf("tx index hash: %w", err)
-	}
-
-	// If we have a real block move forward to the next block since we
-	// already indexed the last block.
-	hh := txHH
-	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
-		if err != nil {
-			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
-		}
-	}
-
-	txsPercentage := 95 // flush cache at >95% capacity
-	blocksProcessed := 0
-	for {
-		log.Debugf("indexing txs: %v", hh)
-
-		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
-		if err != nil {
-			return 0, last, err
-		}
-
-		// Index block
-		err = processTxs(b.Hash(), b.Transactions(), txs)
-		if err != nil {
-			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
-		}
-
-		blocksProcessed++
-
-		// Try not to overshoot the cache to prevent costly allocations
-		cp := len(txs) * 100 / s.cfg.MaxCachedTxs
-		if bh.Height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
-			log.Infof("Tx indexer: %v tx cache %v%%", hh, cp)
-		}
-		if cp > txsPercentage {
-			// Set txsMax to the largest tx capacity seen
-			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
-			last = hh
-			// Flush
-			break
-		}
-
-		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hh.Hash) {
-			last = hh
-			break
-		}
-
-		// Move to next block
-		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
-		if err != nil {
-			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
-		}
-	}
-
-	return blocksProcessed, last, nil
-}
-
-// unindexTxsInBlocks indexes txs from the last processed block until the
-// provided end hash, inclusive. It returns the number of blocks processed and
-// the last hash it has processed.
-func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, txs map[tbcd.TxKey]*tbcd.TxValue) (int, *HashHeight, error) {
-	log.Tracef("unindexTxsInBlocks")
-	defer log.Tracef("unindexTxsInBlocks exit")
-
-	// indicates if we have processed endHash and thus have hit the exit
-	// condition.
-	var last *HashHeight
-
-	// Find start hash
-	txHH, err := s.TxIndexHash(ctx)
-	if err != nil {
-		return 0, last, fmt.Errorf("tx index hash: %w", err)
-	}
-
-	txsPercentage := 95 // flush cache at >95% capacity
-	blocksProcessed := 0
-	hh := txHH
-	for {
-		log.Debugf("unindexing txs: %v", hh)
-
-		hash := hh.Hash
-
-		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hash) {
-			last = hh
-			break
-		}
-
-		bh, err := s.db.BlockHeaderByHash(ctx, hash)
-		if err != nil {
-			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
-		}
-
-		// Index block
-		b, err := s.db.BlockByHash(ctx, bh.Hash)
-		if err != nil {
-			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
-		}
-
-		err = processTxs(b.Hash(), b.Transactions(), txs)
-		if err != nil {
-			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
-		}
-
-		// This is probably not needed here since we already dealt with
-		// it via the utxo unindexer but since it will be mostly a
-		// no-op just go ahead.
-		// if s.cfg.MempoolEnabled {
-		//	// XXX this may not be the right spot.
-		//	txHashes, _ := b.MsgBlock().TxHashes()
-		//	_ = s.mempool.txsRemove(ctx, txHashes)
-		// }
-
-		blocksProcessed++
-
-		// Try not to overshoot the cache to prevent costly allocations
-		cp := len(txs) * 100 / s.cfg.MaxCachedTxs
-		if bh.Height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
-			log.Infof("Tx unindexer: %v tx cache %v%%", hh, cp)
-		}
-
-		// Move to previous block
-		height := bh.Height - 1
-		pbh, err := s.db.BlockHeaderByHash(ctx, *bh.ParentHash())
-		if err != nil {
-			return 0, last, fmt.Errorf("block headers by height %v: %w",
-				height, err)
-		}
-		hh.Hash = *pbh.BlockHash()
-		hh.Height = pbh.Height
-
-		// We check overflow AFTER obtaining the previous hash so that
-		// we can update the database with the LAST processed block.
-		if cp > txsPercentage {
-			// Set txsMax to the largest tx capacity seen
-			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
-			last = hh
-			// Flush
-			break
-		}
-	}
-
-	return blocksProcessed, last, nil
-}
-
-func (s *Server) txIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("txIndexerUnwind")
-	defer log.Tracef("txIndexerUnwind exit")
-
-	// XXX dedup with txIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
-
-	s.mtx.Lock()
-	if !s.indexing {
-		// XXX this prob should be an error but pusnish bad callers for now
-		s.mtx.Unlock()
-		panic("txIndexerUnwind indexing not true")
-	}
-	s.mtx.Unlock()
-	// Allocate here so that we don't waste space when not indexing.
-	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
-	defer clear(txs)
-
-	log.Infof("Start unwinding Txs at hash %v height %v", startBH, startBH.Height)
-	log.Infof("End unwinding Txs at hash %v height %v", endBH, endBH.Height)
-	endHash := endBH.BlockHash()
-	for {
-		start := time.Now()
-		blocksProcessed, last, err := s.unindexTxsInBlocks(ctx, endHash, txs)
-		if err != nil {
-			return fmt.Errorf("unindex txs in blocks: %w", err)
-		}
-		if blocksProcessed == 0 {
-			return nil
-		}
-		txsCached := len(txs)
-		log.Infof("Tx unwinder blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
-			blocksProcessed, time.Since(start), txsCached,
-			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
-
-		// Flush to disk
-		start = time.Now()
-		if err = s.db.BlockTxUpdate(ctx, -1, txs, last.Hash); err != nil {
-			return fmt.Errorf("block tx update: %w", err)
-		}
-		// leveldb does all kinds of allocations, force GC to lower
-		// memory pressure.
-		logMemStats()
-		runtime.GC()
-
-		log.Infof("Flushing unwind txs complete %v took %v",
-			txsCached, time.Since(start))
-
-		if endHash.IsEqual(&last.Hash) {
-			break
-		}
-	}
-	return nil
-}
-
-func (s *Server) txIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("txIndexerWind")
-	defer log.Tracef("txIndexerWind exit")
-
-	s.mtx.Lock()
-	if !s.indexing {
-		// XXX this prob should be an error but pusnish bad callers for now
-		s.mtx.Unlock()
-		panic("txIndexerWind not true")
-	}
-	s.mtx.Unlock()
-
-	// Allocate here so that we don't waste space when not indexing.
-	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
-	defer clear(txs)
-
-	log.Infof("Start indexing Txs at hash %v height %v", startBH, startBH.Height)
-	log.Infof("End indexing Txs at hash %v height %v", endBH, endBH.Height)
-	endHash := endBH.BlockHash()
-	for {
-		start := time.Now()
-		blocksProcessed, last, err := s.indexTxsInBlocks(ctx, endHash, txs)
-		if err != nil {
-			return fmt.Errorf("index blocks: %w", err)
-		}
-		if blocksProcessed == 0 {
-			return nil
-		}
-		txsCached := len(txs)
-		log.Infof("Tx indexer blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
-			blocksProcessed, time.Since(start), txsCached,
-			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
-
-		// Flush to disk
-		start = time.Now()
-		if err = s.db.BlockTxUpdate(ctx, 1, txs, last.Hash); err != nil {
-			return fmt.Errorf("block tx update: %w", err)
-		}
-		// leveldb does all kinds of allocations, force GC to lower
-		// memory pressure.
-		logMemStats()
-		runtime.GC()
-
-		log.Infof("Flushing txs complete %v took %v",
-			txsCached, time.Since(start))
-
-		if endHash.IsEqual(&last.Hash) {
-			break
-		}
-	}
-
-	return nil
-}
-
-func (s *Server) txIndexer(ctx context.Context, endHash chainhash.Hash) error {
-	log.Tracef("txIndexer")
-	defer log.Tracef("txIndexer exit")
-
-	// XXX this is basically duplicate from TxIndexIsLinear
-
-	s.mtx.Lock()
-	if !s.indexing {
-		// XXX this prob should be an error but pusnish bad callers for now
-		s.mtx.Unlock()
-		panic("txIndexer not true")
-	}
-	s.mtx.Unlock()
-
-	// Verify exit condition hash
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
-	if err != nil {
-		return fmt.Errorf("blockheader hash: %w", err)
-	}
-
-	// Verify start point is not after the end point
-	txHH, err := s.TxIndexHash(ctx)
-	if err != nil {
-		return fmt.Errorf("tx index hash: %w", err)
-	}
-
-	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
-	if err != nil {
-		return fmt.Errorf("blockheader hash: %w", err)
-	}
-	direction, err := s.TxIndexIsLinear(ctx, endHash)
-	if err != nil {
-		return fmt.Errorf("tx index is linear: %w", err)
-	}
-	switch direction {
-	case 1:
-		return s.txIndexerWind(ctx, startBH, endBH)
-	case -1:
-		return s.txIndexerUnwind(ctx, startBH, endBH)
-	case 0:
-		// Because we call TxIndexIsLinear we know it's the same block.
-		return nil
-	}
-
-	return fmt.Errorf("invalid direction: %v", direction)
-}
+//// indexTxsInBlocks indexes txs from the last processed block until the
+//// provided end hash, inclusive. It returns the number of blocks processed and
+//// the last hash it has processed.
+//func (s *Server) indexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, txs map[tbcd.TxKey]*tbcd.TxValue) (int, *HashHeight, error) {
+//	log.Tracef("indexTxsInBlocks")
+//	defer log.Tracef("indexTxsInBlocks exit")
+//
+//	// indicates if we have processed endHash and thus have hit the exit
+//	// condition.
+//	var last *HashHeight
+//
+//	// Find start hash
+//	txHH, err := s.TxIndexHash(ctx)
+//	if err != nil {
+//		return 0, last, fmt.Errorf("tx index hash: %w", err)
+//	}
+//
+//	// If we have a real block move forward to the next block since we
+//	// already indexed the last block.
+//	hh := txHH
+//	if !hh.Hash.IsEqual(s.chainParams.GenesisHash) {
+//		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
+//		}
+//	}
+//
+//	txsPercentage := 95 // flush cache at >95% capacity
+//	blocksProcessed := 0
+//	for {
+//		log.Debugf("indexing txs: %v", hh)
+//
+//		bh, b, err := s.headerAndBlock(ctx, hh.Hash)
+//		if err != nil {
+//			return 0, last, err
+//		}
+//
+//		// Index block
+//		err = processTxs(b.Hash(), b.Transactions(), txs)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
+//		}
+//
+//		blocksProcessed++
+//
+//		// Try not to overshoot the cache to prevent costly allocations
+//		cp := len(txs) * 100 / s.cfg.MaxCachedTxs
+//		if bh.Height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
+//			log.Infof("Tx indexer: %v tx cache %v%%", hh, cp)
+//		}
+//		if cp > txsPercentage {
+//			// Set txsMax to the largest tx capacity seen
+//			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
+//			last = hh
+//			// Flush
+//			break
+//		}
+//
+//		// Exit if we processed the provided end hash
+//		if endHash.IsEqual(&hh.Hash) {
+//			last = hh
+//			break
+//		}
+//
+//		// Move to next block
+//		hh, err = s.nextCanonicalBlockheader(ctx, endHash, hh)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("tx next block %v: %w", hh, err)
+//		}
+//	}
+//
+//	return blocksProcessed, last, nil
+//}
+//
+//// unindexTxsInBlocks indexes txs from the last processed block until the
+//// provided end hash, inclusive. It returns the number of blocks processed and
+//// the last hash it has processed.
+//func (s *Server) unindexTxsInBlocks(ctx context.Context, endHash *chainhash.Hash, txs map[tbcd.TxKey]*tbcd.TxValue) (int, *HashHeight, error) {
+//	log.Tracef("unindexTxsInBlocks")
+//	defer log.Tracef("unindexTxsInBlocks exit")
+//
+//	// indicates if we have processed endHash and thus have hit the exit
+//	// condition.
+//	var last *HashHeight
+//
+//	// Find start hash
+//	txHH, err := s.TxIndexHash(ctx)
+//	if err != nil {
+//		return 0, last, fmt.Errorf("tx index hash: %w", err)
+//	}
+//
+//	txsPercentage := 95 // flush cache at >95% capacity
+//	blocksProcessed := 0
+//	hh := txHH
+//	for {
+//		log.Debugf("unindexing txs: %v", hh)
+//
+//		hash := hh.Hash
+//
+//		// Exit if we processed the provided end hash
+//		if endHash.IsEqual(&hash) {
+//			last = hh
+//			break
+//		}
+//
+//		bh, err := s.db.BlockHeaderByHash(ctx, hash)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("block header %v: %w", hash, err)
+//		}
+//
+//		// Index block
+//		b, err := s.db.BlockByHash(ctx, bh.Hash)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("block by hash %v: %w", bh, err)
+//		}
+//
+//		err = processTxs(b.Hash(), b.Transactions(), txs)
+//		if err != nil {
+//			return 0, last, fmt.Errorf("process txs %v: %w", hh, err)
+//		}
+//
+//		// This is probably not needed here since we already dealt with
+//		// it via the utxo unindexer but since it will be mostly a
+//		// no-op just go ahead.
+//		// if s.cfg.MempoolEnabled {
+//		//	// XXX this may not be the right spot.
+//		//	txHashes, _ := b.MsgBlock().TxHashes()
+//		//	_ = s.mempool.txsRemove(ctx, txHashes)
+//		// }
+//
+//		blocksProcessed++
+//
+//		// Try not to overshoot the cache to prevent costly allocations
+//		cp := len(txs) * 100 / s.cfg.MaxCachedTxs
+//		if bh.Height%10000 == 0 || cp > txsPercentage || blocksProcessed == 1 {
+//			log.Infof("Tx unindexer: %v tx cache %v%%", hh, cp)
+//		}
+//
+//		// Move to previous block
+//		height := bh.Height - 1
+//		pbh, err := s.db.BlockHeaderByHash(ctx, *bh.ParentHash())
+//		if err != nil {
+//			return 0, last, fmt.Errorf("block headers by height %v: %w",
+//				height, err)
+//		}
+//		hh.Hash = *pbh.BlockHash()
+//		hh.Height = pbh.Height
+//
+//		// We check overflow AFTER obtaining the previous hash so that
+//		// we can update the database with the LAST processed block.
+//		if cp > txsPercentage {
+//			// Set txsMax to the largest tx capacity seen
+//			s.cfg.MaxCachedTxs = max(len(txs), s.cfg.MaxCachedTxs)
+//			last = hh
+//			// Flush
+//			break
+//		}
+//	}
+//
+//	return blocksProcessed, last, nil
+//}
+//
+//func (s *Server) txIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+//	log.Tracef("txIndexerUnwind")
+//	defer log.Tracef("txIndexerUnwind exit")
+//
+//	// XXX dedup with txIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+//
+//	s.mtx.Lock()
+//	if !s.indexing {
+//		// XXX this prob should be an error but pusnish bad callers for now
+//		s.mtx.Unlock()
+//		panic("txIndexerUnwind indexing not true")
+//	}
+//	s.mtx.Unlock()
+//	// Allocate here so that we don't waste space when not indexing.
+//	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
+//	defer clear(txs)
+//
+//	log.Infof("Start unwinding Txs at hash %v height %v", startBH, startBH.Height)
+//	log.Infof("End unwinding Txs at hash %v height %v", endBH, endBH.Height)
+//	endHash := endBH.BlockHash()
+//	for {
+//		start := time.Now()
+//		blocksProcessed, last, err := s.unindexTxsInBlocks(ctx, endHash, txs)
+//		if err != nil {
+//			return fmt.Errorf("unindex txs in blocks: %w", err)
+//		}
+//		if blocksProcessed == 0 {
+//			return nil
+//		}
+//		txsCached := len(txs)
+//		log.Infof("Tx unwinder blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
+//			blocksProcessed, time.Since(start), txsCached,
+//			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
+//
+//		// Flush to disk
+//		start = time.Now()
+//		if err = s.db.BlockTxUpdate(ctx, -1, txs, last.Hash); err != nil {
+//			return fmt.Errorf("block tx update: %w", err)
+//		}
+//		// leveldb does all kinds of allocations, force GC to lower
+//		// memory pressure.
+//		logMemStats()
+//		runtime.GC()
+//
+//		log.Infof("Flushing unwind txs complete %v took %v",
+//			txsCached, time.Since(start))
+//
+//		if endHash.IsEqual(&last.Hash) {
+//			break
+//		}
+//	}
+//	return nil
+//}
+//
+//func (s *Server) txIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+//	log.Tracef("txIndexerWind")
+//	defer log.Tracef("txIndexerWind exit")
+//
+//	s.mtx.Lock()
+//	if !s.indexing {
+//		// XXX this prob should be an error but pusnish bad callers for now
+//		s.mtx.Unlock()
+//		panic("txIndexerWind not true")
+//	}
+//	s.mtx.Unlock()
+//
+//	// Allocate here so that we don't waste space when not indexing.
+//	txs := make(map[tbcd.TxKey]*tbcd.TxValue, s.cfg.MaxCachedTxs)
+//	defer clear(txs)
+//
+//	log.Infof("Start indexing Txs at hash %v height %v", startBH, startBH.Height)
+//	log.Infof("End indexing Txs at hash %v height %v", endBH, endBH.Height)
+//	endHash := endBH.BlockHash()
+//	for {
+//		start := time.Now()
+//		blocksProcessed, last, err := s.indexTxsInBlocks(ctx, endHash, txs)
+//		if err != nil {
+//			return fmt.Errorf("index blocks: %w", err)
+//		}
+//		if blocksProcessed == 0 {
+//			return nil
+//		}
+//		txsCached := len(txs)
+//		log.Infof("Tx indexer blocks processed %v in %v transactions cached %v cache unused %v avg tx/blk %v",
+//			blocksProcessed, time.Since(start), txsCached,
+//			s.cfg.MaxCachedTxs-txsCached, txsCached/blocksProcessed)
+//
+//		// Flush to disk
+//		start = time.Now()
+//		if err = s.db.BlockTxUpdate(ctx, 1, txs, last.Hash); err != nil {
+//			return fmt.Errorf("block tx update: %w", err)
+//		}
+//		// leveldb does all kinds of allocations, force GC to lower
+//		// memory pressure.
+//		logMemStats()
+//		runtime.GC()
+//
+//		log.Infof("Flushing txs complete %v took %v",
+//			txsCached, time.Since(start))
+//
+//		if endHash.IsEqual(&last.Hash) {
+//			break
+//		}
+//	}
+//
+//	return nil
+//}
+//
+//func (s *Server) txIndexer(ctx context.Context, endHash chainhash.Hash) error {
+//	log.Tracef("txIndexer")
+//	defer log.Tracef("txIndexer exit")
+//
+//	// XXX this is basically duplicate from TxIndexIsLinear
+//
+//	s.mtx.Lock()
+//	if !s.indexing {
+//		// XXX this prob should be an error but pusnish bad callers for now
+//		s.mtx.Unlock()
+//		panic("txIndexer not true")
+//	}
+//	s.mtx.Unlock()
+//
+//	// Verify exit condition hash
+//	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
+//	if err != nil {
+//		return fmt.Errorf("blockheader hash: %w", err)
+//	}
+//
+//	// Verify start point is not after the end point
+//	txHH, err := s.TxIndexHash(ctx)
+//	if err != nil {
+//		return fmt.Errorf("tx index hash: %w", err)
+//	}
+//
+//	// Make sure there is no gap between start and end or vice versa.
+//	startBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
+//	if err != nil {
+//		return fmt.Errorf("blockheader hash: %w", err)
+//	}
+//	direction, err := s.TxIndexIsLinear(ctx, endHash)
+//	if err != nil {
+//		return fmt.Errorf("tx index is linear: %w", err)
+//	}
+//	switch direction {
+//	case 1:
+//		return s.txIndexerWind(ctx, startBH, endBH)
+//	case -1:
+//		return s.txIndexerUnwind(ctx, startBH, endBH)
+//	case 0:
+//		// Because we call TxIndexIsLinear we know it's the same block.
+//		return nil
+//	}
+//
+//	return fmt.Errorf("invalid direction: %v", direction)
+//}
 
 func processKeystones(block *btcutil.Block, direction int, kssCache map[chainhash.Hash]tbcd.Keystone) error {
 	if block.Height() == btcutil.BlockHeightUnknown {
@@ -1923,7 +1925,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 	}
 
 	// Transactions index
-	if err := s.txIndexer(ctx, hash); err != nil {
+	if err := s.newTxIndexer().modeIndexer(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
@@ -1983,31 +1985,32 @@ func (s *Server) txIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) er
 	log.Tracef("txIndexersToBest")
 	defer log.Tracef("txIndexersToBest exit")
 
-	// Index Tx
-	txHH, err := s.TxIndexHash(ctx)
-	if err != nil {
-		return fmt.Errorf("tx index hash: %w", err)
-	}
-	txBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
-	if err != nil {
-		return err
-	}
-	cp, err := s.findCanonicalParent(ctx, txBH)
-	if err != nil {
-		return err
-	}
-	if !cp.Hash.IsEqual(&txBH.Hash) {
-		log.Infof("Syncing tx index to: %v from: %v via: %v",
-			bhb.HH(), txBH.HH(), cp.HH())
-		// txBH is NOT on canonical chain, unwind first
-		if err := s.txIndexer(ctx, cp.Hash); err != nil {
-			return fmt.Errorf("tx indexer unwind: %w", err)
-		}
-	}
-	// Transactions index
-	if err := s.txIndexer(ctx, bhb.Hash); err != nil {
-		return fmt.Errorf("tx indexer: %w", err)
-	}
+	return s.newTxIndexer().modeIndexersToBest(ctx, bhb)
+	//// Index Tx
+	//txHH, err := s.TxIndexHash(ctx)
+	//if err != nil {
+	//	return fmt.Errorf("tx index hash: %w", err)
+	//}
+	//txBH, err := s.db.BlockHeaderByHash(ctx, txHH.Hash)
+	//if err != nil {
+	//	return err
+	//}
+	//cp, err := s.findCanonicalParent(ctx, txBH)
+	//if err != nil {
+	//	return err
+	//}
+	//if !cp.Hash.IsEqual(&txBH.Hash) {
+	//	log.Infof("Syncing tx index to: %v from: %v via: %v",
+	//		bhb.HH(), txBH.HH(), cp.HH())
+	//	// txBH is NOT on canonical chain, unwind first
+	//	if err := s.txIndexer(ctx, cp.Hash); err != nil {
+	//		return fmt.Errorf("tx indexer unwind: %w", err)
+	//	}
+	//}
+	//// Transactions index
+	//if err := s.txIndexer(ctx, bhb.Hash); err != nil {
+	//	return fmt.Errorf("tx indexer: %w", err)
+	//}
 
 	return nil
 }

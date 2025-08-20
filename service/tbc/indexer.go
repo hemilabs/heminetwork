@@ -63,6 +63,49 @@ func (i *indexer) String() string {
 //	return i.modeIndexersToBest(ctx, nil) // XXX
 //}
 
+func (s *Server) newTxIndexer() *indexer {
+	i := &indexer{
+		indexer:                "tx",
+		s:                      s,
+		enabled:                true,
+		maxCachedEntries:       s.cfg.MaxCachedTxs,
+		allocateEntries:        allocateCacheTxs,
+		lenEntries:             lenCacheTxs,
+		clearEntries:           clearCacheTxs,
+		blockHeaderByModeIndex: s.db.BlockHeaderByTxIndex,
+	}
+	i.blockModeUpdate = i.blockTxUpdate // XXX double eew
+	i.processMode = i.processTxs        // XXX double eew
+	return i
+}
+
+// allocateCacheTxs allocates cahe for the txs
+func allocateCacheTxs(maxCachedEntries int) any {
+	return make(map[tbcd.TxKey]*tbcd.TxValue, maxCachedEntries)
+}
+
+// lenCacheTxs returns the entry count in the tx cache.
+func lenCacheTxs(cache any) int {
+	return len(cache.(map[tbcd.TxKey]*tbcd.TxValue))
+}
+
+// clearCacheTxs empties cached txs to lower memory pressure.
+func clearCacheTxs(cache any) {
+	clear(cache.(map[tbcd.TxKey]*tbcd.TxValue))
+}
+
+// blockTxUpdate calls the database update method
+func (i *indexer) blockTxUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
+	return i.s.db.BlockTxUpdate(ctx, direction,
+		cache.(map[tbcd.TxKey]*tbcd.TxValue), modeIndexHash)
+}
+
+// processTx walks a block and peels out the relevant keystones that
+// will be stored in the database.
+func (i indexer) processTxs(block *btcutil.Block, direction int, cache any) error {
+	return processTxs(block, direction, cache.(map[tbcd.TxKey]*tbcd.TxValue))
+}
+
 func (s *Server) newKeystoneIndexer() *indexer {
 	i := &indexer{
 		indexer:                "keystone",
@@ -80,22 +123,6 @@ func (s *Server) newKeystoneIndexer() *indexer {
 	return i
 }
 
-// modeIndexHash replaces (Utxo|Tx|Keystone)IndexHash
-func (i *indexer) modeIndexHash(ctx context.Context) (*HashHeight, error) {
-	bh, err := i.blockHeaderByModeIndex(ctx)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return nil, err
-		}
-		bh = &tbcd.BlockHeader{
-			Hash:   *i.s.chainParams.GenesisHash,
-			Height: 0,
-			Header: h2b(&i.s.chainParams.GenesisBlock.Header),
-		}
-	}
-	return HashHeightFromBlockHeader(bh), nil
-}
-
 // allocateCacheKeystones allocates cahe for the keystones
 func allocateCacheKeystones(maxCachedEntries int) any {
 	return make(map[chainhash.Hash]tbcd.Keystone, maxCachedEntries)
@@ -111,16 +138,32 @@ func clearCacheKeystones(cache any) {
 	clear(cache.(map[chainhash.Hash]tbcd.Keystone))
 }
 
+// processKeystones walks a block and peels out the relevant keystones that
+// will be stored in the database.
+func (i indexer) processKeystones(block *btcutil.Block, direction int, cache any) error {
+	return processKeystones(block, direction, cache.(map[chainhash.Hash]tbcd.Keystone))
+}
+
 // blockKeystoneUpdate calls the database update method
 func (i *indexer) blockKeystoneUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
 	return i.s.db.BlockKeystoneUpdate(ctx, direction,
 		cache.(map[chainhash.Hash]tbcd.Keystone), modeIndexHash)
 }
 
-// processKeystones walks a block and peels out the relevant keystones that
-// will be stored in the database.
-func (i indexer) processKeystones(block *btcutil.Block, direction int, cache any) error {
-	return processKeystones(block, direction, cache.(map[chainhash.Hash]tbcd.Keystone))
+// modeIndexHash replaces (Utxo|Tx|Keystone)IndexHash
+func (i *indexer) modeIndexHash(ctx context.Context) (*HashHeight, error) {
+	bh, err := i.blockHeaderByModeIndex(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return nil, err
+		}
+		bh = &tbcd.BlockHeader{
+			Hash:   *i.s.chainParams.GenesisHash,
+			Height: 0,
+			Header: h2b(&i.s.chainParams.GenesisBlock.Header),
+		}
+	}
+	return HashHeightFromBlockHeader(bh), nil
 }
 
 // modeIndexersToBest replaces (Utxo|Tx|Keystone)IndexersToBest

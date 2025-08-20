@@ -52,7 +52,7 @@ func newBlock(params *chaincfg.Params, name string, b *btcutil.Block) *block {
 		b:    b,
 		txs:  make(map[tbcd.TxKey]*tbcd.TxValue, 10),
 	}
-	err := processTxs(b.Hash(), b.Transactions(), blk.txs)
+	err := processTxs(b, 1, blk.txs)
 	if err != nil {
 		panic(fmt.Errorf("processTxs: %w", err))
 	}
