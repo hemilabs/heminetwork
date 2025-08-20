@@ -65,6 +65,11 @@ type jsonError struct {
 	Data    interface{} `json:"data,omitempty"`
 }
 
+// NewJSONError creates a new JSON error.
+func NewJSONError(code int, message string, data any) *jsonError {
+	return &jsonError{Code: code, Message: message, Data: data}
+}
+
 // Retrieve the URL from the test server
 func (f *mockHandler) URL() string {
 	return f.server.URL
