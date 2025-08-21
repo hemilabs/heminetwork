@@ -180,7 +180,7 @@ func TestDbUpgradeFull(t *testing.T) {
 	}
 
 	// Pull version from DB
-	version, err := s.db.Version(ctx)
+	version, err := s.g.db.Version(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,22 +195,22 @@ func TestDbUpgradeFull(t *testing.T) {
 	txIndexHashKey := []byte("txindexhash")
 	keystoneIndexHashKey := []byte("keystoneindexhash")
 	// Make sure db no longer has index keys
-	_, err = s.db.MetadataGet(ctx, utxoIndexHashKey)
+	_, err = s.g.db.MetadataGet(ctx, utxoIndexHashKey)
 	if err == nil {
 		t.Fatal("expected failure retrieving utxo index hash")
 	}
-	_, err = s.db.MetadataGet(ctx, txIndexHashKey)
+	_, err = s.g.db.MetadataGet(ctx, txIndexHashKey)
 	if err == nil {
 		t.Fatal("expected failure retrieving tx index hash")
 	}
-	_, err = s.db.MetadataGet(ctx, keystoneIndexHashKey)
+	_, err = s.g.db.MetadataGet(ctx, keystoneIndexHashKey)
 	if err == nil {
 		t.Fatal("expected failure retrieving keystone index hash")
 	}
 
 	// Make sure we get the expected indexkeys from db
 	hash := s2h("0000000050ff3053ada24e6ad581fa0295297f20a2747d034997ffc899aa931e")
-	utxobh, err := s.db.BlockHeaderByUtxoIndex(ctx)
+	utxobh, err := s.g.db.BlockHeaderByUtxoIndex(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestDbUpgradeFull(t *testing.T) {
 		t.Fatal("unexpected utxo hash")
 	}
 
-	txbh, err := s.db.BlockHeaderByTxIndex(ctx)
+	txbh, err := s.g.db.BlockHeaderByTxIndex(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestDbUpgradeFull(t *testing.T) {
 		t.Fatal("unexpected tx hash")
 	}
 
-	keystonebh, err := s.db.BlockHeaderByKeystoneIndex(ctx)
+	keystonebh, err := s.g.db.BlockHeaderByKeystoneIndex(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +440,7 @@ func TestDbUpgradeV4(t *testing.T) {
 	}
 
 	// Pull version from DB
-	version, err := s.db.Version(ctx)
+	version, err := s.g.db.Version(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestDbUpgradeV4(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *hash)
+		ks, err := s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *hash)
 		if err != nil {
 			t.Fatal(err)
 		}

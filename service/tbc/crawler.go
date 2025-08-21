@@ -237,262 +237,264 @@ func BlockKeystones(block *btcutil.Block) []tbcapi.KeystoneTx {
 	return BlockKeystonesByHash(block, nil)
 }
 
-// UtxoIndexHash returns the last hash that has been UTxO indexed.
-func (s *Server) UtxoIndexHash(ctx context.Context) (*HashHeight, error) {
-	bh, err := s.db.BlockHeaderByUtxoIndex(ctx)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return nil, err
-		}
-		bh = &tbcd.BlockHeader{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-			Header: h2b(&s.chainParams.GenesisBlock.Header),
-		}
-	}
-	return HashHeightFromBlockHeader(bh), nil
-}
-
+// // UtxoIndexHash returns the last hash that has been UTxO indexed.
+//
+//	func (s *Server) UtxoIndexHash(ctx context.Context) (*HashHeight, error) {
+//		bh, err := s.g.db.BlockHeaderByUtxoIndex(ctx)
+//		if err != nil {
+//			if !errors.Is(err, database.ErrNotFound) {
+//				return nil, err
+//			}
+//			bh = &tbcd.BlockHeader{
+//				Hash:   *s.g.chain.GenesisHash,
+//				Height: 0,
+//				Header: h2b(&s.g.chain.GenesisBlock.Header),
+//			}
+//		}
+//		return HashHeightFromBlockHeader(bh), nil
+//	}
+//
 // TxIndexHash returns the last hash that has been Tx indexed.
 func (s *Server) TxIndexHash(ctx context.Context) (*HashHeight, error) {
-	bh, err := s.db.BlockHeaderByTxIndex(ctx)
+	bh, err := s.g.db.BlockHeaderByTxIndex(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return nil, err
 		}
 		bh = &tbcd.BlockHeader{
-			Hash:   *s.chainParams.GenesisHash,
+			Hash:   *s.g.chain.GenesisHash,
 			Height: 0,
-			Header: h2b(&s.chainParams.GenesisBlock.Header),
+			Header: h2b(&s.g.chain.GenesisBlock.Header),
 		}
 	}
 	return HashHeightFromBlockHeader(bh), nil
 }
 
-// KeystoneIndexHash returns the last hash that has been Keystone indexed.
-func (s *Server) KeystoneIndexHash(ctx context.Context) (*HashHeight, error) {
-	bh, err := s.db.BlockHeaderByKeystoneIndex(ctx)
-	if err != nil {
-		if !errors.Is(err, database.ErrNotFound) {
-			return nil, err
-		}
-		bh = &tbcd.BlockHeader{
-			Hash:   *s.chainParams.GenesisHash,
-			Height: 0,
-			Header: h2b(&s.chainParams.GenesisBlock.Header),
-		}
-	}
-	return HashHeightFromBlockHeader(bh), nil
-}
+//
+//// KeystoneIndexHash returns the last hash that has been Keystone indexed.
+//func (s *Server) KeystoneIndexHash(ctx context.Context) (*HashHeight, error) {
+//	bh, err := s.g.db.BlockHeaderByKeystoneIndex(ctx)
+//	if err != nil {
+//		if !errors.Is(err, database.ErrNotFound) {
+//			return nil, err
+//		}
+//		bh = &tbcd.BlockHeader{
+//			Hash:   *s.g.chain.GenesisHash,
+//			Height: 0,
+//			Header: h2b(&s.g.chain.GenesisBlock.Header),
+//		}
+//	}
+//	return HashHeightFromBlockHeader(bh), nil
+//}
 
-func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
-	// This function has one odd corner case. If bhX and bhY are both on a
-	// "long" chain without multiple blockheaders it will terminate on the
-	// first height that has a single blockheader. This is to be expected!
-	// This function "should" be called between forking blocks and then
-	// it'll find the first common parent.
-
-	// This function assumes that the highest block height connects to the
-	// lowest block height.
-
-	// 0. If bhX and bhY are the same return bhX.
-	if bhX.Hash.IsEqual(&bhY.Hash) {
-		return bhX, nil
-	}
-
-	// 1. Find lowest height between X and Y.
-	h := min(bhX.Height, bhY.Height)
-
-	// 2. Walk chain back until X and Y point to the same parent.
-	for {
-		bhs, err := s.db.BlockHeadersByHeight(ctx, h)
-		if err != nil {
-			return nil, fmt.Errorf("block headers by height: %w", err)
-		}
-		if bhs[0].Hash.IsEqual(s.chainParams.GenesisHash) {
-			if h != 0 {
-				panic("height 0 not genesis")
-			}
-			return nil, fmt.Errorf("genesis")
-		}
-
-		// See if all blockheaders share a common parent.
-		equals := 0
-		var ph *chainhash.Hash
-		for k := range bhs {
-			if k == 0 {
-				ph = bhs[k].ParentHash()
-			}
-			if !ph.IsEqual(bhs[k].ParentHash()) {
-				break
-			}
-			equals++
-		}
-		if equals == len(bhs) {
-			// All blockheaders point to the same parent.
-			return s.db.BlockHeaderByHash(ctx, *ph)
-		}
-
-		// Decrease height
-		h--
-	}
-}
-
-// isCanonical uses checkpoints to determine if a block is on the canonical
-// chain. This is a expensive call hence it tries to use checkpoints to short
-// circuit the check.
-func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, error) {
-	var (
-		bhb *tbcd.BlockHeader
-		err error
-	)
-	ncp := nextCheckpoint(bh, s.chainParams.Checkpoints)
-	if ncp == nil {
-		// Use best since we do not have a best checkpoint
-		bhb, err = s.db.BlockHeaderBest(ctx)
-	} else {
-		bhb, err = s.db.BlockHeaderByHash(ctx, *ncp.Hash)
-	}
-	if err != nil {
-		return false, err
-	}
-
-	// Basic shortcircuit
-	if bhb.Height < bh.Height {
-		// We either hit a race or the caller did something wrong.
-		// Either way, it cannot be canonical.
-		log.Debugf("best height less than provided height: %v < %v",
-			bhb.Height, bh.Height)
-		return false, nil
-	}
-	if bhb.Hash.IsEqual(&bh.Hash) {
-		// Self == best
-		return true, nil
-	}
-
-	genesisHash := previousCheckpoint(bh, s.chainParams.Checkpoints).Hash // either genesis or a snapshot block
-
-	// Move best block header backwards until we find bh.
-	log.Debugf("isCanonical best %v bh %v genesis %v", bhb.HH(), bh.HH(), genesisHash)
-	for {
-		if bhb.Height <= bh.Height {
-			return false, nil
-		}
-		bhb, err = s.db.BlockHeaderByHash(ctx, *bhb.ParentHash())
-		if err != nil {
-			return false, err
-		}
-		if bhb.Hash.IsEqual(genesisHash) {
-			return false, nil
-		}
-		if bhb.Hash.IsEqual(&bh.Hash) {
-			return true, nil
-		}
-	}
-}
-
-func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
-	log.Tracef("findCanonicalParent %v", bh)
-
-	// Genesis is always canonical.
-	if bh.Hash.IsEqual(s.chainParams.GenesisHash) {
-		return bh, nil
-	}
-
-	bhb, err := s.db.BlockHeaderBest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	log.Debugf("findCanonicalParent %v @ %v best %v @ %v",
-		bh, bh.Height, bhb, bhb.Height)
-	for {
-		canonical, err := s.isCanonical(ctx, bh)
-		if err != nil {
-			return nil, err
-		}
-		if canonical {
-			log.Tracef("findCanonicalParent exit %v", bh)
-			return bh, nil
-		}
-		bh, err = s.findCommonParent(ctx, bhb, bh)
-		if err != nil {
-			return nil, err
-		}
-	}
-}
-
+//func (s *Server) findCommonParent(ctx context.Context, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+//	// This function has one odd corner case. If bhX and bhY are both on a
+//	// "long" chain without multiple blockheaders it will terminate on the
+//	// first height that has a single blockheader. This is to be expected!
+//	// This function "should" be called between forking blocks and then
+//	// it'll find the first common parent.
+//
+//	// This function assumes that the highest block height connects to the
+//	// lowest block height.
+//
+//	// 0. If bhX and bhY are the same return bhX.
+//	if bhX.Hash.IsEqual(&bhY.Hash) {
+//		return bhX, nil
+//	}
+//
+//	// 1. Find lowest height between X and Y.
+//	h := min(bhX.Height, bhY.Height)
+//
+//	// 2. Walk chain back until X and Y point to the same parent.
+//	for {
+//		bhs, err := s.g.db.BlockHeadersByHeight(ctx, h)
+//		if err != nil {
+//			return nil, fmt.Errorf("block headers by height: %w", err)
+//		}
+//		if bhs[0].Hash.IsEqual(s.g.chain.GenesisHash) {
+//			if h != 0 {
+//				panic("height 0 not genesis")
+//			}
+//			return nil, fmt.Errorf("genesis")
+//		}
+//
+//		// See if all blockheaders share a common parent.
+//		equals := 0
+//		var ph *chainhash.Hash
+//		for k := range bhs {
+//			if k == 0 {
+//				ph = bhs[k].ParentHash()
+//			}
+//			if !ph.IsEqual(bhs[k].ParentHash()) {
+//				break
+//			}
+//			equals++
+//		}
+//		if equals == len(bhs) {
+//			// All blockheaders point to the same parent.
+//			return s.g.db.BlockHeaderByHash(ctx, *ph)
+//		}
+//
+//		// Decrease height
+//		h--
+//	}
+//}
+//
+//// isCanonical uses checkpoints to determine if a block is on the canonical
+//// chain. This is a expensive call hence it tries to use checkpoints to short
+//// circuit the check.
+//func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, error) {
+//	var (
+//		bhb *tbcd.BlockHeader
+//		err error
+//	)
+//	ncp := nextCheckpoint(bh, s.g.chain.Checkpoints)
+//	if ncp == nil {
+//		// Use best since we do not have a best checkpoint
+//		bhb, err = s.g.db.BlockHeaderBest(ctx)
+//	} else {
+//		bhb, err = s.g.db.BlockHeaderByHash(ctx, *ncp.Hash)
+//	}
+//	if err != nil {
+//		return false, err
+//	}
+//
+//	// Basic shortcircuit
+//	if bhb.Height < bh.Height {
+//		// We either hit a race or the caller did something wrong.
+//		// Either way, it cannot be canonical.
+//		log.Debugf("best height less than provided height: %v < %v",
+//			bhb.Height, bh.Height)
+//		return false, nil
+//	}
+//	if bhb.Hash.IsEqual(&bh.Hash) {
+//		// Self == best
+//		return true, nil
+//	}
+//
+//	genesisHash := previousCheckpoint(bh, s.g.chain.Checkpoints).Hash // either genesis or a snapshot block
+//
+//	// Move best block header backwards until we find bh.
+//	log.Debugf("isCanonical best %v bh %v genesis %v", bhb.HH(), bh.HH(), genesisHash)
+//	for {
+//		if bhb.Height <= bh.Height {
+//			return false, nil
+//		}
+//		bhb, err = s.g.db.BlockHeaderByHash(ctx, *bhb.ParentHash())
+//		if err != nil {
+//			return false, err
+//		}
+//		if bhb.Hash.IsEqual(genesisHash) {
+//			return false, nil
+//		}
+//		if bhb.Hash.IsEqual(&bh.Hash) {
+//			return true, nil
+//		}
+//	}
+//}
+//
+//func (s *Server) findCanonicalParent(ctx context.Context, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+//	log.Tracef("findCanonicalParent %v", bh)
+//
+//	// Genesis is always canonical.
+//	if bh.Hash.IsEqual(s.g.chain.GenesisHash) {
+//		return bh, nil
+//	}
+//
+//	bhb, err := s.g.db.BlockHeaderBest(ctx)
+//	if err != nil {
+//		return nil, err
+//	}
+//	log.Debugf("findCanonicalParent %v @ %v best %v @ %v",
+//		bh, bh.Height, bhb, bhb.Height)
+//	for {
+//		canonical, err := s.isCanonical(ctx, bh)
+//		if err != nil {
+//			return nil, err
+//		}
+//		if canonical {
+//			log.Tracef("findCanonicalParent exit %v", bh)
+//			return bh, nil
+//		}
+//		bh, err = s.findCommonParent(ctx, bhb, bh)
+//		if err != nil {
+//			return nil, err
+//		}
+//	}
+//}
+//
 // findPathFromHash determines which hash is in the path by walking back the
 // chain from the provided end point. It returns the index in bhs of the
 // correct hash. On failure it returns -1 DELIBERATELY to crash the caller if
 // error is not checked.
-func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
-	log.Tracef("findPathFromHash %v", len(bhs))
-	switch len(bhs) {
-	case 1:
-		return 0, nil // most common fast path
-	case 0:
-		return -1, errors.New("no blockheaders provided")
-	}
-
-	// When this happens we have to walk back from endHash to find the
-	// connecting block. There is no shortcut possible without hitting edge
-	// conditions.
-	h := endHash
-	for {
-		bh, err := s.db.BlockHeaderByHash(ctx, *h)
-		if err != nil {
-			return -1, fmt.Errorf("block header by hash: %w", err)
-		}
-		for k, v := range bhs {
-			if h.IsEqual(v.BlockHash()) {
-				return k, nil
-			}
-		}
-		if h.IsEqual(s.chainParams.GenesisHash) {
-			break
-		}
-		h = bh.ParentHash()
-	}
-	return -1, errors.New("path not found")
-}
-
-func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhash.Hash, hh *HashHeight) (*HashHeight, error) {
-	// Move to next block
-	height := hh.Height + 1
-	bhs, err := s.db.BlockHeadersByHeight(ctx, height)
-	if err != nil {
-		return nil, fmt.Errorf("block headers by height %v: %w",
-			height, err)
-	}
-	index, err := s.findPathFromHash(ctx, endHash, bhs)
-	if err != nil {
-		return nil, fmt.Errorf("could not determine canonical path %v: %w",
-			height, err)
-	}
-	// Verify it connects to parent
-	if !hh.Hash.IsEqual(bhs[index].ParentHash()) {
-		return nil, fmt.Errorf("%v does not connect to: %v", bhs[index], hh.Hash)
-	}
-	nbh := bhs[index]
-	return &HashHeight{Hash: *nbh.BlockHash(), Height: nbh.Height}, nil
-}
-
-// headerAndBlock retrieves both the blockheader and the block. While the
-// blockheader is part of the block we do this double database retrieval to
-// ensure both exist.
-func (s *Server) headerAndBlock(ctx context.Context, hash chainhash.Hash) (*tbcd.BlockHeader, *btcutil.Block, error) {
-	bh, err := s.db.BlockHeaderByHash(ctx, hash)
-	if err != nil {
-		return nil, nil, fmt.Errorf("block header %v: %w", hash, err)
-	}
-	b, err := s.db.BlockByHash(ctx, bh.Hash)
-	if err != nil {
-		return nil, nil, fmt.Errorf("block by hash %v: %w", bh, err)
-	}
-	b.SetHeight(int32(bh.Height))
-
-	return bh, b, nil
-}
+//func (s *Server) findPathFromHash(ctx context.Context, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
+//	log.Tracef("findPathFromHash %v", len(bhs))
+//	switch len(bhs) {
+//	case 1:
+//		return 0, nil // most common fast path
+//	case 0:
+//		return -1, errors.New("no blockheaders provided")
+//	}
+//
+//	// When this happens we have to walk back from endHash to find the
+//	// connecting block. There is no shortcut possible without hitting edge
+//	// conditions.
+//	h := endHash
+//	for {
+//		bh, err := s.g.db.BlockHeaderByHash(ctx, *h)
+//		if err != nil {
+//			return -1, fmt.Errorf("block header by hash: %w", err)
+//		}
+//		for k, v := range bhs {
+//			if h.IsEqual(v.BlockHash()) {
+//				return k, nil
+//			}
+//		}
+//		if h.IsEqual(s.g.chain.GenesisHash) {
+//			break
+//		}
+//		h = bh.ParentHash()
+//	}
+//	return -1, errors.New("path not found")
+//}
+//
+//func (s *Server) nextCanonicalBlockheader(ctx context.Context, endHash *chainhash.Hash, hh *HashHeight) (*HashHeight, error) {
+//	// Move to next block
+//	height := hh.Height + 1
+//	bhs, err := s.g.db.BlockHeadersByHeight(ctx, height)
+//	if err != nil {
+//		return nil, fmt.Errorf("block headers by height %v: %w",
+//			height, err)
+//	}
+//	index, err := s.findPathFromHash(ctx, endHash, bhs)
+//	if err != nil {
+//		return nil, fmt.Errorf("could not determine canonical path %v: %w",
+//			height, err)
+//	}
+//	// Verify it connects to parent
+//	if !hh.Hash.IsEqual(bhs[index].ParentHash()) {
+//		return nil, fmt.Errorf("%v does not connect to: %v", bhs[index], hh.Hash)
+//	}
+//	nbh := bhs[index]
+//	return &HashHeight{Hash: *nbh.BlockHash(), Height: nbh.Height}, nil
+//}
+//
+//// headerAndBlock retrieves both the blockheader and the block. While the
+//// blockheader is part of the block we do this double database retrieval to
+//// ensure both exist.
+//func (s *Server) headerAndBlock(ctx context.Context, hash chainhash.Hash) (*tbcd.BlockHeader, *btcutil.Block, error) {
+//	bh, err := s.g.db.BlockHeaderByHash(ctx, hash)
+//	if err != nil {
+//		return nil, fmt.Errorf("block header %v: %w", hash, err)
+//	}
+//	b, err := s.g.db.BlockByHash(ctx, bh.Hash)
+//	if err != nil {
+//		return nil, fmt.Errorf("block by hash %v: %w", bh, err)
+//	}
+//	b.SetHeight(int32(bh.Height))
+//
+//	return bh, b, nil
+//}
 
 func processUtxos(block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	txs := block.Transactions()
@@ -609,7 +611,7 @@ func (s *Server) fetchOPParallel(ctx context.Context, c chan struct{}, w *sync.W
 		}()
 	}
 
-	sh, err := s.db.ScriptHashByOutpoint(ctx, op)
+	sh, err := s.g.db.ScriptHashByOutpoint(ctx, op)
 	if err != nil {
 		// This happens when a transaction is created and spent in the
 		// same block.
@@ -666,7 +668,7 @@ func (s *Server) fixupCacheSerial(ctx context.Context, b *btcutil.Block, utxos m
 				continue
 			}
 
-			sh, err := s.db.ScriptHashByOutpoint(ctx, op)
+			sh, err := s.g.db.ScriptHashByOutpoint(ctx, op)
 			if err != nil {
 				// This happens when a transaction is created
 				// and spent in the same block.
@@ -703,7 +705,7 @@ func (s *Server) fixupCacheBatched(ctx context.Context, b *btcutil.Block, utxos 
 		utxos[op] = tbcd.NewDeleteCacheOutput(sh, op.TxIndex())
 		return nil
 	}
-	return s.db.ScriptHashesByOutpoint(ctx, ops, found)
+	return s.g.db.ScriptHashesByOutpoint(ctx, ops, found)
 }
 
 func (s *Server) fixupCacheChannel(ctx context.Context, b *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
@@ -844,13 +846,13 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash chainhash
 	defer log.Tracef("IndexIsLinear exit")
 
 	// Verify exit condition hash
-	endBH, err := s.db.BlockHeaderByHash(ctx, endHash)
+	endBH, err := s.g.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return 0, fmt.Errorf("blockheader hash: %w", err)
 	}
 
 	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := s.db.BlockHeaderByHash(ctx, startHash)
+	startBH, err := s.g.db.BlockHeaderByHash(ctx, startHash)
 	if err != nil {
 		return 0, fmt.Errorf("blockheader hash: %w", err)
 	}
@@ -886,7 +888,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash chainhash
 			startBH, endBH, direction))
 	}
 	for {
-		bh, err := s.db.BlockHeaderByHash(ctx, *h)
+		bh, err := s.g.db.BlockHeaderByHash(ctx, *h)
 		if err != nil {
 			return -1, fmt.Errorf("block header by hash: %w", err)
 		}
@@ -894,7 +896,7 @@ func (s *Server) IndexIsLinear(ctx context.Context, startHash, endHash chainhash
 		if h.IsEqual(e) {
 			return direction, nil
 		}
-		if h.IsEqual(s.chainParams.GenesisHash) {
+		if h.IsEqual(s.g.chain.GenesisHash) {
 			return 0, NotLinearError(fmt.Sprintf("start %v end %v "+
 				"direction %v: genesis", startBH, endBH, direction))
 		}
@@ -931,25 +933,25 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 	log.Debugf("Syncing indexes to: %v", hash)
 
 	// utxos
-	if err := NewUtxoIndexer(s.chainParams, s.cfg.MaxCachedTxs, s.db, s.fixupCache).ToHash(ctx, hash); err != nil {
+	if err := NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache).ToHash(ctx, hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
 	// Transactions index
-	if err := NewTxIndexer(s.chainParams, s.cfg.MaxCachedTxs, s.db).ToHash(ctx, hash); err != nil {
+	if err := NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db).ToHash(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
 	// Hemi indexes
 	if s.cfg.HemiIndex {
-		if err := s.newKeystoneIndexer().modeIndexer(ctx, hash); err != nil {
+		if err := NewKeystoneIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.cfg.HemiIndex).ToHash(ctx, hash); err != nil {
 			return fmt.Errorf("keystone indexer: %w", err)
 		}
 	}
 
 	log.Debugf("Done syncing to: %v", hash)
 
-	bh, err := s.db.BlockHeaderByHash(ctx, hash)
+	bh, err := s.g.db.BlockHeaderByHash(ctx, hash)
 	if err != nil {
 		log.Errorf("block header by hash: %v", err)
 	} else {
@@ -963,29 +965,29 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	log.Tracef("syncIndexersToBest")
 	defer log.Tracef("syncIndexersToBest exit")
 
-	bhb, err := s.db.BlockHeaderBest(ctx)
+	bhb, err := s.g.db.BlockHeaderBest(ctx)
 	if err != nil {
 		return err
 	}
 
 	log.Debugf("Sync indexers to best: %v @ %v", bhb, bhb.Height)
 
-	if err := NewUtxoIndexer(s.chainParams, s.cfg.MaxCachedTxs, s.db, s.fixupCache).ToBest(ctx); err != nil {
+	if err := NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache).ToBest(ctx); err != nil {
 		return err
 	}
 
-	if err := NewTxIndexer(s.chainParams, s.cfg.MaxCachedTxs, s.db).ToBest(ctx); err != nil {
+	if err := NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db).ToBest(ctx); err != nil {
 		return err
 	}
 
 	if s.cfg.HemiIndex {
-		if err := s.newKeystoneIndexer().modeIndexersToBest(ctx, bhb); err != nil {
+		if err := s.ki.ToBest(ctx); err != nil {
 			return err
 		}
 	}
 
 	// Print nice message to indicate completion.
-	bh, err := s.db.BlockHeaderByHash(ctx, bhb.Hash)
+	bh, err := s.g.db.BlockHeaderByHash(ctx, bhb.Hash)
 	if err != nil {
 		log.Errorf("block header by hash: %v", err)
 	} else {

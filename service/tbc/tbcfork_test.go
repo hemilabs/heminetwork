@@ -1130,7 +1130,7 @@ func errorIsOneOf(err error, errs []error) bool {
 func (s *Server) hasAllBlocks(ctx context.Context, m map[int32][]*block) (bool, error) {
 	for _, k := range m {
 		for _, blk := range k {
-			_, err := s.db.BlockByHash(ctx, *blk.Hash())
+			_, err := s.g.db.BlockByHash(ctx, *blk.Hash())
 			if err != nil {
 				return false, err
 			}
@@ -1573,7 +1573,7 @@ func TestIndexNoFork(t *testing.T) {
 		t.Fatalf("expected an error from mustHave: %v", err)
 	}
 
-	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1716,7 +1716,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone in db
-	rv, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	rv, err := s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1727,7 +1727,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err := s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err := s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1765,7 +1765,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if kss1 in db
-	rv, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1775,7 +1775,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1789,7 +1789,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if kss2 in db
-	rv, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss2Hash)
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss2Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1799,7 +1799,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b3.Height()-1), 1)
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b3.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1858,7 +1858,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone in db
-	rv, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1868,7 +1868,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1881,7 +1881,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		t.Fatalf("unexpected keystone diff: %s", diff)
 	}
 
-	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1903,26 +1903,26 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		}
 	}
 
-	lastKssHeight, err := s.KeystoneIndexHash(ctx)
+	lastKssAt, err := s.ki.At(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// check if keystones unwound to genesis
-	if lastKssHeight.Height != 0 {
-		t.Fatalf("expected keystone index hash 0, got %v", lastKssHeight.Height)
+	if lastKssAt.Height != 0 {
+		t.Fatalf("expected keystone index hash 0, got %v", lastKssAt.Height)
 	}
 
 	// check if keystones not in db
 	for _, v := range n.keystones {
 		abrvKss := hemi.L2KeystoneAbbreviate(*v).Hash()
-		_, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *abrvKss)
+		_, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *abrvKss)
 		if err == nil {
 			t.Fatalf("expected fail in db query for keystone: %v", abrvKss)
 		}
 	}
 
 	// check if no keystones in heighthash index
-	_, err = s.db.KeystonesByHeight(ctx, 6, -5)
+	_, err = s.g.db.KeystonesByHeight(ctx, 6, -5)
 	if err == nil {
 		t.Fatalf("expected fail in db query for keystones at height 5 and below")
 	}
@@ -2079,7 +2079,7 @@ func TestIndexFork(t *testing.T) {
 	t.Logf("b3: %v", b3)
 
 	// b3 -> genesis should work with positive direction (cdiff is greater than target)
-	direction, err = s.TxIndexIsLinear(ctx, *s.chainParams.GenesisHash)
+	direction, err = s.TxIndexIsLinear(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
 	}
@@ -2115,7 +2115,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -2142,7 +2142,7 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
-	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+	if !txHH.Hash.IsEqual(s.g.chain.GenesisHash) {
 		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
 	}
 	if txHH.Height != 0 {
@@ -2177,7 +2177,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -2189,7 +2189,7 @@ func TestIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
-	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+	if !txHH.Hash.IsEqual(s.g.chain.GenesisHash) {
 		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
 	}
 	if txHH.Height != 0 {
@@ -2229,7 +2229,7 @@ func TestIndexFork(t *testing.T) {
 
 	// t.Logf("---------------------------------------- going to b3")
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("xxxx %v", err)
 	}
@@ -2391,7 +2391,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if keystone in db
-	rv, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	rv, err := s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2401,7 +2401,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
 	}
 	// check if keystone stored using heighthash index
-	hk, err := s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err := s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2440,7 +2440,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if kss1 in db
-	rv, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2450,7 +2450,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2464,7 +2464,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if kss2 in db
-	rv, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss2Hash)
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss2Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2474,7 +2474,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b3.Height()-1), 1)
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b3.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2491,7 +2491,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	t.Logf("b3: %v", b3)
 
 	// b3 -> genesis should work with positive direction (cdiff is greater than target)
-	direction, err = s.TxIndexIsLinear(ctx, *s.chainParams.GenesisHash)
+	direction, err = s.TxIndexIsLinear(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
 	}
@@ -2527,7 +2527,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -2554,7 +2554,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
-	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+	if !txHH.Hash.IsEqual(s.g.chain.GenesisHash) {
 		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
 	}
 	if txHH.Height != 0 {
@@ -2576,7 +2576,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if kss1 in db
-	rv, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2586,7 +2586,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2613,7 +2613,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
 	}
@@ -2625,7 +2625,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
-	if !txHH.Hash.IsEqual(s.chainParams.GenesisHash) {
+	if !txHH.Hash.IsEqual(s.g.chain.GenesisHash) {
 		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
 	}
 	if txHH.Height != 0 {
@@ -2664,7 +2664,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if kss1 in db
-	rv, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2674,7 +2674,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// check if keystone stored using heighthash index
-	hk, err = s.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2689,7 +2689,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 
 	// t.Logf("---------------------------------------- going to b3")
 	// unwind back to genesis
-	err = s.SyncIndexersToHash(ctx, *s.chainParams.GenesisHash)
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("xxxx %v", err)
 	}
@@ -2706,26 +2706,26 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
-	lastKssHeight, err := s.KeystoneIndexHash(ctx)
+	lastKssAt, err := s.ki.At(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// check if keystones unwound to genesis
-	if lastKssHeight.Height != 0 {
-		t.Fatalf("expected keystone index hash 0, got %v", lastKssHeight.Height)
+	if lastKssAt.Height != 0 {
+		t.Fatalf("expected keystone index hash 0, got %v", lastKssAt.Height)
 	}
 
 	// check if keystones not in db
 	for _, v := range n.keystones {
 		abrvKss := hemi.L2KeystoneAbbreviate(*v).Hash()
-		_, err = s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *abrvKss)
+		_, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *abrvKss)
 		if err == nil {
 			t.Fatalf("expected fail in db query for keystone: %v", abrvKss)
 		}
 	}
 
 	// check if no keystones in heighthash index
-	_, err = s.db.KeystonesByHeight(ctx, 6, -5)
+	_, err = s.g.db.KeystonesByHeight(ctx, 6, -5)
 	if err == nil {
 		t.Fatalf("expected fail in db query for keystones at height 5 and below")
 	}
@@ -2969,7 +2969,7 @@ func TestForkCanonicity(t *testing.T) {
 	}
 
 	// set checkpoints to genesis, b2 and b4
-	s.chainParams.Checkpoints = []chaincfg.Checkpoint{
+	s.g.chain.Checkpoints = []chaincfg.Checkpoint{
 		{Height: 4, Hash: mainChainHashes["b4"]},
 		{Height: 2, Hash: mainChainHashes["b2"]},
 		{Height: 0, Hash: parent},
@@ -2977,11 +2977,11 @@ func TestForkCanonicity(t *testing.T) {
 
 	// assert genesis -> b5 are canonical
 	for bname, hs := range mainChainHashes {
-		bh, err := s.db.BlockHeaderByHash(ctx, *hs)
+		bh, err := s.g.db.BlockHeaderByHash(ctx, *hs)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ic, err := s.isCanonical(ctx, bh)
+		ic, err := isCanonical(ctx, s.g, bh)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2994,11 +2994,11 @@ func TestForkCanonicity(t *testing.T) {
 
 	// assert a and b chain blocks are not canonical
 	for bname, hs := range altChainHashes {
-		bh, err := s.db.BlockHeaderByHash(ctx, *hs)
+		bh, err := s.g.db.BlockHeaderByHash(ctx, *hs)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ic, err := s.isCanonical(ctx, bh)
+		ic, err := isCanonical(ctx, s.g, bh)
 		if err != nil {
 			t.Fatal(err)
 		}
