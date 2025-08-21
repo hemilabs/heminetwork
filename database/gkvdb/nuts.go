@@ -15,7 +15,7 @@ import (
 
 const logLevel = "INFO"
 
-var log = loggo.GetLogger("nutsdb")
+var log = loggo.GetLogger("db")
 
 func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
