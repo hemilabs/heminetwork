@@ -268,7 +268,7 @@ func txputs(ctx context.Context, tx Transaction, tables []string, insertCount in
 		table := tables[i%len(tables)]
 		err := tx.Put(ctx, table, key[:], value[:])
 		if err != nil {
-			return fmt.Errorf("tx put %v: %v", table, i)
+			return fmt.Errorf("tx put %v in %v: %w", i, table, err)
 		}
 	}
 	return nil
@@ -752,6 +752,7 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 	if err != nil {
 		return fmt.Errorf("new iterator: %w", err)
 	}
+	defer it.Close(ctx)
 
 	// XXX nutsb has a huge limitation. We cannot iterate and perform
 	// actions on a WriteBatch. This is an odd decision but the net is it
@@ -785,7 +786,8 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 	if i != recordCount*3 {
 		return fmt.Errorf("invalid record count got %v, wanted %v", i, recordCount*3)
 	}
-
+	// Close iterator so that we don't block
+	it.Close(ctx)
 	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
 		return tx.Write(ctx, b)
 	})
@@ -793,26 +795,23 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 		return fmt.Errorf("update: %w", err)
 	}
 
-	// Close iterator so that we don't block
-	it.Close(ctx)
-
 	return nil
 }
 
-func TestGKVDB(t *testing.T) {
-	type TestTableItem struct {
-		name   string
-		dbFunc func(home string, tables []string) Database
-	}
+type TestTableItem struct {
+	name   string
+	dbFunc func(home string, tables []string) Database
+}
 
-	testTable := []TestTableItem{
+func getDBs() []TestTableItem {
+	return []TestTableItem{
 		{
 			name: "levelDB",
 			dbFunc: func(home string, tables []string) Database {
 				cfg := DefaultLevelConfig(home, tables)
 				db, err := NewLevelDB(cfg)
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 				return db
 			},
@@ -823,7 +822,7 @@ func TestGKVDB(t *testing.T) {
 				cfg := DefaultPebbleConfig(home, tables)
 				db, err := NewPebbleDB(cfg)
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 				return db
 			},
@@ -834,7 +833,7 @@ func TestGKVDB(t *testing.T) {
 				cfg := DefaultNutsConfig(home, tables)
 				db, err := NewNutsDB(cfg)
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 				return db
 			},
@@ -845,7 +844,7 @@ func TestGKVDB(t *testing.T) {
 				cfg := DefaultBadgerConfig(home, tables)
 				db, err := NewBadgerDB(cfg)
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 				return db
 			},
@@ -856,13 +855,16 @@ func TestGKVDB(t *testing.T) {
 				cfg := DefaultBoltConfig(home, tables)
 				db, err := NewBoltDB(cfg)
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 				return db
 			},
 		},
 	}
+}
 
+func TestGKVDB(t *testing.T) {
+	testTable := getDBs()
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
@@ -1038,5 +1040,59 @@ func TestGKVDB(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func BenchmarkGKVDBPut(b *testing.B) {
+	testTable := getDBs()
+	ctx, cancel := context.WithCancel(b.Context())
+	defer cancel()
+	for _, tti := range testTable {
+		for _, insertCount := range []int{1000, 10000, 100000, 1000000} {
+			benchName := fmt.Sprintf("%v/%v", tti.name, insertCount)
+			b.Run(benchName, func(b *testing.B) {
+				home := b.TempDir()
+
+				table := "table0"
+				tables := []string{table}
+
+				db := tti.dbFunc(home, tables)
+				err := db.Open(ctx)
+				if err != nil {
+					b.Fatal(err)
+				}
+				defer func() {
+					err := db.Close(ctx)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}()
+
+				value := []byte{1}
+				toInsert := make([][]byte, insertCount)
+				for i := range insertCount {
+					var key [4]byte
+					binary.BigEndian.PutUint32(key[:], uint32(i))
+					toInsert[i] = key[:]
+				}
+
+				for b.Loop() {
+					tx, err := db.Begin(ctx, true)
+					if err != nil && !errors.Is(err, ErrDBClosed) {
+						b.Fatalf("db begin: %v", err)
+					}
+					for i, k := range toInsert {
+						err := tx.Put(ctx, table, k, value)
+						if err != nil {
+							b.Fatalf("tx put %v: %v", i, err)
+						}
+					}
+					err = tx.Commit(ctx)
+					if err != nil {
+						panic(fmt.Errorf("tx rollback: %w", err))
+					}
+				}
+			})
+		}
 	}
 }

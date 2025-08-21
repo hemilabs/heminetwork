@@ -185,7 +185,9 @@ func (b *boltDB) NewRange(ctx context.Context, table string, start, end []byte) 
 }
 
 func (b *boltDB) NewBatch(ctx context.Context) (Batch, error) {
-	return &boltBatch{}, nil
+	return &boltBatch{
+		sequence: make([]func(ctx context.Context, tx Transaction) error, 0),
+	}, nil
 }
 
 // Transactions
@@ -252,7 +254,16 @@ func (tx *boltTX) Rollback(ctx context.Context) error {
 }
 
 func (tx *boltTX) Write(ctx context.Context, b Batch) error {
-	return errors.New("not yet bbolt")
+	bb, ok := b.(*boltBatch)
+	if !ok {
+		return fmt.Errorf("unsupported batch type: %T", b)
+	}
+	for _, f := range bb.sequence {
+		if err := f(ctx, tx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Iterations
@@ -365,14 +376,24 @@ func (nr *boltRange) Close(ctx context.Context) {
 
 // Batches
 
-type boltBatch struct{}
+type boltBatch struct {
+	sequence []func(ctx context.Context, tx Transaction) error
+}
 
 func (nb *boltBatch) Del(ctx context.Context, table string, key []byte) {
-
+	act := func(ctx context.Context, tx Transaction) error {
+		return tx.Del(ctx, table, key)
+	}
+	nb.sequence = append(nb.sequence, act)
 }
 
 func (nb *boltBatch) Put(ctx context.Context, table string, key, value []byte) {
+	act := func(ctx context.Context, tx Transaction) error {
+		return tx.Put(ctx, table, key, value)
+	}
+	nb.sequence = append(nb.sequence, act)
 }
 
 func (nb *boltBatch) Reset(ctx context.Context) {
+	nb.sequence = make([]func(ctx context.Context, tx Transaction) error, 0)
 }
