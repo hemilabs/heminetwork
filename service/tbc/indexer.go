@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -18,6 +19,49 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
+
+type Indexer interface {
+	ToBest(context.Context, chainhash.Hash) error    // Move index to best hash, autoresolves forks
+	ToHash(context.Context, chainhash.Hash) error    // Manually move index from current height hash
+	HashHeight(context.Context) (*HashHeight, error) // Current hash/height
+	Indexing() bool                                  // Returns if indexing is active
+}
+
+type utxoIndexer struct {
+	mtx sync.RWMutex
+
+	indexer  string
+	indexing bool
+	db       database.Database
+}
+
+var _ Indexer = (*utxoIndexer)(nil)
+
+func NewUtxoIndexer(db database.Database) (Indexer, error) {
+	return &utxoIndexer{
+		indexer:  "utxo",
+		indexing: false,
+		db:       db,
+	}, nil
+}
+
+func (i *utxoIndexer) ToBest(context.Context, chainhash.Hash) error {
+	return fmt.Errorf("ToBest not yet")
+}
+
+func (i *utxoIndexer) ToHash(context.Context, chainhash.Hash) error {
+	return fmt.Errorf("ToHash not yet")
+}
+
+func (i *utxoIndexer) HashHeight(ctx context.Context) (*HashHeight, error) {
+	return nil, fmt.Errorf("HashHeight not yet")
+}
+
+func (i *utxoIndexer) Indexing() bool {
+	i.mtx.RLock()
+	defer i.mtx.RUnlock()
+	return i.indexing
+}
 
 func logMemStats() {
 	var mem runtime.MemStats
@@ -48,7 +92,7 @@ func logMemStats() {
 //
 // This is obviously shitty but we need an in-between version that shows us
 // where the bodies are.
-type indexer struct {
+type _indexer struct {
 	indexer string // Name of indexer that is running
 
 	s                *Server
@@ -65,12 +109,12 @@ type indexer struct {
 	fixupCache             func(context.Context, *btcutil.Block, any) error
 }
 
-func (i *indexer) String() string {
+func (i *_indexer) String() string {
 	return i.indexer
 }
 
 //func (s *Server) indexToBest(ctx context.Context, mode indexMode) error {
-//	var i *indexer
+//	var i *_indexer
 //	switch mode {
 //	case indexKeystones:
 //		i = s.newKeystoneIndexer()
@@ -81,8 +125,8 @@ func (i *indexer) String() string {
 //	return i.modeIndexersToBest(ctx, nil) // XXX
 //}
 
-func (s *Server) newUtxoIndexer() *indexer {
-	i := &indexer{
+func (s *Server) newUtxoIndexer() *_indexer {
+	i := &_indexer{
 		indexer:                "utxo",
 		s:                      s,
 		enabled:                true,
@@ -114,30 +158,30 @@ func clearCacheUtxos(cache any) {
 }
 
 // blockUtxoUpdate calls the database update method
-func (i *indexer) blockUtxoUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
+func (i *_indexer) blockUtxoUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
 	return i.s.db.BlockUtxoUpdate(ctx, direction,
 		cache.(map[tbcd.Outpoint]tbcd.CacheOutput), modeIndexHash)
 }
 
-func (i *indexer) unprocessUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
+func (i *_indexer) unprocessUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
 	return i.s.unprocessUtxos(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
 }
 
 // processUtxo walks a block and peels out the relevant keystones that
 // will be stored in the database.
-func (i *indexer) processUtxos(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+func (i *_indexer) processUtxos(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
 	if direction == -1 {
 		return i.unprocessUtxos(ctx, block, cache)
 	}
 	return processUtxos(block, direction, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
 }
 
-func (i *indexer) fixupUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
+func (i *_indexer) fixupUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
 	return i.s.fixupCache(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
 }
 
-func (s *Server) newTxIndexer() *indexer {
-	i := &indexer{
+func (s *Server) newTxIndexer() *_indexer {
+	i := &_indexer{
 		indexer:                "tx",
 		s:                      s,
 		enabled:                true,
@@ -168,19 +212,19 @@ func clearCacheTxs(cache any) {
 }
 
 // blockTxUpdate calls the database update method
-func (i *indexer) blockTxUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
+func (i *_indexer) blockTxUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
 	return i.s.db.BlockTxUpdate(ctx, direction,
 		cache.(map[tbcd.TxKey]*tbcd.TxValue), modeIndexHash)
 }
 
 // processTx walks a block and peels out the relevant keystones that
 // will be stored in the database.
-func (i *indexer) processTxs(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+func (i *_indexer) processTxs(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
 	return processTxs(block, direction, cache.(map[tbcd.TxKey]*tbcd.TxValue))
 }
 
-func (s *Server) newKeystoneIndexer() *indexer {
-	i := &indexer{
+func (s *Server) newKeystoneIndexer() *_indexer {
+	i := &_indexer{
 		indexer:                "keystone",
 		s:                      s,
 		enabled:                s.cfg.HemiIndex,
@@ -213,18 +257,18 @@ func clearCacheKeystones(cache any) {
 
 // processKeystones walks a block and peels out the relevant keystones that
 // will be stored in the database.
-func (i *indexer) processKeystones(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+func (i *_indexer) processKeystones(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
 	return processKeystones(block, direction, cache.(map[chainhash.Hash]tbcd.Keystone))
 }
 
 // blockKeystoneUpdate calls the database update method
-func (i *indexer) blockKeystoneUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
+func (i *_indexer) blockKeystoneUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
 	return i.s.db.BlockKeystoneUpdate(ctx, direction,
 		cache.(map[chainhash.Hash]tbcd.Keystone), modeIndexHash)
 }
 
 // modeIndexHash replaces (Utxo|Tx|Keystone)IndexHash
-func (i *indexer) modeIndexHash(ctx context.Context) (*HashHeight, error) {
+func (i *_indexer) modeIndexHash(ctx context.Context) (*HashHeight, error) {
 	bh, err := i.blockHeaderByModeIndex(ctx)
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
@@ -240,7 +284,7 @@ func (i *indexer) modeIndexHash(ctx context.Context) (*HashHeight, error) {
 }
 
 // modeIndexersToBest replaces (Utxo|Tx|Keystone)IndexersToBest
-func (i *indexer) modeIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) error {
+func (i *_indexer) modeIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader) error {
 	log.Tracef("%vIndexersToBest", i)
 	defer log.Tracef("%vIndexersToBest exit", i)
 
@@ -274,7 +318,7 @@ func (i *indexer) modeIndexersToBest(ctx context.Context, bhb *tbcd.BlockHeader)
 }
 
 // modeIndexer replaces (Utxo|Tx|Keystone)Indexer
-func (i *indexer) modeIndexer(ctx context.Context, endHash chainhash.Hash) error {
+func (i *_indexer) modeIndexer(ctx context.Context, endHash chainhash.Hash) error {
 	log.Tracef("%vIndexer", i)
 	defer log.Tracef("%vIndexer exit", i)
 
@@ -326,7 +370,7 @@ func (i *indexer) modeIndexer(ctx context.Context, endHash chainhash.Hash) error
 }
 
 // modeIndexIsLinear replaces (Utxo|Tx|Keystone)IndexIndexIsLinear
-func (i *indexer) modeIndexIsLinear(ctx context.Context, endHash chainhash.Hash) (int, error) {
+func (i *_indexer) modeIndexIsLinear(ctx context.Context, endHash chainhash.Hash) (int, error) {
 	log.Tracef("%vIndexIsLinear", i)
 	defer log.Tracef("%vIndexIsLinear exit", i)
 
@@ -340,7 +384,7 @@ func (i *indexer) modeIndexIsLinear(ctx context.Context, endHash chainhash.Hash)
 }
 
 // modeIndexerWind replaces (Utxo|Tx|Keystone)IndexerWind
-func (i *indexer) modeIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+func (i *_indexer) modeIndexerWind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
 	log.Tracef("%vIndexerWind", i)
 	defer log.Tracef("%vkeystoneIndexerWind exit", i)
 
@@ -395,7 +439,7 @@ func (i *indexer) modeIndexerWind(ctx context.Context, startBH, endBH *tbcd.Bloc
 	return nil
 }
 
-func (i *indexer) modeIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+func (i *_indexer) modeIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
 	log.Tracef("%vIndexerUnwind", i)
 	defer log.Tracef("%vIndexerUnwind exit", i)
 
@@ -453,7 +497,7 @@ func (i *indexer) modeIndexerUnwind(ctx context.Context, startBH, endBH *tbcd.Bl
 // provided end hash, inclusive. It returns the number of blocks processed and
 // the last hash it processed.
 // Replaces index(Utxos|Txs|Keystones)InBlocks
-func (i *indexer) indexModeInBlocks(ctx context.Context, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
+func (i *_indexer) indexModeInBlocks(ctx context.Context, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
 	log.Tracef("%v indexModeInBlocks", i)
 	defer log.Tracef("%v indexModeInBlocks exit", i)
 
@@ -541,7 +585,7 @@ func (i *indexer) indexModeInBlocks(ctx context.Context, endHash *chainhash.Hash
 // until the provided end hash, inclusive. It returns the number of blocks
 // processed and the last hash it processed.
 // Replaces index(Utxos|Txs|Keystones)InBlocks
-func (i *indexer) unindexModeInBlocks(ctx context.Context, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
+func (i *_indexer) unindexModeInBlocks(ctx context.Context, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
 	log.Tracef("%v unindexModeInBlocks", i)
 	defer log.Tracef("%v unindexModeInBlocks exit", i)
 
