@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"sync"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -26,34 +25,6 @@ type Cache interface {
 	Length() int
 	Capacity() int
 	Generic() any
-}
-
-type utxoCache struct {
-	maxCacheEntries int
-	c               map[tbcd.Outpoint]tbcd.CacheOutput
-}
-
-func (c *utxoCache) Clear() {
-	clear(c.c)
-}
-
-func (c *utxoCache) Length() int {
-	return len(c.c)
-}
-
-func (c *utxoCache) Capacity() int {
-	return c.maxCacheEntries
-}
-
-func (c *utxoCache) Generic() any {
-	return c.c
-}
-
-func NewUtxoCache(maxCacheEntries int) Cache {
-	return &utxoCache{
-		maxCacheEntries: maxCacheEntries,
-		c:               make(map[tbcd.Outpoint]tbcd.CacheOutput, maxCacheEntries),
-	}
 }
 
 type Indexer interface {
@@ -77,124 +48,6 @@ type Indexer interface {
 type geometryParams struct {
 	db    tbcd.Database
 	chain *chaincfg.Params
-}
-
-type utxoIndexer struct {
-	// common
-	mtx      sync.RWMutex
-	indexer  string
-	indexing bool
-	enabled  bool
-	c        Cache
-
-	// geometry
-	g geometryParams
-
-	// utxo indexer only
-	fixupHook fixupCacheFunc
-}
-
-var _ Indexer = (*utxoIndexer)(nil)
-
-type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd.CacheOutput) error
-
-func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fixupCacheFunc) Indexer {
-	return &utxoIndexer{
-		indexer:   "utxo",
-		indexing:  false,
-		enabled:   true,
-		c:         NewUtxoCache(cacheLen),
-		fixupHook: f,
-		g: geometryParams{
-			db:    db,
-			chain: chain,
-		},
-	}
-}
-
-func (i *utxoIndexer) geometry() geometryParams {
-	return i.g
-}
-
-func (i *utxoIndexer) cache() Cache {
-	return i.c
-}
-
-func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockUtxoUpdate(ctx, direction,
-		i.cache().Generic().(map[tbcd.Outpoint]tbcd.CacheOutput), atHash)
-}
-
-func (i *utxoIndexer) genesis() *HashHeight {
-	return nil
-}
-
-func (i *utxoIndexer) process(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
-	if direction == -1 {
-		return unprocessUtxos(ctx, i.g.db, block,
-			cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-	}
-	return processUtxos(block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-}
-
-func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, cache any) error {
-	return i.fixupHook(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-}
-
-func (i *utxoIndexer) String() string {
-	return i.indexer
-}
-
-func (i *utxoIndexer) ToBest(ctx context.Context) error {
-	// abstract locking away
-	i.mtx.Lock()
-	if i.indexing {
-		i.mtx.Unlock()
-		return fmt.Errorf("already indexing: %v", i)
-	}
-	i.indexing = true
-	i.mtx.Unlock()
-	return toBest(ctx, i)
-}
-
-func (i *utxoIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error {
-	// abstract locking away
-	i.mtx.Lock()
-	if i.indexing {
-		i.mtx.Unlock()
-		return fmt.Errorf("already indexing: %v", i)
-	}
-	i.indexing = true
-	i.mtx.Unlock()
-	return windOrUnwind(ctx, i, hash)
-}
-
-func (i *utxoIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
-	bh, err := i.g.db.BlockHeaderByUtxoIndex(ctx)
-	if err != nil {
-		// XXX kind of don't want to copy/paste this everywhere
-		if !errors.Is(err, database.ErrNotFound) {
-			return nil, err
-		}
-		bh = &tbcd.BlockHeader{
-			Hash:   *i.g.chain.GenesisHash,
-			Height: 0,
-			Header: h2b(&i.g.chain.GenesisBlock.Header),
-		}
-	}
-	return bh, nil
-}
-
-func (i *utxoIndexer) Indexing() bool {
-	i.mtx.RLock()
-	defer i.mtx.RUnlock()
-	return i.indexing
-}
-
-func (i *utxoIndexer) Enabled() bool {
-	i.mtx.RLock()
-	defer i.mtx.RUnlock()
-	return i.enabled
 }
 
 // toBest moves the indexer to the best tip.
@@ -881,104 +734,113 @@ func (i *_indexer) String() string {
 //	return i.modeIndexersToBest(ctx, nil) // XXX
 //}
 
-//func (s *Server) newUtxoIndexer() *_indexer {
-//	i := &_indexer{
-//		indexer:                "utxo",
-//		s:                      s,
-//		enabled:                true,
-//		maxCachedEntries:       s.cfg.MaxCachedTxs,
-//		allocateEntries:        allocateCacheUtxos,
-//		lenEntries:             lenCacheUtxos,
-//		clearEntries:           clearCacheUtxos,
-//		blockHeaderByModeIndex: s.db.BlockHeaderByUtxoIndex,
+//	func (s *Server) newUtxoIndexer() *_indexer {
+//		i := &_indexer{
+//			indexer:                "utxo",
+//			s:                      s,
+//			enabled:                true,
+//			maxCachedEntries:       s.cfg.MaxCachedTxs,
+//			allocateEntries:        allocateCacheUtxos,
+//			lenEntries:             lenCacheUtxos,
+//			clearEntries:           clearCacheUtxos,
+//			blockHeaderByModeIndex: s.db.BlockHeaderByUtxoIndex,
+//		}
+//		i.blockModeUpdate = i.blockUtxoUpdate // XXX double eew
+//		i.processMode = i.processUtxos        // XXX double eew
+//		i.fixupCache = i.fixupUtxos           // XXX double eew
+//		return i
 //	}
-//	i.blockModeUpdate = i.blockUtxoUpdate // XXX double eew
-//	i.processMode = i.processUtxos        // XXX double eew
-//	i.fixupCache = i.fixupUtxos           // XXX double eew
-//	return i
-//}
 //
-//// allocateCacheUtxos allocates cahe for the txs
-//func allocateCacheUtxos(maxCachedEntries int) any {
-//	return make(map[tbcd.Outpoint]tbcd.CacheOutput, maxCachedEntries)
-//}
+// // allocateCacheUtxos allocates cahe for the txs
 //
-//// lenCacheUtxos returns the entry count in the tx cache.
-//func lenCacheUtxos(cache any) int {
-//	return len(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-//}
-//
-//// clearCacheUtxos empties cached txs to lower memory pressure.
-//func clearCacheUtxos(cache any) {
-//	clear(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-//}
-//
-//// blockUtxoUpdate calls the database update method
-//func (i *_indexer) blockUtxoUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
-//	return i.s.db.BlockUtxoUpdate(ctx, direction,
-//		cache.(map[tbcd.Outpoint]tbcd.CacheOutput), modeIndexHash)
-//}
-//
-//func (i *_indexer) unprocessUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
-//	return unprocessUtxos(ctx, i.s.db, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-//}
-//
-//// processUtxo walks a block and peels out the relevant keystones that
-//// will be stored in the database.
-//func (i *_indexer) processUtxos(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
-//	if direction == -1 {
-//		return i.unprocessUtxos(ctx, block, cache)
+//	func allocateCacheUtxos(maxCachedEntries int) any {
+//		return make(map[tbcd.Outpoint]tbcd.CacheOutput, maxCachedEntries)
 //	}
-//	return processUtxos(block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-//}
 //
-//func (i *_indexer) fixupUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
-//	return i.s.fixupCache(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-//}
-
-func (s *Server) newTxIndexer() *_indexer {
-	i := &_indexer{
-		indexer:                "tx",
-		s:                      s,
-		enabled:                true,
-		maxCachedEntries:       s.cfg.MaxCachedTxs,
-		allocateEntries:        allocateCacheTxs,
-		lenEntries:             lenCacheTxs,
-		clearEntries:           clearCacheTxs,
-		blockHeaderByModeIndex: s.db.BlockHeaderByTxIndex,
-	}
-	i.blockModeUpdate = i.blockTxUpdate // XXX double eew
-	i.processMode = i.processTxs        // XXX double eew
-	return i
-}
-
-// allocateCacheTxs allocates cahe for the txs
-func allocateCacheTxs(maxCachedEntries int) any {
-	return make(map[tbcd.TxKey]*tbcd.TxValue, maxCachedEntries)
-}
-
-// lenCacheTxs returns the entry count in the tx cache.
-func lenCacheTxs(cache any) int {
-	return len(cache.(map[tbcd.TxKey]*tbcd.TxValue))
-}
-
-// clearCacheTxs empties cached txs to lower memory pressure.
-func clearCacheTxs(cache any) {
-	clear(cache.(map[tbcd.TxKey]*tbcd.TxValue))
-}
-
-// blockTxUpdate calls the database update method
-func (i *_indexer) blockTxUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
-	return i.s.db.BlockTxUpdate(ctx, direction,
-		cache.(map[tbcd.TxKey]*tbcd.TxValue), modeIndexHash)
-}
-
-// processTx walks a block and peels out the relevant keystones that
-// will be stored in the database.
-func (i *_indexer) processTxs(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
-	return processTxs(block, direction, cache.(map[tbcd.TxKey]*tbcd.TxValue))
-}
-
+// // lenCacheUtxos returns the entry count in the tx cache.
+//
+//	func lenCacheUtxos(cache any) int {
+//		return len(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//	}
+//
+// // clearCacheUtxos empties cached txs to lower memory pressure.
+//
+//	func clearCacheUtxos(cache any) {
+//		clear(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//	}
+//
+// // blockUtxoUpdate calls the database update method
+//
+//	func (i *_indexer) blockUtxoUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
+//		return i.s.db.BlockUtxoUpdate(ctx, direction,
+//			cache.(map[tbcd.Outpoint]tbcd.CacheOutput), modeIndexHash)
+//	}
+//
+//	func (i *_indexer) unprocessUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
+//		return unprocessUtxos(ctx, i.s.db, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//	}
+//
+// // processUtxo walks a block and peels out the relevant keystones that
+// // will be stored in the database.
+//
+//	func (i *_indexer) processUtxos(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+//		if direction == -1 {
+//			return i.unprocessUtxos(ctx, block, cache)
+//		}
+//		return processUtxos(block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//	}
+//
+//	func (i *_indexer) fixupUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
+//		return i.s.fixupCache(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//	}
+//
+//	func (s *Server) newTxIndexer() *_indexer {
+//		i := &_indexer{
+//			indexer:                "tx",
+//			s:                      s,
+//			enabled:                true,
+//			maxCachedEntries:       s.cfg.MaxCachedTxs,
+//			allocateEntries:        allocateCacheTxs,
+//			lenEntries:             lenCacheTxs,
+//			clearEntries:           clearCacheTxs,
+//			blockHeaderByModeIndex: s.db.BlockHeaderByTxIndex,
+//		}
+//		i.blockModeUpdate = i.blockTxUpdate // XXX double eew
+//		i.processMode = i.processTxs        // XXX double eew
+//		return i
+//	}
+//
+// // allocateCacheTxs allocates cahe for the txs
+//
+//	func allocateCacheTxs(maxCachedEntries int) any {
+//		return make(map[tbcd.TxKey]*tbcd.TxValue, maxCachedEntries)
+//	}
+//
+// // lenCacheTxs returns the entry count in the tx cache.
+//
+//	func lenCacheTxs(cache any) int {
+//		return len(cache.(map[tbcd.TxKey]*tbcd.TxValue))
+//	}
+//
+// // clearCacheTxs empties cached txs to lower memory pressure.
+//
+//	func clearCacheTxs(cache any) {
+//		clear(cache.(map[tbcd.TxKey]*tbcd.TxValue))
+//	}
+//
+// // blockTxUpdate calls the database update method
+//
+//	func (i *_indexer) blockTxUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
+//		return i.s.db.BlockTxUpdate(ctx, direction,
+//			cache.(map[tbcd.TxKey]*tbcd.TxValue), modeIndexHash)
+//	}
+//
+// // processTx walks a block and peels out the relevant keystones that
+// // will be stored in the database.
+//
+//	func (i *_indexer) processTxs(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+//		return processTxs(block, direction, cache.(map[tbcd.TxKey]*tbcd.TxValue))
+//	}
 func (s *Server) newKeystoneIndexer() *_indexer {
 	i := &_indexer{
 		indexer:                "keystone",
