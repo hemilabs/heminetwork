@@ -936,7 +936,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 	}
 
 	// Transactions index
-	if err := s.newTxIndexer().modeIndexer(ctx, hash); err != nil {
+	if err := NewTxIndexer(s.chainParams, s.cfg.MaxCachedTxs, s.db).ToHash(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
@@ -974,7 +974,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 		return err
 	}
 
-	if err := s.newTxIndexer().modeIndexersToBest(ctx, bhb); err != nil {
+	if err := NewTxIndexer(s.chainParams, s.cfg.MaxCachedTxs, s.db).ToBest(ctx); err != nil {
 		return err
 	}
 
