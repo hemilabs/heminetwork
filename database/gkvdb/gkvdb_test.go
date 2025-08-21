@@ -720,39 +720,39 @@ func TestGKVDB(t *testing.T) {
 	}
 
 	testTable := []TestTableItem{
-		// {
-		// 	name: "levelDB",
-		// 	dbFunc: func(home string, tables []string) Database {
-		// 		cfg := DefaultLevelConfig(home, tables)
-		// 		db, err := NewLevelDB(cfg)
-		// 		if err != nil {
-		// 			t.Fatal(err)
-		// 		}
-		// 		return db
-		// 	},
-		// },
-		// {
-		// 	name: "pebbleDB",
-		// 	dbFunc: func(home string, tables []string) Database {
-		// 		cfg := DefaultPebbleConfig(home, tables)
-		// 		db, err := NewPebbleDB(cfg)
-		// 		if err != nil {
-		// 			t.Fatal(err)
-		// 		}
-		// 		return db
-		// 	},
-		// },
-		// {
-		// 	name: "nutsDB",
-		// 	dbFunc: func(home string, tables []string) Database {
-		// 		cfg := DefaultNutsConfig(home, tables)
-		// 		db, err := NewNutsDB(cfg)
-		// 		if err != nil {
-		// 			t.Fatal(err)
-		// 		}
-		// 		return db
-		// 	},
-		// },
+		{
+			name: "levelDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultLevelConfig(home, tables)
+				db, err := NewLevelDB(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "pebbleDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultPebbleConfig(home, tables)
+				db, err := NewPebbleDB(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "nutsDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultNutsConfig(home, tables)
+				db, err := NewNutsDB(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return db
+			},
+		},
 		{
 			name: "badgerDB",
 			dbFunc: func(home string, tables []string) Database {
