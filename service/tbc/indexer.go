@@ -147,11 +147,27 @@ func (i *utxoIndexer) String() string {
 }
 
 func (i *utxoIndexer) ToBest(ctx context.Context) error {
+	// abstract locking away
+	i.mtx.Lock()
+	if i.indexing {
+		i.mtx.Unlock()
+		return fmt.Errorf("already indexing: %v", i)
+	}
+	i.indexing = true
+	i.mtx.Unlock()
 	return toBest(ctx, i)
 }
 
-func (i *utxoIndexer) ToHash(context.Context, chainhash.Hash) error {
-	return fmt.Errorf("ToHash not yet")
+func (i *utxoIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error {
+	// abstract locking away
+	i.mtx.Lock()
+	if i.indexing {
+		i.mtx.Unlock()
+		return fmt.Errorf("already indexing: %v", i)
+	}
+	i.indexing = true
+	i.mtx.Unlock()
+	return windOrUnwind(ctx, i, hash)
 }
 
 func (i *utxoIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -438,7 +454,6 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 		return errors.New("disabled")
 	}
 	if !i.Indexing() {
-		// XXX this prob should be an error but pusnish bad callers for now
 		panic("indexing not true")
 	}
 
@@ -672,13 +687,17 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache 
 	} else {
 		// Some indexers use a different genesis, e.g. keystones. Will
 		// be nil if there is no override.
-		hh = i.genesis()
+		if override := i.genesis(); override != nil {
+			hh = override
+		}
 	}
 
 	percentage := 95 // flush cache at >95% capacity
 	blocksProcessed := 0
 	for {
 		log.Debugf("indexing %vs: %v", i, hh)
+		log.Infof("indexing %vs: %v", i, hh)
+		log.Infof("g %v hh %v", g, hh)
 
 		bh, b, err := headerAndBlock(ctx, g.db, hh.Hash)
 		if err != nil {
@@ -863,60 +882,60 @@ func (i *_indexer) String() string {
 //	return i.modeIndexersToBest(ctx, nil) // XXX
 //}
 
-func (s *Server) newUtxoIndexer() *_indexer {
-	i := &_indexer{
-		indexer:                "utxo",
-		s:                      s,
-		enabled:                true,
-		maxCachedEntries:       s.cfg.MaxCachedTxs,
-		allocateEntries:        allocateCacheUtxos,
-		lenEntries:             lenCacheUtxos,
-		clearEntries:           clearCacheUtxos,
-		blockHeaderByModeIndex: s.db.BlockHeaderByUtxoIndex,
-	}
-	i.blockModeUpdate = i.blockUtxoUpdate // XXX double eew
-	i.processMode = i.processUtxos        // XXX double eew
-	i.fixupCache = i.fixupUtxos           // XXX double eew
-	return i
-}
-
-// allocateCacheUtxos allocates cahe for the txs
-func allocateCacheUtxos(maxCachedEntries int) any {
-	return make(map[tbcd.Outpoint]tbcd.CacheOutput, maxCachedEntries)
-}
-
-// lenCacheUtxos returns the entry count in the tx cache.
-func lenCacheUtxos(cache any) int {
-	return len(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-}
-
-// clearCacheUtxos empties cached txs to lower memory pressure.
-func clearCacheUtxos(cache any) {
-	clear(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-}
-
-// blockUtxoUpdate calls the database update method
-func (i *_indexer) blockUtxoUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
-	return i.s.db.BlockUtxoUpdate(ctx, direction,
-		cache.(map[tbcd.Outpoint]tbcd.CacheOutput), modeIndexHash)
-}
-
-func (i *_indexer) unprocessUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
-	return unprocessUtxos(ctx, i.s.db, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-}
-
-// processUtxo walks a block and peels out the relevant keystones that
-// will be stored in the database.
-func (i *_indexer) processUtxos(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
-	if direction == -1 {
-		return i.unprocessUtxos(ctx, block, cache)
-	}
-	return processUtxos(block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-}
-
-func (i *_indexer) fixupUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
-	return i.s.fixupCache(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
-}
+//func (s *Server) newUtxoIndexer() *_indexer {
+//	i := &_indexer{
+//		indexer:                "utxo",
+//		s:                      s,
+//		enabled:                true,
+//		maxCachedEntries:       s.cfg.MaxCachedTxs,
+//		allocateEntries:        allocateCacheUtxos,
+//		lenEntries:             lenCacheUtxos,
+//		clearEntries:           clearCacheUtxos,
+//		blockHeaderByModeIndex: s.db.BlockHeaderByUtxoIndex,
+//	}
+//	i.blockModeUpdate = i.blockUtxoUpdate // XXX double eew
+//	i.processMode = i.processUtxos        // XXX double eew
+//	i.fixupCache = i.fixupUtxos           // XXX double eew
+//	return i
+//}
+//
+//// allocateCacheUtxos allocates cahe for the txs
+//func allocateCacheUtxos(maxCachedEntries int) any {
+//	return make(map[tbcd.Outpoint]tbcd.CacheOutput, maxCachedEntries)
+//}
+//
+//// lenCacheUtxos returns the entry count in the tx cache.
+//func lenCacheUtxos(cache any) int {
+//	return len(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//}
+//
+//// clearCacheUtxos empties cached txs to lower memory pressure.
+//func clearCacheUtxos(cache any) {
+//	clear(cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//}
+//
+//// blockUtxoUpdate calls the database update method
+//func (i *_indexer) blockUtxoUpdate(ctx context.Context, direction int, cache any, modeIndexHash chainhash.Hash) error {
+//	return i.s.db.BlockUtxoUpdate(ctx, direction,
+//		cache.(map[tbcd.Outpoint]tbcd.CacheOutput), modeIndexHash)
+//}
+//
+//func (i *_indexer) unprocessUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
+//	return unprocessUtxos(ctx, i.s.db, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//}
+//
+//// processUtxo walks a block and peels out the relevant keystones that
+//// will be stored in the database.
+//func (i *_indexer) processUtxos(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+//	if direction == -1 {
+//		return i.unprocessUtxos(ctx, block, cache)
+//	}
+//	return processUtxos(block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//}
+//
+//func (i *_indexer) fixupUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
+//	return i.s.fixupCache(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+//}
 
 func (s *Server) newTxIndexer() *_indexer {
 	i := &_indexer{
