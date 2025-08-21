@@ -713,6 +713,92 @@ func dbRange(ctx context.Context, db Database, tables []string, recordCount int)
 	return nil
 }
 
+func dbBatch(ctx context.Context, db Database, table string, recordCount int) error {
+	// Stuff a bunch of records into the same table to validate that
+	// everything is executed as expected.
+	b, err := db.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("new batch: %w", err)
+	}
+
+	for i := 0; i < recordCount; i++ {
+		// Emulate user records "userXXXX"
+		var key [8]byte
+		copy(key[:], []byte(fmt.Sprintf("user%04v", i)))
+		value := make([]byte, len(key)*2)
+		copy(value[len(key):], key[:])
+		b.Put(ctx, table, key[:], value)
+
+		// Emulate user records "passXXXX"
+		var pkey [8]byte
+		copy(pkey[:], []byte(fmt.Sprintf("pass%04v", i)))
+		eval := []byte(fmt.Sprintf("thisisapassword%v", i))
+		b.Put(ctx, table, pkey[:], eval)
+
+		// Emulate avatar records "avatarXXXX"
+		akey := []byte(fmt.Sprintf("avatar%d", i))
+		aval := []byte(fmt.Sprintf("thisisavatar%d", i))
+		b.Put(ctx, table, akey, aval)
+	}
+	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, b)
+	})
+	if err != nil {
+		return fmt.Errorf("update: %w", err)
+	}
+
+	// Read everything back and create a batch to delete all keys.
+	it, err := db.NewIterator(ctx, table)
+	if err != nil {
+		return fmt.Errorf("new iterator: %w", err)
+	}
+
+	// XXX nutsb has a huge limitation. We cannot iterate and perform
+	// actions on a WriteBatch. This is an odd decision but the net is it
+	// deadlocks the reads and writes (iterator rlocks then the del/put
+	// locks thus deadlocking).
+	//
+	// The solution must come from within nuts because there is a need to
+	// atomic read some shit and perform a write. Maybe the answer is using
+	// nutsdb.Tx.CommitWith(). Investigate this.
+	// For now use a shitty raceable non-atomic test.
+	//
+	// In addition to shity mutex use, we cannot do this either in tests:
+	//
+	// NewIterator()
+	// t.Fatal()
+	//
+	// This will deadlock on the defer db.Close because of outstanding
+	// transactions that haven't been closed.
+	i := 0
+	bd, err := db.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("new batch: %w", err)
+	}
+
+	for it.Next(ctx) {
+		key := append([]byte{}, it.Key(ctx)...)
+		// XXX can't do this with nutsdb
+		bd.Del(ctx, table, key)
+		i++
+	}
+	if i != recordCount*3 {
+		return fmt.Errorf("invalid record count got %v, wanted %v", i, recordCount*3)
+	}
+
+	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, b)
+	})
+	if err != nil {
+		return fmt.Errorf("update: %w", err)
+	}
+
+	// Close iterator so that we don't block
+	it.Close(ctx)
+
+	return nil
+}
+
 func TestGKVDB(t *testing.T) {
 	type TestTableItem struct {
 		name   string
@@ -758,6 +844,17 @@ func TestGKVDB(t *testing.T) {
 			dbFunc: func(home string, tables []string) Database {
 				cfg := DefaultBadgerConfig(home, tables)
 				db, err := NewBadgerDB(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "bbolt",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultBoltConfig(home, tables)
+				db, err := NewBoltDB(cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -873,11 +970,11 @@ func TestGKVDB(t *testing.T) {
 					t.Fail()
 				}
 				if err = dbIterateFirstLast(ctx, db, table, insertCount); err != nil {
-					log.Errorf("dbIterateNext: %v", err)
+					log.Errorf("dbIterateFirstLast: %v", err)
 					t.Fail()
 				}
 				if err = dbIterateSeek(ctx, db, table, insertCount); err != nil {
-					log.Errorf("dbIterateNext: %v", err)
+					log.Errorf("dbIterateSeek: %v", err)
 					t.Fail()
 				}
 			})
@@ -942,90 +1039,4 @@ func TestGKVDB(t *testing.T) {
 			})
 		})
 	}
-}
-
-func dbBatch(ctx context.Context, db Database, table string, recordCount int) error {
-	// Stuff a bunch of records into the same table to validate that
-	// everything is executed as expected.
-	b, err := db.NewBatch(ctx)
-	if err != nil {
-		return fmt.Errorf("new batch: %w", err)
-	}
-
-	for i := 0; i < recordCount; i++ {
-		// Emulate user records "userXXXX"
-		var key [8]byte
-		copy(key[:], []byte(fmt.Sprintf("user%04v", i)))
-		value := make([]byte, len(key)*2)
-		copy(value[len(key):], key[:])
-		b.Put(ctx, table, key[:], value)
-
-		// Emulate user records "passXXXX"
-		var pkey [8]byte
-		copy(pkey[:], []byte(fmt.Sprintf("pass%04v", i)))
-		eval := []byte(fmt.Sprintf("thisisapassword%v", i))
-		b.Put(ctx, table, pkey[:], eval)
-
-		// Emulate avatar records "avatarXXXX"
-		akey := []byte(fmt.Sprintf("avatar%d", i))
-		aval := []byte(fmt.Sprintf("thisisavatar%d", i))
-		b.Put(ctx, table, akey, aval)
-	}
-	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
-		return tx.Write(ctx, b)
-	})
-	if err != nil {
-		return fmt.Errorf("update: %w", err)
-	}
-
-	// Read everything back and create a batch to delete all keys.
-	it, err := db.NewIterator(ctx, table)
-	if err != nil {
-		return fmt.Errorf("new iterator: %w", err)
-	}
-
-	// XXX nutsb has a huge limitation. We cannot iterate and perform
-	// actions on a WriteBatch. This is an odd decision but the net is it
-	// deadlocks the reads and writes (iterator rlocks then the del/put
-	// locks thus deadlocking).
-	//
-	// The solution must come from within nuts because there is a need to
-	// atomic read some shit and perform a write. Maybe the answer is using
-	// nutsdb.Tx.CommitWith(). Investigate this.
-	// For now use a shitty raceable non-atomic test.
-	//
-	// In addition to shity mutex use, we cannot do this either in tests:
-	//
-	// NewIterator()
-	// t.Fatal()
-	//
-	// This will deadlock on the defer db.Close because of outstanding
-	// transactions that haven't been closed.
-	i := 0
-	bd, err := db.NewBatch(ctx)
-	if err != nil {
-		return fmt.Errorf("new batch: %w", err)
-	}
-
-	for it.Next(ctx) {
-		key := append([]byte{}, it.Key(ctx)...)
-		// XXX can't do this with nutsdb
-		bd.Del(ctx, table, key)
-		i++
-	}
-	if i != recordCount*3 {
-		return fmt.Errorf("invalid record count got %v, wanted %v", i, recordCount*3)
-	}
-
-	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
-		return tx.Write(ctx, b)
-	})
-	if err != nil {
-		return fmt.Errorf("update: %w", err)
-	}
-
-	// Close iterator so that we don't block
-	it.Close(ctx)
-
-	return nil
 }

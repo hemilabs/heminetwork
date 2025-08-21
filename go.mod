@@ -30,6 +30,7 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.38.0
 	github.com/tyler-smith/go-bip39 v1.1.0
+	go.etcd.io/bbolt v1.4.3
 	golang.org/x/sync v0.16.0
 	golang.org/x/sys v0.34.0
 )

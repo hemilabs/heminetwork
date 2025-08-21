@@ -270,6 +270,7 @@ func (tx *badgerTX) Write(ctx context.Context, b Batch) error {
 type badgerIterator struct {
 	table string
 	it    *badger.Iterator
+	first bool
 }
 
 func (ni *badgerIterator) First(_ context.Context) bool {
@@ -283,11 +284,18 @@ func (ni *badgerIterator) Last(_ context.Context) bool {
 }
 
 func (ni *badgerIterator) Next(_ context.Context) bool {
-	ni.it.Next()
+	if !ni.first {
+		ni.first = true
+		ni.it.Rewind()
+
+	} else {
+		ni.it.Next()
+	}
 	return ni.it.Valid()
 }
 
 func (ni *badgerIterator) Seek(_ context.Context, key []byte) bool {
+	ni.first = true
 	ni.it.Seek(NewCompositeKey(ni.table, key))
 	return ni.it.Valid()
 }
