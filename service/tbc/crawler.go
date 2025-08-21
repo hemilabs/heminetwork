@@ -494,7 +494,7 @@ func (s *Server) headerAndBlock(ctx context.Context, hash chainhash.Hash) (*tbcd
 	return bh, b, nil
 }
 
-func processUtxos(block *btcutil.Block, direction int, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+func processUtxos(block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	txs := block.Transactions()
 	for _, tx := range txs {
 		for _, txIn := range tx.MsgTx().TxIn {
@@ -522,16 +522,16 @@ func processUtxos(block *btcutil.Block, direction int, utxos map[tbcd.Outpoint]t
 	return nil
 }
 
-func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire.TxOut, error) {
+func txOutFromOutPoint(ctx context.Context, db tbcd.Database, op tbcd.Outpoint) (*wire.TxOut, error) {
 	txId := op.TxIdHash()
 	txIndex := op.TxIndex()
 
 	// Find block hashes
-	blockHash, err := s.db.BlockHashByTxId(ctx, *txId)
+	blockHash, err := db.BlockHashByTxId(ctx, *txId)
 	if err != nil {
 		return nil, fmt.Errorf("block by txid: %w", err)
 	}
-	b, err := s.db.BlockByHash(ctx, *blockHash)
+	b, err := db.BlockByHash(ctx, *blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("block by hash: %w", err)
 	}
@@ -549,7 +549,7 @@ func (s *Server) txOutFromOutPoint(ctx context.Context, op tbcd.Outpoint) (*wire
 	return nil, fmt.Errorf("tx id not found: %v", op)
 }
 
-func (s *Server) unprocessUtxos(ctx context.Context, block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
+func unprocessUtxos(ctx context.Context, db tbcd.Database, block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {
 	txs := block.Transactions()
 	// Walk backwards through the txs
 	for idx := len(txs) - 1; idx >= 0; idx-- {
@@ -563,7 +563,7 @@ func (s *Server) unprocessUtxos(ctx context.Context, block *btcutil.Block, utxos
 
 			op := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
-			prevTxOut, err := s.txOutFromOutPoint(ctx, op)
+			prevTxOut, err := txOutFromOutPoint(ctx, db, op)
 			if err != nil {
 				return fmt.Errorf("script value: %w", err)
 			}

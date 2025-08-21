@@ -2287,7 +2287,8 @@ func (s *Server) parseTx(ctx context.Context, tx *wire.MsgTx) (int64, int64, map
 	txins := make(map[wire.OutPoint]struct{}, len(tx.TxIn))
 	for _, txIn := range tx.TxIn {
 		po := txIn.PreviousOutPoint
-		wtxo, err := s.txOutFromOutPoint(ctx, tbcd.NewOutpoint(po.Hash, po.Index))
+		wtxo, err := txOutFromOutPoint(ctx,
+			s.db, tbcd.NewOutpoint(po.Hash, po.Index))
 		if err != nil {
 			return 0, 0, nil, err
 		}
