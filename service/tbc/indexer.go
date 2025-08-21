@@ -66,6 +66,7 @@ type Indexer interface {
 	geometry() geometryParams                          // Return geometry parameters
 	cache() Cache                                      // Return cache
 	commit(context.Context, int, chainhash.Hash) error // Commit index cache to disk
+	genesis() *HashHeight                              // Genesis override, like hemi
 }
 
 // geometryParams conviniently wraps all parameters required to perform
@@ -116,6 +117,10 @@ func (i *utxoIndexer) cache() Cache {
 func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
 	return i.g.db.BlockUtxoUpdate(ctx, direction,
 		i.cache().Generic().(map[tbcd.Outpoint]tbcd.CacheOutput), atHash)
+}
+
+func (i *utxoIndexer) genesis() *HashHeight {
+	return nil
 }
 
 func (i *utxoIndexer) String() string {
@@ -324,6 +329,79 @@ func findCommonParent(ctx context.Context, g geometryParams, bhX, bhY *tbcd.Bloc
 	}
 }
 
+func nextCanonicalBlockheader(ctx context.Context, g geometryParams, endHash *chainhash.Hash, hh *HashHeight) (*HashHeight, error) {
+	// Move to next block
+	height := hh.Height + 1
+	bhs, err := g.db.BlockHeadersByHeight(ctx, height)
+	if err != nil {
+		return nil, fmt.Errorf("block headers by height %v: %w",
+			height, err)
+	}
+	index, err := findPathFromHash(ctx, g, endHash, bhs)
+	if err != nil {
+		return nil, fmt.Errorf("could not determine canonical path %v: %w",
+			height, err)
+	}
+	// Verify it connects to parent
+	if !hh.Hash.IsEqual(bhs[index].ParentHash()) {
+		return nil, fmt.Errorf("%v does not connect to: %v", bhs[index], hh.Hash)
+	}
+	nbh := bhs[index]
+	return &HashHeight{Hash: *nbh.BlockHash(), Height: nbh.Height}, nil
+}
+
+// findPathFromHash determines which hash is in the path by walking back the
+// chain from the provided end point. It returns the index in bhs of the
+// correct hash. On failure it returns -1 DELIBERATELY to crash the caller if
+// error is not checked.
+func findPathFromHash(ctx context.Context, g geometryParams, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
+	log.Tracef("findPathFromHash %v", len(bhs))
+	switch len(bhs) {
+	case 1:
+		return 0, nil // most common fast path
+	case 0:
+		return -1, errors.New("no blockheaders provided")
+	}
+
+	// When this happens we have to walk back from endHash to find the
+	// connecting block. There is no shortcut possible without hitting edge
+	// conditions.
+	h := endHash
+	for {
+		bh, err := g.db.BlockHeaderByHash(ctx, *h)
+		if err != nil {
+			return -1, fmt.Errorf("block header by hash: %w", err)
+		}
+		for k, v := range bhs {
+			if h.IsEqual(v.BlockHash()) {
+				return k, nil
+			}
+		}
+		if h.IsEqual(g.chain.GenesisHash) {
+			break
+		}
+		h = bh.ParentHash()
+	}
+	return -1, errors.New("path not found")
+}
+
+// headerAndBlock retrieves both the blockheader and the block. While the
+// blockheader is part of the block we do this double database retrieval to
+// ensure both exist.
+func headerAndBlock(ctx context.Context, db tbcd.Database, hash chainhash.Hash) (*tbcd.BlockHeader, *btcutil.Block, error) {
+	bh, err := db.BlockHeaderByHash(ctx, hash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("block header %v: %w", hash, err)
+	}
+	b, err := db.BlockByHash(ctx, bh.Hash)
+	if err != nil {
+		return nil, nil, fmt.Errorf("block by hash %v: %w", bh, err)
+	}
+	b.SetHeight(int32(bh.Height))
+
+	return bh, b, nil
+}
+
 // windOrUnwind determines in which direction we are moving and kicks of the
 // wind or unwind process.
 func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error {
@@ -456,7 +534,7 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
-		blocksProcessed, last, err := i.indexModeInBlocks(ctx, endHash, es)
+		blocksProcessed, last, err := parseBlocks(ctx, i, endHash, es)
 		if err != nil {
 			return fmt.Errorf("%v index blocks: %w", i, err)
 		}
@@ -538,6 +616,91 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 		}
 	}
 	return nil
+}
+
+// parseBlocks indexes the block from the last processed block until the
+// provided end hash, inclusive. It returns the number of blocks processed and
+// the last hash it processed.
+func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
+	log.Tracef("%v parseBlocks", i)
+	defer log.Tracef("%v parseBlocks exit", i)
+
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	g := i.geometry()
+
+	// Find start hash
+	at, err := i.At(ctx)
+	if err != nil {
+		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
+	}
+
+	// If we have a real block move forward to the next block since we
+	// already indexed the last block.
+	hh := &HashHeight{Hash: at.Hash, Height: at.Height}
+	if !hh.Hash.IsEqual(g.chain.GenesisHash) {
+		hh, err = nextCanonicalBlockheader(ctx, g, endHash, hh)
+		if err != nil {
+			return 0, last, fmt.Errorf("%v next block %v: %w", i, hh, err)
+		}
+	} else {
+		// Some indexers use a different genesis, e.g. keystones. Will
+		// be nil if there is no override.
+		hh = i.genesis()
+	}
+
+	percentage := 95 // flush cache at >95% capacity
+	blocksProcessed := 0
+	for {
+		log.Debugf("indexing %vs: %v", i, hh)
+
+		bh, b, err := headerAndBlock(ctx, g.db, hh.Hash)
+		if err != nil {
+			return 0, last, err
+		}
+
+		if i.fixupCache != nil {
+			err = i.fixupCache(ctx, b, cache)
+			if err != nil {
+				return 0, last, fmt.Errorf("process %v fixup %v: %w",
+					i, hh, err)
+			}
+		}
+		// Index block
+		err = i.processMode(ctx, b, 1, cache)
+		if err != nil {
+			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
+		}
+
+		blocksProcessed++
+
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := i.cache().Length() * 100 / i.cache().Capacity()
+		if bh.Height%10000 == 0 || cp > percentage || blocksProcessed == 1 {
+			log.Infof("%v indexer: %v cache %v%%", i, hh, cp)
+		}
+
+		if cp > percentage {
+			// Flush cache to disk
+			break
+		}
+
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hh.Hash) {
+			last = hh
+			break
+		}
+
+		// Move to next block
+		hh, err = nextCanonicalBlockheader(ctx, i.geometry(), endHash, hh)
+		if err != nil {
+			return 0, last, fmt.Errorf("%v next block %v: %w", i, hh, err)
+		}
+	}
+
+	return blocksProcessed, last, nil
 }
 
 func logMemStats() {
