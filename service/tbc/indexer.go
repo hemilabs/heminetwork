@@ -57,7 +57,7 @@ func NewUtxoCache(maxCacheEntries int) Cache {
 }
 
 type Indexer interface {
-	ToBest(context.Context, chainhash.Hash) error  // Move index to best hash, autoresolves forks
+	ToBest(context.Context) error                  // Move index to best hash, autoresolves forks
 	ToHash(context.Context, chainhash.Hash) error  // Manually move index from current height hash
 	At(context.Context) (*tbcd.BlockHeader, error) // Current index location
 	Indexing() bool                                // Returns if indexing is active
@@ -99,7 +99,7 @@ var _ Indexer = (*utxoIndexer)(nil)
 
 type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd.CacheOutput) error
 
-func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fixupCacheFunc) (Indexer, error) {
+func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fixupCacheFunc) Indexer {
 	return &utxoIndexer{
 		indexer:   "utxo",
 		indexing:  false,
@@ -110,7 +110,7 @@ func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fi
 			db:    db,
 			chain: chain,
 		},
-	}, nil
+	}
 }
 
 func (i *utxoIndexer) geometry() geometryParams {
@@ -146,8 +146,8 @@ func (i *utxoIndexer) String() string {
 	return i.indexer
 }
 
-func (i *utxoIndexer) ToBest(context.Context, chainhash.Hash) error {
-	return fmt.Errorf("ToBest not yet")
+func (i *utxoIndexer) ToBest(ctx context.Context) error {
+	return toBest(ctx, i)
 }
 
 func (i *utxoIndexer) ToHash(context.Context, chainhash.Hash) error {
@@ -182,10 +182,15 @@ func (i *utxoIndexer) Enabled() bool {
 	return i.enabled
 }
 
-// indexersToBest replaces (Utxo|Tx|Keystone)IndexersToBest
-func indexersToBest(ctx context.Context, i Indexer, bhb *tbcd.BlockHeader) error {
+// toBest moves the indexer to the best tip.
+func toBest(ctx context.Context, i Indexer) error {
 	log.Tracef("%vIndexersToBest", i)
 	defer log.Tracef("%vIndexersToBest exit", i)
+
+	bhb, err := i.geometry().db.BlockHeaderBest(ctx)
+	if err != nil {
+		return err
+	}
 
 	// Find out where the indexer is at.
 	indexerAt, err := i.At(ctx)
