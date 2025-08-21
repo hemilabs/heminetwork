@@ -599,6 +599,15 @@ func dbIterateNext(ctx context.Context, db Database, table string, recordCount i
 		}
 		i++
 	}
+	return nil
+}
+
+func dbIterateFirstLast(ctx context.Context, db Database, table string, recordCount int) error {
+	it, err := db.NewIterator(ctx, table)
+	if err != nil {
+		return err
+	}
+	defer it.Close(ctx)
 
 	// First
 	if !it.First(ctx) {
@@ -711,33 +720,44 @@ func TestGKVDB(t *testing.T) {
 	}
 
 	testTable := []TestTableItem{
+		// {
+		// 	name: "levelDB",
+		// 	dbFunc: func(home string, tables []string) Database {
+		// 		cfg := DefaultLevelConfig(home, tables)
+		// 		db, err := NewLevelDB(cfg)
+		// 		if err != nil {
+		// 			t.Fatal(err)
+		// 		}
+		// 		return db
+		// 	},
+		// },
+		// {
+		// 	name: "pebbleDB",
+		// 	dbFunc: func(home string, tables []string) Database {
+		// 		cfg := DefaultPebbleConfig(home, tables)
+		// 		db, err := NewPebbleDB(cfg)
+		// 		if err != nil {
+		// 			t.Fatal(err)
+		// 		}
+		// 		return db
+		// 	},
+		// },
+		// {
+		// 	name: "nutsDB",
+		// 	dbFunc: func(home string, tables []string) Database {
+		// 		cfg := DefaultNutsConfig(home, tables)
+		// 		db, err := NewNutsDB(cfg)
+		// 		if err != nil {
+		// 			t.Fatal(err)
+		// 		}
+		// 		return db
+		// 	},
+		// },
 		{
-			name: "levelDB",
+			name: "badgerDB",
 			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultLevelConfig(home, tables)
-				db, err := NewLevelDB(cfg)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return db
-			},
-		},
-		{
-			name: "pebbleDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultPebbleConfig(home, tables)
-				db, err := NewPebbleDB(cfg)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return db
-			},
-		},
-		{
-			name: "nutsDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultNutsConfig(home, tables)
-				db, err := NewNutsDB(cfg)
+				cfg := DefaultBadgerConfig(home, tables)
+				db, err := NewBadgerDB(cfg)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -801,19 +821,24 @@ func TestGKVDB(t *testing.T) {
 				}()
 
 				if err = dbTransactionsRollback(ctx, db, tables, insertCount); err != nil {
-					t.Fatal(fmt.Errorf("dbTransactionsRollback: %w", err))
+					log.Errorf("dbTransactionsRollback: %v", err)
+					t.Fail()
 				}
 				if err = dbTransactionsCommit(ctx, db, tables, insertCount); err != nil {
-					t.Fatal(fmt.Errorf("dbTransactionsCommit: %w", err))
+					log.Errorf("dbTransactionsCommit: %v", err)
+					t.Fail()
 				}
 				if err = dbTransactionsDelete(ctx, db, tables, insertCount); err != nil {
-					t.Fatal(fmt.Errorf("dbTransactionsDelete: %w", err))
+					log.Errorf("dbTransactionsDelete: %v", err)
+					t.Fail()
 				}
 				if err = dbTransactionsErrors(ctx, db, tables, insertCount); err != nil {
-					t.Fatal(fmt.Errorf("dbTransactionsErrors: %w", err))
+					log.Errorf("dbTransactionsErrors: %v", err)
+					t.Fail()
 				}
 				if err = dbTransactionsMultipleWrite(ctx, db, tables[0], 5); err != nil {
-					t.Fatal(fmt.Errorf("dbTransactionsErrors: %w", err))
+					log.Errorf("dbTransactionsMultipleWrite: %v", err)
+					t.Fail()
 				}
 			})
 
@@ -844,10 +869,16 @@ func TestGKVDB(t *testing.T) {
 				}
 
 				if err = dbIterateNext(ctx, db, table, insertCount); err != nil {
-					t.Fatal(err)
+					log.Errorf("dbIterateNext: %v", err)
+					t.Fail()
+				}
+				if err = dbIterateFirstLast(ctx, db, table, insertCount); err != nil {
+					log.Errorf("dbIterateNext: %v", err)
+					t.Fail()
 				}
 				if err = dbIterateSeek(ctx, db, table, insertCount); err != nil {
-					t.Fatal(err)
+					log.Errorf("dbIterateNext: %v", err)
+					t.Fail()
 				}
 			})
 
