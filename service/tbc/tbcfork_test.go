@@ -2970,9 +2970,9 @@ func TestForkCanonicity(t *testing.T) {
 
 	// set checkpoints to genesis, b2 and b4
 	s.chainParams.Checkpoints = []chaincfg.Checkpoint{
-		{4, mainChainHashes["b4"]},
-		{2, mainChainHashes["b2"]},
-		{0, parent},
+		{Height: 4, Hash: mainChainHashes["b4"]},
+		{Height: 2, Hash: mainChainHashes["b2"]},
+		{Height: 0, Hash: parent},
 	}
 
 	// assert genesis -> b5 are canonical

@@ -81,12 +81,11 @@ type geometryParams struct {
 
 type utxoIndexer struct {
 	// common
-	mtx             sync.RWMutex
-	indexer         string
-	indexing        bool
-	enabled         bool
-	maxCacheEntries int
-	c               Cache
+	mtx      sync.RWMutex
+	indexer  string
+	indexing bool
+	enabled  bool
+	c        Cache
 
 	// geometry
 	g geometryParams
