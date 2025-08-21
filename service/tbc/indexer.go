@@ -21,6 +21,41 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
+type Cache interface {
+	Clear()
+	Length() int
+	Capacity() int
+	Generic() any
+}
+
+type utxoCache struct {
+	maxCacheEntries int
+	c               map[tbcd.Outpoint]tbcd.CacheOutput
+}
+
+func (c *utxoCache) Clear() {
+	clear(c.c)
+}
+
+func (c *utxoCache) Length() int {
+	return len(c.c)
+}
+
+func (c *utxoCache) Capacity() int {
+	return c.maxCacheEntries
+}
+
+func (c *utxoCache) Generic() any {
+	return c.c
+}
+
+func NewUtxoCache(maxCacheEntries int) Cache {
+	return &utxoCache{
+		maxCacheEntries: maxCacheEntries,
+		c:               make(map[tbcd.Outpoint]tbcd.CacheOutput, maxCacheEntries),
+	}
+}
+
 type Indexer interface {
 	ToBest(context.Context, chainhash.Hash) error  // Move index to best hash, autoresolves forks
 	ToHash(context.Context, chainhash.Hash) error  // Manually move index from current height hash
@@ -29,7 +64,10 @@ type Indexer interface {
 	Enabled() bool                                 // Returns if index is enabled
 
 	geometry() geometryParams // Return geometry parameters
+	cache() Cache
 }
+
+// XXX implement cache interface?
 
 // geometryParams conviniently wraps all parameters required to perform
 // geometry operations.
@@ -40,10 +78,12 @@ type geometryParams struct {
 
 type utxoIndexer struct {
 	// common
-	mtx      sync.RWMutex
-	indexer  string
-	indexing bool
-	enabled  bool
+	mtx             sync.RWMutex
+	indexer         string
+	indexing        bool
+	enabled         bool
+	maxCacheEntries int
+	c               Cache
 
 	// geometry
 	g geometryParams
@@ -53,11 +93,12 @@ type utxoIndexer struct {
 
 var _ Indexer = (*utxoIndexer)(nil)
 
-func NewUtxoIndexer(chain *chaincfg.Params, db tbcd.Database) (Indexer, error) {
+func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database) (Indexer, error) {
 	return &utxoIndexer{
 		indexer:  "utxo",
 		indexing: false,
 		enabled:  true,
+		c:        NewUtxoCache(cacheLen),
 		g: geometryParams{
 			db:    db,
 			chain: chain,
@@ -67,6 +108,10 @@ func NewUtxoIndexer(chain *chaincfg.Params, db tbcd.Database) (Indexer, error) {
 
 func (i *utxoIndexer) geometry() geometryParams {
 	return i.g
+}
+
+func (i *utxoIndexer) cache() Cache {
+	return i.c
 }
 
 func (i *utxoIndexer) String() string {
@@ -286,8 +331,7 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 	if !i.Enabled() {
 		return errors.New("disabled")
 	}
-	indexing := i.Indexing()
-	if !indexing {
+	if !i.Indexing() {
 		// XXX this prob should be an error but pusnish bad callers for now
 		panic("indexing not true")
 	}
@@ -310,13 +354,13 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 	if err != nil {
 		return fmt.Errorf("blockheader %v hash: %w", i, err)
 	}
-	direction, err := i.modeIndexIsLinear(ctx, endHash)
+	direction, err := indexIsLinear(ctx, g, indexerAt.Hash, endHash)
 	if err != nil {
 		return fmt.Errorf("%v index is linear: %w", i, err)
 	}
 	switch direction {
 	case 1:
-		return i.modeIndexerWind(ctx, startBH, endBH)
+		return wind(ctx, i, startBH, endBH)
 	case -1:
 		return i.modeIndexerUnwind(ctx, startBH, endBH)
 	case 0:
@@ -325,6 +369,120 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 	}
 
 	return fmt.Errorf("invalid direction: %v", direction)
+}
+
+func indexIsLinear(ctx context.Context, g geometryParams, startHash, endHash chainhash.Hash) (int, error) {
+	log.Tracef("indexIsLinear")
+	defer log.Tracef("indexIsLinear exit")
+
+	// Verify exit condition hash
+	endBH, err := g.db.BlockHeaderByHash(ctx, endHash)
+	if err != nil {
+		return 0, fmt.Errorf("blockheader hash: %w", err)
+	}
+
+	// Make sure there is no gap between start and end or vice versa.
+	startBH, err := g.db.BlockHeaderByHash(ctx, startHash)
+	if err != nil {
+		return 0, fmt.Errorf("blockheader hash: %w", err)
+	}
+	// Short circuit if the block hash is the same.
+	if startBH.BlockHash().IsEqual(endBH.BlockHash()) {
+		return 0, nil
+	}
+
+	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
+	log.Debugf("startBH %v %v", startBH.Height, startBH)
+	log.Debugf("endBH %v %v", endBH.Height, endBH)
+	log.Debugf("direction %v", direction)
+	// Expensive linear test, this needs some performance love. We can
+	// memoize it keep snapshot heights whereto we know the chain is
+	// synced. For now just do the entire thing.
+
+	// Always walk backwards because it's only a single lookup.
+	var h, e *chainhash.Hash
+	switch direction {
+	case 1:
+		h = endBH.BlockHash()
+		e = startBH.BlockHash()
+	case -1:
+		h = startBH.BlockHash()
+		e = endBH.BlockHash()
+	default:
+		// This is a fork and thus not linear.
+		// XXX remove this once we determine if ErrNotLinear can happen here.
+		log.Infof("startBH %v %v", startBH, startBH.Difficulty)
+		log.Infof("endBH %v %v", endBH, endBH.Difficulty)
+		log.Infof("direction %v", direction)
+		return 0, NotLinearError(fmt.Sprintf("start %v end %v direction %v",
+			startBH, endBH, direction))
+	}
+	for {
+		bh, err := g.db.BlockHeaderByHash(ctx, *h)
+		if err != nil {
+			return -1, fmt.Errorf("block header by hash: %w", err)
+		}
+		h = bh.ParentHash()
+		if h.IsEqual(e) {
+			return direction, nil
+		}
+		if h.IsEqual(g.chain.GenesisHash) {
+			return 0, NotLinearError(fmt.Sprintf("start %v end %v "+
+				"direction %v: genesis", startBH, endBH, direction))
+		}
+	}
+}
+
+func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("%v wind", i)
+	defer log.Tracef("%v wind exit", i)
+
+	if !i.Indexing() {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic(fmt.Sprintf("%vIndexerWind not true", i))
+	}
+
+	// Allocate here so that we don't waste space when not indexing.
+	// XXX the cache *really* should become a list methinks.
+	es := i.cache().Generic()
+	defer i.cache().Clear()
+
+	log.Infof("Start indexing %vs at hash %v height %v", i, startBH, startBH.Height)
+	log.Infof("End indexing %vs at hash %v height %v", i, endBH, endBH.Height)
+	endHash := endBH.BlockHash()
+	for {
+		start := time.Now()
+		blocksProcessed, last, err := i.indexModeInBlocks(ctx, endHash, es)
+		if err != nil {
+			return fmt.Errorf("%v index blocks: %w", i, err)
+		}
+		if blocksProcessed == 0 {
+			return nil
+		}
+		esCached := i.cache().Length()
+		log.Infof("%v indexer blocks processed %v in %v cached %v cache unused %v avg/blk %v",
+			i, blocksProcessed, time.Since(start), esCached,
+			i.cache().Capacity()-esCached, esCached/blocksProcessed)
+
+		// Flush to disk
+		start = time.Now()
+		if err = i.blockModeUpdate(ctx, 1, es, last.Hash); err != nil {
+			return fmt.Errorf("block %v update: %w", i, err)
+		}
+		// leveldb does all kinds of allocations, force GC to lower
+		// memory pressure.
+		logMemStats()
+		runtime.GC()
+
+		log.Infof("Flushing %vs complete %v took %v",
+			i, esCached, time.Since(start))
+
+		if endHash.IsEqual(&last.Hash) {
+			break
+		}
+	}
+
+	return nil
 }
 
 func logMemStats() {
