@@ -933,18 +933,18 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 	log.Debugf("Syncing indexes to: %v", hash)
 
 	// utxos
-	if err := NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache).ToHash(ctx, hash); err != nil {
+	if err := s.ui.ToHash(ctx, hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
 	// Transactions index
-	if err := NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db).ToHash(ctx, hash); err != nil {
+	if err := s.ti.ToHash(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
 	// Hemi indexes
 	if s.cfg.HemiIndex {
-		if err := NewKeystoneIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.cfg.HemiIndex).ToHash(ctx, hash); err != nil {
+		if err := s.ki.ToHash(ctx, hash); err != nil {
 			return fmt.Errorf("keystone indexer: %w", err)
 		}
 	}
@@ -972,11 +972,11 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 
 	log.Debugf("Sync indexers to best: %v @ %v", bhb, bhb.Height)
 
-	if err := NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache).ToBest(ctx); err != nil {
+	if err := s.ui.ToBest(ctx); err != nil {
 		return err
 	}
 
-	if err := NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db).ToBest(ctx); err != nil {
+	if err := s.ti.ToBest(ctx); err != nil {
 		return err
 	}
 
