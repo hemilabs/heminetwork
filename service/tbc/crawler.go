@@ -14,6 +14,7 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -24,24 +25,24 @@ import (
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
 )
 
-func s2h(s string) chainhash.Hash {
+func s2h(s string) *chainhash.Hash {
 	h, err := chainhash.NewHashFromStr(s)
 	if err != nil {
 		panic(err)
 	}
-	return *h
+	return h
 }
 
-type checkpoint struct {
-	height uint64
-	hash   chainhash.Hash
-}
+//type checkpoint struct {
+//	height uint64
+//	hash   chainhash.Hash
+//}
 
 var (
 	ErrAlreadyIndexing = errors.New("already indexing")
 
 	// checkpoints MUST be sorted high to low!
-	testnet3Checkpoints = []checkpoint{
+	testnet3Checkpoints = []chaincfg.Checkpoint{
 		{4000000, s2h("000000000000033947a6a47cecc029f944f3879da242dec26647360b2764adae")},
 		{3900000, s2h("000000000b21ae775d87e6611b260e69c34f82b04dd95eb25fd946a512691358")},
 		{3800000, s2h("00000000000000fa9c23f20506e6c57b6dda928fb2110629bf5d29df2f737ad2")},
@@ -85,12 +86,12 @@ var (
 		{0, s2h("000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943")},
 	}
 
-	testnet4Checkpoints = []checkpoint{
+	testnet4Checkpoints = []chaincfg.Checkpoint{
 		{80000, s2h("0000000006af13c1117f3e2eb14f10eb9736e255713118cf7eb6659b1448efc1")},
 		{0, s2h("00000000da84f2bafbbc53dee25a72ae507ff4914b867c565be350b0da8bf043")},
 	}
 
-	mainnetCheckpoints = []checkpoint{
+	mainnetCheckpoints = []chaincfg.Checkpoint{
 		{850000, s2h("00000000000000000002a0b5db2a7f8d9087464c2586b546be7bce8eb53b8187")},
 		{800000, s2h("00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054")},
 		{750000, s2h("0000000000000000000592a974b1b9f087cb77628bb4a097d5c2c11b3476a58e")},
@@ -111,7 +112,7 @@ var (
 		{0, s2h("000000000019d6689c085ae165831e934ff763ae46a2a6c172b3f1b60a8ce26f")},
 	}
 
-	localnetCheckpoints = []checkpoint{
+	localnetCheckpoints = []chaincfg.Checkpoint{
 		{0, s2h("0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206")},
 	}
 )
@@ -129,21 +130,21 @@ func (e NotLinearError) Is(target error) bool {
 
 var ErrNotLinear = NotLinearError("not linear")
 
-func nextCheckpoint(bh *tbcd.BlockHeader, hha []checkpoint) *checkpoint {
+func nextCheckpoint(bh *tbcd.BlockHeader, hha []chaincfg.Checkpoint) *chaincfg.Checkpoint {
 	if len(hha) == 0 {
 		return nil
 	}
 	for i := len(hha) - 1; i >= 0; i-- {
-		if hha[i].height >= bh.Height {
+		if uint64(hha[i].Height) >= bh.Height {
 			return &hha[i]
 		}
 	}
 	return nil
 }
 
-func previousCheckpoint(bh *tbcd.BlockHeader, hha []checkpoint) *checkpoint {
+func previousCheckpoint(bh *tbcd.BlockHeader, hha []chaincfg.Checkpoint) *chaincfg.Checkpoint {
 	for k := range hha {
-		if hha[k].height > bh.Height {
+		if uint64(hha[k].Height) > bh.Height {
 			continue
 		}
 		return &hha[k]
@@ -151,12 +152,12 @@ func previousCheckpoint(bh *tbcd.BlockHeader, hha []checkpoint) *checkpoint {
 	return nil
 }
 
-func previousCheckpointHeight(height uint64, hha []checkpoint) uint64 {
+func previousCheckpointHeight(height uint64, hha []chaincfg.Checkpoint) uint64 {
 	hh := previousCheckpoint(&tbcd.BlockHeader{Height: height}, hha)
 	if hh == nil {
 		return 0
 	}
-	return hh.height
+	return uint64(hh.Height)
 }
 
 func h2b(wbh *wire.BlockHeader) [80]byte {
@@ -345,12 +346,12 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		bhb *tbcd.BlockHeader
 		err error
 	)
-	ncp := nextCheckpoint(bh, s.checkpoints)
+	ncp := nextCheckpoint(bh, s.chainParams.Checkpoints)
 	if ncp == nil {
 		// Use best since we do not have a best checkpoint
 		bhb, err = s.db.BlockHeaderBest(ctx)
 	} else {
-		bhb, err = s.db.BlockHeaderByHash(ctx, ncp.hash)
+		bhb, err = s.db.BlockHeaderByHash(ctx, *ncp.Hash)
 	}
 	if err != nil {
 		return false, err
@@ -369,7 +370,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		return true, nil
 	}
 
-	genesisHash := previousCheckpoint(bh, s.checkpoints).hash // either genesis or a snapshot block
+	genesisHash := previousCheckpoint(bh, s.chainParams.Checkpoints).Hash // either genesis or a snapshot block
 
 	// Move best block header backwards until we find bh.
 	log.Debugf("isCanonical best %v bh %v genesis %v", bhb.HH(), bh.HH(), genesisHash)
@@ -381,7 +382,7 @@ func (s *Server) isCanonical(ctx context.Context, bh *tbcd.BlockHeader) (bool, e
 		if err != nil {
 			return false, err
 		}
-		if bhb.Hash.IsEqual(&genesisHash) {
+		if bhb.Hash.IsEqual(genesisHash) {
 			return false, nil
 		}
 		if bhb.Hash.IsEqual(&bh.Hash) {
