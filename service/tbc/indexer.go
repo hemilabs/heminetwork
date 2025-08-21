@@ -22,33 +22,55 @@ import (
 )
 
 type Indexer interface {
-	ToBest(context.Context, chainhash.Hash) error    // Move index to best hash, autoresolves forks
-	ToHash(context.Context, chainhash.Hash) error    // Manually move index from current height hash
-	HashHeight(context.Context) (*HashHeight, error) // Current hash/height
-	Indexing() bool                                  // Returns if indexing is active
+	ToBest(context.Context, chainhash.Hash) error  // Move index to best hash, autoresolves forks
+	ToHash(context.Context, chainhash.Hash) error  // Manually move index from current height hash
+	At(context.Context) (*tbcd.BlockHeader, error) // Current index location
+	Indexing() bool                                // Returns if indexing is active
+	Enabled() bool                                 // Returns if index is enabled
+
+	geometry() geometryParams // Return geometry parameters
+}
+
+// geometryParams conviniently wraps all parameters required to perform
+// geometry operations.
+type geometryParams struct {
+	db    tbcd.Database
+	chain *chaincfg.Params
 }
 
 type utxoIndexer struct {
-	mtx sync.RWMutex
-
 	// common
+	mtx      sync.RWMutex
 	indexer  string
 	indexing bool
-	db       tbcd.Database
-	params   *chaincfg.Params
+	enabled  bool
+
+	// geometry
+	g geometryParams
 
 	// utxo indexer only
 }
 
 var _ Indexer = (*utxoIndexer)(nil)
 
-func NewUtxoIndexer(params *chaincfg.Params, db tbcd.Database) (Indexer, error) {
+func NewUtxoIndexer(chain *chaincfg.Params, db tbcd.Database) (Indexer, error) {
 	return &utxoIndexer{
 		indexer:  "utxo",
 		indexing: false,
-		db:       db,
-		params:   params,
+		enabled:  true,
+		g: geometryParams{
+			db:    db,
+			chain: chain,
+		},
 	}, nil
+}
+
+func (i *utxoIndexer) geometry() geometryParams {
+	return i.g
+}
+
+func (i *utxoIndexer) String() string {
+	return i.indexer
 }
 
 func (i *utxoIndexer) ToBest(context.Context, chainhash.Hash) error {
@@ -59,26 +81,250 @@ func (i *utxoIndexer) ToHash(context.Context, chainhash.Hash) error {
 	return fmt.Errorf("ToHash not yet")
 }
 
-func (i *utxoIndexer) HashHeight(ctx context.Context) (*HashHeight, error) {
-	// XXX kind of don't want to copy/paste this everywhere
-	bh, err := i.db.BlockHeaderByUtxoIndex(ctx)
+func (i *utxoIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
+	bh, err := i.g.db.BlockHeaderByUtxoIndex(ctx)
 	if err != nil {
+		// XXX kind of don't want to copy/paste this everywhere
 		if !errors.Is(err, database.ErrNotFound) {
 			return nil, err
 		}
 		bh = &tbcd.BlockHeader{
-			Hash:   *i.params.GenesisHash,
+			Hash:   *i.g.chain.GenesisHash,
 			Height: 0,
-			Header: h2b(&i.params.GenesisBlock.Header),
+			Header: h2b(&i.g.chain.GenesisBlock.Header),
 		}
 	}
-	return HashHeightFromBlockHeader(bh), nil
+	return bh, nil
 }
 
 func (i *utxoIndexer) Indexing() bool {
 	i.mtx.RLock()
 	defer i.mtx.RUnlock()
 	return i.indexing
+}
+
+func (i *utxoIndexer) Enabled() bool {
+	i.mtx.RLock()
+	defer i.mtx.RUnlock()
+	return i.enabled
+}
+
+// indexersToBest replaces (Utxo|Tx|Keystone)IndexersToBest
+func indexersToBest(ctx context.Context, i Indexer, bhb *tbcd.BlockHeader) error {
+	log.Tracef("%vIndexersToBest", i)
+	defer log.Tracef("%vIndexersToBest exit", i)
+
+	// Find out where the indexer is at.
+	indexerAt, err := i.At(ctx)
+	if err != nil {
+		return err
+	}
+	cp, err := findCanonicalParent(ctx, i.geometry(), indexerAt)
+	if err != nil {
+		return err
+	}
+	if !cp.Hash.IsEqual(&indexerAt.Hash) {
+		log.Infof("Syncing %v index to: %v from: %v via: %v",
+			i, bhb.HH(), indexerAt.HH(), cp.HH())
+		// indexerAt is NOT on canonical chain, unwind first
+		if err := windOrUnwind(ctx, i, cp.Hash); err != nil {
+			return fmt.Errorf("%v indexer unwind: %w", i, err)
+		}
+	}
+	// Index to best block
+	if err := windOrUnwind(ctx, i, bhb.Hash); err != nil {
+		return fmt.Errorf("%v indexer: %w", i, err)
+	}
+
+	return nil
+}
+
+func findCanonicalParent(ctx context.Context, g geometryParams, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+	log.Tracef("findCanonicalParent %v", bh)
+
+	// Genesis is always canonical.
+	if bh.Hash.IsEqual(g.chain.GenesisHash) {
+		return bh, nil
+	}
+
+	bhb, err := g.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	log.Debugf("findCanonicalParent %v @ %v best %v @ %v",
+		bh, bh.Height, bhb, bhb.Height)
+	for {
+		canonical, err := isCanonical(ctx, g, bh)
+		if err != nil {
+			return nil, err
+		}
+		if canonical {
+			log.Tracef("findCanonicalParent exit %v", bh)
+			return bh, nil
+		}
+		bh, err = findCommonParent(ctx, g, bhb, bh)
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+// isCanonical uses checkpoints to determine if a block is on the canonical
+// chain. This is a expensive call hence it tries to use checkpoints to short
+// circuit the check.
+func isCanonical(ctx context.Context, g geometryParams, bh *tbcd.BlockHeader) (bool, error) {
+	var (
+		bhb *tbcd.BlockHeader
+		err error
+	)
+	ncp := nextCheckpoint(bh, g.chain.Checkpoints)
+	if ncp == nil {
+		// Use best since we do not have a best checkpoint
+		bhb, err = g.db.BlockHeaderBest(ctx)
+	} else {
+		bhb, err = g.db.BlockHeaderByHash(ctx, *ncp.Hash)
+	}
+	if err != nil {
+		return false, err
+	}
+
+	// Basic shortcircuit
+	if bhb.Height < bh.Height {
+		// We either hit a race or the caller did something wrong.
+		// Either way, it cannot be canonical.
+		log.Debugf("best height less than provided height: %v < %v",
+			bhb.Height, bh.Height)
+		return false, nil
+	}
+	if bhb.Hash.IsEqual(&bh.Hash) {
+		// Self == best
+		return true, nil
+	}
+
+	genesisHash := previousCheckpoint(bh, g.chain.Checkpoints).Hash // either genesis or a snapshot block
+
+	// Move best block header backwards until we find bh.
+	log.Debugf("isCanonical best %v bh %v genesis %v", bhb.HH(), bh.HH(), genesisHash)
+	for {
+		if bhb.Height <= bh.Height {
+			return false, nil
+		}
+		bhb, err = g.db.BlockHeaderByHash(ctx, *bhb.ParentHash())
+		if err != nil {
+			return false, err
+		}
+		if bhb.Hash.IsEqual(genesisHash) {
+			return false, nil
+		}
+		if bhb.Hash.IsEqual(&bh.Hash) {
+			return true, nil
+		}
+	}
+}
+
+func findCommonParent(ctx context.Context, g geometryParams, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
+	// This function has one odd corner case. If bhX and bhY are both on a
+	// "long" chain without multiple blockheaders it will terminate on the
+	// first height that has a single blockheader. This is to be expected!
+	// This function "should" be called between forking blocks and then
+	// it'll find the first common parent.
+
+	// This function assumes that the highest block height connects to the
+	// lowest block height.
+
+	// 0. If bhX and bhY are the same return bhX.
+	if bhX.Hash.IsEqual(&bhY.Hash) {
+		return bhX, nil
+	}
+
+	// 1. Find lowest height between X and Y.
+	h := min(bhX.Height, bhY.Height)
+
+	// 2. Walk chain back until X and Y point to the same parent.
+	for {
+		bhs, err := g.db.BlockHeadersByHeight(ctx, h)
+		if err != nil {
+			return nil, fmt.Errorf("block headers by height: %w", err)
+		}
+		if bhs[0].Hash.IsEqual(g.chain.GenesisHash) {
+			if h != 0 {
+				panic("height 0 not genesis")
+			}
+			return nil, fmt.Errorf("genesis")
+		}
+
+		// See if all blockheaders share a common parent.
+		equals := 0
+		var ph *chainhash.Hash
+		for k := range bhs {
+			if k == 0 {
+				ph = bhs[k].ParentHash()
+			}
+			if !ph.IsEqual(bhs[k].ParentHash()) {
+				break
+			}
+			equals++
+		}
+		if equals == len(bhs) {
+			// All blockheaders point to the same parent.
+			return g.db.BlockHeaderByHash(ctx, *ph)
+		}
+
+		// Decrease height
+		h--
+	}
+}
+
+// windOrUnwind determines in which direction we are moving and kicks of the
+// wind or unwind process.
+func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error {
+	log.Tracef("%vIndexer", i)
+	defer log.Tracef("%vIndexer exit", i)
+
+	// XXX this is basically duplicate from modeIndexIsLinear
+
+	if !i.Enabled() {
+		return errors.New("disabled")
+	}
+	indexing := i.Indexing()
+	if !indexing {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic("indexing not true")
+	}
+
+	// Verify exit condition hash
+	g := i.geometry()
+	endBH, err := g.db.BlockHeaderByHash(ctx, endHash)
+	if err != nil {
+		return fmt.Errorf("blockheader end hash: %w", err)
+	}
+
+	// Verify start point is not after the end point
+	indexerAt, err := i.At(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Make sure there is no gap between start and end or vice versa.
+	startBH, err := g.db.BlockHeaderByHash(ctx, indexerAt.Hash)
+	if err != nil {
+		return fmt.Errorf("blockheader %v hash: %w", i, err)
+	}
+	direction, err := i.modeIndexIsLinear(ctx, endHash)
+	if err != nil {
+		return fmt.Errorf("%v index is linear: %w", i, err)
+	}
+	switch direction {
+	case 1:
+		return i.modeIndexerWind(ctx, startBH, endBH)
+	case -1:
+		return i.modeIndexerUnwind(ctx, startBH, endBH)
+	case 0:
+		// Because we call modeIndexIsLinear we know it's the same block.
+		return nil
+	}
+
+	return fmt.Errorf("invalid direction: %v", direction)
 }
 
 func logMemStats() {
@@ -97,6 +343,8 @@ func logMemStats() {
 		mem.NumGC)
 }
 
+/////////////////////////////////////////////////////////////////
+// DELETE BELOW THIS LINE
 //type indexMode int
 //
 //const (

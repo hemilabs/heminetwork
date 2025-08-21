@@ -83,16 +83,16 @@ var (
 	upstreamStateIdKey = []byte("upstreamstateid")
 
 	mainnetHemiGenesis = &HashHeight{
-		Hash:   s2h("000000000000000000001d8132106b63876117569713ef4fe89d5a2f1173c66e"),
+		Hash:   *s2h("000000000000000000001d8132106b63876117569713ef4fe89d5a2f1173c66e"),
 		Height: 859303,
 	}
 
 	testnet3HemiGenesis = &HashHeight{
-		Hash:   s2h("0000000000000014a1717b82329a58e344f1821389d0415601f1b12ebce35881"),
+		Hash:   *s2h("0000000000000014a1717b82329a58e344f1821389d0415601f1b12ebce35881"),
 		Height: 2577400,
 	}
 	testnet4HemiGenesis = &HashHeight{
-		Hash:   s2h("00000000a14c6e63123ba02d7e9fd173d4b04412c71a31b7a6ab8bb3106c9231"),
+		Hash:   *s2h("00000000a14c6e63123ba02d7e9fd173d4b04412c71a31b7a6ab8bb3106c9231"),
 		Height: 84190,
 	}
 	localnetHemiGenesis = &HashHeight{
@@ -207,7 +207,6 @@ type Server struct {
 	wireNet     wire.BitcoinNet
 	chainParams *chaincfg.Params
 	timeSource  blockchain.MedianTimeSource
-	checkpoints []checkpoint
 	hemiGenesis *HashHeight
 	pm          *PeerManager
 
@@ -298,7 +297,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	case "mainnet":
 		s.wireNet = wire.MainNet
 		s.chainParams = &chaincfg.MainNetParams
-		s.checkpoints = mainnetCheckpoints
+		s.chainParams.Checkpoints = mainnetCheckpoints
 		s.hemiGenesis = mainnetHemiGenesis
 
 	case "testnet3", "upgradetest":
@@ -308,19 +307,19 @@ func NewServer(cfg *Config) (*Server, error) {
 		// You probably should not touch this.
 		s.wireNet = wire.TestNet3
 		s.chainParams = &chaincfg.TestNet3Params
-		s.checkpoints = testnet3Checkpoints
+		s.chainParams.Checkpoints = testnet3Checkpoints
 		s.hemiGenesis = testnet3HemiGenesis
 
 	case "testnet4":
 		s.wireNet = wire.TestNet4
 		s.chainParams = &chaincfg.TestNet4Params
-		s.checkpoints = testnet4Checkpoints
+		s.chainParams.Checkpoints = testnet4Checkpoints
 		s.hemiGenesis = testnet4HemiGenesis
 
 	case networkLocalnet:
 		s.wireNet = wire.TestNet
 		s.chainParams = &chaincfg.RegressionNetParams
-		s.checkpoints = localnetCheckpoints
+		s.chainParams.Checkpoints = localnetCheckpoints
 		s.hemiGenesis = localnetHemiGenesis
 		wanted = 1
 
@@ -593,7 +592,7 @@ func (s *Server) handlePeer(ctx context.Context, p *rawpeer.RawPeer) error {
 	} else {
 		err := s.getHeadersByHeights(ctx, p,
 			bhb.Height, bhb.Height-1000, bhb.Height-1999,
-			previousCheckpointHeight(bhb.Height, s.checkpoints))
+			previousCheckpointHeight(bhb.Height, s.chainParams.Checkpoints))
 		if err != nil {
 			readError = err
 			return fmt.Errorf("handle peer heights: %w", err)
