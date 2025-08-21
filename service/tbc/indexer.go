@@ -67,6 +67,9 @@ type Indexer interface {
 	cache() Cache                                      // Return cache
 	commit(context.Context, int, chainhash.Hash) error // Commit index cache to disk
 	genesis() *HashHeight                              // Genesis override, like hemi
+
+	process(context.Context, *btcutil.Block, int, any) error   // Process block
+	fixupCacheHook(context.Context, *btcutil.Block, any) error // Fixup cache
 }
 
 // geometryParams conviniently wraps all parameters required to perform
@@ -89,16 +92,20 @@ type utxoIndexer struct {
 	g geometryParams
 
 	// utxo indexer only
+	fixupHook fixupCacheFunc
 }
 
 var _ Indexer = (*utxoIndexer)(nil)
 
-func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database) (Indexer, error) {
+type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd.CacheOutput) error
+
+func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fixupCacheFunc) (Indexer, error) {
 	return &utxoIndexer{
-		indexer:  "utxo",
-		indexing: false,
-		enabled:  true,
-		c:        NewUtxoCache(cacheLen),
+		indexer:   "utxo",
+		indexing:  false,
+		enabled:   true,
+		c:         NewUtxoCache(cacheLen),
+		fixupHook: f,
 		g: geometryParams{
 			db:    db,
 			chain: chain,
@@ -121,6 +128,18 @@ func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhas
 
 func (i *utxoIndexer) genesis() *HashHeight {
 	return nil
+}
+
+func (i *utxoIndexer) process(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+	if direction == -1 {
+		return unprocessUtxos(ctx, i.g.db, block,
+			cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+	}
+	return processUtxos(block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+}
+
+func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, cache any) error {
+	return i.fixupHook(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
 }
 
 func (i *utxoIndexer) String() string {
@@ -586,7 +605,7 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
-		blocksProcessed, last, err := i.unindexModeInBlocks(ctx, endHash, es)
+		blocksProcessed, last, err := parseBlocksReverse(ctx, i, endHash, es)
 		if err != nil {
 			return fmt.Errorf("unindex %vs in blocks: %w", i, err)
 		}
@@ -661,15 +680,14 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache 
 			return 0, last, err
 		}
 
-		if i.fixupCache != nil {
-			err = i.fixupCache(ctx, b, cache)
-			if err != nil {
-				return 0, last, fmt.Errorf("process %v fixup %v: %w",
-					i, hh, err)
-			}
+		err = i.fixupCacheHook(ctx, b, cache)
+		if err != nil {
+			return 0, last, fmt.Errorf("process %v fixup %v: %w",
+				i, hh, err)
 		}
+
 		// Index block
-		err = i.processMode(ctx, b, 1, cache)
+		err = i.process(ctx, b, 1, cache)
 		if err != nil {
 			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
 		}
@@ -697,6 +715,79 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache 
 		hh, err = nextCanonicalBlockheader(ctx, i.geometry(), endHash, hh)
 		if err != nil {
 			return 0, last, fmt.Errorf("%v next block %v: %w", i, hh, err)
+		}
+	}
+
+	return blocksProcessed, last, nil
+}
+
+// parseBlocksReverse unindexes whatever type from the last processed block
+// until the provided end hash, inclusive. It returns the number of blocks
+// processed and the last hash it processed.
+func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
+	log.Tracef("%v parseBlocksReverse", i)
+	defer log.Tracef("%v parseBlocksReverse exit", i)
+
+	// indicates if we have processed endHash and thus have hit the exit
+	// condition.
+	var last *HashHeight
+
+	g := i.geometry()
+
+	// Find start hash
+	at, err := i.At(ctx)
+	if err != nil {
+		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
+	}
+
+	percentage := 95 // flush cache at >95% capacity
+	blocksProcessed := 0
+	hh := &HashHeight{Hash: at.Hash, Height: at.Height}
+	for {
+		log.Debugf("unindexing %vs: %v", i, hh)
+
+		hash := hh.Hash
+
+		// Exit if we processed the provided end hash
+		if endHash.IsEqual(&hash) {
+			last = hh
+			break
+		}
+
+		bh, b, err := headerAndBlock(ctx, g.db, hh.Hash)
+		if err != nil {
+			return 0, last, err
+		}
+
+		err = i.process(ctx, b, -1, cache)
+		if err != nil {
+			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
+		}
+
+		blocksProcessed++
+
+		// Try not to overshoot the cache to prevent costly allocations
+		cp := i.cache().Length() * 100 / i.cache().Capacity()
+		if bh.Height%10000 == 0 || cp > percentage || blocksProcessed == 1 {
+			log.Infof("%v unindexer: %v cache %v%%", i, hh, cp)
+		}
+
+		// Move to previous block
+		height := bh.Height - 1
+		pbh, err := g.db.BlockHeaderByHash(ctx, *bh.ParentHash())
+		if err != nil {
+			return 0, last, fmt.Errorf("block headers by height %v: %w",
+				height, err)
+		}
+		hh.Hash = *pbh.BlockHash()
+		hh.Height = pbh.Height
+
+		// We check overflow AFTER obtaining the previous hash so that
+		// we can update the database with the LAST processed block.
+		if cp > percentage {
+			last = hh
+			// Flush to disk
+			break
 		}
 	}
 
@@ -806,7 +897,7 @@ func (i *_indexer) blockUtxoUpdate(ctx context.Context, direction int, cache any
 }
 
 func (i *_indexer) unprocessUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
-	return i.s.unprocessUtxos(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+	return unprocessUtxos(ctx, i.s.db, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
 }
 
 // processUtxo walks a block and peels out the relevant keystones that
@@ -815,7 +906,7 @@ func (i *_indexer) processUtxos(ctx context.Context, block *btcutil.Block, direc
 	if direction == -1 {
 		return i.unprocessUtxos(ctx, block, cache)
 	}
-	return processUtxos(block, direction, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+	return processUtxos(block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
 }
 
 func (i *_indexer) fixupUtxos(ctx context.Context, block *btcutil.Block, cache any) error {
