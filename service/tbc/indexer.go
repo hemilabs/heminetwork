@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/dustin/go-humanize"
 
@@ -30,18 +31,23 @@ type Indexer interface {
 type utxoIndexer struct {
 	mtx sync.RWMutex
 
+	// common
 	indexer  string
 	indexing bool
-	db       database.Database
+	db       tbcd.Database
+	params   *chaincfg.Params
+
+	// utxo indexer only
 }
 
 var _ Indexer = (*utxoIndexer)(nil)
 
-func NewUtxoIndexer(db database.Database) (Indexer, error) {
+func NewUtxoIndexer(params *chaincfg.Params, db tbcd.Database) (Indexer, error) {
 	return &utxoIndexer{
 		indexer:  "utxo",
 		indexing: false,
 		db:       db,
+		params:   params,
 	}, nil
 }
 
@@ -54,7 +60,19 @@ func (i *utxoIndexer) ToHash(context.Context, chainhash.Hash) error {
 }
 
 func (i *utxoIndexer) HashHeight(ctx context.Context) (*HashHeight, error) {
-	return nil, fmt.Errorf("HashHeight not yet")
+	// XXX kind of don't want to copy/paste this everywhere
+	bh, err := i.db.BlockHeaderByUtxoIndex(ctx)
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return nil, err
+		}
+		bh = &tbcd.BlockHeader{
+			Hash:   *i.params.GenesisHash,
+			Height: 0,
+			Header: h2b(&i.params.GenesisBlock.Header),
+		}
+	}
+	return HashHeightFromBlockHeader(bh), nil
 }
 
 func (i *utxoIndexer) Indexing() bool {
