@@ -970,7 +970,8 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 
 	log.Debugf("Sync indexers to best: %v @ %v", bhb, bhb.Height)
 
-	if err := s.newUtxoIndexer().modeIndexersToBest(ctx, bhb); err != nil {
+	// if err := s.newUtxoIndexer().modeIndexersToBest(ctx, bhb); err != nil {
+	if err := NewUtxoIndexer(s.chainParams, s.cfg.MaxCachedTxs, s.db, s.fixupCache).ToBest(ctx); err != nil {
 		return err
 	}
 

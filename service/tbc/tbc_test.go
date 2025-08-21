@@ -214,7 +214,7 @@ func TestDbUpgradeFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !utxobh.Hash.IsEqual(&hash) {
+	if !utxobh.Hash.IsEqual(hash) {
 		t.Fatal("unexpected utxo hash")
 	}
 
@@ -222,7 +222,7 @@ func TestDbUpgradeFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !txbh.Hash.IsEqual(&hash) {
+	if !txbh.Hash.IsEqual(hash) {
 		t.Fatal("unexpected tx hash")
 	}
 
@@ -230,7 +230,7 @@ func TestDbUpgradeFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !keystonebh.Hash.IsEqual(&hash) {
+	if !keystonebh.Hash.IsEqual(hash) {
 		t.Fatal("unexpected keystone hash")
 	}
 }
