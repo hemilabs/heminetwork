@@ -63,11 +63,10 @@ type Indexer interface {
 	Indexing() bool                                // Returns if indexing is active
 	Enabled() bool                                 // Returns if index is enabled
 
-	geometry() geometryParams // Return geometry parameters
-	cache() Cache
+	geometry() geometryParams                          // Return geometry parameters
+	cache() Cache                                      // Return cache
+	commit(context.Context, int, chainhash.Hash) error // Commit index cache to disk
 }
-
-// XXX implement cache interface?
 
 // geometryParams conviniently wraps all parameters required to perform
 // geometry operations.
@@ -112,6 +111,11 @@ func (i *utxoIndexer) geometry() geometryParams {
 
 func (i *utxoIndexer) cache() Cache {
 	return i.c
+}
+
+func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
+	return i.g.db.BlockUtxoUpdate(ctx, direction,
+		i.cache().Generic().(map[tbcd.Outpoint]tbcd.CacheOutput), atHash)
 }
 
 func (i *utxoIndexer) String() string {
@@ -466,7 +470,7 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 
 		// Flush to disk
 		start = time.Now()
-		if err = i.blockModeUpdate(ctx, 1, es, last.Hash); err != nil {
+		if err = i.commit(ctx, 1, last.Hash); err != nil {
 			return fmt.Errorf("block %v update: %w", i, err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -518,7 +522,7 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 
 		// Flush to disk
 		start = time.Now()
-		if err = i.blockModeUpdate(ctx, -1, es, last.Hash); err != nil {
+		if err = i.commit(ctx, -1, last.Hash); err != nil {
 			return fmt.Errorf("block %v update: %w", i, err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
