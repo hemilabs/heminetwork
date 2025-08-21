@@ -2555,12 +2555,6 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	// Setup indexers
-	s.ui = NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache)
-	s.ti = NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db)
-	if s.cfg.HemiIndex {
-		s.ki = NewKeystoneIndexer(s.g.chain, s.cfg.MaxCachedKeystones,
-			s.g.db, s.cfg.HemiIndex)
-	}
 	switch fixupStrategy {
 	case 0:
 		s.fixupCache = s.fixupCacheParallel
@@ -2570,6 +2564,12 @@ func (s *Server) dbOpen(ctx context.Context) error {
 		s.fixupCache = s.fixupCacheBatched
 	case 3:
 		s.fixupCache = s.fixupCacheChannel
+	}
+	s.ui = NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache)
+	s.ti = NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db)
+	if s.cfg.HemiIndex {
+		s.ki = NewKeystoneIndexer(s.g.chain, s.cfg.MaxCachedKeystones,
+			s.g.db, s.cfg.HemiIndex)
 	}
 
 	return nil
