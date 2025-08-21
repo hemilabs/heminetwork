@@ -332,24 +332,6 @@ func NewServer(cfg *Config) (*Server, error) {
 		s.pm = pm
 	}
 
-	// Setup indexers
-	s.ui = NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache)
-	s.ti = NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db)
-	if s.cfg.HemiIndex {
-		s.ki = NewKeystoneIndexer(s.g.chain, s.cfg.MaxCachedKeystones,
-			s.g.db, s.cfg.HemiIndex)
-	}
-	switch fixupStrategy {
-	case 0:
-		s.fixupCache = s.fixupCacheParallel
-	case 1:
-		s.fixupCache = s.fixupCacheSerial
-	case 2:
-		s.fixupCache = s.fixupCacheBatched
-	case 3:
-		s.fixupCache = s.fixupCacheChannel
-	}
-
 	return s, nil
 }
 
@@ -2555,6 +2537,8 @@ func (s *Server) dbOpen(ctx context.Context) error {
 		s.g.chain = &chaincfg.RegressionNetParams
 		s.g.chain.Checkpoints = localnetCheckpoints
 	case networkLocalnet: // XXX why is this here?, this breaks the filepath.Join
+		s.g.chain = &chaincfg.RegressionNetParams
+		s.g.chain.Checkpoints = localnetCheckpoints
 	default:
 		return fmt.Errorf("unsupported network: %v", s.cfg.Network)
 	}
@@ -2568,6 +2552,24 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	s.g.db, err = level.New(ctx, cfg)
 	if err != nil {
 		return err
+	}
+
+	// Setup indexers
+	s.ui = NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache)
+	s.ti = NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db)
+	if s.cfg.HemiIndex {
+		s.ki = NewKeystoneIndexer(s.g.chain, s.cfg.MaxCachedKeystones,
+			s.g.db, s.cfg.HemiIndex)
+	}
+	switch fixupStrategy {
+	case 0:
+		s.fixupCache = s.fixupCacheParallel
+	case 1:
+		s.fixupCache = s.fixupCacheSerial
+	case 2:
+		s.fixupCache = s.fixupCacheBatched
+	case 3:
+		s.fixupCache = s.fixupCacheChannel
 	}
 
 	return nil
@@ -2758,6 +2760,9 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("df: %w", err)
 	}
 	if df != 0 {
+		if s.g.chain == nil {
+			panic("gfy")
+		}
 		blockPerDay := uint64(24 * time.Hour / s.g.chain.TargetTimePerBlock)
 		blockSize := uint64(2 * 1024 * 1024) // 2MB, a bit over but that's ok
 		sizePerDay := blockSize * blockPerDay
