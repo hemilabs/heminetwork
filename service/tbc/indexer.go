@@ -362,7 +362,7 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 	case 1:
 		return wind(ctx, i, startBH, endBH)
 	case -1:
-		return i.modeIndexerUnwind(ctx, startBH, endBH)
+		return unwind(ctx, i, startBH, endBH)
 	case 0:
 		// Because we call modeIndexIsLinear we know it's the same block.
 		return nil
@@ -482,6 +482,57 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 		}
 	}
 
+	return nil
+}
+
+func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("%v Unwind", i)
+	defer log.Tracef("%v Unwind exit", i)
+
+	// XXX dedup with modeIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+
+	if !i.Indexing() {
+		// XXX this prob should be an error but pusnish bad callers for now
+		panic(fmt.Sprintf("%vIndexerUnwind indexing not true", i))
+	}
+	// Allocate here so that we don't waste space when not indexing.
+	es := i.cache().Generic()
+	defer i.cache().Clear()
+
+	log.Infof("Start unwinding %v at hash %v height %v", i, startBH, startBH.Height)
+	log.Infof("End unwinding %v at hash %v height %v", i, endBH, endBH.Height)
+	endHash := endBH.BlockHash()
+	for {
+		start := time.Now()
+		blocksProcessed, last, err := i.unindexModeInBlocks(ctx, endHash, es)
+		if err != nil {
+			return fmt.Errorf("unindex %vs in blocks: %w", i, err)
+		}
+		if blocksProcessed == 0 {
+			return nil
+		}
+		esCached := i.cache().Length()
+		log.Infof("%v unwinder blocks processed %v in %v cached %v cache unused %v avg/blk %v",
+			blocksProcessed, time.Since(start), esCached,
+			i.cache().Capacity()-esCached, esCached/blocksProcessed)
+
+		// Flush to disk
+		start = time.Now()
+		if err = i.blockModeUpdate(ctx, -1, es, last.Hash); err != nil {
+			return fmt.Errorf("block %v update: %w", i, err)
+		}
+		// leveldb does all kinds of allocations, force GC to lower
+		// memory pressure.
+		logMemStats()
+		runtime.GC()
+
+		log.Infof("Flushing unwind %vs complete %v took %v",
+			i, esCached, time.Since(start))
+
+		if endHash.IsEqual(&last.Hash) {
+			break
+		}
+	}
 	return nil
 }
 
