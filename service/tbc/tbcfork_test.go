@@ -1498,7 +1498,7 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := s.TxIndexIsLinear(ctx, *b3.Hash())
+	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
 	if err != nil {
 		t.Fatalf("expected success g -> b3, got %v", err)
 	}
@@ -1701,7 +1701,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := s.TxIndexIsLinear(ctx, *b3.Hash())
+	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
 	if err != nil {
 		t.Fatalf("expected success g -> b3, got %v", err)
 	}
@@ -2042,7 +2042,7 @@ func TestIndexFork(t *testing.T) {
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := s.TxIndexIsLinear(ctx, *b3.Hash())
+	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
 	if err != nil {
 		t.Fatalf("expected success g -> b3, got %v", err)
 	}
@@ -2079,7 +2079,7 @@ func TestIndexFork(t *testing.T) {
 	t.Logf("b3: %v", b3)
 
 	// b3 -> genesis should work with positive direction (cdiff is greater than target)
-	direction, err = s.TxIndexIsLinear(ctx, *s.g.chain.GenesisHash)
+	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
 	}
@@ -2088,7 +2088,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// b3 -> b1 should work with positive direction
-	direction, err = s.TxIndexIsLinear(ctx, *b1.Hash())
+	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b1.Hash())
 	if err != nil {
 		t.Fatalf("expected success b3 -> b1, got %v", err)
 	}
@@ -2097,13 +2097,13 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// b3 -> b2a should fail
-	_, err = s.TxIndexIsLinear(ctx, *b2a.Hash())
+	_, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b2a.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2a is not linear to b3: %v", err)
 	}
 
 	// b3 -> b2b should fail
-	_, err = s.TxIndexIsLinear(ctx, *b2b.Hash())
+	_, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b2b.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
@@ -2138,19 +2138,19 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// XXX verify indexes
-	txHH, err := s.TxIndexHash(ctx)
+	txBH, err := s.ti.At(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
-	if !txHH.Hash.IsEqual(s.g.chain.GenesisHash) {
-		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
 	}
-	if txHH.Height != 0 {
-		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
 	}
 
 	// see if we can move to b2a
-	direction, err = s.TxIndexIsLinear(ctx, *b2a.Hash())
+	direction, err = indexIsLinear(ctx, s.g, txBH.Hash, *b2a.Hash())
 	if err != nil {
 		t.Fatalf("expected success genesis -> b2a, got %v", err)
 	}
@@ -2185,15 +2185,15 @@ func TestIndexFork(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
-	txHH, err = s.TxIndexHash(ctx)
+	txBH, err = s.ti.At(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
-	if !txHH.Hash.IsEqual(s.g.chain.GenesisHash) {
-		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
 	}
-	if txHH.Height != 0 {
-		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
 	}
 	for address := range n.keys {
 		balance, err := s.BalanceByAddress(ctx, address)
@@ -2376,7 +2376,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
-	direction, err := s.TxIndexIsLinear(ctx, *b3.Hash())
+	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
 	if err != nil {
 		t.Fatalf("expected success g -> b3, got %v", err)
 	}
@@ -2491,7 +2491,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	t.Logf("b3: %v", b3)
 
 	// b3 -> genesis should work with positive direction (cdiff is greater than target)
-	direction, err = s.TxIndexIsLinear(ctx, *s.g.chain.GenesisHash)
+	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *s.g.chain.GenesisHash)
 	if err != nil {
 		t.Fatalf("expected success b3 -> genesis, got %v", err)
 	}
@@ -2500,7 +2500,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// b3 -> b1 should work with positive direction
-	direction, err = s.TxIndexIsLinear(ctx, *b1.Hash())
+	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b1.Hash())
 	if err != nil {
 		t.Fatalf("expected success b3 -> b1, got %v", err)
 	}
@@ -2509,13 +2509,13 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// b3 -> b2a should fail
-	_, err = s.TxIndexIsLinear(ctx, *b2a.Hash())
+	_, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b2a.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2a is not linear to b3: %v", err)
 	}
 
 	// b3 -> b2b should fail
-	_, err = s.TxIndexIsLinear(ctx, *b2b.Hash())
+	_, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b2b.Hash())
 	if !errors.Is(err, ErrNotLinear) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
@@ -2550,19 +2550,19 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// XXX verify indexes
-	txHH, err := s.TxIndexHash(ctx)
+	txBH, err := s.ti.At(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
-	if !txHH.Hash.IsEqual(s.g.chain.GenesisHash) {
-		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
 	}
-	if txHH.Height != 0 {
-		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
 	}
 
 	// see if we can move to b2a
-	direction, err = s.TxIndexIsLinear(ctx, *b2a.Hash())
+	direction, err = indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b2a.Hash())
 	if err != nil {
 		t.Fatalf("expected success genesis -> b2a, got %v", err)
 	}
@@ -2621,15 +2621,15 @@ func TestKeystoneIndexFork(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
-	txHH, err = s.TxIndexHash(ctx)
+	txBH, err = s.ti.At(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
-	if !txHH.Hash.IsEqual(s.g.chain.GenesisHash) {
-		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txHH)
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
 	}
-	if txHH.Height != 0 {
-		t.Fatalf("expected tx index height to be 0, got: %v", txHH.Height)
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
 	}
 	for address := range n.keys {
 		balance, err := s.BalanceByAddress(ctx, address)

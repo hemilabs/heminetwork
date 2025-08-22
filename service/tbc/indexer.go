@@ -64,6 +64,8 @@ type geometryParams struct {
 	chain *chaincfg.Params
 }
 
+// evaluateBlockHeaderIndex makes error handling of the various block header
+// index calls generic.
 func evaluateBlockHeaderIndex(g geometryParams, bh *tbcd.BlockHeader, err error) (*tbcd.BlockHeader, error) {
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
@@ -111,198 +113,6 @@ func toBest(ctx context.Context, i Indexer) error {
 	}
 
 	return nil
-}
-
-func findCanonicalParent(ctx context.Context, g geometryParams, bh *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
-	log.Tracef("findCanonicalParent %v", bh)
-
-	// Genesis is always canonical.
-	if bh.Hash.IsEqual(g.chain.GenesisHash) {
-		return bh, nil
-	}
-
-	bhb, err := g.db.BlockHeaderBest(ctx)
-	if err != nil {
-		return nil, err
-	}
-	log.Debugf("findCanonicalParent %v @ %v best %v @ %v",
-		bh, bh.Height, bhb, bhb.Height)
-	for {
-		canonical, err := isCanonical(ctx, g, bh)
-		if err != nil {
-			return nil, err
-		}
-		if canonical {
-			log.Tracef("findCanonicalParent exit %v", bh)
-			return bh, nil
-		}
-		bh, err = findCommonParent(ctx, g, bhb, bh)
-		if err != nil {
-			return nil, err
-		}
-	}
-}
-
-// isCanonical uses checkpoints to determine if a block is on the canonical
-// chain. This is a expensive call hence it tries to use checkpoints to short
-// circuit the check.
-func isCanonical(ctx context.Context, g geometryParams, bh *tbcd.BlockHeader) (bool, error) {
-	var (
-		bhb *tbcd.BlockHeader
-		err error
-	)
-	ncp := nextCheckpoint(bh, g.chain.Checkpoints)
-	if ncp == nil {
-		// Use best since we do not have a best checkpoint
-		bhb, err = g.db.BlockHeaderBest(ctx)
-	} else {
-		bhb, err = g.db.BlockHeaderByHash(ctx, *ncp.Hash)
-	}
-	if err != nil {
-		return false, err
-	}
-
-	// Basic shortcircuit
-	if bhb.Height < bh.Height {
-		// We either hit a race or the caller did something wrong.
-		// Either way, it cannot be canonical.
-		log.Debugf("best height less than provided height: %v < %v",
-			bhb.Height, bh.Height)
-		return false, nil
-	}
-	if bhb.Hash.IsEqual(&bh.Hash) {
-		// Self == best
-		return true, nil
-	}
-
-	genesisHash := previousCheckpoint(bh, g.chain.Checkpoints).Hash // either genesis or a snapshot block
-
-	// Move best block header backwards until we find bh.
-	log.Debugf("isCanonical best %v bh %v genesis %v", bhb.HH(), bh.HH(), genesisHash)
-	for {
-		if bhb.Height <= bh.Height {
-			return false, nil
-		}
-		bhb, err = g.db.BlockHeaderByHash(ctx, *bhb.ParentHash())
-		if err != nil {
-			return false, err
-		}
-		if bhb.Hash.IsEqual(genesisHash) {
-			return false, nil
-		}
-		if bhb.Hash.IsEqual(&bh.Hash) {
-			return true, nil
-		}
-	}
-}
-
-func findCommonParent(ctx context.Context, g geometryParams, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
-	// This function has one odd corner case. If bhX and bhY are both on a
-	// "long" chain without multiple blockheaders it will terminate on the
-	// first height that has a single blockheader. This is to be expected!
-	// This function "should" be called between forking blocks and then
-	// it'll find the first common parent.
-
-	// This function assumes that the highest block height connects to the
-	// lowest block height.
-
-	// 0. If bhX and bhY are the same return bhX.
-	if bhX.Hash.IsEqual(&bhY.Hash) {
-		return bhX, nil
-	}
-
-	// 1. Find lowest height between X and Y.
-	h := min(bhX.Height, bhY.Height)
-
-	// 2. Walk chain back until X and Y point to the same parent.
-	for {
-		bhs, err := g.db.BlockHeadersByHeight(ctx, h)
-		if err != nil {
-			return nil, fmt.Errorf("block headers by height: %w", err)
-		}
-		if bhs[0].Hash.IsEqual(g.chain.GenesisHash) {
-			if h != 0 {
-				panic("height 0 not genesis")
-			}
-			return nil, fmt.Errorf("genesis")
-		}
-
-		// See if all blockheaders share a common parent.
-		equals := 0
-		var ph *chainhash.Hash
-		for k := range bhs {
-			if k == 0 {
-				ph = bhs[k].ParentHash()
-			}
-			if !ph.IsEqual(bhs[k].ParentHash()) {
-				break
-			}
-			equals++
-		}
-		if equals == len(bhs) {
-			// All blockheaders point to the same parent.
-			return g.db.BlockHeaderByHash(ctx, *ph)
-		}
-
-		// Decrease height
-		h--
-	}
-}
-
-func nextCanonicalBlockheader(ctx context.Context, g geometryParams, endHash *chainhash.Hash, hh *HashHeight) (*HashHeight, error) {
-	// Move to next block
-	height := hh.Height + 1
-	bhs, err := g.db.BlockHeadersByHeight(ctx, height)
-	if err != nil {
-		return nil, fmt.Errorf("block headers by height %v: %w",
-			height, err)
-	}
-	index, err := findPathFromHash(ctx, g, endHash, bhs)
-	if err != nil {
-		return nil, fmt.Errorf("could not determine canonical path %v: %w",
-			height, err)
-	}
-	// Verify it connects to parent
-	if !hh.Hash.IsEqual(bhs[index].ParentHash()) {
-		return nil, fmt.Errorf("%v does not connect to: %v", bhs[index], hh.Hash)
-	}
-	nbh := bhs[index]
-	return &HashHeight{Hash: *nbh.BlockHash(), Height: nbh.Height}, nil
-}
-
-// findPathFromHash determines which hash is in the path by walking back the
-// chain from the provided end point. It returns the index in bhs of the
-// correct hash. On failure it returns -1 DELIBERATELY to crash the caller if
-// error is not checked.
-func findPathFromHash(ctx context.Context, g geometryParams, endHash *chainhash.Hash, bhs []tbcd.BlockHeader) (int, error) {
-	log.Tracef("findPathFromHash %v", len(bhs))
-	switch len(bhs) {
-	case 1:
-		return 0, nil // most common fast path
-	case 0:
-		return -1, errors.New("no blockheaders provided")
-	}
-
-	// When this happens we have to walk back from endHash to find the
-	// connecting block. There is no shortcut possible without hitting edge
-	// conditions.
-	h := endHash
-	for {
-		bh, err := g.db.BlockHeaderByHash(ctx, *h)
-		if err != nil {
-			return -1, fmt.Errorf("block header by hash: %w", err)
-		}
-		for k, v := range bhs {
-			if h.IsEqual(v.BlockHash()) {
-				return k, nil
-			}
-		}
-		if h.IsEqual(g.chain.GenesisHash) {
-			break
-		}
-		h = bh.ParentHash()
-	}
-	return -1, errors.New("path not found")
 }
 
 // headerAndBlock retrieves both the blockheader and the block. While the
@@ -372,68 +182,9 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 	return fmt.Errorf("invalid direction: %v", direction)
 }
 
-func indexIsLinear(ctx context.Context, g geometryParams, startHash, endHash chainhash.Hash) (int, error) {
-	log.Tracef("indexIsLinear")
-	defer log.Tracef("indexIsLinear exit")
-
-	// Verify exit condition hash
-	endBH, err := g.db.BlockHeaderByHash(ctx, endHash)
-	if err != nil {
-		return 0, fmt.Errorf("blockheader hash: %w", err)
-	}
-
-	// Make sure there is no gap between start and end or vice versa.
-	startBH, err := g.db.BlockHeaderByHash(ctx, startHash)
-	if err != nil {
-		return 0, fmt.Errorf("blockheader hash: %w", err)
-	}
-	// Short circuit if the block hash is the same.
-	if startBH.BlockHash().IsEqual(endBH.BlockHash()) {
-		return 0, nil
-	}
-
-	direction := endBH.Difficulty.Cmp(&startBH.Difficulty)
-	log.Debugf("startBH %v %v", startBH.Height, startBH)
-	log.Debugf("endBH %v %v", endBH.Height, endBH)
-	log.Debugf("direction %v", direction)
-	// Expensive linear test, this needs some performance love. We can
-	// memoize it keep snapshot heights whereto we know the chain is
-	// synced. For now just do the entire thing.
-
-	// Always walk backwards because it's only a single lookup.
-	var h, e *chainhash.Hash
-	switch direction {
-	case 1:
-		h = endBH.BlockHash()
-		e = startBH.BlockHash()
-	case -1:
-		h = startBH.BlockHash()
-		e = endBH.BlockHash()
-	default:
-		// This is a fork and thus not linear.
-		// XXX remove this once we determine if ErrNotLinear can happen here.
-		log.Infof("startBH %v %v", startBH, startBH.Difficulty)
-		log.Infof("endBH %v %v", endBH, endBH.Difficulty)
-		log.Infof("direction %v", direction)
-		return 0, NotLinearError(fmt.Sprintf("start %v end %v direction %v",
-			startBH, endBH, direction))
-	}
-	for {
-		bh, err := g.db.BlockHeaderByHash(ctx, *h)
-		if err != nil {
-			return -1, fmt.Errorf("block header by hash: %w", err)
-		}
-		h = bh.ParentHash()
-		if h.IsEqual(e) {
-			return direction, nil
-		}
-		if h.IsEqual(g.chain.GenesisHash) {
-			return 0, NotLinearError(fmt.Sprintf("start %v end %v "+
-				"direction %v: genesis", startBH, endBH, direction))
-		}
-	}
-}
-
+// wind moves the chain forward and process blocks to generate an index cache.
+// When the cache is filled it flushes the cache to disk and repeats this
+// process until it reaches endBH.
 func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) error {
 	log.Tracef("%v wind", i)
 	defer log.Tracef("%v wind exit", i)
@@ -486,6 +237,9 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 	return nil
 }
 
+// unwind moves the chain backward and reverses the wind process on the found
+// blocks. When the cache is filled it flushes the cache to disk and repeats
+// this process until it reaches endBH.
 func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) error {
 	log.Tracef("%v Unwind", i)
 	defer log.Tracef("%v Unwind exit", i)
@@ -698,6 +452,7 @@ func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash,
 	return blocksProcessed, last, nil
 }
 
+// logMemStats pretty prints memory stats during the lengthy index operations.
 func logMemStats() {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)

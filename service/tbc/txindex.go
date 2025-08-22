@@ -8,6 +8,7 @@ import (
 	"context"
 	"sync/atomic"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -134,4 +135,30 @@ func (i *txIndexer) Indexing() bool {
 
 func (i *txIndexer) Enabled() bool {
 	return i.enabled
+}
+
+func processTxs(block *btcutil.Block, direction int, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
+	blockHash := block.Hash()
+	txs := block.Transactions()
+	for _, tx := range txs {
+		// cache txid <-> block
+		txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
+
+		// Don't keep track of spent coinbase inputs
+		if blockchain.IsCoinBase(tx) {
+			// Skip coinbase inputs
+			continue
+		}
+
+		for txInIdx, txIn := range tx.MsgTx().TxIn {
+			txk, txv := tbcd.NewTxSpent(
+				blockHash,
+				tx.Hash(),
+				&txIn.PreviousOutPoint.Hash,
+				txIn.PreviousOutPoint.Index,
+				uint32(txInIdx))
+			txsCache[txk] = &txv
+		}
+	}
+	return nil
 }
