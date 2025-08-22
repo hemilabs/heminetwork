@@ -1080,6 +1080,10 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 
 	log.Infof("Block expired: %v %v", p, hash)
 
+	// XXX we really want to kick of syncing here when blocks missing hits
+	// 0. If not we stall until the next block comes in before downloading
+	// it and then starting the sync.
+
 	// Legit timeout, return error so that it can be retried.
 	return fmt.Errorf("timeout %v", key)
 }
