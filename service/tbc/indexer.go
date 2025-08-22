@@ -218,7 +218,7 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 
 		// Flush to disk
 		start = time.Now()
-		if err = i.commit(ctx, 1, last.Hash); err != nil {
+		if err := i.commit(ctx, 1, last.Hash); err != nil {
 			return fmt.Errorf("block %v update: %w", i, err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
@@ -330,8 +330,6 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache 
 	blocksProcessed := 0
 	for {
 		log.Debugf("indexing %vs: %v", i, hh)
-		log.Infof("indexing %vs: %v", i, hh)
-		log.Infof("g %v hh %v", g, hh)
 
 		bh, b, err := headerAndBlock(ctx, g.db, hh.Hash)
 		if err != nil {
@@ -358,13 +356,9 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache 
 			log.Infof("%v indexer: %v cache %v%%", i, hh, cp)
 		}
 
-		if cp > percentage {
+		// Exit if we processed the provided end hash or hit 95% cache full.
+		if cp > percentage || endHash.IsEqual(&hh.Hash) {
 			// Flush cache to disk
-			break
-		}
-
-		// Exit if we processed the provided end hash
-		if endHash.IsEqual(&hh.Hash) {
 			last = hh
 			break
 		}
