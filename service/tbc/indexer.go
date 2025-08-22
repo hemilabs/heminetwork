@@ -16,6 +16,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/dustin/go-humanize"
 
+	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
@@ -61,6 +62,20 @@ type Indexer interface {
 type geometryParams struct {
 	db    tbcd.Database
 	chain *chaincfg.Params
+}
+
+func evaluateBlockHeaderIndex(g geometryParams, bh *tbcd.BlockHeader, err error) (*tbcd.BlockHeader, error) {
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return nil, err
+		}
+		bh = &tbcd.BlockHeader{
+			Hash:   *g.chain.GenesisHash,
+			Height: 0,
+			Header: h2b(&g.chain.GenesisBlock.Header),
+		}
+	}
+	return bh, nil
 }
 
 // toBest moves the indexer to the best tip.
