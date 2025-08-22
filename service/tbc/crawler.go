@@ -33,14 +33,7 @@ func s2h(s string) *chainhash.Hash {
 	return h
 }
 
-//type checkpoint struct {
-//	height uint64
-//	hash   chainhash.Hash
-//}
-
 var (
-	ErrAlreadyIndexing = errors.New("already indexing")
-
 	// checkpoints MUST be sorted high to low!
 	testnet3Checkpoints = []chaincfg.Checkpoint{
 		{Height: 4000000, Hash: s2h("000000000000033947a6a47cecc029f944f3879da242dec26647360b2764adae")},
