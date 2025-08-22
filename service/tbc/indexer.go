@@ -268,7 +268,7 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 		}
 		esCached := i.cache().Length()
 		log.Infof("%v unwinder blocks processed %v in %v cached %v cache unused %v avg/blk %v",
-			blocksProcessed, time.Since(start), esCached,
+			i, blocksProcessed, time.Since(start), esCached,
 			i.cache().Capacity()-esCached, esCached/blocksProcessed)
 
 		// Flush to disk
