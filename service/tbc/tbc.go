@@ -54,7 +54,7 @@ const (
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
-	defaultMaxCachedKeystones = 1024 // number of cached keystones prior to flush
+	defaultMaxCachedKeystones = 1e6 // number of cached keystones prior to flush
 
 	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
 
