@@ -19,6 +19,19 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
+type AlreadyIndexingError string
+
+func (aie AlreadyIndexingError) Error() string {
+	return string(aie)
+}
+
+func (aie AlreadyIndexingError) Is(target error) bool {
+	_, ok := target.(AlreadyIndexingError)
+	return ok
+}
+
+var ErrAlreadyIndexing = AlreadyIndexingError("already indexing")
+
 type Cache interface {
 	Clear()
 	Length() int
@@ -33,6 +46,7 @@ type Indexer interface {
 	Indexing() bool                                // Returns if indexing is active
 	Enabled() bool                                 // Returns if index is enabled
 
+	// XXX i would be tickled if we can get rid of these inside the interface
 	geometry() geometryParams                          // Return geometry parameters
 	cache() Cache                                      // Return cache
 	commit(context.Context, int, chainhash.Hash) error // Commit index cache to disk

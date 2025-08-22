@@ -7,8 +7,7 @@ package tbc
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
+	"sync/atomic"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -48,9 +47,8 @@ func NewUtxoCache(maxCacheEntries int) Cache {
 
 type utxoIndexer struct {
 	// common
-	mtx      sync.RWMutex
+	indexing uint32 // used with atomics
 	indexer  string
-	indexing bool
 	enabled  bool
 	c        Cache
 
@@ -71,7 +69,7 @@ type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd
 func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fixupCacheFunc) Indexer {
 	return &utxoIndexer{
 		indexer:   "utxo",
-		indexing:  false,
+		indexing:  0,
 		enabled:   true,
 		c:         NewUtxoCache(cacheLen),
 		fixupHook: f,
@@ -116,26 +114,22 @@ func (i *utxoIndexer) String() string {
 }
 
 func (i *utxoIndexer) ToBest(ctx context.Context) error {
-	// abstract locking away
-	i.mtx.Lock()
-	if i.indexing {
-		i.mtx.Unlock()
-		return fmt.Errorf("already indexing: %v", i)
+	// XXX hate to do this here instead of inside the interface.
+	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+		return ErrAlreadyIndexing
 	}
-	i.indexing = true
-	i.mtx.Unlock()
+	defer atomic.StoreUint32(&i.indexing, 0)
+
 	return toBest(ctx, i)
 }
 
 func (i *utxoIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error {
-	// abstract locking away
-	i.mtx.Lock()
-	if i.indexing {
-		i.mtx.Unlock()
-		return fmt.Errorf("already indexing: %v", i)
+	// XXX hate to do this here instead of inside the interface.
+	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+		return ErrAlreadyIndexing
 	}
-	i.indexing = true
-	i.mtx.Unlock()
+	defer atomic.StoreUint32(&i.indexing, 0)
+
 	return windOrUnwind(ctx, i, hash)
 }
 
@@ -156,13 +150,9 @@ func (i *utxoIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
 }
 
 func (i *utxoIndexer) Indexing() bool {
-	i.mtx.RLock()
-	defer i.mtx.RUnlock()
-	return i.indexing
+	return atomic.LoadUint32(&i.indexing) == 1
 }
 
 func (i *utxoIndexer) Enabled() bool {
-	i.mtx.RLock()
-	defer i.mtx.RUnlock()
 	return i.enabled
 }

@@ -7,8 +7,7 @@ package tbc
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
+	"sync/atomic"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -48,9 +47,8 @@ func NewTxCache(maxCacheEntries int) Cache {
 
 type txIndexer struct {
 	// common
-	mtx      sync.RWMutex
+	indexing uint32 // Used as an atomic
 	indexer  string
-	indexing bool
 	enabled  bool
 	c        Cache
 
@@ -68,7 +66,7 @@ var (
 func NewTxIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database) Indexer {
 	return &txIndexer{
 		indexer:  "tx",
-		indexing: false,
+		indexing: 0,
 		enabled:  true,
 		c:        NewTxCache(cacheLen),
 		g: geometryParams{
@@ -108,26 +106,22 @@ func (i *txIndexer) String() string {
 }
 
 func (i *txIndexer) ToBest(ctx context.Context) error {
-	// abstract locking away
-	i.mtx.Lock()
-	if i.indexing {
-		i.mtx.Unlock()
-		return fmt.Errorf("already indexing: %v", i)
+	// XXX hate to do this here instead of inside the interface.
+	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+		return ErrAlreadyIndexing
 	}
-	i.indexing = true
-	i.mtx.Unlock()
+	defer atomic.StoreUint32(&i.indexing, 0)
+
 	return toBest(ctx, i)
 }
 
 func (i *txIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error {
-	// abstract locking away
-	i.mtx.Lock()
-	if i.indexing {
-		i.mtx.Unlock()
-		return fmt.Errorf("already indexing: %v", i)
+	// XXX hate to do this here instead of inside the interface.
+	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+		return ErrAlreadyIndexing
 	}
-	i.indexing = true
-	i.mtx.Unlock()
+	defer atomic.StoreUint32(&i.indexing, 0)
+
 	return windOrUnwind(ctx, i, hash)
 }
 
@@ -148,13 +142,9 @@ func (i *txIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
 }
 
 func (i *txIndexer) Indexing() bool {
-	i.mtx.RLock()
-	defer i.mtx.RUnlock()
-	return i.indexing
+	return atomic.LoadUint32(&i.indexing) == 1
 }
 
 func (i *txIndexer) Enabled() bool {
-	i.mtx.RLock()
-	defer i.mtx.RUnlock()
 	return i.enabled
 }

@@ -7,8 +7,7 @@ package tbc
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sync"
+	"sync/atomic"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -48,9 +47,8 @@ func NewKeystoneCache(maxCacheEntries int) Cache {
 
 type keystoneIndexer struct {
 	// common
-	mtx      sync.RWMutex
+	indexing uint32 // Used as an atomic
 	indexer  string
-	indexing bool
 	enabled  bool
 	c        Cache
 
@@ -68,7 +66,7 @@ var (
 func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, enabled bool) Indexer {
 	return &keystoneIndexer{
 		indexer:  "keystone",
-		indexing: false,
+		indexing: 0,
 		enabled:  enabled,
 		c:        NewKeystoneCache(cacheLen),
 		g: geometryParams{
@@ -109,26 +107,22 @@ func (i *keystoneIndexer) String() string {
 }
 
 func (i *keystoneIndexer) ToBest(ctx context.Context) error {
-	// abstract locking away
-	i.mtx.Lock()
-	if i.indexing {
-		i.mtx.Unlock()
-		return fmt.Errorf("already indexing: %v", i)
+	// XXX hate to do this here instead of inside the interface.
+	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+		return ErrAlreadyIndexing
 	}
-	i.indexing = true
-	i.mtx.Unlock()
+	defer atomic.StoreUint32(&i.indexing, 0)
+
 	return toBest(ctx, i)
 }
 
 func (i *keystoneIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error {
-	// abstract locking away
-	i.mtx.Lock()
-	if i.indexing {
-		i.mtx.Unlock()
-		return fmt.Errorf("already indexing: %v", i)
+	// XXX hate to do this here instead of inside the interface.
+	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+		return ErrAlreadyIndexing
 	}
-	i.indexing = true
-	i.mtx.Unlock()
+	defer atomic.StoreUint32(&i.indexing, 0)
+
 	return windOrUnwind(ctx, i, hash)
 }
 
@@ -149,13 +143,9 @@ func (i *keystoneIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
 }
 
 func (i *keystoneIndexer) Indexing() bool {
-	i.mtx.RLock()
-	defer i.mtx.RUnlock()
-	return i.indexing
+	return atomic.LoadUint32(&i.indexing) == 1
 }
 
 func (i *keystoneIndexer) Enabled() bool {
-	i.mtx.RLock()
-	defer i.mtx.RUnlock()
 	return i.enabled
 }
