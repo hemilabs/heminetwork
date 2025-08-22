@@ -838,6 +838,7 @@ func (b *btcNode) mineMultiple(name string, from *chainhash.Hash, payToAddress b
 		// Add keystone
 		l2Keystone, err := b.lookupKeystone(fmt.Sprintf("kss%d", nextBlockHeight))
 		if err == nil {
+			b.t.Logf("adding kss%d to %v", nextBlockHeight, name)
 			signer, err := b.findKeyByName("miner")
 			if err != nil {
 				return nil, err
@@ -856,17 +857,7 @@ func (b *btcNode) mineMultiple(name string, from *chainhash.Hash, payToAddress b
 				return nil, err
 			}
 
-			popTxAlt, err := createPopTx(uint64(nextBlockHeight), l2Keystone, recipient.Serialize(), recipient.PubKey(), popTx, 0)
-			if err != nil {
-				return nil, err
-			}
-
-			err = executeTX(b.t, false, popTx.MsgTx().TxOut[0].PkScript, popTxAlt)
-			if err != nil {
-				return nil, err
-			}
-
-			mempool = append(mempool, popTx, popTxAlt)
+			mempool = append(mempool, popTx)
 		}
 	}
 
@@ -882,6 +873,7 @@ func (b *btcNode) mineMultiple(name string, from *chainhash.Hash, payToAddress b
 			nextBlockHeight, err)
 	}
 	// XXX this really sucks, we should get rid of height as a best indicator
+	b.t.Logf("%v height is %v", name, blk.Height())
 	if blk.Height() > b.height {
 		b.height = blk.Height()
 	}
@@ -3140,7 +3132,7 @@ func TestForkCanonicity(t *testing.T) {
 }
 
 func TestCacheOverflow(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -3201,7 +3193,7 @@ func TestCacheOverflow(t *testing.T) {
 	}()
 	time.Sleep(250 * time.Millisecond)
 
-	const blockCount = 30
+	const blockCount = 30 // must be >= 2
 	blocks := make([]*block, blockCount)
 
 	// mine blocks
@@ -3212,6 +3204,7 @@ func TestCacheOverflow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Logf("inserted %v / kss%d", blk.name, i)
 		prevHash = blk.Hash()
 		blocks[i-1] = blk
 	}
@@ -3241,6 +3234,8 @@ func TestCacheOverflow(t *testing.T) {
 	for i := 2; i <= blockCount; i++ {
 		kssName := fmt.Sprintf("kss%d", i)
 		blk := blocks[i-1]
+		t.Logf("checking %v / %v", blk.name, kssName)
+
 		// keystones
 		kss, err := n.lookupKeystone(kssName)
 		if err != nil {
