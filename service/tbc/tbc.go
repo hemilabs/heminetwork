@@ -135,6 +135,36 @@ func init() {
 	}
 }
 
+type HashHeight struct {
+	Hash      chainhash.Hash `json:"hash"`
+	Height    uint64         `json:"height"`
+	Timestamp int64          `json:"timestamp"` // optional
+}
+
+func (h HashHeight) String() string {
+	return fmt.Sprintf("%v @ %v", h.Hash, h.Height)
+}
+
+func HashHeightFromBlockHeader(bh *tbcd.BlockHeader) *HashHeight {
+	return &HashHeight{
+		Hash:      bh.Hash,
+		Height:    bh.Height,
+		Timestamp: bh.Timestamp().Unix(),
+	}
+}
+
+// h2b encodes a wire blockheader to the corresponding 80 bytes.
+func h2b(wbh *wire.BlockHeader) [80]byte {
+	var b bytes.Buffer
+	err := wbh.Serialize(&b)
+	if err != nil {
+		panic(err)
+	}
+	var bh [80]byte
+	copy(bh[:], b.Bytes())
+	return bh
+}
+
 type Config struct {
 	AutoIndex               bool
 	BlockCacheSize          string
@@ -2348,6 +2378,132 @@ func (s *Server) FeesByBlockHash(ctx context.Context, hash chainhash.Hash) (*tbc
 	return rf[0], nil
 }
 
+// SyncIndexersToHash tries to move the various indexers to the supplied hash
+// (inclusive).
+//
+// Note: on unwind it means that it WILL unwind the various indexers including
+// the hash that was passed in. E.g. if this unwinds from 1001 to 1000 the
+// indexes for block 1000 WILL be updated as well.
+func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) error {
+	log.Tracef("SyncIndexersToHash")
+	defer log.Tracef("SyncIndexersToHash exit")
+
+	s.mtx.Lock()
+	if s.indexing {
+		s.mtx.Unlock()
+		return ErrAlreadyIndexing
+	}
+	s.indexing = true
+	s.mtx.Unlock()
+
+	defer func() {
+		// Mark indexing done.
+		s.mtx.Lock()
+		s.indexing = false
+		s.mtx.Unlock()
+
+		// Get block headers
+		s.pm.All(ctx, s.headersPeer)
+	}()
+
+	log.Debugf("Syncing indexes to: %v", hash)
+
+	// utxos
+	if err := s.ui.ToHash(ctx, hash); err != nil {
+		return fmt.Errorf("utxo indexer: %w", err)
+	}
+
+	// Transactions index
+	if err := s.ti.ToHash(ctx, hash); err != nil {
+		return fmt.Errorf("tx indexer: %w", err)
+	}
+
+	// Hemi indexes
+	if s.cfg.HemiIndex {
+		if err := s.ki.ToHash(ctx, hash); err != nil {
+			return fmt.Errorf("keystone indexer: %w", err)
+		}
+	}
+
+	log.Debugf("Done syncing to: %v", hash)
+
+	bh, err := s.g.db.BlockHeaderByHash(ctx, hash)
+	if err != nil {
+		log.Errorf("block header by hash: %v", err)
+	} else {
+		log.Infof("Syncing complete at: %v", bh.HH())
+	}
+
+	return nil
+}
+
+func (s *Server) syncIndexersToBest(ctx context.Context) error {
+	log.Tracef("syncIndexersToBest")
+	defer log.Tracef("syncIndexersToBest exit")
+
+	bhb, err := s.g.db.BlockHeaderBest(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Debugf("Sync indexers to best: %v @ %v", bhb, bhb.Height)
+
+	if err := s.ui.ToBest(ctx); err != nil {
+		return err
+	}
+
+	if err := s.ti.ToBest(ctx); err != nil {
+		return err
+	}
+
+	if s.cfg.HemiIndex {
+		if err := s.ki.ToBest(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Print nice message to indicate completion.
+	bh, err := s.g.db.BlockHeaderByHash(ctx, bhb.Hash)
+	if err != nil {
+		log.Errorf("block header by hash: %v", err)
+	} else {
+		log.Debugf("Syncing complete at: %v", bh.HH())
+	}
+
+	return nil
+}
+
+func (s *Server) SyncIndexersToBest(ctx context.Context) error {
+	t := time.Now()
+	log.Tracef("SyncIndexersToBest")
+	defer func() {
+		log.Tracef("SyncIndexersToBest exit %v", time.Since(t))
+	}()
+
+	s.mtx.Lock()
+	if s.indexing {
+		s.mtx.Unlock()
+		return ErrAlreadyIndexing
+	}
+	s.indexing = true
+	s.mtx.Unlock()
+
+	defer func() {
+		s.mtx.Lock()
+		s.indexing = false
+		s.mtx.Unlock()
+	}()
+
+	// NOTE: the way this code works today is that it will ALWAYS reindex
+	// the last block it already indexed. This is wasteful for resources
+	// but so far does no harm. The reason this happens is because
+	// the code to skip the last block is super awkward and potentially
+	// brittle. It would require special handling for genesis or skip the
+	// first block that's passed in. This needs to be revisited but reader
+	// beware of this reality.
+	return s.syncIndexersToBest(ctx)
+}
+
 // FullBlockAvailable returns whether TBC has the full block
 // corresponding to the specified hash available in its database.
 func (s *Server) FullBlockAvailable(ctx context.Context, hash chainhash.Hash) (bool, error) {
@@ -2934,7 +3090,7 @@ func (s *Server) Run(pctx context.Context) error {
 			bhb, bhb.Height, bhb.Timestamp())
 		utxoBH, _ := s.ui.At(ctx)
 		log.Infof("Utxo index %v @ %v", utxoBH.Height, utxoBH.Hash)
-		txBH, _ := s.TxIndexHash(ctx)
+		txBH, _ := s.ti.At(ctx)
 		log.Infof("Tx index %v @ %v", txBH.Height, txBH.Hash)
 		if s.cfg.HemiIndex {
 			hemiBH, _ := s.ki.At(ctx)
