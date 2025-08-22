@@ -6,14 +6,12 @@ package tbc
 
 import (
 	"context"
-	"errors"
 	"sync/atomic"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
-	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
@@ -128,18 +126,7 @@ func (i *keystoneIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error
 
 func (i *keystoneIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
 	bh, err := i.g.db.BlockHeaderByKeystoneIndex(ctx)
-	if err != nil {
-		// XXX kind of don't want to copy/paste this everywhere
-		if !errors.Is(err, database.ErrNotFound) {
-			return nil, err
-		}
-		bh = &tbcd.BlockHeader{
-			Hash:   *i.g.chain.GenesisHash,
-			Height: 0,
-			Header: h2b(&i.g.chain.GenesisBlock.Header),
-		}
-	}
-	return bh, nil
+	return evaluateBlockHeaderIndex(i.g, bh, err)
 }
 
 func (i *keystoneIndexer) Indexing() bool {
