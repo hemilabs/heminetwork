@@ -395,7 +395,11 @@ func (s *Server) fixupCacheChannel(ctx context.Context, b *btcutil.Block, utxos 
 			s.mtx.Unlock()
 
 			// get slot or wait
-			<-c
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-c:
+			}
 
 			// utxo not found, retrieve pkscript from database.
 			w.Add(1)
