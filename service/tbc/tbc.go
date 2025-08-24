@@ -109,6 +109,12 @@ type ExternalHeaderNotAllowedError struct {
 	Op string
 }
 
+// NewExternalHeaderNotAllowedError returns an error indicating that the
+// operation is not allowed in external header mode.
+func NewExternalHeaderNotAllowedError(op string) error {
+	return &ExternalHeaderNotAllowedError{Op: op}
+}
+
 // Error implements the error interface.
 func (e *ExternalHeaderNotAllowedError) Error() string {
 	if e.Op == "" {
@@ -1039,7 +1045,7 @@ func (s *Server) handleBlockExpired(ctx context.Context, key any, value any) err
 	if err != nil {
 		return fmt.Errorf("block header by hash: %w", err)
 	}
-	canonical, _ := s.isCanonical(ctx, bhX)
+	canonical, err := s.isCanonical(ctx, bhX)
 	if err != nil {
 		return fmt.Errorf("is canonical: %v %w", hash, err)
 	}
