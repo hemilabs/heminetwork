@@ -243,6 +243,7 @@ func TestCanonicity(t *testing.T) {
 		blockHashes = append(blockHashes, lastHash)
 	}
 
+	g.chain.GenesisHash = &blockHashes[0]
 	g.chain.Checkpoints = append(g.chain.Checkpoints, chaincfg.Checkpoint{
 		Height: 0, Hash: &blockHashes[0],
 	})
@@ -287,6 +288,24 @@ func TestCanonicity(t *testing.T) {
 		}
 		if !rhh.Hash.IsEqual(&blockHashes[i+1]) {
 			t.Fatalf("expected next canonical %v, got %v", blockHashes[i+1], rhh.Hash)
+		}
+
+		if i == 0 {
+			continue
+		}
+
+		bhCanon, err := db.BlockHeaderByHash(ctx, blockHashes[len(blockHashes)-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		common, err := findCommonParent(ctx, g, bh, bhCanon)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !common.Hash.IsEqual(&blockHashes[i-1]) {
+			t.Fatalf("expected common parent to be %v, got %v", &blockHashes[i-1], common.Hash)
 		}
 	}
 
@@ -334,6 +353,20 @@ func TestCanonicity(t *testing.T) {
 		_, err = nextCanonicalBlockheader(ctx, g, &blockHashes[len(blockHashes)-1], &hh)
 		if err == nil {
 			t.Fatal("expected err")
+		}
+
+		bhCanon, err := db.BlockHeaderByHash(ctx, blockHashes[i+1])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		common, err := findCommonParent(ctx, g, bh, bhCanon)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if !common.Hash.IsEqual(g.chain.GenesisHash) {
+			t.Fatal("expected common parent to be genesis")
 		}
 	}
 }
