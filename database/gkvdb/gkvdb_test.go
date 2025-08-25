@@ -872,19 +872,19 @@ func getDBs() []TestTableItem {
 				cfg1 := DefaultLevelConfig(home1, tables)
 				db1, err := NewLevelDB(cfg1)
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 				home2 := filepath.Join(home, "2")
 				cfg2 := DefaultLevelConfig(home2, tables)
 				db2, err := NewLevelDB(cfg2)
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 
 				rcfg := DefaultReplicatorConfig(Direct)
 				db, err := NewReplicatorDB(rcfg, db1, db2)
 				if err != nil {
-					t.Fatal(err)
+					panic(err)
 				}
 				return db
 			},
