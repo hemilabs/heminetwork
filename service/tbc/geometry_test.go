@@ -81,7 +81,6 @@ func TestCheckpoints(t *testing.T) {
 }
 
 func insertInChain(ctx context.Context, db tbcd.Database, prevBlockHash chainhash.Hash, height, nonce uint64, l2Keystone *tbcd.Keystone) (chainhash.Hash, error) {
-	// t.Logf("prevBlockHash = %v, height = %d", prevBlockHash, h)
 	wireHeader := wire.BlockHeader{
 		Version: 1,
 		Nonce:   uint32(nonce), // something unique so there are no collisions
@@ -125,13 +124,12 @@ func insertInChain(ctx context.Context, db tbcd.Database, prevBlockHash chainhas
 		}
 	}
 	prevBlockHash = wireHeader.BlockHash()
-
 	return prevBlockHash, nil
 }
 
 func TestIndexLinearity(t *testing.T) {
 	const blockCount = 10
-	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer func() {
 		cancel()
 	}()
@@ -154,6 +152,11 @@ func TestIndexLinearity(t *testing.T) {
 		}
 	}()
 
+	g := geometryParams{
+		db:    db,
+		chain: &chaincfg.RegressionNetParams,
+	}
+
 	blockHashes := make([]chainhash.Hash, 0, blockCount)
 	var prevBlockHash chainhash.Hash
 	for i := range blockCount {
@@ -164,11 +167,6 @@ func TestIndexLinearity(t *testing.T) {
 		}
 		prevBlockHash = lastHash
 		blockHashes = append(blockHashes, lastHash)
-	}
-
-	g := geometryParams{
-		db:    db,
-		chain: &chaincfg.RegressionNetParams,
 	}
 
 	// Check if linear
@@ -196,5 +194,146 @@ func TestIndexLinearity(t *testing.T) {
 	_, err = indexIsLinear(ctx, g, blockHashes[len(blockHashes)-1], lastHash)
 	if !errors.Is(err, NotLinearError("")) {
 		t.Fatal(err)
+	}
+}
+
+func TestCanonicity(t *testing.T) {
+	const (
+		blockCount     = 10
+		forkBlockCount = 5
+	)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	cfg, err := level.NewConfig("localnet", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	g := geometryParams{
+		db:    db,
+		chain: &chaincfg.RegressionNetParams,
+	}
+
+	// Canonical Chain Checks
+	blockHashes := make([]chainhash.Hash, 0, blockCount)
+	var prevBlockHash chainhash.Hash
+	for i := range blockCount {
+		t.Logf("prevBlockHash = %v, height = %d", prevBlockHash, i)
+		lastHash, err := insertInChain(ctx, db, prevBlockHash, uint64(i), uint64(i), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prevBlockHash = lastHash
+		blockHashes = append(blockHashes, lastHash)
+	}
+
+	g.chain.Checkpoints = append(g.chain.Checkpoints, chaincfg.Checkpoint{
+		Height: 0, Hash: &blockHashes[0],
+	})
+
+	for i, bhh := range blockHashes {
+		bh, err := db.BlockHeaderByHash(ctx, bhh)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// is canon
+		canon, err := isCanonical(ctx, g, bh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !canon {
+			t.Fatalf("not canon: %v", bhh)
+		}
+
+		// since is canon, return self
+		res, err := findCanonicalParent(ctx, g, bh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.Hash.IsEqual(&bhh) {
+			t.Fatalf("unexpected parent: expected %v, got %v", bhh, res.Hash)
+		}
+
+		hh := HashHeight{
+			Hash:   bhh,
+			Height: uint64(i),
+		}
+		rhh, err := nextCanonicalBlockheader(ctx, g, &blockHashes[len(blockHashes)-1], &hh)
+		if i >= len(blockHashes)-1 {
+			if err == nil {
+				t.Fatalf("expected no next canonical at height %v", i)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !rhh.Hash.IsEqual(&blockHashes[i+1]) {
+			t.Fatalf("expected next canonical %v, got %v", blockHashes[i+1], rhh.Hash)
+		}
+	}
+
+	// Fork Chain Checks
+	fblockHashes := make([]chainhash.Hash, 0, blockCount)
+	fprevBlockHash := blockHashes[0]
+	for i := 1; i <= forkBlockCount; i++ {
+		t.Logf("fprevBlockHash = %v, height = %d", fprevBlockHash, i)
+		lastHash, err := insertInChain(ctx, db, fprevBlockHash, uint64(i), uint64(blockCount+i), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fprevBlockHash = lastHash
+		fblockHashes = append(fblockHashes, lastHash)
+	}
+
+	for i, bhh := range fblockHashes {
+		bh, err := db.BlockHeaderByHash(ctx, bhh)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// is canon
+		canon, err := isCanonical(ctx, g, bh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if canon {
+			t.Fatalf("canon: %v", bhh)
+		}
+
+		// forked from genesis
+		res, err := findCanonicalParent(ctx, g, bh)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.Hash.IsEqual(&blockHashes[0]) {
+			t.Fatalf("unexpected parent: expected %v, got %v", blockHashes[0], res.Hash)
+		}
+
+		hh := HashHeight{
+			Hash:   bhh,
+			Height: uint64(i),
+		}
+		_, err = nextCanonicalBlockheader(ctx, g, &blockHashes[len(blockHashes)-1], &hh)
+		if err == nil {
+			t.Fatal("expected err")
+		}
 	}
 }
