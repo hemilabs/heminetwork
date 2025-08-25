@@ -26,7 +26,7 @@ time to consider contributing!
 
 ## Code of Conduct
 
-Please read and follow the [Code of Conduct](https://github.com/hemilabs/.github/blob/main/CODE_OF_CONDUCT.md) when
+Please read and follow the [Code of Conduct](https://github.com/hemilabs/.github/blob/main/CODE_OF_CONDUCT.md) before
 contributing to this repository.
 
 ## Contributing
@@ -71,7 +71,7 @@ make deps
 **Useful commands**
 
 ```shell
-# Build, lint and test
+# Build, lint, and test
 make
 
 # Build all binaries
@@ -98,7 +98,8 @@ make test
 - All new code should include unit tests where practical. You can run tests with `make test`.
 
 We use `golangci-lint` to run formatters and linters on this codebase. You can run the linter by running `make lint`,
-or manually with `golangci-lint run ./...`
+or manually with `golangci-lint run ./...`. **All changes must pass the linter before being submitted or merged in pull
+requests.**
 
 ### Commit messages
 
@@ -167,7 +168,7 @@ For unstable changes, beta releases (e.g. `v2.0.0-beta.1`) should be made before
 
 ### Release cycle
 
-We aim to create minor releases approximately monthly, and patch releases as needed for bug fixes.
+We aim to create minor releases regularly, and patch releases as needed for bug fixes.
 
 ### Release preparation
 
