@@ -15,6 +15,17 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
+type SinkUnavailableError string
+
+func (sue SinkUnavailableError) Error() string {
+	return string(sue)
+}
+
+func (sue SinkUnavailableError) Is(target error) bool {
+	_, ok := target.(SinkUnavailableError)
+	return ok
+}
+
 // Assert required interfaces
 var (
 	_ Batch       = (*levelBatch)(nil)
