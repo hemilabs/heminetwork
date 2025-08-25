@@ -5,6 +5,7 @@
 package rawdb
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -93,7 +94,7 @@ func New(cfg *Config) (*RawDB, error) {
 	}, nil
 }
 
-func (r *RawDB) Open() error {
+func (r *RawDB) Open(ctx context.Context) error {
 	log.Tracef("Open")
 	defer log.Tracef("Open exit")
 
@@ -142,7 +143,7 @@ func (r *RawDB) Open() error {
 		return fmt.Errorf("new: %w", err)
 	}
 
-	err = r.index.Open(nil)
+	err = r.index.Open(ctx)
 	if err != nil {
 		return fmt.Errorf("open: %w", err)
 	}
@@ -151,14 +152,14 @@ func (r *RawDB) Open() error {
 	return nil
 }
 
-func (r *RawDB) Close() error {
+func (r *RawDB) Close(ctx context.Context) error {
 	log.Tracef("Close")
 	defer log.Tracef("Close exit")
 
 	r.mtx.Lock()
 	defer r.mtx.Unlock()
 
-	err := r.index.Close(nil)
+	err := r.index.Close(ctx)
 	if err != nil {
 		return err
 	}
@@ -177,14 +178,14 @@ func (r *RawDB) DB() gkvdb.Database {
 	return r.index
 }
 
-func (r *RawDB) Has(key []byte) (bool, error) {
+func (r *RawDB) Has(ctx context.Context, key []byte) (bool, error) {
 	log.Tracef("Has")
 	defer log.Tracef("Has exit")
 
-	return r.index.Has(nil, dbname, key)
+	return r.index.Has(ctx, dbname, key)
 }
 
-func (r *RawDB) Insert(key, value []byte) error {
+func (r *RawDB) Insert(ctx context.Context, key, value []byte) error {
 	log.Tracef("Insert")
 	defer log.Tracef("Insert exit")
 
@@ -194,7 +195,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 	}
 
 	// Assert we do not have this key stored yet.
-	if ok, err := r.index.Has(nil, dbname, key); ok {
+	if ok, err := r.index.Has(ctx, dbname, key); ok {
 		return errors.New("key already exists")
 	} else if err != nil {
 		return err
@@ -210,7 +211,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			return errors.New("could not determine last filename")
 		}
 
-		lfe, err := r.index.Get(nil, dbname, lastFilenameKey)
+		lfe, err := r.index.Get(ctx, dbname, lastFilenameKey)
 		if err != nil {
 			if errors.Is(err, gkvdb.ErrKeyNotFound) {
 				lfe = []byte{0, 0, 0, 0}
@@ -240,7 +241,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			last++
 			lastData := make([]byte, 8)
 			binary.BigEndian.PutUint32(lastData, last)
-			err = r.index.Put(nil, dbname, lastFilenameKey, lastData)
+			err = r.index.Put(ctx, dbname, lastFilenameKey, lastData)
 			if err != nil {
 				return err
 			}
@@ -263,7 +264,7 @@ func (r *RawDB) Insert(key, value []byte) error {
 			}
 
 			// Write coordinates
-			err = r.index.Put(nil, dbname, key, c)
+			err = r.index.Put(ctx, dbname, key, c)
 			if err != nil {
 				return err
 			}
@@ -273,11 +274,11 @@ func (r *RawDB) Insert(key, value []byte) error {
 	}
 }
 
-func (r *RawDB) Get(key []byte) ([]byte, error) {
+func (r *RawDB) Get(ctx context.Context, key []byte) ([]byte, error) {
 	log.Tracef("Get: %x", key)
 	defer log.Tracef("Get exit: %x", key)
 
-	c, err := r.index.Get(nil, dbname, key)
+	c, err := r.index.Get(ctx, dbname, key)
 	if err != nil {
 		return nil, err
 	}

@@ -127,7 +127,10 @@ func _main() error {
 				return err
 			}
 			log.Printf("Syncing...")
-			unix.Sync()
+			err := unix.Sync()
+			if err != nil {
+				return err
+			}
 			time.Sleep(3 * time.Second) // Give sync a chance
 		} else {
 			return fmt.Errorf("not a directory: %v", action)
@@ -144,7 +147,7 @@ func _main() error {
 			return err
 		}
 	} else {
-		err = rdb.Open()
+		err = rdb.Open(ctx)
 		if err != nil {
 			return err
 		}
@@ -197,7 +200,7 @@ func _main() error {
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
 			binary.BigEndian.PutUint32(key[:], uint32(i))
-			err := rdb.Insert(key[:], value)
+			err := rdb.Insert(ctx, key[:], value)
 			if err != nil {
 				return err
 			}
@@ -209,7 +212,7 @@ func _main() error {
 		for i := 0; i < maxBlocks; i++ {
 			var key [4]byte
 			binary.BigEndian.PutUint32(key[:], uint32(i))
-			v, err := rdb.Get(key[:])
+			v, err := rdb.Get(ctx, key[:])
 			if err != nil {
 				return err
 			}
@@ -225,7 +228,7 @@ func _main() error {
 			return err
 		}
 	} else {
-		err = rdb.Close()
+		err = rdb.Close(ctx)
 		if err != nil {
 			return err
 		}

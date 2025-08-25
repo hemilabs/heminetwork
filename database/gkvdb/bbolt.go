@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package gkvdb
 
 import (
@@ -57,7 +61,7 @@ func (b *boltDB) Open(_ context.Context) error {
 		return nil // XXX return already open?
 	}
 
-	ndb, err := bolt.Open(filepath.Join(b.cfg.Home, "bolt.db"), 0600, nil)
+	ndb, err := bolt.Open(filepath.Join(b.cfg.Home, "bolt.db"), 0o600, nil)
 	if err != nil {
 		return err
 	}

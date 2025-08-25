@@ -128,8 +128,8 @@ func (b *nutsDB) Del(_ context.Context, table string, key []byte) error {
 
 // XXX the tx.Has() function should be used,
 // but it doesn't seem to be working
-func (b *nutsDB) Has(_ context.Context, table string, key []byte) (bool, error) {
-	_, err := b.Get(nil, table, key)
+func (b *nutsDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
+	_, err := b.Get(ctx, table, key)
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
@@ -292,13 +292,13 @@ func (ni *nutsIterator) First(_ context.Context) bool {
 	return ni.it.Rewind()
 }
 
-func (ni *nutsIterator) Last(_ context.Context) bool {
+func (ni *nutsIterator) Last(ctx context.Context) bool {
 	key, err := ni.tx.(*nutsTX).tx.GetMaxKey(ni.table)
 	if err != nil {
 		log.Errorf("last: %v", err)
 		return false
 	}
-	return ni.Seek(nil, key)
+	return ni.Seek(ctx, key)
 }
 
 func (ni *nutsIterator) Next(_ context.Context) bool {
