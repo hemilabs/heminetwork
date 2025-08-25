@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -860,6 +861,30 @@ func getDBs() []TestTableItem {
 				db, err := NewBoltDB(cfg)
 				if err != nil {
 					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "replicator-direct",
+			dbFunc: func(home string, tables []string) Database {
+				home1 := filepath.Join(home, "1")
+				cfg1 := DefaultLevelConfig(home1, tables)
+				db1, err := NewLevelDB(cfg1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				home2 := filepath.Join(home, "2")
+				cfg2 := DefaultLevelConfig(home2, tables)
+				db2, err := NewLevelDB(cfg2)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				rcfg := DefaultReplicatorConfig(Direct)
+				db, err := NewReplicatorDB(rcfg, db1, db2)
+				if err != nil {
+					t.Fatal(err)
 				}
 				return db
 			},
