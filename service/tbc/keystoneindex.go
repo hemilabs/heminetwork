@@ -59,6 +59,7 @@ type keystoneIndexer struct {
 	g geometryParams
 
 	// keystone indexer only
+	hemiGenesis *HashHeight
 }
 
 var (
@@ -66,7 +67,7 @@ var (
 	_ Indexer = (*keystoneIndexer)(nil)
 )
 
-func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, enabled bool) Indexer {
+func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, enabled bool, hemiGenesis *HashHeight) Indexer {
 	return &keystoneIndexer{
 		indexer:  "keystone",
 		indexing: 0,
@@ -76,6 +77,7 @@ func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, 
 			db:    db,
 			chain: chain,
 		},
+		hemiGenesis: hemiGenesis,
 	}
 }
 
@@ -93,7 +95,7 @@ func (i *keystoneIndexer) commit(ctx context.Context, direction int, atHash chai
 }
 
 func (i *keystoneIndexer) genesis() *HashHeight {
-	return nil
+	return i.hemiGenesis
 }
 
 func (i *keystoneIndexer) process(ctx context.Context, block *btcutil.Block, direction int, cache any) error {

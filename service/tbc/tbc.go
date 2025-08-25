@@ -2729,7 +2729,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	s.ti = NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db)
 	if s.cfg.HemiIndex {
 		s.ki = NewKeystoneIndexer(s.g.chain, s.cfg.MaxCachedKeystones,
-			s.g.db, s.cfg.HemiIndex)
+			s.g.db, s.cfg.HemiIndex, s.hemiGenesis)
 	}
 
 	return nil
