@@ -185,10 +185,6 @@ func indexIsLinear(ctx context.Context, g geometryParams, startHash, endHash cha
 		e = endBH.BlockHash()
 	default:
 		// This is a fork and thus not linear.
-		// XXX remove this once we determine if ErrNotLinear can happen here.
-		log.Infof("startBH %v %v", startBH, startBH.Difficulty)
-		log.Infof("endBH %v %v", endBH, endBH.Difficulty)
-		log.Infof("direction %v", direction)
 		return 0, NotLinearError(fmt.Sprintf("start %v end %v direction %v",
 			startBH, endBH, direction))
 	}
