@@ -5,14 +5,22 @@
 package tbc
 
 import (
+	"context"
+	"errors"
 	"strconv"
 	"testing"
+	"time"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/go-test/deep"
+
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
+	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
@@ -69,5 +77,124 @@ func TestCheckpoints(t *testing.T) {
 	next := nextCheckpoint(&bh, checkpoints)
 	if next != nil {
 		t.Fatalf("expect nil, got %v", spew.Sdump(next))
+	}
+}
+
+func insertInChain(ctx context.Context, db tbcd.Database, prevBlockHash chainhash.Hash, height, nonce uint64, l2Keystone *tbcd.Keystone) (chainhash.Hash, error) {
+	// t.Logf("prevBlockHash = %v, height = %d", prevBlockHash, h)
+	wireHeader := wire.BlockHeader{
+		Version: 1,
+		Nonce:   uint32(nonce), // something unique so there are no collisions
+		Bits:    uint32(0x1d00ffff),
+	}
+	wireHeader.PrevBlock = prevBlockHash
+
+	msgHeaders := wire.NewMsgHeaders()
+	if err := msgHeaders.AddBlockHeader(&wireHeader); err != nil {
+		return prevBlockHash, err
+	}
+	wireBlock := wire.MsgBlock{
+		Header: wireHeader,
+	}
+
+	block := btcutil.NewBlock(&wireBlock)
+	if height == 0 {
+		err := db.BlockHeaderGenesisInsert(ctx, wireHeader, 0, nil)
+		if err != nil {
+			return prevBlockHash, err
+		}
+	} else {
+		_, _, _, _, err := db.BlockHeadersInsert(ctx, msgHeaders, nil)
+		if err != nil {
+			return prevBlockHash, err
+		}
+	}
+
+	_, err := db.BlockInsert(ctx, block)
+	if err != nil {
+		return prevBlockHash, err
+	}
+
+	if l2Keystone != nil {
+		l2Keystone.BlockHash = *block.Hash()
+		kssHash := hemi.L2KeystoneAbrevDeserialize(l2Keystone.AbbreviatedKeystone).Hash()
+		if err := db.BlockKeystoneUpdate(ctx, 1, map[chainhash.Hash]tbcd.Keystone{
+			*kssHash: *l2Keystone,
+		}, *block.Hash()); err != nil {
+			return prevBlockHash, err
+		}
+	}
+	prevBlockHash = wireHeader.BlockHash()
+
+	return prevBlockHash, nil
+}
+
+func TestIndexLinearity(t *testing.T) {
+	const blockCount = 10
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	home := t.TempDir()
+	t.Logf("temp: %v", home)
+
+	cfg, err := level.NewConfig("localnet", home, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := level.New(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	blockHashes := make([]chainhash.Hash, 0, blockCount)
+	var prevBlockHash chainhash.Hash
+	for i := range blockCount {
+		t.Logf("prevBlockHash = %v, height = %d", prevBlockHash, i)
+		lastHash, err := insertInChain(ctx, db, prevBlockHash, uint64(i), uint64(i), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prevBlockHash = lastHash
+		blockHashes = append(blockHashes, lastHash)
+	}
+
+	g := geometryParams{
+		db:    db,
+		chain: &chaincfg.RegressionNetParams,
+	}
+
+	// Check if linear
+	lin, err := indexIsLinear(ctx, g, blockHashes[0], blockHashes[len(blockHashes)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lin != 1 {
+		t.Fatal("index not linear")
+	}
+
+	lin, err = indexIsLinear(ctx, g, blockHashes[len(blockHashes)-1], blockHashes[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lin != -1 {
+		t.Fatal("index not linear")
+	}
+
+	// check if NOT linear
+	lastHash, err := insertInChain(ctx, db, blockHashes[len(blockHashes)-2], uint64(blockCount), uint64(blockCount+1), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = indexIsLinear(ctx, g, blockHashes[len(blockHashes)-1], lastHash)
+	if !errors.Is(err, NotLinearError("")) {
+		t.Fatal(err)
 	}
 }
