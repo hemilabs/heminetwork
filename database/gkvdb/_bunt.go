@@ -78,8 +78,8 @@ func (b *buntDB) Del(_ context.Context, table string, key []byte) error {
 	return err
 }
 
-func (b *buntDB) Has(_ context.Context, table string, key []byte) (bool, error) {
-	_, err := b.Get(nil, table, key)
+func (b *buntDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
+	_, err := b.Get(ctx, table, key)
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}

@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package gkvdb
 
 import (
@@ -238,26 +242,26 @@ func txputInvalidTable(ctx context.Context, tx Transaction, table string) error 
 
 // This fails if we try to access the changes made using a tx put
 // with a tx get after, and it returns the new value
-func txputDuplicate(ctx context.Context, tx Transaction, table string, insertCount int) error {
-	for i := range insertCount {
-		var key [4]byte
-		var value [8]byte
-		binary.BigEndian.PutUint32(key[:], uint32(0))
-		binary.BigEndian.PutUint64(value[:], uint64(i))
-		err := tx.Put(ctx, table, key[:], value[:])
-		if err != nil {
-			return fmt.Errorf("put %v: %v", table, i)
-		}
-		rv, err := tx.Get(ctx, table, key[:])
-		if err != nil {
-			return fmt.Errorf("get %v: %v %w", table, i, err)
-		}
-		if i != 0 && bytes.Equal(rv, value[:]) {
-			return fmt.Errorf("get equal %v: expect %d, got %d", table, value, rv)
-		}
-	}
-	return nil
-}
+// func txputDuplicate(ctx context.Context, tx Transaction, table string, insertCount int) error {
+// 	for i := range insertCount {
+// 		var key [4]byte
+// 		var value [8]byte
+// 		binary.BigEndian.PutUint32(key[:], uint32(0))
+// 		binary.BigEndian.PutUint64(value[:], uint64(i))
+// 		err := tx.Put(ctx, table, key[:], value[:])
+// 		if err != nil {
+// 			return fmt.Errorf("put %v: %v", table, i)
+// 		}
+// 		rv, err := tx.Get(ctx, table, key[:])
+// 		if err != nil {
+// 			return fmt.Errorf("get %v: %v %w", table, i, err)
+// 		}
+// 		if i != 0 && bytes.Equal(rv, value[:]) {
+// 			return fmt.Errorf("get equal %v: expect %d, got %d", table, value, rv)
+// 		}
+// 	}
+// 	return nil
+// }
 
 func txputs(ctx context.Context, tx Transaction, tables []string, insertCount int) error {
 	for i := range insertCount {

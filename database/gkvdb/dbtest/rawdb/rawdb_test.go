@@ -6,11 +6,15 @@ package rawdb
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"testing"
 )
 
 func testRawDB(t *testing.T, dbs string) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
 	home := t.TempDir()
 	remove := true
 	defer func() {
@@ -29,12 +33,12 @@ func testRawDB(t *testing.T, dbs string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = rdb.Open()
+	err = rdb.Open(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := rdb.Close()
+		err := rdb.Close(ctx)
 		if err != nil {
 			panic(err)
 		}
@@ -46,7 +50,7 @@ func testRawDB(t *testing.T, dbs string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = rdb2.Open()
+		err = rdb2.Open(ctx)
 		if err == nil {
 			t.Fatal("expected locked db")
 		}
@@ -54,26 +58,26 @@ func testRawDB(t *testing.T, dbs string) {
 
 	key := []byte("key")
 	data := []byte("hello, world!")
-	err = rdb.Insert(key, data)
+	err = rdb.Insert(ctx, key, data)
 	if err != nil {
 		t.Fatalf("%T %v", err, err)
 	}
 	KEY := []byte("KEY")
 	DATA := []byte("HELLO, WORLD!")
-	err = rdb.Insert(KEY, DATA)
+	err = rdb.Insert(ctx, KEY, DATA)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Get data out again
-	dataRead, err := rdb.Get(key)
+	dataRead, err := rdb.Get(ctx, key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(data, dataRead) {
 		t.Fatal("data not identical")
 	}
-	dataRead, err = rdb.Get(KEY)
+	dataRead, err = rdb.Get(ctx, KEY)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +91,11 @@ func testRawDB(t *testing.T, dbs string) {
 		overflowData[k] = uint8(k)
 	}
 	overflowKey := []byte("overflow")
-	err = rdb.Insert(overflowKey, overflowData)
+	err = rdb.Insert(ctx, overflowKey, overflowData)
 	if err != nil {
 		t.Fatal(err)
 	}
-	overflowRead, err := rdb.Get(overflowKey)
+	overflowRead, err := rdb.Get(ctx, overflowKey)
 	if err != nil {
 		t.Fatal(err)
 	}

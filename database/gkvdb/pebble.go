@@ -87,11 +87,11 @@ func (b *pebbleDB) Del(_ context.Context, table string, key []byte) error {
 	return b.db.Delete(NewCompositeKey(table, key), nil)
 }
 
-func (b *pebbleDB) Has(_ context.Context, table string, key []byte) (bool, error) {
+func (b *pebbleDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
 	if _, ok := b.tables[table]; !ok {
 		return false, ErrTableNotFound
 	}
-	_, err := b.Get(nil, table, key)
+	_, err := b.Get(ctx, table, key)
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}

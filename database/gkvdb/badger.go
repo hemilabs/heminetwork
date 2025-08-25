@@ -93,11 +93,11 @@ func (b *badgerDB) Del(_ context.Context, table string, key []byte) error {
 	return nil
 }
 
-func (b *badgerDB) Has(_ context.Context, table string, key []byte) (bool, error) {
+func (b *badgerDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
 	if _, ok := b.tables[table]; !ok {
 		return false, ErrTableNotFound
 	}
-	_, err := b.Get(nil, table, key)
+	_, err := b.Get(ctx, table, key)
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
@@ -287,7 +287,6 @@ func (ni *badgerIterator) Next(_ context.Context) bool {
 	if !ni.first {
 		ni.first = true
 		ni.it.Rewind()
-
 	} else {
 		ni.it.Next()
 	}
