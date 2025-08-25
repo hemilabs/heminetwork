@@ -95,7 +95,7 @@ func game(t *testing.T) common.Address {
 	return a
 }
 
-// Test_Monitor is a small, bare-bones test to dump the state of localnet
+// TestMonitor is a small, bare-bones test to dump the state of localnet
 // after 5 minutes and check that it has progressed at least to a certain
 // point
 func TestMonitor(t *testing.T) {

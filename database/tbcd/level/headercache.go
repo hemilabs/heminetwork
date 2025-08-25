@@ -87,7 +87,7 @@ func lowIQMapCountNew(count int) (*lowIQMap, error) {
 	}, nil
 }
 
-// lowIQMapNewSize does a bit of math to estimate the number of cache items.
+// lowIQMapSizeNew does a bit of math to estimate the number of cache items.
 // Since it is an estimate it will overflow if Difficulty becomes bigger than
 // 64 bits. This is not an issue since 100MB caches all of mainnet in Jan 2025
 // (~819200 items).

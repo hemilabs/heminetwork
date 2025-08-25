@@ -140,7 +140,7 @@ func gunzip(filename, destination string) error {
 	return nil
 }
 
-// extract extracts the provided archive to the provided destination. It
+// Extract extracts the provided archive to the provided destination. It
 // autodetects if it is a zip or a tar archive.
 func Extract(filename, dst string) error {
 	// log.Printf("Extracting: %v -> %v\n", filename, dst)
