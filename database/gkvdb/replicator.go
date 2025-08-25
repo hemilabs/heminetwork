@@ -135,7 +135,6 @@ func (b *replicatorDB) Begin(ctx context.Context, write bool) (Transaction, erro
 			r.sinkBatch = sinkBatch
 		}
 		r.sink = sink
-		return nil, err
 	}
 	return r, nil
 }
@@ -187,7 +186,6 @@ func (b *replicatorDB) Put(ctx context.Context, table string, key, value []byte)
 			if err := tx.Put(ctx, table, key, value); err != nil {
 				return err
 			}
-
 			if err := b.sink.Put(ctx, table, key, value); err != nil {
 				return fmt.Errorf("sink put: %w", err)
 			}
