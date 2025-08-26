@@ -11,6 +11,7 @@ import (
 
 	"github.com/juju/loggo"
 	"github.com/nutsdb/nutsdb"
+	"github.com/syndtr/goleveldb/leveldb"
 )
 
 const logLevel = "INFO"
@@ -27,6 +28,8 @@ func init() {
 // XXX move this out of here and add leveldb errors
 func xerr(err error) error {
 	switch {
+	case errors.Is(err, leveldb.ErrNotFound):
+		err = ErrKeyNotFound
 	case errors.Is(err, nutsdb.ErrKeyNotFound):
 		err = ErrKeyNotFound
 	case errors.Is(err, nutsdb.ErrRangeScan):
