@@ -1,6 +1,7 @@
 package gkvdb
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,28 @@ var (
 
 	ErrSinkUnavailable = errors.New("sink unavailable")
 )
+
+// designates how to replay a journal entry
+type opT uint8
+
+const (
+	opPut opT = iota
+	opDel
+)
+
+type journalOp struct {
+	op    opT
+	table string // XXX maybe make a const pointer?
+	key   []byte
+	value []byte
+}
+
+type journal struct {
+	ctx  context.Context       // external wait
+	done func(context.Context) // external completion
+
+	ops *list.List
+}
 
 type Policy int
 
@@ -33,6 +56,7 @@ type replicatorDB struct {
 
 	source Database
 	sink   Database
+	sinkC  chan *journal
 }
 
 func DefaultReplicatorConfig(policy Policy) *ReplicatorConfig {
@@ -47,9 +71,23 @@ func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, er
 		cfg:    cfg,
 		source: source,
 		sink:   sink,
+		sinkC:  make(chan *journal, 1024),
 	}
 
 	return bdb, nil
+}
+
+func (b *replicatorDB) sinkHandler(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case j := <-b.sinkC:
+			_ = j
+			// XXX actually commit journal
+			j.done(ctx)
+		}
+	}
 }
 
 func (b *replicatorDB) Open(ctx context.Context) error {
@@ -64,15 +102,21 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 			// If an error occurs, we can proceed, we'll keep a
 			// journal. Do let the caller know the sink is
 			// unavailable.
-			return SinkUnavailableError(fmt.Sprintf("sink unavailable: %v",
+			err = SinkUnavailableError(fmt.Sprintf("sink unavailable: %v",
 				err))
 		case Direct:
 			// If an error occurs, abort and close source.
-			_ = b.source.Close(ctx) // XXX should we log this error?
+			cerr := b.source.Close(ctx)
+			if cerr != nil {
+				return fmt.Errorf("source: %w, sink open: %w", cerr, err)
+			}
 			return fmt.Errorf("sink open: %w", err)
 		}
 	}
-	return nil
+
+	go b.sinkHandler(ctx)
+
+	return err
 }
 
 func (b *replicatorDB) Close(ctx context.Context) error {
@@ -84,86 +128,79 @@ func (b *replicatorDB) Close(ctx context.Context) error {
 	return nil
 }
 
-func (b *replicatorDB) Begin(ctx context.Context, write bool) (Transaction, error) {
-	// If this is a read only transaction just open a source transaction
-	// and punish caller if put/del is called.
-	source, err := b.source.Begin(ctx, write)
-	if err != nil {
-		return nil, err
+func copySlice(value []byte) []byte {
+	if value != nil {
+		return append([]byte{}, value...)
 	}
-	r := &replicatorTX{
-		db:     b,
-		source: source,
-		write:  write,
-	}
-	if write {
-		// XXX rewrite this
-		sink, err := b.sink.Begin(ctx, true)
-		if err != nil {
-			// overwrite error
-			switch b.cfg.Policy {
-			case Lazy:
-				err = SinkUnavailableError(fmt.Sprintf("sink unavailable: %v",
-					err))
-			case Direct:
-				rberr := source.Rollback(ctx)
-				if rberr != nil {
-					return nil, fmt.Errorf("source: %w, sink: %w",
-						rberr, err)
-				}
-				return nil, err
-			}
-		}
-		if sink != nil {
-			// XXX we are killing previous SinkUnavailableError here
-			sinkBatch, err := b.sink.NewBatch(ctx)
-			if err != nil {
-				// overwrite error
-				switch b.cfg.Policy {
-				case Lazy:
-					err = SinkUnavailableError(fmt.Sprintf("sink unavailable: %v",
-						err))
-				case Direct:
-					rberr := source.Rollback(ctx)
-					if rberr != nil {
-						return nil, fmt.Errorf("source: %w, sink: %w",
-							rberr, err)
-					}
-					return nil, err
-				}
-			}
-			r.sinkBatch = sinkBatch
-		}
-		r.sink = sink
-	}
-	return r, nil
+	return nil
 }
 
-func (b *replicatorDB) Del(ctx context.Context, table string, key []byte) error {
-	var err error
+func journalKey(op opT, key []byte) []byte {
+	// XXX think more about this, make it so we can stream this to disk
+	// XXX Do the whole journal+table+key in this function
+	return append([]byte{'j', 'o', 'u', 'r', uint8(op)}, key...)
+}
 
-	switch b.cfg.Policy {
-	case Direct:
-		// It get's hairy now. We are going to forward the delete to
-		// the sink INSIDE the source transaction. If this is a slow
-		// sink performance is going to suck.
-		err = b.source.Update(ctx, func(ctx context.Context, tx Transaction) error {
-			if err := tx.Del(ctx, table, key); err != nil {
-				return err
-			}
+func newJournal(pctx context.Context, sync bool) *journal {
+	ctx, cancel := context.WithCancel(pctx) // XXX make sure cancel is called
+	done := func(context.Context) {}
+	if sync {
+		done = func(_ context.Context) { cancel() }
+	}
+	return &journal{
+		ctx:  ctx, // For caller to wait on
+		done: done,
+		ops:  list.New(),
+	}
+}
 
-			if err := b.sink.Del(ctx, table, key); err != nil {
-				return fmt.Errorf("sink delete: %w", err)
-			}
-			return nil
-		})
+func singleJournal(ctx context.Context, sync bool, op opT, table string, key, value []byte) *journal {
+	j := newJournal(ctx, sync)
+	j.ops.PushBack(&journalOp{
+		op:    op,
+		table: table,
+		key:   journalKey(op, key),
+		value: copySlice(value),
+	})
+	return j
+}
 
-	case Lazy:
-		// Store del op in journal.
-		err = fmt.Errorf("not yet")
+func (b *replicatorDB) journal(pctx context.Context, j *journal) error {
+	select {
+	case <-j.ctx.Done():
+		return j.ctx.Err() // Catches pctx and j cancel
+	case b.sinkC <- j:
 	}
 
-	return err
+	// If this is a slow sink performance is going to suck.
+	// XXX this should be in the journal
+	switch b.cfg.Policy {
+	case Direct:
+		select {
+		case <-j.ctx.Done():
+			// Catches pctx and j cancel
+			return nil
+		}
+	case Lazy:
+		j.done(pctx) // Don't leak contexts
+	}
+	return nil
+}
+
+func (b *replicatorDB) Del(pctx context.Context, table string, key []byte) error {
+	err := b.source.Update(pctx, func(ctx context.Context, tx Transaction) error {
+		if err := tx.Del(ctx, table, key); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// Send to journal
+	j := singleJournal(pctx, b.cfg.Policy == Direct, opDel, table, key, nil)
+	return b.journal(pctx, j)
 }
 
 func (b *replicatorDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
@@ -174,30 +211,35 @@ func (b *replicatorDB) Get(ctx context.Context, table string, key []byte) ([]byt
 	return b.source.Get(ctx, table, key)
 }
 
-func (b *replicatorDB) Put(ctx context.Context, table string, key, value []byte) error {
-	var err error
-
-	switch b.cfg.Policy {
-	case Direct:
-		// It get's hairy now. We are going to forward the put to
-		// the sink INSIDE the source transaction. If this is a slow
-		// sink performance is going to suck.
-		err = b.source.Update(ctx, func(ctx context.Context, tx Transaction) error {
-			if err := tx.Put(ctx, table, key, value); err != nil {
-				return err
-			}
-			if err := b.sink.Put(ctx, table, key, value); err != nil {
-				return fmt.Errorf("sink put: %w", err)
-			}
-			return nil
-		})
-
-	case Lazy:
-		// Store put op in journal.
-		err = fmt.Errorf("not yet")
+func (b *replicatorDB) Put(pctx context.Context, table string, key, value []byte) error {
+	err := b.source.Update(pctx, func(ctx context.Context, tx Transaction) error {
+		if err := tx.Put(ctx, table, key, value); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
-	return err
+	// Send to journal
+	j := singleJournal(pctx, b.cfg.Policy == Direct, opPut, table, key, value)
+	return b.journal(pctx, j)
+}
+
+func (b *replicatorDB) Begin(ctx context.Context, write bool) (Transaction, error) {
+	// If this is a read only transaction just open a source transaction
+	// and punish caller if put/del is called.
+	source, err := b.source.Begin(ctx, write)
+	if err != nil {
+		return nil, err
+	}
+	return &replicatorTX{
+		db:     b,
+		source: source,
+		write:  write,
+		ops:    list.New(),
+	}, nil
 }
 
 func (b *replicatorDB) execute(ctx context.Context, write bool, callback func(ctx context.Context, tx Transaction) error) error {
@@ -246,17 +288,13 @@ func (b *replicatorDB) NewRange(ctx context.Context, table string, start, end []
 }
 
 func (b *replicatorDB) NewBatch(ctx context.Context) (Batch, error) {
-	source, err := b.source.NewBatch(ctx)
+	sourceBatch, err := b.source.NewBatch(ctx)
 	if err != nil {
 		return nil, err
 	}
-	sink, err := b.sink.NewBatch(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("sink batch: %w", err)
-	}
 	return &replicatorBatch{
-		source: source,
-		sink:   sink,
+		sourceBatch: sourceBatch,
+		ops:         list.New(),
 	}, nil
 }
 
@@ -265,11 +303,11 @@ func (b *replicatorDB) NewBatch(ctx context.Context) (Batch, error) {
 // replicator transactions convert front end ops to a sink batch.
 
 type replicatorTX struct {
-	db        *replicatorDB
-	source    Transaction
-	sink      Transaction
-	sinkBatch Batch
-	write     bool
+	db     *replicatorDB
+	source Transaction
+	sink   Transaction
+	write  bool
+	ops    *list.List
 }
 
 func (tx *replicatorTX) Del(ctx context.Context, table string, key []byte) error {
@@ -279,9 +317,12 @@ func (tx *replicatorTX) Del(ctx context.Context, table string, key []byte) error
 	if err := tx.source.Del(ctx, table, key); err != nil {
 		return err
 	}
-	if tx.sinkBatch != nil {
-		tx.sinkBatch.Del(ctx, table, key)
-	}
+	tx.ops.PushBack(&journalOp{
+		op:    opDel,
+		table: table,
+		key:   journalKey(opDel, key),
+		value: nil,
+	})
 	return nil
 }
 
@@ -300,75 +341,45 @@ func (tx *replicatorTX) Put(ctx context.Context, table string, key []byte, value
 	if err := tx.source.Put(ctx, table, key, value); err != nil {
 		return err
 	}
-	if tx.sinkBatch != nil {
-		tx.sinkBatch.Put(ctx, table, key, value)
-	}
+	tx.ops.PushBack(&journalOp{
+		op:    opPut,
+		table: table,
+		key:   journalKey(opPut, key),
+		value: copySlice(value),
+	})
 	return nil
 }
 
 func (tx *replicatorTX) Commit(ctx context.Context) error {
 	err := tx.source.Commit(ctx)
 	if err != nil {
-		if tx.sinkBatch != nil {
-			tx.sinkBatch.Reset(ctx)
-		}
-		if tx.sink != nil {
-			sinkErr := tx.sink.Rollback(ctx)
-			if sinkErr != nil {
-				return fmt.Errorf("%w, sink rollback: %w", err, sinkErr)
-			}
-		}
 		return err
 	}
 	// replay batch
-	if tx.sinkBatch != nil {
-		if tx.sink == nil {
-			return SinkUnavailableError(fmt.Sprintf("sink unavailable: %v",
-				"commit"))
-		}
-		// XXX this is shitty, create a replay journal if sink fails
-		err = tx.sink.Write(ctx, tx.sinkBatch)
-		if err != nil {
-			err = fmt.Errorf("sink write: %w", err)
-			switch tx.db.cfg.Policy {
-			case Direct:
-				return err
-			case Lazy:
-			}
-		}
-		return err
-	}
-	return nil
+	j := newJournal(ctx, tx.db.cfg.Policy == Direct)
+	j.ops = tx.ops
+	return tx.db.journal(ctx, j)
 }
 
 func (tx *replicatorTX) Rollback(ctx context.Context) error {
-	if tx.sinkBatch != nil {
-		tx.sinkBatch.Reset(ctx)
-	}
-	var sinkError error
-	if tx.sink != nil {
-		sinkError = tx.sink.Rollback(ctx)
-	}
+	tx.ops.Init() // Clear tx ops list
 	err := tx.source.Rollback(ctx)
 	if err != nil {
-		if sinkError != nil {
-			return fmt.Errorf("%w, sink: %w", err, sinkError)
-		}
 		return err
 	}
 	return nil
 }
 
 func (tx *replicatorTX) Write(ctx context.Context, b Batch) error {
-	err := tx.source.Write(ctx, b)
+	err := tx.source.Write(ctx, b.(*replicatorBatch).sourceBatch)
 	if err != nil {
 		return err
 	}
-	if tx.sink != nil {
-		if err := tx.sink.Write(ctx, b); err != nil {
-			return fmt.Errorf("sink write: %w", err)
-		}
-	}
+
+	// replay batch
+	j := newJournal(ctx, tx.db.cfg.Policy == Direct)
+	j.ops = b.(*replicatorBatch).ops
+
 	return nil
 }
 
@@ -436,37 +447,32 @@ func (nr *replicatorRange) Close(ctx context.Context) {
 }
 
 // Batches
-// type op int
-//
-// const (
-//
-//	opPut = iota
-//	opDel
-//
-// )
-//
-//	type journal struct {
-//		op    op
-//		table string
-//		key   []byte
-//		value []byte
-//	}
 type replicatorBatch struct {
-	source Batch
-	sink   Batch
+	sourceBatch Batch
+	ops         *list.List
 }
 
 func (rb *replicatorBatch) Del(ctx context.Context, table string, key []byte) {
-	rb.source.Del(ctx, table, key)
-	rb.sink.Del(ctx, table, key)
+	rb.sourceBatch.Del(ctx, table, key)
+	rb.ops.PushBack(&journalOp{
+		op:    opDel,
+		table: table,
+		key:   journalKey(opDel, key),
+		value: nil,
+	})
 }
 
 func (rb *replicatorBatch) Put(ctx context.Context, table string, key, value []byte) {
-	rb.source.Put(ctx, table, key, value)
-	rb.sink.Put(ctx, table, key, value)
+	rb.sourceBatch.Put(ctx, table, key, value)
+	rb.ops.PushBack(&journalOp{
+		op:    opPut,
+		table: table,
+		key:   journalKey(opDel, key),
+		value: copySlice(value),
+	})
 }
 
 func (rb *replicatorBatch) Reset(ctx context.Context) {
-	rb.source.Reset(ctx)
-	rb.sink.Reset(ctx)
+	rb.sourceBatch.Reset(ctx)
+	rb.ops.Init()
 }
