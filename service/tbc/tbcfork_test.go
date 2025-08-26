@@ -3090,12 +3090,14 @@ func TestForkCanonicity(t *testing.T) {
 	}
 
 	// set checkpoints to genesis, b2 and b4
-	// XXX antonio i think this is what i broke
 	s.g.chain.Checkpoints = []chaincfg.Checkpoint{
 		{Height: 4, Hash: mainChainHashes["b4"]},
 		{Height: 2, Hash: mainChainHashes["b2"]},
 		{Height: 0, Hash: parent},
 	}
+	defer func() {
+		s.g.chain.Checkpoints = localnetCheckpoints
+	}()
 
 	// assert genesis -> b5 are canonical
 	for bname, hs := range mainChainHashes {

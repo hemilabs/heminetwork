@@ -88,6 +88,10 @@ func insertInChain(ctx context.Context, db tbcd.Database, prevBlockHash chainhas
 	}
 	wireHeader.PrevBlock = prevBlockHash
 
+	if height == 0 {
+		wireHeader = chaincfg.RegressionNetParams.GenesisBlock.Header
+	}
+
 	msgHeaders := wire.NewMsgHeaders()
 	if err := msgHeaders.AddBlockHeader(&wireHeader); err != nil {
 		return prevBlockHash, err
@@ -243,10 +247,7 @@ func TestCanonicity(t *testing.T) {
 		blockHashes = append(blockHashes, lastHash)
 	}
 
-	g.chain.GenesisHash = &blockHashes[0]
-	g.chain.Checkpoints = append(g.chain.Checkpoints, chaincfg.Checkpoint{
-		Height: 0, Hash: &blockHashes[0],
-	})
+	g.chain.Checkpoints = localnetCheckpoints
 
 	for i, bhh := range blockHashes {
 		bh, err := db.BlockHeaderByHash(ctx, bhh)
