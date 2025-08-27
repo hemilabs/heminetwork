@@ -63,7 +63,9 @@ type journal struct {
 	ops *list.List
 }
 
-var lastTransactionID = []byte("lasttransactionid")
+// lastSequenceID keeps the data on both ends synced. If it doesn't exist the
+// database really needs to be completly copied to the sink.
+var lastSequenceID = []byte("lastsequenceid")
 
 // newJournalID atomically generates a new journal ID.
 func newJournalID(ctx context.Context, db Database) (uint64, error) {
@@ -71,12 +73,12 @@ func newJournalID(ctx context.Context, db Database) (uint64, error) {
 	// that we see gaps.
 	var newID uint64
 	return newID, db.Update(ctx, func(ctx context.Context, tx Transaction) error {
-		x, err := tx.Get(ctx, "", lastTransactionID)
+		x, err := tx.Get(ctx, "", lastSequenceID)
 		if err != nil {
 			// If key does not exist return 0 and store it the db.
 			if errors.Is(err, ErrKeyNotFound) {
 				var id [8]byte
-				err := tx.Put(ctx, "", lastTransactionID, id[:])
+				err := tx.Put(ctx, "", lastSequenceID, id[:])
 				if err != nil {
 					return err
 				}
@@ -91,7 +93,7 @@ func newJournalID(ctx context.Context, db Database) (uint64, error) {
 		newID++
 		var id [8]byte
 		binary.BigEndian.PutUint64(id[:], newID)
-		err = tx.Put(ctx, "", lastTransactionID, id[:])
+		err = tx.Put(ctx, "", lastSequenceID, id[:])
 		if err != nil {
 			return err
 		}
