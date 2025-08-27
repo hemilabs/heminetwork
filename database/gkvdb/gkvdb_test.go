@@ -810,61 +810,61 @@ type TestTableItem struct {
 
 func getDBs() []TestTableItem {
 	return []TestTableItem{
-		//{
-		//	name: "levelDB",
-		//	dbFunc: func(home string, tables []string) Database {
-		//		cfg := DefaultLevelConfig(home, tables)
-		//		db, err := NewLevelDB(cfg)
-		//		if err != nil {
-		//			panic(err)
-		//		}
-		//		return db
-		//	},
-		//},
-		//{
-		//	name: "pebbleDB",
-		//	dbFunc: func(home string, tables []string) Database {
-		//		cfg := DefaultPebbleConfig(home, tables)
-		//		db, err := NewPebbleDB(cfg)
-		//		if err != nil {
-		//			panic(err)
-		//		}
-		//		return db
-		//	},
-		//},
-		//{
-		//	name: "nutsDB",
-		//	dbFunc: func(home string, tables []string) Database {
-		//		cfg := DefaultNutsConfig(home, tables)
-		//		db, err := NewNutsDB(cfg)
-		//		if err != nil {
-		//			panic(err)
-		//		}
-		//		return db
-		//	},
-		//},
-		//{
-		//	name: "badgerDB",
-		//	dbFunc: func(home string, tables []string) Database {
-		//		cfg := DefaultBadgerConfig(home, tables)
-		//		db, err := NewBadgerDB(cfg)
-		//		if err != nil {
-		//			panic(err)
-		//		}
-		//		return db
-		//	},
-		//},
-		//{
-		//	name: "bbolt",
-		//	dbFunc: func(home string, tables []string) Database {
-		//		cfg := DefaultBoltConfig(home, tables)
-		//		db, err := NewBoltDB(cfg)
-		//		if err != nil {
-		//			panic(err)
-		//		}
-		//		return db
-		//	},
-		//},
+		{
+			name: "levelDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultLevelConfig(home, tables)
+				db, err := NewLevelDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "pebbleDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultPebbleConfig(home, tables)
+				db, err := NewPebbleDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "nutsDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultNutsConfig(home, tables)
+				db, err := NewNutsDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "badgerDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultBadgerConfig(home, tables)
+				db, err := NewBadgerDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "bbolt",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultBoltConfig(home, tables)
+				db, err := NewBoltDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
 		{
 			name: "replicator-direct",
 			dbFunc: func(home string, tables []string) Database {
