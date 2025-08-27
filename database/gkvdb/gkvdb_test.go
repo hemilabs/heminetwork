@@ -881,7 +881,8 @@ func getDBs() []TestTableItem {
 					panic(err)
 				}
 
-				rcfg := DefaultReplicatorConfig(Direct)
+				journalHome := filepath.Join(home, "journal")
+				rcfg := DefaultReplicatorConfig(journalHome, Direct)
 				db, err := NewReplicatorDB(rcfg, db1, db2)
 				if err != nil {
 					panic(err)

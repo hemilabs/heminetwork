@@ -1,10 +1,15 @@
 package gkvdb
 
 import (
+	"bytes"
 	"container/list"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
+
+	kbin "github.com/kelindar/binary"
 )
 
 // Assert required interfaces
@@ -26,11 +31,29 @@ const (
 	opDel
 )
 
+// journalOp is an internal journal operation. It represents and individual
+// operation that can be replayed into a database.
+//
+// XXX we currently copy key/val. that may be too expensive and may need caller
+// control. In a worst case scenario we end up copying the key 3 times.
+// 1. On the initial call where it lives in the list
+// 2. On creation of the journal key, which must happen late
+// 3. Possibly when sent into the sink
 type journalOp struct {
-	op    opT
-	table string // XXX maybe make a const pointer?
-	key   []byte
-	value []byte
+	Op    opT
+	Table string // XXX maybe make a const pointer?
+	Key   []byte
+	Value []byte `binary:"omitempty"`
+}
+
+func encodeJournalKey(id uint64) (k [8]byte) {
+	binary.BigEndian.PutUint64(k[0:], id)
+	return
+}
+
+func decodeJournalKey(k [8]byte) (id uint64) {
+	id = binary.BigEndian.Uint64(k[0:])
+	return
 }
 
 type journal struct {
@@ -38,6 +61,42 @@ type journal struct {
 	done func(context.Context) // external completion
 
 	ops *list.List
+}
+
+var lastTransactionID = []byte("lasttransactionid")
+
+// newJournalID atomically generates a new journal ID.
+func newJournalID(ctx context.Context, db Database) (uint64, error) {
+	// XXX @antonio add tests for this please; including rolled back tx' so
+	// that we see gaps.
+	var newID uint64
+	return newID, db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		x, err := tx.Get(ctx, "", lastTransactionID)
+		if err != nil {
+			// If key does not exist return 0 and store it the db.
+			if errors.Is(err, ErrKeyNotFound) {
+				var id [8]byte
+				err := tx.Put(ctx, "", lastTransactionID, id[:])
+				if err != nil {
+					return err
+				}
+				newID = 0
+				return nil
+			}
+			return err
+		}
+
+		// update new id
+		newID = binary.BigEndian.Uint64(x)
+		newID++
+		var id [8]byte
+		binary.BigEndian.PutUint64(id[:], newID)
+		err = tx.Put(ctx, "", lastTransactionID, id[:])
+		if err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 type Policy int
@@ -48,24 +107,32 @@ const (
 )
 
 type ReplicatorConfig struct {
+	Home   string // Journal home, maybe use an nvme on a separate mount point.
 	Policy Policy
 }
 
 type replicatorDB struct {
 	cfg *ReplicatorConfig
 
-	source Database
-	sink   Database
+	source Database // source
+	sink   Database // sink
+	jdb    Database // journal, for now only support leveldb
 	sinkC  chan *journal
 }
 
-func DefaultReplicatorConfig(policy Policy) *ReplicatorConfig {
-	return &ReplicatorConfig{Policy: policy}
+func DefaultReplicatorConfig(home string, policy Policy) *ReplicatorConfig {
+	return &ReplicatorConfig{
+		Home:   home,
+		Policy: policy,
+	}
 }
 
 func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, error) {
 	if cfg == nil {
 		return nil, ErrInvalidConfig
+	}
+	if cfg.Home == "" {
+		return nil, fmt.Errorf("must provide journal home")
 	}
 	bdb := &replicatorDB{
 		cfg:    cfg,
@@ -74,7 +141,74 @@ func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, er
 		sinkC:  make(chan *journal, 1024),
 	}
 
+	// Setup journal.
+	// XXX add version to journal database
+	var err error
+	bdb.jdb, err = NewLevelDB(DefaultLevelConfig(cfg.Home, []string{""}))
+	if err != nil {
+		return nil, err
+	}
 	return bdb, nil
+}
+
+func (b *replicatorDB) commitJournal(ctx context.Context, id uint64, j *journal) error {
+	// Stream ops into value of of journal
+	// XXX verify key does not exist!
+	var value bytes.Buffer
+	encoder := kbin.NewEncoder(&value)
+	for j.ops.Len() > 0 {
+		e := j.ops.Remove(j.ops.Front())
+		err := encoder.Encode(e)
+		if err != nil {
+			return fmt.Errorf("encoder: %w", err)
+		}
+	}
+	j.ops.Init()
+	key := encodeJournalKey(id)
+	return b.jdb.Put(ctx, "", key[:], value.Bytes())
+}
+
+func (b *replicatorDB) processJournal(ctx context.Context, id uint64) error {
+	// Lift journal of disk and commit it into sink
+	key := encodeJournalKey(id)
+	value, err := b.jdb.Get(ctx, "", key[:])
+	if err != nil {
+		return err
+	}
+
+	jb, err := b.jdb.NewBatch(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { jb.Reset(ctx) }()
+
+	decoder := kbin.NewDecoder(bytes.NewBuffer(value))
+	for i := 0; ; i++ {
+		jop := journalOp{}
+		err := decoder.Decode(&jop)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		switch jop.Op {
+		case opDel:
+			jb.Del(ctx, jop.Table, jop.Key)
+		case opPut:
+			jb.Put(ctx, jop.Table, jop.Key, jop.Value)
+		}
+	}
+
+	// Commit batch
+	err = b.sink.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, jb)
+	})
+	if err != nil {
+		return err
+	}
+	// Delete journal
+	return b.jdb.Del(ctx, "", key[:])
 }
 
 func (b *replicatorDB) sinkHandler(ctx context.Context) error {
@@ -85,16 +219,49 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 		case j := <-b.sinkC:
 			_ = j
 			// XXX actually commit journal
-			j.done(ctx)
+			id, err := newJournalID(ctx, b.jdb)
+			if err != nil {
+				panic(err)
+			}
+			err = b.commitJournal(ctx, id, j)
+			if err != nil {
+				panic(err)
+			}
+
+			// Tell caller we are done if we are lazy.
+			switch b.cfg.Policy {
+			case Direct:
+				err := b.processJournal(ctx, id)
+				if err != nil {
+					panic(err)
+				}
+			case Lazy:
+				// Lazy Process journal
+				panic("not yet")
+			}
+
+			j.done(ctx) // Mark journal done
+
 		}
 	}
 }
 
 func (b *replicatorDB) Open(ctx context.Context) error {
-	err := b.source.Open(ctx)
+	// XXX add proper unwind here
+
+	// journal
+	err := b.jdb.Open(ctx)
 	if err != nil {
 		return err
 	}
+
+	// source
+	err = b.source.Open(ctx)
+	if err != nil {
+		return err
+	}
+
+	// sink
 	err = b.sink.Open(ctx)
 	if err != nil {
 		switch b.cfg.Policy {
@@ -105,7 +272,12 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 			err = SinkUnavailableError(fmt.Sprintf("sink unavailable: %v",
 				err))
 		case Direct:
+			// XXX this is shit, rewrite
 			// If an error occurs, abort and close source.
+			jerr := b.jdb.Close(ctx)
+			if jerr != nil {
+				panic(jerr)
+			}
 			cerr := b.source.Close(ctx)
 			if cerr != nil {
 				return fmt.Errorf("source: %w, sink open: %w", cerr, err)
@@ -122,8 +294,10 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 func (b *replicatorDB) Close(ctx context.Context) error {
 	errSource := b.source.Close(ctx)
 	errSink := b.sink.Close(ctx)
-	if errSource != nil || errSink != nil {
-		return fmt.Errorf("source: %w sink: %w", errSource, errSink)
+	errJournal := b.jdb.Close(ctx)
+	if errSource != nil || errSink != nil || errJournal != nil {
+		return fmt.Errorf("source: %w sink: %w journal: %w",
+			errSource, errSink, errJournal)
 	}
 	return nil
 }
@@ -133,12 +307,6 @@ func copySlice(value []byte) []byte {
 		return append([]byte{}, value...)
 	}
 	return nil
-}
-
-func journalKey(op opT, key []byte) []byte {
-	// XXX think more about this, make it so we can stream this to disk
-	// XXX Do the whole journal+table+key in this function
-	return append([]byte{'j', 'o', 'u', 'r', uint8(op)}, key...)
 }
 
 func newJournal(pctx context.Context, sync bool) *journal {
@@ -157,10 +325,10 @@ func newJournal(pctx context.Context, sync bool) *journal {
 func singleJournal(ctx context.Context, sync bool, op opT, table string, key, value []byte) *journal {
 	j := newJournal(ctx, sync)
 	j.ops.PushBack(&journalOp{
-		op:    op,
-		table: table,
-		key:   journalKey(op, key),
-		value: copySlice(value),
+		Op:    op,
+		Table: table,
+		Key:   copySlice(key),
+		Value: copySlice(value),
 	})
 	return j
 }
@@ -173,7 +341,6 @@ func (b *replicatorDB) journal(pctx context.Context, j *journal) error {
 	}
 
 	// If this is a slow sink performance is going to suck.
-	// XXX this should be in the journal
 	switch b.cfg.Policy {
 	case Direct:
 		select {
@@ -182,7 +349,7 @@ func (b *replicatorDB) journal(pctx context.Context, j *journal) error {
 			return nil
 		}
 	case Lazy:
-		j.done(pctx) // Don't leak contexts
+		j.done(pctx) // Don't leak contexts, in case done was not called.
 	}
 	return nil
 }
@@ -305,7 +472,6 @@ func (b *replicatorDB) NewBatch(ctx context.Context) (Batch, error) {
 type replicatorTX struct {
 	db     *replicatorDB
 	source Transaction
-	sink   Transaction
 	write  bool
 	ops    *list.List
 }
@@ -318,10 +484,10 @@ func (tx *replicatorTX) Del(ctx context.Context, table string, key []byte) error
 		return err
 	}
 	tx.ops.PushBack(&journalOp{
-		op:    opDel,
-		table: table,
-		key:   journalKey(opDel, key),
-		value: nil,
+		Op:    opDel,
+		Table: table,
+		Key:   copySlice(key),
+		Value: nil,
 	})
 	return nil
 }
@@ -342,10 +508,10 @@ func (tx *replicatorTX) Put(ctx context.Context, table string, key []byte, value
 		return err
 	}
 	tx.ops.PushBack(&journalOp{
-		op:    opPut,
-		table: table,
-		key:   journalKey(opPut, key),
-		value: copySlice(value),
+		Op:    opPut,
+		Table: table,
+		Key:   copySlice(key),
+		Value: copySlice(value),
 	})
 	return nil
 }
@@ -376,9 +542,8 @@ func (tx *replicatorTX) Write(ctx context.Context, b Batch) error {
 		return err
 	}
 
-	// replay batch
-	j := newJournal(ctx, tx.db.cfg.Policy == Direct)
-	j.ops = b.(*replicatorBatch).ops
+	// append batch to tx ops
+	tx.ops.PushBackList(b.(*replicatorBatch).ops)
 
 	return nil
 }
@@ -455,20 +620,20 @@ type replicatorBatch struct {
 func (rb *replicatorBatch) Del(ctx context.Context, table string, key []byte) {
 	rb.sourceBatch.Del(ctx, table, key)
 	rb.ops.PushBack(&journalOp{
-		op:    opDel,
-		table: table,
-		key:   journalKey(opDel, key),
-		value: nil,
+		Op:    opDel,
+		Table: table,
+		Key:   copySlice(key),
+		Value: nil,
 	})
 }
 
 func (rb *replicatorBatch) Put(ctx context.Context, table string, key, value []byte) {
 	rb.sourceBatch.Put(ctx, table, key, value)
 	rb.ops.PushBack(&journalOp{
-		op:    opPut,
-		table: table,
-		key:   journalKey(opDel, key),
-		value: copySlice(value),
+		Op:    opPut,
+		Table: table,
+		Key:   copySlice(key),
+		Value: copySlice(value),
 	})
 }
 
