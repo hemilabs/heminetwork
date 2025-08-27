@@ -13,6 +13,19 @@ import (
 	kbin "github.com/kelindar/binary"
 )
 
+type SinkUnavailableError struct {
+	e error
+}
+
+func (sue SinkUnavailableError) Error() string {
+	return fmt.Sprintf("sink unavailable: %v", sue.e)
+}
+
+func (sue SinkUnavailableError) Is(target error) bool {
+	_, ok := target.(SinkUnavailableError)
+	return ok
+}
+
 // Assert required interfaces
 var (
 	_ Batch       = (*replicatorBatch)(nil)
@@ -21,7 +34,7 @@ var (
 	_ Range       = (*replicatorRange)(nil)
 	_ Transaction = (*replicatorTX)(nil)
 
-	ErrSinkUnavailable = errors.New("sink unavailable")
+	ErrSinkUnavailable SinkUnavailableError
 )
 
 // designates how to replay a journal entry
@@ -60,6 +73,7 @@ func decodeJournalKey(k [8]byte) (id uint64) {
 type journal struct {
 	ctx  context.Context       // external wait
 	done func(context.Context) // external completion
+	err  error                 // error occured prior to completion
 
 	ops *list.List
 }
@@ -319,7 +333,7 @@ func (b *replicatorDB) sinkHandler(pctx context.Context) error {
 		case Direct:
 			err := b.processJournal(ctx, id)
 			if err != nil {
-				panic(err)
+				j.err = SinkUnavailableError{e: err}
 			}
 		case Lazy:
 			// Lazy Process journal
@@ -359,8 +373,7 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 			// If an error occurs, we can proceed, we'll keep a
 			// journal. Do let the caller know the sink is
 			// unavailable.
-			err = SinkUnavailableError(fmt.Sprintf("sink unavailable: %v",
-				err))
+			err = SinkUnavailableError{e: err}
 		case Direct:
 			// XXX this is shit, rewrite
 			// If an error occurs, abort and close source.
@@ -451,7 +464,7 @@ func (b *replicatorDB) journal(pctx context.Context, j *journal) error {
 		select {
 		case <-j.ctx.Done():
 			// Catches pctx and j cancel
-			return nil
+			return j.err
 		}
 	case Lazy:
 		j.done(pctx) // Don't leak contexts, in case done was not called.
