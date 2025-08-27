@@ -7,7 +7,6 @@ package gkvdb
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -72,28 +71,29 @@ func (b *levelDB) Open(_ context.Context) error {
 		Compression:            opt.NoCompression,
 	})
 	if err != nil {
-		return err
+		return xerr(err)
 	}
 	b.db = ldb
 	return nil
 }
 
 func (b *levelDB) Close(_ context.Context) error {
-	return b.db.Close()
+	return xerr(b.db.Close())
 }
 
 func (b *levelDB) Del(_ context.Context, table string, key []byte) error {
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
-	return b.db.Delete(NewCompositeKey(table, key), nil)
+	return xerr(b.db.Delete(NewCompositeKey(table, key), nil))
 }
 
 func (b *levelDB) Has(_ context.Context, table string, key []byte) (bool, error) {
 	if _, ok := b.tables[table]; !ok {
 		return false, ErrTableNotFound
 	}
-	return b.db.Has(NewCompositeKey(table, key), nil)
+	has, err := b.db.Has(NewCompositeKey(table, key), nil)
+	return has, xerr(err)
 }
 
 func (b *levelDB) Get(_ context.Context, table string, key []byte) ([]byte, error) {
@@ -102,10 +102,7 @@ func (b *levelDB) Get(_ context.Context, table string, key []byte) ([]byte, erro
 	}
 	value, err := b.db.Get(NewCompositeKey(table, key), nil)
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, ErrKeyNotFound
-		}
-		return nil, err
+		return nil, xerr(err)
 	}
 	return value, nil
 }
@@ -114,7 +111,7 @@ func (b *levelDB) Put(_ context.Context, table string, key, value []byte) error 
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
-	return b.db.Put(NewCompositeKey(table, key), value, nil)
+	return xerr(b.db.Put(NewCompositeKey(table, key), value, nil))
 }
 
 func (b *levelDB) Begin(_ context.Context, write bool) (Transaction, error) {
@@ -144,11 +141,11 @@ func (b *levelDB) execute(ctx context.Context, write bool, callback func(ctx con
 }
 
 func (b *levelDB) View(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error {
-	return b.execute(ctx, false, callback)
+	return xerr(b.execute(ctx, false, callback))
 }
 
 func (b *levelDB) Update(ctx context.Context, callback func(ctx context.Context, tx Transaction) error) error {
-	return b.execute(ctx, true, callback)
+	return xerr(b.execute(ctx, true, callback))
 }
 
 func (b *levelDB) NewIterator(ctx context.Context, table string) (Iterator, error) {
@@ -227,7 +224,7 @@ func (tx *levelTX) Rollback(ctx context.Context) error {
 }
 
 func (tx *levelTX) Write(ctx context.Context, b Batch) error {
-	return tx.tx.Write(b.(*levelBatch).wb, nil)
+	return xerr(tx.tx.Write(b.(*levelBatch).wb, nil))
 }
 
 // Iterations

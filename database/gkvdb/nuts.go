@@ -28,8 +28,13 @@ func init() {
 // XXX move this out of here and add leveldb errors
 func xerr(err error) error {
 	switch {
+	// leveldb
+	case errors.Is(err, leveldb.ErrClosed):
+		err = ErrDBClosed
 	case errors.Is(err, leveldb.ErrNotFound):
 		err = ErrKeyNotFound
+
+		// nutsdb
 	case errors.Is(err, nutsdb.ErrKeyNotFound):
 		err = ErrKeyNotFound
 	case errors.Is(err, nutsdb.ErrRangeScan):
