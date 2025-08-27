@@ -3,6 +3,7 @@ package gkvdb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"path/filepath"
 	"reflect"
@@ -15,6 +16,8 @@ import (
 
 // XXX antonio, add gob test and run benchmarks so that we can decide between
 // gob and kelindar.
+
+// XXX antonio, please make TestReplicateDirect and TestReplicateLazy use closures.
 
 func TestJournalEncoding(t *testing.T) {
 	jop := &journalOp{
@@ -409,5 +412,52 @@ func TestReplicateLazy(t *testing.T) {
 			t.Fatalf("%v: got %v wanted %v",
 				tables[k], x, recordsPerTable[k])
 		}
+	}
+}
+
+func TestReplicateDirectBadTarget(t *testing.T) {
+	// First create source and destination
+	home := t.TempDir()
+	tables := []string{"table1", "table2"}
+	homeSource := filepath.Join(home, "source")
+	dbSource, err := NewLevelDB(DefaultLevelConfig(homeSource, tables))
+	if err != nil {
+		t.Fatal(err)
+	}
+	homeDestination := filepath.Join(home, "destination")
+	dbDestination, err := NewLevelDB(DefaultLevelConfig(homeDestination, tables))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create replicator database
+	homeJournal := filepath.Join(home, "journal")
+	rcfg := DefaultReplicatorConfig(homeJournal, Direct)
+	db, err := NewReplicatorDB(rcfg, dbSource, dbDestination)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	err = db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Force close target so that replication fails.
+	err = dbDestination.Close(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Put a value and expect failure
+	i := 1337
+	valueOffset := 10000
+	err = db.Put(ctx, tables[0], []byte(strconv.Itoa(i)),
+		[]byte(strconv.Itoa(i+valueOffset)))
+	if !errors.Is(err, ErrSinkUnavailable) {
+		t.Fatal(err)
 	}
 }
