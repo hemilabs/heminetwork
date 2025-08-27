@@ -161,6 +161,79 @@ func TestReplicateDirect(t *testing.T) {
 		for it.Next(ctx) {
 			x++
 		}
+		it.Close(ctx)
+		if x != recordsPerTable[k] {
+			t.Fatalf("%v: got %v wanted %v",
+				tables[k], x, recordsPerTable[k])
+		}
+	}
+
+	// Empty table1
+	it, err := db.NewIterator(ctx, tables[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := 0
+	for it.Next(ctx) {
+		err := db.Del(ctx, tables[0], it.Key(ctx))
+		if err != nil {
+			t.Fatal(err)
+		}
+		x++
+	}
+	it.Close(ctx)
+	if x != recordsPerTable[0] {
+		t.Fatalf("%v: got %v wanted %v", tables[0], x, recordsPerTable[0])
+	}
+
+	// Iterate over destination in destination and make sure we have 0 and N records.
+	recordsPerTable[0] = 0
+	for k := range tables {
+		it, err := dbDestination.NewIterator(ctx, tables[k])
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := 0
+		for it.Next(ctx) {
+			x++
+		}
+		it.Close(ctx)
+		if x != recordsPerTable[k] {
+			t.Fatalf("%v: got %v wanted %v",
+				tables[k], x, recordsPerTable[k])
+		}
+	}
+
+	// Empty table2
+	it, err = db.NewIterator(ctx, tables[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	x = 0
+	for it.Next(ctx) {
+		err := db.Del(ctx, tables[1], it.Key(ctx))
+		if err != nil {
+			t.Fatal(err)
+		}
+		x++
+	}
+	it.Close(ctx)
+	if x != recordsPerTable[1] {
+		t.Fatalf("%v: got %v wanted %v", tables[1], x, recordsPerTable[1])
+	}
+
+	// Iterate over destination in destination and make sure we have 0 and 0 records.
+	recordsPerTable[1] = 0
+	for k := range tables {
+		it, err := dbDestination.NewIterator(ctx, tables[k])
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := 0
+		for it.Next(ctx) {
+			x++
+		}
+		it.Close(ctx)
 		if x != recordsPerTable[k] {
 			t.Fatalf("%v: got %v wanted %v",
 				tables[k], x, recordsPerTable[k])
