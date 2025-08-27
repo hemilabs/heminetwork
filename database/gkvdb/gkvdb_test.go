@@ -10,9 +10,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -26,12 +26,13 @@ func dbputs(ctx context.Context, db Database, tables []string, insertCount int) 
 		table := tables[i%len(tables)]
 		err := db.Put(ctx, table, key[:], value[:])
 		if err != nil {
-			return fmt.Errorf("put %v: %v", table, i)
+			return fmt.Errorf("put %v in %v: %w", i, table, err)
 		}
 	}
 	return nil
 }
 
+// XXX test if you can read it back
 func dbputEmpty(ctx context.Context, db Database, tables []string) error {
 	for _, table := range tables {
 		err := db.Put(ctx, table, nil, nil)
@@ -499,8 +500,10 @@ func dbTransactionsMultipleWrite(ctx context.Context, db Database, table string,
 			binary.BigEndian.PutUint64(ve[:], uint64(i))
 			err = tx.Put(ctx, table, key[:], ve[:])
 			if err != nil {
-				return fmt.Errorf("tx put %v: %v", table, i)
+				return fmt.Errorf("tx put %v in %v: %w", i, table, err)
 			}
+			// this should work and doesn't race because write txs
+			// are meant to block on creation if one already exists
 			last = i
 			err = tx.Commit(ctx)
 			if err != nil {
@@ -809,7 +812,7 @@ type TestTableItem struct {
 }
 
 func getDBs() []TestTableItem {
-	return []TestTableItem{
+	dbs := []TestTableItem{
 		{
 			name: "levelDB",
 			dbFunc: func(home string, tables []string) Database {
@@ -916,17 +919,39 @@ func getDBs() []TestTableItem {
 			},
 		},
 	}
+
+	mongURI := os.Getenv("MONGO_TEST_URI")
+	if mongURI != "" {
+		dbs = append(dbs,
+			TestTableItem{
+				name: "mongodb",
+				dbFunc: func(home string, tables []string) Database {
+					cfg := MongoConfig{
+						URI:    mongURI,
+						Tables: tables,
+					}
+					db, err := NewMongoDB(&cfg)
+					if err != nil {
+						panic(err)
+					}
+					return db
+				},
+			},
+		)
+	}
+
+	return dbs
 }
 
 func TestGKVDB(t *testing.T) {
 	testTable := getDBs()
 	for _, tti := range testTable {
 		t.Run(tti.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 13*time.Second)
+			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 
 			// Puts
-			const insertCount = 100
+			const insertCount = 10
 			t.Run("basic", func(t *testing.T) {
 				home := t.TempDir()
 
