@@ -174,6 +174,28 @@ func (b *replicatorDB) commitJournal(ctx context.Context, id uint64, j *journal)
 	return b.jdb.Put(ctx, "", key[:], value.Bytes())
 }
 
+// this is very racy, use with caution.
+func (b *replicatorDB) flushed(ctx context.Context) bool {
+	if len(b.sinkC) != 0 {
+		return false
+	}
+	it, err := b.jdb.NewIterator(ctx, "")
+	if err != nil {
+		panic(err)
+	}
+	for it.Next(ctx) {
+		if bytes.Equal(it.Key(ctx), lastSequenceID) {
+			continue
+		}
+		return false
+	}
+	// Make sure nothing came in, this function really is best effort.
+	if len(b.sinkC) != 0 {
+		return false
+	}
+	return true
+}
+
 func (b *replicatorDB) replayJournal(ctx context.Context, key []byte, value []byte) error {
 	jb, err := b.jdb.NewBatch(ctx)
 	if err != nil {
