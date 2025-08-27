@@ -890,6 +890,31 @@ func getDBs() []TestTableItem {
 				return db
 			},
 		},
+		{
+			name: "replicator-lazy",
+			dbFunc: func(home string, tables []string) Database {
+				home1 := filepath.Join(home, "1")
+				cfg1 := DefaultLevelConfig(home1, tables)
+				db1, err := NewLevelDB(cfg1)
+				if err != nil {
+					panic(err)
+				}
+				home2 := filepath.Join(home, "2")
+				cfg2 := DefaultLevelConfig(home2, tables)
+				db2, err := NewLevelDB(cfg2)
+				if err != nil {
+					panic(err)
+				}
+
+				journalHome := filepath.Join(home, "journal")
+				rcfg := DefaultReplicatorConfig(journalHome, Lazy)
+				db, err := NewReplicatorDB(rcfg, db1, db2)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
 	}
 }
 
