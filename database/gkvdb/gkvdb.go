@@ -65,6 +65,11 @@ func NewCompositeKey(table string, key []byte) CompositeKey {
 }
 
 func KeyFromComposite(table string, key []byte) []byte {
+	if table == "" {
+		return key
+	}
+	// XXX antonio, add test cases for this. We must allow "" and make sure
+	// we crash if something bad comes in.
 	if len(table)+1 > len(key) {
 		panic(fmt.Sprintf("fix your code %v > %v", len(table)+1, len(key)))
 	}
