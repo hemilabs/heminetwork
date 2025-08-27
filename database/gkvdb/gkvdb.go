@@ -179,7 +179,7 @@ type Iterator interface {
 // ```
 //
 //	ir, _ := NewRange(ctx, table, start, end)
-//	for ir.Next() {
+//	for ir.Next(ctx) {
 //		// Do things
 //	}
 //	ir.Close(ctx)

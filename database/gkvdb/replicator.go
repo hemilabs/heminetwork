@@ -116,10 +116,11 @@ type ReplicatorConfig struct {
 type replicatorDB struct {
 	cfg *ReplicatorConfig
 
-	source Database // source
-	sink   Database // sink
-	jdb    Database // journal, for now only support leveldb
-	sinkC  chan *journal
+	source   Database // source
+	sink     Database // sink
+	jdb      Database // journal, for now only support leveldb
+	sinkC    chan *journal
+	journalC chan struct{}
 }
 
 func DefaultReplicatorConfig(home string, policy Policy) *ReplicatorConfig {
@@ -137,10 +138,11 @@ func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, er
 		return nil, fmt.Errorf("must provide journal home")
 	}
 	bdb := &replicatorDB{
-		cfg:    cfg,
-		source: source,
-		sink:   sink,
-		sinkC:  make(chan *journal, 1024),
+		cfg:      cfg,
+		source:   source,
+		sink:     sink,
+		sinkC:    make(chan *journal, 1024),
+		journalC: make(chan struct{}, 1), // depth of one to always go around
 	}
 
 	// Setup journal.
@@ -213,14 +215,34 @@ func (b *replicatorDB) processJournal(ctx context.Context, id uint64) error {
 	return b.jdb.Del(ctx, "", key[:])
 }
 
+func (b *replicatorDB) journalHandler(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-b.journalC:
+		}
+
+		// Process as many journals as possible
+		ir, err := b.jdb.NewRange(ctx, "", nil, nil)
+		if err != nil {
+			panic(err)
+		}
+		for ir.Next(ctx) {
+			// Do things
+			fmt.Printf("ir.Key %x\n", ir.Key(ctx))
+		}
+		ir.Close(ctx)
+	}
+}
+
 func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case j := <-b.sinkC:
-			_ = j
-			// XXX actually commit journal
+			// Commit journal
 			id, err := newJournalID(ctx, b.jdb)
 			if err != nil {
 				panic(err)
@@ -239,7 +261,12 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 				}
 			case Lazy:
 				// Lazy Process journal
-				panic("not yet")
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case b.journalC <- struct{}{}:
+				default:
+				}
 			}
 
 			j.done(ctx) // Mark journal done
@@ -289,6 +316,7 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 	}
 
 	go b.sinkHandler(ctx)
+	go b.journalHandler(ctx)
 
 	return err
 }
