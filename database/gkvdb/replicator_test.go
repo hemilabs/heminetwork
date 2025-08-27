@@ -186,7 +186,7 @@ func TestReplicateDirect(t *testing.T) {
 		t.Fatalf("%v: got %v wanted %v", tables[0], x, recordsPerTable[0])
 	}
 
-	// Iterate over destination in destination and make sure we have 0 and N records.
+	// Iterate over destination and make sure we have 0 and N records.
 	recordsPerTable[0] = 0
 	for k := range tables {
 		it, err := dbDestination.NewIterator(ctx, tables[k])
@@ -222,7 +222,7 @@ func TestReplicateDirect(t *testing.T) {
 		t.Fatalf("%v: got %v wanted %v", tables[1], x, recordsPerTable[1])
 	}
 
-	// Iterate over destination in destination and make sure we have 0 and 0 records.
+	// Iterate over destination and make sure we have 0 and 0 records.
 	recordsPerTable[1] = 0
 	for k := range tables {
 		it, err := dbDestination.NewIterator(ctx, tables[k])
