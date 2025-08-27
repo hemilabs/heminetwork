@@ -460,4 +460,11 @@ func TestReplicateDirectBadTarget(t *testing.T) {
 	if !errors.Is(err, ErrSinkUnavailable) {
 		t.Fatal(err)
 	}
+
+	// Now close everything and reopen replicator and the missed put must
+	// be replayed.
+	err = db.Close(ctx)
+	if !errors.Is(err, ErrDBClosed) {
+		t.Fatal(err)
+	}
 }

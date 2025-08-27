@@ -288,8 +288,8 @@ func (b *replicatorDB) journalHandler(pctx context.Context) error {
 			}
 			err := b.replayJournal(ctx, key[:], ir.Value(ctx))
 			if err != nil {
-				// ignore database closed, we will just replay on restart
-				panic(err)
+				// XXX do we need to spew something here?
+				break
 			}
 		}
 		ir.Close(ctx)
@@ -410,14 +410,20 @@ func (b *replicatorDB) Close(ctx context.Context) error {
 		panic("journal not flushed")
 	}
 
-	errSource := b.source.Close(ctx)
-	errSink := b.sink.Close(ctx)
-	errJournal := b.jdb.Close(ctx)
-	if errSource != nil || errSink != nil || errJournal != nil {
-		return fmt.Errorf("source: %w sink: %w journal: %w",
-			errSource, errSink, errJournal)
+	var errs []error
+	err := b.source.Close(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("source: %w", err))
 	}
-	return nil
+	err = b.sink.Close(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("sink: %w", err))
+	}
+	err = b.jdb.Close(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("journal: %w", err))
+	}
+	return errors.Join(errs...)
 }
 
 func copySlice(value []byte) []byte {
