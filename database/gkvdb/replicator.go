@@ -295,7 +295,7 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 
 	// XXX this needs some more thought. In direct mode we should flush
 	// journals. In lazy mode we can exist whenever since the journal can
-	// be replayed later. Allthough it is good form to at least try to
+	// be replayed later. Although it is good form to at least try to
 	// flush the journals.
 	//
 	// The terminal sentinel is crap and needs to be rethought.

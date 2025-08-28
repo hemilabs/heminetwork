@@ -920,14 +920,14 @@ func getDBs() []TestTableItem {
 		},
 	}
 
-	mongURI := os.Getenv("MONGO_TEST_URI")
-	if mongURI != "" {
+	mongoURI := os.Getenv("MONGO_TEST_URI")
+	if mongoURI != "" {
 		dbs = append(dbs,
 			TestTableItem{
 				name: "mongodb",
 				dbFunc: func(home string, tables []string) Database {
 					cfg := MongoConfig{
-						URI:    mongURI,
+						URI:    mongoURI,
 						Tables: tables,
 					}
 					db, err := NewMongoDB(&cfg)
