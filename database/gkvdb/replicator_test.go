@@ -62,7 +62,7 @@ func TestJournalStream(t *testing.T) {
 		jop := journalOp{} // Yes, always allocate
 		err := d.Decode(&jop)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				if i != maxItems {
 					t.Fatalf("i != maxItems, %v != %v", i, maxItems)
 				}
@@ -353,6 +353,7 @@ func TestReplicateLazy(t *testing.T) {
 	if x != recordsPerTable[0] {
 		t.Fatalf("%v: got %v wanted %v", tables[0], x, recordsPerTable[0])
 	}
+	// XXX this is trash, fix
 	for !db.(*replicatorDB).flushed(ctx) {
 		time.Sleep(time.Millisecond)
 	}

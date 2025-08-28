@@ -73,7 +73,7 @@ func decodeJournalKey(k [8]byte) (id uint64) {
 type journal struct {
 	ctx  context.Context       // external wait
 	done func(context.Context) // external completion
-	err  error                 // error occured prior to completion
+	err  error                 // error occurred prior to completion
 
 	ops *list.List
 }
@@ -172,7 +172,7 @@ func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, er
 }
 
 func (b *replicatorDB) commitJournal(ctx context.Context, id uint64, j *journal) error {
-	// Stream ops into value of of journal
+	// Stream ops into value of journal
 	// XXX verify key does not exist!
 	var value bytes.Buffer
 	encoder := kbin.NewEncoder(&value)
@@ -259,7 +259,7 @@ func (b *replicatorDB) processJournal(pctx context.Context, id uint64) error {
 	return b.replayJournal(ctx, key[:], value[:])
 }
 
-// processJournals reads all uncommited journals and commits them into the
+// processJournals reads all uncommitted journals and commits them into the
 // destination.
 func (b *replicatorDB) processJournals(ctx context.Context) error {
 	// Process as many journals as possible.
@@ -303,6 +303,7 @@ func (b *replicatorDB) journalHandler(ctx context.Context) error {
 			// Prevent going down if cmd != ""
 			if cmd == "" {
 			} else {
+				log.Infof("Going down, finish replaying journals on target.")
 				goingDown = true
 			}
 		}
@@ -314,6 +315,7 @@ func (b *replicatorDB) journalHandler(ctx context.Context) error {
 		}
 
 		if goingDown {
+			log.Infof("Journals replayed, exiting.")
 			return nil
 		}
 	}
@@ -331,6 +333,11 @@ func (b *replicatorDB) sinkHandler(pctx context.Context) error {
 			return pctx.Err()
 		case j = <-b.sinkC:
 			if j == nil {
+				// XXX we must really make sure
+				// there is nothing else in the channel!
+				if len(b.sinkC) != 0 {
+					panic("FIX THIS SHIT")
+				}
 				return nil
 			}
 		}
@@ -371,7 +378,6 @@ func (b *replicatorDB) sinkHandler(pctx context.Context) error {
 		}
 
 		j.done(ctx) // Mark journal done
-
 	}
 }
 
@@ -396,32 +402,23 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 	err = b.sink.Open(ctx)
 	if err != nil {
 		panic(err)
-		switch b.cfg.Policy {
-		case Lazy:
-			// If an error occurs, we can proceed, we'll keep a
-			// journal. Do let the caller know the sink is
-			// unavailable.
-			err = SinkUnavailableError{e: err}
-		case Direct:
-			// XXX this is shit, rewrite
-			// If an error occurs, abort and close source.
-			jerr := b.jdb.Close(ctx)
-			if jerr != nil {
-				panic(jerr)
-			}
-			cerr := b.source.Close(ctx)
-			if cerr != nil {
-				return fmt.Errorf("source: %w, sink open: %w", cerr, err)
-			}
-			return fmt.Errorf("sink open: %w", err)
-		}
 	}
 
 	b.handlersFlusher.Add(1)
-	go b.sinkHandler(ctx)
+	go func() {
+		err := b.sinkHandler(ctx)
+		if err != nil {
+			log.Errorf("sink: %v", err)
+		}
+	}()
 
 	b.handlersFlusher.Add(1)
-	go b.journalHandler(ctx)
+	go func() {
+		err := b.journalHandler(ctx)
+		if err != nil {
+			log.Errorf("sink: %v", err)
+		}
+	}()
 
 	switch b.cfg.Policy {
 	case Lazy:
@@ -477,8 +474,8 @@ func copySlice(value []byte) []byte {
 }
 
 func newJournal(pctx context.Context, sync bool) *journal {
-	ctx, cancel := context.WithCancel(pctx) // XXX make sure cancel is called
 	done := func(context.Context) {}
+	ctx, cancel := context.WithCancel(pctx) // Make sure done is called
 	if sync {
 		done = func(_ context.Context) { cancel() }
 	}
@@ -510,6 +507,7 @@ func (b *replicatorDB) journal(pctx context.Context, j *journal) error {
 	// If this is a slow sink performance is going to suck.
 	switch b.cfg.Policy {
 	case Direct:
+		//nolint:staticcheck // fuck you dumb ass linter
 		select {
 		case <-j.ctx.Done():
 			// Catches pctx and j cancel
