@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -552,4 +553,213 @@ func TestReplicateDirectBadTarget(t *testing.T) {
 	// network connection. This will require some retry code inside the
 	// replicator to deal with this; going to be interesting because like
 	// "disk-full" is terminal but tcp rst is not.
+}
+
+func TestReplicateLevelMongo(t *testing.T) {
+	homeDestination := os.Getenv("MONGO_TEST_URI")
+	if homeDestination == "" {
+		t.Skip()
+	}
+	// First create source and destination
+	home := t.TempDir()
+	tables := []string{"table1", "table2"}
+	homeSource := filepath.Join(home, "source")
+	dbSource, err := NewLevelDB(DefaultLevelConfig(homeSource, tables))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbDestination, err := NewMongoDB(DefaultMongoConfig(homeDestination, tables))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create replicator database
+	homeJournal := filepath.Join(home, "journal")
+	rcfg := DefaultReplicatorConfig(homeJournal, Direct)
+	db, err := NewReplicatorDB(rcfg, dbSource, dbDestination)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	err = db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	bat, err := db.NewBatch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Individual Puts
+	maxPuts := 300
+	valueOffset := 10000
+	recordsPerTable := make([]int, len(tables))
+	for i := 0; i < maxPuts; i++ {
+		tx := i % len(tables)
+		table := tables[tx]
+		// t.Logf("%v %v", table, i)
+		bat.Put(ctx, table, []byte(strconv.Itoa(i)),
+			[]byte(strconv.Itoa(i+valueOffset)))
+		recordsPerTable[tx]++
+		if (i+1)%50 == 0 {
+			t.Logf("%v records inserted", i+1)
+		}
+	}
+	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, bat)
+	})
+	if err != nil {
+		t.Fatalf("commit batch: %v", err)
+	}
+	t.Logf("txput batch commited")
+
+	// Verify that we have them in the replicator db (really the source)
+	// and in the destination db.
+	for i := range maxPuts {
+		tx := i % len(tables)
+		table := tables[tx]
+
+		value, err := db.Get(ctx, table, []byte(strconv.Itoa(i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectedValue := []byte(strconv.Itoa(i + valueOffset))
+		if !bytes.Equal(expectedValue, value) {
+			t.Fatal("not equal")
+		}
+
+		// Now fish it out of destination.
+		dValue, err := dbDestination.Get(ctx, table, []byte(strconv.Itoa(i)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(expectedValue, dValue) {
+			t.Fatal("not equal")
+		}
+
+		if (i+1)%50 == 0 {
+			t.Logf("%d records verified", i+1)
+		}
+	}
+
+	// Iterate over all tables and count records to compare to source
+	for k := range tables {
+		it, err := dbDestination.NewIterator(ctx, tables[k])
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := 0
+		for it.Next(ctx) {
+			x++
+		}
+		it.Close(ctx)
+		if x != recordsPerTable[k] {
+			t.Fatalf("%v: got %v wanted %v",
+				tables[k], x, recordsPerTable[k])
+		}
+		t.Logf("num of records in %v matches both dbs", tables[k])
+	}
+
+	// Empty table1
+	bat.Reset(ctx)
+
+	it, err := db.NewIterator(ctx, tables[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := 0
+	for it.Next(ctx) {
+		bat.Del(ctx, tables[0], it.Key(ctx))
+		x++
+	}
+
+	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, bat)
+	})
+	if err != nil {
+		t.Fatalf("delete %v batch: %v", tables[0], err)
+	}
+	t.Logf("delete %v batch commited", tables[0])
+
+	it.Close(ctx)
+	if x != recordsPerTable[0] {
+		t.Fatalf("%v: got %v wanted %v", tables[0], x, recordsPerTable[0])
+	}
+
+	// Iterate over destination and make sure we have 0 and N records.
+	recordsPerTable[0] = 0
+	for k := range tables {
+		it, err := dbDestination.NewIterator(ctx, tables[k])
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := 0
+		for it.Next(ctx) {
+			x++
+		}
+		it.Close(ctx)
+		if x != recordsPerTable[k] {
+			t.Fatalf("%v: got %v wanted %v",
+				tables[k], x, recordsPerTable[k])
+		}
+
+		t.Logf("num of records in %v matches %d", tables[k], recordsPerTable[k])
+	}
+
+	// Empty table2
+	bat.Reset(ctx)
+
+	it, err = db.NewIterator(ctx, tables[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	x = 0
+	for it.Next(ctx) {
+		bat.Del(ctx, tables[1], it.Key(ctx))
+		x++
+	}
+
+	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, bat)
+	})
+	if err != nil {
+		t.Fatalf("delete %v batch: %v", tables[1], err)
+	}
+	t.Logf("delete %v batch commited", tables[1])
+
+	it.Close(ctx)
+	if x != recordsPerTable[1] {
+		t.Fatalf("%v: got %v wanted %v", tables[1], x, recordsPerTable[1])
+	}
+
+	// Iterate over destination and make sure we have 0 and 0 records.
+	recordsPerTable[1] = 0
+	for k := range tables {
+		it, err := dbDestination.NewIterator(ctx, tables[k])
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := 0
+		for it.Next(ctx) {
+			x++
+		}
+		it.Close(ctx)
+		if x != recordsPerTable[k] {
+			t.Fatalf("%v: got %v wanted %v",
+				tables[k], x, recordsPerTable[k])
+		}
+
+		t.Logf("num of records in %v matches %d", tables[k], recordsPerTable[k])
+	}
+
 }

@@ -211,7 +211,7 @@ func (b *replicatorDB) flushed(ctx context.Context) bool {
 }
 
 func (b *replicatorDB) replayJournal(ctx context.Context, key []byte, value []byte) error {
-	jb, err := b.jdb.NewBatch(ctx)
+	jb, err := b.sink.NewBatch(ctx)
 	if err != nil {
 		return err
 	}
