@@ -474,16 +474,20 @@ func copySlice(value []byte) []byte {
 }
 
 func newJournal(pctx context.Context, sync bool) *journal {
-	done := func(context.Context) {}
-	ctx, cancel := context.WithCancel(pctx) // Make sure done is called
-	if sync {
-		done = func(_ context.Context) { cancel() }
-	}
-	return &journal{
-		ctx:  ctx, // For caller to wait on
-		done: done,
+	// This is a bit awkward but if we are in direct mode derive a new
+	// context that we cancel once a command is complete. In lazy mode just
+	// use the parent context.
+	j := &journal{
+		ctx:  pctx, // For caller to wait on
+		done: func(context.Context) {},
 		ops:  list.New(),
 	}
+	if sync {
+		ctx, cancel := context.WithCancel(pctx) // Make sure done is called
+		j.ctx = ctx
+		j.done = func(_ context.Context) { cancel() }
+	}
+	return j
 }
 
 func singleJournal(ctx context.Context, sync bool, op opT, table string, key, value []byte) *journal {
