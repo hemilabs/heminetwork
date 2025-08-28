@@ -542,4 +542,14 @@ func TestReplicateDirectBadTarget(t *testing.T) {
 		}
 		t.Fatalf("found unflushed journal: %v", spew.Sdump(it.Key(ctx)))
 	}
+
+	// XXX antonio we need same test repeated with 100 transactions with 99
+	// records each in the journal that must be replayed on startup.
+
+	// XXX antonio we need a test here where we kill the the destination
+	// and we end up journaling however many tx that then are replayed on
+	// startup. This is to simulate a runtime failure such as dropped
+	// network connection. This will require some retry code inside the
+	// replicator to deal with this; going to be interesting because like
+	// "disk-full" is terminal but tcp rst is not.
 }
