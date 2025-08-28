@@ -20,8 +20,6 @@ import (
 // XXX antonio, add gob test and run benchmarks so that we can decide between
 // gob and kelindar.
 
-// XXX antonio, please make TestReplicateDirect and TestReplicateLazy use closures.
-
 func TestJournalEncoding(t *testing.T) {
 	jop := &journalOp{
 		Op:    opDel,
@@ -129,17 +127,17 @@ func tableDel(ctx context.Context, db Database, table string, batchCount int) (i
 	return i, nil
 }
 
-func tablePut(ctx context.Context, db Database, table string, batchCount, putCount int) error {
+func tablePut(ctx context.Context, db Database, table string, offset, batchCount, putCount int) error {
 	bat, err := db.NewBatch(ctx)
 	if err != nil {
 		return fmt.Errorf("new batch: err")
 	}
 	for i := range batchCount {
-		key, value := generateKV(i)
+		key, value := generateKV(i + offset)
 		bat.Put(ctx, table, key, value)
 	}
 	for i := range putCount {
-		key, value := generateKV(i + batchCount)
+		key, value := generateKV(i + batchCount + offset)
 		err := db.Put(ctx, table, key, value)
 		if err != nil {
 			return fmt.Errorf("put %v: %w", i, err)
@@ -213,11 +211,11 @@ const (
 	// n of records per table
 	maxPuts = 50
 
-	// n of unbatched (put / del) operations
-	manualCount = maxPuts / 10
-
 	// n of batched (put / del) operations
 	batchCount = maxPuts - manualCount
+
+	// n of unbatched (put / del) operations
+	manualCount = maxPuts / 10
 )
 
 func TestReplicateDirect(t *testing.T) {
@@ -241,7 +239,7 @@ func TestReplicateDirect(t *testing.T) {
 	// Individual Puts
 	recordsPerTable := make([]int, len(tables))
 	for k, table := range tables {
-		err := tablePut(ctx, db, table, batchCount, manualCount)
+		err := tablePut(ctx, db, table, 0, batchCount, manualCount)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -336,7 +334,7 @@ func TestReplicateLazy(t *testing.T) {
 	// Individual Puts
 	recordsPerTable := make([]int, len(tables))
 	for k, table := range tables {
-		err := tablePut(ctx, db, table, batchCount, manualCount)
+		err := tablePut(ctx, db, table, 0, batchCount, manualCount)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -531,15 +529,91 @@ func TestReplicateDirectBadTarget(t *testing.T) {
 		t.Fatalf("found unflushed journal: %v", spew.Sdump(it.Key(ctx)))
 	}
 
-	// XXX antonio we need same test repeated with 100 transactions with 99
-	// records each in the journal that must be replayed on startup.
-
 	// XXX antonio we need a test here where we kill the destination
 	// and we end up journaling however many tx that then are replayed on
 	// startup. This is to simulate a runtime failure such as dropped
 	// network connection. This will require some retry code inside the
 	// replicator to deal with this; going to be interesting because like
 	// "disk-full" is terminal but tcp rst is not.
+}
+
+func TestReplicateOnStartup(t *testing.T) {
+	home := t.TempDir()
+	tables := []string{"table1", "table2"}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	// First create source and destination
+	db, dbDestination := createReplicator(t, Lazy, home, "level", "level", tables)
+
+	if err := db.Open(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Close destination early to prevent replay
+	if err := dbDestination.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Individual Puts
+	maxPuts := 50
+	maxTxs := 100
+
+	// These all fail, but since no one listens for
+	// the error when using Lazy policy, it will
+	// keep adding new Txs and creating Journals.
+	for tx := range maxTxs {
+		for _, table := range tables {
+			err := tablePut(ctx, db, table, maxPuts*tx, maxPuts, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// Restart Replicator
+	if err := db.Close(ctx); err == nil {
+		t.Fatal("expected err")
+	}
+	if err := db.Open(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("db restarted")
+
+	for !db.(*replicatorDB).flushed(ctx) {
+		time.Sleep(time.Millisecond)
+	}
+
+	// Verify that we have them in the replicator db (really the source)
+	// and in the destination db.
+	for _, table := range tables {
+		for i := range maxPuts * maxTxs {
+			key, expectedValue := generateKV(i)
+
+			// Get out of source
+			value, err := db.Get(ctx, table, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(expectedValue, value) {
+				t.Fatal("not equal")
+			}
+
+			// Now fish it out of destination.
+			dValue, err := dbDestination.Get(ctx, table, []byte(strconv.Itoa(i)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(expectedValue, dValue) {
+				t.Fatal("not equal")
+			}
+		}
+	}
 }
 
 func TestReplicateLevelMongo(t *testing.T) {
@@ -563,7 +637,7 @@ func TestReplicateLevelMongo(t *testing.T) {
 	// Individual Puts
 	recordsPerTable := make([]int, len(tables))
 	for k, table := range tables {
-		err := tablePut(ctx, db, table, batchCount, manualCount)
+		err := tablePut(ctx, db, table, 0, batchCount, manualCount)
 		if err != nil {
 			t.Fatal(err)
 		}
