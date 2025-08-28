@@ -293,6 +293,13 @@ func (b *replicatorDB) journalHandler(ctx context.Context) error {
 	log.Tracef("journalHandler")
 	defer log.Tracef("journalHandler exit")
 
+	// XXX this needs some more thought. In direct mode we should flush
+	// journals. In lazy mode we can exist whenever since the journal can
+	// be replayed later. Allthough it is good form to at least try to
+	// flush the journals.
+	//
+	// The terminal sentinel is crap and needs to be rethought.
+
 	defer b.handlersFlusher.Done()
 	var goingDown bool
 	for {
@@ -342,8 +349,8 @@ func (b *replicatorDB) sinkHandler(pctx context.Context) error {
 			}
 		}
 
-		// don't use parent context since we MUST flush the journal
-		// prior to exit.
+		// don't use parent context since we MUST sink the journal
+		// entry prior to exit.
 		ctx := context.TODO() // XXX this needs thinking
 
 		// Commit journal.

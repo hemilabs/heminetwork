@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/kelindar/binary"
 )
 
@@ -528,5 +529,17 @@ func TestReplicateDirectBadTarget(t *testing.T) {
 	}
 	if !bytes.Equal(value, []byte(strconv.Itoa(i+valueOffset))) {
 		t.Fatal("not equal")
+	}
+
+	// Make sure journal is empty.
+	it, err := db.(*replicatorDB).jdb.NewRange(ctx, "", nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for it.Next(ctx) {
+		if bytes.Equal(lastSequenceID, it.Key(ctx)) {
+			continue
+		}
+		t.Fatalf("found unflushed journal: %v", spew.Sdump(it.Key(ctx)))
 	}
 }
