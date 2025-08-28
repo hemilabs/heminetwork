@@ -246,7 +246,10 @@ func (b *replicatorDB) replayJournal(ctx context.Context, key []byte, value []by
 	return b.jdb.Del(ctx, "", key)
 }
 
-func (b *replicatorDB) processJournal(ctx context.Context, id uint64) error {
+func (b *replicatorDB) processJournal(pctx context.Context, id uint64) error {
+	// XXX This sucks. We should shutdown the journal handler when
+	// being shutdown. We do MUST wait for the sink to complete.
+	ctx := context.TODO()
 	// Lift journal of disk and commit it into sink
 	key := encodeJournalKey(id)
 	value, err := b.jdb.Get(ctx, "", key[:])
@@ -256,13 +259,46 @@ func (b *replicatorDB) processJournal(ctx context.Context, id uint64) error {
 	return b.replayJournal(ctx, key[:], value[:])
 }
 
-func (b *replicatorDB) journalHandler(pctx context.Context) error {
+// processJournals reads all uncommited journals and commits them into the
+// destination.
+func (b *replicatorDB) processJournals(ctx context.Context) error {
+	// Process as many journals as possible.
+	ir, err := b.jdb.NewRange(ctx, "", nil, nil)
+	if err != nil {
+		// Caller may want to ignore database closed, we will just
+		// replay on restart
+		log.Errorf("process journals: %v", err)
+		return err
+	}
+	for ir.Next(ctx) {
+		// Do things
+		key := ir.Key(ctx)
+		if bytes.Equal(key, lastSequenceID) {
+			continue
+		}
+		err := b.replayJournal(ctx, key[:], ir.Value(ctx))
+		if err != nil {
+			// XXX this is going to be way too loud when we have an
+			// actual persistent failure.
+			log.Errorf("could not replay journal: %v", err)
+			break
+		}
+	}
+	ir.Close(ctx)
+
+	return err
+}
+
+func (b *replicatorDB) journalHandler(ctx context.Context) error {
+	log.Tracef("journalHandler")
+	defer log.Tracef("journalHandler exit")
+
 	defer b.handlersFlusher.Done()
 	var goingDown bool
 	for {
 		select {
-		case <-pctx.Done():
-			return pctx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
 		case cmd := <-b.journalC:
 			// Prevent going down if cmd != ""
 			if cmd == "" {
@@ -271,28 +307,11 @@ func (b *replicatorDB) journalHandler(pctx context.Context) error {
 			}
 		}
 
-		// XXX This sucks. We should shutdown the journal handler when
-		// being shutdown. We do MUST wait for the sink to complete.
-		ctx := context.TODO()
-		// Process as many journals as possible
-		ir, err := b.jdb.NewRange(ctx, "", nil, nil)
+		err := b.processJournals(ctx)
 		if err != nil {
-			// ignore database closed, we will just replay on restart
-			panic(err)
+			log.Errorf("journal handler: %v", err)
+			return err // XXX no one listens to these
 		}
-		for ir.Next(ctx) {
-			// Do things
-			key := ir.Key(ctx)
-			if bytes.Equal(key, lastSequenceID) {
-				continue
-			}
-			err := b.replayJournal(ctx, key[:], ir.Value(ctx))
-			if err != nil {
-				// XXX do we need to spew something here?
-				break
-			}
-		}
-		ir.Close(ctx)
 
 		if goingDown {
 			return nil
@@ -301,6 +320,9 @@ func (b *replicatorDB) journalHandler(pctx context.Context) error {
 }
 
 func (b *replicatorDB) sinkHandler(pctx context.Context) error {
+	log.Tracef("sinkHandler")
+	defer log.Tracef("sinkHandler exit")
+
 	defer b.handlersFlusher.Done()
 	for {
 		var j *journal
@@ -315,10 +337,13 @@ func (b *replicatorDB) sinkHandler(pctx context.Context) error {
 
 		// don't use parent context since we MUST flush the journal
 		// prior to exit.
-
 		ctx := context.TODO() // XXX this needs thinking
 
-		// Commit journal
+		// Commit journal.
+		//
+		// Think about these panics, but there is inherent data loss
+		// when this happens. The only way to recover is a full
+		// database reconciliation.
 		id, err := newJournalID(ctx, b.jdb)
 		if err != nil {
 			panic(err)
@@ -328,7 +353,7 @@ func (b *replicatorDB) sinkHandler(pctx context.Context) error {
 			panic(err)
 		}
 
-		// Tell caller we are done if we are lazy.
+		// Tell caller we are done if we are in lazy mode.
 		switch b.cfg.Policy {
 		case Direct:
 			err := b.processJournal(ctx, id)
@@ -336,7 +361,7 @@ func (b *replicatorDB) sinkHandler(pctx context.Context) error {
 				j.err = SinkUnavailableError{e: err}
 			}
 		case Lazy:
-			// Lazy Process journal
+			// Lazy Process journal.
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -351,6 +376,8 @@ func (b *replicatorDB) sinkHandler(pctx context.Context) error {
 }
 
 func (b *replicatorDB) Open(ctx context.Context) error {
+	log.Tracef("Open")
+	defer log.Tracef("Open exit")
 	// XXX add proper unwind here
 
 	// journal
@@ -368,6 +395,7 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 	// sink
 	err = b.sink.Open(ctx)
 	if err != nil {
+		panic(err)
 		switch b.cfg.Policy {
 		case Lazy:
 			// If an error occurs, we can proceed, we'll keep a
@@ -395,10 +423,25 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 	b.handlersFlusher.Add(1)
 	go b.journalHandler(ctx)
 
+	switch b.cfg.Policy {
+	case Lazy:
+		// poke journalHandler to replay journals that weren't replicated.
+		b.journalC <- ""
+	case Direct:
+		// Process missed journal entries before returning.
+		err := b.processJournals(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
 	return err
 }
 
 func (b *replicatorDB) Close(ctx context.Context) error {
+	log.Tracef("Close")
+	defer log.Tracef("Close exit")
+
 	// XXX for now don't allow close until finished flushing journal.
 	// XXX this kinda sucks, rethink
 	// XXX at the very least we must prevent database commands from

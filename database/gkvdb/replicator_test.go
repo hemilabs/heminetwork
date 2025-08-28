@@ -415,6 +415,53 @@ func TestReplicateLazy(t *testing.T) {
 	}
 }
 
+// XXX antonio add this test for all dbs
+func TestOpenCloseOpen(t *testing.T) {
+	// First create source and destination
+	home := t.TempDir()
+	tables := []string{"table1"}
+	db, err := NewLevelDB(DefaultLevelConfig(home, tables))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	err = db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Open again expect fail
+	err = db.Open(ctx)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	err = db.Put(ctx, tables[0], []byte("xxx"), []byte("yyy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Get(ctx, tables[0], []byte("xxx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.Close(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Get(ctx, tables[0], []byte("xxx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.Close(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReplicateDirectBadTarget(t *testing.T) {
 	// First create source and destination
 	home := t.TempDir()
@@ -466,5 +513,19 @@ func TestReplicateDirectBadTarget(t *testing.T) {
 	err = db.Close(ctx)
 	if !errors.Is(err, ErrDBClosed) {
 		t.Fatal(err)
+	}
+
+	err = db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// See if we replicated the missing key/val
+	value, err := dbDestination.Get(ctx, tables[0], []byte(strconv.Itoa(i)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(value, []byte(strconv.Itoa(i+valueOffset))) {
+		t.Fatal("not equal")
 	}
 }
