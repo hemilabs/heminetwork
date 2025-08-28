@@ -5,7 +5,6 @@
 package gkvdb
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 
@@ -149,9 +148,10 @@ func (b *levelDB) NewIterator(ctx context.Context, table string) (Iterator, erro
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
+	r := util.BytesPrefix(NewCompositeKey(table, []byte{}))
 	return &levelIterator{
 		table: table,
-		it:    b.db.NewIterator(&util.Range{}, nil),
+		it:    b.db.NewIterator(r, nil),
 	}, nil
 }
 
@@ -231,47 +231,15 @@ type levelIterator struct {
 }
 
 func (ni *levelIterator) First(_ context.Context) bool {
-	// Find the right table. This may be slow as balls. Beware!
-	if !ni.it.First() {
-		return false
-	}
-	for {
-		if bytes.HasPrefix(ni.it.Key(), []byte(ni.table+":")) {
-			return true
-		}
-		if !ni.it.Next() {
-			return false // table not found
-		}
-	}
+	return ni.it.First()
 }
 
 func (ni *levelIterator) Last(_ context.Context) bool {
-	if !ni.it.Last() {
-		return false
-	}
-	for {
-		if bytes.HasPrefix(ni.it.Key(), []byte(ni.table+":")) {
-			return true
-		}
-		if !ni.it.Prev() {
-			return false // table not found
-		}
-	}
+	return ni.it.Last()
 }
 
 func (ni *levelIterator) Next(_ context.Context) bool {
-	// Find the right table. This may be slow as balls. Beware!
-	if !ni.it.Next() {
-		return false
-	}
-	for {
-		if bytes.HasPrefix(ni.it.Key(), []byte(ni.table+":")) {
-			return true
-		}
-		if !ni.it.Next() {
-			return false // table not found
-		}
-	}
+	return ni.it.Next()
 }
 
 func (ni *levelIterator) Seek(_ context.Context, key []byte) bool {
