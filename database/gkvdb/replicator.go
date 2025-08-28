@@ -157,8 +157,8 @@ func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, er
 		cfg:      cfg,
 		source:   source,
 		sink:     sink,
-		journalC: make(chan *journal, 1024),
-		sinkC:    make(chan string, 1), // depth of one to always go around
+		journalC: make(chan *journal, 1024), // MUST BE FLUSHED PRIOR TO EXIT
+		sinkC:    make(chan string, 1),      // Can be aborted
 	}
 
 	// Setup journal.
@@ -323,9 +323,6 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 
 		if goingDown {
 			log.Infof("Journals replayed, exiting.")
-			if len(b.sinkC) != 0 {
-				panic("fix this")
-			}
 			return nil
 		}
 	}
@@ -394,7 +391,8 @@ func (b *replicatorDB) journalHandler(pctx context.Context) error {
 func (b *replicatorDB) Open(ctx context.Context) error {
 	log.Tracef("Open")
 	defer log.Tracef("Open exit")
-	// XXX add proper unwind here
+
+	var errs []error
 
 	// journal
 	err := b.jdb.Open(ctx)
@@ -405,20 +403,25 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 	// source
 	err = b.source.Open(ctx)
 	if err != nil {
-		return err
+		goto journal
 	}
 
 	// sink
 	err = b.sink.Open(ctx)
 	if err != nil {
-		panic(err)
+		switch b.cfg.Policy {
+		case Direct:
+			goto source
+		case Lazy:
+			err = SinkUnavailableError{e: err}
+		}
 	}
 
 	b.handlersFlusher.Add(1)
 	go func() {
 		err := b.journalHandler(ctx)
 		if err != nil {
-			log.Errorf("sink: %v", err)
+			log.Errorf("journal: %v", err)
 		}
 	}()
 
@@ -431,26 +434,41 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 	}()
 
 	switch b.cfg.Policy {
-	case Lazy:
-		// poke sinkHandler to replay journals that weren't replicated.
-		b.sinkC <- ""
 	case Direct:
 		// Process missed journal entries before returning.
 		err := b.sinkJournals(ctx)
 		if err != nil {
 			return err
 		}
+	case Lazy:
+		// poke sinkHandler to replay journals that weren't replicated.
+		b.sinkC <- ""
 	}
 
 	return err
+
+	// unwind
+journal:
+	err = b.jdb.Close(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("journal: %w", err))
+	}
+source:
+	err = b.source.Close(ctx)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("source: %w", err))
+	}
+
+	return errors.Join(errs...)
 }
 
 func (b *replicatorDB) Close(ctx context.Context) error {
 	log.Tracef("Close")
 	defer log.Tracef("Close exit")
 
-	// XXX for now don't allow close until finished flushing journal.
-	// XXX this kinda sucks, rethink
+	// We must not allow close until the journal has been flushed.
+	//
+	// XXX this channel mess kinda sucks, rethink
 	// XXX at the very least we must prevent database commands from
 	// generating more flushing pressure.
 	b.journalC <- nil // nil is sentinel value for going down
