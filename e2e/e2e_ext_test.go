@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -23,7 +24,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/go-test/deep"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer/tbcgozer"
@@ -44,14 +44,10 @@ func nextPort(ctx context.Context, t *testing.T) int {
 		default:
 		}
 
-		port, err := freeport.GetFreePort()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)), 1*time.Second); err != nil {
+		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", testutil.FreePort()), 1*time.Second); err != nil {
 			if errors.Is(err, syscall.ECONNREFUSED) {
 				// connection error, port is open
+				port, _ := strconv.Atoi(testutil.FreePort())
 				return port
 			}
 

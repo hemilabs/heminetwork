@@ -18,7 +18,6 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/juju/loggo"
-	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/v2/api/bfgapi"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
@@ -344,9 +343,6 @@ func messageListener(t *testing.T, expected map[string]int, errCh chan error, ms
 }
 
 func createAddress() string {
-	port, err := freeport.GetFreePort()
-	if err != nil {
-		panic(fmt.Errorf("find free port: %w", err))
-	}
-	return fmt.Sprintf("localhost:%d", port)
+	port := testutil.FreePort()
+	return fmt.Sprintf("localhost:%s", port)
 }

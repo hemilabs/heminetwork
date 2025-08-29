@@ -6,7 +6,6 @@ package wallet
 
 import (
 	"context"
-	"crypto/sha256"
 	"testing"
 	"time"
 
@@ -21,13 +20,9 @@ import (
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul/memory"
 	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/heminetwork/v2/testutil"
 	"github.com/hemilabs/heminetwork/v2/testutil/mock"
 )
-
-func digest256(x []byte) []byte {
-	xx := sha256.Sum256(x)
-	return xx[:]
-}
 
 // XXX make this a generic non-testing specific function.
 func executeTX(t *testing.T, dump bool, scriptPubKey []byte, tx *btcutil.Tx) error {
@@ -176,10 +171,10 @@ func TestIntegration(t *testing.T) {
 		Version:            1,
 		L1BlockNumber:      0xbadc0ffe,
 		L2BlockNumber:      0xdeadbeef,
-		ParentEPHash:       digest256([]byte{1, 1, 3, 7}),
-		PrevKeystoneEPHash: digest256([]byte{0x04, 0x20, 69}),
-		StateRoot:          digest256([]byte("Hello, world!")),
-		EPHash:             digest256([]byte{0xaa, 0x55}),
+		ParentEPHash:       testutil.SHA256([]byte{1, 1, 3, 7}),
+		PrevKeystoneEPHash: testutil.SHA256([]byte{0x04, 0x20, 69}),
+		StateRoot:          testutil.SHA256([]byte("Hello, world!")),
+		EPHash:             testutil.SHA256([]byte{0xaa, 0x55}),
 	}
 
 	tx, prevOut, err := TransactionCreate(uint32(time.Now().Unix()),

@@ -31,7 +31,6 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
 	"github.com/juju/loggo"
-	"github.com/phayes/freeport"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -1256,7 +1255,8 @@ func nextPort(ctx context.Context, t *testing.T) int {
 		default:
 		}
 
-		port, err := freeport.GetFreePort()
+		portStr := testutil.FreePort()
+		port, err := strconv.Atoi(portStr)
 		if err != nil {
 			t.Fatal(err)
 		}
