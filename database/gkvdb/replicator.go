@@ -329,9 +329,9 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 		if err != nil {
 			log.Errorf("sink handler: %v", err)
 			// Exponential retry in case of error
-			delay = defaultRetryTimeout * time.Duration(math.Pow(2, float64(attempt)))
-			if delay > maxRetryDelay {
-				delay = maxRetryDelay
+			if delay < maxRetryDelay {
+				exp := time.Duration(math.Pow(2, float64(attempt)))
+				delay = min(defaultRetryTimeout*exp, maxRetryDelay)
 			}
 		} else {
 			// Reset retry logic on success
