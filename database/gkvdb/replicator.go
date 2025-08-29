@@ -8,9 +8,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
+	"time"
 
 	kbin "github.com/kelindar/binary"
+)
+
+const (
+	defaultRetryTimeout = 2 * time.Second
+	maxRetryDelay       = 15 * time.Second
 )
 
 type SinkUnavailableError struct {
@@ -276,12 +283,9 @@ func (b *replicatorDB) sinkJournals(ctx context.Context) error {
 		if bytes.Equal(key, lastSequenceID) {
 			continue
 		}
-		err := b.replayJournal(ctx, key[:], ir.Value(ctx))
+		err = b.replayJournal(ctx, key[:], ir.Value(ctx))
 		if err != nil {
-			// XXX this is going to be way too loud when we have an
-			// actual persistent failure.
-			log.Errorf("could not replay journal: %v", err)
-			break
+			return err
 		}
 	}
 	ir.Close(ctx)
@@ -301,11 +305,17 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 	// The terminal sentinel is crap and needs to be rethought.
 
 	defer b.handlersFlusher.Done()
-	var goingDown bool
+	var (
+		attempt   int
+		delay     time.Duration = -1
+		goingDown bool
+	)
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-time.Tick(delay):
+			attempt++
 		case cmd := <-b.sinkC:
 			// Prevent going down if cmd != ""
 			if cmd == "" {
@@ -317,8 +327,16 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 
 		err := b.sinkJournals(ctx)
 		if err != nil {
-			log.Errorf("journal handler: %v", err)
-			return err // XXX no one listens to these
+			log.Errorf("sink handler: %v", err)
+			// Exponential retry in case of error
+			delay = defaultRetryTimeout * time.Duration(math.Pow(2, float64(attempt)))
+			if delay > maxRetryDelay {
+				delay = maxRetryDelay
+			}
+		} else {
+			// Reset retry logic on success
+			attempt = 0
+			delay = -1
 		}
 
 		if goingDown {
@@ -373,6 +391,12 @@ func (b *replicatorDB) journalHandler(pctx context.Context) error {
 			err := b.processJournal(ctx, id)
 			if err != nil {
 				j.err = SinkUnavailableError{e: err}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case b.sinkC <- "":
+				default:
+				}
 			}
 		case Lazy:
 			// Sink journal
@@ -427,8 +451,7 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 
 	b.handlersFlusher.Add(1)
 	go func() {
-		err := b.sinkHandler(ctx)
-		if err != nil {
+		if err := b.sinkHandler(ctx); err != nil {
 			log.Errorf("sink: %v", err)
 		}
 	}()
@@ -471,8 +494,8 @@ func (b *replicatorDB) Close(ctx context.Context) error {
 	// XXX this channel mess kinda sucks, rethink
 	// XXX at the very least we must prevent database commands from
 	// generating more flushing pressure.
-	b.journalC <- nil // nil is sentinel value for going down
-	b.sinkC <- "going down"
+	b.journalC <- nil       // nil is sentinel value for going down
+	b.sinkC <- "going down" //XXX this will prevent shutting down if ctx dies
 	b.handlersFlusher.Wait()
 	if len(b.journalC) != 0 {
 		panic("journal not flushed")
