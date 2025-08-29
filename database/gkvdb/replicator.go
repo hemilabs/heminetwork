@@ -327,6 +327,7 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 
 		err := b.sinkJournals(ctx)
 		if err != nil {
+			// XXX let's not do this in a 1 message deep queue.
 			log.Errorf("sink handler: %v", err)
 			// Exponential retry in case of error
 			if delay < maxRetryDelay {
@@ -495,7 +496,7 @@ func (b *replicatorDB) Close(ctx context.Context) error {
 	// XXX at the very least we must prevent database commands from
 	// generating more flushing pressure.
 	b.journalC <- nil       // nil is sentinel value for going down
-	b.sinkC <- "going down" //XXX this will prevent shutting down if ctx dies
+	b.sinkC <- "going down" // XXX this will prevent shutting down if ctx dies
 	b.handlersFlusher.Wait()
 	if len(b.journalC) != 0 {
 		panic("journal not flushed")
