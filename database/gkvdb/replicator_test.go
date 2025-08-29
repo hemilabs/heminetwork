@@ -537,6 +537,85 @@ func TestReplicateDirectBadTarget(t *testing.T) {
 	// "disk-full" is terminal but tcp rst is not.
 }
 
+func TestReplicateRetry(t *testing.T) {
+	home := t.TempDir()
+	tables := []string{"table1", "table2"}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	// First create source and destination
+	db, dbDestination := createReplicator(t, Direct, home, "level", "level", tables)
+
+	if err := db.Open(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := db.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Individual Puts
+	maxPuts := 50
+	maxTxs := 100
+
+	stopDB := false
+	for tx := range maxTxs {
+		for _, table := range tables {
+			err := tablePut(ctx, db, table, maxPuts*tx, maxPuts, 0)
+			if err != nil && !stopDB {
+				t.Fatal("expected error")
+			}
+		}
+		// Stop destination db half way through
+		if tx >= maxTxs/3 && !stopDB {
+			stopDB = true
+			if err := dbDestination.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			t.Log("destination db stopped")
+		}
+	}
+
+	time.Sleep(5 * time.Second)
+
+	// Restart destination db
+	if err := dbDestination.Open(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("destination db restarted")
+
+	for !db.(*replicatorDB).flushed(ctx) {
+		time.Sleep(time.Millisecond)
+	}
+
+	// Verify that we have them in the replicator db (really the source)
+	// and in the destination db.
+	for _, table := range tables {
+		for i := range maxPuts * maxTxs {
+			key, expectedValue := generateKV(i)
+
+			// Get out of source
+			value, err := db.Get(ctx, table, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(expectedValue, value) {
+				t.Fatal("not equal")
+			}
+
+			// Now fish it out of destination.
+			dValue, err := dbDestination.Get(ctx, table, []byte(strconv.Itoa(i)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(expectedValue, dValue) {
+				t.Fatal("not equal")
+			}
+		}
+	}
+}
+
 func TestReplicateOnStartup(t *testing.T) {
 	home := t.TempDir()
 	tables := []string{"table1", "table2"}
