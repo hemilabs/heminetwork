@@ -191,7 +191,11 @@ func (b *replicatorDB) putJournal(ctx context.Context, id uint64, j *journal) er
 	return b.jdb.Put(ctx, "", key[:], value.Bytes())
 }
 
-func (b *replicatorDB) commitJournal(ctx context.Context, j *journal) error {
+func (b *replicatorDB) commitJournal(_ context.Context, j *journal) error {
+	// We do not use the parent context at all here. This is to prevent a
+	// premature exit that would result in dataloss at the target.
+	ctx := context.Background()
+
 	id, err := newJournalID(ctx, b.jdb)
 	if err != nil {
 		return err
@@ -452,12 +456,12 @@ func copySlice(value []byte) []byte {
 	return nil
 }
 
-func (b *replicatorDB) Del(pctx context.Context, table string, key []byte) error {
-	if b.closed(pctx) {
+func (b *replicatorDB) Del(ctx context.Context, table string, key []byte) error {
+	if b.closed(ctx) {
 		return ErrDBClosed
 	}
 
-	err := b.source.Update(pctx, func(ctx context.Context, tx Transaction) error {
+	err := b.source.Update(ctx, func(ctx context.Context, tx Transaction) error {
 		if err := tx.Del(ctx, table, key); err != nil {
 			return err
 		}
@@ -477,7 +481,6 @@ func (b *replicatorDB) Del(pctx context.Context, table string, key []byte) error
 	// database reconciliation.
 	//
 	// XXX an idea is to dump the journal in the log but it may be gigantic.
-	ctx := context.Background()
 	j := &journal{ops: new(list.List)}
 	j.ops.PushFront(&journalOp{
 		Op:    opDel,
@@ -509,12 +512,12 @@ func (b *replicatorDB) Get(ctx context.Context, table string, key []byte) ([]byt
 	return b.source.Get(ctx, table, key)
 }
 
-func (b *replicatorDB) Put(pctx context.Context, table string, key, value []byte) error {
-	if b.closed(pctx) {
+func (b *replicatorDB) Put(ctx context.Context, table string, key, value []byte) error {
+	if b.closed(ctx) {
 		return ErrDBClosed
 	}
 
-	err := b.source.Update(pctx, func(ctx context.Context, tx Transaction) error {
+	err := b.source.Update(ctx, func(ctx context.Context, tx Transaction) error {
 		if err := tx.Put(ctx, table, key, value); err != nil {
 			return err
 		}
@@ -524,8 +527,6 @@ func (b *replicatorDB) Put(pctx context.Context, table string, key, value []byte
 		return err
 	}
 
-	// XXX dont exit
-	ctx := context.Background()
 	j := &journal{ops: new(list.List)}
 	j.ops.PushFront(&journalOp{
 		Op:    opPut,
@@ -663,19 +664,15 @@ func (tx *replicatorTX) Put(ctx context.Context, table string, key []byte, value
 	return nil
 }
 
-func (tx *replicatorTX) Commit(pctx context.Context) error {
-	if tx.db.closed(pctx) {
+func (tx *replicatorTX) Commit(ctx context.Context) error {
+	if tx.db.closed(ctx) {
 		return ErrDBClosed
 	}
 
-	err := tx.source.Commit(pctx)
+	err := tx.source.Commit(ctx)
 	if err != nil {
 		return err
 	}
-	// journal tx
-	// XXX we must makre sure this journal makes it; not sure that's the
-	// case now. Add test for this.
-	ctx := context.Background()
 	err = tx.db.commitJournal(ctx, &journal{ops: tx.ops})
 	if err != nil {
 		panic(err)
