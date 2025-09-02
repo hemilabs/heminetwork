@@ -485,7 +485,6 @@ func (b *replicatorDB) Del(ctx context.Context, table string, key []byte) error 
 		panic(err)
 	}
 
-	// XXX lazy here
 	return nil
 }
 
