@@ -172,7 +172,7 @@ func (b *levelDB) NewRange(ctx context.Context, table string, start, end []byte)
 }
 
 func (b *levelDB) NewBatch(ctx context.Context) (Batch, error) {
-	return &levelBatch{wb: new(leveldb.Batch)}, nil
+	return &levelBatch{db: b, wb: new(leveldb.Batch)}, nil
 }
 
 func (b *levelDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
@@ -302,14 +302,23 @@ func (nr *levelRange) Close(ctx context.Context) {
 // Batches
 
 type levelBatch struct {
+	db *levelDB
 	wb *leveldb.Batch
 }
 
 func (nb *levelBatch) Del(ctx context.Context, table string, key []byte) {
+	if _, ok := nb.db.tables[table]; !ok {
+		log.Errorf("%s: %v", table, ErrTableNotFound)
+		return
+	}
 	nb.wb.Delete(NewCompositeKey(table, key))
 }
 
 func (nb *levelBatch) Put(ctx context.Context, table string, key, value []byte) {
+	if _, ok := nb.db.tables[table]; !ok {
+		log.Errorf("%s: %v", table, ErrTableNotFound)
+		return
+	}
 	nb.wb.Put(NewCompositeKey(table, key), value)
 }
 

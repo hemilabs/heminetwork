@@ -163,6 +163,9 @@ func (b *boltDB) NewIterator(ctx context.Context, table string) (Iterator, error
 		return nil, err
 	}
 	bu := tx.(*boltTX).tx.Bucket([]byte(table))
+	if bu == nil {
+		return nil, ErrTableNotFound
+	}
 	return &boltIterator{
 		tx: tx,
 		it: bu.Cursor(),
@@ -180,8 +183,13 @@ func (b *boltDB) NewRange(ctx context.Context, table string, start, end []byte) 
 		ntx:    tx.(*boltTX).tx,
 		cursor: -1, // first key when next called
 	}
-	keys := make([][]byte, 0, 10000) // XXX PNOOMA
-	c := nr.ntx.Bucket([]byte(table)).Cursor()
+	keys := make([][]byte, 0)
+	bu := nr.ntx.Bucket([]byte(table))
+	if bu == nil {
+		return nil, ErrTableNotFound
+	}
+	c := bu.Cursor()
+	// XXX find a better way to do this
 	for k, _ := c.Seek(start); k != nil && bytes.Compare(k, end) <= 0; k, _ = c.Next() {
 		keys = append(keys, k)
 	}

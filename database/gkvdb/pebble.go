@@ -205,7 +205,7 @@ func (b *pebbleDB) NewRange(ctx context.Context, table string, start, end []byte
 }
 
 func (b *pebbleDB) NewBatch(ctx context.Context) (Batch, error) {
-	return &pebbleBatch{wb: b.db.NewBatch()}, nil
+	return &pebbleBatch{db: b, wb: b.db.NewBatch()}, nil
 }
 
 func (b *pebbleDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
@@ -360,16 +360,25 @@ func (nr *pebbleRange) Close(ctx context.Context) {
 // Batches
 
 type pebbleBatch struct {
+	db *pebbleDB
 	wb *pebble.Batch
 }
 
 func (nb *pebbleBatch) Del(ctx context.Context, table string, key []byte) {
+	if _, ok := nb.db.tables[table]; !ok {
+		log.Errorf("%s: %v", table, ErrTableNotFound)
+		return
+	}
 	if err := nb.wb.Delete(NewCompositeKey(table, key), nil); err != nil {
 		log.Errorf("delete %v: %v", table, key)
 	}
 }
 
 func (nb *pebbleBatch) Put(ctx context.Context, table string, key, value []byte) {
+	if _, ok := nb.db.tables[table]; !ok {
+		log.Errorf("%s: %v", table, ErrTableNotFound)
+		return
+	}
 	if err := nb.wb.Set(NewCompositeKey(table, key), value, nil); err != nil {
 		log.Errorf("set %v: %v %v", table, key, value)
 	}

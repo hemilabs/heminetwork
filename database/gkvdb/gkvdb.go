@@ -12,6 +12,7 @@ import (
 )
 
 var (
+	ErrDBAlreadyOpen  = errors.New("database already open")
 	ErrDBClosed       = errors.New("database is closed")
 	ErrDuplicateTable = errors.New("duplicate table")
 	ErrInvalidConfig  = errors.New("invalid config")

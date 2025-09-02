@@ -12,7 +12,6 @@ import (
 
 	"github.com/juju/loggo"
 	"github.com/nutsdb/nutsdb"
-	"github.com/syndtr/goleveldb/leveldb"
 )
 
 const logLevel = "INFO"
@@ -23,32 +22,6 @@ func init() {
 	if err := loggo.ConfigureLoggers(logLevel); err != nil {
 		panic(err)
 	}
-}
-
-// Translate nutsb errors into gkvdb errors
-// XXX move this out of here and add leveldb errors
-func xerr(err error) error {
-	switch {
-	// leveldb
-	case errors.Is(err, leveldb.ErrClosed):
-		err = ErrDBClosed
-	case errors.Is(err, leveldb.ErrNotFound):
-		err = ErrKeyNotFound
-
-		// nutsdb
-	case errors.Is(err, nutsdb.ErrKeyNotFound):
-		err = ErrKeyNotFound
-	case errors.Is(err, nutsdb.ErrRangeScan):
-		err = ErrInvalidRange
-	case errors.Is(err, nutsdb.ErrBucketNotExist),
-		errors.Is(err, nutsdb.ErrorBucketNotExist):
-		err = ErrTableNotFound
-	case errors.Is(err, nutsdb.ErrDBClosed):
-		err = ErrDBClosed
-	case errors.Is(err, nutsdb.ErrKeyEmpty):
-		return nil
-	}
-	return err
 }
 
 // Assert required interfaces

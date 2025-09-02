@@ -242,6 +242,7 @@ func (b *mongoDB) NewRange(ctx context.Context, table string, start, end []byte)
 
 func (b *mongoDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &mongoBatch{
+		db: b,
 		wm: make([]mongo.ClientBulkWrite, 0),
 	}, nil
 }
@@ -518,10 +519,15 @@ func (nr *mongoRange) Close(ctx context.Context) {
 // Batches
 
 type mongoBatch struct {
+	db *mongoDB
 	wm []mongo.ClientBulkWrite
 }
 
 func (nb *mongoBatch) Del(ctx context.Context, table string, key []byte) {
+	if _, ok := nb.db.tables[table]; !ok {
+		log.Errorf("%s: %v", table, ErrTableNotFound)
+		return
+	}
 	m := mongo.NewClientDeleteOneModel().SetFilter(bson.D{{Key: "key", Value: key}})
 	cbw := mongo.ClientBulkWrite{
 		Database:   internalDB,
@@ -532,6 +538,10 @@ func (nb *mongoBatch) Del(ctx context.Context, table string, key []byte) {
 }
 
 func (nb *mongoBatch) Put(ctx context.Context, table string, key, value []byte) {
+	if _, ok := nb.db.tables[table]; !ok {
+		log.Errorf("%s: %v", table, ErrTableNotFound)
+		return
+	}
 	m := mongo.NewClientUpdateOneModel().SetFilter(bson.D{{Key: "key", Value: key}}).SetUpsert(true).
 		SetUpdate(bson.D{{Key: "$set", Value: bson.D{{Key: "value", Value: value}}}})
 	cbw := mongo.ClientBulkWrite{
