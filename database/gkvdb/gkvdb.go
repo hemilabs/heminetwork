@@ -206,3 +206,27 @@ type Range interface {
 
 	Close(ctx context.Context)
 }
+
+// OperationT is used to tag what database operation is being described. These
+// operations are used to perform database dump/restores.
+type OperationT uint8
+
+const (
+	OpPut OperationT = 1 // Database put
+	OpDel            = 2 // Database delete
+)
+
+// Operation describes a single database operation. An entire database can be
+// replicated by creating a delta between a source database table and a
+// destination database table.
+type Operation struct {
+	Op    OperationT `json:"op"`
+	Table string     `json:"table"`
+	Key   []byte     `json:"key"`
+	Value []byte     `json:"value,omitempty" binary:"omitempty"`
+}
+
+// Replay describes a replay of operations into a database.
+type Replay struct {
+	Operations []Operation `json:"operations"`
+}

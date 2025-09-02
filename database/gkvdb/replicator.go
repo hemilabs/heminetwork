@@ -41,30 +41,6 @@ var (
 	ErrSinkUnavailable SinkUnavailableError
 )
 
-// designates how to replay a journal entry
-type opT uint8
-
-const (
-	opPut opT = iota
-	opDel
-)
-
-// journalOp is an internal journal operation. It represents and individual
-// operation that can be replayed into a database.
-//
-// XXX we currently have a mixture of a copy or direct use of key/val. that may
-// be too expensive and may need
-// caller control. In a worst case scenario we end up copying the key 3 times.
-// 1. On the initial call where it lives in the list
-// 2. On creation of the journal key, which must happen late
-// 3. Possibly when sent into the sink
-type journalOp struct {
-	Op    opT
-	Table string // XXX maybe make a const pointer?
-	Key   []byte
-	Value []byte `binary:"omitempty"`
-}
-
 func encodeJournalKey(id uint64) (k [8]byte) {
 	binary.BigEndian.PutUint64(k[0:], id)
 	return
@@ -76,6 +52,15 @@ func encodeJournalKey(id uint64) (k [8]byte) {
 //	return
 //}
 
+// journal is the internal structure that is used to keep database operations
+// in order.
+//
+// XXX we currently have a mixture of a copy or direct use of key/val. that may
+// be too expensive and may need
+// caller control. In a worst case scenario we end up copying the key 3 times.
+// 1. On the initial call where it lives in the list
+// 2. On creation of the journal key, which must happen late
+// 3. Possibly when sent into the sink
 type journal struct {
 	ops *list.List
 }
@@ -232,7 +217,7 @@ func (b *replicatorDB) replayJournal(ctx context.Context, key []byte, value []by
 
 	decoder := kbin.NewDecoder(bytes.NewBuffer(value))
 	for i := 0; ; i++ {
-		jop := journalOp{}
+		jop := Operation{}
 		err := decoder.Decode(&jop)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -241,9 +226,9 @@ func (b *replicatorDB) replayJournal(ctx context.Context, key []byte, value []by
 			return err
 		}
 		switch jop.Op {
-		case opDel:
+		case OpDel:
 			jb.Del(ctx, jop.Table, jop.Key)
-		case opPut:
+		case OpPut:
 			jb.Put(ctx, jop.Table, jop.Key, jop.Value)
 		}
 	}
@@ -492,8 +477,8 @@ func (b *replicatorDB) Del(ctx context.Context, table string, key []byte) error 
 		}
 
 		j := &journal{ops: new(list.List)}
-		j.ops.PushFront(&journalOp{
-			Op:    opDel,
+		j.ops.PushFront(&Operation{
+			Op:    OpDel,
 			Table: table,
 			Key:   key,
 		})
@@ -530,8 +515,8 @@ func (b *replicatorDB) Put(ctx context.Context, table string, key, value []byte)
 		}
 
 		j := &journal{ops: new(list.List)}
-		j.ops.PushFront(&journalOp{
-			Op:    opPut,
+		j.ops.PushFront(&Operation{
+			Op:    OpPut,
 			Table: table,
 			Key:   key,
 			Value: value,
@@ -637,8 +622,8 @@ func (tx *replicatorTX) Del(ctx context.Context, table string, key []byte) error
 	if err := tx.source.Del(ctx, table, key); err != nil {
 		return err
 	}
-	tx.ops.PushBack(&journalOp{
-		Op:    opDel,
+	tx.ops.PushBack(&Operation{
+		Op:    OpDel,
 		Table: table,
 		Key:   copySlice(key),
 		Value: nil,
@@ -661,8 +646,8 @@ func (tx *replicatorTX) Put(ctx context.Context, table string, key []byte, value
 	if err := tx.source.Put(ctx, table, key, value); err != nil {
 		return err
 	}
-	tx.ops.PushBack(&journalOp{
-		Op:    opPut,
+	tx.ops.PushBack(&Operation{
+		Op:    OpPut,
 		Table: table,
 		Key:   copySlice(key),
 		Value: copySlice(value),
@@ -785,8 +770,8 @@ type replicatorBatch struct {
 
 func (rb *replicatorBatch) Del(ctx context.Context, table string, key []byte) {
 	rb.sourceBatch.Del(ctx, table, key)
-	rb.ops.PushBack(&journalOp{
-		Op:    opDel,
+	rb.ops.PushBack(&Operation{
+		Op:    OpDel,
 		Table: table,
 		Key:   copySlice(key),
 		Value: nil,
@@ -795,8 +780,8 @@ func (rb *replicatorBatch) Del(ctx context.Context, table string, key []byte) {
 
 func (rb *replicatorBatch) Put(ctx context.Context, table string, key, value []byte) {
 	rb.sourceBatch.Put(ctx, table, key, value)
-	rb.ops.PushBack(&journalOp{
-		Op:    opPut,
+	rb.ops.PushBack(&Operation{
+		Op:    OpPut,
 		Table: table,
 		Key:   copySlice(key),
 		Value: copySlice(value),

@@ -25,8 +25,8 @@ import (
 // gob and kelindar.
 
 func TestJournalEncoding(t *testing.T) {
-	jop := &journalOp{
-		Op:    opDel,
+	jop := &Operation{
+		Op:    OpDel,
 		Table: "table",
 		Key:   []byte("key"),
 		Value: []byte("value"),
@@ -35,7 +35,7 @@ func TestJournalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var d journalOp
+	var d Operation
 	err = binary.Unmarshal(e, &d)
 	if err != nil {
 		t.Fatal(err)
@@ -51,8 +51,8 @@ func TestJournalStream(t *testing.T) {
 	var b bytes.Buffer
 	encoder := binary.NewEncoder(&b)
 	for i := 0; i < maxItems; i++ {
-		err := encoder.Encode(&journalOp{
-			Op:    opDel,
+		err := encoder.Encode(&Operation{
+			Op:    OpDel,
 			Table: "table",
 			Key:   []byte("key" + strconv.Itoa(i)),
 			Value: []byte("value" + strconv.Itoa(i)),
@@ -64,7 +64,7 @@ func TestJournalStream(t *testing.T) {
 
 	d := binary.NewDecoder(&b)
 	for i := 0; ; i++ {
-		jop := journalOp{} // Yes, always allocate
+		jop := Operation{} // Yes, always allocate
 		err := d.Decode(&jop)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -75,8 +75,8 @@ func TestJournalStream(t *testing.T) {
 			}
 			t.Fatal(err)
 		}
-		jopExected := journalOp{
-			Op:    opDel,
+		jopExected := Operation{
+			Op:    OpDel,
 			Table: "table",
 			Key:   []byte("key" + strconv.Itoa(i)),
 			Value: []byte("value" + strconv.Itoa(i)),
