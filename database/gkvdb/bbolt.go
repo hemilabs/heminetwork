@@ -6,6 +6,7 @@ package gkvdb
 
 import (
 	"bytes"
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -64,7 +65,6 @@ func (b *boltDB) Open(_ context.Context) error {
 	}
 	err = ndb.Update(func(tx *bolt.Tx) error {
 		for _, table := range b.cfg.Tables {
-			// XXX add mechanism to pass in the datastructure type
 			_, err := tx.CreateBucketIfNotExists([]byte(table))
 			if err != nil {
 				return fmt.Errorf("could not create table: %v", table)
@@ -79,6 +79,7 @@ func (b *boltDB) Open(_ context.Context) error {
 	return nil
 }
 
+// Note: blocks when waiting for pending Txs
 func (b *boltDB) Close(_ context.Context) error {
 	return xerr(b.db.Close())
 }
@@ -128,8 +129,6 @@ func (b *boltDB) Begin(_ context.Context, write bool) (Transaction, error) {
 }
 
 // execute runs a transaction and commits or rolls it back depending on errors.
-// It does not perform error translation meaning that the caller must handle
-// that prior to returning to the caller.
 func (b *boltDB) execute(ctx context.Context, write bool, callback func(ctx context.Context, tx Transaction) error) error {
 	itx, err := b.Begin(ctx, write)
 	if err != nil {
@@ -174,29 +173,25 @@ func (b *boltDB) NewRange(ctx context.Context, table string, start, end []byte) 
 		return nil, err
 	}
 	nr := &boltRange{
-		table:  table,
-		tx:     tx,
-		ntx:    tx.(*boltTX).tx,
-		cursor: -1, // first key when next called
+		table: table,
+		tx:    tx,
 	}
-	keys := make([][]byte, 0)
-	bu := nr.ntx.Bucket([]byte(table))
+	keys := new(list.List)
+	bu := tx.(*boltTX).tx.Bucket([]byte(table))
 	if bu == nil {
 		return nil, ErrTableNotFound
 	}
 	c := bu.Cursor()
-	// XXX find a better way to do this
 	for k, _ := c.Seek(start); k != nil && bytes.Compare(k, end) <= 0; k, _ = c.Next() {
-		keys = append(keys, k)
+		// XXX bbolts docs make me weary to use pointer, but keep for now
+		keys.PushBack(&k)
 	}
 	nr.keys = keys
 	return nr, nil
 }
 
 func (b *boltDB) NewBatch(ctx context.Context) (Batch, error) {
-	return &boltBatch{
-		sequence: make([]func(ctx context.Context, tx Transaction) error, 0),
-	}, nil
+	return &boltBatch{wb: new(list.List)}, nil
 }
 
 func (b *boltDB) DumpTables(ctx context.Context, table []string, target Encoder) error {
@@ -272,7 +267,11 @@ func (tx *boltTX) Write(ctx context.Context, b Batch) error {
 	if !ok {
 		return fmt.Errorf("unsupported batch type: %T", b)
 	}
-	for _, f := range bb.sequence {
+	for e := bb.wb.Front(); e != nil; e = e.Next() {
+		f, ok := e.Value.(batchFunc)
+		if !ok {
+			return fmt.Errorf("unexpected batch element type %T", e.Value)
+		}
 		if err := f(ctx, tx); err != nil {
 			return xerr(err)
 		}
@@ -334,47 +333,50 @@ func (ni *boltIterator) Close(ctx context.Context) {
 type boltRange struct {
 	table string
 	tx    Transaction
-	ntx   *bolt.Tx
 
-	keys   [][]byte
-	cursor int // Current key
+	keys *list.List // elements of type []byte
+	cur  *list.Element
+
+	first bool
 }
 
 func (nr *boltRange) First(_ context.Context) bool {
-	if len(nr.keys) == 0 {
-		return false
-	}
-	nr.cursor = 0
-	return true
+	nr.cur = nr.keys.Front()
+	return nr.cur != nil
 }
 
 func (nr *boltRange) Last(_ context.Context) bool {
-	if len(nr.keys) == 0 {
-		return false
-	}
-	nr.cursor = len(nr.keys) - 1
-	return true
+	nr.cur = nr.keys.Back()
+	return nr.cur != nil
 }
 
-func (nr *boltRange) Next(_ context.Context) bool {
-	if len(nr.keys) == 0 {
-		return false
+func (nr *boltRange) Next(ctx context.Context) bool {
+	if !nr.first {
+		nr.first = true
+		return nr.First(ctx)
 	}
-	if nr.cursor < len(nr.keys)-1 {
-		nr.cursor++
-		return true
-	}
-	return false
+	nr.cur = nr.cur.Next()
+	return nr.cur != nil
 }
 
 func (nr *boltRange) Key(_ context.Context) []byte {
-	return nr.keys[nr.cursor]
+	val, ok := nr.cur.Value.(*[]byte)
+	if !ok {
+		// this should not happen
+		log.Errorf("key type %T", nr.cur.Value)
+		return nil
+	}
+	return *val
 }
 
 func (nr *boltRange) Value(ctx context.Context) []byte {
-	value, err := nr.tx.Get(ctx, nr.table, nr.keys[nr.cursor])
+	key := nr.Key(ctx)
+	if key == nil {
+		return nil
+	}
+	value, err := nr.tx.Get(ctx, nr.table, key)
 	if err != nil {
-		// meh, this should not happen
+		// this should not happen
 		log.Errorf("value %v", err)
 		return nil
 	}
@@ -391,23 +393,25 @@ func (nr *boltRange) Close(ctx context.Context) {
 // Batches
 
 type boltBatch struct {
-	sequence []func(ctx context.Context, tx Transaction) error
+	wb *list.List // elements of type batchFunc
 }
 
+type batchFunc func(context.Context, Transaction) error
+
 func (nb *boltBatch) Del(ctx context.Context, table string, key []byte) {
-	act := func(ctx context.Context, tx Transaction) error {
+	var act batchFunc = func(ctx context.Context, tx Transaction) error {
 		return tx.Del(ctx, table, key)
 	}
-	nb.sequence = append(nb.sequence, act)
+	nb.wb.PushBack(act)
 }
 
 func (nb *boltBatch) Put(ctx context.Context, table string, key, value []byte) {
-	act := func(ctx context.Context, tx Transaction) error {
+	var act batchFunc = func(ctx context.Context, tx Transaction) error {
 		return tx.Put(ctx, table, key, value)
 	}
-	nb.sequence = append(nb.sequence, act)
+	nb.wb.PushBack(act)
 }
 
 func (nb *boltBatch) Reset(ctx context.Context) {
-	nb.sequence = make([]func(ctx context.Context, tx Transaction) error, 0)
+	nb.wb.Init()
 }
