@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 )
 
 var (
@@ -17,6 +18,7 @@ var (
 	ErrInvalidRange   = errors.New("invalid or empty range")
 	ErrKeyNotFound    = errors.New("key not found")
 	ErrTableNotFound  = errors.New("table not found")
+	ErrNotSuported    = errors.New("not supported")
 )
 
 type Database interface {
@@ -45,7 +47,8 @@ type Database interface {
 
 	// Backup
 	// DumpAll()
-	// DumpBucket()
+	DumpTable(ctx context.Context, table string, target io.Writer) error
+	RestoreTable(ctx context.Context, table string, target io.Reader) error
 }
 
 // CompositeKey is used by backends that do not support the concept of tables

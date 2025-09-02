@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 
 	bolt "go.etcd.io/bbolt"
@@ -192,6 +193,14 @@ func (b *boltDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &boltBatch{
 		sequence: make([]func(ctx context.Context, tx Transaction) error, 0),
 	}, nil
+}
+
+func (b *boltDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
+	return ErrNotSuported
+}
+
+func (b *boltDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+	return ErrNotSuported
 }
 
 // Transactions

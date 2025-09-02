@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/cockroachdb/pebble"
 )
@@ -205,6 +206,14 @@ func (b *pebbleDB) NewRange(ctx context.Context, table string, start, end []byte
 
 func (b *pebbleDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &pebbleBatch{wb: b.db.NewBatch()}, nil
+}
+
+func (b *pebbleDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
+	return ErrNotSuported
+}
+
+func (b *pebbleDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+	return ErrNotSuported
 }
 
 // Transactions

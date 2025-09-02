@@ -7,6 +7,7 @@ package gkvdb
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -172,6 +173,14 @@ func (b *levelDB) NewRange(ctx context.Context, table string, start, end []byte)
 
 func (b *levelDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &levelBatch{wb: new(leveldb.Batch)}, nil
+}
+
+func (b *levelDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
+	return ErrNotSuported
+}
+
+func (b *levelDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+	return ErrNotSuported
 }
 
 // Transactions

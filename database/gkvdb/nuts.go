@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/juju/loggo"
 	"github.com/nutsdb/nutsdb"
@@ -242,6 +243,14 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 
 func (b *nutsDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &nutsBatch{}, nil
+}
+
+func (b *nutsDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
+	return ErrNotSuported
+}
+
+func (b *nutsDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+	return ErrNotSuported
 }
 
 // Transactions

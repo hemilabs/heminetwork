@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/badger/v4/options"
@@ -201,6 +202,14 @@ func (b *badgerDB) NewRange(ctx context.Context, table string, start, end []byte
 
 func (b *badgerDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &badgerBatch{}, nil
+}
+
+func (b *badgerDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
+	return ErrNotSuported
+}
+
+func (b *badgerDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+	return ErrNotSuported
 }
 
 // Transactions
