@@ -321,7 +321,6 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 		if err != nil {
 			// XXX let's not do this in a 1 message deep queue.
 			log.Errorf("sink handler: %v", err)
-			panic(err)
 		}
 
 		if goingDown {
@@ -362,6 +361,7 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 
 	b.handlersFlusher.Add(1)
 	go func() {
+		// XXX do not call this with parent context
 		if err := b.sinkHandler(ctx); err != nil {
 			log.Errorf("sink: %v", err)
 		}
@@ -498,7 +498,7 @@ func (b *replicatorDB) Put(pctx context.Context, table string, key, value []byte
 	})
 	err = b.commitJournal(ctx, j)
 	if err != nil {
-		panic(err)
+		return SinkUnavailableError{e: err}
 	}
 
 	return nil
