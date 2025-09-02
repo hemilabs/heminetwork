@@ -307,6 +307,15 @@ func (b *replicatorDB) flushed(ctx context.Context) bool {
 	return true
 }
 
+func (b *replicatorDB) closed(ctx context.Context) bool {
+	select {
+	case <-ctx.Done():
+		return true
+	default:
+	}
+	return false
+}
+
 func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 	log.Tracef("sinkHandler")
 	defer log.Tracef("sinkHandler exit")
@@ -444,6 +453,10 @@ func copySlice(value []byte) []byte {
 }
 
 func (b *replicatorDB) Del(pctx context.Context, table string, key []byte) error {
+	if b.closed(pctx) {
+		return ErrDBClosed
+	}
+
 	err := b.source.Update(pctx, func(ctx context.Context, tx Transaction) error {
 		if err := tx.Del(ctx, table, key); err != nil {
 			return err
@@ -481,14 +494,26 @@ func (b *replicatorDB) Del(pctx context.Context, table string, key []byte) error
 }
 
 func (b *replicatorDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
+	if b.closed(ctx) {
+		return false, ErrDBClosed
+	}
+
 	return b.source.Has(ctx, table, key)
 }
 
 func (b *replicatorDB) Get(ctx context.Context, table string, key []byte) ([]byte, error) {
+	if b.closed(ctx) {
+		return nil, ErrDBClosed
+	}
+
 	return b.source.Get(ctx, table, key)
 }
 
 func (b *replicatorDB) Put(pctx context.Context, table string, key, value []byte) error {
+	if b.closed(pctx) {
+		return ErrDBClosed
+	}
+
 	err := b.source.Update(pctx, func(ctx context.Context, tx Transaction) error {
 		if err := tx.Put(ctx, table, key, value); err != nil {
 			return err
@@ -639,6 +664,10 @@ func (tx *replicatorTX) Put(ctx context.Context, table string, key []byte, value
 }
 
 func (tx *replicatorTX) Commit(pctx context.Context) error {
+	if tx.db.closed(pctx) {
+		return ErrDBClosed
+	}
+
 	err := tx.source.Commit(pctx)
 	if err != nil {
 		return err
