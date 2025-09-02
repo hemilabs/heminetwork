@@ -615,7 +615,7 @@ func (b *replicatorDB) DumpTable(ctx context.Context, table string, target io.Wr
 	return ErrNotSuported
 }
 
-func (b *replicatorDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+func (b *replicatorDB) RestoreTable(ctx context.Context, table string, source io.Reader) error {
 	return ErrNotSuported
 }
 

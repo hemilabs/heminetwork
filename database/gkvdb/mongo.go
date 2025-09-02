@@ -250,7 +250,7 @@ func (b *mongoDB) DumpTable(ctx context.Context, table string, target io.Writer)
 	return ErrNotSuported
 }
 
-func (b *mongoDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+func (b *mongoDB) RestoreTable(ctx context.Context, table string, source io.Reader) error {
 	return ErrNotSuported
 }
 

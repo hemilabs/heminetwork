@@ -208,7 +208,7 @@ func (b *badgerDB) DumpTable(ctx context.Context, table string, target io.Writer
 	return ErrNotSuported
 }
 
-func (b *badgerDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+func (b *badgerDB) RestoreTable(ctx context.Context, table string, source io.Reader) error {
 	return ErrNotSuported
 }
 

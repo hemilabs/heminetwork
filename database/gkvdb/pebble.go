@@ -212,7 +212,7 @@ func (b *pebbleDB) DumpTable(ctx context.Context, table string, target io.Writer
 	return ErrNotSuported
 }
 
-func (b *pebbleDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+func (b *pebbleDB) RestoreTable(ctx context.Context, table string, source io.Reader) error {
 	return ErrNotSuported
 }
 

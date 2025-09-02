@@ -249,7 +249,7 @@ func (b *nutsDB) DumpTable(ctx context.Context, table string, target io.Writer) 
 	return ErrNotSuported
 }
 
-func (b *nutsDB) RestoreTable(ctx context.Context, table string, target io.Reader) error {
+func (b *nutsDB) RestoreTable(ctx context.Context, table string, source io.Reader) error {
 	return ErrNotSuported
 }
 

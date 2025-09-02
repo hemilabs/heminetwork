@@ -48,7 +48,7 @@ type Database interface {
 	// Backup
 	// DumpAll()
 	DumpTable(ctx context.Context, table string, target io.Writer) error
-	RestoreTable(ctx context.Context, table string, target io.Reader) error
+	RestoreTable(ctx context.Context, table string, source io.Reader) error
 }
 
 // CompositeKey is used by backends that do not support the concept of tables
