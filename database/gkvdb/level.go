@@ -6,6 +6,7 @@ package gkvdb
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -178,12 +179,63 @@ func (b *levelDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &levelBatch{db: b, wb: new(leveldb.Batch)}, nil
 }
 
-func (b *levelDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
-	return ErrNotSuported
+func (b *levelDB) DumpTables(ctx context.Context, tables []string, target Encoder) error {
+	log.Infof("dude, make these tables read only")
+
+	for _, table := range tables {
+		it, err := b.NewIterator(ctx, table)
+		if err != nil {
+			return err
+		}
+		for it.Next(ctx) {
+			op := Operation{
+				Op:    OpPut,
+				Table: table,
+				Key:   it.Key(ctx),
+				Value: it.Value(ctx),
+			}
+			err := target.Encode(op)
+			if err != nil {
+				it.Close(ctx)
+				return err
+			}
+		}
+		it.Close(ctx)
+	}
+
+	return nil
 }
 
-func (b *levelDB) RestoreTable(ctx context.Context, table string, source io.Reader) error {
-	return ErrNotSuported
+func (b *levelDB) Restore(ctx context.Context, source Decoder) error {
+	batch, err := b.NewBatch(ctx)
+	if err != nil {
+		return err
+	}
+
+	for {
+		var op Operation
+		err := source.Decode(&op)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return err
+		}
+		switch op.Op {
+		case OpPut:
+			batch.Put(ctx, op.Table, op.Key, op.Value)
+		case OpDel:
+			batch.Del(ctx, op.Table, op.Key)
+		}
+	}
+	err = b.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, batch)
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Transactions

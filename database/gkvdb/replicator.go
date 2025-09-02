@@ -596,11 +596,11 @@ func (b *replicatorDB) NewBatch(ctx context.Context) (Batch, error) {
 	}, nil
 }
 
-func (b *replicatorDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
+func (b *replicatorDB) DumpTables(ctx context.Context, table []string, target Encoder) error {
 	return ErrNotSuported
 }
 
-func (b *replicatorDB) RestoreTable(ctx context.Context, table string, source io.Reader) error {
+func (b *replicatorDB) Restore(ctx context.Context, source Decoder) error {
 	return ErrNotSuported
 }
 

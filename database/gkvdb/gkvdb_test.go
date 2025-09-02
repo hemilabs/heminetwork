@@ -8,12 +8,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -1189,5 +1191,82 @@ func BenchmarkGKVDBPut(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+func TestDumpRestorePipeline(t *testing.T) {
+	home := t.TempDir()
+
+	tableCount := 5
+	tables := make([]string, 0, tableCount)
+	for i := range tableCount {
+		tables = append(tables, fmt.Sprintf("table%v", i))
+	}
+
+	cfg := DefaultLevelConfig(home, tables)
+	db, err := NewLevelDB(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	err = db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := db.Close(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Puts
+	insertCount := 9999
+	err = dbputs(ctx, db, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get
+	err = dbgets(ctx, db, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dump
+	var b bytes.Buffer
+	zw, _ := zstd.NewWriter(&b)
+	je := json.NewEncoder(zw)
+	err = db.DumpTables(ctx, tables, je)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restore, del first
+	err = dbdels(ctx, db, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = dbhas(ctx, db, tables, insertCount)
+	if err == nil {
+		t.Fatal("wtf")
+	}
+	zr, _ := zstd.NewReader(&b)
+	jd := json.NewDecoder(zr)
+	err = db.Restore(ctx, jd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = dbhas(ctx, db, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = dbgets(ctx, db, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

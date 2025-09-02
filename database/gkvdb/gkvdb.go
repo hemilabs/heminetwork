@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 )
 
 var (
@@ -47,9 +46,8 @@ type Database interface {
 	NewBatch(ctx context.Context) (Batch, error)
 
 	// Backup
-	// DumpAll()
-	DumpTable(ctx context.Context, table string, target io.Writer) error
-	RestoreTable(ctx context.Context, table string, source io.Reader) error
+	DumpTables(ctx context.Context, tables []string, target Encoder) error
+	Restore(ctx context.Context, source Decoder) error
 }
 
 // CompositeKey is used by backends that do not support the concept of tables
@@ -229,4 +227,12 @@ type Operation struct {
 // Replay describes a replay of operations into a database.
 type Replay struct {
 	Operations []Operation `json:"operations"`
+}
+
+type Encoder interface {
+	Encode(v any) error
+}
+
+type Decoder interface {
+	Decode(v any) error
 }

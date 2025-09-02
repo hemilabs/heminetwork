@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -247,11 +246,11 @@ func (b *mongoDB) NewBatch(ctx context.Context) (Batch, error) {
 	}, nil
 }
 
-func (b *mongoDB) DumpTable(ctx context.Context, table string, target io.Writer) error {
+func (b *mongoDB) DumpTables(ctx context.Context, tables []string, target Encoder) error {
 	return ErrNotSuported
 }
 
-func (b *mongoDB) RestoreTable(ctx context.Context, table string, source io.Reader) error {
+func (b *mongoDB) Restore(ctx context.Context, source Decoder) error {
 	return ErrNotSuported
 }
 
