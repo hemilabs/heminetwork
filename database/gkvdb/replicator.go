@@ -191,9 +191,12 @@ func (b *replicatorDB) putJournal(ctx context.Context, id uint64, j *journal) er
 	return b.jdb.Put(ctx, "", key[:], value.Bytes())
 }
 
-func (b *replicatorDB) commitJournal(_ context.Context, j *journal) error {
-	// We do not use the parent context at all here. This is to prevent a
-	// premature exit that would result in dataloss at the target.
+// commitJournal drops the provided journal onto disk. This function must
+// complete and cannot be canceled.
+func (b *replicatorDB) commitJournal(pctx context.Context, j *journal) error {
+	// We do not use the parent context unless we are in lazy mode. This is
+	// to prevent a premature exit that would result in dataloss at the
+	// target.
 	ctx := context.Background()
 
 	id, err := newJournalID(ctx, b.jdb)
@@ -214,8 +217,8 @@ func (b *replicatorDB) commitJournal(_ context.Context, j *journal) error {
 	} else {
 		// Sink journal lazily
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-pctx.Done():
+			return pctx.Err()
 		case b.sinkC <- struct{}{}:
 		default:
 		}
@@ -471,16 +474,6 @@ func (b *replicatorDB) Del(ctx context.Context, table string, key []byte) error 
 		return err
 	}
 
-	// Commit journal.
-	//
-	// If we make it here we MUST NOT exit until the journal is safely on
-	// disk.
-	//
-	// Think about these panics, but there is inherent data loss
-	// when this happens. The only way to recover is a full
-	// database reconciliation.
-	//
-	// XXX an idea is to dump the journal in the log but it may be gigantic.
 	j := &journal{ops: new(list.List)}
 	j.ops.PushFront(&journalOp{
 		Op:    opDel,
