@@ -70,7 +70,7 @@ func (b *nutsDB) Open(_ context.Context) error {
 	log.Tracef("open")
 
 	if b.db != nil {
-		return nil // XXX return already open?
+		return ErrDBOpen
 	}
 	// XXX no compression
 	ndb, err := nutsdb.Open(nutsdb.DefaultOptions, nutsdb.WithDir(b.cfg.Home))

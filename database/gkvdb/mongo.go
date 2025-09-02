@@ -68,7 +68,7 @@ func NewMongoDB(cfg *MongoConfig) (Database, error) {
 
 func (b *mongoDB) Open(ctx context.Context) error {
 	if b.db != nil {
-		return nil // XXX return already open?
+		return ErrDBOpen
 	}
 
 	client, err := mongo.Connect(options.Client().

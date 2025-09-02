@@ -317,6 +317,11 @@ func txdelInvalidKey(ctx context.Context, tx Transaction, table string) error {
 }
 
 func dbBasic(ctx context.Context, db Database, tables []string, insertCount int) error {
+	// Already Open
+	if err := db.Open(ctx); !errors.Is(err, ErrDBOpen) {
+		return errors.New("expected already open error")
+	}
+
 	// Put Empty
 	err := dbputEmpty(ctx, db, tables)
 	if err != nil {

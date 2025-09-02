@@ -56,10 +56,8 @@ func NewBoltDB(cfg *BoltConfig) (Database, error) {
 }
 
 func (b *boltDB) Open(_ context.Context) error {
-	log.Tracef("open")
-
 	if b.db != nil {
-		return nil // XXX return already open?
+		return ErrDBOpen
 	}
 
 	ndb, err := bolt.Open(filepath.Join(b.cfg.Home, "bolt.db"), 0o600, nil)
