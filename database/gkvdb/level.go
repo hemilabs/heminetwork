@@ -64,9 +64,6 @@ func NewLevelDB(cfg *LevelConfig) (Database, error) {
 }
 
 func (b *levelDB) Open(_ context.Context) error {
-	if b.db != nil {
-		return ErrDBOpen
-	}
 	ldb, err := leveldb.OpenFile(b.cfg.Home, &opt.Options{
 		BlockCacheEvictRemoved: true,
 		Compression:            opt.NoCompression,
@@ -206,33 +203,46 @@ func (b *levelDB) DumpTables(ctx context.Context, tables []string, target Encode
 	return nil
 }
 
-func (b *levelDB) Restore(ctx context.Context, source Decoder) error {
-	batch, err := b.NewBatch(ctx)
-	if err != nil {
-		return err
-	}
+var defaultMaxRestoreChunk = 256 * 1024 * 1024 // XXX make generic
 
+func (b *levelDB) Restore(ctx context.Context, source Decoder) error {
+	// this code is generic, should be shared by all dbs.
 	for {
-		var op Operation
-		err := source.Decode(&op)
+		batch, err := b.NewBatch(ctx)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
 			return err
 		}
-		switch op.Op {
-		case OpPut:
-			batch.Put(ctx, op.Table, op.Key, op.Value)
-		case OpDel:
-			batch.Del(ctx, op.Table, op.Key)
+
+		totalWritten := 0
+		for {
+			var op Operation
+			err := source.Decode(&op)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					return nil
+				}
+				return err
+			}
+			switch op.Op {
+			case OpPut:
+				batch.Put(ctx, op.Table, op.Key, op.Value)
+			case OpDel:
+				batch.Del(ctx, op.Table, op.Key)
+			}
+
+			// Break out of loop to commit if we went over 256MiB
+			totalWritten += len(op.Key) + len(op.Value)
+			if totalWritten > defaultMaxRestoreChunk {
+				break
+			}
 		}
-	}
-	err = b.Update(ctx, func(ctx context.Context, tx Transaction) error {
-		return tx.Write(ctx, batch)
-	})
-	if err != nil {
-		return err
+
+		err = b.Update(ctx, func(ctx context.Context, tx Transaction) error {
+			return tx.Write(ctx, batch)
+		})
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil

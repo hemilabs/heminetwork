@@ -1255,6 +1255,7 @@ func TestDumpRestorePipeline(t *testing.T) {
 	if err == nil {
 		t.Fatal("wtf")
 	}
+	defaultMaxRestoreChunk = 4096 // Many chunks
 	zr, _ := zstd.NewReader(&b)
 	jd := json.NewDecoder(zr)
 	err = db.Restore(ctx, jd)
