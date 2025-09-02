@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"sync"
 	"time"
 
@@ -78,10 +77,6 @@ func decodeJournalKey(k [8]byte) (id uint64) {
 }
 
 type journal struct {
-	ctx  context.Context       // external wait
-	done func(context.Context) // external completion
-	err  error                 // error occurred prior to completion
-
 	ops *list.List
 }
 
@@ -141,7 +136,6 @@ type replicatorDB struct {
 	source          Database // source
 	sink            Database // sink
 	jdb             Database // journal, for now only support leveldb
-	journalC        chan *journal
 	sinkC           chan string
 	handlersFlusher sync.WaitGroup
 }
@@ -161,11 +155,10 @@ func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, er
 		return nil, fmt.Errorf("must provide journal home")
 	}
 	bdb := &replicatorDB{
-		cfg:      cfg,
-		source:   source,
-		sink:     sink,
-		journalC: make(chan *journal, 1024), // MUST BE FLUSHED PRIOR TO EXIT
-		sinkC:    make(chan string, 1),      // Can be aborted
+		cfg:    cfg,
+		source: source,
+		sink:   sink,
+		sinkC:  make(chan string, 1), // Can be aborted
 	}
 
 	// Setup journal.
@@ -178,9 +171,10 @@ func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, er
 	return bdb, nil
 }
 
-func (b *replicatorDB) commitJournal(ctx context.Context, id uint64, j *journal) error {
-	// Stream ops into value of journal
+func (b *replicatorDB) putJournal(ctx context.Context, id uint64, j *journal) error {
 	// XXX verify key does not exist!
+	//
+	// Stream ops into value of journal
 	var value bytes.Buffer
 	encoder := kbin.NewEncoder(&value)
 	for j.ops.Len() > 0 {
@@ -195,26 +189,25 @@ func (b *replicatorDB) commitJournal(ctx context.Context, id uint64, j *journal)
 	return b.jdb.Put(ctx, "", key[:], value.Bytes())
 }
 
-// this is very racy, use with caution.
-func (b *replicatorDB) flushed(ctx context.Context) bool {
-	if len(b.journalC) != 0 {
-		return false
-	}
-	it, err := b.jdb.NewIterator(ctx, "")
+func (b *replicatorDB) commitJournal(ctx context.Context, j *journal) error {
+	id, err := newJournalID(ctx, b.jdb)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	for it.Next(ctx) {
-		if bytes.Equal(it.Key(ctx), lastSequenceID) {
-			continue
-		}
-		return false
+	err = b.putJournal(ctx, id, j)
+	if err != nil {
+		return err
 	}
-	// Make sure nothing came in, this function really is best effort.
-	if len(b.journalC) != 0 {
-		return false
+
+	// Try to sink journal
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case b.sinkC <- "":
+	default:
 	}
-	return true
+
+	return nil
 }
 
 func (b *replicatorDB) replayJournal(ctx context.Context, key []byte, value []byte) error {
@@ -305,17 +298,11 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 	// The terminal sentinel is crap and needs to be rethought.
 
 	defer b.handlersFlusher.Done()
-	var (
-		attempt   int
-		delay     time.Duration = -1
-		goingDown bool
-	)
+	var goingDown bool
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.Tick(delay):
-			attempt++
 		case cmd := <-b.sinkC:
 			// Prevent going down if cmd != ""
 			if cmd == "" {
@@ -325,91 +312,18 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 			}
 		}
 
+		log.Infof("sinking")
 		err := b.sinkJournals(ctx)
 		if err != nil {
 			// XXX let's not do this in a 1 message deep queue.
 			log.Errorf("sink handler: %v", err)
-			// Exponential retry in case of error
-			if delay < maxRetryDelay {
-				exp := time.Duration(math.Pow(2, float64(attempt)))
-				delay = min(defaultRetryTimeout*exp, maxRetryDelay)
-			}
-		} else {
-			// Reset retry logic on success
-			attempt = 0
-			delay = -1
+			panic(err)
 		}
 
 		if goingDown {
 			log.Infof("Journals replayed, exiting.")
 			return nil
 		}
-	}
-}
-
-func (b *replicatorDB) journalHandler(pctx context.Context) error {
-	log.Tracef("journalHandler")
-	defer log.Tracef("journalHandler exit")
-
-	defer b.handlersFlusher.Done()
-	for {
-		var j *journal
-		select {
-		case <-pctx.Done():
-			return pctx.Err()
-		case j = <-b.journalC:
-			if j == nil {
-				// XXX we must really make sure
-				// there is nothing else in the channel!
-				if len(b.journalC) != 0 {
-					panic("FIX THIS SHIT")
-				}
-				return nil
-			}
-		}
-
-		// don't use parent context since we MUST sink the journal
-		// entry prior to exit.
-		ctx := context.TODO() // XXX this needs thinking
-
-		// Commit journal.
-		//
-		// Think about these panics, but there is inherent data loss
-		// when this happens. The only way to recover is a full
-		// database reconciliation.
-		id, err := newJournalID(ctx, b.jdb)
-		if err != nil {
-			panic(err)
-		}
-		err = b.commitJournal(ctx, id, j)
-		if err != nil {
-			panic(err)
-		}
-
-		// Tell caller we are done if we are in lazy mode.
-		switch b.cfg.Policy {
-		case Direct:
-			err := b.processJournal(ctx, id)
-			if err != nil {
-				j.err = SinkUnavailableError{e: err}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case b.sinkC <- "":
-				default:
-				}
-			}
-		case Lazy:
-			// Sink journal
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case b.sinkC <- "":
-			default:
-			}
-		}
-
-		j.done(ctx) // Mark journal done
 	}
 }
 
@@ -441,14 +355,6 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 			err = SinkUnavailableError{e: err}
 		}
 	}
-
-	b.handlersFlusher.Add(1)
-	go func() {
-		err := b.journalHandler(ctx)
-		if err != nil {
-			log.Errorf("journal: %v", err)
-		}
-	}()
 
 	b.handlersFlusher.Add(1)
 	go func() {
@@ -495,12 +401,8 @@ func (b *replicatorDB) Close(ctx context.Context) error {
 	// XXX this channel mess kinda sucks, rethink
 	// XXX at the very least we must prevent database commands from
 	// generating more flushing pressure.
-	b.journalC <- nil       // nil is sentinel value for going down
 	b.sinkC <- "going down" // XXX this will prevent shutting down if ctx dies
 	b.handlersFlusher.Wait()
-	if len(b.journalC) != 0 {
-		panic("journal not flushed")
-	}
 
 	var errs []error
 	err := b.source.Close(ctx)
@@ -525,56 +427,6 @@ func copySlice(value []byte) []byte {
 	return nil
 }
 
-func newJournal(pctx context.Context, sync bool) *journal {
-	// This is a bit awkward but if we are in direct mode derive a new
-	// context that we cancel once a command is complete. In lazy mode just
-	// use the parent context.
-	j := &journal{
-		ctx:  pctx, // For caller to wait on
-		done: func(context.Context) {},
-		ops:  list.New(),
-	}
-	if sync {
-		ctx, cancel := context.WithCancel(pctx) // Make sure done is called
-		j.ctx = ctx
-		j.done = func(_ context.Context) { cancel() }
-	}
-	return j
-}
-
-func singleJournal(ctx context.Context, sync bool, op opT, table string, key, value []byte) *journal {
-	j := newJournal(ctx, sync)
-	j.ops.PushBack(&journalOp{
-		Op:    op,
-		Table: table,
-		Key:   copySlice(key),
-		Value: copySlice(value),
-	})
-	return j
-}
-
-func (b *replicatorDB) journal(pctx context.Context, j *journal) error {
-	select {
-	case <-j.ctx.Done():
-		return j.ctx.Err() // Catches pctx and j cancel
-	case b.journalC <- j:
-	}
-
-	// If this is a slow sink performance is going to suck.
-	switch b.cfg.Policy {
-	case Direct:
-		//nolint:staticcheck // fuck you dumb ass linter
-		select {
-		case <-j.ctx.Done():
-			// Catches pctx and j cancel
-			return j.err
-		}
-	case Lazy:
-		j.done(pctx) // Don't leak contexts, in case done was not called.
-	}
-	return nil
-}
-
 func (b *replicatorDB) Del(pctx context.Context, table string, key []byte) error {
 	err := b.source.Update(pctx, func(ctx context.Context, tx Transaction) error {
 		if err := tx.Del(ctx, table, key); err != nil {
@@ -586,9 +438,30 @@ func (b *replicatorDB) Del(pctx context.Context, table string, key []byte) error
 		return err
 	}
 
-	// Send to journal
-	j := singleJournal(pctx, b.cfg.Policy == Direct, opDel, table, key, nil)
-	return b.journal(pctx, j)
+	// Commit journal.
+	//
+	// If we make it here we MUST NOT exit until the journal is safely on
+	// disk.
+	//
+	// Think about these panics, but there is inherent data loss
+	// when this happens. The only way to recover is a full
+	// database reconciliation.
+	//
+	// XXX an idea is to dump the journal in the log but it may be gigantic.
+	ctx := context.Background()
+	j := &journal{ops: new(list.List)}
+	j.ops.PushFront(&journalOp{
+		Op:    opDel,
+		Table: table,
+		Key:   key,
+	})
+	err = b.commitJournal(ctx, j)
+	if err != nil {
+		panic(err)
+	}
+
+	// XXX lazy here
+	return nil
 }
 
 func (b *replicatorDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
@@ -610,9 +483,21 @@ func (b *replicatorDB) Put(pctx context.Context, table string, key, value []byte
 		return err
 	}
 
-	// Send to journal
-	j := singleJournal(pctx, b.cfg.Policy == Direct, opPut, table, key, value)
-	return b.journal(pctx, j)
+	// XXX dont exit
+	ctx := context.Background()
+	j := &journal{ops: new(list.List)}
+	j.ops.PushFront(&journalOp{
+		Op:    opPut,
+		Table: table,
+		Key:   key,
+		Value: value,
+	})
+	err = b.commitJournal(ctx, j)
+	if err != nil {
+		panic(err)
+	}
+
+	return nil
 }
 
 func (b *replicatorDB) Begin(ctx context.Context, write bool) (Transaction, error) {
@@ -737,17 +622,20 @@ func (tx *replicatorTX) Put(ctx context.Context, table string, key []byte, value
 	return nil
 }
 
-func (tx *replicatorTX) Commit(ctx context.Context) error {
-	err := tx.source.Commit(ctx)
+func (tx *replicatorTX) Commit(pctx context.Context) error {
+	err := tx.source.Commit(pctx)
 	if err != nil {
 		return err
 	}
 	// journal tx
 	// XXX we must makre sure this journal makes it; not sure that's the
 	// case now. Add test for this.
-	j := newJournal(ctx, tx.db.cfg.Policy == Direct)
-	j.ops = tx.ops
-	return tx.db.journal(ctx, j)
+	ctx := context.Background()
+	err = tx.db.commitJournal(ctx, &journal{ops: tx.ops})
+	if err != nil {
+		panic(err)
+	}
+	return nil
 }
 
 func (tx *replicatorTX) Rollback(ctx context.Context) error {

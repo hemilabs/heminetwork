@@ -342,10 +342,6 @@ func TestReplicateLazy(t *testing.T) {
 		t.Logf("%v: %v records inserted", table, maxPuts)
 	}
 
-	for !db.(*replicatorDB).flushed(ctx) {
-		time.Sleep(time.Millisecond)
-	}
-
 	// Verify that we have them in the replicator db (really the source)
 	// and in the destination db.
 	for _, table := range tables {
@@ -396,10 +392,6 @@ func TestReplicateLazy(t *testing.T) {
 		}
 		recordsPerTable[k] = 0
 		t.Logf("%v: %v record deleted", table, x)
-
-		for !db.(*replicatorDB).flushed(ctx) {
-			time.Sleep(time.Millisecond)
-		}
 
 		// Iterate over table and assert it matches source
 		for tb := range tables {
@@ -585,10 +577,6 @@ func TestReplicateRetry(t *testing.T) {
 	}
 	t.Log("destination db restarted")
 
-	for !db.(*replicatorDB).flushed(ctx) {
-		time.Sleep(time.Millisecond)
-	}
-
 	// Verify that we have them in the replicator db (really the source)
 	// and in the destination db.
 	for _, table := range tables {
@@ -664,10 +652,6 @@ func TestReplicateOnStartup(t *testing.T) {
 	}
 	t.Log("db restarted")
 
-	for !db.(*replicatorDB).flushed(ctx) {
-		time.Sleep(time.Millisecond)
-	}
-
 	// Verify that we have them in the replicator db (really the source)
 	// and in the destination db.
 	for _, table := range tables {
@@ -724,10 +708,6 @@ func TestReplicateLevelMongo(t *testing.T) {
 		t.Logf("%v: %v records inserted", table, maxPuts)
 	}
 
-	for !db.(*replicatorDB).flushed(ctx) {
-		time.Sleep(time.Millisecond)
-	}
-
 	// Verify that we have them in the replicator db (really the source)
 	// and in the destination db.
 	for _, table := range tables {
@@ -778,10 +758,6 @@ func TestReplicateLevelMongo(t *testing.T) {
 		}
 		recordsPerTable[k] = 0
 		t.Logf("%v: %v record deleted", table, x)
-
-		for !db.(*replicatorDB).flushed(ctx) {
-			time.Sleep(time.Millisecond)
-		}
 
 		// Iterate over table and assert it matches source
 		for tb := range tables {
