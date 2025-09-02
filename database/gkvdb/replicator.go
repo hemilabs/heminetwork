@@ -54,7 +54,8 @@ const (
 // journalOp is an internal journal operation. It represents and individual
 // operation that can be replayed into a database.
 //
-// XXX we currently DO NOT copy key/val. that may be too expensive and may need
+// XXX we currently have a mixture of a copy or direct use of key/val. that may
+// be too expensive and may need
 // caller control. In a worst case scenario we end up copying the key 3 times.
 // 1. On the initial call where it lives in the list
 // 2. On creation of the journal key, which must happen late
@@ -192,23 +193,15 @@ func (b *replicatorDB) putJournal(ctx context.Context, id uint64, j *journal) er
 }
 
 // commitJournal drops the provided journal onto disk. This function must
-// complete and cannot be canceled.
-// XXX there is a race between comitting a transaction and obtaining a journal
-// ID from the journal database. This can lead to data corruption and we should
-// find a way to atomically instead of best-effort to keep the order of
-// transactions.
-func (b *replicatorDB) commitJournal(pctx context.Context, j *journal) error {
+// complete and cannot be canceled. The id parameter is passed in so that the
+// caller can determine the commit order at the target.
+func (b *replicatorDB) commitJournal(pctx context.Context, id uint64, j *journal) error {
 	// We do not use the parent context unless we are in lazy mode. This is
-	// to prevent a premature exit that would result in dataloss at the
+	// to prevent a premature exit that would result in data-loss at the
 	// target.
 	ctx := context.Background()
 
-	id, err := newJournalID(ctx, b.jdb)
-	if err != nil {
-		return err
-	}
-	err = b.putJournal(ctx, id, j)
-	if err != nil {
+	if err := b.putJournal(ctx, id, j); err != nil {
 		return err
 	}
 
@@ -261,7 +254,7 @@ func (b *replicatorDB) replayJournal(ctx context.Context, key []byte, value []by
 		return tx.Write(ctx, jb)
 	})
 	if err != nil {
-		return err
+		return SinkUnavailableError{e: err}
 	}
 	// Delete journal
 	return b.jdb.Del(ctx, "", key)
@@ -463,33 +456,50 @@ func copySlice(value []byte) []byte {
 	return nil
 }
 
-func (b *replicatorDB) Del(ctx context.Context, table string, key []byte) error {
+func (b *replicatorDB) directAccess(ctx context.Context, callback func(context.Context) (*journal, error)) error {
 	if b.closed(ctx) {
 		return ErrDBClosed
 	}
 
-	err := b.source.Update(ctx, func(ctx context.Context, tx Transaction) error {
-		if err := tx.Del(ctx, table, key); err != nil {
-			return err
-		}
-		return nil
-	})
+	// Obtain an ID early so that we can do our college best to maintain
+	// access order.
+	id, err := newJournalID(ctx, b.jdb)
 	if err != nil {
 		return err
 	}
 
-	j := &journal{ops: new(list.List)}
-	j.ops.PushFront(&journalOp{
-		Op:    opDel,
-		Table: table,
-		Key:   key,
-	})
-	err = b.commitJournal(ctx, j)
+	j, err := callback(ctx)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
+	err = b.commitJournal(ctx, id, j)
+	if err != nil {
+		return err
+	}
 	return nil
+}
+
+func (b *replicatorDB) Del(ctx context.Context, table string, key []byte) error {
+	return b.directAccess(ctx, func(ctx context.Context) (*journal, error) {
+		err := b.source.Update(ctx, func(ctx context.Context, tx Transaction) error {
+			if err := tx.Del(ctx, table, key); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		j := &journal{ops: new(list.List)}
+		j.ops.PushFront(&journalOp{
+			Op:    opDel,
+			Table: table,
+			Key:   key,
+		})
+		return j, nil
+	})
 }
 
 func (b *replicatorDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
@@ -509,33 +519,26 @@ func (b *replicatorDB) Get(ctx context.Context, table string, key []byte) ([]byt
 }
 
 func (b *replicatorDB) Put(ctx context.Context, table string, key, value []byte) error {
-	if b.closed(ctx) {
-		return ErrDBClosed
-	}
-
-	err := b.source.Update(ctx, func(ctx context.Context, tx Transaction) error {
-		if err := tx.Put(ctx, table, key, value); err != nil {
-			return err
+	return b.directAccess(ctx, func(ctx context.Context) (*journal, error) {
+		err := b.source.Update(ctx, func(ctx context.Context, tx Transaction) error {
+			if err := tx.Put(ctx, table, key, value); err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
 
-	j := &journal{ops: new(list.List)}
-	j.ops.PushFront(&journalOp{
-		Op:    opPut,
-		Table: table,
-		Key:   key,
-		Value: value,
+		j := &journal{ops: new(list.List)}
+		j.ops.PushFront(&journalOp{
+			Op:    opPut,
+			Table: table,
+			Key:   key,
+			Value: value,
+		})
+		return j, nil
 	})
-	err = b.commitJournal(ctx, j)
-	if err != nil {
-		return SinkUnavailableError{e: err}
-	}
-
-	return nil
 }
 
 func (b *replicatorDB) Begin(ctx context.Context, write bool) (Transaction, error) {
@@ -665,14 +668,21 @@ func (tx *replicatorTX) Commit(ctx context.Context) error {
 		return ErrDBClosed
 	}
 
-	err := tx.source.Commit(ctx)
+	// Obtain an ID early so that we can do our college best to maintain
+	// access order.
+	id, err := newJournalID(ctx, tx.db.jdb)
 	if err != nil {
 		return err
 	}
-	err = tx.db.commitJournal(ctx, &journal{ops: tx.ops})
+	err = tx.source.Commit(ctx)
+	if err != nil {
+		return err
+	}
+	err = tx.db.commitJournal(ctx, id, &journal{ops: tx.ops})
 	if err != nil {
 		panic(err)
 	}
+
 	return nil
 }
 
