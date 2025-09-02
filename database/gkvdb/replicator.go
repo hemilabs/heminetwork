@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package gkvdb
 
 import (
@@ -9,14 +13,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"time"
 
 	kbin "github.com/kelindar/binary"
-)
-
-const (
-	defaultRetryTimeout = 2 * time.Second
-	maxRetryDelay       = 15 * time.Second
 )
 
 type SinkUnavailableError struct {
@@ -72,10 +70,11 @@ func encodeJournalKey(id uint64) (k [8]byte) {
 	return
 }
 
-func decodeJournalKey(k [8]byte) (id uint64) {
-	id = binary.BigEndian.Uint64(k[0:])
-	return
-}
+// decodeJournalKey is currently unused.
+//func decodeJournalKey(k [8]byte) (id uint64) {
+//	id = binary.BigEndian.Uint64(k[0:])
+//	return
+//}
 
 type journal struct {
 	ops *list.List
