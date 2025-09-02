@@ -54,8 +54,8 @@ const (
 // journalOp is an internal journal operation. It represents and individual
 // operation that can be replayed into a database.
 //
-// XXX we currently copy key/val. that may be too expensive and may need caller
-// control. In a worst case scenario we end up copying the key 3 times.
+// XXX we currently DO NOT copy key/val. that may be too expensive and may need
+// caller control. In a worst case scenario we end up copying the key 3 times.
 // 1. On the initial call where it lives in the list
 // 2. On creation of the journal key, which must happen late
 // 3. Possibly when sent into the sink
@@ -193,6 +193,10 @@ func (b *replicatorDB) putJournal(ctx context.Context, id uint64, j *journal) er
 
 // commitJournal drops the provided journal onto disk. This function must
 // complete and cannot be canceled.
+// XXX there is a race between comitting a transaction and obtaining a journal
+// ID from the journal database. This can lead to data corruption and we should
+// find a way to atomically instead of best-effort to keep the order of
+// transactions.
 func (b *replicatorDB) commitJournal(pctx context.Context, j *journal) error {
 	// We do not use the parent context unless we are in lazy mode. This is
 	// to prevent a premature exit that would result in dataloss at the
