@@ -607,6 +607,9 @@ func dbIterateNext(ctx context.Context, db Database, table string, recordCount i
 		}
 		i++
 	}
+	if recordCount != i {
+		return fmt.Errorf("found %d records, expected %d", i, recordCount)
+	}
 	return nil
 }
 
@@ -1024,8 +1027,11 @@ func TestGKVDB(t *testing.T) {
 			t.Run("iterator", func(t *testing.T) {
 				home := t.TempDir()
 
-				table := "mytable"
-				tables := []string{table}
+				tableCount := 3
+				tables := make([]string, 0, tableCount)
+				for i := range tableCount {
+					tables = append(tables, fmt.Sprintf("table%v", i))
+				}
 
 				db := tti.dbFunc(home, tables)
 				err := db.Open(ctx)
@@ -1040,24 +1046,28 @@ func TestGKVDB(t *testing.T) {
 				}()
 
 				// Populate db
-				for i := range insertCount {
-					err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
-					if err != nil {
-						t.Fatal(fmt.Errorf("put [%v,%v]: %w", i, i, err))
+				for _, table := range tables {
+					for i := range insertCount {
+						err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
+						if err != nil {
+							t.Fatal(fmt.Errorf("put [%v,%v]: %w", i, i, err))
+						}
 					}
 				}
 
-				if err = dbIterateNext(ctx, db, table, insertCount); err != nil {
-					log.Errorf("dbIterateNext: %v", err)
-					t.Fail()
-				}
-				if err = dbIterateFirstLast(ctx, db, table, insertCount); err != nil {
-					log.Errorf("dbIterateFirstLast: %v", err)
-					t.Fail()
-				}
-				if err = dbIterateSeek(ctx, db, table, insertCount); err != nil {
-					log.Errorf("dbIterateSeek: %v", err)
-					t.Fail()
+				for _, table := range tables {
+					if err = dbIterateNext(ctx, db, table, insertCount); err != nil {
+						log.Errorf("dbIterateNext: %v", err)
+						t.Fail()
+					}
+					if err = dbIterateFirstLast(ctx, db, table, insertCount); err != nil {
+						log.Errorf("dbIterateFirstLast: %v", err)
+						t.Fail()
+					}
+					if err = dbIterateSeek(ctx, db, table, insertCount); err != nil {
+						log.Errorf("dbIterateSeek: %v", err)
+						t.Fail()
+					}
 				}
 			})
 
