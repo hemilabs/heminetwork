@@ -318,6 +318,7 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 
 	defer b.handlersFlusher.Done()
 	var goingDown bool
+	printError := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -333,8 +334,13 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 
 		err := b.sinkJournals(ctx)
 		if err != nil {
-			// XXX let's not do this in a 1 message deep queue.
-			log.Errorf("sink handler: %v", err)
+			if printError {
+				// Only print first error
+				log.Errorf("sink handler: %v", err)
+				printError = false
+			}
+		} else {
+			printError = true
 		}
 
 		if goingDown {
