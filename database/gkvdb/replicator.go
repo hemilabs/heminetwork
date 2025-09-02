@@ -133,11 +133,13 @@ type ReplicatorConfig struct {
 type replicatorDB struct {
 	cfg *ReplicatorConfig
 
-	source          Database // source
-	sink            Database // sink
-	jdb             Database // journal, for now only support leveldb
-	sinkC           chan string
-	handlersFlusher sync.WaitGroup
+	source Database // source
+	sink   Database // sink
+	jdb    Database // journal, for now only support leveldb
+
+	sinkC     chan struct{}
+	closeSink context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 func DefaultReplicatorConfig(home string, policy Policy) *ReplicatorConfig {
@@ -158,7 +160,7 @@ func NewReplicatorDB(cfg *ReplicatorConfig, source, sink Database) (Database, er
 		cfg:    cfg,
 		source: source,
 		sink:   sink,
-		sinkC:  make(chan string, 1), // Can be aborted
+		sinkC:  make(chan struct{}, 1), // Can be aborted
 	}
 
 	// Setup journal.
@@ -210,7 +212,7 @@ func (b *replicatorDB) commitJournal(ctx context.Context, j *journal) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case b.sinkC <- "":
+		case b.sinkC <- struct{}{}:
 		default:
 		}
 	}
@@ -309,27 +311,16 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 	log.Tracef("sinkHandler")
 	defer log.Tracef("sinkHandler exit")
 
-	// XXX this needs some more thought. In direct mode we should flush
-	// journals. In lazy mode we can exist whenever since the journal can
-	// be replayed later. Although it is good form to at least try to
-	// flush the journals.
-	//
-	// The terminal sentinel is crap and needs to be rethought.
+	// When context is canceled try to sink the journals.
 
-	defer b.handlersFlusher.Done()
+	defer b.wg.Done()
 	var goingDown bool
 	printError := true
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case cmd := <-b.sinkC:
-			// Prevent going down if cmd != ""
-			if cmd == "" {
-			} else {
-				log.Infof("Going down, finish replaying journals on target.")
-				goingDown = true
-			}
+			goingDown = true
+		case <-b.sinkC:
 		}
 
 		err := b.sinkJournals(ctx)
@@ -350,26 +341,26 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 	}
 }
 
-func (b *replicatorDB) Open(ctx context.Context) error {
+func (b *replicatorDB) Open(pctx context.Context) error {
 	log.Tracef("Open")
 	defer log.Tracef("Open exit")
 
 	var errs []error
 
 	// journal
-	err := b.jdb.Open(ctx)
+	err := b.jdb.Open(pctx)
 	if err != nil {
 		return err
 	}
 
 	// source
-	err = b.source.Open(ctx)
+	err = b.source.Open(pctx)
 	if err != nil {
 		goto journal
 	}
 
 	// sink
-	err = b.sink.Open(ctx)
+	err = b.sink.Open(pctx)
 	if err != nil {
 		switch b.cfg.Policy {
 		case Direct:
@@ -379,36 +370,42 @@ func (b *replicatorDB) Open(ctx context.Context) error {
 		}
 	}
 
-	b.handlersFlusher.Add(1)
-	go func() {
-		// XXX do not call this with parent context
-		if err := b.sinkHandler(ctx); err != nil {
-			log.Errorf("sink: %v", err)
-		}
-	}()
-
 	switch b.cfg.Policy {
 	case Direct:
+		// Do nothing on close sink
+		b.closeSink = func() {}
+
 		// Process missed journal entries before returning.
-		err := b.sinkJournals(ctx)
+		err := b.sinkJournals(pctx)
 		if err != nil {
 			return err
 		}
 	case Lazy:
+		// Context to cancel sink
+		sctx, scancel := context.WithCancel(pctx)
+		b.closeSink = scancel
+
+		b.wg.Add(1)
+		go func() {
+			if err := b.sinkHandler(sctx); err != nil {
+				log.Errorf("sink: %v", err)
+			}
+		}()
+
 		// poke sinkHandler to replay journals that weren't replicated.
-		b.sinkC <- ""
+		b.sinkC <- struct{}{}
 	}
 
 	return err
 
 	// unwind
 journal:
-	err = b.jdb.Close(ctx)
+	err = b.jdb.Close(pctx)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("journal: %w", err))
 	}
 source:
-	err = b.source.Close(ctx)
+	err = b.source.Close(pctx)
 	if err != nil {
 		errs = append(errs, fmt.Errorf("source: %w", err))
 	}
@@ -420,13 +417,8 @@ func (b *replicatorDB) Close(ctx context.Context) error {
 	log.Tracef("Close")
 	defer log.Tracef("Close exit")
 
-	// We must not allow close until the journal has been flushed.
-	//
-	// XXX this channel mess kinda sucks, rethink
-	// XXX at the very least we must prevent database commands from
-	// generating more flushing pressure.
-	b.sinkC <- "going down" // XXX this will prevent shutting down if ctx dies
-	b.handlersFlusher.Wait()
+	b.closeSink()
+	b.wg.Wait()
 
 	var errs []error
 	err := b.source.Close(ctx)
