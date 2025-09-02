@@ -291,6 +291,20 @@ func (b *replicatorDB) sinkJournals(ctx context.Context) error {
 	return err
 }
 
+func (b *replicatorDB) flushed(ctx context.Context) bool {
+	it, err := b.jdb.NewIterator(ctx, "")
+	if err != nil {
+		panic(err) // XXX should we return true or false instead?
+	}
+	for it.Next(ctx) {
+		if bytes.Equal(it.Key(ctx), lastSequenceID) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 	log.Tracef("sinkHandler")
 	defer log.Tracef("sinkHandler exit")
