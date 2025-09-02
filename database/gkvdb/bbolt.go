@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 
 	bolt "go.etcd.io/bbolt"
-	berr "go.etcd.io/bbolt/errors"
 )
 
 type BoltConfig struct {
@@ -81,7 +80,7 @@ func (b *boltDB) Open(_ context.Context) error {
 }
 
 func (b *boltDB) Close(_ context.Context) error {
-	return b.db.Close()
+	return xerr(b.db.Close())
 }
 
 func (b *boltDB) Del(ctx context.Context, table string, key []byte) error {
@@ -97,7 +96,7 @@ func (b *boltDB) Has(ctx context.Context, table string, key []byte) (bool, error
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
-	return err == nil, xerr(err)
+	return err == nil, err
 }
 
 func (b *boltDB) Get(ctx context.Context, table string, key []byte) ([]byte, error) {
@@ -121,7 +120,7 @@ func (b *boltDB) Put(ctx context.Context, table string, key, value []byte) error
 func (b *boltDB) Begin(_ context.Context, write bool) (Transaction, error) {
 	tx, err := b.db.Begin(write)
 	if err != nil {
-		return nil, err
+		return nil, xerr(err)
 	}
 	return &boltTX{
 		tx: tx,
@@ -141,7 +140,7 @@ func (b *boltDB) execute(ctx context.Context, write bool, callback func(ctx cont
 		if rberr := itx.Rollback(ctx); rberr != nil {
 			return fmt.Errorf("rollback: callback: %w -> %w", err, rberr)
 		}
-		return err
+		return xerr(err)
 	}
 	return itx.Commit(ctx)
 }
@@ -172,7 +171,7 @@ func (b *boltDB) NewIterator(ctx context.Context, table string) (Iterator, error
 func (b *boltDB) NewRange(ctx context.Context, table string, start, end []byte) (Range, error) {
 	tx, err := b.Begin(ctx, false)
 	if err != nil {
-		return nil, xerr(err)
+		return nil, err
 	}
 	nr := &boltRange{
 		table:  table,
@@ -219,7 +218,7 @@ func (tx *boltTX) Del(ctx context.Context, table string, key []byte) error {
 	if bu == nil {
 		return ErrTableNotFound
 	}
-	return bu.Delete(key)
+	return xerr(bu.Delete(key))
 }
 
 func (tx *boltTX) Has(ctx context.Context, table string, key []byte) (bool, error) {
@@ -252,10 +251,7 @@ func (tx *boltTX) Put(ctx context.Context, table string, key []byte, value []byt
 	}
 	err := bu.Put(key, value)
 	if err != nil {
-		if errors.Is(err, berr.ErrKeyRequired) {
-			return nil
-		}
-		return err
+		return xerr(err)
 	}
 	return nil
 }
@@ -264,11 +260,11 @@ func (tx *boltTX) Commit(ctx context.Context) error {
 	if !tx.tx.Writable() {
 		return tx.Rollback(ctx)
 	}
-	return tx.tx.Commit()
+	return xerr(tx.tx.Commit())
 }
 
 func (tx *boltTX) Rollback(ctx context.Context) error {
-	return tx.tx.Rollback()
+	return xerr(tx.tx.Rollback())
 }
 
 func (tx *boltTX) Write(ctx context.Context, b Batch) error {
@@ -278,7 +274,7 @@ func (tx *boltTX) Write(ctx context.Context, b Batch) error {
 	}
 	for _, f := range bb.sequence {
 		if err := f(ctx, tx); err != nil {
-			return err
+			return xerr(err)
 		}
 	}
 	return nil

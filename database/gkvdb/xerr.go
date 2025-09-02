@@ -7,17 +7,37 @@ package gkvdb
 import (
 	"errors"
 
+	"github.com/cockroachdb/pebble"
+	"github.com/dgraph-io/badger/v4"
 	"github.com/nutsdb/nutsdb"
 	"github.com/syndtr/goleveldb/leveldb"
+	bolterrs "go.etcd.io/bbolt/errors"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // Translate nutsb errors into gkvdb errors
 func xerr(err error) error {
 	switch {
+	// badger
+	case errors.Is(err, badger.ErrDBClosed):
+		err = ErrDBClosed
+	case errors.Is(err, badger.ErrKeyNotFound):
+		err = ErrKeyNotFound
+
+	// bbolt
+	case errors.Is(err, bolterrs.ErrDatabaseNotOpen):
+		err = ErrDBClosed
+	case errors.Is(err, bolterrs.ErrKeyRequired):
+		err = nil
+
 	// leveldb
 	case errors.Is(err, leveldb.ErrClosed):
 		err = ErrDBClosed
 	case errors.Is(err, leveldb.ErrNotFound):
+		err = ErrKeyNotFound
+
+	// mongo
+	case errors.Is(err, mongo.ErrNoDocuments):
 		err = ErrKeyNotFound
 
 	// nutsdb
@@ -31,7 +51,13 @@ func xerr(err error) error {
 	case errors.Is(err, nutsdb.ErrDBClosed):
 		err = ErrDBClosed
 	case errors.Is(err, nutsdb.ErrKeyEmpty):
-		return nil
+		err = nil
+
+	// pebble
+	case errors.Is(err, pebble.ErrClosed):
+		err = ErrDBClosed
+	case errors.Is(err, pebble.ErrNotFound):
+		err = ErrKeyNotFound
 	}
 	return err
 }

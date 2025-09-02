@@ -70,21 +70,21 @@ func (b *pebbleDB) Open(_ context.Context) error {
 		},
 	})
 	if err != nil {
-		return err
+		return xerr(err)
 	}
 	b.db = ldb
 	return nil
 }
 
 func (b *pebbleDB) Close(_ context.Context) error {
-	return b.db.Close()
+	return xerr(b.db.Close())
 }
 
 func (b *pebbleDB) Del(_ context.Context, table string, key []byte) error {
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
-	return b.db.Delete(NewCompositeKey(table, key), nil)
+	return xerr(b.db.Delete(NewCompositeKey(table, key), nil))
 }
 
 func (b *pebbleDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
@@ -104,10 +104,7 @@ func (b *pebbleDB) Get(_ context.Context, table string, key []byte) ([]byte, err
 	}
 	value, closer, err := b.db.Get(NewCompositeKey(table, key))
 	if err != nil {
-		if errors.Is(err, pebble.ErrNotFound) {
-			return nil, ErrKeyNotFound
-		}
-		return nil, err
+		return nil, xerr(err)
 	}
 	defer func() {
 		err = closer.Close()
@@ -124,7 +121,7 @@ func (b *pebbleDB) Put(_ context.Context, table string, key, value []byte) error
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
-	return b.db.Set(NewCompositeKey(table, key), value, nil)
+	return xerr(b.db.Set(NewCompositeKey(table, key), value, nil))
 }
 
 // / XXX Since pebbleDB doesn't have transactions, we must use batches to
@@ -149,7 +146,7 @@ func (b *pebbleDB) execute(ctx context.Context, write bool, callback func(ctx co
 		if cerr := tx.Rollback(ctx); cerr != nil {
 			return fmt.Errorf("rollback %w: %w", cerr, err)
 		}
-		return err
+		return xerr(err)
 	}
 	return tx.Commit(ctx)
 }
@@ -168,7 +165,7 @@ func (b *pebbleDB) NewIterator(ctx context.Context, table string) (Iterator, err
 	}
 	iter, err := b.db.NewIterWithContext(ctx, nil)
 	if err != nil {
-		return nil, err
+		return nil, xerr(err)
 	}
 
 	// set iterator to before first value
@@ -189,7 +186,7 @@ func (b *pebbleDB) NewRange(ctx context.Context, table string, start, end []byte
 		UpperBound: NewCompositeKey(table, end),
 	})
 	if err != nil {
-		return nil, err
+		return nil, xerr(err)
 	}
 
 	// set iterator to before first value
@@ -248,10 +245,7 @@ func (tx *pebbleTX) Get(ctx context.Context, table string, key []byte) ([]byte, 
 	}
 	val, closer, err := tx.tx.Get(NewCompositeKey(table, key))
 	if err != nil {
-		if errors.Is(err, pebble.ErrNotFound) {
-			return nil, ErrKeyNotFound
-		}
-		return nil, err
+		return nil, xerr(err)
 	}
 	defer func() {
 		err = closer.Close() // XXX check for nil?
@@ -282,7 +276,7 @@ func (tx *pebbleTX) Rollback(ctx context.Context) error {
 }
 
 func (tx *pebbleTX) Write(ctx context.Context, b Batch) error {
-	return tx.tx.Apply(b.(*pebbleBatch).wb, nil)
+	return xerr(tx.tx.Apply(b.(*pebbleBatch).wb, nil))
 }
 
 // Iterations

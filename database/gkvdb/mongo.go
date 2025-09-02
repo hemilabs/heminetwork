@@ -6,7 +6,6 @@ package gkvdb
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -140,10 +139,7 @@ func (b *mongoDB) Get(ctx context.Context, table string, key []byte) ([]byte, er
 	co := b.db.Database(internalDB).Collection(table)
 	err := co.FindOne(ctx, bson.M{"key": key}).Decode(&result)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, ErrKeyNotFound
-		}
-		return nil, err
+		return nil, xerr(err)
 	}
 	// log.Infof("%v", spew.Sdump(result))
 	return result.Value, nil
@@ -308,13 +304,10 @@ func (tx *mongoTX) Get(pctx context.Context, table string, key []byte) ([]byte, 
 	var result mongoKV
 	err := mongo.WithSession(sctx, tx.s, func(ctx context.Context) error {
 		co := tx.db.db.Database(internalDB).Collection(table)
-		serr := co.FindOne(ctx, bson.M{"key": key}).Decode(&result)
-		if errors.Is(serr, mongo.ErrNoDocuments) {
-			return ErrKeyNotFound
-		}
-		return serr
+		err := co.FindOne(ctx, bson.M{"key": key}).Decode(&result)
+		return err
 	})
-	return result.Value, err
+	return result.Value, xerr(err)
 }
 
 func (tx *mongoTX) Put(pctx context.Context, table string, key []byte, value []byte) error {

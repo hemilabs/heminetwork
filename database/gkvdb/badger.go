@@ -67,14 +67,14 @@ func (b *badgerDB) Open(_ context.Context) error {
 	}
 	db, err := badger.Open(*b.opt)
 	if err != nil {
-		return err
+		return xerr(err)
 	}
 	b.db = db
 	return nil
 }
 
 func (b *badgerDB) Close(_ context.Context) error {
-	return b.db.Close()
+	return xerr(b.db.Close())
 }
 
 func (b *badgerDB) Del(_ context.Context, table string, key []byte) error {
@@ -88,7 +88,7 @@ func (b *badgerDB) Del(_ context.Context, table string, key []byte) error {
 		if errors.Is(err, badger.ErrKeyNotFound) {
 			return nil
 		}
-		return err
+		return xerr(err)
 	}
 	return nil
 }
@@ -118,10 +118,7 @@ func (b *badgerDB) Get(_ context.Context, table string, key []byte) ([]byte, err
 		return err
 	})
 	if err != nil {
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil, ErrKeyNotFound
-		}
-		return nil, err
+		return nil, xerr(err)
 	}
 	return val, nil
 }
@@ -134,7 +131,7 @@ func (b *badgerDB) Put(_ context.Context, table string, key, value []byte) error
 		return txn.Set(NewCompositeKey(table, key), value)
 	})
 	if err != nil {
-		return err
+		return xerr(err)
 	}
 	return nil
 }
@@ -150,14 +147,14 @@ func (b *badgerDB) Begin(_ context.Context, write bool) (Transaction, error) {
 func (b *badgerDB) execute(ctx context.Context, write bool, callback func(ctx context.Context, tx Transaction) error) error {
 	tx, err := b.Begin(ctx, write)
 	if err != nil {
-		return err
+		return xerr(err)
 	}
 	err = callback(ctx, tx)
 	if err != nil {
 		if cerr := tx.Rollback(ctx); cerr != nil {
 			return fmt.Errorf("rollback %w: %w", cerr, err)
 		}
-		return err
+		return xerr(err)
 	}
 	return tx.Commit(ctx)
 }
@@ -233,7 +230,7 @@ func (tx *badgerTX) Has(ctx context.Context, table string, key []byte) (bool, er
 	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
-	return err == nil, xerr(err)
+	return err == nil, err
 }
 
 func (tx *badgerTX) Get(ctx context.Context, table string, key []byte) ([]byte, error) {
@@ -242,14 +239,11 @@ func (tx *badgerTX) Get(ctx context.Context, table string, key []byte) ([]byte, 
 	}
 	item, err := tx.tx.Get(NewCompositeKey(table, key))
 	if err != nil {
-		if errors.Is(err, badger.ErrKeyNotFound) {
-			return nil, ErrKeyNotFound
-		}
-		return nil, err
+		return nil, xerr(err)
 	}
 	val, err := item.ValueCopy(nil)
 	if err != nil {
-		return nil, err
+		return nil, xerr(err)
 	}
 	return val, nil
 }
