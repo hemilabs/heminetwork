@@ -199,12 +199,20 @@ func (b *replicatorDB) commitJournal(ctx context.Context, j *journal) error {
 		return err
 	}
 
-	// Try to sink journal
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case b.sinkC <- "":
-	default:
+	if b.cfg.Policy == Direct {
+		// XXX we should have a light weight function here since there
+		// is no point in decoding the journal again. Do this here for
+		// now to verify the code but this is running much slower than
+		// it should.
+		return b.processJournal(ctx, id)
+	} else {
+		// Sink journal lazily
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case b.sinkC <- "":
+		default:
+		}
 	}
 
 	return nil
@@ -246,10 +254,7 @@ func (b *replicatorDB) replayJournal(ctx context.Context, key []byte, value []by
 	return b.jdb.Del(ctx, "", key)
 }
 
-func (b *replicatorDB) processJournal(pctx context.Context, id uint64) error {
-	// XXX This sucks. We should shutdown the journal handler when
-	// being shutdown. We do MUST wait for the sink to drain.
-	ctx := context.TODO()
+func (b *replicatorDB) processJournal(ctx context.Context, id uint64) error {
 	// Lift journal of disk and commit it into sink
 	key := encodeJournalKey(id)
 	value, err := b.jdb.Get(ctx, "", key[:])
@@ -312,7 +317,6 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 			}
 		}
 
-		log.Infof("sinking")
 		err := b.sinkJournals(ctx)
 		if err != nil {
 			// XXX let's not do this in a 1 message deep queue.
