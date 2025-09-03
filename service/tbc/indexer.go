@@ -108,7 +108,7 @@ type indexerCommon struct {
 	enabled  bool
 	indexing atomic.Bool
 
-	geometry geometryParams
+	g geometryParams
 	genesis  *HashHeight
 
 	p     indexer
@@ -165,9 +165,9 @@ func (c *indexerCommon) evaluateBlockHeaderIndex(bh *tbcd.BlockHeader, err error
 			return nil, err
 		}
 		bh = &tbcd.BlockHeader{
-			Hash:   *c.geometry.chain.GenesisHash,
+			Hash:   *c.g.chain.GenesisHash,
 			Height: 0,
-			Header: h2b(&c.geometry.chain.GenesisBlock.Header),
+			Header: h2b(&c.g.chain.GenesisBlock.Header),
 		}
 	}
 	return bh, nil
@@ -178,7 +178,7 @@ func (c *indexerCommon) toBest(ctx context.Context) error {
 	log.Tracef("%vIndexersToBest", c)
 	defer log.Tracef("%vIndexersToBest exit", c)
 
-	bhb, err := c.geometry.db.BlockHeaderBest(ctx)
+	bhb, err := c.g.db.BlockHeaderBest(ctx)
 	if err != nil {
 		return err
 	}
@@ -188,7 +188,7 @@ func (c *indexerCommon) toBest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cp, err := findCanonicalParent(ctx, c.geometry, indexerAt)
+	cp, err := findCanonicalParent(ctx, c.g, indexerAt)
 	if err != nil {
 		return err
 	}
@@ -241,7 +241,7 @@ func (c *indexerCommon) windOrUnwind(ctx context.Context, endHash chainhash.Hash
 	}
 
 	// Verify exit condition hash
-	g := c.geometry
+	g := c.g
 	endBH, err := g.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("blockheader end hash: %w", err)
@@ -389,7 +389,7 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 	// condition.
 	var last *HashHeight
 
-	g := c.geometry
+	g := c.g
 
 	// Find start hash
 	at, err := c.IndexAt(ctx)
@@ -449,7 +449,7 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 		}
 
 		// Move to next block
-		hh, err = nextCanonicalBlockheader(ctx, c.geometry, endHash, hh)
+		hh, err = nextCanonicalBlockheader(ctx, c.g, endHash, hh)
 		if err != nil {
 			return 0, last, fmt.Errorf("%v next block %v: %w", c, hh, err)
 		}
@@ -469,7 +469,7 @@ func (c *indexerCommon) parseBlocksReverse(ctx context.Context, endHash *chainha
 	// condition.
 	var last *HashHeight
 
-	g := c.geometry
+	g := c.g
 
 	// Find start hash
 	at, err := c.IndexAt(ctx)

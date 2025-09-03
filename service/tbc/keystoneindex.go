@@ -11,7 +11,6 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
@@ -31,7 +30,7 @@ var (
 	_ indexer = (*keystoneIndexer)(nil)
 )
 
-func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, enabled bool, hemiGenesis *HashHeight) Indexer {
+func NewKeystoneIndexer(g geometryParams, cacheLen int, enabled bool, hemiGenesis *HashHeight) Indexer {
 	ki := &keystoneIndexer{
 		cache:       NewCache[chainhash.Hash, tbcd.Keystone](cacheLen),
 		hemiGenesis: hemiGenesis,
@@ -39,18 +38,15 @@ func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, 
 	ki.indexerCommon = indexerCommon{
 		name:    "keystone",
 		enabled: enabled,
-		geometry: geometryParams{
-			db:    db,
-			chain: chain,
-		},
-		p:     ki,
-		cache: ki.cache,
+		g:       g,
+		p:       ki,
+		cache:   ki.cache,
 	}
 	return ki
 }
 
 func (i *keystoneIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
-	bh, err := i.geometry.db.BlockHeaderByKeystoneIndex(ctx)
+	bh, err := i.g.db.BlockHeaderByKeystoneIndex(ctx)
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
@@ -59,7 +55,7 @@ func (i *keystoneIndexer) process(_ context.Context, direction int, block *btcut
 }
 
 func (i *keystoneIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.geometry.db.BlockKeystoneUpdate(ctx, direction, i.cache.Map(), atHash)
+	return i.g.db.BlockKeystoneUpdate(ctx, direction, i.cache.Map(), atHash)
 }
 
 func (i *keystoneIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block) error {

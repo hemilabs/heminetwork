@@ -9,7 +9,6 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
@@ -25,25 +24,22 @@ var (
 	_ indexer = (*txIndexer)(nil)
 )
 
-func NewTxIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database) Indexer {
+func NewTxIndexer(g geometryParams, cacheLen int) Indexer {
 	txi := &txIndexer{
 		cache: NewCache[tbcd.TxKey, *tbcd.TxValue](cacheLen),
 	}
 	txi.indexerCommon = indexerCommon{
 		name:    "tx",
 		enabled: true,
-		geometry: geometryParams{
-			db:    db,
-			chain: chain,
-		},
-		p:     txi,
-		cache: txi.cache,
+		g:       g,
+		p:       txi,
+		cache:   txi.cache,
 	}
 	return txi
 }
 
 func (i *txIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
-	bh, err := i.geometry.db.BlockHeaderByTxIndex(ctx)
+	bh, err := i.g.db.BlockHeaderByTxIndex(ctx)
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
@@ -52,7 +48,7 @@ func (i *txIndexer) process(ctx context.Context, direction int, block *btcutil.B
 }
 
 func (i *txIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.geometry.db.BlockTxUpdate(ctx, direction, i.cache.Map(), atHash)
+	return i.g.db.BlockTxUpdate(ctx, direction, i.cache.Map(), atHash)
 }
 
 func (i *txIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block) error {

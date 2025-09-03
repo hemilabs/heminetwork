@@ -34,7 +34,7 @@ var (
 
 type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd.CacheOutput) error
 
-func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fixupCacheFunc) Indexer {
+func NewUtxoIndexer(g geometryParams, cacheLen int, f fixupCacheFunc) Indexer {
 	uxi := &utxoIndexer{
 		cache:     NewCache[tbcd.Outpoint, tbcd.CacheOutput](cacheLen),
 		fixupHook: f,
@@ -42,30 +42,27 @@ func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fi
 	uxi.indexerCommon = indexerCommon{
 		name:    "utxo",
 		enabled: true,
-		geometry: geometryParams{
-			db:    db,
-			chain: chain,
-		},
-		p:     uxi,
-		cache: uxi.cache,
+		g:       g,
+		p:       uxi,
+		cache:   uxi.cache,
 	}
 	return uxi
 }
 
 func (i *utxoIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
-	bh, err := i.geometry.db.BlockHeaderByUtxoIndex(ctx)
+	bh, err := i.g.db.BlockHeaderByUtxoIndex(ctx)
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
 func (i *utxoIndexer) process(ctx context.Context, direction int, block *btcutil.Block) error {
 	if direction == -1 {
-		return unprocessUtxos(ctx, i.geometry.db, block, i.cache.Map())
+		return unprocessUtxos(ctx, i.g.db, block, i.cache.Map())
 	}
 	return processUtxos(block, i.cache.Map())
 }
 
 func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.geometry.db.BlockUtxoUpdate(ctx, direction, i.cache.Map(), atHash)
+	return i.g.db.BlockUtxoUpdate(ctx, direction, i.cache.Map(), atHash)
 }
 
 func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block) error {

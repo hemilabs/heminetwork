@@ -2725,11 +2725,11 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	case 3:
 		s.fixupCache = s.fixupCacheChannel
 	}
-	s.ui = NewUtxoIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db, s.fixupCache)
-	s.ti = NewTxIndexer(s.g.chain, s.cfg.MaxCachedTxs, s.g.db)
-	if s.cfg.HemiIndex {
-		s.ki = NewKeystoneIndexer(s.g.chain, s.cfg.MaxCachedKeystones,
-			s.g.db, s.cfg.HemiIndex, s.hemiGenesis)
+	s.ui = NewUtxoIndexer(s.g, s.cfg.MaxCachedTxs, s.fixupCache)
+	s.ti = NewTxIndexer(s.g, s.cfg.MaxCachedTxs)
+	if s.cfg.HemiIndex { // TODO: nil if not enabled, but we pass enabled into the indexer?
+		s.ki = NewKeystoneIndexer(s.g, s.cfg.MaxCachedKeystones,
+			s.cfg.HemiIndex, s.hemiGenesis)
 	}
 
 	return nil
