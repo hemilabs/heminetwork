@@ -18,7 +18,7 @@ import (
 
 type txIndexer struct {
 	// common
-	indexing uint32 // Used as an atomic
+	indexing atomic.Bool
 	indexer  string
 	enabled  bool
 	c        *Cache[tbcd.TxKey, *tbcd.TxValue]
@@ -33,10 +33,9 @@ var _ Indexer = (*txIndexer)(nil)
 
 func NewTxIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database) Indexer {
 	return &txIndexer{
-		indexer:  "tx",
-		indexing: 0,
-		enabled:  true,
-		c:        NewCache[tbcd.TxKey, *tbcd.TxValue](cacheLen),
+		indexer: "tx",
+		enabled: true,
+		c:       NewCache[tbcd.TxKey, *tbcd.TxValue](cacheLen),
 		g: geometryParams{
 			db:    db,
 			chain: chain,
@@ -78,20 +77,20 @@ func (i *txIndexer) String() string {
 
 func (i *txIndexer) IndexToBest(ctx context.Context) error {
 	// XXX hate to do this here instead of inside the interface.
-	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+	if !i.indexing.CompareAndSwap(false, true) {
 		return ErrAlreadyIndexing
 	}
-	defer atomic.StoreUint32(&i.indexing, 0)
+	defer i.indexing.Store(false)
 
 	return toBest(ctx, i)
 }
 
 func (i *txIndexer) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
 	// XXX hate to do this here instead of inside the interface.
-	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+	if !i.indexing.CompareAndSwap(false, true) {
 		return ErrAlreadyIndexing
 	}
-	defer atomic.StoreUint32(&i.indexing, 0)
+	defer i.indexing.Store(false)
 
 	return windOrUnwind(ctx, i, hash)
 }
@@ -102,7 +101,7 @@ func (i *txIndexer) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 }
 
 func (i *txIndexer) Indexing() bool {
-	return atomic.LoadUint32(&i.indexing) == 1
+	return i.indexing.Load()
 }
 
 func (i *txIndexer) Enabled() bool {

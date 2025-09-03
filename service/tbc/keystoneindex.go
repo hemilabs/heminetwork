@@ -22,7 +22,7 @@ import (
 
 type keystoneIndexer struct {
 	// common
-	indexing uint32 // Used as an atomic
+	indexing atomic.Bool
 	indexer  string
 	enabled  bool
 	c        *Cache[chainhash.Hash, tbcd.Keystone]
@@ -39,7 +39,6 @@ var _ Indexer = (*keystoneIndexer)(nil)
 func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, enabled bool, hemiGenesis *HashHeight) Indexer {
 	return &keystoneIndexer{
 		indexer:  "keystone",
-		indexing: 0,
 		enabled:  enabled,
 		c:        NewCache[chainhash.Hash, tbcd.Keystone](cacheLen),
 		g: geometryParams{
@@ -84,20 +83,20 @@ func (i *keystoneIndexer) String() string {
 
 func (i *keystoneIndexer) IndexToBest(ctx context.Context) error {
 	// XXX hate to do this here instead of inside the interface.
-	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+	if !i.indexing.CompareAndSwap(false, true) {
 		return ErrAlreadyIndexing
 	}
-	defer atomic.StoreUint32(&i.indexing, 0)
+	defer i.indexing.Store(false)
 
 	return toBest(ctx, i)
 }
 
 func (i *keystoneIndexer) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
 	// XXX hate to do this here instead of inside the interface.
-	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+	if !i.indexing.CompareAndSwap(false, true) {
 		return ErrAlreadyIndexing
 	}
-	defer atomic.StoreUint32(&i.indexing, 0)
+	defer i.indexing.Store(false)
 
 	return windOrUnwind(ctx, i, hash)
 }
@@ -108,7 +107,7 @@ func (i *keystoneIndexer) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error
 }
 
 func (i *keystoneIndexer) Indexing() bool {
-	return atomic.LoadUint32(&i.indexing) == 1
+	return i.indexing.Load()
 }
 
 func (i *keystoneIndexer) Enabled() bool {

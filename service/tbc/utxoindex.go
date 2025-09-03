@@ -23,7 +23,7 @@ import (
 
 type utxoIndexer struct {
 	// common
-	indexing uint32 // used with atomics
+	indexing atomic.Bool
 	indexer  string
 	enabled  bool
 	c        *Cache[tbcd.Outpoint, tbcd.CacheOutput]
@@ -42,7 +42,6 @@ type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd
 func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fixupCacheFunc) Indexer {
 	return &utxoIndexer{
 		indexer:   "utxo",
-		indexing:  0,
 		enabled:   true,
 		c:         NewCache[tbcd.Outpoint, tbcd.CacheOutput](cacheLen),
 		fixupHook: f,
@@ -90,20 +89,20 @@ func (i *utxoIndexer) String() string {
 
 func (i *utxoIndexer) IndexToBest(ctx context.Context) error {
 	// XXX hate to do this here instead of inside the interface.
-	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+	if !i.indexing.CompareAndSwap(false, true) {
 		return ErrAlreadyIndexing
 	}
-	defer atomic.StoreUint32(&i.indexing, 0)
+	defer i.indexing.Store(false)
 
 	return toBest(ctx, i)
 }
 
 func (i *utxoIndexer) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
 	// XXX hate to do this here instead of inside the interface.
-	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
+	if !i.indexing.CompareAndSwap(false, true) {
 		return ErrAlreadyIndexing
 	}
-	defer atomic.StoreUint32(&i.indexing, 0)
+	defer i.indexing.Store(false)
 
 	return windOrUnwind(ctx, i, hash)
 }
@@ -114,7 +113,7 @@ func (i *utxoIndexer) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 }
 
 func (i *utxoIndexer) Indexing() bool {
-	return atomic.LoadUint32(&i.indexing) == 1
+	return i.indexing.Load()
 }
 
 func (i *utxoIndexer) Enabled() bool {
