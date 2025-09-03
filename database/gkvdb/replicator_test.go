@@ -493,7 +493,7 @@ func TestReplicateRetry(t *testing.T) {
 	defer cancel()
 
 	// First create source and destination
-	db, dbDestination := createReplicator(t, Direct, home, "level", "level", tables)
+	db, dbDestination := createReplicator(t, Lazy, home, "level", "level", tables)
 
 	if err := db.Open(ctx); err != nil {
 		t.Fatal(err)
@@ -528,12 +528,13 @@ func TestReplicateRetry(t *testing.T) {
 		}
 	}
 
-	time.Sleep(5 * time.Second)
-
-	// Restart destination db
+	// Restart db
+	time.Sleep(time.Second)
 	if err := dbDestination.Open(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// poke sink since this test uses external stimuli
+	db.(*replicatorDB).sinkC <- struct{}{}
 	t.Log("destination db restarted")
 
 	for !db.(*replicatorDB).flushed(ctx) {

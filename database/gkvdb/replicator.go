@@ -186,7 +186,7 @@ func (b *replicatorDB) commitJournal(pctx context.Context, id uint64, j *journal
 	ctx := context.Background()
 
 	if err := b.putJournal(ctx, id, j); err != nil {
-		return err
+		panic(err)
 	}
 
 	if b.cfg.Policy == Direct {
@@ -664,7 +664,7 @@ func (tx *replicatorTX) Commit(ctx context.Context) error {
 	}
 	err = tx.db.commitJournal(ctx, id, &journal{ops: tx.ops})
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	return nil
