@@ -2024,7 +2024,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		}
 	}
 
-	lastKssAt, err := s.ki.At(ctx)
+	lastKssAt, err := s.ki.IndexAt(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2259,7 +2259,7 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// XXX verify indexes
-	txBH, err := s.ti.At(ctx)
+	txBH, err := s.ti.IndexAt(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
@@ -2306,7 +2306,7 @@ func TestIndexFork(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
-	txBH, err = s.ti.At(ctx)
+	txBH, err = s.ti.IndexAt(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
@@ -2671,7 +2671,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// XXX verify indexes
-	txBH, err := s.ti.At(ctx)
+	txBH, err := s.ti.IndexAt(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
@@ -2742,7 +2742,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
-	txBH, err = s.ti.At(ctx)
+	txBH, err = s.ti.IndexAt(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
 	}
@@ -2827,7 +2827,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
-	lastKssAt, err := s.ki.At(ctx)
+	lastKssAt, err := s.ki.IndexAt(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -70,11 +70,20 @@ func (c *Cache[K, V]) Map() map[K]V {
 }
 
 type Indexer interface {
-	ToBest(context.Context) error                  // Move index to best hash, autoresolves forks
-	ToHash(context.Context, chainhash.Hash) error  // Manually move index from current height hash
-	At(context.Context) (*tbcd.BlockHeader, error) // Current index location
-	Indexing() bool                                // Returns if indexing is active
-	Enabled() bool                                 // Returns if index is enabled
+	// Enabled returns whether the indexer is enabled.
+	Enabled() bool
+
+	// Indexing returns whether the indexer is currently indexing.
+	Indexing() bool
+
+	// IndexToBest moves the indexer to the best hash, and auto-resolves forks.
+	IndexToBest(ctx context.Context) error
+
+	// IndexToHash moves the indexer to the given hash.
+	IndexToHash(ctx context.Context, hash chainhash.Hash) error
+
+	// IndexAt returns the point the indexer is currently at.
+	IndexAt(ctx context.Context) (*tbcd.BlockHeader, error)
 
 	// Cache control
 	cacheStats() (l int, c int, pct int)
@@ -123,7 +132,7 @@ func toBest(ctx context.Context, i Indexer) error {
 	}
 
 	// Find out where the indexer is at.
-	indexerAt, err := i.At(ctx)
+	indexerAt, err := i.IndexAt(ctx)
 	if err != nil {
 		return err
 	}
@@ -187,7 +196,7 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 	}
 
 	// Verify start point is not after the end point
-	indexerAt, err := i.At(ctx)
+	indexerAt, err := i.IndexAt(ctx)
 	if err != nil {
 		return err
 	}
@@ -335,7 +344,7 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, 
 	g := i.geometry()
 
 	// Find start hash
-	at, err := i.At(ctx)
+	at, err := i.IndexAt(ctx)
 	if err != nil {
 		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
 	}
@@ -415,7 +424,7 @@ func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash)
 	g := i.geometry()
 
 	// Find start hash
-	at, err := i.At(ctx)
+	at, err := i.IndexAt(ctx)
 	if err != nil {
 		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
 	}

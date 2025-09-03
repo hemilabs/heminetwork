@@ -2413,18 +2413,18 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 	log.Debugf("Syncing indexes to: %v", hash)
 
 	// utxos
-	if err := s.ui.ToHash(ctx, hash); err != nil {
+	if err := s.ui.IndexToHash(ctx, hash); err != nil {
 		return fmt.Errorf("utxo indexer: %w", err)
 	}
 
 	// Transactions index
-	if err := s.ti.ToHash(ctx, hash); err != nil {
+	if err := s.ti.IndexToHash(ctx, hash); err != nil {
 		return fmt.Errorf("tx indexer: %w", err)
 	}
 
 	// Hemi indexes
 	if s.cfg.HemiIndex {
-		if err := s.ki.ToHash(ctx, hash); err != nil {
+		if err := s.ki.IndexToHash(ctx, hash); err != nil {
 			return fmt.Errorf("keystone indexer: %w", err)
 		}
 	}
@@ -2452,16 +2452,16 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 
 	log.Debugf("Sync indexers to best: %v @ %v", bhb, bhb.Height)
 
-	if err := s.ui.ToBest(ctx); err != nil {
+	if err := s.ui.IndexToBest(ctx); err != nil {
 		return err
 	}
 
-	if err := s.ti.ToBest(ctx); err != nil {
+	if err := s.ti.IndexToBest(ctx); err != nil {
 		return err
 	}
 
 	if s.cfg.HemiIndex {
-		if err := s.ki.ToBest(ctx); err != nil {
+		if err := s.ki.IndexToBest(ctx); err != nil {
 			return err
 		}
 	}
@@ -2597,7 +2597,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	si.BlockHeader.Timestamp = bhb.Timestamp().Unix()
 
 	// utxo index
-	utxoBH, err := s.ui.At(ctx)
+	utxoBH, err := s.ui.IndexAt(ctx)
 	if err != nil {
 		utxoBH = &tbcd.BlockHeader{}
 	}
@@ -2608,7 +2608,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	si.Utxo = *utxoHH
 
 	// tx index
-	txBH, err := s.ti.At(ctx)
+	txBH, err := s.ti.IndexAt(ctx)
 	if err != nil {
 		txBH = &tbcd.BlockHeader{}
 	}
@@ -2647,7 +2647,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		}
 
 		// Perform additional keystone indexer tests.
-		keystoneBH, err := s.ki.At(ctx)
+		keystoneBH, err := s.ki.IndexAt(ctx)
 		if err != nil {
 			keystoneBH = &tbcd.BlockHeader{}
 		}
@@ -3092,12 +3092,12 @@ func (s *Server) Run(pctx context.Context) error {
 		log.Infof("Genesis: %v", s.g.chain.GenesisHash) // XXX make debug
 		log.Infof("Starting block headers sync at %v height: %v time %v",
 			bhb, bhb.Height, bhb.Timestamp())
-		utxoBH, _ := s.ui.At(ctx)
+		utxoBH, _ := s.ui.IndexAt(ctx)
 		log.Infof("Utxo index %v @ %v", utxoBH.Height, utxoBH.Hash)
-		txBH, _ := s.ti.At(ctx)
+		txBH, _ := s.ti.IndexAt(ctx)
 		log.Infof("Tx index %v @ %v", txBH.Height, txBH.Hash)
 		if s.cfg.HemiIndex {
-			hemiBH, _ := s.ki.At(ctx)
+			hemiBH, _ := s.ki.IndexAt(ctx)
 			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
 		}
 	}

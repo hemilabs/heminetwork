@@ -82,7 +82,7 @@ func (i *keystoneIndexer) String() string {
 	return i.indexer
 }
 
-func (i *keystoneIndexer) ToBest(ctx context.Context) error {
+func (i *keystoneIndexer) IndexToBest(ctx context.Context) error {
 	// XXX hate to do this here instead of inside the interface.
 	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
 		return ErrAlreadyIndexing
@@ -92,7 +92,7 @@ func (i *keystoneIndexer) ToBest(ctx context.Context) error {
 	return toBest(ctx, i)
 }
 
-func (i *keystoneIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error {
+func (i *keystoneIndexer) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
 	// XXX hate to do this here instead of inside the interface.
 	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
 		return ErrAlreadyIndexing
@@ -102,7 +102,7 @@ func (i *keystoneIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error
 	return windOrUnwind(ctx, i, hash)
 }
 
-func (i *keystoneIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (i *keystoneIndexer) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 	bh, err := i.g.db.BlockHeaderByKeystoneIndex(ctx)
 	return evaluateBlockHeaderIndex(i.g, bh, err)
 }

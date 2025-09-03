@@ -76,7 +76,7 @@ func (i *txIndexer) String() string {
 	return i.indexer
 }
 
-func (i *txIndexer) ToBest(ctx context.Context) error {
+func (i *txIndexer) IndexToBest(ctx context.Context) error {
 	// XXX hate to do this here instead of inside the interface.
 	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
 		return ErrAlreadyIndexing
@@ -86,7 +86,7 @@ func (i *txIndexer) ToBest(ctx context.Context) error {
 	return toBest(ctx, i)
 }
 
-func (i *txIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error {
+func (i *txIndexer) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
 	// XXX hate to do this here instead of inside the interface.
 	if !atomic.CompareAndSwapUint32(&i.indexing, 0, 1) {
 		return ErrAlreadyIndexing
@@ -96,7 +96,7 @@ func (i *txIndexer) ToHash(ctx context.Context, hash chainhash.Hash) error {
 	return windOrUnwind(ctx, i, hash)
 }
 
-func (i *txIndexer) At(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (i *txIndexer) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 	bh, err := i.g.db.BlockHeaderByTxIndex(ctx)
 	return evaluateBlockHeaderIndex(i.g, bh, err)
 }
