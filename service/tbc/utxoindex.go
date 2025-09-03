@@ -21,40 +21,12 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
-type utxoCache struct {
-	maxCacheEntries int
-	c               map[tbcd.Outpoint]tbcd.CacheOutput
-}
-
-func (c *utxoCache) Clear() {
-	clear(c.c)
-}
-
-func (c *utxoCache) Length() int {
-	return len(c.c)
-}
-
-func (c *utxoCache) Capacity() int {
-	return c.maxCacheEntries
-}
-
-func (c *utxoCache) Generic() any {
-	return c.c
-}
-
-func NewUtxoCache(maxCacheEntries int) Cache {
-	return &utxoCache{
-		maxCacheEntries: maxCacheEntries,
-		c:               make(map[tbcd.Outpoint]tbcd.CacheOutput, maxCacheEntries),
-	}
-}
-
 type utxoIndexer struct {
 	// common
 	indexing uint32 // used with atomics
 	indexer  string
 	enabled  bool
-	c        Cache
+	c        *Cache[tbcd.Outpoint, tbcd.CacheOutput]
 
 	// geometry
 	g geometryParams
@@ -63,10 +35,7 @@ type utxoIndexer struct {
 	fixupHook fixupCacheFunc
 }
 
-var (
-	_ Cache   = (*utxoCache)(nil)
-	_ Indexer = (*utxoIndexer)(nil)
-)
+var _ Indexer = (*utxoIndexer)(nil)
 
 type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd.CacheOutput) error
 
@@ -75,7 +44,7 @@ func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fi
 		indexer:   "utxo",
 		indexing:  0,
 		enabled:   true,
-		c:         NewUtxoCache(cacheLen),
+		c:         NewCache[tbcd.Outpoint, tbcd.CacheOutput](cacheLen),
 		fixupHook: f,
 		g: geometryParams{
 			db:    db,
@@ -88,29 +57,31 @@ func (i *utxoIndexer) geometry() geometryParams {
 	return i.g
 }
 
-func (i *utxoIndexer) cache() Cache {
-	return i.c
+func (i *utxoIndexer) cacheStats() (int, int, int) {
+	return i.c.Stats()
+}
+
+func (i *utxoIndexer) cacheFlush() {
+	i.c.Clear()
 }
 
 func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockUtxoUpdate(ctx, direction,
-		i.cache().Generic().(map[tbcd.Outpoint]tbcd.CacheOutput), atHash)
+	return i.g.db.BlockUtxoUpdate(ctx, direction, i.c.Map(), atHash)
 }
 
 func (i *utxoIndexer) genesis() *HashHeight {
 	return nil
 }
 
-func (i *utxoIndexer) process(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
+func (i *utxoIndexer) process(ctx context.Context, block *btcutil.Block, direction int) error {
 	if direction == -1 {
-		return unprocessUtxos(ctx, i.g.db, block,
-			cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+		return unprocessUtxos(ctx, i.g.db, block, i.c.Map())
 	}
-	return processUtxos(block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+	return processUtxos(block, i.c.Map())
 }
 
-func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, cache any) error {
-	return i.fixupHook(ctx, block, cache.(map[tbcd.Outpoint]tbcd.CacheOutput))
+func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block) error {
+	return i.fixupHook(ctx, block, i.c.Map())
 }
 
 func (i *utxoIndexer) String() string {

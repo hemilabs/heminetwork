@@ -16,40 +16,12 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
-type txCache struct {
-	maxCacheEntries int
-	c               map[tbcd.TxKey]*tbcd.TxValue
-}
-
-func (c *txCache) Clear() {
-	clear(c.c)
-}
-
-func (c *txCache) Length() int {
-	return len(c.c)
-}
-
-func (c *txCache) Capacity() int {
-	return c.maxCacheEntries
-}
-
-func (c *txCache) Generic() any {
-	return c.c
-}
-
-func NewTxCache(maxCacheEntries int) Cache {
-	return &txCache{
-		maxCacheEntries: maxCacheEntries,
-		c:               make(map[tbcd.TxKey]*tbcd.TxValue, maxCacheEntries),
-	}
-}
-
 type txIndexer struct {
 	// common
 	indexing uint32 // Used as an atomic
 	indexer  string
 	enabled  bool
-	c        Cache
+	c        *Cache[tbcd.TxKey, *tbcd.TxValue]
 
 	// geometry
 	g geometryParams
@@ -57,17 +29,14 @@ type txIndexer struct {
 	// tx indexer only
 }
 
-var (
-	_ Cache   = (*txCache)(nil)
-	_ Indexer = (*txIndexer)(nil)
-)
+var _ Indexer = (*txIndexer)(nil)
 
 func NewTxIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database) Indexer {
 	return &txIndexer{
 		indexer:  "tx",
 		indexing: 0,
 		enabled:  true,
-		c:        NewTxCache(cacheLen),
+		c:        NewCache[tbcd.TxKey, *tbcd.TxValue](cacheLen),
 		g: geometryParams{
 			db:    db,
 			chain: chain,
@@ -79,24 +48,27 @@ func (i *txIndexer) geometry() geometryParams {
 	return i.g
 }
 
-func (i *txIndexer) cache() Cache {
-	return i.c
+func (i *txIndexer) cacheStats() (int, int, int) {
+	return i.c.Stats()
+}
+
+func (i *txIndexer) cacheFlush() {
+	i.c.Clear()
 }
 
 func (i *txIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockTxUpdate(ctx, direction,
-		i.cache().Generic().(map[tbcd.TxKey]*tbcd.TxValue), atHash)
+	return i.g.db.BlockTxUpdate(ctx, direction, i.c.Map(), atHash)
 }
 
 func (i *txIndexer) genesis() *HashHeight {
 	return nil
 }
 
-func (i *txIndexer) process(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
-	return processTxs(block, direction, cache.(map[tbcd.TxKey]*tbcd.TxValue))
+func (i *txIndexer) process(ctx context.Context, block *btcutil.Block, direction int) error {
+	return processTxs(block, direction, i.c.Map())
 }
 
-func (i *txIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, cache any) error {
+func (i *txIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block) error {
 	return nil
 }
 

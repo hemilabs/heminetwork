@@ -33,11 +33,40 @@ func (aie AlreadyIndexingError) Is(target error) bool {
 
 var ErrAlreadyIndexing = AlreadyIndexingError("already indexing")
 
-type Cache interface {
-	Clear()
-	Length() int
-	Capacity() int
-	Generic() any
+// Cache is an in-memory cache implementation.
+type Cache[K comparable, V any] struct {
+	capacity int
+	m        map[K]V
+}
+
+// NewCache returns a new cache with a specified capacity.
+func NewCache[K comparable, V any](capacity int) *Cache[K, V] {
+	return &Cache[K, V]{capacity: capacity, m: make(map[K]V, capacity)}
+}
+
+// Clear clears the cache.
+func (c *Cache[K, V]) Clear() {
+	clear(c.m)
+}
+
+// Len returns the number of items stored in the cache.
+func (c *Cache[K, V]) Len() int {
+	return len(c.m)
+}
+
+// Cap returns the capacity of the cache.
+func (c *Cache[K, V]) Cap() int {
+	return c.capacity
+}
+
+func (c *Cache[K, V]) Stats() (length int, capacity int, pct int) {
+	length = c.Len()
+	return length, c.Cap(), length * 100 / c.Cap()
+}
+
+// Map returns the underlying map[K]V used in the cache.
+func (c *Cache[K, V]) Map() map[K]V {
+	return c.m
 }
 
 type Indexer interface {
@@ -47,14 +76,17 @@ type Indexer interface {
 	Indexing() bool                                // Returns if indexing is active
 	Enabled() bool                                 // Returns if index is enabled
 
+	// Cache control
+	cacheStats() (l int, c int, pct int)
+	cacheFlush()
+
 	// XXX i would be tickled if we can get rid of these inside the interface
 	geometry() geometryParams                          // Return geometry parameters
-	cache() Cache                                      // Return cache
 	commit(context.Context, int, chainhash.Hash) error // Commit index cache to disk
 	genesis() *HashHeight                              // Genesis override, like hemi
 
-	process(context.Context, *btcutil.Block, int, any) error   // Process block
-	fixupCacheHook(context.Context, *btcutil.Block, any) error // Fixup cache
+	process(context.Context, *btcutil.Block, int) error   // Process block
+	fixupCacheHook(context.Context, *btcutil.Block) error // Fixup cache
 }
 
 // geometryParams conviniently wraps all parameters required to perform
@@ -196,25 +228,24 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 
 	// Allocate here so that we don't waste space when not indexing.
 	// XXX the cache *really* should become a list methinks.
-	es := i.cache().Generic()
-	defer i.cache().Clear()
+	defer i.cacheFlush()
 
 	log.Infof("Start indexing %vs at hash %v height %v", i, startBH, startBH.Height)
 	log.Infof("End indexing %vs at hash %v height %v", i, endBH, endBH.Height)
 	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
-		blocksProcessed, last, err := parseBlocks(ctx, i, endHash, es)
+		blocksProcessed, last, err := parseBlocks(ctx, i, endHash)
 		if err != nil {
 			return fmt.Errorf("%v index blocks: %w", i, err)
 		}
 		if blocksProcessed == 0 {
 			return nil
 		}
-		esCached := i.cache().Length()
-		log.Infof("%v indexer blocks processed %v in %v cached %v cache unused %v avg/blk %v",
-			i, blocksProcessed, time.Since(start), esCached,
-			i.cache().Capacity()-esCached, esCached/blocksProcessed)
+
+		cached, _, pct := i.cacheStats()
+		log.Infof("%v indexer blocks processed %v in %v cached %v (%v%%) avg/blk %v",
+			i, blocksProcessed, time.Since(start), cached, pct, cached/blocksProcessed)
 
 		// Flush to disk
 		start = time.Now()
@@ -227,7 +258,7 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 		runtime.GC()
 
 		log.Infof("Flushing %vs complete %v took %v",
-			i, esCached, time.Since(start))
+			i, cached, time.Since(start))
 
 		if endHash.IsEqual(&last.Hash) {
 			break
@@ -251,25 +282,24 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 		panic(fmt.Sprintf("%vIndexerUnwind indexing not true", i))
 	}
 	// Allocate here so that we don't waste space when not indexing.
-	es := i.cache().Generic()
-	defer i.cache().Clear()
+	defer i.cacheFlush()
 
 	log.Infof("Start unwinding %v at hash %v height %v", i, startBH, startBH.Height)
 	log.Infof("End unwinding %v at hash %v height %v", i, endBH, endBH.Height)
 	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
-		blocksProcessed, last, err := parseBlocksReverse(ctx, i, endHash, es)
+		blocksProcessed, last, err := parseBlocksReverse(ctx, i, endHash)
 		if err != nil {
 			return fmt.Errorf("unindex %vs in blocks: %w", i, err)
 		}
 		if blocksProcessed == 0 {
 			return nil
 		}
-		esCached := i.cache().Length()
-		log.Infof("%v unwinder blocks processed %v in %v cached %v cache unused %v avg/blk %v",
-			i, blocksProcessed, time.Since(start), esCached,
-			i.cache().Capacity()-esCached, esCached/blocksProcessed)
+
+		cached, _, pct := i.cacheStats()
+		log.Infof("%v unwinder blocks processed %v in %v cached %v cache (%v%%) avg/blk %v",
+			i, blocksProcessed, time.Since(start), cached, pct, cached/blocksProcessed)
 
 		// Flush to disk
 		start = time.Now()
@@ -282,7 +312,7 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 		runtime.GC()
 
 		log.Infof("Flushing unwind %vs complete %v took %v",
-			i, esCached, time.Since(start))
+			i, cached, time.Since(start))
 
 		if endHash.IsEqual(&last.Hash) {
 			break
@@ -294,7 +324,7 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 // parseBlocks indexes the block from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
 // the last hash it processed.
-func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
+func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, *HashHeight, error) {
 	log.Tracef("%v parseBlocks", i)
 	defer log.Tracef("%v parseBlocks exit", i)
 
@@ -326,8 +356,8 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache 
 		}
 	}
 
-	percentage := 95 // flush cache at >95% capacity
-	blocksProcessed := 0
+	const percentage = 95 // flush cache at >95% capacity
+	var blocksProcessed int
 	for {
 		log.Debugf("indexing %vs: %v", i, hh)
 
@@ -336,28 +366,26 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache 
 			return 0, last, err
 		}
 
-		err = i.fixupCacheHook(ctx, b, cache)
-		if err != nil {
+		if err = i.fixupCacheHook(ctx, b); err != nil {
 			return 0, last, fmt.Errorf("process %v fixup %v: %w",
 				i, hh, err)
 		}
 
 		// Index block
-		err = i.process(ctx, b, 1, cache)
-		if err != nil {
+		if err = i.process(ctx, b, 1); err != nil {
 			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
 		}
 
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
-		cp := i.cache().Length() * 100 / i.cache().Capacity()
-		if bh.Height%10000 == 0 || cp > percentage || blocksProcessed == 1 {
-			log.Infof("%v indexer: %v cache %v%%", i, hh, cp)
+		_, _, pct := i.cacheStats()
+		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
+			log.Infof("%v indexer: %v cache %v%%", i, hh, pct)
 		}
 
 		// Exit if we processed the provided end hash or hit 95% cache full.
-		if cp > percentage || endHash.IsEqual(&hh.Hash) {
+		if pct > percentage || endHash.IsEqual(&hh.Hash) {
 			// Flush cache to disk
 			last = hh
 			break
@@ -376,7 +404,7 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache 
 // parseBlocksReverse unindexes whatever type from the last processed block
 // until the provided end hash, inclusive. It returns the number of blocks
 // processed and the last hash it processed.
-func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash, cache any) (int, *HashHeight, error) {
+func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, *HashHeight, error) {
 	log.Tracef("%v parseBlocksReverse", i)
 	defer log.Tracef("%v parseBlocksReverse exit", i)
 
@@ -392,8 +420,8 @@ func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash,
 		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
 	}
 
-	percentage := 95 // flush cache at >95% capacity
-	blocksProcessed := 0
+	const percentage = 95 // flush cache at >95% capacity
+	var blocksProcessed int
 	hh := &HashHeight{Hash: at.Hash, Height: at.Height}
 	for {
 		log.Debugf("unindexing %vs: %v", i, hh)
@@ -411,7 +439,7 @@ func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash,
 			return 0, last, err
 		}
 
-		err = i.process(ctx, b, -1, cache)
+		err = i.process(ctx, b, -1)
 		if err != nil {
 			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
 		}
@@ -419,9 +447,9 @@ func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash,
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
-		cp := i.cache().Length() * 100 / i.cache().Capacity()
-		if bh.Height%10000 == 0 || cp > percentage || blocksProcessed == 1 {
-			log.Infof("%v unindexer: %v cache %v%%", i, hh, cp)
+		_, _, pct := i.cacheStats()
+		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
+			log.Infof("%v unindexer: %v cache %v%%", i, hh, pct)
 		}
 
 		// Move to previous block
@@ -436,7 +464,7 @@ func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash,
 
 		// We check overflow AFTER obtaining the previous hash so that
 		// we can update the database with the LAST processed block.
-		if cp > percentage {
+		if pct > percentage {
 			last = hh
 			// Flush to disk
 			break

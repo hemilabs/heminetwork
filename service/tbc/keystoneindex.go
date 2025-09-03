@@ -20,40 +20,12 @@ import (
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
 )
 
-type keystoneCache struct {
-	maxCacheEntries int
-	c               map[chainhash.Hash]tbcd.Keystone
-}
-
-func (c *keystoneCache) Clear() {
-	clear(c.c)
-}
-
-func (c *keystoneCache) Length() int {
-	return len(c.c)
-}
-
-func (c *keystoneCache) Capacity() int {
-	return c.maxCacheEntries
-}
-
-func (c *keystoneCache) Generic() any {
-	return c.c
-}
-
-func NewKeystoneCache(maxCacheEntries int) Cache {
-	return &keystoneCache{
-		maxCacheEntries: maxCacheEntries,
-		c:               make(map[chainhash.Hash]tbcd.Keystone, maxCacheEntries),
-	}
-}
-
 type keystoneIndexer struct {
 	// common
 	indexing uint32 // Used as an atomic
 	indexer  string
 	enabled  bool
-	c        Cache
+	c        *Cache[chainhash.Hash, tbcd.Keystone]
 
 	// geometry
 	g geometryParams
@@ -62,17 +34,14 @@ type keystoneIndexer struct {
 	hemiGenesis *HashHeight
 }
 
-var (
-	_ Cache   = (*keystoneCache)(nil)
-	_ Indexer = (*keystoneIndexer)(nil)
-)
+var _ Indexer = (*keystoneIndexer)(nil)
 
 func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, enabled bool, hemiGenesis *HashHeight) Indexer {
 	return &keystoneIndexer{
 		indexer:  "keystone",
 		indexing: 0,
 		enabled:  enabled,
-		c:        NewKeystoneCache(cacheLen),
+		c:        NewCache[chainhash.Hash, tbcd.Keystone](cacheLen),
 		g: geometryParams{
 			db:    db,
 			chain: chain,
@@ -85,25 +54,27 @@ func (i *keystoneIndexer) geometry() geometryParams {
 	return i.g
 }
 
-func (i *keystoneIndexer) cache() Cache {
-	return i.c
+func (i *keystoneIndexer) cacheStats() (int, int, int) {
+	return i.c.Stats()
+}
+
+func (i *keystoneIndexer) cacheFlush() {
+	i.c.Clear()
 }
 
 func (i *keystoneIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockKeystoneUpdate(ctx, direction,
-		i.cache().Generic().(map[chainhash.Hash]tbcd.Keystone), atHash)
+	return i.g.db.BlockKeystoneUpdate(ctx, direction, i.c.Map(), atHash)
 }
 
 func (i *keystoneIndexer) genesis() *HashHeight {
 	return i.hemiGenesis
 }
 
-func (i *keystoneIndexer) process(ctx context.Context, block *btcutil.Block, direction int, cache any) error {
-	return processKeystones(block, direction,
-		cache.(map[chainhash.Hash]tbcd.Keystone))
+func (i *keystoneIndexer) process(ctx context.Context, block *btcutil.Block, direction int) error {
+	return processKeystones(block, direction, i.c.Map())
 }
 
-func (i *keystoneIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, cache any) error {
+func (i *keystoneIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block) error {
 	return nil
 }
 
