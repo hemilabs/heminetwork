@@ -465,8 +465,7 @@ func dbTransactionsCommit(ctx context.Context, db Database, tables []string, ins
 }
 
 // Transaction Multiple Write
-// This will race for PebbleDB since it doesn't have real
-// transactions, and instead must rely on batches.
+// XXX marco, should we block read txs too like in leveldb?
 func dbTransactionsMultipleWrite(ctx context.Context, db Database, table string, txCount int) error {
 	last := txCount + 1
 	var key [4]byte

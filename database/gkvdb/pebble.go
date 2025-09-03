@@ -8,8 +8,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/cockroachdb/pebble"
+	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // Assert required interfaces
@@ -39,6 +41,10 @@ type pebbleDB struct {
 	tables map[string]struct{}
 
 	cfg *PebbleConfig
+
+	// kinda sucks but we must force
+	// multiple write txs to block
+	txMtx sync.Mutex
 }
 
 func NewPebbleDB(cfg *PebbleConfig) (Database, error) {
@@ -124,15 +130,19 @@ func (b *pebbleDB) Put(_ context.Context, table string, key, value []byte) error
 	return xerr(b.db.Set(NewCompositeKey(table, key), value, nil))
 }
 
-// / XXX Since pebbleDB doesn't have transactions, we must use batches to
+// XXX Since pebbleDB doesn't have transactions, we must use batches to
 // emulate the behavior. However, having reads in a pebble batch is MORE
 // expensive than write only, so we should reconsider using
 // NewIndexedBatch (read/write) and use NewBatch (write only).
 func (b *pebbleDB) Begin(_ context.Context, write bool) (Transaction, error) {
+	if write {
+		b.txMtx.Lock()
+	}
 	tx := b.db.NewIndexedBatch()
 	return &pebbleTX{
-		db: b,
-		tx: tx,
+		db:    b,
+		tx:    tx,
+		write: write,
 	}, nil
 }
 
@@ -163,13 +173,19 @@ func (b *pebbleDB) NewIterator(ctx context.Context, table string) (Iterator, err
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
-	iter, err := b.db.NewIterWithContext(ctx, nil)
+
+	r := util.BytesPrefix(NewCompositeKey(table, []byte{}))
+	opt := &pebble.IterOptions{
+		LowerBound: r.Start,
+		UpperBound: r.Limit,
+	}
+	iter, err := b.db.NewIterWithContext(ctx, opt)
 	if err != nil {
 		return nil, xerr(err)
 	}
 
 	// set iterator to before first value
-	iter.SeekLT([]byte{})
+	iter.SeekLT(r.Start)
 
 	return &pebbleIterator{
 		table: table,
@@ -181,10 +197,12 @@ func (b *pebbleDB) NewRange(ctx context.Context, table string, start, end []byte
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
-	iter, err := b.db.NewIterWithContext(ctx, &pebble.IterOptions{
+
+	opt := &pebble.IterOptions{
 		LowerBound: NewCompositeKey(table, start),
 		UpperBound: NewCompositeKey(table, end),
-	})
+	}
+	iter, err := b.db.NewIterWithContext(ctx, opt)
 	if err != nil {
 		return nil, xerr(err)
 	}
@@ -217,8 +235,9 @@ func (b *pebbleDB) Restore(ctx context.Context, source Decoder) error {
 // PebbleDB doesn't have transactions, so emulate behavior
 // Using batches.
 type pebbleTX struct {
-	db *pebbleDB
-	tx *pebble.Batch
+	db    *pebbleDB
+	tx    *pebble.Batch
+	write bool
 }
 
 func (tx *pebbleTX) Del(ctx context.Context, table string, key []byte) error {
@@ -267,12 +286,17 @@ func (tx *pebbleTX) Put(ctx context.Context, table string, key []byte, value []b
 }
 
 func (tx *pebbleTX) Commit(ctx context.Context) error {
+	if tx.write {
+		defer tx.db.txMtx.Unlock()
+	}
 	return xerr(tx.tx.Commit(nil))
 }
 
 func (tx *pebbleTX) Rollback(ctx context.Context) error {
-	tx.tx.Close()
-	return nil
+	if tx.write {
+		defer tx.db.txMtx.Unlock()
+	}
+	return xerr(tx.tx.Close())
 }
 
 func (tx *pebbleTX) Write(ctx context.Context, b Batch) error {
