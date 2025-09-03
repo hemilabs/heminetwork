@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
+
+	"github.com/dustin/go-humanize"
 )
 
 // DumpTables and Restore are used to create portable backups. Any
-// Encoder/Decoder can be used provided thet conform to the interface.  The
+// Encoder/Decoder can be used provided it conforms to the interface.  The
 // caller is responsible for quiescing the tables. The backup itself will be
 // made using a consistent view.
 //
@@ -54,7 +57,11 @@ type Decoder interface {
 	Decode(v any) error
 }
 
-var DefaultMaxRestoreChunk = 256 * 1024 * 1024 // Maximum transaction size during restore.
+var (
+	DefaultMaxRestoreChunk = 256 * 1024 * 1024 // Maximum transaction size during restore.
+
+	Verbose = true // use logger to print progress
+)
 
 func DumpTables(ctx context.Context, db Database, tables []string, target Encoder) error {
 	for _, table := range tables {
@@ -123,5 +130,72 @@ func Restore(ctx context.Context, db Database, source Decoder) error {
 		batch.Reset(ctx)
 	}
 
+	return nil
+}
+
+func commitChunk(ctx context.Context, db Database, batch Batch) error {
+	err := db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+		return tx.Write(ctx, batch)
+	})
+	if err != nil {
+		return err
+	}
+	batch.Reset(ctx)
+	return nil
+}
+
+// Copy makes a copy of the source database tables to destination.
+func Copy(ctx context.Context, source, destination Database, tables []string) error {
+	total := 0
+	start := time.Now()
+	for _, table := range tables {
+		it, err := source.NewIterator(ctx, table)
+		if err != nil {
+			return err
+		}
+		defer func(i Iterator) {
+			// Just in case we exit with an error
+			i.Close(ctx)
+		}(it)
+
+		batch, err := destination.NewBatch(ctx)
+		if err != nil {
+			return err
+		}
+		chunk := 0
+		for it.Next(ctx) {
+			key := append([]byte{}, it.Key(ctx)...)
+			value := append([]byte{}, it.Value(ctx)...)
+			batch.Put(ctx, table, key, value)
+
+			chunk += len(key) + len(value)
+			total += len(key) + len(value)
+			if chunk > DefaultMaxRestoreChunk {
+				// Commit chunk.
+				if Verbose {
+					log.Infof("table: %v copied %v",
+						table,
+						humanize.IBytes(uint64(total)))
+				}
+				err = commitChunk(ctx, destination, batch)
+				if err != nil {
+					return err
+				}
+				chunk = 0
+			}
+		}
+		it.Close(ctx)
+
+		// Commit chunk.
+		err = commitChunk(ctx, destination, batch)
+		if err != nil {
+			return err
+		}
+	}
+	if Verbose {
+		log.Infof("tables copied %v total bytes copied %v in %v",
+			len(tables), humanize.IBytes(uint64(total)),
+			time.Since(start))
+	}
 	return nil
 }

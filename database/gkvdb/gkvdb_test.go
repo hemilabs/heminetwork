@@ -1270,3 +1270,78 @@ func TestDumpRestorePipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCopy(t *testing.T) {
+	home := t.TempDir()
+
+	tableCount := 5
+	tables := make([]string, 0, tableCount)
+	for i := range tableCount {
+		tables = append(tables, fmt.Sprintf("table%v", i))
+	}
+
+	srcCfg := DefaultLevelConfig(filepath.Join(home, "source"), tables)
+	source, err := NewLevelDB(srcCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	err = source.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := source.Close(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	// Puts
+	insertCount := 18999
+	err = dbputs(ctx, source, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get
+	err = dbgets(ctx, source, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Destination
+	dstCfg := DefaultLevelConfig(filepath.Join(home, "destination"), tables)
+	destination, err := NewLevelDB(dstCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = destination.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := destination.Close(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	Verbose = true
+	DefaultMaxRestoreChunk = 16384 // Many chunks
+	err = Copy(ctx, source, destination, tables)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Get and has destination
+	err = dbhas(ctx, destination, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = dbgets(ctx, destination, tables, insertCount)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
