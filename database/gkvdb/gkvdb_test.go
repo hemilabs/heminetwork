@@ -788,12 +788,15 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 	//
 	// This will deadlock on the defer db.Close because of outstanding
 	// transactions that haven't been closed.
-	b.Reset(ctx)
+	bd, err := db.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("new batch: %w", err)
+	}
 	i := 0
 	for it.Next(ctx) {
-		key := append([]byte{}, []byte{1}...)
+		key := append([]byte{}, it.Key(ctx)...)
 		// XXX can't do this with nutsdb
-		b.Del(ctx, table, key)
+		bd.Del(ctx, table, key)
 		i++
 	}
 	if i != recordCount*3 {
@@ -803,7 +806,7 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 	it.Close(ctx)
 
 	err = db.Update(ctx, func(ctx context.Context, txn Transaction) error {
-		return txn.Write(ctx, b)
+		return txn.Write(ctx, bd)
 	})
 	if err != nil {
 		return fmt.Errorf("update: %w", err)

@@ -266,20 +266,21 @@ func (tx *nutsTX) Rollback(ctx context.Context) error {
 }
 
 func (tx *nutsTX) Write(ctx context.Context, b Batch) error {
-	bb, ok := b.(*nutsBatch)
-	if !ok {
-		return fmt.Errorf("unexpected batch type: %T", b)
-	}
-	for e := bb.wb.Front(); e != nil; e = e.Next() {
-		f, ok := e.Value.(batchFunc)
-		if !ok {
-			return fmt.Errorf("unexpected batch element type %T", e.Value)
-		}
-		if err := f(ctx, tx); err != nil {
-			return xerr(err)
-		}
-	}
-	return nil
+	// bb, ok := b.(*nutsBatch)
+	// if !ok {
+	// 	return fmt.Errorf("unexpected batch type: %T", b)
+	// }
+	// for e := bb.wb.Front(); e != nil; e = e.Next() {
+	// 	f, ok := e.Value.(batchFunc)
+	// 	if !ok {
+	// 		return fmt.Errorf("unexpected batch element type %T", e.Value)
+	// 	}
+	// 	if err := f(ctx, tx); err != nil {
+	// 		return xerr(err)
+	// 	}
+	// }
+	// return nil
+	return errors.New("not yet nutsdb")
 }
 
 // Iterations
@@ -333,6 +334,8 @@ func (ni *nutsIterator) Value(_ context.Context) []byte {
 }
 
 func (ni *nutsIterator) Close(ctx context.Context) {
+	// XXX internally nutsdb doesn't close the iterator
+	// so it will never release
 	err := ni.tx.Rollback(ctx)
 	if err != nil {
 		log.Errorf("iterator close: %v", err)
