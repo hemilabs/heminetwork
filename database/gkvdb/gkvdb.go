@@ -44,11 +44,6 @@ type Database interface {
 
 	// Batches
 	NewBatch(ctx context.Context) (Batch, error)
-
-	// Backup
-	// XXX this is trivial to implement outside of the interface. Pull it out?
-	DumpTables(ctx context.Context, tables []string, target Encoder) error
-	Restore(ctx context.Context, source Decoder) error
 }
 
 // CompositeKey is used by backends that do not support the concept of tables
@@ -207,52 +202,4 @@ type Range interface {
 	Value(ctx context.Context) []byte
 
 	Close(ctx context.Context)
-}
-
-// DumpTables and Restore are used to create backups. Any Encoder/Decoder can
-// be used provided thet conform to the interface.  The caller is responsible
-// for quiescing the tables. The backup itself will be made using a consistent
-// view.
-//
-// Typical use:
-//	var b bytes.Buffer
-//	zw, _ := zstd.NewWriter(&b)
-//	je := json.NewEncoder(zw)
-//	_ = db.DumpTables(ctx, tables, je)
-//	_ = zw.Close()
-//
-//	zr, _ := zstd.NewReader(&b)
-//	jd := json.NewDecoder(zr)
-//	_ = db.Restore(ctx, jd)
-
-// OperationT is used to tag what database operation is being described. These
-// operations are used to perform database dump/restores.
-type OperationT uint8
-
-const (
-	OpPut OperationT = 1 // Database put
-	OpDel            = 2 // Database delete
-)
-
-// Operation describes a single database operation. An entire database can be
-// replicated by creating a delta between a source database table and a
-// destination database table.
-type Operation struct {
-	Op    OperationT `json:"op"`
-	Table string     `json:"table"`
-	Key   []byte     `json:"key"`
-	Value []byte     `json:"value,omitempty" binary:"omitempty"`
-}
-
-// Replay describes a replay of operations into a database.
-type Replay struct {
-	Operations []Operation `json:"operations"`
-}
-
-type Encoder interface {
-	Encode(v any) error
-}
-
-type Decoder interface {
-	Decode(v any) error
 }

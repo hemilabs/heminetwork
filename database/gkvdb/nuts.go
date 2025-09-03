@@ -218,14 +218,6 @@ func (b *nutsDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &nutsBatch{wb: new(list.List)}, nil
 }
 
-func (b *nutsDB) DumpTables(ctx context.Context, table []string, target Encoder) error {
-	return ErrNotSuported
-}
-
-func (b *nutsDB) Restore(ctx context.Context, source Decoder) error {
-	return ErrNotSuported
-}
-
 // Transactions
 
 type nutsTX struct {

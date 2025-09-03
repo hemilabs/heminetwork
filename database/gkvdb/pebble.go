@@ -222,14 +222,6 @@ func (b *pebbleDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &pebbleBatch{db: b, wb: b.db.NewBatch()}, nil
 }
 
-func (b *pebbleDB) DumpTables(ctx context.Context, tables []string, target Encoder) error {
-	return ErrNotSuported
-}
-
-func (b *pebbleDB) Restore(ctx context.Context, source Decoder) error {
-	return ErrNotSuported
-}
-
 // Transactions
 
 // PebbleDB doesn't have transactions, so emulate behavior

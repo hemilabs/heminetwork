@@ -178,14 +178,6 @@ func (b *levelDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &levelBatch{db: b, wb: new(leveldb.Batch)}, nil
 }
 
-func (b *levelDB) DumpTables(ctx context.Context, tables []string, target Encoder) error {
-	return dumpTables(ctx, b, tables, target)
-}
-
-func (b *levelDB) Restore(ctx context.Context, source Decoder) error {
-	return restore(ctx, b, source)
-}
-
 // Transactions
 
 type levelTX struct {

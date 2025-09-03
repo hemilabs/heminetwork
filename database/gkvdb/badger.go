@@ -248,14 +248,6 @@ func (b *badgerDB) NewBatch(ctx context.Context) (Batch, error) {
 	return &badgerBatch{wb: new(list.List)}, nil
 }
 
-func (b *badgerDB) DumpTables(ctx context.Context, tables []string, target Encoder) error {
-	return ErrNotSuported
-}
-
-func (b *badgerDB) Restore(ctx context.Context, source Decoder) error {
-	return ErrNotSuported
-}
-
 // Transactions
 
 type badgerTX struct {

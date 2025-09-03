@@ -596,14 +596,6 @@ func (b *replicatorDB) NewBatch(ctx context.Context) (Batch, error) {
 	}, nil
 }
 
-func (b *replicatorDB) DumpTables(ctx context.Context, table []string, target Encoder) error {
-	return ErrNotSuported
-}
-
-func (b *replicatorDB) Restore(ctx context.Context, source Decoder) error {
-	return ErrNotSuported
-}
-
 // Transactions
 
 // replicator transactions convert front end ops to a sink batch.

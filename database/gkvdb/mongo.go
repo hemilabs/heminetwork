@@ -242,14 +242,6 @@ func (b *mongoDB) NewBatch(ctx context.Context) (Batch, error) {
 	}, nil
 }
 
-func (b *mongoDB) DumpTables(ctx context.Context, tables []string, target Encoder) error {
-	return ErrNotSuported
-}
-
-func (b *mongoDB) Restore(ctx context.Context, source Decoder) error {
-	return ErrNotSuported
-}
-
 // Transactions
 type mongoTX struct {
 	db *mongoDB

@@ -1237,7 +1237,7 @@ func TestDumpRestorePipeline(t *testing.T) {
 	var b bytes.Buffer
 	zw, _ := zstd.NewWriter(&b)
 	je := json.NewEncoder(zw)
-	err = db.DumpTables(ctx, tables, je)
+	err = DumpTables(ctx, db, tables, je)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1254,10 +1254,10 @@ func TestDumpRestorePipeline(t *testing.T) {
 	if err == nil {
 		t.Fatal("wtf")
 	}
-	defaultMaxRestoreChunk = 4096 // Many chunks
+	DefaultMaxRestoreChunk = 4096 // Many chunks
 	zr, _ := zstd.NewReader(&b)
 	jd := json.NewDecoder(zr)
-	err = db.Restore(ctx, jd)
+	err = Restore(ctx, db, jd)
 	if err != nil {
 		t.Fatal(err)
 	}
