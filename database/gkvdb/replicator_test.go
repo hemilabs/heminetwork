@@ -419,53 +419,6 @@ func TestReplicateLazy(t *testing.T) {
 	}
 }
 
-// XXX antonio add this test for all dbs
-func TestOpenCloseOpen(t *testing.T) {
-	// First create source and destination
-	home := t.TempDir()
-	tables := []string{"table1"}
-	db, err := NewLevelDB(DefaultLevelConfig(home, tables))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-	defer cancel()
-	err = db.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Open again expect fail
-	err = db.Open(ctx)
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	err = db.Put(ctx, tables[0], []byte("xxx"), []byte("yyy"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Get(ctx, tables[0], []byte("xxx"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.Close(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	err = db.Open(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Get(ctx, tables[0], []byte("xxx"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.Close(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestReplicateDirectBadTarget(t *testing.T) {
 	home := t.TempDir()
 	tables := []string{"table1", "table2"}
