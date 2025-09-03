@@ -98,7 +98,7 @@ type Indexer interface {
 	fixupCacheHook(context.Context, *btcutil.Block) error // Fixup cache
 }
 
-// geometryParams conviniently wraps all parameters required to perform
+// geometryParams conveniently wraps all parameters required to perform
 // geometry operations.
 type geometryParams struct {
 	db    tbcd.Database
