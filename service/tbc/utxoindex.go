@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -22,102 +21,55 @@ import (
 )
 
 type utxoIndexer struct {
-	// common
-	indexing atomic.Bool
-	indexer  string
-	enabled  bool
-	c        *Cache[tbcd.Outpoint, tbcd.CacheOutput]
+	indexerCommon
 
-	// geometry
-	g geometryParams
-
-	// utxo indexer only
+	cache     *Cache[tbcd.Outpoint, tbcd.CacheOutput]
 	fixupHook fixupCacheFunc
 }
 
-var _ Indexer = (*utxoIndexer)(nil)
+var (
+	_ Indexer = (*utxoIndexer)(nil)
+	_ indexer = (*utxoIndexer)(nil)
+)
 
 type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd.CacheOutput) error
 
 func NewUtxoIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, f fixupCacheFunc) Indexer {
-	return &utxoIndexer{
-		indexer:   "utxo",
-		enabled:   true,
-		c:         NewCache[tbcd.Outpoint, tbcd.CacheOutput](cacheLen),
+	uxi := &utxoIndexer{
+		cache:     NewCache[tbcd.Outpoint, tbcd.CacheOutput](cacheLen),
 		fixupHook: f,
-		g: geometryParams{
+	}
+	uxi.indexerCommon = indexerCommon{
+		name:    "utxo",
+		enabled: true,
+		geometry: geometryParams{
 			db:    db,
 			chain: chain,
 		},
+		p:     uxi,
+		cache: uxi.cache,
 	}
+	return uxi
 }
 
-func (i *utxoIndexer) geometry() geometryParams {
-	return i.g
+func (i *utxoIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
+	bh, err := i.geometry.db.BlockHeaderByUtxoIndex(ctx)
+	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-func (i *utxoIndexer) cacheStats() (int, int, int) {
-	return i.c.Stats()
-}
-
-func (i *utxoIndexer) cacheFlush() {
-	i.c.Clear()
+func (i *utxoIndexer) process(ctx context.Context, direction int, block *btcutil.Block) error {
+	if direction == -1 {
+		return unprocessUtxos(ctx, i.geometry.db, block, i.cache.Map())
+	}
+	return processUtxos(block, i.cache.Map())
 }
 
 func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockUtxoUpdate(ctx, direction, i.c.Map(), atHash)
-}
-
-func (i *utxoIndexer) genesis() *HashHeight {
-	return nil
-}
-
-func (i *utxoIndexer) process(ctx context.Context, block *btcutil.Block, direction int) error {
-	if direction == -1 {
-		return unprocessUtxos(ctx, i.g.db, block, i.c.Map())
-	}
-	return processUtxos(block, i.c.Map())
+	return i.geometry.db.BlockUtxoUpdate(ctx, direction, i.cache.Map(), atHash)
 }
 
 func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block) error {
-	return i.fixupHook(ctx, block, i.c.Map())
-}
-
-func (i *utxoIndexer) String() string {
-	return i.indexer
-}
-
-func (i *utxoIndexer) IndexToBest(ctx context.Context) error {
-	// XXX hate to do this here instead of inside the interface.
-	if !i.indexing.CompareAndSwap(false, true) {
-		return ErrAlreadyIndexing
-	}
-	defer i.indexing.Store(false)
-
-	return toBest(ctx, i)
-}
-
-func (i *utxoIndexer) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
-	// XXX hate to do this here instead of inside the interface.
-	if !i.indexing.CompareAndSwap(false, true) {
-		return ErrAlreadyIndexing
-	}
-	defer i.indexing.Store(false)
-
-	return windOrUnwind(ctx, i, hash)
-}
-
-func (i *utxoIndexer) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
-	bh, err := i.g.db.BlockHeaderByUtxoIndex(ctx)
-	return evaluateBlockHeaderIndex(i.g, bh, err)
-}
-
-func (i *utxoIndexer) Indexing() bool {
-	return i.indexing.Load()
-}
-
-func (i *utxoIndexer) Enabled() bool {
-	return i.enabled
+	return i.fixupHook(ctx, block, i.cache.Map())
 }
 
 func processUtxos(block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {

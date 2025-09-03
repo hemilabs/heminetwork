@@ -6,7 +6,6 @@ package tbc
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -17,98 +16,51 @@ import (
 )
 
 type txIndexer struct {
-	// common
-	indexing atomic.Bool
-	indexer  string
-	enabled  bool
-	c        *Cache[tbcd.TxKey, *tbcd.TxValue]
-
-	// geometry
-	g geometryParams
-
-	// tx indexer only
+	indexerCommon
+	cache *Cache[tbcd.TxKey, *tbcd.TxValue]
 }
 
-var _ Indexer = (*txIndexer)(nil)
+var (
+	_ Indexer = (*txIndexer)(nil)
+	_ indexer = (*txIndexer)(nil)
+)
 
 func NewTxIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database) Indexer {
-	return &txIndexer{
-		indexer: "tx",
+	txi := &txIndexer{
+		cache: NewCache[tbcd.TxKey, *tbcd.TxValue](cacheLen),
+	}
+	txi.indexerCommon = indexerCommon{
+		name:    "tx",
 		enabled: true,
-		c:       NewCache[tbcd.TxKey, *tbcd.TxValue](cacheLen),
-		g: geometryParams{
+		geometry: geometryParams{
 			db:    db,
 			chain: chain,
 		},
+		p:     txi,
+		cache: txi.cache,
 	}
+	return txi
 }
 
-func (i *txIndexer) geometry() geometryParams {
-	return i.g
+func (i *txIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
+	bh, err := i.geometry.db.BlockHeaderByTxIndex(ctx)
+	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-func (i *txIndexer) cacheStats() (int, int, int) {
-	return i.c.Stats()
-}
-
-func (i *txIndexer) cacheFlush() {
-	i.c.Clear()
+func (i *txIndexer) process(ctx context.Context, direction int, block *btcutil.Block) error {
+	return processTxs(ctx, block, direction, i.cache.Map())
 }
 
 func (i *txIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockTxUpdate(ctx, direction, i.c.Map(), atHash)
+	return i.geometry.db.BlockTxUpdate(ctx, direction, i.cache.Map(), atHash)
 }
 
-func (i *txIndexer) genesis() *HashHeight {
+func (i *txIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block) error {
+	// Not needed for tx indexer.
 	return nil
 }
 
-func (i *txIndexer) process(ctx context.Context, block *btcutil.Block, direction int) error {
-	return processTxs(block, direction, i.c.Map())
-}
-
-func (i *txIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block) error {
-	return nil
-}
-
-func (i *txIndexer) String() string {
-	return i.indexer
-}
-
-func (i *txIndexer) IndexToBest(ctx context.Context) error {
-	// XXX hate to do this here instead of inside the interface.
-	if !i.indexing.CompareAndSwap(false, true) {
-		return ErrAlreadyIndexing
-	}
-	defer i.indexing.Store(false)
-
-	return toBest(ctx, i)
-}
-
-func (i *txIndexer) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
-	// XXX hate to do this here instead of inside the interface.
-	if !i.indexing.CompareAndSwap(false, true) {
-		return ErrAlreadyIndexing
-	}
-	defer i.indexing.Store(false)
-
-	return windOrUnwind(ctx, i, hash)
-}
-
-func (i *txIndexer) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
-	bh, err := i.g.db.BlockHeaderByTxIndex(ctx)
-	return evaluateBlockHeaderIndex(i.g, bh, err)
-}
-
-func (i *txIndexer) Indexing() bool {
-	return i.indexing.Load()
-}
-
-func (i *txIndexer) Enabled() bool {
-	return i.enabled
-}
-
-func processTxs(block *btcutil.Block, direction int, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
+func processTxs(ctx context.Context, block *btcutil.Block, direction int, txsCache map[tbcd.TxKey]*tbcd.TxValue) error {
 	blockHash := block.Hash()
 	txs := block.Transactions()
 	for _, tx := range txs {

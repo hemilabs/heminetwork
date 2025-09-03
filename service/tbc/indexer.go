@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -84,18 +85,69 @@ type Indexer interface {
 
 	// IndexAt returns the point the indexer is currently at.
 	IndexAt(ctx context.Context) (*tbcd.BlockHeader, error)
+}
 
-	// Cache control
-	cacheStats() (l int, c int, pct int)
-	cacheFlush()
+// indexer does indexer-specific work.
+// TODO: tidy this up
+type indexer interface {
+	indexAt(ctx context.Context) (*tbcd.BlockHeader, error)
+	process(ctx context.Context, direction int, block *btcutil.Block) error // Process block
+	commit(ctx context.Context, direction int, hash chainhash.Hash) error   // Commit index cache to disk
+	fixupCacheHook(ctx context.Context, block *btcutil.Block) error         // Fixup cache
+}
 
-	// XXX i would be tickled if we can get rid of these inside the interface
-	geometry() geometryParams                          // Return geometry parameters
-	commit(context.Context, int, chainhash.Hash) error // Commit index cache to disk
-	genesis() *HashHeight                              // Genesis override, like hemi
+// indexerCache exposes Cache management functions.
+type indexerCache interface {
+	Clear()
+	Stats() (length int, capacity int, pct int)
+}
 
-	process(context.Context, *btcutil.Block, int) error   // Process block
-	fixupCacheHook(context.Context, *btcutil.Block) error // Fixup cache
+// indexerCommon is the common base for Indexer implementations.
+type indexerCommon struct {
+	name     string
+	enabled  bool
+	indexing atomic.Bool
+
+	geometry geometryParams
+	genesis  *HashHeight
+
+	p     indexer
+	cache indexerCache
+}
+
+func (c *indexerCommon) Enabled() bool {
+	return c.enabled
+}
+
+func (c *indexerCommon) Indexing() bool {
+	return c.indexing.Load()
+}
+
+func (c *indexerCommon) IndexToBest(ctx context.Context) error {
+	if !c.indexing.CompareAndSwap(false, true) {
+		return ErrAlreadyIndexing
+	}
+	defer c.indexing.Store(false)
+
+	return c.toBest(ctx)
+}
+
+func (c *indexerCommon) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
+	if !c.indexing.CompareAndSwap(false, true) {
+		return ErrAlreadyIndexing
+	}
+	defer c.indexing.Store(false)
+
+	return c.windOrUnwind(ctx, hash)
+}
+
+func (c *indexerCommon) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
+	return c.p.indexAt(ctx)
+}
+
+// String returns the indexer name.
+func (c *indexerCommon) String() string {
+	return c.name
 }
 
 // geometryParams conveniently wraps all parameters required to perform
@@ -107,50 +159,50 @@ type geometryParams struct {
 
 // evaluateBlockHeaderIndex makes error handling of the various block header
 // index calls generic.
-func evaluateBlockHeaderIndex(g geometryParams, bh *tbcd.BlockHeader, err error) (*tbcd.BlockHeader, error) {
+func (c *indexerCommon) evaluateBlockHeaderIndex(bh *tbcd.BlockHeader, err error) (*tbcd.BlockHeader, error) {
 	if err != nil {
 		if !errors.Is(err, database.ErrNotFound) {
 			return nil, err
 		}
 		bh = &tbcd.BlockHeader{
-			Hash:   *g.chain.GenesisHash,
+			Hash:   *c.geometry.chain.GenesisHash,
 			Height: 0,
-			Header: h2b(&g.chain.GenesisBlock.Header),
+			Header: h2b(&c.geometry.chain.GenesisBlock.Header),
 		}
 	}
 	return bh, nil
 }
 
 // toBest moves the indexer to the best tip.
-func toBest(ctx context.Context, i Indexer) error {
-	log.Tracef("%vIndexersToBest", i)
-	defer log.Tracef("%vIndexersToBest exit", i)
+func (c *indexerCommon) toBest(ctx context.Context) error {
+	log.Tracef("%vIndexersToBest", c)
+	defer log.Tracef("%vIndexersToBest exit", c)
 
-	bhb, err := i.geometry().db.BlockHeaderBest(ctx)
+	bhb, err := c.geometry.db.BlockHeaderBest(ctx)
 	if err != nil {
 		return err
 	}
 
 	// Find out where the indexer is at.
-	indexerAt, err := i.IndexAt(ctx)
+	indexerAt, err := c.IndexAt(ctx)
 	if err != nil {
 		return err
 	}
-	cp, err := findCanonicalParent(ctx, i.geometry(), indexerAt)
+	cp, err := findCanonicalParent(ctx, c.geometry, indexerAt)
 	if err != nil {
 		return err
 	}
 	if !cp.Hash.IsEqual(&indexerAt.Hash) {
 		log.Infof("Syncing %v index to: %v from: %v via: %v",
-			i, bhb.HH(), indexerAt.HH(), cp.HH())
+			c, bhb.HH(), indexerAt.HH(), cp.HH())
 		// indexerAt is NOT on canonical chain, unwind first
-		if err := windOrUnwind(ctx, i, cp.Hash); err != nil {
-			return fmt.Errorf("%v indexer unwind: %w", i, err)
+		if err := c.windOrUnwind(ctx, cp.Hash); err != nil {
+			return fmt.Errorf("%v indexer unwind: %w", c, err)
 		}
 	}
 	// Index to best block
-	if err := windOrUnwind(ctx, i, bhb.Hash); err != nil {
-		return fmt.Errorf("%v indexer: %w", i, err)
+	if err := c.windOrUnwind(ctx, bhb.Hash); err != nil {
+		return fmt.Errorf("%v indexer: %w", c, err)
 	}
 
 	return nil
@@ -175,28 +227,28 @@ func headerAndBlock(ctx context.Context, db tbcd.Database, hash chainhash.Hash) 
 
 // windOrUnwind determines in which direction we are moving and kicks of the
 // wind or unwind process.
-func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error {
-	log.Tracef("%vIndexer", i)
-	defer log.Tracef("%vIndexer exit", i)
+func (c *indexerCommon) windOrUnwind(ctx context.Context, endHash chainhash.Hash) error {
+	log.Tracef("%vIndexer", c)
+	defer log.Tracef("%vIndexer exit", c)
 
 	// XXX this is basically duplicate from modeIndexIsLinear
 
-	if !i.Enabled() {
+	if !c.Enabled() {
 		return errors.New("disabled")
 	}
-	if !i.Indexing() {
-		panic("indexing not true")
+	if !c.Indexing() {
+		panic("bug: indexing not true")
 	}
 
 	// Verify exit condition hash
-	g := i.geometry()
+	g := c.geometry
 	endBH, err := g.db.BlockHeaderByHash(ctx, endHash)
 	if err != nil {
 		return fmt.Errorf("blockheader end hash: %w", err)
 	}
 
 	// Verify start point is not after the end point
-	indexerAt, err := i.IndexAt(ctx)
+	indexerAt, err := c.IndexAt(ctx)
 	if err != nil {
 		return err
 	}
@@ -204,17 +256,17 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 	// Make sure there is no gap between start and end or vice versa.
 	startBH, err := g.db.BlockHeaderByHash(ctx, indexerAt.Hash)
 	if err != nil {
-		return fmt.Errorf("blockheader %v hash: %w", i, err)
+		return fmt.Errorf("blockheader %v hash: %w", c, err)
 	}
 	direction, err := indexIsLinear(ctx, g, indexerAt.Hash, endHash)
 	if err != nil {
-		return fmt.Errorf("%v index is linear: %w", i, err)
+		return fmt.Errorf("%v index is linear: %w", c, err)
 	}
 	switch direction {
 	case 1:
-		return wind(ctx, i, startBH, endBH)
+		return c.wind(ctx, startBH, endBH)
 	case -1:
-		return unwind(ctx, i, startBH, endBH)
+		return c.unwind(ctx, startBH, endBH)
 	case 0:
 		// Because we call modeIndexIsLinear we know it's the same block.
 		return nil
@@ -226,40 +278,37 @@ func windOrUnwind(ctx context.Context, i Indexer, endHash chainhash.Hash) error 
 // wind moves the chain forward and process blocks to generate an index cache.
 // When the cache is filled it flushes the cache to disk and repeats this
 // process until it reaches endBH.
-func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("%v wind", i)
-	defer log.Tracef("%v wind exit", i)
+func (c *indexerCommon) wind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("%v wind", c)
+	defer log.Tracef("%v wind exit", c)
 
-	if !i.Indexing() {
-		// XXX this prob should be an error but pusnish bad callers for now
-		panic(fmt.Sprintf("%vIndexerWind not true", i))
+	if !c.Indexing() {
+		panic("bug: indexing not true")
 	}
+	// Flush cache on exit.
+	defer c.cache.Clear()
 
-	// Allocate here so that we don't waste space when not indexing.
-	// XXX the cache *really* should become a list methinks.
-	defer i.cacheFlush()
-
-	log.Infof("Start indexing %vs at hash %v height %v", i, startBH, startBH.Height)
-	log.Infof("End indexing %vs at hash %v height %v", i, endBH, endBH.Height)
+	log.Infof("Start indexing %vs at hash %v height %v", c, startBH, startBH.Height)
+	log.Infof("End indexing %vs at hash %v height %v", c, endBH, endBH.Height)
 	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
-		blocksProcessed, last, err := parseBlocks(ctx, i, endHash)
+		blocksProcessed, last, err := c.parseBlocks(ctx, endHash)
 		if err != nil {
-			return fmt.Errorf("%v index blocks: %w", i, err)
+			return fmt.Errorf("%v index blocks: %w", c, err)
 		}
 		if blocksProcessed == 0 {
 			return nil
 		}
 
-		cached, _, pct := i.cacheStats()
+		cached, _, pct := c.cache.Stats()
 		log.Infof("%v indexer blocks processed %v in %v cached %v (%v%%) avg/blk %v",
-			i, blocksProcessed, time.Since(start), cached, pct, cached/blocksProcessed)
+			c, blocksProcessed, time.Since(start), cached, pct, cached/blocksProcessed)
 
 		// Flush to disk
 		start = time.Now()
-		if err := i.commit(ctx, 1, last.Hash); err != nil {
-			return fmt.Errorf("block %v update: %w", i, err)
+		if err := c.p.commit(ctx, 1, last.Hash); err != nil {
+			return fmt.Errorf("block %v update: %w", c, err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
 		// memory pressure.
@@ -267,7 +316,7 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 		runtime.GC()
 
 		log.Infof("Flushing %vs complete %v took %v",
-			i, cached, time.Since(start))
+			c, cached, time.Since(start))
 
 		if endHash.IsEqual(&last.Hash) {
 			break
@@ -280,40 +329,39 @@ func wind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) erro
 // unwind moves the chain backward and reverses the wind process on the found
 // blocks. When the cache is filled it flushes the cache to disk and repeats
 // this process until it reaches endBH.
-func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) error {
-	log.Tracef("%v Unwind", i)
-	defer log.Tracef("%v Unwind exit", i)
+func (c *indexerCommon) unwind(ctx context.Context, startBH, endBH *tbcd.BlockHeader) error {
+	log.Tracef("%v Unwind", c)
+	defer log.Tracef("%v Unwind exit", c)
 
-	// XXX dedup with modeIndexerWind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with wind; it's basically the same code but with the direction, start anf endhas flipped
 
-	if !i.Indexing() {
-		// XXX this prob should be an error but pusnish bad callers for now
-		panic(fmt.Sprintf("%vIndexerUnwind indexing not true", i))
+	if !c.Indexing() {
+		panic("bug: indexing not true")
 	}
-	// Allocate here so that we don't waste space when not indexing.
-	defer i.cacheFlush()
+	// Flush cache on exit.
+	defer c.cache.Clear()
 
-	log.Infof("Start unwinding %v at hash %v height %v", i, startBH, startBH.Height)
-	log.Infof("End unwinding %v at hash %v height %v", i, endBH, endBH.Height)
+	log.Infof("Start unwinding %v at hash %v height %v", c, startBH, startBH.Height)
+	log.Infof("End unwinding %v at hash %v height %v", c, endBH, endBH.Height)
 	endHash := endBH.BlockHash()
 	for {
 		start := time.Now()
-		blocksProcessed, last, err := parseBlocksReverse(ctx, i, endHash)
+		blocksProcessed, last, err := c.parseBlocksReverse(ctx, endHash)
 		if err != nil {
-			return fmt.Errorf("unindex %vs in blocks: %w", i, err)
+			return fmt.Errorf("unindex %vs in blocks: %w", c, err)
 		}
 		if blocksProcessed == 0 {
 			return nil
 		}
 
-		cached, _, pct := i.cacheStats()
+		cached, _, pct := c.cache.Stats()
 		log.Infof("%v unwinder blocks processed %v in %v cached %v cache (%v%%) avg/blk %v",
-			i, blocksProcessed, time.Since(start), cached, pct, cached/blocksProcessed)
+			c, blocksProcessed, time.Since(start), cached, pct, cached/blocksProcessed)
 
 		// Flush to disk
 		start = time.Now()
-		if err = i.commit(ctx, -1, last.Hash); err != nil {
-			return fmt.Errorf("block %v update: %w", i, err)
+		if err = c.p.commit(ctx, -1, last.Hash); err != nil {
+			return fmt.Errorf("block %v update: %w", c, err)
 		}
 		// leveldb does all kinds of allocations, force GC to lower
 		// memory pressure.
@@ -321,7 +369,7 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 		runtime.GC()
 
 		log.Infof("Flushing unwind %vs complete %v took %v",
-			i, cached, time.Since(start))
+			c, cached, time.Since(start))
 
 		if endHash.IsEqual(&last.Hash) {
 			break
@@ -333,20 +381,20 @@ func unwind(ctx context.Context, i Indexer, startBH, endBH *tbcd.BlockHeader) er
 // parseBlocks indexes the block from the last processed block until the
 // provided end hash, inclusive. It returns the number of blocks processed and
 // the last hash it processed.
-func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, *HashHeight, error) {
-	log.Tracef("%v parseBlocks", i)
-	defer log.Tracef("%v parseBlocks exit", i)
+func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash) (int, *HashHeight, error) {
+	log.Tracef("%v parseBlocks", c)
+	defer log.Tracef("%v parseBlocks exit", c)
 
 	// indicates if we have processed endHash and thus have hit the exit
 	// condition.
 	var last *HashHeight
 
-	g := i.geometry()
+	g := c.geometry
 
 	// Find start hash
-	at, err := i.IndexAt(ctx)
+	at, err := c.IndexAt(ctx)
 	if err != nil {
-		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
+		return 0, last, fmt.Errorf("%v index hash: %w", c, err)
 	}
 
 	// If we have a real block move forward to the next block since we
@@ -355,12 +403,12 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, 
 	if !hh.Hash.IsEqual(g.chain.GenesisHash) {
 		hh, err = nextCanonicalBlockheader(ctx, g, endHash, hh)
 		if err != nil {
-			return 0, last, fmt.Errorf("%v next block %v: %w", i, hh, err)
+			return 0, last, fmt.Errorf("%v next block %v: %w", c, hh, err)
 		}
 	} else {
 		// Some indexers use a different genesis, e.g. keystones. Will
 		// be nil if there is no override.
-		if override := i.genesis(); override != nil {
+		if override := c.genesis; override != nil {
 			hh = override
 		}
 	}
@@ -368,29 +416,29 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, 
 	const percentage = 95 // flush cache at >95% capacity
 	var blocksProcessed int
 	for {
-		log.Debugf("indexing %vs: %v", i, hh)
+		log.Debugf("indexing %vs: %v", c, hh)
 
 		bh, b, err := headerAndBlock(ctx, g.db, hh.Hash)
 		if err != nil {
 			return 0, last, err
 		}
 
-		if err = i.fixupCacheHook(ctx, b); err != nil {
+		if err = c.p.fixupCacheHook(ctx, b); err != nil {
 			return 0, last, fmt.Errorf("process %v fixup %v: %w",
-				i, hh, err)
+				c, hh, err)
 		}
 
 		// Index block
-		if err = i.process(ctx, b, 1); err != nil {
-			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
+		if err = c.p.process(ctx, 1, b); err != nil {
+			return 0, last, fmt.Errorf("process %vs %v: %w", c, hh, err)
 		}
 
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
-		_, _, pct := i.cacheStats()
+		_, _, pct := c.cache.Stats()
 		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
-			log.Infof("%v indexer: %v cache %v%%", i, hh, pct)
+			log.Infof("%v indexer: %v cache %v%%", c, hh, pct)
 		}
 
 		// Exit if we processed the provided end hash or hit 95% cache full.
@@ -401,9 +449,9 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, 
 		}
 
 		// Move to next block
-		hh, err = nextCanonicalBlockheader(ctx, i.geometry(), endHash, hh)
+		hh, err = nextCanonicalBlockheader(ctx, c.geometry, endHash, hh)
 		if err != nil {
-			return 0, last, fmt.Errorf("%v next block %v: %w", i, hh, err)
+			return 0, last, fmt.Errorf("%v next block %v: %w", c, hh, err)
 		}
 	}
 
@@ -413,27 +461,27 @@ func parseBlocks(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, 
 // parseBlocksReverse unindexes whatever type from the last processed block
 // until the provided end hash, inclusive. It returns the number of blocks
 // processed and the last hash it processed.
-func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash) (int, *HashHeight, error) {
-	log.Tracef("%v parseBlocksReverse", i)
-	defer log.Tracef("%v parseBlocksReverse exit", i)
+func (c *indexerCommon) parseBlocksReverse(ctx context.Context, endHash *chainhash.Hash) (int, *HashHeight, error) {
+	log.Tracef("%v parseBlocksReverse", c)
+	defer log.Tracef("%v parseBlocksReverse exit", c)
 
 	// indicates if we have processed endHash and thus have hit the exit
 	// condition.
 	var last *HashHeight
 
-	g := i.geometry()
+	g := c.geometry
 
 	// Find start hash
-	at, err := i.IndexAt(ctx)
+	at, err := c.IndexAt(ctx)
 	if err != nil {
-		return 0, last, fmt.Errorf("%v index hash: %w", i, err)
+		return 0, last, fmt.Errorf("%v index hash: %w", c, err)
 	}
 
 	const percentage = 95 // flush cache at >95% capacity
 	var blocksProcessed int
 	hh := &HashHeight{Hash: at.Hash, Height: at.Height}
 	for {
-		log.Debugf("unindexing %vs: %v", i, hh)
+		log.Debugf("unindexing %vs: %v", c, hh)
 
 		hash := hh.Hash
 
@@ -448,17 +496,16 @@ func parseBlocksReverse(ctx context.Context, i Indexer, endHash *chainhash.Hash)
 			return 0, last, err
 		}
 
-		err = i.process(ctx, b, -1)
-		if err != nil {
-			return 0, last, fmt.Errorf("process %vs %v: %w", i, hh, err)
+		if err = c.p.process(ctx, -1, b); err != nil {
+			return 0, last, fmt.Errorf("process %vs %v: %w", c, hh, err)
 		}
 
 		blocksProcessed++
 
 		// Try not to overshoot the cache to prevent costly allocations
-		_, _, pct := i.cacheStats()
+		_, _, pct := c.cache.Stats()
 		if bh.Height%10000 == 0 || pct > percentage || blocksProcessed == 1 {
-			log.Infof("%v unindexer: %v cache %v%%", i, hh, pct)
+			log.Infof("%v unindexer: %v cache %v%%", c, hh, pct)
 		}
 
 		// Move to previous block

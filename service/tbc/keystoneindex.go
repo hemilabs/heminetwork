@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"sync/atomic"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
@@ -21,97 +20,51 @@ import (
 )
 
 type keystoneIndexer struct {
-	// common
-	indexing atomic.Bool
-	indexer  string
-	enabled  bool
-	c        *Cache[chainhash.Hash, tbcd.Keystone]
+	indexerCommon
 
-	// geometry
-	g geometryParams
-
-	// keystone indexer only
+	cache       *Cache[chainhash.Hash, tbcd.Keystone]
 	hemiGenesis *HashHeight
 }
 
-var _ Indexer = (*keystoneIndexer)(nil)
+var (
+	_ Indexer = (*keystoneIndexer)(nil)
+	_ indexer = (*keystoneIndexer)(nil)
+)
 
 func NewKeystoneIndexer(chain *chaincfg.Params, cacheLen int, db tbcd.Database, enabled bool, hemiGenesis *HashHeight) Indexer {
-	return &keystoneIndexer{
-		indexer:  "keystone",
-		enabled:  enabled,
-		c:        NewCache[chainhash.Hash, tbcd.Keystone](cacheLen),
-		g: geometryParams{
+	ki := &keystoneIndexer{
+		cache:       NewCache[chainhash.Hash, tbcd.Keystone](cacheLen),
+		hemiGenesis: hemiGenesis,
+	}
+	ki.indexerCommon = indexerCommon{
+		name:    "keystone",
+		enabled: enabled,
+		geometry: geometryParams{
 			db:    db,
 			chain: chain,
 		},
-		hemiGenesis: hemiGenesis,
+		p:     ki,
+		cache: ki.cache,
 	}
+	return ki
 }
 
-func (i *keystoneIndexer) geometry() geometryParams {
-	return i.g
+func (i *keystoneIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
+	bh, err := i.geometry.db.BlockHeaderByKeystoneIndex(ctx)
+	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-func (i *keystoneIndexer) cacheStats() (int, int, int) {
-	return i.c.Stats()
-}
-
-func (i *keystoneIndexer) cacheFlush() {
-	i.c.Clear()
+func (i *keystoneIndexer) process(_ context.Context, direction int, block *btcutil.Block) error {
+	return processKeystones(block, direction, i.cache.Map())
 }
 
 func (i *keystoneIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockKeystoneUpdate(ctx, direction, i.c.Map(), atHash)
+	return i.geometry.db.BlockKeystoneUpdate(ctx, direction, i.cache.Map(), atHash)
 }
 
-func (i *keystoneIndexer) genesis() *HashHeight {
-	return i.hemiGenesis
-}
-
-func (i *keystoneIndexer) process(ctx context.Context, block *btcutil.Block, direction int) error {
-	return processKeystones(block, direction, i.c.Map())
-}
-
-func (i *keystoneIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block) error {
+func (i *keystoneIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block) error {
+	// Not needed for keystone indexer.
 	return nil
-}
-
-func (i *keystoneIndexer) String() string {
-	return i.indexer
-}
-
-func (i *keystoneIndexer) IndexToBest(ctx context.Context) error {
-	// XXX hate to do this here instead of inside the interface.
-	if !i.indexing.CompareAndSwap(false, true) {
-		return ErrAlreadyIndexing
-	}
-	defer i.indexing.Store(false)
-
-	return toBest(ctx, i)
-}
-
-func (i *keystoneIndexer) IndexToHash(ctx context.Context, hash chainhash.Hash) error {
-	// XXX hate to do this here instead of inside the interface.
-	if !i.indexing.CompareAndSwap(false, true) {
-		return ErrAlreadyIndexing
-	}
-	defer i.indexing.Store(false)
-
-	return windOrUnwind(ctx, i, hash)
-}
-
-func (i *keystoneIndexer) IndexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
-	bh, err := i.g.db.BlockHeaderByKeystoneIndex(ctx)
-	return evaluateBlockHeaderIndex(i.g, bh, err)
-}
-
-func (i *keystoneIndexer) Indexing() bool {
-	return i.indexing.Load()
-}
-
-func (i *keystoneIndexer) Enabled() bool {
-	return i.enabled
 }
 
 // BlockKeystonesByHash returns all keystones within a block. If hash is not
