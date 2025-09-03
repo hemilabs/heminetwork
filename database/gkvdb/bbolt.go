@@ -265,7 +265,7 @@ func (tx *boltTX) Rollback(ctx context.Context) error {
 func (tx *boltTX) Write(ctx context.Context, b Batch) error {
 	bb, ok := b.(*boltBatch)
 	if !ok {
-		return fmt.Errorf("unsupported batch type: %T", b)
+		return fmt.Errorf("unexpected batch type: %T", b)
 	}
 	for e := bb.wb.Front(); e != nil; e = e.Next() {
 		f, ok := e.Value.(batchFunc)

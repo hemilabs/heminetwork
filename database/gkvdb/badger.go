@@ -5,9 +5,11 @@
 package gkvdb
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/badger/v4/options"
@@ -39,6 +41,10 @@ type badgerDB struct {
 	opt    *badger.Options
 	tables map[string]struct{}
 	cfg    *BadgerConfig
+
+	// kinda sucks but we must force
+	// multiple write txs to block
+	txMtx sync.Mutex
 }
 
 func NewBadgerDB(cfg *BadgerConfig) (Database, error) {
@@ -137,10 +143,14 @@ func (b *badgerDB) Put(_ context.Context, table string, key, value []byte) error
 }
 
 func (b *badgerDB) Begin(_ context.Context, write bool) (Transaction, error) {
+	if write {
+		b.txMtx.Lock()
+	}
 	tx := b.db.NewTransaction(write)
 	return &badgerTX{
-		db: b,
-		tx: tx,
+		db:    b,
+		tx:    tx,
+		write: write,
 	}, nil
 }
 
@@ -172,12 +182,35 @@ func (b *badgerDB) NewIterator(ctx context.Context, table string) (Iterator, err
 		return nil, ErrTableNotFound
 	}
 	tx := b.db.NewTransaction(false)
+
 	opts := badger.DefaultIteratorOptions
+	opts.Prefix = NewCompositeKey(table, []byte{})
 	it := tx.NewIterator(opts)
 	it.Rewind()
+
+	// Reverse iterate to get the last item.
+	// Since iterators use a snapshot from their creation,
+	// the value should always remain the same.
+	opts.Reverse = true
+	revIt := tx.NewIterator(opts)
+	defer revIt.Close()
+
+	revIt.Seek(NewCompositeKey(table, []byte{0xff}))
+	if !revIt.ValidForPrefix(opts.Prefix) {
+		return nil, errors.New("last key not found")
+	}
+
+	it.Seek(revIt.Item().KeyCopy(nil))
+	if !it.ValidForPrefix(opts.Prefix) {
+		return nil, errors.New("last key not in forward iterator")
+	}
+	lastKey := revIt.Item().KeyCopy(nil)
+
 	return &badgerIterator{
-		table: table,
-		it:    it,
+		table:   table,
+		tx:      tx,
+		it:      it,
+		lastKey: lastKey,
 	}, nil
 }
 
@@ -185,19 +218,34 @@ func (b *badgerDB) NewRange(ctx context.Context, table string, start, end []byte
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
-	tx := b.db.NewTransaction(false)
+	tx, err := b.Begin(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	txb := tx.(*badgerTX)
+
 	opts := badger.DefaultIteratorOptions
-	opts.Prefix = []byte(table + ":")
-	it := tx.NewIterator(opts)
+	opts.Prefix = NewCompositeKey(table, []byte{})
+	it := txb.tx.NewIterator(opts)
+	defer it.Close()
 	it.Rewind()
-	return &badgerIterator{
+
+	keys := new(list.List)
+	for it.Valid() {
+		key := it.Item().KeyCopy(nil)
+		keys.PushBack(KeyFromComposite(table, key))
+		it.Next()
+	}
+
+	return &badgerRange{
 		table: table,
-		it:    it,
+		tx:    tx,
+		keys:  keys,
 	}, nil
 }
 
 func (b *badgerDB) NewBatch(ctx context.Context) (Batch, error) {
-	return &badgerBatch{}, nil
+	return &badgerBatch{wb: new(list.List)}, nil
 }
 
 func (b *badgerDB) DumpTables(ctx context.Context, tables []string, target Encoder) error {
@@ -211,8 +259,9 @@ func (b *badgerDB) Restore(ctx context.Context, source Decoder) error {
 // Transactions
 
 type badgerTX struct {
-	db *badgerDB
-	tx *badger.Txn
+	db    *badgerDB
+	tx    *badger.Txn
+	write bool
 }
 
 func (tx *badgerTX) Del(ctx context.Context, table string, key []byte) error {
@@ -256,21 +305,43 @@ func (tx *badgerTX) Put(ctx context.Context, table string, key []byte, value []b
 }
 
 func (tx *badgerTX) Commit(ctx context.Context) error {
+	if tx.write {
+		defer tx.db.txMtx.Unlock()
+	}
 	return xerr(tx.tx.Commit())
 }
 
 func (tx *badgerTX) Rollback(ctx context.Context) error {
+	if tx.write {
+		defer tx.db.txMtx.Unlock()
+	}
 	tx.tx.Discard()
 	return nil
 }
 
 func (tx *badgerTX) Write(ctx context.Context, b Batch) error {
-	return errors.New("not yet badger")
+	bb, ok := b.(*badgerBatch)
+	if !ok {
+		return fmt.Errorf("unexpected batch type: %T", b)
+	}
+	for e := bb.wb.Front(); e != nil; e = e.Next() {
+		f, ok := e.Value.(batchFunc)
+		if !ok {
+			return fmt.Errorf("unexpected batch element type %T", e.Value)
+		}
+		if err := f(ctx, tx); err != nil {
+			return xerr(err)
+		}
+	}
+	return nil
 }
 
 // Iterations
 type badgerIterator struct {
-	table string
+	lastKey []byte
+	table   string
+
+	tx    *badger.Txn
 	it    *badger.Iterator
 	first bool
 }
@@ -280,18 +351,17 @@ func (ni *badgerIterator) First(_ context.Context) bool {
 	return ni.it.Valid()
 }
 
-// XXX Not yet
-func (ni *badgerIterator) Last(_ context.Context) bool {
-	return false
+func (ni *badgerIterator) Last(ctx context.Context) bool {
+	ni.it.Seek(ni.lastKey)
+	return ni.it.Valid()
 }
 
-func (ni *badgerIterator) Next(_ context.Context) bool {
+func (ni *badgerIterator) Next(ctx context.Context) bool {
 	if !ni.first {
 		ni.first = true
-		ni.it.Rewind()
-	} else {
-		ni.it.Next()
+		return ni.First(ctx)
 	}
+	ni.it.Next()
 	return ni.it.Valid()
 }
 
@@ -316,57 +386,90 @@ func (ni *badgerIterator) Value(_ context.Context) []byte {
 
 func (ni *badgerIterator) Close(ctx context.Context) {
 	ni.it.Close()
+	ni.tx.Discard()
 }
 
 // Ranges
 type badgerRange struct {
 	table string
-	tx    *badger.Txn
-	it    *badger.Iterator
+	tx    Transaction
+
+	keys *list.List
+	cur  *list.Element
+
+	first bool
 }
 
 func (nr *badgerRange) First(_ context.Context) bool {
-	nr.it.Rewind()
-	return !nr.it.Valid()
+	nr.cur = nr.keys.Front()
+	return nr.cur != nil
 }
 
-// XXX not yet
 func (nr *badgerRange) Last(_ context.Context) bool {
-	return false
+	nr.cur = nr.keys.Back()
+	return nr.cur != nil
 }
 
-func (nr *badgerRange) Next(_ context.Context) bool {
-	nr.it.Next()
-	return nr.it.Valid()
+func (nr *badgerRange) Next(ctx context.Context) bool {
+	if !nr.first {
+		nr.first = true
+		return nr.First(ctx)
+	}
+	nr.cur = nr.cur.Next()
+	return nr.cur != nil
 }
 
 func (nr *badgerRange) Key(ctx context.Context) []byte {
-	return KeyFromComposite(nr.table, nr.it.Item().KeyCopy(nil))
-}
-
-func (nr *badgerRange) Value(ctx context.Context) []byte {
-	val, err := nr.it.Item().ValueCopy(nil)
-	if err != nil {
-		log.Errorf("value: %v", err)
+	val, ok := nr.cur.Value.([]byte)
+	if !ok {
+		// this should not happen
+		log.Errorf("key type %T", nr.cur.Value)
 		return nil
 	}
 	return val
 }
 
+func (nr *badgerRange) Value(ctx context.Context) []byte {
+	key := nr.Key(ctx)
+	if key == nil {
+		return nil
+	}
+	value, err := nr.tx.Get(ctx, nr.table, key)
+	if err != nil {
+		// this should not happen
+		log.Errorf("value %v", err)
+		return nil
+	}
+	return value
+}
+
 func (nr *badgerRange) Close(ctx context.Context) {
-	nr.it.Close()
-	nr.tx.Discard()
+	err := nr.tx.Commit(ctx)
+	if err != nil {
+		log.Errorf("range close: %v", err)
+	}
 }
 
 // Batches
 
-type badgerBatch struct{}
+type badgerBatch struct {
+	wb *list.List // elements of type batchFunc
+}
 
 func (nb *badgerBatch) Del(ctx context.Context, table string, key []byte) {
+	var act batchFunc = func(ctx context.Context, tx Transaction) error {
+		return tx.Del(ctx, table, key)
+	}
+	nb.wb.PushBack(act)
 }
 
 func (nb *badgerBatch) Put(ctx context.Context, table string, key, value []byte) {
+	var act batchFunc = func(ctx context.Context, tx Transaction) error {
+		return tx.Put(ctx, table, key, value)
+	}
+	nb.wb.PushBack(act)
 }
 
 func (nb *badgerBatch) Reset(ctx context.Context) {
+	nb.wb.Init()
 }
