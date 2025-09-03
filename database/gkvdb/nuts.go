@@ -5,6 +5,7 @@
 package gkvdb
 
 import (
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -214,7 +215,7 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 }
 
 func (b *nutsDB) NewBatch(ctx context.Context) (Batch, error) {
-	return &nutsBatch{}, nil
+	return &nutsBatch{wb: new(list.List)}, nil
 }
 
 func (b *nutsDB) DumpTables(ctx context.Context, table []string, target Encoder) error {
@@ -265,7 +266,20 @@ func (tx *nutsTX) Rollback(ctx context.Context) error {
 }
 
 func (tx *nutsTX) Write(ctx context.Context, b Batch) error {
-	return errors.New("not yet nuts")
+	bb, ok := b.(*nutsBatch)
+	if !ok {
+		return fmt.Errorf("unexpected batch type: %T", b)
+	}
+	for e := bb.wb.Front(); e != nil; e = e.Next() {
+		f, ok := e.Value.(batchFunc)
+		if !ok {
+			return fmt.Errorf("unexpected batch element type %T", e.Value)
+		}
+		if err := f(ctx, tx); err != nil {
+			return xerr(err)
+		}
+	}
+	return nil
 }
 
 // Iterations
@@ -305,16 +319,21 @@ func (ni *nutsIterator) Seek(_ context.Context, key []byte) bool {
 }
 
 func (ni *nutsIterator) Key(_ context.Context) []byte {
-	return ni.it.Key()
+	k := ni.it.Key()
+	key := make([]byte, len(k))
+	copy(key, k)
+	return key
 }
 
 func (ni *nutsIterator) Value(_ context.Context) []byte {
-	v, _ := ni.it.Value()
-	return v
+	val, _ := ni.it.Value()
+	value := make([]byte, len(val))
+	copy(value, val)
+	return value
 }
 
 func (ni *nutsIterator) Close(ctx context.Context) {
-	err := ni.tx.Commit(ctx)
+	err := ni.tx.Rollback(ctx)
 	if err != nil {
 		log.Errorf("iterator close: %v", err)
 	}
@@ -382,13 +401,24 @@ func (nr *nutsRange) Close(ctx context.Context) {
 
 // Batches
 
-type nutsBatch struct{}
+type nutsBatch struct {
+	wb *list.List // elements of type batchFunc
+}
 
 func (nb *nutsBatch) Del(ctx context.Context, table string, key []byte) {
+	var act batchFunc = func(ctx context.Context, tx Transaction) error {
+		return tx.Del(ctx, table, key)
+	}
+	nb.wb.PushBack(act)
 }
 
 func (nb *nutsBatch) Put(ctx context.Context, table string, key, value []byte) {
+	var act batchFunc = func(ctx context.Context, tx Transaction) error {
+		return tx.Put(ctx, table, key, value)
+	}
+	nb.wb.PushBack(act)
 }
 
 func (nb *nutsBatch) Reset(ctx context.Context) {
+	nb.wb.Init()
 }

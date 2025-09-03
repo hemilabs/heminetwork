@@ -137,6 +137,10 @@ type Batch interface {
 	Reset(ctx context.Context)
 }
 
+// batchFunc serves as an element for a list of transaction
+// operations inside certain batch type to be executed by a Tx
+type batchFunc func(context.Context, Transaction) error
+
 // Iterator is a generic database iterator that only supports minimal
 // functionality. It is NOT concurrency safe and there are no guarantees about
 // the life-cycle of the returned key and value outside of the iterator or even

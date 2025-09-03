@@ -396,8 +396,6 @@ type boltBatch struct {
 	wb *list.List // elements of type batchFunc
 }
 
-type batchFunc func(context.Context, Transaction) error
-
 func (nb *boltBatch) Del(ctx context.Context, table string, key []byte) {
 	var act batchFunc = func(ctx context.Context, tx Transaction) error {
 		return tx.Del(ctx, table, key)
