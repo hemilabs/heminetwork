@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -33,6 +34,11 @@ type boltDB struct {
 	tables map[string]struct{}
 
 	cfg *BoltConfig
+
+	// bbolt blocks if we try to open the db while it
+	// is already open, so we must use a synced variable
+	mtx  sync.Mutex
+	open bool
 }
 
 func NewBoltDB(cfg *BoltConfig) (Database, error) {
@@ -55,7 +61,10 @@ func NewBoltDB(cfg *BoltConfig) (Database, error) {
 }
 
 func (b *boltDB) Open(_ context.Context) error {
-	if b.db != nil {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	if b.open {
 		return ErrDBOpen
 	}
 
@@ -76,12 +85,24 @@ func (b *boltDB) Open(_ context.Context) error {
 		return xerr(err)
 	}
 	b.db = ndb
+	b.open = true
 	return nil
 }
 
 // Note: blocks when waiting for pending Txs
 func (b *boltDB) Close(_ context.Context) error {
-	return xerr(b.db.Close())
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	if !b.open {
+		return ErrDBClosed
+	}
+
+	if err := xerr(b.db.Close()); err != nil {
+		return err
+	}
+	b.open = false
+	return nil
 }
 
 func (b *boltDB) Del(ctx context.Context, table string, key []byte) error {

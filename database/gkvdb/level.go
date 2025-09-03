@@ -62,10 +62,6 @@ func NewLevelDB(cfg *LevelConfig) (Database, error) {
 }
 
 func (b *levelDB) Open(_ context.Context) error {
-	if b.db != nil {
-		return ErrDBOpen
-	}
-
 	ldb, err := leveldb.OpenFile(b.cfg.Home, &opt.Options{
 		BlockCacheEvictRemoved: true,
 		Compression:            opt.NoCompression,

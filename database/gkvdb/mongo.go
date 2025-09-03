@@ -65,10 +65,6 @@ func NewMongoDB(cfg *MongoConfig) (Database, error) {
 }
 
 func (b *mongoDB) Open(ctx context.Context) error {
-	if b.db != nil {
-		return ErrDBOpen
-	}
-
 	client, err := mongo.Connect(options.Client().
 		ApplyURI(b.cfg.URI))
 	if err != nil {
@@ -97,12 +93,7 @@ func (b *mongoDB) Open(ctx context.Context) error {
 }
 
 func (b *mongoDB) Close(ctx context.Context) error {
-	err := b.db.Disconnect(ctx)
-	if err != nil {
-		return err
-	}
-	b.db = nil
-	return nil
+	return b.db.Disconnect(ctx)
 }
 
 func (b *mongoDB) Del(ctx context.Context, table string, key []byte) error {

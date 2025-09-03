@@ -320,7 +320,7 @@ func txdelInvalidKey(ctx context.Context, tx Transaction, table string) error {
 
 func dbBasic(ctx context.Context, db Database, tables []string, insertCount int) error {
 	// Already Open
-	if err := db.Open(ctx); !errors.Is(err, ErrDBOpen) {
+	if err := db.Open(ctx); err == nil {
 		return errors.New("expected already open error")
 	}
 
@@ -1135,6 +1135,29 @@ func TestGKVDB(t *testing.T) {
 					t.Fatal(err)
 				}
 			})
+
+			t.Run("reopen", func(t *testing.T) {
+				home := t.TempDir()
+
+				table := "users"
+				tables := []string{table}
+
+				db := tti.dbFunc(home, tables)
+				err := db.Open(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() {
+					err := db.Close(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}()
+
+				if err = dbOpenCloseOpen(ctx, db, table); err != nil {
+					t.Fatal(err)
+				}
+			})
 		})
 	}
 }
@@ -1269,6 +1292,36 @@ func TestDumpRestorePipeline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func dbOpenCloseOpen(ctx context.Context, db Database, table string) error {
+	// Open again expect fail
+	err := db.Open(ctx)
+	if err == nil {
+		return errors.New("db open: expected error")
+	}
+	err = db.Put(ctx, table, []byte("xxx"), []byte("yyy"))
+	if err != nil {
+		return fmt.Errorf("db put: %v", err)
+	}
+	_, err = db.Get(ctx, table, []byte("xxx"))
+	if err != nil {
+		return fmt.Errorf("db get: %v", err)
+	}
+	err = db.Close(ctx)
+	if err != nil {
+		return fmt.Errorf("db close: %v", err)
+	}
+	err = db.Open(ctx)
+	if err != nil {
+		return fmt.Errorf("db open: %v", err)
+	}
+	_, err = db.Get(ctx, table, []byte("xxx"))
+	if err != nil {
+		return fmt.Errorf("db get 2: %v", err)
+	}
+
+	return nil
 }
 
 func TestCopy(t *testing.T) {

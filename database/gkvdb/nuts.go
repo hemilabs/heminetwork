@@ -69,9 +69,6 @@ func NewNutsDB(cfg *NutsConfig) (Database, error) {
 func (b *nutsDB) Open(_ context.Context) error {
 	log.Tracef("open")
 
-	if b.db != nil {
-		return ErrDBOpen
-	}
 	// XXX no compression
 	ndb, err := nutsdb.Open(nutsdb.DefaultOptions, nutsdb.WithDir(b.cfg.Home))
 	if err != nil {
@@ -82,7 +79,9 @@ func (b *nutsDB) Open(_ context.Context) error {
 			// XXX add mechanism to pass in the datastructure type
 			err := tx.NewBucket(nutsdb.DataStructureBTree, table)
 			if err != nil {
-				return fmt.Errorf("could not create table: %v", table)
+				if !errors.Is(err, nutsdb.ErrBucketAlreadyExist) {
+					return fmt.Errorf("could not create table: %v", table)
+				}
 			}
 		}
 		return nil

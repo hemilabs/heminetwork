@@ -68,9 +68,6 @@ func NewBadgerDB(cfg *BadgerConfig) (Database, error) {
 }
 
 func (b *badgerDB) Open(_ context.Context) error {
-	if b.db != nil {
-		return ErrDBOpen
-	}
 	db, err := badger.Open(*b.opt)
 	if err != nil {
 		return xerr(err)

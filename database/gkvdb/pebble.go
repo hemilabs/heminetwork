@@ -67,9 +67,6 @@ func NewPebbleDB(cfg *PebbleConfig) (Database, error) {
 }
 
 func (b *pebbleDB) Open(_ context.Context) error {
-	if b.db != nil {
-		return ErrDBOpen
-	}
 	ldb, err := pebble.Open(b.cfg.Home, &pebble.Options{
 		Levels: []pebble.LevelOptions{
 			{Compression: pebble.NoCompression},
