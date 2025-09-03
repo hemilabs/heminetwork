@@ -46,6 +46,7 @@ type Database interface {
 	NewBatch(ctx context.Context) (Batch, error)
 
 	// Backup
+	// XXX this is trivial to implement outside of the interface. Pull it out?
 	DumpTables(ctx context.Context, tables []string, target Encoder) error
 	Restore(ctx context.Context, source Decoder) error
 }
@@ -171,8 +172,7 @@ type Iterator interface {
 	Close(ctx context.Context)
 }
 
-// Range
-// is a generic database bound iterator that only supports minimal
+// Range is a generic database bound iterator that only supports minimal
 // functionality. It is NOT concurrency safe and there are no guarantees about
 // the life-cycle of the returned key and value outside of the iterator or even
 // upon a seek type operation. It is wise to make a copy of key/value for use
@@ -208,6 +208,22 @@ type Range interface {
 
 	Close(ctx context.Context)
 }
+
+// DumpTables and Restore are used to create backups. Any Encoder/Decoder can
+// be used provided thet conform to the interface.  The caller is responsible
+// for quiescing the tables. The backup itself will be made using a consistent
+// view.
+//
+// Typical use:
+//	var b bytes.Buffer
+//	zw, _ := zstd.NewWriter(&b)
+//	je := json.NewEncoder(zw)
+//	_ = db.DumpTables(ctx, tables, je)
+//	_ = zw.Close()
+//
+//	zr, _ := zstd.NewReader(&b)
+//	jd := json.NewDecoder(zr)
+//	_ = db.Restore(ctx, jd)
 
 // OperationT is used to tag what database operation is being described. These
 // operations are used to perform database dump/restores.
