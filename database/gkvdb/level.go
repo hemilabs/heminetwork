@@ -6,9 +6,7 @@ package gkvdb
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
@@ -181,75 +179,11 @@ func (b *levelDB) NewBatch(ctx context.Context) (Batch, error) {
 }
 
 func (b *levelDB) DumpTables(ctx context.Context, tables []string, target Encoder) error {
-	log.Infof("dude, make these tables read only")
-
-	for _, table := range tables {
-		it, err := b.NewIterator(ctx, table)
-		if err != nil {
-			return err
-		}
-		for it.Next(ctx) {
-			op := Operation{
-				Op:    OpPut,
-				Table: table,
-				Key:   it.Key(ctx),
-				Value: it.Value(ctx),
-			}
-			err := target.Encode(op)
-			if err != nil {
-				it.Close(ctx)
-				return err
-			}
-		}
-		it.Close(ctx)
-	}
-
-	return nil
+	return dumpTables(ctx, b, tables, target)
 }
 
-var defaultMaxRestoreChunk = 256 * 1024 * 1024 // XXX make generic
-
 func (b *levelDB) Restore(ctx context.Context, source Decoder) error {
-	// this code is generic, should be shared by all dbs.
-	for {
-		batch, err := b.NewBatch(ctx)
-		if err != nil {
-			return err
-		}
-
-		totalWritten := 0
-		for {
-			var op Operation
-			err := source.Decode(&op)
-			if err != nil {
-				if errors.Is(err, io.EOF) {
-					return nil
-				}
-				return err
-			}
-			switch op.Op {
-			case OpPut:
-				batch.Put(ctx, op.Table, op.Key, op.Value)
-			case OpDel:
-				batch.Del(ctx, op.Table, op.Key)
-			}
-
-			// Break out of loop to commit if we went over 256MiB
-			totalWritten += len(op.Key) + len(op.Value)
-			if totalWritten > defaultMaxRestoreChunk {
-				break
-			}
-		}
-
-		err = b.Update(ctx, func(ctx context.Context, tx Transaction) error {
-			return tx.Write(ctx, batch)
-		})
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return restore(ctx, b, source)
 }
 
 // Transactions

@@ -1221,7 +1221,7 @@ func TestDumpRestorePipeline(t *testing.T) {
 	}()
 
 	// Puts
-	insertCount := 9999
+	insertCount := 18999
 	err = dbputs(ctx, db, tables, insertCount)
 	if err != nil {
 		t.Fatal(err)
