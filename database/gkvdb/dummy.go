@@ -16,8 +16,41 @@ var (
 	ErrDummy = errors.New("dummy")
 )
 
+type DummyConfig struct {
+	Home   string
+	Tables []string
+}
+
+func DefaultDummyConfig(home string, tables []string) *DummyConfig {
+	return &DummyConfig{
+		Home:   home,
+		Tables: tables,
+	}
+}
+
+func NewDummyDB(cfg *DummyConfig) (Database, error) {
+	if cfg == nil {
+		return nil, ErrInvalidConfig
+	}
+	ddb := &dummyDB{
+		cfg:    cfg,
+		tables: make(map[string]struct{}, len(cfg.Tables)),
+	}
+	for _, v := range cfg.Tables {
+		if _, ok := ddb.tables[v]; ok {
+			return nil, ErrDuplicateTable
+		}
+		ddb.tables[v] = struct{}{}
+	}
+
+	return ddb, nil
+}
+
 // Database
-type dummyDB struct{}
+type dummyDB struct {
+	cfg    *DummyConfig
+	tables map[string]struct{}
+}
 
 func (db *dummyDB) Open(context.Context) error {
 	return ErrDummy
