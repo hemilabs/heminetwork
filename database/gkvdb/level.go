@@ -131,7 +131,7 @@ func (b *levelDB) execute(ctx context.Context, write bool, callback func(ctx con
 		if cerr := tx.Rollback(ctx); cerr != nil {
 			return fmt.Errorf("rollback %w: %w", cerr, err)
 		}
-		return err
+		return xerr(err)
 	}
 	return tx.Commit(ctx)
 }

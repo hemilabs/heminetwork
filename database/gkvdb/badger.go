@@ -195,11 +195,15 @@ func (b *badgerDB) NewIterator(ctx context.Context, table string) (Iterator, err
 
 	revIt.Seek(NewCompositeKey(table, []byte{0xff}))
 	if !revIt.ValidForPrefix(opts.Prefix) {
+		it.Close()
+		tx.Discard()
 		return nil, errors.New("last key not found")
 	}
 
 	it.Seek(revIt.Item().KeyCopy(nil))
 	if !it.ValidForPrefix(opts.Prefix) {
+		it.Close()
+		tx.Discard()
 		return nil, errors.New("last key not in forward iterator")
 	}
 	lastKey := revIt.Item().KeyCopy(nil)
@@ -230,10 +234,21 @@ func (b *badgerDB) NewRange(ctx context.Context, table string, start, end []byte
 	revIt := tx.NewIterator(opts)
 	defer revIt.Close()
 
+	// XXX this is terrible, fix this
 	endKey := NewCompositeKey(table, end)
 	revIt.Seek(endKey)
+	if !revIt.ValidForPrefix(opts.Prefix) {
+		it.Close()
+		tx.Discard()
+		return nil, errors.New("last key not found")
+	}
 	if bytes.Compare(revIt.Item().Key(), endKey) >= 0 {
 		revIt.Next()
+		if !revIt.ValidForPrefix(opts.Prefix) {
+			it.Close()
+			tx.Discard()
+			return nil, errors.New("last key not found")
+		}
 	}
 
 	lastKey := revIt.Item().KeyCopy(nil)

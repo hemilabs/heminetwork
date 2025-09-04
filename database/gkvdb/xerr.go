@@ -15,7 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-// Translate nutsb errors into gkvdb errors
+// Translate specific dbs' errors into gkvdb errors
 func xerr(err error) error {
 	switch {
 	// badger

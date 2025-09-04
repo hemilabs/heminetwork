@@ -1450,3 +1450,9 @@ func TestCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TODO tests
+// iterator / range concurrent put / del (for reverse reliant iters)
+// iterator / range no keys
+// insert large key / value
+// tx ordered operations
