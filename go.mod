@@ -19,6 +19,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.16.1
 	github.com/go-test/deep v1.1.1
+	github.com/guycipher/btree v1.3.2
 	github.com/juju/loggo v1.0.0
 	github.com/kelindar/binary v1.0.19
 	github.com/klauspost/compress v1.18.0
@@ -86,7 +87,6 @@ require (
 	github.com/google/flatbuffers v25.2.10+incompatible // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/guycipher/btree v1.3.2 // indirect
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/kkdai/bstream v1.0.0 // indirect

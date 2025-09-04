@@ -292,11 +292,10 @@ func (tx *boltTX) Write(ctx context.Context, b Batch) error {
 
 // Iterations
 type boltIterator struct {
-	tx    Transaction
-	it    *bolt.Cursor
-	table string
-	key   []byte
-	val   []byte
+	tx  Transaction
+	it  *bolt.Cursor
+	key []byte
+	val []byte
 
 	first bool
 }

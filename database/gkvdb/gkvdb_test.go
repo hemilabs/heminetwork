@@ -1356,23 +1356,23 @@ func dbOpenCloseOpen(ctx context.Context, db Database, table string) error {
 	}
 	err = db.Put(ctx, table, []byte("xxx"), []byte("yyy"))
 	if err != nil {
-		return fmt.Errorf("db put: %v", err)
+		return fmt.Errorf("db put: %w", err)
 	}
 	_, err = db.Get(ctx, table, []byte("xxx"))
 	if err != nil {
-		return fmt.Errorf("db get: %v", err)
+		return fmt.Errorf("db get: %w", err)
 	}
 	err = db.Close(ctx)
 	if err != nil {
-		return fmt.Errorf("db close: %v", err)
+		return fmt.Errorf("db close: %w", err)
 	}
 	err = db.Open(ctx)
 	if err != nil {
-		return fmt.Errorf("db open: %v", err)
+		return fmt.Errorf("db open: %w", err)
 	}
 	_, err = db.Get(ctx, table, []byte("xxx"))
 	if err != nil {
-		return fmt.Errorf("db get 2: %v", err)
+		return fmt.Errorf("db get 2: %w", err)
 	}
 
 	return nil

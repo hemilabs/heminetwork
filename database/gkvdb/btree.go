@@ -1,3 +1,7 @@
+// Copyright (c) 2025 Hemi Labs, Inc.
+// Use of this source code is governed by the MIT License,
+// which can be found in the LICENSE file.
+
 package gkvdb
 
 import (
@@ -74,7 +78,7 @@ func (db *btreeDB) Del(ctx context.Context, table string, key []byte) error {
 }
 
 func (db *btreeDB) Has(ctx context.Context, table string, key []byte) (bool, error) {
-	// XXX implement proper has
+	//nolint:nilerr // XXX implement proper has
 	if _, err := db.Get(ctx, table, key); err != nil {
 		return false, nil
 	}

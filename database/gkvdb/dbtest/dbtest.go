@@ -127,7 +127,9 @@ func _main() error {
 				return err
 			}
 			log.Printf("Syncing...")
-			unix.Sync()
+			if err := unix.Sync(); err != nil {
+				return err
+			}
 			time.Sleep(3 * time.Second) // Give sync a chance
 		} else {
 			return fmt.Errorf("not a directory: %v", action)
