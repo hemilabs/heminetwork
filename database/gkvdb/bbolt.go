@@ -194,20 +194,18 @@ func (b *boltDB) NewRange(ctx context.Context, table string, start, end []byte) 
 		return nil, err
 	}
 	nr := &boltRange{
-		table: table,
 		tx:    tx,
+		start: start,
+		end:   end,
 	}
-	keys := new(list.List)
 	bu := tx.(*boltTX).tx.Bucket([]byte(table))
 	if bu == nil {
+		if err := tx.Rollback(ctx); err != nil {
+			log.Errorf("close tx: %v", err)
+		}
 		return nil, ErrTableNotFound
 	}
-	c := bu.Cursor()
-	for k, _ := c.Seek(start); k != nil && bytes.Compare(k, end) <= 0; k, _ = c.Next() {
-		// XXX bbolts docs make me weary to use pointer, but keep for now
-		keys.PushBack(&k)
-	}
-	nr.keys = keys
+	nr.it = bu.Cursor()
 	return nr, nil
 }
 
@@ -294,10 +292,11 @@ func (tx *boltTX) Write(ctx context.Context, b Batch) error {
 
 // Iterations
 type boltIterator struct {
-	tx  Transaction
-	it  *bolt.Cursor
-	key []byte
-	val []byte
+	tx    Transaction
+	it    *bolt.Cursor
+	table string
+	key   []byte
+	val   []byte
 
 	first bool
 }
@@ -344,23 +343,37 @@ func (ni *boltIterator) Close(ctx context.Context) {
 
 // Ranges
 type boltRange struct {
-	table string
-	tx    Transaction
+	tx Transaction
+	it *bolt.Cursor
 
-	keys *list.List // elements of type []byte
-	cur  *list.Element
+	start []byte
+	end   []byte
+	key   []byte
+	val   []byte
 
 	first bool
 }
 
 func (nr *boltRange) First(_ context.Context) bool {
-	nr.cur = nr.keys.Front()
-	return nr.cur != nil
+	nr.key, nr.val = nr.it.Seek(nr.start)
+	if bytes.Compare(nr.key, nr.end) >= 0 {
+		nr.key, nr.val = nil, nil
+	}
+	return nr.key != nil
 }
 
 func (nr *boltRange) Last(_ context.Context) bool {
-	nr.cur = nr.keys.Back()
-	return nr.cur != nil
+	nr.key, nr.val = nr.it.Seek(nr.end)
+	if nr.key == nil {
+		nr.key, nr.val = nr.it.Last()
+	}
+	for nr.key != nil {
+		if bytes.Compare(nr.key, nr.end) < 0 {
+			return true
+		}
+		nr.key, nr.val = nr.it.Prev()
+	}
+	return false
 }
 
 func (nr *boltRange) Next(ctx context.Context) bool {
@@ -368,32 +381,19 @@ func (nr *boltRange) Next(ctx context.Context) bool {
 		nr.first = true
 		return nr.First(ctx)
 	}
-	nr.cur = nr.cur.Next()
-	return nr.cur != nil
+	nr.key, nr.val = nr.it.Next()
+	if bytes.Compare(nr.key, nr.end) >= 0 {
+		nr.key, nr.val = nil, nil
+	}
+	return nr.key != nil
 }
 
 func (nr *boltRange) Key(_ context.Context) []byte {
-	val, ok := nr.cur.Value.(*[]byte)
-	if !ok {
-		// this should not happen
-		log.Errorf("key type %T", nr.cur.Value)
-		return nil
-	}
-	return *val
+	return nr.key
 }
 
 func (nr *boltRange) Value(ctx context.Context) []byte {
-	key := nr.Key(ctx)
-	if key == nil {
-		return nil
-	}
-	value, err := nr.tx.Get(ctx, nr.table, key)
-	if err != nil {
-		// this should not happen
-		log.Errorf("value %v", err)
-		return nil
-	}
-	return value
+	return nr.val
 }
 
 func (nr *boltRange) Close(ctx context.Context) {

@@ -21,8 +21,9 @@ require (
 	github.com/go-test/deep v1.1.1
 	github.com/juju/loggo v1.0.0
 	github.com/kelindar/binary v1.0.19
+	github.com/klauspost/compress v1.18.0
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/nutsdb/nutsdb v1.0.5-0.20250818134531-344c2a294d39
+	github.com/nutsdb/nutsdb v1.0.5-0.20250903151218-b455523071f3
 	github.com/otiai10/copy v1.14.1
 	github.com/phayes/freeport v0.0.0-20220201140144-74d24b5ae9f5
 	github.com/prometheus/client_golang v1.23.0
@@ -89,7 +90,6 @@ require (
 	github.com/hashicorp/go-msgpack v0.5.5 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/kkdai/bstream v1.0.0 // indirect
-	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20250317134145-8bc96cf8fc35 // indirect

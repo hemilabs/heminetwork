@@ -5,6 +5,7 @@
 package gkvdb
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"errors"
@@ -197,17 +198,18 @@ func (b *nutsDB) NewRange(ctx context.Context, table string, start, end []byte) 
 		table:  table,
 		tx:     tx,
 		ntx:    tx.(*nutsTX).tx,
-		start:  start,
-		end:    end,
 		cursor: -1, // first key when next called
 	}
-	keys, _, err := nr.ntx.RangeScanEntries(nr.table, nr.start, nr.end, true, false)
+	keys, _, err := nr.ntx.RangeScanEntries(nr.table, start, end, true, false)
 	if err != nil {
 		// Kill tx
 		if cerr := tx.Commit(ctx); cerr != nil {
 			log.Errorf("commit error: %v", cerr)
 		}
 		return nil, xerr(err)
+	}
+	if bytes.Compare(keys[len(keys)-1], end) >= 0 {
+		keys = keys[:len(keys)-1]
 	}
 	nr.keys = keys
 	return nr, nil
@@ -257,21 +259,20 @@ func (tx *nutsTX) Rollback(ctx context.Context) error {
 }
 
 func (tx *nutsTX) Write(ctx context.Context, b Batch) error {
-	// bb, ok := b.(*nutsBatch)
-	// if !ok {
-	// 	return fmt.Errorf("unexpected batch type: %T", b)
-	// }
-	// for e := bb.wb.Front(); e != nil; e = e.Next() {
-	// 	f, ok := e.Value.(batchFunc)
-	// 	if !ok {
-	// 		return fmt.Errorf("unexpected batch element type %T", e.Value)
-	// 	}
-	// 	if err := f(ctx, tx); err != nil {
-	// 		return xerr(err)
-	// 	}
-	// }
-	// return nil
-	return errors.New("not yet nutsdb")
+	bb, ok := b.(*nutsBatch)
+	if !ok {
+		return fmt.Errorf("unexpected batch type: %T", b)
+	}
+	for e := bb.wb.Front(); e != nil; e = e.Next() {
+		f, ok := e.Value.(batchFunc)
+		if !ok {
+			return fmt.Errorf("unexpected batch element type %T", e.Value)
+		}
+		if err := f(ctx, tx); err != nil {
+			return xerr(err)
+		}
+	}
+	return nil
 }
 
 // Iterations
@@ -325,8 +326,7 @@ func (ni *nutsIterator) Value(_ context.Context) []byte {
 }
 
 func (ni *nutsIterator) Close(ctx context.Context) {
-	// XXX internally nutsdb doesn't close the iterator
-	// so it will never release
+	ni.it.Release()
 	err := ni.tx.Rollback(ctx)
 	if err != nil {
 		log.Errorf("iterator close: %v", err)
@@ -338,8 +338,6 @@ type nutsRange struct {
 	table string
 	tx    Transaction
 	ntx   *nutsdb.Tx
-	start []byte
-	end   []byte
 
 	keys   [][]byte
 	cursor int // Current key
@@ -387,7 +385,7 @@ func (nr *nutsRange) Value(ctx context.Context) []byte {
 }
 
 func (nr *nutsRange) Close(ctx context.Context) {
-	err := nr.tx.Commit(ctx)
+	err := nr.tx.Rollback(ctx)
 	if err != nil {
 		log.Errorf("range close: %v", err)
 	}

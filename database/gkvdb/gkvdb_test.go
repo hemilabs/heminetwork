@@ -698,20 +698,22 @@ func dbIterateSeek(ctx context.Context, db Database, table string, recordCount i
 	return nil
 }
 
-func dbRange(ctx context.Context, db Database, tables []string, recordCount int) error {
+func dbRange(ctx context.Context, db Database, tables []string, total int) error {
+	frac := total / 4
+	start := frac
+	end := frac * 3
 	for _, table := range tables {
-		start := []byte{uint8(0)}
-		end := []byte{uint8(recordCount)}
+		s := []byte{uint8(start)}
+		e := []byte{uint8(end)}
 
-		it, err := db.NewRange(ctx, table, start[:], end[:])
+		it, err := db.NewRange(ctx, table, s[:], e[:])
 		if err != nil {
 			return fmt.Errorf("new range: %w", err)
 		}
-		defer it.Close(ctx)
 
 		i := 0
 		for it.Next(ctx) {
-			expected := []byte{uint8(i)}
+			expected := []byte{uint8(start + i)}
 			if !bytes.Equal(it.Key(ctx), expected) {
 				return fmt.Errorf("invalid key got %v wanted %v",
 					it.Key(ctx), expected)
@@ -722,11 +724,61 @@ func dbRange(ctx context.Context, db Database, tables []string, recordCount int)
 			}
 			i++
 		}
-		if i != recordCount {
-			return fmt.Errorf("invalid record count got %v want %v", i, recordCount)
+		if i != end-start {
+			return fmt.Errorf("invalid record count got %v want %v", i, end-start)
 		}
+		it.Close(ctx)
 	}
 
+	return nil
+}
+
+func dbRangeFirstLast(ctx context.Context, db Database, tables []string, total int) error {
+	frac := total / 4
+	start := frac
+	// Test with end outside and inside
+	// values inserted into the dbs
+	for _, end := range []int{total + start, frac * 3} {
+		for _, table := range tables {
+			s := []byte{uint8(start)}
+			e := []byte{uint8(end)}
+
+			it, err := db.NewRange(ctx, table, s[:], e[:])
+			if err != nil {
+				return fmt.Errorf("new range: %w", err)
+			}
+
+			// First
+			if !it.First(ctx) {
+				return errors.New("first")
+			}
+			key := it.Key(ctx)
+			val := it.Value(ctx)
+			expected := []byte{uint8(start)}
+			if !bytes.Equal(key, expected) {
+				return fmt.Errorf("first unequal key: got %v, expected %v", key, expected)
+			}
+			if !bytes.Equal(val, expected) {
+				return fmt.Errorf("first unequal value: got %v, expected %v", val, expected)
+			}
+
+			// Last
+			if !it.Last(ctx) {
+				return errors.New("last")
+			}
+			key = it.Key(ctx)
+			val = it.Value(ctx)
+			expected = []byte{uint8(min(total-1, end-1))}
+			if !bytes.Equal(key, expected) {
+				return fmt.Errorf("last unequal key: got %v, expected %v", key, expected)
+			}
+			if !bytes.Equal(val, expected) {
+				return fmt.Errorf("last unequal value: got %v, expected %v", val, expected)
+			}
+
+			it.Close(ctx)
+		}
+	}
 	return nil
 }
 
@@ -1107,8 +1159,10 @@ func TestGKVDB(t *testing.T) {
 						}
 					}
 				}
-
 				if err = dbRange(ctx, db, tables, insertCount); err != nil {
+					t.Fatal(err)
+				}
+				if err = dbRangeFirstLast(ctx, db, tables, insertCount); err != nil {
 					t.Fatal(err)
 				}
 			})

@@ -5,6 +5,7 @@
 package gkvdb
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"errors"
@@ -215,29 +216,34 @@ func (b *badgerDB) NewRange(ctx context.Context, table string, start, end []byte
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
-	tx, err := b.Begin(ctx, false)
-	if err != nil {
-		return nil, err
-	}
-	txb := tx.(*badgerTX)
+	tx := b.db.NewTransaction(false)
 
 	opts := badger.DefaultIteratorOptions
 	opts.Prefix = NewCompositeKey(table, []byte{})
-	it := txb.tx.NewIterator(opts)
-	defer it.Close()
+	it := tx.NewIterator(opts)
 	it.Rewind()
 
-	keys := new(list.List)
-	for it.Valid() {
-		key := it.Item().KeyCopy(nil)
-		keys.PushBack(KeyFromComposite(table, key))
-		it.Next()
+	// Reverse iterate to get the last item.
+	// Since iterators use a snapshot from their creation,
+	// the value should always remain the same.
+	opts.Reverse = true
+	revIt := tx.NewIterator(opts)
+	defer revIt.Close()
+
+	endKey := NewCompositeKey(table, end)
+	revIt.Seek(endKey)
+	if bytes.Compare(revIt.Item().Key(), endKey) >= 0 {
+		revIt.Next()
 	}
 
+	lastKey := revIt.Item().KeyCopy(nil)
 	return &badgerRange{
-		table: table,
-		tx:    tx,
-		keys:  keys,
+		tx:      tx,
+		it:      it,
+		table:   table,
+		prefix:  opts.Prefix,
+		start:   NewCompositeKey(table, start),
+		lastKey: lastKey,
 	}, nil
 }
 
@@ -380,23 +386,31 @@ func (ni *badgerIterator) Close(ctx context.Context) {
 
 // Ranges
 type badgerRange struct {
+	tx    *badger.Txn
+	it    *badger.Iterator
 	table string
-	tx    Transaction
 
-	keys *list.List
-	cur  *list.Element
+	prefix  []byte
+	start   []byte
+	lastKey []byte
 
 	first bool
 }
 
 func (nr *badgerRange) First(_ context.Context) bool {
-	nr.cur = nr.keys.Front()
-	return nr.cur != nil
+	nr.it.Seek(nr.start)
+	if bytes.Compare(nr.it.Item().Key(), nr.lastKey) > 0 {
+		return false
+	}
+	return nr.it.ValidForPrefix(nr.prefix)
 }
 
 func (nr *badgerRange) Last(_ context.Context) bool {
-	nr.cur = nr.keys.Back()
-	return nr.cur != nil
+	nr.it.Seek(nr.lastKey)
+	if bytes.Compare(nr.it.Item().Key(), nr.lastKey) > 0 {
+		return false
+	}
+	return nr.it.ValidForPrefix(nr.prefix)
 }
 
 func (nr *badgerRange) Next(ctx context.Context) bool {
@@ -404,39 +418,35 @@ func (nr *badgerRange) Next(ctx context.Context) bool {
 		nr.first = true
 		return nr.First(ctx)
 	}
-	nr.cur = nr.cur.Next()
-	return nr.cur != nil
+	nr.it.Next()
+	if bytes.Compare(nr.it.Item().Key(), nr.lastKey) > 0 {
+		return false
+	}
+	return nr.it.ValidForPrefix(nr.prefix)
 }
 
 func (nr *badgerRange) Key(ctx context.Context) []byte {
-	val, ok := nr.cur.Value.([]byte)
-	if !ok {
-		// this should not happen
-		log.Errorf("key type %T", nr.cur.Value)
+	key := nr.it.Item().KeyCopy(nil)
+	belowLimit := bytes.Compare(key, nr.lastKey) <= 0
+	valid := nr.it.ValidForPrefix(nr.prefix)
+	if belowLimit && valid {
+		return KeyFromComposite(nr.table, key)
+	}
+	return nil
+}
+
+func (nr *badgerRange) Value(ctx context.Context) []byte {
+	val, err := nr.it.Item().ValueCopy(nil)
+	if err != nil {
+		log.Errorf("get value: %v", err)
 		return nil
 	}
 	return val
 }
 
-func (nr *badgerRange) Value(ctx context.Context) []byte {
-	key := nr.Key(ctx)
-	if key == nil {
-		return nil
-	}
-	value, err := nr.tx.Get(ctx, nr.table, key)
-	if err != nil {
-		// this should not happen
-		log.Errorf("value %v", err)
-		return nil
-	}
-	return value
-}
-
 func (nr *badgerRange) Close(ctx context.Context) {
-	err := nr.tx.Commit(ctx)
-	if err != nil {
-		log.Errorf("range close: %v", err)
-	}
+	nr.it.Close()
+	nr.tx.Discard()
 }
 
 // Batches
