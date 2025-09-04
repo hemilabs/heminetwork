@@ -320,6 +320,12 @@ func (b *replicatorDB) sinkHandler(ctx context.Context) error {
 		case <-b.sinkC:
 		}
 
+		// XXX think about this. We do our best to flush journals but
+		// if we make it here after ctx was canceled the sinkJournals
+		// function may exit prematurely. This is at best database
+		// dependent. The argument for keeping it is that it may take a
+		// long time AND that on restart the journal will be replayed.
+		// Maybe make this poilicy that can be set by the caller.
 		err := b.sinkJournals(ctx)
 		if err != nil {
 			if printError {
