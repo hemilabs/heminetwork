@@ -16,7 +16,8 @@ import (
 
 type txIndexer struct {
 	indexerCommon
-	cache *Cache[tbcd.TxKey, *tbcd.TxValue]
+
+	cacheCapacity int
 }
 
 var (
@@ -26,32 +27,37 @@ var (
 
 func NewTxIndexer(g geometryParams, cacheLen int) Indexer {
 	txi := &txIndexer{
-		cache: NewCache[tbcd.TxKey, *tbcd.TxValue](cacheLen),
+		cacheCapacity: cacheLen,
 	}
 	txi.indexerCommon = indexerCommon{
 		name:    "tx",
 		enabled: true,
 		g:       g,
 		p:       txi,
-		cache:   txi.cache,
 	}
 	return txi
 }
 
-func (i *txIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (i *txIndexer) newCache() indexerCache {
+	return NewCache[tbcd.TxKey, *tbcd.TxValue](i.cacheCapacity)
+}
+
+func (i *txIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 	bh, err := i.g.db.BlockHeaderByTxIndex(ctx)
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-func (i *txIndexer) process(ctx context.Context, direction int, block *btcutil.Block) error {
-	return processTxs(ctx, block, direction, i.cache.Map())
+func (i *txIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
+	cache := c.(*Cache[tbcd.TxKey, *tbcd.TxValue])
+	return processTxs(ctx, block, direction, cache.Map())
 }
 
-func (i *txIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockTxUpdate(ctx, direction, i.cache.Map(), atHash)
+func (i *txIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
+	cache := c.(*Cache[tbcd.TxKey, *tbcd.TxValue])
+	return i.g.db.BlockTxUpdate(ctx, direction, cache.Map(), atHash)
 }
 
-func (i *txIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block) error {
+func (i *txIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {
 	// Not needed for tx indexer.
 	return nil
 }

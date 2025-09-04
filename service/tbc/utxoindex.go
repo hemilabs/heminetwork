@@ -12,7 +12,6 @@ import (
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
-	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
@@ -23,8 +22,8 @@ import (
 type utxoIndexer struct {
 	indexerCommon
 
-	cache     *Cache[tbcd.Outpoint, tbcd.CacheOutput]
-	fixupHook fixupCacheFunc
+	cacheCapacity int
+	fixupHook     fixupCacheFunc
 }
 
 var (
@@ -36,37 +35,43 @@ type fixupCacheFunc func(context.Context, *btcutil.Block, map[tbcd.Outpoint]tbcd
 
 func NewUtxoIndexer(g geometryParams, cacheLen int, f fixupCacheFunc) Indexer {
 	uxi := &utxoIndexer{
-		cache:     NewCache[tbcd.Outpoint, tbcd.CacheOutput](cacheLen),
-		fixupHook: f,
+		cacheCapacity: cacheLen,
+		fixupHook:     f,
 	}
 	uxi.indexerCommon = indexerCommon{
 		name:    "utxo",
 		enabled: true,
 		g:       g,
 		p:       uxi,
-		cache:   uxi.cache,
 	}
 	return uxi
 }
 
-func (i *utxoIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (i *utxoIndexer) newCache() indexerCache {
+	return NewCache[tbcd.Outpoint, tbcd.CacheOutput](i.cacheCapacity)
+}
+
+func (i *utxoIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 	bh, err := i.g.db.BlockHeaderByUtxoIndex(ctx)
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-func (i *utxoIndexer) process(ctx context.Context, direction int, block *btcutil.Block) error {
+func (i *utxoIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
+	cache := c.(*Cache[tbcd.Outpoint, tbcd.CacheOutput])
 	if direction == -1 {
-		return unprocessUtxos(ctx, i.g.db, block, i.cache.Map())
+		return unprocessUtxos(ctx, i.g.db, block, cache.Map())
 	}
-	return processUtxos(block, i.cache.Map())
+	return processUtxos(block, cache.Map())
 }
 
-func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockUtxoUpdate(ctx, direction, i.cache.Map(), atHash)
+func (i *utxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
+	cache := c.(*Cache[tbcd.Outpoint, tbcd.CacheOutput])
+	return i.g.db.BlockUtxoUpdate(ctx, direction, cache.Map(), atHash)
 }
 
-func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block) error {
-	return i.fixupHook(ctx, block, i.cache.Map())
+func (i *utxoIndexer) fixupCacheHook(ctx context.Context, block *btcutil.Block, c indexerCache) error {
+	cache := c.(*Cache[tbcd.Outpoint, tbcd.CacheOutput])
+	return i.fixupHook(ctx, block, cache.Map())
 }
 
 func processUtxos(block *btcutil.Block, utxos map[tbcd.Outpoint]tbcd.CacheOutput) error {

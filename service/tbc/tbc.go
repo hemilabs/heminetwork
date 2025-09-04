@@ -2597,7 +2597,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	si.BlockHeader.Timestamp = bhb.Timestamp().Unix()
 
 	// utxo index
-	utxoBH, err := s.ui.IndexAt(ctx)
+	utxoBH, err := s.ui.IndexerAt(ctx)
 	if err != nil {
 		utxoBH = &tbcd.BlockHeader{}
 	}
@@ -2608,7 +2608,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	si.Utxo = *utxoHH
 
 	// tx index
-	txBH, err := s.ti.IndexAt(ctx)
+	txBH, err := s.ti.IndexerAt(ctx)
 	if err != nil {
 		txBH = &tbcd.BlockHeader{}
 	}
@@ -2647,7 +2647,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		}
 
 		// Perform additional keystone indexer tests.
-		keystoneBH, err := s.ki.IndexAt(ctx)
+		keystoneBH, err := s.ki.IndexerAt(ctx)
 		if err != nil {
 			keystoneBH = &tbcd.BlockHeader{}
 		}
@@ -3092,12 +3092,12 @@ func (s *Server) Run(pctx context.Context) error {
 		log.Infof("Genesis: %v", s.g.chain.GenesisHash) // XXX make debug
 		log.Infof("Starting block headers sync at %v height: %v time %v",
 			bhb, bhb.Height, bhb.Timestamp())
-		utxoBH, _ := s.ui.IndexAt(ctx)
+		utxoBH, _ := s.ui.IndexerAt(ctx)
 		log.Infof("Utxo index %v @ %v", utxoBH.Height, utxoBH.Hash)
-		txBH, _ := s.ti.IndexAt(ctx)
+		txBH, _ := s.ti.IndexerAt(ctx)
 		log.Infof("Tx index %v @ %v", txBH.Height, txBH.Hash)
 		if s.cfg.HemiIndex {
-			hemiBH, _ := s.ki.IndexAt(ctx)
+			hemiBH, _ := s.ki.IndexerAt(ctx)
 			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
 		}
 	}

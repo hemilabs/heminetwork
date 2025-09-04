@@ -21,8 +21,8 @@ import (
 type keystoneIndexer struct {
 	indexerCommon
 
-	cache       *Cache[chainhash.Hash, tbcd.Keystone]
-	hemiGenesis *HashHeight
+	cacheCapacity int
+	hemiGenesis   *HashHeight
 }
 
 var (
@@ -32,33 +32,38 @@ var (
 
 func NewKeystoneIndexer(g geometryParams, cacheLen int, enabled bool, hemiGenesis *HashHeight) Indexer {
 	ki := &keystoneIndexer{
-		cache:       NewCache[chainhash.Hash, tbcd.Keystone](cacheLen),
-		hemiGenesis: hemiGenesis,
+		cacheCapacity: cacheLen,
+		hemiGenesis:   hemiGenesis,
 	}
 	ki.indexerCommon = indexerCommon{
 		name:    "keystone",
 		enabled: enabled,
 		g:       g,
 		p:       ki,
-		cache:   ki.cache,
 	}
 	return ki
 }
 
-func (i *keystoneIndexer) indexAt(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (i *keystoneIndexer) newCache() indexerCache {
+	return NewCache[chainhash.Hash, tbcd.Keystone](i.cacheCapacity)
+}
+
+func (i *keystoneIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 	bh, err := i.g.db.BlockHeaderByKeystoneIndex(ctx)
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-func (i *keystoneIndexer) process(_ context.Context, direction int, block *btcutil.Block) error {
-	return processKeystones(block, direction, i.cache.Map())
+func (i *keystoneIndexer) process(_ context.Context, direction int, block *btcutil.Block, c indexerCache) error {
+	cache := c.(*Cache[chainhash.Hash, tbcd.Keystone])
+	return processKeystones(block, direction, cache.Map())
 }
 
-func (i *keystoneIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash) error {
-	return i.g.db.BlockKeystoneUpdate(ctx, direction, i.cache.Map(), atHash)
+func (i *keystoneIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
+	cache := c.(*Cache[chainhash.Hash, tbcd.Keystone])
+	return i.g.db.BlockKeystoneUpdate(ctx, direction, cache.Map(), atHash)
 }
 
-func (i *keystoneIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block) error {
+func (i *keystoneIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {
 	// Not needed for keystone indexer.
 	return nil
 }
