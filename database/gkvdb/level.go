@@ -148,7 +148,7 @@ func (b *levelDB) NewIterator(ctx context.Context, table string) (Iterator, erro
 	if _, ok := b.tables[table]; !ok {
 		return nil, ErrTableNotFound
 	}
-	r := util.BytesPrefix(NewCompositeKey(table, []byte{}))
+	r := util.BytesPrefix(NewCompositeKey(table, nil))
 	return &levelIterator{
 		table: table,
 		it:    b.db.NewIterator(r, nil),

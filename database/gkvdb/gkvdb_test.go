@@ -555,7 +555,7 @@ func dbTransactionsDelete(ctx context.Context, db Database, tables []string, ins
 }
 
 // Transaction test expected errors
-func dbTransactionsErrors(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbTransactionsErrors(ctx context.Context, db Database, tables []string) error {
 	tx, err := db.Begin(ctx, true)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -710,7 +710,6 @@ func dbRange(ctx context.Context, db Database, tables []string, total int) error
 		if err != nil {
 			return fmt.Errorf("new range: %w", err)
 		}
-
 		i := 0
 		for it.Next(ctx) {
 			expected := []byte{uint8(start + i)}
@@ -930,6 +929,17 @@ func getDBs() []TestTableItem {
 			},
 		},
 		{
+			name: "bitcask",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultBitcaskConfig(home, tables)
+				db, err := NewBitcaskDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
 			name: "replicator-direct",
 			dbFunc: func(home string, tables []string) Database {
 				home1 := filepath.Join(home, "1")
@@ -944,7 +954,6 @@ func getDBs() []TestTableItem {
 				if err != nil {
 					panic(err)
 				}
-
 				journalHome := filepath.Join(home, "journal")
 				rcfg := DefaultReplicatorConfig(journalHome, Direct)
 				db, err := NewReplicatorDB(rcfg, db1, db2)
@@ -969,7 +978,6 @@ func getDBs() []TestTableItem {
 				if err != nil {
 					panic(err)
 				}
-
 				journalHome := filepath.Join(home, "journal")
 				rcfg := DefaultReplicatorConfig(journalHome, Lazy)
 				db, err := NewReplicatorDB(rcfg, db1, db2)
@@ -1073,7 +1081,7 @@ func TestGKVDB(t *testing.T) {
 					log.Errorf("dbTransactionsDelete: %v", err)
 					t.Fail()
 				}
-				if err = dbTransactionsErrors(ctx, db, tables, insertCount); err != nil {
+				if err = dbTransactionsErrors(ctx, db, tables); err != nil {
 					log.Errorf("dbTransactionsErrors: %v", err)
 					t.Fail()
 				}
@@ -1456,3 +1464,4 @@ func TestCopy(t *testing.T) {
 // iterator / range no keys
 // insert large key / value
 // tx ordered operations
+// consider making multiple write txs not block

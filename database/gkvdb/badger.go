@@ -182,7 +182,7 @@ func (b *badgerDB) NewIterator(ctx context.Context, table string) (Iterator, err
 	tx := b.db.NewTransaction(false)
 
 	opts := badger.DefaultIteratorOptions
-	opts.Prefix = NewCompositeKey(table, []byte{})
+	opts.Prefix = NewCompositeKey(table, nil)
 	it := tx.NewIterator(opts)
 	it.Rewind()
 
@@ -197,14 +197,14 @@ func (b *badgerDB) NewIterator(ctx context.Context, table string) (Iterator, err
 	if !revIt.ValidForPrefix(opts.Prefix) {
 		it.Close()
 		tx.Discard()
-		return nil, errors.New("last key not found")
+		return nil, errors.New("empty iterator")
 	}
 
 	it.Seek(revIt.Item().KeyCopy(nil))
 	if !it.ValidForPrefix(opts.Prefix) {
 		it.Close()
 		tx.Discard()
-		return nil, errors.New("last key not in forward iterator")
+		return nil, errors.New("empty iterator")
 	}
 	lastKey := revIt.Item().KeyCopy(nil)
 
@@ -223,7 +223,7 @@ func (b *badgerDB) NewRange(ctx context.Context, table string, start, end []byte
 	tx := b.db.NewTransaction(false)
 
 	opts := badger.DefaultIteratorOptions
-	opts.Prefix = NewCompositeKey(table, []byte{})
+	opts.Prefix = NewCompositeKey(table, nil)
 	it := tx.NewIterator(opts)
 	it.Rewind()
 
@@ -240,14 +240,14 @@ func (b *badgerDB) NewRange(ctx context.Context, table string, start, end []byte
 	if !revIt.ValidForPrefix(opts.Prefix) {
 		it.Close()
 		tx.Discard()
-		return nil, errors.New("last key not found")
+		return nil, errors.New("empty range")
 	}
 	if bytes.Compare(revIt.Item().Key(), endKey) >= 0 {
 		revIt.Next()
 		if !revIt.ValidForPrefix(opts.Prefix) {
 			it.Close()
 			tx.Discard()
-			return nil, errors.New("last key not found")
+			return nil, errors.New("empty range")
 		}
 	}
 

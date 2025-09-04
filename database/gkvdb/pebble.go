@@ -171,7 +171,7 @@ func (b *pebbleDB) NewIterator(ctx context.Context, table string) (Iterator, err
 		return nil, ErrTableNotFound
 	}
 
-	r := util.BytesPrefix(NewCompositeKey(table, []byte{}))
+	r := util.BytesPrefix(NewCompositeKey(table, nil))
 	opt := &pebble.IterOptions{
 		LowerBound: r.Start,
 		UpperBound: r.Limit,
@@ -205,7 +205,7 @@ func (b *pebbleDB) NewRange(ctx context.Context, table string, start, end []byte
 	}
 
 	// set iterator to before first value
-	iter.SeekLT([]byte{})
+	iter.SeekLT(nil)
 
 	return &pebbleRange{
 		table: table,
