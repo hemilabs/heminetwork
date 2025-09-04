@@ -165,7 +165,9 @@ func createReplicator(t *testing.T, policy Policy, home, srcType, dstType string
 		if homeDestination == "" {
 			t.Skip("mongo URI not set")
 		}
-		dbs, err := NewMongoDB(DefaultMongoConfig(homeDestination, tables))
+		cfg := DefaultMongoConfig(homeDestination, tables)
+		cfg.dropTables = true
+		dbs, err := NewMongoDB(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

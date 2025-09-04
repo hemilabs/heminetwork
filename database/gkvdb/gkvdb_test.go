@@ -988,8 +988,9 @@ func getDBs() []TestTableItem {
 				name: "mongodb",
 				dbFunc: func(home string, tables []string) Database {
 					cfg := MongoConfig{
-						URI:    mongoURI,
-						Tables: tables,
+						URI:        mongoURI,
+						Tables:     tables,
+						dropTables: true,
 					}
 					db, err := NewMongoDB(&cfg)
 					if err != nil {
@@ -1208,6 +1209,11 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
+				mdb, ok := db.(*mongoDB)
+				if ok {
+					mdb.cfg.dropTables = false
+				}
+
 				if err = dbOpenCloseOpen(ctx, db, table); err != nil {
 					t.Fatal(err)
 				}
@@ -1221,7 +1227,7 @@ func BenchmarkGKVDBPut(b *testing.B) {
 	ctx, cancel := context.WithCancel(b.Context())
 	defer cancel()
 	for _, tti := range testTable {
-		for _, insertCount := range []int{1000, 10000, 100000, 1000000} {
+		for _, insertCount := range []int{1, 10, 100, 1000, 10000, 100000} {
 			benchName := fmt.Sprintf("%v/%v", tti.name, insertCount)
 			b.Run(benchName, func(b *testing.B) {
 				home := b.TempDir()
@@ -1241,28 +1247,20 @@ func BenchmarkGKVDBPut(b *testing.B) {
 					}
 				}()
 
-				value := []byte{1}
-				toInsert := make([][]byte, insertCount)
+				bt, err := db.NewBatch(ctx)
+				if err != nil {
+					b.Fatal(err)
+				}
 				for i := range insertCount {
-					var key [4]byte
-					binary.BigEndian.PutUint32(key[:], uint32(i))
-					toInsert[i] = key[:]
+					bt.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
 				}
 
 				for b.Loop() {
-					tx, err := db.Begin(ctx, true)
-					if err != nil && !errors.Is(err, ErrDBClosed) {
-						b.Fatalf("db begin: %v", err)
-					}
-					for i, k := range toInsert {
-						err := tx.Put(ctx, table, k, value)
-						if err != nil {
-							b.Fatalf("tx put %v: %v", i, err)
-						}
-					}
-					err = tx.Commit(ctx)
+					err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+						return tx.Write(ctx, bt)
+					})
 					if err != nil {
-						panic(fmt.Errorf("tx rollback: %w", err))
+						b.Fatal(err)
 					}
 				}
 			})

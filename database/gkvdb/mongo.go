@@ -7,6 +7,7 @@ package gkvdb
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -30,8 +31,9 @@ type mongoKV struct {
 }
 
 type MongoConfig struct {
-	URI    string
-	Tables []string
+	URI        string
+	Tables     []string
+	dropTables bool
 }
 
 func DefaultMongoConfig(URI string, tables []string) *MongoConfig {
@@ -45,6 +47,11 @@ type mongoDB struct {
 	db     *mongo.Client
 	cfg    *MongoConfig
 	tables map[string]struct{}
+
+	// mongo doesn't care if we try to open the db while it
+	// is already open, so we must use a synced variable
+	mtx  sync.Mutex
+	open bool
 }
 
 func NewMongoDB(cfg *MongoConfig) (Database, error) {
@@ -65,14 +72,22 @@ func NewMongoDB(cfg *MongoConfig) (Database, error) {
 }
 
 func (b *mongoDB) Open(ctx context.Context) error {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	if b.open {
+		return ErrDBOpen
+	}
+
 	client, err := mongo.Connect(options.Client().
 		ApplyURI(b.cfg.URI))
 	if err != nil {
 		return err
 	}
 	b.db = client
-	if true {
-		// XXX don't do this
+
+	// drop tables on first open
+	if b.cfg.dropTables {
 		for _, table := range b.cfg.Tables {
 			co := client.Database(internalDB).Collection(table)
 			err := co.Drop(ctx)
@@ -89,11 +104,23 @@ func (b *mongoDB) Open(ctx context.Context) error {
 			return fmt.Errorf("error creating table %v: %w", table, err)
 		}
 	}
+	b.open = true
 	return nil
 }
 
 func (b *mongoDB) Close(ctx context.Context) error {
-	return b.db.Disconnect(ctx)
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+
+	if !b.open {
+		return ErrDBClosed
+	}
+
+	if err := xerr(b.db.Disconnect(ctx)); err != nil {
+		return err
+	}
+	b.open = false
+	return nil
 }
 
 func (b *mongoDB) Del(ctx context.Context, table string, key []byte) error {
@@ -212,7 +239,7 @@ func (b *mongoDB) NewRange(ctx context.Context, table string, start, end []byte)
 		bson.D{
 			{Key: "key", Value: bson.M{
 				"$gte": start,
-				"$lte": end,
+				"$lt":  end,
 			}},
 		})
 	if err != nil {
@@ -429,7 +456,7 @@ func (nr *mongoRange) First(ctx context.Context) bool {
 	it, err := nr.co.Find(ctx, bson.D{
 		{Key: "key", Value: bson.M{
 			"$gte": nr.start,
-			"$lte": nr.end,
+			"$lt":  nr.end,
 		}},
 	})
 	if err != nil {
@@ -449,7 +476,7 @@ func (nr *mongoRange) Last(ctx context.Context) bool {
 	it, err := nr.co.Find(ctx, bson.D{
 		{Key: "key", Value: bson.M{
 			"$gte": nr.start,
-			"$lte": nr.end,
+			"$lt":  nr.end,
 		}},
 	}, fopt)
 	if err != nil {
