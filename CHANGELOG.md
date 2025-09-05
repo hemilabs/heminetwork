@@ -55,8 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add Bitcoin mempool support ([#549](https://github.com/hemilabs/heminetwork/pull/549)).
 - Add transaction fee estimation ([#549](https://github.com/hemilabs/heminetwork/pull/549)). This can be used by `popmd`
   when creating PoP transactions.
-- Add Hemi Keystone height hash index with V4 database
-  upgrade ([#539](https://github.com/hemilabs/heminetwork/pull/539)).
+- Add Hemi Keystone height hash index with V4 database upgrade, allowing keystones to be retrieved at a specified block
+  height ([#539](https://github.com/hemilabs/heminetwork/pull/539)). Used in `op-geth` for handling PoP payouts.
 - Add standalone TBC Docker image: [`hemilabs/tbcd`](https://hub.docker.com/r/hemilabs/tbcd), [
   `ghcr.io/hemilabs/tbcd`](https://ghcr.io/hemilabs/tbcd) ([#531](https://github.com/hemilabs/heminetwork/pull/531)).
 
