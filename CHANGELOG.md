@@ -40,8 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### `bitcoin` package
 
-- Add `bitcoin/gozer` package: Bitcoin data interface layer, with implementations for Blockstream (Electrs)
-  and TBC ([#562](https://github.com/hemilabs/heminetwork/pull/562)).
+- Add `bitcoin/gozer` package: Bitcoin data interface layer, with a basic implementation for Blockstream (Electrs)
+  and a complete implementation supporting the TBC RPC API ([#562](https://github.com/hemilabs/heminetwork/pull/562)).
 - Add `bitcoin/vinzclortho` package: Bitcoin wallet interface that handles creation and derivation of Bitcoin
   addresses ([#562](https://github.com/hemilabs/heminetwork/pull/562)).
 - Add `bitcoin/zuul` package: Interface for handling the storage of secret material, such as Bitcoin wallet private
