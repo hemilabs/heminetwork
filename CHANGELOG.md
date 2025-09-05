@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Rewrite `popmd`. To run `popmd`, the following data sources are now required:
     - A Hemi `op-geth` node (for keystone notifications).
     - A "Gozer" Bitcoin data source, such as [TBC](cmd/tbcd), to retrieve Bitcoin data and publish PoP transactions.
+      Gozer can also be used to provide fee estimations.
+  - PoP Miners can now use either a static fee or dynamic fee estimations from Gozer.
 
 - Rename Go module to `github.com/hemilabs/heminetwork/v2` (add `/v2`
   suffix) ([#622](https://github.com/hemilabs/heminetwork/pull/622)).
@@ -51,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add indexing for Hemi Keystones published to Bitcoin by PoP
   miners ([#549](https://github.com/hemilabs/heminetwork/pull/549)).
 - Add Bitcoin mempool support ([#549](https://github.com/hemilabs/heminetwork/pull/549)).
-- Add transaction fee estimation ([#549](https://github.com/hemilabs/heminetwork/pull/549)). This is used by `popmd`
+- Add transaction fee estimation ([#549](https://github.com/hemilabs/heminetwork/pull/549)). This can be used by `popmd`
   when creating PoP transactions.
 - Add Hemi Keystone height hash index with V4 database
   upgrade ([#539](https://github.com/hemilabs/heminetwork/pull/539)).
