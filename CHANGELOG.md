@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.0.0]
+
 ### Breaking Changes
 
 - Rework how PoP Miners and BFG work ([#396](https://github.com/hemilabs/heminetwork/pull/396)).
@@ -125,4 +127,5 @@ Thank you to everyone who contributed to this release!
 
 _Looking for the changelog for an older version? Check https://github.com/hemilabs/heminetwork/releases_
 
-[Unreleased]: https://github.com/hemilabs/heminetwork/compare/v1.6.3...HEAD
+[Unreleased]: https://github.com/hemilabs/heminetwork/compare/v2.0.0...HEAD
+[v2.0.0]: https://github.com/hemilabs/heminetwork/releases/tag/v2.0.0
