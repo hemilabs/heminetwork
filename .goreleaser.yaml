@@ -538,8 +538,6 @@ release:
     name: "heminetwork"
   replace_existing_draft: true
   prerelease: "auto"
-  make_latest: true
-  mode: "keep-existing"
 
 # Closes milestones for the released tag.
 milestones:
