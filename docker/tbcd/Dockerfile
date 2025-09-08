@@ -7,14 +7,8 @@ FROM golang:1.24.7-alpine3.22@sha256:fc2cff6625f3c1c92e6c85938ac5bd09034ad0d4bc2
 
 ARG GO_LDFLAGS
 
-# Add ca-certificates, timezone data, make and git
-RUN apk --no-cache add --update ca-certificates tzdata make git
-
-# Create non-root user
-RUN addgroup --gid 65532 tbcd && \
-    adduser --disabled-password --gecos "" \
-        --home "/etc/tbcd/" --shell "/sbin/nologin" \
-        -G tbcd --uid 65532 tbcd
+# Add make and git
+RUN apk --no-cache add --update make git
 
 WORKDIR /build/
 
@@ -27,7 +21,7 @@ COPY . .
 RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" tbcd
 
 # Run stage
-FROM scratch
+FROM cgr.dev/chainguard/static@sha256:4cddf8bdcac1480e825d3c17c2f7248d21a774abda0e095cf25c19376b93eab5
 
 # Build metadata
 ARG VERSION
@@ -51,11 +45,7 @@ LABEL org.opencontainers.image.created=$BUILD_DATE \
       org.label-schema.version=$VERSION \
       org.label-schema.schema-version="1.0"
 
-# Copy files
-COPY --from=builder /etc/group /etc/group
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+# Copy binary
 COPY --from=builder /build/bin/tbcd /usr/local/bin/tbcd
 
 # Environment variables
@@ -76,6 +66,5 @@ ENV TBC_PEERS_WANTED=""
 ENV TBC_PPROF_ADDRESS=""
 ENV TBC_SEEDS=""
 
-USER tbcd:tbcd
 WORKDIR /etc/tbcd/
 ENTRYPOINT ["/usr/local/bin/tbcd"]

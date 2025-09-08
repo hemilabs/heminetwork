@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Hemi Labs, Inc.
+# Copyright (c) 2024-2025 Hemi Labs, Inc.
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
@@ -27,6 +27,7 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
+      - "-extldflags '-static'"
       - "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=Hemi Labs'"
       - "-X github.com/hemilabs/heminetwork/v2/version.Major={{ .Major }}"
       - "-X github.com/hemilabs/heminetwork/v2/version.Minor={{ .Minor }}"
@@ -51,6 +52,7 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
+      - "-extldflags '-static'"
       - "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=Hemi Labs'"
       - "-X github.com/hemilabs/heminetwork/v2/version.Major={{ .Major }}"
       - "-X github.com/hemilabs/heminetwork/v2/version.Minor={{ .Minor }}"
@@ -75,6 +77,7 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
+      - "-extldflags '-static'"
       - "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=Hemi Labs'"
       - "-X github.com/hemilabs/heminetwork/v2/version.Major={{ .Major }}"
       - "-X github.com/hemilabs/heminetwork/v2/version.Minor={{ .Minor }}"
@@ -99,6 +102,7 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
+      - "-extldflags '-static'"
       - "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=Hemi Labs'"
       - "-X github.com/hemilabs/heminetwork/v2/version.Major={{ .Major }}"
       - "-X github.com/hemilabs/heminetwork/v2/version.Minor={{ .Minor }}"
@@ -123,6 +127,7 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
+      - "-extldflags '-static'"
       - "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=Hemi Labs'"
       - "-X github.com/hemilabs/heminetwork/v2/version.Major={{ .Major }}"
       - "-X github.com/hemilabs/heminetwork/v2/version.Minor={{ .Minor }}"
@@ -147,6 +152,7 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
+      - "-extldflags '-static'"
       - "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=Hemi Labs'"
       - "-X github.com/hemilabs/heminetwork/v2/version.Major={{ .Major }}"
       - "-X github.com/hemilabs/heminetwork/v2/version.Minor={{ .Minor }}"
@@ -166,6 +172,7 @@ builds:
     env: ["CGO_ENABLED=0", "GOGC=off"]
     ldflags:
       - "-s -w"
+      - "-extldflags '-static'"
       - "-X 'github.com/hemilabs/heminetwork/v2/version.Brand=Hemi Labs'"
       - "-X github.com/hemilabs/heminetwork/v2/version.Major={{ .Major }}"
       - "-X github.com/hemilabs/heminetwork/v2/version.Minor={{ .Minor }}"
@@ -222,300 +229,70 @@ signs:
 
 # Creates Docker images:
 #  - bfgd: linux/amd64, linux/arm64
-#  - popmd: linux/amd64, linux/arm64/v8, linux/arm/v7
+#  - popmd: linux/amd64, linux/arm64, linux/arm/v7
 #  - tbcd: linux/amd64, linux/arm64
 #  - hproxyd: linux/amd64, linux/arm64
-dockers:
-  # bfgd amd64
-  - id: "bfgd-amd64"
-    goos: "linux"
-    goarch: "amd64"
+dockers_v2:
+  - id: "bfgd"
+    ids: [ "bfgd" ]
     dockerfile: "docker/bfgd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/bfgd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
+    images:
+      - "hemilabs/bfgd"
+      - "ghcr.io/hemilabs/bfgd"
+    tags: [ "latest", "{{ .Version }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}" ]
+    platforms:
+      - "linux/amd64"
+      - "linux/arm64"
+    build_args:
+      VERSION: "{{ .Version }}"
+      VCS_REF: "{{ .FullCommit }}"
+      BUILD_DATE: "{{ .Date }}"
 
-  # bfgd arm64
-  - id: "bfgd-arm64"
-    goos: "linux"
-    goarch: "arm64"
-    dockerfile: "docker/bfgd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/bfgd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64/v8"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
-
-  # popmd amd64
-  - id: "popmd-amd64"
-    goos: "linux"
-    goarch: "amd64"
+  - id: "popmd"
+    ids: [ "popmd" ]
     dockerfile: "docker/popmd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/popmd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
+    images:
+      - "hemilabs/popmd"
+      - "ghcr.io/hemilabs/popmd"
+    tags: [ "latest", "{{ .Version }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}" ]
+    platforms:
+      - "linux/amd64"
+      - "linux/arm64"
+      - "linux/arm/v7"
+    build_args:
+      VERSION: "{{ .Version }}"
+      VCS_REF: "{{ .FullCommit }}"
+      BUILD_DATE: "{{ .Date }}"
 
-  # popmd arm64
-  - id: "popmd-arm64"
-    goos: "linux"
-    goarch: "arm64"
-    dockerfile: "docker/popmd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/popmd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64/v8"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
-
-  # popmd armv7
-  - id: "popmd-armv7"
-    goos: "linux"
-    goarch: "arm"
-    goarm: "7"
-    dockerfile: "docker/popmd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/popmd:{{ .Version }}-armv7"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
-    build_flag_templates:
-      - "--platform=linux/arm/v7"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
-
-  # tbcd amd64
-  - id: "tbcd-amd64"
-    goos: "linux"
-    goarch: "amd64"
+  - id: "tbcd"
+    ids: [ "tbcd" ]
     dockerfile: "docker/tbcd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/tbcd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
+    images:
+      - "hemilabs/tbcd"
+      - "ghcr.io/hemilabs/tbcd"
+    tags: [ "latest", "{{ .Version }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}" ]
+    platforms:
+      - "linux/amd64"
+      - "linux/arm64"
+    build_args:
+      VERSION: "{{ .Version }}"
+      VCS_REF: "{{ .FullCommit }}"
+      BUILD_DATE: "{{ .Date }}"
 
-  # tbcd arm64
-  - id: "tbcd-arm64"
-    goos: "linux"
-    goarch: "arm64"
-    dockerfile: "docker/tbcd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/tbcd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64/v8"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
-
-  # hproxyd amd64
-  - id: "hproxyd-amd64"
-    goos: "linux"
-    goarch: "amd64"
+  - id: "hproxyd"
+    ids: [ "hproxyd" ]
     dockerfile: "docker/hproxyd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
-
-  # hproxyd arm64
-  - id: "hproxyd-arm64"
-    goos: "linux"
-    goarch: "arm64"
-    dockerfile: "docker/hproxyd/goreleaser.Dockerfile"
-    use: "buildx"
-    image_templates:
-      - "hemilabs/hproxyd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64/v8"
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=VCS_REF={{ .FullCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
-
-# Creates Docker manifests for each image containing the images for each
-# architecture.
-docker_manifests:
-  # bfgd - Docker Hub
-  - name_template: "hemilabs/bfgd:latest"
-    image_templates:
-      - "hemilabs/bfgd:{{ .Version }}-amd64"
-      - "hemilabs/bfgd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/bfgd:{{ .Major }}"
-    image_templates:
-      - "hemilabs/bfgd:{{ .Version }}-amd64"
-      - "hemilabs/bfgd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/bfgd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "hemilabs/bfgd:{{ .Version }}-amd64"
-      - "hemilabs/bfgd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/bfgd:{{ .Version }}"
-    image_templates:
-      - "hemilabs/bfgd:{{ .Version }}-amd64"
-      - "hemilabs/bfgd:{{ .Version }}-arm64"
-
-  # bfgd - GitHub Container Registry
-  - name_template: "ghcr.io/hemilabs/bfgd:latest"
-    image_templates:
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/bfgd:{{ .Major }}"
-    image_templates:
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/bfgd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/bfgd:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/bfgd:{{ .Version }}-arm64"
-
-  # popmd - Docker Hub
-  - name_template: "hemilabs/popmd:latest"
-    image_templates:
-      - "hemilabs/popmd:{{ .Version }}-amd64"
-      - "hemilabs/popmd:{{ .Version }}-arm64"
-      - "hemilabs/popmd:{{ .Version }}-armv7"
-  - name_template: "hemilabs/popmd:{{ .Major }}"
-    image_templates:
-      - "hemilabs/popmd:{{ .Version }}-amd64"
-      - "hemilabs/popmd:{{ .Version }}-arm64"
-      - "hemilabs/popmd:{{ .Version }}-armv7"
-  - name_template: "hemilabs/popmd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "hemilabs/popmd:{{ .Version }}-amd64"
-      - "hemilabs/popmd:{{ .Version }}-arm64"
-      - "hemilabs/popmd:{{ .Version }}-armv7"
-  - name_template: "hemilabs/popmd:{{ .Version }}"
-    image_templates:
-      - "hemilabs/popmd:{{ .Version }}-amd64"
-      - "hemilabs/popmd:{{ .Version }}-arm64"
-      - "hemilabs/popmd:{{ .Version }}-armv7"
-
-  # popmd - GitHub Container Registry
-  - name_template: "ghcr.io/hemilabs/popmd:latest"
-    image_templates:
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
-  - name_template: "ghcr.io/hemilabs/popmd:{{ .Major }}"
-    image_templates:
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
-  - name_template: "ghcr.io/hemilabs/popmd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
-  - name_template: "ghcr.io/hemilabs/popmd:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-arm64"
-      - "ghcr.io/hemilabs/popmd:{{ .Version }}-armv7"
-
-  # tbcd - Docker Hub
-  - name_template: "hemilabs/tbcd:latest"
-    image_templates:
-      - "hemilabs/tbcd:{{ .Version }}-amd64"
-      - "hemilabs/tbcd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/tbcd:{{ .Major }}"
-    image_templates:
-      - "hemilabs/tbcd:{{ .Version }}-amd64"
-      - "hemilabs/tbcd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/tbcd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "hemilabs/tbcd:{{ .Version }}-amd64"
-      - "hemilabs/tbcd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/tbcd:{{ .Version }}"
-    image_templates:
-      - "hemilabs/tbcd:{{ .Version }}-amd64"
-      - "hemilabs/tbcd:{{ .Version }}-arm64"
-
-  # tbcd - GitHub Container Registry
-  - name_template: "ghcr.io/hemilabs/tbcd:latest"
-    image_templates:
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/tbcd:{{ .Major }}"
-    image_templates:
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/tbcd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/tbcd:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/tbcd:{{ .Version }}-arm64"
-
-  # hproxyd - Docker Hub
-  - name_template: "hemilabs/hproxyd:latest"
-    image_templates:
-      - "hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "hemilabs/hproxyd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/hproxyd:{{ .Major }}"
-    image_templates:
-      - "hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "hemilabs/hproxyd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/hproxyd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "hemilabs/hproxyd:{{ .Version }}-arm64"
-  - name_template: "hemilabs/hproxyd:{{ .Version }}"
-    image_templates:
-      - "hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "hemilabs/hproxyd:{{ .Version }}-arm64"
-
-  # hproxyd - GitHub Container Registry
-  - name_template: "ghcr.io/hemilabs/hproxyd:latest"
-    image_templates:
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/hproxyd:{{ .Major }}"
-    image_templates:
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/hproxyd:{{ .Major }}.{{ .Minor }}"
-    image_templates:
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/hemilabs/hproxyd:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-amd64"
-      - "ghcr.io/hemilabs/hproxyd:{{ .Version }}-arm64"
+    images:
+      - "hemilabs/hproxyd"
+      - "ghcr.io/hemilabs/hproxyd"
+    tags: [ "latest", "{{ .Version }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}" ]
+    platforms:
+      - "linux/amd64"
+      - "linux/arm64"
+    build_args:
+      VERSION: "{{ .Version }}"
+      VCS_REF: "{{ .FullCommit }}"
+      BUILD_DATE: "{{ .Date }}"
 
 # Signs Docker images and manifests.
 docker_signs:
