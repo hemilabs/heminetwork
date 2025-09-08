@@ -300,6 +300,10 @@ docker_signs:
     args: ["sign", "${artifact}", "--yes"]
     artifacts: "all"
 
+# Create file with Docker image digests.
+docker_digest:
+  name_template: "{{ .ProjectName }}_v{{ .Version }}_image_digests.txt"
+
 # Snapshot version settings.
 snapshot:
   version_template: "{{ incpatch .Version }}-dev-{{ .ShortCommit }}"
