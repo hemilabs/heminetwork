@@ -34,7 +34,7 @@ func newVal(i int) []byte {
 	return value[:]
 }
 
-// dbputs inserts N records into the DB.
+// dbputs splits N inserts into multiple tables.
 func dbputs(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -46,7 +46,7 @@ func dbputs(ctx context.Context, db gkvdb.Database, tables []string, insertCount
 	return nil
 }
 
-// dbputEmpty inserts an empty record into the DB and expects a no-op.
+// dbputEmpty inserts empty records and expects a no-op.
 func dbputEmpty(ctx context.Context, db gkvdb.Database, tables []string) error {
 	for _, table := range tables {
 		err := db.Put(ctx, table, nil, nil)
@@ -65,6 +65,7 @@ func dbputEmpty(ctx context.Context, db gkvdb.Database, tables []string) error {
 	return nil
 }
 
+// dbputInvalidTable inserts into an invalid table and expects an error.
 func dbputInvalidTable(ctx context.Context, db gkvdb.Database, table string) error {
 	err := db.Put(ctx, table, newKey(0), nil)
 	if !errors.Is(err, gkvdb.ErrTableNotFound) {
@@ -73,6 +74,8 @@ func dbputInvalidTable(ctx context.Context, db gkvdb.Database, table string) err
 	return nil
 }
 
+// dbputDuplicate inserts / updates the value of a key multiple times.
+// After each put, we assert the value matches the last insert.
 func dbputDuplicate(ctx context.Context, db gkvdb.Database, table string, insertCount int) error {
 	for i := range insertCount {
 		key := newKey(0)
@@ -92,6 +95,8 @@ func dbputDuplicate(ctx context.Context, db gkvdb.Database, table string, insert
 	return nil
 }
 
+// dbgets gets records split across tables.
+// The retrieved value is asserted.
 func dbgets(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -106,6 +111,7 @@ func dbgets(ctx context.Context, db gkvdb.Database, tables []string, insertCount
 	return nil
 }
 
+// dbgetInvalidTable gets from an invalid table and expects an error.
 func dbgetInvalidTable(ctx context.Context, db gkvdb.Database, table string) error {
 	_, err := db.Get(ctx, table, newKey(0))
 	if !errors.Is(err, gkvdb.ErrTableNotFound) {
@@ -114,6 +120,7 @@ func dbgetInvalidTable(ctx context.Context, db gkvdb.Database, table string) err
 	return nil
 }
 
+// dbhas asserts records split across tables exist.
 func dbhas(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -128,6 +135,7 @@ func dbhas(ctx context.Context, db gkvdb.Database, tables []string, insertCount 
 	return nil
 }
 
+// dbhasInvalidTable calls has for an invalid table and expects an error.
 func dbhasInvalidTable(ctx context.Context, db gkvdb.Database, table string) error {
 	has, err := db.Has(ctx, table, newKey(0))
 	if !errors.Is(err, gkvdb.ErrTableNotFound) {
@@ -139,6 +147,7 @@ func dbhasInvalidTable(ctx context.Context, db gkvdb.Database, table string) err
 	return nil
 }
 
+// dbdels deletes records split across tables.
 func dbdels(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -150,6 +159,7 @@ func dbdels(ctx context.Context, db gkvdb.Database, tables []string, insertCount
 	return nil
 }
 
+// dbdelInvalidKey deletes an invalid record and expects a no-op.
 func dbdelInvalidKey(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -161,6 +171,7 @@ func dbdelInvalidKey(ctx context.Context, db gkvdb.Database, tables []string, in
 	return nil
 }
 
+// dbdelInvalidTable deletes from an invalid table and expects an error.
 func dbdelInvalidTable(ctx context.Context, db gkvdb.Database, table string) error {
 	err := db.Del(ctx, table, newKey(0))
 	if !errors.Is(err, gkvdb.ErrTableNotFound) {
@@ -169,6 +180,7 @@ func dbdelInvalidTable(ctx context.Context, db gkvdb.Database, table string) err
 	return nil
 }
 
+// dbhasNegative asserts records split across tables don't exist.
 func dbhasNegative(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -183,6 +195,8 @@ func dbhasNegative(ctx context.Context, db gkvdb.Database, tables []string, inse
 	return nil
 }
 
+// dbgetsNegative gets records split across tables.
+// It expects the operation to fail with an error.
 func dbgetsNegative(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -194,6 +208,7 @@ func dbgetsNegative(ctx context.Context, db gkvdb.Database, tables []string, ins
 	return nil
 }
 
+// dbhasOdds asserts odd records split across tables exist.
 func dbhasOdds(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -218,6 +233,7 @@ func dbhasOdds(ctx context.Context, db gkvdb.Database, tables []string, insertCo
 	return nil
 }
 
+// txputEmpty inserts empty records and expects a no-op.
 func txputEmpty(ctx context.Context, tx gkvdb.Transaction, tables []string) error {
 	for _, table := range tables {
 		err := tx.Put(ctx, table, nil, nil)
@@ -228,6 +244,7 @@ func txputEmpty(ctx context.Context, tx gkvdb.Transaction, tables []string) erro
 	return nil
 }
 
+// dbputEmpty inserts into an invalid table and expects an error.
 func txputInvalidTable(ctx context.Context, tx gkvdb.Transaction, table string) error {
 	err := tx.Put(ctx, table, newKey(0), nil)
 	if !errors.Is(err, gkvdb.ErrTableNotFound) {
@@ -259,6 +276,7 @@ func txputInvalidTable(ctx context.Context, tx gkvdb.Transaction, table string) 
 // 	return nil
 // }
 
+// dbputs splits N inserts into multiple tables.
 func txputs(ctx context.Context, tx gkvdb.Transaction, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -270,6 +288,7 @@ func txputs(ctx context.Context, tx gkvdb.Transaction, tables []string, insertCo
 	return nil
 }
 
+// dbdels deletes even records split across tables.
 func txdelsEven(ctx context.Context, tx gkvdb.Transaction, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -293,6 +312,7 @@ func txdelsEven(ctx context.Context, tx gkvdb.Transaction, tables []string, inse
 	return nil
 }
 
+// dbdelInvalidKey deletes an invalid record and expects a no-op.
 func txdelInvalidKey(ctx context.Context, tx gkvdb.Transaction, table string) error {
 	err := tx.Del(ctx, table, newKey(0))
 	if err != nil {
@@ -301,6 +321,7 @@ func txdelInvalidKey(ctx context.Context, tx gkvdb.Transaction, table string) er
 	return nil
 }
 
+// dbBasic tests all basic operations of a db.
 func dbBasic(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	// Already Open
 	if err := db.Open(ctx); err == nil {
@@ -388,7 +409,8 @@ func dbBasic(ctx context.Context, db gkvdb.Database, tables []string, insertCoun
 	return nil
 }
 
-// Transaction Rollback
+// dbTransactionsRollback inserts N records into a Tx, rolls it back, and
+// expects the inserted records to not be present in the db.
 func dbTransactionsRollback(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	tx, err := db.Begin(ctx, true)
 	if err != nil && !errors.Is(err, gkvdb.ErrDBClosed) {
@@ -417,7 +439,8 @@ func dbTransactionsRollback(ctx context.Context, db gkvdb.Database, tables []str
 	return nil
 }
 
-// Transaction Commit
+// dbTransactionsCommit inserts N records into a Tx, commits it, and
+// expects the inserted records to be present in the db.
 func dbTransactionsCommit(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	tx, err := db.Begin(ctx, true)
 	if err != nil {
@@ -447,7 +470,9 @@ func dbTransactionsCommit(ctx context.Context, db gkvdb.Database, tables []strin
 	return nil
 }
 
-// Transaction Multiple Write
+// dbTransactionsMultipleWrite creates multiple write TXs concurrently
+// that update the same value. It asserts that each new write TX created
+// blocks until the previous one is commited.
 func dbTransactionsMultipleWrite(ctx context.Context, db gkvdb.Database, table string, txCount int) error {
 	last := txCount + 1
 	key := newKey(0)
@@ -502,7 +527,8 @@ func dbTransactionsMultipleWrite(ctx context.Context, db gkvdb.Database, table s
 	return nil
 }
 
-// Transaction delete even records
+// dbTransactionsDelete deletes even records into a Tx, commits it, and
+// expects the deleted records to not be present in the db.
 func dbTransactionsDelete(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	tx, err := db.Begin(ctx, true)
 	if err != nil {
@@ -532,7 +558,7 @@ func dbTransactionsDelete(ctx context.Context, db gkvdb.Database, tables []strin
 	return nil
 }
 
-// Transaction test expected errors
+// dbTransactionsErrors checks edge case TX errors.
 func dbTransactionsErrors(ctx context.Context, db gkvdb.Database, tables []string) error {
 	tx, err := db.Begin(ctx, true)
 	if err != nil {
@@ -570,6 +596,8 @@ func dbTransactionsErrors(ctx context.Context, db gkvdb.Database, tables []strin
 	return nil
 }
 
+// dbIterateNext iterates through a table and asserts the number
+// of found records matches the number of inserts.
 func dbIterateNext(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
 	it, err := db.NewIterator(ctx, table)
 	if err != nil {
@@ -596,6 +624,8 @@ func dbIterateNext(ctx context.Context, db gkvdb.Database, table string, recordC
 	return nil
 }
 
+// dbIterateFirstLast asserts the first and last record of
+// the iterator matches the expected value.
 func dbIterateFirstLast(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
 	it, err := db.NewIterator(ctx, table)
 	if err != nil {
@@ -632,6 +662,8 @@ func dbIterateFirstLast(ctx context.Context, db gkvdb.Database, table string, re
 	return nil
 }
 
+// dbIterateSeek seeks every record using an iterator and verifies that
+// Next returns the next record after a seek.
 func dbIterateSeek(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
 	it, err := db.NewIterator(ctx, table)
 	if err != nil {
@@ -705,6 +737,8 @@ func dbIterateConcurrentWrites(ctx context.Context, db gkvdb.Database, table str
 	return nil
 }
 
+// dbRange iterates through a subset of records, asserting the number of
+// records iterated match the number of inserted records.
 func dbRange(ctx context.Context, db gkvdb.Database, tables []string, total int) error {
 	frac := total / 4
 	start := frac
@@ -737,6 +771,8 @@ func dbRange(ctx context.Context, db gkvdb.Database, tables []string, total int)
 	return nil
 }
 
+// dbRangeFirstLast asserts the first and last record of
+// the range matches the expected value.
 func dbRangeFirstLast(ctx context.Context, db gkvdb.Database, tables []string, total int) error {
 	frac := total / 4
 	start := frac
@@ -786,6 +822,8 @@ func dbRangeFirstLast(ctx context.Context, db gkvdb.Database, tables []string, t
 	return nil
 }
 
+// dbBatch inserts N records into a batch, commits it, iterates
+// through the table to ensure they exist, and deletes them.
 func dbBatch(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
 	// Stuff a bunch of records into the same table to validate that
 	// everything is executed as expected.
@@ -853,6 +891,7 @@ func dbBatch(ctx context.Context, db gkvdb.Database, table string, recordCount i
 	return nil
 }
 
+// dbBatchNoop ensures invalid deletes in a batch are ignored.
 func dbBatchNoop(ctx context.Context, db gkvdb.Database, table string) error {
 	b, err := db.NewBatch(ctx)
 	if err != nil {
