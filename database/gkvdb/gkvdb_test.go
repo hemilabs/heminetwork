@@ -2,7 +2,7 @@
 // Use of this source code is governed by the MIT License,
 // which can be found in the LICENSE file.
 
-package gkvdb
+package gkvdb_test
 
 import (
 	"bytes"
@@ -15,18 +15,29 @@ import (
 	"path/filepath"
 	"testing"
 
+	"slices"
+
+	"github.com/hemilabs/heminetwork/v2/database/gkvdb"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sync/errgroup"
 )
 
-func dbputs(ctx context.Context, db Database, tables []string, insertCount int) error {
+func newKey(i int) []byte {
+	var key [4]byte
+	binary.BigEndian.PutUint32(key[:], uint32(i))
+	return key[:]
+}
+
+func newVal(i int) []byte {
+	var value [8]byte
+	binary.BigEndian.PutUint64(value[:], uint64(i))
+	return value[:]
+}
+
+func dbputs(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
-		var key [4]byte
-		var value [8]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		binary.BigEndian.PutUint64(value[:], uint64(i))
 		table := tables[i%len(tables)]
-		err := db.Put(ctx, table, key[:], value[:])
+		err := db.Put(ctx, table, newKey(i), newVal(i))
 		if err != nil {
 			return fmt.Errorf("put %v in %v: %w", i, table, err)
 		}
@@ -35,7 +46,7 @@ func dbputs(ctx context.Context, db Database, tables []string, insertCount int) 
 }
 
 // XXX test if you can read it back
-func dbputEmpty(ctx context.Context, db Database, tables []string) error {
+func dbputEmpty(ctx context.Context, db gkvdb.Database, tables []string) error {
 	for _, table := range tables {
 		err := db.Put(ctx, table, nil, nil)
 		if err != nil {
@@ -45,71 +56,59 @@ func dbputEmpty(ctx context.Context, db Database, tables []string) error {
 	return nil
 }
 
-func dbputInvalidTable(ctx context.Context, db Database, table string) error {
-	var key [4]byte
-	binary.BigEndian.PutUint32(key[:], uint32(0))
-	err := db.Put(ctx, table, key[:], nil)
-	if !errors.Is(err, ErrTableNotFound) {
+func dbputInvalidTable(ctx context.Context, db gkvdb.Database, table string) error {
+	err := db.Put(ctx, table, newKey(0), nil)
+	if !errors.Is(err, gkvdb.ErrTableNotFound) {
 		return fmt.Errorf("put expected not found error %v: %w", table, err)
 	}
 	return nil
 }
 
-func dbputDuplicate(ctx context.Context, db Database, table string, insertCount int) error {
+func dbputDuplicate(ctx context.Context, db gkvdb.Database, table string, insertCount int) error {
 	for i := range insertCount {
-		var key [4]byte
-		var value [8]byte
-		binary.BigEndian.PutUint32(key[:], uint32(0))
-		binary.BigEndian.PutUint64(value[:], uint64(i))
-		err := db.Put(ctx, table, key[:], value[:])
+		key := newKey(0)
+		value := newVal(i)
+		err := db.Put(ctx, table, key, value)
 		if err != nil {
 			return fmt.Errorf("put %v: %v", table, i)
 		}
-		rv, err := db.Get(ctx, table, key[:])
+		rv, err := db.Get(ctx, table, key)
 		if err != nil {
 			return fmt.Errorf("get %v: %v %w", table, i, err)
 		}
-		if !bytes.Equal(rv, value[:]) {
+		if !bytes.Equal(rv, value) {
 			return fmt.Errorf("get unequal %v: %v", table, i)
 		}
 	}
 	return nil
 }
 
-func dbgets(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbgets(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [4]byte
-		var valueExpected [8]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		binary.BigEndian.PutUint64(valueExpected[:], uint64(i))
-		value, err := db.Get(ctx, table, key[:])
+		value, err := db.Get(ctx, table, newKey(i))
 		if err != nil {
 			return fmt.Errorf("get %v: %v %w", table, i, err)
 		}
-		if !bytes.Equal(value, valueExpected[:]) {
+		if !bytes.Equal(value, newVal(i)) {
 			return fmt.Errorf("get unequal %v: %v", table, i)
 		}
 	}
 	return nil
 }
 
-func dbgetInvalidTable(ctx context.Context, db Database, table string) error {
-	var key [4]byte
-	binary.BigEndian.PutUint32(key[:], uint32(0))
-	_, err := db.Get(ctx, table, key[:])
-	if !errors.Is(err, ErrTableNotFound) {
+func dbgetInvalidTable(ctx context.Context, db gkvdb.Database, table string) error {
+	_, err := db.Get(ctx, table, newKey(0))
+	if !errors.Is(err, gkvdb.ErrTableNotFound) {
 		return fmt.Errorf("get expected not found error %v: %w", table, err)
 	}
 	return nil
 }
 
-func dbhas(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbhas(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [4]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		has, err := db.Has(ctx, table, key[:])
+		has, err := db.Has(ctx, table, newKey(i))
 		if err != nil {
 			return fmt.Errorf("has %v: %v %w", table, i, err)
 		}
@@ -120,11 +119,9 @@ func dbhas(ctx context.Context, db Database, tables []string, insertCount int) e
 	return nil
 }
 
-func dbhasInvalidTable(ctx context.Context, db Database, table string) error {
-	var key [4]byte
-	binary.BigEndian.PutUint32(key[:], uint32(0))
-	has, err := db.Has(ctx, table, key[:])
-	if !errors.Is(err, ErrTableNotFound) {
+func dbhasInvalidTable(ctx context.Context, db gkvdb.Database, table string) error {
+	has, err := db.Has(ctx, table, newKey(0))
+	if !errors.Is(err, gkvdb.ErrTableNotFound) {
 		return fmt.Errorf("has expected not found error %v: %w", table, err)
 	}
 	if has {
@@ -133,12 +130,10 @@ func dbhasInvalidTable(ctx context.Context, db Database, table string) error {
 	return nil
 }
 
-func dbdels(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbdels(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [4]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		err := db.Del(ctx, table, key[:])
+		err := db.Del(ctx, table, newKey(i))
 		if err != nil {
 			return fmt.Errorf("del %v: %v %w", table, i, err)
 		}
@@ -146,12 +141,10 @@ func dbdels(ctx context.Context, db Database, tables []string, insertCount int) 
 	return nil
 }
 
-func dbdelInvalidKey(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbdelInvalidKey(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [4]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		err := db.Del(ctx, table, key[:])
+		err := db.Del(ctx, table, newKey(i))
 		if err != nil {
 			return fmt.Errorf("del invalid key %v: %v %w", table, i, err)
 		}
@@ -159,22 +152,18 @@ func dbdelInvalidKey(ctx context.Context, db Database, tables []string, insertCo
 	return nil
 }
 
-func dbdelInvalidTable(ctx context.Context, db Database, table string) error {
-	var key [4]byte
-	binary.BigEndian.PutUint32(key[:], uint32(0))
-	err := db.Del(ctx, table, key[:])
-	if !errors.Is(err, ErrTableNotFound) {
+func dbdelInvalidTable(ctx context.Context, db gkvdb.Database, table string) error {
+	err := db.Del(ctx, table, newKey(0))
+	if !errors.Is(err, gkvdb.ErrTableNotFound) {
 		return fmt.Errorf("del expected not found error %v: %w", table, err)
 	}
 	return nil
 }
 
-func dbhasNegative(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbhasNegative(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [4]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		has, err := db.Has(ctx, table, key[:])
+		has, err := db.Has(ctx, table, newKey(i))
 		if err != nil {
 			return fmt.Errorf("has %v: %v %w", table, i, err)
 		}
@@ -185,25 +174,21 @@ func dbhasNegative(ctx context.Context, db Database, tables []string, insertCoun
 	return nil
 }
 
-func dbgetsNegative(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbgetsNegative(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [4]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		_, err := db.Get(ctx, table, key[:])
-		if !errors.Is(err, ErrKeyNotFound) {
+		_, err := db.Get(ctx, table, newKey(i))
+		if !errors.Is(err, gkvdb.ErrKeyNotFound) {
 			return fmt.Errorf("get expected not found error %v: %v %w", table, i, err)
 		}
 	}
 	return nil
 }
 
-func dbhasOdds(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbhasOdds(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [4]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		has, err := db.Has(ctx, table, key[:])
+		has, err := db.Has(ctx, table, newKey(i))
 		if i%2 == 0 {
 			// Assert we don't have evens
 			if err != nil {
@@ -224,7 +209,7 @@ func dbhasOdds(ctx context.Context, db Database, tables []string, insertCount in
 	return nil
 }
 
-func txputEmpty(ctx context.Context, tx Transaction, tables []string) error {
+func txputEmpty(ctx context.Context, tx gkvdb.Transaction, tables []string) error {
 	for _, table := range tables {
 		err := tx.Put(ctx, table, nil, nil)
 		if err != nil {
@@ -234,11 +219,9 @@ func txputEmpty(ctx context.Context, tx Transaction, tables []string) error {
 	return nil
 }
 
-func txputInvalidTable(ctx context.Context, tx Transaction, table string) error {
-	var key [4]byte
-	binary.BigEndian.PutUint32(key[:], uint32(0))
-	err := tx.Put(ctx, table, key[:], nil)
-	if !errors.Is(err, ErrTableNotFound) {
+func txputInvalidTable(ctx context.Context, tx gkvdb.Transaction, table string) error {
+	err := tx.Put(ctx, table, newKey(0), nil)
+	if !errors.Is(err, gkvdb.ErrTableNotFound) {
 		return fmt.Errorf("tx put expected not found error %v: %w", table, err)
 	}
 	return nil
@@ -246,7 +229,7 @@ func txputInvalidTable(ctx context.Context, tx Transaction, table string) error 
 
 // This fails if we try to access the changes made using a tx put
 // with a tx get after, and it returns the new value
-// func txputDuplicate(ctx context.Context, tx Transaction, table string, insertCount int) error {
+// func txputDuplicate(ctx context.Context, tx gkvdb.Transaction, table string, insertCount int) error {
 // 	for i := range insertCount {
 // 		var key [4]byte
 // 		var value [8]byte
@@ -267,14 +250,10 @@ func txputInvalidTable(ctx context.Context, tx Transaction, table string) error 
 // 	return nil
 // }
 
-func txputs(ctx context.Context, tx Transaction, tables []string, insertCount int) error {
+func txputs(ctx context.Context, tx gkvdb.Transaction, tables []string, insertCount int) error {
 	for i := range insertCount {
-		var key [4]byte
-		var value [8]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
-		binary.BigEndian.PutUint64(value[:], uint64(i))
 		table := tables[i%len(tables)]
-		err := tx.Put(ctx, table, key[:], value[:])
+		err := tx.Put(ctx, table, newKey(i), newVal(i))
 		if err != nil {
 			return fmt.Errorf("tx put %v in %v: %w", i, table, err)
 		}
@@ -282,25 +261,22 @@ func txputs(ctx context.Context, tx Transaction, tables []string, insertCount in
 	return nil
 }
 
-func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCount int) error {
+func txdelsEven(ctx context.Context, tx gkvdb.Transaction, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
-		var key [4]byte
-		binary.BigEndian.PutUint32(key[:], uint32(i))
+		key := newKey(i)
 		if i%2 == 0 {
-			err := tx.Del(ctx, table, key[:])
+			err := tx.Del(ctx, table, key)
 			if err != nil {
 				return fmt.Errorf("del %v: %v %w", table, i, err)
 			}
 		} else {
 			// Assert odd record exist
-			var valueExpected [8]byte
-			binary.BigEndian.PutUint64(valueExpected[:], uint64(i))
-			value, err := tx.Get(ctx, table, key[:])
+			value, err := tx.Get(ctx, table, key)
 			if err != nil {
 				return fmt.Errorf("even get %v: %v %w", table, i, err)
 			}
-			if !bytes.Equal(value, valueExpected[:]) {
+			if !bytes.Equal(value, newVal(i)) {
 				return fmt.Errorf("even get unequal %v: %v", table, i)
 			}
 		}
@@ -308,17 +284,15 @@ func txdelsEven(ctx context.Context, tx Transaction, tables []string, insertCoun
 	return nil
 }
 
-func txdelInvalidKey(ctx context.Context, tx Transaction, table string) error {
-	var key [4]byte
-	binary.BigEndian.PutUint32(key[:], uint32(0))
-	err := tx.Del(ctx, table, key[:])
+func txdelInvalidKey(ctx context.Context, tx gkvdb.Transaction, table string) error {
+	err := tx.Del(ctx, table, newKey(0))
 	if err != nil {
 		return fmt.Errorf("del invalid key %v: %w", table, err)
 	}
 	return nil
 }
 
-func dbBasic(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbBasic(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	// Already Open
 	if err := db.Open(ctx); err == nil {
 		return errors.New("expected already open error")
@@ -406,9 +380,9 @@ func dbBasic(ctx context.Context, db Database, tables []string, insertCount int)
 }
 
 // Transaction Rollback
-func dbTransactionsRollback(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbTransactionsRollback(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	tx, err := db.Begin(ctx, true)
-	if err != nil && !errors.Is(err, ErrDBClosed) {
+	if err != nil && !errors.Is(err, gkvdb.ErrDBClosed) {
 		return fmt.Errorf("db begin: %w", err)
 	}
 	defer func() {
@@ -435,7 +409,7 @@ func dbTransactionsRollback(ctx context.Context, db Database, tables []string, i
 }
 
 // Transaction Commit
-func dbTransactionsCommit(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbTransactionsCommit(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	tx, err := db.Begin(ctx, true)
 	if err != nil {
 		return fmt.Errorf("db begin: %w", err)
@@ -443,7 +417,7 @@ func dbTransactionsCommit(ctx context.Context, db Database, tables []string, ins
 	defer func() {
 		if err != nil {
 			err = tx.Rollback(ctx)
-			if err != nil && !errors.Is(err, ErrDBClosed) {
+			if err != nil && !errors.Is(err, gkvdb.ErrDBClosed) {
 				panic(fmt.Errorf("tx rollback: %w", err))
 			}
 		}
@@ -465,14 +439,10 @@ func dbTransactionsCommit(ctx context.Context, db Database, tables []string, ins
 }
 
 // Transaction Multiple Write
-// XXX marco, should we block read txs too like in leveldb?
-func dbTransactionsMultipleWrite(ctx context.Context, db Database, table string, txCount int) error {
+func dbTransactionsMultipleWrite(ctx context.Context, db gkvdb.Database, table string, txCount int) error {
 	last := txCount + 1
-	var key [4]byte
-	var val [8]byte
-	binary.BigEndian.PutUint32(key[:], uint32(0))
-	binary.BigEndian.PutUint64(val[:], uint64(last))
-	err := db.Put(ctx, table, key[:], val[:])
+	key := newKey(0)
+	err := db.Put(ctx, table, key, newVal(last))
 	if err != nil {
 		return fmt.Errorf("initial put")
 	}
@@ -486,25 +456,24 @@ func dbTransactionsMultipleWrite(ctx context.Context, db Database, table string,
 			defer func() {
 				if err != nil {
 					err = tx.Rollback(ctx)
-					if err != nil && !errors.Is(err, ErrDBClosed) {
+					if err != nil && !errors.Is(err, gkvdb.ErrDBClosed) {
 						panic(fmt.Errorf("tx%d - tx rollback: %w", i, err))
 					}
 				}
 			}()
 			// see if value set by last tx matches "last"
-			var ve [8]byte
-			binary.BigEndian.PutUint64(ve[:], uint64(last))
-			rv, err := tx.Get(ctx, table, key[:])
+			ve := newVal(last)
+			rv, err := tx.Get(ctx, table, key)
 			if err != nil {
 				return fmt.Errorf("tx%d - get: %w", i, err)
 			}
-			if !bytes.Equal(rv, ve[:]) {
-				return fmt.Errorf("tx%d - expected %v, got %v", i, ve[:], rv)
+			if !bytes.Equal(rv, ve) {
+				return fmt.Errorf("tx%d - expected %v, got %v", i, ve, rv)
 			}
 
 			// set value and "last" to "i"
-			binary.BigEndian.PutUint64(ve[:], uint64(i))
-			err = tx.Put(ctx, table, key[:], ve[:])
+			ve = newVal(i)
+			err = tx.Put(ctx, table, key, ve)
 			if err != nil {
 				return fmt.Errorf("tx put %v in %v: %w", i, table, err)
 			}
@@ -525,7 +494,7 @@ func dbTransactionsMultipleWrite(ctx context.Context, db Database, table string,
 }
 
 // Transaction delete even records
-func dbTransactionsDelete(ctx context.Context, db Database, tables []string, insertCount int) error {
+func dbTransactionsDelete(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	tx, err := db.Begin(ctx, true)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -533,7 +502,7 @@ func dbTransactionsDelete(ctx context.Context, db Database, tables []string, ins
 	defer func() {
 		if err != nil {
 			err = tx.Rollback(ctx)
-			if err != nil && !errors.Is(err, ErrDBClosed) {
+			if err != nil && !errors.Is(err, gkvdb.ErrDBClosed) {
 				panic(fmt.Errorf("tx rollback: %w", err))
 			}
 		}
@@ -555,7 +524,7 @@ func dbTransactionsDelete(ctx context.Context, db Database, tables []string, ins
 }
 
 // Transaction test expected errors
-func dbTransactionsErrors(ctx context.Context, db Database, tables []string) error {
+func dbTransactionsErrors(ctx context.Context, db gkvdb.Database, tables []string) error {
 	tx, err := db.Begin(ctx, true)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -563,7 +532,7 @@ func dbTransactionsErrors(ctx context.Context, db Database, tables []string) err
 	defer func() {
 		if err != nil {
 			err = tx.Rollback(ctx)
-			if err != nil && !errors.Is(err, ErrDBClosed) {
+			if err != nil && !errors.Is(err, gkvdb.ErrDBClosed) {
 				panic(fmt.Errorf("tx rollback: %w", err))
 			}
 		}
@@ -592,12 +561,120 @@ func dbTransactionsErrors(ctx context.Context, db Database, tables []string) err
 	return nil
 }
 
-func dbIterateNext(ctx context.Context, db Database, table string, recordCount int) error {
+func dbIterateNext(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
 	it, err := db.NewIterator(ctx, table)
 	if err != nil {
 		return err
 	}
 	defer it.Close(ctx)
+
+	// Next
+	i := 0
+	for it.Next(ctx) {
+		key := it.Key(ctx)
+		val := it.Value(ctx)
+		if !bytes.Equal(key, newKey(i)) {
+			return fmt.Errorf("next unequal key: got %v, expected %v", key, newKey(i))
+		}
+		if !bytes.Equal(val, newVal(i)) {
+			return fmt.Errorf("next unequal value: got %v, expected %v", val, newVal(i))
+		}
+		i++
+	}
+	if recordCount != i {
+		return fmt.Errorf("found %d records, expected %d", i, recordCount)
+	}
+	return nil
+}
+
+func dbIterateFirstLast(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
+	it, err := db.NewIterator(ctx, table)
+	if err != nil {
+		return err
+	}
+	defer it.Close(ctx)
+
+	// First
+	if !it.First(ctx) {
+		return errors.New("first")
+	}
+	key := it.Key(ctx)
+	val := it.Value(ctx)
+	if !bytes.Equal(key, newKey(0)) {
+		return fmt.Errorf("first unequal key: got %v, expected %v", key, newKey(0))
+	}
+	if !bytes.Equal(val, newVal(0)) {
+		return fmt.Errorf("first unequal value: got %v, expected %v", val, newVal(0))
+	}
+
+	// Last
+	if !it.Last(ctx) {
+		return errors.New("last")
+	}
+	key = it.Key(ctx)
+	val = it.Value(ctx)
+	if !bytes.Equal(key, newKey(recordCount-1)) {
+		return fmt.Errorf("last unequal key: got %v, expected %v", key, newKey(recordCount-1))
+	}
+	if !bytes.Equal(val, newVal(recordCount-1)) {
+		return fmt.Errorf("last unequal value: got %v, expected %v", val, newVal(recordCount-1))
+	}
+
+	return nil
+}
+
+func dbIterateSeek(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
+	it, err := db.NewIterator(ctx, table)
+	if err != nil {
+		return err
+	}
+	defer it.Close(ctx)
+
+	// Seek even
+	for i := range recordCount {
+		if i%2 == 0 {
+			expectedKey := newKey(i)
+			if !it.Seek(ctx, expectedKey) {
+				return fmt.Errorf("seek %v", expectedKey)
+			}
+			key := it.Key(ctx)
+			val := it.Value(ctx)
+			if !bytes.Equal(key, expectedKey) {
+				return fmt.Errorf("seek unequal key: got %v, expected %v",
+					key, expectedKey)
+			}
+			if !bytes.Equal(val, newVal(i)) {
+				return fmt.Errorf("seek unequal value: got %v, expected %v",
+					val, newVal(i))
+			}
+		}
+	}
+
+	// Verify that Next returns the Next record after a seek.
+	if !it.Seek(ctx, newKey(1)) {
+		return errors.New("seek 1")
+	}
+	if !it.Next(ctx) {
+		return errors.New("next")
+	}
+	if !bytes.Equal(it.Key(ctx), newKey(2)) {
+		return fmt.Errorf("not equal seek, got %v wanted %v", it.Key(ctx), newKey(2))
+	}
+
+	return nil
+}
+
+func dbIterateConcurrentWrites(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
+	it, err := db.NewIterator(ctx, table)
+	if err != nil {
+		return err
+	}
+	defer it.Close(ctx)
+
+	err = db.Put(ctx, table, []byte{uint8(recordCount)}, []byte{uint8(recordCount)})
+	if err != nil {
+		return fmt.Errorf("put [%v,%v]: %w", recordCount, recordCount, err)
+	}
 
 	// Next
 	i := 0
@@ -619,107 +696,27 @@ func dbIterateNext(ctx context.Context, db Database, table string, recordCount i
 	return nil
 }
 
-func dbIterateFirstLast(ctx context.Context, db Database, table string, recordCount int) error {
-	it, err := db.NewIterator(ctx, table)
-	if err != nil {
-		return err
-	}
-	defer it.Close(ctx)
-
-	// First
-	if !it.First(ctx) {
-		return errors.New("first")
-	}
-	key := it.Key(ctx)
-	val := it.Value(ctx)
-	expected := []byte{uint8(0)}
-	if !bytes.Equal(key, expected) {
-		return fmt.Errorf("first unequal key: got %v, expected %v", key, expected)
-	}
-	if !bytes.Equal(val, expected) {
-		return fmt.Errorf("first unequal value: got %v, expected %v", val, expected)
-	}
-
-	// Last
-	if !it.Last(ctx) {
-		return errors.New("last")
-	}
-	key = it.Key(ctx)
-	val = it.Value(ctx)
-	expected = []byte{uint8(recordCount - 1)}
-	if !bytes.Equal(key, expected) {
-		return fmt.Errorf("last unequal key: got %v, expected %v", key, expected)
-	}
-	if !bytes.Equal(val, expected) {
-		return fmt.Errorf("last unequal value: got %v, expected %v", val, expected)
-	}
-
-	return nil
-}
-
-func dbIterateSeek(ctx context.Context, db Database, table string, recordCount int) error {
-	it, err := db.NewIterator(ctx, table)
-	if err != nil {
-		return err
-	}
-	defer it.Close(ctx)
-
-	// Seek even
-	for i := range recordCount {
-		if i%2 == 0 {
-			expected := []byte{uint8(i)}
-			if !it.Seek(ctx, expected) {
-				return fmt.Errorf("seek %v", expected)
-			}
-			key := it.Key(ctx)
-			val := it.Value(ctx)
-			if !bytes.Equal(key, expected) {
-				return fmt.Errorf("seek unequal key: got %v, expected %v",
-					key, expected)
-			}
-			if !bytes.Equal(val, expected) {
-				return fmt.Errorf("seek unequal value: got %v, expected %v",
-					val, expected)
-			}
-		}
-	}
-
-	// Verify that Next returns the Next record after a seek.
-	if !it.Seek(ctx, []byte{1}) {
-		return errors.New("seek 1")
-	}
-	if !it.Next(ctx) {
-		return errors.New("next")
-	}
-	if !bytes.Equal(it.Key(ctx), []byte{2}) {
-		return fmt.Errorf("not equal seek, got %v wanted %v", it.Key(ctx), []byte{2})
-	}
-
-	return nil
-}
-
-func dbRange(ctx context.Context, db Database, tables []string, total int) error {
+func dbRange(ctx context.Context, db gkvdb.Database, tables []string, total int) error {
 	frac := total / 4
 	start := frac
 	end := frac * 3
 	for _, table := range tables {
-		s := []byte{uint8(start)}
-		e := []byte{uint8(end)}
+		s := newKey(start)
+		e := newKey(end)
 
-		it, err := db.NewRange(ctx, table, s[:], e[:])
+		it, err := db.NewRange(ctx, table, s, e)
 		if err != nil {
 			return fmt.Errorf("new range: %w", err)
 		}
 		i := 0
 		for it.Next(ctx) {
-			expected := []byte{uint8(start + i)}
-			if !bytes.Equal(it.Key(ctx), expected) {
+			if !bytes.Equal(it.Key(ctx), newKey(start+i)) {
 				return fmt.Errorf("invalid key got %v wanted %v",
-					it.Key(ctx), expected)
+					it.Key(ctx), newKey(start+i))
 			}
-			if !bytes.Equal(it.Value(ctx), expected) {
+			if !bytes.Equal(it.Value(ctx), newVal(start+i)) {
 				return fmt.Errorf("invalid value got %x wanted %x",
-					it.Value(ctx), expected)
+					it.Value(ctx), newVal(start+i))
 			}
 			i++
 		}
@@ -728,21 +725,20 @@ func dbRange(ctx context.Context, db Database, tables []string, total int) error
 		}
 		it.Close(ctx)
 	}
-
 	return nil
 }
 
-func dbRangeFirstLast(ctx context.Context, db Database, tables []string, total int) error {
+func dbRangeFirstLast(ctx context.Context, db gkvdb.Database, tables []string, total int) error {
 	frac := total / 4
 	start := frac
 	// Test with end outside and inside
 	// values inserted into the dbs
 	for _, end := range []int{total + start, frac * 3} {
 		for _, table := range tables {
-			s := []byte{uint8(start)}
-			e := []byte{uint8(end)}
+			s := newKey(start)
+			e := newKey(end)
 
-			it, err := db.NewRange(ctx, table, s[:], e[:])
+			it, err := db.NewRange(ctx, table, s, e)
 			if err != nil {
 				return fmt.Errorf("new range: %w", err)
 			}
@@ -753,12 +749,11 @@ func dbRangeFirstLast(ctx context.Context, db Database, tables []string, total i
 			}
 			key := it.Key(ctx)
 			val := it.Value(ctx)
-			expected := []byte{uint8(start)}
-			if !bytes.Equal(key, expected) {
-				return fmt.Errorf("first unequal key: got %v, expected %v", key, expected)
+			if !bytes.Equal(key, newKey(start)) {
+				return fmt.Errorf("first unequal key: got %v, expected %v", key, newKey(start))
 			}
-			if !bytes.Equal(val, expected) {
-				return fmt.Errorf("first unequal value: got %v, expected %v", val, expected)
+			if !bytes.Equal(val, newVal(start)) {
+				return fmt.Errorf("first unequal value: got %v, expected %v", val, newVal(start))
 			}
 
 			// Last
@@ -767,12 +762,13 @@ func dbRangeFirstLast(ctx context.Context, db Database, tables []string, total i
 			}
 			key = it.Key(ctx)
 			val = it.Value(ctx)
-			expected = []byte{uint8(min(total-1, end-1))}
-			if !bytes.Equal(key, expected) {
-				return fmt.Errorf("last unequal key: got %v, expected %v", key, expected)
+			expectedKey := newKey(min(total-1, end-1))
+			expectedVal := newVal(min(total-1, end-1))
+			if !bytes.Equal(key, expectedKey) {
+				return fmt.Errorf("last unequal key: got %v, expected %v", key, expectedKey)
 			}
-			if !bytes.Equal(val, expected) {
-				return fmt.Errorf("last unequal value: got %v, expected %v", val, expected)
+			if !bytes.Equal(val, expectedVal) {
+				return fmt.Errorf("last unequal value: got %v, expected %v", val, expectedVal)
 			}
 
 			it.Close(ctx)
@@ -781,7 +777,7 @@ func dbRangeFirstLast(ctx context.Context, db Database, tables []string, total i
 	return nil
 }
 
-func dbBatch(ctx context.Context, db Database, table string, recordCount int) error {
+func dbBatch(ctx context.Context, db gkvdb.Database, table string, recordCount int) error {
 	// Stuff a bunch of records into the same table to validate that
 	// everything is executed as expected.
 	b, err := db.NewBatch(ctx)
@@ -789,26 +785,26 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 		return fmt.Errorf("new batch: %w", err)
 	}
 
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		// Emulate user records "userXXXX"
 		var key [8]byte
-		copy(key[:], []byte(fmt.Sprintf("user%04v", i)))
+		copy(key[:], fmt.Appendf(nil, "user%04v", i))
 		value := make([]byte, len(key)*2)
 		copy(value[len(key):], key[:])
 		b.Put(ctx, table, key[:], value)
 
 		// Emulate user records "passXXXX"
 		var pkey [8]byte
-		copy(pkey[:], []byte(fmt.Sprintf("pass%04v", i)))
-		eval := []byte(fmt.Sprintf("thisisapassword%v", i))
+		copy(pkey[:], fmt.Appendf(nil, "pass%04v", i))
+		eval := fmt.Appendf(nil, "thisisapassword%v", i)
 		b.Put(ctx, table, pkey[:], eval)
 
 		// Emulate avatar records "avatarXXXX"
-		akey := []byte(fmt.Sprintf("avatar%d", i))
-		aval := []byte(fmt.Sprintf("thisisavatar%d", i))
+		akey := fmt.Appendf(nil, "avatar%d", i)
+		aval := fmt.Appendf(nil, "thisisavatar%d", i)
 		b.Put(ctx, table, akey, aval)
 	}
-	err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+	err = db.Update(ctx, func(ctx context.Context, tx gkvdb.Transaction) error {
 		return tx.Write(ctx, b)
 	})
 	if err != nil {
@@ -822,31 +818,13 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 	}
 	defer it.Close(ctx)
 
-	// XXX nutsb has a huge limitation. We cannot iterate and perform
-	// actions on a WriteBatch. This is an odd decision but the net is it
-	// deadlocks the reads and writes (iterator rlocks then the del/put
-	// locks thus deadlocking).
-	//
-	// The solution must come from within nuts because there is a need to
-	// atomic read some shit and perform a write. Maybe the answer is using
-	// nutsdb.Tx.CommitWith(). Investigate this.
-	// For now use a shitty raceable non-atomic test.
-	//
-	// In addition to shity mutex use, we cannot do this either in tests:
-	//
-	// NewIterator()
-	// t.Fatal()
-	//
-	// This will deadlock on the defer db.Close because of outstanding
-	// transactions that haven't been closed.
 	bd, err := db.NewBatch(ctx)
 	if err != nil {
 		return fmt.Errorf("new batch: %w", err)
 	}
 	i := 0
 	for it.Next(ctx) {
-		key := append([]byte{}, it.Key(ctx)...)
-		// XXX can't do this with nutsdb
+		key := slices.Clone(it.Key(ctx))
 		bd.Del(ctx, table, key)
 		i++
 	}
@@ -856,7 +834,7 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 	// Close iterator so that we don't block
 	it.Close(ctx)
 
-	err = db.Update(ctx, func(ctx context.Context, txn Transaction) error {
+	err = db.Update(ctx, func(ctx context.Context, txn gkvdb.Transaction) error {
 		return txn.Write(ctx, bd)
 	})
 	if err != nil {
@@ -866,18 +844,46 @@ func dbBatch(ctx context.Context, db Database, table string, recordCount int) er
 	return nil
 }
 
+func dbBatchNoop(ctx context.Context, db gkvdb.Database, table string) error {
+	b, err := db.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("new batch: %w", err)
+	}
+
+	// Invalid del should be noop
+	b.Del(ctx, table, newKey(0))
+
+	// valid put
+	validKey := newKey(1)
+	b.Put(ctx, table, validKey, newVal(1))
+
+	err = db.Update(ctx, func(ctx context.Context, tx gkvdb.Transaction) error {
+		return tx.Write(ctx, b)
+	})
+	if err != nil {
+		return fmt.Errorf("update: %w", err)
+	}
+
+	_, err = db.Get(ctx, table, validKey)
+	if err != nil {
+		return fmt.Errorf("get: %w", err)
+	}
+
+	return nil
+}
+
 type TestTableItem struct {
 	name   string
-	dbFunc func(home string, tables []string) Database
+	dbFunc func(home string, tables []string) gkvdb.Database
 }
 
 func getDBs() []TestTableItem {
 	dbs := []TestTableItem{
 		{
 			name: "badgerDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultBadgerConfig(home, tables)
-				db, err := NewBadgerDB(cfg)
+			dbFunc: func(home string, tables []string) gkvdb.Database {
+				cfg := gkvdb.DefaultBadgerConfig(home, tables)
+				db, err := gkvdb.NewBadgerDB(cfg)
 				if err != nil {
 					panic(err)
 				}
@@ -886,9 +892,9 @@ func getDBs() []TestTableItem {
 		},
 		{
 			name: "bbolt",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultBoltConfig(home, tables)
-				db, err := NewBoltDB(cfg)
+			dbFunc: func(home string, tables []string) gkvdb.Database {
+				cfg := gkvdb.DefaultBoltConfig(home, tables)
+				db, err := gkvdb.NewBoltDB(cfg)
 				if err != nil {
 					panic(err)
 				}
@@ -897,9 +903,9 @@ func getDBs() []TestTableItem {
 		},
 		{
 			name: "bitcask",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultBitcaskConfig(home, tables)
-				db, err := NewBitcaskDB(cfg)
+			dbFunc: func(home string, tables []string) gkvdb.Database {
+				cfg := gkvdb.DefaultBitcaskConfig(home, tables)
+				db, err := gkvdb.NewBitcaskDB(cfg)
 				if err != nil {
 					panic(err)
 				}
@@ -908,9 +914,9 @@ func getDBs() []TestTableItem {
 		},
 		{
 			name: "buntdb",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultBuntConfig(home, tables)
-				db, err := NewBuntDB(cfg)
+			dbFunc: func(home string, tables []string) gkvdb.Database {
+				cfg := gkvdb.DefaultBuntConfig(home, tables)
+				db, err := gkvdb.NewBuntDB(cfg)
 				if err != nil {
 					panic(err)
 				}
@@ -919,9 +925,9 @@ func getDBs() []TestTableItem {
 		},
 		{
 			name: "levelDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultLevelConfig(home, tables)
-				db, err := NewLevelDB(cfg)
+			dbFunc: func(home string, tables []string) gkvdb.Database {
+				cfg := gkvdb.DefaultLevelConfig(home, tables)
+				db, err := gkvdb.NewLevelDB(cfg)
 				if err != nil {
 					panic(err)
 				}
@@ -930,9 +936,9 @@ func getDBs() []TestTableItem {
 		},
 		{
 			name: "nutsDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultNutsConfig(home, tables)
-				db, err := NewNutsDB(cfg)
+			dbFunc: func(home string, tables []string) gkvdb.Database {
+				cfg := gkvdb.DefaultNutsConfig(home, tables)
+				db, err := gkvdb.NewNutsDB(cfg)
 				if err != nil {
 					panic(err)
 				}
@@ -941,9 +947,9 @@ func getDBs() []TestTableItem {
 		},
 		{
 			name: "pebbleDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultPebbleConfig(home, tables)
-				db, err := NewPebbleDB(cfg)
+			dbFunc: func(home string, tables []string) gkvdb.Database {
+				cfg := gkvdb.DefaultPebbleConfig(home, tables)
+				db, err := gkvdb.NewPebbleDB(cfg)
 				if err != nil {
 					panic(err)
 				}
@@ -952,22 +958,22 @@ func getDBs() []TestTableItem {
 		},
 		{
 			name: "replicator-direct",
-			dbFunc: func(home string, tables []string) Database {
+			dbFunc: func(home string, tables []string) gkvdb.Database {
 				home1 := filepath.Join(home, "1")
-				cfg1 := DefaultLevelConfig(home1, tables)
-				db1, err := NewLevelDB(cfg1)
+				cfg1 := gkvdb.DefaultLevelConfig(home1, tables)
+				db1, err := gkvdb.NewLevelDB(cfg1)
 				if err != nil {
 					panic(err)
 				}
 				home2 := filepath.Join(home, "2")
-				cfg2 := DefaultLevelConfig(home2, tables)
-				db2, err := NewLevelDB(cfg2)
+				cfg2 := gkvdb.DefaultLevelConfig(home2, tables)
+				db2, err := gkvdb.NewLevelDB(cfg2)
 				if err != nil {
 					panic(err)
 				}
 				journalHome := filepath.Join(home, "journal")
-				rcfg := DefaultReplicatorConfig(journalHome, Direct)
-				db, err := NewReplicatorDB(rcfg, db1, db2)
+				rcfg := gkvdb.DefaultReplicatorConfig(journalHome, gkvdb.Direct)
+				db, err := gkvdb.NewReplicatorDB(rcfg, db1, db2)
 				if err != nil {
 					panic(err)
 				}
@@ -976,22 +982,22 @@ func getDBs() []TestTableItem {
 		},
 		{
 			name: "replicator-lazy",
-			dbFunc: func(home string, tables []string) Database {
+			dbFunc: func(home string, tables []string) gkvdb.Database {
 				home1 := filepath.Join(home, "1")
-				cfg1 := DefaultLevelConfig(home1, tables)
-				db1, err := NewLevelDB(cfg1)
+				cfg1 := gkvdb.DefaultLevelConfig(home1, tables)
+				db1, err := gkvdb.NewLevelDB(cfg1)
 				if err != nil {
 					panic(err)
 				}
 				home2 := filepath.Join(home, "2")
-				cfg2 := DefaultLevelConfig(home2, tables)
-				db2, err := NewLevelDB(cfg2)
+				cfg2 := gkvdb.DefaultLevelConfig(home2, tables)
+				db2, err := gkvdb.NewLevelDB(cfg2)
 				if err != nil {
 					panic(err)
 				}
 				journalHome := filepath.Join(home, "journal")
-				rcfg := DefaultReplicatorConfig(journalHome, Lazy)
-				db, err := NewReplicatorDB(rcfg, db1, db2)
+				rcfg := gkvdb.DefaultReplicatorConfig(journalHome, gkvdb.Lazy)
+				db, err := gkvdb.NewReplicatorDB(rcfg, db1, db2)
 				if err != nil {
 					panic(err)
 				}
@@ -1005,13 +1011,13 @@ func getDBs() []TestTableItem {
 		dbs = append(dbs,
 			TestTableItem{
 				name: "mongodb",
-				dbFunc: func(home string, tables []string) Database {
-					cfg := MongoConfig{
+				dbFunc: func(home string, tables []string) gkvdb.Database {
+					cfg := gkvdb.MongoConfig{
 						URI:        mongoURI,
 						Tables:     tables,
-						dropTables: true,
+						DropTables: true,
 					}
-					db, err := NewMongoDB(&cfg)
+					db, err := gkvdb.NewMongoDB(&cfg)
 					if err != nil {
 						panic(err)
 					}
@@ -1022,6 +1028,23 @@ func getDBs() []TestTableItem {
 	}
 
 	return dbs
+}
+
+func mongoReopen(tables []string) gkvdb.Database {
+	mongoURI := os.Getenv("MONGO_TEST_URI")
+	if mongoURI != "" {
+		cfg := gkvdb.MongoConfig{
+			URI:        mongoURI,
+			Tables:     tables,
+			DropTables: true,
+		}
+		db, err := gkvdb.NewMongoDB(&cfg)
+		if err != nil {
+			panic(err)
+		}
+		return db
+	}
+	return nil
 }
 
 func TestGKVDB(t *testing.T) {
@@ -1081,23 +1104,23 @@ func TestGKVDB(t *testing.T) {
 				}()
 
 				if err = dbTransactionsRollback(ctx, db, tables, insertCount); err != nil {
-					log.Errorf("dbTransactionsRollback: %v", err)
+					t.Errorf("dbTransactionsRollback: %v", err)
 					t.Fail()
 				}
 				if err = dbTransactionsCommit(ctx, db, tables, insertCount); err != nil {
-					log.Errorf("dbTransactionsCommit: %v", err)
+					t.Errorf("dbTransactionsCommit: %v", err)
 					t.Fail()
 				}
 				if err = dbTransactionsDelete(ctx, db, tables, insertCount); err != nil {
-					log.Errorf("dbTransactionsDelete: %v", err)
+					t.Errorf("dbTransactionsDelete: %v", err)
 					t.Fail()
 				}
 				if err = dbTransactionsErrors(ctx, db, tables); err != nil {
-					log.Errorf("dbTransactionsErrors: %v", err)
+					t.Errorf("dbTransactionsErrors: %v", err)
 					t.Fail()
 				}
 				if err = dbTransactionsMultipleWrite(ctx, db, tables[0], 5); err != nil {
-					log.Errorf("dbTransactionsMultipleWrite: %v", err)
+					t.Errorf("dbTransactionsMultipleWrite: %v", err)
 					t.Fail()
 				}
 			})
@@ -1126,7 +1149,7 @@ func TestGKVDB(t *testing.T) {
 				// Populate db
 				for _, table := range tables {
 					for i := range insertCount {
-						err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
+						err := db.Put(ctx, table, newKey(i), newVal(i))
 						if err != nil {
 							t.Fatal(fmt.Errorf("put [%v,%v]: %w", i, i, err))
 						}
@@ -1135,15 +1158,15 @@ func TestGKVDB(t *testing.T) {
 
 				for _, table := range tables {
 					if err = dbIterateNext(ctx, db, table, insertCount); err != nil {
-						log.Errorf("dbIterateNext: %v", err)
+						t.Errorf("dbIterateNext: %v", err)
 						t.Fail()
 					}
 					if err = dbIterateFirstLast(ctx, db, table, insertCount); err != nil {
-						log.Errorf("dbIterateFirstLast: %v", err)
+						t.Errorf("dbIterateFirstLast: %v", err)
 						t.Fail()
 					}
 					if err = dbIterateSeek(ctx, db, table, insertCount); err != nil {
-						log.Errorf("dbIterateSeek: %v", err)
+						t.Errorf("dbIterateSeek: %v", err)
 						t.Fail()
 					}
 				}
@@ -1173,9 +1196,9 @@ func TestGKVDB(t *testing.T) {
 				// Populate db
 				for _, table := range tables {
 					for i := range insertCount {
-						err := db.Put(ctx, table, []byte{uint8(i)}, []byte{uint8(i)})
+						err := db.Put(ctx, table, newKey(i), newVal(i))
 						if err != nil {
-							t.Fatal(fmt.Errorf("put [%v,%v] in %v: %w", table, i, i, err))
+							t.Fatal(fmt.Errorf("put [%v,%v]: %w", i, i, err))
 						}
 					}
 				}
@@ -1208,6 +1231,9 @@ func TestGKVDB(t *testing.T) {
 				if err = dbBatch(ctx, db, table, 10); err != nil {
 					t.Fatal(err)
 				}
+				if err = dbBatchNoop(ctx, db, table); err != nil {
+					t.Fatal(err)
+				}
 			})
 
 			t.Run("reopen", func(t *testing.T) {
@@ -1216,7 +1242,13 @@ func TestGKVDB(t *testing.T) {
 				table := "users"
 				tables := []string{table}
 
-				db := tti.dbFunc(home, tables)
+				var db gkvdb.Database
+				if tti.name == "mongodb" {
+					db = mongoReopen(tables)
+				} else {
+					db = tti.dbFunc(home, tables)
+				}
+
 				err := db.Open(ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -1227,11 +1259,6 @@ func TestGKVDB(t *testing.T) {
 						t.Fatal(err)
 					}
 				}()
-
-				mdb, ok := db.(*mongoDB)
-				if ok {
-					mdb.cfg.dropTables = false
-				}
 
 				if err = dbOpenCloseOpen(ctx, db, table); err != nil {
 					t.Fatal(err)
@@ -1275,7 +1302,7 @@ func BenchmarkGKVDBPut(b *testing.B) {
 				}
 
 				for b.Loop() {
-					err = db.Update(ctx, func(ctx context.Context, tx Transaction) error {
+					err = db.Update(ctx, func(ctx context.Context, tx gkvdb.Transaction) error {
 						return tx.Write(ctx, bt)
 					})
 					if err != nil {
@@ -1296,8 +1323,8 @@ func TestDumpRestorePipeline(t *testing.T) {
 		tables = append(tables, fmt.Sprintf("table%v", i))
 	}
 
-	cfg := DefaultLevelConfig(home, tables)
-	db, err := NewLevelDB(cfg)
+	cfg := gkvdb.DefaultLevelConfig(home, tables)
+	db, err := gkvdb.NewLevelDB(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1331,7 +1358,7 @@ func TestDumpRestorePipeline(t *testing.T) {
 	var b bytes.Buffer
 	zw, _ := zstd.NewWriter(&b)
 	je := json.NewEncoder(zw)
-	err = DumpTables(ctx, db, tables, je)
+	err = gkvdb.DumpTables(ctx, db, tables, je)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1348,10 +1375,10 @@ func TestDumpRestorePipeline(t *testing.T) {
 	if err == nil {
 		t.Fatal("wtf")
 	}
-	DefaultMaxRestoreChunk = 4096 // Many chunks
+	gkvdb.DefaultMaxRestoreChunk = 4096 // Many chunks
 	zr, _ := zstd.NewReader(&b)
 	jd := json.NewDecoder(zr)
-	err = Restore(ctx, db, jd)
+	err = gkvdb.Restore(ctx, db, jd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1365,7 +1392,7 @@ func TestDumpRestorePipeline(t *testing.T) {
 	}
 }
 
-func dbOpenCloseOpen(ctx context.Context, db Database, table string) error {
+func dbOpenCloseOpen(ctx context.Context, db gkvdb.Database, table string) error {
 	// Open again expect fail
 	err := db.Open(ctx)
 	if err == nil {
@@ -1404,8 +1431,8 @@ func TestCopy(t *testing.T) {
 		tables = append(tables, fmt.Sprintf("table%v", i))
 	}
 
-	srcCfg := DefaultLevelConfig(filepath.Join(home, "source"), tables)
-	source, err := NewLevelDB(srcCfg)
+	srcCfg := gkvdb.DefaultLevelConfig(filepath.Join(home, "source"), tables)
+	source, err := gkvdb.NewLevelDB(srcCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1436,8 +1463,8 @@ func TestCopy(t *testing.T) {
 	}
 
 	// Destination
-	dstCfg := DefaultLevelConfig(filepath.Join(home, "destination"), tables)
-	destination, err := NewLevelDB(dstCfg)
+	dstCfg := gkvdb.DefaultLevelConfig(filepath.Join(home, "destination"), tables)
+	destination, err := gkvdb.NewLevelDB(dstCfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1452,9 +1479,9 @@ func TestCopy(t *testing.T) {
 		}
 	}()
 
-	Verbose = true
-	DefaultMaxRestoreChunk = 16384 // Many chunks
-	err = Copy(ctx, source, destination, tables)
+	gkvdb.Verbose = true
+	gkvdb.DefaultMaxRestoreChunk = 16384 // Many chunks
+	err = gkvdb.Copy(ctx, source, destination, tables)
 	if err != nil {
 		t.Fatal(err)
 	}

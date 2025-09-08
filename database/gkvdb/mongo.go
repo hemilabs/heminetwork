@@ -33,7 +33,7 @@ type mongoKV struct {
 type MongoConfig struct {
 	URI        string
 	Tables     []string
-	dropTables bool
+	DropTables bool
 }
 
 func DefaultMongoConfig(URI string, tables []string) *MongoConfig {
@@ -87,7 +87,7 @@ func (b *mongoDB) Open(ctx context.Context) error {
 	b.db = client
 
 	// drop tables on first open
-	if b.cfg.dropTables {
+	if b.cfg.DropTables {
 		for _, table := range b.cfg.Tables {
 			co := client.Database(internalDB).Collection(table)
 			err := co.Drop(ctx)
