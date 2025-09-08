@@ -874,39 +874,6 @@ type TestTableItem struct {
 func getDBs() []TestTableItem {
 	dbs := []TestTableItem{
 		{
-			name: "levelDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultLevelConfig(home, tables)
-				db, err := NewLevelDB(cfg)
-				if err != nil {
-					panic(err)
-				}
-				return db
-			},
-		},
-		{
-			name: "pebbleDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultPebbleConfig(home, tables)
-				db, err := NewPebbleDB(cfg)
-				if err != nil {
-					panic(err)
-				}
-				return db
-			},
-		},
-		{
-			name: "nutsDB",
-			dbFunc: func(home string, tables []string) Database {
-				cfg := DefaultNutsConfig(home, tables)
-				db, err := NewNutsDB(cfg)
-				if err != nil {
-					panic(err)
-				}
-				return db
-			},
-		},
-		{
 			name: "badgerDB",
 			dbFunc: func(home string, tables []string) Database {
 				cfg := DefaultBadgerConfig(home, tables)
@@ -933,6 +900,50 @@ func getDBs() []TestTableItem {
 			dbFunc: func(home string, tables []string) Database {
 				cfg := DefaultBitcaskConfig(home, tables)
 				db, err := NewBitcaskDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "buntdb",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultBuntConfig(home, tables)
+				db, err := NewBuntDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "levelDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultLevelConfig(home, tables)
+				db, err := NewLevelDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "nutsDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultNutsConfig(home, tables)
+				db, err := NewNutsDB(cfg)
+				if err != nil {
+					panic(err)
+				}
+				return db
+			},
+		},
+		{
+			name: "pebbleDB",
+			dbFunc: func(home string, tables []string) Database {
+				cfg := DefaultPebbleConfig(home, tables)
+				db, err := NewPebbleDB(cfg)
 				if err != nil {
 					panic(err)
 				}

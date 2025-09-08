@@ -33,6 +33,7 @@ require (
 	github.com/spy16/kiwi v0.0.0-20231119051452-932458bb4371
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.38.0
+	github.com/tidwall/buntdb v1.3.2
 	github.com/tyler-smith/go-bip39 v1.1.0
 	go.etcd.io/bbolt v1.4.3
 	go.mills.io/bitcask/v2 v2.1.3
@@ -125,6 +126,12 @@ require (
 	github.com/stretchr/testify v1.10.0 // indirect
 	github.com/supranational/blst v0.3.15 // indirect
 	github.com/tidwall/btree v1.7.0 // indirect
+	github.com/tidwall/gjson v1.14.3 // indirect
+	github.com/tidwall/grect v0.1.4 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.0 // indirect
+	github.com/tidwall/rtred v0.1.2 // indirect
+	github.com/tidwall/tinyqueue v0.1.1 // indirect
 	github.com/tklauser/go-sysconf v0.3.15 // indirect
 	github.com/tklauser/numcpus v0.10.0 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect

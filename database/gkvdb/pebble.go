@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/pebble"
-	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 // Assert required interfaces
@@ -171,10 +170,10 @@ func (b *pebbleDB) NewIterator(ctx context.Context, table string) (Iterator, err
 		return nil, ErrTableNotFound
 	}
 
-	r := util.BytesPrefix(NewCompositeKey(table, nil))
+	start, limit := BytesPrefix(NewCompositeKey(table, nil))
 	opt := &pebble.IterOptions{
-		LowerBound: r.Start,
-		UpperBound: r.Limit,
+		LowerBound: start,
+		UpperBound: limit,
 	}
 	iter, err := b.db.NewIterWithContext(ctx, opt)
 	if err != nil {
@@ -182,7 +181,7 @@ func (b *pebbleDB) NewIterator(ctx context.Context, table string) (Iterator, err
 	}
 
 	// set iterator to before first value
-	iter.SeekLT(r.Start)
+	iter.SeekLT(start)
 
 	return &pebbleIterator{
 		table: table,

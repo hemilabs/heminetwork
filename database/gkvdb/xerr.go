@@ -11,6 +11,7 @@ import (
 	"github.com/dgraph-io/badger/v4"
 	"github.com/nutsdb/nutsdb"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/tidwall/buntdb"
 	bolterrs "go.etcd.io/bbolt/errors"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
@@ -29,6 +30,10 @@ func xerr(err error) error {
 		err = ErrDBClosed
 	case errors.Is(err, bolterrs.ErrKeyRequired):
 		err = nil
+
+	// bunt
+	case errors.Is(err, buntdb.ErrNotFound):
+		err = ErrKeyNotFound
 
 	// leveldb
 	case errors.Is(err, leveldb.ErrClosed):
