@@ -2,7 +2,7 @@ module github.com/hemilabs/heminetwork/v2
 
 go 1.24.2
 
-toolchain go1.24.5
+toolchain go1.24.7
 
 require (
 	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
