@@ -5,10 +5,15 @@
 package testutil
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"strconv"
+	"testing"
 
+	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/v2/hemi"
@@ -92,4 +97,57 @@ func FreePort() string {
 		panic(err)
 	}
 	return strconv.Itoa(port)
+}
+
+// RandomBytes returns a slice with cryptographically secure random bytes.
+func RandomBytes(count int) []byte {
+	b := make([]byte, count)
+	_, err := rand.Read(b)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
+// ExecuteTX executes a bitcoin transaction script against a VM and optionally dumps steps.
+// This consolidates the frequently used executeTX helper into testutil.
+func ExecuteTX(t testing.TB, dump bool, scriptPubKey []byte, tx *btcutil.Tx) error {
+	flags := txscript.ScriptBip16 | txscript.ScriptVerifyDERSignatures |
+		txscript.ScriptStrictMultiSig | txscript.ScriptDiscourageUpgradableNops
+	vm, err := txscript.NewEngine(scriptPubKey, tx.MsgTx(), 0, flags, nil, nil, -1, nil)
+	if err != nil {
+		return err
+	}
+	if dump {
+		t.Logf("=== executing tx %v", tx.Hash())
+	}
+	for i := 0; ; i++ {
+		d, err := vm.DisasmPC()
+		if err != nil {
+			return err
+		}
+		if dump {
+			t.Logf("%v: %v", i, d)
+		}
+		done, err := vm.Step()
+		if err != nil {
+			return err
+		}
+		stack := vm.GetStack()
+		if dump {
+			t.Logf("%v: stack %v", i, spew.Sdump(stack))
+		}
+		if done {
+			break
+		}
+	}
+	err = vm.CheckErrorCondition(true)
+	if err != nil {
+		return err
+	}
+
+	if dump {
+		t.Logf("=== SUCCESS tx %v", tx.Hash())
+	}
+	return nil
 }
