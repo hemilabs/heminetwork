@@ -123,6 +123,9 @@ func (b *pebbleDB) Put(_ context.Context, table string, key, value []byte) error
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
+	if key == nil {
+		return nil
+	}
 	return xerr(b.db.Set(NewCompositeKey(table, key), value, nil))
 }
 
@@ -270,6 +273,9 @@ func (tx *pebbleTX) Put(ctx context.Context, table string, key []byte, value []b
 	if _, ok := tx.db.tables[table]; !ok {
 		return ErrTableNotFound
 	}
+	if key == nil {
+		return nil
+	}
 	return xerr(tx.tx.Set(NewCompositeKey(table, key), value, nil))
 }
 
@@ -382,6 +388,9 @@ func (nb *pebbleBatch) Del(ctx context.Context, table string, key []byte) {
 func (nb *pebbleBatch) Put(ctx context.Context, table string, key, value []byte) {
 	if _, ok := nb.db.tables[table]; !ok {
 		log.Errorf("%s: %v", table, ErrTableNotFound)
+		return
+	}
+	if key == nil {
 		return
 	}
 	if err := nb.wb.Set(NewCompositeKey(table, key), value, nil); err != nil {

@@ -275,6 +275,9 @@ func (tx *buntTX) Put(ctx context.Context, table string, key []byte, value []byt
 	if _, ok := tx.db.tables[table]; !ok {
 		return ErrTableNotFound
 	}
+	if key == nil {
+		return nil
+	}
 	_, _, err := tx.tx.Set(string(NewCompositeKey(table, key)),
 		string(value), nil)
 	return xerr(err)

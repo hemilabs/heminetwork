@@ -131,6 +131,9 @@ func (b *badgerDB) Put(_ context.Context, table string, key, value []byte) error
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
+	if key == nil {
+		return nil
+	}
 	err := b.db.Update(func(txn *badger.Txn) error {
 		return txn.Set(NewCompositeKey(table, key), value)
 	})
@@ -310,6 +313,9 @@ func (tx *badgerTX) Get(ctx context.Context, table string, key []byte) ([]byte, 
 func (tx *badgerTX) Put(ctx context.Context, table string, key []byte, value []byte) error {
 	if _, ok := tx.db.tables[table]; !ok {
 		return ErrTableNotFound
+	}
+	if key == nil {
+		return nil
 	}
 	return xerr(tx.tx.Set(NewCompositeKey(table, key), value))
 }

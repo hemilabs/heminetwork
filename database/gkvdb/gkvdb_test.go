@@ -13,13 +13,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
-	"slices"
-
-	"github.com/hemilabs/heminetwork/v2/database/gkvdb"
 	"github.com/klauspost/compress/zstd"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/hemilabs/heminetwork/v2/database/gkvdb"
 )
 
 func newKey(i int) []byte {
@@ -34,6 +34,7 @@ func newVal(i int) []byte {
 	return value[:]
 }
 
+// dbputs inserts N records into the DB.
 func dbputs(ctx context.Context, db gkvdb.Database, tables []string, insertCount int) error {
 	for i := range insertCount {
 		table := tables[i%len(tables)]
@@ -45,12 +46,20 @@ func dbputs(ctx context.Context, db gkvdb.Database, tables []string, insertCount
 	return nil
 }
 
-// XXX test if you can read it back
+// dbputEmpty inserts an empty record into the DB and expects a no-op.
 func dbputEmpty(ctx context.Context, db gkvdb.Database, tables []string) error {
 	for _, table := range tables {
 		err := db.Put(ctx, table, nil, nil)
 		if err != nil {
 			return fmt.Errorf("put empty key %v: %w", table, err)
+		}
+
+		has, err := db.Has(ctx, table, nil)
+		if err != nil {
+			return fmt.Errorf("has: %w", err)
+		}
+		if has {
+			return errors.New("expected no empty record")
 		}
 	}
 	return nil
@@ -1450,3 +1459,4 @@ func TestCopy(t *testing.T) {
 // insert large key / value
 // tx ordered operations
 // consider making multiple write txs not block
+// tx put empty

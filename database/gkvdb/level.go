@@ -107,6 +107,9 @@ func (b *levelDB) Put(_ context.Context, table string, key, value []byte) error 
 	if _, ok := b.tables[table]; !ok {
 		return ErrTableNotFound
 	}
+	if key == nil {
+		return nil
+	}
 	return xerr(b.db.Put(NewCompositeKey(table, key), value, nil))
 }
 
@@ -208,6 +211,9 @@ func (tx *levelTX) Put(ctx context.Context, table string, key []byte, value []by
 	if _, ok := tx.db.tables[table]; !ok {
 		return ErrTableNotFound
 	}
+	if key == nil {
+		return nil
+	}
 	return xerr(tx.tx.Put(NewCompositeKey(table, key), value, nil))
 }
 
@@ -308,6 +314,9 @@ func (nb *levelBatch) Del(ctx context.Context, table string, key []byte) {
 func (nb *levelBatch) Put(ctx context.Context, table string, key, value []byte) {
 	if _, ok := nb.db.tables[table]; !ok {
 		log.Errorf("%s: %v", table, ErrTableNotFound)
+		return
+	}
+	if key == nil {
 		return
 	}
 	nb.wb.Put(NewCompositeKey(table, key), value)

@@ -30,7 +30,6 @@ require (
 	github.com/prometheus/client_golang v1.23.0
 	github.com/sethvargo/go-retry v0.3.0
 	github.com/shirou/gopsutil/v4 v4.25.7
-	github.com/spy16/kiwi v0.0.0-20231119051452-932458bb4371
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	github.com/testcontainers/testcontainers-go v0.38.0
 	github.com/tidwall/buntdb v1.3.2
