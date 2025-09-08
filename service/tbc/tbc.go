@@ -138,7 +138,7 @@ func init() {
 type HashHeight struct {
 	Hash      chainhash.Hash `json:"hash"`
 	Height    uint64         `json:"height"`
-	Timestamp int64          `json:"timestamp"` // optional
+	Timestamp int64          `json:"timestamp,omitempty"` // optional
 }
 
 func (h HashHeight) String() string {
