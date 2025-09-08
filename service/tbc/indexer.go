@@ -322,7 +322,7 @@ func (c *indexerCommon) wind(ctx context.Context, startBH, endBH *tbcd.BlockHead
 		if err := c.p.commit(ctx, 1, last.Hash, cache); err != nil {
 			return fmt.Errorf("block %v update: %w", c, err)
 		}
-		// TODO: do we need to clear the cache here?
+		cache.Clear() // Done in db but do it again here to be sure.
 
 		// leveldb does all kinds of allocations, force GC to lower
 		// memory pressure.
@@ -380,7 +380,7 @@ func (c *indexerCommon) unwind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 		if err = c.p.commit(ctx, -1, last.Hash, cache); err != nil {
 			return fmt.Errorf("block %v update: %w", c, err)
 		}
-		// TODO: do we need to clear the cache here?
+		cache.Clear() // Done in db but do it again here to be sure.
 
 		// leveldb does all kinds of allocations, force GC to lower
 		// memory pressure.

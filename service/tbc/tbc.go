@@ -2715,6 +2715,9 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	// Setup indexers
+	// XXX I think the hammer has come down on using fixupCacheChannel. So
+	// let's remove all the other strategies and remove the receiver from
+	// fixup so that we can the mutex as well.
 	switch fixupStrategy {
 	case 0:
 		s.fixupCache = s.fixupCacheParallel
@@ -2727,7 +2730,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 	s.ui = NewUtxoIndexer(s.g, s.cfg.MaxCachedTxs, s.fixupCache)
 	s.ti = NewTxIndexer(s.g, s.cfg.MaxCachedTxs)
-	if s.cfg.HemiIndex { // TODO: nil if not enabled, but we pass enabled into the indexer?
+	if s.cfg.HemiIndex {
 		s.ki = NewKeystoneIndexer(s.g, s.cfg.MaxCachedKeystones,
 			s.cfg.HemiIndex, s.hemiGenesis)
 	}
@@ -2920,9 +2923,6 @@ func (s *Server) Run(pctx context.Context) error {
 		return fmt.Errorf("df: %w", err)
 	}
 	if df != 0 {
-		if s.g.chain == nil {
-			panic("gfy")
-		}
 		blockPerDay := uint64(24 * time.Hour / s.g.chain.TargetTimePerBlock)
 		blockSize := uint64(2 * 1024 * 1024) // 2MB, a bit over but that's ok
 		sizePerDay := blockSize * blockPerDay
