@@ -1047,6 +1047,32 @@ func mongoReopen(tables []string) gkvdb.Database {
 	return nil
 }
 
+func prepareTestSuite(t *testing.T, ctx context.Context, tableCount, insert int, tti TestTableItem) (gkvdb.Database, []string) {
+	home := t.TempDir()
+
+	tables := make([]string, 0, tableCount)
+	for i := range tableCount {
+		tables = append(tables, fmt.Sprintf("table%v", i))
+	}
+
+	db := tti.dbFunc(home, tables)
+	err := db.Open(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, table := range tables {
+		for i := range insert {
+			err := db.Put(ctx, table, newKey(i), newVal(i))
+			if err != nil {
+				t.Fatal(fmt.Errorf("put [%v,%v]: %w", i, i, err))
+			}
+		}
+	}
+
+	return db, tables
+}
+
 func TestGKVDB(t *testing.T) {
 	testTable := getDBs()
 	for _, tti := range testTable {
@@ -1054,22 +1080,9 @@ func TestGKVDB(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 
-			// Puts
 			const insertCount = 10
 			t.Run("basic", func(t *testing.T) {
-				home := t.TempDir()
-
-				tableCount := 5
-				tables := make([]string, 0, tableCount)
-				for i := range tableCount {
-					tables = append(tables, fmt.Sprintf("table%v", i))
-				}
-
-				db := tti.dbFunc(home, tables)
-				err := db.Open(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
+				db, tables := prepareTestSuite(t, ctx, 5, 0, tti)
 				defer func() {
 					err := db.Close(ctx)
 					if err != nil {
@@ -1077,25 +1090,13 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
-				if err = dbBasic(ctx, db, tables, insertCount); err != nil {
+				if err := dbBasic(ctx, db, tables, insertCount); err != nil {
 					t.Fatal(err)
 				}
 			})
 
 			t.Run("transactions", func(t *testing.T) {
-				home := t.TempDir()
-
-				tableCount := 5
-				tables := make([]string, 0, tableCount)
-				for i := range tableCount {
-					tables = append(tables, fmt.Sprintf("table%v", i))
-				}
-
-				db := tti.dbFunc(home, tables)
-				err := db.Open(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
+				db, tables := prepareTestSuite(t, ctx, 5, 0, tti)
 				defer func() {
 					err := db.Close(ctx)
 					if err != nil {
@@ -1103,42 +1104,30 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
-				if err = dbTransactionsRollback(ctx, db, tables, insertCount); err != nil {
+				if err := dbTransactionsRollback(ctx, db, tables, insertCount); err != nil {
 					t.Errorf("dbTransactionsRollback: %v", err)
 					t.Fail()
 				}
-				if err = dbTransactionsCommit(ctx, db, tables, insertCount); err != nil {
+				if err := dbTransactionsCommit(ctx, db, tables, insertCount); err != nil {
 					t.Errorf("dbTransactionsCommit: %v", err)
 					t.Fail()
 				}
-				if err = dbTransactionsDelete(ctx, db, tables, insertCount); err != nil {
+				if err := dbTransactionsDelete(ctx, db, tables, insertCount); err != nil {
 					t.Errorf("dbTransactionsDelete: %v", err)
 					t.Fail()
 				}
-				if err = dbTransactionsErrors(ctx, db, tables); err != nil {
+				if err := dbTransactionsErrors(ctx, db, tables); err != nil {
 					t.Errorf("dbTransactionsErrors: %v", err)
 					t.Fail()
 				}
-				if err = dbTransactionsMultipleWrite(ctx, db, tables[0], 5); err != nil {
+				if err := dbTransactionsMultipleWrite(ctx, db, tables[0], 5); err != nil {
 					t.Errorf("dbTransactionsMultipleWrite: %v", err)
 					t.Fail()
 				}
 			})
 
 			t.Run("iterator", func(t *testing.T) {
-				home := t.TempDir()
-
-				tableCount := 3
-				tables := make([]string, 0, tableCount)
-				for i := range tableCount {
-					tables = append(tables, fmt.Sprintf("table%v", i))
-				}
-
-				db := tti.dbFunc(home, tables)
-				err := db.Open(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
+				db, tables := prepareTestSuite(t, ctx, 3, insertCount, tti)
 				defer func() {
 					err := db.Close(ctx)
 					if err != nil {
@@ -1146,26 +1135,16 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
-				// Populate db
 				for _, table := range tables {
-					for i := range insertCount {
-						err := db.Put(ctx, table, newKey(i), newVal(i))
-						if err != nil {
-							t.Fatal(fmt.Errorf("put [%v,%v]: %w", i, i, err))
-						}
-					}
-				}
-
-				for _, table := range tables {
-					if err = dbIterateNext(ctx, db, table, insertCount); err != nil {
+					if err := dbIterateNext(ctx, db, table, insertCount); err != nil {
 						t.Errorf("dbIterateNext: %v", err)
 						t.Fail()
 					}
-					if err = dbIterateFirstLast(ctx, db, table, insertCount); err != nil {
+					if err := dbIterateFirstLast(ctx, db, table, insertCount); err != nil {
 						t.Errorf("dbIterateFirstLast: %v", err)
 						t.Fail()
 					}
-					if err = dbIterateSeek(ctx, db, table, insertCount); err != nil {
+					if err := dbIterateSeek(ctx, db, table, insertCount); err != nil {
 						t.Errorf("dbIterateSeek: %v", err)
 						t.Fail()
 					}
@@ -1173,19 +1152,7 @@ func TestGKVDB(t *testing.T) {
 			})
 
 			t.Run("range", func(t *testing.T) {
-				home := t.TempDir()
-
-				tableCount := 3
-				tables := make([]string, 0, tableCount)
-				for i := range tableCount {
-					tables = append(tables, fmt.Sprintf("table%v", i))
-				}
-
-				db := tti.dbFunc(home, tables)
-				err := db.Open(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
+				db, tables := prepareTestSuite(t, ctx, 3, insertCount, tti)
 				defer func() {
 					err := db.Close(ctx)
 					if err != nil {
@@ -1193,34 +1160,16 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
-				// Populate db
-				for _, table := range tables {
-					for i := range insertCount {
-						err := db.Put(ctx, table, newKey(i), newVal(i))
-						if err != nil {
-							t.Fatal(fmt.Errorf("put [%v,%v]: %w", i, i, err))
-						}
-					}
-				}
-				if err = dbRange(ctx, db, tables, insertCount); err != nil {
+				if err := dbRange(ctx, db, tables, insertCount); err != nil {
 					t.Fatal(err)
 				}
-				if err = dbRangeFirstLast(ctx, db, tables, insertCount); err != nil {
+				if err := dbRangeFirstLast(ctx, db, tables, insertCount); err != nil {
 					t.Fatal(err)
 				}
 			})
 
 			t.Run("batch", func(t *testing.T) {
-				home := t.TempDir()
-
-				table := "users"
-				tables := []string{table}
-
-				db := tti.dbFunc(home, tables)
-				err := db.Open(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
+				db, tables := prepareTestSuite(t, ctx, 1, 0, tti)
 				defer func() {
 					err := db.Close(ctx)
 					if err != nil {
@@ -1228,31 +1177,16 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
-				if err = dbBatch(ctx, db, table, 10); err != nil {
+				if err := dbBatch(ctx, db, tables[0], 10); err != nil {
 					t.Fatal(err)
 				}
-				if err = dbBatchNoop(ctx, db, table); err != nil {
+				if err := dbBatchNoop(ctx, db, tables[0]); err != nil {
 					t.Fatal(err)
 				}
 			})
 
 			t.Run("reopen", func(t *testing.T) {
-				home := t.TempDir()
-
-				table := "users"
-				tables := []string{table}
-
-				var db gkvdb.Database
-				if tti.name == "mongodb" {
-					db = mongoReopen(tables)
-				} else {
-					db = tti.dbFunc(home, tables)
-				}
-
-				err := db.Open(ctx)
-				if err != nil {
-					t.Fatal(err)
-				}
+				db, tables := prepareTestSuite(t, ctx, 1, 0, tti)
 				defer func() {
 					err := db.Close(ctx)
 					if err != nil {
@@ -1260,7 +1194,20 @@ func TestGKVDB(t *testing.T) {
 					}
 				}()
 
-				if err = dbOpenCloseOpen(ctx, db, table); err != nil {
+				if tti.name == "mongodb" {
+					err := db.Close(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					db = mongoReopen(tables)
+					err = db.Open(ctx)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+
+				if err := dbOpenCloseOpen(ctx, db, tables[0]); err != nil {
 					t.Fatal(err)
 				}
 			})
