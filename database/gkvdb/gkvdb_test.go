@@ -712,6 +712,8 @@ func dbIterateConcurrentWrites(ctx context.Context, db gkvdb.Database, table str
 	}
 	defer it.Close(ctx)
 
+	return errors.New("err")
+
 	err = db.Put(ctx, table, []byte{uint8(recordCount)}, []byte{uint8(recordCount)})
 	if err != nil {
 		return fmt.Errorf("put [%v,%v]: %w", recordCount, recordCount, err)
@@ -731,7 +733,7 @@ func dbIterateConcurrentWrites(ctx context.Context, db gkvdb.Database, table str
 		}
 		i++
 	}
-	if recordCount != i {
+	if recordCount+1 != i {
 		return fmt.Errorf("found %d records, expected %d", i, recordCount)
 	}
 	return nil
@@ -1186,15 +1188,18 @@ func TestGKVDB(t *testing.T) {
 				for _, table := range tables {
 					if err := dbIterateNext(ctx, db, table, insertCount); err != nil {
 						t.Errorf("dbIterateNext: %v", err)
-						t.Fail()
 					}
 					if err := dbIterateFirstLast(ctx, db, table, insertCount); err != nil {
 						t.Errorf("dbIterateFirstLast: %v", err)
-						t.Fail()
 					}
 					if err := dbIterateSeek(ctx, db, table, insertCount); err != nil {
 						t.Errorf("dbIterateSeek: %v", err)
-						t.Fail()
+					}
+					if err := dbIterateSeek(ctx, db, table, insertCount); err != nil {
+						t.Errorf("dbIterateSeek: %v", err)
+					}
+					if err := dbIterateConcurrentWrites(ctx, db, table, insertCount); err != nil {
+						t.Errorf("dbIterateConcurrentWrites: %v", err)
 					}
 				}
 			})
@@ -1209,7 +1214,7 @@ func TestGKVDB(t *testing.T) {
 				}()
 
 				if err := dbRange(ctx, db, tables, insertCount); err != nil {
-					t.Fatal(err)
+					t.Errorf("dbRange: %v", err)
 				}
 				if err := dbRangeFirstLast(ctx, db, tables, insertCount); err != nil {
 					t.Fatal(err)
