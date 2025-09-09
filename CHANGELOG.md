@@ -151,7 +151,7 @@ Thank you to everyone who contributed to this release!
 
 ---
 
-_Looking for the changelog for an older version? Check https://github.com/hemilabs/heminetwork/releases_
+_Looking for the changelog for an older version? Check <https://github.com/hemilabs/heminetwork/releases>_
 
 [Unreleased]: https://github.com/hemilabs/heminetwork/compare/v2.0.0...HEAD
 [v2.0.0]: https://github.com/hemilabs/heminetwork/releases/tag/v2.0.0

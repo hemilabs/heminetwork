@@ -288,6 +288,36 @@ func TxOutFromBytes(x []byte) (txOut wire.TxOut) {
 	return txOut
 }
 
+func NewOutpointFromString(s string) (*Outpoint, error) {
+	p := strings.SplitN(s, ":", 2)
+	if len(p) != 2 {
+		return nil, errors.New("invalid point")
+	}
+	h, err := chainhash.NewHashFromStr(p[0])
+	if err != nil {
+		return nil, err
+	}
+	i, err := strconv.ParseUint(p[1], 10, 32)
+	if err != nil {
+		return nil, err
+	}
+	point := NewOutpoint(*h, uint32(i))
+	return &point, nil
+}
+
+func NewTxOut(txOut *wire.TxOut) []byte {
+	x := make([]byte, 8+len(txOut.PkScript))
+	binary.BigEndian.PutUint64(x[0:], uint64(txOut.Value))
+	copy(x[8:], txOut.PkScript)
+	return x
+}
+
+func TxOutFromBytes(x []byte) (txOut wire.TxOut) {
+	txOut.Value = int64(binary.BigEndian.Uint64(x[0:]))
+	txOut.PkScript = append([]byte{}, x[8:]...)
+	return
+}
+
 // CacheOutput is a densely packed representation of a bitcoin UTXo. The fields
 // are script_hash + value + out_index. It is packed for memory conservation
 // reasons.

@@ -187,6 +187,7 @@ type Config struct {
 	PprofListenAddress      string
 	Seeds                   []string
 	ZKIndex                 bool
+	ZKIndex                 bool
 
 	// Fields used for running TBC in External Header Mode, where P2P is disabled
 	// and TBC is used to determine consensus based on headers fed from external
@@ -2715,7 +2716,14 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		}
 	}
 
-	if s.cfg.HemiIndex {
+	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
+		!s.indexing && !blksMissing {
+		// If keystone and zk indexers are disabled we are synced.
+		if !s.cfg.HemiIndex && !s.cfg.ZKIndex {
+			si.Synced = true
+			return
+		}
+
 		// Perform additional keystone indexer tests.
 		keystoneBH, err := s.ki.IndexerAt(ctx)
 		if err != nil {
@@ -3227,10 +3235,10 @@ func (s *Server) Run(pctx context.Context) error {
 		// Not sure which one to pick here. The likelihood that a new
 		// blockheaders comes through is high if the box has been down
 		// for >10m but very low if it is a simple restart.
-		// err := s.SyncIndexersToBest(ctx)
-		// if err != nil {
+		//err := s.SyncIndexersToBest(ctx)
+		//if err != nil {
 		//	panic(err)
-		// }
+		//}
 	}
 
 	select {
