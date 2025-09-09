@@ -2220,6 +2220,16 @@ func (l *ldb) BlockHeaderByZKBlockHeaderIndex(ctx context.Context) (*tbcd.BlockH
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
+// height hash ->  h_uint32_[32]byte
+type ZKHeightHash [37]byte
+
+func encodeZKHeightHash(height uint32, hash chainhash.Hash) (zkhh ZKHeightHash) {
+	zkhh[0] = 'h'
+	binary.BigEndian.PutUint32(zkhh[1:5], height)
+	copy(zkhh[5:], hash[:])
+	return
+}
+
 func (l *ldb) BlockZKBlockHeaderUpdate(ctx context.Context, direction int, blockheaders map[chainhash.Hash]tbcd.BlockHeader, zkBlockHeadersIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKBlockHeaderUpdate")
 	defer log.Tracef("BlockZKBlockHeaderUpdate exit")
@@ -2242,23 +2252,14 @@ func (l *ldb) BlockZKBlockHeaderUpdate(ctx context.Context, direction int, block
 		_ = v
 		switch direction {
 		case -1:
-			//eks, err := bhsTx.Get(k[:], nil)
-			//if err == nil {
-			//	ks := decodeKeystone(eks)
-			//	// Only delete keystone if it is in the
-			//	// previously found block.
-			//	if ks.BlockHash.IsEqual(&v.BlockHash) {
-			//		bhsBatch.Delete(k[:])
-			//		bhsBatch.Delete(encodeKeystoneHeightHashSlice(v.BlockHeight, k))
-			//	}
-			//}
+			ehh := encodeZKHeightHash(uint32(v.Height), k)
+			bhsBatch.Delete(ehh[:])
+			bhsBatch.Delete(k[:])
 		case 1:
-			//has, _ := bhsTx.Has(k[:], nil)
-			//if !has {
-			//	// Only store unknown blockheaders and indexes
-			//	bhsBatch.Put(k[:], encodeKeystoneToSlice(v))
-			//	bhsBatch.Put(encodeKeystoneHeightHashSlice(v.BlockHeight, k), nil)
-			//}
+			ehh := encodeZKHeightHash(uint32(v.Height), k)
+			bhsBatch.Put(ehh[:], nil)
+			ebh := encodeBlockHeader(v.Height, v.Header, &v.Difficulty)
+			bhsBatch.Put(k[:], ebh[:])
 		}
 
 		// Empty out cache.
