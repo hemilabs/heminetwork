@@ -1,21 +1,8 @@
-# Copyright (c) 2024 Hemi Labs, Inc.
+# Copyright (c) 2024-2025 Hemi Labs, Inc.
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
-# Build stage
-FROM alpine:3.22.1@sha256:4bcff63911fcb4448bd4fdacec207030997caf25e9bea4045fa6c8c44de311d1 AS builder
-
-# Add ca-certificates, timezone data
-RUN apk --no-cache add --update ca-certificates tzdata
-
-# Create non-root user
-RUN addgroup --gid 65532 popmd && \
-    adduser --disabled-password --gecos "" \
-        --home "/etc/popmd/" --shell "/sbin/nologin" \
-        -G popmd --uid 65532 popmd
-
-# Run stage
-FROM scratch
+FROM cgr.dev/chainguard/static@sha256:4cddf8bdcac1480e825d3c17c2f7248d21a774abda0e095cf25c19376b93eab5
 
 # Build metadata
 ARG VERSION
@@ -39,12 +26,9 @@ LABEL org.opencontainers.image.created=$BUILD_DATE \
       org.label-schema.version=$VERSION \
       org.label-schema.schema-version="1.0"
 
-# Copy files
-COPY --from=builder /etc/group /etc/group
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
-COPY popmd /usr/local/bin/popmd
+# Copy binary
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/popmd /usr/local/bin/popmd
 
 # Environment variables
 ENV POPM_LOG_LEVEL=""
@@ -56,6 +40,5 @@ ENV POPM_PPROF_ADDRESS=""
 ENV POPM_REMINE_THRESHOLD=""
 ENV POPM_STATIC_FEE=""
 
-USER popmd:popmd
 WORKDIR /etc/popmd/
 ENTRYPOINT ["/usr/local/bin/popmd"]
