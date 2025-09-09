@@ -131,6 +131,12 @@ var (
 			Help:         "list of seed domains for Bitcoin P2P, in the format '<host>:<port>' (for localnet, must be a single host:port)",
 			Print:        config.PrintAll,
 		},
+		"TBC_ZK_INDEX": config.Config{
+			Value:        &cfg.ZKIndex,
+			DefaultValue: false,
+			Help:         "enable/disable various zk related indexes",
+			Print:        config.PrintAll,
+		},
 	}
 )
 

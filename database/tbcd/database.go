@@ -133,6 +133,10 @@ type Database interface {
 	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*Keystone, error)
 	BlockHeaderByKeystoneIndex(ctx context.Context) (*BlockHeader, error)
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]Keystone, error)
+
+	// ZK
+	BlockHeaderByZKBlockHeaderIndex(ctx context.Context) (*BlockHeader, error)
+	BlockZKBlockHeaderUpdate(ctx context.Context, direction int, blockheaders map[chainhash.Hash]BlockHeader, zkBlockHeadersIndexHash chainhash.Hash) error
 }
 
 type Keystone struct {
