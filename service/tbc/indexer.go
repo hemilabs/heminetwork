@@ -21,18 +21,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
-type AlreadyIndexingError string
-
-func (aie AlreadyIndexingError) Error() string {
-	return string(aie)
-}
-
-func (aie AlreadyIndexingError) Is(target error) bool {
-	_, ok := target.(AlreadyIndexingError)
-	return ok
-}
-
-var ErrAlreadyIndexing = AlreadyIndexingError("already indexing")
+var ErrAlreadyIndexing = errors.New("already indexing")
 
 // Cache is an in-memory cache implementation.
 type Cache[K comparable, V any] struct {
