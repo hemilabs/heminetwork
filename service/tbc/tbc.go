@@ -184,6 +184,7 @@ type Config struct {
 	PrometheusNamespace     string
 	PprofListenAddress      string
 	Seeds                   []string
+	ZKIndex                 bool
 
 	// Fields used for running TBC in External Header Mode, where P2P is disabled
 	// and TBC is used to determine consensus based on headers fed from external
@@ -247,9 +248,10 @@ type Server struct {
 	g geometryParams
 
 	// indexers
-	ui Indexer
-	ti Indexer
-	ki Indexer
+	ui   Indexer
+	ti   Indexer
+	ki   Indexer
+	zkbh Indexer
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -2429,6 +2431,13 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 		}
 	}
 
+	// ZK indexes
+	if s.cfg.ZKIndex {
+		if err := s.zkbh.IndexToHash(ctx, hash); err != nil {
+			return fmt.Errorf("zk blockheaders indexer: %w", err)
+		}
+	}
+
 	log.Debugf("Done syncing to: %v", hash)
 
 	bh, err := s.g.db.BlockHeaderByHash(ctx, hash)
@@ -2462,6 +2471,12 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 
 	if s.cfg.HemiIndex {
 		if err := s.ki.IndexToBest(ctx); err != nil {
+			return err
+		}
+	}
+
+	if s.cfg.ZKIndex {
+		if err := s.zkbh.IndexToBest(ctx); err != nil {
 			return err
 		}
 	}
@@ -2640,6 +2655,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
 		!s.indexing && !blksMissing {
+		// XXX roll zk in there as well
 		// If keystone indexers are disabled we are synced.
 		if !s.cfg.HemiIndex {
 			si.Synced = true
@@ -2733,6 +2749,11 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	if s.cfg.HemiIndex {
 		s.ki = NewKeystoneIndexer(s.g, s.cfg.MaxCachedKeystones,
 			s.cfg.HemiIndex, s.hemiGenesis)
+	}
+
+	if s.cfg.ZKIndex {
+		s.zkbh = NewZKBlockHeaderIndexer(s.g, s.cfg.MaxCachedKeystones,
+			s.cfg.ZKIndex)
 	}
 
 	return nil
@@ -3099,6 +3120,10 @@ func (s *Server) Run(pctx context.Context) error {
 		if s.cfg.HemiIndex {
 			hemiBH, _ := s.ki.IndexerAt(ctx)
 			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
+		}
+		if s.cfg.ZKIndex {
+			bh, _ := s.zkbh.IndexerAt(ctx)
+			log.Infof("ZK block headers index %v @ %v", bh.Height, bh.Hash)
 		}
 	}
 

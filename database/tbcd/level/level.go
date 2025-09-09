@@ -75,9 +75,10 @@ var (
 	versionKey = []byte("version")
 
 	// These keys live in their own respective databases.
-	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
-	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
-	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
+	utxoIndexHashKey           = []byte("utxoindexhash")          // last indexed utxo block hash
+	txIndexHashKey             = []byte("txindexhash")            // last indexed tx block hash
+	keystoneIndexHashKey       = []byte("keystoneindexhash")      // last indexed keystone block hash
+	zkBlockHeadersIndexHashKey = []byte("zkblockheaderindexhash") // last indexed zk blockheader hash
 )
 
 func init() {
@@ -2191,6 +2192,89 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
 	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockHeaderByZKBlockHeaderIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKBlockHeadersDB)
+	if err != nil {
+		return nil, fmt.Errorf("zk blockheaders open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	hash, err := kssTx.Get(zkBlockHeadersIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("zkBlockHeaders get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockZKBlockHeaderUpdate(ctx context.Context, direction int, blockheaders map[chainhash.Hash]tbcd.BlockHeader, zkBlockHeadersIndexHash chainhash.Hash) error {
+	log.Tracef("BlockZKBlockHeaderUpdate")
+	defer log.Tracef("BlockZKBlockHeaderUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	// blockheaders
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.ZKBlockHeadersDB)
+	if err != nil {
+		return fmt.Errorf("zk blockheaders open db transaction: %w", err)
+	}
+	defer bhsDiscard()
+
+	bhsBatch := new(leveldb.Batch)
+	for k, v := range blockheaders {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
+		_ = v
+		switch direction {
+		case -1:
+			//eks, err := bhsTx.Get(k[:], nil)
+			//if err == nil {
+			//	ks := decodeKeystone(eks)
+			//	// Only delete keystone if it is in the
+			//	// previously found block.
+			//	if ks.BlockHash.IsEqual(&v.BlockHash) {
+			//		bhsBatch.Delete(k[:])
+			//		bhsBatch.Delete(encodeKeystoneHeightHashSlice(v.BlockHeight, k))
+			//	}
+			//}
+		case 1:
+			//has, _ := bhsTx.Has(k[:], nil)
+			//if !has {
+			//	// Only store unknown blockheaders and indexes
+			//	bhsBatch.Put(k[:], encodeKeystoneToSlice(v))
+			//	bhsBatch.Put(encodeKeystoneHeightHashSlice(v.BlockHeight, k), nil)
+			//}
+		}
+
+		// Empty out cache.
+		delete(blockheaders, k)
+	}
+
+	// Store index
+	bhsBatch.Put(zkBlockHeadersIndexHashKey, zkBlockHeadersIndexHash[:])
+
+	// Write blockheaders batch
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+		return fmt.Errorf("blockheaders insert: %w", err)
+	}
+
+	// blockheaders commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("blockheaders commit: %w", err)
+	}
+
+	return nil
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
