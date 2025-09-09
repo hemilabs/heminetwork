@@ -25,13 +25,14 @@ import (
 const (
 	logLevel = "INFO"
 
-	BlockHeadersDB  = "blockheaders"
-	BlocksMissingDB = "blocksmissing"
-	MetadataDB      = "metadata"
-	KeystonesDB     = "keystones"
-	HeightHashDB    = "heighthash"
-	OutputsDB       = "outputs"
-	TransactionsDB  = "transactions"
+	BlockHeadersDB   = "blockheaders"
+	BlocksMissingDB  = "blocksmissing"
+	MetadataDB       = "metadata"
+	KeystonesDB      = "keystones"
+	HeightHashDB     = "heighthash"
+	OutputsDB        = "outputs"
+	TransactionsDB   = "transactions"
+	ZKBlockHeadersDB = "zkblockheaders"
 
 	BlocksDB = "blocks" // raw database
 )
@@ -218,6 +219,10 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	err = l.openDB(KeystonesDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
+	}
+	err = l.openDB(ZKBlockHeadersDB)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", ZKBlockHeadersDB, err)
 	}
 	err = l.openDB(MetadataDB)
 	if err != nil {
