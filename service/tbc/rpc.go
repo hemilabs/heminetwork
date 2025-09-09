@@ -637,7 +637,7 @@ func (s *Server) handleBlockInsertRequest(ctx context.Context, req *tbcapi.Block
 		}, err
 	}
 
-	_, err := s.db.BlockInsert(ctx, btcutil.NewBlock(req.Block))
+	_, err := s.g.db.BlockInsert(ctx, btcutil.NewBlock(req.Block))
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
@@ -659,7 +659,7 @@ func (s *Server) handleBlockInsertRawRequest(ctx context.Context, req *tbcapi.Bl
 		}, nil
 	}
 
-	_, err = s.db.BlockInsert(ctx, btcutil.NewBlock(b))
+	_, err = s.g.db.BlockInsert(ctx, btcutil.NewBlock(b))
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlockInsertResponse{Error: e.ProtocolError()}, e
@@ -673,7 +673,7 @@ func (s *Server) handleKeystonesByHeightRequest(ctx context.Context, req *tbcapi
 	log.Tracef("handleKeystonesByHeightRequest")
 	defer log.Tracef("handleKeystonesByHeightRequest exit")
 
-	bhb, err := s.db.BlockHeaderBest(ctx)
+	bhb, err := s.g.db.BlockHeaderBest(ctx)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.KeystonesByHeightResponse{
@@ -749,11 +749,11 @@ func (s *Server) handleFeeEstimateRequest(ctx context.Context, _ *tbcapi.FeeEsti
 }
 
 func (s *Server) blockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Context, hash chainhash.Hash) (*tbcd.Keystone, *tbcd.BlockHeader, error) {
-	ks, err := s.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
+	ks, err := s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, hash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("keystone by abbreviated hash: %w", err)
 	}
-	ksBh, err := s.db.BlockHeaderByHash(ctx, ks.BlockHash)
+	ksBh, err := s.g.db.BlockHeaderByHash(ctx, ks.BlockHash)
 	if err != nil {
 		return nil, nil, fmt.Errorf("block header by hash: %w", err)
 	}
@@ -773,7 +773,7 @@ func (s *Server) handleBlockKeystoneByL2KeystoneAbrevHashRequest(ctx context.Con
 
 	// Obtain best block first, if new block headers arrive the rest of the
 	// call remains idempotent.
-	bhb, err := s.db.BlockHeaderBest(ctx)
+	bhb, err := s.g.db.BlockHeaderBest(ctx)
 	if err != nil {
 		e := protocol.NewInternalError(err)
 		return &tbcapi.BlocksByL2AbrevHashesResponse{
@@ -817,7 +817,7 @@ func (s *Server) KeystoneTxsByHash(ctx context.Context, req *tbcapi.KeystoneTxsB
 
 	// Obtain best block first, we are going to use this as the path for
 	// nextCanonicalBlockheader thus making the call logically idempotent.
-	bhb, err := s.db.BlockHeaderBest(ctx)
+	bhb, err := s.g.db.BlockHeaderBest(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("best blockheader: %w", err)
 	}
@@ -835,7 +835,7 @@ func (s *Server) KeystoneTxsByHash(ctx context.Context, req *tbcapi.KeystoneTxsB
 	ktxs := make([]tbcapi.KeystoneTx, 0, 16*req.Depth)
 	for i := uint(0); i < req.Depth; i++ {
 		// Retrieve first block
-		block, err := s.db.BlockByHash(ctx, hh.Hash)
+		block, err := s.g.db.BlockByHash(ctx, hh.Hash)
 		if err != nil {
 			return nil, fmt.Errorf("block by hash: %w", err)
 		}
@@ -843,7 +843,7 @@ func (s *Server) KeystoneTxsByHash(ctx context.Context, req *tbcapi.KeystoneTxsB
 		ktxs = append(ktxs, BlockKeystonesByHash(block, &req.L2KeystoneAbrevHash)...)
 
 		// next canonical block
-		hh, err = s.nextCanonicalBlockheader(ctx, &bhb.Hash, hh)
+		hh, err = nextCanonicalBlockheader(ctx, s.g, &bhb.Hash, hh)
 		if err != nil {
 			// if we can't get the next canonical block, we should still
 			// return keytones that we have found
