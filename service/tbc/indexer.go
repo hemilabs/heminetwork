@@ -103,7 +103,7 @@ type geometryParams struct {
 type indexerCommon struct {
 	name     string
 	enabled  bool
-	indexing atomic.Bool
+	indexing atomic.Uint32
 
 	p       indexer        // parent indexer
 	g       geometryParams // geometry params
@@ -115,7 +115,7 @@ func (c *indexerCommon) Enabled() bool {
 }
 
 func (c *indexerCommon) Indexing() bool {
-	return c.indexing.Load()
+	return c.indexing.Load() == 1
 }
 
 func (c *indexerCommon) IndexToBest(ctx context.Context) error {
@@ -124,10 +124,10 @@ func (c *indexerCommon) IndexToBest(ctx context.Context) error {
 	}
 
 	// Ensure indexer is not already running.
-	if !c.indexing.CompareAndSwap(false, true) {
+	if !c.indexing.CompareAndSwap(0, 1) {
 		return ErrAlreadyIndexing
 	}
-	defer c.indexing.Store(false)
+	defer c.indexing.Store(0)
 
 	return c.toBest(ctx)
 }
@@ -138,10 +138,10 @@ func (c *indexerCommon) IndexToHash(ctx context.Context, hash chainhash.Hash) er
 	}
 
 	// Ensure index is not already running.
-	if !c.indexing.CompareAndSwap(false, true) {
+	if !c.indexing.CompareAndSwap(0, 1) {
 		return ErrAlreadyIndexing
 	}
-	defer c.indexing.Store(false)
+	defer c.indexing.Store(0)
 
 	return c.windOrUnwind(ctx, hash)
 }
