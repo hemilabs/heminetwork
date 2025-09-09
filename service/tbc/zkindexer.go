@@ -6,7 +6,6 @@ package tbc
 
 import (
 	"context"
-	"encoding/binary"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -15,16 +14,6 @@ import (
 )
 
 // Need height lookup AND hash lookup
-
-// height hash ->  h_uint32_[32]byte
-type ZKHeightHash [37]byte
-
-func encodeZKHeightHash(height uint32, hash chainhash.Hash) (zkhh ZKHeightHash) {
-	zkhh[0] = 'h'
-	binary.BigEndian.PutUint32(zkhh[1:5], height)
-	copy(zkhh[5:], hash[:])
-	return
-}
 
 type zkIndexer struct {
 	indexerCommon
