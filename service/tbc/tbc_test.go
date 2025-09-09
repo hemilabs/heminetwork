@@ -1249,6 +1249,9 @@ func getRandomTxId(ctx context.Context, t *testing.T, bitcoindContainer testcont
 }
 
 func nextPort(ctx context.Context, t *testing.T) int {
+	var dialer net.Dialer
+	dialer.Timeout = 1 * time.Second
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -1261,7 +1264,7 @@ func nextPort(ctx context.Context, t *testing.T) int {
 			t.Fatal(err)
 		}
 
-		if _, err := net.DialTimeout("tcp", net.JoinHostPort("localhost", fmt.Sprintf("%d", port)), 1*time.Second); err != nil {
+		if _, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port))); err != nil {
 			if errors.Is(err, syscall.ECONNREFUSED) {
 				// connection error, port is open
 				return port
