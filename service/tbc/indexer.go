@@ -429,6 +429,7 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 			return 0, last, err
 		}
 
+		// Some indexers require a fixup of the cache, e.g. utxo indexer.
 		if err = c.p.fixupCacheHook(ctx, b, cache); err != nil {
 			return 0, last, fmt.Errorf("process %v fixup %v: %w",
 				c, hh, err)
