@@ -289,7 +289,7 @@ func isCanonical(ctx context.Context, g geometryParams, bh *tbcd.BlockHeader) (b
 	}
 }
 
-// findCommonParent find the common parrent between the two provided
+// findCommonParent find the common parent between the two provided
 // blockheaders. It will return an error if it walks all the way back to
 // genesis.
 func findCommonParent(ctx context.Context, g geometryParams, bhX, bhY *tbcd.BlockHeader) (*tbcd.BlockHeader, error) {
