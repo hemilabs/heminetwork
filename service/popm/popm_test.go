@@ -9,6 +9,7 @@ import (
 	"errors"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -408,6 +409,110 @@ func TestStaticFee(t *testing.T) {
 
 	if fee.SatsPerByte != 1.5 {
 		t.Fatalf("expected fee of 1.5 sats/byte, got %v sats/byte", fee.SatsPerByte)
+	}
+}
+
+func TestOpgethReconnect(t *testing.T) {
+	const retry = 250 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	_, kssList := testutil.MakeSharedKeystones(1)
+
+	// Create opgeth test server with the request handler.
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, 0)
+	defer opgeth.Shutdown()
+
+	opgeth.Stop()
+
+	emptyMap := make(map[chainhash.Hash]*hemi.L2KeystoneAbrev, 0)
+
+	// Create tbc test server with the request handler.
+	mtbc := mock.NewMockTBC(ctx, errCh, msgCh, emptyMap, 0, 100)
+	defer mtbc.Shutdown()
+
+	// Setup pop miner
+	cfg := NewDefaultConfig()
+	cfg.BitcoinSource = "tbc"
+	cfg.BitcoinURL = "ws" + strings.TrimPrefix(mtbc.URL(), "http")
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
+	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
+	cfg.l2KeystoneMaxAge = mock.InfiniteDuration
+	cfg.opgethReconnectTimeout = retry
+	cfg.opgethMaxReconnectDelay = 1 * time.Second
+
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create pop miner
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// -- first attempt:
+	// min = 0.25s
+	// max = 0.25s + 0.125s
+
+	// -- second attempt:
+	// min = 1s
+	// max = 1s + 0.5s
+
+	// slightly buffered to process messages
+	maxCtx, cancelMax := context.WithTimeout(ctx, retry+retry/2+2*time.Second)
+	defer cancelMax()
+
+	// reduced by 1 * retry since we
+	// start opgeth after 2 * retry
+	minDuration := 1*time.Second - retry
+	wg := new(sync.WaitGroup)
+	var (
+		tErr  error
+		mPass bool
+	)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// start server after first attempt
+		select {
+		case <-time.Tick(2 * retry):
+			opgeth.Start()
+		case <-ctx.Done():
+			tErr = maxCtx.Err()
+		}
+
+		// wait for first message
+		for {
+			select {
+			case <-maxCtx.Done():
+				tErr = errors.New("reconnected too slow")
+				return
+			case msg := <-msgCh:
+				if msg == "kss_getLatestKeystones" {
+					if !mPass {
+						tErr = errors.New("reconnected too fast")
+					}
+					cancelMax()
+					return
+				}
+			case <-time.Tick(minDuration):
+				mPass = true
+			}
+		}
+	}()
+
+	s.opgeth(maxCtx)
+	wg.Wait()
+
+	if tErr != nil {
+		t.Fatal(tErr)
 	}
 }
 

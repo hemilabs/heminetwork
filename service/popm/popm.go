@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	mathrand "math/rand/v2"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync"
@@ -58,6 +58,8 @@ const (
 	defaultL2KeystonePollTimeout  = 13 * time.Second
 	defaultL2KeystoneRetryTimeout = 15 * time.Second
 
+	defaultMaxReconnectDelay = 15 * time.Second
+
 	minRelayFee = 1                // sats/byte
 	maxBlockAge = 30 * time.Second // XXX make this configurable?
 )
@@ -96,22 +98,24 @@ type Config struct {
 	StaticFee               float64
 
 	// cooked settings, do not export
-	opgethReconnectTimeout time.Duration
-	l2KeystoneMaxAge       time.Duration
-	l2KeystonePollTimeout  time.Duration
+	opgethReconnectTimeout  time.Duration
+	opgethMaxReconnectDelay time.Duration
+	l2KeystoneMaxAge        time.Duration
+	l2KeystonePollTimeout   time.Duration
 }
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		Network:                "mainnet",
-		PrometheusNamespace:    appName,
-		OpgethURL:              defaultOpgethURL,
-		BitcoinConfirmations:   defaultBitcoinConfirmations,
-		BitcoinSource:          bitcoinSourceTBC,
-		BitcoinURL:             tbcgozer.DefaultURL,
-		opgethReconnectTimeout: defaultOpgethReconnectTimeout,
-		l2KeystoneMaxAge:       defaultL2KeystoneMaxAge,
-		l2KeystonePollTimeout:  defaultL2KeystonePollTimeout,
+		Network:                 "mainnet",
+		PrometheusNamespace:     appName,
+		OpgethURL:               defaultOpgethURL,
+		BitcoinConfirmations:    defaultBitcoinConfirmations,
+		BitcoinSource:           bitcoinSourceTBC,
+		BitcoinURL:              tbcgozer.DefaultURL,
+		opgethReconnectTimeout:  defaultOpgethReconnectTimeout,
+		opgethMaxReconnectDelay: defaultMaxReconnectDelay,
+		l2KeystoneMaxAge:        defaultL2KeystoneMaxAge,
+		l2KeystonePollTimeout:   defaultL2KeystonePollTimeout,
 	}
 }
 
@@ -631,10 +635,8 @@ func (s *Server) opgeth(ctx context.Context) {
 	log.Tracef("opgeth")
 	defer log.Tracef("opgeth exit")
 
-	const maxDelay = 15 * time.Second
+	const minIncr = 1 * time.Second
 	baseDelay := s.cfg.opgethReconnectTimeout
-
-	var attempt int
 	for {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
@@ -643,7 +645,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		} else {
 			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
 			// Reset attempt on success
-			attempt = 0
+			baseDelay = s.cfg.opgethReconnectTimeout
 		}
 		// See if we were terminated
 		select {
@@ -652,14 +654,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		default:
 		}
 
-		delay := baseDelay * (1 << attempt)
-		if delay > maxDelay {
-			delay = maxDelay
-		}
-
-		jitter := int64(delay / 10)
-		delay += time.Duration(mathrand.Int64N(jitter*2) - jitter)
-
+		delay := baseDelay + time.Duration(rand.Uint64N(uint64(baseDelay)/2))
 		log.Debugf("reconnecting to: %v in %v", s.cfg.OpgethURL, delay)
 
 		select {
@@ -667,7 +662,8 @@ func (s *Server) opgeth(ctx context.Context) {
 			return
 		case <-time.Tick(delay):
 		}
-		attempt++
+		baseDelay += minIncr + time.Duration(rand.Uint64N(2*uint64(minIncr)))
+		baseDelay = min(baseDelay, s.cfg.opgethMaxReconnectDelay)
 	}
 }
 
