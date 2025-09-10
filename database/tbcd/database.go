@@ -134,9 +134,17 @@ type Database interface {
 	BlockHeaderByKeystoneIndex(ctx context.Context) (*BlockHeader, error)
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]Keystone, error)
 
-	// ZK
+	// ZKBlockHeader
 	BlockHeaderByZKBlockHeaderIndex(ctx context.Context) (*BlockHeader, error)
 	BlockZKBlockHeaderUpdate(ctx context.Context, direction int, blockheaders map[chainhash.Hash]BlockHeader, zkBlockHeadersIndexHash chainhash.Hash) error
+
+	// ZKTX
+	BlockHeaderByZKTXIndex(ctx context.Context) (*BlockHeader, error)
+	BlockZKTXUpdate(ctx context.Context, direction int, blockheaders map[TxSpendKey][]byte, zkTxIndexHash chainhash.Hash) error
+
+	// ZKUtxo
+	BlockHeaderByZKUtxoIndex(ctx context.Context) (*BlockHeader, error)
+	BlockZKUtxoUpdate(ctx context.Context, direction int, blockheaders map[TxSpendKey][]byte, zkTxIndexHash chainhash.Hash) error
 }
 
 type Keystone struct {
@@ -218,6 +226,7 @@ type SpentInfo struct {
 // for memory conservation reasons.
 //
 // The bytes contained by Outpoint is 'u' + txid + index.
+// XXX can we make index 2 bytes?
 type Outpoint [1 + 32 + 4]byte
 
 // String returns a reversed pretty printed outpoint.
@@ -456,4 +465,33 @@ type CacheStats struct {
 	Purges int
 	Size   int
 	Items  int
+}
+
+// Point is a generic tx:idx encoded value. It can be used to TxIn and TxOut.
+type TxSpendKey [32 + 4 + 32 + 4]byte // txid:blockheight:blockhash:VoutIdx
+
+func NewTxSpendKey(txId chainhash.Hash, height uint32, blockHash chainhash.Hash, voutIdx uint32) (tsk TxSpendKey) {
+	copy(tsk[:], txId[:])
+	binary.BigEndian.PutUint32(tsk[32:], height)
+	copy(tsk[32+4:], blockHash[:])
+	binary.BigEndian.PutUint32(tsk[32+4+32:], voutIdx)
+	return
+}
+
+type Point [32 + 4]byte // hash:idx
+
+func (p Point) String() string {
+	h, _ := chainhash.NewHash(p[0:32])
+	return fmt.Sprintf("%v:%v", h, binary.BigEndian.Uint32(p[32:]))
+}
+
+func NewPoint(h chainhash.Hash, idx uint32) (p Point) {
+	copy(p[0:], h[:])
+	binary.BigEndian.PutUint32(p[32:], idx)
+	return
+}
+
+func NewPointSlice(h chainhash.Hash, idx uint32) []byte {
+	p := NewPoint(h, idx)
+	return p[:]
 }

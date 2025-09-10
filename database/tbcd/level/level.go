@@ -79,6 +79,8 @@ var (
 	txIndexHashKey             = []byte("txindexhash")            // last indexed tx block hash
 	keystoneIndexHashKey       = []byte("keystoneindexhash")      // last indexed keystone block hash
 	zkBlockHeadersIndexHashKey = []byte("zkblockheaderindexhash") // last indexed zk blockheader hash
+	zkTXIndexHashKey           = []byte("zktxindexhash")          // last indexed zk tx hash
+	zkUtxoIndexHashKey         = []byte("zkutxoindexhash")        // last indexed zk utxo hash
 )
 
 func init() {
@@ -2273,6 +2275,140 @@ func (l *ldb) BlockZKBlockHeaderUpdate(ctx context.Context, direction int, block
 	// blockheaders commit
 	if err = bhsCommit(); err != nil {
 		return fmt.Errorf("blockheaders commit: %w", err)
+	}
+
+	return nil
+}
+
+func (l *ldb) BlockHeaderByZKTXIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKBlockHeadersDB)
+	if err != nil {
+		return nil, fmt.Errorf("zk tx open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	hash, err := kssTx.Get(zkTXIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("zk tx get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockZKTXUpdate(ctx context.Context, direction int, txs map[tbcd.TxSpendKey][]byte, zkTXsIndexHash chainhash.Hash) error {
+	log.Tracef("BlockZKTXUpdate")
+	defer log.Tracef("BlockZKTXUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	// txs
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.ZKTXDB)
+	if err != nil {
+		return fmt.Errorf("zk tx open db transaction: %w", err)
+	}
+	defer bhsDiscard()
+
+	bhsBatch := new(leveldb.Batch)
+	for k, v := range txs {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
+		_ = v
+		switch direction {
+		case -1:
+		case 1:
+		}
+
+		// Empty out cache.
+		delete(txs, k)
+	}
+
+	// Store index
+	bhsBatch.Put(zkTXIndexHashKey, zkTXsIndexHash[:])
+
+	// Write txs batch
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+		return fmt.Errorf("txs insert: %w", err)
+	}
+
+	// txs commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("txs commit: %w", err)
+	}
+
+	return nil
+}
+
+func (l *ldb) BlockHeaderByZKUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKUtxoDB)
+	if err != nil {
+		return nil, fmt.Errorf("zk utxo open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	hash, err := kssTx.Get(zkUtxoIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("zk utxo get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.TxSpendKey][]byte, zkTXsIndexHash chainhash.Hash) error {
+	log.Tracef("BlockZKUtxoUpdate")
+	defer log.Tracef("BlockZKUtxoUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	// utxos
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.ZKUtxoDB)
+	if err != nil {
+		return fmt.Errorf("zk utxos open db transaction: %w", err)
+	}
+	defer bhsDiscard()
+
+	bhsBatch := new(leveldb.Batch)
+	for k, v := range utxos {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
+		_ = v
+		switch direction {
+		case -1:
+		case 1:
+		}
+
+		// Empty out cache.
+		delete(utxos, k)
+	}
+
+	// Store index
+	bhsBatch.Put(zkTXIndexHashKey, zkTXsIndexHash[:])
+
+	// Write utxos batch
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+		return fmt.Errorf("utxos insert: %w", err)
+	}
+
+	// utxos commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("utxos commit: %w", err)
 	}
 
 	return nil
