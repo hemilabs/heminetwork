@@ -58,7 +58,7 @@ our [Security Policy](https://github.com/hemilabs/.github/blob/main/SECURITY.md)
 
 **Prerequisites**
 
-- Go v1.24 or newer - https://go.dev/dl/
+- Go v1.25 or newer - https://go.dev/dl/
 - `git`, `make`
 
 **Setup**

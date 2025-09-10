@@ -14,8 +14,6 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-
-	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 func mockPeerServer(ctx context.Context, id int, listener net.Listener, msgCh chan string) error {
@@ -51,22 +49,22 @@ func TestConcurrentReadWrite(t *testing.T) {
 
 	msgCh := make(chan string)
 
-	port := testutil.FreePort()
-
-	listener, err := net.Listen("tcp", ":"+port)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
+	defer ln.Close()
 
 	go func() {
-		err := mockPeerServer(ctx, 2, listener, msgCh)
+		err := mockPeerServer(ctx, 2, ln, msgCh)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
 			panic(err)
 		}
 	}()
 
-	conn, err := net.Dial("tcp", "localhost:"+port)
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, ln.Addr().Network(), ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}

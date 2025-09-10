@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Update required Go version to [Go 1.25](https://tip.golang.org/doc/go1.25).
+
 ## [v2.0.0]
 
 ### Breaking Changes

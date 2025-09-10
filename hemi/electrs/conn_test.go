@@ -18,8 +18,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 func TestClientConn(t *testing.T) {
@@ -29,7 +27,8 @@ func TestClientConn(t *testing.T) {
 	server := createMockServer(t)
 	defer server.Close()
 
-	conn, err := net.Dial("tcp", server.address)
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", server.address)
 	if err != nil {
 		t.Fatalf("failed to dial server: %v", err)
 	}
@@ -169,7 +168,8 @@ func TestClose(t *testing.T) {
 	server := createMockServer(t)
 	defer server.Close()
 
-	conn, err := net.Dial("tcp", server.address)
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", server.address)
 	if err != nil {
 		t.Fatalf("failed to dial server: %v", err)
 	}
@@ -202,16 +202,14 @@ type mockServer struct {
 }
 
 func createMockServer(t *testing.T) *mockServer {
-	port := testutil.FreePort()
-	addr := fmt.Sprintf("localhost:%s", port)
-
-	ln, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	s := &mockServer{
-		address: addr,
+		address: ln.Addr().String(),
 		ln:      ln,
 		stateCh: make(chan bool, 25),
 		stopCh:  make(chan struct{}, 1),

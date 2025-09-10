@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Hemi Labs, Inc.
+# Copyright (c) 2024-2025 Hemi Labs, Inc.
 # Use of this source code is governed by the MIT License,
 # which can be found in the LICENSE file.
 
@@ -64,9 +64,10 @@ lint:
 	$(shell go env GOPATH)/bin/golicenser -tmpl="$$LICENSE_HEADER" -author="Hemi Labs, Inc." -year-mode=git-range -fix ./...
 
 lint-deps:
-	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1
+	@echo "Installing with $(shell go env GOVERSION)"
+	GOBIN=$(shell go env GOPATH)/bin go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.4.0
 	GOBIN=$(shell go env GOPATH)/bin go install github.com/joshuasing/golicenser/cmd/golicenser@v0.3
-	GOBIN=$(shell go env GOPATH)/bin go install mvdan.cc/gofumpt@v0.8.0
+	GOBIN=$(shell go env GOPATH)/bin go install mvdan.cc/gofumpt@v0.9.1
 
 tidy:
 	go mod tidy
