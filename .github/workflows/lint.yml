@@ -24,15 +24,5 @@ jobs:
       - name: "Run lint script"
         run: ./scripts/lint.sh
 
-  yaml:
-    name: "YAML"
-    runs-on: "ubuntu-latest"
-    steps:
-      - name: "Checkout repository"
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: "Install yamllint"
-        run: sudo apt install yamllint
-
       - name: "Run yamllint"
         run: yamllint ./e2e ./localnode -s
