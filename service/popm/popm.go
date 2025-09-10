@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	mathrand "math/rand/v2"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"sync"
@@ -631,10 +631,11 @@ func (s *Server) opgeth(ctx context.Context) {
 	log.Tracef("opgeth")
 	defer log.Tracef("opgeth exit")
 
-	const maxDelay = 15 * time.Second
-	baseDelay := s.cfg.opgethReconnectTimeout
-
-	var attempt int
+	const (
+		maxBaseDelay = int64(15 * time.Second)
+		minInc       = int64(1 * time.Second)
+	)
+	baseDelay := int64(s.cfg.opgethReconnectTimeout)
 	for {
 		log.Tracef("connecting to: %v", s.cfg.OpgethURL)
 		if err := s.connectOpgeth(ctx); err != nil {
@@ -643,7 +644,7 @@ func (s *Server) opgeth(ctx context.Context) {
 		} else {
 			log.Infof("Connected to opgeth: %s", s.cfg.OpgethURL)
 			// Reset attempt on success
-			attempt = 0
+			baseDelay = int64(s.cfg.opgethReconnectTimeout)
 		}
 		// See if we were terminated
 		select {
@@ -652,22 +653,16 @@ func (s *Server) opgeth(ctx context.Context) {
 		default:
 		}
 
-		delay := baseDelay * (1 << attempt)
-		if delay > maxDelay {
-			delay = maxDelay
-		}
-
-		jitter := int64(delay / 10)
-		delay += time.Duration(mathrand.Int64N(jitter*2) - jitter)
-
-		log.Debugf("reconnecting to: %v in %v", s.cfg.OpgethURL, delay)
+		delay := baseDelay + rand.Int64N(baseDelay/2)
+		log.Debugf("reconnecting to: %v in %v", s.cfg.OpgethURL, time.Duration(delay))
 
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.Tick(delay):
+		case <-time.Tick(time.Duration(delay)):
 		}
-		attempt++
+		baseDelay += minInc + rand.Int64N(2*minInc)
+		baseDelay = min(baseDelay, maxBaseDelay)
 	}
 }
 
