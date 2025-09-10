@@ -472,7 +472,7 @@ func dbTransactionsCommit(ctx context.Context, db gkvdb.Database, tables []strin
 
 // dbTransactionsMultipleWrite creates multiple write TXs concurrently
 // that update the same value. It asserts that each new write TX created
-// blocks until the previous one is commited.
+// blocks until the previous one is committed.
 func dbTransactionsMultipleWrite(ctx context.Context, db gkvdb.Database, table string, txCount int) error {
 	last := txCount + 1
 	key := newKey(0)
@@ -714,7 +714,7 @@ func dbIterateSeek(ctx context.Context, db gkvdb.Database, table string, recordC
 
 // 	err = db.Put(ctx, table, []byte{uint8(recordCount)}, []byte{uint8(recordCount)})
 // 	if err != nil {
-// 		return fmt.Errorf("put [%v,%v]: %w", recordCount, recordCount, err)
+// 		return fmt.Errorf("put [%v,%v]: %w", recordCount, err)
 // 	}
 
 // 	// Next
