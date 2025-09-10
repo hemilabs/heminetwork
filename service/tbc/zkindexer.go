@@ -13,7 +13,8 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
 
-// Need height lookup AND hash lookup
+// Index block headers by hash and height to blockheader. This index is
+// canonical only.
 
 type zkIndexer struct {
 	indexerCommon
@@ -48,6 +49,8 @@ func (i *zkIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
+var maxTxin, maxTxout, maxBs, maxTxs, totalTxs int
+
 func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
 	cache := c.(*Cache[chainhash.Hash, tbcd.BlockHeader]).Map()
 	bh, err := i.g.db.BlockHeaderByHash(ctx, *block.Hash())
@@ -55,6 +58,38 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 		return err
 	}
 	cache[*block.Hash()] = *bh
+
+	bs, err := block.Bytes()
+	if err != nil {
+		panic(err)
+	}
+	if len(bs) > maxBs {
+		maxBs = len(bs)
+		log.Infof("largest block %v: %v", block.Hash(), maxBs)
+	}
+	if len(block.Transactions()) > maxTxs {
+		maxTxs = len(block.Transactions())
+		log.Infof("largest block txs %v: %v", block.Hash(), maxTxs)
+	}
+	totalTxs += len(block.Transactions())
+	for _, tx := range block.Transactions() {
+		if len(tx.MsgTx().TxIn) > maxTxin {
+			maxTxin = len(tx.MsgTx().TxIn)
+			log.Infof("largest txin %v: %v", tx.Hash(), maxTxin)
+		}
+		if len(tx.MsgTx().TxOut) > maxTxout {
+			maxTxout = len(tx.MsgTx().TxOut)
+			log.Infof("largest txout %v: %v", tx.Hash(), maxTxout)
+		}
+		//if blockchain.IsCoinBase(tx) {
+		//	// Skip coinbase inputs
+		//	continue
+		//}
+
+		//for _, txOut := range tx.MsgTx().TxOut {
+		//}
+	}
+
 	return nil
 }
 
