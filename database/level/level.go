@@ -230,6 +230,10 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", ZKTXDB, err)
 	}
+	err = l.openDB(ZKUtxoDB)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", ZKUtxoDB, err)
+	}
 	err = l.openDB(MetadataDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", MetadataDB, err)
