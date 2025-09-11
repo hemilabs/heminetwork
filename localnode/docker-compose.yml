@@ -81,7 +81,7 @@ services:
   # Bitcoin Secure Sequencer
   bssd:
     image: hemilabs/bssd:1.6.3
-    profiles: ["hemi", "hemi-min", "full"]
+    profiles: ["hemi", "hemi-min", "full", "hemitrap"]
     environment:
       BSS_BFG_URL: "ws://bfgd:8080/v1/ws/private"
       BSS_LOG_LEVEL: "INFO"
@@ -159,6 +159,27 @@ services:
       - "--gpo.percentile=0"
     working_dir: "/tmp/geth"
 
+  geth-l1-forked:
+    profiles:
+      - hemitrap
+    build:
+      dockerfile: ./localnode/hemitrap/hardhat.Dockerfile
+      context: ".."
+    command:
+      - npx
+      - hardhat
+      - node
+      - --fork 
+      - <changeme>
+      - --port
+      - '9988'
+    ports:
+      - 9988:9988
+    volumes:
+      - ./hemitrap/l1.hardhat.config.js:/app/hardhat.config.js
+    networks:
+      - "localnode"
+
   # Hemi L2 node
   op-geth-l2:
     # yamllint disable-line rule:line-length
@@ -185,7 +206,7 @@ services:
       - op-geth_data:/tmp/datadir
       - ./rollup.json:/tmp/rollup.json
       - ./l2-config.toml:/tmp/l2-config.toml
-      - tbc_data:/tbcdata
+      - /mnt/blockstorage/tbc/tbc-upgrade-2:/tbcdata
     environment:
       OP_GETH_L1_RPC: "${GETHL1ENDPOINT:-http://geth-l1:8545}"
       OP_GETH_L2_READINESS_RPC: "http://localhost:18546"
@@ -208,7 +229,7 @@ services:
   op-geth-l2-init:
     # yamllint disable-line rule:line-length
     image: "alpine@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c"  # 3.21.3
-    profiles: ["hemi", "hemi-min", "full"]
+    profiles: ["hemi", "hemi-min", "full", "hemitrap"]
     volumes:
       - op-geth_data:/tmp/datadir
     command:
@@ -221,7 +242,7 @@ services:
   op-geth-l2-init-tbc:
     # yamllint disable-line rule:line-length
     image: "alpine@sha256:a8560b36e8b8210634f77d9f7f9efd7ffa463e380b75e2e74aff4511df3ef88c"  # 3.21.3
-    profiles: ["hemi", "hemi-min", "full"]
+    profiles: ["hemi", "hemi-min", "full", "hemitrap"]
     volumes:
       - tbc_data:/tbcdata
     command:
@@ -282,6 +303,71 @@ services:
       restart_policy:
         condition: "any"
 
+  op-batcher-forked:
+    profiles: ["hemitrap"]
+    image: "9eb59ba2a1f573b5a81375df0fd7328160a8149d447c7c73d0e842f0d3746241"
+    deploy:
+      restart_policy:
+        condition: "any"
+    healthcheck:
+      start_period: 180s
+    command:
+      - "bin/op-batcher"
+      - "--l2-eth-rpc=http://op-geth-l2-forked:18546"
+      - "--rollup-rpc=http://op-node-forked:8547"
+      - "--poll-interval=1s"
+      - "--sub-safety-margin=1"
+      - "--num-confirmations=1"
+      - "--safe-abort-nonce-too-low-count=1"
+      - "--resubmission-timeout=15s"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8548"
+      - "--rpc.enable-admin"
+      - "--max-channel-duration=5"
+      - "--max-pending-tx=1"
+      - "--l1-eth-rpc=http://geth-l1-forked:9988"
+      - "--private-key=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      - "--throttle-threshold=0"
+    depends_on:
+      geth-l1-forked:
+        condition: "service_started"
+      op-geth-l2-forked:
+        condition: "service_healthy"
+      op-node-forked:
+        condition: "service_started"
+    networks:
+      localnode:
+
+  op-proposer-forked:
+    profiles: ["hemitrap"]
+    image: "9eb59ba2a1f573b5a81375df0fd7328160a8149d447c7c73d0e842f0d3746241"
+    deploy:
+      restart_policy:
+        condition: "any"
+    depends_on:
+      geth-l1-forked:
+        condition: "service_started"
+      op-geth-l2-forked:
+        condition: "service_healthy"
+      op-node-forked:
+        condition: "service_started"
+    healthcheck:
+      start_period: 180s
+    command:
+      - bin/op-proposer
+      - --poll-interval=1s
+      - --rpc.port=8560
+      - --private-key=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+      - --l1-eth-rpc=http://geth-l1-forked:9988
+      - --rollup-rpc=http://op-node-forked:8547
+      - --resubmission-timeout=15s
+      - --safe-abort-nonce-too-low-count=1
+      - --txmgr.not-in-mempool-timeout=3s
+      - --allow-non-finalized=true
+      - --l2oo-address=0x032d1e1dd960a4b027a9a35ff8b2b672e333bc27
+    networks:
+      localnode:
+
   # Prysm
   prysm:
     # yamllint disable-line rule:line-length
@@ -308,6 +394,107 @@ services:
       - "--enable-debug-rpc-endpoints"
       - "--grpc-gateway-host=0.0.0.0"
       - "--enable-experimental-backfill"
+
+  # Hemi op-node
+  op-node-forked:
+    # yamllint disable-line rule:line-length
+    image: "9eb59ba2a1f573b5a81375df0fd7328160a8149d447c7c73d0e842f0d3746241"
+    platform: linux/amd64
+    profiles: ["hemitrap"]
+    depends_on:
+      op-geth-l2-forked:
+        condition: "service_healthy"
+    volumes:
+      # change this token value if you expose this service's ports for
+      # connection from other machines
+      - ./jwt.hex:/tmp/jwt/jwt.hex
+      - ./op-node-priv-key.txt:/tmp/op-node-priv-key.txt
+      - ./rollup.json:/tmp/rollup.json
+    environment:
+      OP_NODE_BSS_WS: "http://bssd:8081/v1/ws"
+    ports:
+      - '8547:8547'
+    networks:
+      - "localnode"
+    command:
+      - "op-node"
+      - "--ignore-missing-pectra-blob-schedule"
+      - "--l1=http://geth-l1-forked:9988"
+      - "--l1.rpckind=basic"
+      - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
+      - "--l2=ws://op-geth-l2-forked:8551"
+      - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
+      - "--sequencer.enabled=true"
+      - "--sequencer.stopped=false"
+      - "--rollup.config=/tmp/rollup.json"
+      - "--override.ecotone=1715865630"
+      - "--override.canyon=1715865630"
+      - "--override.delta=1715865630"
+      - "--rpc.addr=0.0.0.0"
+      - "--rpc.port=8547"
+      - "--p2p.no-discovery"
+      - "--p2p.ban.peers=false"
+      - "--p2p.ban.duration=1s"
+      - "--p2p.ban.threshold=-10000000000"
+      - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
+      - "--p2p.sequencer.key=caa4d3f71fa10a2cd87923055f61f36a94e06f094e38ee080cc1f5babd0a620a"
+      - "--log.level=info"
+      - "--syncmode=${OPSYNCMODE:-execution-layer}"
+      - "--override.pectrablobschedule=1748963425"
+      - "--override.isthmus=1748963425"
+      - "--override.holocene=1748963425"
+      - "--override.granite=1748963425"
+      - "--override.fjord=1748963425"
+      - "--l1.trustrpc=true"
+      - "--log.level=TRACE"
+    deploy:
+      restart_policy:
+        condition: "any"
+
+    # Hemi L2 node
+  op-geth-l2-forked:
+    # yamllint disable-line rule:line-length
+    image: "ghcr.io/hemilabs/op-geth:e79d992@sha256:dbe292e013345a8a41c9dc8ee09088853410b17c06ef779258d251f55356c501"
+    platform: linux/amd64
+    # XXX does geth need to be fully synced
+    profiles: ["hemitrap"]
+    depends_on:
+      op-geth-l2-init:
+        condition: "service_completed_successfully"
+      op-geth-l2-init-tbc:
+        condition: "service_completed_successfully"
+    healthcheck:
+      test: ["CMD", "nc", "-vz", "0.0.0.0", "18546"]
+      interval: 5s
+      timeout: 5s
+      retries: 999999
+    volumes:
+      - ./testnet-genesis.json:/tmp/testnet-genesis.json
+      # change this token value if you expose this service's ports for
+      # connection from other machines
+      - ./jwt.hex:/tmp/jwt/jwt.hex:ro
+      - ./hemitrap/entrypointl2.sh:/tmp/entrypointl2.sh
+      - op-geth_data:/tmp/datadir
+      - ./rollup.json:/tmp/rollup.json
+      - /mnt/blockstorage/tbc/tbc-upgrade-2:/tbcdata
+    environment:
+      OP_GETH_L1_RPC: http://geth-l1-forked:9988"
+      OP_GETH_L2_READINESS_RPC: "http://localhost:18546"
+      GETH_MAXPEERS: 0
+    ports:
+      - '18546:18546'
+      - '28546:28546'
+    networks:
+      - "localnode"
+    entrypoint:
+      - "sh"
+      - "/tmp/entrypointl2.sh"
+    working_dir: "/tmp"
+    ulimits:
+      memlock: -1
+    deploy:
+      restart_policy:
+        condition: "on-failure"
 
 networks:
   localnode: {}
