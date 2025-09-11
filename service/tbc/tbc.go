@@ -2766,6 +2766,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
+		// XXX s.cfg.MaxCachedKeystones ??
 		s.zkbh = NewZKBlockHeaderIndexer(s.g, s.cfg.MaxCachedKeystones,
 			s.cfg.ZKIndex)
 		s.zktx = NewZKTXIndexer(s.g, s.cfg.MaxCachedKeystones,
