@@ -32,7 +32,7 @@ func NewZKTXIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 		cacheCapacity: cacheLen,
 	}
 	zi.indexerCommon = indexerCommon{
-		name:    "zkblockheader",
+		name:    "zktx",
 		enabled: enabled,
 		g:       g,
 		p:       zi,
