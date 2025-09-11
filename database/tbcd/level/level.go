@@ -2306,7 +2306,7 @@ func (l *ldb) BlockHeaderByZKTXIndex(ctx context.Context) (*tbcd.BlockHeader, er
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
-func (l *ldb) BlockZKTXUpdate(ctx context.Context, direction int, txs map[tbcd.TxSpendKey][]byte, zkTXsIndexHash chainhash.Hash) error {
+func (l *ldb) BlockZKTXUpdate(ctx context.Context, direction int, txs map[tbcd.TxSpendKey][]byte, zkTXIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKTXUpdate")
 	defer log.Tracef("BlockZKTXUpdate exit")
 
@@ -2328,7 +2328,10 @@ func (l *ldb) BlockZKTXUpdate(ctx context.Context, direction int, txs map[tbcd.T
 		_ = v
 		switch direction {
 		case -1:
+			// On unwind we can simply delete the key.
+			bhsBatch.Delete(k[:])
 		case 1:
+			bhsBatch.Put(k[:], v)
 		}
 
 		// Empty out cache.
@@ -2336,7 +2339,7 @@ func (l *ldb) BlockZKTXUpdate(ctx context.Context, direction int, txs map[tbcd.T
 	}
 
 	// Store index
-	bhsBatch.Put(zkTXIndexHashKey, zkTXsIndexHash[:])
+	bhsBatch.Put(zkTXIndexHashKey, zkTXIndexHash[:])
 
 	// Write txs batch
 	if err = bhsTx.Write(bhsBatch, nil); err != nil {
@@ -2373,7 +2376,7 @@ func (l *ldb) BlockHeaderByZKUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, 
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
-func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.TxSpendKey][]byte, zkTXsIndexHash chainhash.Hash) error {
+func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.TxSpendKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKUtxoUpdate")
 	defer log.Tracef("BlockZKUtxoUpdate exit")
 
@@ -2403,7 +2406,7 @@ func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tb
 	}
 
 	// Store index
-	bhsBatch.Put(zkTXIndexHashKey, zkTXsIndexHash[:])
+	bhsBatch.Put(zkUtxoIndexHashKey, zkUtxoIndexHash[:])
 
 	// Write utxos batch
 	if err = bhsTx.Write(bhsBatch, nil); err != nil {
