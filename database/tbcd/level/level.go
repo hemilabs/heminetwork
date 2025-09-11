@@ -2281,7 +2281,7 @@ func (l *ldb) BlockZKBlockHeaderUpdate(ctx context.Context, direction int, block
 }
 
 func (l *ldb) BlockHeaderByZKTXIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
-	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKBlockHeadersDB)
+	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKTXDB)
 	if err != nil {
 		return nil, fmt.Errorf("zk tx open db transaction: %w", err)
 	}
