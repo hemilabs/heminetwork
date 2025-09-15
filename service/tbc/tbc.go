@@ -2113,6 +2113,16 @@ func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId chainhash.
 	return false, nil
 }
 
+func (s *Server) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
+	log.Tracef("ScriptHashByOutpoint")
+	defer log.Tracef("ScriptHashByOutpoint exit")
+	if s.cfg.ExternalHeaderMode {
+		return nil, NewExternalHeaderNotAllowedError("ScriptHashByOutpoint")
+	}
+
+	return s.g.db.ScriptHashByOutpoint(ctx, op)
+}
+
 func (s *Server) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputsByTxId")
 	defer log.Tracef("SpentOutputsByTxId exit")

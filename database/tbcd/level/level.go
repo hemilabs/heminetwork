@@ -2372,7 +2372,41 @@ func (l *ldb) BlockHeaderByZKUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, 
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
-func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.TxSpendKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
+func (l *ldb) ZKScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) ([]byte, error) {
+	log.Tracef("ZKScriptByOutpoint")
+	defer log.Tracef("ZKScriptByOutpoint exit")
+
+	zkdb := l.pool[level.ZKUtxoDB]
+	v, err := zkdb.Get(op[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(err.Error())
+		}
+		return nil, fmt.Errorf("script by outpoint: %w", err)
+	}
+	return v, nil
+}
+
+func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
+	log.Tracef("ZKScriptByOutpoint")
+	defer log.Tracef("ZKScriptByOutpoint exit")
+
+	zkdb := l.pool[level.ZKUtxoDB]
+	val, err := zkdb.Get(sh[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return 0, database.NotFoundError(err.Error())
+		}
+		return 0, fmt.Errorf("balance by scripthash: %w", err)
+	}
+	if len(val) != 8 {
+		return 0, fmt.Errorf("balance by scripthash: invalid value length %v",
+			len(val))
+	}
+	return binary.BigEndian.Uint64(val[:]), nil
+}
+
+func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKUtxoKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKUtxoUpdate")
 	defer log.Tracef("BlockZKUtxoUpdate exit")
 
@@ -2391,10 +2425,12 @@ func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tb
 	for k, v := range utxos {
 		// I will punch the first person that tells me to use continue
 		// in this loop in the larynx.
-		_ = v
 		switch direction {
 		case -1:
+			// On unwind we can simply delete the key.
+			bhsBatch.Delete([]byte(k))
 		case 1:
+			bhsBatch.Put([]byte(k), v)
 		}
 
 		// Empty out cache.
