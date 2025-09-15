@@ -673,6 +673,26 @@ func tbcdb(pctx context.Context, flags []string) error {
 			fmt.Printf("%v\n", si[k])
 		}
 
+		// crosss check
+		index := args["index"]
+		if index == "" {
+			return errors.New("index: must be set")
+		}
+		idx, err := strconv.Atoi(index)
+		if err != nil {
+			return err
+		}
+		// var h [32]byte
+		txIdBytes := [32]byte(chtxid.CloneBytes())
+		op := tbcd.NewOutpoint(txIdBytes, uint32(idx))
+		// copy(h[:], chtxid[:])
+		// op := tbcd.NewOutpoint(h, uint32(idx))
+		sh, err := s.ScriptHashByOutpoint(ctx, op)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%x\n", sh)
+
 	case "blockintxindex":
 		blkid := args["blkid"]
 		if blkid == "" {

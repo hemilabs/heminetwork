@@ -59,13 +59,13 @@ func (i *zktxIndexer) process(ctx context.Context, direction int, block *btcutil
 	blockHash := block.Hash()
 	blockHeight := uint32(block.Height())
 	for _, tx := range block.Transactions() {
-		if blockchain.IsCoinBase(tx) {
-			// Skip coinbase inputs
-			continue
-		}
-
 		txId := tx.Hash()
 		for txInIdx, txIn := range tx.MsgTx().TxIn {
+			if blockchain.IsCoinBase(tx) {
+				// Skip coinbase inputs
+				continue
+			}
+
 			tsk := tbcd.NewTxSpendKey(txIn.PreviousOutPoint.Hash,
 				blockHeight, *blockHash, txIn.PreviousOutPoint.Index)
 			cache[tsk] = tbcd.NewPointSlice(*txId, uint32(txInIdx))
