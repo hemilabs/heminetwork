@@ -115,14 +115,14 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 			// Retrieve TxOut from PreviousOutPoint
 			value, script, err := i.txOut(ctx, pop, c)
 			if err != nil {
-				panic(err)
+				fmt.Errorf("tx out: %w", err)
 			}
 
 			// Retrieve balance
 			sh := tbcd.NewScriptHashFromScript(script)
 			balance, err := i.balance(ctx, sh, c)
 			if err != nil {
-				panic(err)
+				fmt.Errorf("balance in: %w", err)
 			}
 
 			// Handle balance
@@ -145,6 +145,13 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 				panic(fmt.Sprintf("diagnostic: %v", spo))
 			}
 			cache[tbcd.ZKIndexKey(spo[:])] = nil
+
+			// Mark UTxO spent and point where it was spent
+			// XXX max what about this one?
+			tsk := tbcd.NewTxSpendKey(txIn.PreviousOutPoint.Hash,
+				blockHeight, *blockHash, txIn.PreviousOutPoint.Index)
+			cache[tbcd.ZKIndexKey(tsk[:])] = tbcd.NewPointSlice(*txId,
+				uint32(txInIdx))
 		}
 
 		for txOutIdx, txOut := range tx.MsgTx().TxOut {
@@ -169,8 +176,7 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 			// Fetch current balance of PkScript hash.
 			balance, err := i.balance(ctx, sh, c)
 			if err != nil {
-				log.Infof("op: %v", op)
-				panic(err)
+				fmt.Errorf("balance out: %w", err)
 			}
 			switch direction {
 			case 1:
@@ -182,6 +188,11 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 			default:
 				panic("wtf")
 			}
+
+			// Spendable UTxO XXX max do we need this?
+			tsk := tbcd.NewTxSpendKey(*txId, blockHeight, *blockHash,
+				uint32(txOutIdx))
+			cache[tbcd.ZKIndexKey(tsk[:])] = nil
 		}
 	}
 
