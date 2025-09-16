@@ -21,23 +21,23 @@ import (
 
 // Transactions to be looked up by txid.
 
-type zkutxoIndexer struct {
+type zkIndexer struct {
 	indexerCommon
 
 	cacheCapacity int
 }
 
 var (
-	_ Indexer = (*zkutxoIndexer)(nil)
-	_ indexer = (*zkutxoIndexer)(nil)
+	_ Indexer = (*zkIndexer)(nil)
+	_ indexer = (*zkIndexer)(nil)
 )
 
 func NewZKUtxoIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
-	zi := &zkutxoIndexer{
+	zi := &zkIndexer{
 		cacheCapacity: cacheLen,
 	}
 	zi.indexerCommon = indexerCommon{
-		name:    "zkutxo",
+		name:    "zkindexer",
 		enabled: enabled,
 		g:       g,
 		p:       zi,
@@ -45,16 +45,16 @@ func NewZKUtxoIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 	return zi
 }
 
-func (i *zkutxoIndexer) newCache() indexerCache {
+func (i *zkIndexer) newCache() indexerCache {
 	return NewCache[tbcd.ZKIndexKey, []byte](i.cacheCapacity)
 }
 
-func (i *zkutxoIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (i *zkIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 	bh, err := i.g.db.BlockHeaderByZKUtxoIndex(ctx)
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-func (i *zkutxoIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c indexerCache) ([]byte, error) {
+func (i *zkIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c indexerCache) ([]byte, error) {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
 	if balance, ok := cache[tbcd.ZKIndexKey(ss[:])]; ok {
 		// log.Infof("balance %v %x", ss, balance)
@@ -76,7 +76,7 @@ func (i *zkutxoIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c index
 	return balance[:], nil
 }
 
-func (i *zkutxoIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache) (uint64, []byte, error) {
+func (i *zkIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache) (uint64, []byte, error) {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
 	if utxoE, ok := cache[tbcd.ZKIndexKey(pop[:])]; ok {
 		txOut := tbcd.TxOutFromBytes(utxoE)
@@ -90,7 +90,7 @@ func (i *zkutxoIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerC
 	return binary.BigEndian.Uint64(txOut[0:]), txOut[8:], nil
 }
 
-func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
+func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
 	if block.Height() == btcutil.BlockHeightUnknown {
 		panic("diagnostic: block height not set")
 	}
@@ -199,12 +199,12 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 	return nil
 }
 
-func (i *zkutxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
+func (i *zkIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte])
 	return i.g.db.BlockZKUtxoUpdate(ctx, direction, cache.Map(), atHash)
 }
 
-func (i *zkutxoIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {
+func (i *zkIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {
 	// Not needed for zk indexer.
 	return nil
 }
