@@ -21,6 +21,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"math"
 	"strings"
 	"syscall"
 	"time"
@@ -682,7 +683,9 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return err
 		}
-		// var h [32]byte
+		if idx < 0 || idx > int(math.MaxUint32) {
+			return fmt.Errorf("index: must be between 0 and %d (was %d)", math.MaxUint32, idx)
+		}
 		txIdBytes := [32]byte(chtxid.CloneBytes())
 		op := tbcd.NewOutpoint(txIdBytes, uint32(idx))
 		// copy(h[:], chtxid[:])
