@@ -128,6 +128,9 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 			// Handle balance
 			switch direction {
 			case 1:
+				// log.Infof("value %v balance %x", value, balance)
+				// log.Infof("pop %v", pop)
+				// log.Infof("sh %v", sh)
 				cache[tbcd.ZKIndexKey(sh[:])] = tbcd.BESubUint64(balance,
 					value)
 			case -1:
@@ -163,7 +166,7 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 			// SpendableOutput
 			sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
 			so := tbcd.NewSpendableOutput(chainhash.Hash(sh), blockHeight,
-				*blockHash, *txId)
+				*blockHash, *txId, uint32(txOutIdx))
 			cache[tbcd.ZKIndexKey(so[:])] = nil
 
 			// Outpoint to TxOut
