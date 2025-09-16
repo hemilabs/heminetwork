@@ -261,6 +261,19 @@ func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 	return
 }
 
+func NewTxOut(txOut *wire.TxOut) []byte {
+	x := make([]byte, 8+len(txOut.PkScript))
+	binary.BigEndian.PutUint64(x[0:], uint64(txOut.Value))
+	copy(x[8:], txOut.PkScript)
+	return x
+}
+
+func TxOutFromBytes(x []byte) (txOut wire.TxOut) {
+	txOut.Value = int64(binary.BigEndian.Uint64(x[0:]))
+	txOut.PkScript = append([]byte{}, x[8:]...)
+	return
+}
+
 // CacheOutput is a densely packed representation of a bitcoin UTXo. The fields
 // are script_hash + value + out_index. It is packed for memory conservation
 // reasons.
@@ -515,6 +528,19 @@ func NewZKUtxoIn(prevScripthash chainhash.Hash, height uint32, blockhash, txid, 
 
 // ZKUtxoKeyOut = sha256(PkScript):blockheight:blockhash:txId
 type ZKUtxoOut [32 + 4 + 32 + 32]byte
+
+func (o ZKUtxoOut) Pretty() string {
+	block, err := chainhash.NewHash(o[32+4 : 32+4+32])
+	if err != nil {
+		panic(err)
+	}
+	txid, err := chainhash.NewHash(o[32+4+32:])
+	if err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf("sh %x height %v block %v tx %v", o[0:32],
+		binary.BigEndian.Uint32(o[32:32+4]), block, txid)
+}
 
 func NewZKUtxoOut(scripthash chainhash.Hash, height uint32, blockhash, txid chainhash.Hash) (o ZKUtxoOut) {
 	copy(o[0:], scripthash[:])
