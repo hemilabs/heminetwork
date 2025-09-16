@@ -115,14 +115,14 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 			// Retrieve TxOut from PreviousOutPoint
 			value, script, err := i.txOut(ctx, pop, c)
 			if err != nil {
-				fmt.Errorf("tx out: %w", err)
+				return fmt.Errorf("tx out: %w", err)
 			}
 
 			// Retrieve balance
 			sh := tbcd.NewScriptHashFromScript(script)
 			balance, err := i.balance(ctx, sh, c)
 			if err != nil {
-				fmt.Errorf("balance in: %w", err)
+				return fmt.Errorf("balance in: %w", err)
 			}
 
 			// Handle balance
@@ -176,7 +176,7 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 			// Fetch current balance of PkScript hash.
 			balance, err := i.balance(ctx, sh, c)
 			if err != nil {
-				fmt.Errorf("balance out: %w", err)
+				return fmt.Errorf("balance out: %w", err)
 			}
 			switch direction {
 			case 1:
