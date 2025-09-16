@@ -251,8 +251,6 @@ type Server struct {
 	ui     Indexer
 	ti     Indexer
 	ki     Indexer
-	zkbh   Indexer
-	zktx   Indexer
 	zkutxo Indexer
 
 	// Prometheus
@@ -2445,12 +2443,6 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 
 	// ZK indexes
 	if s.cfg.ZKIndex {
-		if err := s.zkbh.IndexToHash(ctx, hash); err != nil {
-			return fmt.Errorf("zk blockheaders indexer: %w", err)
-		}
-		if err := s.zktx.IndexToHash(ctx, hash); err != nil {
-			return fmt.Errorf("zk tx indexer: %w", err)
-		}
 		if err := s.zkutxo.IndexToHash(ctx, hash); err != nil {
 			return fmt.Errorf("zk utxo indexer: %w", err)
 		}
@@ -2494,12 +2486,6 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
-		if err := s.zkbh.IndexToBest(ctx); err != nil {
-			return err
-		}
-		if err := s.zktx.IndexToBest(ctx); err != nil {
-			return err
-		}
 		if err := s.zkutxo.IndexToBest(ctx); err != nil {
 			return err
 		}
@@ -2777,10 +2763,6 @@ func (s *Server) dbOpen(ctx context.Context) error {
 
 	if s.cfg.ZKIndex {
 		// XXX s.cfg.MaxCachedKeystones ??
-		s.zkbh = NewZKBlockHeaderIndexer(s.g, s.cfg.MaxCachedKeystones,
-			s.cfg.ZKIndex)
-		s.zktx = NewZKTXIndexer(s.g, s.cfg.MaxCachedKeystones,
-			s.cfg.ZKIndex)
 		s.zkutxo = NewZKUtxoIndexer(s.g, s.cfg.MaxCachedKeystones,
 			s.cfg.ZKIndex)
 	}
@@ -3151,11 +3133,7 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
 		}
 		if s.cfg.ZKIndex {
-			bh, _ := s.zkbh.IndexerAt(ctx)
-			log.Infof("ZK block headers index %v @ %v", bh.Height, bh.Hash)
-			bh, _ = s.zktx.IndexerAt(ctx)
-			log.Infof("ZK tx index %v @ %v", bh.Height, bh.Hash)
-			bh, _ = s.zkutxo.IndexerAt(ctx)
+			bh, _ := s.zkutxo.IndexerAt(ctx)
 			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
 		}
 	}
