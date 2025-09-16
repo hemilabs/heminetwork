@@ -144,7 +144,7 @@ type Database interface {
 
 	// ZKUtxo
 	BlockHeaderByZKUtxoIndex(ctx context.Context) (*BlockHeader, error)
-	BlockZKUtxoUpdate(ctx context.Context, direction int, blockheaders map[ZKUtxoKey][]byte, zkTxIndexHash chainhash.Hash) error
+	BlockZKUtxoUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkTxIndexHash chainhash.Hash) error
 	ZKScriptByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 }
@@ -512,10 +512,10 @@ func NewPointSlice(h chainhash.Hash, idx uint32) []byte {
 	return p[:]
 }
 
-// ZKUtxoIn sha256(PreviousOutPoint->pkscript):blockheight:blockhash:txId:PreviousOutPoint.Hash:PreviousOutPoint.Index:txInIdx
-type ZKUtxoIn [32 + 4 + 32 + 32 + 32 + 4 + 4]byte
+// SpentOutput sha256(PreviousOutPoint->pkscript):blockheight:blockhash:txId:PreviousOutPoint.Hash:PreviousOutPoint.Index:txInIdx
+type SpentOutput [32 + 4 + 32 + 32 + 32 + 4 + 4]byte
 
-func NewZKUtxoIn(prevScripthash chainhash.Hash, height uint32, blockhash, txid, txidPrevHash chainhash.Hash, txidPrevIndex, txinIndex uint32) (o ZKUtxoIn) {
+func NewSpentOutput(prevScripthash chainhash.Hash, height uint32, blockhash, txid, txidPrevHash chainhash.Hash, txidPrevIndex, txinIndex uint32) (o SpentOutput) {
 	copy(o[0:], prevScripthash[:])
 	binary.BigEndian.PutUint32(o[32:], height)
 	copy(o[32+4:], blockhash[:])
@@ -526,10 +526,10 @@ func NewZKUtxoIn(prevScripthash chainhash.Hash, height uint32, blockhash, txid, 
 	return
 }
 
-// ZKUtxoKeyOut = sha256(PkScript):blockheight:blockhash:txId
-type ZKUtxoOut [32 + 4 + 32 + 32]byte
+// SpendableOutput = sha256(PkScript):blockheight:blockhash:txId
+type SpendableOutput [32 + 4 + 32 + 32]byte
 
-func (o ZKUtxoOut) Pretty() string {
+func (o SpendableOutput) String() string {
 	block, err := chainhash.NewHash(o[32+4 : 32+4+32])
 	if err != nil {
 		panic(err)
@@ -542,7 +542,7 @@ func (o ZKUtxoOut) Pretty() string {
 		binary.BigEndian.Uint32(o[32:32+4]), block, txid)
 }
 
-func NewZKUtxoOut(scripthash chainhash.Hash, height uint32, blockhash, txid chainhash.Hash) (o ZKUtxoOut) {
+func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txid chainhash.Hash) (o SpendableOutput) {
 	copy(o[0:], scripthash[:])
 	binary.BigEndian.PutUint32(o[32:], height)
 	copy(o[32+4:], blockhash[:])
@@ -550,9 +550,10 @@ func NewZKUtxoOut(scripthash chainhash.Hash, height uint32, blockhash, txid chai
 	return
 }
 
-// ZKUtxoKey is a wrapper to the various types to make the comparable.
-// Valid keys are, ZKUtxoOut(100), ZKUtxoIn(140), Outpoint(37), ScriptHash(32)
-type ZKUtxoKey string // ugh to make []byte comparable
+// ZKIndexKey is a wrapper to the various types to make the comparable.
+// Valid keys are, SpendableOutput(100), SpentOutput(140), Outpoint(37),
+// ScriptHash(32)
+type ZKIndexKey string // ugh to make []byte comparable
 
 func BEUint64(x uint64) []byte {
 	var b [8]byte

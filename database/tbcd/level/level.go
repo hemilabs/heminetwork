@@ -2406,7 +2406,7 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
-func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKUtxoKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
+func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKUtxoUpdate")
 	defer log.Tracef("BlockZKUtxoUpdate exit")
 

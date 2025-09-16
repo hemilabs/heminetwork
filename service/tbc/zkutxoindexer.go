@@ -9,13 +9,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"reflect"
 
 	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
-	"github.com/davecgh/go-spew/spew"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
@@ -48,7 +46,7 @@ func NewZKUtxoIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 }
 
 func (i *zkutxoIndexer) newCache() indexerCache {
-	return NewCache[tbcd.ZKUtxoKey, []byte](i.cacheCapacity)
+	return NewCache[tbcd.ZKIndexKey, []byte](i.cacheCapacity)
 }
 
 func (i *zkutxoIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -56,9 +54,9 @@ func (i *zkutxoIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
-func (i *zkutxoIndexer) runningBalance(ctx context.Context, ss tbcd.ScriptHash, c indexerCache) ([]byte, error) {
-	cache := c.(*Cache[tbcd.ZKUtxoKey, []byte]).Map()
-	if balance, ok := cache[tbcd.ZKUtxoKey(ss[:])]; ok {
+func (i *zkutxoIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c indexerCache) ([]byte, error) {
+	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
+	if balance, ok := cache[tbcd.ZKIndexKey(ss[:])]; ok {
 		// log.Infof("balance %v %x", ss, balance)
 		return balance, nil
 	}
@@ -78,38 +76,18 @@ func (i *zkutxoIndexer) runningBalance(ctx context.Context, ss tbcd.ScriptHash, 
 	return balance[:], nil
 }
 
-func (i *zkutxoIndexer) script(ctx context.Context, pop tbcd.Outpoint, c indexerCache) ([]byte, error) {
-	// XXX combine with i.value
-	cache := c.(*Cache[tbcd.ZKUtxoKey, []byte]).Map()
-	if utxoE, ok := cache[tbcd.ZKUtxoKey(pop[:])]; ok {
+func (i *zkutxoIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache) (uint64, []byte, error) {
+	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
+	if utxoE, ok := cache[tbcd.ZKIndexKey(pop[:])]; ok {
 		txOut := tbcd.TxOutFromBytes(utxoE)
-		return txOut.PkScript, nil
+		return uint64(txOut.Value), txOut.PkScript, nil
 	}
 	// Not found in cache, fetch from db
-	script, err := i.g.db.ZKScriptByOutpoint(ctx, pop)
+	txOut, err := i.g.db.ZKScriptByOutpoint(ctx, pop) // Rename
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	return script[8:], err
-}
-
-func (i *zkutxoIndexer) value(ctx context.Context, pop tbcd.Outpoint, c indexerCache) (uint64, error) {
-	// XXX combine with i.script
-	cache := c.(*Cache[tbcd.ZKUtxoKey, []byte]).Map()
-	if utxoE, ok := cache[tbcd.ZKUtxoKey(pop[:])]; ok {
-		txOut := tbcd.TxOutFromBytes(utxoE)
-		// log.Infof("value from pop %v", txOut.Value)
-		return uint64(txOut.Value), nil
-	}
-	// XXX DONT DO THIS
-	// LIFT THIS FROM THE "utxo bits" cache, see processing TxOut
-	prevTxOut, err := txOutFromOutPoint(ctx, i.g.db, pop)
-	if err != nil {
-		// log.Infof("value from db new %v", pop)
-		return 0, fmt.Errorf("fetch outpoint: %w", err)
-	}
-	// log.Infof("value from db no error %v", prevTxOut.Value)
-	return uint64(prevTxOut.Value), nil
+	return binary.BigEndian.Uint64(txOut[0:]), txOut[8:], nil
 }
 
 func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
@@ -117,20 +95,12 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 		panic("diagnostic: block height not set")
 	}
 
-	cache := c.(*Cache[tbcd.ZKUtxoKey, []byte]).Map()
+	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
 
 	blockHash := block.Hash()
 	blockHeight := uint32(block.Height())
-	log.Infof("process: %v %v", blockHeight, blockHash)
+	log.Tracef("processing: %v %v", blockHeight, blockHash)
 	for _, tx := range block.Transactions() {
-		// Every TxIn and TxOut journals three pieces of information.
-		// 1. TxID to block height and hash mapping that stores spend info.
-		// 2. SpendScript at block height hash and additional key
-		//    material that stores TxOut.Value.
-		// 3. Outpoint to PkScript mapping.
-		//
-		// In addition a running balance is kept for SpendScript.
-
 		txId := tx.Hash()
 		for txInIdx, txIn := range tx.MsgTx().TxIn {
 			// Skip coinbase inputs
@@ -141,30 +111,40 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 			// Recreate Outpoint from TxIn.PreviousOutPoint
 			pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index)
-			script, err := i.script(ctx, pop, c)
-			if err != nil {
-				panic(err)
-			}
-			ss := tbcd.NewScriptHashFromScript(script)
-			balance, err := i.runningBalance(ctx, ss, c)
-			if err != nil {
-				panic(err)
-			}
-			// Fetch previous value
-			value, err := i.value(ctx, pop, c) // XXX rename?
-			if err != nil {
-				panic(err)
-			}
-			cache[tbcd.ZKUtxoKey(ss[:])] = tbcd.BESubUint64(balance, value)
 
-			// Insert spend
-			ui := tbcd.NewZKUtxoIn(chainhash.Hash(ss), blockHeight,
+			// Retrieve TxOut from PreviousOutPoint
+			value, script, err := i.txOut(ctx, pop, c)
+			if err != nil {
+				panic(err)
+			}
+
+			// Retrieve balance
+			sh := tbcd.NewScriptHashFromScript(script)
+			balance, err := i.balance(ctx, sh, c)
+			if err != nil {
+				panic(err)
+			}
+
+			// Handle balance
+			switch direction {
+			case 1:
+				cache[tbcd.ZKIndexKey(sh[:])] = tbcd.BESubUint64(balance,
+					value)
+			case -1:
+				cache[tbcd.ZKIndexKey(sh[:])] = tbcd.BEAddUint64(balance,
+					value)
+			default:
+				panic("wtf")
+			}
+
+			// Insert SpentOutput
+			spo := tbcd.NewSpentOutput(chainhash.Hash(sh), blockHeight,
 				*blockHash, *txId, txIn.PreviousOutPoint.Hash,
 				txIn.PreviousOutPoint.Index, uint32(txInIdx))
-			if _, ok := cache[tbcd.ZKUtxoKey(ui[:])]; ok {
-				panic(fmt.Sprintf("diagnostic: %v", ui))
+			if _, ok := cache[tbcd.ZKIndexKey(spo[:])]; ok {
+				panic(fmt.Sprintf("diagnostic: %v", spo))
 			}
-			cache[tbcd.ZKUtxoKey(ui[:])] = tbcd.BEUint64(value)
+			cache[tbcd.ZKIndexKey(spo[:])] = nil
 		}
 
 		for txOutIdx, txOut := range tx.MsgTx().TxOut {
@@ -173,39 +153,35 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 				continue
 			}
 
-			// utxo bits
-			ss := tbcd.NewScriptHashFromScript(txOut.PkScript)
-			o := tbcd.NewZKUtxoOut(chainhash.Hash(ss), blockHeight,
+			// SpendableOutput
+			sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
+			so := tbcd.NewSpendableOutput(chainhash.Hash(sh), blockHeight,
 				*blockHash, *txId)
-			if _, ok := cache[tbcd.ZKUtxoKey(o[:])]; ok {
-				// XXX @max is this right?
-				// panic: diagnostic: sh 4ae81572f06e1b88fd5ced7a1a000945432e83e1551e6f721ee9c00b8cc33260 height 25200 block 0000000000000067674a7a4b0787a9e54a21f05b1339f59e5a22af07e22ac7d6 tx 056aad3e8616785f6abc70cc8e0f089907126ac81634abde4399fdf7a69eb4c0
-				// this can only work if we dont store value or make it cumulative? do we need to add txOutIdx?
-				// panic(fmt.Sprintf("diagnostic: %v", o.Pretty()))
-			}
-			cache[tbcd.ZKUtxoKey(o[:])] = tbcd.BEUint64(uint64(txOut.Value))
+			cache[tbcd.ZKIndexKey(so[:])] = nil
 
+			// Outpoint to TxOut
 			op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
-			txOutEncoded := tbcd.NewTxOut(txOut)
-			if _, ok := cache[tbcd.ZKUtxoKey(op[:])]; ok {
+			if _, ok := cache[tbcd.ZKIndexKey(op[:])]; ok {
 				panic(fmt.Sprintf("diagnostic: %v", op))
 			}
-			txOutDecoded := tbcd.TxOutFromBytes(txOutEncoded)
-			if !reflect.DeepEqual(txOutDecoded, *txOut) {
-				spew.Dump(txOutDecoded)
-				spew.Dump(*txOut)
-				panic("x")
-			}
-			cache[tbcd.ZKUtxoKey(op[:])] = txOutEncoded
+			cache[tbcd.ZKIndexKey(op[:])] = tbcd.NewTxOut(txOut)
 
 			// Fetch current balance of PkScript hash.
-			balance, err := i.runningBalance(ctx, ss, c)
+			balance, err := i.balance(ctx, sh, c)
 			if err != nil {
 				log.Infof("op: %v", op)
 				panic(err)
 			}
-			cache[tbcd.ZKUtxoKey(ss[:])] = tbcd.BEAddUint64(balance,
-				uint64(txOut.Value))
+			switch direction {
+			case 1:
+				cache[tbcd.ZKIndexKey(sh[:])] = tbcd.BEAddUint64(balance,
+					uint64(txOut.Value))
+			case -1:
+				cache[tbcd.ZKIndexKey(sh[:])] = tbcd.BESubUint64(balance,
+					uint64(txOut.Value))
+			default:
+				panic("wtf")
+			}
 		}
 	}
 
@@ -213,7 +189,7 @@ func (i *zkutxoIndexer) process(ctx context.Context, direction int, block *btcut
 }
 
 func (i *zkutxoIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
-	cache := c.(*Cache[tbcd.ZKUtxoKey, []byte])
+	cache := c.(*Cache[tbcd.ZKIndexKey, []byte])
 	return i.g.db.BlockZKUtxoUpdate(ctx, direction, cache.Map(), atHash)
 }
 
