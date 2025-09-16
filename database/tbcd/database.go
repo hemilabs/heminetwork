@@ -134,14 +134,6 @@ type Database interface {
 	BlockHeaderByKeystoneIndex(ctx context.Context) (*BlockHeader, error)
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]Keystone, error)
 
-	// ZKBlockHeader
-	BlockHeaderByZKBlockHeaderIndex(ctx context.Context) (*BlockHeader, error)
-	BlockZKBlockHeaderUpdate(ctx context.Context, direction int, blockheaders map[chainhash.Hash]BlockHeader, zkBlockHeadersIndexHash chainhash.Hash) error
-
-	// ZKTX
-	BlockHeaderByZKTXIndex(ctx context.Context) (*BlockHeader, error)
-	BlockZKTXUpdate(ctx context.Context, direction int, blockheaders map[TxSpendKey][]byte, zkTxIndexHash chainhash.Hash) error
-
 	// ZKUtxo
 	BlockHeaderByZKUtxoIndex(ctx context.Context) (*BlockHeader, error)
 	BlockZKUtxoUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkTxIndexHash chainhash.Hash) error

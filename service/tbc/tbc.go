@@ -248,10 +248,10 @@ type Server struct {
 	g geometryParams
 
 	// indexers
-	ui     Indexer
-	ti     Indexer
-	ki     Indexer
-	zkutxo Indexer
+	ui  Indexer
+	ti  Indexer
+	ki  Indexer
+	zki Indexer
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -2443,7 +2443,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 
 	// ZK indexes
 	if s.cfg.ZKIndex {
-		if err := s.zkutxo.IndexToHash(ctx, hash); err != nil {
+		if err := s.zki.IndexToHash(ctx, hash); err != nil {
 			return fmt.Errorf("zk utxo indexer: %w", err)
 		}
 	}
@@ -2486,7 +2486,7 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
-		if err := s.zkutxo.IndexToBest(ctx); err != nil {
+		if err := s.zki.IndexToBest(ctx); err != nil {
 			return err
 		}
 	}
@@ -2763,7 +2763,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 
 	if s.cfg.ZKIndex {
 		// XXX s.cfg.MaxCachedKeystones ??
-		s.zkutxo = NewZKUtxoIndexer(s.g, s.cfg.MaxCachedKeystones,
+		s.zki = NewZKUtxoIndexer(s.g, s.cfg.MaxCachedKeystones,
 			s.cfg.ZKIndex)
 	}
 
@@ -3133,7 +3133,7 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
 		}
 		if s.cfg.ZKIndex {
-			bh, _ := s.zkutxo.IndexerAt(ctx)
+			bh, _ := s.zki.IndexerAt(ctx)
 			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
 		}
 	}
