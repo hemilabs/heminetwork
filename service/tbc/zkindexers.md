@@ -1,4 +1,53 @@
-## Raw
+## Current starte
+
+Every block wind/unwind goes goes thorugh the following process:
+
+### In
+
+UTxO index
+```
+PkScript, Value = cache[PrevOut]                        // OutpointScriptValue
+Balance = cache[sha256(PkScript)]                       // ScriptHash
+cache[sha256(PkScript)] -= Value                        // ScriptHash
+cache[sha256(PkScript) + height + hash + txid + PrevOut + txInIndex] = nil  // SpentOutput
+```
+
+Tx index
+```
+cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // SpendingOutpoint
+```
+
+### Out
+
+UTxO index
+```
+cache[sha256(PkScript) + height + hash + txid] = nil    // SpendableOutput
+cache[Out] = TxOut                                      // OutpointScriptValue
+cache[sha256(PkScript)] += Value                        // ScriptHash
+```
+
+Tx index
+```
+cache[txid + height + hash + txOutIndex] = nil          // TxSpend
+```
+
+Thoughts
+1. If we keep track of the balance in SpendableOutput we can get rid of
+   OutpointScriptValue however that makes cache lookups O(N), disk is O log(N).
+2. OutpointScriptValue is prunable.
+3. With this format we must flip balance += and -= depending on direction.
+4. I don't see the point of SpendableOutput. It isn't pruned and if spent, it
+   is not marked as such. Cross referencing it with SpentOutput is O(N). It is
+   not used as a cache input either. We probably should add the txid (or even
+   SpendableOutput) to TxOut structure if we need a quick lookup of PrevOut to
+   tx mapping.
+5. When combining utxo+tx index it feels that we are overlapping
+   spending/unspent data. It looks that this can be easily reconstructed from
+   utxo SpentOutput, which may be another reason to prune some values.
+
+
+
+## Raw thoughts and other junk
 
 global hvm state root is a merkle over: utxo, txid, block hash, block height
 
