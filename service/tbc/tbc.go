@@ -748,6 +748,12 @@ func (s *Server) promKeystone() float64 {
 	return deucalion.Uint64ToFloat(s.prom.syncInfo.Keystone.Height)
 }
 
+func (s *Server) promZK() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.Uint64ToFloat(s.prom.syncInfo.ZK.Height)
+}
+
 func (s *Server) promConnectedPeers() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
@@ -2444,7 +2450,7 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 	// ZK indexes
 	if s.cfg.ZKIndex {
 		if err := s.zki.IndexToHash(ctx, hash); err != nil {
-			return fmt.Errorf("zk utxo indexer: %w", err)
+			return fmt.Errorf("zk indexer: %w", err)
 		}
 	}
 
@@ -2588,6 +2594,7 @@ type SyncInfo struct {
 	Keystone    HashHeight `json:"keystone_index_height"`
 	Tx          HashHeight `json:"tx_index_height"`
 	Utxo        HashHeight `json:"utxo_index_height"`
+	ZK          HashHeight `json:"zk_index_height"`
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2665,26 +2672,46 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
 		!s.indexing && !blksMissing {
-		// XXX roll zk in there as well
-		// If keystone indexers are disabled we are synced.
-		if !s.cfg.HemiIndex {
+		// If keystone and zk indexers are disabled we are synced.
+		if !s.cfg.HemiIndex && !s.cfg.ZKIndex {
 			si.Synced = true
 			return
 		}
 
-		// Perform additional keystone indexer tests.
-		keystoneBH, err := s.ki.IndexerAt(ctx)
-		if err != nil {
-			keystoneBH = &tbcd.BlockHeader{}
+		if s.cfg.HemiIndex {
+			// Perform additional keystone indexer tests.
+			keystoneBH, err := s.ki.IndexerAt(ctx)
+			if err != nil {
+				keystoneBH = &tbcd.BlockHeader{}
+			}
+			keystoneHH := &HashHeight{
+				Hash:   keystoneBH.Hash,
+				Height: keystoneBH.Height,
+			}
+			si.Keystone = *keystoneHH
+			if keystoneHH.Hash.IsEqual(&bhb.Hash) {
+				si.Synced = true
+				// Fallthrough to handle zk indexer
+			}
 		}
-		keystoneHH := &HashHeight{
-			Hash:   keystoneBH.Hash,
-			Height: keystoneBH.Height,
-		}
-		si.Keystone = *keystoneHH
-		if keystoneHH.Hash.IsEqual(&bhb.Hash) {
-			si.Synced = true
-			return
+
+		if s.cfg.ZKIndex {
+			si.Synced = false // reset Synced flag
+
+			// Perform additional zk indexer tests.
+			zkBH, err := s.zki.IndexerAt(ctx)
+			if err != nil {
+				zkBH = &tbcd.BlockHeader{}
+			}
+			zkHH := &HashHeight{
+				Hash:   zkBH.Hash,
+				Height: zkBH.Height,
+			}
+			si.ZK = *zkHH
+			if zkHH.Hash.IsEqual(&bhb.Hash) {
+				si.Synced = true
+				// Fallthrough
+			}
 		}
 	}
 	return
@@ -2904,6 +2931,14 @@ func (s *Server) Collectors() []prometheus.Collector {
 					Name:      "keystone_sync_height",
 					Help:      "Height of the keystone indexer",
 				}, s.promKeystone))
+		}
+		if s.cfg.ZKIndex {
+			s.promCollectors = append(s.promCollectors,
+				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+					Namespace: s.cfg.PrometheusNamespace,
+					Name:      "zk_sync_height",
+					Help:      "Height of the zk indexer",
+				}, s.promZK))
 		}
 	}
 	return s.promCollectors
