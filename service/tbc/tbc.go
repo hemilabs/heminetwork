@@ -2684,8 +2684,6 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 	}
 
 	if s.cfg.ZKIndex {
-		si.Synced = false // reset Synced flag
-
 		// Perform additional zk indexer tests.
 		zkBH, err := s.zki.IndexerAt(ctx)
 		if err != nil {
