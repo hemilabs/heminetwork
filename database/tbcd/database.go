@@ -518,8 +518,8 @@ func NewSpentOutput(prevScripthash chainhash.Hash, height uint32, blockhash, txi
 	return
 }
 
-// SpendableOutput = sha256(PkScript):blockheight:blockhash:txId
-type SpendableOutput [32 + 4 + 32 + 32]byte
+// SpendableOutput = sha256(PkScript):blockheight:blockhash:txId:txOutIdx
+type SpendableOutput [32 + 4 + 32 + 32 + 4]byte
 
 func (o SpendableOutput) String() string {
 	block, err := chainhash.NewHash(o[32+4 : 32+4+32])
@@ -530,20 +530,22 @@ func (o SpendableOutput) String() string {
 	if err != nil {
 		panic(err)
 	}
-	return fmt.Sprintf("sh %x height %v block %v tx %v", o[0:32],
-		binary.BigEndian.Uint32(o[32:32+4]), block, txid)
+	return fmt.Sprintf("sh %x height %v block %v tx %v:%v", o[0:32],
+		binary.BigEndian.Uint32(o[32:32+4]), block, txid,
+		binary.BigEndian.Uint32(o[32+4+32+32:]))
 }
 
-func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txid chainhash.Hash) (o SpendableOutput) {
+func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txid chainhash.Hash, txOutIndex uint32) (o SpendableOutput) {
 	copy(o[0:], scripthash[:])
 	binary.BigEndian.PutUint32(o[32:], height)
 	copy(o[32+4:], blockhash[:])
 	copy(o[32+4+32:], txid[:])
+	binary.BigEndian.PutUint32(o[32+4+32+32:], txOutIndex)
 	return
 }
 
 // ZKIndexKey is a wrapper to the various types to make the comparable.
-// Valid keys are, SpendableOutput(100), SpentOutput(140), Outpoint(37),
+// Valid keys are, SpendableOutput(104), SpentOutput(140), Outpoint(37),
 // ScriptHash(32), TxSpendKey(72)
 type ZKIndexKey string // ugh to make []byte comparable
 

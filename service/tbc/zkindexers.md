@@ -21,7 +21,7 @@ cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // SpendingO
 
 UTxO index
 ```
-cache[sha256(PkScript) + height + hash + txid] = nil    // SpendableOutput
+cache[sha256(PkScript) + height + hash + txid + txOutIndex] = nil    // SpendableOutput
 cache[Out] = TxOut                                      // OutpointScriptValue
 cache[sha256(PkScript)] += Value                        // ScriptHash
 ```
