@@ -75,12 +75,10 @@ var (
 	versionKey = []byte("version")
 
 	// These keys live in their own respective databases.
-	utxoIndexHashKey           = []byte("utxoindexhash")          // last indexed utxo block hash
-	txIndexHashKey             = []byte("txindexhash")            // last indexed tx block hash
-	keystoneIndexHashKey       = []byte("keystoneindexhash")      // last indexed keystone block hash
-	zkBlockHeadersIndexHashKey = []byte("zkblockheaderindexhash") // last indexed zk blockheader hash
-	zkTXIndexHashKey           = []byte("zktxindexhash")          // last indexed zk tx hash
-	zkUtxoIndexHashKey         = []byte("zkutxoindexhash")        // last indexed zk utxo hash
+	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
+	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
+	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
+	zkIndexHashKey       = []byte("zkindexhash")       // last indexed zk block hash
 )
 
 func init() {
@@ -2203,7 +2201,7 @@ func (l *ldb) BlockHeaderByZKIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 	}
 	defer kssDiscard()
 
-	hash, err := kssTx.Get(zkUtxoIndexHashKey, nil)
+	hash, err := kssTx.Get(zkIndexHashKey, nil)
 	if err != nil {
 		nerr := fmt.Errorf("zk utxo get: %w", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -2252,7 +2250,7 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
-func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
+func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKUpdate")
 	defer log.Tracef("BlockZKUpdate exit")
 
@@ -2284,7 +2282,7 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 	}
 
 	// Store index
-	bhsBatch.Put(zkUtxoIndexHashKey, zkUtxoIndexHash[:])
+	bhsBatch.Put(zkIndexHashKey, zkIndexHash[:])
 
 	// Write utxos batch
 	if err = bhsTx.Write(bhsBatch, nil); err != nil {

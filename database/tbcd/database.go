@@ -136,7 +136,7 @@ type Database interface {
 
 	// ZKUtxo
 	BlockHeaderByZKIndex(ctx context.Context) (*BlockHeader, error)
-	BlockZKUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkTxIndexHash chainhash.Hash) error
+	BlockZKUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error
 	ZKScriptByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 }
