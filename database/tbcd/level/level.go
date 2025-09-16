@@ -2196,7 +2196,7 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
-func (l *ldb) BlockHeaderByZKUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+func (l *ldb) BlockHeaderByZKIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
 	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKDB)
 	if err != nil {
 		return nil, fmt.Errorf("zk utxo open db transaction: %w", err)
@@ -2252,9 +2252,9 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
-func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
-	log.Tracef("BlockZKUtxoUpdate")
-	defer log.Tracef("BlockZKUtxoUpdate exit")
+func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
+	log.Tracef("BlockZKUpdate")
+	defer log.Tracef("BlockZKUpdate exit")
 
 	if !(direction == 1 || direction == -1) {
 		return fmt.Errorf("invalid direction: %v", direction)

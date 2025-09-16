@@ -2763,7 +2763,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 
 	if s.cfg.ZKIndex {
 		// XXX s.cfg.MaxCachedKeystones ??
-		s.zki = NewZKUtxoIndexer(s.g, s.cfg.MaxCachedKeystones,
+		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedKeystones,
 			s.cfg.ZKIndex)
 	}
 

@@ -135,8 +135,8 @@ type Database interface {
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]Keystone, error)
 
 	// ZKUtxo
-	BlockHeaderByZKUtxoIndex(ctx context.Context) (*BlockHeader, error)
-	BlockZKUtxoUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkTxIndexHash chainhash.Hash) error
+	BlockHeaderByZKIndex(ctx context.Context) (*BlockHeader, error)
+	BlockZKUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkTxIndexHash chainhash.Hash) error
 	ZKScriptByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 }

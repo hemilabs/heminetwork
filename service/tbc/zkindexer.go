@@ -32,7 +32,7 @@ var (
 	_ indexer = (*zkIndexer)(nil)
 )
 
-func NewZKUtxoIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
+func NewZKIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 	zi := &zkIndexer{
 		cacheCapacity: cacheLen,
 	}
@@ -50,7 +50,7 @@ func (i *zkIndexer) newCache() indexerCache {
 }
 
 func (i *zkIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
-	bh, err := i.g.db.BlockHeaderByZKUtxoIndex(ctx)
+	bh, err := i.g.db.BlockHeaderByZKIndex(ctx)
 	return i.evaluateBlockHeaderIndex(bh, err)
 }
 
@@ -201,7 +201,7 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 
 func (i *zkIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte])
-	return i.g.db.BlockZKUtxoUpdate(ctx, direction, cache.Map(), atHash)
+	return i.g.db.BlockZKUpdate(ctx, direction, cache.Map(), atHash)
 }
 
 func (i *zkIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {
