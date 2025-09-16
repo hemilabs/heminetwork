@@ -2670,6 +2670,34 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		}
 	}
 
+	if s.cfg.HemiIndex {
+		// Perform additional keystone indexer tests.
+		keystoneBH, err := s.ki.IndexerAt(ctx)
+		if err != nil {
+			keystoneBH = &tbcd.BlockHeader{}
+		}
+		keystoneHH := &HashHeight{
+			Hash:   keystoneBH.Hash,
+			Height: keystoneBH.Height,
+		}
+		si.Keystone = *keystoneHH
+	}
+
+	if s.cfg.ZKIndex {
+		si.Synced = false // reset Synced flag
+
+		// Perform additional zk indexer tests.
+		zkBH, err := s.zki.IndexerAt(ctx)
+		if err != nil {
+			zkBH = &tbcd.BlockHeader{}
+		}
+		zkHH := &HashHeight{
+			Hash:   zkBH.Hash,
+			Height: zkBH.Height,
+		}
+		si.ZK = *zkHH
+	}
+
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
 		!s.indexing && !blksMissing {
 		// If keystone and zk indexers are disabled we are synced.
@@ -2677,42 +2705,15 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 			si.Synced = true
 			return
 		}
-
-		if s.cfg.HemiIndex {
-			// Perform additional keystone indexer tests.
-			keystoneBH, err := s.ki.IndexerAt(ctx)
-			if err != nil {
-				keystoneBH = &tbcd.BlockHeader{}
-			}
-			keystoneHH := &HashHeight{
-				Hash:   keystoneBH.Hash,
-				Height: keystoneBH.Height,
-			}
-			si.Keystone = *keystoneHH
-			if keystoneHH.Hash.IsEqual(&bhb.Hash) {
-				si.Synced = true
-				// Fallthrough to handle zk indexer
-			}
+		if !(s.cfg.HemiIndex && si.Keystone.Hash.IsEqual(&bhb.Hash)) {
+			// Keystone index not synced
+			return
 		}
-
-		if s.cfg.ZKIndex {
-			si.Synced = false // reset Synced flag
-
-			// Perform additional zk indexer tests.
-			zkBH, err := s.zki.IndexerAt(ctx)
-			if err != nil {
-				zkBH = &tbcd.BlockHeader{}
-			}
-			zkHH := &HashHeight{
-				Hash:   zkBH.Hash,
-				Height: zkBH.Height,
-			}
-			si.ZK = *zkHH
-			if zkHH.Hash.IsEqual(&bhb.Hash) {
-				si.Synced = true
-				// Fallthrough
-			}
+		if !(s.cfg.ZKIndex && si.ZK.Hash.IsEqual(&bhb.Hash)) {
+			// ZK index not synced
+			return
 		}
+		si.Synced = true
 	}
 	return
 }
