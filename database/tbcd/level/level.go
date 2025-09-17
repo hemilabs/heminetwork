@@ -2250,6 +2250,11 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
+var (
+	spent tbcd.SpentOutput
+	spend tbcd.SpendableOutput
+)
+
 func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKUpdate")
 	defer log.Tracef("BlockZKUpdate exit")
@@ -2271,8 +2276,12 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 		// in this loop in the larynx.
 		switch direction {
 		case -1:
-			// On unwind we can simply delete the key.
-			bhsBatch.Delete([]byte(k))
+			// On unwind we can delete some keys.
+			if len(k) == len(spent) || len(k) == len(spend) {
+				bhsBatch.Delete([]byte(k))
+			} else {
+				bhsBatch.Put([]byte(k), v)
+			}
 		case 1:
 			bhsBatch.Put([]byte(k), v)
 		}
