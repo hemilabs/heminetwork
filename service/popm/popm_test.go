@@ -472,7 +472,7 @@ func TestOpgethReconnect(t *testing.T) {
 		}
 
 		if reconAttempts >= 2 {
-			if time.Since(start) <= minDelay {
+			if time.Since(start) < minDelay {
 				t.Fatal("reconnected too fast")
 			}
 			return
