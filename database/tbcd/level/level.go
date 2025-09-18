@@ -2250,6 +2250,11 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
+//func (l *ldb) ZKScriptHashJournal(ctx context.Context, sh tbcd.ScriptHash) (int, error) {
+//	zkdb := l.pool[level.ZKDB]
+//	util.BytesPrefix()
+//}
+
 var scriptHashLen = len(tbcd.ScriptHash{})
 
 func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error {

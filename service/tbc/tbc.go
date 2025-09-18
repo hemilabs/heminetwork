@@ -3171,6 +3171,12 @@ func (s *Server) Run(pctx context.Context) error {
 			bh, _ := s.zki.IndexerAt(ctx)
 			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
 		}
+
+		//// XXX remove
+		//err := s.SyncIndexersToBest(ctx)
+		//if err != nil {
+		//	panic(err)
+		//}
 	}
 
 	select {
