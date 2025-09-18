@@ -1385,7 +1385,7 @@ func (s *Server) RemoveExternalHeaders(ctx context.Context, headers *wire.MsgHea
 			return fmt.Errorf("post hook batch not found: %v",
 				dbnames.MetadataDB)
 		}
-		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
+		level.BatchAppend(ctx, dbnames.MetadataDB, b.Batch, []tbcd.Row{
 			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
@@ -1440,7 +1440,7 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 			return fmt.Errorf("post hook batch not found: %v",
 				dbnames.MetadataDB)
 		}
-		level.BatchAppend(ctx, b.Batch, []tbcd.Row{
+		level.BatchAppend(ctx, dbnames.MetadataDB, b.Batch, []tbcd.Row{
 			{Key: upstreamStateIdKey, Value: upstreamStateId},
 		})
 		return nil
@@ -2801,7 +2801,8 @@ func (s *Server) dbClose() error {
 	log.Tracef("dbClose")
 	defer log.Tracef("dbClose")
 
-	return s.g.db.Close()
+	// XXX marco, should we just pass the normal ctx?
+	return s.g.db.Close(context.TODO())
 }
 
 // Collectors returns the Prometheus collectors available for the server.
