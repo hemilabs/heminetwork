@@ -21,6 +21,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
+	"github.com/hemilabs/larry/larry"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -30,7 +31,6 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
-	"github.com/hemilabs/larry/larry"
 )
 
 // Locking order:
@@ -331,19 +331,19 @@ type (
 func (l *ldb) startTransaction(ctx context.Context, write bool) (larry.Transaction, commitFunc, discardFunc, error) {
 	tx, err := l.pool.Begin(ctx, write)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%v open transaction: %w", err)
+		return nil, nil, nil, fmt.Errorf("open transaction: %w", err)
 	}
 	d := true
 	discard := &d
 	df := func() {
 		if *discard {
 			log.Debugf("discarding transaction")
-			tx.Rollback(ctx)
+			_ = tx.Rollback(ctx)
 		}
 	}
 	cf := func() error {
 		if err := tx.Commit(ctx); err != nil {
-			return fmt.Errorf("%v commit: %w", err)
+			return fmt.Errorf("commit: %w", err)
 		}
 		*discard = false
 		return nil
@@ -425,7 +425,6 @@ func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byt
 			}
 			return nil
 		})
-
 	if err != nil {
 		return nil, err
 	}

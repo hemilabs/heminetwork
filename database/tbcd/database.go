@@ -20,10 +20,10 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/hemilabs/larry/larry"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/hemi"
-	"github.com/hemilabs/larry/larry"
 )
 
 type InsertType int
