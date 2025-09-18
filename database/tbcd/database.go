@@ -544,9 +544,10 @@ func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txi
 	return
 }
 
-// ZKIndexKey is a wrapper to the various types to make the comparable.
-// Valid keys are, SpendableOutput(104), SpentOutput(140), Outpoint(37),
-// ScriptHash(32), TxSpendKey(72)
+// ZKIndexKey is a wrapper to the various types to make the comparable.  Valid
+// keys are, SpendableOutput(104), SpentOutput(140), Outpoint(37),
+// ScriptHash(32), TxSpendKey(72). ScriptHash(32) is the *ONLY* table that is
+// updated, the others are essentially a journal of activity.
 type ZKIndexKey string // ugh to make []byte comparable
 
 func BEUint64(x uint64) []byte {
