@@ -54,9 +54,9 @@ const (
 	minPeersRequired     = 64  // minimum number of peers in good map before cache is purged
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
-	defaultMaxCachedKeystones = 1e6 // number of cached keystones prior to flush
-
-	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
+	defaultMaxCachedKeystones = 2e6 // number of cached keystones prior to flush
+	defaultMaxCachedTxs       = 2e6 // dual purpose cache, max key 69, max value 36
+	defaultMaxZK              = 2e6 // number of cached zk rows prior to flush
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
@@ -176,6 +176,7 @@ type Config struct {
 	LogLevel                string
 	MaxCachedKeystones      int
 	MaxCachedTxs            int
+	MaxCachedZK             int
 	MempoolEnabled          bool
 	DatabaseDebug           bool
 	Network                 string
@@ -203,6 +204,7 @@ func NewDefaultConfig() *Config {
 		LogLevel:             logLevel,
 		MaxCachedKeystones:   defaultMaxCachedKeystones,
 		MaxCachedTxs:         defaultMaxCachedTxs,
+		MaxCachedZK:          defaultMaxZK,
 		MempoolEnabled:       true,
 		PeersWanted:          defaultPeersWanted,
 		PrometheusNamespace:  appName,
@@ -2788,8 +2790,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
-		// XXX s.cfg.MaxCachedKeystones ??
-		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedKeystones,
+		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedZK,
 			s.cfg.ZKIndex)
 	}
 
