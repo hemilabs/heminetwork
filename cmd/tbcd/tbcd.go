@@ -85,14 +85,20 @@ var (
 		},
 		"TBC_MAX_CACHED_KEYSTONES": config.Config{
 			Value:        &cfg.MaxCachedKeystones,
-			DefaultValue: int(1e6),
+			DefaultValue: int(2e6),
 			Help:         "maximum cached keystones during indexing",
 			Print:        config.PrintAll,
 		},
 		"TBC_MAX_CACHED_TXS": config.Config{
 			Value:        &cfg.MaxCachedTxs,
-			DefaultValue: int(1e6),
+			DefaultValue: int(2e6),
 			Help:         "maximum cached utxos and/or txs during indexing",
+			Print:        config.PrintAll,
+		},
+		"TBC_MAX_CACHED_ZK": config.Config{
+			Value:        &cfg.MaxCachedZK,
+			DefaultValue: int(2e6),
+			Help:         "maximum cached zk rows during indexing",
 			Print:        config.PrintAll,
 		},
 		"TBC_MEMPOOL_ENABLED": config.Config{
@@ -129,6 +135,12 @@ var (
 			Value:        &cfg.Seeds,
 			DefaultValue: []string{},
 			Help:         "list of seed domains for Bitcoin P2P, in the format '<host>:<port>' (for localnet, must be a single host:port)",
+			Print:        config.PrintAll,
+		},
+		"TBC_ZK_INDEX": config.Config{
+			Value:        &cfg.ZKIndex,
+			DefaultValue: false,
+			Help:         "enable/disable various zk related indexes",
 			Print:        config.PrintAll,
 		},
 	}

@@ -32,6 +32,7 @@ const (
 	HeightHashDB    = "heighthash"
 	OutputsDB       = "outputs"
 	TransactionsDB  = "transactions"
+	ZKDB            = "zkindex"
 
 	BlocksDB = "blocks" // raw database
 )
@@ -218,6 +219,10 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	err = l.openDB(KeystonesDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
+	}
+	err = l.openDB(ZKDB)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", ZKDB, err)
 	}
 	err = l.openDB(MetadataDB)
 	if err != nil {
