@@ -318,7 +318,8 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
 	cfg.l2KeystoneMaxAge = mock.InfiniteDuration
-	cfg.opgethReconnectTimeout = 500 * time.Millisecond
+	cfg.opgethMaxReconnectDelay = 1 * time.Second
+	cfg.opgethMinReconnectDelay = 500 * time.Millisecond
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -408,6 +409,74 @@ func TestStaticFee(t *testing.T) {
 
 	if fee.SatsPerByte != 1.5 {
 		t.Fatalf("expected fee of 1.5 sats/byte, got %v sats/byte", fee.SatsPerByte)
+	}
+}
+
+func TestOpgethReconnect(t *testing.T) {
+	const (
+		minDelay = 250 * time.Millisecond
+		maxDelay = 1 * time.Second
+	)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	defer cancel()
+
+	errCh := make(chan error, 10)
+	msgCh := make(chan string, 10)
+
+	_, kssList := testutil.MakeSharedKeystones(1)
+
+	// Create opgeth test server with the request handler.
+	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, 0)
+	defer opgeth.Shutdown()
+
+	opgeth.Stop()
+
+	// Setup pop miner
+	cfg := NewDefaultConfig()
+	cfg.BitcoinSource = "tbc"
+	cfg.OpgethURL = "ws" + strings.TrimPrefix(opgeth.URL(), "http")
+	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
+	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
+	cfg.l2KeystoneMaxAge = mock.InfiniteDuration
+	cfg.opgethMinReconnectDelay = minDelay
+	cfg.opgethMaxReconnectDelay = maxDelay
+
+	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create pop miner
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// slightly buffered to process messages
+	maxCtx, cancelMax := context.WithTimeout(ctx, maxDelay*2)
+	defer cancelMax()
+
+	start := time.Now()
+
+	go s.opgeth(maxCtx)
+
+	var reconAttempts int
+	for {
+		select {
+		case <-maxCtx.Done():
+			t.Fatal("reconnect too long")
+		case err := <-errCh:
+			if errors.Is(err, mock.ErrConnectionClosed) {
+				reconAttempts += 1
+			}
+		}
+
+		if reconAttempts >= 2 {
+			if time.Since(start) <= minDelay {
+				t.Fatal("reconnected too fast")
+			}
+			return
+		}
 	}
 }
 
