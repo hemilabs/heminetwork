@@ -75,9 +75,12 @@ var (
 	versionKey = []byte("version")
 
 	// These keys live in their own respective databases.
-	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
-	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
-	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
+	utxoIndexHashKey           = []byte("utxoindexhash")          // last indexed utxo block hash
+	txIndexHashKey             = []byte("txindexhash")            // last indexed tx block hash
+	keystoneIndexHashKey       = []byte("keystoneindexhash")      // last indexed keystone block hash
+	zkBlockHeadersIndexHashKey = []byte("zkblockheaderindexhash") // last indexed zk blockheader hash
+	zkTXIndexHashKey           = []byte("zktxindexhash")          // last indexed zk tx hash
+	zkUtxoIndexHashKey         = []byte("zkutxoindexhash")        // last indexed zk utxo hash
 )
 
 func init() {
@@ -704,25 +707,29 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	bmBatch := new(leveldb.Batch)
 	bhBatch := new(leveldb.Batch)
 
-	// Genesis insert can be called with an effective genesis block at a particular height
-	// and with a particular cumulative difficulty which is guaranteed canonical (protocol
-	// assumes this effective genesis block will never fork), allowing a header-only TBC
-	// instance to maintain Bitcoin consensus starting from a non-genesis block rather
-	// than requiring all historical state which is irrelevant to conesnsus assuming the
-	// effective genesis block is never forked.
+	// Genesis insert can be called with an effective genesis block at a
+	// particular height and with a particular cumulative difficulty which
+	// is guaranteed canonical (protocol assumes this effective genesis
+	// block will never fork), allowing a header-only TBC instance to
+	// maintain Bitcoin consensus starting from a non-genesis block rather
+	// than requiring all historical state which is irrelevant to conesnsus
+	// assuming the effective genesis block is never forked.
 	hhKey := heightHashToKey(height, bhash[:])
 	hhBatch.Put(hhKey, []byte{})
 
-	// Handle the default case where the passed-in block is actually the genesis
+	// Handle the default case where the passed-in block is actually the
+	// genesis
 	cdiff := blockchain.CalcWork(wbh.Bits)
 
-	// If an effective starting difficulty is supplied and is not set to zero, then use it
-	// instead (used for external header mode). In the event that an effective genesis block
-	// is supplied but the cumulative difficulty is not set, the difficulty of that
-	// effective genesis block (set above) will be retained, which has no effect on local
-	// consensus determination but will not permit direct comparison of cumulative difficulty
-	// against the full chain, only relative comparisons between cumulative difficulties of
-	// blocks on top of the same effective genesis block are guaranteed valid.
+	// If an effective starting difficulty is supplied and is not set to
+	// zero, then use it instead (used for external header mode). In the
+	// event that an effective genesis block is supplied but the cumulative
+	// difficulty is not set, the difficulty of that effective genesis
+	// block (set above) will be retained, which has no effect on local
+	// consensus determination but will not permit direct comparison of
+	// cumulative difficulty against the full chain, only relative
+	// comparisons between cumulative difficulties of blocks on top of the
+	// same effective genesis block are guaranteed valid.
 	if diff != nil && diff.Cmp(big.NewInt(0)) > 0 {
 		cdiff = diff
 	}
@@ -2191,6 +2198,227 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
 	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockHeaderByZKBlockHeaderIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKBlockHeadersDB)
+	if err != nil {
+		return nil, fmt.Errorf("zk blockheaders open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	hash, err := kssTx.Get(zkBlockHeadersIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("zkBlockHeaders get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+// height hash ->  h_uint32_[32]byte
+type ZKHeightHash [37]byte
+
+func encodeZKHeightHash(height uint32, hash chainhash.Hash) (zkhh ZKHeightHash) {
+	zkhh[0] = 'h'
+	binary.BigEndian.PutUint32(zkhh[1:5], height)
+	copy(zkhh[5:], hash[:])
+	return
+}
+
+func (l *ldb) BlockZKBlockHeaderUpdate(ctx context.Context, direction int, blockheaders map[chainhash.Hash]tbcd.BlockHeader, zkBlockHeadersIndexHash chainhash.Hash) error {
+	log.Tracef("BlockZKBlockHeaderUpdate")
+	defer log.Tracef("BlockZKBlockHeaderUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	// blockheaders
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.ZKBlockHeadersDB)
+	if err != nil {
+		return fmt.Errorf("zk blockheaders open db transaction: %w", err)
+	}
+	defer bhsDiscard()
+
+	bhsBatch := new(leveldb.Batch)
+	for k, v := range blockheaders {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
+		_ = v
+		switch direction {
+		case -1:
+			ehh := encodeZKHeightHash(uint32(v.Height), k)
+			bhsBatch.Delete(ehh[:])
+			bhsBatch.Delete(k[:])
+		case 1:
+			ehh := encodeZKHeightHash(uint32(v.Height), k)
+			bhsBatch.Put(ehh[:], nil)
+			ebh := encodeBlockHeader(v.Height, v.Header, &v.Difficulty)
+			bhsBatch.Put(k[:], ebh[:])
+		}
+
+		// Empty out cache.
+		delete(blockheaders, k)
+	}
+
+	// Store index
+	bhsBatch.Put(zkBlockHeadersIndexHashKey, zkBlockHeadersIndexHash[:])
+
+	// Write blockheaders batch
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+		return fmt.Errorf("blockheaders insert: %w", err)
+	}
+
+	// blockheaders commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("blockheaders commit: %w", err)
+	}
+
+	return nil
+}
+
+func (l *ldb) BlockHeaderByZKTXIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKTXDB)
+	if err != nil {
+		return nil, fmt.Errorf("zk tx open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	hash, err := kssTx.Get(zkTXIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("zk tx get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockZKTXUpdate(ctx context.Context, direction int, txs map[tbcd.TxSpendKey][]byte, zkTXIndexHash chainhash.Hash) error {
+	log.Tracef("BlockZKTXUpdate")
+	defer log.Tracef("BlockZKTXUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	// txs
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.ZKTXDB)
+	if err != nil {
+		return fmt.Errorf("zk tx open db transaction: %w", err)
+	}
+	defer bhsDiscard()
+
+	bhsBatch := new(leveldb.Batch)
+	for k, v := range txs {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
+		_ = v
+		switch direction {
+		case -1:
+			// On unwind we can simply delete the key.
+			bhsBatch.Delete(k[:])
+		case 1:
+			bhsBatch.Put(k[:], v)
+		}
+
+		// Empty out cache.
+		delete(txs, k)
+	}
+
+	// Store index
+	bhsBatch.Put(zkTXIndexHashKey, zkTXIndexHash[:])
+
+	// Write txs batch
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+		return fmt.Errorf("txs insert: %w", err)
+	}
+
+	// txs commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("txs commit: %w", err)
+	}
+
+	return nil
+}
+
+func (l *ldb) BlockHeaderByZKUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKUtxoDB)
+	if err != nil {
+		return nil, fmt.Errorf("zk utxo open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	hash, err := kssTx.Get(zkUtxoIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("zk utxo get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockZKUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd.TxSpendKey][]byte, zkUtxoIndexHash chainhash.Hash) error {
+	log.Tracef("BlockZKUtxoUpdate")
+	defer log.Tracef("BlockZKUtxoUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	// utxos
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.ZKUtxoDB)
+	if err != nil {
+		return fmt.Errorf("zk utxos open db transaction: %w", err)
+	}
+	defer bhsDiscard()
+
+	bhsBatch := new(leveldb.Batch)
+	for k, v := range utxos {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
+		_ = v
+		switch direction {
+		case -1:
+		case 1:
+		}
+
+		// Empty out cache.
+		delete(utxos, k)
+	}
+
+	// Store index
+	bhsBatch.Put(zkUtxoIndexHashKey, zkUtxoIndexHash[:])
+
+	// Write utxos batch
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+		return fmt.Errorf("utxos insert: %w", err)
+	}
+
+	// utxos commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("utxos commit: %w", err)
+	}
+
+	return nil
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
