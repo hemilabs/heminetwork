@@ -18,10 +18,10 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/v2/database"
 	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/larry/larry"
 )
 
 type InsertType int
@@ -77,7 +77,7 @@ func (rt RemoveType) String() string {
 }
 
 type Batch struct {
-	Batch *leveldb.Batch
+	Batch larry.Batch
 }
 
 type BatchHook func(ctx context.Context, batches map[string]Batch) error
