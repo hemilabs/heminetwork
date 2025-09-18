@@ -51,7 +51,8 @@ type Database struct {
 	pool    larry.Database // database pool
 	rawPool RawPool        // raw database pool
 
-	home string
+	home   string
+	tables map[string]string
 }
 
 var _ database.Database = (*Database)(nil)
@@ -100,6 +101,15 @@ func (l *Database) RawDB() RawPool {
 	return maps.Clone(l.rawPool)
 }
 
+func (l *Database) Tables() map[string]string {
+	log.Tracef("Tables")
+	defer log.Tracef("Tables exit")
+
+	l.mtx.RLock()
+	defer l.mtx.RUnlock()
+	return maps.Clone(l.tables)
+}
+
 func (l *Database) openRawDB(ctx context.Context, name string, blockSize int64) error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
@@ -133,11 +143,6 @@ func New(ctx context.Context, home string) (*Database, error) {
 		return nil, fmt.Errorf("home dir: %w", err)
 	}
 
-	l := &Database{
-		home:    h,
-		rawPool: make(RawPool),
-	}
-
 	poolMap := map[string]string{
 		BlockHeadersDB:  "level",
 		BlocksMissingDB: "level",
@@ -147,6 +152,12 @@ func New(ctx context.Context, home string) (*Database, error) {
 		OutputsDB:       "level",
 		TransactionsDB:  "level",
 		ZKDB:            "level",
+	}
+
+	l := &Database{
+		home:    h,
+		rawPool: make(RawPool),
+		tables:  poolMap,
 	}
 
 	// MultiDB makes the directory path for home

@@ -41,7 +41,7 @@ func TestMD(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -243,7 +243,7 @@ func TestHeightHashIndexing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -455,7 +455,7 @@ func TestKeystoneUpdate(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer func() {
-				err := db.Close()
+				err := db.Close(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -553,7 +553,7 @@ func TestKeystoneDBWindUnwind(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -621,7 +621,7 @@ func TestKeystoneDBCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -787,7 +787,7 @@ func TestDbUpgradeV4Errors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := dbTemp.insertTable(level.KeystonesDB, tti.key, tti.value); err != nil {
+			if err := dbTemp.insertTable(ctx, level.KeystonesDB, tti.key, tti.value); err != nil {
 				panic(err)
 			}
 
@@ -798,7 +798,7 @@ func TestDbUpgradeV4Errors(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := dbTemp.Close(); err != nil {
+			if err := dbTemp.Close(ctx); err != nil {
 				t.Fatal(err)
 			}
 
