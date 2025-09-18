@@ -30,6 +30,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
+	"github.com/hemilabs/larry/larry"
 )
 
 // Locking order:
@@ -89,7 +90,7 @@ func init() {
 
 type ldb struct {
 	*level.Database
-	pool    level.Pool
+	pool    larry.Database
 	rawPool level.RawPool
 
 	blockCache *lowIQLRU
@@ -99,6 +100,8 @@ type ldb struct {
 	headerCache *lowIQMap
 
 	cfg *Config
+
+	tables map[string]string
 }
 
 var _ tbcd.Database = (*ldb)(nil)
@@ -205,7 +208,7 @@ func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*C
 }
 
 func open(ctx context.Context, cfg *Config) (*ldb, error) {
-	ld, err := level.New(ctx, level.NewDefaultConfig(cfg.Home))
+	ld, err := level.New(ctx, cfg.Home)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +218,7 @@ func open(ctx context.Context, cfg *Config) (*ldb, error) {
 		pool:     ld.DB(),
 		rawPool:  ld.RawDB(),
 		cfg:      cfg,
+		tables:   ld.Tables(),
 	}
 
 	welcome := make([]string, 0, 10)
@@ -324,23 +328,22 @@ type (
 	commitFunc  func() error
 )
 
-func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, discardFunc, error) {
-	bhsDB := l.pool[db]
-	tx, err := bhsDB.OpenTransaction()
+func (l *ldb) startTransaction(ctx context.Context, write bool) (larry.Transaction, commitFunc, discardFunc, error) {
+	tx, err := l.pool.Begin(ctx, write)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("%v open transaction: %w", db, err)
+		return nil, nil, nil, fmt.Errorf("%v open transaction: %w", err)
 	}
 	d := true
 	discard := &d
 	df := func() {
 		if *discard {
-			log.Debugf("discarding transaction: %v", db)
-			tx.Discard()
+			log.Debugf("discarding transaction")
+			tx.Rollback(ctx)
 		}
 	}
 	cf := func() error {
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("%v commit: %w", db, err)
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("%v commit: %w", err)
 		}
 		*discard = false
 		return nil
@@ -349,32 +352,8 @@ func (l *ldb) startTransaction(db string) (*leveldb.Transaction, commitFunc, dis
 	return tx, cf, df, nil
 }
 
-func (l *ldb) transactionBatchGet(ctx context.Context, t *leveldb.Transaction, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
-	log.Tracef("transactionBatchGet")
-	defer log.Tracef("transactionBatchGet exit")
-
-	rows := make([]tbcd.Row, len(keys))
-	for k := range keys {
-		value, err := t.Get(keys[k], nil)
-		if err != nil && allOrNone {
-			if errors.Is(err, leveldb.ErrNotFound) {
-				return nil, database.NotFoundError(fmt.Sprintf("%s: %v",
-					string(keys[k]), err))
-			}
-			return nil, fmt.Errorf("%s: %w", string(keys[k]), err)
-		}
-		if errors.Is(err, leveldb.ErrNotFound) {
-			// overload err
-			err = database.NotFoundError(err.Error())
-		}
-		rows[k] = tbcd.Row{Key: keys[k], Value: value, Error: err}
-	}
-	return rows, nil
-}
-
 func (l *ldb) Version(ctx context.Context) (int, error) {
-	mdDB := l.pool[level.MetadataDB]
-	value, err := mdDB.Get(versionKey, nil)
+	value, err := l.pool.Get(ctx, level.MetadataDB, versionKey)
 	if err != nil {
 		return -1, fmt.Errorf("version: %w", err)
 	}
@@ -387,69 +366,70 @@ func (l *ldb) MetadataDel(ctx context.Context, key []byte) error {
 	log.Tracef("MetadataDel")
 	defer log.Tracef("MetadataDel exit")
 
-	mdDB, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
-	if err != nil {
-		return fmt.Errorf("metadata open db transaction: %w", err)
-	}
-	defer mdDiscard()
-
-	ok, err := mdDB.Has(key, nil)
-	if err != nil {
-		return database.NotFoundError(err.Error())
-	}
-	if !ok {
-		return database.NotFoundError("not found")
-	}
-
-	mdBatch := new(leveldb.Batch)
-	mdBatch.Delete(key)
-
-	// Transaction write
-	if err := mdDB.Write(mdBatch, nil); err != nil {
-		return fmt.Errorf("metadata write: %w", err)
-	}
-
-	// Transaction commit
-	if err = mdCommit(); err != nil {
-		return fmt.Errorf("transactions commit: %w", err)
-	}
-
-	return nil
+	err := l.pool.Update(ctx,
+		func(ctx context.Context, tx larry.Transaction) error {
+			ok, ierr := tx.Has(ctx, level.MetadataDB, key)
+			if ierr != nil {
+				return database.NotFoundError(ierr.Error())
+			}
+			if !ok {
+				return database.NotFoundError("not found")
+			}
+			if err := tx.Del(ctx, level.MetadataDB, key); err != nil {
+				return fmt.Errorf("metadata write: %w", err)
+			}
+			return nil
+		})
+	return err
 }
 
-func (l *ldb) MetadataGet(ctx context.Context, key []byte) ([]byte, error) {
+func (l *ldb) MetadataGet(ctx context.Context, key []byte) (v []byte, err error) {
 	log.Tracef("MetadataGet")
 	defer log.Tracef("MetadataGet exit")
 
-	// Metadata transaction, we do this to simply lock the table.
-	mdDB, _, mdDiscard, err := l.startTransaction(level.MetadataDB)
-	if err != nil {
-		return nil, fmt.Errorf("metadata open db transaction: %w", err)
-	}
-	defer mdDiscard()
+	err = l.pool.View(ctx,
+		func(ctx context.Context, tx larry.Transaction) error {
+			val, ierr := tx.Get(ctx, level.MetadataDB, key)
+			if ierr != nil {
+				return database.NotFoundError(ierr.Error())
+			}
+			v = val
+			return nil
+		})
 
-	rows, err := l.transactionBatchGet(ctx, mdDB, true, [][]byte{key})
-	if err != nil {
-		return nil, err
-	}
-	if len(rows) != 1 {
-		return nil, fmt.Errorf("unexpected rows length: %v", len(rows))
-	}
-	return rows[0].Value, err
+	return
 }
 
 func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {
 	log.Tracef("MetadataBatchGet")
 	defer log.Tracef("MetadataBatchGet exit")
 
-	// Metadata transaction, we do this to simply lock the table.
-	mdDB, _, mdDiscard, err := l.startTransaction(level.MetadataDB)
-	if err != nil {
-		return nil, fmt.Errorf("metadata open db transaction: %w", err)
-	}
-	defer mdDiscard()
+	rows := make([]tbcd.Row, len(keys))
+	err := l.pool.View(ctx,
+		func(ctx context.Context, tx larry.Transaction) error {
+			for k := range keys {
+				value, ierr := tx.Get(ctx, level.MetadataDB, keys[k])
+				if ierr != nil && allOrNone {
+					if errors.Is(ierr, larry.ErrKeyNotFound) {
+						return database.NotFoundError(fmt.Sprintf("%s: %v",
+							string(keys[k]), ierr))
+					}
+					return fmt.Errorf("%s: %w", string(keys[k]), ierr)
+				}
+				if errors.Is(ierr, larry.ErrKeyNotFound) {
+					// overload error
+					ierr = database.NotFoundError(fmt.Sprintf("%s: %v",
+						string(keys[k]), ierr))
+				}
+				rows[k] = tbcd.Row{Key: keys[k], Value: value, Error: ierr}
+			}
+			return nil
+		})
 
-	return l.transactionBatchGet(ctx, mdDB, allOrNone, keys)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*tbcd.Keystone, error) {
@@ -460,11 +440,10 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	log.Tracef("BlockKeystoneByL2KeystoneAbrevHash: lookup %s (%s)",
 		abrevhash.String(), hex.EncodeToString(abrevHashB))
 
-	kssDB := l.pool[level.KeystonesDB]
-	eks, err := kssDB.Get(abrevHashB, nil)
+	eks, err := l.pool.Get(ctx, level.KeystonesDB, abrevHashB)
 	if err != nil {
 		log.Errorf("error found getting keystone: %s", err)
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("l2 keystone not found: %v", abrevhash))
 		}
 		return nil, fmt.Errorf("l2 keystone: %w", err)
@@ -473,13 +452,29 @@ func (l *ldb) BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash 
 	return &ks, nil
 }
 
+// batchCommit commits a batch using a transaction.
+func (l *ldb) batchCommit(ctx context.Context, b larry.Batch) error {
+	log.Tracef("batchCommit")
+	defer log.Tracef("batchCommit exit")
+
+	err := l.pool.Update(ctx,
+		func(ctx context.Context, tx larry.Transaction) error {
+			if err := tx.Write(ctx, b); err != nil {
+				return fmt.Errorf("batch write: %w", err)
+			}
+			return nil
+		})
+
+	return err
+}
+
 // BatchAppend appends rows to batch b.
-func BatchAppend(ctx context.Context, b *leveldb.Batch, rows []tbcd.Row) {
+func BatchAppend(ctx context.Context, table string, b larry.Batch, rows []tbcd.Row) {
 	log.Tracef("BatchAppend")
 	defer log.Tracef("BatchAppend exit")
 
 	for k := range rows {
-		b.Put(rows[k].Key, rows[k].Value)
+		b.Put(ctx, table, rows[k].Key, rows[k].Value)
 	}
 }
 
@@ -487,53 +482,27 @@ func (l *ldb) MetadataBatchPut(ctx context.Context, rows []tbcd.Row) error {
 	log.Tracef("MetadataBatchPut")
 	defer log.Tracef("MetadataBatchPut exit")
 
-	// Metadata transaction
-	mdDB, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	mdBatch, err := l.pool.NewBatch(ctx)
 	if err != nil {
-		return fmt.Errorf("metadata open db transaction: %w", err)
+		return fmt.Errorf("open batch %w", err)
 	}
-	defer mdDiscard()
+	BatchAppend(ctx, level.MetadataDB, mdBatch, rows)
 
-	mdBatch := new(leveldb.Batch)
-	BatchAppend(ctx, mdBatch, rows)
-
-	// Transaction write
-	if err := mdDB.Write(mdBatch, nil); err != nil {
-		return fmt.Errorf("metadata write: %w", err)
-	}
-
-	// Transaction commit
-	if err = mdCommit(); err != nil {
-		return fmt.Errorf("metadata commit: %w", err)
-	}
-
-	return nil
+	return l.batchCommit(ctx, mdBatch)
 }
 
 func (l *ldb) MetadataPut(ctx context.Context, key, value []byte) error {
 	log.Tracef("MetadataPut")
 	defer log.Tracef("MetadataPut exit")
 
-	// Metadata transaction
-	mdDB, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	mdBatch, err := l.pool.NewBatch(ctx)
 	if err != nil {
-		return fmt.Errorf("metadata open db transaction: %w", err)
+		return fmt.Errorf("open batch %w", err)
 	}
-	defer mdDiscard()
+	row := []tbcd.Row{{Key: key, Value: value}}
+	BatchAppend(ctx, level.MetadataDB, mdBatch, row)
 
-	mdBatch := new(leveldb.Batch)
-	BatchAppend(ctx, mdBatch, []tbcd.Row{{Key: key, Value: value}})
-	// Transaction write
-	if err := mdDB.Write(mdBatch, nil); err != nil {
-		return fmt.Errorf("metadata write: %w", err)
-	}
-
-	// Transaction commit
-	if err = mdCommit(); err != nil {
-		return fmt.Errorf("transactions commit: %w", err)
-	}
-
-	return nil
+	return l.batchCommit(ctx, mdBatch)
 }
 
 func (l *ldb) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*tbcd.BlockHeader, error) {
@@ -551,10 +520,9 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*tbcd
 	// caller code will either receive or not receive an answer. It does
 	// not seem likely to be racing higher up in the stack.
 
-	bhsDB := l.pool[level.BlockHeadersDB]
-	ebh, err := bhsDB.Get(hash[:], nil)
+	ebh, err := l.pool.Get(ctx, level.BlockHeadersDB, hash[:])
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return nil, database.NotFoundError(fmt.Sprintf("block header not found: %v", hash))
 		}
 		return nil, fmt.Errorf("block header get: %w", err)
@@ -579,11 +547,13 @@ func (l *ldb) BlockHeadersByHeight(ctx context.Context, height uint64) ([]tbcd.B
 	limit := make([]byte, 8)
 	binary.BigEndian.PutUint64(limit, height+2)
 
-	hhDB := l.pool[level.HeightHashDB]
-	it := hhDB.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
-	defer it.Release()
-	for it.Next() {
-		fh, hash := keyToHeightHash(it.Key())
+	it, err := l.pool.NewRange(ctx, level.HeightHashDB, start, limit)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
+	defer it.Close(ctx)
+	for it.Next(ctx) {
+		fh, hash := keyToHeightHash(it.Key(ctx))
 		if fh != height {
 			// all done
 			break
@@ -608,9 +578,8 @@ func (l *ldb) BlockHeaderBest(ctx context.Context) (*tbcd.BlockHeader, error) {
 	// and thus it is racing by definition. Avoid the lock and let the
 	// caller serialize the response.
 
-	bhsDB := l.pool[level.BlockHeadersDB]
 	// Get last record
-	ebh, err := bhsDB.Get([]byte(bhsCanonicalTipKey), nil)
+	ebh, err := l.pool.Get(ctx, level.BlockHeadersDB, []byte(bhsCanonicalTipKey))
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return nil, database.NotFoundError("best block header not found")
@@ -670,15 +639,15 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	defer log.Tracef("BlockHeaderGenesisInsert exit")
 
 	// block headers
-	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
+	tx, txCommit, txDiscard, err := l.startTransaction(ctx, true)
 	if err != nil {
 		return fmt.Errorf("block header open transaction: %w", err)
 	}
-	defer bhsDiscard()
+	defer txDiscard()
 
 	// Make sure we are not inserting the same blocks
 	bhash := wbh.BlockHash()
-	has, err := bhsTx.Has(bhash[:], nil)
+	has, err := tx.Has(ctx, level.BlockHeadersDB, bhash[:])
 	if err != nil {
 		return fmt.Errorf("block header insert has: %w", err)
 	}
@@ -686,24 +655,22 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 		return database.DuplicateError("block header insert duplicate")
 	}
 
-	// blocks missing
-	bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
-	if err != nil {
-		return fmt.Errorf("blocks missing open transaction: %w", err)
-	}
-	defer bmDiscard()
-
-	// height hash
-	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
-	if err != nil {
-		return fmt.Errorf("height hash open transaction: %w", err)
-	}
-	defer hhDiscard()
-
 	// Insert height hash, missing, block header
-	hhBatch := new(leveldb.Batch)
-	bmBatch := new(leveldb.Batch)
-	bhBatch := new(leveldb.Batch)
+
+	hhBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("open height hash batch %w", err)
+	}
+
+	bmBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("open blocks missing batch %w", err)
+	}
+
+	bhBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("open blockheaders batch %w", err)
+	}
 
 	// Genesis insert can be called with an effective genesis block at a particular height
 	// and with a particular cumulative difficulty which is guaranteed canonical (protocol
@@ -712,7 +679,7 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 	// than requiring all historical state which is irrelevant to conesnsus assuming the
 	// effective genesis block is never forked.
 	hhKey := heightHashToKey(height, bhash[:])
-	hhBatch.Put(hhKey, []byte{})
+	hhBatch.Put(ctx, level.HeightHashDB, hhKey, []byte{})
 
 	// Handle the default case where the passed-in block is actually the genesis
 	cdiff := blockchain.CalcWork(wbh.Bits)
@@ -728,38 +695,28 @@ func (l *ldb) BlockHeaderGenesisInsert(ctx context.Context, wbh wire.BlockHeader
 		cdiff = diff
 	}
 	ebh := encodeBlockHeader(height, h2b(&wbh), cdiff)
-	bhBatch.Put(bhash[:], ebh[:])
+	bhBatch.Put(ctx, level.BlockHeadersDB, bhash[:], ebh[:])
 
-	bhBatch.Put([]byte(bhsCanonicalTipKey), ebh[:])
+	bhBatch.Put(ctx, level.BlockHeadersDB, []byte(bhsCanonicalTipKey), ebh[:])
 
 	// Write height hash batch
-	if err = hhTx.Write(hhBatch, nil); err != nil {
+	if err = tx.Write(ctx, hhBatch); err != nil {
 		return fmt.Errorf("height hash batch: %w", err)
 	}
 
 	// Write missing blocks batch
-	if err = bmTx.Write(bmBatch, nil); err != nil {
+	if err = tx.Write(ctx, bmBatch); err != nil {
 		return fmt.Errorf("blocks missing batch: %w", err)
 	}
 
 	// Write block headers batch
-	if err = bhsTx.Write(bhBatch, nil); err != nil {
+	if err = tx.Write(ctx, bhBatch); err != nil {
 		return fmt.Errorf("block header insert: %w", err)
 	}
 
-	// height hash commit
-	if err = hhCommit(); err != nil {
-		return fmt.Errorf("height hash commit: %w", err)
-	}
-
-	// blocks missing commit
-	if err = bmCommit(); err != nil {
-		return fmt.Errorf("blocks missing commit: %w", err)
-	}
-
-	// block headers commit
-	if err = bhsCommit(); err != nil {
-		return fmt.Errorf("block header commit: %w", err)
+	// tx commit
+	if err = txCommit(); err != nil {
+		return fmt.Errorf("tx commit: %w", err)
 	}
 
 	return nil
@@ -879,29 +836,12 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	// XXX this function looks broken; this looks ike everything should
 	// happen inside the database transaction.
 
-	// Metadata
-	mdTx, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	tx, txCommit, txDiscard, err := l.startTransaction(ctx, true)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
-			fmt.Errorf("metadata open transaction: %w", err)
+			fmt.Errorf("open transaction: %w", err)
 	}
-	defer mdDiscard()
-
-	// Block headers
-	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
-	if err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to start block headers leveldb transaction, err: %w", err)
-	}
-	defer bhsDiscard()
-
-	// height hash
-	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
-	if err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to start height hash leveldb transaction, err: %w", err)
-	}
-	defer hhDiscard()
+	defer txDiscard()
 
 	// <MAXMADNESS>
 
@@ -1042,9 +982,23 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		}
 	}
 
-	mdBatch := new(leveldb.Batch)
-	bhsBatch := new(leveldb.Batch)
-	hhBatch := new(leveldb.Batch)
+	mdBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("open metadata batch %w", err)
+	}
+
+	bhsBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("open blockheaders batch %w", err)
+	}
+
+	hhBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return tbcd.RTInvalid, nil,
+			fmt.Errorf("open height hash batch %w", err)
+	}
 
 	var bhCacheBatch []*chainhash.Hash
 	if l.cfg.blockheaderCacheSize > 0 {
@@ -1059,7 +1013,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 		bhash := headersParsed[i].BlockHash()
 		fh := fullHeadersFromDb[i]
 		// Make db delete batch
-		bhsBatch.Delete(bhash[:])
+		bhsBatch.Del(ctx, level.BlockHeadersDB, bhash[:])
 
 		// Remove from header cache as well in a batch
 		if l.cfg.blockheaderCacheSize > 0 {
@@ -1068,7 +1022,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 
 		// Delete height mapping for header i
 		hhKey := heightHashToKey(fh.Height, bhash[:])
-		hhBatch.Delete(hhKey)
+		hhBatch.Del(ctx, level.HeightHashDB, hhKey)
 	}
 	if l.cfg.blockheaderCacheSize > 0 {
 		// Delete right away. Cache can always be rehydrated.
@@ -1078,7 +1032,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	// Insert updated canonical tip after removal of the provided block headers
 	tipAfterRemovalEncoded := h2b(tipAfterRemoval)
 	tipEbh := encodeBlockHeader(tipAfterRemovalFromDb.Height, tipAfterRemovalEncoded, &tipAfterRemovalFromDb.Difficulty)
-	bhsBatch.Put([]byte(bhsCanonicalTipKey), tipEbh[:])
+	bhsBatch.Put(ctx, level.BlockHeadersDB, []byte(bhsCanonicalTipKey), tipEbh[:])
 
 	// XXX move upstreamStateId from here to right before Commit
 
@@ -1131,42 +1085,30 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	}
 
 	// Write height hash batch
-	err = hhTx.Write(hhBatch, nil)
+	err = tx.Write(ctx, hhBatch)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: unable to write height hash batch: %w", err)
 	}
 
 	// Write block headers batch
-	err = bhsTx.Write(bhsBatch, nil)
+	err = tx.Write(ctx, bhsBatch)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: unable to write block headers batch: %w", err)
 	}
 
 	// Write metadata batch
-	err = mdTx.Write(mdBatch, nil)
+	err = tx.Write(ctx, mdBatch)
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: unable to write metadata batch: %w", err)
 	}
 
-	// height hash commit
-	if err = hhCommit(); err != nil {
+	// tx commit
+	if err = txCommit(); err != nil {
 		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to commit height hash modifications: %w", err)
-	}
-
-	// block headers commit
-	if err = bhsCommit(); err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("block headers remove: unable to commit block header modifications: %w", err)
-	}
-
-	// metadata commit
-	if err = mdCommit(); err != nil {
-		return tbcd.RTInvalid, nil,
-			fmt.Errorf("metadata commit: %w", err)
+			fmt.Errorf("tx commit: unable to commit modifications: %w", err)
 	}
 
 	return removalType, parentToRemovalSet, nil
@@ -1187,21 +1129,12 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			errors.New("block headers insert: invalid")
 	}
 
-	// Metadata
-	mdTx, mdCommit, mdDiscard, err := l.startTransaction(level.MetadataDB)
+	tx, txCommit, txDiscard, err := l.startTransaction(ctx, true)
 	if err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("metadata open transaction: %w", err)
+			fmt.Errorf("open transaction: %w", err)
 	}
-	defer mdDiscard()
-
-	// block headers
-	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.BlockHeadersDB)
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("block headers open transaction: %w", err)
-	}
-	defer bhsDiscard()
+	defer txDiscard()
 
 	// Ensure we can connect these blockheaders. This also obtains the
 	// starting cumulative difficulty and height.
@@ -1211,7 +1144,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	var x int
 	for _, rbh := range bhs.Headers {
 		bhash := rbh.BlockHash()
-		has, err := bhsTx.Has(bhash[:], nil)
+		has, err := tx.Has(ctx, level.BlockHeadersDB, bhash[:])
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("block headers insert has: %w", err)
@@ -1235,27 +1168,11 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
-	// blocks missing
-	bmTx, bmCommit, bmDiscard, err := l.startTransaction(level.BlocksMissingDB)
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("blocks missing open transaction: %w", err)
-	}
-	defer bmDiscard()
-
-	// height hash
-	hhTx, hhCommit, hhDiscard, err := l.startTransaction(level.HeightHashDB)
-	if err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash open transaction: %w", err)
-	}
-	defer hhDiscard()
-
 	// blocks
 	blocksDB := l.rawPool[level.BlocksDB]
 
 	// retrieve best/canonical block header
-	bbh, err := bhsTx.Get([]byte(bhsCanonicalTipKey), nil)
+	bbh, err := tx.Get(ctx, level.BlockHeadersDB, []byte(bhsCanonicalTipKey))
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return tbcd.ITInvalid, nil, nil, 0,
@@ -1281,10 +1198,30 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	}
 
 	// Insert missing blocks and block headers
-	hhBatch := new(leveldb.Batch)
-	bmBatch := new(leveldb.Batch)
-	bhsBatch := new(leveldb.Batch)
-	mdBatch := new(leveldb.Batch)
+
+	hhBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("open height hash batch %w", err)
+	}
+
+	bmBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("open blocks missing batch %w", err)
+	}
+
+	bhsBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("open blockheaders batch %w", err)
+	}
+
+	mdBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return tbcd.ITInvalid, nil, nil, 0,
+			fmt.Errorf("open metadata batch %w", err)
+	}
 
 	cdiff := &pbh.Difficulty
 	height := pbh.Height
@@ -1304,22 +1241,22 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 
 		// Store height_hash for future reference
 		hhKey := heightHashToKey(height, bhash[:])
-		ok, err := hhTx.Has(hhKey, nil)
+		ok, err := tx.Has(ctx, level.HeightHashDB, hhKey)
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("height hash has: %w", err)
 		} else if !ok {
-			hhBatch.Put(hhKey, []byte{})
+			hhBatch.Put(ctx, level.HeightHashDB, hhKey, []byte{})
 		}
 
 		// Insert a synthesized height_hash key that serves as an index
 		// to see which blocks are missing.
-		ok, err = blocksDB.Has(hhKey)
+		ok, err = blocksDB.Has(ctx, hhKey)
 		if err != nil {
 			return tbcd.ITInvalid, nil, nil, 0,
 				fmt.Errorf("blocks has: %w", err)
 		} else if !ok {
-			bmBatch.Put(hhKey, []byte{})
+			bmBatch.Put(ctx, level.BlocksMissingDB, hhKey, []byte{})
 		}
 
 		// XXX reason about pre encoding. Due to the caller code being
@@ -1331,7 +1268,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		// [32][8+80+32] bytes
 		lastBlockHeader = h2b(bh)
 		ebh := encodeBlockHeader(height, lastBlockHeader, cdiff)
-		bhsBatch.Put(bhash[:], ebh[:])
+		bhsBatch.Put(ctx, level.BlockHeadersDB, bhash[:], ebh[:])
 		lastRecord = ebh[:]
 	}
 
@@ -1364,7 +1301,8 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 			// log.Infof("%v", spew.Sdump(bestBH.Hash[:]))
 			// log.Infof("%v", spew.Sdump(firstHash))
 			// pick the right return value based on ancestor
-			bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
+			bhsBatch.Put(ctx, level.BlockHeadersDB,
+				[]byte(bhsCanonicalTipKey), lastRecord)
 			it = tbcd.ITChainFork
 
 		default:
@@ -1372,7 +1310,8 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 		}
 	} else {
 		// Extend current best tip
-		bhsBatch.Put([]byte(bhsCanonicalTipKey), lastRecord)
+		bhsBatch.Put(ctx, level.BlockHeadersDB,
+			[]byte(bhsCanonicalTipKey), lastRecord)
 		it = tbcd.ITChainExtend
 	}
 
@@ -1392,51 +1331,33 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	}
 
 	// Write height hash batch
-	if err = hhTx.Write(hhBatch, nil); err != nil {
+	if err = tx.Write(ctx, hhBatch); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("height hash batch: %w", err)
 	}
 
 	// Write missing blocks batch
-	if err = bmTx.Write(bmBatch, nil); err != nil {
+	if err = tx.Write(ctx, bmBatch); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("blocks missing batch: %w", err)
 	}
 
 	// Write block headers batch
-	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+	if err = tx.Write(ctx, bhsBatch); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("block headers insert: %w", err)
 	}
 
 	// Write metadata batch
-	if err = mdTx.Write(mdBatch, nil); err != nil {
+	if err = tx.Write(ctx, mdBatch); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
 			fmt.Errorf("metadata insert: %w", err)
 	}
 
-	// height hash commit
-	if err = hhCommit(); err != nil {
+	// tx commit
+	if err = txCommit(); err != nil {
 		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("height hash commit: %w", err)
-	}
-
-	// blocks missing commit
-	if err = bmCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("blocks missing commit: %w", err)
-	}
-
-	// block headers commit
-	if err = bhsCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("block headers commit: %w", err)
-	}
-
-	// metadata commit
-	if err = mdCommit(); err != nil {
-		return tbcd.ITInvalid, nil, nil, 0,
-			fmt.Errorf("metadata commit: %w", err)
+			fmt.Errorf("tx commit: %w", err)
 	}
 
 	return it, cbh, lbh, len(bhs.Headers), nil
@@ -1453,13 +1374,16 @@ func (l *ldb) BlocksMissing(ctx context.Context, count int) ([]tbcd.BlockIdentif
 	// ignored.
 
 	var blockCacheLen, x int
-	bmDB := l.pool[level.BlocksMissingDB]
 	bis := make([]tbcd.BlockIdentifier, 0, count)
-	it := bmDB.NewIterator(nil, nil)
-	defer it.Release()
-	for it.Next() {
+
+	it, err := l.pool.NewIterator(ctx, level.BlocksMissingDB)
+	if err != nil {
+		return nil, fmt.Errorf("new iterator: %w", err)
+	}
+	defer it.Close(ctx)
+	for it.Next(ctx) {
 		bh := tbcd.BlockIdentifier{}
-		bh.Height, bh.Hash = keyToHeightHash(it.Key())
+		bh.Height, bh.Hash = keyToHeightHash(it.Key(ctx))
 		bis = append(bis, bh)
 
 		x++
@@ -1483,7 +1407,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	}
 
 	bDB := l.rawPool[level.BlocksDB]
-	has, err := bDB.Has(b.Hash()[:])
+	has, err := bDB.Has(ctx, b.Hash()[:])
 	if err != nil {
 		return -1, database.DuplicateError("block insert: exists")
 	}
@@ -1493,7 +1417,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 			return -1, fmt.Errorf("blocks encode: %w", err)
 		}
 		// Insert block since we do not have it yet
-		if err = bDB.Insert(b.Hash()[:], raw); err != nil {
+		if err = bDB.Insert(ctx, b.Hash()[:], raw); err != nil {
 			return -1, fmt.Errorf("blocks insert put: %w", err)
 		}
 		if l.cfg.blockCacheSize > 0 {
@@ -1503,8 +1427,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 
 	// Remove block identifier from blocks missing
 	key := heightHashToKey(bh.Height, bh.Hash[:])
-	bmDB := l.pool[level.BlocksMissingDB]
-	if err = bmDB.Delete(key, nil); err != nil {
+	if err = l.pool.Del(ctx, level.BlocksMissingDB, key); err != nil {
 		// Ignore not found, it was deleted prior to this call.
 		if !errors.Is(err, leveldb.ErrNotFound) {
 			return -1, fmt.Errorf("block insert delete from missing: %w", err)
@@ -1519,8 +1442,7 @@ func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash chainha
 	defer log.Tracef("BlockMissingDelete exit")
 
 	key := heightHashToKey(uint64(height), hash[:])
-	bmDB := l.pool[level.BlocksMissingDB]
-	if err := bmDB.Delete(key, nil); err != nil {
+	if err := l.pool.Del(ctx, level.BlocksMissingDB, key); err != nil {
 		// Ignore not found, it was deleted prior to this call.
 		if !errors.Is(err, leveldb.ErrNotFound) {
 			return fmt.Errorf("block missing delete: %w", err)
@@ -1546,7 +1468,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Bl
 	// get from db
 	if eb == nil {
 		bDB := l.rawPool[level.BlocksDB]
-		eb, err = bDB.Get(hash[:])
+		eb, err = bDB.Get(ctx, hash[:])
 		if err != nil {
 			if errors.Is(err, leveldb.ErrNotFound) {
 				return nil, database.BlockNotFoundError{Hash: hash}
@@ -1578,7 +1500,7 @@ func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool,
 	}
 
 	bDB := l.rawPool[level.BlocksDB]
-	ok, err := bDB.Has(hash[:])
+	ok, err := bDB.Has(ctx, hash[:])
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return false, nil
@@ -1593,21 +1515,22 @@ func (l *ldb) BlockHashByTxId(ctx context.Context, txId chainhash.Hash) (*chainh
 	defer log.Tracef("BlockHashByTxId exit")
 
 	blocks := make([]*chainhash.Hash, 0, 2)
-	txDB := l.pool[level.TransactionsDB]
 	var txid [33]byte
 	txid[0] = 't'
 	copy(txid[1:], txId[:])
-	it := txDB.NewIterator(util.BytesPrefix(txid[:]), nil)
-	defer it.Release()
-	for it.Next() {
-		block, err := chainhash.NewHash(it.Key()[33:])
+
+	start, limit := larry.BytesPrefix(txid[:])
+	it, err := l.pool.NewRange(ctx, level.TransactionsDB, start, limit)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
+	defer it.Close(ctx)
+	for it.Next(ctx) {
+		block, err := chainhash.NewHash(it.Key(ctx)[33:])
 		if err != nil {
 			return nil, err
 		}
 		blocks = append(blocks, block)
-	}
-	if err := it.Error(); err != nil {
-		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	switch len(blocks) {
 	case 0:
@@ -1625,33 +1548,33 @@ func (l *ldb) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tb
 	defer log.Tracef("SpentOutputByOutpoint exit")
 
 	si := make([]tbcd.SpentInfo, 0, 2)
-	txDB := l.pool[level.TransactionsDB]
 	var key [1 + 32]byte
 	key[0] = 's'
 	copy(key[1:], txId[:])
-	it := txDB.NewIterator(&util.Range{Start: key[:]}, nil)
-	defer it.Release()
-	for it.Next() {
-		if !bytes.Equal(it.Key()[:33], key[:]) {
+
+	it, err := l.pool.NewRange(ctx, level.TransactionsDB, key[:], nil)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
+	defer it.Close(ctx)
+	for it.Next(ctx) {
+		if !bytes.Equal(it.Key(ctx)[:33], key[:]) {
 			continue
 		}
 		var (
 			s   tbcd.SpentInfo
 			err error
 		)
-		s.TxId, err = chainhash.NewHash(it.Value()[0:32])
+		s.TxId, err = chainhash.NewHash(it.Value(ctx)[0:32])
 		if err != nil {
 			return nil, fmt.Errorf("new tx id: %w", err)
 		}
-		s.BlockHash, err = chainhash.NewHash(it.Key()[37:])
+		s.BlockHash, err = chainhash.NewHash(it.Key(ctx)[37:])
 		if err != nil {
 			return nil, fmt.Errorf("new block hash: %w", err)
 		}
-		s.InputIndex = binary.BigEndian.Uint32(it.Value()[32:36])
+		s.InputIndex = binary.BigEndian.Uint32(it.Value(ctx)[32:36])
 		si = append(si, s)
-	}
-	if err := it.Error(); err != nil {
-		return nil, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	if len(si) == 0 {
 		return nil, database.NotFoundError(fmt.Sprintf("not found %v", txId))
@@ -1665,21 +1588,22 @@ func (l *ldb) BlockInTxIndex(ctx context.Context, hash chainhash.Hash) (bool, er
 	defer log.Tracef("BlockInTxIndex exit")
 
 	blocks := make([]*chainhash.Hash, 0, 2)
-	txDB := l.pool[level.TransactionsDB]
 	var blkid [33]byte
 	blkid[0] = 'b'
 	copy(blkid[1:], hash[:])
-	it := txDB.NewIterator(util.BytesPrefix(blkid[:]), nil)
-	defer it.Release()
-	for it.Next() {
-		block, err := chainhash.NewHash(it.Key()[33:])
+
+	start, limit := larry.BytesPrefix(blkid[:])
+	it, err := l.pool.NewRange(ctx, level.TransactionsDB, start, limit)
+	if err != nil {
+		return false, fmt.Errorf("new range: %w", err)
+	}
+	defer it.Close(ctx)
+	for it.Next(ctx) {
+		block, err := chainhash.NewHash(it.Key(ctx)[33:])
 		if err != nil {
 			return false, err
 		}
 		blocks = append(blocks, block)
-	}
-	if err := it.Error(); err != nil {
-		return false, fmt.Errorf("blocks by id iterator: %w", err)
 	}
 	switch len(blocks) {
 	case 0:
@@ -1696,10 +1620,8 @@ func (l *ldb) ScriptHashesByOutpoint(ctx context.Context, ops []*tbcd.Outpoint, 
 	log.Tracef("ScriptHashesByOutpoint")
 	defer log.Tracef("ScriptHashesByOutpoint exit")
 
-	uDB := l.pool[level.OutputsDB]
-
 	for k := range ops {
-		scriptHash, err := uDB.Get(ops[k][:], nil)
+		scriptHash, err := l.pool.Get(ctx, level.OutputsDB, ops[k][:])
 		if err != nil {
 			// not found, skip
 			continue
@@ -1720,8 +1642,7 @@ func (l *ldb) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd
 	log.Tracef("ScriptHashByOutpoint")
 	defer log.Tracef("ScriptHashByOutpoint exit")
 
-	uDB := l.pool[level.OutputsDB]
-	scriptHash, err := uDB.Get(op[:], nil)
+	scriptHash, err := l.pool.Get(ctx, level.OutputsDB, op[:])
 	if err != nil {
 		return nil, fmt.Errorf("script hash by outpoint: %w", err)
 	}
@@ -1740,14 +1661,15 @@ func (l *ldb) BalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint
 	)
 	start[0] = 'h'
 	copy(start[1:], sh[:])
-	oDB := l.pool[level.OutputsDB]
-	it := oDB.NewIterator(util.BytesPrefix(start[:]), nil)
-	defer it.Release()
-	for it.Next() {
-		balance += binary.BigEndian.Uint64(it.Value())
+
+	st, limit := larry.BytesPrefix(start[:])
+	it, err := l.pool.NewRange(ctx, level.OutputsDB, st, limit)
+	if err != nil {
+		return 0, fmt.Errorf("new range: %w", err)
 	}
-	if err := it.Error(); err != nil {
-		return 0, IteratorError(err)
+	defer it.Close(ctx)
+	for it.Next(ctx) {
+		balance += binary.BigEndian.Uint64(it.Value(ctx))
 	}
 
 	return balance, nil
@@ -1761,27 +1683,28 @@ func (l *ldb) UtxosByScriptHash(ctx context.Context, sh tbcd.ScriptHash, start u
 	utxos := make([]tbcd.Utxo, 0, 32)
 	prefix[0] = 'h'
 	copy(prefix[1:], sh[:])
-	oDB := l.pool[level.OutputsDB]
-	it := oDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
-	defer it.Release()
+
+	st, limit := larry.BytesPrefix(prefix[:])
+	it, err := l.pool.NewRange(ctx, level.OutputsDB, st, limit)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
+	defer it.Close(ctx)
 	skip := start
-	for it.Next() {
+	for it.Next(ctx) {
 		if skip > 0 {
 			skip--
 			continue
 		}
-		index := binary.BigEndian.Uint32(it.Key()[65:])
-		value := binary.BigEndian.Uint64(it.Value())
+		index := binary.BigEndian.Uint32(it.Key(ctx)[65:])
+		value := binary.BigEndian.Uint64(it.Value(ctx))
 		var txId chainhash.Hash
-		copy(txId[:], it.Key()[33:65])
+		copy(txId[:], it.Key(ctx)[33:65])
 		utxos = append(utxos, tbcd.NewUtxo(txId, value, index))
 
 		if uint64(len(utxos)) >= count {
 			break
 		}
-	}
-	if err := it.Error(); err != nil {
-		return nil, IteratorError(err)
 	}
 
 	return utxos, nil
@@ -1794,15 +1717,16 @@ func (l *ldb) UtxosByScriptHashCount(ctx context.Context, sh tbcd.ScriptHash) (u
 	var prefix [33]byte
 	prefix[0] = 'h'
 	copy(prefix[1:], sh[:])
-	oDB := l.pool[level.OutputsDB]
-	it := oDB.NewIterator(util.BytesPrefix(prefix[:]), nil)
-	defer it.Release()
-	var x uint64
-	for it.Next() {
-		x++
+
+	start, limit := larry.BytesPrefix(prefix[:])
+	it, err := l.pool.NewRange(ctx, level.OutputsDB, start, limit)
+	if err != nil {
+		return 0, fmt.Errorf("new range: %w", err)
 	}
-	if err := it.Error(); err != nil {
-		return 0, IteratorError(err)
+	defer it.Close(ctx)
+	var x uint64
+	for it.Next(ctx) {
+		x++
 	}
 
 	return x, nil
@@ -1817,13 +1741,17 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 	}
 
 	// outputs
-	outsTx, outsCommit, outsDiscard, err := l.startTransaction(level.OutputsDB)
+	outsTx, outsCommit, outsDiscard, err := l.startTransaction(ctx, true)
 	if err != nil {
 		return fmt.Errorf("outputs open db transaction: %w", err)
 	}
 	defer outsDiscard()
 
-	outsBatch := new(leveldb.Batch)
+	outsBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("open outputs batch %w", err)
+	}
+
 	for op, utxo := range utxos {
 		// op is already 'u' tx_id idx
 
@@ -1837,12 +1765,12 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 		// irrelevant.
 		if utxo.IsDelete() {
 			// Delete balance and utxos
-			outsBatch.Delete(op[:])
-			outsBatch.Delete(hop[:])
+			outsBatch.Del(ctx, level.OutputsDB, op[:])
+			outsBatch.Del(ctx, level.OutputsDB, hop[:])
 		} else {
 			// Add utxo to balance and utxos
-			outsBatch.Put(op[:], utxo.ScriptHashSlice())
-			outsBatch.Put(hop[:], utxo.ValueBytes())
+			outsBatch.Put(ctx, level.OutputsDB, op[:], utxo.ScriptHashSlice())
+			outsBatch.Put(ctx, level.OutputsDB, hop[:], utxo.ValueBytes())
 		}
 
 		// Empty out cache.
@@ -1850,10 +1778,10 @@ func (l *ldb) BlockUtxoUpdate(ctx context.Context, direction int, utxos map[tbcd
 	}
 
 	// Store index
-	outsBatch.Put(utxoIndexHashKey, utxoIndexHash[:])
+	outsBatch.Put(ctx, level.OutputsDB, utxoIndexHashKey, utxoIndexHash[:])
 
 	// Write outputs batch
-	if err = outsTx.Write(outsBatch, nil); err != nil {
+	if err = outsTx.Write(ctx, outsBatch); err != nil {
 		return fmt.Errorf("outputs insert: %w", err)
 	}
 
@@ -1874,11 +1802,16 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 
 	// transactions
-	txsTx, txsCommit, txsDiscard, err := l.startTransaction(level.TransactionsDB)
+	txsTx, txsCommit, txsDiscard, err := l.startTransaction(ctx, true)
 	if err != nil {
 		return fmt.Errorf("transactions open db transaction: %w", err)
 	}
 	defer txsDiscard()
+
+	txsBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("open transactions batch %w", err)
+	}
 
 	block := make([]byte, 33)
 	block[0] = 'b'
@@ -1886,7 +1819,6 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	bm := make(map[string]struct{}, len(txs))
 	defer clear(bm)
 
-	txsBatch := new(leveldb.Batch)
 	for k, v := range txs {
 		// cache is being emptied so we can slice it here.
 		var key, value []byte
@@ -1914,14 +1846,14 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 		}
 		switch direction {
 		case -1:
-			txsBatch.Delete(key)
+			txsBatch.Del(ctx, level.TransactionsDB, key)
 			if blk != nil {
-				txsBatch.Delete(blk)
+				txsBatch.Del(ctx, level.TransactionsDB, blk)
 			}
 		case 1:
-			txsBatch.Put(key, value)
+			txsBatch.Put(ctx, level.TransactionsDB, key, value)
 			if blk != nil {
-				txsBatch.Put(blk, nil)
+				txsBatch.Put(ctx, level.TransactionsDB, blk, nil)
 			}
 		}
 
@@ -1930,10 +1862,10 @@ func (l *ldb) BlockTxUpdate(ctx context.Context, direction int, txs map[tbcd.TxK
 	}
 
 	// Store index
-	txsBatch.Put(txIndexHashKey, txIndexHash[:])
+	txsBatch.Put(ctx, level.TransactionsDB, txIndexHashKey, txIndexHash[:])
 
 	// Write transactions batch
-	if err = txsTx.Write(txsBatch, nil); err != nil {
+	if err = txsTx.Write(ctx, txsBatch); err != nil {
 		return fmt.Errorf("transactions insert: %w", err)
 	}
 
@@ -2040,23 +1972,23 @@ func (l *ldb) KeystonesByHeight(ctx context.Context, height uint32, depth int) (
 		return nil, errors.New("underflow")
 	}
 
-	kssDB := l.pool[level.KeystonesDB]
-	i := kssDB.NewIterator(keystoneHeightRange(start, d), nil)
-	defer i.Release()
+	r := keystoneHeightRange(start, d)
+	i, err := l.pool.NewRange(ctx, level.KeystonesDB, r.Start, r.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
+	defer i.Close(ctx)
 
 	kssList := make([]tbcd.Keystone, 0, 16)
-	for i.Next() {
-		_, hash := decodeKeystoneHeightHash(i.Key())
-		eks, err := kssDB.Get(hash[:], nil)
+	for i.Next(ctx) {
+		_, hash := decodeKeystoneHeightHash(i.Key(ctx))
+		eks, err := l.pool.Get(ctx, level.KeystonesDB, hash[:])
 		if err != nil {
 			// mismatch between heighthash and hash indexes
 			panic(fmt.Errorf("data corruption: %w", err))
 		}
 		deks := decodeKeystone(eks)
 		kssList = append(kssList, deks)
-	}
-	if i.Error() != nil {
-		return nil, fmt.Errorf("keystones iterator: %w", i.Error())
 	}
 
 	if len(kssList) == 0 {
@@ -2077,34 +2009,41 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 	}
 
 	// keystones
-	kssTx, kssCommit, kssDiscard, err := l.startTransaction(level.KeystonesDB)
+	kssTx, kssCommit, kssDiscard, err := l.startTransaction(ctx, true)
 	if err != nil {
 		return fmt.Errorf("keystones open db transaction: %w", err)
 	}
 	defer kssDiscard()
 
-	kssBatch := new(leveldb.Batch)
+	kssBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("open keystone batch %w", err)
+	}
+
 	for k, v := range keystones {
 		// I will punch the first person that tells me to use continue
 		// in this loop in the larynx.
 		switch direction {
 		case -1:
-			eks, err := kssTx.Get(k[:], nil)
+			eks, err := kssTx.Get(ctx, level.KeystonesDB, k[:])
 			if err == nil {
 				ks := decodeKeystone(eks)
 				// Only delete keystone if it is in the
 				// previously found block.
 				if ks.BlockHash.IsEqual(&v.BlockHash) {
-					kssBatch.Delete(k[:])
-					kssBatch.Delete(encodeKeystoneHeightHashSlice(v.BlockHeight, k))
+					kssBatch.Del(ctx, level.KeystonesDB, k[:])
+					kssBatch.Del(ctx, level.KeystonesDB,
+						encodeKeystoneHeightHashSlice(v.BlockHeight, k))
 				}
 			}
 		case 1:
-			has, _ := kssTx.Has(k[:], nil)
+			has, _ := kssTx.Has(ctx, level.KeystonesDB, k[:])
 			if !has {
 				// Only store unknown keystones and indexes
-				kssBatch.Put(k[:], encodeKeystoneToSlice(v))
-				kssBatch.Put(encodeKeystoneHeightHashSlice(v.BlockHeight, k), nil)
+				kssBatch.Put(ctx, level.KeystonesDB,
+					k[:], encodeKeystoneToSlice(v))
+				kssBatch.Put(ctx, level.KeystonesDB,
+					encodeKeystoneHeightHashSlice(v.BlockHeight, k), nil)
 			}
 		}
 
@@ -2113,10 +2052,11 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 	}
 
 	// Store index
-	kssBatch.Put(keystoneIndexHashKey, keystoneIndexHash[:])
+	kssBatch.Put(ctx, level.KeystonesDB,
+		keystoneIndexHashKey, keystoneIndexHash[:])
 
 	// Write keystones batch
-	if err = kssTx.Write(kssBatch, nil); err != nil {
+	if err = kssTx.Write(ctx, kssBatch); err != nil {
 		return fmt.Errorf("keystones insert: %w", err)
 	}
 
@@ -2129,13 +2069,13 @@ func (l *ldb) BlockKeystoneUpdate(ctx context.Context, direction int, keystones 
 }
 
 func (l *ldb) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
-	kssTx, _, kssDiscard, err := l.startTransaction(level.KeystonesDB)
+	kssTx, _, kssDiscard, err := l.startTransaction(ctx, false)
 	if err != nil {
 		return nil, fmt.Errorf("keystones open db transaction: %w", err)
 	}
 	defer kssDiscard()
 
-	hash, err := kssTx.Get(keystoneIndexHashKey, nil)
+	hash, err := kssTx.Get(ctx, level.KeystonesDB, keystoneIndexHashKey)
 	if err != nil {
 		nerr := fmt.Errorf("keystone get: %w", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -2151,13 +2091,13 @@ func (l *ldb) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader
 }
 
 func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
-	utxoTx, _, utxoDiscard, err := l.startTransaction(level.OutputsDB)
+	utxoTx, _, utxoDiscard, err := l.startTransaction(ctx, false)
 	if err != nil {
 		return nil, fmt.Errorf("utxos open db transaction: %w", err)
 	}
 	defer utxoDiscard()
 
-	hash, err := utxoTx.Get(utxoIndexHashKey, nil)
+	hash, err := utxoTx.Get(ctx, level.OutputsDB, utxoIndexHashKey)
 	if err != nil {
 		nerr := fmt.Errorf("utxo get: %w", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -2173,13 +2113,13 @@ func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, er
 }
 
 func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
-	txTx, _, txDiscard, err := l.startTransaction(level.TransactionsDB)
+	txTx, _, txDiscard, err := l.startTransaction(ctx, false)
 	if err != nil {
 		return nil, fmt.Errorf("txs open db transaction: %w", err)
 	}
 	defer txDiscard()
 
-	hash, err := txTx.Get(txIndexHashKey, nil)
+	hash, err := txTx.Get(ctx, level.TransactionsDB, txIndexHashKey)
 	if err != nil {
 		nerr := fmt.Errorf("tx get: %w", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -2195,13 +2135,13 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 }
 
 func (l *ldb) BlockHeaderByZKIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
-	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKDB)
+	kssTx, _, kssDiscard, err := l.startTransaction(ctx, false)
 	if err != nil {
 		return nil, fmt.Errorf("zk utxo open db transaction: %w", err)
 	}
 	defer kssDiscard()
 
-	hash, err := kssTx.Get(zkIndexHashKey, nil)
+	hash, err := kssTx.Get(ctx, level.ZKDB, zkIndexHashKey)
 	if err != nil {
 		nerr := fmt.Errorf("zk utxo get: %w", err)
 		if errors.Is(err, leveldb.ErrNotFound) {
@@ -2220,8 +2160,7 @@ func (l *ldb) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) 
 	log.Tracef("ZKValueAndScriptByOutpoint")
 	defer log.Tracef("ZKValueAndScriptByOutpoint exit")
 
-	zkdb := l.pool[level.ZKDB]
-	v, err := zkdb.Get(op[:], nil)
+	v, err := l.pool.Get(ctx, level.ZKDB, op[:])
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return 0, nil, database.NotFoundError(err.Error())
@@ -2235,8 +2174,7 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	log.Tracef("ZKBalanceByScriptHash")
 	defer log.Tracef("ZKBalanceByScriptHash exit")
 
-	zkdb := l.pool[level.ZKDB]
-	val, err := zkdb.Get(sh[:], nil)
+	val, err := l.pool.Get(ctx, level.ZKDB, sh[:])
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
 			return 0, database.NotFoundError(err.Error())
@@ -2364,13 +2302,17 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 	}
 
 	// utxos
-	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.ZKDB)
+	zkTx, zkCommit, zkDiscard, err := l.startTransaction(ctx, true)
 	if err != nil {
 		return fmt.Errorf("zk utxos open db transaction: %w", err)
 	}
-	defer bhsDiscard()
+	defer zkDiscard()
 
-	bhsBatch := new(leveldb.Batch)
+	zkBatch, err := l.pool.NewBatch(ctx)
+	if err != nil {
+		return fmt.Errorf("open ZK batch %w", err)
+	}
+
 	for k, v := range utxos {
 		// I will punch the first person that tells me to use continue
 		// in this loop in the larynx.
@@ -2378,12 +2320,12 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 		case -1:
 			// On unwind we can delete some keys.
 			if len(k) != scriptHashLen {
-				bhsBatch.Delete([]byte(k))
+				zkBatch.Del(ctx, level.ZKDB, []byte(k))
 			} else {
-				bhsBatch.Put([]byte(k), v)
+				zkBatch.Put(ctx, level.ZKDB, []byte(k), v)
 			}
 		case 1:
-			bhsBatch.Put([]byte(k), v)
+			zkBatch.Put(ctx, level.ZKDB, []byte(k), v)
 		}
 
 		// Empty out cache.
@@ -2391,15 +2333,15 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 	}
 
 	// Store index
-	bhsBatch.Put(zkIndexHashKey, zkIndexHash[:])
+	zkBatch.Put(ctx, level.ZKDB, zkIndexHashKey, zkIndexHash[:])
 
 	// Write utxos batch
-	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+	if err = zkTx.Write(ctx, zkBatch); err != nil {
 		return fmt.Errorf("utxos insert: %w", err)
 	}
 
 	// utxos commit
-	if err = bhsCommit(); err != nil {
+	if err = zkCommit(); err != nil {
 		return fmt.Errorf("utxos commit: %w", err)
 	}
 
