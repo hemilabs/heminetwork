@@ -12,13 +12,13 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/hemilabs/larry/larry"
+	"github.com/hemilabs/larry/larry/multi"
+	"github.com/hemilabs/larry/larry/rawdb"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 
 	"github.com/hemilabs/heminetwork/v2/database"
-	"github.com/hemilabs/larry/larry"
-	"github.com/hemilabs/larry/larry/multi"
-	"github.com/hemilabs/larry/larry/rawdb"
 )
 
 const (
@@ -154,12 +154,6 @@ func New(ctx context.Context, home string) (*Database, error) {
 		ZKDB:            "level",
 	}
 
-	l := &Database{
-		home:    h,
-		rawPool: make(RawPool),
-		tables:  poolMap,
-	}
-
 	// MultiDB makes the directory path for home
 	mcfg := multi.DefaultMultiConfig(home, poolMap)
 	pool, err := multi.NewMultiDB(mcfg)
@@ -168,6 +162,13 @@ func New(ctx context.Context, home string) (*Database, error) {
 	}
 	if err := pool.Open(ctx); err != nil {
 		return nil, fmt.Errorf("open pool: %w", err)
+	}
+
+	l := &Database{
+		home:    h,
+		pool:    pool,
+		rawPool: make(RawPool),
+		tables:  poolMap,
 	}
 
 	unwind := true
