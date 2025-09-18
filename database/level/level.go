@@ -9,18 +9,16 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/filter"
-	"github.com/syndtr/goleveldb/leveldb/opt"
 
 	"github.com/hemilabs/heminetwork/v2/database"
-	"github.com/hemilabs/heminetwork/v2/rawdb"
+	"github.com/hemilabs/larry/larry"
+	"github.com/hemilabs/larry/larry/multi"
+	"github.com/hemilabs/larry/larry/rawdb"
 )
 
 const (
@@ -46,43 +44,19 @@ func init() {
 	}
 }
 
-type Pool map[string]*leveldb.DB
-
 type RawPool map[string]*rawdb.RawDB
 
 type Database struct {
 	mtx     sync.RWMutex
-	pool    Pool    // database pool
-	rawPool RawPool // raw database pool
+	pool    larry.Database // database pool
+	rawPool RawPool        // raw database pool
 
-	cfg *Config
-}
-
-type Config struct {
-	Home    string
-	Options opt.Options
-}
-
-func NewDefaultConfig(home string) *Config {
-	return &Config{
-		Home: home, // leveldb toplevel database directory
-		Options: opt.Options{
-			BlockCacheEvictRemoved: true, // Do yourself a favor and leave this one alone
-			Compression:            opt.NoCompression,
-			Filter:                 filter.NewBloomFilter(10),
-			// XXX investigate if this has adverse affect on memory
-			// use and i it helps performance at all. ZK indexer
-			// may simply be too big for cache to matters.
-			// OpenFilesCacheCapacity: 2000,
-			// BlockCacheCapacity: 64 * opt.MiB,
-			// WriteBuffer:        64 * opt.MiB,
-		},
-	}
+	home string
 }
 
 var _ database.Database = (*Database)(nil)
 
-func (l *Database) Close() error {
+func (l *Database) Close(ctx context.Context) error {
 	log.Tracef("Close")
 	defer log.Tracef("Close exit")
 
@@ -92,7 +66,7 @@ func (l *Database) Close() error {
 	var errSeen error
 
 	for k, v := range l.rawPool {
-		if err := v.Close(); err != nil {
+		if err := v.Close(ctx); err != nil {
 			// do continue, leveldb does not like unfresh shutdowns
 			log.Errorf("close %v: %v", k, err)
 			errSeen = errors.Join(errSeen, err)
@@ -100,25 +74,21 @@ func (l *Database) Close() error {
 		delete(l.rawPool, k)
 	}
 
-	for k, v := range l.pool {
-		if err := v.Close(); err != nil {
-			// do continue, leveldb does not like unfresh shutdowns
-			log.Errorf("close %v: %v", k, err)
-			errSeen = errors.Join(errSeen, err)
-		}
-		delete(l.pool, k)
+	if err := l.pool.Close(ctx); err != nil {
+		log.Errorf("close pool: %v", err)
+		errSeen = errors.Join(errSeen, err)
 	}
 
 	return errSeen
 }
 
-func (l *Database) DB() Pool {
+func (l *Database) DB() larry.Database {
 	log.Tracef("DB")
 	defer log.Tracef("DB exit")
 
 	l.mtx.RLock()
 	defer l.mtx.RUnlock()
-	return maps.Clone(l.pool)
+	return l.pool
 }
 
 func (l *Database) RawDB() RawPool {
@@ -130,30 +100,19 @@ func (l *Database) RawDB() RawPool {
 	return maps.Clone(l.rawPool)
 }
 
-func (l *Database) openDB(name string) error {
+func (l *Database) openRawDB(ctx context.Context, name string, blockSize int64) error {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	bhs := filepath.Join(l.cfg.Home, name)
-	bhsDB, err := leveldb.OpenFile(bhs, &l.cfg.Options)
-	if err != nil {
-		return fmt.Errorf("leveldb open %v: %w", name, err)
-	}
-	l.pool[name] = bhsDB
-
-	return nil
-}
-
-func (l *Database) openRawDB(name string, blockSize int64) error {
-	l.mtx.Lock()
-	defer l.mtx.Unlock()
-
-	dir := filepath.Join(l.cfg.Home, name)
-	rdb, err := rawdb.New(&rawdb.Config{Home: dir, MaxSize: blockSize})
+	dir := filepath.Join(l.home, name)
+	rcfg := rawdb.NewDefaultConfig(dir)
+	rcfg.DB = "level"
+	rcfg.MaxSize = blockSize
+	rdb, err := rawdb.New(rcfg)
 	if err != nil {
 		return fmt.Errorf("rawdb new %v: %w", name, err)
 	}
-	err = rdb.Open()
+	err = rdb.Open(ctx)
 	if err != nil {
 		return fmt.Errorf("rawdb open %v: %w", name, err)
 	}
@@ -162,83 +121,59 @@ func (l *Database) openRawDB(name string, blockSize int64) error {
 	return nil
 }
 
-func New(ctx context.Context, cfg *Config) (*Database, error) {
+func New(ctx context.Context, home string) (*Database, error) {
 	log.Tracef("New")
 	defer log.Tracef("New exit")
-
-	if cfg == nil {
-		return nil, errors.New("must provide database config")
-	}
 
 	// Care must be taken to not shadow err and l in this function. The
 	// defer will overwrite those if an unwind condition occurs.
 
-	h, err := homedir.Expand(cfg.Home)
+	h, err := homedir.Expand(home)
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
 	}
-	err = os.MkdirAll(h, 0o0700)
-	if err != nil {
-		return nil, fmt.Errorf("mkdir: %w", err)
-	}
-	cfg.Home = h
 
 	l := &Database{
-		cfg:     cfg,
-		pool:    make(Pool),
+		home:    h,
 		rawPool: make(RawPool),
+	}
+
+	poolMap := map[string]string{
+		BlockHeadersDB:  "level",
+		BlocksMissingDB: "level",
+		MetadataDB:      "level",
+		KeystonesDB:     "level",
+		HeightHashDB:    "level",
+		OutputsDB:       "level",
+		TransactionsDB:  "level",
+		ZKDB:            "level",
+	}
+
+	// MultiDB makes the directory path for home
+	mcfg := multi.DefaultMultiConfig(home, poolMap)
+	pool, err := multi.NewMultiDB(mcfg)
+	if err != nil {
+		return nil, fmt.Errorf("create pool: %w", err)
+	}
+	if err := pool.Open(ctx); err != nil {
+		return nil, fmt.Errorf("open pool: %w", err)
 	}
 
 	unwind := true
 	defer func() {
 		if unwind {
-			cerr := l.Close()
+			cerr := l.Close(ctx)
 			if cerr != nil {
 				log.Debugf("new unwind exited with: %v", cerr)
 				err = errors.Join(err, cerr)
 			}
-			clear(l.pool)
 			clear(l.rawPool)
 			l = nil // Reset l
 		}
 	}()
 
-	// Open all databases
-	err = l.openDB(BlockHeadersDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", BlockHeadersDB, err)
-	}
-	err = l.openDB(BlocksMissingDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", BlocksMissingDB, err)
-	}
-	err = l.openDB(HeightHashDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", HeightHashDB, err)
-	}
-	err = l.openDB(OutputsDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", OutputsDB, err)
-	}
-	err = l.openDB(TransactionsDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", TransactionsDB, err)
-	}
-	err = l.openDB(KeystonesDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
-	}
-	err = l.openDB(ZKDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", ZKDB, err)
-	}
-	err = l.openDB(MetadataDB)
-	if err != nil {
-		return nil, fmt.Errorf("leveldb %v: %w", MetadataDB, err)
-	}
-
 	// Blocks database is special
-	err = l.openRawDB(BlocksDB, rawdb.DefaultMaxFileSize)
+	err = l.openRawDB(ctx, BlocksDB, rawdb.DefaultMaxFileSize)
 	if err != nil {
 		return nil, fmt.Errorf("rawdb %v: %w", BlocksDB, err)
 	}
