@@ -24,7 +24,6 @@ import (
 	"github.com/hemilabs/larry/larry"
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
-	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/v2/database"
@@ -266,7 +265,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 		var reopen bool
 		dbVersion, err := l.Version(ctx)
 		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
+			if errors.Is(err, larry.ErrKeyNotFound) {
 				// New database, insert version.
 				v := make([]byte, 8)
 				binary.BigEndian.PutUint64(v, ldbVersion)
@@ -580,7 +579,7 @@ func (l *ldb) BlockHeaderBest(ctx context.Context) (*tbcd.BlockHeader, error) {
 	// Get last record
 	ebh, err := l.pool.Get(ctx, level.BlockHeadersDB, []byte(bhsCanonicalTipKey))
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return nil, database.NotFoundError("best block header not found")
 		}
 		return nil, fmt.Errorf("block headers best: %w", err)
@@ -1173,7 +1172,7 @@ func (l *ldb) BlockHeadersInsert(ctx context.Context, bhs *wire.MsgHeaders, batc
 	// retrieve best/canonical block header
 	bbh, err := tx.Get(ctx, level.BlockHeadersDB, []byte(bhsCanonicalTipKey))
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return tbcd.ITInvalid, nil, nil, 0,
 				database.NotFoundError("best block header not found")
 		}
@@ -1428,7 +1427,7 @@ func (l *ldb) BlockInsert(ctx context.Context, b *btcutil.Block) (int64, error) 
 	key := heightHashToKey(bh.Height, bh.Hash[:])
 	if err = l.pool.Del(ctx, level.BlocksMissingDB, key); err != nil {
 		// Ignore not found, it was deleted prior to this call.
-		if !errors.Is(err, leveldb.ErrNotFound) {
+		if !errors.Is(err, larry.ErrKeyNotFound) {
 			return -1, fmt.Errorf("block insert delete from missing: %w", err)
 		}
 	}
@@ -1443,7 +1442,7 @@ func (l *ldb) BlockMissingDelete(ctx context.Context, height int64, hash chainha
 	key := heightHashToKey(uint64(height), hash[:])
 	if err := l.pool.Del(ctx, level.BlocksMissingDB, key); err != nil {
 		// Ignore not found, it was deleted prior to this call.
-		if !errors.Is(err, leveldb.ErrNotFound) {
+		if !errors.Is(err, larry.ErrKeyNotFound) {
 			return fmt.Errorf("block missing delete: %w", err)
 		}
 	}
@@ -1469,7 +1468,7 @@ func (l *ldb) BlockByHash(ctx context.Context, hash chainhash.Hash) (*btcutil.Bl
 		bDB := l.rawPool[level.BlocksDB]
 		eb, err = bDB.Get(ctx, hash[:])
 		if err != nil {
-			if errors.Is(err, leveldb.ErrNotFound) {
+			if errors.Is(err, larry.ErrKeyNotFound) {
 				return nil, database.BlockNotFoundError{Hash: hash}
 			}
 			return nil, fmt.Errorf("block get: %w", err)
@@ -1501,7 +1500,7 @@ func (l *ldb) BlockExistsByHash(ctx context.Context, hash chainhash.Hash) (bool,
 	bDB := l.rawPool[level.BlocksDB]
 	ok, err := bDB.Has(ctx, hash[:])
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return false, nil
 		}
 		return false, fmt.Errorf("check block exists: %w", err)
@@ -2077,7 +2076,7 @@ func (l *ldb) BlockHeaderByKeystoneIndex(ctx context.Context) (*tbcd.BlockHeader
 	hash, err := kssTx.Get(ctx, level.KeystonesDB, keystoneIndexHashKey)
 	if err != nil {
 		nerr := fmt.Errorf("keystone get: %w", err)
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return nil, database.NotFoundError(nerr.Error())
 		}
 		return nil, nerr
@@ -2099,7 +2098,7 @@ func (l *ldb) BlockHeaderByUtxoIndex(ctx context.Context) (*tbcd.BlockHeader, er
 	hash, err := utxoTx.Get(ctx, level.OutputsDB, utxoIndexHashKey)
 	if err != nil {
 		nerr := fmt.Errorf("utxo get: %w", err)
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return nil, database.NotFoundError(nerr.Error())
 		}
 		return nil, nerr
@@ -2121,7 +2120,7 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 	hash, err := txTx.Get(ctx, level.TransactionsDB, txIndexHashKey)
 	if err != nil {
 		nerr := fmt.Errorf("tx get: %w", err)
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return nil, database.NotFoundError(nerr.Error())
 		}
 		return nil, nerr
@@ -2143,7 +2142,7 @@ func (l *ldb) BlockHeaderByZKIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 	hash, err := kssTx.Get(ctx, level.ZKDB, zkIndexHashKey)
 	if err != nil {
 		nerr := fmt.Errorf("zk utxo get: %w", err)
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return nil, database.NotFoundError(nerr.Error())
 		}
 		return nil, nerr
@@ -2161,7 +2160,7 @@ func (l *ldb) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) 
 
 	v, err := l.pool.Get(ctx, level.ZKDB, op[:])
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return 0, nil, database.NotFoundError(err.Error())
 		}
 		return 0, nil, fmt.Errorf("script by outpoint: %w", err)
@@ -2175,7 +2174,7 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 
 	val, err := l.pool.Get(ctx, level.ZKDB, sh[:])
 	if err != nil {
-		if errors.Is(err, leveldb.ErrNotFound) {
+		if errors.Is(err, larry.ErrKeyNotFound) {
 			return 0, database.NotFoundError(err.Error())
 		}
 		return 0, fmt.Errorf("balance by scripthash: %w", err)
