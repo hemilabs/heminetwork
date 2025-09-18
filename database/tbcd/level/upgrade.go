@@ -16,6 +16,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/dustin/go-humanize"
+	"github.com/hemilabs/larry/larry"
 	"github.com/mitchellh/go-homedir"
 	cp "github.com/otiai10/copy"
 	"github.com/shirou/gopsutil/v4/disk"
@@ -24,7 +25,6 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/rawdb"
-	"github.com/hemilabs/larry/larry"
 )
 
 var (
@@ -227,6 +227,7 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b larry.Database, dbnam
 
 			// XXX Larry has no compaction
 
+			_ = modeFast
 			// start := cmr.Range.Start
 			// if !modeFast {
 			// 	start = nil
