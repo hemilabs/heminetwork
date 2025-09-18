@@ -149,8 +149,7 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 			}
 			cache[tbcd.ZKIndexKey(spo[:])] = nil
 
-			// Mark UTxO spent and point where it was spent
-			// XXX max what about this one?
+			// Spent UTxO lookup
 			tsk := tbcd.NewTxSpendKey(txIn.PreviousOutPoint.Hash,
 				blockHeight, *blockHash, txIn.PreviousOutPoint.Index)
 			cache[tbcd.ZKIndexKey(tsk[:])] = tbcd.NewPointSlice(*txId,
@@ -163,20 +162,8 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 				continue
 			}
 
-			// SpendableOutput
-			sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
-			so := tbcd.NewSpendableOutput(chainhash.Hash(sh), blockHeight,
-				*blockHash, *txId, uint32(txOutIdx))
-			cache[tbcd.ZKIndexKey(so[:])] = nil
-
-			// Outpoint to TxOut
-			op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
-			if _, ok := cache[tbcd.ZKIndexKey(op[:])]; ok {
-				panic(fmt.Sprintf("diagnostic: %v", op))
-			}
-			cache[tbcd.ZKIndexKey(op[:])] = tbcd.NewTxOut(txOut)
-
 			// Fetch current balance of PkScript hash.
+			sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
 			balance, err := i.balance(ctx, sh, c)
 			if err != nil {
 				return fmt.Errorf("balance out: %w", err)
@@ -192,7 +179,19 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 				panic("wtf")
 			}
 
-			// Spendable UTxO XXX max do we need this?
+			// SpendableOutput
+			so := tbcd.NewSpendableOutput(chainhash.Hash(sh), blockHeight,
+				*blockHash, *txId, uint32(txOutIdx))
+			cache[tbcd.ZKIndexKey(so[:])] = nil
+
+			// Outpoint to TxOut
+			op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
+			if _, ok := cache[tbcd.ZKIndexKey(op[:])]; ok {
+				panic(fmt.Sprintf("diagnostic: %v", op))
+			}
+			cache[tbcd.ZKIndexKey(op[:])] = tbcd.NewTxOut(txOut)
+
+			// Spendable UTxO lookup
 			tsk := tbcd.NewTxSpendKey(*txId, blockHeight, *blockHash,
 				uint32(txOutIdx))
 			cache[tbcd.ZKIndexKey(tsk[:])] = nil

@@ -2250,10 +2250,7 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
-var (
-	spent tbcd.SpentOutput
-	spend tbcd.SpendableOutput
-)
+var scriptHashLen = len(tbcd.ScriptHash{})
 
 func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKUpdate")
@@ -2277,7 +2274,7 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 		switch direction {
 		case -1:
 			// On unwind we can delete some keys.
-			if len(k) == len(spent) || len(k) == len(spend) {
+			if len(k) == scriptHashLen {
 				bhsBatch.Delete([]byte(k))
 			} else {
 				bhsBatch.Put([]byte(k), v)

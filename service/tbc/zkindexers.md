@@ -31,6 +31,38 @@ Tx index
 cache[txid + height + hash + txOutIndex] = nil          // TxSpend
 ```
 
+### Unwinding
+
+Cache values are mixed updates and inserts thus, on unwind there must be
+updates and deletes. An example of an update are the `ScriptHash` to balance
+rows. Those will either add or subtract an amount from the stored total and
+will be updated in place. An example of an insert is a `SpentOutput` row, these
+will be inserted at wind time and must be deleted at unwind time.
+
+Practically speaking it seems like updates must always occur prior to deletes.
+This does however not happen inside the database transaction but shouldn't
+matter because it is an atomically committed batch.
+
+### In
+
+```
+PkScript, Value = cache[PrevOut]                        // Lookup
+Balance = cache[sha256(PkScript)]                       // Lookup
+cache[sha256(PkScript)] += Value                        // Update balance
+cache[sha256(PkScript) + height + hash + txid + PrevOut + txInIndex] = nil  // Delete
+cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // Delete
+```
+
+### Out
+
+```
+Balance = cache[sha256(PkScript)]                                   // Lookup
+cache[sha256(PkScript)] -= Value                                    // Update balance
+cache[sha256(PkScript) + height + hash + txid + txOutIndex] = nil   // Delete
+cache[Out] = TxOut                                                  // Delete
+cache[txid + height + hash + txOutIndex] = nil                      // Delete
+```
+
 Thoughts
 1. If we keep track of the balance in SpendableOutput we can get rid of
    OutpointScriptValue however that makes cache lookups O(N), disk is O log(N).
