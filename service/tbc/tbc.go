@@ -28,11 +28,11 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
+	"github.com/hemilabs/larry/larry"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/v2/api"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
@@ -1120,7 +1120,7 @@ func (s *Server) blockExpired(ctx context.Context, key any, value any) {
 		// Close peer.
 		if p, ok := value.(*rawpeer.RawPeer); ok {
 			p.Close() // kill peer
-			if !errors.Is(err, leveldb.ErrClosed) {
+			if !errors.Is(err, larry.ErrDBClosed) {
 				log.Errorf("block expired: %v %v", p, err)
 			}
 		}
@@ -1261,7 +1261,7 @@ func (s *Server) syncBlocks(ctx context.Context) {
 			case errors.Is(err, nil):
 			case errors.Is(err, context.Canceled):
 				return
-			case errors.Is(err, leveldb.ErrClosed):
+			case errors.Is(err, larry.ErrDBClosed):
 				return
 			case errors.Is(err, ErrAlreadyIndexing):
 				return
@@ -2852,7 +2852,7 @@ func (s *Server) dbClose() error {
 	log.Tracef("dbClose")
 	defer log.Tracef("dbClose")
 
-	// XXX marco, should we just pass the normal ctx?
+	// XXX larry, should we just pass the normal ctx?
 	return s.g.db.Close(context.TODO())
 }
 
