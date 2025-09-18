@@ -17,6 +17,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/larry/larry"
+	"github.com/hemilabs/larry/larry/rawdb"
 	"github.com/mitchellh/go-homedir"
 	cp "github.com/otiai10/copy"
 	"github.com/shirou/gopsutil/v4/disk"
@@ -24,7 +25,6 @@ import (
 
 	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/hemi"
-	"github.com/hemilabs/heminetwork/v2/rawdb"
 )
 
 var (
@@ -109,13 +109,13 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b larry.Database, dbname
 	}
 
 	// delete batch
-	batchA, err := a.NewBatch(ctx) // XXX no buffer
+	batchA, err := a.NewBatch(ctx) // XXX larry no buffer
 	if err != nil {
 		return &cmr, fmt.Errorf("open batch %w", err)
 	}
 
 	// copy batch
-	batchB, err := b.NewBatch(ctx) // XXX no buffer
+	batchB, err := b.NewBatch(ctx) // XXX larry no buffer
 	if err != nil {
 		return &cmr, fmt.Errorf("open batch %w", err)
 	}
@@ -225,7 +225,7 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b larry.Database, dbnam
 				dbname, humanize.Comma(int64(cmr.Records)),
 				humanize.Bytes(uint64(cmr.Size)))
 
-			// XXX Larry has no compaction
+			// XXX larry has no compaction
 
 			_ = modeFast
 			// start := cmr.Range.Start
@@ -492,7 +492,8 @@ func (l *ldb) v3(ctx context.Context) error {
 
 		a := l.rawPool[dbs].DB()
 		b := dst.RawDB()[dbs].DB()
-		n, err := copyOrMoveTable(ctx, modeMove, a, b, dbs, filter)
+		// XXX larry, export dbname out of larry
+		n, err := copyOrMoveTable(ctx, modeMove, a, b, "rawdb", filter)
 		if err != nil {
 			return fmt.Errorf("move raw database %v: %w", dbs, err)
 		}
