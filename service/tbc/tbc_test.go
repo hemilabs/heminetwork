@@ -27,6 +27,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
+	"github.com/hemilabs/larry/larry"
 	"github.com/juju/loggo/v2"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -38,7 +39,6 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"
-	"github.com/hemilabs/larry/larry"
 )
 
 const (
