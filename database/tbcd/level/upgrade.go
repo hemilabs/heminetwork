@@ -19,12 +19,12 @@ import (
 	"github.com/mitchellh/go-homedir"
 	cp "github.com/otiai10/copy"
 	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/hemilabs/heminetwork/v2/database/level"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/rawdb"
+	"github.com/hemilabs/larry/larry"
 )
 
 var (
@@ -82,7 +82,7 @@ func diskFree(path string) (uint64, error) {
 	return du.Free, nil
 }
 
-func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string, first []byte) (*CMResult, error) {
+func copyOrMoveChunk(ctx context.Context, move bool, a, b larry.Database, dbname string, filter map[string]string, first []byte) (*CMResult, error) {
 	skipOne := false
 	if !move && first != nil {
 		// When copying skip one record since incoming first is the
@@ -90,8 +90,12 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 		skipOne = true
 	}
 	start := time.Now()
-	i := a.NewIterator(&util.Range{Start: first, Limit: nil}, nil)
-	defer func() { i.Release() }()
+
+	i, err := a.NewRange(ctx, dbname, first, nil)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
+	defer func() { i.Close(ctx) }()
 	log.Infof("   Creating iterator took: %v", time.Since(start))
 
 	start = time.Now() // reset timer for move/copy
@@ -99,17 +103,29 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 	// Skip first record during copy to prevent infinite loops.
 	var cmr CMResult
 	if skipOne {
-		if !i.Next() {
-			return &cmr, i.Error()
+		if !i.Next(ctx) {
+			return &cmr, nil
 		}
 	}
 
-	batchA := leveldb.MakeBatch(batchSize) // delete batch
-	batchB := leveldb.MakeBatch(batchSize) // copy batch
+	// delete batch
+	batchA, err := a.NewBatch(ctx) // XXX no buffer
+	if err != nil {
+		return &cmr, fmt.Errorf("open batch %w", err)
+	}
+
+	// copy batch
+	batchB, err := b.NewBatch(ctx) // XXX no buffer
+	if err != nil {
+		return &cmr, fmt.Errorf("open batch %w", err)
+	}
+
+	// batchA := leveldb.MakeBatch(batchSize) // delete batch
+	// batchB := leveldb.MakeBatch(batchSize) // copy batch
 
 	firstKey := true
 	var records int
-	for records = 0; i.Next(); records++ {
+	for records = 0; i.Next(ctx); records++ {
 		// See if we were interrupted
 		select {
 		case <-ctx.Done():
@@ -117,8 +133,8 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 		default:
 		}
 
-		key := i.Key()
-		val := i.Value()
+		key := i.Key(ctx)
+		val := i.Value(ctx)
 		if filter != nil {
 			// skip filtered records
 			k, v := filter[string(key)]
@@ -129,9 +145,9 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			}
 		}
 		// Create batches to speed things up a bit.
-		batchB.Put(key, val)
+		batchB.Put(ctx, dbname, key, val)
 		if move {
-			batchA.Delete(key)
+			batchA.Del(ctx, dbname, key)
 		}
 
 		// Always keep track of range
@@ -151,17 +167,30 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 	}
 	cmr.Records += records - cmr.Skipped
 
-	if err := b.Write(batchB, nil); err != nil {
-		return &cmr, fmt.Errorf("batch write b: %w", err)
+	err = b.Update(ctx,
+		func(ctx context.Context, tx larry.Transaction) error {
+			if ierr := tx.Write(ctx, batchB); ierr != nil {
+				return fmt.Errorf("batch write b: %w", ierr)
+			}
+			return nil
+		})
+	if err != nil {
+		return &cmr, err
 	}
-	batchB.Reset() // Help gc
+	batchB.Reset(ctx) // Help gc
 
 	if move {
-		// Delete destination records
-		if err := a.Write(batchA, nil); err != nil {
-			return &cmr, fmt.Errorf("batch write a: %w", err)
+		err = a.Update(ctx,
+			func(ctx context.Context, tx larry.Transaction) error {
+				if ierr := tx.Write(ctx, batchA); ierr != nil {
+					return fmt.Errorf("batch write a: %w", ierr)
+				}
+				return nil
+			})
+		if err != nil {
+			return &cmr, err
 		}
-		batchA.Reset() // Help gc
+		batchA.Reset(ctx) // Help gc
 	}
 
 	if upgradeVerbose {
@@ -175,10 +204,10 @@ func copyOrMoveChunk(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			humanize.Bytes(uint64(cmr.Size)), time.Since(start))
 	}
 
-	return &cmr, i.Error()
+	return &cmr, nil
 }
 
-func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
+func _copyOrMoveTable(ctx context.Context, move bool, a, b larry.Database, dbname string, filter map[string]string) (int, error) {
 	var first []byte
 	total := 0
 	for {
@@ -195,17 +224,20 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 			log.Infof("  Compacting %v: records %v %v",
 				dbname, humanize.Comma(int64(cmr.Records)),
 				humanize.Bytes(uint64(cmr.Size)))
-			start := cmr.Range.Start
-			if !modeFast {
-				start = nil
-			}
-			err := a.CompactRange(util.Range{
-				Start: start,
-				Limit: cmr.Range.Limit,
-			})
-			if err != nil {
-				return 0, fmt.Errorf("compaction: %w", err)
-			}
+
+			// XXX Larry has no compaction
+
+			// start := cmr.Range.Start
+			// if !modeFast {
+			// 	start = nil
+			// }
+			// err := a.CompactRange(util.Range{
+			// 	Start: start,
+			// 	Limit: cmr.Range.Limit,
+			// })
+			// if err != nil {
+			// 	return 0, fmt.Errorf("compaction: %w", err)
+			// }
 			log.Infof("  Compacting took %v", time.Since(ct))
 		}
 
@@ -226,7 +258,7 @@ func _copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname s
 // move is true the record is deleted from a after being copied to b.
 // This function verifies that indeed all records have been moved and will
 // restart the copy/move if it didn't.
-func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname string, filter map[string]string) (int, error) {
+func copyOrMoveTable(ctx context.Context, move bool, a, b larry.Database, dbname string, filter map[string]string) (int, error) {
 	verb := "move"
 	if !move {
 		verb = "copy"
@@ -238,11 +270,14 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 
 	// Diagnostic to ensure db is actually fully copied
 	if move {
-		i := a.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
-		defer func() { i.Release() }()
+		i, err := a.NewIterator(ctx, dbname)
+		if err != nil {
+			return 0, fmt.Errorf("new iterator: %w", err)
+		}
+		defer func() { i.Close(ctx) }()
 		var skipped, records int
-		for records = 0; i.Next(); records++ {
-			key := i.Key()
+		for records = 0; i.Next(ctx); records++ {
+			key := i.Key(ctx)
 			if filter != nil {
 				// skip filtered records
 				k, v := filter[string(key)]
@@ -256,26 +291,18 @@ func copyOrMoveTable(ctx context.Context, move bool, a, b *leveldb.DB, dbname st
 			return 0, fmt.Errorf("database not empty %v: %v",
 				dbname, records-skipped)
 		}
-		return 0, i.Error()
+		return 0, nil
 	}
 
 	return n, nil
 }
 
-func (l *ldb) insertTable(dbname string, key, value []byte) error {
-	db := l.pool[dbname]
-	if db == nil {
-		return fmt.Errorf("invalid db: %v", db)
-	}
-	return db.Put(key, value, nil)
+func (l *ldb) insertTable(ctx context.Context, dbname string, key, value []byte) error {
+	return l.pool.Put(ctx, dbname, key, value)
 }
 
-func (l *ldb) deleteTable(dbname string, key []byte) error {
-	db := l.pool[dbname]
-	if db == nil {
-		return fmt.Errorf("invalid db: %v", db)
-	}
-	return db.Delete(key, nil)
+func (l *ldb) deleteTable(ctx context.Context, dbname string, key []byte) error {
+	return l.pool.Del(ctx, dbname, key)
 }
 
 // v2 upgrade the database from v1 to v2.
@@ -291,11 +318,11 @@ func (l *ldb) v2(ctx context.Context) error {
 	// update outputs index hash
 	utxoH, err := l.MetadataGet(ctx, utxoIndexHashKey)
 	if err == nil {
-		err := l.insertTable(level.OutputsDB, utxoIndexHashKey, utxoH)
+		err := l.insertTable(ctx, level.OutputsDB, utxoIndexHashKey, utxoH)
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.OutputsDB, err)
 		}
-		err = l.deleteTable(level.MetadataDB, utxoIndexHashKey)
+		err = l.deleteTable(ctx, level.MetadataDB, utxoIndexHashKey)
 		if err != nil {
 			return fmt.Errorf("delete table %v: %w", level.OutputsDB, err)
 		}
@@ -304,11 +331,11 @@ func (l *ldb) v2(ctx context.Context) error {
 	// update transaction index hash
 	txH, err := l.MetadataGet(ctx, txIndexHashKey)
 	if err == nil {
-		err := l.insertTable(level.TransactionsDB, txIndexHashKey, txH)
+		err := l.insertTable(ctx, level.TransactionsDB, txIndexHashKey, txH)
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.TransactionsDB, err)
 		}
-		err = l.deleteTable(level.MetadataDB, txIndexHashKey)
+		err = l.deleteTable(ctx, level.MetadataDB, txIndexHashKey)
 		if err != nil {
 			return fmt.Errorf("delete table %v: %w", level.TransactionsDB, err)
 		}
@@ -317,11 +344,11 @@ func (l *ldb) v2(ctx context.Context) error {
 	// update keystone index hash
 	keystoneH, err := l.MetadataGet(ctx, keystoneIndexHashKey)
 	if err == nil {
-		err := l.insertTable(level.KeystonesDB, keystoneIndexHashKey, keystoneH)
+		err := l.insertTable(ctx, level.KeystonesDB, keystoneIndexHashKey, keystoneH)
 		if err != nil {
 			return fmt.Errorf("insert table %v: %w", level.KeystonesDB, err)
 		}
-		err = l.deleteTable(level.MetadataDB, keystoneIndexHashKey)
+		err = l.deleteTable(ctx, level.MetadataDB, keystoneIndexHashKey)
 		if err != nil {
 			return fmt.Errorf("delete table %v: %w", level.KeystonesDB, err)
 		}
@@ -389,8 +416,8 @@ func (l *ldb) v3(ctx context.Context) error {
 	}
 
 	// sort database names
-	keys := make([]string, 0, len(l.pool))
-	for k := range l.pool {
+	keys := make([]string, 0, len(l.tables))
+	for k := range l.tables {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
@@ -430,8 +457,8 @@ func (l *ldb) v3(ctx context.Context) error {
 
 		log.Infof("Moving database: %v", dbs)
 
-		a := l.pool[dbs]
-		b := dst.DB()[dbs]
+		a := l.pool
+		b := dst.DB()
 		n, err := copyOrMoveTable(ctx, modeMove, a, b, dbs, filter)
 		if err != nil {
 			return fmt.Errorf("move database %v: %w", dbs, err)
@@ -508,7 +535,7 @@ func (l *ldb) v3(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("destination metadata version put: %w", err)
 	}
-	err = dst.Close()
+	err = dst.Close(ctx)
 	if err != nil {
 		return fmt.Errorf("destination close: %w", err)
 	}
@@ -518,7 +545,7 @@ func (l *ldb) v3(ctx context.Context) error {
 	// Technically it's still in v2, but copy mode is test only so it's OK.
 	if modeMove {
 		// Close source
-		err = l.Close()
+		err = l.Close(ctx)
 		if err != nil {
 			return fmt.Errorf("source close: %w", err)
 		}
@@ -554,7 +581,7 @@ func (l *ldb) v3(ctx context.Context) error {
 			return fmt.Errorf("source metadata version put: %w", err)
 		}
 		// Close source
-		err = l.Close()
+		err = l.Close(ctx)
 		if err != nil {
 			return fmt.Errorf("source close: %w", err)
 		}
@@ -573,14 +600,16 @@ func (l *ldb) v4(ctx context.Context) error {
 	log.Infof("Upgrading database from v3 to v4")
 
 	// Index all keystones to H[height][hash] format.
-	bhs := l.pool[level.BlockHeadersDB]
-	ksdb := l.pool[level.KeystonesDB]
-	i := ksdb.NewIterator(&util.Range{Start: nil, Limit: nil}, nil)
-	defer func() { i.Release() }()
+	i, err := l.pool.NewIterator(ctx, level.KeystonesDB)
+	if err != nil {
+		return fmt.Errorf("new iterator: %w", err)
+	}
+
+	defer func() { i.Close(ctx) }()
 	var records int
-	for records = 0; i.Next(); records++ {
-		key := i.Key()
-		value := i.Value()
+	for records = 0; i.Next(ctx); records++ {
+		key := i.Key(ctx)
+		value := i.Value(ctx)
 		if len(value) != keystoneSize {
 			if len(value) == keystoneSizeV3 {
 				// Keystone without height encoded.
@@ -593,7 +622,7 @@ func (l *ldb) v4(ctx context.Context) error {
 			}
 		}
 		ks := decodeKeystone(value)
-		ebh, err := bhs.Get(ks.BlockHash[:], nil)
+		ebh, err := l.pool.Get(ctx, level.BlockHeadersDB, ks.BlockHash[:])
 		if err != nil {
 			return fmt.Errorf("blockheader: %w", err)
 		}
@@ -603,19 +632,16 @@ func (l *ldb) v4(ctx context.Context) error {
 			return fmt.Errorf("hash: %w", err)
 		}
 		ehh := encodeKeystoneHeightHash(uint32(bh.Height), *ksHash)
-		err = ksdb.Put(ehh[:], nil, nil)
+		err = l.pool.Put(ctx, level.KeystonesDB, ehh[:], nil)
 		if err != nil {
 			return fmt.Errorf("put: %w", err)
 		}
 		ks.BlockHeight = uint32(bh.Height)
 		nv := encodeKeystone(ks)
-		err = ksdb.Put(key[:], nv[:], nil)
+		err = l.pool.Put(ctx, level.KeystonesDB, key[:], nv[:])
 		if err != nil {
 			return fmt.Errorf("put: %w", err)
 		}
-	}
-	if i.Error() != nil {
-		return fmt.Errorf("keystones iterator: %w", i.Error())
 	}
 	log.Infof("records handled: %v", records)
 
