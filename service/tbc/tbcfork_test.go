@@ -1785,7 +1785,7 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -2099,7 +2099,7 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -2433,7 +2433,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -3010,7 +3010,7 @@ func TestForkCanonicity(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
 	//		   		 /--> b3aa
 	//        / --> b2a - b3a - b4a - b5a - b6a
@@ -3193,7 +3193,7 @@ func TestCacheOverflow(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
 	const blockCount = 30 // must be >= 2
 	blocks := make([]*block, blockCount)
