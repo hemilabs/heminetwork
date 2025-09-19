@@ -492,7 +492,7 @@ func (l *ldb) v3(ctx context.Context) error {
 
 		a := l.rawPool[dbs].DB()
 		b := dst.RawDB()[dbs].DB()
-		// XXX larry, export dbname out of larry
+		// XXX larry, export "rawdb" dbname out of larry
 		n, err := copyOrMoveTable(ctx, modeMove, a, b, "rawdb", filter)
 		if err != nil {
 			return fmt.Errorf("move raw database %v: %w", dbs, err)
