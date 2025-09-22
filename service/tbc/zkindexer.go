@@ -211,7 +211,13 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		// Outpoint to TxOut
 		op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
 		if _, ok := cache[tbcd.ZKIndexKey(op[:])]; ok {
+			// Work around two invalid txids on mainnet
+			switch op.String() {
+			case "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599:0":
+			case "e3bf3d07d4b0375638d5f1db5255fe07ba2c4cb067cd81b84ee974b6585fb468:0":
+			default:
 			panic(fmt.Sprintf("diagnostic: %v", op))
+		}
 		}
 		cache[tbcd.ZKIndexKey(op[:])] = tbcd.NewTxOut(txOut)
 
