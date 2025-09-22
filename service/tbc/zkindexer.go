@@ -83,11 +83,11 @@ func (i *zkIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache
 		return uint64(txOut.Value), txOut.PkScript, nil
 	}
 	// Not found in cache, fetch from db
-	txOut, err := i.g.db.ZKScriptByOutpoint(ctx, pop) // Rename
+	value, txOut, err := i.g.db.ZKValueAndScriptByOutpoint(ctx, pop) // Rename
 	if err != nil {
 		return 0, nil, err
 	}
-	return binary.BigEndian.Uint64(txOut[0:]), txOut[8:], nil
+	return value, txOut, nil
 }
 
 func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
@@ -101,6 +101,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		}
 
 		// Recreate Outpoint from TxIn.PreviousOutPoint
+		log.Infof("prev %v", txIn.PreviousOutPoint.Hash)
 		pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 			txIn.PreviousOutPoint.Index)
 
@@ -179,6 +180,12 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		//	tbcd.NewScriptHashFromScript(script), sc, addrs, rs,
 		//	script)
 		// Fetch current balance of PkScript hash.
+		log.Infof("PkScript %x", txOut.PkScript)
+		disasm, err := txscript.DisasmString(txOut.PkScript)
+		if err != nil {
+			panic(err)
+		}
+		log.Infof("disasm: %v", disasm)
 		sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
 		balance, err := i.balance(ctx, sh, c)
 		if err != nil {

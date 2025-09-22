@@ -1171,25 +1171,33 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 				zk := true
 				if zk {
 					// find spend script by outpoint in zkindex
-					var txid [32]byte
-					copy(txid[:], tx[:])
-					index := binary.BigEndian.Uint32(ktx[33 : 33+4])
-					// copy(txid[:], vtx[:32])
-					// index := binary.BigEndian.Uint32(vtx[32 : 32+4])
-					op := tbcd.NewOutpoint(txid, index)
-					s1, err := s.g.db.ZKScriptByOutpoint(ctx, op)
+					txid, _ := chainhash.NewHash(ktx[1 : 1+32])
+					index := binary.BigEndian.Uint32(ktx[33:])
+					// txid, _ := chainhash.NewHash(vtx[:32])
+					// index := binary.BigEndian.Uint32(vtx[32:])
+					op := tbcd.NewOutpoint(*txid, index)
+					_, s1, err := s.g.db.ZKValueAndScriptByOutpoint(ctx, op)
 					if err != nil {
 						return fmt.Errorf("op not found: %v %v",
 							op, err)
 					}
 					// find balance from scripthash
+					// panic(spew.Sdump(s1))
+					// t.Logf("index %v %v", spew.Sdump(txid), spew.Sdump(s1))
+					disasm, err := txscript.DisasmString(s1)
+					if err != nil {
+						panic(err)
+					}
+					_ = disasm
+					// t.Logf("disasm %v", disasm)
 					sh := tbcd.NewScriptHashFromScript(s1)
 					balance, err := s.g.db.ZKBalanceByScriptHash(ctx, sh)
 					if err != nil {
-						return fmt.Errorf("balance not found: %v %v",
-							op, err)
+						return fmt.Errorf("balance not found: "+
+							"op %v sh %v err %v",
+							op, sh, err)
 					}
-					panic(spew.Sdump(balance))
+					_ = balance
 				}
 
 			case 't':
@@ -3510,7 +3518,6 @@ func TestZKIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Fatal("stop")
 	// XXX add mustNotHave
 	// verify tx
 	for address := range n.keys {
