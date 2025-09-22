@@ -93,7 +93,7 @@ func (i *zkIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache
 func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
 	txId := tx.Hash()
-	// log.Infof("tx %v", tx.Hash())
+	log.Infof("tx %v", tx.Hash())
 	for txInIdx, txIn := range tx.MsgTx().TxIn {
 		// Skip coinbase inputs
 		if blockchain.IsCoinBase(tx) {
@@ -116,7 +116,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		if err != nil {
 			return fmt.Errorf("balance in: %w", err)
 		}
-		// log.Infof("in pop %v value %v sh %v script %x", pop, value, sh, script)
+		log.Infof("in pop %v value %v sh %v script %x", pop, value, sh, script)
 
 		// Handle balance
 		switch direction {

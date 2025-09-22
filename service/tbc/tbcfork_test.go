@@ -1168,6 +1168,30 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					return errors.New("block mismatch")
 				}
 
+				zk := true
+				if zk {
+					// find spend script by outpoint in zkindex
+					var txid [32]byte
+					copy(txid[:], tx[:])
+					index := binary.BigEndian.Uint32(ktx[33 : 33+4])
+					// copy(txid[:], vtx[:32])
+					// index := binary.BigEndian.Uint32(vtx[32 : 32+4])
+					op := tbcd.NewOutpoint(txid, index)
+					s1, err := s.g.db.ZKScriptByOutpoint(ctx, op)
+					if err != nil {
+						return fmt.Errorf("op not found: %v %v",
+							op, err)
+					}
+					// find balance from scripthash
+					sh := tbcd.NewScriptHashFromScript(s1)
+					balance, err := s.g.db.ZKBalanceByScriptHash(ctx, sh)
+					if err != nil {
+						return fmt.Errorf("balance not found: %v %v",
+							op, err)
+					}
+					panic(spew.Sdump(balance))
+				}
+
 			case 't':
 				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
 				if err != nil {
@@ -3442,7 +3466,14 @@ func TestZKIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify ZK stuff here
+	// Verify ZK has all scripts by outpoint
+	//panic(spew.Sdump(b.txs))
+	//op1 := tbcd.NewOutpoint(txid, index)
+	//s1, err := s.g.db.ZKScriptByOutpoint(ctx, op1)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//_ = s1
 
 	// check if keystone in db
 	rv, err := s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
@@ -3479,6 +3510,7 @@ func TestZKIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Fatal("stop")
 	// XXX add mustNotHave
 	// verify tx
 	for address := range n.keys {
