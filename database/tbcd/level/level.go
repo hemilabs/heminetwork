@@ -2216,24 +2216,24 @@ func (l *ldb) BlockHeaderByZKIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 	return l.BlockHeaderByHash(ctx, *ch)
 }
 
-func (l *ldb) ZKScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) ([]byte, error) {
-	log.Tracef("ZKScriptByOutpoint")
-	defer log.Tracef("ZKScriptByOutpoint exit")
+func (l *ldb) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) (uint64, []byte, error) {
+	log.Tracef("ZKValueAndScriptByOutpoint")
+	defer log.Tracef("ZKValueAndScriptByOutpoint exit")
 
 	zkdb := l.pool[level.ZKDB]
 	v, err := zkdb.Get(op[:], nil)
 	if err != nil {
 		if errors.Is(err, leveldb.ErrNotFound) {
-			return nil, database.NotFoundError(err.Error())
+			return 0, nil, database.NotFoundError(err.Error())
 		}
-		return nil, fmt.Errorf("script by outpoint: %w", err)
+		return 0, nil, fmt.Errorf("script by outpoint: %w", err)
 	}
-	return v, nil
+	return binary.BigEndian.Uint64(v[0:]), v[8:], nil
 }
 
 func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
-	log.Tracef("ZKScriptByOutpoint")
-	defer log.Tracef("ZKScriptByOutpoint exit")
+	log.Tracef("ZKBalanceByScriptHash")
+	defer log.Tracef("ZKBalanceByScriptHash exit")
 
 	zkdb := l.pool[level.ZKDB]
 	val, err := zkdb.Get(sh[:], nil)

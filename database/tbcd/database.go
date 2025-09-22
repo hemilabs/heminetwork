@@ -137,7 +137,7 @@ type Database interface {
 	// ZKUtxo
 	BlockHeaderByZKIndex(ctx context.Context) (*BlockHeader, error)
 	BlockZKUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error
-	ZKScriptByOutpoint(ctx context.Context, op Outpoint) ([]byte, error)
+	ZKValueAndScriptByOutpoint(ctx context.Context, op Outpoint) (uint64, []byte, error)
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 }
 
@@ -526,7 +526,7 @@ func (o SpendableOutput) String() string {
 	if err != nil {
 		panic(err)
 	}
-	txid, err := chainhash.NewHash(o[32+4+32:])
+	txid, err := chainhash.NewHash(o[33+4+32 : 33+4+32+32])
 	if err != nil {
 		panic(err)
 	}
