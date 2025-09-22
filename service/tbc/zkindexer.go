@@ -93,7 +93,7 @@ func (i *zkIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache
 func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
 	txId := tx.Hash()
-	log.Infof("tx %v", tx.Hash())
+	// log.Infof("tx %v", tx.Hash())
 	for txInIdx, txIn := range tx.MsgTx().TxIn {
 		// Skip coinbase inputs
 		if blockchain.IsCoinBase(tx) {
@@ -101,7 +101,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		}
 
 		// Recreate Outpoint from TxIn.PreviousOutPoint
-		log.Infof("prev %v", txIn.PreviousOutPoint.Hash)
+		// log.Infof("prev %v", txIn.PreviousOutPoint.Hash)
 		pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 			txIn.PreviousOutPoint.Index)
 
@@ -117,7 +117,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		if err != nil {
 			return fmt.Errorf("balance in: %w", err)
 		}
-		log.Infof("in pop %v value %v sh %v script %x", pop, value, sh, script)
+		// log.Infof("in pop %v value %v sh %v script %x", pop, value, sh, script)
 
 		// Handle balance
 		switch direction {
@@ -180,12 +180,12 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		//	tbcd.NewScriptHashFromScript(script), sc, addrs, rs,
 		//	script)
 		// Fetch current balance of PkScript hash.
-		log.Infof("PkScript %x", txOut.PkScript)
-		disasm, err := txscript.DisasmString(txOut.PkScript)
-		if err != nil {
-			panic(err)
-		}
-		log.Infof("disasm: %v", disasm)
+		//log.Infof("PkScript %x", txOut.PkScript)
+		//disasm, err := txscript.DisasmString(txOut.PkScript)
+		//if err != nil {
+		//	panic(err)
+		//}
+		//log.Infof("disasm: %v", disasm)
 		sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
 		balance, err := i.balance(ctx, sh, c)
 		if err != nil {
