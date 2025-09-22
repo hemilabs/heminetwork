@@ -3296,6 +3296,499 @@ func TestCacheOverflow(t *testing.T) {
 	}
 }
 
+func TestZKIndexFork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 21*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	port := testutil.FreePort()
+	n, err := newFakeNode(t, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	popPriv, popPublic, popAddress, err := n.newKey("pop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("pop keys:")
+	t.Logf("  private    : %x", popPriv.Serialize())
+	t.Logf("  public     : %x", popPublic.SerializeCompressed())
+	t.Logf("  address    : %v", popAddress)
+
+	kss1Hash := n.newKeystone("kss1")
+	kss2Hash := n.newKeystone("kss2")
+
+	go func() {
+		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		HemiIndex:            true, // Test keystone index
+		ZKIndex:              true, // Test zk index
+		LevelDBHome:          t.TempDir(),
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
+		MaxCachedZK:             1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{"127.0.0.1:" + port},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	// Create a bunch of weird geometries to catch all corner cases in the indexer.
+
+	//   /-> b1a -> b2a
+	// g ->  b1 ->  b2 -> b3
+	//   \-> b1b -> b2b
+
+	// best is b3
+
+	// best chain
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// a chain
+	b1a, err := n.MineAndSend(ctx, "b1a", parent, address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b chain
+	b1b, err := n.MineAndSend(ctx, "b1b", parent, address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, MineWithKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc downloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	// Verify linear indexing. Current TxIndex is sitting at genesis
+
+	// genesis -> b3 should work with negative direction (cdiff is less than target)
+	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
+	if err != nil {
+		t.Fatalf("expected success g -> b3, got %v", err)
+	}
+	if direction <= 0 {
+		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
+	}
+
+	t.Logf("sync to b2")
+	// Index to b2
+	err = s.SyncIndexersToHash(ctx, *b2.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify ZK stuff here
+
+	// check if keystone in db
+	rv, err := s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// check if keystone stored with correct block hash
+	if !rv.BlockHash.IsEqual(b2.Hash()) {
+		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
+	}
+	// check if keystone stored using heighthash index
+	hk, err := s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
+	}
+
+	// Index to b3
+	t.Logf("sync to b3")
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// XXX verify indexes
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// XXX add mustNotHave
+	// verify tx
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// check if kss1 in db
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check if kss1 stored with correct block hash
+	if !rv.BlockHash.IsEqual(b2.Hash()) {
+		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
+	}
+
+	// check if keystone stored using heighthash index
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
+	}
+
+	// check if kss2 in db
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss2Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check if kss2 stored with correct block hash
+	if !rv.BlockHash.IsEqual(b3.Hash()) {
+		t.Fatalf("wrong blockhash for stored keystone: %v", kss2Hash)
+	}
+
+	// check if keystone stored using heighthash index
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b3.Height()-1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 3, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
+	}
+
+	// Verify linear indexing. Current TxIndex is sitting at b3
+	t.Logf("b3: %v", b3)
+
+	// b3 -> genesis should work with positive direction (cdiff is greater than target)
+	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *s.g.chain.GenesisHash)
+	if err != nil {
+		t.Fatalf("expected success b3 -> genesis, got %v", err)
+	}
+	if direction != -1 {
+		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
+	}
+
+	// b3 -> b1 should work with positive direction
+	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b1.Hash())
+	if err != nil {
+		t.Fatalf("expected success b3 -> b1, got %v", err)
+	}
+	if direction != -1 {
+		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
+	}
+
+	// b3 -> b2a should fail
+	_, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b2a.Hash())
+	if !errors.Is(err, ErrNotLinear) {
+		t.Fatalf("b2a is not linear to b3: %v", err)
+	}
+
+	// b3 -> b2b should fail
+	_, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b2b.Hash())
+	if !errors.Is(err, ErrNotLinear) {
+		t.Fatalf("b2b is not linear to b3: %v", err)
+	}
+
+	// make sure syncing to iself is non linear
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
+	if err != nil {
+		t.Fatalf("at b3, should have returned nil, got %v", err)
+	}
+
+	// unwind back to genesis
+	t.Logf("unwind to genesis")
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// XXX verify indexes
+	txBH, err := s.ti.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
+	}
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
+	}
+
+	// see if we can move to b2a
+	direction, err = indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b2a.Hash())
+	if err != nil {
+		t.Fatalf("expected success genesis -> b2a, got %v", err)
+	}
+	if direction != 1 {
+		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
+	}
+
+	t.Logf("sync to b2a")
+	err = s.SyncIndexersToHash(ctx, *b2a.Hash())
+	if err != nil {
+		t.Fatalf("wind to b2a: %v", err)
+	}
+
+	// check if kss1 in db
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check if kss1 stored with correct block hash
+	if !rv.BlockHash.IsEqual(b2a.Hash()) {
+		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
+	}
+
+	// check if keystone stored using heighthash index
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// unwind back to genesis
+	t.Logf("unwind to genesis 2")
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+	txBH, err = s.ti.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
+	}
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
+	}
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	t.Logf("---------------------------------------- going to b2b")
+	err = s.SyncIndexersToHash(ctx, *b2b.Hash())
+	if err != nil {
+		t.Fatalf("wind to b2b: %v", err)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// check if kss1 in db
+	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check if kss1 stored with correct block hash
+	if !rv.BlockHash.IsEqual(b2b.Hash()) {
+		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
+	}
+
+	// check if keystone stored using heighthash index
+	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hk) != 1 {
+		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
+	}
+
+	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
+		t.Fatalf("unexpected keystone diff: %s", diff)
+	}
+
+	// t.Logf("---------------------------------------- going to b3")
+	// unwind back to genesis
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
+	if err != nil {
+		t.Fatalf("xxxx %v", err)
+	}
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	lastKssAt, err := s.ki.IndexerAt(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// check if keystones unwound to genesis
+	if lastKssAt.Height != 0 {
+		t.Fatalf("expected keystone index hash 0, got %v", lastKssAt.Height)
+	}
+
+	// check if keystones not in db
+	for _, v := range n.keystones {
+		abrvKss := hemi.L2KeystoneAbbreviate(*v).Hash()
+		_, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *abrvKss)
+		if err == nil {
+			t.Fatalf("expected fail in db query for keystone: %v", abrvKss)
+		}
+	}
+
+	// check if no keystones in heighthash index
+	_, err = s.g.db.KeystonesByHeight(ctx, 6, -5)
+	if err == nil {
+		t.Fatalf("expected fail in db query for keystones at height 5 and below")
+	}
+}
+
 // borrowed from btcd
 //
 // Copyright (c) 2014-2016 The btcsuite developers
