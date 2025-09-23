@@ -260,11 +260,7 @@ func NewOutpointFromString(s string) (*Outpoint, error) {
 	if len(p) != 2 {
 		return nil, errors.New("invalid point")
 	}
-	ph, err := hex.DecodeString(p[0])
-	if err != nil {
-		return nil, err
-	}
-	h, err := chainhash.NewHash(ph)
+	h, err := chainhash.NewHashFromStr(p[0])
 	if err != nil {
 		return nil, err
 	}
