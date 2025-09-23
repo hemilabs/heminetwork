@@ -404,6 +404,8 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tutxosbyscripthash [hash] <count> <start>")
 		fmt.Println("\tutxosbyscripthashcount [hash]")
 		fmt.Println("\tversion")
+		fmt.Println("\tzkbalancebyscripthash")
+		fmt.Println("\tzkvalueandscriptbyoutpoint")
 		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
@@ -1017,6 +1019,40 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("version: %w", err)
 		}
 		fmt.Printf("database version: %v\n", version)
+
+	case "zkbalancebyscripthash":
+		scripthash := args["scripthash"]
+		if scripthash == "" {
+			return errors.New("scripthash: must be set")
+		}
+		sh, err := tbcd.NewScriptHashFromString(scripthash)
+		if err != nil {
+			return fmt.Errorf("scripthash: %w", err)
+		}
+
+		balance, err := s.ZKBalanceByScriptHash(ctx, sh)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("balance: %v\n", balance)
+
+	case "zkvalueandscriptbyoutpoint":
+		outpoint := args["outpoint"]
+		if outpoint == "" {
+			return errors.New("outpoint: must be set")
+		}
+		op, err := tbcd.NewOutpointFromString(outpoint)
+		if err != nil {
+			return fmt.Errorf("outpoint: %w", err)
+		}
+
+		value, script, err := s.ZKValueAndScriptByOutpoint(ctx, *op)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("value      : %v\n", value)
+		fmt.Printf("script   : %x\n", script)
+		fmt.Printf("script hash: %x\n", tbcd.NewScriptHashFromScript(script))
 
 	case "metadatabatchget", "metadatabatchput", "blockheadergenesisinsert",
 		"blockheadercachestats", "blockheadersinsert", "blockheadersremove",

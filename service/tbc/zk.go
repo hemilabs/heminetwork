@@ -1,0 +1,35 @@
+package tbc
+
+import (
+	"context"
+
+	"github.com/btcsuite/btcd/btcutil"
+
+	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+)
+
+func (s *Server) ZKBalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash) (btcutil.Amount, error) {
+	log.Tracef("ZKBalanceByScriptHash")
+	defer log.Tracef("ZKBalanceByScriptHash exit")
+
+	balance, err := s.g.db.ZKBalanceByScriptHash(ctx, hash)
+	if err != nil {
+		return 0, err
+	}
+	return btcutil.NewAmount(float64(balance))
+}
+
+func (s *Server) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) (btcutil.Amount, []byte, error) {
+	log.Tracef("ZKValueAndScriptByOutpoint")
+	defer log.Tracef("ZKValueAndScriptByOutpoint exit")
+
+	value, script, err := s.g.db.ZKValueAndScriptByOutpoint(ctx, op)
+	if err != nil {
+		return 0, nil, err
+	}
+	v, err := btcutil.NewAmount(float64(value))
+	if err != nil {
+		return 0, nil, err
+	}
+	return v, script, nil
+}
