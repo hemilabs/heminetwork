@@ -2250,6 +2250,44 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
+var lzkso = len(tbcd.SpentOutput{})
+
+func bytes2hash(b []byte) chainhash.Hash {
+	h, err := chainhash.NewHash(b)
+	if err != nil {
+		panic(err)
+	}
+	return *h
+}
+
+func (l *ldb) ZKSpentOutputJournal(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
+	log.Tracef("ZKSpentOutputJournal")
+	defer log.Tracef("ZKSpentOutputJournal exit")
+
+	zkdb := l.pool[level.ZKDB]
+	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
+	defer it.Release()
+
+	sos := make([]tbcd.ZKSpentOutput, 0, 128)
+	for it.Next() {
+		k := it.Key()
+		if len(k) != lzkso {
+			continue
+		}
+		so := tbcd.ZKSpentOutput{
+			Height:            binary.BigEndian.Uint32(k[32:]),
+			BlockHash:         bytes2hash(k[32+4 : 32+4+32]),
+			TxID:              bytes2hash(k[32+4+32 : 32+4+32+32]),
+			PrevOutpointHash:  bytes2hash(k[32+4+32+32 : 32+4+32+32+32]),
+			PrevOutpointIndex: binary.BigEndian.Uint32(k[32+4+32+32+32:]),
+			TxInIndex:         binary.BigEndian.Uint32(k[32+4+32+32+32+4:]),
+		}
+		sos = append(sos, so)
+	}
+
+	return sos, nil
+}
+
 //func (l *ldb) ZKScriptHashJournal(ctx context.Context, sh tbcd.ScriptHash) (int, error) {
 //	zkdb := l.pool[level.ZKDB]
 //	util.BytesPrefix()

@@ -141,6 +141,7 @@ type Database interface {
 	BlockZKUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error
 	ZKValueAndScriptByOutpoint(ctx context.Context, op Outpoint) (uint64, []byte, error)
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
+	ZKSpentOutputJournal(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
 }
 
 type Keystone struct {
@@ -525,6 +526,15 @@ func NewPointSlice(h chainhash.Hash, idx uint32) []byte {
 
 // SpentOutput sha256(PreviousOutPoint->pkscript):blockheight:blockhash:txId:PreviousOutPoint.Hash:PreviousOutPoint.Index:txInIdx
 type SpentOutput [32 + 4 + 32 + 32 + 32 + 4 + 4]byte
+
+type ZKSpentOutput struct {
+	Height            uint32
+	BlockHash         chainhash.Hash
+	TxID              chainhash.Hash
+	PrevOutpointHash  chainhash.Hash
+	PrevOutpointIndex uint32
+	TxInIndex         uint32
+}
 
 func NewSpentOutput(prevScripthash chainhash.Hash, height uint32, blockhash, txid, txidPrevHash chainhash.Hash, txidPrevIndex, txinIndex uint32) (o SpentOutput) {
 	copy(o[0:], prevScripthash[:])
