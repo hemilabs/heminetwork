@@ -493,7 +493,7 @@ type CacheStats struct {
 	Items  int
 }
 
-// Point is a generic tx:idx encoded value. It can be used to TxIn and TxOut.
+// TxSpendKey is a generic tx:idx encoded value. It can be used to TxIn and TxOut.
 type TxSpendKey [32 + 4 + 32 + 4]byte // txid:blockheight:blockhash:VoutIdx
 
 func NewTxSpendKey(txId chainhash.Hash, height uint32, blockHash chainhash.Hash, voutIdx uint32) (tsk TxSpendKey) {
