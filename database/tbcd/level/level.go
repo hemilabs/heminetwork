@@ -2279,7 +2279,7 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 		switch direction {
 		case -1:
 			// On unwind we can delete some keys.
-			if len(k) == scriptHashLen {
+			if len(k) != scriptHashLen {
 				bhsBatch.Delete([]byte(k))
 			} else {
 				bhsBatch.Put([]byte(k), v)
