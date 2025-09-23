@@ -250,7 +250,7 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 		}
 	case -1:
 		txs := block.Transactions()
-		for k := len(txs) - 1; k > 0; k-- {
+		for k := len(txs) - 1; k >= 0; k-- {
 			tx := txs[k]
 			err := i.processTx(ctx, direction, blockHeight, blockHash, tx, c)
 			if err != nil {
