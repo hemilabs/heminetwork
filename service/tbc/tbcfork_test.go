@@ -1178,7 +1178,7 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					op := tbcd.NewOutpoint(*txid, index)
 					_, s1, err := s.g.db.ZKValueAndScriptByOutpoint(ctx, op)
 					if err != nil {
-						return fmt.Errorf("op not found: %v %v",
+						return fmt.Errorf("op not found: %v %w",
 							op, err)
 					}
 					// find balance from scripthash
