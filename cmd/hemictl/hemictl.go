@@ -1050,9 +1050,9 @@ func tbcdb(pctx context.Context, flags []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("value      : %v\n", value)
+		fmt.Printf("value    : %v\n", value)
 		fmt.Printf("script   : %x\n", script)
-		fmt.Printf("script hash: %x\n", tbcd.NewScriptHashFromScript(script))
+		fmt.Printf("script hash: %v\n", tbcd.NewScriptHashFromScript(script))
 
 	case "metadatabatchget", "metadatabatchput", "blockheadergenesisinsert",
 		"blockheadercachestats", "blockheadersinsert", "blockheadersremove",
