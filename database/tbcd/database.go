@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -251,6 +253,27 @@ func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 	copy(op[1:33], txid[:])
 	binary.BigEndian.PutUint32(op[33:], index)
 	return
+}
+
+func NewOutpointFromString(s string) (*Outpoint, error) {
+	p := strings.SplitN(s, ":", 2)
+	if len(p) != 2 {
+		return nil, errors.New("invalid point")
+	}
+	ph, err := hex.DecodeString(p[0])
+	if err != nil {
+		return nil, err
+	}
+	h, err := chainhash.NewHash(ph)
+	if err != nil {
+		return nil, err
+	}
+	i, err := strconv.ParseUint(p[1], 10, 32)
+	if err != nil {
+		return nil, err
+	}
+	point := NewOutpoint(*h, uint32(i))
+	return &point, nil
 }
 
 func NewTxOut(txOut *wire.TxOut) []byte {
