@@ -16,7 +16,7 @@ func (s *Server) ZKBalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash
 	if err != nil {
 		return 0, err
 	}
-	return btcutil.NewAmount(float64(balance))
+	return btcutil.Amount(int64(balance)), nil
 }
 
 func (s *Server) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) (btcutil.Amount, []byte, error) {
@@ -27,9 +27,5 @@ func (s *Server) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoin
 	if err != nil {
 		return 0, nil, err
 	}
-	v, err := btcutil.NewAmount(float64(value))
-	if err != nil {
-		return 0, nil, err
-	}
-	return v, script, nil
+	return btcutil.Amount(int64(value)), script, nil
 }
