@@ -2275,6 +2275,7 @@ func (l *ldb) ZKSpentOutputJournal(ctx context.Context, sh tbcd.ScriptHash) ([]t
 			continue
 		}
 		so := tbcd.ZKSpentOutput{
+			// XXX add ScriptHash
 			Height:            binary.BigEndian.Uint32(k[32:]),
 			BlockHash:         bytes2hash(k[32+4 : 32+4+32]),
 			TxID:              bytes2hash(k[32+4+32 : 32+4+32+32]),
@@ -2285,6 +2286,43 @@ func (l *ldb) ZKSpentOutputJournal(ctx context.Context, sh tbcd.ScriptHash) ([]t
 		sos = append(sos, so)
 	}
 
+	return sos, nil
+}
+
+var (
+	lzsok  = len(tbcd.SpendingOutpointKey{})
+	lzsokv = len(tbcd.SpendingOutpointValue{})
+)
+
+func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
+	log.Tracef("ZKSpendingOutpoints")
+	defer log.Tracef("ZKSpendingOutpoints exit")
+
+	zkdb := l.pool[level.ZKDB]
+	it := zkdb.NewIterator(util.BytesPrefix(txid[:]), nil)
+	defer it.Release()
+
+	sos := make([]tbcd.ZKSpendingOutpoint, 0, 128)
+	for it.Next() {
+		k := it.Key()
+		if len(k) != lzsok {
+			continue
+		}
+		sok := tbcd.ZKSpendingOutpoint{
+			TxID:        bytes2hash(k[0:32]),
+			BlockHeight: binary.BigEndian.Uint32(k[32:]),
+			BlockHash:   bytes2hash(k[32+4 : 32+4+32]),
+			VOutIndex:   binary.BigEndian.Uint32(k[32+4+32:]),
+		}
+		v := it.Value()
+		if len(v) == lzsokv {
+			sok.SpendingOutpoint = &tbcd.ZKSpendingOutpointValue{
+				TxID:  bytes2hash(v[:32]),
+				Index: binary.BigEndian.Uint32(v[32:]),
+			}
+		}
+		sos = append(sos, sok)
+	}
 	return sos, nil
 }
 

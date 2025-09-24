@@ -28,7 +28,7 @@ cache[sha256(PkScript)] += Value                        // ScriptHash
 
 Tx index
 ```
-cache[txid + height + hash + txOutIndex] = nil          // TxSpend
+cache[txid + height + hash + txOutIndex] = nil          // SpendingOutpoint
 ```
 
 ### Unwinding

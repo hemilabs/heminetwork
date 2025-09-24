@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
@@ -39,4 +40,11 @@ func (s *Server) ZKSpentOutputJournal(ctx context.Context, hash tbcd.ScriptHash)
 	defer log.Tracef("ZKSpentOutputJournal exit")
 
 	return s.g.db.ZKSpentOutputJournal(ctx, hash)
+}
+
+func (s *Server) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
+	log.Tracef("ZKSpendingOutpoints")
+	defer log.Tracef("ZKSpendingOutpoints exit")
+
+	return s.g.db.ZKSpendingOutpoints(ctx, txid)
 }

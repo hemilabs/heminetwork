@@ -1078,6 +1078,33 @@ func tbcdb(pctx context.Context, flags []string) error {
 			fmt.Printf("tx in index            : %v\n\n", v.TxInIndex)
 		}
 
+	case "zkspendingoutpoints":
+		txid := args["txid"]
+		if txid == "" {
+			return errors.New("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		sos, err := s.ZKSpendingOutpoints(ctx, *chtxid)
+		if err != nil {
+			return err
+		}
+		for _, v := range sos {
+			fmt.Printf("tx id                  : %v\n", v.TxID)
+			fmt.Printf("block height           : %v\n", v.BlockHeight)
+			fmt.Printf("block hash             : %v\n", v.BlockHash)
+			fmt.Printf("vout index             : %v\n", v.VOutIndex)
+			if v.SpendingOutpoint != nil {
+				fmt.Printf("spending outpoint      : %v:%v\n\n",
+					v.SpendingOutpoint.TxID, v.SpendingOutpoint.Index)
+			} else {
+				fmt.Printf("spending outpoint      : N/A\n\n")
+			}
+		}
+
 	case "metadatabatchget", "metadatabatchput", "blockheadergenesisinsert",
 		"blockheadercachestats", "blockheadersinsert", "blockheadersremove",
 		"blockmissingdelete", "blockinsert", "blockcachestats",
