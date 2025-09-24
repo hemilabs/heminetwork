@@ -2275,7 +2275,7 @@ func (l *ldb) ZKSpentOutputJournal(ctx context.Context, sh tbcd.ScriptHash) ([]t
 			continue
 		}
 		so := tbcd.ZKSpentOutput{
-			// XXX add ScriptHash
+			ScriptHash:        tbcd.NewScriptHashFromBytesP(k[:32]),
 			Height:            binary.BigEndian.Uint32(k[32:]),
 			BlockHash:         bytes2hash(k[32+4 : 32+4+32]),
 			TxID:              bytes2hash(k[32+4+32 : 32+4+32+32]),
@@ -2325,11 +2325,6 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 	}
 	return sos, nil
 }
-
-//func (l *ldb) ZKScriptHashJournal(ctx context.Context, sh tbcd.ScriptHash) (int, error) {
-//	zkdb := l.pool[level.ZKDB]
-//	util.BytesPrefix()
-//}
 
 var scriptHashLen = len(tbcd.ScriptHash{})
 
