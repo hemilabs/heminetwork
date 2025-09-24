@@ -16,6 +16,7 @@ import (
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 
 	"github.com/hemilabs/heminetwork/v2/database"
@@ -68,6 +69,7 @@ func NewDefaultConfig(home string) *Config {
 		Options: opt.Options{
 			BlockCacheEvictRemoved: true, // Do yourself a favor and leave this one alone
 			Compression:            opt.NoCompression,
+			Filter:                 filter.NewBloomFilter(10),
 		},
 	}
 }

@@ -1,4 +1,4 @@
-## Current starte
+## Current state
 
 Every block wind/unwind goes goes thorugh the following process:
 

@@ -57,7 +57,6 @@ func (i *zkIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
 func (i *zkIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c indexerCache) ([]byte, error) {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
 	if balance, ok := cache[tbcd.ZKIndexKey(ss[:])]; ok {
-		// log.Infof("balance %v %x", ss, balance)
 		return balance, nil
 	}
 
@@ -66,13 +65,11 @@ func (i *zkIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c indexerCa
 	b, err := i.g.db.ZKBalanceByScriptHash(ctx, ss)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			// log.Infof("balance 0 %v %x", ss, balance)
 			return balance[:], nil
 		}
 		return nil, err
 	}
 	binary.BigEndian.PutUint64(balance[:], b)
-	// log.Infof("balance db %v %v", ss, balance)
 	return balance[:], nil
 }
 
@@ -83,7 +80,7 @@ func (i *zkIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache
 		return uint64(txOut.Value), txOut.PkScript, nil
 	}
 	// Not found in cache, fetch from db
-	value, txOut, err := i.g.db.ZKValueAndScriptByOutpoint(ctx, pop) // Rename
+	value, txOut, err := i.g.db.ZKValueAndScriptByOutpoint(ctx, pop)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -93,7 +90,6 @@ func (i *zkIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache
 func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
 	cache := c.(*Cache[tbcd.ZKIndexKey, []byte]).Map()
 	txId := tx.Hash()
-	// log.Infof("tx %v", tx.Hash())
 	for txInIdx, txIn := range tx.MsgTx().TxIn {
 		// Skip coinbase inputs
 		if blockchain.IsCoinBase(tx) {
@@ -101,7 +97,6 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		}
 
 		// Recreate Outpoint from TxIn.PreviousOutPoint
-		// log.Infof("prev %v", txIn.PreviousOutPoint.Hash)
 		pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
 			txIn.PreviousOutPoint.Index)
 
@@ -117,14 +112,10 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		if err != nil {
 			return fmt.Errorf("balance in: %w", err)
 		}
-		// log.Infof("in pop %v value %v sh %v script %x", pop, value, sh, script)
 
 		// Handle balance
 		switch direction {
 		case 1:
-			// log.Infof("value %v balance %x", value, balance)
-			// log.Infof("pop %v", pop)
-			// log.Infof("sh %v", sh)
 			cache[tbcd.ZKIndexKey(sh[:])] = tbcd.BESubUint64(balance,
 				value)
 		case -1:
@@ -156,36 +147,6 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 			continue
 		}
 
-		//// XXX not needed but diagnostic
-		//pop := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
-		//value, script, err := i.txOut(ctx, pop, c)
-		//if err != nil {
-		//	return fmt.Errorf("tx out: %w", err)
-		//}
-		//if int64(value) != txOut.Value {
-		//	panic(fmt.Sprintf("op %v want %v got %v",
-		//		pop, txOut.Value, value))
-		//}
-		//if !bytes.Equal(txOut.PkScript, script) {
-		//	panic(fmt.Sprintf("op %v want %v got %v",
-		//		pop, spew.Sdump(txOut.PkScript),
-		//		spew.Sdump(script)))
-		//}
-		//sc, addrs, rs, err := txscript.ExtractPkScriptAddrs(script,
-		//	i.g.chain)
-		//if err != nil {
-		//	panic(err)
-		//}
-		// log.Infof("pop %v pkscripthash %v sc %v addrs %v rs %v script %x", pop,
-		//	tbcd.NewScriptHashFromScript(script), sc, addrs, rs,
-		//	script)
-		// Fetch current balance of PkScript hash.
-		//log.Infof("PkScript %x", txOut.PkScript)
-		//disasm, err := txscript.DisasmString(txOut.PkScript)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//log.Infof("disasm: %v", disasm)
 		sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
 		balance, err := i.balance(ctx, sh, c)
 		if err != nil {
@@ -239,7 +200,6 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 	blockHeight := uint32(block.Height())
 	log.Tracef("processing: %v %v", blockHeight, blockHash)
 	log.Infof("direction %v processing: %v %v", direction, blockHeight, blockHash)
-	// log.Infof("block: %v", spew.Sdump(block))
 	switch direction {
 	case 1:
 		for _, tx := range block.Transactions() {
