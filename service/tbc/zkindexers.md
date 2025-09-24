@@ -9,12 +9,12 @@ UTxO index
 PkScript, Value = cache[PrevOut]                        // OutpointScriptValue
 Balance = cache[sha256(PkScript)]                       // ScriptHash
 cache[sha256(PkScript)] -= Value                        // ScriptHash
-cache[sha256(PkScript) + height + hash + txid + PrevOut + txInIndex] = nil  // SpendingOutpointKey = SpendingOutpointValue
+cache[sha256(PkScript) + height + hash + txid + PrevOut + txInIndex] = nil  // SpentOutput
 ```
 
 Tx index
 ```
-cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // SpendingOutpoint
+cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // SpendingOutpoint = SpendingOutpointValue
 ```
 
 ### Out
@@ -28,7 +28,7 @@ cache[sha256(PkScript)] += Value                        // ScriptHash
 
 Tx index
 ```
-cache[txid + height + hash + txOutIndex] = nil          // SpendingOutpointKey = nil
+cache[txid + height + hash + txOutIndex] = nil          // SpendingOutpoint
 ```
 
 ### Unwinding
