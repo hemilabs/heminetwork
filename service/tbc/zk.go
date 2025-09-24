@@ -35,11 +35,11 @@ func (s *Server) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoin
 	return btcutil.Amount(int64(value)), script, nil
 }
 
-func (s *Server) ZKSpentOutputJournal(ctx context.Context, hash tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
+func (s *Server) ZKSpentOutputs(ctx context.Context, hash tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
 	log.Tracef("ZKSpentOutputJournal")
 	defer log.Tracef("ZKSpentOutputJournal exit")
 
-	return s.g.db.ZKSpentOutputJournal(ctx, hash)
+	return s.g.db.ZKSpentOutputs(ctx, hash)
 }
 
 func (s *Server) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
