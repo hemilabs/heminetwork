@@ -143,6 +143,7 @@ type Database interface {
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 	ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
 	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
+	ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
 }
 
 type Keystone struct {
@@ -551,7 +552,7 @@ type SpentOutput [32 + 4 + 32 + 32 + 32 + 4 + 4]byte
 
 type ZKSpentOutput struct {
 	ScriptHash        ScriptHash
-	Height            uint32
+	BlockHeight       uint32
 	BlockHash         chainhash.Hash
 	TxID              chainhash.Hash
 	PrevOutpointHash  chainhash.Hash
@@ -572,6 +573,14 @@ func NewSpentOutput(prevScripthash chainhash.Hash, height uint32, blockhash, txi
 
 // SpendableOutput = sha256(PkScript):blockheight:blockhash:txId:txOutIdx
 type SpendableOutput [32 + 4 + 32 + 32 + 4]byte
+
+type ZKSpendableOutput struct {
+	ScriptHash  ScriptHash
+	BlockHeight uint32
+	BlockHash   chainhash.Hash
+	TxID        chainhash.Hash
+	TxOutIndex  uint32
+}
 
 func (o SpendableOutput) String() string {
 	block, err := chainhash.NewHash(o[32+4 : 32+4+32])

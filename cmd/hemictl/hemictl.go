@@ -408,6 +408,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tzkvalueandscriptbyoutpoint")
 		fmt.Println("\tzkspentoutputs")
 		fmt.Println("\tzkspendingoutpoints")
+		fmt.Println("\tzkspendableoutputs")
 		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
@@ -1072,7 +1073,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		}
 		for _, v := range sos {
 			fmt.Printf("script hash            : %v\n", v.ScriptHash)
-			fmt.Printf("height                 : %v\n", v.Height)
+			fmt.Printf("block height           : %v\n", v.BlockHeight)
 			fmt.Printf("block hash             : %v\n", v.BlockHash)
 			fmt.Printf("tx id                  : %v\n", v.TxID)
 			fmt.Printf("previous outpoint hash : %v\n", v.PrevOutpointHash)
@@ -1105,6 +1106,28 @@ func tbcdb(pctx context.Context, flags []string) error {
 			} else {
 				fmt.Printf("spending outpoint      : N/A\n\n")
 			}
+		}
+
+	case "zkspendableoutputs":
+		scripthash := args["scripthash"]
+		if scripthash == "" {
+			return errors.New("scripthash: must be set")
+		}
+		sh, err := tbcd.NewScriptHashFromString(scripthash)
+		if err != nil {
+			return fmt.Errorf("scripthash: %w", err)
+		}
+
+		sos, err := s.ZKSpendableOutputs(ctx, sh)
+		if err != nil {
+			return err
+		}
+		for _, v := range sos {
+			fmt.Printf("script hash            : %v\n", v.ScriptHash)
+			fmt.Printf("block height           : %v\n", v.BlockHeight)
+			fmt.Printf("block hash             : %v\n", v.BlockHash)
+			fmt.Printf("tx id                  : %v\n", v.TxID)
+			fmt.Printf("tx out index           : %v\n\n", v.TxOutIndex)
 		}
 
 	case "metadatabatchget", "metadatabatchput", "blockheadergenesisinsert",
