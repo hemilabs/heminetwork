@@ -144,9 +144,9 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		cache[tbcd.ZKIndexKey(spo[:])] = nil
 
 		// Spent UTxO lookup
-		tsk := tbcd.NewTxSpendKey(txIn.PreviousOutPoint.Hash,
+		sok := tbcd.NewSpendingOutpointKey(txIn.PreviousOutPoint.Hash,
 			blockHeight, *blockHash, txIn.PreviousOutPoint.Index)
-		cache[tbcd.ZKIndexKey(tsk[:])] = tbcd.NewPointSlice(*txId,
+		cache[tbcd.ZKIndexKey(sok[:])] = tbcd.NewSpendingOutpointValueSlice(*txId,
 			uint32(txInIdx))
 	}
 
@@ -222,9 +222,9 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 		cache[tbcd.ZKIndexKey(op[:])] = tbcd.NewTxOut(txOut)
 
 		// Spendable UTxO lookup
-		tsk := tbcd.NewTxSpendKey(*txId, blockHeight, *blockHash,
+		sok := tbcd.NewSpendingOutpointKey(*txId, blockHeight, *blockHash,
 			uint32(txOutIdx))
-		cache[tbcd.ZKIndexKey(tsk[:])] = nil
+		cache[tbcd.ZKIndexKey(sok[:])] = nil
 	}
 
 	return nil

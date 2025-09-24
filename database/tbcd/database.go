@@ -142,6 +142,7 @@ type Database interface {
 	ZKValueAndScriptByOutpoint(ctx context.Context, op Outpoint) (uint64, []byte, error)
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 	ZKSpentOutputJournal(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
+	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
 }
 
 type Keystone struct {
@@ -494,33 +495,46 @@ type CacheStats struct {
 	Items  int
 }
 
-// TxSpendKey is a generic tx:idx encoded value. It can be used to TxIn and TxOut.
-type TxSpendKey [32 + 4 + 32 + 4]byte // txid:blockheight:blockhash:VoutIdx
+// SpendingOutpointKey is a database encoded key for a SpendingOutpoint
+type SpendingOutpointKey [32 + 4 + 32 + 4]byte // txid:blockheight:blockhash:VoutIdx
 
-func NewTxSpendKey(txId chainhash.Hash, height uint32, blockHash chainhash.Hash, voutIdx uint32) (tsk TxSpendKey) {
-	copy(tsk[:], txId[:])
-	binary.BigEndian.PutUint32(tsk[32:], height)
-	copy(tsk[32+4:], blockHash[:])
-	binary.BigEndian.PutUint32(tsk[32+4+32:], voutIdx)
+type ZKSpendingOutpoint struct {
+	TxID             chainhash.Hash
+	BlockHeight      uint32
+	BlockHash        chainhash.Hash
+	VOutIndex        uint32
+	SpendingOutpoint *ZKSpendingOutpointValue
+}
+
+func NewSpendingOutpointKey(txId chainhash.Hash, height uint32, blockHash chainhash.Hash, voutIdx uint32) (sok SpendingOutpointKey) {
+	copy(sok[:], txId[:])
+	binary.BigEndian.PutUint32(sok[32:], height)
+	copy(sok[32+4:], blockHash[:])
+	binary.BigEndian.PutUint32(sok[32+4+32:], voutIdx)
 	return
 }
 
-// XXX think we need to get rid of this
-type Point [32 + 4]byte // hash:idx
+// SpendingOutpointValue
+type SpendingOutpointValue [32 + 4]byte // hash:idx of spending tx
 
-func (p Point) String() string {
+type ZKSpendingOutpointValue struct {
+	TxID  chainhash.Hash
+	Index uint32
+}
+
+func (p SpendingOutpointValue) String() string {
 	h, _ := chainhash.NewHash(p[0:32])
 	return fmt.Sprintf("%v:%v", h, binary.BigEndian.Uint32(p[32:]))
 }
 
-func NewPoint(h chainhash.Hash, idx uint32) (p Point) {
+func NewSpendingOutpointValue(h chainhash.Hash, idx uint32) (p SpendingOutpointValue) {
 	copy(p[0:], h[:])
 	binary.BigEndian.PutUint32(p[32:], idx)
 	return
 }
 
-func NewPointSlice(h chainhash.Hash, idx uint32) []byte {
-	p := NewPoint(h, idx)
+func NewSpendingOutpointValueSlice(h chainhash.Hash, idx uint32) []byte {
+	p := NewSpendingOutpointValue(h, idx)
 	return p[:]
 }
 
