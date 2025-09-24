@@ -70,6 +70,10 @@ func NewDefaultConfig(home string) *Config {
 			BlockCacheEvictRemoved: true, // Do yourself a favor and leave this one alone
 			Compression:            opt.NoCompression,
 			Filter:                 filter.NewBloomFilter(10),
+			OpenFilesCacheCapacity: 2000,
+			BlockCacheCapacity:     16 * opt.MiB,
+			CompactionTableSize:    4 * opt.MiB,
+			BlockSize:              64 * opt.KiB,
 		},
 	}
 }
