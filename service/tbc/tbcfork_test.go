@@ -1113,20 +1113,153 @@ func (b *btcNode) Stop() error {
 	return b.listener.Close()
 }
 
-// func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
-// 	key, err := btcec.NewPrivateKey()
-// 	if err != nil {
-// 		return nil, err
-// 	}
-//
-// 	pk := key.PubKey().SerializeUncompressed()
-// 	// address, err := btcutil.NewAddressPubKey(pk, params)
-// 	address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), params)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return key, key.PubKey(), address, nil
-// }
+type zkTxInfo struct {
+	tx     *btcutil.Tx
+	errors []error
+}
+
+type zkTxInInfo struct {
+	zkTxInfo
+
+	inIndex  int
+	utxoTxId chainhash.Hash
+	utxoVal  uint64
+}
+
+type zkTxOutInfo struct {
+	zkTxInfo
+
+	outIndex int
+	balance  uint64
+	value    uint64
+}
+
+func (i *zkTxInfo) Err() error {
+	var errSeen error
+	for _, err := range i.errors {
+		errSeen = errors.Join(errSeen, err)
+	}
+	return errSeen
+}
+
+func zkValidateTxOut(ctx context.Context, s *Server, i *zkTxOutInfo) {
+	txOut := i.tx.MsgTx().TxOut[i.outIndex]
+	sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
+
+	// assert SpendableOutput exists
+	_, err := spendableOutByTxOut(ctx, s, sh, i.tx.Hash(), i.outIndex)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+
+	// assert spendable UTXO exists
+	_, err = spendingOutByTxOut(ctx, s, *i.tx.Hash(), i.outIndex)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+
+	// assert balance matches expected
+	rb, err := s.g.db.ZKBalanceByScriptHash(ctx, sh)
+	if err != nil {
+		// should never happen
+		panic("ZKBalanceByScriptHash")
+	}
+	if rb != i.balance {
+		err = fmt.Errorf("bad balance: expected %v, got %d", i.balance, rb)
+		i.errors = append(i.errors, err)
+	}
+
+	// assert value matches expected
+	op := tbcd.NewOutpoint(*i.tx.Hash(), uint32(i.outIndex))
+	rv, _, err := s.ZKValueAndScriptByOutpoint(ctx, op)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+	if rv != btcutil.Amount(i.value) {
+		err = fmt.Errorf("bad value: expected %v, got %d", i.value, rv)
+		i.errors = append(i.errors, err)
+	}
+}
+
+func zkValidateTxIn(ctx context.Context, s *Server, i *zkTxInInfo) {
+	txIn := i.tx.MsgTx().TxIn[i.inIndex]
+	pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+		txIn.PreviousOutPoint.Index)
+	val, tout, err := s.g.db.ZKValueAndScriptByOutpoint(ctx, pop) // Rename
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+	if val != i.utxoVal {
+		err := fmt.Errorf("prev outpoint value: expected %v, got %v", i.utxoVal, val)
+		i.errors = append(i.errors, err)
+	}
+	sh := tbcd.NewScriptHashFromScript(tout)
+
+	_, err = spendingOutByTxIn(ctx, s, i.utxoTxId,
+		*i.tx.Hash(), i.inIndex)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+
+	_, err = spentOutByTxIn(ctx, s, sh, *i.tx.Hash(), i.inIndex)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+}
+
+func spendingOutByTxIn(ctx context.Context, s *Server, prevTxId, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
+	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, prevTxId)
+	if err != nil {
+		return tbcd.ZKSpendingOutpoint{}, err
+	}
+
+	for _, so := range spendingOps {
+		spv := so.SpendingOutpoint
+		if spv != nil && spv.TxID.IsEqual(&txId) && spv.Index == uint32(index) {
+			return so, nil
+		}
+	}
+	return tbcd.ZKSpendingOutpoint{}, database.NotFoundError("spending outpoint by txIn")
+}
+
+func spendingOutByTxOut(ctx context.Context, s *Server, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
+	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, txId)
+	if err != nil {
+		return tbcd.ZKSpendingOutpoint{}, err
+	}
+	for _, so := range spendingOps {
+		if so.TxID.IsEqual(&txId) && so.VOutIndex == uint32(index) {
+			return so, nil
+		}
+	}
+	return tbcd.ZKSpendingOutpoint{}, database.NotFoundError("spending outpoint by txOut")
+}
+
+func spentOutByTxIn(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId chainhash.Hash, inIndex int) (tbcd.ZKSpentOutput, error) {
+	spentOps, err := s.g.db.ZKSpentOutputs(ctx, sh)
+	if err != nil {
+		return tbcd.ZKSpentOutput{}, err
+	}
+	for _, so := range spentOps {
+		if so.TxID.IsEqual(&txId) && so.TxInIndex == uint32(inIndex) {
+			return so, nil
+		}
+	}
+	return tbcd.ZKSpentOutput{}, database.NotFoundError("spent outpoint")
+}
+
+func spendableOutByTxOut(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId *chainhash.Hash, outIndex int) (tbcd.ZKSpendableOutput, error) {
+	spendableOut, err := s.g.db.ZKSpendableOutputs(ctx, sh)
+	if err != nil {
+		return tbcd.ZKSpendableOutput{}, err
+	}
+	for _, so := range spendableOut {
+		if so.TxID.IsEqual(txId) && so.TxOutIndex == uint32(outIndex) {
+			return so, nil
+		}
+	}
+	return tbcd.ZKSpendableOutput{}, database.NotFoundError("spendable output")
+}
 
 func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
 	for _, b := range blocks {
@@ -1167,39 +1300,6 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					t.Logf("%s", spew.Sdump(sis))
 					return errors.New("block mismatch")
 				}
-
-				zk := true
-				if zk {
-					// find spend script by outpoint in zkindex
-					txid, _ := chainhash.NewHash(ktx[1 : 1+32])
-					index := binary.BigEndian.Uint32(ktx[33:])
-					// txid, _ := chainhash.NewHash(vtx[:32])
-					// index := binary.BigEndian.Uint32(vtx[32:])
-					op := tbcd.NewOutpoint(*txid, index)
-					_, s1, err := s.g.db.ZKValueAndScriptByOutpoint(ctx, op)
-					if err != nil {
-						return fmt.Errorf("op not found: %v %w",
-							op, err)
-					}
-					// find balance from scripthash
-					// panic(spew.Sdump(s1))
-					// t.Logf("index %v %v", spew.Sdump(txid), spew.Sdump(s1))
-					disasm, err := txscript.DisasmString(s1)
-					if err != nil {
-						panic(err)
-					}
-					_ = disasm
-					// t.Logf("disasm %v", disasm)
-					sh := tbcd.NewScriptHashFromScript(s1)
-					balance, err := s.g.db.ZKBalanceByScriptHash(ctx, sh)
-					if err != nil {
-						return fmt.Errorf("balance not found: "+
-							"op %v sh %v err %v",
-							op, sh, err)
-					}
-					_ = balance
-				}
-
 			case 't':
 				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
 				if err != nil {
@@ -1247,6 +1347,7 @@ func mustNotHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 				if !errors.Is(err, expected) {
 					return fmt.Errorf("expected invalid spend infos %v: %w", tx, err)
 				}
+
 			case 't':
 				txId, _, err := tbcd.TxIdBlockHashFromTxKey(ktx)
 				if err != nil {
@@ -3346,18 +3447,6 @@ func TestZKIndexFork(t *testing.T) {
 		}
 	}()
 
-	popPriv, popPublic, popAddress, err := n.newKey("pop")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("pop keys:")
-	t.Logf("  private    : %x", popPriv.Serialize())
-	t.Logf("  public     : %x", popPublic.SerializeCompressed())
-	t.Logf("  address    : %v", popAddress)
-
-	kss1Hash := n.newKeystone("kss1")
-	kss2Hash := n.newKeystone("kss2")
-
 	go func() {
 		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
 			panic(err)
@@ -3371,7 +3460,6 @@ func TestZKIndexFork(t *testing.T) {
 		BlockCacheSize:       "10mb",
 		BlockheaderCacheSize: "1mb",
 		BlockSanity:          false,
-		HemiIndex:            true, // Test keystone index
 		ZKIndex:              true, // Test zk index
 		LevelDBHome:          t.TempDir(),
 		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
@@ -3408,35 +3496,35 @@ func TestZKIndexFork(t *testing.T) {
 	// best chain
 	parent := chaincfg.RegressionNetParams.GenesisHash
 	address := n.address
-	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineWithKeystones)
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineWithKeystones)
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineNoKeystones)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineWithKeystones)
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineNoKeystones)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// a chain
-	b1a, err := n.MineAndSend(ctx, "b1a", parent, address, MineWithKeystones)
+	b1a, err := n.MineAndSend(ctx, "b1a", parent, address, MineNoKeystones)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address, MineWithKeystones)
+	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address, MineNoKeystones)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// b chain
-	b1b, err := n.MineAndSend(ctx, "b1b", parent, address, MineWithKeystones)
+	b1b, err := n.MineAndSend(ctx, "b1b", parent, address, MineNoKeystones)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, MineWithKeystones)
+	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, MineNoKeystones)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3474,37 +3562,41 @@ func TestZKIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Verify ZK has all scripts by outpoint
-	//panic(spew.Sdump(b.txs))
-	//op1 := tbcd.NewOutpoint(txid, index)
-	//s1, err := s.g.db.ZKScriptByOutpoint(ctx, op1)
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//_ = s1
-
-	// check if keystone in db
-	rv, err := s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
+	err = mustHave(ctx, t, s, n.genesis, b1, b2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// check if keystone stored with correct block hash
-	if !rv.BlockHash.IsEqual(b2.Hash()) {
-		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
-	}
-	// check if keystone stored using heighthash index
-	hk, err := s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
-	if err != nil {
+	// append every zkInfo to verify everything gets unwound
+	zki := make([]zkTxInInfo, 0)
+	zko := make([]zkTxOutInfo, 0)
+
+	// Check b2 TX
+	txInfo := zkTxInfo{tx: b2.TxByIndex(1)}
+
+	// b2 tx: txIn 0
+	utxoTxId := *b1.TxByIndex(0).Hash()
+	inInfo := zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(hk) != 1 {
-		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
+	// b2 tx: txOut 0
+	outInfo := zkTxOutInfo{txInfo, 0, 3e9, 3e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
 	}
 
-	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
-		t.Fatalf("unexpected keystone diff: %s", diff)
+	// b2 tx: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 7e9, 2e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	// Index to b3
@@ -3513,72 +3605,74 @@ func TestZKIndexFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// XXX verify indexes
+
 	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// XXX add mustNotHave
-	// verify tx
-	for address := range n.keys {
-		balance, err := s.BalanceByAddress(ctx, address)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v: %v", address, balance)
-		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("%v: %v", address, utxos)
-	}
 
-	// check if kss1 in db
-	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// check if kss1 stored with correct block hash
-	if !rv.BlockHash.IsEqual(b2.Hash()) {
-		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
-	}
+	// Check b3 TX1, which serves as TxIn for b3 TX2
+	txInfo = zkTxInfo{tx: b3.TxByIndex(1)}
 
-	// check if keystone stored using heighthash index
-	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
-	if err != nil {
+	// b3 tx1: txIn 0
+	utxoTxId = *b2.TxByIndex(1).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 3e09}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(hk) != 1 {
-		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
-	}
-
-	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
-		t.Fatalf("unexpected keystone diff: %s", diff)
-	}
-
-	// check if kss2 in db
-	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss2Hash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// check if kss2 stored with correct block hash
-	if !rv.BlockHash.IsEqual(b3.Hash()) {
-		t.Fatalf("wrong blockhash for stored keystone: %v", kss2Hash)
-	}
-
-	// check if keystone stored using heighthash index
-	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b3.Height()-1), 1)
-	if err != nil {
+	// b3 tx1: txOut 0
+	outInfo = zkTxOutInfo{txInfo, 0, 0, 11e8}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(hk) != 1 {
-		t.Fatalf("expected 1 keystone at height 3, got %d", len(hk))
+	// b3 tx1: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 0, 19e8}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
 	}
 
-	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
-		t.Fatalf("unexpected keystone diff: %s", diff)
+	// Check b3 TX2
+	txInfo = zkTxInfo{tx: b3.TxByIndex(2)}
+
+	// b3 tx2: txIn 0
+	utxoTxId = *b3.TxByIndex(1).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 11e08}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3 tx2: txIn 1
+	inInfo = zkTxInInfo{txInfo, 1, utxoTxId, 19e8}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3 tx2: txOut 0
+	outInfo = zkTxOutInfo{txInfo, 0, 3e9, 11e8}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3 tx2: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 3e9, 19e8}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	// Verify linear indexing. Current TxIndex is sitting at b3
@@ -3631,6 +3725,21 @@ func TestZKIndexFork(t *testing.T) {
 		t.Fatalf("expected an error from mustHave")
 	}
 
+	// check everything was unwound
+	for _, zkIn := range zki {
+		zkValidateTxIn(ctx, s, &zkIn)
+		if len(zkIn.errors) != 4 {
+			t.Fatalf("expected 4 checks to fail, got: %v", zkIn.Err())
+		}
+	}
+	for _, zkOut := range zko {
+		zkOut.balance = 1 // prevent valid 0 on error
+		zkValidateTxOut(ctx, s, &zkOut)
+		if len(zkOut.errors) != 5 {
+			t.Fatalf("expected 5 checks to fail, got: %v", zkOut.Err())
+		}
+	}
+
 	for address := range n.keys {
 		balance, err := s.BalanceByAddress(ctx, address)
 		if err != nil {
@@ -3671,28 +3780,36 @@ func TestZKIndexFork(t *testing.T) {
 		t.Fatalf("wind to b2a: %v", err)
 	}
 
-	// check if kss1 in db
-	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
-	if err != nil {
+	// append every zkInfo to verify everything gets unwound
+	zki = make([]zkTxInInfo, 0)
+	zko = make([]zkTxOutInfo, 0)
+
+	// Check b2a TX
+	txInfo = zkTxInfo{tx: b2a.TxByIndex(1)}
+
+	// b2a tx: txIn 0
+	utxoTxId = *b1a.TxByIndex(0).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
 		t.Fatal(err)
 	}
-	// check if kss1 stored with correct block hash
-	if !rv.BlockHash.IsEqual(b2a.Hash()) {
-		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
-	}
 
-	// check if keystone stored using heighthash index
-	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
-	if err != nil {
+	// b2a tx: txOut 0
+	outInfo = zkTxOutInfo{txInfo, 0, 3e9, 3e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
 		t.Fatal(err)
 	}
 
-	if len(hk) != 1 {
-		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
-	}
-
-	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
-		t.Fatalf("unexpected keystone diff: %s", diff)
+	// b2a tx: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 7e9, 2e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
 	}
 
 	for address := range n.keys {
@@ -3718,6 +3835,22 @@ func TestZKIndexFork(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error from mustHave")
 	}
+
+	// check everything was unwound
+	for _, zkIn := range zki {
+		zkValidateTxIn(ctx, s, &zkIn)
+		if len(zkIn.errors) != 4 {
+			t.Fatalf("expected 4 checks to fail, got: %v", zkIn.Err())
+		}
+	}
+	for _, zkOut := range zko {
+		zkOut.balance = 1 // prevent valid 0 on error
+		zkValidateTxOut(ctx, s, &zkOut)
+		if len(zkOut.errors) != 5 {
+			t.Fatalf("expected 5 checks to fail, got: %v", zkOut.Err())
+		}
+	}
+
 	txBH, err = s.ti.IndexerAt(ctx)
 	if err != nil {
 		t.Fatalf("expected success getting tx index hash, got: %v", err)
@@ -3741,12 +3874,44 @@ func TestZKIndexFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
-	t.Logf("---------------------------------------- going to b2b")
+	t.Logf("sync to b2b")
 	err = s.SyncIndexersToHash(ctx, *b2b.Hash())
 	if err != nil {
 		t.Fatalf("wind to b2b: %v", err)
 	}
 
+	// append every zkInfo to verify everything gets unwound
+	zki = make([]zkTxInInfo, 0)
+	zko = make([]zkTxOutInfo, 0)
+
+	// Check b2b TX
+	txInfo = zkTxInfo{tx: b2b.TxByIndex(1)}
+
+	// b2b tx: txIn 0
+	utxoTxId = *b1b.TxByIndex(0).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b2b tx: txOut 0
+	outInfo = zkTxOutInfo{txInfo, 0, 3e9, 3e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b2b tx: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 7e9, 2e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
 	for address := range n.keys {
 		balance, err := s.BalanceByAddress(ctx, address)
 		if err != nil {
@@ -3760,35 +3925,41 @@ func TestZKIndexFork(t *testing.T) {
 		t.Logf("%v: %v", address, utxos)
 	}
 
-	// check if kss1 in db
-	rv, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *kss1Hash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// check if kss1 stored with correct block hash
-	if !rv.BlockHash.IsEqual(b2b.Hash()) {
-		t.Fatalf("wrong blockhash for stored keystone: %v", kss1Hash)
-	}
-
-	// check if keystone stored using heighthash index
-	hk, err = s.g.db.KeystonesByHeight(ctx, uint32(b2.Height()-1), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(hk) != 1 {
-		t.Fatalf("expected 1 keystone at height 2, got %d", len(hk))
-	}
-
-	if diff := deep.Equal(hk[0], *rv); len(diff) > 0 {
-		t.Fatalf("unexpected keystone diff: %s", diff)
-	}
-
-	// t.Logf("---------------------------------------- going to b3")
 	// unwind back to genesis
+	t.Logf("unwind to genesis 3")
 	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
 	if err != nil {
-		t.Fatalf("xxxx %v", err)
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+
+	// check everything was unwound
+	for _, zkIn := range zki {
+		zkValidateTxIn(ctx, s, &zkIn)
+		if len(zkIn.errors) != 4 {
+			t.Fatalf("expected 4 checks to fail, got: %v", zkIn.Err())
+		}
+	}
+	for _, zkOut := range zko {
+		zkOut.balance = 1 // prevent valid 0 on error
+		zkValidateTxOut(ctx, s, &zkOut)
+		if len(zkOut.errors) != 5 {
+			t.Fatalf("expected 5 checks to fail, got: %v", zkOut.Err())
+		}
+	}
+
+	txBH, err = s.ti.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
+	}
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
 	}
 	for address := range n.keys {
 		balance, err := s.BalanceByAddress(ctx, address)
@@ -3801,30 +3972,6 @@ func TestZKIndexFork(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("%v: %v", address, utxos)
-	}
-
-	lastKssAt, err := s.ki.IndexerAt(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// check if keystones unwound to genesis
-	if lastKssAt.Height != 0 {
-		t.Fatalf("expected keystone index hash 0, got %v", lastKssAt.Height)
-	}
-
-	// check if keystones not in db
-	for _, v := range n.keystones {
-		abrvKss := hemi.L2KeystoneAbbreviate(*v).Hash()
-		_, err = s.g.db.BlockKeystoneByL2KeystoneAbrevHash(ctx, *abrvKss)
-		if err == nil {
-			t.Fatalf("expected fail in db query for keystone: %v", abrvKss)
-		}
-	}
-
-	// check if no keystones in heighthash index
-	_, err = s.g.db.KeystonesByHeight(ctx, 6, -5)
-	if err == nil {
-		t.Fatalf("expected fail in db query for keystones at height 5 and below")
 	}
 }
 
