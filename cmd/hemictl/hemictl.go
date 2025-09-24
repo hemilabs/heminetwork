@@ -407,6 +407,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tzkbalancebyscripthash")
 		fmt.Println("\tzkvalueandscriptbyoutpoint")
 		fmt.Println("\tzkspentoutputjournal")
+		fmt.Println("\tzkspendingoutpoints")
 		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
