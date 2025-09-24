@@ -1070,6 +1070,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return err
 		}
 		for _, v := range sos {
+			fmt.Printf("script hash            : %v\n", v.ScriptHash)
 			fmt.Printf("height                 : %v\n", v.Height)
 			fmt.Printf("block hash             : %v\n", v.BlockHash)
 			fmt.Printf("tx id                  : %v\n", v.TxID)

@@ -425,6 +425,14 @@ func NewScriptHashFromBytes(hash []byte) (scriptHash ScriptHash, err error) {
 	return
 }
 
+func NewScriptHashFromBytesP(hash []byte) (scriptHash ScriptHash) {
+	sh, err := NewScriptHashFromBytes(hash)
+	if err != nil {
+		panic(err)
+	}
+	return sh
+}
+
 func NewScriptHashFromString(hash string) (ScriptHash, error) {
 	shs, err := hex.DecodeString(hash)
 	if err != nil {
@@ -542,6 +550,7 @@ func NewSpendingOutpointValueSlice(h chainhash.Hash, idx uint32) []byte {
 type SpentOutput [32 + 4 + 32 + 32 + 32 + 4 + 4]byte
 
 type ZKSpentOutput struct {
+	ScriptHash        ScriptHash
 	Height            uint32
 	BlockHash         chainhash.Hash
 	TxID              chainhash.Hash
