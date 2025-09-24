@@ -2260,9 +2260,9 @@ func bytes2hash(b []byte) chainhash.Hash {
 	return *h
 }
 
-func (l *ldb) ZKSpentOutputJournal(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
-	log.Tracef("ZKSpentOutputJournal")
-	defer log.Tracef("ZKSpentOutputJournal exit")
+func (l *ldb) ZKSpentOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
+	log.Tracef("ZKSpentOutputs")
+	defer log.Tracef("ZKSpentOutputs exit")
 
 	zkdb := l.pool[level.ZKDB]
 	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
