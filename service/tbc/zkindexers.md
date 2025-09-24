@@ -14,7 +14,7 @@ cache[sha256(PkScript) + height + hash + txid + PrevOut + txInIndex] = nil  // S
 
 Tx index
 ```
-cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // SpendingOutpoint = SpendingOutpointValue
+cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // SpendingOutpointKey = SpendingOutpointValue
 ```
 
 ### Out
