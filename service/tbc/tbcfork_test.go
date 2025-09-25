@@ -3483,7 +3483,7 @@ func TestZKIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+	time.Sleep(400 * time.Millisecond)
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
