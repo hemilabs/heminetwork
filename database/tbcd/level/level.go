@@ -2200,13 +2200,16 @@ func (l *ldb) ZKSpentOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZK
 	log.Tracef("ZKSpentOutputs")
 	defer log.Tracef("ZKSpentOutputs exit")
 
-	zkdb := l.pool[level.ZKDB]
-	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
-	defer it.Release()
+	start, limit := larry.BytesPrefix(sh[:])
+	it, err := l.pool.NewRange(ctx, level.ZKDB, start, limit)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
+	defer it.Close(ctx)
 
 	sos := make([]tbcd.ZKSpentOutput, 0, 128)
-	for it.Next() {
-		k := it.Key()
+	for it.Next(ctx) {
+		k := it.Key(ctx)
 		if len(k) != lzkso {
 			continue
 		}
@@ -2234,13 +2237,15 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 	log.Tracef("ZKSpendingOutpoints")
 	defer log.Tracef("ZKSpendingOutpoints exit")
 
-	zkdb := l.pool[level.ZKDB]
-	it := zkdb.NewIterator(util.BytesPrefix(txid[:]), nil)
-	defer it.Release()
+	start, limit := larry.BytesPrefix(txid[:])
+	it, err := l.pool.NewRange(ctx, level.ZKDB, start, limit)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
 
 	sos := make([]tbcd.ZKSpendingOutpoint, 0, 128)
-	for it.Next() {
-		k := it.Key()
+	for it.Next(ctx) {
+		k := it.Key(ctx)
 		if len(k) != lzsok {
 			continue
 		}
@@ -2250,7 +2255,7 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 			BlockHash:   bytes2hash(k[32+4 : 32+4+32]),
 			VOutIndex:   binary.BigEndian.Uint32(k[32+4+32:]),
 		}
-		v := it.Value()
+		v := it.Value(ctx)
 		if len(v) == lzsokv {
 			sok.SpendingOutpoint = &tbcd.ZKSpendingOutpointValue{
 				TxID:  bytes2hash(v[:32]),
@@ -2268,13 +2273,16 @@ func (l *ldb) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbc
 	log.Tracef("ZKSpendableOutputs")
 	defer log.Tracef("ZKSpendableOutputs exit")
 
-	zkdb := l.pool[level.ZKDB]
-	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
-	defer it.Release()
+	start, limit := larry.BytesPrefix(sh[:])
+	it, err := l.pool.NewRange(ctx, level.ZKDB, start, limit)
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
+	}
+	defer it.Close(ctx)
 
 	sos := make([]tbcd.ZKSpendableOutput, 0, 128)
-	for it.Next() {
-		k := it.Key()
+	for it.Next(ctx) {
+		k := it.Key(ctx)
 		if len(k) != lzsops {
 			continue
 		}
