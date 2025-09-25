@@ -2242,6 +2242,7 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 	if err != nil {
 		return nil, fmt.Errorf("new range: %w", err)
 	}
+	defer it.Close(ctx)
 
 	sos := make([]tbcd.ZKSpendingOutpoint, 0, 128)
 	for it.Next(ctx) {
