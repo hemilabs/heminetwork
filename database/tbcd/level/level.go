@@ -2250,7 +2250,20 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
-var lzkso = len(tbcd.SpentOutput{})
+func fill(b []byte) {
+	for i := range b {
+		b[i] = 0xff
+	}
+}
+
+var (
+	lzkso            = len(tbcd.SpentOutput{})
+	limitSpentOutput tbcd.SpentOutput
+)
+
+func init() {
+	fill(limitSpentOutput[:])
+}
 
 func bytes2hash(b []byte) chainhash.Hash {
 	h, err := chainhash.NewHash(b)
@@ -2265,14 +2278,22 @@ func (l *ldb) ZKSpentOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZK
 	defer log.Tracef("ZKSpentOutputs exit")
 
 	zkdb := l.pool[level.ZKDB]
-	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
+	start := tbcd.SpentOutput{}
+	limit := tbcd.SpentOutput{}
+	copy(start[0:], sh[:])
+	copy(limit[0:], sh[:])
+	copy(limit[32:], limitSpentOutput[32:])
+	spew.Dump(start)
+	spew.Dump(limit)
+	it := zkdb.NewIterator(&util.Range{Start: start[:], Limit: limit[:]}, nil)
 	defer it.Release()
 
 	sos := make([]tbcd.ZKSpentOutput, 0, 128)
 	for it.Next() {
 		k := it.Key()
 		if len(k) != lzkso {
-			continue
+			panic(spew.Sdump(k))
+			panic("diagnostic")
 		}
 		so := tbcd.ZKSpentOutput{
 			ScriptHash:        tbcd.NewScriptHashFromBytesP(k[:32]),
