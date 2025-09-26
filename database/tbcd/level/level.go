@@ -2158,7 +2158,7 @@ func (l *ldb) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) 
 	log.Tracef("ZKValueAndScriptByOutpoint")
 	defer log.Tracef("ZKValueAndScriptByOutpoint exit")
 
-	v, err := l.pool.Get(ctx, level.ZKDB, op[:])
+	v, err := l.pool.Get(ctx, level.ZKOutpointsDB, op[:])
 	if err != nil {
 		if errors.Is(err, larry.ErrKeyNotFound) {
 			return 0, nil, database.NotFoundError(err.Error())
@@ -2201,7 +2201,7 @@ func (l *ldb) ZKSpentOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZK
 	defer log.Tracef("ZKSpentOutputs exit")
 
 	start, limit := larry.BytesPrefix(sh[:])
-	it, err := l.pool.NewRange(ctx, level.ZKDB, start, limit)
+	it, err := l.pool.NewRange(ctx, level.ZKSpentOutDB, start, limit)
 	if err != nil {
 		return nil, fmt.Errorf("new range: %w", err)
 	}
@@ -2210,9 +2210,6 @@ func (l *ldb) ZKSpentOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZK
 	sos := make([]tbcd.ZKSpentOutput, 0, 128)
 	for it.Next(ctx) {
 		k := it.Key(ctx)
-		if len(k) != lzkso {
-			continue
-		}
 		so := tbcd.ZKSpentOutput{
 			ScriptHash:        tbcd.NewScriptHashFromBytesP(k[:32]),
 			BlockHeight:       binary.BigEndian.Uint32(k[32:]),
@@ -2238,7 +2235,7 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 	defer log.Tracef("ZKSpendingOutpoints exit")
 
 	start, limit := larry.BytesPrefix(txid[:])
-	it, err := l.pool.NewRange(ctx, level.ZKDB, start, limit)
+	it, err := l.pool.NewRange(ctx, level.ZKSpentTxDB, start, limit)
 	if err != nil {
 		return nil, fmt.Errorf("new range: %w", err)
 	}
@@ -2247,9 +2244,6 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 	sos := make([]tbcd.ZKSpendingOutpoint, 0, 128)
 	for it.Next(ctx) {
 		k := it.Key(ctx)
-		if len(k) != lzsok {
-			continue
-		}
 		sok := tbcd.ZKSpendingOutpoint{
 			TxID:        bytes2hash(k[0:32]),
 			BlockHeight: binary.BigEndian.Uint32(k[32:]),
@@ -2275,7 +2269,7 @@ func (l *ldb) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbc
 	defer log.Tracef("ZKSpendableOutputs exit")
 
 	start, limit := larry.BytesPrefix(sh[:])
-	it, err := l.pool.NewRange(ctx, level.ZKDB, start, limit)
+	it, err := l.pool.NewRange(ctx, level.ZKSpendableOutDB, start, limit)
 	if err != nil {
 		return nil, fmt.Errorf("new range: %w", err)
 	}
@@ -2284,9 +2278,6 @@ func (l *ldb) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbc
 	sos := make([]tbcd.ZKSpendableOutput, 0, 128)
 	for it.Next(ctx) {
 		k := it.Key(ctx)
-		if len(k) != lzsops {
-			continue
-		}
 		sos = append(sos, tbcd.ZKSpendableOutput{
 			ScriptHash:  tbcd.NewScriptHashFromBytesP(k[:32]),
 			BlockHeight: binary.BigEndian.Uint32(k[32:]),
@@ -2298,7 +2289,21 @@ func (l *ldb) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbc
 	return sos, nil
 }
 
-var scriptHashLen = len(tbcd.ScriptHash{})
+// var (
+// 	scriptHashLen   = len(tbcd.ScriptHash{})
+// 	spentOutLen     = len(tbcd.SpentOutput{})
+// 	spendableOutLen = len(tbcd.SpendableOutput{})
+// 	spentTxLen      = len(tbcd.SpendingOutpointKey{})
+// 	outpointLen     = len(tbcd.Outpoint{})
+// )
+
+var zkKeyMap = map[int]string{
+	len(tbcd.ScriptHash{}):          level.ZKDB,
+	len(tbcd.SpentOutput{}):         level.ZKSpentOutDB,
+	len(tbcd.SpendableOutput{}):     level.ZKSpendableOutDB,
+	len(tbcd.SpendingOutpointKey{}): level.ZKSpentTxDB,
+	len(tbcd.Outpoint{}):            level.ZKOutpointsDB,
+}
 
 func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error {
 	log.Tracef("BlockZKUpdate")
@@ -2321,18 +2326,22 @@ func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.Z
 	}
 
 	for k, v := range utxos {
+		table, ok := zkKeyMap[len([]byte(k))]
+		if !ok {
+			return fmt.Errorf("unexpected key len: %x (%d)", k, len(k))
+		}
 		// I will punch the first person that tells me to use continue
 		// in this loop in the larynx.
 		switch direction {
 		case -1:
 			// On unwind we can delete some keys.
-			if len(k) != scriptHashLen {
-				zkBatch.Del(ctx, level.ZKDB, []byte(k))
+			if table != level.ZKDB {
+				zkBatch.Del(ctx, table, []byte(k))
 			} else {
-				zkBatch.Put(ctx, level.ZKDB, []byte(k), v)
+				zkBatch.Put(ctx, table, []byte(k), v)
 			}
 		case 1:
-			zkBatch.Put(ctx, level.ZKDB, []byte(k), v)
+			zkBatch.Put(ctx, table, []byte(k), v)
 		}
 
 		// Empty out cache.
