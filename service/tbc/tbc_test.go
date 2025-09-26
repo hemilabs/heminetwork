@@ -124,7 +124,6 @@ func countKeystones(b *btcutil.Block) int {
 // XXX larry, this test relies on tared
 // leveldb database so will fail for other dbs
 func TestDbUpgradeFull(t *testing.T) {
-	t.Skip()
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
@@ -237,7 +236,6 @@ func TestDbUpgradeFull(t *testing.T) {
 // XXX larry, this test relies on tared
 // leveldb database so will fail for other dbs
 func TestDbUpgradeV3(t *testing.T) {
-	t.Skip()
 	home := t.TempDir()
 	network := "upgradetest"
 	t.Logf("temp: %v", home)
@@ -394,7 +392,6 @@ func cmpDB(ctx context.Context, a, b larry.Database, dbname string) (int, error)
 // XXX larry, this test relies on tared
 // leveldb database so will fail for other dbs
 func TestDbUpgradeV4(t *testing.T) {
-	t.Skip()
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
