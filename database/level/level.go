@@ -144,14 +144,14 @@ func New(ctx context.Context, home string) (*Database, error) {
 	}
 
 	poolMap := map[string]string{
-		BlockHeadersDB:  "pebble",
-		BlocksMissingDB: "pebble",
-		MetadataDB:      "pebble",
-		KeystonesDB:     "pebble",
-		HeightHashDB:    "pebble",
-		OutputsDB:       "pebble",
-		TransactionsDB:  "pebble",
-		ZKDB:            "pebble",
+		BlockHeadersDB:  "level",
+		BlocksMissingDB: "level",
+		MetadataDB:      "level",
+		KeystonesDB:     "level",
+		HeightHashDB:    "level",
+		OutputsDB:       "level",
+		TransactionsDB:  "level",
+		ZKDB:            "level",
 	}
 
 	// MultiDB makes the directory path for home
