@@ -24,14 +24,18 @@ import (
 const (
 	logLevel = "INFO"
 
-	BlockHeadersDB  = "blockheaders"
-	BlocksMissingDB = "blocksmissing"
-	MetadataDB      = "metadata"
-	KeystonesDB     = "keystones"
-	HeightHashDB    = "heighthash"
-	OutputsDB       = "outputs"
-	TransactionsDB  = "transactions"
-	ZKDB            = "zkindex"
+	BlockHeadersDB   = "blockheaders"
+	BlocksMissingDB  = "blocksmissing"
+	MetadataDB       = "metadata"
+	KeystonesDB      = "keystones"
+	HeightHashDB     = "heighthash"
+	OutputsDB        = "outputs"
+	TransactionsDB   = "transactions"
+	ZKDB             = "zkindex"
+	ZKOutpointsDB    = "zkoutpoints"
+	ZKSpendableOutDB = "zkspendableout"
+	ZKSpentOutDB     = "zkspentout"
+	ZKSpentTxDB      = "zkspenttx"
 
 	BlocksDB = "blocks" // raw database
 )
@@ -144,14 +148,18 @@ func New(ctx context.Context, home string) (*Database, error) {
 	}
 
 	poolMap := map[string]string{
-		BlockHeadersDB:  "level",
-		BlocksMissingDB: "level",
-		MetadataDB:      "level",
-		KeystonesDB:     "level",
-		HeightHashDB:    "level",
-		OutputsDB:       "level",
-		TransactionsDB:  "level",
-		ZKDB:            "level",
+		BlockHeadersDB:   "level",
+		BlocksMissingDB:  "level",
+		MetadataDB:       "level",
+		KeystonesDB:      "level",
+		HeightHashDB:     "level",
+		OutputsDB:        "level",
+		TransactionsDB:   "level",
+		ZKOutpointsDB:    "level",
+		ZKSpendableOutDB: "level",
+		ZKSpentOutDB:     "level",
+		ZKSpentTxDB:      "level",
+		ZKDB:             "level",
 	}
 
 	// MultiDB makes the directory path for home
