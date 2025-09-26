@@ -31,11 +31,11 @@ const (
 	HeightHashDB     = "heighthash"
 	OutputsDB        = "outputs"
 	TransactionsDB   = "transactions"
-	ZKDB             = "zkindex"
-	ZKOutpointsDB    = "zkoutpoints"
-	ZKSpendableOutDB = "zkspendableout"
-	ZKSpentOutDB     = "zkspentout"
-	ZKSpentTxDB      = "zkspenttx"
+	ZKDB             = "zkdb/zkindex"
+	ZKOutpointsDB    = "zkdb/zkoutpoints"
+	ZKSpendableOutDB = "zkdb/zkspendableout"
+	ZKSpentOutDB     = "zkdb/zkspentout"
+	ZKSpentTxDB      = "zkdb/zkspenttx"
 
 	BlocksDB = "blocks" // raw database
 )
