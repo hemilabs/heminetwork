@@ -92,7 +92,7 @@ make test
 
 ### Code style
 
-- Follow [Effective Go](hhttps://go.dev/doc/effective_go).
+- Follow [Effective Go](https://go.dev/doc/effective_go).
 - Keep lines under 80 characters where possible.
   - Don't wrap long function signatures; it makes them harder to read.
   - Avoid wrapping of nested `if err := abc; err != nil`; move the `err` assignment above the if statement.
