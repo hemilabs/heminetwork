@@ -4,7 +4,10 @@
 
 # GitHub Actions workflow to automatically label pull requests.
 name: "Label"
-on: [ "pull_request_target" ]
+on:
+  pull_request_target:
+    branches: ["main"]
+    types: ["labeled", "unlabeled", "opened", "closed", "synchronize"]
 
 jobs:
   labeler:
@@ -20,6 +23,7 @@ jobs:
       - name: "Check if CHANGELOG changed"
         id: "changelog-check"
         env:
+          GH_TOKEN: "${{ github.token }}"
           PR_NUMBER: "${{ github.event.pull_request.number }}"
         run: |
           CL_CHANGED=false
@@ -31,6 +35,7 @@ jobs:
       - name: "Manage changelog labels"
         id: "changelog"
         env:
+          GH_TOKEN: "${{ github.token }}"
           PR_NUMBER: "${{ github.event.pull_request.number }}"
           CL_CHANGED: "${{ steps.changelog-check.outputs.changed }}"
         run: |
