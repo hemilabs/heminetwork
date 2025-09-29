@@ -408,13 +408,6 @@ type MempoolInfoResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-/*
-	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
-	ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
-	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
-	ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
-*/
-
 type Outpoint struct {
 	TxID  api.ByteSlice `json:"txid"`
 	Index uint32        `json:"index"`
@@ -437,6 +430,19 @@ type ZKBalanceByScriptHashRequest struct {
 type ZKBalanceByScriptHashResponse struct {
 	Satoshis uint64          `json:"satoshis"`
 	Error    *protocol.Error `json:"error,omitempty"`
+}
+
+/*
+ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
+ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
+ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
+*/
+type ZKSpentOutputsRequest struct {
+	ScriptHash api.ByteSlice `json:"scripthash"`
+}
+
+type ZKSpentOutputsResponse struct {
+	Error *protocol.Error `json:"error,omitempty"`
 }
 
 var commands = map[protocol.Command]reflect.Type{
