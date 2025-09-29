@@ -16,3 +16,47 @@ jobs:
     steps:
       - name: "Label pull requests"
         uses: actions/labeler@634933edcd8ababfe52f92936142cc22ac488b1b # v6.0.1
+
+      - name: "Check if CHANGELOG changed"
+        id: "changelog-check"
+        env:
+          PR_NUMBER: "${{ github.event.pull_request.number }}"
+        run: |
+          CL_CHANGED=false
+          if gh pr diff "$PR_NUMBER" | grep -q '^diff --git a/CHANGELOG.md'; then
+            CL_CHANGED=true
+          fi
+          echo "changed=$CL_CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: "Manage changelog labels"
+        id: "changelog"
+        env:
+          PR_NUMBER: "${{ github.event.pull_request.number }}"
+          CL_CHANGED: "${{ steps.changelog-check.outputs.changed }}"
+        run: |
+          labels=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          REQUIRED=false
+
+          if [ "$CL_CHANGED" = "true" ]; then
+            # Changelog was updated, replace 'changelog: required' with 'changelog: done'
+            gh pr edit "$PR_NUMBER" --remove-label "changelog: required" || true
+            gh pr edit "$PR_NUMBER" --add-label "changelog: done" || true
+            REQUIRED=false
+          elif echo "$labels" | grep -q "^changelog: skip$"; then
+            # Explicitly marked with 'changelog: skip', remove required label
+            gh pr edit "$PR_NUMBER" --remove-label "changelog: required" || true
+            REQUIRED=false
+          else
+            # Add default changelog: required label
+            gh pr edit "$PR_NUMBER" --add-label "changelog: required" || true
+            gh pr edit "$PR_NUMBER" --remove-label "changelog: done" || true
+            REQUIRED=true
+          fi
+
+          echo "required=$REQUIRED" >> "$GITHUB_OUTPUT"
+
+      - name: "Block if changelog has not been updated"
+        if: "${{ steps.changelog.outputs.required == 'true' }}"
+        run: |
+          echo "❌ This pull request must have either 'changelog: done' or 'changelog: skip' label before merging."
+          exit 1
