@@ -93,6 +93,9 @@ const (
 
 	CmdKeystonesByHeightRequest  = "tbcapi-keystones-by-height-request"
 	CmdKeystonesByHeightResponse = "tbcapi-keystones-by-height-response"
+
+	CmdZKValueAndScriptByOutpointRequest  = "tbcapi-zk-value-and-script-by-outpoint-request"
+	CmdZKValueAndScriptByOutpointResponse = "tbcapi-zk-value-and-script-by-outpoint-response"
 )
 
 var (
@@ -402,6 +405,28 @@ type MempoolInfoResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
+/*
+	ZKValueAndScriptByOutpoint(ctx context.Context, op Outpoint) (uint64, []byte, error)
+	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
+	ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
+	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
+	ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
+*/
+
+type Outpoint struct {
+	TxID  api.ByteSlice `json:"txid"`
+	Index uint32        `json:"index"`
+}
+
+type ZKValueAndScriptByOutpointRequest struct {
+	Outpoint Outpoint `json:"outpoint"`
+}
+
+type ZKValueAndScriptByOutpointResponse struct {
+	Satoshis uint64        `json:"satoshis"`
+	PkScript api.ByteSlice `json:"pkscript"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                              reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                             reflect.TypeOf(PingResponse{}),
@@ -449,6 +474,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdMempoolInfoResponse:                      reflect.TypeOf(MempoolInfoResponse{}),
 	CmdKeystonesByHeightRequest:                 reflect.TypeOf(KeystonesByHeightRequest{}),
 	CmdKeystonesByHeightResponse:                reflect.TypeOf(KeystonesByHeightResponse{}),
+	CmdZKValueAndScriptByOutpointRequest:        reflect.TypeOf(ZKValueAndScriptByOutpointRequest{}),
+	CmdZKValueAndScriptByOutpointResponse:       reflect.TypeOf(ZKValueAndScriptByOutpointResponse{}),
 }
 
 type tbcAPI struct{}
