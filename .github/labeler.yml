@@ -30,11 +30,26 @@
       - any-glob-to-any-file:
           - "docker/**"
 
+# Documentation
+'area: docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "README.md"
+          - "CONTRIBUTING.md"
+          - "**/*.md"
+
 # hemictl
 'area: hemictl':
   - changed-files:
       - any-glob-to-any-file:
           - "cmd/hemictl/**"
+# hproxy
+'area: hproxy':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "cmd/hproxyd/**"
+          - "docker/hproxyd/**"
+          - "service/hproxy/**"
 
 # Local node
 'area: localnode':
@@ -53,6 +68,12 @@
           - "cmd/popmd/**"
           - "docker/popmd/**"
           - "service/popm/**"
+
+# Scripts
+'area: scripts':
+  - changed-files:
+      - any-glob-to-any-file:
+          - "scripts/**"
 
 # Tiny Bitcoin Daemon (TBC)
 'area: tbc':
