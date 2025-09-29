@@ -20,6 +20,7 @@ jobs:
       - name: "Check if CHANGELOG changed"
         id: "changelog-check"
         env:
+          GH_TOKEN: "${{ github.token }}"
           PR_NUMBER: "${{ github.event.pull_request.number }}"
         run: |
           CL_CHANGED=false
@@ -31,6 +32,7 @@ jobs:
       - name: "Manage changelog labels"
         id: "changelog"
         env:
+          GH_TOKEN: "${{ github.token }}"
           PR_NUMBER: "${{ github.event.pull_request.number }}"
           CL_CHANGED: "${{ steps.changelog-check.outputs.changed }}"
         run: |
