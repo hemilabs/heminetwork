@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Update required Go version to [Go 1.25](https://tip.golang.org/doc/go1.25).
-- Move `localnode` to dedicated [hemilabs/hemi-node](https://github.com/hemilabs/hemi-node) repository.
+- Move `localnode` to dedicated [hemilabs/hemi-node](https://github.com/hemilabs/hemi-node)
+  repository ([#687](https://github.com/hemilabs/heminetwork/pull/687)).
 
 ## [v2.0.0]
 
