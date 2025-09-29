@@ -19,7 +19,7 @@ func TestNewKeystoneIndexer(t *testing.T) {
 
 	testTable := []testTableItem{
 		{
-			name: "Non-nil hemi index",
+			name: "Non-nil hemi genesis",
 			hemiGenesis: &HashHeight{
 				Hash:      *mustNewHashFromStr(t, "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"),
 				Height:    66,
@@ -27,7 +27,7 @@ func TestNewKeystoneIndexer(t *testing.T) {
 			},
 		},
 		{
-			name:        "nil hemi index",
+			name:        "nil hemi genesis",
 			hemiGenesis: nil,
 		},
 	}
