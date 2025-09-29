@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add ZK indexers.
+
 ### Changed
 
 - Update required Go version to [Go 1.25](https://tip.golang.org/doc/go1.25).
