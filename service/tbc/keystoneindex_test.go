@@ -14,7 +14,7 @@ func TestNewKeystoneIndexer(t *testing.T) {
 	}
 
 	testTable := []testTableItem{
-		testTableItem{
+		{
 			name: "Non-nil hemi index",
 			hemiGenesis: &HashHeight{
 				Hash:      *mustNewHashFromStr(t, "0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"),
@@ -22,7 +22,7 @@ func TestNewKeystoneIndexer(t *testing.T) {
 				Timestamp: 9999,
 			},
 		},
-		testTableItem{
+		{
 			name:        "nil hemi index",
 			hemiGenesis: nil,
 		},
@@ -32,11 +32,11 @@ func TestNewKeystoneIndexer(t *testing.T) {
 		t.Run(tti.name, func(t *testing.T) {
 			indexer := NewKeystoneIndexer(geometryParams{}, 0, false, tti.hemiGenesis).(*keystoneIndexer)
 
-			if tti.hemiGenesis != indexer.indexerCommon.genesis {
+			if tti.hemiGenesis != indexer.genesis {
 				t.Fatal("indexer geneis pointer is not the same as the parameter")
 			}
 
-			if diff := deep.Equal(tti.hemiGenesis, indexer.indexerCommon.genesis); len(diff) != 0 {
+			if diff := deep.Equal(tti.hemiGenesis, indexer.genesis); len(diff) != 0 {
 				t.Fatalf("different genesis on indexer: %s", diff)
 			}
 		})
