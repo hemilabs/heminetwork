@@ -140,6 +140,7 @@ type Database interface {
 	BlockHeaderByZKIndex(ctx context.Context) (*BlockHeader, error)
 	BlockZKUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error
 	ZKValueAndScriptByOutpoint(ctx context.Context, op Outpoint) (uint64, []byte, error)
+	// XXX rename the next 4 calls to add "By"
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
 	ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
 	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
