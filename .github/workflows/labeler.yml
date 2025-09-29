@@ -24,10 +24,12 @@ jobs:
         id: "changelog-check"
         env:
           GH_TOKEN: "${{ github.token }}"
+          GH_REPO: "${{ github.repository }}"
           PR_NUMBER: "${{ github.event.pull_request.number }}"
         run: |
           CL_CHANGED=false
-          if gh pr diff "$PR_NUMBER" | grep -q '^diff --git a/CHANGELOG.md'; then
+          files=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')
+          if echo "$files" | grep -q '^CHANGELOG.md$'; then
             CL_CHANGED=true
           fi
           echo "changed=$CL_CHANGED" >> "$GITHUB_OUTPUT"
@@ -36,25 +38,36 @@ jobs:
         id: "changelog"
         env:
           GH_TOKEN: "${{ github.token }}"
+          GH_REPO: "${{ github.repository }}"
           PR_NUMBER: "${{ github.event.pull_request.number }}"
           CL_CHANGED: "${{ steps.changelog-check.outputs.changed }}"
         run: |
-          labels=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          labels=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.labels[].name')
           REQUIRED=false
 
+          edit_label() {
+            action="$1"
+            label="$2"
+
+            if [ "$action" = "add" ]; then
+              gh api -X POST "repos/$GH_REPO/issues/$PR_NUMBER/labels" -f labels="[$label]" >/dev/null
+            elif [ "$action" = "remove" ]; then
+              encoded_label=$(printf "%s" "$label" | jq -s -R -r @uri)
+              gh api -X DELETE "repos/$GH_REPO/issues/$PR_NUMBER/labels/$encoded_label" >/dev/null
+            else
+              echo "unknown action: $action"
+              exit 1
+            fi
+          }
+
           if [ "$CL_CHANGED" = "true" ]; then
-            # Changelog was updated, replace 'changelog: required' with 'changelog: done'
-            gh pr edit "$PR_NUMBER" --remove-label "changelog: required" || true
-            gh pr edit "$PR_NUMBER" --add-label "changelog: done" || true
-            REQUIRED=false
+            edit_label remove "changelog: required"
+            edit_label add "changelog: done"
           elif echo "$labels" | grep -q "^changelog: skip$"; then
-            # Explicitly marked with 'changelog: skip', remove required label
-            gh pr edit "$PR_NUMBER" --remove-label "changelog: required" || true
-            REQUIRED=false
+            edit_label remove "changelog: required"
           else
-            # Add default changelog: required label
-            gh pr edit "$PR_NUMBER" --add-label "changelog: required" || true
-            gh pr edit "$PR_NUMBER" --remove-label "changelog: done" || true
+            edit_label add "changelog: required"
+            edit_label remove "changelog: done"
             REQUIRED=true
           fi
 
