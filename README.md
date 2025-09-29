@@ -27,6 +27,11 @@ The Hemi Network is composed of many services. The core Hemi services in this re
 | [Hemi PoP Miner Daemon (`popmd`)](./cmd/popmd)     | The Hemi Proof-of-Proof miner daemon       |
 | [Hemi Tiny Bitcoin Daemon (`tbcd`)](./cmd/tbcd)    | Embeddable Bitcoin node                    |
 
+### Hemi Node
+
+For documentation and files for running Hemi L2 nodes, see the
+dedicated [hemilabs/hemi-node](https://github.com/hemilabs/hemi-node) repository.
+
 ### Utilities
 
 This repository also contains several utility binaries.
