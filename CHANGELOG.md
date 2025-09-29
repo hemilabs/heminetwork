@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#673](https://github.com/hemilabs/heminetwork/pull/673), [#698](https://github.com/hemilabs/heminetwork/pull/698),
   [#896](https://github.com/hemilabs/heminetwork/pull/896)).
 
-- Move `localnode` to dedicated [hemilabs/hemi-node](https://github.com/hemilabs/hemi-node) repository.
+- Move `localnode` to dedicated [hemilabs/hemi-node](https://github.com/hemilabs/hemi-node)
+  repository ([#687](https://github.com/hemilabs/heminetwork/pull/687)).
 
 - Move `testutil` into the `internal/` package, removing it from the public API
   ([#735](https://github.com/hemilabs/heminetwork/pull/735)).
