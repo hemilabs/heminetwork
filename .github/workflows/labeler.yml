@@ -4,7 +4,10 @@
 
 # GitHub Actions workflow to automatically label pull requests.
 name: "Label"
-on: [ "pull_request_target" ]
+on:
+  pull_request_target:
+    branches: ["main"]
+    types: ["labeled", "unlabeled", "opened", "closed", "synchronize"]
 
 jobs:
   labeler:
