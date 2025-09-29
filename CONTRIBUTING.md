@@ -141,6 +141,13 @@ For the body (longer description):
 
 We maintain a [CHANGELOG.md](CHANGELOG.md) for all notable changes. Update it in the same pull request as your change.
 
+Pull requests are automatically labeled based on changelog status:
+
+- **`changelog: required`** - Added by default when no changelog entry is detected
+- **`changelog: done`** - Automatically applied when `CHANGELOG.md` is updated
+- **`changelog: skip`** - Only for internal changes invisible to users (CI/build scripts, test fixes, minor typos in
+  non-user docs). Most changes affecting code behavior, APIs, or user-facing features require changelog entries.
+
 Follow the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) style:
 
 - **Breaking changes** - Breaking changes that may need attention
