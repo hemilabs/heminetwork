@@ -23,7 +23,7 @@ func TestNewKeystoneIndexer(t *testing.T) {
 			},
 		},
 		testTableItem{
-			name:        "Non-nil hemi index",
+			name:        "nil hemi index",
 			hemiGenesis: nil,
 		},
 	}
