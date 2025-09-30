@@ -5,6 +5,7 @@
 package hproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -86,7 +87,7 @@ func newServer(x int, state func() (int, time.Time)) *httptest.Server {
 	}))
 }
 
-func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
+func newHproxy(t *testing.T, servers []string, filter ...string) (*Server, *Config) {
 	hpCfg := NewDefaultConfig()
 	hpCfg.HVMURLs = servers
 	hpCfg.LogLevel = "hproxy=TRACE" // XXX figure out why this isn't working
@@ -94,6 +95,10 @@ func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
 	hpCfg.PollFrequency = time.Second
 	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
 	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
+	hpCfg.MethodFilter = filter
+	if len(filter) < 1 {
+		hpCfg.MethodFilter = []string{"ping"}
+	}
 	hp, err := NewServer(hpCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +119,7 @@ func TestNobodyHome(t *testing.T) {
 
 	c := &http.Client{}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
-		"http://"+hpCfg.ListenAddress, nil)
+		"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -153,6 +158,7 @@ func TestClientReap(t *testing.T) {
 	hpCfg.PollFrequency = time.Second
 	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
 	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
+	hpCfg.MethodFilter = []string{"ping"}
 	hp, err := NewServer(hpCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +187,7 @@ func TestClientReap(t *testing.T) {
 			// which would result in a new client not being created.
 			c := &http.Client{Transport: &http.Transport{}}
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-				"http://"+hpCfg.ListenAddress, nil)
+				"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 			if err != nil {
 				panic(fmt.Errorf("get %v: %w", x, err))
 			}
@@ -256,7 +262,7 @@ func TestRequestTimeout(t *testing.T) {
 
 	c := &http.Client{}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
-		"http://"+hpCfg.ListenAddress, nil)
+		"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -270,10 +276,24 @@ func TestRequestTimeout(t *testing.T) {
 	reply.Body.Close() // shut linter up
 }
 
-func request(ctx context.Context, serverID int, hpCfg *Config) error {
+func newEthReq(method string) io.Reader {
+	ec := EthereumRequest{
+		Method:  method,
+		Params:  nil,
+		ID:      ethID(),
+		Version: EthereumVersion,
+	}
+	b := new(bytes.Buffer)
+	if err := json.NewEncoder(b).Encode(ec); err != nil {
+		panic(err)
+	}
+	return b
+}
+
+func request(ctx context.Context, serverID int, hpCfg *Config, m string) error {
 	c := &http.Client{}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"http://"+hpCfg.ListenAddress, nil)
+		"http://"+hpCfg.ListenAddress, newEthReq(m))
 	if err != nil {
 		return fmt.Errorf("get: %w", err)
 	}
@@ -284,6 +304,8 @@ func request(ctx context.Context, serverID int, hpCfg *Config) error {
 	defer reply.Body.Close()
 	switch reply.StatusCode {
 	case http.StatusOK:
+	case http.StatusMethodNotAllowed:
+		return ForbiddenMethodError{method: m}
 	default:
 		return fmt.Errorf("%v replied %v", hpCfg.ListenAddress, reply.StatusCode)
 	}
@@ -316,7 +338,30 @@ func TestProxy(t *testing.T) {
 	time.Sleep(250 * time.Millisecond)
 
 	// Send command
-	err := request(t.Context(), serverID, hpCfg)
+	err := request(t.Context(), serverID, hpCfg, "ping")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWhitelist(t *testing.T) {
+	serverID := 1337
+	s := newServer(serverID, nil)
+	defer s.Close()
+	servers := []string{s.URL}
+
+	// Setup hproxy with "valid" method whitelisted
+	_, hpCfg := newHproxy(t, servers, "valid")
+	time.Sleep(250 * time.Millisecond)
+
+	// Send invalid command
+	err := request(t.Context(), serverID, hpCfg, "invalid")
+	if !errors.Is(err, ErrForbiddenMethod) {
+		t.Fatalf("expected %v, got %v", ErrForbiddenMethod, err)
+	}
+
+	// Send valid command
+	err = request(t.Context(), serverID, hpCfg, "valid")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,7 +404,7 @@ func TestFanout(t *testing.T) {
 			defer wg.Done()
 			c := &http.Client{}
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
-				"http://"+hpCfg.ListenAddress, nil)
+				"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 			if err != nil {
 				panic(fmt.Errorf("get %v: %w", x, err))
 			}
@@ -454,7 +499,7 @@ func TestPersistence(t *testing.T) {
 	for i := 0; i < clientCount; i++ {
 		x := i
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			"http://"+hpCfg.ListenAddress, nil)
+			"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 		if err != nil {
 			t.Fatalf("get %v: %v", x, err)
 		}
@@ -547,7 +592,7 @@ func TestFailover(t *testing.T) {
 	var nextUnhealthy int
 	for i := 0; i < clientCount; i++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			"http://"+hpCfg.ListenAddress, nil)
+			"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 		if err != nil {
 			t.Fatal(err)
 		}

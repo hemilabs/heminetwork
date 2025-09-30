@@ -5,10 +5,12 @@
 package hproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -72,6 +74,21 @@ func init() {
 		panic(err)
 	}
 }
+
+type ForbiddenMethodError struct {
+	method string
+}
+
+func (fme ForbiddenMethodError) Error() string {
+	return fmt.Sprintf("method not allowed: %s", fme.method)
+}
+
+func (fme ForbiddenMethodError) Is(target error) bool {
+	_, ok := target.(ForbiddenMethodError)
+	return ok
+}
+
+var ErrForbiddenMethod ForbiddenMethodError
 
 func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.HandleFunc(pattern, handler)
@@ -139,6 +156,7 @@ type Config struct {
 	HVMURLs                 []string
 	ListenAddress           string
 	LogLevel                string
+	MethodFilter            []string
 	Network                 string
 	PollFrequency           time.Duration
 	PrometheusListenAddress string
@@ -170,6 +188,8 @@ type Server struct {
 	hvmHandlers []HVMHandler       // hvm nodes
 	clients     map[string]*client // [ip_address]server_id
 
+	whitelist map[string]interface{} // method filter
+
 	// Prometheus
 	promCollectors        []prometheus.Collector
 	promPollVerbose       bool // set to true to print stats during poll
@@ -198,6 +218,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			Name:      "proxy_calls",
 			Help:      "The total number of successful proxy calls",
 		}),
+		whitelist: make(map[string]any, len(cfg.MethodFilter)),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -205,6 +226,10 @@ func NewServer(cfg *Config) (*Server, error) {
 	case "sepolia":
 	default:
 		return nil, fmt.Errorf("unknown network %q", cfg.Network)
+	}
+
+	for _, m := range cfg.MethodFilter {
+		s.whitelist[m] = nil
 	}
 
 	return s, nil
@@ -462,6 +487,16 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	startTime := time.Now()
 
+	if err := s.filterRequest(r); err != nil {
+		if errors.Is(err, ErrForbiddenMethod) {
+			w.Header().Set("Allow", strings.Join(s.cfg.MethodFilter, ", "))
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
 	// Select host to call
 	s.mtx.Lock()
 	id := -1
@@ -565,6 +600,26 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 //		panic(e)
 //	}
 // }
+
+func (s *Server) filterRequest(r *http.Request) error {
+	// copy and reset body
+	const byteLimit = 5 * 1024 * 1024 // 5 MiB
+	lr := io.LimitReader(r.Body, byteLimit)
+	data, err := io.ReadAll(lr)
+	if err != nil {
+		return err
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+
+	var j EthereumRequest
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&j); err != nil {
+		return errors.New("unknown request type")
+	}
+	if _, ok := s.whitelist[j.Method]; !ok {
+		return ForbiddenMethodError{method: j.Method}
+	}
+	return nil
+}
 
 func (s *Server) _clientRemove(remoteAddr string) {
 	if v, ok := s.clients[remoteAddr]; ok {

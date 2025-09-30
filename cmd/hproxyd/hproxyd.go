@@ -43,6 +43,12 @@ var (
 			Help:         "comma separated HVM URLs",
 			Print:        config.PrintAll,
 		},
+		"HPROXY_METHOD_WHITELIST": config.Config{
+			Value:        &cfg.MethodFilter,
+			DefaultValue: cfg.MethodFilter,
+			Help:         "comma separated methods allowed by eth node RPCs",
+			Print:        config.PrintAll,
+		},
 		"HPROXY_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
