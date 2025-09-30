@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add **hproxyd**, a simple and efficient RPC request proxy to replace
   `proxyd` ([#568](https://github.com/hemilabs/heminetwork/pull/568), [#574](https://github.com/hemilabs/heminetwork/pull/574),
-  [#576](https://github.com/hemilabs/heminetwork/pull/576)).
+  [#576](https://github.com/hemilabs/heminetwork/pull/576), [#691](https://github.com/hemilabs/heminetwork/pull/691)).
 
 - Add Prometheus metrics and health check endpoints to `bfgd` and
   `popmd` ([#619](https://github.com/hemilabs/heminetwork/pull/619)).
