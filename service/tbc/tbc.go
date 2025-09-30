@@ -3181,7 +3181,7 @@ func (s *Server) Run(pctx context.Context) error {
 		// complete. This potentially lead down a non-canonical path
 		// which in turn will require fork resolution.
 		//
-		// Not sure which one to pick here. The likelyhood that a new
+		// Not sure which one to pick here. The likelihood that a new
 		// blockheaders comes through is high if the box has been down
 		// for >10m but very low if it is a simple restart.
 		//err := s.SyncIndexersToBest(ctx)
