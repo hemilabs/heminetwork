@@ -106,29 +106,29 @@ func TestZKEncodeRetrieve(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(out) != 1 {
-		t.Fatalf("expected 1 spent output, got %d", len(out))
+		t.Fatalf("ZKSpentOutputs out len = %d, want 1", len(out))
 	}
 	rout := out[0]
 	if !bytes.Equal(sh[:], rout.ScriptHash[:]) {
-		t.Fatalf("expected %x, got %x", sh, rout.ScriptHash[:])
+		t.Fatalf("got %x, expected %x", rout.ScriptHash[:], sh)
 	}
 	if index != int(rout.BlockHeight) {
-		t.Fatalf("expected %v, got %v", index, rout.BlockHeight)
+		t.Fatalf("got %v, expected %v", rout.BlockHeight, index)
 	}
 	if !bytes.Equal(blockHash[:], rout.BlockHash[:]) {
-		t.Fatalf("expected %x, got %x", blockHash, rout.BlockHash)
+		t.Fatalf("got %x, expected %x", rout.BlockHash, blockHash)
 	}
 	if !bytes.Equal(txId[:], rout.TxID[:]) {
-		t.Fatalf("expected %x, got %x", txId, rout.TxID)
+		t.Fatalf("got %x, expected %x", rout.TxID, txId)
 	}
 	if !bytes.Equal(prevHash[:], rout.PrevOutpointHash[:]) {
-		t.Fatalf("expected %x, got %x", prevHash, rout.PrevOutpointHash)
+		t.Fatalf("got %x, expected %x", rout.PrevOutpointHash, prevHash)
 	}
 	if index-1 != int(rout.PrevOutpointIndex) {
-		t.Fatalf("expected %v, got %v", index-1, rout.PrevOutpointIndex)
+		t.Fatalf("got %v, expected %v", rout.PrevOutpointIndex, index-1)
 	}
 	if rout.TxInIndex != 0 {
-		t.Fatalf("expected %v, got %v", 0, rout.TxInIndex)
+		t.Fatalf("got %v, expected %v", rout.TxInIndex, 0)
 	}
 
 	// SpendableOut
@@ -137,23 +137,23 @@ func TestZKEncodeRetrieve(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(out) != 1 {
-		t.Fatalf("expected 1 spendable output, got %d", len(out))
+		t.Fatalf("ZKSpendableOutputs out len = %d, want 1", len(out))
 	}
 	srout := sout[0]
 	if !bytes.Equal(sh[:], srout.ScriptHash[:]) {
-		t.Fatalf("expected %x, got %x", sh, srout.ScriptHash[:])
+		t.Fatalf("got %x, expected %x", srout.ScriptHash[:], sh)
 	}
 	if index != int(srout.BlockHeight) {
-		t.Fatalf("expected %v, got %v", index, srout.BlockHeight)
+		t.Fatalf("expected %v, got %v", srout.BlockHeight, index)
 	}
 	if !bytes.Equal(blockHash[:], srout.BlockHash[:]) {
-		t.Fatalf("expected %x, got %x", blockHash, srout.BlockHash)
+		t.Fatalf("got %x, expected %x", srout.BlockHash, blockHash)
 	}
 	if !bytes.Equal(txId[:], srout.TxID[:]) {
-		t.Fatalf("expected %x, got %x", txId, srout.TxID)
+		t.Fatalf("got %x, expected %x", srout.TxID, txId)
 	}
 	if srout.TxOutIndex != 0 {
-		t.Fatalf("expected %v, got %v", 0, srout.TxOutIndex)
+		t.Fatalf("expected %v, got %v", srout.TxOutIndex, 0)
 	}
 
 	// SpendingOut
@@ -162,27 +162,27 @@ func TestZKEncodeRetrieve(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(spout) != 1 {
-		t.Fatalf("expected 1 spending output, got %d", len(out))
+		t.Fatalf("ZKSpendingOutpoints out len = %d, want 1", len(out))
 	}
 	sprout := spout[0]
 	if index != int(sprout.BlockHeight) {
-		t.Fatalf("expected %v, got %v", index, sprout.BlockHeight)
+		t.Fatalf("expected %v, got %v", sprout.BlockHeight, index)
 	}
 	if !bytes.Equal(blockHash[:], sprout.BlockHash[:]) {
-		t.Fatalf("expected %x, got %x", blockHash, sprout.BlockHash)
+		t.Fatalf("expected %x, got %x", sprout.BlockHash, blockHash)
 	}
 	if !bytes.Equal(prevHash[:], sprout.TxID[:]) {
-		t.Fatalf("expected %x, got %x", prevHash, sprout.TxID)
+		t.Fatalf("expected %x, got %x", sprout.TxID, prevHash)
 	}
 	if uint32(index-1) != sprout.VOutIndex {
-		t.Fatalf("expected %v, got %v", index, sprout.VOutIndex)
+		t.Fatalf("expected %v, got %v", sprout.VOutIndex, index)
 	}
 	sv := sprout.SpendingOutpoint
 	if !bytes.Equal(txId[:], sv.TxID[:]) {
-		t.Fatalf("expected %x, got %x", txId, sv.TxID)
+		t.Fatalf("expected %x, got %x", sv.TxID, txId)
 	}
 	if uint32(index) != sv.Index {
-		t.Fatalf("expected %v, got %v", index, sv.Index)
+		t.Fatalf("expected %v, got %v", sv.Index, index)
 	}
 }
 
