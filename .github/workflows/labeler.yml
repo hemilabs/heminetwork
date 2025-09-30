@@ -51,10 +51,10 @@ jobs:
 
             if [ "$action" = "add" ]; then
               gh api -X POST "repos/$GH_REPO/issues/$PR_NUMBER/labels" \
-                -F "labels[]=$(printf '%s' "$label")" >/dev/null
+                -F "labels[]=$(printf '%s' "$label")" >/dev/null 2>&1 || true
             elif [ "$action" = "remove" ]; then
               encoded_label=$(printf "%s" "$label" | jq -s -R -r @uri)
-              gh api -X DELETE "repos/$GH_REPO/issues/$PR_NUMBER/labels/$encoded_label" >/dev/null
+              gh api -X DELETE "repos/$GH_REPO/issues/$PR_NUMBER/labels/$encoded_label" >/dev/null 2>&1 || true
             else
               echo "unknown action: $action"
               exit 1
