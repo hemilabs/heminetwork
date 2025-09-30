@@ -188,7 +188,10 @@ type Server struct {
 	hvmHandlers []HVMHandler       // hvm nodes
 	clients     map[string]*client // [ip_address]server_id
 
-	whitelist map[string]interface{} // method filter
+	// method whitelist
+	// doesn't require locking as it's created on
+	// startup, and isn't modified further
+	whitelist map[string]interface{}
 
 	// Prometheus
 	promCollectors        []prometheus.Collector
