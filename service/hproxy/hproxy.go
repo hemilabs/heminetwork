@@ -62,6 +62,8 @@ const (
 	RouteControlAdd    = routeControl + "/add"
 	RouteControlRemove = routeControl + "/remove"
 	RouteControlList   = routeControl + "/list"
+
+	maxRequestSize = 5 * 1024 * 1024 // 5 MiB
 )
 
 var (
@@ -605,9 +607,8 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 // }
 
 func (s *Server) filterRequest(r *http.Request) error {
-	// copy and reset body
-	const byteLimit = 5 * 1024 * 1024 // 5 MiB
-	lr := io.LimitReader(r.Body, byteLimit)
+	// copy and reset bod
+	lr := io.LimitReader(r.Body, maxRequestSize)
 	data, err := io.ReadAll(lr)
 	if err != nil {
 		return err
