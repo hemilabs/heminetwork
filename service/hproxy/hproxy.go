@@ -193,7 +193,7 @@ type Server struct {
 	// method whitelist
 	// doesn't require locking as it's created on
 	// startup, and isn't modified further
-	whitelist map[string]interface{}
+	whitelist map[string]struct{}
 
 	// Prometheus
 	promCollectors        []prometheus.Collector
@@ -223,7 +223,7 @@ func NewServer(cfg *Config) (*Server, error) {
 			Name:      "proxy_calls",
 			Help:      "The total number of successful proxy calls",
 		}),
-		whitelist: make(map[string]any, len(cfg.MethodFilter)),
+		whitelist: make(map[string]struct{}, len(cfg.MethodFilter)),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -234,7 +234,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	for _, m := range cfg.MethodFilter {
-		s.whitelist[m] = nil
+		s.whitelist[m] = struct{}{}
 	}
 
 	return s, nil
