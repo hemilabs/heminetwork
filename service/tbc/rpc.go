@@ -1001,7 +1001,28 @@ func (s *Server) handleZKBalanceByScriptHashRequest(ctx context.Context, req *tb
 	log.Tracef("handleZKBalanceByScriptHashRequest")
 	defer log.Tracef("handleZKBalanceByScriptHashRequest exit")
 
-	panic("x")
+	sh, err := tbcd.NewScriptHashFromBytes(req.ScriptHash)
+	if err != nil {
+		return &tbcapi.ZKBalanceByScriptHashResponse{
+			Error: protocol.RequestErrorf("invalid scripthash: %v", err),
+		}, nil
+	}
+	amount, err := s.ZKBalanceByScriptHash(ctx, sh)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.ZKBalanceByScriptHashResponse{
+				Error: protocol.NotFoundError("scripthash", sh),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ZKBalanceByScriptHashResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.ZKBalanceByScriptHashResponse{
+		Satoshis: uint64(amount),
+	}, nil
 }
 
 func (s *Server) handleZKSpentOutputsByScriptHashRequest(ctx context.Context, req *tbcapi.ZKSpentOutputsByScriptHashRequest) (any, error) {
