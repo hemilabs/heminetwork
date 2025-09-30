@@ -1108,7 +1108,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			}
 		}
 
-	case "zkspendableoutputsscripthash":
+	case "zkspendableoutputsbyscripthash":
 		scripthash := args["scripthash"]
 		if scripthash == "" {
 			return errors.New("scripthash: must be set")
