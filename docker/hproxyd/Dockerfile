@@ -51,6 +51,7 @@ COPY --from=builder /build/bin/hproxyd /usr/local/bin/hproxyd
 # Environment variables
 ENV HPROXY_CLIENT_IDLE_TIMEOUT=""
 ENV HPROXY_HVM_URLS=""
+ENV HPROXY_METHOD_WHITELIST=""
 ENV HPROXY_LOG_LEVEL=""
 ENV HPROXY_CONTROL_ADDRESS=""
 ENV HPROXY_LISTEN_ADDRESS=""
