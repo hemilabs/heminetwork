@@ -90,7 +90,11 @@ func (fme ForbiddenMethodError) Is(target error) bool {
 	return ok
 }
 
-var ErrForbiddenMethod ForbiddenMethodError
+var (
+	ErrForbiddenMethod ForbiddenMethodError
+	ErrRequestTooLarge = errors.New("request payload too large")
+	ErrInvalidRequest  = errors.New("invalid request type")
+)
 
 func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.HandleFunc(pattern, handler)
@@ -493,12 +497,17 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 
 	if err := s.filterRequest(r); err != nil {
-		if errors.Is(err, ErrForbiddenMethod) {
-			w.Header().Set("Allow", strings.Join(s.cfg.MethodFilter, ", "))
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
+		switch {
+		case errors.Is(err, ErrForbiddenMethod):
+			w.WriteHeader(http.StatusForbidden)
+		case errors.Is(err, ErrInvalidRequest):
+			w.WriteHeader(http.StatusUnsupportedMediaType)
+		case errors.Is(err, ErrRequestTooLarge):
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
 		}
-		w.WriteHeader(http.StatusBadRequest)
+		log.Debugf("request filtered: %v", err)
 		return
 	}
 
@@ -607,7 +616,10 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 // }
 
 func (s *Server) filterRequest(r *http.Request) error {
-	// copy and reset bod
+	if r.ContentLength > maxRequestSize {
+		return ErrRequestTooLarge
+	}
+	// copy and reset body
 	lr := io.LimitReader(r.Body, maxRequestSize)
 	data, err := io.ReadAll(lr)
 	if err != nil {
@@ -617,7 +629,7 @@ func (s *Server) filterRequest(r *http.Request) error {
 
 	var j EthereumRequest
 	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&j); err != nil {
-		return errors.New("unknown request type")
+		return ErrInvalidRequest
 	}
 	if _, ok := s.whitelist[j.Method]; !ok {
 		return ForbiddenMethodError{method: j.Method}
