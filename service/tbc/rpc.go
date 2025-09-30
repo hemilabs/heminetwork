@@ -228,6 +228,41 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKValueAndScriptByOutpointRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKValueAndScriptByOutpointRequest)
+				return s.handleZKValueAndScriptByOutpointRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKBalanceByScriptHashRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKBalanceByScriptHashRequest)
+				return s.handleZKBalanceByScriptHashRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKSpentOutputsByScriptHashRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKSpentOutputsByScriptHashRequest)
+				return s.handleZKSpentOutputsByScriptHashRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKSpendingOutpointsByTxIDRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKSpendingOutpointsByTxIDRequest)
+				return s.handleZKSpendingOutpointsByTxIDRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKSpendableOutputsByScriptHashRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKSpendableOutputsByScriptHashRequest)
+				return s.handleZKSpendableOutputsByScriptHashRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -936,6 +971,41 @@ func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tb
 		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
 	}
 	return &tbcapi.BlockDownloadAsyncRawResponse{Block: rb}, nil
+}
+
+func (s *Server) handleZKValueAndScriptByOutpointRequest(ctx context.Context, req *tbcapi.ZKValueAndScriptByOutpointRequest) (any, error) {
+	log.Tracef("handleZKValueAndScriptByOutpointRequest")
+	defer log.Tracef("handleZKValueAndScriptByOutpointRequest exit")
+
+	panic("x")
+}
+
+func (s *Server) handleZKBalanceByScriptHashRequest(ctx context.Context, req *tbcapi.ZKBalanceByScriptHashRequest) (any, error) {
+	log.Tracef("handleZKBalanceByScriptHashRequest")
+	defer log.Tracef("handleZKBalanceByScriptHashRequest exit")
+
+	panic("x")
+}
+
+func (s *Server) handleZKSpentOutputsByScriptHashRequest(ctx context.Context, req *tbcapi.ZKSpentOutputsByScriptHashRequest) (any, error) {
+	log.Tracef("handleZKSpentOutputsByScriptHashRequest")
+	defer log.Tracef("handleZKSpentOutputsByScriptHashRequest exit")
+
+	panic("x")
+}
+
+func (s *Server) handleZKSpendingOutpointsByTxIDRequest(ctx context.Context, req *tbcapi.ZKSpendingOutpointsByTxIDRequest) (any, error) {
+	log.Tracef("handleZKSpendingOutpointsByTxIDRequest")
+	defer log.Tracef("handleZKSpendingOutpointsByTxIDRequest exit")
+
+	panic("x")
+}
+
+func (s *Server) handleZKSpendableOutputsByScriptHashRequest(ctx context.Context, req *tbcapi.ZKSpendableOutputsByScriptHashRequest) (any, error) {
+	log.Tracef("handleZKSpendableOutputsByScriptHashRequest")
+	defer log.Tracef("handleZKSpendableOutputsByScriptHashRequest exit")
+
+	panic("x")
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
