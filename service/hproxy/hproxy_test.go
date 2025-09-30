@@ -369,7 +369,8 @@ func TestProxy(t *testing.T) {
 				{
 					content:        newEthReq("invalid"),
 					expectedStatus: http.StatusForbidden,
-				}},
+				},
+			},
 		},
 	}
 
@@ -405,6 +406,8 @@ func TestProxy(t *testing.T) {
 					t.Errorf("get %v: %v", i, err)
 					continue
 				}
+				defer reply.Body.Close()
+
 				if reply.StatusCode != hpr.expectedStatus {
 					t.Errorf("status code %v: got %v, expected %v", i,
 						reply.StatusCode, hpr.expectedStatus)
