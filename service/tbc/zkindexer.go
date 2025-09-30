@@ -218,7 +218,7 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 			}
 		}
 	default:
-		panic(fmt.Sprintf("diagnostic: %v", op))
+		panic(fmt.Sprintf("diagnostic: %v", direction))
 	}
 
 	return nil
