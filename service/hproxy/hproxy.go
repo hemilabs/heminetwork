@@ -63,7 +63,7 @@ const (
 	RouteControlRemove = routeControl + "/remove"
 	RouteControlList   = routeControl + "/list"
 
-	maxRequestSize = 5 * 1024 * 1024 // 5 MiB
+	defaultMaxRequestSize int64 = 5 * 1024 * 1024 // 5 MiB
 )
 
 var (
@@ -169,6 +169,9 @@ type Config struct {
 	PrometheusNamespace     string
 	PprofListenAddress      string
 	RequestTimeout          time.Duration
+
+	// cooked settings, do not export
+	maxRequestSize int64
 }
 
 func NewDefaultConfig() *Config {
@@ -180,6 +183,7 @@ func NewDefaultConfig() *Config {
 		Network:             "mainnet",
 		PrometheusNamespace: appName,
 		RequestTimeout:      DefaultRequestTimeout,
+		maxRequestSize:      defaultMaxRequestSize,
 	}
 }
 
@@ -616,11 +620,11 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 // }
 
 func (s *Server) filterRequest(r *http.Request) error {
-	if r.ContentLength > maxRequestSize {
+	if r.ContentLength > s.cfg.maxRequestSize {
 		return ErrRequestTooLarge
 	}
 	// copy and reset body
-	lr := io.LimitReader(r.Body, maxRequestSize)
+	lr := io.LimitReader(r.Body, s.cfg.maxRequestSize)
 	data, err := io.ReadAll(lr)
 	if err != nil {
 		return err
