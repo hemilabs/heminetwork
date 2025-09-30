@@ -104,7 +104,10 @@ const (
 	CmdZKSpentOutputsResponse = "tbcapi-zk-spent-outputs-response"
 
 	CmdZKSpendingOutpointsRequest = "tbcapi-zk-spending-outpoints-request"
-	CmdZKSpendingOutpointsResonse = "tbcapi-zk-spending-ourpoints-response"
+	CmdZKSpendingOutpointsResonse = "tbcapi-zk-spending-outpoints-response"
+
+	CmdZKSpendableOutputsRequest  = "tbcapi-zk-spendable-outputs-request"
+	CmdZKSpendableOutputsResponse = "tbcapi-zk-spendable-outputs-response"
 )
 
 var (
@@ -456,11 +459,6 @@ type ZKSpentOutputsResponse struct {
 	Error        *protocol.Error `json:"error,omitempty"`
 }
 
-/*
-ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
-ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
-*/
-
 type ZKSpendingOutpointValue struct {
 	TxID  api.ByteSlice `json:"txid"`
 	Index uint32        `json:"index"`
@@ -480,6 +478,27 @@ type ZKSpendingOutpointsRequest struct {
 type ZKSpendingOutpointsResponse struct {
 	SpendingOutpoints []ZKSpendingOutpoint `json:"spending_outpoint"`
 	Error             *protocol.Error      `json:"error,omitempty"`
+}
+
+/*
+ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
+*/
+
+type ZKSpendableOutput struct {
+	ScriptHash  api.ByteSlice `json:"scripthash"`
+	BlockHeight uint32        `json:"block_height"`
+	BlockHash   api.ByteSlice `json:"block_hash"`
+	TxID        api.ByteSlice `json:"txid"`
+	TxOutIndex  uint32        `json:"txout_index"`
+}
+
+type ZKSpendableOutputsRequest struct {
+	ScriptHash api.ByteSlice `json:"scripthash"`
+}
+
+type ZKSpendableOutputsResponse struct {
+	SpendableOutputs []ZKSpendableOutput `json:"spendable_outputs"`
+	Error            *protocol.Error     `json:"error,omitempty"`
 }
 
 var commands = map[protocol.Command]reflect.Type{
@@ -537,6 +556,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdZKSpentOutputsResponse:                   reflect.TypeOf(ZKSpentOutputsResponse{}),
 	CmdZKSpendingOutpointsRequest:               reflect.TypeOf(ZKSpendingOutpointsRequest{}),
 	CmdZKSpendingOutpointsResonse:               reflect.TypeOf(ZKSpendingOutpointsResponse{}),
+	CmdZKSpendableOutputsRequest:                reflect.TypeOf(ZKSpendableOutputsRequest{}),
+	CmdZKSpendableOutputsResponse:               reflect.TypeOf(ZKSpendableOutputsResponse{}),
 }
 
 type tbcAPI struct{}
