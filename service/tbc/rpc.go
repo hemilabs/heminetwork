@@ -1070,7 +1070,40 @@ func (s *Server) handleZKSpendingOutpointsByTxIDRequest(ctx context.Context, req
 	log.Tracef("handleZKSpendingOutpointsByTxIDRequest")
 	defer log.Tracef("handleZKSpendingOutpointsByTxIDRequest exit")
 
-	panic("x")
+	sos, err := s.ZKSpendingOutpointsByTxID(ctx, req.TxID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.ZKSpendingOutpointsByTxIDResponse{
+				Error: protocol.NotFoundError("txid", req.TxID),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ZKSpendingOutpointsByTxIDResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	rsos := make([]tbcapi.ZKSpendingOutpoint, 0, len(sos))
+	for _, v := range sos {
+		var so *tbcapi.ZKSpendingOutpointValue
+		if v.SpendingOutpoint != nil {
+			so = &tbcapi.ZKSpendingOutpointValue{
+				TxID:  v.SpendingOutpoint.TxID,
+				Index: v.SpendingOutpoint.Index,
+			}
+		}
+		rsos = append(rsos, tbcapi.ZKSpendingOutpoint{
+			TxID:             v.TxID,
+			BlockHeight:      v.BlockHeight,
+			BlockHash:        v.BlockHash,
+			VOutIndex:        v.VOutIndex,
+			SpendingOutpoint: so,
+		})
+	}
+
+	return &tbcapi.ZKSpendingOutpointsByTxIDResponse{
+		SpendingOutpoints: rsos,
+	}, nil
 }
 
 func (s *Server) handleZKSpendableOutputsByScriptHashRequest(ctx context.Context, req *tbcapi.ZKSpendableOutputsByScriptHashRequest) (any, error) {
