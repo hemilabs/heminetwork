@@ -3172,7 +3172,18 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
 		}
 
-		//// XXX remove
+		// XXX this code really should do something along the lines of
+		// SyncIndexersToBest to nudge the indexers. If that is not
+		// done indexing will not start until after a block comes in.
+		//
+		// The problem is that if indexing is kicked off here,
+		// blockheaders will not synchronize until indexing is
+		// complete. This potentially lead down a non-canonical path
+		// which in turn will require fork resolution.
+		//
+		// Not sure which one to pick here. The likelyhood that a new
+		// blockheaders comes through is high if the box has been down
+		// for >10m but very low if it is a simple restart.
 		//err := s.SyncIndexersToBest(ctx)
 		//if err != nil {
 		//	panic(err)
