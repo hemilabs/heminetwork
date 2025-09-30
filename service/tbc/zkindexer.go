@@ -122,7 +122,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 			cache[tbcd.ZKIndexKey(sh[:])] = tbcd.BEAddUint64(balance,
 				value)
 		default:
-			panic("wtf")
+			panic(fmt.Sprintf("diagnostic: invalid direction %v", direction))
 		}
 
 		// Insert SpentOutput
@@ -161,7 +161,7 @@ func (i *zkIndexer) processTx(ctx context.Context, direction int, blockHeight ui
 			cache[tbcd.ZKIndexKey(sh[:])] = tbcd.BESubUint64(balance,
 				uint64(txOut.Value))
 		default:
-			panic("wtf")
+			panic(fmt.Sprintf("diagnostic: invalid direction %v", direction))
 		}
 
 		// SpendableOutput
@@ -218,7 +218,7 @@ func (i *zkIndexer) process(ctx context.Context, direction int, block *btcutil.B
 			}
 		}
 	default:
-		panic("wtf")
+		panic(fmt.Sprintf("diagnostic: %v", op))
 	}
 
 	return nil
