@@ -140,11 +140,10 @@ type Database interface {
 	BlockHeaderByZKIndex(ctx context.Context) (*BlockHeader, error)
 	BlockZKUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error
 	ZKValueAndScriptByOutpoint(ctx context.Context, op Outpoint) (uint64, []byte, error)
-	// XXX rename the next 4 calls to add "By"
 	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
-	ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
-	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
-	ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
+	ZKSpentOutputsByScriptHash(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
+	ZKSpendingOutpointsByTxID(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
+	ZKSpendableOutputsByScriptHash(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
 }
 
 type Keystone struct {

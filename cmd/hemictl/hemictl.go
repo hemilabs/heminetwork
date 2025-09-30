@@ -406,9 +406,9 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tversion")
 		fmt.Println("\tzkbalancebyscripthash")
 		fmt.Println("\tzkvalueandscriptbyoutpoint")
-		fmt.Println("\tzkspentoutputs")
-		fmt.Println("\tzkspendingoutpoints")
-		fmt.Println("\tzkspendableoutputs")
+		fmt.Println("\tzkspentoutputsbyscripthash")
+		fmt.Println("\tzkspendingoutpointsbytxid")
+		fmt.Println("\tzkspendableoutputsbyscripthash")
 		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
@@ -1057,7 +1057,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Printf("script   : %x\n", script)
 		fmt.Printf("script hash: %v\n", tbcd.NewScriptHashFromScript(script))
 
-	case "zkspentoutputs":
+	case "zkspentoutputsbyscripthash":
 		scripthash := args["scripthash"]
 		if scripthash == "" {
 			return errors.New("scripthash: must be set")
@@ -1067,7 +1067,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("scripthash: %w", err)
 		}
 
-		sos, err := s.ZKSpentOutputs(ctx, sh)
+		sos, err := s.ZKSpentOutputsByScriptHash(ctx, sh)
 		if err != nil {
 			return err
 		}
@@ -1081,7 +1081,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			fmt.Printf("tx in index            : %v\n\n", v.TxInIndex)
 		}
 
-	case "zkspendingoutpoints":
+	case "zkspendingoutpointsbytxid":
 		txid := args["txid"]
 		if txid == "" {
 			return errors.New("txid: must be set")
@@ -1091,7 +1091,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("chainhash: %w", err)
 		}
 
-		sos, err := s.ZKSpendingOutpoints(ctx, *chtxid)
+		sos, err := s.ZKSpendingOutpointsByTxID(ctx, *chtxid)
 		if err != nil {
 			return err
 		}
@@ -1108,7 +1108,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			}
 		}
 
-	case "zkspendableoutputs":
+	case "zkspendableoutputsscripthash":
 		scripthash := args["scripthash"]
 		if scripthash == "" {
 			return errors.New("scripthash: must be set")
@@ -1118,7 +1118,7 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("scripthash: %w", err)
 		}
 
-		sos, err := s.ZKSpendableOutputs(ctx, sh)
+		sos, err := s.ZKSpendableOutputsByScriptHash(ctx, sh)
 		if err != nil {
 			return err
 		}
