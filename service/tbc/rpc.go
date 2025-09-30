@@ -977,7 +977,24 @@ func (s *Server) handleZKValueAndScriptByOutpointRequest(ctx context.Context, re
 	log.Tracef("handleZKValueAndScriptByOutpointRequest")
 	defer log.Tracef("handleZKValueAndScriptByOutpointRequest exit")
 
-	panic("x")
+	amount, pkscript, err := s.ZKValueAndScriptByOutpoint(ctx,
+		tbcd.NewOutpoint(req.Outpoint.Hash, req.Outpoint.Index))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.ZKValueAndScriptByOutpointResponse{
+				Error: protocol.NotFoundError("outpoint", req.Outpoint),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ZKValueAndScriptByOutpointResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.ZKValueAndScriptByOutpointResponse{
+		Satoshis: uint64(amount),
+		PkScript: pkscript,
+	}, nil
 }
 
 func (s *Server) handleZKBalanceByScriptHashRequest(ctx context.Context, req *tbcapi.ZKBalanceByScriptHashRequest) (any, error) {

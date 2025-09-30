@@ -417,13 +417,8 @@ type MempoolInfoResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
-type Outpoint struct {
-	TxID  api.ByteSlice `json:"txid"`
-	Index uint32        `json:"index"`
-}
-
 type ZKValueAndScriptByOutpointRequest struct {
-	Outpoint Outpoint `json:"outpoint"`
+	Outpoint OutPoint `json:"outpoint"`
 }
 
 type ZKValueAndScriptByOutpointResponse struct {
@@ -442,13 +437,13 @@ type ZKBalanceByScriptHashResponse struct {
 }
 
 type ZKSpentOutput struct {
-	ScriptHash        api.ByteSlice `json:"scripthash"`
-	BlockHeight       uint32        `json:"block_height"`
-	BlockHash         api.ByteSlice `json:"block_hash"`
-	TxID              api.ByteSlice `json:"txid"`
-	PrevOutpointHash  api.ByteSlice `json:"prev_outpoint_hash"`
-	PrevOutpointIndex uint32        `json:"prev_outpoint_index"`
-	TxInIndex         uint32        `json:"txin_index"`
+	ScriptHash        api.ByteSlice  `json:"scripthash"`
+	BlockHeight       uint32         `json:"block_height"`
+	BlockHash         chainhash.Hash `json:"block_hash"`
+	TxID              chainhash.Hash `json:"txid"`
+	PrevOutpointHash  chainhash.Hash `json:"prev_outpoint_hash"`
+	PrevOutpointIndex uint32         `json:"prev_outpoint_index"`
+	TxInIndex         uint32         `json:"txin_index"`
 }
 type ZKSpentOutputsByScriptHashRequest struct {
 	ScriptHash api.ByteSlice `json:"scripthash"`
@@ -460,19 +455,19 @@ type ZKSpentOutputsByScriptHashResponse struct {
 }
 
 type ZKSpendingOutpointValue struct {
-	TxID  api.ByteSlice `json:"txid"`
-	Index uint32        `json:"index"`
+	TxID  chainhash.Hash `json:"txid"`
+	Index uint32         `json:"index"`
 }
 type ZKSpendingOutpoint struct {
-	TxID             api.ByteSlice            `json:"txid"`
+	TxID             chainhash.Hash           `json:"txid"`
 	BlockHeight      uint32                   `json:"block_height"`
-	BlockHash        api.ByteSlice            `json:"block_hash"`
+	BlockHash        chainhash.Hash           `json:"block_hash"`
 	VOutIndex        uint32                   `json:"vout_index"`
 	SpendingOutpoint *ZKSpendingOutpointValue `json:"spending_output,omitempty"`
 }
 
 type ZKSpendingOutpointsByTxIDRequest struct {
-	TxID api.ByteSlice `json:"txid"`
+	TxID chainhash.Hash `json:"txid"`
 }
 
 type ZKSpendingOutpointsByTxIDResponse struct {
@@ -481,11 +476,11 @@ type ZKSpendingOutpointsByTxIDResponse struct {
 }
 
 type ZKSpendableOutput struct {
-	ScriptHash  api.ByteSlice `json:"scripthash"`
-	BlockHeight uint32        `json:"block_height"`
-	BlockHash   api.ByteSlice `json:"block_hash"`
-	TxID        api.ByteSlice `json:"txid"`
-	TxOutIndex  uint32        `json:"txout_index"`
+	ScriptHash  api.ByteSlice  `json:"scripthash"`
+	BlockHeight uint32         `json:"block_height"`
+	BlockHash   chainhash.Hash `json:"block_hash"`
+	TxID        chainhash.Hash `json:"txid"`
+	TxOutIndex  uint32         `json:"txout_index"`
 }
 
 type ZKSpendableOutputsByScriptHashRequest struct {
