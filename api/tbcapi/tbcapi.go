@@ -99,6 +99,9 @@ const (
 
 	CmdZKBalanceByScriptHashRequest  = "tbcapi-zk-balance-by-scripthash-request"
 	CmdZKBalanceByScriptHashResponse = "tbcapi-zk-balance-by-scripthash-response"
+
+	CmdZKSpentOutputsRequest  = "tbcapi-zk-spent-outputs-request"
+	CmdZKSpentOutputsResponse = "tbcapi-zk-spent-outputs-response"
 )
 
 var (
@@ -437,12 +440,22 @@ ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
 ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
 ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
 */
+type ZKSpentOutput struct {
+	ScriptHash        api.ByteSlice `json:"scripthash"`
+	BlockHeight       uint32        `json:"block_height"`
+	BlockHash         api.ByteSlice `json:"block_hash"`
+	TxID              api.ByteSlice `json:"txid"`
+	PrevOutpointHash  api.ByteSlice `json:"prev_outpoint_hash"`
+	PrevOutpointIndex uint32        `json:"prev_outpoint_index"`
+	TxInIndex         uint32        `json:"txin_index"`
+}
 type ZKSpentOutputsRequest struct {
 	ScriptHash api.ByteSlice `json:"scripthash"`
 }
 
 type ZKSpentOutputsResponse struct {
-	Error *protocol.Error `json:"error,omitempty"`
+	SpentOutputs []ZKSpentOutput `json:"spent_outputs"`
+	Error        *protocol.Error `json:"error,omitempty"`
 }
 
 var commands = map[protocol.Command]reflect.Type{
@@ -496,6 +509,8 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdZKValueAndScriptByOutpointResponse:       reflect.TypeOf(ZKValueAndScriptByOutpointResponse{}),
 	CmdZKBalanceByScriptHashRequest:             reflect.TypeOf(ZKBalanceByScriptHashRequest{}),
 	CmdZKBalanceByScriptHashResponse:            reflect.TypeOf(ZKBalanceByScriptHashResponse{}),
+	CmdZKSpentOutputsRequest:                    reflect.TypeOf(ZKSpentOutputsRequest{}),
+	CmdZKSpentOutputsResponse:                   reflect.TypeOf(ZKSpentOutputsResponse{}),
 }
 
 type tbcAPI struct{}
