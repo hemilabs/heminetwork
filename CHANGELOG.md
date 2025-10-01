@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Method whitelist to hproxy ([#691](https://github.com/hemilabs/heminetwork/pull/691))
+- Add RPC request method whitelist to hproxy ([#691](https://github.com/hemilabs/heminetwork/pull/691)).
 
 ### Changed
 
