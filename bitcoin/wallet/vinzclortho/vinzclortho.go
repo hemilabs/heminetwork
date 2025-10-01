@@ -180,7 +180,7 @@ func pathElement(p string) (uint32, error) {
 }
 
 // DerivePath returns an extended key from the provided path. E.g.
-// "m/1337'/0'/1", this will return a non-hardned extended key from the hardned
+// "m/1337'/0'/1", this will return a non-hardened extended key from the hardened
 // 1337/0 path.
 func (vc *VinzClortho) DerivePath(path string) (*hdkeychain.ExtendedKey, error) {
 	rk := vc.rootKey()
