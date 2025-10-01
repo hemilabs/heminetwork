@@ -52,13 +52,13 @@ var (
 		"HPROXY_CONTROL_ADDRESS": config.Config{
 			Value:        &cfg.ControlAddress,
 			DefaultValue: hproxy.DefaultControlAddress,
-			Help:         "control address for incomming commands",
+			Help:         "control address for incoming commands",
 			Print:        config.PrintAll,
 		},
 		"HPROXY_LISTEN_ADDRESS": config.Config{
 			Value:        &cfg.ListenAddress,
 			DefaultValue: hproxy.DefaultListenAddress,
-			Help:         "listen address for incomming connections",
+			Help:         "listen address for incoming connections",
 			Print:        config.PrintAll,
 		},
 		"HPROXY_NETWORK": config.Config{

@@ -196,7 +196,7 @@ func TestDeriveAddresses(t *testing.T) {
 	}
 	t.Log(spew.Sdump(pkHHash))
 	if pkHHash.String() != "14fjqmZJU7qrRtWHgVjh6jcoKjqu6y1gyM" {
-		t.Fatal("invalid hardned address")
+		t.Fatal("invalid hardened address")
 	}
 
 	// Derive extended key for external account 0 m/0'/0
