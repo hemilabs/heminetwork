@@ -63,7 +63,7 @@ const (
 	RouteControlRemove = routeControl + "/remove"
 	RouteControlList   = routeControl + "/list"
 
-	defaultMaxRequestSize int64 = 5 * 1024 * 1024 // 5 MiB
+	defaultMaxRequestSize int64 = 4 * 1024 * 1024 // 4 MiB
 )
 
 var (
@@ -500,6 +500,9 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	startTime := time.Now()
 
+	// limit body size
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.maxRequestSize)
+
 	if err := s.filterRequest(r); err != nil {
 		switch {
 		case errors.Is(err, ErrForbiddenMethod):
@@ -620,13 +623,12 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 // }
 
 func (s *Server) filterRequest(r *http.Request) error {
-	if r.ContentLength > s.cfg.maxRequestSize {
-		return ErrRequestTooLarge
-	}
 	// copy and reset body
-	lr := io.LimitReader(r.Body, s.cfg.maxRequestSize)
-	data, err := io.ReadAll(lr)
+	data, err := io.ReadAll(r.Body)
 	if err != nil {
+		if _, ok := err.(*http.MaxBytesError); ok {
+			return ErrRequestTooLarge
+		}
 		return err
 	}
 	r.Body = io.NopCloser(bytes.NewReader(data))
