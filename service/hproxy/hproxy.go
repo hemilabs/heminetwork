@@ -626,7 +626,8 @@ func (s *Server) filterRequest(r *http.Request) error {
 	// copy and reset body
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
-		if _, ok := err.(*http.MaxBytesError); ok {
+		maxBytesError := &http.MaxBytesError{}
+		if errors.As(err, &maxBytesError) {
 			return ErrRequestTooLarge
 		}
 		return err
