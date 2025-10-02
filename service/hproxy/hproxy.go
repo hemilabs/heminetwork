@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -63,7 +64,7 @@ const (
 	RouteControlRemove = routeControl + "/remove"
 	RouteControlList   = routeControl + "/list"
 
-	defaultMaxRequestSize int64 = 4 * 1024 * 1024 // 4 MiB
+	defaultMaxRequestSize = "4mb"
 )
 
 var (
@@ -162,7 +163,7 @@ type Config struct {
 	HVMURLs                 []string
 	ListenAddress           string
 	LogLevel                string
-	MaxRequestSize          int64
+	MaxRequestSize          string
 	MethodFilter            []string
 	Network                 string
 	PollFrequency           time.Duration
@@ -199,7 +200,8 @@ type Server struct {
 	// method whitelist
 	// doesn't require locking as it's created on
 	// startup, and isn't modified further
-	whitelist map[string]struct{}
+	whitelist      map[string]struct{}
+	maxRequestSize int64
 
 	// Prometheus
 	promCollectors        []prometheus.Collector
@@ -221,6 +223,17 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg.RequestTimeout = DefaultRequestTimeout
 	}
 
+	if cfg.MaxRequestSize == "" {
+		cfg.MaxRequestSize = defaultMaxRequestSize
+	}
+	maxReqSize, err := humanize.ParseBytes(cfg.MaxRequestSize)
+	if err != nil {
+		return nil, fmt.Errorf("max request size: %w", err)
+	}
+	if maxReqSize > math.MaxInt64 {
+		return nil, errors.New("max request size")
+	}
+
 	s := &Server{
 		cfg:     cfg,
 		clients: make(map[string]*client, expectedClients),
@@ -229,7 +242,8 @@ func NewServer(cfg *Config) (*Server, error) {
 			Name:      "proxy_calls",
 			Help:      "The total number of successful proxy calls",
 		}),
-		whitelist: make(map[string]struct{}, len(cfg.MethodFilter)),
+		whitelist:      make(map[string]struct{}, len(cfg.MethodFilter)),
+		maxRequestSize: int64(maxReqSize),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -499,7 +513,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 
 	// limit body size
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestSize)
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxRequestSize)
 
 	if err := s.filterRequest(r); err != nil {
 		switch {

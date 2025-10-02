@@ -94,7 +94,7 @@ var (
 		"HPROXY_REQUEST_SIZE": config.Config{
 			Value:        &cfg.MaxRequestSize,
 			DefaultValue: cfg.MaxRequestSize,
-			Help:         "HVM request max size (MiB)",
+			Help:         "HVM request max size",
 			Print:        config.PrintAll,
 		},
 		"HPROXY_REQUEST_TIMEOUT": config.Config{

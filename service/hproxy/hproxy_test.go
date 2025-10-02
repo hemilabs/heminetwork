@@ -385,11 +385,11 @@ func TestProxy(t *testing.T) {
 			servers := []string{s.URL}
 
 			// Setup hproxy
-			_, hpCfg := newHproxy(t, servers, tti.whitelist)
+			hps, hpCfg := newHproxy(t, servers, tti.whitelist)
 			time.Sleep(250 * time.Millisecond)
 
 			if tti.sizeOverride != 0 {
-				hpCfg.MaxRequestSize = tti.sizeOverride
+				hps.maxRequestSize = tti.sizeOverride
 			}
 
 			for i, hpr := range tti.requests {
