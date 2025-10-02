@@ -5,6 +5,7 @@
 package hproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -86,7 +87,7 @@ func newServer(x int, state func() (int, time.Time)) *httptest.Server {
 	}))
 }
 
-func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
+func newHproxy(t *testing.T, servers []string, filter []string) (*Server, *Config) {
 	hpCfg := NewDefaultConfig()
 	hpCfg.HVMURLs = servers
 	hpCfg.LogLevel = "hproxy=TRACE" // XXX figure out why this isn't working
@@ -94,6 +95,7 @@ func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
 	hpCfg.PollFrequency = time.Second
 	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
 	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
+	hpCfg.MethodFilter = filter
 	hp, err := NewServer(hpCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -109,12 +111,12 @@ func newHproxy(t *testing.T, servers []string) (*Server, *Config) {
 
 func TestNobodyHome(t *testing.T) {
 	servers := []string{"http://localhost:1"}
-	_, hpCfg := newHproxy(t, servers)
+	_, hpCfg := newHproxy(t, servers, []string{"ping"})
 	time.Sleep(250 * time.Millisecond)
 
 	c := &http.Client{}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
-		"http://"+hpCfg.ListenAddress, nil)
+		"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -153,6 +155,7 @@ func TestClientReap(t *testing.T) {
 	hpCfg.PollFrequency = time.Second
 	hpCfg.ListenAddress = "127.0.0.1:" + testutil.FreePort()
 	hpCfg.ControlAddress = "127.0.0.1:" + testutil.FreePort()
+	hpCfg.MethodFilter = []string{"ping"}
 	hp, err := NewServer(hpCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -181,7 +184,7 @@ func TestClientReap(t *testing.T) {
 			// which would result in a new client not being created.
 			c := &http.Client{Transport: &http.Transport{}}
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-				"http://"+hpCfg.ListenAddress, nil)
+				"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 			if err != nil {
 				panic(fmt.Errorf("get %v: %w", x, err))
 			}
@@ -251,12 +254,12 @@ func TestRequestTimeout(t *testing.T) {
 	defer s.Close()
 
 	servers := []string{s.URL}
-	_, hpCfg := newHproxy(t, servers)
+	_, hpCfg := newHproxy(t, servers, []string{"ping"})
 	time.Sleep(250 * time.Millisecond)
 
 	c := &http.Client{}
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
-		"http://"+hpCfg.ListenAddress, nil)
+		"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -270,55 +273,169 @@ func TestRequestTimeout(t *testing.T) {
 	reply.Body.Close() // shut linter up
 }
 
-func request(ctx context.Context, serverID int, hpCfg *Config) error {
-	c := &http.Client{}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		"http://"+hpCfg.ListenAddress, nil)
-	if err != nil {
-		return fmt.Errorf("get: %w", err)
+func newEthReq(method string) io.Reader {
+	ec := EthereumRequest{
+		Method:  method,
+		Params:  nil,
+		ID:      ethID(),
+		Version: EthereumVersion,
 	}
-	reply, err := c.Do(req)
-	if err != nil {
-		return fmt.Errorf("get %v: %w", 0, err)
+	b := new(bytes.Buffer)
+	if err := json.NewEncoder(b).Encode(ec); err != nil {
+		panic(err)
 	}
-	defer reply.Body.Close()
-	switch reply.StatusCode {
-	case http.StatusOK:
-	default:
-		return fmt.Errorf("%v replied %v", hpCfg.ListenAddress, reply.StatusCode)
-	}
-
-	// Require X-Hproxy
-	ids := reply.Header.Get("X-Hproxy")
-	if ids == "" {
-		return errors.New("expected X-Hproxy being set")
-	}
-
-	// Read body
-	var jr serverReply
-	if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
-		return fmt.Errorf("decode: %w", err)
-	}
-	if jr.ID != serverID {
-		return fmt.Errorf("invalid response got %v, wanted %v", jr.ID, serverID)
-	}
-	return nil
+	return b
 }
 
 func TestProxy(t *testing.T) {
-	serverID := 1337
-	s := newServer(serverID, nil)
-	defer s.Close()
-	servers := []string{s.URL}
+	type hpReq struct {
+		content        io.Reader
+		expectedStatus int
+	}
 
-	// Setup hproxy
-	_, hpCfg := newHproxy(t, servers)
-	time.Sleep(250 * time.Millisecond)
+	type testTableItem struct {
+		name         string
+		requests     []hpReq
+		sizeOverride int64
+		whitelist    []string
+	}
 
-	// Send command
-	err := request(t.Context(), serverID, hpCfg)
-	if err != nil {
-		t.Fatal(err)
+	invalidBody := new(bytes.Buffer)
+	invalidBody.Write([]byte("{message: test!}"))
+
+	testTable := []testTableItem{
+		{
+			name: "invalid format",
+			requests: []hpReq{
+				{
+					content:        invalidBody,
+					expectedStatus: http.StatusUnsupportedMediaType,
+				},
+			},
+			whitelist: []string{"valid"},
+		},
+		{
+			name: "request too large",
+			requests: []hpReq{
+				{
+					content:        newEthReq("valid"),
+					expectedStatus: http.StatusRequestEntityTooLarge,
+				},
+			},
+			sizeOverride: 1,
+			whitelist:    []string{"valid"},
+		},
+		{
+			name: "valid request",
+			requests: []hpReq{
+				{
+					content:        newEthReq("valid"),
+					expectedStatus: http.StatusOK,
+				},
+			},
+			whitelist: []string{"valid"},
+		},
+		{
+			name: "filtered method",
+			requests: []hpReq{
+				{
+					content:        newEthReq("invalid"),
+					expectedStatus: http.StatusForbidden,
+				},
+			},
+			whitelist: []string{"valid"},
+		},
+		{
+			name: "mixed methods",
+			requests: []hpReq{
+				{
+					content:        newEthReq("valid"),
+					expectedStatus: http.StatusOK,
+				},
+				{
+					content:        newEthReq("invalid"),
+					expectedStatus: http.StatusForbidden,
+				},
+			},
+			whitelist: []string{"valid"},
+		},
+		{
+			name: "empty whitelist",
+			requests: []hpReq{
+				{
+					content:        newEthReq("valid"),
+					expectedStatus: http.StatusForbidden,
+				},
+				{
+					content:        newEthReq("invalid"),
+					expectedStatus: http.StatusForbidden,
+				},
+			},
+		},
+	}
+
+	for _, tti := range testTable {
+		t.Run(tti.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			serverID := 1337
+			s := newServer(serverID, nil)
+			defer s.Close()
+			servers := []string{s.URL}
+
+			// Setup hproxy
+			hps, hpCfg := newHproxy(t, servers, tti.whitelist)
+			time.Sleep(250 * time.Millisecond)
+
+			if tti.sizeOverride != 0 {
+				hps.maxRequestSize = tti.sizeOverride
+			}
+
+			for i, hpr := range tti.requests {
+				c := &http.Client{}
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+					"http://"+hpCfg.ListenAddress, hpr.content)
+				if err != nil {
+					t.Error(fmt.Errorf("get %v: %w", i, err))
+					continue
+				}
+
+				reply, err := c.Do(req)
+				if err != nil {
+					t.Errorf("get %v: %v", i, err)
+					continue
+				}
+				defer reply.Body.Close()
+
+				if reply.StatusCode != hpr.expectedStatus {
+					t.Errorf("status code %v: got %v, expected %v", i,
+						reply.StatusCode, hpr.expectedStatus)
+					continue
+				}
+
+				if reply.StatusCode != http.StatusOK {
+					continue
+				}
+
+				// Require X-Hproxy
+				ids := reply.Header.Get("X-Hproxy")
+				if ids == "" {
+					t.Errorf("header get %v: expected X-Hproxy being set", i)
+					continue
+				}
+
+				// Read body
+				var jr serverReply
+				if err = json.NewDecoder(reply.Body).Decode(&jr); err != nil {
+					t.Errorf("decode: %v", err)
+					continue
+				}
+				if jr.ID != serverID {
+					t.Errorf("invalid response %v: got %v, wanted %v", i, jr.ID, serverID)
+				}
+			}
+		})
 	}
 }
 
@@ -343,7 +460,7 @@ func TestFanout(t *testing.T) {
 	defer cancel()
 
 	// Setup hproxy
-	_, hpCfg := newHproxy(t, servers)
+	_, hpCfg := newHproxy(t, servers, []string{"ping"})
 	time.Sleep(500 * time.Millisecond) // Let proxies be marked healthy
 
 	// clients
@@ -359,7 +476,7 @@ func TestFanout(t *testing.T) {
 			defer wg.Done()
 			c := &http.Client{}
 			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet,
-				"http://"+hpCfg.ListenAddress, nil)
+				"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 			if err != nil {
 				panic(fmt.Errorf("get %v: %w", x, err))
 			}
@@ -441,7 +558,7 @@ func TestPersistence(t *testing.T) {
 	defer cancel()
 
 	// Setup hproxy
-	_, hpCfg := newHproxy(t, servers)
+	_, hpCfg := newHproxy(t, servers, []string{"ping"})
 	time.Sleep(500 * time.Millisecond) // Let proxies be marked healthy
 
 	// single client
@@ -454,7 +571,7 @@ func TestPersistence(t *testing.T) {
 	for i := 0; i < clientCount; i++ {
 		x := i
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			"http://"+hpCfg.ListenAddress, nil)
+			"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 		if err != nil {
 			t.Fatalf("get %v: %v", x, err)
 		}
@@ -532,7 +649,7 @@ func TestFailover(t *testing.T) {
 	defer cancel()
 
 	// Setup hproxy
-	hp, hpCfg := newHproxy(t, servers)
+	hp, hpCfg := newHproxy(t, servers, []string{"ping"})
 	time.Sleep(500 * time.Millisecond) // Let proxies be marked healthy
 
 	// Do 10 command and fail node 0
@@ -547,7 +664,7 @@ func TestFailover(t *testing.T) {
 	var nextUnhealthy int
 	for i := 0; i < clientCount; i++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			"http://"+hpCfg.ListenAddress, nil)
+			"http://"+hpCfg.ListenAddress, newEthReq("ping"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -643,7 +760,7 @@ func TestNodePoking(t *testing.T) {
 	}
 
 	// Setup hproxy
-	hp, _ := newHproxy(t, servers)
+	hp, _ := newHproxy(t, servers, []string{"ping"})
 	time.Sleep(500 * time.Millisecond) // Let healthcheck happen
 
 	// Count healthy and unhealthy nodes
