@@ -91,6 +91,12 @@ var (
 			Help:         "frequency that hproxy pokes nodes for health information",
 			Print:        config.PrintAll,
 		},
+		"HPROXY_REQUEST_SIZE": config.Config{
+			Value:        &cfg.MaxRequestSize,
+			DefaultValue: cfg.MaxRequestSize,
+			Help:         "HVM request max size (MiB)",
+			Print:        config.PrintAll,
+		},
 		"HPROXY_REQUEST_TIMEOUT": config.Config{
 			Value:        &cfg.RequestTimeout,
 			DefaultValue: cfg.RequestTimeout,

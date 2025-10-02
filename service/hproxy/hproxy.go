@@ -162,6 +162,7 @@ type Config struct {
 	HVMURLs                 []string
 	ListenAddress           string
 	LogLevel                string
+	MaxRequestSize          int64
 	MethodFilter            []string
 	Network                 string
 	PollFrequency           time.Duration
@@ -169,9 +170,6 @@ type Config struct {
 	PrometheusNamespace     string
 	PprofListenAddress      string
 	RequestTimeout          time.Duration
-
-	// cooked settings, do not export
-	maxRequestSize int64
 }
 
 func NewDefaultConfig() *Config {
@@ -183,7 +181,7 @@ func NewDefaultConfig() *Config {
 		Network:             "mainnet",
 		PrometheusNamespace: appName,
 		RequestTimeout:      DefaultRequestTimeout,
-		maxRequestSize:      defaultMaxRequestSize,
+		MaxRequestSize:      defaultMaxRequestSize,
 	}
 }
 
@@ -501,7 +499,7 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 	startTime := time.Now()
 
 	// limit body size
-	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.maxRequestSize)
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestSize)
 
 	if err := s.filterRequest(r); err != nil {
 		switch {

@@ -389,7 +389,7 @@ func TestProxy(t *testing.T) {
 			time.Sleep(250 * time.Millisecond)
 
 			if tti.sizeOverride != 0 {
-				hpCfg.maxRequestSize = tti.sizeOverride
+				hpCfg.MaxRequestSize = tti.sizeOverride
 			}
 
 			for i, hpr := range tti.requests {
