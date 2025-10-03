@@ -35,23 +35,23 @@ func (s *Server) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoin
 	return btcutil.Amount(int64(value)), script, nil
 }
 
-func (s *Server) ZKSpentOutputs(ctx context.Context, hash tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
-	log.Tracef("ZKSpentOutputJournal")
-	defer log.Tracef("ZKSpentOutputJournal exit")
+func (s *Server) ZKSpentOutputsByScriptHash(ctx context.Context, hash tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
+	log.Tracef("ZKSpentOutputsByScriptHash")
+	defer log.Tracef("ZKSpentOutputsByScriptHash exit")
 
-	return s.g.db.ZKSpentOutputs(ctx, hash)
+	return s.g.db.ZKSpentOutputsByScriptHash(ctx, hash)
 }
 
-func (s *Server) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
-	log.Tracef("ZKSpendingOutpoints")
-	defer log.Tracef("ZKSpendingOutpoints exit")
+func (s *Server) ZKSpendingOutpointsByTxID(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
+	log.Tracef("ZKSpendingOutpointsByTxID")
+	defer log.Tracef("ZKSpendingOutpointsByTxID exit")
 
-	return s.g.db.ZKSpendingOutpoints(ctx, txid)
+	return s.g.db.ZKSpendingOutpointsByTxID(ctx, txid)
 }
 
-func (s *Server) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpendableOutput, error) {
-	log.Tracef("ZKSpendableOutputs")
-	defer log.Tracef("ZKSpendableOutputs exit")
+func (s *Server) ZKSpendableOutputsByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpendableOutput, error) {
+	log.Tracef("ZKSpendableOutputsByScriptHash")
+	defer log.Tracef("ZKSpendableOutputsByScriptHash exit")
 
-	return s.g.db.ZKSpendableOutputs(ctx, sh)
+	return s.g.db.ZKSpendableOutputsByScriptHash(ctx, sh)
 }

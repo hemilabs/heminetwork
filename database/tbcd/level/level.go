@@ -2260,9 +2260,9 @@ func bytes2hash(b []byte) chainhash.Hash {
 	return *h
 }
 
-func (l *ldb) ZKSpentOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
-	log.Tracef("ZKSpentOutputs")
-	defer log.Tracef("ZKSpentOutputs exit")
+func (l *ldb) ZKSpentOutputsByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
+	log.Tracef("ZKSpentOutputsByScriptHash")
+	defer log.Tracef("ZKSpentOutputsByScriptHash exit")
 
 	zkdb := l.pool[level.ZKDB]
 	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
@@ -2294,9 +2294,9 @@ var (
 	lzsokv = len(tbcd.SpendingOutpointValue{})
 )
 
-func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
-	log.Tracef("ZKSpendingOutpoints")
-	defer log.Tracef("ZKSpendingOutpoints exit")
+func (l *ldb) ZKSpendingOutpointsByTxID(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
+	log.Tracef("ZKSpendingOutpointsByTxID")
+	defer log.Tracef("ZKSpendingOutpointsByTxID exit")
 
 	zkdb := l.pool[level.ZKDB]
 	it := zkdb.NewIterator(util.BytesPrefix(txid[:]), nil)
@@ -2328,9 +2328,9 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 
 var lzsops = len(tbcd.SpendableOutput{})
 
-func (l *ldb) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpendableOutput, error) {
-	log.Tracef("ZKSpendableOutputs")
-	defer log.Tracef("ZKSpendableOutputs exit")
+func (l *ldb) ZKSpendableOutputsByScriptHash(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpendableOutput, error) {
+	log.Tracef("ZKSpendableOutputsByScriptHash")
+	defer log.Tracef("ZKSpendableOutputsByScriptHash exit")
 
 	zkdb := l.pool[level.ZKDB]
 	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
