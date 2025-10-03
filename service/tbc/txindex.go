@@ -70,6 +70,9 @@ func processTxs(ctx context.Context, block *btcutil.Block, direction int, txsCac
 		txsCache[tbcd.NewTxMapping(tx.Hash(), blockHash)] = nil
 
 		// Don't keep track of spent coinbase inputs
+		// XXX note that after debate this is deemed to be correct. We
+		// are ONLY looking at ins and thus skipping the outs is fine.
+		// This may have to change in the future.
 		if blockchain.IsCoinBase(tx) {
 			// Skip coinbase inputs
 			continue

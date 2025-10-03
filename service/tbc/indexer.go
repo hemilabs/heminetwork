@@ -455,6 +455,13 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 			break
 		}
 
+		// Check for sigterm.
+		select {
+		case <-ctx.Done():
+			return 0, last, ctx.Err()
+		default:
+		}
+
 		// Move to next block
 		hh, err = nextCanonicalBlockheader(ctx, c.g, endHash, hh)
 		if err != nil {

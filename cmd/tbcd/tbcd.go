@@ -95,6 +95,12 @@ var (
 			Help:         "maximum cached utxos and/or txs during indexing",
 			Print:        config.PrintAll,
 		},
+		"TBC_MAX_CACHED_ZK": config.Config{
+			Value:        &cfg.MaxCachedZK,
+			DefaultValue: int(1e6),
+			Help:         "maximum cached zk rows during indexing",
+			Print:        config.PrintAll,
+		},
 		"TBC_MEMPOOL_ENABLED": config.Config{
 			Value:        &cfg.MempoolEnabled,
 			DefaultValue: true,
@@ -129,6 +135,12 @@ var (
 			Value:        &cfg.Seeds,
 			DefaultValue: []string{},
 			Help:         "list of seed domains for Bitcoin P2P, in the format '<host>:<port>' (for localnet, must be a single host:port)",
+			Print:        config.PrintAll,
+		},
+		"TBC_ZK_INDEX": config.Config{
+			Value:        &cfg.ZKIndex,
+			DefaultValue: false,
+			Help:         "enable/disable various zk related indexes",
 			Print:        config.PrintAll,
 		},
 	}

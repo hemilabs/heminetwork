@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcutil"
@@ -133,6 +135,15 @@ type Database interface {
 	BlockKeystoneByL2KeystoneAbrevHash(ctx context.Context, abrevhash chainhash.Hash) (*Keystone, error)
 	BlockHeaderByKeystoneIndex(ctx context.Context) (*BlockHeader, error)
 	KeystonesByHeight(ctx context.Context, height uint32, depth int) ([]Keystone, error)
+
+	// ZKUtxo
+	BlockHeaderByZKIndex(ctx context.Context) (*BlockHeader, error)
+	BlockZKUpdate(ctx context.Context, direction int, blockheaders map[ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error
+	ZKValueAndScriptByOutpoint(ctx context.Context, op Outpoint) (uint64, []byte, error)
+	ZKBalanceByScriptHash(ctx context.Context, sh ScriptHash) (uint64, error)
+	ZKSpentOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpentOutput, error)
+	ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]ZKSpendingOutpoint, error)
+	ZKSpendableOutputs(ctx context.Context, sh ScriptHash) ([]ZKSpendableOutput, error)
 }
 
 type Keystone struct {
@@ -214,6 +225,7 @@ type SpentInfo struct {
 // for memory conservation reasons.
 //
 // The bytes contained by Outpoint is 'u' + txid + index.
+// XXX can we make index 2 bytes?
 type Outpoint [1 + 32 + 4]byte
 
 // String returns a reversed pretty printed outpoint.
@@ -243,6 +255,36 @@ func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 	op[0] = 'u' // match leveldb cache so that we prevent a bunch of bcopy
 	copy(op[1:33], txid[:])
 	binary.BigEndian.PutUint32(op[33:], index)
+	return
+}
+
+func NewOutpointFromString(s string) (*Outpoint, error) {
+	p := strings.SplitN(s, ":", 2)
+	if len(p) != 2 {
+		return nil, errors.New("invalid point")
+	}
+	h, err := chainhash.NewHashFromStr(p[0])
+	if err != nil {
+		return nil, err
+	}
+	i, err := strconv.ParseUint(p[1], 10, 32)
+	if err != nil {
+		return nil, err
+	}
+	point := NewOutpoint(*h, uint32(i))
+	return &point, nil
+}
+
+func NewTxOut(txOut *wire.TxOut) []byte {
+	x := make([]byte, 8+len(txOut.PkScript))
+	binary.BigEndian.PutUint64(x[0:], uint64(txOut.Value))
+	copy(x[8:], txOut.PkScript)
+	return x
+}
+
+func TxOutFromBytes(x []byte) (txOut wire.TxOut) {
+	txOut.Value = int64(binary.BigEndian.Uint64(x[0:]))
+	txOut.PkScript = append([]byte{}, x[8:]...)
 	return
 }
 
@@ -384,6 +426,14 @@ func NewScriptHashFromBytes(hash []byte) (scriptHash ScriptHash, err error) {
 	return
 }
 
+func NewScriptHashFromBytesP(hash []byte) (scriptHash ScriptHash) {
+	sh, err := NewScriptHashFromBytes(hash)
+	if err != nil {
+		panic(err)
+	}
+	return sh
+}
+
 func NewScriptHashFromString(hash string) (ScriptHash, error) {
 	shs, err := hex.DecodeString(hash)
 	if err != nil {
@@ -452,4 +502,140 @@ type CacheStats struct {
 	Purges int
 	Size   int
 	Items  int
+}
+
+// SpendingOutpointKey is a database encoded key for a SpendingOutpoint
+type SpendingOutpointKey [32 + 4 + 32 + 4]byte // txid:blockheight:blockhash:VoutIdx
+
+type ZKSpendingOutpoint struct {
+	TxID             chainhash.Hash
+	BlockHeight      uint32
+	BlockHash        chainhash.Hash
+	VOutIndex        uint32
+	SpendingOutpoint *ZKSpendingOutpointValue
+}
+
+func NewSpendingOutpointKey(txId chainhash.Hash, height uint32, blockHash chainhash.Hash, voutIdx uint32) (sok SpendingOutpointKey) {
+	copy(sok[:], txId[:])
+	binary.BigEndian.PutUint32(sok[32:], height)
+	copy(sok[32+4:], blockHash[:])
+	binary.BigEndian.PutUint32(sok[32+4+32:], voutIdx)
+	return
+}
+
+// SpendingOutpointValue
+type SpendingOutpointValue [32 + 4]byte // hash:idx of spending tx
+
+type ZKSpendingOutpointValue struct {
+	TxID  chainhash.Hash
+	Index uint32
+}
+
+func (p SpendingOutpointValue) String() string {
+	h, _ := chainhash.NewHash(p[0:32])
+	return fmt.Sprintf("%v:%v", h, binary.BigEndian.Uint32(p[32:]))
+}
+
+func NewSpendingOutpointValue(h chainhash.Hash, idx uint32) (p SpendingOutpointValue) {
+	copy(p[0:], h[:])
+	binary.BigEndian.PutUint32(p[32:], idx)
+	return
+}
+
+func NewSpendingOutpointValueSlice(h chainhash.Hash, idx uint32) []byte {
+	p := NewSpendingOutpointValue(h, idx)
+	return p[:]
+}
+
+// SpentOutput sha256(PreviousOutPoint->pkscript):blockheight:blockhash:txId:PreviousOutPoint.Hash:PreviousOutPoint.Index:txInIdx
+type SpentOutput [32 + 4 + 32 + 32 + 32 + 4 + 4]byte
+
+type ZKSpentOutput struct {
+	ScriptHash        ScriptHash
+	BlockHeight       uint32
+	BlockHash         chainhash.Hash
+	TxID              chainhash.Hash
+	PrevOutpointHash  chainhash.Hash
+	PrevOutpointIndex uint32
+	TxInIndex         uint32
+}
+
+func NewSpentOutput(prevScripthash chainhash.Hash, height uint32, blockhash, txid, txidPrevHash chainhash.Hash, txidPrevIndex, txinIndex uint32) (o SpentOutput) {
+	copy(o[0:], prevScripthash[:])
+	binary.BigEndian.PutUint32(o[32:], height)
+	copy(o[32+4:], blockhash[:])
+	copy(o[32+4+32:], txid[:])
+	copy(o[32+4+32+32:], txidPrevHash[:])
+	binary.BigEndian.PutUint32(o[32+4+32+32+32:], txidPrevIndex)
+	binary.BigEndian.PutUint32(o[32+4+32+32+32+4:], txinIndex)
+	return
+}
+
+// SpendableOutput = sha256(PkScript):blockheight:blockhash:txId:txOutIdx
+type SpendableOutput [32 + 4 + 32 + 32 + 4]byte
+
+type ZKSpendableOutput struct {
+	ScriptHash  ScriptHash
+	BlockHeight uint32
+	BlockHash   chainhash.Hash
+	TxID        chainhash.Hash
+	TxOutIndex  uint32
+}
+
+func (o SpendableOutput) String() string {
+	block, err := chainhash.NewHash(o[32+4 : 32+4+32])
+	if err != nil {
+		panic(err)
+	}
+	txid, err := chainhash.NewHash(o[33+4+32 : 33+4+32+32])
+	if err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf("sh %x height %v block %v tx %v:%v", o[0:32],
+		binary.BigEndian.Uint32(o[32:32+4]), block, txid,
+		binary.BigEndian.Uint32(o[32+4+32+32:]))
+}
+
+func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txid chainhash.Hash, txOutIndex uint32) (o SpendableOutput) {
+	copy(o[0:], scripthash[:])
+	binary.BigEndian.PutUint32(o[32:], height)
+	copy(o[32+4:], blockhash[:])
+	copy(o[32+4+32:], txid[:])
+	binary.BigEndian.PutUint32(o[32+4+32+32:], txOutIndex)
+	return
+}
+
+// ZKIndexKey is a wrapper to the various types to make the comparable.  Valid
+// keys are, SpendableOutput(104), SpentOutput(140), Outpoint(37),
+// ScriptHash(32), TxSpendKey(72). ScriptHash(32) is the *ONLY* table that is
+// updated, the others are essentially a journal of activity.
+type ZKIndexKey string // ugh to make []byte comparable
+
+func BEUint64(x uint64) []byte {
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], x)
+	return b[:]
+}
+
+func BEAddUint64(x []byte, y uint64) []byte {
+	if len(x) != 8 {
+		panic("fix your code")
+	}
+	xx := binary.BigEndian.Uint64(x)
+	var z [8]byte
+	binary.BigEndian.PutUint64(z[:], xx+y)
+	return z[:]
+}
+
+func BESubUint64(x []byte, y uint64) []byte {
+	if len(x) != 8 {
+		panic("fix your code")
+	}
+	xx := binary.BigEndian.Uint64(x)
+	if y > xx {
+		panic(fmt.Sprintf("xx %v y %v", xx, y))
+	}
+	var z [8]byte
+	binary.BigEndian.PutUint64(z[:], xx-y)
+	return z[:]
 }
