@@ -55,8 +55,8 @@ const (
 	defaultPendingBlocks = 128 // 128 * ~4MB max memory use
 
 	defaultMaxCachedKeystones = 1e6 // number of cached keystones prior to flush
-
-	defaultMaxCachedTxs = 1e6 // dual purpose cache, max key 69, max value 36
+	defaultMaxCachedTxs       = 1e6 // dual purpose cache, max key 69, max value 36
+	defaultMaxZK              = 1e6 // number of cached zk rows prior to flush
 
 	networkLocalnet = "localnet" // XXX this needs to be rethought
 
@@ -176,6 +176,7 @@ type Config struct {
 	LogLevel                string
 	MaxCachedKeystones      int
 	MaxCachedTxs            int
+	MaxCachedZK             int
 	MempoolEnabled          bool
 	DatabaseDebug           bool
 	Network                 string
@@ -184,6 +185,7 @@ type Config struct {
 	PrometheusNamespace     string
 	PprofListenAddress      string
 	Seeds                   []string
+	ZKIndex                 bool
 
 	// Fields used for running TBC in External Header Mode, where P2P is disabled
 	// and TBC is used to determine consensus based on headers fed from external
@@ -202,6 +204,7 @@ func NewDefaultConfig() *Config {
 		LogLevel:             logLevel,
 		MaxCachedKeystones:   defaultMaxCachedKeystones,
 		MaxCachedTxs:         defaultMaxCachedTxs,
+		MaxCachedZK:          defaultMaxZK,
 		MempoolEnabled:       true,
 		PeersWanted:          defaultPeersWanted,
 		PrometheusNamespace:  appName,
@@ -247,9 +250,10 @@ type Server struct {
 	g geometryParams
 
 	// indexers
-	ui Indexer
-	ti Indexer
-	ki Indexer
+	ui  Indexer
+	ti  Indexer
+	ki  Indexer
+	zki Indexer
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -744,6 +748,12 @@ func (s *Server) promKeystone() float64 {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
 	return deucalion.Uint64ToFloat(s.prom.syncInfo.Keystone.Height)
+}
+
+func (s *Server) promZK() float64 {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	return deucalion.Uint64ToFloat(s.prom.syncInfo.ZK.Height)
 }
 
 func (s *Server) promConnectedPeers() float64 {
@@ -2109,6 +2119,16 @@ func (s *Server) ScriptHashAvailableToSpend(ctx context.Context, txId chainhash.
 	return false, nil
 }
 
+func (s *Server) ScriptHashByOutpoint(ctx context.Context, op tbcd.Outpoint) (*tbcd.ScriptHash, error) {
+	log.Tracef("ScriptHashByOutpoint")
+	defer log.Tracef("ScriptHashByOutpoint exit")
+	if s.cfg.ExternalHeaderMode {
+		return nil, NewExternalHeaderNotAllowedError("ScriptHashByOutpoint")
+	}
+
+	return s.g.db.ScriptHashByOutpoint(ctx, op)
+}
+
 func (s *Server) SpentOutputsByTxId(ctx context.Context, txId chainhash.Hash) ([]tbcd.SpentInfo, error) {
 	log.Tracef("SpentOutputsByTxId")
 	defer log.Tracef("SpentOutputsByTxId exit")
@@ -2429,6 +2449,13 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 		}
 	}
 
+	// ZK indexes
+	if s.cfg.ZKIndex {
+		if err := s.zki.IndexToHash(ctx, hash); err != nil {
+			return fmt.Errorf("zk indexer: %w", err)
+		}
+	}
+
 	log.Debugf("Done syncing to: %v", hash)
 
 	bh, err := s.g.db.BlockHeaderByHash(ctx, hash)
@@ -2462,6 +2489,12 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 
 	if s.cfg.HemiIndex {
 		if err := s.ki.IndexToBest(ctx); err != nil {
+			return err
+		}
+	}
+
+	if s.cfg.ZKIndex {
+		if err := s.zki.IndexToBest(ctx); err != nil {
 			return err
 		}
 	}
@@ -2563,6 +2596,7 @@ type SyncInfo struct {
 	Keystone    HashHeight `json:"keystone_index_height"`
 	Tx          HashHeight `json:"tx_index_height"`
 	Utxo        HashHeight `json:"utxo_index_height"`
+	ZK          HashHeight `json:"zk_index_height"`
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2638,14 +2672,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		}
 	}
 
-	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
-		!s.indexing && !blksMissing {
-		// If keystone indexers are disabled we are synced.
-		if !s.cfg.HemiIndex {
-			si.Synced = true
-			return
-		}
-
+	if s.cfg.HemiIndex {
 		// Perform additional keystone indexer tests.
 		keystoneBH, err := s.ki.IndexerAt(ctx)
 		if err != nil {
@@ -2656,10 +2683,37 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 			Height: keystoneBH.Height,
 		}
 		si.Keystone = *keystoneHH
-		if keystoneHH.Hash.IsEqual(&bhb.Hash) {
+	}
+
+	if s.cfg.ZKIndex {
+		// Perform additional zk indexer tests.
+		zkBH, err := s.zki.IndexerAt(ctx)
+		if err != nil {
+			zkBH = &tbcd.BlockHeader{}
+		}
+		zkHH := &HashHeight{
+			Hash:   zkBH.Hash,
+			Height: zkBH.Height,
+		}
+		si.ZK = *zkHH
+	}
+
+	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
+		!s.indexing && !blksMissing {
+		// If keystone and zk indexers are disabled we are synced.
+		if !s.cfg.HemiIndex && !s.cfg.ZKIndex {
 			si.Synced = true
 			return
 		}
+		if !(s.cfg.HemiIndex && si.Keystone.Hash.IsEqual(&bhb.Hash)) {
+			// Keystone index not synced
+			return
+		}
+		if !(s.cfg.ZKIndex && si.ZK.Hash.IsEqual(&bhb.Hash)) {
+			// ZK index not synced
+			return
+		}
+		si.Synced = true
 	}
 	return
 }
@@ -2733,6 +2787,11 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	if s.cfg.HemiIndex {
 		s.ki = NewKeystoneIndexer(s.g, s.cfg.MaxCachedKeystones,
 			s.cfg.HemiIndex, s.hemiGenesis)
+	}
+
+	if s.cfg.ZKIndex {
+		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedZK,
+			s.cfg.ZKIndex)
 	}
 
 	return nil
@@ -2872,6 +2931,14 @@ func (s *Server) Collectors() []prometheus.Collector {
 					Name:      "keystone_sync_height",
 					Help:      "Height of the keystone indexer",
 				}, s.promKeystone))
+		}
+		if s.cfg.ZKIndex {
+			s.promCollectors = append(s.promCollectors,
+				prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+					Namespace: s.cfg.PrometheusNamespace,
+					Name:      "zk_sync_height",
+					Help:      "Height of the zk indexer",
+				}, s.promZK))
 		}
 	}
 	return s.promCollectors
@@ -3100,6 +3167,27 @@ func (s *Server) Run(pctx context.Context) error {
 			hemiBH, _ := s.ki.IndexerAt(ctx)
 			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
 		}
+		if s.cfg.ZKIndex {
+			bh, _ := s.zki.IndexerAt(ctx)
+			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
+		}
+
+		// XXX this code really should do something along the lines of
+		// SyncIndexersToBest to nudge the indexers. If that is not
+		// done indexing will not start until after a block comes in.
+		//
+		// The problem is that if indexing is kicked off here,
+		// blockheaders will not synchronize until indexing is
+		// complete. This potentially lead down a non-canonical path
+		// which in turn will require fork resolution.
+		//
+		// Not sure which one to pick here. The likelihood that a new
+		// blockheaders comes through is high if the box has been down
+		// for >10m but very low if it is a simple restart.
+		//err := s.SyncIndexersToBest(ctx)
+		//if err != nil {
+		//	panic(err)
+		//}
 	}
 
 	select {

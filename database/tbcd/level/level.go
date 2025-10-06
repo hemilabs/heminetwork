@@ -78,6 +78,7 @@ var (
 	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
 	txIndexHashKey       = []byte("txindexhash")       // last indexed tx block hash
 	keystoneIndexHashKey = []byte("keystoneindexhash") // last indexed keystone block hash
+	zkIndexHashKey       = []byte("zkindexhash")       // last indexed zk block hash
 )
 
 func init() {
@@ -2191,6 +2192,218 @@ func (l *ldb) BlockHeaderByTxIndex(ctx context.Context) (*tbcd.BlockHeader, erro
 		return nil, fmt.Errorf("new hash: %w", err)
 	}
 	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) BlockHeaderByZKIndex(ctx context.Context) (*tbcd.BlockHeader, error) {
+	kssTx, _, kssDiscard, err := l.startTransaction(level.ZKDB)
+	if err != nil {
+		return nil, fmt.Errorf("zk utxo open db transaction: %w", err)
+	}
+	defer kssDiscard()
+
+	hash, err := kssTx.Get(zkIndexHashKey, nil)
+	if err != nil {
+		nerr := fmt.Errorf("zk utxo get: %w", err)
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return nil, database.NotFoundError(nerr.Error())
+		}
+		return nil, nerr
+	}
+	ch, err := chainhash.NewHash(hash)
+	if err != nil {
+		return nil, fmt.Errorf("new hash: %w", err)
+	}
+	return l.BlockHeaderByHash(ctx, *ch)
+}
+
+func (l *ldb) ZKValueAndScriptByOutpoint(ctx context.Context, op tbcd.Outpoint) (uint64, []byte, error) {
+	log.Tracef("ZKValueAndScriptByOutpoint")
+	defer log.Tracef("ZKValueAndScriptByOutpoint exit")
+
+	zkdb := l.pool[level.ZKDB]
+	v, err := zkdb.Get(op[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return 0, nil, database.NotFoundError(err.Error())
+		}
+		return 0, nil, fmt.Errorf("script by outpoint: %w", err)
+	}
+	return binary.BigEndian.Uint64(v[0:]), v[8:], nil
+}
+
+func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (uint64, error) {
+	log.Tracef("ZKBalanceByScriptHash")
+	defer log.Tracef("ZKBalanceByScriptHash exit")
+
+	zkdb := l.pool[level.ZKDB]
+	val, err := zkdb.Get(sh[:], nil)
+	if err != nil {
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return 0, database.NotFoundError(err.Error())
+		}
+		return 0, fmt.Errorf("balance by scripthash: %w", err)
+	}
+	if len(val) != 8 {
+		return 0, fmt.Errorf("balance by scripthash: invalid value length %v",
+			len(val))
+	}
+	return binary.BigEndian.Uint64(val[:]), nil
+}
+
+var lzkso = len(tbcd.SpentOutput{})
+
+func bytes2hash(b []byte) chainhash.Hash {
+	h, err := chainhash.NewHash(b)
+	if err != nil {
+		panic(err)
+	}
+	return *h
+}
+
+func (l *ldb) ZKSpentOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpentOutput, error) {
+	log.Tracef("ZKSpentOutputs")
+	defer log.Tracef("ZKSpentOutputs exit")
+
+	zkdb := l.pool[level.ZKDB]
+	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
+	defer it.Release()
+
+	sos := make([]tbcd.ZKSpentOutput, 0, 128)
+	for it.Next() {
+		k := it.Key()
+		if len(k) != lzkso {
+			continue
+		}
+		so := tbcd.ZKSpentOutput{
+			ScriptHash:        tbcd.NewScriptHashFromBytesP(k[:32]),
+			BlockHeight:       binary.BigEndian.Uint32(k[32:]),
+			BlockHash:         bytes2hash(k[32+4 : 32+4+32]),
+			TxID:              bytes2hash(k[32+4+32 : 32+4+32+32]),
+			PrevOutpointHash:  bytes2hash(k[32+4+32+32 : 32+4+32+32+32]),
+			PrevOutpointIndex: binary.BigEndian.Uint32(k[32+4+32+32+32:]),
+			TxInIndex:         binary.BigEndian.Uint32(k[32+4+32+32+32+4:]),
+		}
+		sos = append(sos, so)
+	}
+
+	return sos, nil
+}
+
+var (
+	lzsok  = len(tbcd.SpendingOutpointKey{})
+	lzsokv = len(tbcd.SpendingOutpointValue{})
+)
+
+func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
+	log.Tracef("ZKSpendingOutpoints")
+	defer log.Tracef("ZKSpendingOutpoints exit")
+
+	zkdb := l.pool[level.ZKDB]
+	it := zkdb.NewIterator(util.BytesPrefix(txid[:]), nil)
+	defer it.Release()
+
+	sos := make([]tbcd.ZKSpendingOutpoint, 0, 128)
+	for it.Next() {
+		k := it.Key()
+		if len(k) != lzsok {
+			continue
+		}
+		sok := tbcd.ZKSpendingOutpoint{
+			TxID:        bytes2hash(k[0:32]),
+			BlockHeight: binary.BigEndian.Uint32(k[32:]),
+			BlockHash:   bytes2hash(k[32+4 : 32+4+32]),
+			VOutIndex:   binary.BigEndian.Uint32(k[32+4+32:]),
+		}
+		v := it.Value()
+		if len(v) == lzsokv {
+			sok.SpendingOutpoint = &tbcd.ZKSpendingOutpointValue{
+				TxID:  bytes2hash(v[:32]),
+				Index: binary.BigEndian.Uint32(v[32:]),
+			}
+		}
+		sos = append(sos, sok)
+	}
+	return sos, nil
+}
+
+var lzsops = len(tbcd.SpendableOutput{})
+
+func (l *ldb) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpendableOutput, error) {
+	log.Tracef("ZKSpendableOutputs")
+	defer log.Tracef("ZKSpendableOutputs exit")
+
+	zkdb := l.pool[level.ZKDB]
+	it := zkdb.NewIterator(util.BytesPrefix(sh[:]), nil)
+	defer it.Release()
+
+	sos := make([]tbcd.ZKSpendableOutput, 0, 128)
+	for it.Next() {
+		k := it.Key()
+		if len(k) != lzsops {
+			continue
+		}
+		sos = append(sos, tbcd.ZKSpendableOutput{
+			ScriptHash:  tbcd.NewScriptHashFromBytesP(k[:32]),
+			BlockHeight: binary.BigEndian.Uint32(k[32:]),
+			BlockHash:   bytes2hash(k[32+4 : 32+4+32]),
+			TxID:        bytes2hash(k[32+4+32 : 32+4+32+32]),
+			TxOutIndex:  binary.BigEndian.Uint32(k[32+4+32+32:]),
+		})
+	}
+	return sos, nil
+}
+
+var scriptHashLen = len(tbcd.ScriptHash{})
+
+func (l *ldb) BlockZKUpdate(ctx context.Context, direction int, utxos map[tbcd.ZKIndexKey][]byte, zkIndexHash chainhash.Hash) error {
+	log.Tracef("BlockZKUpdate")
+	defer log.Tracef("BlockZKUpdate exit")
+
+	if !(direction == 1 || direction == -1) {
+		return fmt.Errorf("invalid direction: %v", direction)
+	}
+
+	// utxos
+	bhsTx, bhsCommit, bhsDiscard, err := l.startTransaction(level.ZKDB)
+	if err != nil {
+		return fmt.Errorf("zk utxos open db transaction: %w", err)
+	}
+	defer bhsDiscard()
+
+	bhsBatch := new(leveldb.Batch)
+	for k, v := range utxos {
+		// I will punch the first person that tells me to use continue
+		// in this loop in the larynx.
+		switch direction {
+		case -1:
+			// On unwind we can delete some keys.
+			if len(k) != scriptHashLen {
+				bhsBatch.Delete([]byte(k))
+			} else {
+				bhsBatch.Put([]byte(k), v)
+			}
+		case 1:
+			bhsBatch.Put([]byte(k), v)
+		}
+
+		// Empty out cache.
+		delete(utxos, k)
+	}
+
+	// Store index
+	bhsBatch.Put(zkIndexHashKey, zkIndexHash[:])
+
+	// Write utxos batch
+	if err = bhsTx.Write(bhsBatch, nil); err != nil {
+		return fmt.Errorf("utxos insert: %w", err)
+	}
+
+	// utxos commit
+	if err = bhsCommit(); err != nil {
+		return fmt.Errorf("utxos commit: %w", err)
+	}
+
+	return nil
 }
 
 func (l *ldb) BlockHeaderCacheStats() tbcd.CacheStats {
