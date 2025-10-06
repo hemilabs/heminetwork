@@ -2186,8 +2186,6 @@ func (l *ldb) ZKBalanceByScriptHash(ctx context.Context, sh tbcd.ScriptHash) (ui
 	return binary.BigEndian.Uint64(val[:]), nil
 }
 
-var lzkso = len(tbcd.SpentOutput{})
-
 func bytes2hash(b []byte) chainhash.Hash {
 	h, err := chainhash.NewHash(b)
 	if err != nil {
@@ -2225,11 +2223,6 @@ func (l *ldb) ZKSpentOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZK
 	return sos, nil
 }
 
-var (
-	lzsok  = len(tbcd.SpendingOutpointKey{})
-	lzsokv = len(tbcd.SpendingOutpointValue{})
-)
-
 func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]tbcd.ZKSpendingOutpoint, error) {
 	log.Tracef("ZKSpendingOutpoints")
 	defer log.Tracef("ZKSpendingOutpoints exit")
@@ -2251,7 +2244,7 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 			VOutIndex:   binary.BigEndian.Uint32(k[32+4+32:]),
 		}
 		v := it.Value(ctx)
-		if len(v) == lzsokv {
+		if len(v) == len(tbcd.SpendingOutpointValue{}) {
 			sok.SpendingOutpoint = &tbcd.ZKSpendingOutpointValue{
 				TxID:  bytes2hash(v[:32]),
 				Index: binary.BigEndian.Uint32(v[32:]),
@@ -2261,8 +2254,6 @@ func (l *ldb) ZKSpendingOutpoints(ctx context.Context, txid chainhash.Hash) ([]t
 	}
 	return sos, nil
 }
-
-var lzsops = len(tbcd.SpendableOutput{})
 
 func (l *ldb) ZKSpendableOutputs(ctx context.Context, sh tbcd.ScriptHash) ([]tbcd.ZKSpendableOutput, error) {
 	log.Tracef("ZKSpendableOutputs")
