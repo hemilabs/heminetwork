@@ -414,8 +414,8 @@ func (c *indexerCommon) parseBlocks(ctx context.Context, endHash *chainhash.Hash
 	} else {
 		// Some indexers use a different genesis, e.g. keystones. Will
 		// be nil if there is no override.
-		if override := c.genesis; override != nil {
-			hh = override
+		if c.genesis != nil {
+			hh = c.genesis
 		}
 	}
 

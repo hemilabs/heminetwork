@@ -1173,7 +1173,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 }
 
 // BlockHeadersInsert decodes and inserts the passed blockheaders into the
-// database. Additionally it updates the hight/hash and missing blocks table as
+// database. Additionally it updates the height/hash and missing blocks table as
 // well.  On return it informs the caller about potential forking situations
 // and always returns the canonical and last inserted blockheader, which may be
 // the same.

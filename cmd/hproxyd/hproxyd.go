@@ -43,6 +43,12 @@ var (
 			Help:         "comma separated HVM URLs",
 			Print:        config.PrintAll,
 		},
+		"HPROXY_METHOD_WHITELIST": config.Config{
+			Value:        &cfg.MethodFilter,
+			DefaultValue: cfg.MethodFilter,
+			Help:         "comma separated methods allowed by eth node RPCs",
+			Print:        config.PrintAll,
+		},
 		"HPROXY_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
@@ -52,13 +58,13 @@ var (
 		"HPROXY_CONTROL_ADDRESS": config.Config{
 			Value:        &cfg.ControlAddress,
 			DefaultValue: hproxy.DefaultControlAddress,
-			Help:         "control address for incomming commands",
+			Help:         "control address for incoming commands",
 			Print:        config.PrintAll,
 		},
 		"HPROXY_LISTEN_ADDRESS": config.Config{
 			Value:        &cfg.ListenAddress,
 			DefaultValue: hproxy.DefaultListenAddress,
-			Help:         "listen address for incomming connections",
+			Help:         "listen address for incoming connections",
 			Print:        config.PrintAll,
 		},
 		"HPROXY_NETWORK": config.Config{
@@ -83,6 +89,12 @@ var (
 			Value:        &cfg.PollFrequency,
 			DefaultValue: hproxy.DefaultPollFrequency,
 			Help:         "frequency that hproxy pokes nodes for health information",
+			Print:        config.PrintAll,
+		},
+		"HPROXY_REQUEST_SIZE": config.Config{
+			Value:        &cfg.MaxRequestSize,
+			DefaultValue: cfg.MaxRequestSize,
+			Help:         "HVM request max size",
 			Print:        config.PrintAll,
 		},
 		"HPROXY_REQUEST_TIMEOUT": config.Config{
