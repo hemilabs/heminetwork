@@ -134,8 +134,8 @@ var (
 		"TBC_REPLICA_URI": config.Config{
 			Value:        &cfg.ReplicaURI,
 			DefaultValue: "",
-			Help:         "URI to the",
-			Print:        config.PrintAll,
+			Help:         "URI pointing to distributed database to replicate data to",
+			Print:        config.PrintSecret,
 		},
 		"TBC_SEEDS": config.Config{
 			Value:        &cfg.Seeds,
