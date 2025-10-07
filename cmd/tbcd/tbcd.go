@@ -131,6 +131,12 @@ var (
 			Help:         "address and port tbcd pprof listens on (open <address>/debug/pprof to see available profiles)",
 			Print:        config.PrintAll,
 		},
+		"TBC_REPLICA_URI": config.Config{
+			Value:        &cfg.ReplicaURI,
+			DefaultValue: "",
+			Help:         "URI to the",
+			Print:        config.PrintAll,
+		},
 		"TBC_SEEDS": config.Config{
 			Value:        &cfg.Seeds,
 			DefaultValue: []string{},
