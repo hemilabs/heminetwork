@@ -143,7 +143,7 @@ type Config struct {
 	BlockheaderCacheSize string // size of block header cache
 	Home                 string // home directory
 	Network              string // network e.g. "testnet3", "mainnet" etc
-	ReplicationURI       string // distributed db URI to replicate data to
+	ReplicaURI           string // distributed db URI to replicate data to
 	blockCacheSize       int    // parsed size of block cache
 	blockheaderCacheSize int    // parsed size of block header cache
 	nonInteractive       bool   // Set to true to prevent user interaction
@@ -158,7 +158,7 @@ func (cfg *Config) SetUpgradeOpen(x bool) {
 	cfg.upgradeOpen = x
 }
 
-func NewConfig(network, home, replicationURI, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
+func NewConfig(network, home, replicaURI, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
 	if blockheaderCacheSizeS == "" {
 		blockheaderCacheSizeS = "0"
 	}
@@ -203,7 +203,7 @@ func NewConfig(network, home, replicationURI, blockheaderCacheSizeS, blockCacheS
 	return &Config{
 		Home:                 homedir,
 		Network:              network,
-		ReplicationURI:       replicationURI,
+		ReplicaURI:           replicaURI,
 		BlockCacheSize:       blockCacheSizeS,
 		blockCacheSize:       int(blockCacheSize),
 		BlockheaderCacheSize: blockheaderCacheSizeS,
@@ -306,7 +306,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 					log.Infof("tbcdb database version: %v",
 						ldbVersion)
 				}
-				err = l.syncReplica(ctx, cfg.ReplicationURI)
+				err = l.syncReplica(ctx, cfg.ReplicaURI)
 				return l, err
 			}
 			return nil, fmt.Errorf("invalid version: wanted %v got %v",
