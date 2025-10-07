@@ -272,7 +272,7 @@ func TestGetFinalitiesByL2KeystoneBFGInheritingfinality(t *testing.T) {
 		}
 	}()
 
-	cfg, err := level.NewConfig("localnet", levelDbHome, "0", "0")
+	cfg, err := level.NewConfig("localnet", levelDbHome, "", "0", "0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestGetFinalitiesByL2KeystoneBFGInOrder(t *testing.T) {
 		}
 	}()
 
-	cfg, err := level.NewConfig("localnet", levelDbHome, "0", "0")
+	cfg, err := level.NewConfig("localnet", levelDbHome, "", "0", "0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOnChain(t *testing.T) {
 		}
 	}()
 
-	cfg, err := level.NewConfig("localnet", levelDbHome, "0", "0")
+	cfg, err := level.NewConfig("localnet", levelDbHome, "", "0", "0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -615,7 +615,7 @@ func TestGetFinalitiesByL2KeystoneBFGNotFoundOpGeth(t *testing.T) {
 		}
 	}()
 
-	cfg, err := level.NewConfig("localnet", levelDbHome, "0", "0")
+	cfg, err := level.NewConfig("localnet", levelDbHome, "", "0", "0")
 	if err != nil {
 		t.Fatal(err)
 	}

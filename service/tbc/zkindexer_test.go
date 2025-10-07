@@ -25,8 +25,7 @@ func TestZKEncodeRetrieve(t *testing.T) {
 	defer cancel()
 
 	home := t.TempDir()
-	cfg, err := level.NewConfig("localnet", home,
-		"", "")
+	cfg, err := level.NewConfig("localnet", home, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

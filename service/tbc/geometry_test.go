@@ -141,7 +141,7 @@ func TestIndexLinearity(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	cfg, err := level.NewConfig("localnet", home, "", "")
+	cfg, err := level.NewConfig("localnet", home, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestCanonicity(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
 
-	cfg, err := level.NewConfig("localnet", home, "", "")
+	cfg, err := level.NewConfig("localnet", home, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

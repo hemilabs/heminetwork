@@ -260,7 +260,7 @@ func TestDbUpgradeV3(t *testing.T) {
 	level.SetBatchSize(3)
 
 	// Upgrade database to v3 with move
-	cfg, err := level.NewConfig(network, home, "0mb", "0mb")
+	cfg, err := level.NewConfig(network, home, "", "0mb", "0mb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestDbUpgradeV3(t *testing.T) {
 	}
 
 	// Open move DB
-	cfgMove, err := level.NewConfig(network, home, "0mb", "0mb")
+	cfgMove, err := level.NewConfig(network, home, "", "0mb", "0mb")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestDbUpgradeV3(t *testing.T) {
 	}
 
 	// Open copy DB
-	cfgCopy, err := level.NewConfig(network, home, "0mb", "0mb")
+	cfgCopy, err := level.NewConfig(network, home, "", "0mb", "0mb")
 	if err != nil {
 		t.Fatal(err)
 	}

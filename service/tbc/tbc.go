@@ -184,6 +184,7 @@ type Config struct {
 	PrometheusListenAddress string
 	PrometheusNamespace     string
 	PprofListenAddress      string
+	ReplicaURI              string
 	Seeds                   []string
 	ZKIndex                 bool
 
@@ -2759,7 +2760,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 
 	// Open db.
 	cfg, err := level.NewConfig(s.cfg.Network, s.cfg.LevelDBHome,
-		s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
+		s.cfg.BlockheaderCacheSize, s.cfg.ReplicaURI, s.cfg.BlockCacheSize)
 	if err != nil {
 		return err
 	}
