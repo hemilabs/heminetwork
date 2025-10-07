@@ -31,11 +31,11 @@ const (
 	HeightHashDB     = "heighthash"
 	OutputsDB        = "outputs"
 	TransactionsDB   = "transactions"
-	ZKDB             = "zkdb/zkbalance"
-	ZKOutpointsDB    = "zkdb/zkoutpoint"
-	ZKSpendableOutDB = "zkdb/zkspendableout"
-	ZKSpentOutDB     = "zkdb/zkspentout"
-	ZKSpentTxDB      = "zkdb/zkspenttx"
+	ZKDB             = "zkbalance"
+	ZKOutpointsDB    = "zkoutpoint"
+	ZKSpendableOutDB = "zkspendableout"
+	ZKSpentOutDB     = "zkspentout"
+	ZKSpentTxDB      = "zkspenttx"
 
 	BlocksDB = "blocks" // raw database
 )
@@ -147,6 +147,7 @@ func New(ctx context.Context, home string) (*Database, error) {
 		return nil, fmt.Errorf("home dir: %w", err)
 	}
 
+	// TODO: put zk dbs inside common dir
 	poolMap := map[string]string{
 		BlockHeadersDB:   "level",
 		BlocksMissingDB:  "level",
