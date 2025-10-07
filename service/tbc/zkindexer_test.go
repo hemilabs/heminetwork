@@ -30,8 +30,7 @@ func TestZKEncodeRetrieve(t *testing.T) {
 }
 
 func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64) map[tbcd.ZKIndexKey][]byte {
-	cfg, err := level.NewConfig("localnet", home,
-		"", "")
+	cfg, err := level.NewConfig("localnet", home, "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

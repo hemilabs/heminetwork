@@ -9,12 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/hemilabs/larry/larry"
-	"github.com/hemilabs/larry/larry/clickhouse"
 	"github.com/hemilabs/larry/larry/multi"
 	"github.com/hemilabs/larry/larry/rawdb"
 	"github.com/juju/loggo/v2"
@@ -144,7 +142,7 @@ func New(ctx context.Context, home string) (*Database, error) {
 	// Care must be taken to not shadow err and l in this function. The
 	// defer will overwrite those if an unwind condition occurs.
 
-	_, err := homedir.Expand(home)
+	h, err := homedir.Expand(home)
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
 	}
@@ -173,83 +171,35 @@ func New(ctx context.Context, home string) (*Database, error) {
 	if err := pool.Open(ctx); err != nil {
 		return nil, fmt.Errorf("open pool: %w", err)
 	}
+
+	l := &Database{
+		home:    h,
+		pool:    pool,
+		rawPool: make(RawPool),
+		tables:  poolMap,
+	}
+
+	unwind := true
 	defer func() {
-		if err := pool.Close(ctx); err != nil {
-			log.Errorf("close pool: %v", err)
+		if unwind {
+			cerr := l.Close(ctx)
+			if cerr != nil {
+				log.Debugf("new unwind exited with: %v", cerr)
+				err = errors.Join(err, cerr)
+			}
+			clear(l.rawPool)
+			l = nil // Reset l
 		}
 	}()
 
-	destTables := []string{
-		BlockHeadersDB,
-		BlocksMissingDB,
-		MetadataDB,
-		KeystonesDB,
-		HeightHashDB,
-		OutputsDB,
-		TransactionsDB,
-	}
-
-	destHome := os.Getenv("TBC_CLICKHOUSE_URI")
-	if destHome == "" {
-		if err := pool.Close(ctx); err != nil {
-			log.Errorf("close pool: %v", err)
-		}
-		return nil, errors.New("clickhouse URI not set")
-	}
-	dcfg := clickhouse.DefaultClickConfig(destHome, destTables)
-	dcfg.DropTables = false
-	ddb, err := clickhouse.NewClickDB(dcfg)
+	// Blocks database is special
+	err = l.openRawDB(ctx, BlocksDB, rawdb.DefaultMaxFileSize)
 	if err != nil {
-		return nil, err
-	}
-	if err := ddb.Open(ctx); err != nil {
-		return nil, fmt.Errorf("open click: %w", err)
-	}
-	defer func() {
-		if err := ddb.Close(ctx); err != nil {
-			log.Errorf("close click: %v", err)
-		}
-	}()
-
-	err = larry.Clone(ctx, pool, ddb, destTables)
-	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("rawdb %v: %w", BlocksDB, err)
 	}
 
-	return nil, errors.New("finished as expected")
+	unwind = false // Everything is good, do not unwind.
 
-	// homeJournal := filepath.Join(home, "journal")
-	// rcfg := replicator.DefaultReplicatorConfig(homeJournal, replicator.Lazy)
-	// replicator.NewReplicatorDB(rcfg, pool, ddb)
-
-	// l := &Database{
-	// 	home:    h,
-	// 	pool:    pool,
-	// 	rawPool: make(RawPool),
-	// 	tables:  poolMap,
-	// }
-
-	// unwind := true
-	// defer func() {
-	// 	if unwind {
-	// 		cerr := l.Close(ctx)
-	// 		if cerr != nil {
-	// 			log.Debugf("new unwind exited with: %v", cerr)
-	// 			err = errors.Join(err, cerr)
-	// 		}
-	// 		clear(l.rawPool)
-	// 		l = nil // Reset l
-	// 	}
-	// }()
-
-	// // Blocks database is special
-	// err = l.openRawDB(ctx, BlocksDB, rawdb.DefaultMaxFileSize)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("rawdb %v: %w", BlocksDB, err)
-	// }
-
-	// unwind = false // Everything is good, do not unwind.
-
-	// // The defer above will set/reset these values.
-	// return l, err
+	// The defer above will set/reset these values.
+	return l, err
 }

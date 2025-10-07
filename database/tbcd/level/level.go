@@ -7,6 +7,7 @@ package level
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -22,6 +23,8 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
 	"github.com/hemilabs/larry/larry"
+	"github.com/hemilabs/larry/larry/clickhouse"
+	"github.com/hemilabs/larry/larry/replicator"
 	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -72,7 +75,8 @@ var (
 	noStats tbcd.CacheStats
 
 	// Metadata keys.
-	versionKey = []byte("version")
+	versionKey     = []byte("version")
+	replicaSyncKey = []byte("replicasync")
 
 	// These keys live in their own respective databases.
 	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
@@ -139,6 +143,7 @@ type Config struct {
 	BlockheaderCacheSize string // size of block header cache
 	Home                 string // home directory
 	Network              string // network e.g. "testnet3", "mainnet" etc
+	ReplicationURI       string // distributed db URI to replicate data to
 	blockCacheSize       int    // parsed size of block cache
 	blockheaderCacheSize int    // parsed size of block header cache
 	nonInteractive       bool   // Set to true to prevent user interaction
@@ -153,7 +158,7 @@ func (cfg *Config) SetUpgradeOpen(x bool) {
 	cfg.upgradeOpen = x
 }
 
-func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
+func NewConfig(network, home, replicationURI, blockheaderCacheSizeS, blockCacheSizeS string) (*Config, error) {
 	if blockheaderCacheSizeS == "" {
 		blockheaderCacheSizeS = "0"
 	}
@@ -198,6 +203,7 @@ func NewConfig(network, home, blockheaderCacheSizeS, blockCacheSizeS string) (*C
 	return &Config{
 		Home:                 homedir,
 		Network:              network,
+		ReplicationURI:       replicationURI,
 		BlockCacheSize:       blockCacheSizeS,
 		blockCacheSize:       int(blockCacheSize),
 		BlockheaderCacheSize: blockheaderCacheSizeS,
@@ -261,7 +267,8 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	}
 
 	// Upgrade database
-	for {
+	var done bool
+	for !done {
 		var reopen bool
 		dbVersion, err := l.Version(ctx)
 		if err != nil {
@@ -300,7 +307,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 					log.Infof("tbcdb database version: %v",
 						ldbVersion)
 				}
-				return l, nil
+				done = true
 			}
 			return nil, fmt.Errorf("invalid version: wanted %v got %v",
 				ldbVersion, dbVersion)
@@ -320,6 +327,113 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			}
 		}
 	}
+
+	err = l.syncReplica(ctx, cfg.ReplicationURI)
+	return l, err
+}
+
+func random(n int) []byte {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		panic(fmt.Errorf("read random: %w", err))
+	}
+	return buf
+}
+
+func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
+	r := random(8) // random value assigned to this sync
+	if replicaURI == "" {
+		err := l.pool.Put(ctx, level.MetadataDB, replicaSyncKey, r)
+		if err != nil {
+			return fmt.Errorf("put replica sync key: %w", err)
+		}
+		return nil
+	}
+	var success bool // flag to close dbs if we exit early with error
+	destTables := make([]string, len(l.tables))
+	for t := range l.tables {
+		destTables = append(destTables, t)
+	}
+	dcfg := clickhouse.DefaultClickConfig(replicaURI, destTables)
+	ddb, err := clickhouse.NewClickDB(dcfg)
+	if err != nil {
+		return fmt.Errorf("new replica: %w", err)
+	}
+	if err := ddb.Open(ctx); err != nil {
+		return fmt.Errorf("open replica: %w", err)
+	}
+	defer func() {
+		if !success {
+			if err := ddb.Close(ctx); err != nil {
+				log.Errorf("close replica: %v", err)
+			}
+			if err := l.pool.Close(ctx); err != nil {
+				log.Errorf("close replica: %v", err)
+			}
+		}
+	}()
+
+	drs, err := ddb.Get(ctx, level.MetadataDB, replicaSyncKey)
+	if err != nil && !errors.Is(err, larry.ErrKeyNotFound) {
+		return fmt.Errorf("replica get sync key: %w", err)
+	}
+
+	srs, err := l.pool.Get(ctx, level.MetadataDB, replicaSyncKey)
+	if err != nil && !errors.Is(err, larry.ErrKeyNotFound) {
+		return fmt.Errorf("pool get sync key: %w", err)
+	}
+
+	if srs == nil || !bytes.Equal(srs, drs) {
+		if err := larry.Copy(ctx, true, l.pool, ddb, destTables); err != nil {
+			return fmt.Errorf("copy db: %w", err)
+		}
+		for _, tb := range destTables {
+			ok, _, err := larry.Compare(ctx, false, l.pool, ddb, tb)
+			if err != nil {
+				return fmt.Errorf("compare table %s pool -> dst: %w", tb, err)
+			}
+			if !ok {
+				return fmt.Errorf("compare table %s pool -> dst: mismatch", tb)
+			}
+			ok, _, err = larry.Compare(ctx, false, ddb, l.pool, tb)
+			if err != nil {
+				return fmt.Errorf("compare table %s dst -> pool: %w", tb, err)
+			}
+			if !ok {
+				return fmt.Errorf("compare table %s dst -> pool: mismatch", tb)
+			}
+		}
+	}
+
+	err = ddb.Put(ctx, level.MetadataDB, replicaSyncKey, r)
+	if err != nil {
+		return fmt.Errorf("replica put sync key: %w", err)
+	}
+	err = l.pool.Put(ctx, level.MetadataDB, replicaSyncKey, r)
+	if err != nil {
+		return fmt.Errorf("pool put sync key: %w", err)
+	}
+
+	if err := ddb.Close(ctx); err != nil {
+		return fmt.Errorf("replica close: %w", err)
+	}
+	if err := l.pool.Close(ctx); err != nil {
+		return fmt.Errorf("pool close: %w", err)
+	}
+	success = true
+
+	homeJournal := filepath.Join(l.cfg.Home, "journal")
+	rcfg := replicator.DefaultReplicatorConfig(homeJournal, replicator.Lazy)
+	repDB, err := replicator.NewReplicatorDB(rcfg, l.pool, ddb)
+	if err != nil {
+		return fmt.Errorf("new replicator: %w", err)
+	}
+	if err := repDB.Open(ctx); err != nil {
+		return fmt.Errorf("open replicator: %w", err)
+	}
+
+	l.pool = repDB
+	return nil
 }
 
 type (
