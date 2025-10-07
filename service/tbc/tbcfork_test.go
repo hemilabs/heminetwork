@@ -1208,7 +1208,7 @@ func zkValidateTxIn(ctx context.Context, s *Server, i *zkTxInInfo) {
 }
 
 func spendingOutByTxIn(ctx context.Context, s *Server, prevTxId, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
-	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, prevTxId)
+	spendingOps, err := s.g.db.ZKSpendingOutpointsByTxID(ctx, prevTxId)
 	if err != nil {
 		return tbcd.ZKSpendingOutpoint{}, err
 	}
@@ -1223,7 +1223,7 @@ func spendingOutByTxIn(ctx context.Context, s *Server, prevTxId, txId chainhash.
 }
 
 func spendingOutByTxOut(ctx context.Context, s *Server, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
-	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, txId)
+	spendingOps, err := s.g.db.ZKSpendingOutpointsByTxID(ctx, txId)
 	if err != nil {
 		return tbcd.ZKSpendingOutpoint{}, err
 	}
@@ -1236,7 +1236,7 @@ func spendingOutByTxOut(ctx context.Context, s *Server, txId chainhash.Hash, ind
 }
 
 func spentOutByTxIn(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId chainhash.Hash, inIndex int) (tbcd.ZKSpentOutput, error) {
-	spentOps, err := s.g.db.ZKSpentOutputs(ctx, sh)
+	spentOps, err := s.g.db.ZKSpentOutputsByScriptHash(ctx, sh)
 	if err != nil {
 		return tbcd.ZKSpentOutput{}, err
 	}
@@ -1249,7 +1249,7 @@ func spentOutByTxIn(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId cha
 }
 
 func spendableOutByTxOut(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId *chainhash.Hash, outIndex int) (tbcd.ZKSpendableOutput, error) {
-	spendableOut, err := s.g.db.ZKSpendableOutputs(ctx, sh)
+	spendableOut, err := s.g.db.ZKSpendableOutputsByScriptHash(ctx, sh)
 	if err != nil {
 		return tbcd.ZKSpendableOutput{}, err
 	}
