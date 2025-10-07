@@ -267,8 +267,7 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	}
 
 	// Upgrade database
-	var done bool
-	for !done {
+	for {
 		var reopen bool
 		dbVersion, err := l.Version(ctx)
 		if err != nil {
@@ -307,7 +306,8 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 					log.Infof("tbcdb database version: %v",
 						ldbVersion)
 				}
-				done = true
+				err = l.syncReplica(ctx, cfg.ReplicationURI)
+				return l, err
 			}
 			return nil, fmt.Errorf("invalid version: wanted %v got %v",
 				ldbVersion, dbVersion)
@@ -327,9 +327,6 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 			}
 		}
 	}
-
-	err = l.syncReplica(ctx, cfg.ReplicationURI)
-	return l, err
 }
 
 func random(n int) []byte {
@@ -350,7 +347,7 @@ func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
 		return nil
 	}
 	var success bool // flag to close dbs if we exit early with error
-	destTables := make([]string, len(l.tables))
+	destTables := make([]string, 0, len(l.tables))
 	for t := range l.tables {
 		destTables = append(destTables, t)
 	}
