@@ -2811,7 +2811,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 
 	// Open db.
 	cfg, err := level.NewConfig(s.cfg.Network, s.cfg.LevelDBHome,
-		s.cfg.BlockheaderCacheSize, s.cfg.ReplicaURI, s.cfg.BlockCacheSize)
+		s.cfg.ReplicaURI, s.cfg.BlockheaderCacheSize, s.cfg.BlockCacheSize)
 	if err != nil {
 		return err
 	}
