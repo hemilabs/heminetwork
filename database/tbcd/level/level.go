@@ -384,22 +384,22 @@ func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
 		if err := larry.Copy(ctx, true, l.pool, ddb, destTables); err != nil {
 			return fmt.Errorf("copy db: %w", err)
 		}
-		// for _, tb := range destTables {
-		// 	ok, _, err := larry.Compare(ctx, false, l.pool, ddb, tb)
-		// 	if err != nil {
-		// 		return fmt.Errorf("compare table %s pool -> dst: %w", tb, err)
-		// 	}
-		// 	if !ok {
-		// 		return fmt.Errorf("compare table %s pool -> dst: mismatch", tb)
-		// 	}
-		// 	ok, _, err = larry.Compare(ctx, false, ddb, l.pool, tb)
-		// 	if err != nil {
-		// 		return fmt.Errorf("compare table %s dst -> pool: %w", tb, err)
-		// 	}
-		// 	if !ok {
-		// 		return fmt.Errorf("compare table %s dst -> pool: mismatch", tb)
-		// 	}
-		// }
+		for _, tb := range destTables {
+			ok, _, err := larry.Compare(ctx, false, l.pool, ddb, tb)
+			if err != nil {
+				return fmt.Errorf("compare table %s pool -> dst: %w", tb, err)
+			}
+			if !ok {
+				return fmt.Errorf("compare table %s pool -> dst: mismatch", tb)
+			}
+			ok, _, err = larry.Compare(ctx, false, ddb, l.pool, tb)
+			if err != nil {
+				return fmt.Errorf("compare table %s dst -> pool: %w", tb, err)
+			}
+			if !ok {
+				return fmt.Errorf("compare table %s dst -> pool: mismatch", tb)
+			}
+		}
 	}
 
 	err = ddb.Put(ctx, level.MetadataDB, replicaSyncKey, r)
