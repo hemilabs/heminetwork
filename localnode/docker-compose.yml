@@ -162,15 +162,20 @@ services:
   geth-l1-forked:
     profiles:
       - hemitrap
-    build:
-      dockerfile: ./localnode/hemitrap/hardhat.Dockerfile
-      context: ".."
+    environment:
+      ANVIL_IP_ADDR: '0.0.0.0'
+    image: ghcr.io/foundry-rs/foundry:latest
+    entrypoint:
+      - anvil
     command:
-      - npx
-      - hardhat
-      - node
-      - --fork 
-      - <changeme>
+      - --block-time
+      - '12'
+      - --fork-url
+      - ${GETHL1ENDPOINT}
+      - --fork-chain-id
+      - '11155111'
+      - --fork-block-number
+      - '-1'
       - --port
       - '9988'
     ports:
@@ -207,6 +212,7 @@ services:
       - ./rollup.json:/tmp/rollup.json
       - ./l2-config.toml:/tmp/l2-config.toml
       - /mnt/blockstorage/tbc/tbc-upgrade-2:/tbcdata
+      # - /mnt/blockstorage/tbc/headers-9:/tbcheaders
     environment:
       OP_GETH_L1_RPC: "${GETHL1ENDPOINT:-http://geth-l1:8545}"
       OP_GETH_L2_READINESS_RPC: "http://localhost:18546"
@@ -305,7 +311,7 @@ services:
 
   op-batcher-forked:
     profiles: ["hemitrap"]
-    image: "9eb59ba2a1f573b5a81375df0fd7328160a8149d447c7c73d0e842f0d3746241"
+    image: "dacb1d2bdc7caa568b64f5ef010f6ad8897beae76ac5b89ab07e2f0c3e1d4025"
     deploy:
       restart_policy:
         condition: "any"
@@ -326,8 +332,9 @@ services:
       - "--max-channel-duration=5"
       - "--max-pending-tx=1"
       - "--l1-eth-rpc=http://geth-l1-forked:9988"
-      - "--private-key=ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+      - "--private-key=59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
       - "--throttle-threshold=0"
+      - "--log.level=TRACE"
     depends_on:
       geth-l1-forked:
         condition: "service_started"
@@ -340,7 +347,7 @@ services:
 
   op-proposer-forked:
     profiles: ["hemitrap"]
-    image: "9eb59ba2a1f573b5a81375df0fd7328160a8149d447c7c73d0e842f0d3746241"
+    image: "dacb1d2bdc7caa568b64f5ef010f6ad8897beae76ac5b89ab07e2f0c3e1d4025"
     deploy:
       restart_policy:
         condition: "any"
@@ -365,6 +372,7 @@ services:
       - --txmgr.not-in-mempool-timeout=3s
       - --allow-non-finalized=true
       - --l2oo-address=0x032d1e1dd960a4b027a9a35ff8b2b672e333bc27
+      - --log.level=TRACE
     networks:
       localnode:
 
@@ -395,10 +403,11 @@ services:
       - "--grpc-gateway-host=0.0.0.0"
       - "--enable-experimental-backfill"
 
+
   # Hemi op-node
   op-node-forked:
     # yamllint disable-line rule:line-length
-    image: "9eb59ba2a1f573b5a81375df0fd7328160a8149d447c7c73d0e842f0d3746241"
+    image: "dacb1d2bdc7caa568b64f5ef010f6ad8897beae76ac5b89ab07e2f0c3e1d4025"
     platform: linux/amd64
     profiles: ["hemitrap"]
     depends_on:
@@ -421,7 +430,8 @@ services:
       - "--ignore-missing-pectra-blob-schedule"
       - "--l1=http://geth-l1-forked:9988"
       - "--l1.rpckind=basic"
-      - "--l1.beacon=${PRYSMENDPOINT:-http://prysm:3500}"
+      - "--l1.beacon=${GETHL1ENDPOINT}"
+      - "--l1.epoch-poll-interval=12s"
       - "--l2=ws://op-geth-l2-forked:8551"
       - "--l2.jwt-secret=/tmp/jwt/jwt.hex"
       - "--sequencer.enabled=true"
@@ -437,9 +447,9 @@ services:
       - "--p2p.ban.duration=1s"
       - "--p2p.ban.threshold=-10000000000"
       - "--p2p.priv.path=/tmp/op-node-priv-key.txt"
-      - "--p2p.sequencer.key=caa4d3f71fa10a2cd87923055f61f36a94e06f094e38ee080cc1f5babd0a620a"
+      - "--p2p.sequencer.key=5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a"
       - "--log.level=info"
-      - "--syncmode=${OPSYNCMODE:-execution-layer}"
+      # - "--syncmode=${OPSYNCMODE:-execution-layer}"
       - "--override.pectrablobschedule=1748963425"
       - "--override.isthmus=1748963425"
       - "--override.holocene=1748963425"

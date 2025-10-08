@@ -4,7 +4,7 @@ module.exports = {
             chainId: 11155111,
             mining: {
                 auto: false,
-                interval: 24000
+                interval: 12000
             }
         }
     }
