@@ -417,10 +417,7 @@ func (l *ldb) v3(ctx context.Context) error {
 	}
 
 	// sort database names
-	keys := make([]string, 0, len(l.tables))
-	for k := range l.tables {
-		keys = append(keys, k)
-	}
+	keys := l.tables
 	sort.Strings(keys)
 
 	// copy config and create database destination.

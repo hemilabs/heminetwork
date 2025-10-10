@@ -268,10 +268,7 @@ func TestDbUpgradeV3(t *testing.T) {
 	}
 
 	// Get all db keys
-	keys := make([]string, 0, len(dbTemp.Tables()))
-	for k := range dbTemp.Tables() {
-		keys = append(keys, k)
-	}
+	keys := dbTemp.Tables()
 	sort.Strings(keys)
 
 	// Close temporary DB
