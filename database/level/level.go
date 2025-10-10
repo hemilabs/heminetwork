@@ -56,7 +56,7 @@ type Database struct {
 	rawPool RawPool        // raw database pool
 
 	home   string
-	tables map[string]string
+	tables []string
 }
 
 var _ database.Database = (*Database)(nil)
@@ -105,13 +105,13 @@ func (l *Database) RawDB() RawPool {
 	return maps.Clone(l.rawPool)
 }
 
-func (l *Database) Tables() map[string]string {
+func (l *Database) Tables() []string {
 	log.Tracef("Tables")
 	defer log.Tracef("Tables exit")
 
 	l.mtx.RLock()
 	defer l.mtx.RUnlock()
-	return maps.Clone(l.tables)
+	return l.tables
 }
 
 func (l *Database) openRawDB(ctx context.Context, name string, blockSize int64) error {
@@ -149,18 +149,23 @@ func New(ctx context.Context, home string) (*Database, error) {
 
 	// TODO: put zk dbs inside common dir
 	poolMap := map[string]string{
-		BlockHeadersDB:   "level",
-		BlocksMissingDB:  "level",
-		MetadataDB:       "level",
-		KeystonesDB:      "level",
-		HeightHashDB:     "level",
-		OutputsDB:        "level",
-		TransactionsDB:   "level",
-		ZKOutpointsDB:    "level",
-		ZKSpendableOutDB: "level",
-		ZKSpentOutDB:     "level",
-		ZKSpentTxDB:      "level",
-		ZKDB:             "level",
+		BlockHeadersDB:             "level",
+		BlocksMissingDB:            "level",
+		MetadataDB:                 "level",
+		KeystonesDB:                "level",
+		HeightHashDB:               "level",
+		OutputsDB:                  "level",
+		TransactionsDB:             "level",
+		"zkdb/" + ZKOutpointsDB:    "level",
+		"zkdb/" + ZKSpendableOutDB: "level",
+		"zkdb/" + ZKSpentOutDB:     "level",
+		"zkdb/" + ZKSpentTxDB:      "level",
+		"zkdb/" + ZKDB:             "level",
+	}
+
+	tables := make([]string, 0, len(poolMap))
+	for table := range poolMap {
+		tables = append(tables, filepath.Base(table))
 	}
 
 	// MultiDB makes the directory path for home
@@ -177,7 +182,7 @@ func New(ctx context.Context, home string) (*Database, error) {
 		home:    h,
 		pool:    pool,
 		rawPool: make(RawPool),
-		tables:  poolMap,
+		tables:  tables,
 	}
 
 	unwind := true

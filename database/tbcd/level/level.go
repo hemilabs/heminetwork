@@ -105,7 +105,7 @@ type ldb struct {
 
 	cfg *Config
 
-	tables map[string]string
+	tables []string
 }
 
 var _ tbcd.Database = (*ldb)(nil)
@@ -348,10 +348,7 @@ func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
 		return nil
 	}
 	var success bool // flag to close dbs if we exit early with error
-	destTables := make([]string, 0, len(l.tables))
-	for t := range l.tables {
-		destTables = append(destTables, t)
-	}
+	destTables := l.tables
 	dcfg := clickhouse.DefaultClickConfig(replicaURI, destTables)
 	ddb, err := clickhouse.NewClickDB(dcfg)
 	if err != nil {
