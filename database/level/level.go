@@ -16,6 +16,7 @@ import (
 	"github.com/juju/loggo"
 	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/filter"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 
 	"github.com/hemilabs/heminetwork/v2/database"
@@ -32,6 +33,7 @@ const (
 	HeightHashDB    = "heighthash"
 	OutputsDB       = "outputs"
 	TransactionsDB  = "transactions"
+	ZKDB            = "zkindex"
 
 	BlocksDB = "blocks" // raw database
 )
@@ -67,6 +69,13 @@ func NewDefaultConfig(home string) *Config {
 		Options: opt.Options{
 			BlockCacheEvictRemoved: true, // Do yourself a favor and leave this one alone
 			Compression:            opt.NoCompression,
+			Filter:                 filter.NewBloomFilter(10),
+			// XXX investigate if this has adverse affect on memory
+			// use and i it helps performance at all. ZK indexer
+			// may simply be too big for cache to matters.
+			// OpenFilesCacheCapacity: 2000,
+			// BlockCacheCapacity: 64 * opt.MiB,
+			// WriteBuffer:        64 * opt.MiB,
 		},
 	}
 }
@@ -218,6 +227,10 @@ func New(ctx context.Context, cfg *Config) (*Database, error) {
 	err = l.openDB(KeystonesDB)
 	if err != nil {
 		return nil, fmt.Errorf("leveldb %v: %w", KeystonesDB, err)
+	}
+	err = l.openDB(ZKDB)
+	if err != nil {
+		return nil, fmt.Errorf("leveldb %v: %w", ZKDB, err)
 	}
 	err = l.openDB(MetadataDB)
 	if err != nil {

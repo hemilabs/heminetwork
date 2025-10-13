@@ -1113,20 +1113,153 @@ func (b *btcNode) Stop() error {
 	return b.listener.Close()
 }
 
-// func newPKAddress(params *chaincfg.Params) (*btcec.PrivateKey, *btcec.PublicKey, *btcutil.AddressPubKeyHash, error) {
-// 	key, err := btcec.NewPrivateKey()
-// 	if err != nil {
-// 		return nil, err
-// 	}
-//
-// 	pk := key.PubKey().SerializeUncompressed()
-// 	// address, err := btcutil.NewAddressPubKey(pk, params)
-// 	address, err := btcutil.NewAddressPubKeyHash(btcutil.Hash160(pk), params)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return key, key.PubKey(), address, nil
-// }
+type zkTxInfo struct {
+	tx     *btcutil.Tx
+	errors []error
+}
+
+type zkTxInInfo struct {
+	zkTxInfo
+
+	inIndex  int
+	utxoTxId chainhash.Hash
+	utxoVal  uint64
+}
+
+type zkTxOutInfo struct {
+	zkTxInfo
+
+	outIndex int
+	balance  uint64
+	value    uint64
+}
+
+func (i *zkTxInfo) Err() error {
+	var errSeen error
+	for _, err := range i.errors {
+		errSeen = errors.Join(errSeen, err)
+	}
+	return errSeen
+}
+
+func zkValidateTxOut(ctx context.Context, s *Server, i *zkTxOutInfo) {
+	txOut := i.tx.MsgTx().TxOut[i.outIndex]
+	sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
+
+	// assert SpendableOutput exists
+	_, err := spendableOutByTxOut(ctx, s, sh, i.tx.Hash(), i.outIndex)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+
+	// assert spendable UTXO exists
+	_, err = spendingOutByTxOut(ctx, s, *i.tx.Hash(), i.outIndex)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+
+	// assert balance matches expected
+	rb, err := s.g.db.ZKBalanceByScriptHash(ctx, sh)
+	if err != nil {
+		// should never happen
+		panic("ZKBalanceByScriptHash")
+	}
+	if rb != i.balance {
+		err = fmt.Errorf("bad balance: expected %v, got %d", i.balance, rb)
+		i.errors = append(i.errors, err)
+	}
+
+	// assert value matches expected
+	op := tbcd.NewOutpoint(*i.tx.Hash(), uint32(i.outIndex))
+	rv, _, err := s.ZKValueAndScriptByOutpoint(ctx, op)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+	if rv != btcutil.Amount(i.value) {
+		err = fmt.Errorf("bad value: expected %v, got %d", i.value, rv)
+		i.errors = append(i.errors, err)
+	}
+}
+
+func zkValidateTxIn(ctx context.Context, s *Server, i *zkTxInInfo) {
+	txIn := i.tx.MsgTx().TxIn[i.inIndex]
+	pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+		txIn.PreviousOutPoint.Index)
+	val, tout, err := s.g.db.ZKValueAndScriptByOutpoint(ctx, pop) // Rename
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+	if val != i.utxoVal {
+		err := fmt.Errorf("prev outpoint value: expected %v, got %v", i.utxoVal, val)
+		i.errors = append(i.errors, err)
+	}
+	sh := tbcd.NewScriptHashFromScript(tout)
+
+	_, err = spendingOutByTxIn(ctx, s, i.utxoTxId,
+		*i.tx.Hash(), i.inIndex)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+
+	_, err = spentOutByTxIn(ctx, s, sh, *i.tx.Hash(), i.inIndex)
+	if err != nil {
+		i.errors = append(i.errors, err)
+	}
+}
+
+func spendingOutByTxIn(ctx context.Context, s *Server, prevTxId, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
+	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, prevTxId)
+	if err != nil {
+		return tbcd.ZKSpendingOutpoint{}, err
+	}
+
+	for _, so := range spendingOps {
+		spv := so.SpendingOutpoint
+		if spv != nil && spv.TxID.IsEqual(&txId) && spv.Index == uint32(index) {
+			return so, nil
+		}
+	}
+	return tbcd.ZKSpendingOutpoint{}, database.NotFoundError("spending outpoint by txIn")
+}
+
+func spendingOutByTxOut(ctx context.Context, s *Server, txId chainhash.Hash, index int) (tbcd.ZKSpendingOutpoint, error) {
+	spendingOps, err := s.g.db.ZKSpendingOutpoints(ctx, txId)
+	if err != nil {
+		return tbcd.ZKSpendingOutpoint{}, err
+	}
+	for _, so := range spendingOps {
+		if so.TxID.IsEqual(&txId) && so.VOutIndex == uint32(index) {
+			return so, nil
+		}
+	}
+	return tbcd.ZKSpendingOutpoint{}, database.NotFoundError("spending outpoint by txOut")
+}
+
+func spentOutByTxIn(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId chainhash.Hash, inIndex int) (tbcd.ZKSpentOutput, error) {
+	spentOps, err := s.g.db.ZKSpentOutputs(ctx, sh)
+	if err != nil {
+		return tbcd.ZKSpentOutput{}, err
+	}
+	for _, so := range spentOps {
+		if so.TxID.IsEqual(&txId) && so.TxInIndex == uint32(inIndex) {
+			return so, nil
+		}
+	}
+	return tbcd.ZKSpentOutput{}, database.NotFoundError("spent outpoint")
+}
+
+func spendableOutByTxOut(ctx context.Context, s *Server, sh tbcd.ScriptHash, txId *chainhash.Hash, outIndex int) (tbcd.ZKSpendableOutput, error) {
+	spendableOut, err := s.g.db.ZKSpendableOutputs(ctx, sh)
+	if err != nil {
+		return tbcd.ZKSpendableOutput{}, err
+	}
+	for _, so := range spendableOut {
+		if so.TxID.IsEqual(txId) && so.TxOutIndex == uint32(outIndex) {
+			return so, nil
+		}
+	}
+	return tbcd.ZKSpendableOutput{}, database.NotFoundError("spendable output")
+}
 
 func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) error {
 	for _, b := range blocks {
@@ -1167,7 +1300,6 @@ func mustHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block) er
 					t.Logf("%s", spew.Sdump(sis))
 					return errors.New("block mismatch")
 				}
-
 			case 't':
 				txId, blockHash, err := tbcd.TxIdBlockHashFromTxKey(ktx)
 				if err != nil {
@@ -1215,6 +1347,7 @@ func mustNotHave(ctx context.Context, t *testing.T, s *Server, blocks ...*block)
 				if !errors.Is(err, expected) {
 					return fmt.Errorf("expected invalid spend infos %v: %w", tx, err)
 				}
+
 			case 't':
 				txId, _, err := tbcd.TxIdBlockHashFromTxKey(ktx)
 				if err != nil {
@@ -3293,6 +3426,552 @@ func TestCacheOverflow(t *testing.T) {
 
 	if err = mustNotHave(ctx, t, s, blocks...); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestZKIndexFork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 21*time.Second)
+	defer func() {
+		cancel()
+	}()
+
+	port := testutil.FreePort()
+	n, err := newFakeNode(t, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		err := n.Stop()
+		if err != nil {
+			t.Logf("node stop: %v", err)
+		}
+	}()
+
+	go func() {
+		if err := n.Run(ctx); !errorIsOneOf(err, []error{net.ErrClosed, context.Canceled, rawpeer.ErrNoConn}) {
+			panic(err)
+		}
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	// Connect tbc service
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		ZKIndex:              true, // Test zk index
+		LevelDBHome:          t.TempDir(),
+		// LogLevel:                "tbcd=TRACE:tbc=TRACE:level=DEBUG",
+		MaxCachedTxs:            1000, // XXX
+		MaxCachedKeystones:      1000, // XXX
+		MaxCachedZK:             1000, // XXX
+		Network:                 networkLocalnet,
+		PeersWanted:             1,
+		PrometheusListenAddress: "",
+		MempoolEnabled:          true,
+		Seeds:                   []string{"127.0.0.1:" + port},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
+			panic(err)
+		}
+	}()
+	time.Sleep(250 * time.Millisecond)
+
+	// Create a bunch of weird geometries to catch all corner cases in the indexer.
+
+	//   /-> b1a -> b2a
+	// g ->  b1 ->  b2 -> b3
+	//   \-> b1b -> b2b
+
+	// best is b3
+
+	// best chain
+	parent := chaincfg.RegressionNetParams.GenesisHash
+	address := n.address
+	b1, err := n.MineAndSend(ctx, "b1", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2, err := n.MineAndSend(ctx, "b2", b1.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b3, err := n.MineAndSend(ctx, "b3", b2.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// a chain
+	b1a, err := n.MineAndSend(ctx, "b1a", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2a, err := n.MineAndSend(ctx, "b2a", b1a.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// b chain
+	b1b, err := n.MineAndSend(ctx, "b1b", parent, address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b2b, err := n.MineAndSend(ctx, "b2b", b1b.Hash(), address, MineNoKeystones)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure tbc downloads blocks
+	if err := n.MineAndSendEmpty(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for tbc to insert all blocks
+	var hasBlocks bool
+	for !hasBlocks {
+		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
+		if err != nil {
+			t.Logf("blocks not yet synced: %v", err)
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	// Verify linear indexing. Current TxIndex is sitting at genesis
+
+	// genesis -> b3 should work with negative direction (cdiff is less than target)
+	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
+	if err != nil {
+		t.Fatalf("expected success g -> b3, got %v", err)
+	}
+	if direction <= 0 {
+		t.Fatalf("expected 1 going from genesis to b3, got %v", direction)
+	}
+
+	t.Logf("sync to b2")
+	// Index to b2
+	err = s.SyncIndexersToHash(ctx, *b2.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = mustHave(ctx, t, s, n.genesis, b1, b2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// append every zkInfo to verify everything gets unwound
+	zki := make([]zkTxInInfo, 0)
+	zko := make([]zkTxOutInfo, 0)
+
+	// Check b2 TX
+	txInfo := zkTxInfo{tx: b2.TxByIndex(1)}
+
+	// b2 tx: txIn 0
+	utxoTxId := *b1.TxByIndex(0).Hash()
+	inInfo := zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b2 tx: txOut 0
+	outInfo := zkTxOutInfo{txInfo, 0, 3e9, 3e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b2 tx: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 7e9, 2e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Index to b3
+	t.Logf("sync to b3")
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check b3 TX1, which serves as TxIn for b3 TX2
+	txInfo = zkTxInfo{tx: b3.TxByIndex(1)}
+
+	// b3 tx1: txIn 0
+	utxoTxId = *b2.TxByIndex(1).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 3e09}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3 tx1: txOut 0
+	outInfo = zkTxOutInfo{txInfo, 0, 0, 11e8}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3 tx1: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 0, 19e8}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check b3 TX2
+	txInfo = zkTxInfo{tx: b3.TxByIndex(2)}
+
+	// b3 tx2: txIn 0
+	utxoTxId = *b3.TxByIndex(1).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 11e08}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3 tx2: txIn 1
+	inInfo = zkTxInInfo{txInfo, 1, utxoTxId, 19e8}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3 tx2: txOut 0
+	outInfo = zkTxOutInfo{txInfo, 0, 3e9, 11e8}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b3 tx2: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 3e9, 19e8}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify linear indexing. Current TxIndex is sitting at b3
+	t.Logf("b3: %v", b3)
+
+	// b3 -> genesis should work with positive direction (cdiff is greater than target)
+	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *s.g.chain.GenesisHash)
+	if err != nil {
+		t.Fatalf("expected success b3 -> genesis, got %v", err)
+	}
+	if direction != -1 {
+		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
+	}
+
+	// b3 -> b1 should work with positive direction
+	direction, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b1.Hash())
+	if err != nil {
+		t.Fatalf("expected success b3 -> b1, got %v", err)
+	}
+	if direction != -1 {
+		t.Fatalf("expected -1 going from b3 to genesis, got %v", direction)
+	}
+
+	// b3 -> b2a should fail
+	_, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b2a.Hash())
+	if !errors.Is(err, ErrNotLinear) {
+		t.Fatalf("b2a is not linear to b3: %v", err)
+	}
+
+	// b3 -> b2b should fail
+	_, err = indexIsLinear(ctx, s.g, *b3.Hash(), *b2b.Hash())
+	if !errors.Is(err, ErrNotLinear) {
+		t.Fatalf("b2b is not linear to b3: %v", err)
+	}
+
+	// make sure syncing to iself is non linear
+	err = s.SyncIndexersToHash(ctx, *b3.Hash())
+	if err != nil {
+		t.Fatalf("at b3, should have returned nil, got %v", err)
+	}
+
+	// unwind back to genesis
+	t.Logf("unwind to genesis")
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+
+	// check everything was unwound
+	for _, zkIn := range zki {
+		zkValidateTxIn(ctx, s, &zkIn)
+		if len(zkIn.errors) != 4 {
+			t.Fatalf("expected 4 checks to fail, got: %v", zkIn.Err())
+		}
+	}
+	for _, zkOut := range zko {
+		zkOut.balance = 1 // prevent valid 0 on error
+		zkValidateTxOut(ctx, s, &zkOut)
+		if len(zkOut.errors) != 5 {
+			t.Fatalf("expected 5 checks to fail, got: %v", zkOut.Err())
+		}
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// XXX verify indexes
+	txBH, err := s.ti.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
+	}
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
+	}
+
+	// see if we can move to b2a
+	direction, err = indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b2a.Hash())
+	if err != nil {
+		t.Fatalf("expected success genesis -> b2a, got %v", err)
+	}
+	if direction != 1 {
+		t.Fatalf("expected 1 going from genesis to b2a, got %v", direction)
+	}
+
+	t.Logf("sync to b2a")
+	err = s.SyncIndexersToHash(ctx, *b2a.Hash())
+	if err != nil {
+		t.Fatalf("wind to b2a: %v", err)
+	}
+
+	// append every zkInfo to verify everything gets unwound
+	zki = make([]zkTxInInfo, 0)
+	zko = make([]zkTxOutInfo, 0)
+
+	// Check b2a TX
+	txInfo = zkTxInfo{tx: b2a.TxByIndex(1)}
+
+	// b2a tx: txIn 0
+	utxoTxId = *b1a.TxByIndex(0).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b2a tx: txOut 0
+	outInfo = zkTxOutInfo{txInfo, 0, 3e9, 3e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b2a tx: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 7e9, 2e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// unwind back to genesis
+	t.Logf("unwind to genesis 2")
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+
+	// check everything was unwound
+	for _, zkIn := range zki {
+		zkValidateTxIn(ctx, s, &zkIn)
+		if len(zkIn.errors) != 4 {
+			t.Fatalf("expected 4 checks to fail, got: %v", zkIn.Err())
+		}
+	}
+	for _, zkOut := range zko {
+		zkOut.balance = 1 // prevent valid 0 on error
+		zkValidateTxOut(ctx, s, &zkOut)
+		if len(zkOut.errors) != 5 {
+			t.Fatalf("expected 5 checks to fail, got: %v", zkOut.Err())
+		}
+	}
+
+	txBH, err = s.ti.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
+	}
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
+	}
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	t.Logf("sync to b2b")
+	err = s.SyncIndexersToHash(ctx, *b2b.Hash())
+	if err != nil {
+		t.Fatalf("wind to b2b: %v", err)
+	}
+
+	// append every zkInfo to verify everything gets unwound
+	zki = make([]zkTxInInfo, 0)
+	zko = make([]zkTxOutInfo, 0)
+
+	// Check b2b TX
+	txInfo = zkTxInfo{tx: b2b.TxByIndex(1)}
+
+	// b2b tx: txIn 0
+	utxoTxId = *b1b.TxByIndex(0).Hash()
+	inInfo = zkTxInInfo{txInfo, 0, utxoTxId, 5e9}
+	zki = append(zki, inInfo)
+	zkValidateTxIn(ctx, s, &inInfo)
+	if err := inInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b2b tx: txOut 0
+	outInfo = zkTxOutInfo{txInfo, 0, 3e9, 3e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	// b2b tx: txOut 1
+	outInfo = zkTxOutInfo{txInfo, 1, 7e9, 2e9}
+	zko = append(zko, outInfo)
+	zkValidateTxOut(ctx, s, &outInfo)
+	if err := outInfo.Err(); err != nil {
+		t.Fatal(err)
+	}
+
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
+	}
+
+	// unwind back to genesis
+	t.Logf("unwind to genesis 3")
+	err = s.SyncIndexersToHash(ctx, *s.g.chain.GenesisHash)
+	if err != nil {
+		t.Fatalf("unwinding to genesis should have returned nil, got %v", err)
+	}
+	err = mustHave(ctx, t, s, n.genesis, b1, b2, b3)
+	if err == nil {
+		t.Fatalf("expected an error from mustHave")
+	}
+
+	// check everything was unwound
+	for _, zkIn := range zki {
+		zkValidateTxIn(ctx, s, &zkIn)
+		if len(zkIn.errors) != 4 {
+			t.Fatalf("expected 4 checks to fail, got: %v", zkIn.Err())
+		}
+	}
+	for _, zkOut := range zko {
+		zkOut.balance = 1 // prevent valid 0 on error
+		zkValidateTxOut(ctx, s, &zkOut)
+		if len(zkOut.errors) != 5 {
+			t.Fatalf("expected 5 checks to fail, got: %v", zkOut.Err())
+		}
+	}
+
+	txBH, err = s.ti.IndexerAt(ctx)
+	if err != nil {
+		t.Fatalf("expected success getting tx index hash, got: %v", err)
+	}
+	if !txBH.Hash.IsEqual(s.g.chain.GenesisHash) {
+		t.Fatalf("expected tx index hash to be equal to genesis, got: %v", txBH)
+	}
+	if txBH.Height != 0 {
+		t.Fatalf("expected tx index height to be 0, got: %v", txBH.Height)
+	}
+	for address := range n.keys {
+		balance, err := s.BalanceByAddress(ctx, address)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, balance)
+		utxos, err := s.UtxosByAddress(ctx, true, address, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v: %v", address, utxos)
 	}
 }
 

@@ -404,6 +404,11 @@ func tbcdb(pctx context.Context, flags []string) error {
 		fmt.Println("\tutxosbyscripthash [hash] <count> <start>")
 		fmt.Println("\tutxosbyscripthashcount [hash]")
 		fmt.Println("\tversion")
+		fmt.Println("\tzkbalancebyscripthash")
+		fmt.Println("\tzkvalueandscriptbyoutpoint")
+		fmt.Println("\tzkspentoutputs")
+		fmt.Println("\tzkspendingoutpoints")
+		fmt.Println("\tzkspendableoutputs")
 		fmt.Println("")
 		fmt.Println("ARGUMENTS:")
 		fmt.Println("\tThe action arguments are expected to be passed in as a key/value pair.")
@@ -672,6 +677,25 @@ func tbcdb(pctx context.Context, flags []string) error {
 		for k := range si {
 			fmt.Printf("%v\n", si[k])
 		}
+
+		// crosss check
+		index := args["index"]
+		if index == "" {
+			return errors.New("index: must be set")
+		}
+		idx, err := strconv.ParseUint(index, 10, 32)
+		if err != nil {
+			return err
+		}
+		txIdBytes := [32]byte(chtxid.CloneBytes())
+		op := tbcd.NewOutpoint(txIdBytes, uint32(idx))
+		// copy(h[:], chtxid[:])
+		// op := tbcd.NewOutpoint(h, uint32(idx))
+		sh, err := s.ScriptHashByOutpoint(ctx, op)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%x\n", sh)
 
 	case "blockintxindex":
 		blkid := args["blkid"]
@@ -998,6 +1022,113 @@ func tbcdb(pctx context.Context, flags []string) error {
 			return fmt.Errorf("version: %w", err)
 		}
 		fmt.Printf("database version: %v\n", version)
+
+	case "zkbalancebyscripthash":
+		scripthash := args["scripthash"]
+		if scripthash == "" {
+			return errors.New("scripthash: must be set")
+		}
+		sh, err := tbcd.NewScriptHashFromString(scripthash)
+		if err != nil {
+			return fmt.Errorf("scripthash: %w", err)
+		}
+
+		balance, err := s.ZKBalanceByScriptHash(ctx, sh)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("balance: %v\n", balance)
+
+	case "zkvalueandscriptbyoutpoint":
+		outpoint := args["outpoint"]
+		if outpoint == "" {
+			return errors.New("outpoint: must be set")
+		}
+		op, err := tbcd.NewOutpointFromString(outpoint)
+		if err != nil {
+			return fmt.Errorf("outpoint: %w", err)
+		}
+
+		value, script, err := s.ZKValueAndScriptByOutpoint(ctx, *op)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("value    : %v\n", value)
+		fmt.Printf("script   : %x\n", script)
+		fmt.Printf("script hash: %v\n", tbcd.NewScriptHashFromScript(script))
+
+	case "zkspentoutputs":
+		scripthash := args["scripthash"]
+		if scripthash == "" {
+			return errors.New("scripthash: must be set")
+		}
+		sh, err := tbcd.NewScriptHashFromString(scripthash)
+		if err != nil {
+			return fmt.Errorf("scripthash: %w", err)
+		}
+
+		sos, err := s.ZKSpentOutputs(ctx, sh)
+		if err != nil {
+			return err
+		}
+		for _, v := range sos {
+			fmt.Printf("script hash            : %v\n", v.ScriptHash)
+			fmt.Printf("block height           : %v\n", v.BlockHeight)
+			fmt.Printf("block hash             : %v\n", v.BlockHash)
+			fmt.Printf("tx id                  : %v\n", v.TxID)
+			fmt.Printf("previous outpoint hash : %v\n", v.PrevOutpointHash)
+			fmt.Printf("previous outpoint index: %v\n", v.PrevOutpointIndex)
+			fmt.Printf("tx in index            : %v\n\n", v.TxInIndex)
+		}
+
+	case "zkspendingoutpoints":
+		txid := args["txid"]
+		if txid == "" {
+			return errors.New("txid: must be set")
+		}
+		chtxid, err := chainhash.NewHashFromStr(txid)
+		if err != nil {
+			return fmt.Errorf("chainhash: %w", err)
+		}
+
+		sos, err := s.ZKSpendingOutpoints(ctx, *chtxid)
+		if err != nil {
+			return err
+		}
+		for _, v := range sos {
+			fmt.Printf("tx id                  : %v\n", v.TxID)
+			fmt.Printf("block height           : %v\n", v.BlockHeight)
+			fmt.Printf("block hash             : %v\n", v.BlockHash)
+			fmt.Printf("vout index             : %v\n", v.VOutIndex)
+			if v.SpendingOutpoint != nil {
+				fmt.Printf("spending outpoint      : %v:%v\n\n",
+					v.SpendingOutpoint.TxID, v.SpendingOutpoint.Index)
+			} else {
+				fmt.Printf("spending outpoint      : N/A\n\n")
+			}
+		}
+
+	case "zkspendableoutputs":
+		scripthash := args["scripthash"]
+		if scripthash == "" {
+			return errors.New("scripthash: must be set")
+		}
+		sh, err := tbcd.NewScriptHashFromString(scripthash)
+		if err != nil {
+			return fmt.Errorf("scripthash: %w", err)
+		}
+
+		sos, err := s.ZKSpendableOutputs(ctx, sh)
+		if err != nil {
+			return err
+		}
+		for _, v := range sos {
+			fmt.Printf("script hash            : %v\n", v.ScriptHash)
+			fmt.Printf("block height           : %v\n", v.BlockHeight)
+			fmt.Printf("block hash             : %v\n", v.BlockHash)
+			fmt.Printf("tx id                  : %v\n", v.TxID)
+			fmt.Printf("tx out index           : %v\n\n", v.TxOutIndex)
+		}
 
 	case "metadatabatchget", "metadatabatchput", "blockheadergenesisinsert",
 		"blockheadercachestats", "blockheadersinsert", "blockheadersremove",
