@@ -31,6 +31,36 @@ Tx index
 cache[txid + height + hash + txOutIndex] = nil          // SpendingOutpoint
 ```
 
+### Overall state
+
+We need to roll-up the entire state of a block too as we process the indexer.
+The state will be rolled-up in a merkle tree and will contain the following
+information:
+```
+sha256(be_uint32(height) + blockhash)                            // Positional proof
+sha256(blockheader + FillBytes(cumdiff))                         // Header and cumdiff
+for range block.ins {sha256(SpentOutput+SpendingOutpointValue) } // Spent ouput by where
+for range block.outs {sha256(SpendableOutput) }                  // Spendables outputs
+```
+
+After rolling up a block it needs to recorded as the transition from the
+parent. This works just like blockheaders do. It is stacked on top of a parent
+with a cumulative state change.
+```
+db[sha256(be_uint32(height) + blockhash)] = merkle(parent.state.merkle, state.merkle) + state.merkletree
+```
+This stores the state transition at blockhash+blockheight which is witnessed
+inside the state.merkletree and witness the stacking on top of a parent.
+
+Thoughts:
+1. There are a few corners hiding in there and maybe we should roll up the
+   state change merkle into the overall block merkle we are generating.
+2. Consensus enforces parent before child Tx's in the blockheader merkle root.
+   This practically means we can handle Tx's in order of appearance (reverse on
+   unwind).
+3. This can in theory proof the entire chain "positionally" but you do have to
+   show up with a whole lot of inputs.
+
 ### Unwinding
 
 Cache values are mixed updates and inserts thus, on unwind there must be

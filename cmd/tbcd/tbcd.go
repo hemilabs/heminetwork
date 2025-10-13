@@ -97,7 +97,7 @@ var (
 		},
 		"TBC_MAX_CACHED_ZK": config.Config{
 			Value:        &cfg.MaxCachedZK,
-			DefaultValue: int(2e6),
+			DefaultValue: int(1e6),
 			Help:         "maximum cached zk rows during indexing",
 			Print:        config.PrintAll,
 		},
