@@ -242,24 +242,24 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdZKSpentOutputsByScriptHashRequest:
+		case tbcapi.CmdZKSpentOutputsRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.ZKSpentOutputsByScriptHashRequest)
-				return s.handleZKSpentOutputsByScriptHashRequest(ctx, req)
+				req := payload.(*tbcapi.ZKSpentOutputsRequest)
+				return s.handleZKSpentOutputsRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdZKSpendingOutpointsByTxIDRequest:
+		case tbcapi.CmdZKSpendingOutpointsRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.ZKSpendingOutpointsByTxIDRequest)
-				return s.handleZKSpendingOutpointsByTxIDRequest(ctx, req)
+				req := payload.(*tbcapi.ZKSpendingOutpointsRequest)
+				return s.handleZKSpendingOutpointsRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
-		case tbcapi.CmdZKSpendableOutputsByScriptHashRequest:
+		case tbcapi.CmdZKSpendableOutputsRequest:
 			handler := func(ctx context.Context) (any, error) {
-				req := payload.(*tbcapi.ZKSpendableOutputsByScriptHashRequest)
-				return s.handleZKSpendableOutputsByScriptHashRequest(ctx, req)
+				req := payload.(*tbcapi.ZKSpendableOutputsRequest)
+				return s.handleZKSpendableOutputsRequest(ctx, req)
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
@@ -1025,25 +1025,25 @@ func (s *Server) handleZKBalanceByScriptHashRequest(ctx context.Context, req *tb
 	}, nil
 }
 
-func (s *Server) handleZKSpentOutputsByScriptHashRequest(ctx context.Context, req *tbcapi.ZKSpentOutputsByScriptHashRequest) (any, error) {
-	log.Tracef("handleZKSpentOutputsByScriptHashRequest")
-	defer log.Tracef("handleZKSpentOutputsByScriptHashRequest exit")
+func (s *Server) handleZKSpentOutputsRequest(ctx context.Context, req *tbcapi.ZKSpentOutputsRequest) (any, error) {
+	log.Tracef("handleZKSpentOutputsRequest")
+	defer log.Tracef("handleZKSpentOutputsRequest exit")
 
 	sh, err := tbcd.NewScriptHashFromBytes(req.ScriptHash)
 	if err != nil {
-		return &tbcapi.ZKSpentOutputsByScriptHashResponse{
+		return &tbcapi.ZKSpentOutputsResponse{
 			Error: protocol.RequestErrorf("invalid scripthash: %v", err),
 		}, nil
 	}
-	sos, err := s.ZKSpentOutputsByScriptHash(ctx, sh)
+	sos, err := s.ZKSpentOutputs(ctx, sh)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.ZKSpentOutputsByScriptHashResponse{
+			return &tbcapi.ZKSpentOutputsResponse{
 				Error: protocol.NotFoundError("scripthash", sh),
 			}, nil
 		}
 		e := protocol.NewInternalError(err)
-		return &tbcapi.ZKBalanceByScriptHashResponse{
+		return &tbcapi.ZKSpentOutputsResponse{
 			Error: e.ProtocolError(),
 		}, e
 	}
@@ -1061,24 +1061,24 @@ func (s *Server) handleZKSpentOutputsByScriptHashRequest(ctx context.Context, re
 		})
 	}
 
-	return &tbcapi.ZKSpentOutputsByScriptHashResponse{
+	return &tbcapi.ZKSpentOutputsResponse{
 		SpentOutputs: rsos,
 	}, nil
 }
 
-func (s *Server) handleZKSpendingOutpointsByTxIDRequest(ctx context.Context, req *tbcapi.ZKSpendingOutpointsByTxIDRequest) (any, error) {
-	log.Tracef("handleZKSpendingOutpointsByTxIDRequest")
-	defer log.Tracef("handleZKSpendingOutpointsByTxIDRequest exit")
+func (s *Server) handleZKSpendingOutpointsRequest(ctx context.Context, req *tbcapi.ZKSpendingOutpointsRequest) (any, error) {
+	log.Tracef("handleZKSpendingOutpointsRequest")
+	defer log.Tracef("handleZKSpendingOutpointsRequest exit")
 
-	sos, err := s.ZKSpendingOutpointsByTxID(ctx, req.TxID)
+	sos, err := s.ZKSpendingOutpoints(ctx, req.TxID)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.ZKSpendingOutpointsByTxIDResponse{
+			return &tbcapi.ZKSpendingOutpointsResponse{
 				Error: protocol.NotFoundError("txid", req.TxID),
 			}, nil
 		}
 		e := protocol.NewInternalError(err)
-		return &tbcapi.ZKSpendingOutpointsByTxIDResponse{
+		return &tbcapi.ZKSpendingOutpointsResponse{
 			Error: e.ProtocolError(),
 		}, e
 	}
@@ -1101,30 +1101,30 @@ func (s *Server) handleZKSpendingOutpointsByTxIDRequest(ctx context.Context, req
 		})
 	}
 
-	return &tbcapi.ZKSpendingOutpointsByTxIDResponse{
+	return &tbcapi.ZKSpendingOutpointsResponse{
 		SpendingOutpoints: rsos,
 	}, nil
 }
 
-func (s *Server) handleZKSpendableOutputsByScriptHashRequest(ctx context.Context, req *tbcapi.ZKSpendableOutputsByScriptHashRequest) (any, error) {
-	log.Tracef("handleZKSpendableOutputsByScriptHashRequest")
-	defer log.Tracef("handleZKSpendableOutputsByScriptHashRequest exit")
+func (s *Server) handleZKSpendableOutputsRequest(ctx context.Context, req *tbcapi.ZKSpendableOutputsRequest) (any, error) {
+	log.Tracef("handleZKSpendableOutputsRequest")
+	defer log.Tracef("handleZKSpendableOutputsRequest exit")
 
 	sh, err := tbcd.NewScriptHashFromBytes(req.ScriptHash)
 	if err != nil {
-		return &tbcapi.ZKSpendableOutputsByScriptHashResponse{
+		return &tbcapi.ZKSpendableOutputsResponse{
 			Error: protocol.RequestErrorf("invalid scripthash: %v", err),
 		}, nil
 	}
-	sos, err := s.ZKSpendableOutputsByScriptHash(ctx, sh)
+	sos, err := s.ZKSpendableOutputs(ctx, sh)
 	if err != nil {
 		if errors.Is(err, database.ErrNotFound) {
-			return &tbcapi.ZKSpentOutputsByScriptHashResponse{
+			return &tbcapi.ZKSpentOutputsResponse{
 				Error: protocol.NotFoundError("scripthash", sh),
 			}, nil
 		}
 		e := protocol.NewInternalError(err)
-		return &tbcapi.ZKSpendableOutputsByScriptHashResponse{
+		return &tbcapi.ZKSpendableOutputsResponse{
 			Error: e.ProtocolError(),
 		}, e
 	}
@@ -1140,7 +1140,7 @@ func (s *Server) handleZKSpendableOutputsByScriptHashRequest(ctx context.Context
 		})
 	}
 
-	return &tbcapi.ZKSpendableOutputsByScriptHashResponse{
+	return &tbcapi.ZKSpendableOutputsResponse{
 		SpendableOutputs: rsos,
 	}, nil
 }

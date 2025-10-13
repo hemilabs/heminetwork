@@ -2616,7 +2616,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		// XXX make this a function?
 		select {
 		case <-ctx.Done():
-			return
+			return si
 		default:
 		}
 		panic(err)
@@ -2703,19 +2703,19 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		// If keystone and zk indexers are disabled we are synced.
 		if !s.cfg.HemiIndex && !s.cfg.ZKIndex {
 			si.Synced = true
-			return
+			return si
 		}
 		if !(s.cfg.HemiIndex && si.Keystone.Hash.IsEqual(&bhb.Hash)) {
 			// Keystone index not synced
-			return
+			return si
 		}
 		if !(s.cfg.ZKIndex && si.ZK.Hash.IsEqual(&bhb.Hash)) {
 			// ZK index not synced
-			return
+			return si
 		}
 		si.Synced = true
 	}
-	return
+	return si
 }
 
 // Synced returns true if all block headers, blocks and all indexes are caught up.
