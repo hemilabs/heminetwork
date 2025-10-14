@@ -66,7 +66,6 @@ testnet)
 	TBCNET="testnet3"
 	OVERRIDES="--override.ecotone=1715865630 \\
 	--override.canyon=1715865630 \\
-	--override.cancun=1715865630 \\
 	--override.hvm0=1733930401 \\
  	--override.isthmus=1748963425 \\
  	--override.holocene=1748963425 \\
