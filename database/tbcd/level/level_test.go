@@ -831,7 +831,7 @@ func TestDbUpgradeV4Errors(t *testing.T) {
 func encodeKeystoneV1(ks tbcd.Keystone) (eks [chainhash.HashSize + hemi.L2KeystoneAbrevSize]byte) {
 	copy(eks[0:32], ks.BlockHash[:])
 	copy(eks[32:], ks.AbbreviatedKeystone[:])
-	return eks
+	return
 }
 
 func encodeKeystoneToSliceV1(ks tbcd.Keystone) []byte {
