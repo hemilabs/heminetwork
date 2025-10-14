@@ -35,6 +35,8 @@ func init() {
 	}
 }
 
+var ErrConnectionClosed = errors.New("mock server closed")
+
 type mockHandler struct {
 	handleFunc func(w http.ResponseWriter, r *http.Request) error
 	errCh      chan error  // use notifyErr to write to it
@@ -78,7 +80,8 @@ func (f *mockHandler) notifyErr(ctx context.Context, err error) {
 func (f *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !f.Running() {
 		log.Infof("%v: %v connection to closed server", f.name, r.RemoteAddr)
-		http.Error(w, string("mock server closed"), http.StatusServiceUnavailable)
+		http.Error(w, ErrConnectionClosed.Error(), http.StatusServiceUnavailable)
+		f.notifyErr(f.pctx, ErrConnectionClosed)
 		return
 	}
 	log.Infof("serving %v: %v", r.RemoteAddr, r.RequestURI)

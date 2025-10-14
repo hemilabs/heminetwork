@@ -5,10 +5,12 @@
 package hproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -20,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/juju/loggo"
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -60,6 +63,8 @@ const (
 	RouteControlAdd    = routeControl + "/add"
 	RouteControlRemove = routeControl + "/remove"
 	RouteControlList   = routeControl + "/list"
+
+	defaultMaxRequestSize = "4mb"
 )
 
 var (
@@ -72,6 +77,25 @@ func init() {
 		panic(err)
 	}
 }
+
+type ForbiddenMethodError struct {
+	method string
+}
+
+func (fme ForbiddenMethodError) Error() string {
+	return fmt.Sprintf("method not allowed: %s", fme.method)
+}
+
+func (fme ForbiddenMethodError) Is(target error) bool {
+	_, ok := target.(ForbiddenMethodError)
+	return ok
+}
+
+var (
+	ErrForbiddenMethod ForbiddenMethodError
+	ErrRequestTooLarge = errors.New("request payload too large")
+	ErrInvalidRequest  = errors.New("invalid request type")
+)
 
 func handle(service string, mux *http.ServeMux, pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	mux.HandleFunc(pattern, handler)
@@ -139,6 +163,8 @@ type Config struct {
 	HVMURLs                 []string
 	ListenAddress           string
 	LogLevel                string
+	MaxRequestSize          string
+	MethodFilter            []string
 	Network                 string
 	PollFrequency           time.Duration
 	PrometheusListenAddress string
@@ -156,6 +182,7 @@ func NewDefaultConfig() *Config {
 		Network:             "mainnet",
 		PrometheusNamespace: appName,
 		RequestTimeout:      DefaultRequestTimeout,
+		MaxRequestSize:      defaultMaxRequestSize,
 	}
 }
 
@@ -169,6 +196,12 @@ type Server struct {
 
 	hvmHandlers []HVMHandler       // hvm nodes
 	clients     map[string]*client // [ip_address]server_id
+
+	// method whitelist
+	// doesn't require locking as it's created on
+	// startup, and isn't modified further
+	whitelist      map[string]struct{}
+	maxRequestSize int64
 
 	// Prometheus
 	promCollectors        []prometheus.Collector
@@ -190,6 +223,17 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg.RequestTimeout = DefaultRequestTimeout
 	}
 
+	if cfg.MaxRequestSize == "" {
+		cfg.MaxRequestSize = defaultMaxRequestSize
+	}
+	maxReqSize, err := humanize.ParseBytes(cfg.MaxRequestSize)
+	if err != nil {
+		return nil, fmt.Errorf("max request size: %w", err)
+	}
+	if maxReqSize > math.MaxInt64 {
+		return nil, errors.New("max request size")
+	}
+
 	s := &Server{
 		cfg:     cfg,
 		clients: make(map[string]*client, expectedClients),
@@ -198,6 +242,8 @@ func NewServer(cfg *Config) (*Server, error) {
 			Name:      "proxy_calls",
 			Help:      "The total number of successful proxy calls",
 		}),
+		whitelist:      make(map[string]struct{}, len(cfg.MethodFilter)),
+		maxRequestSize: int64(maxReqSize),
 	}
 
 	switch strings.ToLower(cfg.Network) {
@@ -205,6 +251,10 @@ func NewServer(cfg *Config) (*Server, error) {
 	case "sepolia":
 	default:
 		return nil, fmt.Errorf("unknown network %q", cfg.Network)
+	}
+
+	for _, m := range cfg.MethodFilter {
+		s.whitelist[m] = struct{}{}
 	}
 
 	return s, nil
@@ -462,6 +512,24 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 
 	startTime := time.Now()
 
+	// limit body size
+	r.Body = http.MaxBytesReader(w, r.Body, s.maxRequestSize)
+
+	if err := s.filterRequest(r); err != nil {
+		switch {
+		case errors.Is(err, ErrForbiddenMethod):
+			w.WriteHeader(http.StatusForbidden)
+		case errors.Is(err, ErrInvalidRequest):
+			w.WriteHeader(http.StatusUnsupportedMediaType)
+		case errors.Is(err, ErrRequestTooLarge):
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		log.Debugf("request filtered: %v", err)
+		return
+	}
+
 	// Select host to call
 	s.mtx.Lock()
 	id := -1
@@ -565,6 +633,28 @@ func (s *Server) handleProxyRequest(w http.ResponseWriter, r *http.Request) {
 //		panic(e)
 //	}
 // }
+
+func (s *Server) filterRequest(r *http.Request) error {
+	// copy and reset body
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		maxBytesError := &http.MaxBytesError{}
+		if errors.As(err, &maxBytesError) {
+			return ErrRequestTooLarge
+		}
+		return err
+	}
+	r.Body = io.NopCloser(bytes.NewReader(data))
+
+	var j EthereumRequest
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&j); err != nil {
+		return ErrInvalidRequest
+	}
+	if _, ok := s.whitelist[j.Method]; !ok {
+		return ForbiddenMethodError{method: j.Method}
+	}
+	return nil
+}
 
 func (s *Server) _clientRemove(remoteAddr string) {
 	if v, ok := s.clients[remoteAddr]; ok {

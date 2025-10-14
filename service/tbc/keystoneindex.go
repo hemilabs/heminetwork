@@ -22,7 +22,6 @@ type keystoneIndexer struct {
 	indexerCommon
 
 	cacheCapacity int
-	hemiGenesis   *HashHeight
 }
 
 var (
@@ -33,13 +32,13 @@ var (
 func NewKeystoneIndexer(g geometryParams, cacheLen int, enabled bool, hemiGenesis *HashHeight) Indexer {
 	ki := &keystoneIndexer{
 		cacheCapacity: cacheLen,
-		hemiGenesis:   hemiGenesis,
 	}
 	ki.indexerCommon = indexerCommon{
 		name:    "keystone",
 		enabled: enabled,
 		g:       g,
 		p:       ki,
+		genesis: hemiGenesis,
 	}
 	return ki
 }

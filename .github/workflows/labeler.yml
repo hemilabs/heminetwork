@@ -4,7 +4,10 @@
 
 # GitHub Actions workflow to automatically label pull requests.
 name: "Label"
-on: [ "pull_request_target" ]
+on:
+  pull_request_target:
+    branches: ["main"]
+    types: ["labeled", "unlabeled", "opened", "closed", "synchronize"]
 
 jobs:
   labeler:
@@ -16,3 +19,63 @@ jobs:
     steps:
       - name: "Label pull requests"
         uses: actions/labeler@634933edcd8ababfe52f92936142cc22ac488b1b # v6.0.1
+
+      - name: "Check if CHANGELOG changed"
+        id: "changelog-check"
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          GH_REPO: "${{ github.repository }}"
+          PR_NUMBER: "${{ github.event.pull_request.number }}"
+        run: |
+          CL_CHANGED=false
+          files=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER/files" --jq '.[].filename')
+          if echo "$files" | grep -q '^CHANGELOG.md$'; then
+            CL_CHANGED=true
+          fi
+          echo "changed=$CL_CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: "Manage changelog labels"
+        id: "changelog"
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          GH_REPO: "${{ github.repository }}"
+          PR_NUMBER: "${{ github.event.pull_request.number }}"
+          CL_CHANGED: "${{ steps.changelog-check.outputs.changed }}"
+        run: |
+          labels=$(gh api "repos/$GH_REPO/pulls/$PR_NUMBER" --jq '.labels[].name')
+          REQUIRED=false
+
+          edit_label() {
+            action="$1"
+            label="$2"
+
+            if [ "$action" = "add" ]; then
+              gh api -X POST "repos/$GH_REPO/issues/$PR_NUMBER/labels" \
+                -F "labels[]=$(printf '%s' "$label")" >/dev/null 2>&1 || true
+            elif [ "$action" = "remove" ]; then
+              encoded_label=$(printf "%s" "$label" | jq -s -R -r @uri)
+              gh api -X DELETE "repos/$GH_REPO/issues/$PR_NUMBER/labels/$encoded_label" >/dev/null 2>&1 || true
+            else
+              echo "unknown action: $action"
+              exit 1
+            fi
+          }
+
+          if [ "$CL_CHANGED" = "true" ]; then
+            edit_label remove "changelog: required"
+            edit_label add "changelog: done"
+          elif echo "$labels" | grep -q "^changelog: skip$"; then
+            edit_label remove "changelog: required"
+          else
+            edit_label add "changelog: required"
+            edit_label remove "changelog: done"
+            REQUIRED=true
+          fi
+
+          echo "required=$REQUIRED" >> "$GITHUB_OUTPUT"
+
+      - name: "Block if changelog has not been updated"
+        if: "${{ steps.changelog.outputs.required == 'true' }}"
+        run: |
+          echo "❌ This pull request must have either 'changelog: done' or 'changelog: skip' label before merging."
+          exit 1

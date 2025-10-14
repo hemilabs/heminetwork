@@ -7,11 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
 - Add ZK indexers.
+- Add RPC request method whitelist to hproxy ([#691](https://github.com/hemilabs/heminetwork/pull/691)).
 
 ### Changed
 
 - Update required Go version to [Go 1.25](https://tip.golang.org/doc/go1.25).
+
+### Fixed
+
+- Fix typos across the codebase
+  ([#694](https://github.com/hemilabs/heminetwork/pull/694)).
 
 ## [v2.0.0]
 

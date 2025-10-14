@@ -92,7 +92,7 @@ make test
 
 ### Code style
 
-- Follow [Effective Go](hhttps://go.dev/doc/effective_go).
+- Follow [Effective Go](https://go.dev/doc/effective_go).
 - Keep lines under 80 characters where possible.
   - Don't wrap long function signatures; it makes them harder to read.
   - Avoid wrapping of nested `if err := abc; err != nil`; move the `err` assignment above the if statement.
@@ -140,6 +140,13 @@ For the body (longer description):
 ### Changelog
 
 We maintain a [CHANGELOG.md](CHANGELOG.md) for all notable changes. Update it in the same pull request as your change.
+
+Pull requests are automatically labeled based on changelog status:
+
+- **`changelog: required`** - Added by default when no changelog entry is detected
+- **`changelog: done`** - Automatically applied when `CHANGELOG.md` is updated
+- **`changelog: skip`** - Only for internal changes invisible to users (CI/build scripts, test fixes, minor typos in
+  non-user docs). Most changes affecting code behavior, APIs, or user-facing features require changelog entries.
 
 Follow the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) style:
 

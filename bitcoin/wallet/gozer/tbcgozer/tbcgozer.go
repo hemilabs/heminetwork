@@ -173,7 +173,7 @@ func (t *tbcGozer) UtxosByAddress(ctx context.Context, filterMempool bool, addr 
 
 	buResp, ok := res.(*tbcapi.UTXOsByAddressResponse)
 	if !ok {
-		return nil, fmt.Errorf("not a utxos by address respose %T", res)
+		return nil, fmt.Errorf("not a utxos by address response %T", res)
 	}
 
 	if buResp.Error != nil {

@@ -147,7 +147,7 @@ type ClientOptions struct {
 	// of being added to the pool.
 	MaxConnections int
 
-	// PromNamespace is the application Prometheus namespace.
+	// PrometheusNamespace is the application Prometheus namespace.
 	PrometheusNamespace string
 }
 

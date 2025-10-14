@@ -413,7 +413,7 @@ Several components of the Hemi stack peer with different P2P networks:
   * For back-channeling Bitcoin data unavailable over Bitcoin P2P (ex: non-canonical BTC blocks that pivot over a 2+ BTC
     block reorg)
 * [Hemi] `op-geth` (via embedded `TBC`) peers with the Bitcoin P2P Network
-  * For synchronizing Bitcoin block data needed to progress `TBC`'s determinstic Bitcoin view for hVM precompile calls
+  * For synchronizing Bitcoin block data needed to progress `TBC`'s deterministic Bitcoin view for hVM precompile calls
 
 Different functionality may not work if any of these P2P network connections are not established correctly.
 
