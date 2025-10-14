@@ -7,7 +7,6 @@ package level
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -78,6 +77,7 @@ var (
 	// Metadata keys.
 	versionKey     = []byte("version")
 	replicaSyncKey = []byte("replicasync")
+	replicaModeKey = []byte("replicamode")
 
 	// These keys live in their own respective databases.
 	utxoIndexHashKey     = []byte("utxoindexhash")     // last indexed utxo block hash
@@ -330,24 +330,54 @@ func New(ctx context.Context, cfg *Config) (*ldb, error) {
 	}
 }
 
-func random(n int) []byte {
-	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
-		panic(fmt.Errorf("read random: %w", err))
-	}
-	return buf
-}
-
 func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
-	r := random(8) // random value assigned to this sync
+	// Use timestamp as sync value
+	r := []byte(time.Now().String())
+
+	// Close dbs if we exit early with error
+	var success bool
+	defer func() {
+		if !success {
+			if err := l.pool.Close(ctx); err != nil {
+				log.Errorf("close source: %v", err)
+			}
+		}
+	}()
+
+	// Get pool sync mode
+	poolMode, err := l.pool.Get(ctx, level.MetadataDB, replicaModeKey)
+	if err != nil {
+		if !errors.Is(err, larry.ErrKeyNotFound) {
+			return fmt.Errorf("pool get sync mode key: %w", err)
+		}
+		// Just to be sure.
+		poolMode = nil
+	}
 	if replicaURI == "" {
+		// Open unreplicated database
+		if poolMode != nil {
+			return fmt.Errorf("pool standalone startup but sync mode = \"%s\"",
+				poolMode)
+		}
+		success = true
+		// Insert sync value
 		err := l.pool.Put(ctx, level.MetadataDB, replicaSyncKey, r)
 		if err != nil {
-			return fmt.Errorf("put replica sync key: %w", err)
+			return fmt.Errorf("put source sync key: %w", err)
 		}
 		return nil
 	}
-	var success bool // flag to close dbs if we exit early with error
+
+	// Check if pool's first replicated sync, or previously used as source.
+	// This prevents someone from shooting themselves in the foot by using
+	// a db as a source, and later accidentally desyncing it from the replica
+	// by opening it with a different role.
+	if poolMode != nil && string(poolMode) != "source" {
+		return fmt.Errorf("pool startup as \"source\" but sync mode = \"%s\"",
+			poolMode)
+	}
+
+	// Open destination
 	destTables := l.tables
 	dcfg := clickhouse.DefaultClickConfig(replicaURI, destTables)
 	ddb, err := clickhouse.NewClickDB(dcfg)
@@ -362,42 +392,44 @@ func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
 			if err := ddb.Close(ctx); err != nil {
 				log.Errorf("close replica: %v", err)
 			}
-			if err := l.pool.Close(ctx); err != nil {
-				log.Errorf("close replica: %v", err)
-			}
 		}
 	}()
 
+	// Check if destination's first sync, or previously used as replica.
+	destMode, err := ddb.Get(ctx, level.MetadataDB, replicaModeKey)
+	if err != nil {
+		if !errors.Is(err, larry.ErrKeyNotFound) {
+			return fmt.Errorf("replica get sync mode key: %w", err)
+		}
+		// Just to be sure.
+		destMode = nil
+	}
+	if destMode != nil && string(destMode) != "replica" {
+		return fmt.Errorf(`replica startup as "replica"
+		 but sync mode = "%s"`, destMode)
+	}
+
+	// Get replica sync key value for both dbs
 	drs, err := ddb.Get(ctx, level.MetadataDB, replicaSyncKey)
 	if err != nil && !errors.Is(err, larry.ErrKeyNotFound) {
 		return fmt.Errorf("replica get sync key: %w", err)
 	}
-
 	srs, err := l.pool.Get(ctx, level.MetadataDB, replicaSyncKey)
 	if err != nil && !errors.Is(err, larry.ErrKeyNotFound) {
 		return fmt.Errorf("pool get sync key: %w", err)
 	}
 
+	// If values don't match, it means the dbs are not synced.
 	if srs == nil || !bytes.Equal(srs, drs) {
+		// Copy tables from source to destination.
+		// In case of an early stoppage before they become fully synced,
+		// this will resume from the last (lexicographically greatest)
+		// key found in the destination.
 		if err := larry.Copy(ctx, true, l.pool, ddb, destTables); err != nil {
 			return fmt.Errorf("copy db: %w", err)
 		}
-		// for _, tb := range destTables {
-		// 	ok, _, err := larry.Compare(ctx, false, l.pool, ddb, tb)
-		// 	if err != nil {
-		// 		return fmt.Errorf("compare table %s pool -> dst: %w", tb, err)
-		// 	}
-		// 	if !ok {
-		// 		return fmt.Errorf("compare table %s pool -> dst: mismatch", tb)
-		// 	}
-		// 	ok, _, err = larry.Compare(ctx, false, ddb, l.pool, tb)
-		// 	if err != nil {
-		// 		return fmt.Errorf("compare table %s dst -> pool: %w", tb, err)
-		// 	}
-		// 	if !ok {
-		// 		return fmt.Errorf("compare table %s dst -> pool: mismatch", tb)
-		// 	}
-		// }
+
+		// Perform a rolling hash for each db and compare.
 		for _, tb := range destTables {
 			start := time.Now()
 			sh, err := larry.HashTable(ctx, l.pool, tb)
@@ -417,15 +449,41 @@ func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
 		}
 	}
 
-	err = ddb.Put(ctx, level.MetadataDB, replicaSyncKey, r)
+	// Update sync metadata for source.
+	err = l.pool.Update(ctx,
+		func(ctx context.Context, tx larry.Transaction) error {
+			ierr := tx.Put(ctx, level.MetadataDB, replicaSyncKey, r)
+			if ierr != nil {
+				return fmt.Errorf("source put sync key: %w", ierr)
+			}
+			ierr = tx.Put(ctx, level.MetadataDB, replicaModeKey, []byte("source"))
+			if ierr != nil {
+				return fmt.Errorf("source put sync mode key: %w", ierr)
+			}
+			return nil
+		})
 	if err != nil {
-		return fmt.Errorf("replica put sync key: %w", err)
-	}
-	err = l.pool.Put(ctx, level.MetadataDB, replicaSyncKey, r)
-	if err != nil {
-		return fmt.Errorf("pool put sync key: %w", err)
+		return err
 	}
 
+	// Update sync metadata for replica.
+	err = ddb.Update(ctx,
+		func(ctx context.Context, tx larry.Transaction) error {
+			ierr := tx.Put(ctx, level.MetadataDB, replicaSyncKey, r)
+			if ierr != nil {
+				return fmt.Errorf("replica put sync key: %w", ierr)
+			}
+			ierr = tx.Put(ctx, level.MetadataDB, replicaModeKey, []byte("replica"))
+			if ierr != nil {
+				return fmt.Errorf("replica put sync mode key: %w", ierr)
+			}
+			return nil
+		})
+	if err != nil {
+		return err
+	}
+
+	// Close dbs.
 	if err := ddb.Close(ctx); err != nil {
 		return fmt.Errorf("replica close: %w", err)
 	}
@@ -434,6 +492,7 @@ func (l *ldb) syncReplica(ctx context.Context, replicaURI string) error {
 	}
 	success = true
 
+	// From this point, sync using lazy replicator.
 	homeJournal := filepath.Join(l.cfg.Home, "journal")
 	rcfg := replicator.DefaultReplicatorConfig(homeJournal, replicator.Lazy)
 	repDB, err := replicator.NewReplicatorDB(rcfg, l.pool, ddb)
@@ -522,7 +581,7 @@ func (l *ldb) MetadataGet(ctx context.Context, key []byte) (v []byte, err error)
 			return nil
 		})
 
-	return
+	return v, err
 }
 
 func (l *ldb) MetadataBatchGet(ctx context.Context, allOrNone bool, keys [][]byte) ([]tbcd.Row, error) {

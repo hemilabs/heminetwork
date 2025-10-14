@@ -147,7 +147,6 @@ func New(ctx context.Context, home string) (*Database, error) {
 		return nil, fmt.Errorf("home dir: %w", err)
 	}
 
-	// TODO: put zk dbs inside common dir
 	poolMap := map[string]string{
 		BlockHeadersDB:             "level",
 		BlocksMissingDB:            "level",

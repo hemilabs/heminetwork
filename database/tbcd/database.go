@@ -315,7 +315,7 @@ func NewTxOut(txOut *wire.TxOut) []byte {
 func TxOutFromBytes(x []byte) (txOut wire.TxOut) {
 	txOut.Value = int64(binary.BigEndian.Uint64(x[0:]))
 	txOut.PkScript = append([]byte{}, x[8:]...)
-	return
+	return txOut
 }
 
 // CacheOutput is a densely packed representation of a bitcoin UTXo. The fields
