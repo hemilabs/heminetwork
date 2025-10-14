@@ -51,7 +51,7 @@ const (
 	daemonName      = "hemictl"
 	defaultLogLevel = daemonName + "=INFO;protocol=INFO"
 
-	tbcReadLimit = 16 * (1 << 20) // 8 MiB.
+	tbcReadLimit = 16 * (1 << 20) // 16 MiB.
 )
 
 var (

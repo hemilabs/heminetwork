@@ -85,13 +85,13 @@ var (
 		},
 		"TBC_MAX_CACHED_KEYSTONES": config.Config{
 			Value:        &cfg.MaxCachedKeystones,
-			DefaultValue: int(2e6),
+			DefaultValue: int(1e6),
 			Help:         "maximum cached keystones during indexing",
 			Print:        config.PrintAll,
 		},
 		"TBC_MAX_CACHED_TXS": config.Config{
 			Value:        &cfg.MaxCachedTxs,
-			DefaultValue: int(2e6),
+			DefaultValue: int(1e6),
 			Help:         "maximum cached utxos and/or txs during indexing",
 			Print:        config.PrintAll,
 		},
