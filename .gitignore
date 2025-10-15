@@ -3,6 +3,7 @@
 /dist/
 /pkg/
 /.gocache/
+coverage.out
 
 ## Tests
 /service/tbc/.testleveldb/
