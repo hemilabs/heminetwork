@@ -239,7 +239,11 @@ dockers_v2:
     images:
       - "hemilabs/bfgd"
       - "ghcr.io/hemilabs/bfgd"
-    tags: [ "latest", "{{ .Version }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}" ]
+    tags:
+      - "{{ .Version }}"
+      - "{{if not .Prerelease}}latest{{end}}"
+      - "{{if not .Prerelease}}{{ .Major }}{{end}}"
+      - "{{if not .Prerelease}}{{ .Major }}.{{ .Minor }}{{end}}"
     platforms:
       - "linux/amd64"
       - "linux/arm64"
@@ -254,7 +258,11 @@ dockers_v2:
     images:
       - "hemilabs/popmd"
       - "ghcr.io/hemilabs/popmd"
-    tags: [ "latest", "{{ .Version }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}" ]
+    tags:
+      - "{{ .Version }}"
+      - "{{if not .Prerelease}}latest{{end}}"
+      - "{{if not .Prerelease}}{{ .Major }}{{end}}"
+      - "{{if not .Prerelease}}{{ .Major }}.{{ .Minor }}{{end}}"
     platforms:
       - "linux/amd64"
       - "linux/arm64"
@@ -270,7 +278,11 @@ dockers_v2:
     images:
       - "hemilabs/tbcd"
       - "ghcr.io/hemilabs/tbcd"
-    tags: [ "latest", "{{ .Version }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}" ]
+    tags:
+      - "{{ .Version }}"
+      - "{{if not .Prerelease}}latest{{end}}"
+      - "{{if not .Prerelease}}{{ .Major }}{{end}}"
+      - "{{if not .Prerelease}}{{ .Major }}.{{ .Minor }}{{end}}"
     platforms:
       - "linux/amd64"
       - "linux/arm64"
@@ -285,7 +297,11 @@ dockers_v2:
     images:
       - "hemilabs/hproxyd"
       - "ghcr.io/hemilabs/hproxyd"
-    tags: [ "latest", "{{ .Version }}", "{{ .Major }}", "{{ .Major }}.{{ .Minor }}" ]
+    tags:
+      - "{{ .Version }}"
+      - "{{if not .Prerelease}}latest{{end}}"
+      - "{{if not .Prerelease}}{{ .Major }}{{end}}"
+      - "{{if not .Prerelease}}{{ .Major }}.{{ .Minor }}{{end}}"
     platforms:
       - "linux/amd64"
       - "linux/arm64"
