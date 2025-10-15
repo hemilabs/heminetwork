@@ -5,6 +5,7 @@ Every block wind/unwind goes through the following process:
 ### In
 
 UTxO index
+
 ```
 PkScript, Value = cache[PrevOut]                        // OutpointScriptValue
 Balance = cache[sha256(PkScript)]                       // ScriptHash
@@ -13,6 +14,7 @@ cache[sha256(PkScript) + height + hash + txid + PrevOut + txInIndex] = nil  // S
 ```
 
 Tx index
+
 ```
 cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // SpendingOutpointKey = SpendingOutpointValue
 ```
@@ -20,6 +22,7 @@ cache[PrevOut.Hash, height, hash, PrevOut.Index] = txid + txInIndex // SpendingO
 ### Out
 
 UTxO index
+
 ```
 cache[sha256(PkScript) + height + hash + txid + txOutIndex] = nil    // SpendableOutput
 cache[Out] = TxOut                                      // OutpointScriptValue
@@ -27,6 +30,7 @@ cache[sha256(PkScript)] += Value                        // ScriptHash
 ```
 
 Tx index
+
 ```
 cache[txid + height + hash + txOutIndex] = nil          // SpendingOutpoint
 ```
@@ -36,23 +40,29 @@ cache[txid + height + hash + txOutIndex] = nil          // SpendingOutpoint
 We need to roll-up the entire state of a block too as we process the indexer.
 The state will be rolled-up in a merkle tree and will contain the following
 information:
+
 ```
-sha256(be_uint32(height) + blockhash)                            // Positional proof
-sha256(blockheader + FillBytes(cumdiff))                         // Header and cumdiff
-for range block.ins {sha256(SpentOutput+SpendingOutpointValue) } // Spent output by where
-for range block.outs {sha256(SpendableOutput) }                  // Spendables outputs
+sha256(be_uint32(height) + blockhash)                             // Positional proof
+sha256(blockheader + FillBytes(cumdiff))                          // Header and cumdiff
+for range block.ins { sha256(SpentOutput+SpendingOutpointValue) } // Spent ouput by where
+for range block.outs { sha256(SpendableOutput) }                  // Spendables outputs
+utxo delta state root = merkle(ins, outs)
+utxo state root = trie root
 ```
 
 After rolling up a block it needs to recorded as the transition from the
 parent. This works just like blockheaders do. It is stacked on top of a parent
 with a cumulative state change.
+
 ```
-db[sha256(be_uint32(height) + blockhash)] = merkle(parent.state.merkle, state.merkle) + state.merkletree
+db[sha256(be_uint32(height) + blockhash)] = merkle(utxo state root, utxo delta state root, parent.state.merkleroot, state.merkleroot) + state.merkletree
 ```
+
 This stores the state transition at blockhash+blockheight which is witnessed
 inside the state.merkletree and witness the stacking on top of a parent.
 
 Thoughts:
+
 1. There are a few corners hiding in there and maybe we should roll up the
    state change merkle into the overall block merkle we are generating.
 2. Consensus enforces parent before child Tx's in the blockheader merkle root.
@@ -60,6 +70,21 @@ Thoughts:
    unwind).
 3. This can in theory proof the entire chain "positionally" but you do have to
    show up with a whole lot of inputs.
+
+### Trie
+
+Range over ins
+    create a delete map of
+        key = sha256(PkScript)
+        value = []PrevOutpoint
+
+Range over utxos
+    key = sha256(PkScript)
+    value = []Outpoint{txid + txOutIndex}
+
+Roll up the ins and utxos as a single key to update on disk
+
+for this height tell me if thuis utxo was spent
 
 ### Unwinding
 
@@ -94,6 +119,7 @@ cache[txid + height + hash + txOutIndex] = nil                      // Delete
 ```
 
 Thoughts
+
 1. If we keep track of the balance in SpendableOutput we can get rid of
    OutpointScriptValue however that makes cache lookups O(N), disk is O log(N).
 2. OutpointScriptValue is prunable.
@@ -106,8 +132,6 @@ Thoughts
 5. When combining utxo+tx index it feels that we are overlapping
    spending/unspent data. It looks that this can be easily reconstructed from
    utxo SpentOutput, which may be another reason to prune some values.
-
-
 
 ## Raw thoughts and other junk
 
@@ -145,6 +169,7 @@ difficulty. It consists of two indexes in the same table.
 
 Block Height Hash indexer has no payload and the index key is encoded as
 follows:
+
 ```
  0 1          4 5       37
 +-+------------+----------+
@@ -153,12 +178,13 @@ follows:
 ```
 
 Block header is encoded as follows:
+
 ```
  0       31      0    3 4   83 84
 +----------+    +------+------+----------+
 |block hash| -> |height|header|difficulty|
 +----------+    +------+------+----------+
 ```
+
 XXX Note that we reuse the encoding from height/hash that encodes height as
 uint64 so these values are off. This needs to be corrected.
-
