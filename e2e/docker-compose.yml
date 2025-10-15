@@ -75,9 +75,6 @@ services:
     build:
       dockerfile: "./docker/tbcd/Dockerfile"
       context: "./.."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     environment:
       TBC_NETWORK: "localnet"
       TBC_HEMI_INDEX: "true"
@@ -90,9 +87,6 @@ services:
     build:
       dockerfile: "./docker/bfgd/Dockerfile"
       context: "./.."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     deploy:
       restart_policy:
         condition: "any"
@@ -116,9 +110,6 @@ services:
     build:
       dockerfile: "./docker/popmd/Dockerfile"
       context: "./.."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     depends_on:
       - "bfgd"
       - "tbcd"
@@ -201,9 +192,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     depends_on:
       bitcoind:
         condition: "service_started"
@@ -235,9 +223,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     depends_on:
       geth-l1:
         condition: "service_started"
@@ -282,9 +267,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     depends_on:
       geth-l1:
         condition: "service_started"
@@ -338,9 +320,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     depends_on:
       op-node:
         condition: "service_started"
@@ -387,9 +366,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     depends_on:
       op-geth-l2:
         condition: "service_started"
@@ -426,9 +402,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     deploy:
       restart_policy:
         condition: "any"
@@ -464,9 +437,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-      platforms:
-        - linux/arm64
-        - linux/amd64/v3
     deploy:
       restart_policy:
         condition: "any"
