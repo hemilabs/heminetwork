@@ -62,8 +62,12 @@ func forkedL2Endpoint() string {
 	return "http://localhost:18546"
 }
 
-func forkedPrivateKey() string {
-	return "92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e"
+func privateKeyForTest() string {
+	if testingFork() {
+		return "92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e"
+	}
+
+	return "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 }
 
 func testingFork() bool {
@@ -206,9 +210,9 @@ func TestMonitor(t *testing.T) {
 
 func TestL1L2Comms(t *testing.T) {
 	if testingFork() {
-		testL1L2Comms(t, forkedL1Endpoint(), forkedL2Endpoint(), forkedL2Endpoint(), forkedPrivateKey())
+		testL1L2Comms(t, forkedL1Endpoint(), forkedL2Endpoint(), forkedL2Endpoint(), privateKeyForTest())
 	} else {
-		testL1L2Comms(t, "http://localhost:8545", "http://localhost:8546", "http://localhost:18546", forkedPrivateKey())
+		testL1L2Comms(t, "http://localhost:8545", "http://localhost:8546", "http://localhost:18546", privateKeyForTest())
 	}
 }
 
@@ -1635,7 +1639,12 @@ func assertOutputRootsAreTheSame(t *testing.T, ctx context.Context, l2Client *et
 }
 
 func waitForTxReceipt(t *testing.T, ctx context.Context, client *ethclient.Client, tx *types.Transaction) *types.Receipt {
-	return waitForTxReceiptForSeconds(t, ctx, client, tx, 13*time.Second)
+	delay := 5 * time.Second
+	if testingFork() {
+		delay = 13 * time.Second
+	}
+
+	return waitForTxReceiptForSeconds(t, ctx, client, tx, delay)
 }
 
 // put here for readability
