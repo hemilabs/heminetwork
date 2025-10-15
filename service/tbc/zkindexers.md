@@ -37,17 +37,19 @@ We need to roll-up the entire state of a block too as we process the indexer.
 The state will be rolled-up in a merkle tree and will contain the following
 information:
 ```
-sha256(be_uint32(height) + blockhash)                            // Positional proof
-sha256(blockheader + FillBytes(cumdiff))                         // Header and cumdiff
-for range block.ins {sha256(SpentOutput+SpendingOutpointValue) } // Spent ouput by where
-for range block.outs {sha256(SpendableOutput) }                  // Spendables outputs
+sha256(be_uint32(height) + blockhash)                             // Positional proof
+sha256(blockheader + FillBytes(cumdiff))                          // Header and cumdiff
+for range block.ins { sha256(SpentOutput+SpendingOutpointValue) } // Spent ouput by where
+for range block.outs { sha256(SpendableOutput) }                  // Spendables outputs
+utxo delta state root = merkle(ins, outs)
+utxo state root = trie root
 ```
 
 After rolling up a block it needs to recorded as the transition from the
 parent. This works just like blockheaders do. It is stacked on top of a parent
 with a cumulative state change.
 ```
-db[sha256(be_uint32(height) + blockhash)] = merkle(parent.state.merkle, state.merkle) + state.merkletree
+db[sha256(be_uint32(height) + blockhash)] = merkle(utxo state root, utxo delta state root, parent.state.merkleroot, state.merkleroot) + state.merkletree
 ```
 This stores the state transition at blockhash+blockheight which is witnessed
 inside the state.merkletree and witness the stacking on top of a parent.
@@ -60,6 +62,22 @@ Thoughts:
    unwind).
 3. This can in theory proof the entire chain "positionally" but you do have to
    show up with a whole lot of inputs.
+
+### Trie
+
+Range over ins
+    create a delete map of 
+        key = sha256(PkScript)
+        value = []PrevOutpoint
+
+Range over utxos
+    key = sha256(PkScript)
+    value = []Outpoint{txid + txOutIndex}
+
+Roll up the ins and utxos as a single key to update on disk
+
+for this height tell me if thuis utxo was spent
+
 
 ### Unwinding
 
