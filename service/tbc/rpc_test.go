@@ -1592,13 +1592,13 @@ func TestRpcZK(t *testing.T) {
 			},
 			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
-				var r tbcapi.BalanceByAddressResponse
+				var r tbcapi.ZKBalanceByScriptHashResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
 				}
-				if r.Balance != 0 {
+				if r.Satoshis != balance {
 					return protocol.Errorf("balance: got %v, wanted %v",
-						r.Balance, 0)
+						r.Satoshis, balance)
 				}
 				return r.Error
 			},
@@ -1610,7 +1610,7 @@ func TestRpcZK(t *testing.T) {
 			},
 			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
-				var r tbcapi.BalanceByAddressResponse
+				var r tbcapi.ZKBalanceByScriptHashResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
 				}
@@ -1625,7 +1625,7 @@ func TestRpcZK(t *testing.T) {
 			req:        tbcapi.ZKBalanceByScriptHashRequest{},
 			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
-				var r tbcapi.BalanceByAddressResponse
+				var r tbcapi.ZKBalanceByScriptHashResponse
 				if err := json.Unmarshal(v.Payload, &r); err != nil {
 					panic(err)
 				}
