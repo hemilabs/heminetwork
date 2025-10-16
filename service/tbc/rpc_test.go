@@ -7,6 +7,7 @@ package tbc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1407,6 +1408,402 @@ func TestTxByIdInvalid(t *testing.T) {
 		if !strings.Contains(response.Error.Message, "not found:") {
 			t.Fatalf("incorrect error found %s", response.Error.Message)
 		}
+	}
+}
+
+func bytes2hash(b []byte) chainhash.Hash {
+	h, err := chainhash.NewHash(b)
+	if err != nil {
+		panic(err)
+	}
+	return *h
+}
+
+func TestRpcZK(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
+	defer cancel()
+
+	home := t.TempDir()
+
+	// Fill up a db with zk index keys
+	const balance uint64 = 10
+	cache := createFullZKDB(ctx, t, home, balance)
+
+	// Parse out values from inserted keys
+	var (
+		out       tbcd.Outpoint
+		sh        tbcd.ScriptHash
+		spent     tbcd.SpentOutput
+		spending  tbcd.SpendingOutpointKey
+		spendable tbcd.SpendableOutput
+	)
+	// No need to check if variables were copied, if not
+	// it will fail in the subtests
+	for k := range cache {
+		op := []byte(k)
+		switch len(k) {
+		case len(out):
+			copy(out[:], op[:])
+		case len(sh):
+			copy(sh[:], op[:])
+		case len(spent):
+			copy(spent[:], op[:])
+		case len(spending):
+			copy(spending[:], op[:])
+		case len(spendable):
+			copy(spendable[:], op[:])
+		default:
+			t.Fatalf("unexpected key len = %d", len(k))
+		}
+	}
+
+	// Translate to API structs
+	apiSpent := tbcapi.ZKSpentOutput{
+		ScriptHash:        sh[:],
+		BlockHeight:       binary.BigEndian.Uint32(spent[32:]),
+		BlockHash:         bytes2hash(spent[32+4 : 32+4+32]),
+		TxID:              bytes2hash(spent[32+4+32 : 32+4+32+32]),
+		PrevOutpointHash:  bytes2hash(spent[32+4+32+32 : 32+4+32+32+32]),
+		PrevOutpointIndex: binary.BigEndian.Uint32(spent[32+4+32+32+32:]),
+		TxInIndex:         binary.BigEndian.Uint32(spent[32+4+32+32+32+4:]),
+	}
+	apiSpending := tbcapi.ZKSpendingOutpoint{
+		TxID:        bytes2hash(spending[0:32]),
+		BlockHeight: binary.BigEndian.Uint32(spending[32:]),
+		BlockHash:   bytes2hash(spending[32+4 : 32+4+32]),
+		VOutIndex:   binary.BigEndian.Uint32(spending[32+4+32:]),
+		SpendingOutpoint: &tbcapi.ZKSpendingOutpointValue{
+			TxID:  apiSpent.TxID,
+			Index: apiSpent.BlockHeight,
+		},
+	}
+	apiSpendable := tbcapi.ZKSpendableOutput{
+		ScriptHash:  sh[:],
+		BlockHeight: binary.BigEndian.Uint32(spendable[32:]),
+		BlockHash:   bytes2hash(spendable[32+4 : 32+4+32]),
+		TxID:        bytes2hash(spendable[32+4+32 : 32+4+32+32]),
+		TxOutIndex:  binary.BigEndian.Uint32(spendable[32+4+32+32:]),
+	}
+
+	tcbListenAddress := fmt.Sprintf(":%s", testutil.FreePort())
+
+	cfg := &Config{
+		AutoIndex:            false,
+		BlockCacheSize:       "10mb",
+		BlockheaderCacheSize: "1mb",
+		BlockSanity:          false,
+		ZKIndex:              true,
+		LevelDBHome:          home,
+		ListenAddress:        tcbListenAddress,
+		MaxCachedTxs:         1000,
+		MaxCachedZK:          1000,
+		Network:              networkLocalnet,
+		Seeds:                []string{"127.0.0.1:" + testutil.FreePort()},
+	}
+	_ = loggo.ConfigureLoggers(cfg.LogLevel)
+	s, err := NewServer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	go func() {
+		err := s.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			panic(err)
+		}
+	}()
+
+	// wait for server to start
+	var running bool
+	for !running {
+		select {
+		case <-time.Tick(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		running = s.Running()
+	}
+
+	tbcUrl := fmt.Sprintf("http://localhost%s%s", tcbListenAddress, tbcapi.RouteWebsocket)
+
+	c, _, err := websocket.Dial(ctx, tbcUrl, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+
+	assertPing(ctx, t, c, tbcapi.CmdPingRequest)
+
+	tws := &tbcWs{
+		conn: protocol.NewWSConn(c),
+	}
+
+	type testTableItem struct {
+		name          string
+		req           any
+		respHeader    protocol.Command
+		handler       func(ctx context.Context, v protocol.Message) *protocol.Error
+		expectedError *protocol.Error
+	}
+
+	tests := []testTableItem{
+		{
+			name: "ValueAndScriptByOutpoint",
+			req: tbcapi.ZKValueAndScriptByOutpointRequest{
+				Outpoint: tbcapi.OutPoint{
+					Hash:  *out.TxIdHash(),
+					Index: out.TxIndex(),
+				},
+			},
+			respHeader: tbcapi.CmdZKValueAndScriptByOutpointResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKValueAndScriptByOutpointResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Satoshis != balance {
+					return protocol.Errorf("balance: got %v, wanted %v",
+						r.Satoshis, balance)
+				}
+				if !bytes.Equal(out[1:33], r.PkScript) {
+					return protocol.Errorf("pkscript: got %s, wanted %x",
+						r.PkScript, out[1:33])
+				}
+				return r.Error
+			},
+		},
+		{
+			name:       "ValueAndScriptByOutpoint Not Found",
+			req:        tbcapi.ZKValueAndScriptByOutpointRequest{},
+			respHeader: tbcapi.CmdZKValueAndScriptByOutpointResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKValueAndScriptByOutpointResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				return r.Error
+			},
+			expectedError: protocol.NotFoundError("outpoint", tbcapi.OutPoint{}),
+		},
+		{
+			name: "BalanceByScriptHash",
+			req: tbcapi.ZKBalanceByScriptHashRequest{
+				ScriptHash: sh[:],
+			},
+			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKBalanceByScriptHashResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if r.Satoshis != balance {
+					return protocol.Errorf("balance: got %v, wanted %v",
+						r.Satoshis, balance)
+				}
+				return r.Error
+			},
+		},
+		{
+			name: "BalanceByScriptHash Not Found",
+			req: tbcapi.ZKBalanceByScriptHashRequest{
+				ScriptHash: testutil.SHA256(nil),
+			},
+			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKBalanceByScriptHashResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				return r.Error
+			},
+			expectedError: protocol.NotFoundError("scripthash",
+				api.ByteSlice(testutil.SHA256(nil)),
+			),
+		},
+		{
+			name:       "BalanceByScriptHash Invalid",
+			req:        tbcapi.ZKBalanceByScriptHashRequest{},
+			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKBalanceByScriptHashResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				return r.Error
+			},
+			expectedError: protocol.RequestErrorf("invalid scripthash: invalid script hash length"),
+		},
+		{
+			name: "SpentOutputs",
+			req: tbcapi.ZKSpentOutputsRequest{
+				ScriptHash: sh[:],
+			},
+			respHeader: tbcapi.CmdZKSpentOutputsResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKSpentOutputsResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if len(r.SpentOutputs) != 1 {
+					return protocol.Errorf("expected 1 output, got %d",
+						len(r.SpentOutputs))
+				}
+				if diff := deep.Equal(apiSpent, r.SpentOutputs[0]); len(diff) > 0 {
+					return protocol.Errorf("unexpected output diff: %s", diff)
+				}
+				return r.Error
+			},
+		},
+		{
+			name: "SpentOutputs Empty",
+			req: tbcapi.ZKSpentOutputsRequest{
+				ScriptHash: testutil.SHA256(nil),
+			},
+			respHeader: tbcapi.CmdZKSpentOutputsResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKSpentOutputsResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if len(r.SpentOutputs) > 0 {
+					return protocol.Errorf("expected 0 outputs, got %d",
+						len(r.SpentOutputs))
+				}
+				return r.Error
+			},
+		},
+		{
+			name:       "SpentOutputs Invalid",
+			req:        tbcapi.ZKSpentOutputsRequest{},
+			respHeader: tbcapi.CmdZKSpentOutputsResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKSpentOutputsResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				return r.Error
+			},
+			expectedError: protocol.RequestErrorf("invalid scripthash: invalid script hash length"),
+		},
+		{
+			name: "SpendingOutpoints",
+			req: tbcapi.ZKSpendingOutpointsRequest{
+				TxID: chainhash.Hash(spending[:32]),
+			},
+			respHeader: tbcapi.CmdZKSpendingOutpointsResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKSpendingOutpointsResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if len(r.SpendingOutpoints) != 1 {
+					return protocol.Errorf("expected 1 outpoint, got %d",
+						len(r.SpendingOutpoints))
+				}
+				if diff := deep.Equal(apiSpending, r.SpendingOutpoints[0]); len(diff) > 0 {
+					return protocol.Errorf("unexpected outpoint diff: %s", diff)
+				}
+				return r.Error
+			},
+		},
+		{
+			name: "SpendingOutpoints Not Found",
+			req: tbcapi.ZKSpendingOutpointsRequest{
+				TxID: chainhash.Hash{},
+			},
+			respHeader: tbcapi.CmdZKSpendingOutpointsResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKSpendingOutpointsResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if len(r.SpendingOutpoints) > 0 {
+					return protocol.Errorf("expected 0 outpoints, got %d",
+						len(r.SpendingOutpoints))
+				}
+				return r.Error
+			},
+		},
+		{
+			name: "SpendableOutputs",
+			req: tbcapi.ZKSpendableOutputsRequest{
+				ScriptHash: sh[:],
+			},
+			respHeader: tbcapi.CmdZKSpendableOutputsResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKSpendableOutputsResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if len(r.SpendableOutputs) != 1 {
+					return protocol.Errorf("expected 1 output, got %d",
+						len(r.SpendableOutputs))
+				}
+				if diff := deep.Equal(apiSpendable, r.SpendableOutputs[0]); len(diff) > 0 {
+					return protocol.Errorf("unexpected outpoint diff: %s", diff)
+				}
+				return r.Error
+			},
+		},
+		{
+			name: "SpendableOutputs Empty",
+			req: tbcapi.ZKSpendableOutputsRequest{
+				ScriptHash: testutil.SHA256(nil),
+			},
+			respHeader: tbcapi.CmdZKSpendableOutputsResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKSpendableOutputsResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				if len(r.SpendableOutputs) != 0 {
+					return protocol.Errorf("expected 0 output, got %d",
+						len(r.SpendableOutputs))
+				}
+				return r.Error
+			},
+		},
+		{
+			name:       "SpendableOutputs Invalid",
+			req:        tbcapi.ZKSpendableOutputsRequest{},
+			respHeader: tbcapi.CmdZKSpendableOutputsResponse,
+			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
+				var r tbcapi.ZKSpendableOutputsResponse
+				if err := json.Unmarshal(v.Payload, &r); err != nil {
+					panic(err)
+				}
+				return r.Error
+			},
+			expectedError: protocol.RequestErrorf("invalid scripthash: invalid script hash length"),
+		},
+	}
+
+	for _, tti := range tests {
+		t.Run(tti.name, func(t *testing.T) {
+			err = tbcapi.Write(ctx, tws.conn, "someid", tti.req)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var v protocol.Message
+			if err := wsjson.Read(ctx, c, &v); err != nil {
+				t.Fatal(err)
+			}
+
+			if v.Header.Command != tti.respHeader {
+				t.Fatalf("received unexpected command: %s", v.Header.Command)
+			}
+
+			resp := tti.handler(ctx, v)
+			if tti.expectedError != nil {
+				if resp == nil || resp.Message != tti.expectedError.Message {
+					t.Fatalf("unexpected error: got %v, wanted %v",
+						resp, tti.expectedError)
+				}
+			} else if resp != nil {
+				t.Fatalf("unexpected error: %v", resp.Message)
+			}
+		})
 	}
 }
 

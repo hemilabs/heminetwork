@@ -228,6 +228,41 @@ func (s *Server) handleWebsocketRead(ctx context.Context, ws *tbcWs) {
 			}
 
 			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKValueAndScriptByOutpointRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKValueAndScriptByOutpointRequest)
+				return s.handleZKValueAndScriptByOutpointRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKBalanceByScriptHashRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKBalanceByScriptHashRequest)
+				return s.handleZKBalanceByScriptHashRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKSpentOutputsRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKSpentOutputsRequest)
+				return s.handleZKSpentOutputsRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKSpendingOutpointsRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKSpendingOutpointsRequest)
+				return s.handleZKSpendingOutpointsRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
+		case tbcapi.CmdZKSpendableOutputsRequest:
+			handler := func(ctx context.Context) (any, error) {
+				req := payload.(*tbcapi.ZKSpendableOutputsRequest)
+				return s.handleZKSpendableOutputsRequest(ctx, req)
+			}
+
+			go s.handleRequest(ctx, ws, id, cmd, handler)
 		default:
 			err = fmt.Errorf("unknown command: %v", cmd)
 		}
@@ -936,6 +971,178 @@ func (s *Server) handleBlockDownloadAsyncRawRequest(ctx context.Context, req *tb
 		return &tbcapi.BlockDownloadAsyncRawResponse{Error: e.ProtocolError()}, e
 	}
 	return &tbcapi.BlockDownloadAsyncRawResponse{Block: rb}, nil
+}
+
+func (s *Server) handleZKValueAndScriptByOutpointRequest(ctx context.Context, req *tbcapi.ZKValueAndScriptByOutpointRequest) (any, error) {
+	log.Tracef("handleZKValueAndScriptByOutpointRequest")
+	defer log.Tracef("handleZKValueAndScriptByOutpointRequest exit")
+
+	amount, pkscript, err := s.ZKValueAndScriptByOutpoint(ctx,
+		tbcd.NewOutpoint(req.Outpoint.Hash, req.Outpoint.Index))
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.ZKValueAndScriptByOutpointResponse{
+				Error: protocol.NotFoundError("outpoint", req.Outpoint),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ZKValueAndScriptByOutpointResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.ZKValueAndScriptByOutpointResponse{
+		Satoshis: uint64(amount),
+		PkScript: pkscript,
+	}, nil
+}
+
+func (s *Server) handleZKBalanceByScriptHashRequest(ctx context.Context, req *tbcapi.ZKBalanceByScriptHashRequest) (any, error) {
+	log.Tracef("handleZKBalanceByScriptHashRequest")
+	defer log.Tracef("handleZKBalanceByScriptHashRequest exit")
+
+	sh, err := tbcd.NewScriptHashFromBytes(req.ScriptHash)
+	if err != nil {
+		return &tbcapi.ZKBalanceByScriptHashResponse{
+			Error: protocol.RequestErrorf("invalid scripthash: %v", err),
+		}, nil
+	}
+	amount, err := s.ZKBalanceByScriptHash(ctx, sh)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.ZKBalanceByScriptHashResponse{
+				Error: protocol.NotFoundError("scripthash", sh),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ZKBalanceByScriptHashResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	return &tbcapi.ZKBalanceByScriptHashResponse{
+		Satoshis: uint64(amount),
+	}, nil
+}
+
+func (s *Server) handleZKSpentOutputsRequest(ctx context.Context, req *tbcapi.ZKSpentOutputsRequest) (any, error) {
+	log.Tracef("handleZKSpentOutputsRequest")
+	defer log.Tracef("handleZKSpentOutputsRequest exit")
+
+	sh, err := tbcd.NewScriptHashFromBytes(req.ScriptHash)
+	if err != nil {
+		return &tbcapi.ZKSpentOutputsResponse{
+			Error: protocol.RequestErrorf("invalid scripthash: %v", err),
+		}, nil
+	}
+	sos, err := s.ZKSpentOutputs(ctx, sh)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.ZKSpentOutputsResponse{
+				Error: protocol.NotFoundError("scripthash", sh),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ZKSpentOutputsResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	rsos := make([]tbcapi.ZKSpentOutput, 0, len(sos))
+	for _, v := range sos {
+		rsos = append(rsos, tbcapi.ZKSpentOutput{
+			ScriptHash:        sh[:],
+			BlockHeight:       v.BlockHeight,
+			BlockHash:         v.BlockHash,
+			TxID:              v.TxID,
+			PrevOutpointHash:  v.PrevOutpointHash,
+			PrevOutpointIndex: v.PrevOutpointIndex,
+			TxInIndex:         v.TxInIndex,
+		})
+	}
+
+	return &tbcapi.ZKSpentOutputsResponse{
+		SpentOutputs: rsos,
+	}, nil
+}
+
+func (s *Server) handleZKSpendingOutpointsRequest(ctx context.Context, req *tbcapi.ZKSpendingOutpointsRequest) (any, error) {
+	log.Tracef("handleZKSpendingOutpointsRequest")
+	defer log.Tracef("handleZKSpendingOutpointsRequest exit")
+
+	sos, err := s.ZKSpendingOutpoints(ctx, req.TxID)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.ZKSpendingOutpointsResponse{
+				Error: protocol.NotFoundError("txid", req.TxID),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ZKSpendingOutpointsResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	rsos := make([]tbcapi.ZKSpendingOutpoint, 0, len(sos))
+	for _, v := range sos {
+		var so *tbcapi.ZKSpendingOutpointValue
+		if v.SpendingOutpoint != nil {
+			so = &tbcapi.ZKSpendingOutpointValue{
+				TxID:  v.SpendingOutpoint.TxID,
+				Index: v.SpendingOutpoint.Index,
+			}
+		}
+		rsos = append(rsos, tbcapi.ZKSpendingOutpoint{
+			TxID:             v.TxID,
+			BlockHeight:      v.BlockHeight,
+			BlockHash:        v.BlockHash,
+			VOutIndex:        v.VOutIndex,
+			SpendingOutpoint: so,
+		})
+	}
+
+	return &tbcapi.ZKSpendingOutpointsResponse{
+		SpendingOutpoints: rsos,
+	}, nil
+}
+
+func (s *Server) handleZKSpendableOutputsRequest(ctx context.Context, req *tbcapi.ZKSpendableOutputsRequest) (any, error) {
+	log.Tracef("handleZKSpendableOutputsRequest")
+	defer log.Tracef("handleZKSpendableOutputsRequest exit")
+
+	sh, err := tbcd.NewScriptHashFromBytes(req.ScriptHash)
+	if err != nil {
+		return &tbcapi.ZKSpendableOutputsResponse{
+			Error: protocol.RequestErrorf("invalid scripthash: %v", err),
+		}, nil
+	}
+	sos, err := s.ZKSpendableOutputs(ctx, sh)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return &tbcapi.ZKSpentOutputsResponse{
+				Error: protocol.NotFoundError("scripthash", sh),
+			}, nil
+		}
+		e := protocol.NewInternalError(err)
+		return &tbcapi.ZKSpendableOutputsResponse{
+			Error: e.ProtocolError(),
+		}, e
+	}
+
+	rsos := make([]tbcapi.ZKSpendableOutput, 0, len(sos))
+	for _, v := range sos {
+		rsos = append(rsos, tbcapi.ZKSpendableOutput{
+			ScriptHash:  sh[:],
+			BlockHeight: v.BlockHeight,
+			BlockHash:   v.BlockHash,
+			TxID:        v.TxID,
+			TxOutIndex:  v.TxOutIndex,
+		})
+	}
+
+	return &tbcapi.ZKSpendableOutputsResponse{
+		SpendableOutputs: rsos,
+	}, nil
 }
 
 func (s *Server) handleWebsocket(w http.ResponseWriter, r *http.Request) {
