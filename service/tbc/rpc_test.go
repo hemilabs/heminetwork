@@ -1553,7 +1553,8 @@ func TestRpcZK(t *testing.T) {
 				Outpoint: tbcapi.OutPoint{
 					Hash:  *out.TxIdHash(),
 					Index: out.TxIndex(),
-				}},
+				},
+			},
 			respHeader: tbcapi.CmdZKValueAndScriptByOutpointResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKValueAndScriptByOutpointResponse
@@ -1587,7 +1588,8 @@ func TestRpcZK(t *testing.T) {
 		{
 			name: "BalanceByScriptHash",
 			req: tbcapi.ZKBalanceByScriptHashRequest{
-				ScriptHash: sh[:]},
+				ScriptHash: sh[:],
+			},
 			respHeader: tbcapi.CmdZKBalanceByScriptHashResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.BalanceByAddressResponse
@@ -1634,7 +1636,8 @@ func TestRpcZK(t *testing.T) {
 		{
 			name: "SpentOutputs",
 			req: tbcapi.ZKSpentOutputsRequest{
-				ScriptHash: sh[:]},
+				ScriptHash: sh[:],
+			},
 			respHeader: tbcapi.CmdZKSpentOutputsResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpentOutputsResponse
@@ -1654,7 +1657,8 @@ func TestRpcZK(t *testing.T) {
 		{
 			name: "SpentOutputs Empty",
 			req: tbcapi.ZKSpentOutputsRequest{
-				ScriptHash: testutil.SHA256(nil)},
+				ScriptHash: testutil.SHA256(nil),
+			},
 			respHeader: tbcapi.CmdZKSpentOutputsResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpentOutputsResponse
@@ -1684,7 +1688,8 @@ func TestRpcZK(t *testing.T) {
 		{
 			name: "SpendingOutpoints",
 			req: tbcapi.ZKSpendingOutpointsRequest{
-				TxID: chainhash.Hash(spending[:32])},
+				TxID: chainhash.Hash(spending[:32]),
+			},
 			respHeader: tbcapi.CmdZKSpendingOutpointsResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendingOutpointsResponse
@@ -1704,7 +1709,8 @@ func TestRpcZK(t *testing.T) {
 		{
 			name: "SpendingOutpoints Not Found",
 			req: tbcapi.ZKSpendingOutpointsRequest{
-				TxID: chainhash.Hash{}},
+				TxID: chainhash.Hash{},
+			},
 			respHeader: tbcapi.CmdZKSpendingOutpointsResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendingOutpointsResponse
@@ -1721,7 +1727,8 @@ func TestRpcZK(t *testing.T) {
 		{
 			name: "SpendableOutputs",
 			req: tbcapi.ZKSpendableOutputsRequest{
-				ScriptHash: sh[:]},
+				ScriptHash: sh[:],
+			},
 			respHeader: tbcapi.CmdZKSpendableOutputsResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendableOutputsResponse
@@ -1741,7 +1748,8 @@ func TestRpcZK(t *testing.T) {
 		{
 			name: "SpendableOutputs Empty",
 			req: tbcapi.ZKSpendableOutputsRequest{
-				ScriptHash: testutil.SHA256(nil)},
+				ScriptHash: testutil.SHA256(nil),
+			},
 			respHeader: tbcapi.CmdZKSpendableOutputsResponse,
 			handler: func(ctx context.Context, v protocol.Message) *protocol.Error {
 				var r tbcapi.ZKSpendableOutputsResponse
