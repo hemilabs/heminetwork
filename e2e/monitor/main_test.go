@@ -55,11 +55,19 @@ var (
 )
 
 func forkedL1Endpoint() string {
-	return "http://localhost:9988"
+	if testingFork() {
+		return "http://localhost:9988"
+	}
+
+	return "http://localhost:8545"
 }
 
 func forkedL2Endpoint() string {
-	return "http://localhost:18546"
+	if testingFork() {
+		return "http://localhost:18546"
+	}
+
+	return "http://localhost:8546"
 }
 
 func privateKeyForTest() string {
@@ -209,11 +217,7 @@ func TestMonitor(t *testing.T) {
 }
 
 func TestL1L2Comms(t *testing.T) {
-	if testingFork() {
-		testL1L2Comms(t, forkedL1Endpoint(), forkedL2Endpoint(), forkedL2Endpoint(), privateKeyForTest())
-	} else {
-		testL1L2Comms(t, "http://localhost:8545", "http://localhost:8546", "http://localhost:18546", privateKeyForTest())
-	}
+	testL1L2Comms(t, forkedL1Endpoint(), forkedL2Endpoint(), "http://localhost:18546", privateKeyForTest())
 }
 
 func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequencingEndpoint string, privateKey string) {
@@ -250,6 +254,9 @@ func testL1L2Comms(t *testing.T, l1Endpoint string, l2Endpoint string, l2NonSequ
 
 			l2ClientToUse := l2Client
 			if !sequencing {
+				if testingFork() {
+					t.Fatal("there is no non-sequencing client for testing a forked network")
+				}
 				l2ClientToUse = l2ClientNonSequencing
 			}
 
