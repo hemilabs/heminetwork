@@ -1,0 +1,50 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:best-practices',
+    ':configMigration',
+    ':pinVersions',
+    ':prConcurrentLimit10',
+    ':rebaseStalePrs',
+    'schedule:weekly',
+    'docker:enableMajor',
+    'docker:pinDigests',
+    'preview:dockerCompose',
+    'preview:dockerVersions',
+    'customManagers:dockerfileVersions',
+    'customManagers:githubActionsVersions',
+    'helpers:pinGitHubActionDigests',
+    ':assignAndReview(joshuasing)'
+  ],
+  commitMessagePrefix: 'all:',
+  commitMessageAction: 'update',
+  commitMessageTopic: '{{depName}}',
+  labels: [
+    'type: dependencies',
+  ],
+  minimumReleaseAge: '3 days',
+  packageRules: [
+    {
+      matchDatasources: [
+        'go',
+      ],
+      commitMessageTopic: '{{depName}}'
+    },
+    {
+      matchDatasources: [
+        'docker',
+      ],
+      commitMessageTopic: 'image {{depName}}',
+    },
+  ],
+  osvVulnerabilityAlerts: true,
+  vulnerabilityAlerts: {
+    enabled: true,
+    addLabels: [
+      'type: security',
+    ],
+    additionalReviewers: [
+      'team:secops'
+    ],
+  },
+}
