@@ -38,6 +38,10 @@
       commitMessageTopic: 'image {{depName}}',
     },
     {
+      matchManagers: ['gomod'],
+      commitMessagePrefix: 'go.mod:',
+    },
+    {
       matchManagers: ['github-actions'],
       commitMessagePrefix: 'ci:',
     },
