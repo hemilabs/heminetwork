@@ -21,6 +21,7 @@
   commitMessageTopic: '{{depName}}',
   labels: [
     'type: dependencies',
+    'changelog: skip',
   ],
   minimumReleaseAge: '3 days',
   packageRules: [
@@ -36,6 +37,14 @@
       ],
       commitMessageTopic: 'image {{depName}}',
     },
+    {
+      matchManagers: ['github-actions'],
+      commitMessagePrefix: 'ci:',
+    },
+    {
+      matchUpdateTypes: ['pin', 'pinDigest'],
+      commitMessageAction: 'pin',
+    },
   ],
   osvVulnerabilityAlerts: true,
   vulnerabilityAlerts: {
@@ -44,7 +53,7 @@
       'type: security',
     ],
     additionalReviewers: [
-      'team:secops'
+      'team:secops',
     ],
   },
 }
