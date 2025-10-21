@@ -445,6 +445,7 @@ type ZKSpentOutput struct {
 	PrevOutpointIndex uint32         `json:"prev_outpoint_index"`
 	TxInIndex         uint32         `json:"txin_index"`
 }
+
 type ZKSpentOutputsRequest struct {
 	ScriptHash api.ByteSlice `json:"scripthash"`
 }
@@ -458,6 +459,7 @@ type ZKSpendingOutpointValue struct {
 	TxID  chainhash.Hash `json:"txid"`
 	Index uint32         `json:"index"`
 }
+
 type ZKSpendingOutpoint struct {
 	TxID             chainhash.Hash           `json:"txid"`
 	BlockHeight      uint32                   `json:"block_height"`
