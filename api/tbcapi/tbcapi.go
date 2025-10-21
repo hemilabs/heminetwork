@@ -93,6 +93,21 @@ const (
 
 	CmdKeystonesByHeightRequest  = "tbcapi-keystones-by-height-request"
 	CmdKeystonesByHeightResponse = "tbcapi-keystones-by-height-response"
+
+	CmdZKValueAndScriptByOutpointRequest  = "tbcapi-zk-value-and-script-by-outpoint-request"
+	CmdZKValueAndScriptByOutpointResponse = "tbcapi-zk-value-and-script-by-outpoint-response"
+
+	CmdZKBalanceByScriptHashRequest  = "tbcapi-zk-balance-by-scripthash-request"
+	CmdZKBalanceByScriptHashResponse = "tbcapi-zk-balance-by-scripthash-response"
+
+	CmdZKSpentOutputsRequest  = "tbcapi-zk-spent-outputs-request"
+	CmdZKSpentOutputsResponse = "tbcapi-zk-spent-outputs-response"
+
+	CmdZKSpendingOutpointsRequest  = "tbcapi-zk-spending-outpoints-request"
+	CmdZKSpendingOutpointsResponse = "tbcapi-zk-spending-outpoints-response"
+
+	CmdZKSpendableOutputsRequest  = "tbcapi-zk-spendable-outputs-request"
+	CmdZKSpendableOutputsResponse = "tbcapi-zk-spendable-outputs-response"
 )
 
 var (
@@ -402,6 +417,83 @@ type MempoolInfoResponse struct {
 	Error *protocol.Error `json:"error,omitempty"`
 }
 
+type ZKValueAndScriptByOutpointRequest struct {
+	Outpoint OutPoint `json:"outpoint"`
+}
+
+type ZKValueAndScriptByOutpointResponse struct {
+	Satoshis uint64          `json:"satoshis"`
+	PkScript api.ByteSlice   `json:"pkscript"`
+	Error    *protocol.Error `json:"error,omitempty"`
+}
+
+type ZKBalanceByScriptHashRequest struct {
+	ScriptHash api.ByteSlice `json:"scripthash"`
+}
+
+type ZKBalanceByScriptHashResponse struct {
+	Satoshis uint64          `json:"satoshis"`
+	Error    *protocol.Error `json:"error,omitempty"`
+}
+
+type ZKSpentOutput struct {
+	ScriptHash        api.ByteSlice  `json:"scripthash"`
+	BlockHeight       uint32         `json:"block_height"`
+	BlockHash         chainhash.Hash `json:"block_hash"`
+	TxID              chainhash.Hash `json:"txid"`
+	PrevOutpointHash  chainhash.Hash `json:"prev_outpoint_hash"`
+	PrevOutpointIndex uint32         `json:"prev_outpoint_index"`
+	TxInIndex         uint32         `json:"txin_index"`
+}
+
+type ZKSpentOutputsRequest struct {
+	ScriptHash api.ByteSlice `json:"scripthash"`
+}
+
+type ZKSpentOutputsResponse struct {
+	SpentOutputs []ZKSpentOutput `json:"spent_outputs"`
+	Error        *protocol.Error `json:"error,omitempty"`
+}
+
+type ZKSpendingOutpointValue struct {
+	TxID  chainhash.Hash `json:"txid"`
+	Index uint32         `json:"index"`
+}
+
+type ZKSpendingOutpoint struct {
+	TxID             chainhash.Hash           `json:"txid"`
+	BlockHeight      uint32                   `json:"block_height"`
+	BlockHash        chainhash.Hash           `json:"block_hash"`
+	VOutIndex        uint32                   `json:"vout_index"`
+	SpendingOutpoint *ZKSpendingOutpointValue `json:"spending_output,omitempty"`
+}
+
+type ZKSpendingOutpointsRequest struct {
+	TxID chainhash.Hash `json:"txid"`
+}
+
+type ZKSpendingOutpointsResponse struct {
+	SpendingOutpoints []ZKSpendingOutpoint `json:"spending_outpoint"`
+	Error             *protocol.Error      `json:"error,omitempty"`
+}
+
+type ZKSpendableOutput struct {
+	ScriptHash  api.ByteSlice  `json:"scripthash"`
+	BlockHeight uint32         `json:"block_height"`
+	BlockHash   chainhash.Hash `json:"block_hash"`
+	TxID        chainhash.Hash `json:"txid"`
+	TxOutIndex  uint32         `json:"txout_index"`
+}
+
+type ZKSpendableOutputsRequest struct {
+	ScriptHash api.ByteSlice `json:"scripthash"`
+}
+
+type ZKSpendableOutputsResponse struct {
+	SpendableOutputs []ZKSpendableOutput `json:"spendable_outputs"`
+	Error            *protocol.Error     `json:"error,omitempty"`
+}
+
 var commands = map[protocol.Command]reflect.Type{
 	CmdPingRequest:                              reflect.TypeOf(PingRequest{}),
 	CmdPingResponse:                             reflect.TypeOf(PingResponse{}),
@@ -449,6 +541,16 @@ var commands = map[protocol.Command]reflect.Type{
 	CmdMempoolInfoResponse:                      reflect.TypeOf(MempoolInfoResponse{}),
 	CmdKeystonesByHeightRequest:                 reflect.TypeOf(KeystonesByHeightRequest{}),
 	CmdKeystonesByHeightResponse:                reflect.TypeOf(KeystonesByHeightResponse{}),
+	CmdZKValueAndScriptByOutpointRequest:        reflect.TypeOf(ZKValueAndScriptByOutpointRequest{}),
+	CmdZKValueAndScriptByOutpointResponse:       reflect.TypeOf(ZKValueAndScriptByOutpointResponse{}),
+	CmdZKBalanceByScriptHashRequest:             reflect.TypeOf(ZKBalanceByScriptHashRequest{}),
+	CmdZKBalanceByScriptHashResponse:            reflect.TypeOf(ZKBalanceByScriptHashResponse{}),
+	CmdZKSpentOutputsRequest:                    reflect.TypeOf(ZKSpentOutputsRequest{}),
+	CmdZKSpentOutputsResponse:                   reflect.TypeOf(ZKSpentOutputsResponse{}),
+	CmdZKSpendingOutpointsRequest:               reflect.TypeOf(ZKSpendingOutpointsRequest{}),
+	CmdZKSpendingOutpointsResponse:              reflect.TypeOf(ZKSpendingOutpointsResponse{}),
+	CmdZKSpendableOutputsRequest:                reflect.TypeOf(ZKSpendableOutputsRequest{}),
+	CmdZKSpendableOutputsResponse:               reflect.TypeOf(ZKSpendableOutputsResponse{}),
 }
 
 type tbcAPI struct{}

@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"testing"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
@@ -25,6 +26,24 @@ func TestZKEncodeRetrieve(t *testing.T) {
 	defer cancel()
 
 	home := t.TempDir()
+
+	createFullZKDB(ctx, t, home, 10)
+}
+
+func randomHash() *chainhash.Hash {
+	b := make([]byte, len(chainhash.Hash{}))
+	_, err := rand.Read(b)
+	if err != nil {
+		panic(err)
+	}
+	h, err := chainhash.NewHash(b)
+	if err != nil {
+		panic(err)
+	}
+	return h
+}
+
+func createFullZKDB(ctx context.Context, t *testing.T, home string, value uint64) map[tbcd.ZKIndexKey][]byte {
 	cfg, err := level.NewConfig("localnet", home,
 		"", "")
 	if err != nil {
@@ -41,13 +60,12 @@ func TestZKEncodeRetrieve(t *testing.T) {
 	blockHash := randomHash()
 	txId := randomHash()
 	prevHash := randomHash()
-	var balance uint64 = 10
 
 	// ScriptHash
 	shbytes := testutil.FillBytes(fmt.Sprintf("scripthash%d", index), len(tbcd.ScriptHash{}))
 	sh := tbcd.NewScriptHashFromScript(shbytes)
 	var v [8]byte
-	binary.BigEndian.PutUint64(v[:], balance)
+	binary.BigEndian.PutUint64(v[:], value)
 	cache[tbcd.ZKIndexKey(sh[:])] = v[:]
 
 	// SpentOut
@@ -72,10 +90,16 @@ func TestZKEncodeRetrieve(t *testing.T) {
 
 	// Insert into DB
 
-	err = db.BlockZKUpdate(ctx, 1, cache, chainhash.Hash{})
+	cloned := maps.Clone(cache)
+	err = db.BlockZKUpdate(ctx, 1, cloned, chainhash.Hash{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
 
 	// Retrieve values by encoded key and assert values
 
@@ -84,8 +108,8 @@ func TestZKEncodeRetrieve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if balance != rv {
-		t.Fatalf("expected %v, got %v", balance, rv)
+	if value != rv {
+		t.Fatalf("expected %v, got %v", value, rv)
 	}
 	if !bytes.Equal(txId[:], rid) {
 		t.Fatalf("expected %x, got %x", txId, rid)
@@ -96,8 +120,8 @@ func TestZKEncodeRetrieve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if balance != rv {
-		t.Fatalf("expected %v, got %v", balance, rv)
+	if value != rv {
+		t.Fatalf("expected %v, got %v", value, rv)
 	}
 
 	// SpentOut
@@ -184,17 +208,6 @@ func TestZKEncodeRetrieve(t *testing.T) {
 	if uint32(index) != sv.Index {
 		t.Fatalf("expected %v, got %v", sv.Index, index)
 	}
-}
 
-func randomHash() *chainhash.Hash {
-	b := make([]byte, len(chainhash.Hash{}))
-	_, err := rand.Read(b)
-	if err != nil {
-		panic(err)
-	}
-	h, err := chainhash.NewHash(b)
-	if err != nil {
-		panic(err)
-	}
-	return h
+	return cache
 }
