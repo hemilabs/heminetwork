@@ -1741,12 +1741,21 @@ func TestNotFoundError(t *testing.T) {
 		Network:                 networkLocalnet,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{"127.0.0.1:" + testutil.FreePort()},
+		NotificationBlocking:    true,
+		NotificationQueueSize:   10,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
 
 	go func() {
 		err := s.Run(ctx)
@@ -1755,10 +1764,17 @@ func TestNotFoundError(t *testing.T) {
 		}
 	}()
 
-	// wait for server to start
-	for !s.Running() {
-		time.Sleep(50 * time.Millisecond)
+	// Wait for tbc to insert all blocks
+	for done := false; !done; {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-l.Listen():
+			// Any message is fine
+			done = true
+		}
 	}
+	l.Unsubscribe()
 
 	var emptyHash chainhash.Hash
 	testTable := []testTableItem{

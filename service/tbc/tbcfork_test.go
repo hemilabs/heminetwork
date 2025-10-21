@@ -107,6 +107,8 @@ type btcNode struct {
 	public         *btcec.PublicKey
 	address        *btcutil.AddressPubKeyHash
 
+	msgCh chan string
+
 	keys      map[string]*namedKey        // keys used to sign various tx'
 	keystones map[string]*hemi.L2Keystone // keystones found in various tx'
 
@@ -126,6 +128,7 @@ func newFakeNode(t *testing.T, port string) (*btcNode, error) {
 		params:         &chaincfg.RegressionNetParams,
 		keys:           make(map[string]*namedKey, 10),
 		keystones:      make(map[string]*hemi.L2Keystone, 10),
+		msgCh:          make(chan string, 10),
 	}
 
 	// Add miner key to key pool
@@ -444,6 +447,11 @@ func (b *btcNode) handleRPC(ctx context.Context, conn net.Conn) error {
 
 		if err = b.handleMsg(ctx, p, msg); err != nil {
 			return fmt.Errorf("handle message %v: %w", p, err)
+		}
+
+		select {
+		case b.msgCh <- msg.Command():
+		default:
 		}
 	}
 }
@@ -3452,7 +3460,6 @@ func TestZKIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -3471,19 +3478,35 @@ func TestZKIndexFork(t *testing.T) {
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
+		NotificationQueueSize:   10,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
 	go func() {
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -3535,14 +3558,17 @@ func TestZKIndexFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	var hasBlocks bool
-	for !hasBlocks {
-		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
-		if err != nil {
-			t.Logf("blocks not yet synced: %v", err)
-			time.Sleep(50 * time.Millisecond)
+	for inserted := 0; inserted < 8; {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case msg := <-l.Listen():
+			if msg == NotificationBlock {
+				inserted++
+			}
 		}
 	}
+	l.Unsubscribe()
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
