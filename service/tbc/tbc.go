@@ -1724,7 +1724,6 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 	// Stats
 	s.blocksSize += uint64(len(raw))
 	s.blocksInserted++
-	s.notifier.Notify(ctx, NotificationBlock)
 
 	if now.After(s.printTime) {
 		var (
