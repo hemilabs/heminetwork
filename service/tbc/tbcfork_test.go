@@ -1394,11 +1394,36 @@ func (s *Server) hasAllBlocks(ctx context.Context, m map[int32][]*block) (bool, 
 		for _, blk := range k {
 			_, err := s.g.db.BlockByHash(ctx, *blk.Hash())
 			if err != nil {
-				return false, err
+				if !errors.Is(err, database.ErrBlockNotFound) {
+					return false, err
+				}
+				return false, nil
 			}
 		}
 	}
 	return true, nil
+}
+
+func (s *Server) waitForBlocks(ctx context.Context, l *Listener, m map[int32][]*block) error {
+	var (
+		err       error
+		hasBlocks bool
+	)
+	for !hasBlocks {
+		select {
+		case <-ctx.Done():
+			return err
+		case msg := <-l.Listen():
+			if msg != NotificationBlock {
+				continue
+			}
+			hasBlocks, err = s.hasAllBlocks(ctx, m)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func TestFork(t *testing.T) {
@@ -1437,7 +1462,6 @@ func TestFork(t *testing.T) {
 
 	startHash := n.Best()
 	count := 9
-	expectedHeight := uint64(count)
 	address := n.address
 	_, err = n.MineN(count, startHash[0], address)
 	if err != nil {
@@ -1447,8 +1471,6 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// t.Logf("%v", spew.Sdump(n.chain[n.Best()[0].String()]))
-	time.Sleep(250 * time.Millisecond) // XXX
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1463,12 +1485,21 @@ func TestFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
 	go func() {
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
@@ -1476,37 +1507,27 @@ func TestFork(t *testing.T) {
 		}
 	}()
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-time.Tick(2 * time.Second):
-		}
+	// Wait for tbc to insert all blocks
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
 
-		// See if we are at the right height
-		si := s.Synced(ctx)
-		if si.BlockHeader.Height != expectedHeight {
-			continue
+	// Don't execute balance tests if index is disabled.
+	if cfg.AutoIndex {
+		// Execute tests
+		balance, err := s.BalanceByAddress(ctx, address.String())
+		if err != nil {
+			t.Fatal(err)
 		}
-
-		// Don't execute balance tests if index is disabled.
-		if cfg.AutoIndex {
-			// Execute tests
-			balance, err := s.BalanceByAddress(ctx, address.String())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if balance != uint64(count*5000000000) {
-				t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
-			}
-			t.Logf("balance %v", spew.Sdump(balance))
-			utxos, err := s.UtxosByAddress(ctx, true, address.String(), 0, 100)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("%v", spew.Sdump(utxos))
+		if balance != uint64(count*5000000000) {
+			t.Fatalf("balance got %v wanted %v", balance, count*5000000000)
 		}
-		break
+		t.Logf("balance %v", spew.Sdump(balance))
+		utxos, err := s.UtxosByAddress(ctx, true, address.String(), 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("%v", spew.Sdump(utxos))
 	}
 
 	// Check cumulative difficulty
@@ -1527,8 +1548,12 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// XXX check hashes
-	time.Sleep(50 * time.Millisecond)
+
+	// Wait for tbc to insert all blocks
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
+
 	t.Logf("b10a: %v", b10a.Hash())
 	t.Logf("b10b: %v", b10b.Hash())
 	b10s := n.Best()
@@ -1547,13 +1572,8 @@ func TestFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	var hasBlocks bool
-	for !hasBlocks {
-		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
-		if err != nil {
-			t.Logf("blocks not yet synced: %v", err)
-			time.Sleep(50 * time.Millisecond)
-		}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
 	}
 
 	t.Logf("b11a: %v", b11a.Hash())
@@ -1562,7 +1582,6 @@ func TestFork(t *testing.T) {
 	if len(b11s) != 2 {
 		t.Fatalf("expected 2 best blocks, got %v", len(b11s))
 	}
-	time.Sleep(50 * time.Millisecond)
 
 	// Let's see if tbcd agrees
 	si := s.Synced(ctx)
@@ -1576,9 +1595,7 @@ func TestFork(t *testing.T) {
 	if len(bhsAt11) != 2 {
 		t.Fatalf("expected 2 best blocks, got %v", len(bhsAt11))
 	}
-	// XXX check hashes
-	// t.Logf("block headers at 11: %v", spew.Sdump(bhsAt11))
-	time.Sleep(500 * time.Millisecond)
+
 	if cfg.AutoIndex && !si.Synced {
 		t.Fatalf("expected synced chain")
 	}
@@ -1600,7 +1617,6 @@ func TestFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
 
 	// 12
 	t.Logf("mine 12")
@@ -1609,7 +1625,11 @@ func TestFork(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = b12
-	time.Sleep(50 * time.Millisecond)
+
+	// Wait for tbc to insert all blocks
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
+	}
 
 	t.Logf("did we fork?")
 
@@ -1693,7 +1713,6 @@ func TestIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1708,12 +1727,20 @@ func TestIndexNoFork(t *testing.T) {
 		PeersWanted:             1,
 		PrometheusListenAddress: "",
 		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
 
 	go func() {
 		err := s.Run(ctx)
@@ -1722,7 +1749,12 @@ func TestIndexNoFork(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(750 * time.Millisecond)
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -1750,14 +1782,10 @@ func TestIndexNoFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	var hasBlocks bool
-	for !hasBlocks {
-		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
-		if err != nil {
-			t.Logf("blocks not yet synced: %v", err)
-			time.Sleep(50 * time.Millisecond)
-		}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
 	}
+	l.Unsubscribe()
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
 	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
@@ -1894,7 +1922,6 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -1912,12 +1939,20 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
 
 	go func() {
 		err := s.Run(ctx)
@@ -1926,7 +1961,12 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(250 * time.Millisecond)
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
 
 	// creat a linear chain with some tx's
 	// g ->  b1 ->  b2 -> b3
@@ -1953,14 +1993,10 @@ func TestKeystoneIndexNoFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	var hasBlocks bool
-	for !hasBlocks {
-		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
-		if err != nil {
-			t.Logf("blocks not yet synced: %v", err)
-			time.Sleep(50 * time.Millisecond)
-		}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
 	}
+	l.Unsubscribe()
 
 	// genesis -> b3 should work with negative direction (cdiff is less than target)
 	direction, err := indexIsLinear(ctx, s.g, *s.g.chain.GenesisHash, *b3.Hash())
@@ -2212,7 +2248,6 @@ func TestIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -2228,19 +2263,34 @@ func TestIndexFork(t *testing.T) {
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
 	go func() {
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -2292,14 +2342,10 @@ func TestIndexFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	var hasBlocks bool
-	for !hasBlocks {
-		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
-		if err != nil {
-			t.Logf("blocks not yet synced: %v", err)
-			time.Sleep(50 * time.Millisecond)
-		}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
 	}
+	l.Unsubscribe()
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
@@ -2544,7 +2590,6 @@ func TestKeystoneIndexFork(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -2562,19 +2607,34 @@ func TestKeystoneIndexFork(t *testing.T) {
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
 	go func() {
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
 
 	// Create a bunch of weird geometries to catch all corner cases in the indexer.
 
@@ -2626,14 +2686,10 @@ func TestKeystoneIndexFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	var hasBlocks bool
-	for !hasBlocks {
-		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
-		if err != nil {
-			t.Logf("blocks not yet synced: %v", err)
-			time.Sleep(50 * time.Millisecond)
-		}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
 	}
+	l.Unsubscribe()
 
 	// Verify linear indexing. Current TxIndex is sitting at genesis
 
@@ -3123,7 +3179,6 @@ func TestForkCanonicity(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -3139,19 +3194,34 @@ func TestForkCanonicity(t *testing.T) {
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
 	go func() {
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
 
 	//		   		 /--> b3aa
 	//        / --> b2a - b3a - b4a - b5a - b6a
@@ -3221,14 +3291,10 @@ func TestForkCanonicity(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	var hasBlocks bool
-	for !hasBlocks {
-		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
-		if err != nil {
-			t.Logf("blocks not yet synced: %v", err)
-			time.Sleep(50 * time.Millisecond)
-		}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
 	}
+	l.Unsubscribe()
 
 	// set checkpoints to genesis, b2 and b4
 	s.g.chain.Checkpoints = []chaincfg.Checkpoint{
@@ -3306,7 +3372,6 @@ func TestCacheOverflow(t *testing.T) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
 
 	// Connect tbc service
 	cfg := &Config{
@@ -3322,19 +3387,34 @@ func TestCacheOverflow(t *testing.T) {
 		PrometheusListenAddress: "",
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
+		NotificationBlocking:    true,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Unsubscribe()
+
 	go func() {
 		err := s.Run(ctx)
 		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, rawpeer.ErrNoConn) {
 			panic(err)
 		}
 	}()
-	time.Sleep(250 * time.Millisecond)
+
+	// wait for node to connect as peer
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-n.msgCh:
+	}
 
 	const blockCount = 30 // must be >= 2
 	blocks := make([]*block, blockCount)
@@ -3358,14 +3438,10 @@ func TestCacheOverflow(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	var hasBlocks bool
-	for !hasBlocks {
-		hasBlocks, err = s.hasAllBlocks(ctx, n.blocksAtHeight)
-		if err != nil {
-			t.Logf("blocks not yet synced: %v", err)
-			time.Sleep(50 * time.Millisecond)
-		}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
 	}
+	l.Unsubscribe()
 
 	// Index to last block
 	err = s.SyncIndexersToHash(ctx, *blocks[len(blocks)-1].Hash())
@@ -3479,7 +3555,6 @@ func TestZKIndexFork(t *testing.T) {
 		MempoolEnabled:          true,
 		Seeds:                   []string{"127.0.0.1:" + port},
 		NotificationBlocking:    true,
-		NotificationQueueSize:   10,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -3487,8 +3562,8 @@ func TestZKIndexFork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// subscribe to tbc notifications
-	l, err := s.SubscribeNotifications(ctx)
+	// Subscribe to tbc notifications
+	l, err := s.SubscribeNotifications(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3558,15 +3633,8 @@ func TestZKIndexFork(t *testing.T) {
 	}
 
 	// Wait for tbc to insert all blocks
-	for inserted := 0; inserted < 8; {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case msg := <-l.Listen():
-			if msg == NotificationBlock {
-				inserted++
-			}
-		}
+	if err := s.waitForBlocks(ctx, l, n.blocksAtHeight); err != nil {
+		t.Fatal(err)
 	}
 	l.Unsubscribe()
 

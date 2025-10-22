@@ -19,9 +19,6 @@ type Notifier struct {
 
 	listeners map[string]*Listener
 
-	// Channel capacity for every listener
-	capacity uint64
-
 	// If true, the notifier will block on new messages until the queue for
 	// each listener's message channel is unblocked (i.e., read from).
 	// This should only be TRUE for test purposes.
@@ -38,6 +35,8 @@ type Listener struct {
 }
 
 func (l *Listener) Unsubscribe() {
+	// Mark listener for deletion even if we block
+	// so we skip sending notifications to them
 	l.cancel()
 
 	l.notifier.mtx.Lock()
@@ -50,16 +49,15 @@ func (l *Listener) Listen() <-chan notification {
 	return l.ch
 }
 
-func NewNotifier(capacity uint64, blocking bool) *Notifier {
+func NewNotifier(blocking bool) *Notifier {
 	n := Notifier{
 		listeners: make(map[string]*Listener),
-		capacity:  capacity,
 		blocking:  blocking,
 	}
 	return &n
 }
 
-func (n *Notifier) Subscribe(ctx context.Context) (*Listener, error) {
+func (n *Notifier) Subscribe(ctx context.Context, capacity uint64) (*Listener, error) {
 	n.mtx.Lock()
 	defer n.mtx.Unlock()
 
@@ -71,7 +69,7 @@ func (n *Notifier) Subscribe(ctx context.Context) (*Listener, error) {
 		if _, ok := n.listeners[string(nid[:])]; !ok {
 			lctx, cancel := context.WithCancel(ctx)
 			l := Listener{
-				ch:       make(chan notification, n.capacity),
+				ch:       make(chan notification, capacity),
 				id:       string(nid[:]),
 				notifier: n,
 				ctx:      lctx,

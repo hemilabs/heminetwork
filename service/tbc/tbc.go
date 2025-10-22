@@ -64,9 +64,6 @@ const (
 	defaultPingTimeout         = 9 * time.Second
 	defaultBlockPendingTimeout = 13 * time.Second
 
-	defaultNotificationsQueue = 10
-	blockingNotifications     = false
-
 	defaultMempoolAge = 2 * 7 * 24 * time.Hour // two weeks
 )
 
@@ -181,7 +178,6 @@ type Config struct {
 	MaxCachedTxs            int
 	MaxCachedZK             int
 	MempoolEnabled          bool
-	NotificationQueueSize   int
 	NotificationBlocking    bool
 	DatabaseDebug           bool
 	Network                 string
@@ -203,20 +199,19 @@ type Config struct {
 
 func NewDefaultConfig() *Config {
 	return &Config{
-		ListenAddress:         tbcapi.DefaultListen,
-		BlockCacheSize:        "1gb",
-		BlockheaderCacheSize:  "128mb",
-		LogLevel:              logLevel,
-		MaxCachedKeystones:    defaultMaxCachedKeystones,
-		MaxCachedTxs:          defaultMaxCachedTxs,
-		MaxCachedZK:           defaultMaxZK,
-		MempoolEnabled:        true,
-		NotificationQueueSize: defaultNotificationsQueue,
-		NotificationBlocking:  blockingNotifications,
-		PeersWanted:           defaultPeersWanted,
-		PrometheusNamespace:   appName,
-		ExternalHeaderMode:    false, // Default anyway, but for readability
-		DatabaseDebug:         false, // Default anyway, but dangerous so be explicit
+		ListenAddress:        tbcapi.DefaultListen,
+		BlockCacheSize:       "1gb",
+		BlockheaderCacheSize: "128mb",
+		LogLevel:             logLevel,
+		MaxCachedKeystones:   defaultMaxCachedKeystones,
+		MaxCachedTxs:         defaultMaxCachedTxs,
+		MaxCachedZK:          defaultMaxZK,
+		MempoolEnabled:       true,
+		NotificationBlocking: false, // Default anyway, but dangerous so be explicit
+		PeersWanted:          defaultPeersWanted,
+		PrometheusNamespace:  appName,
+		ExternalHeaderMode:   false, // Default anyway, but for readability
+		DatabaseDebug:        false, // Default anyway, but dangerous so be explicit
 	}
 }
 
@@ -341,7 +336,7 @@ func NewServer(cfg *Config) (*Server, error) {
 	}
 
 	// TBC Notifier
-	s.notifier = NewNotifier(uint64(cfg.NotificationQueueSize), cfg.NotificationBlocking)
+	s.notifier = NewNotifier(cfg.NotificationBlocking)
 
 	wanted := defaultPeersWanted
 	switch cfg.Network {
@@ -382,8 +377,8 @@ func NewServer(cfg *Config) (*Server, error) {
 	return s, nil
 }
 
-func (s *Server) SubscribeNotifications(ctx context.Context) (*Listener, error) {
-	return s.notifier.Subscribe(ctx)
+func (s *Server) SubscribeNotifications(ctx context.Context, capacity uint64) (*Listener, error) {
+	return s.notifier.Subscribe(ctx, capacity)
 }
 
 func (s *Server) invInsertUnlocked(h chainhash.Hash) bool {

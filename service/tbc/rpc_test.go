@@ -1742,7 +1742,6 @@ func TestNotFoundError(t *testing.T) {
 		PrometheusListenAddress: "",
 		Seeds:                   []string{"127.0.0.1:" + testutil.FreePort()},
 		NotificationBlocking:    true,
-		NotificationQueueSize:   10,
 	}
 	_ = loggo.ConfigureLoggers(cfg.LogLevel)
 	s, err := NewServer(cfg)
@@ -1751,7 +1750,7 @@ func TestNotFoundError(t *testing.T) {
 	}
 
 	// subscribe to tbc notifications
-	l, err := s.SubscribeNotifications(ctx)
+	l, err := s.SubscribeNotifications(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
