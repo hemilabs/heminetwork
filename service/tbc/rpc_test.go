@@ -1764,14 +1764,18 @@ func TestNotFoundError(t *testing.T) {
 	}()
 
 	// Wait for tbc to insert all blocks
-	for done := false; !done; {
+	for {
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
-		case <-l.Listen():
-			// Any message is fine
-			done = true
+		case msg := <-l.Listen():
+			// If we insert genesis, then TBC
+			// has finished starting up
+			if msg != NotificationBlock {
+				continue
+			}
 		}
+		break
 	}
 	l.Unsubscribe()
 
