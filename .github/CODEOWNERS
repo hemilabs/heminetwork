@@ -9,29 +9,29 @@
 #  within the codebase, please add yourself as a code owner.
 
 # This is the default owner for all files in this repository.
-# Core Engineering is responsible for all source code in this repository.
-* @hemilabs/dev
+# Protocol Engineering is responsible for all source code in this repository.
+* @hemilabs/eng-protocol
 
 # GitHub Actions Workflows
-/.github/workflows/ @hemilabs/dev @joshuasing
+/.github/workflows/ @hemilabs/eng-protocol @joshuasing
 
 # Docker images
-/docker/ @hemilabs/dev @ClaytonNorthey92 @joshuasing
+/docker/ @hemilabs/eng-protocol @ClaytonNorthey92 @joshuasing
 
 # End-to-End testing
-/e2e/ @hemilabs/dev @ClaytonNorthey92
+/e2e/ @hemilabs/eng-protocol @ClaytonNorthey92
 
 # Pprof service
-/service/pprof/ @hemilabs/dev @joshuasing
+/service/pprof/ @hemilabs/eng-protocol @joshuasing
 
 # Tiny Bitcoin Daemon (TBC)
-/api/tbcapi/    @hemilabs/dev @marcopeereboom @joshuasing
-/cmd/tbcd/      @hemilabs/dev @marcopeereboom
-/database/tbcd/ @hemilabs/dev @marcopeereboom
-/service/tbc/   @hemilabs/dev @marcopeereboom
+/api/tbcapi/    @hemilabs/eng-protocol @marcopeereboom @joshuasing
+/cmd/tbcd/      @hemilabs/eng-protocol @marcopeereboom
+/database/tbcd/ @hemilabs/eng-protocol @marcopeereboom
+/service/tbc/   @hemilabs/eng-protocol @marcopeereboom
 
 # Release script
-/scripts/release.sh @hemilabs/dev @joshuasing
+/scripts/release.sh @hemilabs/eng-protocol @joshuasing
 
 # GoReleaser config
-.goreleaser.yaml @hemilabs/dev @joshuasing
+.goreleaser.yaml @hemilabs/eng-protocol @joshuasing
