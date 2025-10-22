@@ -1,4 +1,51 @@
-## Current state
+# ZK & Hemi sitting in a tree.
+
+tl;dr We want to be able to quickly and succinctly prove "bitcoin state".
+
+## Why are we doing this?
+
+The reason for this is create pre-compiles in evm that can be "easily" and
+"quickly" verified to enable complex functionality such as tunneling funds to
+and from bitcoin. In order to do these complex functions we need primitives
+that prove positives and negatives.
+
+Examples:
+* Does this utxo exist?
+* Has this utxo been spent? When? Whereto?
+* What is the balance of this address?
+
+## How are we doing this?
+
+We are compressing bitcoin state in a way that can be quickly and easily
+accessed (zkindexers).
+
+On top of that data we "compress" the overall state of various bitcoin stateless
+properties and positional data to get to a succinct representation of bitcoin
+state.
+
+The big challenge is how do we compress delta state to positonal verifiable
+state so that we do not feed "many" inputs into the zk prover. For example, if
+a utxo came into existence in block 1000, how do we verify it's inclusion and
+non-spending status at block 9897 without traversing 7897 blocks and
+"accumulated state"? We have been referring to this as "the merkleization of
+state".
+
+## Why ZK?
+
+While we are really only after succinctly proving data and not zero-knowledge
+there exist no better system than ZK which happens to include all the things we
+need. Our problem can be narrowed down to "compressing bitcoin state" and use
+the various ZK algorithms do the hard math.
+
+## What is ZK?
+
+A zero-knowledge proof is a cryptographic protocol that can improve data
+privacy. It allows one party, known as the prover, to assure another party, the
+verifier, that a statement is true without revealing any extra information. For
+example, the prover can convince the verifier that they know a specific number
+without actually revealing it.
+
+## ZK indexers
 
 Every block wind/unwind goes through the following process:
 
