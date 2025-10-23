@@ -13,7 +13,7 @@ require (
 	github.com/coder/websocket v1.8.14
 	github.com/davecgh/go-spew v1.1.1
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
-	github.com/docker/go-connections v0.5.0
+	github.com/docker/go-connections v0.6.0
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.16.5
 	github.com/go-test/deep v1.1.1
