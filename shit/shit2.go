@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/triedb"
@@ -12,7 +15,21 @@ import (
 )
 
 func main() {
-	diskdb, err := rawdb.Open(rawdb.NewMemoryDatabase(), rawdb.OpenOptions{
+	// Path to the chaindata directory (LevelDB)
+	datadir := "lxx"
+
+	// Open LevelDB database (implements ethdb.KeyValueStore)
+	db, err := leveldb.New(datadir, 0, 0, "", false)
+	if err != nil {
+		log.Fatalf("Failed to open LevelDB: %v", err)
+	}
+	// defer db.Close()
+
+	// You can now use db as a KeyValueStore
+	var kv ethdb.KeyValueStore = db
+
+	// diskdb, err := rawdb.Open(rawdb.NewMemoryDatabase(), rawdb.OpenOptions{
+	diskdb, err := rawdb.Open(kv, rawdb.OpenOptions{
 		Ancient: "x", // os.TempDir(),
 	})
 	if err != nil {
@@ -46,6 +63,9 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("Root V1:", rootV1)
+	//if err := tdb.Enable(types.EmptyRootHash); err != nil {
+	//	panic(err)
+	//}
 
 	// V2
 	trV1, err := trie.New(trie.TrieID(rootV1), tdb)
@@ -62,6 +82,9 @@ func main() {
 		panic(err)
 	}
 	fmt.Println("Committed Root V2:", rootV2)
+	//if err := tdb.Enable(rootV1); err != nil {
+	//	panic(err)
+	//}
 
 	// V3
 	trV2, err := trie.New(trie.TrieID(rootV2), tdb)
@@ -115,9 +138,14 @@ func main() {
 	// rawdb.WriteStateID(diskdb, rootV1, 1)
 	// rawdb.WriteStateID(diskdb, rootV2, 2)
 	// rawdb.WriteStateID(diskdb, rootV3, 3)
-	if err := tdb.Recover(rootV3); err != nil {
+	//if err := tdb.Recover(rootV1); err != nil {
+	//	panic(err)
+	//}
+	if err := tdb.Close(); err != nil {
 		panic(err)
 	}
+
+	fmt.Printf("done\n")
 }
 
 func showKeys(tr *trie.Trie, keys []string) {
