@@ -145,7 +145,7 @@ Range over ins
         storage trie
             key = sha256(PkScript)
             value =
-                key = outpoint
+                key = sha256(outpoint) // fixed 32 bytes so sha
                 value = nil
 
 Range over utxos
@@ -155,8 +155,8 @@ Range over utxos
         storage trie
             key = sha256(PkScript)
             value =
-                key = outpoint
-                value = outpoint
+                key = sha256(outpoint) // fixed 32 bytes so sha
+                value = value
 
 commit above
 
