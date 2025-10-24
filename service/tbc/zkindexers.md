@@ -1,4 +1,4 @@
-# ZK & Hemi sitting in a tree.
+# ZK & Hemi sitting in a tree
 
 tl;dr We want to be able to quickly and succinctly prove "bitcoin state".
 
@@ -10,6 +10,7 @@ and from bitcoin. In order to do these complex functions we need primitives
 that prove positives and negatives.
 
 Examples:
+
 * Does this utxo exist?
 * Has this utxo been spent? When? Whereto?
 * What is the balance of this address?
@@ -120,18 +121,44 @@ Thoughts:
 
 ### Trie
 
+//Range over ins
+//    create a delete map of
+//        key = sha256(PkScript)
+//        value = []PrevOutpoint
+//
+//Range over utxos
+//    key = sha256(PkScript)
+//    value = []Outpoint{txid + txOutIndex}
+//
+//Roll up the ins and utxos as a single key to update on disk
+//
+//for this height tell me if thuis utxo was spent
+
+every block we want to record the new state of the utxo set.
+
+new trie
 Range over ins
     create a delete map of
-        key = sha256(PkScript)
-        value = []PrevOutpoint
+        address trie
+            key = sha256(PkScript) // address fake keccak of sha256(pkscript)
+            value -= value
+        storage trie
+            key = sha256(PkScript)
+            value =
+                key = outpoint
+                value = nil
 
 Range over utxos
-    key = sha256(PkScript)
-    value = []Outpoint{txid + txOutIndex}
+        address trie
+            key = sha256(PkScript) // address fake keccak of sha256(pkscript)
+            value += value
+        storage trie
+            key = sha256(PkScript)
+            value =
+                key = outpoint
+                value = outpoint
 
-Roll up the ins and utxos as a single key to update on disk
-
-for this height tell me if thuis utxo was spent
+commit above
 
 ### Unwinding
 
