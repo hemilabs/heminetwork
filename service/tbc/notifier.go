@@ -7,8 +7,8 @@ package tbc
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -64,12 +64,12 @@ type Listener struct {
 
 	listening atomic.Bool
 
-	ctx      context.Context
-	callback func()
+	ctx         context.Context
+	unsubscribe func()
 }
 
 func (l *Listener) Unsubscribe() {
-	l.callback()
+	l.unsubscribe()
 }
 
 // Listen blocks until either a message is received by the listener, or
@@ -101,19 +101,16 @@ func (n *Notifier) Subscribe(pctx context.Context, capacity uint64) (*Listener, 
 	n.mtx.Lock()
 	defer n.mtx.Unlock()
 
-	var nid [16]byte
 	for {
-		if _, err := io.ReadFull(rand.Reader, nid[:]); err != nil {
-			return nil, err
-		}
-		if _, ok := n.listeners[string(nid[:])]; !ok {
+		id := genID()
+		if _, ok := n.listeners[id]; !ok {
 			lctx, cancel := context.WithCancel(pctx)
-			l := Listener{
+			l := &Listener{
 				ch:  make(chan Notification, capacity),
-				id:  string(nid[:]),
+				id:  id,
 				ctx: lctx,
 			}
-			l.callback = func() {
+			l.unsubscribe = func() {
 				// Mark listener for deletion even if we block
 				// so we skip sending notifications to them
 				cancel()
@@ -121,10 +118,10 @@ func (n *Notifier) Subscribe(pctx context.Context, capacity uint64) (*Listener, 
 				n.mtx.Lock()
 				defer n.mtx.Unlock()
 
-				delete(n.listeners, string(nid[:]))
+				delete(n.listeners, id)
 			}
-			n.listeners[string(nid[:])] = &l
-			return &l, nil
+			n.listeners[id] = l
+			return l, nil
 		}
 	}
 }
@@ -154,4 +151,12 @@ func (l *Listener) block(blocking bool) <-chan struct{} {
 		return ch
 	}
 	return l.ctx.Done()
+}
+
+func genID() string {
+	buf := make([]byte, 24)
+	if _, err := rand.Read(buf); err != nil {
+		panic(fmt.Errorf("read random: %w", err))
+	}
+	return hex.EncodeToString(buf)
 }
