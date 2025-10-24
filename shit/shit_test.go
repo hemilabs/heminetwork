@@ -1,9 +1,7 @@
 package main
 
 import (
-	"crypto/rand"
 	"fmt"
-	"io"
 	mathrand "math/rand"
 	"testing"
 
@@ -208,12 +206,83 @@ func TestShit2(t *testing.T) {
 	fmt.Printf("done\n")
 }
 
-// random returns a variable number of random bytes.
-func random(n int) []byte {
-	buffer := make([]byte, n)
-	_, err := io.ReadFull(rand.Reader, buffer)
+func TestZKTrie(t *testing.T) {
+	datadir := t.TempDir()
+
+	// Open LevelDB database as the underlying disk DB
+	db, err := leveldb.New(datadir, 0, 0, "", false)
 	if err != nil {
 		panic(err)
 	}
-	return buffer
+
+	// You can now use db as a KeyValueStore
+	var kv ethdb.KeyValueStore = db
+
+	// high-level database wrapper for the given key-value store
+	disk, err := rawdb.Open(kv, rawdb.OpenOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create triedb using pathDB.
+	//
+	// Basically, consists of one persistent base layer backed by a key-value
+	// store (which is rawdb wrapped level), on top of which arbitrarily many
+	// in-memory diff layers are stacked.
+	//
+	// On startup, attempts to load an already existing layer from the rawDB
+	// store (with a number of memory layers from a journal). If the journal is not
+	// matched with the base persistent layer, all the recorded diff layers are discarded.
+	tdb := triedb.NewDatabase(disk, &triedb.Config{
+		PathDB: &pathdb.Config{
+			NoAsyncFlush: true,
+		},
+	})
+
+	defer func() {
+		if err := tdb.Close(); err != nil {
+			t.Logf("ERROR: %v", err)
+		}
+	}()
+
+	holder := NewTestHolder(tdb)
+
+	pkScript := common.BytesToAddress(random(common.AddressLength))
+
+	// simulate 100 new outpoints to pkscript
+	var i int
+	for i = range 100 {
+		out, err := holder.createOut(uint64(i), pkScript, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("pkscript %s: new outpoint %s with value %d", pkScript, out, 1000)
+	}
+
+	bal, err := holder.getBalance(pkScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("total balance for %s: %d", pkScript, bal)
+
+	// simulate using 50 outpoints
+	outs := holder.outpoints[pkScript]
+	for j := range 50 {
+		err := holder.createIn(uint64(i+j), pkScript, outs[j])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("pkscript %s: used outpoint %x with value %d", pkScript, outs[j], 1000)
+	}
+
+	bal, err = holder.getBalance(pkScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("total balance for %s: %d", pkScript, bal)
+
+	if err := tdb.Recover(types.EmptyRootHash); err != nil {
+		t.Fatal(err)
+	}
 }
