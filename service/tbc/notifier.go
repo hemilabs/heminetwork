@@ -7,16 +7,45 @@ package tbc
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
-type notification string
+type Notification struct {
+	Type      string
+	ID        string
+	Timestamp time.Time
+	Error     error
+}
 
-const (
-	NotificationBlock       notification = "block inserted"
-	NotificationBlockheader notification = "blockheader inserted"
-)
+func (n Notification) Is(target Notification) bool {
+	return n.Type == target.Type
+}
+
+func (n Notification) String() string {
+	return fmt.Sprintf("[%v] %s %s", n.Timestamp, n.Type, n.ID)
+}
+
+func NotificationBlock(hash chainhash.Hash) Notification {
+	return Notification{
+		Type:      "block inserted",
+		ID:        hash.String(),
+		Timestamp: time.Now(),
+	}
+}
+
+func NotificationBlockheader(hash chainhash.Hash) Notification {
+	return Notification{
+		Type:      "blockheader inserted",
+		ID:        hash.String(),
+		Timestamp: time.Now(),
+	}
+}
 
 type Notifier struct {
 	mtx sync.Mutex
@@ -30,27 +59,34 @@ type Notifier struct {
 }
 
 type Listener struct {
-	id       string
-	notifier *Notifier
-	ch       chan notification
+	id string
+	ch chan Notification
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	listening atomic.Bool
+
+	ctx      context.Context
+	callback func()
 }
 
 func (l *Listener) Unsubscribe() {
-	// Mark listener for deletion even if we block
-	// so we skip sending notifications to them
-	l.cancel()
-
-	l.notifier.mtx.Lock()
-	defer l.notifier.mtx.Unlock()
-
-	delete(l.notifier.listeners, l.id)
+	l.callback()
 }
 
-func (l *Listener) Listen() <-chan notification {
-	return l.ch
+// Listen blocks until either a message is received by the listener, or
+// the passed context expires. Calling Listen from multiple goroutines
+// is not safe and will result in a panic.
+func (l *Listener) Listen(ctx context.Context) (Notification, error) {
+	if !l.listening.CompareAndSwap(false, true) {
+		panic("multiple goroutines listening simultaneously")
+	}
+	defer l.listening.Store(false)
+
+	select {
+	case <-ctx.Done():
+		return Notification{}, ctx.Err()
+	case msg := <-l.ch:
+		return msg, nil
+	}
 }
 
 func NewNotifier(blocking bool) *Notifier {
@@ -61,7 +97,7 @@ func NewNotifier(blocking bool) *Notifier {
 	return &n
 }
 
-func (n *Notifier) Subscribe(ctx context.Context, capacity uint64) (*Listener, error) {
+func (n *Notifier) Subscribe(pctx context.Context, capacity uint64) (*Listener, error) {
 	n.mtx.Lock()
 	defer n.mtx.Unlock()
 
@@ -71,13 +107,21 @@ func (n *Notifier) Subscribe(ctx context.Context, capacity uint64) (*Listener, e
 			return nil, err
 		}
 		if _, ok := n.listeners[string(nid[:])]; !ok {
-			lctx, cancel := context.WithCancel(ctx)
+			lctx, cancel := context.WithCancel(pctx)
 			l := Listener{
-				ch:       make(chan notification, capacity),
-				id:       string(nid[:]),
-				notifier: n,
-				ctx:      lctx,
-				cancel:   cancel,
+				ch:  make(chan Notification, capacity),
+				id:  string(nid[:]),
+				ctx: lctx,
+			}
+			l.callback = func() {
+				// Mark listener for deletion even if we block
+				// so we skip sending notifications to them
+				cancel()
+
+				n.mtx.Lock()
+				defer n.mtx.Unlock()
+
+				delete(n.listeners, string(nid[:]))
 			}
 			n.listeners[string(nid[:])] = &l
 			return &l, nil
@@ -85,7 +129,10 @@ func (n *Notifier) Subscribe(ctx context.Context, capacity uint64) (*Listener, e
 	}
 }
 
-func (n *Notifier) Notify(ctx context.Context, message notification) error {
+// Notify sends a notification to every listener. If the Notifier
+// is blocking, it blocks until every listener can receive the
+// notification.
+func (n *Notifier) Notify(ctx context.Context, message Notification) error {
 	n.mtx.Lock()
 	defer n.mtx.Unlock()
 
@@ -94,14 +141,14 @@ func (n *Notifier) Notify(ctx context.Context, message notification) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case l.ch <- message:
-		case <-l.block():
+		case <-l.block(n.blocking):
 		}
 	}
 	return nil
 }
 
-func (l *Listener) block() <-chan struct{} {
-	if !l.notifier.blocking {
+func (l *Listener) block(blocking bool) <-chan struct{} {
+	if !blocking {
 		ch := make(chan struct{}, 1)
 		ch <- struct{}{}
 		return ch

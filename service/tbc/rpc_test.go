@@ -1763,20 +1763,21 @@ func TestNotFoundError(t *testing.T) {
 		}
 	}()
 
-	// Wait for tbc to insert all blocks
+	// Wait for tbc to start up
 	for {
-		select {
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
-		case msg := <-l.Listen():
-			// If we insert genesis, then TBC
-			// has finished starting up
-			if msg != NotificationBlock {
-				continue
-			}
+		msg, err := l.Listen(ctx)
+		if err != nil {
+			t.Fatal(err)
 		}
-		break
+		if msg.Error != nil {
+			t.Fatal(msg.Error)
+		}
+		// If we insert genesis, then TBC has finished starting up
+		if msg.Is(NotificationBlock(chainhash.Hash{})) {
+			break
+		}
 	}
+
 	l.Unsubscribe()
 
 	var emptyHash chainhash.Hash

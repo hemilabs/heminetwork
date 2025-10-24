@@ -1460,7 +1460,7 @@ func (s *Server) AddExternalHeaders(ctx context.Context, headers *wire.MsgHeader
 
 	// We aren't checking error because we want to pass everything from db
 	// upstream
-	it, cbh, lbh, n, err := s.insertBlockheaderAndNotify(ctx, headers, ph)
+	it, cbh, lbh, n, err := s.insertBlockheader(ctx, headers, ph)
 
 	// Caller of AddExternalHeaders wants fork geometry change, canonical
 	// and last inserted header, and must handle error upstream as an error
@@ -1541,7 +1541,7 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 
 	// When running in normal (not External Header) mode, do not set
 	// upstream state IDs
-	it, cbh, lbh, n, err := s.insertBlockheaderAndNotify(ctx, msg, nil)
+	it, cbh, lbh, n, err := s.insertBlockheader(ctx, msg, nil)
 	if err != nil {
 		// This ends the race between peers during IBD. It should
 		// starve the slower peers and eventually we end up with one
@@ -1619,35 +1619,39 @@ func (s *Server) handleHeaders(ctx context.Context, p *rawpeer.RawPeer, msg *wir
 	return nil
 }
 
-func (s *Server) insertBlockAndNotify(ctx context.Context, block *btcutil.Block) (int64, error) {
+func (s *Server) insertBlock(ctx context.Context, block *btcutil.Block) (int64, error) {
 	height, err := s.g.db.BlockInsert(ctx, block)
 	if err != nil {
 		return 0, err
 	}
-	if err := s.notifier.Notify(ctx, NotificationBlock); err != nil {
+	msg := NotificationBlock(*block.Hash())
+	if err := s.notifier.Notify(ctx, msg); err != nil {
 		return 0, fmt.Errorf("send new block notification: %w", err)
 	}
 	return height, nil
 }
 
-func (s *Server) insertBlockheaderAndNotify(ctx context.Context, headers *wire.MsgHeaders, batchHook tbcd.BatchHook) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
+func (s *Server) insertBlockheader(ctx context.Context, headers *wire.MsgHeaders, batchHook tbcd.BatchHook) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
 	it, cbh, lbh, n, err := s.g.db.BlockHeadersInsert(ctx, headers, batchHook)
 	if err != nil {
 		return it, cbh, lbh, n, err
 	}
-	if err := s.notifier.Notify(ctx, NotificationBlockheader); err != nil {
-		return it, cbh, lbh, n,
-			fmt.Errorf("send new blockheader notification: %w", err)
+	for _, h := range headers.Headers {
+		msg := NotificationBlockheader(h.BlockHash())
+		if err := s.notifier.Notify(ctx, msg); err != nil {
+			return it, cbh, lbh, n,
+				fmt.Errorf("send new blockheader notification: %w", err)
+		}
 	}
 	return it, cbh, lbh, n, err
 }
 
 func (s *Server) BlockInsert(ctx context.Context, blk *wire.MsgBlock) (int64, error) {
-	return s.insertBlockAndNotify(ctx, btcutil.NewBlock(blk))
+	return s.insertBlock(ctx, btcutil.NewBlock(blk))
 }
 
 func (s *Server) BlockHeadersInsert(ctx context.Context, headers *wire.MsgHeaders) (tbcd.InsertType, *tbcd.BlockHeader, *tbcd.BlockHeader, int, error) {
-	return s.insertBlockheaderAndNotify(ctx, headers, nil)
+	return s.insertBlockheader(ctx, headers, nil)
 }
 
 func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.MsgBlock, raw []byte) error {
@@ -1688,7 +1692,7 @@ func (s *Server) handleBlock(ctx context.Context, p *rawpeer.RawPeer, msg *wire.
 		// }
 	}
 
-	height, err := s.insertBlockAndNotify(ctx, block) // XXX see if we can use raw here
+	height, err := s.insertBlock(ctx, block) // XXX see if we can use raw here
 	if err != nil {
 		return fmt.Errorf("database block insert %v: %w", bhs, err)
 	} else {
@@ -1872,7 +1876,7 @@ func (s *Server) insertGenesis(ctx context.Context, height uint64, diff *big.Int
 	}
 
 	log.Debugf("Inserting genesis block")
-	_, err = s.insertBlockAndNotify(ctx, btcutil.NewBlock(s.g.chain.GenesisBlock))
+	_, err = s.insertBlock(ctx, btcutil.NewBlock(s.g.chain.GenesisBlock))
 	if err != nil {
 		return fmt.Errorf("genesis block insert: %w", err)
 	}

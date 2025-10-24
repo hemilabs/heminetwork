@@ -7,6 +7,7 @@ package tbc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"testing/synctest"
 )
@@ -87,7 +88,7 @@ func TestNotifier(t *testing.T) {
 
 				n := NewNotifier(tti.block)
 
-				for _, listen := range tti.listeners {
+				for i, listen := range tti.listeners {
 					l, err := n.Subscribe(ctx, tti.capacity)
 					if err != nil {
 						panic(err)
@@ -96,11 +97,14 @@ func TestNotifier(t *testing.T) {
 						defer l.Unsubscribe()
 						if listen {
 							for {
-								select {
-								case <-ctx.Done():
-									return
-								case <-l.Listen():
+								msg, err := l.Listen(ctx)
+								if err != nil {
+									if errors.Is(err, context.Canceled) {
+										return
+									}
+									panic(err)
 								}
+								t.Logf("l%d: %v", i, msg)
 							}
 						}
 						<-ctx.Done()
@@ -108,8 +112,12 @@ func TestNotifier(t *testing.T) {
 				}
 
 				go func() {
-					for range tti.messages {
-						if err := n.Notify(ctx, notification("test")); err != nil {
+					for i := range tti.messages {
+						err := n.Notify(ctx, Notification{
+							Type: "Test",
+							ID:   fmt.Sprintf("m%d", i),
+						})
+						if err != nil {
 							if !errors.Is(err, context.Canceled) {
 								panic(err)
 							}
@@ -145,7 +153,7 @@ func TestNotifierUnsubscribe(t *testing.T) {
 
 		var sent bool
 		go func() {
-			if err := n.Notify(ctx, notification("test")); err != nil {
+			if err := n.Notify(ctx, Notification{}); err != nil {
 				panic(err)
 			}
 			sent = true
@@ -162,5 +170,32 @@ func TestNotifierUnsubscribe(t *testing.T) {
 		if !sent {
 			t.Fatal("notifications still blocked after unsubscribe")
 		}
+	})
+}
+
+func TestConcurrentListen(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer func() {
+			if r := recover(); r == nil {
+				t.Errorf("expected panic")
+			}
+			cancel()
+		}()
+
+		n := NewNotifier(true)
+
+		l, err := n.Subscribe(ctx, 0)
+		if err != nil {
+			panic(err)
+		}
+
+		go func() {
+			_, _ = l.Listen(ctx)
+		}()
+
+		synctest.Wait()
+
+		_, _ = l.Listen(ctx)
 	})
 }

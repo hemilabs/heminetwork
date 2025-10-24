@@ -1405,22 +1405,20 @@ func (s *Server) hasAllBlocks(ctx context.Context, m map[int32][]*block) (bool, 
 }
 
 func (s *Server) waitForBlocks(ctx context.Context, l *Listener, m map[int32][]*block) error {
-	var (
-		err       error
-		hasBlocks bool
-	)
-	for !hasBlocks {
-		select {
-		case <-ctx.Done():
+	for hasBlocks := false; !hasBlocks; {
+		msg, err := l.Listen(ctx)
+		if err != nil {
 			return err
-		case msg := <-l.Listen():
-			if msg != NotificationBlock {
-				continue
-			}
-			hasBlocks, err = s.hasAllBlocks(ctx, m)
-			if err != nil {
-				return err
-			}
+		}
+		if !msg.Is(NotificationBlock(chainhash.Hash{})) {
+			continue
+		}
+		if msg.Error != nil {
+			return msg.Error
+		}
+		hasBlocks, err = s.hasAllBlocks(ctx, m)
+		if err != nil {
+			return err
 		}
 	}
 	return nil
