@@ -1,6 +1,6 @@
 ## Current state
 
-Every block wind/unwind goes goes thorugh the following process:
+Every block wind/unwind goes through the following process:
 
 ### In
 
@@ -39,7 +39,7 @@ information:
 ```
 sha256(be_uint32(height) + blockhash)                            // Positional proof
 sha256(blockheader + FillBytes(cumdiff))                         // Header and cumdiff
-for range block.ins {sha256(SpentOutput+SpendingOutpointValue) } // Spent ouput by where
+for range block.ins {sha256(SpentOutput+SpendingOutpointValue) } // Spent output by where
 for range block.outs {sha256(SpendableOutput) }                  // Spendables outputs
 ```
 
@@ -125,7 +125,7 @@ txid_height_hash -> rolling tx spend
         roll up vout index + spend info (spending txin:vidx)
 
 sha256(spendscript)_height_hash_txid_vin/vout_vin/voutindex -> cumulative balance
-        fear that this structure will baloon and we may have to keep "just the latest"
+        fear that this structure will balloon and we may have to keep "just the latest"
 
 After generating the merkle we must record the state transition to this block
 which is the merkle root of the parent + merkle rooto of self.
