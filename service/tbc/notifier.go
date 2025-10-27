@@ -17,10 +17,10 @@ import (
 )
 
 type Notification struct {
-	Type      string
-	ID        string
-	Timestamp time.Time
-	Error     error
+	Type      string    `json:"type"`
+	ID        string    `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Error     error     `json:"error,omitempty"`
 }
 
 func (n Notification) Is(target Notification) bool {
@@ -33,7 +33,7 @@ func (n Notification) String() string {
 
 func NotificationBlock(hash chainhash.Hash) Notification {
 	return Notification{
-		Type:      "block inserted",
+		Type:      "block_insert",
 		ID:        hash.String(),
 		Timestamp: time.Now(),
 	}
@@ -41,7 +41,7 @@ func NotificationBlock(hash chainhash.Hash) Notification {
 
 func NotificationBlockheader(hash chainhash.Hash) Notification {
 	return Notification{
-		Type:      "blockheader inserted",
+		Type:      "blockheader_insert",
 		ID:        hash.String(),
 		Timestamp: time.Now(),
 	}
@@ -98,31 +98,34 @@ func NewNotifier(blocking bool) *Notifier {
 }
 
 func (n *Notifier) Subscribe(pctx context.Context, capacity uint64) (*Listener, error) {
+	lctx, cancel := context.WithCancel(pctx)
+	l := &Listener{
+		ch:  make(chan Notification, capacity),
+		ctx: lctx,
+	}
+	l.unsubscribe = func() {
+		// Mark listener for deletion even if we block
+		// so we skip sending notifications to them.
+		cancel()
+
+		n.mtx.Lock()
+		defer n.mtx.Unlock()
+
+		delete(n.listeners, l.id)
+	}
+
 	n.mtx.Lock()
 	defer n.mtx.Unlock()
 
 	for {
 		id := genID()
-		if _, ok := n.listeners[id]; !ok {
-			lctx, cancel := context.WithCancel(pctx)
-			l := &Listener{
-				ch:  make(chan Notification, capacity),
-				id:  id,
-				ctx: lctx,
-			}
-			l.unsubscribe = func() {
-				// Mark listener for deletion even if we block
-				// so we skip sending notifications to them
-				cancel()
-
-				n.mtx.Lock()
-				defer n.mtx.Unlock()
-
-				delete(n.listeners, id)
-			}
-			n.listeners[id] = l
-			return l, nil
+		if _, ok := n.listeners[id]; ok {
+			// ID is already used, retry.
+			continue
 		}
+		l.id = id
+		n.listeners[id] = l
+		return l, nil
 	}
 }
 
