@@ -548,7 +548,7 @@ func (l *ldb) BlockHeaderByHash(ctx context.Context, hash chainhash.Hash) (*tbcd
 	}
 
 	// It stands to reason that this code does not need a transaction. The
-	// caller code will either receive or not receice an answer. It does
+	// caller code will either receive or not receive an answer. It does
 	// not seem likely to be racing higher up in the stack.
 
 	bhsDB := l.pool[level.BlockHeadersDB]
@@ -1088,7 +1088,7 @@ func (l *ldb) BlockHeadersRemove(ctx context.Context, bhs *wire.MsgHeaders, tipA
 	if err != nil {
 		return tbcd.RTInvalid, nil,
 			fmt.Errorf("block headers remove: cannot find previous header (with hash %s) to lowest header"+
-				" removed (whth hash %s) in database, err: %w",
+				" removed (with hash %s) in database, err: %w",
 				headersParsed[0].PrevBlock.String(), headersParsed[0].BlockHash().String(), err)
 	}
 
