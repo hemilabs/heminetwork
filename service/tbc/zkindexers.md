@@ -148,7 +148,7 @@ Range over utxos
             key = sha256(PkScript)
             value = 
                 key = sha256(outpoint) // fixed 32 bytes so sha
-                value = value
+                value = pkscript+value
 
 commit above
 
