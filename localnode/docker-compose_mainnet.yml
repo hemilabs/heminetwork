@@ -9,6 +9,7 @@ name: "hemi-stack"
 services:
   # Bitcoin Finality Governor
   bfgd:
+    # yamllint disable-line rule:line-length
     image: hemilabs/bfgd:1.6.3@sha256:13d1c04508ed85df4756ed0681993f9c1625b75bbc765d88c0e6a88bac59d3e6
     profiles: ["hemi", "full"]
     depends_on:
@@ -79,6 +80,7 @@ services:
 
   # Bitcoin Secure Sequencer
   bssd:
+    # yamllint disable-line rule:line-length
     image: hemilabs/bssd:1.6.3@sha256:b6782c25b3245f1cede1d7b75bbea4d9fe36f2dc4fa708a9fae03b1f34ee7126
     profiles: ["hemi", "hemi-min", "full"]
     environment:
