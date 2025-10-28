@@ -29,8 +29,8 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 	"github.com/hemilabs/heminetwork/v2/service/tbc"
-	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 type TBCMockHandler struct {

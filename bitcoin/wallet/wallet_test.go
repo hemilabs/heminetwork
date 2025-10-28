@@ -21,7 +21,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul"
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/zuul/memory"
 	"github.com/hemilabs/heminetwork/v2/hemi"
-	"github.com/hemilabs/heminetwork/v2/testutil/mock"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
 )
 
 func digest256(x []byte) []byte {

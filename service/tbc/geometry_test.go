@@ -21,7 +21,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/database/tbcd/level"
 	"github.com/hemilabs/heminetwork/v2/hemi"
-	"github.com/hemilabs/heminetwork/v2/testutil"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
 
 func makeCheckpoints(start, count int) []chaincfg.Checkpoint {

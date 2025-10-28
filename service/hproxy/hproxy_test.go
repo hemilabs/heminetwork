@@ -22,8 +22,8 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
-	"github.com/hemilabs/heminetwork/v2/testutil"
-	"github.com/hemilabs/heminetwork/v2/testutil/mock"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
 )
 
 type serverReply struct {
