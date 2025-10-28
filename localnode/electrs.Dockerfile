@@ -1,4 +1,4 @@
-FROM blockstream/esplora@sha256:1fb16180f430f75da28eca37a265630c7192b3c103aafd9b9ba4bf5b6d9c8ea8
+FROM blockstream/esplora@sha256:1db92e95b55cdea9e1fcb80f94dabff66f6aa370574a02af4baeecefd1d6c236
 
 RUN apt update
 
