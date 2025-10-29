@@ -18,9 +18,9 @@ import (
 	"github.com/juju/loggo"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
 	"github.com/hemilabs/heminetwork/v2/service/tbc"
-	"github.com/hemilabs/heminetwork/v2/testutil"
-	"github.com/hemilabs/heminetwork/v2/testutil/mock"
 )
 
 func TestTBCGozerConnection(t *testing.T) {

@@ -19,7 +19,7 @@ import (
 	"github.com/go-test/deep"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
-	"github.com/hemilabs/heminetwork/v2/testutil"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
 
 func TestMempoolFees(t *testing.T) {

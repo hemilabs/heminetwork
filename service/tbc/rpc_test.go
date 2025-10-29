@@ -38,7 +38,7 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
-	"github.com/hemilabs/heminetwork/v2/testutil"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 )
 
 func bytes2Tx(b []byte) (*wire.MsgTx, error) {

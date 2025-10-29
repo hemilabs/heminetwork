@@ -36,8 +36,8 @@ import (
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 	"github.com/hemilabs/heminetwork/v2/hemi"
 	"github.com/hemilabs/heminetwork/v2/hemi/pop"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
 	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
-	"github.com/hemilabs/heminetwork/v2/testutil"
 )
 
 type block struct {

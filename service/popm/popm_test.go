@@ -17,8 +17,8 @@ import (
 
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/hemi"
-	"github.com/hemilabs/heminetwork/v2/testutil"
-	"github.com/hemilabs/heminetwork/v2/testutil/mock"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil"
+	"github.com/hemilabs/heminetwork/v2/internal/testutil/mock"
 )
 
 const wantedKeystones = 20
