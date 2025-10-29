@@ -1624,9 +1624,11 @@ func (s *Server) insertBlock(ctx context.Context, block *btcutil.Block) (int64, 
 	if err != nil {
 		return 0, err
 	}
-	msg := NotificationBlock(*block.Hash())
-	if err := s.notifier.Notify(ctx, msg); err != nil {
-		return 0, fmt.Errorf("send new block notification: %w", err)
+	if s.notifier.HasListeners() {
+		msg := NotificationBlock(*block.Hash())
+		if err := s.notifier.Notify(ctx, msg); err != nil {
+			return 0, fmt.Errorf("send new block notification: %w", err)
+		}
 	}
 	return height, nil
 }
@@ -1636,11 +1638,13 @@ func (s *Server) insertBlockheader(ctx context.Context, headers *wire.MsgHeaders
 	if err != nil {
 		return it, cbh, lbh, n, err
 	}
-	for _, h := range headers.Headers {
-		msg := NotificationBlockheader(h.BlockHash())
-		if err := s.notifier.Notify(ctx, msg); err != nil {
-			return it, cbh, lbh, n,
-				fmt.Errorf("send new blockheader notification: %w", err)
+	if s.notifier.HasListeners() {
+		for _, h := range headers.Headers {
+			msg := NotificationBlockheader(h.BlockHash())
+			if err := s.notifier.Notify(ctx, msg); err != nil {
+				return it, cbh, lbh, n,
+					fmt.Errorf("send new blockheader notification: %w", err)
+			}
 		}
 	}
 	return it, cbh, lbh, n, err

@@ -97,6 +97,13 @@ func NewNotifier(blocking bool) *Notifier {
 	return &n
 }
 
+func (n *Notifier) HasListeners() bool {
+	n.mtx.Lock()
+	defer n.mtx.Unlock()
+
+	return len(n.listeners) > 0
+}
+
 func (n *Notifier) Subscribe(pctx context.Context, capacity uint64) (*Listener, error) {
 	lctx, cancel := context.WithCancel(pctx)
 	l := &Listener{
