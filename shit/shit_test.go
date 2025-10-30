@@ -4,6 +4,7 @@ import (
 	"fmt"
 	mathrand "math/rand"
 	"testing"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -207,6 +208,14 @@ func TestShit2(t *testing.T) {
 }
 
 func TestZKTrie(t *testing.T) {
+	const (
+		blockCount uint64 = 1000000 // num of blocks
+		// newOutsCount >= inCount + outCount
+		newOutsCount uint64 = 1500 // num of outs with new scripts
+		inCount      uint64 = 1000 // num of ins
+		outCount     uint64 = 500  // num of outs with previous scripts
+	)
+
 	datadir := t.TempDir()
 
 	// Open LevelDB database as the underlying disk DB
@@ -238,7 +247,6 @@ func TestZKTrie(t *testing.T) {
 			NoAsyncFlush: true,
 		},
 	})
-
 	defer func() {
 		if err := tdb.Close(); err != nil {
 			t.Logf("ERROR: %v", err)
@@ -246,41 +254,38 @@ func TestZKTrie(t *testing.T) {
 	}()
 
 	holder := NewTestHolder(tdb)
-
-	pkScript := common.BytesToAddress(random(common.AddressLength))
-
-	// simulate 100 new outpoints to pkscript
-	var i int
-	for i = range 100 {
-		out, err := holder.createOut(uint64(i), pkScript, 1000)
-		if err != nil {
+	for blk := range blockCount {
+		realDuration := time.Now()
+		for range newOutsCount {
+			pkScript := common.BytesToAddress(random(common.AddressLength))
+			if err := holder.simulateOut(pkScript, 1000); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if blk != 0 {
+			for range outCount {
+				os := holder.outpoints[0]
+				holder.outpoints = holder.outpoints[1:]
+				pkScript := os.getAddress()
+				if err := holder.simulateOut(pkScript, 75); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for range inCount {
+				os := holder.outpoints[0]
+				holder.outpoints = holder.outpoints[1:]
+				if err := holder.simulateIn(os); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		commitDuration := time.Now()
+		if err := holder.commitBlock(blk); err != nil {
 			t.Fatal(err)
 		}
-		t.Logf("pkscript %s: new outpoint %s with value %d", pkScript, out, 1000)
+		t.Logf("block %d: commited in %v, total time %v",
+			blk, time.Since(commitDuration), time.Since(realDuration))
 	}
-
-	bal, err := holder.getBalance(pkScript)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("total balance for %s: %d", pkScript, bal)
-
-	// simulate using 50 outpoints
-	outs := holder.outpoints[pkScript]
-	for j := range 50 {
-		err := holder.createIn(uint64(i+j), pkScript, outs[j])
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		t.Logf("pkscript %s: used outpoint %x with value %d", pkScript, outs[j], 1000)
-	}
-
-	bal, err = holder.getBalance(pkScript)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("total balance for %s: %d", pkScript, bal)
 
 	if err := tdb.Recover(types.EmptyRootHash); err != nil {
 		t.Fatal(err)
