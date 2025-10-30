@@ -6,12 +6,31 @@ package tbc
 
 import (
 	"context"
+	"crypto/sha256"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
+
+var (
+	// Zero hash indicates positional data in trie.
+	positionalAccountKey = chainhash.Hash{}
+
+	// Positional data stored in positionalAccountKey.
+	currentBlockKey      = []byte("currentblock")
+	previousBlockKey     = []byte("previousblock")
+	previousStateRootKey = []byte("previousstateroot")
+)
+
+// ZKstate contains all hashes required to generate a state root. This is a bit
+// of a chicken and egg problem.
+type ZKState struct {
+	CurrentBlock      [sha256.Size]byte
+	PreviousBlock     [sha256.Size]byte
+	previousStateRoot [sha256.Size]byte
+}
 
 func (s *Server) ZKBalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash) (btcutil.Amount, error) {
 	log.Tracef("ZKBalanceByScriptHash")
