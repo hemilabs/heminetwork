@@ -269,22 +269,24 @@ func (kc *keystoneCounter) count() int {
 }
 
 func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.Request) error {
+	f.mtx.Lock()
+
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
 	if err != nil {
+		f.mtx.Unlock()
 		panic(err)
 	}
 	defer c.Close(websocket.StatusNormalClosure, "") // Force close connection
 
-	f.mtx.Lock()
 	f.conns = append(f.conns, c) // XXX don't we need to reap this? yes.
 	f.mtx.Unlock()
 
 	log.Infof("%v: new connection to %v", f.name, r.RemoteAddr)
 
 	var kc keystoneCounter
-	for {
+	for f.Running() {
 		// Handle command
 		method, err := f.handle(c, w, r, &kc)
 		if err != nil {
@@ -298,6 +300,7 @@ func (f *OpGethMockHandler) mockOpGethHandleFunc(w http.ResponseWriter, r *http.
 		}
 		f.notifyMsg(f.pctx, method)
 	}
+	return nil
 }
 
 func lastKeystones(n int, keystones []hemi.L2Keystone) []hemi.L2Keystone {

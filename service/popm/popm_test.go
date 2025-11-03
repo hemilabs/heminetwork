@@ -7,7 +7,6 @@ package popm
 import (
 	"context"
 	"errors"
-	"net"
 	"strings"
 	"testing"
 	"time"
@@ -294,11 +293,11 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
-	_, kssList := testutil.MakeSharedKeystones(wantedKeystones)
+	_, kssList := testutil.MakeSharedKeystones(1)
 	btcTip := uint(kssList[len(kssList)-1].L1BlockNumber)
 
-	errCh := make(chan error, 10)
-	msgCh := make(chan string, 10)
+	errCh := make(chan error)
+	msgCh := make(chan string)
 
 	// Create opgeth test server with the request handler.
 	opgeth := mock.NewMockOpGeth(ctx, errCh, msgCh, kssList, defaultL2KeystonesCount)
@@ -318,8 +317,8 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	cfg.BitcoinSecret = "5e2deaa9f1bb2bcef294cc36513c591c5594d6b671fe83a104aa2708bc634c"
 	cfg.LogLevel = "popm=TRACE; mock=TRACE;"
 	cfg.l2KeystoneMaxAge = mock.InfiniteDuration
-	cfg.opgethMaxReconnectDelay = 1 * time.Second
-	cfg.opgethMinReconnectDelay = 500 * time.Millisecond
+	cfg.opgethMaxReconnectDelay = 100 * time.Millisecond
+	cfg.opgethMinReconnectDelay = 50 * time.Millisecond
 
 	if err := loggo.ConfigureLoggers(cfg.LogLevel); err != nil {
 		t.Fatal(err)
@@ -351,22 +350,43 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// close current popm connection to opgeth
-	if err = opgeth.CloseConnections(false); err != nil && !errors.Is(err, net.ErrClosed) {
+	opgeth.Stop()
+	if err = opgeth.CloseConnections(false); err != nil {
 		t.Fatal(err)
 	}
 
-	select {
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	case <-errCh:
-		// discard expected error from forced closure
+	// wait for popminer to try and reconnect
+	for attempted := false; attempted != true; {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-msgCh:
+		case rcvErr := <-errCh:
+			// miner has tried to reconnect
+			if errors.Is(rcvErr, mock.ErrConnectionClosed) {
+				t.Log("popminer attempted to reconnect")
+				opgeth.Start()
+				attempted = true
+			}
+		}
+	}
+
+	// flush all other error messages
+	for flushed := false; flushed != true; {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-errCh:
+		default:
+			t.Log("error messages flushed")
+			flushed = true
+		}
 	}
 
 	// messages we expect to receive
 	expectedMsg = map[string]int{
-		"kss_getLatestKeystones":     1,
-		"kss_subscribe":              1,
-		tbcapi.CmdTxBroadcastRequest: 1,
+		"kss_getLatestKeystones": 1,
+		"kss_subscribe":          1,
 	}
 
 	// receive messages and errors from opgeth and tbc

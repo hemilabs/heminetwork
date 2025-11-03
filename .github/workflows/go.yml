@@ -101,6 +101,7 @@ jobs:
         run: make GOCACHE="$(go env GOCACHE)" go-deps
 
       - name: "make test (with E2E tests)"
-        env:
-          HEMI_DOCKER_TESTS: "1"
-        run: go test -v -count 100 -run TestDisconnectedOpgeth ./service/popm
+        run: go test -v -count 50 -run TestDisconnectedOpgeth ./service/popm
+
+      - name: "test race"
+        run: go test -v -count 50 -run TestDisconnectedOpgeth --race ./service/popm
