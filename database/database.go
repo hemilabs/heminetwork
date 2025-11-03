@@ -5,13 +5,14 @@
 package database
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 )
 
 type Database interface {
-	Close() error // Close database
+	Close(ctx context.Context) error // Close database
 }
 
 type NotFoundError string

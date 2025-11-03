@@ -30,9 +30,9 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
+	"github.com/hemilabs/larry/larry"
 	"github.com/juju/loggo"
 	"github.com/phayes/freeport"
-	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
@@ -125,6 +125,8 @@ func countKeystones(b *btcutil.Block) int {
 	return keystonesFound
 }
 
+// XXX larry, this test relies on tared
+// leveldb database so will fail for other dbs
 func TestDbUpgradeFull(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
@@ -235,6 +237,8 @@ func TestDbUpgradeFull(t *testing.T) {
 	}
 }
 
+// XXX larry, this test relies on tared
+// leveldb database so will fail for other dbs
 func TestDbUpgradeV3(t *testing.T) {
 	home := t.TempDir()
 	network := "upgradetest"
@@ -267,14 +271,11 @@ func TestDbUpgradeV3(t *testing.T) {
 	}
 
 	// Get all db keys
-	keys := make([]string, 0, len(dbTemp.DB()))
-	for k := range dbTemp.DB() {
-		keys = append(keys, k)
-	}
+	keys := dbTemp.Tables()
 	sort.Strings(keys)
 
 	// Close temporary DB
-	if err = dbTemp.Close(); err != nil {
+	if err = dbTemp.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -330,13 +331,12 @@ func TestDbUpgradeV3(t *testing.T) {
 	t.Log("Comparing DBs")
 
 	// Compare all databases
+	a := dbv2.DB()
+	b := dbMove.DB()
+	c := dbCopy.DB()
 	for _, dbs := range keys {
-		a := dbv2.DB()[dbs]
-		b := dbMove.DB()[dbs]
-		c := dbCopy.DB()[dbs]
-
 		t.Logf("Comparing original records against dbmove (%v)", dbs)
-		records, err := cmpDB(a, b)
+		records, err := cmpDB(ctx, a, b, dbs)
 		if err != nil {
 			t.Errorf("found diff in record %v: %v", records, err)
 		} else {
@@ -344,7 +344,7 @@ func TestDbUpgradeV3(t *testing.T) {
 		}
 
 		t.Logf("Comparing dbmove records against original (%v)", dbs)
-		records, err = cmpDB(b, a)
+		records, err = cmpDB(ctx, b, a, dbs)
 		if err != nil {
 			t.Errorf("found diff in record %v: %v", records, err)
 		} else {
@@ -352,7 +352,7 @@ func TestDbUpgradeV3(t *testing.T) {
 		}
 
 		t.Logf("Comparing original records against dbcopy (%v)", dbs)
-		records, err = cmpDB(a, c)
+		records, err = cmpDB(ctx, a, c, dbs)
 		if err != nil {
 			t.Errorf("found diff in record %v: %v", records, err)
 		} else {
@@ -360,7 +360,7 @@ func TestDbUpgradeV3(t *testing.T) {
 		}
 
 		t.Logf("Comparing dbcopy records against original (%v)", dbs)
-		records, err = cmpDB(c, a)
+		records, err = cmpDB(ctx, c, a, dbs)
 		if err != nil {
 			t.Errorf("found diff in record %v: %v", records, err)
 		} else {
@@ -369,24 +369,29 @@ func TestDbUpgradeV3(t *testing.T) {
 	}
 }
 
-func cmpDB(a, b *leveldb.DB) (int, error) {
-	i := a.NewIterator(nil, nil)
-	defer func() { i.Release() }()
+func cmpDB(ctx context.Context, a, b larry.Database, dbname string) (int, error) {
+	i, err := a.NewIterator(ctx, dbname)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { i.Close(ctx) }()
 
 	records := 0
-	for records = 0; i.Next(); records++ {
-		v, err := b.Get(i.Key(), nil)
+	for records = 0; i.Next(ctx); records++ {
+		v, err := b.Get(ctx, dbname, i.Key(ctx))
 		if err != nil {
 			return records, err
 		}
 
-		if diff := deep.Equal(i.Value(), v); len(diff) > 0 {
+		if diff := deep.Equal(i.Value(ctx), v); len(diff) > 0 {
 			return records, fmt.Errorf("unexpected diff: %v", diff)
 		}
 	}
 	return records, nil
 }
 
+// XXX larry, this test relies on tared
+// leveldb database so will fail for other dbs
 func TestDbUpgradeV4(t *testing.T) {
 	home := t.TempDir()
 	t.Logf("temp: %v", home)
