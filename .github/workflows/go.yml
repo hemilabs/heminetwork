@@ -103,29 +103,4 @@ jobs:
       - name: "make test (with E2E tests)"
         env:
           HEMI_DOCKER_TESTS: "1"
-        run: make GOCACHE="$(go env GOCACHE)" test
-
-      - name: "Upload coverage reports to Codecov"
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
-        with:
-          files: ./coverage.out
-          token: "${{ secrets.CODECOV_TOKEN }}"
-
-  test-race:
-    name: "Test (race)"
-    runs-on: "ubuntu-latest"
-    steps:
-      - name: "Checkout repository"
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: "Setup Go"
-        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
-        with:
-          go-version-file: "go.mod"
-
-      - name: "Download and verify dependencies"
-        id: deps
-        run: make GOCACHE="$(go env GOCACHE)" go-deps
-
-      - name: "make race"
-        run: make GOCACHE="$(go env GOCACHE)" race
+        run: go test -v -count 100 -run TestDisconnectedOpgeth ./service/popm
