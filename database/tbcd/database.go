@@ -255,7 +255,7 @@ func NewOutpoint(txid [32]byte, index uint32) (op Outpoint) {
 	op[0] = 'u' // match leveldb cache so that we prevent a bunch of bcopy
 	copy(op[1:33], txid[:])
 	binary.BigEndian.PutUint32(op[33:], index)
-	return
+	return op
 }
 
 func NewOutpointFromString(s string) (*Outpoint, error) {
@@ -285,7 +285,7 @@ func NewTxOut(txOut *wire.TxOut) []byte {
 func TxOutFromBytes(x []byte) (txOut wire.TxOut) {
 	txOut.Value = int64(binary.BigEndian.Uint64(x[0:]))
 	txOut.PkScript = append([]byte{}, x[8:]...)
-	return
+	return txOut
 }
 
 // CacheOutput is a densely packed representation of a bitcoin UTXo. The fields
@@ -302,7 +302,7 @@ func (c CacheOutput) String() string {
 
 func (c CacheOutput) ScriptHash() (hash ScriptHash) {
 	copy(hash[:], c[0:32])
-	return
+	return hash
 }
 
 func (c CacheOutput) ScriptHashSlice() []byte {
@@ -342,14 +342,14 @@ func NewCacheOutput(hash [32]byte, value uint64, outIndex uint32) (co CacheOutpu
 	copy(co[0:32], hash[:]) // scripthash
 	binary.BigEndian.PutUint64(co[32:40], value)
 	binary.BigEndian.PutUint32(co[40:], outIndex)
-	return
+	return co
 }
 
 func NewDeleteCacheOutput(hash [32]byte, outIndex uint32) (co CacheOutput) {
 	copy(co[0:32], hash[:]) // scripthash or txid
 	copy(co[32:40], DeleteUtxo[:])
 	binary.BigEndian.PutUint32(co[40:], outIndex)
-	return
+	return co
 }
 
 // Utxo packs a transaction id, the value and the out index.
@@ -372,7 +372,7 @@ func (u Utxo) ChainHash() *chainhash.Hash {
 // XXX deprecate
 func (u Utxo) ScriptHash() (hash ScriptHash) {
 	copy(hash[:], u[0:32])
-	return
+	return hash
 }
 
 func (u Utxo) ScriptHashSlice() []byte {
@@ -403,7 +403,7 @@ func NewUtxo(hash [32]byte, value uint64, outIndex uint32) (u Utxo) {
 	copy(u[0:32], hash[:]) // txid
 	binary.BigEndian.PutUint64(u[32:40], value)
 	binary.BigEndian.PutUint32(u[40:], outIndex)
-	return
+	return u
 }
 
 // ScriptHash is a SHA256 hash that implements fmt.Stringer.
@@ -420,10 +420,10 @@ func NewScriptHashFromScript(script []byte) (scriptHash ScriptHash) {
 func NewScriptHashFromBytes(hash []byte) (scriptHash ScriptHash, err error) {
 	if len(hash) != sha256.Size {
 		err = errors.New("invalid script hash length")
-		return
+		return scriptHash, err
 	}
 	copy(scriptHash[:], hash)
-	return
+	return scriptHash, err
 }
 
 func NewScriptHashFromBytesP(hash []byte) (scriptHash ScriptHash) {
@@ -520,7 +520,7 @@ func NewSpendingOutpointKey(txId chainhash.Hash, height uint32, blockHash chainh
 	binary.BigEndian.PutUint32(sok[32:], height)
 	copy(sok[32+4:], blockHash[:])
 	binary.BigEndian.PutUint32(sok[32+4+32:], voutIdx)
-	return
+	return sok
 }
 
 // SpendingOutpointValue
@@ -539,7 +539,7 @@ func (p SpendingOutpointValue) String() string {
 func NewSpendingOutpointValue(h chainhash.Hash, idx uint32) (p SpendingOutpointValue) {
 	copy(p[0:], h[:])
 	binary.BigEndian.PutUint32(p[32:], idx)
-	return
+	return p
 }
 
 func NewSpendingOutpointValueSlice(h chainhash.Hash, idx uint32) []byte {
@@ -568,7 +568,7 @@ func NewSpentOutput(prevScripthash chainhash.Hash, height uint32, blockhash, txi
 	copy(o[32+4+32+32:], txidPrevHash[:])
 	binary.BigEndian.PutUint32(o[32+4+32+32+32:], txidPrevIndex)
 	binary.BigEndian.PutUint32(o[32+4+32+32+32+4:], txinIndex)
-	return
+	return o
 }
 
 // SpendableOutput = sha256(PkScript):blockheight:blockhash:txId:txOutIdx
@@ -602,7 +602,7 @@ func NewSpendableOutput(scripthash chainhash.Hash, height uint32, blockhash, txi
 	copy(o[32+4:], blockhash[:])
 	copy(o[32+4+32:], txid[:])
 	binary.BigEndian.PutUint32(o[32+4+32+32:], txOutIndex)
-	return
+	return o
 }
 
 // ZKIndexKey is a wrapper to the various types to make the comparable.  Valid

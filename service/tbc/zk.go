@@ -15,21 +15,21 @@ import (
 )
 
 var (
-	// Zero hash indicates positional data in trie.
-	positionalAccountKey = chainhash.Hash{}
+// Zero hash indicates positional data in trie.
+// positionalAccountKey = chainhash.Hash{}
 
-	// Positional data stored in positionalAccountKey.
-	currentBlockKey      = []byte("currentblock")
-	previousBlockKey     = []byte("previousblock")
-	previousStateRootKey = []byte("previousstateroot")
+// Positional data stored in positionalAccountKey.
+// currentBlockKey      = []byte("currentblock")
+// previousBlockKey     = []byte("previousblock")
+// previousStateRootKey = []byte("previousstateroot")
 )
 
 // ZKstate contains all hashes required to generate a state root. This is a bit
 // of a chicken and egg problem.
 type ZKState struct {
-	CurrentBlock      [sha256.Size]byte
-	PreviousBlock     [sha256.Size]byte
-	previousStateRoot [sha256.Size]byte
+	CurrentBlock  [sha256.Size]byte
+	PreviousBlock [sha256.Size]byte
+	// previousStateRoot [sha256.Size]byte
 }
 
 func (s *Server) ZKBalanceByScriptHash(ctx context.Context, hash tbcd.ScriptHash) (btcutil.Amount, error) {

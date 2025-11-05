@@ -255,10 +255,11 @@ type Server struct {
 	g geometryParams
 
 	// indexers
-	ui  Indexer
-	ti  Indexer
-	ki  Indexer
-	zki Indexer
+	ui   Indexer
+	ti   Indexer
+	ki   Indexer
+	zki  Indexer
+	zkri Indexer
 
 	// Prometheus
 	promCollectors  []prometheus.Collector
@@ -2494,6 +2495,9 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 
 	// ZK indexes
 	if s.cfg.ZKIndex {
+		if err := s.zkri.IndexToHash(ctx, hash); err != nil {
+			return fmt.Errorf("zk rollup indexer: %w", err)
+		}
 		if err := s.zki.IndexToHash(ctx, hash); err != nil {
 			return fmt.Errorf("zk indexer: %w", err)
 		}
@@ -2537,6 +2541,9 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
+		if err := s.zkri.IndexToBest(ctx); err != nil {
+			return err
+		}
 		if err := s.zki.IndexToBest(ctx); err != nil {
 			return err
 		}
@@ -2640,6 +2647,7 @@ type SyncInfo struct {
 	Tx          HashHeight `json:"tx_index_height"`
 	Utxo        HashHeight `json:"utxo_index_height"`
 	ZK          HashHeight `json:"zk_index_height"`
+	ZKR         HashHeight `json:"zkr_index_height"`
 }
 
 func (s *Server) synced(ctx context.Context) (si SyncInfo) {
@@ -2659,7 +2667,7 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		// XXX make this a function?
 		select {
 		case <-ctx.Done():
-			return
+			return si
 		default:
 		}
 		panic(err)
@@ -2739,6 +2747,17 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 			Height: zkBH.Height,
 		}
 		si.ZK = *zkHH
+
+		// ZK rollup
+		zkrBH, err := s.zkri.IndexerAt(ctx)
+		if err != nil {
+			zkrBH = &tbcd.BlockHeader{}
+		}
+		zkrHH := &HashHeight{
+			Hash:   zkrBH.Hash,
+			Height: zkrBH.Height,
+		}
+		si.ZKR = *zkrHH
 	}
 
 	if utxoHH.Hash.IsEqual(&bhb.Hash) && txHH.Hash.IsEqual(&bhb.Hash) &&
@@ -2746,19 +2765,23 @@ func (s *Server) synced(ctx context.Context) (si SyncInfo) {
 		// If keystone and zk indexers are disabled we are synced.
 		if !s.cfg.HemiIndex && !s.cfg.ZKIndex {
 			si.Synced = true
-			return
+			return si
 		}
 		if !(s.cfg.HemiIndex && si.Keystone.Hash.IsEqual(&bhb.Hash)) {
 			// Keystone index not synced
-			return
+			return si
 		}
 		if !(s.cfg.ZKIndex && si.ZK.Hash.IsEqual(&bhb.Hash)) {
 			// ZK index not synced
-			return
+			return si
+		}
+		if !(s.cfg.ZKIndex && si.ZKR.Hash.IsEqual(&bhb.Hash)) {
+			// ZK rollup index not synced
+			return si
 		}
 		si.Synced = true
 	}
-	return
+	return si
 }
 
 // Synced returns true if all block headers, blocks and all indexes are caught up.
@@ -2833,6 +2856,8 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
+		s.zkri = NewZKRollupIndexer(s.g, s.cfg.MaxCachedZK,
+			s.cfg.ZKIndex)
 		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedZK,
 			s.cfg.ZKIndex)
 	}
@@ -3211,8 +3236,10 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
 		}
 		if s.cfg.ZKIndex {
-			bh, _ := s.zki.IndexerAt(ctx)
-			log.Infof("ZK utxo index %v @ %v", bh.Height, bh.Hash)
+			bh, _ := s.zkri.IndexerAt(ctx)
+			log.Infof("ZK rollup index %v @ %v", bh.Height, bh.Hash)
+			bh, _ = s.zki.IndexerAt(ctx)
+			log.Infof("ZK index %v @ %v", bh.Height, bh.Hash)
 		}
 
 		// XXX this code really should do something along the lines of
