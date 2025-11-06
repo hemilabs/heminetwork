@@ -69,5 +69,5 @@ _NOTE_: The upgrade program itself expects the proposer to be a certain "code".
   So it's easiest to only run this once per fork.
 
 ```shell
-./e2e/proposer-code-1.2.sh
+./e2e/proposer-code-1.3.sh
 ```
