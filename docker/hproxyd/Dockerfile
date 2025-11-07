@@ -21,7 +21,7 @@ COPY . .
 RUN GOOS=$(go env GOOS) GOARCH=$(go env GOARCH) CGO_ENABLED=0 GOGC=off make GO_LDFLAGS="$GO_LDFLAGS" hproxyd
 
 # Run stage
-FROM cgr.dev/chainguard/static@sha256:b00a88ca2a8136cdbd86a8aa834c3f69c17debb295a38055f7babfc2c9f9a02b
+FROM cgr.dev/chainguard/static@sha256:d4c20db9cb2dbf1ac9ec77f9dbc11080a78514a5f9b96096965550dbd1c73e09
 
 # Build metadata
 ARG VERSION
