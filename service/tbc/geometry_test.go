@@ -150,7 +150,7 @@ func TestIndexLinearity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +223,7 @@ func TestCanonicity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() {
-		err := db.Close()
+		err := db.Close(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
