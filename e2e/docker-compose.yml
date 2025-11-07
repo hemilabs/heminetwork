@@ -127,7 +127,7 @@ services:
 
   geth-l1-setup:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
+    image: "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     working_dir: "/tmp/geth"
     depends_on:
       op-geth-l2-setup:
@@ -144,7 +144,7 @@ services:
 
   geth-l1:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
+    image: "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     container_name: e2e-geth-l1-1
     ports:
       - "8545:8545"
@@ -156,8 +156,6 @@ services:
       - "--dev"
       - "--dev.period"
       - "3"
-      - "--networkid"
-      - "1337"
       - "--keystore"
       - "/tmp/keystore"
       - "--password"
