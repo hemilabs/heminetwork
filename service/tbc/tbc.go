@@ -2857,7 +2857,7 @@ func (s *Server) dbOpen(ctx context.Context) error {
 
 	if s.cfg.ZKIndex {
 		s.zkri, err = NewZKRollupIndexer(s.g, s.cfg.MaxCachedZK,
-			s.cfg.ZKIndex)
+			s.cfg.ZKIndex, s.cfg.Network, s.cfg.LevelDBHome)
 		if err != nil {
 			return err
 		}
@@ -2872,7 +2872,13 @@ func (s *Server) dbClose() error {
 	log.Tracef("dbClose")
 	defer log.Tracef("dbClose")
 
-	return s.g.db.Close()
+	// XXX this probably should be moved into db or pool
+	var errzk error
+	if s.cfg.ZKIndex {
+		errzk = s.zkri.(*zkRollupIndexer).tr.Close()
+	}
+
+	return errors.Join(errzk, s.g.db.Close())
 }
 
 // Collectors returns the Prometheus collectors available for the server.

@@ -7,10 +7,12 @@ package tbc
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/hemilabs/x/zktrie"
+	"github.com/mitchellh/go-homedir"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
@@ -28,8 +30,12 @@ var (
 	_ indexer = (*zkRollupIndexer)(nil)
 )
 
-func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool) (Indexer, error) {
-	tr, err := zktrie.NewZKTrie(context.TODO(), "")
+func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, home string) (Indexer, error) {
+	homedir, err := homedir.Expand(filepath.Join(home, network, "zkrollup"))
+	if err != nil {
+		return nil, err
+	}
+	tr, err := zktrie.NewZKTrie(context.TODO(), homedir) // XXX kill context here
 	if err != nil {
 		return nil, err
 	}
