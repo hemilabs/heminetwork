@@ -2856,8 +2856,11 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
-		s.zkri = NewZKRollupIndexer(s.g, s.cfg.MaxCachedZK,
+		s.zkri, err = NewZKRollupIndexer(s.g, s.cfg.MaxCachedZK,
 			s.cfg.ZKIndex)
+		if err != nil {
+			return err
+		}
 		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedZK,
 			s.cfg.ZKIndex)
 	}

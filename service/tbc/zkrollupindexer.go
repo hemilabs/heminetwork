@@ -10,9 +10,9 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/hemilabs/x/zktrie"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
-	"github.com/hemilabs/x/zktrie"
 )
 
 type zkRollupIndexer struct {
@@ -20,7 +20,7 @@ type zkRollupIndexer struct {
 
 	cacheCapacity int
 
-	tr zktrie.ZKTrie
+	tr *zktrie.ZKTrie
 }
 
 var (
@@ -28,9 +28,14 @@ var (
 	_ indexer = (*zkRollupIndexer)(nil)
 )
 
-func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
+func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool) (Indexer, error) {
+	tr, err := zktrie.NewZKTrie(context.TODO(), "")
+	if err != nil {
+		return nil, err
+	}
 	zi := &zkRollupIndexer{
 		cacheCapacity: cacheLen,
+		tr:            tr,
 	}
 	zi.indexerCommon = indexerCommon{
 		name:    "zkrollupindexer",
@@ -38,12 +43,7 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 		g:       g,
 		p:       zi,
 	}
-	var err error
-	zi.tr, err = zktrie.NewZKTrie(context.TODO(), "")
-	if err != nil {
-		panic(err) // XXX return err
-	}
-	return zi
+	return zi, nil
 }
 
 func (i *zkRollupIndexer) newCache() indexerCache {
