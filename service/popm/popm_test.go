@@ -372,16 +372,18 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// flush all other error messages
-	for flushed := false; flushed != true; {
+	for {
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-errCh:
+			continue
 		default:
-			t.Log("error messages flushed")
-			flushed = true
 		}
-	}
+
+		t.Log("error messages flushed")
+		break
+}
 
 	// messages we expect to receive
 	expectedMsg = map[string]int{
