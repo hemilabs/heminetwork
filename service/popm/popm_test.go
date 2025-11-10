@@ -385,7 +385,7 @@ func TestDisconnectedOpgeth(t *testing.T) {
 
 		t.Log("error messages flushed")
 		break
-}
+	}
 
 	// messages we expect to receive
 	expectedMsg = map[string]int{
