@@ -15,7 +15,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.16.7
 	github.com/go-test/deep v1.1.1
-	github.com/hemilabs/x v0.0.0-20251107162533-7d34f02c05e5
+	github.com/hemilabs/x/zktrie v0.0.0-20251107162533-7d34f02c05e5
 	github.com/juju/loggo v1.0.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
@@ -115,7 +115,6 @@ require (
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.0.0 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
-	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/time v0.12.0 // indirect

@@ -12,7 +12,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
-	"github.com/hemilabs/heminetwork/x/zktrie"
+	"github.com/hemilabs/x/zktrie"
 )
 
 type zkRollupIndexer struct {
