@@ -12,12 +12,15 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
+	"github.com/hemilabs/heminetwork/x/zktrie"
 )
 
 type zkRollupIndexer struct {
 	indexerCommon
 
 	cacheCapacity int
+
+	tr zktrie.ZKTrie
 }
 
 var (
@@ -34,6 +37,11 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool) Indexer {
 		enabled: enabled,
 		g:       g,
 		p:       zi,
+	}
+	var err error
+	zi.tr, err = zktrie.NewZKTrie(context.TODO(), "")
+	if err != nil {
+		panic(err) // XXX return err
 	}
 	return zi
 }
