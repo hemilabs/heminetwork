@@ -6,6 +6,7 @@ package tbc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/hemilabs/x/zktrie"
 	"github.com/mitchellh/go-homedir"
+	"github.com/syndtr/goleveldb/leveldb"
 
 	"github.com/hemilabs/heminetwork/v2/database/tbcd"
 )
@@ -28,6 +30,8 @@ type zkRollupIndexer struct {
 var (
 	_ Indexer = (*zkRollupIndexer)(nil)
 	_ indexer = (*zkRollupIndexer)(nil)
+
+	zkRollupIndexHashKey = []byte("zkrollupindexhash")
 )
 
 func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, home string) (Indexer, error) {
@@ -58,9 +62,24 @@ func (i *zkRollupIndexer) newCache() indexerCache {
 }
 
 func (i *zkRollupIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
-	panic("indexerAt")
-	// bh, err := i.g.db.BlockHeaderByZKRollup(ctx)
-	// return i.evaluateBlockHeaderIndex(bh, err)
+	bhHashR, err := i.tr.Get(zkRollupIndexHashKey)
+	if err != nil {
+		// XXX trie returns level error, we should think about
+		// larryizing it.
+		if !errors.Is(err, leveldb.ErrNotFound) {
+			return nil, err
+		}
+		return &tbcd.BlockHeader{
+			Hash:   *i.g.chain.GenesisHash,
+			Height: 0,
+			Header: h2b(&i.g.chain.GenesisBlock.Header),
+		}, nil
+	}
+	bhHash, err := chainhash.NewHash(bhHashR)
+	if err != nil {
+		return nil, err
+	}
+	return i.g.db.BlockHeaderByHash(ctx, *bhHash)
 }
 
 //func (i *zkRollupIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c indexerCache) ([]byte, error) {
