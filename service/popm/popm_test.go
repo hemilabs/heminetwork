@@ -356,18 +356,20 @@ func TestDisconnectedOpgeth(t *testing.T) {
 	}
 
 	// wait for popminer to try and reconnect
-	for attempted := false; attempted != true; {
+	var rcvErr error
+	for {
 		select {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		case <-msgCh:
-		case rcvErr := <-errCh:
-			// miner has tried to reconnect
-			if errors.Is(rcvErr, mock.ErrConnectionClosed) {
-				t.Log("popminer attempted to reconnect")
-				opgeth.Start()
-				attempted = true
-			}
+		case rcvErr = <-errCh:
+		}
+
+		// miner has tried to reconnect
+		if errors.Is(rcvErr, mock.ErrConnectionClosed) {
+			t.Log("popminer attempted to reconnect")
+			opgeth.Start()
+			break
 		}
 	}
 
