@@ -34,6 +34,8 @@ var (
 	zkRollupIndexHashKey = []byte("zkrollupindexhash")
 )
 
+type ZKRollupKey chainhash.Hash
+
 func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, home string) (Indexer, error) {
 	homedir, err := homedir.Expand(filepath.Join(home, network, "zkrollup"))
 	if err != nil {
@@ -57,8 +59,7 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, h
 }
 
 func (i *zkRollupIndexer) newCache() indexerCache {
-	panic("newCache")
-	// return NewCache[tbcd.ZKRollupKey, []byte](i.cacheCapacity)
+	return NewCache[ZKRollupKey, []byte](i.cacheCapacity)
 }
 
 func (i *zkRollupIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
