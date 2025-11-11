@@ -255,10 +255,13 @@ func (f *TBCMockHandler) handle(c protocol.APIConn, utxos []tbcd.Utxo, mp *tbc.M
 }
 
 func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Request) error {
+	f.mtx.Lock()
+
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		CompressionMode: websocket.CompressionContextTakeover,
 	})
 	if err != nil {
+		f.mtx.Lock()
 		panic(fmt.Errorf("failed to accept websocket connection for %s: %w",
 			r.RemoteAddr, err))
 	}
@@ -271,10 +274,10 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 
 	wsConn := protocol.NewWSConn(conn)
 	if err = tbcapi.Write(r.Context(), wsConn, "0", ping); err != nil {
+		f.mtx.Lock()
 		panic(fmt.Errorf("write ping: %w", err))
 	}
 
-	f.mtx.Lock()
 	f.conns = append(f.conns, conn)
 	f.mtx.Unlock()
 
@@ -295,7 +298,7 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		panic(fmt.Errorf("create mempool: %w", err))
 	}
 
-	for {
+	for f.Running() {
 		// Handle command
 		method, err := f.handle(wsConn, utxos, mp, w, r)
 		if err != nil {
@@ -304,6 +307,8 @@ func (f *TBCMockHandler) mockTBCHandleFunc(w http.ResponseWriter, r *http.Reques
 		}
 		f.notifyMsg(f.pctx, method)
 	}
+
+	return nil
 }
 
 func newAmountFromUint64(u uint64) (btcutil.Amount, error) {

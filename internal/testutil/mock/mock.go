@@ -92,6 +92,12 @@ func (f *mockHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Close all websocket connection to the test server
 func (f *mockHandler) CloseConnections(force bool) error {
+	f.mtx.Lock()
+	defer func() {
+		f.mtx.Unlock()
+		f.server.CloseClientConnections()
+	}()
+
 	log.Infof("%v: websocket connections closed", f.name)
 	for _, c := range f.conns {
 		if force {
@@ -106,6 +112,7 @@ func (f *mockHandler) CloseConnections(force bool) error {
 			return err
 		}
 	}
+
 	return nil
 }
 
