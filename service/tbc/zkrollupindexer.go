@@ -6,12 +6,17 @@ package tbc
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"path/filepath"
 
+	"github.com/btcsuite/btcd/blockchain"
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/txscript"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/hemilabs/x/zktrie"
 	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -41,7 +46,7 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, h
 	if err != nil {
 		return nil, err
 	}
-	tr, err := zktrie.NewZKTrie(context.TODO(), homedir) // XXX kill context here
+	tr, err := zktrie.NewZKTrie(homedir)
 	if err != nil {
 		return nil, err
 	}
@@ -116,109 +121,145 @@ func (i *zkRollupIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, err
 //	return value, txOut, nil
 //}
 
-//func (i *zkRollupIndexer) processTx(ctx context.Context, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
-//	cache := c.(*Cache[tbcd.ZKRollupKey, []byte]).Map()
-//	txId := tx.Hash()
-//	for txInIdx, txIn := range tx.MsgTx().TxIn {
-//		// Skip coinbase inputs
-//		if blockchain.IsCoinBase(tx) {
-//			continue
-//		}
-//
-//		// Recreate Outpoint from TxIn.PreviousOutPoint
-//		pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
-//			txIn.PreviousOutPoint.Index)
-//
-//		// Retrieve TxOut from PreviousOutPoint
-//		value, script, err := i.txOut(ctx, pop, c)
-//		if err != nil {
-//			return fmt.Errorf("tx out: %w", err)
-//		}
-//
-//		// Retrieve balance
-//		sh := tbcd.NewScriptHashFromScript(script)
-//		balance, err := i.balance(ctx, sh, c)
-//		if err != nil {
-//			return fmt.Errorf("balance in: %w", err)
-//		}
-//
-//		// Handle balance
-//		switch direction {
-//		case 1:
-//			cache[tbcd.ZKRollupKey(sh[:])] = tbcd.BESubUint64(balance,
-//				value)
-//		case -1:
-//			cache[tbcd.ZKRollupKey(sh[:])] = tbcd.BEAddUint64(balance,
-//				value)
-//		default:
-//			panic(fmt.Sprintf("diagnostic: invalid direction %v", direction))
-//		}
-//
-//		// Insert SpentOutput
-//		spo := tbcd.NewSpentOutput(chainhash.Hash(sh), blockHeight,
-//			*blockHash, *txId, txIn.PreviousOutPoint.Hash,
-//			txIn.PreviousOutPoint.Index, uint32(txInIdx))
-//		if _, ok := cache[tbcd.ZKRollupKey(spo[:])]; ok {
-//			panic(fmt.Sprintf("diagnostic: %v", spo))
-//		}
-//		cache[tbcd.ZKRollupKey(spo[:])] = nil
-//
-//		// Tx index, where spent
-//		sok := tbcd.NewSpendingOutpointKey(txIn.PreviousOutPoint.Hash,
-//			blockHeight, *blockHash, txIn.PreviousOutPoint.Index)
-//		cache[tbcd.ZKRollupKey(sok[:])] = tbcd.NewSpendingOutpointValueSlice(*txId,
-//			uint32(txInIdx))
-//	}
-//
-//	for txOutIdx, txOut := range tx.MsgTx().TxOut {
-//		// Skip unspendables.
-//		if txscript.IsUnspendable(txOut.PkScript) {
-//			continue
-//		}
-//
-//		sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
-//		balance, err := i.balance(ctx, sh, c)
-//		if err != nil {
-//			return fmt.Errorf("balance out: %w", err)
-//		}
-//		// log.Infof("sh %v balance %v", sh, binary.BigEndian.Uint64(balance))
-//		switch direction {
-//		case 1:
-//			cache[tbcd.ZKRollupKey(sh[:])] = tbcd.BEAddUint64(balance,
-//				uint64(txOut.Value))
-//		case -1:
-//			cache[tbcd.ZKRollupKey(sh[:])] = tbcd.BESubUint64(balance,
-//				uint64(txOut.Value))
-//		default:
-//			panic(fmt.Sprintf("diagnostic: invalid direction %v", direction))
-//		}
-//
-//		// SpendableOutput
-//		so := tbcd.NewSpendableOutput(chainhash.Hash(sh), blockHeight,
-//			*blockHash, *txId, uint32(txOutIdx))
-//		cache[tbcd.ZKRollupKey(so[:])] = nil
-//
-//		// Outpoint to TxOut
-//		op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
-//		if _, ok := cache[tbcd.ZKRollupKey(op[:])]; ok {
-//			// Work around two invalid txids on mainnet
-//			switch op.String() {
-//			case "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599:0":
-//			case "e3bf3d07d4b0375638d5f1db5255fe07ba2c4cb067cd81b84ee974b6585fb468:0":
-//			default:
-//				panic(fmt.Sprintf("diagnostic: %v", op))
-//			}
-//		}
-//		cache[tbcd.ZKRollupKey(op[:])] = tbcd.NewTxOut(txOut)
-//
-//		// Tx index, available to spend
-//		sok := tbcd.NewSpendingOutpointKey(*txId, blockHeight, *blockHash,
-//			uint32(txOutIdx))
-//		cache[tbcd.ZKRollupKey(sok[:])] = nil
-//	}
-//
-//	return nil
-//}
+func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
+	// cache := c.(*Cache[ZKRollupKey, []byte]).Map()
+	// txId := tx.Hash()
+	for txInIdx, txIn := range tx.MsgTx().TxIn {
+		// Skip coinbase inputs
+		if blockchain.IsCoinBase(tx) {
+			continue
+		}
+		_ = txInIdx
+		_ = txIn
+
+		//		// Recreate Outpoint from TxIn.PreviousOutPoint
+		//		pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+		//			txIn.PreviousOutPoint.Index)
+		//
+		//		// Retrieve TxOut from PreviousOutPoint
+		//		value, script, err := i.txOut(ctx, pop, c)
+		//		if err != nil {
+		//			return fmt.Errorf("tx out: %w", err)
+		//		}
+		//
+		//		// Retrieve balance
+		//		sh := tbcd.NewScriptHashFromScript(script)
+		//		balance, err := i.balance(ctx, sh, c)
+		//		if err != nil {
+		//			return fmt.Errorf("balance in: %w", err)
+		//		}
+		//
+		//		// Handle balance
+		//		switch direction {
+		//		case 1:
+		//			cache[tbcd.ZKRollupKey(sh[:])] = tbcd.BESubUint64(balance,
+		//				value)
+		//		case -1:
+		//			cache[tbcd.ZKRollupKey(sh[:])] = tbcd.BEAddUint64(balance,
+		//				value)
+		//		default:
+		//			panic(fmt.Sprintf("diagnostic: invalid direction %v", direction))
+		//		}
+		//
+		//		// Insert SpentOutput
+		//		spo := tbcd.NewSpentOutput(chainhash.Hash(sh), blockHeight,
+		//			*blockHash, *txId, txIn.PreviousOutPoint.Hash,
+		//			txIn.PreviousOutPoint.Index, uint32(txInIdx))
+		//		if _, ok := cache[tbcd.ZKRollupKey(spo[:])]; ok {
+		//			panic(fmt.Sprintf("diagnostic: %v", spo))
+		//		}
+		//		cache[tbcd.ZKRollupKey(spo[:])] = nil
+		//
+		//		// Tx index, where spent
+		//		sok := tbcd.NewSpendingOutpointKey(txIn.PreviousOutPoint.Hash,
+		//			blockHeight, *blockHash, txIn.PreviousOutPoint.Index)
+		//		cache[tbcd.ZKRollupKey(sok[:])] = tbcd.NewSpendingOutpointValueSlice(*txId,
+		//			uint32(txInIdx))
+	}
+
+	for txOutIdx, txOut := range tx.MsgTx().TxOut {
+		// Skip unspendables.
+		if txscript.IsUnspendable(txOut.PkScript) {
+			continue
+		}
+
+		sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
+		ca := common.BytesToAddress(sh[:])
+		balance := zktrieUpdateAddress(zkb, txOut.Value)
+
+		// try current block first
+		//if sa, err := zkb.GetAccount(ca); errors.Is(err, zktrie.ErrNotFound) {
+		//	// Try trie
+		//	sa, err := i.tr.GetAccount(common.BytesToAddress(sh[:]))
+		//	if err != nil {
+		//		return fmt.Errorf("balance out: %w", err)
+		//	}
+		//	zkg.Storage(ca)
+		//	if sa == nil {
+		//		// Insert into trie
+		//		sa = types.NewEmptyStateAccount()
+		//		sa.Balance = uint256.NewInt(uint64(txOut.Value))
+		//	} else {
+		//		sa.Balance = sa.Balance.Add(uint256.NewInt(uint64(txOut.Value)), sa.Balance)
+		//	}
+		//}
+
+		//sa, err := i.tr.GetAccount(common.BytesToAddress(sh[:]))
+		//if err != nil {
+		//	return fmt.Errorf("balance out: %w", err)
+		//}
+		//if sa == nil {
+		//	// Insert into trie
+		//	sa = types.NewEmptyStateAccount()
+		//	sa.Balance = uint256.NewInt(uint64(txOut.Value))
+		//} else {
+		//	sa.Balance = sa.Balance.Add(uint256.NewInt(uint64(txOut.Value)), sa.Balance)
+		//}
+		//// zkb.AddAccount
+		//log.Infof("sh %v balance %v", sh, sa.Balance) // binary.BigEndian.Uint64(balance))
+		_ = txOutIdx
+		_ = txOut
+		switch direction {
+		case 1:
+			op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
+			zkb.AddStorage(ca, crypto.Keccak256Hash(op[:]),
+				binary.BigEndian.Uint64(txOut.Value))
+			//			cache[tbcd.ZKRollupKey(sh[:])] = tbcd.BEAddUint64(balance,
+			//				uint64(txOut.Value))
+		case -1:
+			panic("-1")
+			//			cache[tbcd.ZKRollupKey(sh[:])] = tbcd.BESubUint64(balance,
+			//				uint64(txOut.Value))
+		default:
+			panic(fmt.Sprintf("diagnostic: invalid direction %v", direction))
+		}
+		//
+		//		// SpendableOutput
+		//		so := tbcd.NewSpendableOutput(chainhash.Hash(sh), blockHeight,
+		//			*blockHash, *txId, uint32(txOutIdx))
+		//		cache[tbcd.ZKRollupKey(so[:])] = nil
+		//
+		//		// Outpoint to TxOut
+		//		op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
+		//		if _, ok := cache[tbcd.ZKRollupKey(op[:])]; ok {
+		//			// Work around two invalid txids on mainnet
+		//			switch op.String() {
+		//			case "d5d27987d2a3dfc724e359870c6644b40e497bdc0589a033220fe15429d88599:0":
+		//			case "e3bf3d07d4b0375638d5f1db5255fe07ba2c4cb067cd81b84ee974b6585fb468:0":
+		//			default:
+		//				panic(fmt.Sprintf("diagnostic: %v", op))
+		//			}
+		//		}
+		//		cache[tbcd.ZKRollupKey(op[:])] = tbcd.NewTxOut(txOut)
+		//
+		//		// Tx index, available to spend
+		//		sok := tbcd.NewSpendingOutpointKey(*txId, blockHeight, *blockHash,
+		//			uint32(txOutIdx))
+		//		cache[tbcd.ZKRollupKey(sok[:])] = nil
+	}
+
+	return nil
+}
 
 func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
 	if block.Height() == btcutil.BlockHeightUnknown {
@@ -229,15 +270,20 @@ func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btc
 	blockHeight := uint32(block.Height())
 	log.Tracef("processing: %v %v", blockHeight, blockHash)
 	log.Infof("direction %v processing: %v %v", direction, blockHeight, blockHash)
+	zkb := zktrie.NewZKBlock(uint64(blockHeight))
 	switch direction {
 	case 1:
-		panic("1")
-		//for _, tx := range block.Transactions() {
-		//	err := i.processTx(ctx, direction, blockHeight, blockHash, tx, c)
-		//	if err != nil {
-		//		return err
-		//	}
-		//}
+		for _, tx := range block.Transactions() {
+			err := i.processTx(ctx, zkb, direction, blockHeight, blockHash, tx, c)
+			if err != nil {
+				return err
+			}
+		}
+
+		// height+cumdiff
+
+		// XXX create stateroot for block here and cache that
+
 	case -1:
 		panic("-1")
 		//txs := block.Transactions()
@@ -251,6 +297,8 @@ func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btc
 	default:
 		panic(fmt.Sprintf("diagnostic: %v", direction))
 	}
+
+	return nil
 }
 
 func (i *zkRollupIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
@@ -260,6 +308,6 @@ func (i *zkRollupIndexer) commit(ctx context.Context, direction int, atHash chai
 }
 
 func (i *zkRollupIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {
-	// Not needed for zk indexer.
+	// Not needed for zk rollup indexer.
 	return nil
 }
