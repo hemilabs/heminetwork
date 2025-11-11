@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Move `testutil` into the `internal/` package, removing it from the public API
   ([#735](https://github.com/hemilabs/heminetwork/pull/735)).
 
+- Update `localnet` and `localnode` `geth-l1` versions to 16.7 and fix tests
+  ([#746](https://github.com/hemilabs/heminetwork/pull/746)).
+
 ### Fixed
 
 - Fix typos across the codebase
