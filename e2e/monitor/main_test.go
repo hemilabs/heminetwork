@@ -10,6 +10,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -46,8 +47,8 @@ import (
 )
 
 const (
-	retries = 10
-
+	retries                    = 10
+	SolErrClaimAlreadyResolved = "0xf1a94581"
 	// hardcoded pre-funded private key that shouldn't change with our changes
 	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 )
@@ -808,9 +809,13 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			t.Fatal(err)
 		}
 
-		_, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
-		if err != nil {
-			t.Fatal(err)
+		var rsErr *wait.ReceiptStatusError
+		_, resolveClaimReceipt, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+		if errors.As(err, &rsErr) && rsErr.TxTrace.Output.String() == SolErrClaimAlreadyResolved {
+			t.Logf("resolveClaim failed (tx: %s) because claim got already resolved", resolveClaimReceipt.TxHash)
+		} else if err != nil {
+			t.Logf("error sending tx, will retry: %s", err)
+			continue
 		}
 
 		resolvedtx, err = gameContract.ResolveTx()
@@ -818,10 +823,23 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 			t.Fatal(err)
 		}
 
-		transactions.RequireSendTx(t, ctx, l1Client, resolvedtx, privateKey, transactions.WithReceiptStatusIgnore())
+		for {
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(1 * time.Second):
+			}
+
+			_, _, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+			if err != nil {
+				t.Logf("could not send tx, will retry: %s", err)
+				continue
+			}
+
+			break
+		}
 
 		t.Log("FinalizeWithdrawal: waiting for successful withdrawal check...")
-
 		if err := wait.ForWithdrawalCheck(ctx, l1Client, wd, optimismPortalProxy, opts.From); err != nil {
 			t.Fatal(err)
 		}
@@ -1344,9 +1362,13 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 			t.Fatal(err)
 		}
 
-		_, _, err = transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
-		if err != nil {
-			t.Fatal(err)
+		var rsErr *wait.ReceiptStatusError
+		_, resolveClaimReceipt, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+		if errors.As(err, &rsErr) && rsErr.TxTrace.Output.String() == SolErrClaimAlreadyResolved {
+			t.Logf("resolveClaim failed (tx: %s) because claim got already resolved", resolveClaimReceipt.TxHash)
+		} else if err != nil {
+			t.Logf("error sending tx, will retry: %s", err)
+			continue
 		}
 
 		resolvedtx, err = gameContract.ResolveTx()
@@ -1354,7 +1376,21 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 			t.Fatal(err)
 		}
 
-		transactions.RequireSendTx(t, ctx, l1Client, resolvedtx, privateKey, transactions.WithReceiptStatusIgnore())
+		for {
+			select {
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			case <-time.After(1 * time.Second):
+			}
+
+			_, _, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
+			if err != nil {
+				t.Logf("could not send tx, will retry: %s", err)
+				continue
+			}
+
+			break
+		}
 
 		t.Log("FinalizeWithdrawal: waiting for successful withdrawal check...")
 		err = wait.ForWithdrawalCheck(ctx, l1Client, wd, optimismPortalProxy, opts.From)
