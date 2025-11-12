@@ -20,7 +20,6 @@ services:
       - "-txindex=1"
       - "-rpcworkqueue=400"
       - "-printtoconsole"
-      - "-debug=1"
     ports:
       - "18443:18443"
       - "18444:18444"
@@ -127,7 +126,7 @@ services:
 
   geth-l1-setup:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
+    image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
     working_dir: "/tmp/geth"
     depends_on:
       op-geth-l2-setup:
@@ -144,7 +143,7 @@ services:
 
   geth-l1:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
+    image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
     container_name: e2e-geth-l1-1
     ports:
       - "8545:8545"
@@ -304,6 +303,7 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
+      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -352,6 +352,7 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
+      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"

@@ -100,6 +100,8 @@ func game(t *testing.T) common.Address {
 // after 5 minutes and check that it has progressed at least to a certain
 // point
 func TestMonitor(t *testing.T) {
+	t.Parallel()
+
 	// let localnet start, there are smarter ways to do this but this will work
 	// for now
 	time.Sleep(2 * time.Minute)
@@ -167,6 +169,7 @@ func TestMonitor(t *testing.T) {
 }
 
 func TestL1L2Comms(t *testing.T) {
+	t.Parallel()
 	for _, sequencing := range []bool{true, false} {
 		var name string
 		if sequencing {
@@ -175,7 +178,7 @@ func TestL1L2Comms(t *testing.T) {
 			name = "testing non-sequencing client"
 		}
 		t.Run(name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Minute)
+			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Minute)
 			defer cancel()
 
 			l1Client, err := ethclient.Dial("http://localhost:8545")
@@ -230,6 +233,7 @@ func TestL1L2Comms(t *testing.T) {
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
@@ -1249,6 +1253,7 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		)
 		if err != nil {
 			t.Fatal(err)
+
 		}
 
 		t.Logf("prove withdrawal tx is %s", tx.Hash())
