@@ -14,6 +14,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/hemilabs/x/zktrie"
 	"github.com/mitchellh/go-homedir"
@@ -148,11 +149,21 @@ func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, di
 		ca := common.BytesToAddress(sh[:])
 		_ = txOutIdx
 		_ = txOut
-		zktrie.NewBlockUtxo(txOut.PkScript, txOut.Value, Outpoint, blockhash, previous_block_header, previous_state_root)
+		// op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
+		zktrie.NewBlockUtxo(txOut.Value, op, blockhash, previous_block_header, previous_state_root)
 	}
 	cache[blockhash] = nil // Just store the blockhash to fill up cache
 
 	return nil
+}
+
+func NewOut(txOut *wire.TxOut) {
+	value := txOut.Value
+	key := sha256(txLOut.PkScript)
+
+	// magic encoding goes here
+
+	// Send to trie
 }
 
 func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
@@ -193,6 +204,7 @@ func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btc
 
 func (i *zkRollupIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
 	panic("commit")
+	// clear cache
 	// cache := c.(*Cache[tbcd.ZKRollupKey, []byte])
 	// return i.g.db.BlockZKUpdate(ctx, direction, cache.Map(), atHash)
 }
