@@ -24,8 +24,8 @@ github.com/btcsuite/btcd v0.20.1-beta/go.mod h1:wVuoA8VJLEcwgqHBwHmzLRazpKxTv13P
 github.com/btcsuite/btcd v0.22.0-beta.0.20220111032746-97732e52810c/go.mod h1:tjmYdS6MLJ5/s0Fj4DbLgSbDHbEqLJrtnHecBFkdz5M=
 github.com/btcsuite/btcd v0.23.5-0.20231215221805-96c9fd8078fd/go.mod h1:nm3Bko6zh6bWP60UxwoT5LzdGJsQJaPo6HjduXq9p6A=
 github.com/btcsuite/btcd v0.24.2/go.mod h1:5C8ChTkl5ejr3WHj8tkQSCmydiMEPB0ZhQhehpq7Dgg=
-github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef h1:eEI40ENVabDd0utAelUSEJ1uGxAM6VIb5Sh8gc+OQds=
-github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef/go.mod h1:OmM4kFtB0klaG/ZqT86rQiyw/1iyXlJgc3UHClPhhbs=
+github.com/btcsuite/btcd v0.25.0 h1:JPbjwvHGpSywBRuorFFqTjaVP4y6Qw69XJ1nQ6MyWJM=
+github.com/btcsuite/btcd v0.25.0/go.mod h1:qbPE+pEiR9643E1s1xu57awsRhlCIm1ZIi6FfeRA4KE=
 github.com/btcsuite/btcd/btcec/v2 v2.1.0/go.mod h1:2VzYrv4Gm4apmbVVsSq5bqf1Ec8v56E48Vt0Y/umPgA=
 github.com/btcsuite/btcd/btcec/v2 v2.1.3/go.mod h1:ctjw4H1kknNJmRN4iP1R7bTQ+v3GJkZBd6mui8ZsAZE=
 github.com/btcsuite/btcd/btcec/v2 v2.3.5 h1:dpAlnAwmT1yIBm3exhT1/8iUSD98RDJM5vqJVQDQLiU=
@@ -189,8 +189,8 @@ github.com/hashicorp/go-bexpr v0.1.10 h1:9kuI5PFotCboP3dkDYFr/wi0gg0QVbSNz5oFRpx
 github.com/hashicorp/go-bexpr v0.1.10/go.mod h1:oxlubA2vC/gFVfX1A6JGp7ls7uCDlfJn732ehYYg+g0=
 github.com/hemilabs/x/eth-trie v0.0.0-20251105164544-95cd47e9e738 h1:vfq6tWheHCJnVwpGbdQInMJwLrYUpAWaDe+eSxwAsJg=
 github.com/hemilabs/x/eth-trie v0.0.0-20251105164544-95cd47e9e738/go.mod h1:Ww/u6/pC+fwKpLDw2HNxLw0PxsLDukGCMXJRe1VBym4=
-github.com/hemilabs/x/zktrie v0.0.0-20251110135357-c3390a405379 h1:UEY5Xyb3LkzYdIY1v/1ST7Eda7HZIKXURa+34tGpnBs=
-github.com/hemilabs/x/zktrie v0.0.0-20251110135357-c3390a405379/go.mod h1:64M1pqqt9xAlLhyCAZiNMVEUsv+kggUHm2WMbwUbUIc=
+github.com/hemilabs/x/zktrie v0.0.0-20251112161533-c23516e94b0d h1:defrpxxgEMonyEzmtZ7JwoqxctufKPzVukJowt/aUNo=
+github.com/hemilabs/x/zktrie v0.0.0-20251112161533-c23516e94b0d/go.mod h1:rKX0pAjGaELjQLOk1MPExg+tRbFsadivtEfkOK7ftrc=
 github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db h1:IZUYC/xb3giYwBLMnr8d0TGTzPKFGNTCGgGLoyeX330=
 github.com/holiman/billy v0.0.0-20250707135307-f2f9b9aae7db/go.mod h1:xTEYN9KCHxuYHs+NmrmzFcnvHMzLLNiGFafCb1n3Mfg=
 github.com/holiman/bloomfilter/v2 v2.0.3 h1:73e0e/V0tCydx14a0SCYS/EWCxgwLZ18CZcZKVu0fao=
