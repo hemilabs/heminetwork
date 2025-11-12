@@ -3,7 +3,7 @@ module github.com/hemilabs/heminetwork/v2
 go 1.25.1
 
 require (
-	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
+	github.com/btcsuite/btcd v0.25.0
 	github.com/btcsuite/btcd/btcec/v2 v2.3.5
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
@@ -15,7 +15,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.16.7
 	github.com/go-test/deep v1.1.1
-	github.com/hemilabs/x/zktrie v0.0.0-20251110135357-c3390a405379
+	github.com/hemilabs/x/zktrie v0.0.0-20251112161533-c23516e94b0d
 	github.com/juju/loggo v1.0.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
