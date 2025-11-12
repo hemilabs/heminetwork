@@ -8,7 +8,7 @@ op-proposer/bin/op-proposer \
     --l1-eth-rpc=http://geth-l1:8545 \
     --rollup-rpc=http://op-node:8548 \
     --resubmission-timeout=15s \
-    --safe-abort-nonce-too-low-count=1 \
+    --safe-abort-nonce-too-low-count=3 \
     --proposal-interval=10s \
     --game-type=1 \
     --txmgr.not-in-mempool-timeout=3s \
