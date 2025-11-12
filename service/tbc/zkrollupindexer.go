@@ -14,8 +14,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
-	"github.com/btcsuite/btcd/wire"
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/hemilabs/x/zktrie"
 	"github.com/mitchellh/go-homedir"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -87,56 +86,14 @@ func (i *zkRollupIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, err
 	return i.g.db.BlockHeaderByHash(ctx, *bhHash)
 }
 
-func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
-	switch direction {
-	case -1:
-		// Revert trie here and exit
-		panic("revertme")
-		return nil
-	default:
-		panic(fmt.Sprintf("diagnostic: invalid direction %v", direction))
-	}
-
-	// What do we need to commit
-	// address:
-	// - txid to a block (storage trie)
-	// - sha256(pkscript) to balance (account)
-	//         - prove inclusion or exclusion of a utxo (state)
-	//
-	// map[address]struct that contains balance + root hash of storage map
-	// storage map[root hash] -> map[[]byte][]byte
-	//
-	// State trie: f account
-	// - blockhash to a height+cumdiff
-	// - previous sha256("stateroot") = previous stateroot
-	// - previous sha256("previousblock") = previous blockhash
-	//
-	// prune zero balance account? worth it!
-	//
-	//
-	// map[common.Address] -> map[common.Has] []byte
-	//
-	// Create StateAccount use address = sha256(PkScript) (stores balance)
-	// Create StorageTrie use address as the key
-	//         - insert storage trie[address] map[sha256(Outpoint)]=Outpoint+blockhash (on in maybe turn this into the spending tx)
-	//
-	// Metadata:
-	// address = 0xff
-	// Create StorageTrie use address as the key
-	//         - insert storage trie[address] map[blockhash]=encode(previous_state_root + previous_block + height+cumdiff)
-	//
-
-	// cache := c.(*Cache[ZKRollupKey, []byte]).Map()
-	// txId := tx.Hash()
+func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
 	for txInIdx, txIn := range tx.MsgTx().TxIn {
 		// Skip coinbase inputs
 		if blockchain.IsCoinBase(tx) {
 			continue
 		}
-		_ = txInIdx
 		_ = txIn
-
-		zktrie.NewBlockIn(txOut.PkScript, txOut.Value, Outpoint, blockhash, previous_block_header, previous_state_root) // Spend utxo
+		_ = txInIdx
 	}
 
 	for txOutIdx, txOut := range tx.MsgTx().TxOut {
@@ -145,52 +102,45 @@ func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, di
 			continue
 		}
 
-		sh := tbcd.NewScriptHashFromScript(txOut.PkScript)
-		ca := common.BytesToAddress(sh[:])
-		_ = txOutIdx
-		_ = txOut
-		// op := tbcd.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
-		zktrie.NewBlockUtxo(txOut.Value, op, blockhash, previous_block_header, previous_state_root)
+		o := zktrie.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
+		so := zktrie.NewSpendableOutput(*blockHash, *tx.Hash(), uint32(txOutIdx), uint64(txOut.Value))
+		zkb.NewOut(txOut.PkScript, o, so)
 	}
 	cache[blockhash] = nil // Just store the blockhash to fill up cache
 
 	return nil
 }
 
-func NewOut(txOut *wire.TxOut) {
-	value := txOut.Value
-	key := sha256(txLOut.PkScript)
-
-	// magic encoding goes here
-
-	// Send to trie
-}
+// XXX this gets replaced by blockhash -> stateRoot cache
+var previousStateRoot = types.EmptyRootHash
 
 func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
 	if block.Height() == btcutil.BlockHeightUnknown {
 		panic("diagnostic: block height not set")
 	}
 
-	blockHash := block.Hash()
-	blockHeight := uint32(block.Height())
+	blockHash := *block.Hash()
+	prevBlockHash := block.MsgBlock().Header.PrevBlock
+	blockHeight := block.Height()
 	log.Tracef("processing: %v %v", blockHeight, blockHash)
 	log.Infof("direction %v processing: %v %v", direction, blockHeight, blockHash)
-	zkb := zktrie.NewZKBlock(uint64(blockHeight))
-	switch direction {
-	case 1:
-		for _, tx := range block.Transactions() {
-			err := i.processTx(ctx, zkb, direction, blockHeight, blockHash, tx, c)
-			if err != nil {
-				return err
-			}
-		}
 
+	switch direction {
 	case -1:
 		// Revert trie here and exit
 		panic("revertme")
-		return nil
+	case 1:
 	default:
 		panic(fmt.Sprintf("diagnostic: %v", direction))
+	}
+
+	zkb := zktrie.NewZKBlock(blockHash, prevBlockHash, previousStateRoot, uint64(blockHeight))
+
+	for _, tx := range block.Transactions() {
+		err := i.processTx(ctx, zkb, uint32(blockHeight), &blockHash, tx, c)
+		if err != nil {
+			return err
+		}
 	}
 
 	// XXX create stateroot for block here and cache that
