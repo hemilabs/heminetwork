@@ -86,39 +86,6 @@ func (i *zkRollupIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, err
 	return i.g.db.BlockHeaderByHash(ctx, *bhHash)
 }
 
-//func (i *zkRollupIndexer) balance(ctx context.Context, ss tbcd.ScriptHash, c indexerCache) ([]byte, error) {
-//	cache := c.(*Cache[tbcd.ZKRollupKey, []byte]).Map()
-//	if balance, ok := cache[tbcd.ZKRollupKey(ss[:])]; ok {
-//		return balance, nil
-//	}
-//
-//	// Not found in cache, fetch from db
-//	var balance [8]byte
-//	b, err := i.g.db.ZKBalanceByScriptHash(ctx, ss)
-//	if err != nil {
-//		if errors.Is(err, database.ErrNotFound) {
-//			return balance[:], nil
-//		}
-//		return nil, err
-//	}
-//	binary.BigEndian.PutUint64(balance[:], b)
-//	return balance[:], nil
-//}
-//
-//func (i *zkRollupIndexer) txOut(ctx context.Context, pop tbcd.Outpoint, c indexerCache) (uint64, []byte, error) {
-//	cache := c.(*Cache[tbcd.ZKRollupKey, []byte]).Map()
-//	if utxoE, ok := cache[tbcd.ZKRollupKey(pop[:])]; ok {
-//		txOut := tbcd.TxOutFromBytes(utxoE)
-//		return uint64(txOut.Value), txOut.PkScript, nil
-//	}
-//	// Not found in cache, fetch from db
-//	value, txOut, err := i.g.db.ZKValueAndScriptByOutpoint(ctx, pop)
-//	if err != nil {
-//		return 0, nil, err
-//	}
-//	return value, txOut, nil
-//}
-
 func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, direction int, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
 	switch direction {
 	case -1:
@@ -207,23 +174,19 @@ func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btc
 			}
 		}
 
-		// height+cumdiff
-
-		// XXX create stateroot for block here and cache that
-
 	case -1:
-		panic("-1")
-		//txs := block.Transactions()
-		//for k := len(txs) - 1; k >= 0; k-- {
-		//	tx := txs[k]
-		//	err := i.processTx(ctx, direction, blockHeight, blockHash, tx, c)
-		//	if err != nil {
-		//		return err
-		//	}
-		//}
+		// Revert trie here and exit
+		panic("revertme")
+		return nil
 	default:
 		panic(fmt.Sprintf("diagnostic: %v", direction))
 	}
+
+	// XXX create stateroot for block here and cache that
+	// NewMetadata(blockheader, previous stateroot)
+	// StateRoot = zkb.InsertBlock()
+	// rawdb[blockhash]=StateRoot
+	// can we pull the previous state root from the 0xff account?
 
 	return nil
 }
