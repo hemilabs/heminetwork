@@ -129,6 +129,35 @@ func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, di
 		panic(fmt.Sprintf("diagnostic: invalid direction %v", direction))
 	}
 
+	// What do we need to commit
+	// address:
+	// - txid to a block (storage trie)
+	// - sha256(pkscript) to balance (account)
+	//         - prove inclusion or exclusion of a utxo (state)
+	//
+	// map[address]struct that contains balance + root hash of storage map
+	// storage map[root hash] -> map[[]byte][]byte
+	//
+	// State trie: f account
+	// - blockhash to a height+cumdiff
+	// - previous sha256("stateroot") = previous stateroot
+	// - previous sha256("previousblock") = previous blockhash
+	//
+	// prune zero balance account? worth it!
+	//
+	//
+	// map[common.Address] -> map[common.Has] []byte
+	//
+	// Create StateAccount use address = sha256(PkScript) (stores balance)
+	// Create StorageTrie use address as the key
+	//         - insert storage trie[address] map[sha256(Outpoint)]=Outpoint+blockhash (on in maybe turn this into the spending tx)
+	//
+	// Metadata:
+	// address = 0xff
+	// Create StorageTrie use address as the key
+	//         - insert storage trie[address] map[blockhash]=encode(previous_state_root + previous_block + height+cumdiff)
+	//
+
 	// cache := c.(*Cache[ZKRollupKey, []byte]).Map()
 	// txId := tx.Hash()
 	for txInIdx, txIn := range tx.MsgTx().TxIn {
