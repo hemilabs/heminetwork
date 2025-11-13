@@ -2495,11 +2495,11 @@ func (s *Server) SyncIndexersToHash(ctx context.Context, hash chainhash.Hash) er
 
 	// ZK indexes
 	if s.cfg.ZKIndex {
-		if err := s.zkri.IndexToHash(ctx, hash); err != nil {
-			return fmt.Errorf("zk rollup indexer: %w", err)
-		}
 		if err := s.zki.IndexToHash(ctx, hash); err != nil {
 			return fmt.Errorf("zk indexer: %w", err)
+		}
+		if err := s.zkri.IndexToHash(ctx, hash); err != nil {
+			return fmt.Errorf("zk rollup indexer: %w", err)
 		}
 	}
 
@@ -2541,10 +2541,10 @@ func (s *Server) syncIndexersToBest(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
-		if err := s.zkri.IndexToBest(ctx); err != nil {
+		if err := s.zki.IndexToBest(ctx); err != nil {
 			return err
 		}
-		if err := s.zki.IndexToBest(ctx); err != nil {
+		if err := s.zkri.IndexToBest(ctx); err != nil {
 			return err
 		}
 	}
@@ -2856,13 +2856,13 @@ func (s *Server) dbOpen(ctx context.Context) error {
 	}
 
 	if s.cfg.ZKIndex {
-		s.zkri, err = NewZKRollupIndexer(s.g, 100, /* 100 blocks */
+		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedZK,
+			s.cfg.ZKIndex)
+		s.zkri, err = NewZKRollupIndexer(s.g, 10, /* 10 blocks */
 			s.cfg.ZKIndex, s.cfg.Network, s.cfg.LevelDBHome)
 		if err != nil {
 			return err
 		}
-		s.zki = NewZKIndexer(s.g, s.cfg.MaxCachedZK,
-			s.cfg.ZKIndex)
 	}
 
 	return nil
@@ -3245,10 +3245,10 @@ func (s *Server) Run(pctx context.Context) error {
 			log.Infof("Keystone index %v @ %v", hemiBH.Height, hemiBH.Hash)
 		}
 		if s.cfg.ZKIndex {
-			bh, _ := s.zkri.IndexerAt(ctx)
-			log.Infof("ZK rollup index %v @ %v", bh.Height, bh.Hash)
-			bh, _ = s.zki.IndexerAt(ctx)
+			bh, _ := s.zki.IndexerAt(ctx)
 			log.Infof("ZK index %v @ %v", bh.Height, bh.Hash)
+			bh, _ = s.zkri.IndexerAt(ctx)
+			log.Infof("ZK rollup index %v @ %v", bh.Height, bh.Hash)
 		}
 
 		// XXX this code really should do something along the lines of
