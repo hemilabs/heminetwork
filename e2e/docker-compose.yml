@@ -20,6 +20,7 @@ services:
       - "-txindex=1"
       - "-rpcworkqueue=400"
       - "-printtoconsole"
+      - "-debug=1"
     ports:
       - "18443:18443"
       - "18444:18444"
@@ -126,7 +127,7 @@ services:
 
   geth-l1-setup:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.16.0sha256:e16e706d17280e2265e4f64e6236f762f3fc732981f4426759d6a5139ab9d7ac"
+    image: "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     working_dir: "/tmp/geth"
     depends_on:
       op-geth-l2-setup:
@@ -143,7 +144,7 @@ services:
 
   geth-l1:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.16.0sha256:e16e706d17280e2265e4f64e6236f762f3fc732981f4426759d6a5139ab9d7ac"
+    image: "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     container_name: e2e-geth-l1-1
     ports:
       - "8545:8545"
@@ -189,8 +190,6 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
-      args:
-        OPTIMISM_COMMIT: fa8ee0f4aab5d1b26506f1297284ac61db431ee5
     depends_on:
       bitcoind:
         condition: "service_started"
@@ -305,7 +304,6 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -354,7 +352,6 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
-      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"

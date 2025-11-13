@@ -1253,7 +1253,6 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		)
 		if err != nil {
 			t.Fatal(err)
-
 		}
 
 		t.Logf("prove withdrawal tx is %s", tx.Hash())
