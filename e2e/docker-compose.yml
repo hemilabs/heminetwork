@@ -126,7 +126,7 @@ services:
 
   geth-l1-setup:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
+    image: "ethereum/client-go:v1.16.6@sha256:dc9311fca0c276abdf44920dacfebb45f36354b21fee8f9e5eeb356f61f1feed"
     working_dir: "/tmp/geth"
     depends_on:
       op-geth-l2-setup:
@@ -143,7 +143,7 @@ services:
 
   geth-l1:
     # yamllint disable-line rule:line-length
-    image: "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
+    image: "ethereum/client-go:v1.16.6@sha256:dc9311fca0c276abdf44920dacfebb45f36354b21fee8f9e5eeb356f61f1feed"
     container_name: e2e-geth-l1-1
     ports:
       - "8545:8545"
@@ -189,6 +189,8 @@ services:
     build:
       dockerfile: "optimism-stack.Dockerfile"
       context: "."
+      args:
+        OPTIMISM_COMMIT: fa8ee0f4aab5d1b26506f1297284ac61db431ee5
     depends_on:
       bitcoind:
         condition: "service_started"
