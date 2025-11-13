@@ -20,7 +20,6 @@ services:
       - "-txindex=1"
       - "-rpcworkqueue=400"
       - "-printtoconsole"
-      - "-debug=1"
     ports:
       - "18443:18443"
       - "18444:18444"
@@ -304,6 +303,7 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
+      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
@@ -352,6 +352,7 @@ services:
       - "--override.granite=${HVM_PHASE0_TIMESTAMP}"
       - "--override.fjord=${HVM_PHASE0_TIMESTAMP}"
       - "--l1.beacon.ignore=true"
+      - "--rollup.l1-chain-config=/shared-dir/l1genesis.json"
     volumes:
       - "shared-dir:/shared-dir"
       - "./jwt.hex:/tmp/jwt.hex"
