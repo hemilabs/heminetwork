@@ -14,6 +14,7 @@ import (
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/hemilabs/x/zktrie"
 	"github.com/mitchellh/go-homedir"
@@ -48,6 +49,10 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, h
 	if err != nil {
 		return nil, err
 	}
+	err = tr.Put(g.chain.GenesisHash[:], types.EmptyRootHash[:])
+	if err != nil {
+		return nil, err
+	}
 	zi := &zkRollupIndexer{
 		cacheCapacity: cacheLen,
 		tr:            tr,
@@ -62,7 +67,7 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, h
 }
 
 func (i *zkRollupIndexer) newCache() indexerCache {
-	return NewCache[ZKRollupKey, []byte](i.cacheCapacity)
+	return NewCache[chainhash.Hash, []byte](i.cacheCapacity)
 }
 
 func (i *zkRollupIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, error) {
@@ -86,14 +91,24 @@ func (i *zkRollupIndexer) indexerAt(ctx context.Context) (*tbcd.BlockHeader, err
 	return i.g.db.BlockHeaderByHash(ctx, *bhHash)
 }
 
-func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, blockHeight uint32, blockHash *chainhash.Hash, tx *btcutil.Tx, c indexerCache) error {
+func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, blockHash *chainhash.Hash, tx *btcutil.Tx) error {
 	for txInIdx, txIn := range tx.MsgTx().TxIn {
 		// Skip coinbase inputs
 		if blockchain.IsCoinBase(tx) {
 			continue
 		}
-		_ = txIn
-		_ = txInIdx
+		// Recreate Outpoint from TxIn.PreviousOutPoint
+		pop := tbcd.NewOutpoint(txIn.PreviousOutPoint.Hash,
+			txIn.PreviousOutPoint.Index)
+
+		_, txOut, err := i.g.db.ZKValueAndScriptByOutpoint(ctx, pop)
+		if err != nil {
+			return err
+		}
+
+		o := zktrie.NewOutpoint(*tx.Hash(), uint32(txInIdx))
+		so := zktrie.NewSpentOutput(*blockHash, *tx.Hash(), uint32(txInIdx))
+		zkb.NewIn(txOut, o, so)
 	}
 
 	for txOutIdx, txOut := range tx.MsgTx().TxOut {
@@ -101,62 +116,115 @@ func (i *zkRollupIndexer) processTx(ctx context.Context, zkb *zktrie.ZKBlock, bl
 		if txscript.IsUnspendable(txOut.PkScript) {
 			continue
 		}
-
 		o := zktrie.NewOutpoint(*tx.Hash(), uint32(txOutIdx))
 		so := zktrie.NewSpendableOutput(*blockHash, *tx.Hash(), uint32(txOutIdx), uint64(txOut.Value))
 		zkb.NewOut(txOut.PkScript, o, so)
 	}
-	cache[blockhash] = nil // Just store the blockhash to fill up cache
-
 	return nil
 }
 
-// XXX this gets replaced by blockhash -> stateRoot cache
-var previousStateRoot = types.EmptyRootHash
+func (i *zkRollupIndexer) getStateRoot(blockHash chainhash.Hash, c indexerCache) (common.Hash, error) {
+	cache := c.(*Cache[chainhash.Hash, []byte]).Map()
+	if sr, ok := cache[blockHash]; ok {
+		return common.BytesToHash(sr), nil
+	}
+
+	// Not found in cache, fetch from db
+	sr, err := i.tr.Get(blockHash[:])
+	if err != nil {
+		// XXX leveldb error
+		if errors.Is(err, leveldb.ErrNotFound) {
+			return types.EmptyRootHash, nil
+		}
+		return types.EmptyRootHash, err
+	}
+	if sr == nil {
+		return types.EmptyRootHash, nil
+	}
+	return common.BytesToHash(sr), nil
+}
 
 func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btcutil.Block, c indexerCache) error {
 	if block.Height() == btcutil.BlockHeightUnknown {
 		panic("diagnostic: block height not set")
 	}
-
 	blockHash := *block.Hash()
+	// skip genesis
+	if blockHash.IsEqual(i.g.chain.GenesisHash) {
+		return nil
+	}
+
+	cache := c.(*Cache[chainhash.Hash, []byte]).Map()
 	prevBlockHash := block.MsgBlock().Header.PrevBlock
 	blockHeight := block.Height()
 	log.Tracef("processing: %v %v", blockHeight, blockHash)
 	log.Infof("direction %v processing: %v %v", direction, blockHeight, blockHash)
 
+	prevState, err := i.getStateRoot(prevBlockHash, c)
+	if err != nil {
+		return err
+	}
 	switch direction {
 	case -1:
 		// Revert trie here and exit
-		panic("revertme")
+		err := i.tr.Recover(prevState)
+		return err
 	case 1:
 	default:
 		panic(fmt.Sprintf("diagnostic: %v", direction))
 	}
 
-	zkb := zktrie.NewZKBlock(blockHash, prevBlockHash, previousStateRoot, uint64(blockHeight))
+	zkb := zktrie.NewZKBlock(blockHash, prevBlockHash, prevState, uint64(blockHeight))
 
 	for _, tx := range block.Transactions() {
-		err := i.processTx(ctx, zkb, uint32(blockHeight), &blockHash, tx, c)
+		err := i.processTx(ctx, zkb, &blockHash, tx)
 		if err != nil {
 			return err
 		}
 	}
-
-	// XXX create stateroot for block here and cache that
-	// NewMetadata(blockheader, previous stateroot)
-	// StateRoot = zkb.InsertBlock()
-	// rawdb[blockhash]=StateRoot
-	// can we pull the previous state root from the 0xff account?
+	stateRoot, err := i.tr.InsertBlock(zkb)
+	if err != nil {
+		return err
+	}
+	cache[blockHash] = stateRoot[:]
 
 	return nil
 }
 
 func (i *zkRollupIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
-	panic("commit")
-	// clear cache
-	// cache := c.(*Cache[tbcd.ZKRollupKey, []byte])
-	// return i.g.db.BlockZKUpdate(ctx, direction, cache.Map(), atHash)
+	switch direction {
+	case -1:
+		/// TODO: delete stored stateroots for forked out blocks
+		if err := i.tr.Put(zkRollupIndexHashKey, atHash[:]); err != nil {
+			return err
+		}
+		return nil
+	case 1:
+	default:
+		panic(fmt.Sprintf("diagnostic: %v", direction))
+	}
+
+	cache := c.(*Cache[chainhash.Hash, []byte]).Map()
+	// sr, err := i.getStateRoot(atHash, c)
+	// if err != nil {
+	// 	return err
+	// }
+	if err := i.tr.Commit(); err != nil {
+		return err
+	}
+
+	if err := i.tr.Put(zkRollupIndexHashKey, atHash[:]); err != nil {
+		return err
+	}
+
+	var errSeen error
+	for bh, sr := range cache {
+		if err := i.tr.Put(bh[:], sr); err != nil {
+			errSeen = errors.Join(errSeen, err)
+		}
+	}
+	c.Clear()
+	return errSeen
 }
 
 func (i *zkRollupIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {

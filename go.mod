@@ -15,7 +15,7 @@ require (
 	github.com/dustin/go-humanize v1.0.1
 	github.com/ethereum/go-ethereum v1.16.7
 	github.com/go-test/deep v1.1.1
-	github.com/hemilabs/x/zktrie v0.0.0-20251112161533-c23516e94b0d
+	github.com/hemilabs/x/zktrie v0.0.0-20251113124035-35695fd11f8a
 	github.com/juju/loggo v1.0.0
 	github.com/mitchellh/go-homedir v1.1.0
 	github.com/otiai10/copy v1.14.1
