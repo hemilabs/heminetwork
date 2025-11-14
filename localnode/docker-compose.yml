@@ -164,7 +164,7 @@ services:
   # Hemi L2 node
   op-geth-l2:
     # yamllint disable-line rule:line-length
-    image: "ghcr.io/hemilabs/op-geth:157cd4b@sha256:2988074ab0bbd4d343fc4132782ecde5d230436626c7da4e841bd1b9f0f2c81a"
+    image: "ghcr.io/hemilabs/op-geth:157cd4b@sha256:68a3d18216e3e936b8282f38ef4da7dcc547f3a56564e2dc55149bdf3c7f02d5"
     platform: linux/amd64
     # XXX does geth need to be fully synced
     profiles: ["hemi", "hemi-min", "full"]
