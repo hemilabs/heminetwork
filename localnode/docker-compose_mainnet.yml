@@ -233,7 +233,7 @@ services:
   # Hemi op-node
   op-node:
     # yamllint disable-line rule:line-length
-    image: "ghcr.io/hemilabs/op-node:ea9fe7b@sha256:7110e3c4c61e495ea0a6621d7ec211ceb7e948e25c648b05bd51fcc557ad06bc"
+    image: "ghcr.io/hemilabs/op-node:ea9fe7b@sha256:3e3716b147de156058102c4865e3393bf5e82f96fa0e8d7c3576192f52f51569"
     platform: linux/amd64
     profiles: ["hemi", "hemi-min", "full"]
     depends_on:
