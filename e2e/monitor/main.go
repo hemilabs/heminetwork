@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"os/exec"
 	"strconv"
@@ -39,7 +40,7 @@ type state struct {
 	lastBatcherPublicationHash  string
 	batcherPublicationCount     int
 	popMinerBalance             string // very large number
-	tipDiff                     uint64
+	tipDiff                     *big.Int
 	tipHash                     string
 	tipHashNonSequencing        string
 }
@@ -360,14 +361,13 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 		return strings.Split(string(output), "\n")[0]
 	}
 
-	runJsToInt := func(jsi string, layer string, ipcPath string, replica string) uint64 {
+	runJsToInt := func(jsi string, layer string, ipcPath string, replica string) *big.Int {
 		val := runJs(jsi, layer, ipcPath, replica)
-		intVal, err := strconv.ParseUint(val, 10, 64)
-		if err != nil {
-			panic(fmt.Sprintf("error converting to int: %s", err))
+		result := big.NewInt(0)
+		if _, ok := result.SetString(val, 10); !ok {
+			panic(fmt.Sprintf("error parsing value: %s", val))
 		}
-
-		return intVal
+		return result
 	}
 
 	for {
@@ -386,17 +386,15 @@ func monitorRolledUpTxs(ctx context.Context, s *state, mtx *sync.Mutex) {
 
 		// choose the min of these values; the values should be going up.  if
 		// one node is not keeping up, it will have a (noticeably) lower balance
-		if popMinerBalanceNonSequencing < popMinerBalance {
-			popMinerBalance = popMinerBalanceNonSequencing
+		if popMinerBalanceNonSequencing.Cmp(popMinerBalance) == -1 {
+			popMinerBalance.Set(popMinerBalanceNonSequencing)
 		}
 
 		// the non-sequencing tip may be above the tip, if the tip changes
 		// between reads, so make sure we get the diff regardless of which one
 		// is ahead
-		tipDiff := tip - tipNonSequencing
-		if tipNonSequencing > tip {
-			tipDiff = tipNonSequencing - tip
-		}
+		tipDiff := tip.Sub(tip, tipNonSequencing)
+		tipDiff = tipDiff.Abs(tipDiff)
 
 		mtx.Lock()
 		s.firstBatcherPublicationHash = first

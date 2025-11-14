@@ -82,7 +82,6 @@ echo $filecontents > ./config.toml
  --tbc.seeds='bitcoind:18444' \
  --override.ecotone=1725868497 \
  --override.canyon=1725868497 \
- --override.cancun=1725868497 \
  --hvm.headerdatadir=/tbc/headers \
  --tbc.leveldbhome=/tbc/tbcdatadir \
  --hvm.genesisheader=$BLOCKHEADER \

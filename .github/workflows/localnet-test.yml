@@ -21,6 +21,9 @@ jobs:
     strategy:
       matrix:
         go-version: [ "1.25.x" ]
+        gethl1:
+          - "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
+          - "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     steps:
       - name: "Checkout repository"
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -35,6 +38,8 @@ jobs:
         run: docker system prune -f
 
       - name: "run localnet"
+        env:
+          LOCALNET_GETH_L1_IMAGE: ${{ matrix.gethl1 }}
         run: HVM_PHASE0_TIMESTAMP=$(date --date='+120 seconds' +%s) docker compose -f ./e2e/docker-compose.yml up -d --wait-timeout 600
 
       - name: "remove more dangling"
@@ -43,7 +48,7 @@ jobs:
       - name: "get localnet stats"
         working-directory: ./e2e/monitor
         # XXX should this be a make command?
-        run: go test -timeout 60m -v .
+        run: go test -timeout 30m -v .
       
       - name: "dump logs"
         if: "always()"

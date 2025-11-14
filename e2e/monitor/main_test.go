@@ -100,6 +100,8 @@ func game(t *testing.T) common.Address {
 // after 5 minutes and check that it has progressed at least to a certain
 // point
 func TestMonitor(t *testing.T) {
+	t.Parallel()
+
 	// let localnet start, there are smarter ways to do this but this will work
 	// for now
 	time.Sleep(2 * time.Minute)
@@ -167,6 +169,7 @@ func TestMonitor(t *testing.T) {
 }
 
 func TestL1L2Comms(t *testing.T) {
+	t.Parallel()
 	for _, sequencing := range []bool{true, false} {
 		var name string
 		if sequencing {
@@ -230,6 +233,7 @@ func TestL1L2Comms(t *testing.T) {
 }
 
 func TestOperatorFeeVaultIsPresent(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(t.Context(), 1*time.Minute)
 	defer cancel()
 
@@ -559,14 +563,25 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		break
 	}
 
-	balance, err := l2Client.BalanceAt(ctx, receiverAddress, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	for {
+		select {
+		case <-time.After(1 * time.Second):
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
 
-	// check that we have at least the sent balance in HemiEth
-	if balance.Cmp(value) < 0 {
-		t.Fatalf("unexpected balance: %s", balance)
+		balance, err := l2Client.BalanceAt(ctx, receiverAddress, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// check that we have at least the sent balance in HemiEth
+		if balance.Cmp(value) < 0 {
+			t.Logf("unexpected balance: %s", balance)
+			continue
+		}
+
+		break
 	}
 }
 
