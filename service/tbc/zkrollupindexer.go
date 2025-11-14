@@ -213,18 +213,18 @@ func (i *zkRollupIndexer) commit(ctx context.Context, direction int, atHash chai
 		return err
 	}
 
+	for bh, sr := range cache {
+		if err := i.tr.Put(bh[:], sr); err != nil {
+			return err
+		}
+	}
+
 	if err := i.tr.Put(zkRollupIndexHashKey, atHash[:]); err != nil {
 		return err
 	}
 
-	var errSeen error
-	for bh, sr := range cache {
-		if err := i.tr.Put(bh[:], sr); err != nil {
-			errSeen = errors.Join(errSeen, err)
-		}
-	}
 	c.Clear()
-	return errSeen
+	return nil
 }
 
 func (i *zkRollupIndexer) fixupCacheHook(_ context.Context, _ *btcutil.Block, _ indexerCache) error {
