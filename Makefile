@@ -18,12 +18,13 @@ project = heminetwork
 version = $(shell git describe --tags 2>/dev/null || echo "v0.0.0")
 
 cmds = \
-	bfgd	\
-	hemictl	\
-	hproxyd	\
-	keygen	\
-	popmd	\
-	tbcd
+	bfgd			\
+	hemictl			\
+	hproxyd			\
+	keygen			\
+	popmd			\
+	tbcd			\
+	transfunctionerd	\
 
 .PHONY: all clean deps go-deps $(cmds) build install lint lint-deps tidy race test vulncheck \
 	vulncheck-deps
