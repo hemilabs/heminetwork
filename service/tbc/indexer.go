@@ -336,7 +336,7 @@ func (c *indexerCommon) unwind(ctx context.Context, startBH, endBH *tbcd.BlockHe
 	log.Tracef("%v Unwind", c)
 	defer log.Tracef("%v Unwind exit", c)
 
-	// XXX dedup with wind; it's basically the same code but with the direction, start anf endhas flipped
+	// XXX dedup with wind; it's basically the same code but with the direction, start and endhas flipped
 
 	if !c.Indexing() {
 		panic("bug: indexing not true")

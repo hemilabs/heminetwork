@@ -2323,7 +2323,7 @@ func (s *Server) TxBroadcast(ctx context.Context, tx *wire.MsgTx, force bool) (*
 		if err != nil {
 			log.Errorf("mempool tx: %w", err)
 		} else if err := s.mempool.TxInsert(ctx, mptx); err != nil {
-			log.Errorf("broacast mempool tx: %w", err)
+			log.Errorf("broadcast mempool tx: %w", err)
 		}
 	}
 
