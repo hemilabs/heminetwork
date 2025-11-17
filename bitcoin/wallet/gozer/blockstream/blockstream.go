@@ -162,7 +162,7 @@ func (bs *blockstreamGozer) UtxosByAddress(ctx context.Context, filterMempool bo
 		return nil, fmt.Errorf("request: %w", err)
 	}
 
-	// XXX figure out if we need to set ot do something with filterMempool here
+	// XXX figure out if we need to set or do something with filterMempool here
 	type statusJSON struct {
 		Confirmed   bool           `json:"confirmed"`
 		BlockHeight uint64         `json:"block_height"`
