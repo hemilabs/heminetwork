@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,7 +53,8 @@ const (
 	retries                    = 10
 	SolErrClaimAlreadyResolved = "0xf1a94581"
 	// hardcoded pre-funded private key that shouldn't change with our changes
-	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
+	localnetPrivateKey      = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
+	otherLocalnetPrivateKey = "7842c4d618821f836ee741ed7a0977b0a57a0714b71b4adbd94b14eb4e469398"
 )
 
 var (
@@ -101,10 +105,6 @@ func game(t *testing.T) common.Address {
 // point
 func TestMonitor(t *testing.T) {
 	t.Parallel()
-
-	// let localnet start, there are smarter ways to do this but this will work
-	// for now
-	time.Sleep(2 * time.Minute)
 
 	// somewhat arbitrary; we should be able to get to 24 pop txs mined in a
 	// reasonable amount of time
@@ -178,6 +178,7 @@ func TestL1L2Comms(t *testing.T) {
 			name = "testing non-sequencing client"
 		}
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Minute)
 			defer cancel()
 
@@ -196,7 +197,12 @@ func TestL1L2Comms(t *testing.T) {
 				t.Fatalf("could not dial eth l1 %s", err)
 			}
 
-			privateKey, err := crypto.HexToECDSA(localnetPrivateKey)
+			pk := localnetPrivateKey
+			if !sequencing {
+				pk = otherLocalnetPrivateKey
+			}
+
+			privateKey, err := crypto.HexToECDSA(pk)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -599,7 +605,18 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		t.Fatal(err)
 	}
 
-	otherReceiverAddress := common.Address(common.FromHex("06f0f8ee8119b2a0b7a95ba267231be783d8d2ab"))
+	tmpPrivateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+
+	tmpPublicKey := tmpPrivateKey.Public()
+	tmpPublicKeyECDSA, ok := tmpPublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		t.Fatal("error casting public key to ECDSA")
+	}
+
+	otherReceiverAddress := crypto.PubkeyToAddress(*tmpPublicKeyECDSA)
 
 	var receipt *types.Receipt
 	var tx *types.Transaction
@@ -812,6 +829,9 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		time.Sleep(time.Duration(maxClockDuration)*time.Second + 1)
 
 		if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
+			if strings.Contains(err.Error(), "execution reverted") {
+				break
+			}
 			if i == abort {
 				t.Fatal(err)
 			}
@@ -847,6 +867,10 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 			_, _, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
 			if err != nil {
+				if strings.Contains(err.Error(), "0x67fe1950") {
+					break
+				}
+
 				t.Logf("could not send tx, will retry: %s", err)
 				continue
 			}
@@ -917,13 +941,7 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		t.Fatal(err)
 	}
 
-	mod := big.NewInt(0)
-	mod.Mod(balance, big.NewInt(97))
-
-	// the balance must be greater than zero and divisible by 97.  we
-	// send 97 eth from l1 to l2.  if you run this test more than once on the
-	// same network, it will send 97 multiple times
-	if balance.Cmp(big.NewInt(0)) != 1 || mod.Cmp(big.NewInt(0)) != 0 {
+	if balance.Cmp(big.NewInt(97)) != 0 {
 		t.Fatalf("unexpected balance: %d", balance)
 	}
 }
@@ -1365,6 +1383,9 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 		time.Sleep(time.Duration(maxClockDuration)*time.Second + 1)
 
 		if err := gameContract.CallResolveClaim(ctx, 0); err != nil {
+			if strings.Contains(err.Error(), "execution reverted") {
+				break
+			}
 			if i == abort {
 				t.Fatal(err)
 			}
@@ -1400,6 +1421,10 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 
 			_, _, err := transactions.SendTx(ctx, l1Client, resolvedtx, privateKey)
 			if err != nil {
+				if strings.Contains(err.Error(), "0x67fe1950") {
+					break
+				}
+
 				t.Logf("could not send tx, will retry: %s", err)
 				continue
 			}

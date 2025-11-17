@@ -93,6 +93,7 @@ cat l1allocs.json
 # this adds an allocation line to fund our address on L1, this allows us
 # to transact with the L1
 echo "$(jq '.alloc."0x78697c88847dfbbb40523e42c1f2e28a13a170be".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
+echo "$(jq '.alloc."0x06F0F8ee8119B2A0B7a95bA267231bE783D8d2AB".balance = "0x999999999999999999"' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 
 echo "$(jq --argjson timestamp "$(jq '.timestamp' /shared-dir/genesis.json)" '.timestamp = $timestamp' /shared-dir/l1genesis.json)" > /shared-dir/l1genesis.json
 
