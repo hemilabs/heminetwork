@@ -51,7 +51,6 @@ const (
 	SolErrClaimAlreadyResolved = "0xf1a94581"
 	// hardcoded pre-funded private key that shouldn't change with our changes
 	localnetPrivateKey = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
-	retries            = 10
 )
 
 var (
