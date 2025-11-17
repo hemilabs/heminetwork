@@ -1,6 +1,6 @@
 # Hemitrap
 
-Hemitrap is a feature that allows a user to fork a synced production 
+Hemitrap is a testing/non-production feature that allows a user to fork a synced production 
 (testnet or mainnet) hemi node and run a local, isolated private network
 for (mainly) testing contract upgrades.
 
