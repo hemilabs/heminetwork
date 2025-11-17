@@ -2414,7 +2414,7 @@ func TestIndexFork(t *testing.T) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
 
-	// make sure syncing to iself is non linear
+	// make sure syncing to itself is non linear
 	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("at b3, should have returned nil, got %v", err)
@@ -2836,7 +2836,7 @@ func TestKeystoneIndexFork(t *testing.T) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
 
-	// make sure syncing to iself is non linear
+	// make sure syncing to itself is non linear
 	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("at b3, should have returned nil, got %v", err)
@@ -3800,7 +3800,7 @@ func TestZKIndexFork(t *testing.T) {
 		t.Fatalf("b2b is not linear to b3: %v", err)
 	}
 
-	// make sure syncing to iself is non linear
+	// make sure syncing to itself is non linear
 	err = s.SyncIndexersToHash(ctx, *b3.Hash())
 	if err != nil {
 		t.Fatalf("at b3, should have returned nil, got %v", err)
