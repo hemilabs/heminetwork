@@ -62,6 +62,14 @@ var (
 	btcAddress = os.Getenv("BTC_ADDRESS")
 )
 
+func waitL1Block(t *testing.T, ctx context.Context) {
+	select {
+	case <-time.After(time.Second * 4):
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
 func addressAt(t *testing.T, path string) common.Address {
 	cmd := exec.Command(
 		"docker",
@@ -452,6 +460,8 @@ func deployL1TestToken(t *testing.T, ctx context.Context, l1Client *ethclient.Cl
 		t.Fatal(err)
 	}
 
+	waitL1Block(t, ctx)
+
 	balance, err := testToken.BalanceOf(nil, fromAddress)
 	if err != nil {
 		t.Fatal(err)
@@ -575,6 +585,8 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
+
+		waitL1Block(t, ctx)
 
 		balance, err := l2Client.BalanceAt(ctx, receiverAddress, nil)
 		if err != nil {
@@ -936,6 +948,7 @@ func bridgeEthL2ToL1(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 
 	}
 
+	waitL1Block(t, ctx)
 	balance, err := l1Client.BalanceAt(ctx, otherReceiverAddress, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1103,6 +1116,8 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
 
+		waitL1Block(t, ctx)
+
 		balance, err := optimismMintableErc2.OptimismMintableERC20Caller.BalanceOf(nil, receiverAddress)
 		if err != nil {
 			t.Fatal(err)
@@ -1118,6 +1133,8 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 		if err != nil {
 			t.Fatal(err)
 		}
+
+		waitL1Block(t, ctx)
 
 		balance, err = testToken.BalanceOf(nil, receiverAddress)
 		if err != nil {
@@ -1494,6 +1511,8 @@ func bridgeERC20FromL2ToL1(t *testing.T, ctx context.Context, l1Address common.A
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	waitL1Block(t, ctx)
 
 	balance, err := testToken.BalanceOf(nil, receiverAddress)
 	if err != nil {
