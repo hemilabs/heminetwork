@@ -16,7 +16,7 @@ import (
 	"sync"
 
 	"github.com/btcsuite/btcd/wire"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 )
 
 // XXX add tests

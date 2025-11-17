@@ -16,7 +16,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/service/tbc/peer/rawpeer"
 )

@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/config"
 	"github.com/hemilabs/heminetwork/v2/service/hproxy"

@@ -28,7 +28,7 @@ import (
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/dustin/go-humanize"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shirou/gopsutil/v4/disk"
@@ -3227,10 +3227,10 @@ func (s *Server) Run(pctx context.Context) error {
 		// Not sure which one to pick here. The likelihood that a new
 		// blockheaders comes through is high if the box has been down
 		// for >10m but very low if it is a simple restart.
-		//err := s.SyncIndexersToBest(ctx)
-		//if err != nil {
+		// err := s.SyncIndexersToBest(ctx)
+		// if err != nil {
 		//	panic(err)
-		//}
+		// }
 	}
 
 	select {

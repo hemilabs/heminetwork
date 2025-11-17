@@ -30,7 +30,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/phayes/freeport"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/testcontainers/testcontainers-go"
