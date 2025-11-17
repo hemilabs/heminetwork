@@ -17,7 +17,7 @@ import (
 
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/phayes/freeport"
 
 	"github.com/hemilabs/heminetwork/v2/api/bfgapi"

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	btcchainhash "github.com/btcsuite/btcd/chaincfg/chainhash"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sethvargo/go-retry"
 

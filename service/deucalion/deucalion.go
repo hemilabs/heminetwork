@@ -36,7 +36,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"

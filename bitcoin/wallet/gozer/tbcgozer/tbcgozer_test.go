@@ -15,7 +15,7 @@ import (
 
 	"github.com/btcsuite/btcd/btcutil"
 	"github.com/btcsuite/btcd/chaincfg"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/bitcoin/wallet/gozer"
 	"github.com/hemilabs/heminetwork/v2/internal/testutil"

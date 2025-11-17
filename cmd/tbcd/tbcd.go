@@ -12,7 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"
 	"github.com/hemilabs/heminetwork/v2/config"

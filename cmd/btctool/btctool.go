@@ -26,7 +26,7 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/mitchellh/go-homedir"
 
 	"github.com/hemilabs/heminetwork/v2/cmd/btctool/bdf"

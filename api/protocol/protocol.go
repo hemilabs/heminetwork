@@ -20,7 +20,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 )
 
 var log = loggo.GetLogger("protocol")

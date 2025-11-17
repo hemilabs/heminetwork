@@ -27,7 +27,7 @@ import (
 	dcrecdsa "github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/docker/go-connections/nat"
 	"github.com/go-test/deep"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/testcontainers/testcontainers-go"
 
 	"github.com/hemilabs/heminetwork/v2/api"

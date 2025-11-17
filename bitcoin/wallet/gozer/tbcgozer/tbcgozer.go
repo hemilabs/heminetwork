@@ -18,7 +18,7 @@ import (
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 
 	"github.com/hemilabs/heminetwork/v2/api/protocol"
 	"github.com/hemilabs/heminetwork/v2/api/tbcapi"

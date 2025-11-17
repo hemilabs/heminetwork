@@ -23,7 +23,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/heminetwork/v2/api/bfgapi"

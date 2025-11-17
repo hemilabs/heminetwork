@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/hemilabs/heminetwork/v2/service/deucalion"

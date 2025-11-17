@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/juju/loggo"
+	"github.com/juju/loggo/v2"
 )
 
 const (
