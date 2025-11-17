@@ -522,7 +522,7 @@ func _main() error {
 		fmt.Fprintf(f, "Actions:\n")
 		fmt.Fprintf(f, "  block <hash=hash> [json=bool] [wire=bool] - retrieve block for hash\n")
 		fmt.Fprintf(f, "  blockheader <hash=string>                 - retrieve blockheader for hash\n")
-		fmt.Fprintf(f, "  blockheighthash <heigh=int>               - block hash at height\n")
+		fmt.Fprintf(f, "  blockheighthash <height=int>               - block hash at height\n")
 		fmt.Fprintf(f, "  storeblockheaders [start=int] [count=int] - store block headers\n")
 		fmt.Fprintf(f, "  tip                                       - retrieve tip height\n")
 	}
