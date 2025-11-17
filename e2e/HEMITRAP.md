@@ -27,7 +27,7 @@ docker compose -f ./testnet/docker-compose.yml up --profiles hemi-min
 
 Let that sync.
 
-Once your node is synced, you could be able to tell by:
+Once your node is synced, you should be able to tell by:
 
 _NOTE_: there are ways to do this in one command, but this works.
 
