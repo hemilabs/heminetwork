@@ -1452,26 +1452,6 @@ func printJSON(where io.Writer, indent string, payload any) error {
 	return nil
 }
 
-func HandleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
-	defer func() {
-		signal.Stop(signalChan)
-		cancel()
-	}()
-
-	select {
-	case <-ctx.Done():
-	case s := <-signalChan: // First signal, cancel context.
-		if callback != nil {
-			callback(s) // Do whatever caller wants first.
-			cancel()
-		}
-	}
-	<-signalChan // Second signal, hard exit.
-	os.Exit(2)
-}
-
 func Jsonify(args []string) (string, error) {
 	formatted := "{"
 	for i, c := range args {
@@ -1634,6 +1614,9 @@ func api(ctx context.Context, args []string) error {
 }
 
 func _main(args []string) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	if err := config.Parse(cm); err != nil {
 		return err
 	}
@@ -1648,11 +1631,11 @@ func _main(args []string) error {
 		log.Debugf("%v", pc[k])
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go HandleSignals(ctx, cancel, func(s os.Signal) {
-		log.Infof("hemi received signal: %s", s)
-	})
+	go func() {
+		// Stop receiving signals as soon as possible.
+		<-ctx.Done()
+		cancel()
+	}()
 
 	cmd := args[0] // command provided by user
 

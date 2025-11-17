@@ -89,27 +89,10 @@ var (
 	}
 )
 
-func handleSignals(ctx context.Context, cancel context.CancelFunc, callback func(os.Signal)) {
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
-	defer func() {
-		signal.Stop(signalChan)
-		cancel()
-	}()
-
-	select {
-	case <-ctx.Done():
-	case s := <-signalChan: // First signal, cancel context.
-		if callback != nil {
-			callback(s) // Do whatever caller wants first.
-			cancel()
-		}
-	}
-	<-signalChan // Second signal, hard exit.
-	os.Exit(2)
-}
-
 func _main() error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
 	if err := config.Parse(cm); err != nil {
 		return err
 	}
@@ -124,10 +107,11 @@ func _main() error {
 		log.Infof("%v", pc[k])
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	go handleSignals(ctx, cancel, func(s os.Signal) {
-		log.Infof("popm service received signal: %s", s)
-	})
+	go func() {
+		// Stop receiving signals as soon as possible.
+		<-ctx.Done()
+		cancel()
+	}()
 
 	miner, err := popm.NewServer(cfg)
 	if err != nil {

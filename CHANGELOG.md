@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update `localnet` and `localnode` `geth-l1` versions to 16.7 and fix tests
   ([#746](https://github.com/hemilabs/heminetwork/pull/746)).
 
+- Improved signal handling in the daemons ([#763](https://github.com/hemilabs/heminetwork/pull/763)).
+
 ### Fixed
 
 - Fix typos across the codebase
