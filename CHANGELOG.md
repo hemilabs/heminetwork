@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix typos across the codebase
-  ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733)).
+  ([#694](https://github.com/hemilabs/heminetwork/pull/694), [#733](https://github.com/hemilabs/heminetwork/pull/733),
+  [#751](https://github.com/hemilabs/heminetwork/pull/751)).
 
 ## [v2.0.0]
 
