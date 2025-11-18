@@ -22,7 +22,7 @@ jobs:
       matrix:
         go-version: [ "1.25.x" ]
         gethl1:
-          - "ethereum/client-go:v1.15.8@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
+          - "ethereum/client-go:v1.16.6@sha256:a5ef22282a8d154d9f634d38cdcc233e72daef454edc6339d13b3fc456355fa2"
           - "ethereum/client-go:v1.16.7@sha256:fc5cee2ac93202d72af2eacaffbd17a43f6d9316032dc5f3c67663f91d43aa5f"
     steps:
       - name: "Checkout repository"
