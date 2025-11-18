@@ -6,7 +6,7 @@ toolchain go1.25.4
 
 require (
 	github.com/btcsuite/btcd v0.24.3-0.20250506233109-1eb974aab6ef
-	github.com/btcsuite/btcd/btcec/v2 v2.3.5
+	github.com/btcsuite/btcd/btcec/v2 v2.3.6
 	github.com/btcsuite/btcd/btcutil v1.1.6
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
 	github.com/btcsuite/btcwallet/wallet/txsizes v1.2.5
