@@ -19,7 +19,7 @@ require (
 	github.com/go-test/deep v1.1.1
 	github.com/gosuri/uilive v0.0.4
 	github.com/hemilabs/heminetwork v1.6.4-0.20250716150413-22552f1a5442
-	github.com/jedib0t/go-pretty/v6 v6.6.9
+	github.com/jedib0t/go-pretty/v6 v6.7.1
 )
 
 require (
