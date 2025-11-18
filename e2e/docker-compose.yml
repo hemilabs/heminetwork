@@ -176,6 +176,7 @@ services:
       - --http.api=web3,debug,eth,txpool,net,engine,miner
       - --ws.api=debug,eth,txpool,net,engine,miner
       - --rpc.txfeecap=0
+      - --override.osaka=${HVM_PHASE0_TIMESTAMP}
     volumes:
       - "shared-dir:/shared-dir"
       - "./e2e/keystore:/tmp/keystore:ro"
