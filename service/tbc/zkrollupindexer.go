@@ -49,10 +49,10 @@ func NewZKRollupIndexer(g geometryParams, cacheLen int, enabled bool, network, h
 	if err != nil {
 		return nil, err
 	}
-	err = tr.Put(g.chain.GenesisHash[:], types.EmptyRootHash[:])
-	if err != nil {
-		return nil, err
-	}
+	// err = tr.Put(g.chain.GenesisHash[:], types.EmptyRootHash[:])
+	// if err != nil {
+	// 	return nil, err
+	// }
 	zi := &zkRollupIndexer{
 		cacheCapacity: cacheLen,
 		tr:            tr,
@@ -149,9 +149,16 @@ func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btc
 		panic("diagnostic: block height not set")
 	}
 	blockHash := *block.Hash()
-	// skip genesis
+
+	// skip genesis if we already inserted it once
 	if blockHash.IsEqual(i.g.chain.GenesisHash) {
-		return nil
+		state, err := i.getStateRoot(blockHash, c)
+		if err != nil {
+			return fmt.Errorf("get state from prev block: %w", err)
+		}
+		if state.Cmp(types.EmptyRootHash) != 0 {
+			return nil
+		}
 	}
 
 	cache := c.(*Cache[chainhash.Hash, []byte]).Map()
@@ -162,67 +169,73 @@ func (i *zkRollupIndexer) process(ctx context.Context, direction int, block *btc
 
 	prevState, err := i.getStateRoot(prevBlockHash, c)
 	if err != nil {
-		return err
+		return fmt.Errorf("get state from prev block: %w", err)
 	}
 	switch direction {
 	case -1:
 		// Revert trie here and exit
-		err := i.tr.Recover(prevState)
-		return err
+		if err := i.tr.Recover(prevState); err != nil {
+			return err
+		}
+		log.Infof("reverted to %s", prevState)
+		cache[blockHash] = nil
 	case 1:
+		zkb := zktrie.NewZKBlock(blockHash, prevBlockHash, prevState, uint64(blockHeight))
+		for _, tx := range block.Transactions() {
+			err := i.processTx(ctx, zkb, &blockHash, tx)
+			if err != nil {
+				return err
+			}
+		}
+		stateRoot, err := i.tr.InsertBlock(zkb)
+		if err != nil {
+			return fmt.Errorf("insert trie block: %w", err)
+		}
+		if blockHash.IsEqual(i.g.chain.GenesisHash) {
+			log.Infof("new genesis value %s", stateRoot)
+		}
+		cache[blockHash] = stateRoot[:]
 	default:
 		panic(fmt.Sprintf("diagnostic: %v", direction))
 	}
-
-	zkb := zktrie.NewZKBlock(blockHash, prevBlockHash, prevState, uint64(blockHeight))
-
-	for _, tx := range block.Transactions() {
-		err := i.processTx(ctx, zkb, &blockHash, tx)
-		if err != nil {
-			return err
-		}
-	}
-	stateRoot, err := i.tr.InsertBlock(zkb)
-	if err != nil {
-		return err
-	}
-	cache[blockHash] = stateRoot[:]
-
 	return nil
 }
 
 func (i *zkRollupIndexer) commit(ctx context.Context, direction int, atHash chainhash.Hash, c indexerCache) error {
+	cache := c.(*Cache[chainhash.Hash, []byte]).Map()
+	var updateTip bool
+	defer func() {
+		if !updateTip {
+			return
+		}
+		if err := i.tr.Put(zkRollupIndexHashKey, atHash[:]); err != nil {
+			log.Errorf("failed to update zkRollupIndexHashKey: %v", err)
+		}
+	}()
 	switch direction {
 	case -1:
-		/// TODO: delete stored stateroots for forked out blocks
-		if err := i.tr.Put(zkRollupIndexHashKey, atHash[:]); err != nil {
-			return err
+		updateTip = true
+		for bh := range cache {
+			if err := i.tr.Del(bh[:]); err != nil {
+				if !errors.Is(err, leveldb.ErrNotFound) {
+					return fmt.Errorf("delete old blockhash state: %w", err)
+				}
+			}
 		}
 		return nil
 	case 1:
+		if err := i.tr.Commit(); err != nil {
+			return fmt.Errorf("commit trie: %w", err)
+		}
+		updateTip = true
+		for bh, sr := range cache {
+			if err := i.tr.Put(bh[:], sr); err != nil {
+				return fmt.Errorf("insert blockhash state: %w", err)
+			}
+		}
 	default:
 		panic(fmt.Sprintf("diagnostic: %v", direction))
 	}
-
-	cache := c.(*Cache[chainhash.Hash, []byte]).Map()
-	// sr, err := i.getStateRoot(atHash, c)
-	// if err != nil {
-	// 	return err
-	// }
-	if err := i.tr.Commit(); err != nil {
-		return err
-	}
-
-	for bh, sr := range cache {
-		if err := i.tr.Put(bh[:], sr); err != nil {
-			return err
-		}
-	}
-
-	if err := i.tr.Put(zkRollupIndexHashKey, atHash[:]); err != nil {
-		return err
-	}
-
 	c.Clear()
 	return nil
 }
