@@ -7,6 +7,7 @@ package popm
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -351,7 +352,8 @@ func TestDisconnectedOpgeth(t *testing.T) {
 
 	// close current popm connection to opgeth
 	opgeth.Stop()
-	if err = opgeth.CloseConnections(false); err != nil {
+	err = opgeth.CloseConnections(false)
+	if err != nil && !errors.Is(err, net.ErrClosed) {
 		t.Fatal(err)
 	}
 
