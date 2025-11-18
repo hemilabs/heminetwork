@@ -15,7 +15,7 @@ require (
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.1.0
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 	github.com/ethereum-optimism/optimism v0.0.0-00010101000000-000000000000
-	github.com/ethereum/go-ethereum v1.16.5
+	github.com/ethereum/go-ethereum v1.16.7
 	github.com/go-test/deep v1.1.1
 	github.com/gosuri/uilive v0.0.4
 	github.com/hemilabs/heminetwork v1.6.4-0.20250716150413-22552f1a5442
