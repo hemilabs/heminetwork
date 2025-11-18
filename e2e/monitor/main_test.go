@@ -52,7 +52,11 @@ import (
 const (
 	retries                    = 10
 	SolErrClaimAlreadyResolved = "0xf1a94581"
-	// hardcoded pre-funded private key that shouldn't change with our changes
+	l1BlockTime                = 3 * time.Second
+
+	// hardcoded pre-funded private keys that shouldn't change with our changes
+	// note that these are for a local network only and should not be used in
+	// any production environment
 	localnetPrivateKey      = "dfe61681b31b12b04f239bc0692965c61ffc79244ed9736ffa1a72d00a23a530"
 	otherLocalnetPrivateKey = "7842c4d618821f836ee741ed7a0977b0a57a0714b71b4adbd94b14eb4e469398"
 )
@@ -64,7 +68,7 @@ var (
 
 func waitL1Block(t *testing.T, ctx context.Context) {
 	select {
-	case <-time.After(time.Second * 4):
+	case <-time.After(l1BlockTime + (1 * time.Second)):
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
@@ -585,8 +589,6 @@ func bridgeEthL1ToL2(t *testing.T, ctx context.Context, l1Client *ethclient.Clie
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-
-		waitL1Block(t, ctx)
 
 		balance, err := l2Client.BalanceAt(ctx, receiverAddress, nil)
 		if err != nil {
@@ -1116,8 +1118,6 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 
 		t.Logf("receipt for tx.  gas used: %d, block number: %d, status %d", receipt.GasUsed, receipt.BlockNumber, receipt.Status)
 
-		waitL1Block(t, ctx)
-
 		balance, err := optimismMintableErc2.OptimismMintableERC20Caller.BalanceOf(nil, receiverAddress)
 		if err != nil {
 			t.Fatal(err)
@@ -1135,7 +1135,6 @@ func bridgeERC20FromL1ToL2(t *testing.T, ctx context.Context, l1Address common.A
 		}
 
 		waitL1Block(t, ctx)
-
 		balance, err = testToken.BalanceOf(nil, receiverAddress)
 		if err != nil {
 			t.Fatal(err)
