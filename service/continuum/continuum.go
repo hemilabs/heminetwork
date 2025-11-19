@@ -8,6 +8,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"sync"
 	"time"
 
@@ -45,6 +47,9 @@ type Server struct {
 
 	cfg *Config
 
+	// Listener
+	listenConfig *net.ListenConfig
+
 	// Prometheus
 	promCollectors  []prometheus.Collector
 	promPollVerbose bool // set to true to print stats during poll
@@ -68,8 +73,60 @@ func NewServer(cfg *Config) (*Server, error) {
 		cfg = NewDefaultConfig()
 	}
 	return &Server{
-		cfg: cfg,
+		cfg:          cfg,
+		listenConfig: &net.ListenConfig{},
 	}, nil
+}
+
+func (s *Server) handle(ctx context.Context, conn net.Conn) {
+	log.Infof("handle: %v", conn.RemoteAddr())
+	defer log.Infof("handle exit: %v", conn.RemoteAddr())
+
+	defer s.wg.Done()
+	defer func() {
+		err := conn.Close()
+		if err != nil {
+			log.Errorf("close %v: %v", conn.RemoteAddr(), err)
+		}
+	}()
+
+	// XXX move all transports into a session manager so we can close them
+	// on ctx cancel.
+	//
+	// XXX move this to a function so that we don't panic
+	transport, err := NewTransport("P521") // XXX make curve an option
+	if err != nil {
+		panic(err)
+	}
+	err = transport.KeyExchange(ctx, conn)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		log.Errorf("key exchange: %v", err)
+		return
+	}
+
+	hr, err := transport.Handshake(ctx)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return
+		}
+		log.Errorf("handshake: %v", err)
+		return
+	}
+	_ = hr
+
+	log.Infof("read")
+	for {
+		cmd, err := transport.Read()
+		if err != nil {
+			panic(err) // XXX
+		}
+
+		switch cmd.(type) {
+		}
+	}
 }
 
 // Collectors returns the Prometheus collectors available for the server.
@@ -204,6 +261,38 @@ func (s *Server) Run(pctx context.Context) error {
 	}
 
 	errC := make(chan error)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		listener, err := s.listenConfig.Listen(ctx, "tcp", ":49152")
+		if err != nil {
+			errC <- err
+			return
+		}
+		go func() {
+			<-ctx.Done()
+			if err := listener.Close(); err != nil {
+				log.Errorf("listner close: %v", err)
+			}
+		}()
+
+		for {
+			conn, err := listener.Accept()
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return
+			}
+			if err != nil {
+				log.Errorf("accept: %v", err)
+				continue
+			}
+
+			// XXX add max cons here and reject new ones with busy?
+
+			// handle connection
+			s.wg.Add(1)
+			go s.handle(ctx, conn)
+		}
+	}()
 
 	select {
 	case <-ctx.Done():
