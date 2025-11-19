@@ -8,8 +8,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -22,7 +20,6 @@ import (
 	"codeberg.org/miekg/dns/dnsutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"golang.org/x/crypto/hkdf"
@@ -101,7 +98,7 @@ func createNode(name, domain string, ip net.IP, port uint16) (*node, error) {
 		return nil, err
 	}
 	n.PublicKey = n.PrivateKey.PubKey()
-	n.Identity = IdentityFromPub(n.PublicKey)
+	n.Identity = NewIdentityFromPub(n.PublicKey)
 
 	return n, nil
 }
@@ -292,34 +289,6 @@ func TestDNSServer(t *testing.T) {
 	}
 }
 
-func Hash160(data []byte) []byte {
-	hash := chainhash.HashB(data)
-	ripemd := ripemd160.New()
-	ripemd.Write(hash[:])
-	return ripemd.Sum(nil)
-}
-
-type Identity [ripemd160.Size]byte // ripemd160 of compressed pubkey
-
-func (i Identity) String() string {
-	return hex.EncodeToString(i[:])
-}
-
-func (i *Identity) UnmarshalJSON(data []byte) error {
-	if len(data) != len(i) {
-		return errors.New("invalid length")
-	}
-	copy(i[:], data)
-	return nil
-}
-
-func IdentityFromPub(pub *secp256k1.PublicKey) Identity {
-	id := Hash160(pub.SerializeCompressed())
-	var i Identity
-	copy(i[:], id)
-	return i
-}
-
 type Command struct {
 	Tag         [4]byte
 	PayloadHint [2]byte
@@ -380,6 +349,53 @@ func TestID(t *testing.T) {
 	pub2 := Hash160(pubRecovered.SerializeCompressed())
 	if !bytes.Equal(pub1, pub2) {
 		t.Fatal("not same ripemd")
+	}
+}
+
+func TestIdentity(t *testing.T) {
+	s1, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var c1 [32]byte
+	_, err = rand.Read(c1[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var c2 [32]byte
+	_, err = rand.Read(c2[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sig1 := s1.Sign(c2[:])
+	sig2 := s2.Sign(c1[:])
+
+	rec1, err := Verify(c1[:], sig2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec2, err := Verify(c2[:], sig1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("id1: %v", s1)
+	t.Logf("id2: %v", s2)
+	t.Logf("rec1: %v", NewIdentityFromPub(rec1))
+	t.Logf("rec2: %v", NewIdentityFromPub(rec2))
+
+	if s1.String() != NewIdentityFromPub(rec2).String() {
+		t.Fatal("recovery failed in 1")
+	}
+	if s2.String() != NewIdentityFromPub(rec1).String() {
+		t.Fatal("recovery failed in 2")
 	}
 }
 
@@ -468,10 +484,21 @@ func TestTransportHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	usSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("us: %v", usSecret)
+
 	them, err := NewTransport("P521")
 	if err != nil {
 		t.Fatal(err)
 	}
+	themSecret, err := NewSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("them: %v", themSecret)
 
 	listener, err := net.Listen("tcp", ":0")
 	if err != nil {
@@ -496,16 +523,20 @@ func TestTransportHandshake(t *testing.T) {
 		if err = them.KeyExchange(ctx, conn); err != nil {
 			panic(err)
 		}
-		hr, err := them.Handshake(ctx)
+		usRecovered, err := them.Handshake(ctx, themSecret)
 		if err != nil {
 			t.Fatal(err)
 		}
-		spew.Dump(hr)
 		wg.Done()
 
 		wg.Wait()
 		if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
 			panic(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+		}
+		t.Logf("us recovered: %v", usRecovered)
+		if usRecovered.String() != usSecret.String() {
+			t.Fatalf("us recovered not equal got %v, want %v",
+				usRecovered, usSecret)
 		}
 	}()
 
@@ -517,16 +548,21 @@ func TestTransportHandshake(t *testing.T) {
 	if err := us.KeyExchange(ctx, conn); err != nil {
 		t.Fatal(err)
 	}
-	hr, err := us.Handshake(ctx)
+	themRecovered, err := us.Handshake(ctx, usSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	spew.Dump(hr)
+	// spew.Dump(hr)
 	wg.Done()
 
 	wg.Wait()
 	if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
 		t.Fatal(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+	}
+	t.Logf("them recovered: %v", themRecovered)
+	if themRecovered.String() != themSecret.String() {
+		t.Fatalf("them recovered not equal got %v, want %v",
+			themRecovered, themSecret)
 	}
 	// XXX conn must go
 	if err := conn.Close(); err != nil {
