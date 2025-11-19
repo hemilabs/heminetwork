@@ -11,8 +11,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -175,7 +177,25 @@ func TestDNSServer(t *testing.T) {
 
 		newDNSServer("127.0.0.1", 5353, handler)
 	}()
-	time.Sleep(1 * time.Second)
+	// time.Sleep(1 * time.Second)
+	// All of this to replace a sleep!
+	d := net.Dialer{}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	for {
+		conn, err := d.DialContext(ctx, "tcp", "127.0.0.1:5353")
+		if err == nil {
+			err = conn.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+
+		if err.(*net.OpError).Err.(*os.SyscallError).Err == syscall.ECONNREFUSED {
+			continue
+		}
+	}
 
 	t.Logf("resolving")
 	r := &net.Resolver{

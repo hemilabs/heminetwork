@@ -350,6 +350,9 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 		return nil, err
 	}
 	if helloRequest.Version != ProtocolVersion {
+		// XXX I have seen some tests go through here and I don't know
+		// why. Just leaving a nugget as a reminder to debug that.
+		// Basically, helloRequest is not unmarshaled.
 		return nil, ErrUnsupportedVersion
 	}
 	if len(helloRequest.Challenge) != ChallengeSize {
