@@ -1,12 +1,14 @@
 package continuum
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdh"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +17,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/decred/dcrd/crypto/ripemd160"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/nacl/secretbox"
 )
@@ -35,13 +39,6 @@ import (
 // message is for the reader and an envelope should be routed to a third party.
 //
 // Size is encoded as a big endian 24 bit unsigned integer.
-//
-
-type Size [3]byte
-
-type Header struct{}
-
-type Message struct{}
 
 // Version
 //	1:
@@ -51,9 +48,6 @@ type Message struct{}
 //	encoding=json
 //	compression=no
 //
-
-//func Handshake(c net.Conn) {
-//}
 
 type HelloRequest struct {
 	Version   uint32            `json:"version"`           // Version number
@@ -81,35 +75,6 @@ type HelloResponse struct {
 //	}
 //	return s, nil
 //}
-//
-//func (s *Server) Run(ctx context.Context) error {
-//	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-//	defer cancel()
-//
-//	s.wg.Add(1)
-//	go func() {
-//		defer s.wg.Done()
-//		listener, err := s.lc.ListenTCP(ctx, "tcp", s.address)
-//		if err != nil {
-//			return nil, err
-//		}
-//		defer listener.Close()
-//	}()
-//}
-//
-//func (s *Server) Read(ctx context.Context) (*Message, error) {
-//}
-//
-//type Client struct{}
-//
-//func NewClient(o Options) (*Client, error) {
-//}
-//
-//func Read(ctx context.Context) (*Message, error) {
-//}
-
-//func NewServer(private *secp256k1.PrivateKey) (*Remote, error) {
-//}
 
 const (
 	TransportVersion = 1
@@ -118,7 +83,11 @@ const (
 
 	TransportNonceSize = 24         // 24 bytes, per secretbox
 	TransportMaxSize   = 0x00ffffff // 24 bit, 3 bytes
+
+	ChallengeSize = 32 // 32 bytes random data
 )
+
+var ZeroChallenge = [ChallengeSize]byte{} // All zeroes is invalid
 
 type Nonce struct {
 	counter atomic.Uint64
@@ -126,11 +95,12 @@ type Nonce struct {
 }
 
 // Next returns the next nonce by atomically incrementing the nonce counter and
-// then running an HMAC-SHA256 over the big endian encoding of it.
+// then running an HMAC-SHA256 over the big endian encoding of it. Since sha256
+// is 32 bytes and the nonce is 24 the bottom 8 bytes are clipped.
 func (n *Nonce) Next() *[TransportNonceSize]byte {
 	var (
 		counter [8]byte
-		nonce   [24]byte
+		nonce   [TransportNonceSize]byte
 	)
 	binary.BigEndian.PutUint64(counter[:], n.counter.Add(1))
 	h := hmac.New(sha256.New, n.key[:])
@@ -151,6 +121,89 @@ func NewNonce() (*Nonce, error) {
 	return n, nil
 }
 
+func Hash160(data []byte) []byte {
+	ripemd := ripemd160.New()
+	ripemd.Write(data[:])
+	return ripemd.Sum(nil)
+}
+
+type Identity [ripemd160.Size]byte // ripemd160 of compressed pubkey
+
+func (i Identity) String() string {
+	return hex.EncodeToString(i[:])
+}
+
+func (i Identity) Bytes() []byte {
+	return append(i[:])
+}
+
+func (i *Identity) UnmarshalJSON(data []byte) error {
+	if len(data) != len(i) {
+		return errors.New("invalid length")
+	}
+	copy(i[:], data)
+	return nil
+}
+
+func NewIdentityFromPub(pub *secp256k1.PublicKey) Identity {
+	id := Hash160(pub.SerializeCompressed())
+	var i Identity
+	copy(i[:], id)
+	return i
+}
+
+type Secret struct {
+	privateKey *secp256k1.PrivateKey
+
+	Identity // Provides stringer
+}
+
+func (s Secret) PublicKey() *secp256k1.PublicKey {
+	return s.privateKey.PubKey()
+}
+
+func (s Secret) Sign(hash []byte) []byte {
+	return ecdsa.SignCompact(s.privateKey, hash[:], true)
+}
+
+func Verify(hash []byte, sig []byte) (*secp256k1.PublicKey, error) {
+	publicKey, compact, err := ecdsa.RecoverCompact(sig, hash[:])
+	if err != nil {
+		return nil, err
+	}
+	if !compact {
+		return nil, ErrNotCompact
+	}
+	return publicKey, nil
+}
+
+func NewSecretFromPrivate(privateKey *secp256k1.PrivateKey) *Secret {
+	return &Secret{
+		privateKey: privateKey,
+		Identity:   NewIdentityFromPub(privateKey.PubKey()),
+	}
+}
+
+func NewSecretFromString(secret string) (*Secret, error) {
+	s, err := hex.DecodeString(secret)
+	if err != nil {
+		return nil, err
+	}
+	// XXX this may not always be the case and may need to be a range
+	if len(s) != 32 {
+		return nil, fmt.Errorf("invalid key")
+	}
+	return NewSecretFromPrivate(secp256k1.PrivKeyFromBytes(s)), nil
+}
+
+func NewSecret() (*Secret, error) {
+	s, err := secp256k1.GeneratePrivateKey()
+	if err != nil {
+		return nil, err
+	}
+	return NewSecretFromPrivate(s), nil
+}
+
 type TransportRequest struct {
 	Version   uint32 `json:"version"`
 	Curve     string `json:"curve"`
@@ -160,7 +213,9 @@ type TransportRequest struct {
 var (
 	ErrCurveDoesnotMatch  = errors.New("curve does not match")
 	ErrDecrypt            = errors.New("could not decrypt")
+	ErrInvalidChallenge   = errors.New("invalid challenge")
 	ErrInvalidPublicKey   = errors.New("invalid public key")
+	ErrNotCompact         = errors.New("not a compact public key")
 	ErrUnsupportedCurve   = errors.New("unsupported cruve")
 	ErrUnsupportedVersion = errors.New("unsupported version")
 )
@@ -272,17 +327,18 @@ func (t *Transport) encrypt(cmd []byte) ([]byte, []byte, error) {
 	return size[1:4], blob, nil
 }
 
-func (t *Transport) Handshake(ctx context.Context) (*HelloResponse, error) {
+func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, error) {
 	// XXX add timeout based on context
-	var challenge [32]byte
-	_, err := rand.Read(challenge[:])
+	var ourChallenge [32]byte
+	_, err := rand.Read(ourChallenge[:])
 	if err != nil {
 		return nil, err
 	}
 
+	// Write HelloRequest
 	err = t.Write(HelloRequest{
 		Version:   ProtocolVersion,
-		Challenge: challenge[:],
+		Challenge: ourChallenge[:],
 		Options: map[string]string{
 			"encoding":    "json",
 			"compression": "none",
@@ -293,22 +349,52 @@ func (t *Transport) Handshake(ctx context.Context) (*HelloResponse, error) {
 	}
 	// panic(fmt.Sprintf("size %x len %v\n%v", size, len(request), spew.Sdump(request)))
 
-	response, err := t.read()
+	// Read HelloRequest
+	jsonHelloRequest, err := t.read()
+	if err != nil {
+		return nil, err
+	}
+	var helloRequest HelloRequest
+	err = json.Unmarshal(jsonHelloRequest, &helloRequest)
+	if err != nil {
+		return nil, err
+	}
+	if helloRequest.Version != ProtocolVersion {
+		return nil, ErrUnsupportedVersion
+	}
+	if len(helloRequest.Challenge) != ChallengeSize {
+		return nil, ErrInvalidChallenge
+	}
+	if bytes.Equal(ZeroChallenge[:], helloRequest.Challenge) {
+		return nil, ErrInvalidChallenge
+	}
+
+	// XXX do something with options
+
+	// Write HelloResponse
+	err = t.Write(HelloResponse{
+		Signature: secret.Sign(helloRequest.Challenge),
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	panic(spew.Sdump(response))
-
-	// Sign challenge
-
-	//var hr HelloResponse
-	//err = json.NewDecoder(t.conn).Decode(&hr)
-	//if err != nil {
-	//	return nil, err
-	//}
-
-	return nil, fmt.Errorf("not yet")
+	// Read HelloResponse
+	jsonHelloResponse, err := t.read()
+	if err != nil {
+		return nil, err
+	}
+	var helloResponse HelloResponse
+	err = json.Unmarshal(jsonHelloResponse, &helloResponse)
+	if err != nil {
+		return nil, err
+	}
+	themPub, err := Verify(ourChallenge[:], helloResponse.Signature)
+	if err != nil {
+		return nil, err
+	}
+	themID := NewIdentityFromPub(themPub)
+	return &themID, nil
 }
 
 // readBlob locks the connection and reads a size and the associated blob into
@@ -343,9 +429,9 @@ func (t *Transport) read() ([]byte, error) {
 		return nil, err
 	}
 
-	var nonce [24]byte
-	copy(nonce[:], blob[:24])
-	cmd, ok := secretbox.Open(nil, blob[24:], &nonce, &t.encryptionKey)
+	var nonce [TransportNonceSize]byte
+	copy(nonce[:], blob[:TransportNonceSize])
+	cmd, ok := secretbox.Open(nil, blob[TransportNonceSize:], &nonce, &t.encryptionKey)
 	if !ok {
 		return nil, ErrDecrypt
 	}

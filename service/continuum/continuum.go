@@ -40,12 +40,16 @@ type Config struct {
 	PprofListenAddress      string
 	PrometheusListenAddress string
 	PrometheusNamespace     string
+	Secret                  string
 }
 type Server struct {
 	mtx sync.RWMutex
 	wg  sync.WaitGroup
 
 	cfg *Config
+
+	// Secrets
+	secret *Secret
 
 	// Listener
 	listenConfig *net.ListenConfig
@@ -65,6 +69,7 @@ func NewDefaultConfig() *Config {
 		Home:                "", // XXX
 		LogLevel:            logLevel,
 		PrometheusNamespace: appName,
+		Secret:              "",
 	}
 }
 
@@ -107,7 +112,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 		return
 	}
 
-	hr, err := transport.Handshake(ctx)
+	hr, err := transport.Handshake(ctx, s.secret)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return
@@ -207,6 +212,11 @@ func (s *Server) Run(pctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("expand: %w", err)
 	}
+	s.secret, err = NewSecretFromString(s.cfg.Secret)
+	if err != nil {
+		return fmt.Errorf("secret: %w", err)
+	}
+	s.cfg.Secret = "" // hopefully Secret is reaped later.
 
 	ctx, cancel := context.WithCancel(pctx)
 	defer cancel()

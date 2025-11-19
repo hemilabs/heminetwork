@@ -38,6 +38,11 @@ var (
 			Help:         "data directory",
 			Print:        config.PrintAll,
 		},
+		"TRF_SECRET": config.Config{
+			Value: &cfg.Secret,
+			Help:  "secp256k1 private key",
+			Print: config.PrintSecret,
+		},
 		"TRF_LOG_LEVEL": config.Config{
 			Value:        &cfg.LogLevel,
 			DefaultValue: defaultLogLevel,
