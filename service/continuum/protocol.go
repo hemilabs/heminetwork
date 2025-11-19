@@ -26,6 +26,9 @@ import (
 
 // The continuum protocol is a simple gossipy P2P system.
 //
+// The continuum transfunctioner is a very mysterious and powerful device and
+// it's mystery is exceeded only by it's power.
+//
 // Continuum runs directly on top of TCP and can run in the clear since it does
 // it's own encryption. It is a streaming protocol that prefixes encrypted
 // payloads with a size (that is capped). If the message is too large the
