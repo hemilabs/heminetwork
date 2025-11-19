@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/davecgh/go-spew/spew"
 	"golang.org/x/crypto/hkdf"
@@ -120,24 +121,20 @@ const (
 )
 
 type Nonce struct {
-	mtx     sync.Mutex
+	counter atomic.Uint64
 	key     [TransportNonceSize]byte
-	counter uint64
 }
 
+// Next returns the next nonce by atomically incrementing the nonce counter and
+// then running an HMAC-SHA256 over the big endian encoding of it.
 func (n *Nonce) Next() *[TransportNonceSize]byte {
-	n.mtx.Lock()
-	counter := n.counter
-	n.counter++
-	n.mtx.Unlock()
-
 	var (
-		c     [8]byte
-		nonce [24]byte
+		counter [8]byte
+		nonce   [24]byte
 	)
-	binary.BigEndian.PutUint64(c[:], counter)
+	binary.BigEndian.PutUint64(counter[:], n.counter.Add(1))
 	h := hmac.New(sha256.New, n.key[:])
-	_, err := h.Write(c[:])
+	_, err := h.Write(counter[:])
 	if err != nil {
 		panic(err)
 	}
@@ -146,9 +143,7 @@ func (n *Nonce) Next() *[TransportNonceSize]byte {
 }
 
 func NewNonce() (*Nonce, error) {
-	n := &Nonce{
-		counter: 1,
-	}
+	n := &Nonce{}
 	_, err := rand.Read(n.key[:])
 	if err != nil {
 		return nil, err
