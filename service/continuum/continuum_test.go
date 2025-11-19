@@ -3,21 +3,30 @@ package continuum
 import (
 	"bytes"
 	"context"
+	"crypto/ecdh"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
 	"codeberg.org/miekg/dns"
 	"codeberg.org/miekg/dns/dnsutil"
 	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/decred/dcrd/crypto/ripemd160"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
+	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/nacl/secretbox"
 )
 
 // seeds is a dns query with N ip addresses on the default port
@@ -320,17 +329,17 @@ type Command struct {
 	TTL         byte
 }
 
-// Hello challenges the other side to sign the challenge.
-type Hello struct {
-	Identity  Identity                 `json:"identity"`
-	Challenge [chainhash.HashSize]byte // Challenge them
-}
-
-// HelloReply returns the signed response. The Identity of the other side can
-// be recovered fomr the challenge response.
-type HelloReply struct {
-	ChallengeResponse []byte
-}
+//// Hello challenges the other side to sign the challenge.
+//type Hello struct {
+//	Identity  Identity                 `json:"identity"`
+//	Challenge [chainhash.HashSize]byte // Challenge them
+//}
+//
+//// HelloReply returns the signed response. The Identity of the other side can
+//// be recovered fomr the challenge response.
+//type HelloReply struct {
+//	ChallengeResponse []byte
+//}
 
 func TestID(t *testing.T) {
 	// Create DNS record with identity + ip + port
@@ -371,5 +380,156 @@ func TestID(t *testing.T) {
 	pub2 := Hash160(pubRecovered.SerializeCompressed())
 	if !bytes.Equal(pub1, pub2) {
 		t.Fatal("not same ripemd")
+	}
+}
+
+func newNonce(key [32]byte, counter uint64) (nonce [24]byte) {
+	var c [8]byte
+	binary.BigEndian.PutUint64(c[:], counter)
+	h := hmac.New(sha256.New, key[:])
+	_, err := h.Write(c[:])
+	if err != nil {
+		panic(err)
+	}
+	s := h.Sum(nil)
+	copy(nonce[:], s)
+	return
+}
+
+func TestECDHSecretBox(t *testing.T) {
+	curve := ecdh.P521()
+	priv1, _ := curve.GenerateKey(rand.Reader)
+	priv2, _ := curve.GenerateKey(rand.Reader)
+
+	// Derive shared secret
+	t.Logf("pub1: %x", priv1.PublicKey().Bytes())
+	t.Logf("pub2: %x", priv2.PublicKey().Bytes())
+	secret1, _ := priv1.ECDH(priv2.PublicKey())
+	secret2, _ := priv2.ECDH(priv1.PublicKey())
+
+	// Both secrets should be equal
+	if !bytes.Equal(secret1, secret2) {
+		t.Fatal("bad secret")
+	}
+
+	// Derive encryption keys
+	var ek1 [32]byte
+	ek1R := hkdf.New(sha256.New, secret1, nil, nil)
+	io.ReadFull(ek1R, ek1[:])
+
+	var ek2 [32]byte
+	ek2R := hkdf.New(sha256.New, secret2, nil, nil)
+	io.ReadFull(ek2R, ek2[:])
+	if !bytes.Equal(ek1[:], ek2[:]) {
+		t.Fatal("bad derive")
+	}
+
+	// Nonce is random hmac + counter
+	var nk1 [32]byte
+	_, _ = rand.Read(nk1[:])
+	nonce1 := newNonce(nk1, 1)
+
+	var nk2 [32]byte
+	_, _ = rand.Read(nk2[:])
+	nonce2 := newNonce(nk2, 1)
+
+	// Encrypt from 1 to 2
+	msg1 := []byte("hello msg 1")
+	enc1 := secretbox.Seal(nonce1[:], msg1, &nonce1, &ek1)
+	var msg1Nonce [24]byte
+	copy(msg1Nonce[:], enc1[:24])
+	decrMsg1, ok := secretbox.Open(nil, enc1[24:], &msg1Nonce, &ek2)
+	if !ok {
+		t.Fatal("decryption failed")
+	}
+	if !bytes.Equal(decrMsg1, msg1) {
+		t.Fatal("failed to decrypt")
+	}
+
+	// Encrypt from 2 to 1
+	msg2 := []byte("hello msg 2")
+	enc2 := secretbox.Seal(nonce2[:], msg2, &nonce2, &ek2)
+	var msg2Nonce [24]byte
+	copy(msg2Nonce[:], enc2[:24])
+	decrMsg2, ok := secretbox.Open(nil, enc2[24:], &msg2Nonce, &ek1)
+	if !ok {
+		t.Fatal("decryption failed")
+	}
+	if !bytes.Equal(decrMsg2, msg2) {
+		t.Fatal("failed to decrypt")
+	}
+}
+
+// Below this line should be all retained
+
+func TestTransportHandshake(t *testing.T) {
+	// XXX make this table driven and test all possible permutations.
+	us, err := NewTransport("P521")
+	if err != nil {
+		t.Fatal(err)
+	}
+	them, err := NewTransport("P521")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listener, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	ctx := context.TODO()
+	var wg sync.WaitGroup
+	wg.Add(2) // Wait for both key exchanges to complete
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			if err := conn.Close(); err != nil {
+				panic(err)
+			}
+		}()
+		if err = them.KeyExchange(ctx, conn); err != nil {
+			panic(err)
+		}
+		hr, err := them.Handshake(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spew.Dump(hr)
+		wg.Done()
+
+		wg.Wait()
+		if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
+			panic(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+		}
+	}()
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1",
+		strconv.Itoa(port)), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := us.KeyExchange(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	hr, err := us.Handshake(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spew.Dump(hr)
+	wg.Done()
+
+	wg.Wait()
+	if !bytes.Equal(us.encryptionKey[:], them.encryptionKey[:]) {
+		t.Fatal(spew.Sdump(us.encryptionKey) + spew.Sdump(them.encryptionKey))
+	}
+	// XXX conn must go
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

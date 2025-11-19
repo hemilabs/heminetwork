@@ -44,7 +44,7 @@ var (
 			Help:         "loglevel for various packages; INFO, DEBUG and TRACE",
 			Print:        config.PrintAll,
 		},
-		"TBC_PROMETHEUS_ADDRESS": config.Config{
+		"TRF_PROMETHEUS_ADDRESS": config.Config{
 			Value:        &cfg.PrometheusListenAddress,
 			DefaultValue: "",
 			Help:         "address and port transfunctionerd prometheus listens on",
