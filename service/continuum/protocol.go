@@ -266,6 +266,14 @@ func NewTransport(curve string) (*Transport, error) {
 	return t, nil
 }
 
+func (t *Transport) Close() error {
+	t.mtx.Lock()
+	defer t.mtx.Unlock()
+	err := t.conn.Close()
+	t.conn = nil // XXX should we do this?
+	return err
+}
+
 func (t *Transport) KeyExchange(ctx context.Context, conn net.Conn) error {
 	err := json.NewEncoder(conn).Encode(TransportRequest{
 		Version:   TransportVersion,
@@ -347,7 +355,6 @@ func (t *Transport) Handshake(ctx context.Context, secret *Secret) (*Identity, e
 	if err != nil {
 		return nil, err
 	}
-	// panic(fmt.Sprintf("size %x len %v\n%v", size, len(request), spew.Sdump(request)))
 
 	// Read HelloRequest
 	jsonHelloRequest, err := t.read()

@@ -516,7 +516,7 @@ func TestTransportHandshake(t *testing.T) {
 			panic(err)
 		}
 		defer func() {
-			if err := conn.Close(); err != nil {
+			if err := them.Close(); err != nil {
 				panic(err)
 			}
 		}()
@@ -525,7 +525,7 @@ func TestTransportHandshake(t *testing.T) {
 		}
 		usRecovered, err := them.Handshake(ctx, themSecret)
 		if err != nil {
-			t.Fatal(err)
+			panic(err)
 		}
 		wg.Done()
 
@@ -535,8 +535,8 @@ func TestTransportHandshake(t *testing.T) {
 		}
 		t.Logf("us recovered: %v", usRecovered)
 		if usRecovered.String() != usSecret.String() {
-			t.Fatalf("us recovered not equal got %v, want %v",
-				usRecovered, usSecret)
+			panic(fmt.Sprintf("us recovered not equal got %v, want %v",
+				usRecovered, usSecret))
 		}
 	}()
 
@@ -564,8 +564,7 @@ func TestTransportHandshake(t *testing.T) {
 		t.Fatalf("them recovered not equal got %v, want %v",
 			themRecovered, themSecret)
 	}
-	// XXX conn must go
-	if err := conn.Close(); err != nil {
+	if err := us.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
